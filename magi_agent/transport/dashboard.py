@@ -27,24 +27,27 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
   <title>Open Magi Agent Dashboard</title>
   <style>
     :root {{
-      color-scheme: light;
-      --bg: #f7f8fb;
-      --surface: #ffffff;
-      --surface-2: #fbfcff;
-      --surface-3: #eef1f7;
-      --surface-4: #f4f0ff;
-      --ink: #222736;
-      --muted: #6d7484;
-      --soft: #9aa3b5;
-      --line: #dde2eb;
-      --line-strong: #cfd6e2;
-      --accent: #7047d8;
-      --accent-soft: #efe8ff;
-      --green: #2fbf7b;
-      --red: #d9495f;
-      --amber: #b7791f;
-      --shadow: 0 14px 36px rgba(28, 34, 48, 0.08);
-      --shadow-soft: 0 5px 18px rgba(31, 38, 52, 0.05);
+      color-scheme: dark;
+      --canvas: #0f141c;
+      --bg: var(--canvas);
+      --surface: #151a21;
+      --surface-2: #1a2029;
+      --surface-3: #242c36;
+      --surface-4: #111a18;
+      --ink: #edf3ef;
+      --muted: #aab4b7;
+      --soft: #76838c;
+      --line: #2e3742;
+      --line-strong: #46505d;
+      --accent: #21c17a;
+      --accent-soft: rgba(33, 193, 122, 0.14);
+      --accent-line: rgba(33, 193, 122, 0.38);
+      --green: #21c17a;
+      --red: #ff6b7a;
+      --amber: #efbd5a;
+      --focus: #efbd5a;
+      --shadow: 0 20px 58px rgba(0, 0, 0, 0.34);
+      --shadow-soft: 0 10px 30px rgba(0, 0, 0, 0.22);
       --radius: 8px;
     }}
     * {{ box-sizing: border-box; }}
@@ -58,17 +61,23 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
     }}
     button, input, textarea, select {{ font: inherit; letter-spacing: 0; }}
     button {{ cursor: pointer; }}
+    button:disabled {{ cursor: not-allowed; }}
+    :focus-visible {{
+      outline: 2px solid var(--focus);
+      outline-offset: 2px;
+    }}
     .app {{
       display: grid;
-      grid-template-columns: 292px minmax(0, 1fr) 392px;
+      grid-template-columns: 304px minmax(0, 1fr) 408px;
       height: 100vh;
       min-height: 720px;
+      background: var(--canvas);
     }}
     .sidebar {{
       display: grid;
       grid-template-rows: auto 1fr auto;
       min-height: 0;
-      background: var(--surface);
+      background: #10161f;
       border-right: 1px solid var(--line);
     }}
     .brand {{
@@ -155,15 +164,15 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       place-items: center;
       border: 1px solid var(--line);
       border-radius: 999px;
-      background: var(--surface);
+      background: #10161f;
       color: var(--soft);
       font-size: 11px;
       font-weight: 800;
     }}
     .channel.active .channel-count {{
-      border-color: #d8ccff;
+      border-color: var(--accent-line);
       color: var(--accent);
-      background: #fbf9ff;
+      background: var(--surface-4);
     }}
     .sidebar-footer {{
       display: grid;
@@ -191,7 +200,7 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       grid-template-rows: auto 1fr auto;
       min-width: 0;
       min-height: 0;
-      background: var(--bg);
+      background: var(--canvas);
     }}
     .topbar {{
       display: flex;
@@ -199,7 +208,7 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       justify-content: space-between;
       min-height: 66px;
       padding: 0 24px;
-      background: var(--surface);
+      background: #121922;
       border-bottom: 1px solid var(--line);
     }}
     .topbar-title {{
@@ -231,8 +240,26 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       border-radius: var(--radius);
       background: var(--surface);
       color: var(--muted);
+      transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
     }}
     .icon-button:hover {{ color: var(--ink); border-color: var(--line-strong); }}
+    .icon-button svg {{
+      width: 16px;
+      height: 16px;
+      stroke: currentColor;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      fill: none;
+    }}
+    .icon-button.danger {{
+      color: var(--red);
+      border-color: rgba(255, 107, 122, 0.34);
+      background: rgba(255, 107, 122, 0.08);
+    }}
+    .icon-button.danger:disabled {{
+      opacity: 0.42;
+    }}
     .pill {{
       display: inline-flex;
       align-items: center;
@@ -253,9 +280,10 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       display: flex;
       flex-direction: column;
       gap: 18px;
-      background:
-        linear-gradient(180deg, rgba(255,255,255,0.6), rgba(247,248,251,0) 230px),
-        var(--bg);
+      background: var(--canvas);
+    }}
+    .chat-viewport {{
+      scroll-padding-bottom: 132px;
     }}
     .run-summary {{
       max-width: 980px;
@@ -407,6 +435,9 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       margin: 0 auto;
       display: grid;
       gap: 12px;
+    }}
+    .message-stack {{
+      align-content: start;
     }}
     .thread-meta {{
       display: flex;
@@ -561,7 +592,7 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       padding: 12px 14px;
       border-radius: var(--radius);
       background: var(--accent-soft);
-      border: 1px solid #ddceff;
+      border: 1px solid var(--accent-line);
     }}
     .message.assistant {{
       align-self: flex-start;
@@ -581,13 +612,13 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       box-shadow: none;
     }}
     .message.error {{
-      border-color: #f2bfca;
-      background: #fff4f6;
-      color: #8a2638;
+      border-color: rgba(255, 107, 122, 0.42);
+      background: rgba(255, 107, 122, 0.12);
+      color: #ffc7ce;
     }}
     .composer-wrap {{
       padding: 16px min(7vw, 78px) 22px;
-      background: linear-gradient(180deg, rgba(246,247,251,0), var(--bg) 18%);
+      background: linear-gradient(180deg, rgba(15, 20, 28, 0), var(--canvas) 18%);
     }}
     .composer {{
       overflow: hidden;
@@ -604,6 +635,9 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       min-height: 44px;
       padding: 0 14px;
       border-bottom: 1px solid var(--line);
+    }}
+    .composer-toolbar {{
+      background: var(--surface-2);
     }}
     .mode {{
       display: inline-flex;
@@ -683,7 +717,7 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       display: grid;
       grid-template-rows: auto auto 1fr;
       min-height: 0;
-      background: var(--surface-2);
+      background: #10161f;
       border-left: 1px solid var(--line);
     }}
     .inspector-head {{
@@ -726,9 +760,9 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       padding: 0 14px 18px;
     }}
     .agent-card {{
-      border: 1px solid #d9ccff;
+      border: 1px solid var(--accent-line);
       border-radius: var(--radius);
-      background: #fbf9ff;
+      background: var(--accent-soft);
       padding: 12px;
       margin-bottom: 12px;
     }}
@@ -758,8 +792,8 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       min-height: 24px;
       padding: 0 8px;
       border-radius: 999px;
-      background: #eefaf4;
-      color: #257756;
+      background: rgba(33, 193, 122, 0.16);
+      color: #9ff0c8;
       font-size: 11px;
       font-weight: 700;
       white-space: nowrap;
@@ -790,8 +824,8 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       color: var(--muted);
     }}
     .event.pending {{
-      border-color: #d8ccff;
-      background: #fbf9ff;
+      border-color: var(--accent-line);
+      background: var(--accent-soft);
     }}
     .event strong {{
       display: block;
@@ -913,8 +947,8 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       font-size: 13px;
     }}
     .control-request {{
-      border-color: #d8ccff;
-      background: #fbf9ff;
+      border-color: var(--accent-line);
+      background: var(--accent-soft);
     }}
     .knowledge-list {{
       display: grid;
@@ -984,6 +1018,16 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       font-size: 13px;
     }}
     .hidden {{ display: none !important; }}
+    @media (prefers-reduced-motion: reduce) {{
+      *,
+      *::before,
+      *::after {{
+        animation-duration: 0.001ms !important;
+        animation-iteration-count: 1 !important;
+        scroll-behavior: auto !important;
+        transition-duration: 0.001ms !important;
+      }}
+    }}
     @media (max-width: 1120px) {{
       .app {{ grid-template-columns: 220px minmax(0, 1fr); }}
       html, body {{ overflow: auto; }}
@@ -1031,7 +1075,7 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
 </head>
 <body>
   <script type="application/json" id="runtime-bootstrap">{bootstrap_json}</script>
-  <div class="app" data-dashboard-shell="local-chat">
+  <div class="app" data-dashboard-shell="local-chat" data-visual-system="agent-console">
     <aside class="sidebar" data-shell-region="channels">
       <div class="brand">
         <h1>Magi Agent</h1>
@@ -1061,15 +1105,22 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
           <h2 id="selected-channel-title"># general</h2>
           <p id="selected-channel-summary">Local Magi Agent workspace</p>
         </div>
-        <div class="topbar-actions">
-          <button class="icon-button" type="button" title="Refresh runtime health" id="refresh-health">&#8635;</button>
+        <div class="topbar-actions" aria-label="Conversation controls">
+          <span class="pill" id="active-session-id">local session</span>
+          <span class="pill" id="transport-status">transport idle</span>
+          <button class="icon-button danger" type="button" title="Cancel current run" aria-label="Cancel current run" id="cancel-run" disabled>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12"></path><path d="M18 6L6 18"></path></svg>
+          </button>
+          <button class="icon-button" type="button" title="Refresh runtime health" aria-label="Refresh runtime health" id="refresh-health">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"></path><path d="M21 3v6h-6"></path></svg>
+          </button>
           <span class="pill"><span class="dot ready"></span><span>ADK runtime</span></span>
           <span class="pill" id="chat-route-pill">chat route unknown</span>
         </div>
       </header>
 
-      <section class="messages" id="messages" aria-label="Chat transcript" aria-live="polite">
-        <div class="thread-list" id="thread-list">
+      <section class="messages chat-viewport" id="messages" aria-label="Chat transcript" aria-live="polite">
+        <div class="thread-list message-stack" id="thread-list">
         <div class="empty-state" id="empty-state">
           <div class="welcome-message message assistant">
             <div class="welcome-kicker"><span class="dot ready"></span><span>Local workspace ready</span></div>
@@ -1118,7 +1169,7 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
 
       <section class="composer-wrap" data-shell-region="composer">
         <form class="composer" id="chat-form" aria-label="Prompt composer">
-          <div class="composer-strip">
+          <div class="composer-strip composer-toolbar">
             <span class="mode"><span class="dot ready"></span><strong>Live run</strong></span>
             <span class="mode">Streams ADK events, tool progress, and evidence when emitted</span>
           </div>
@@ -1238,8 +1289,11 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
     const promptInput = document.getElementById("prompt");
     const tokenInput = document.getElementById("gateway-token");
     const sendButton = document.getElementById("send-button");
+    const cancelButton = document.getElementById("cancel-run");
     const modelSelect = document.getElementById("model-select");
     const composerStatus = document.getElementById("composer-status");
+    const activeSessionId = document.getElementById("active-session-id");
+    const transportStatus = document.getElementById("transport-status");
     const runtimeDot = document.getElementById("runtime-dot");
     const runtimeLabel = document.getElementById("runtime-label");
     const runtimeKv = document.getElementById("runtime-kv");
@@ -1272,8 +1326,10 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
     const cancelEndpoint = "/v1/chat/cancel";
     let sseFrameCount = 0;
     let agentEventCount = 0;
+    let currentTurnId = null;
     let inspectedSources = [];
 
+    activeSessionId.textContent = `${{bootstrap.botId}}:local-dashboard:general`;
     document.getElementById("footer-runtime").textContent = bootstrap.runtime;
     document.getElementById("footer-version").textContent = bootstrap.version;
     document.getElementById("settings-runtime").textContent = bootstrap.runtime;
@@ -1307,8 +1363,8 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       node.className = tone === "pending" ? "event pending" : "event";
       const safeDetail = detail ? `<code>${{escapeText(detail)}}</code>` : "";
       node.innerHTML = `<strong>${{escapeText(title)}}</strong>${{safeDetail}}`;
-      if (tone === "error") node.style.borderColor = "#f2bfca";
-      if (tone === "ok") node.style.borderColor = "#b7e7cf";
+      if (tone === "error") node.style.borderColor = "rgba(255, 107, 122, 0.52)";
+      if (tone === "ok") node.style.borderColor = "rgba(33, 193, 122, 0.48)";
       workStreamEvents.appendChild(node);
       workStreamEvents.scrollTop = workStreamEvents.scrollHeight;
       return node;
@@ -1323,6 +1379,7 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       boardTransportState.textContent = isRunning ? "open" : isBlocked ? "closed" : "ready";
       metricTools.textContent = isRunning ? "watching" : isBlocked ? "blocked" : "idle";
       metricReceipts.textContent = isRunning ? "collecting" : isBlocked ? "blocked" : "ready";
+      transportStatus.textContent = isRunning ? "stream open" : isBlocked ? "transport blocked" : "transport idle";
     }}
 
     function renderReceiptList(receipts) {{
@@ -1539,7 +1596,7 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       return false;
     }}
 
-    async function postChatStream(endpoint, token, prompt) {{
+    async function postChatStream(endpoint, token, prompt, turnId) {{
       return fetch(endpoint, {{
         method: "POST",
         headers: {{
@@ -1550,31 +1607,67 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
           model: modelSelect.value || bootstrap.model,
           messages: [{{ role: "user", content: prompt }}],
           sessionId: `${{bootstrap.botId}}:local-dashboard:general`,
-          turnId: `${{Date.now()}}:${{Math.random().toString(16).slice(2)}}`,
+          turnId: turnId || `${{Date.now()}}:${{Math.random().toString(16).slice(2)}}`,
           stream: true,
         }}),
       }});
+    }}
+
+    async function cancelCurrentRun() {{
+      if (!currentTurnId) return;
+      const token = tokenInput.value.trim();
+      cancelButton.disabled = true;
+      transportStatus.textContent = "cancelling";
+      addEvent("Cancel requested", `POST ${{cancelEndpoint}}`, "pending");
+      try {{
+        const response = await fetch(cancelEndpoint, {{
+          method: "POST",
+          headers: {{
+            "Content-Type": "application/json",
+            ...(token ? {{ "Authorization": `Bearer ${{token}}` }} : {{}}),
+          }},
+          body: JSON.stringify({{
+            sessionId: `${{bootstrap.botId}}:local-dashboard:general`,
+            turnId: currentTurnId,
+          }}),
+        }});
+        if (!response.ok) {{
+          const text = await response.text();
+          addEvent("Cancel failed", text || `Request failed: ${{response.status}}`, "error");
+          transportStatus.textContent = "cancel blocked";
+          return;
+        }}
+        composerStatus.textContent = "Cancelling";
+        agentStatePill.textContent = "cancelling";
+        transportStatus.textContent = "cancel sent";
+        addEvent("Cancel sent", currentTurnId, "ok");
+      }} catch (error) {{
+        addEvent("Cancel unavailable", "Could not reach /v1/chat/cancel", "error");
+        transportStatus.textContent = "cancel unavailable";
+      }}
     }}
 
     async function sendPrompt(prompt) {{
       const token = tokenInput.value.trim();
       localStorage.setItem(tokenKey, token);
       const assistant = addMessage("assistant", "");
+      currentTurnId = `${{Date.now()}}:${{Math.random().toString(16).slice(2)}}`;
       sseFrameCount = 0;
       agentEventCount = 0;
       metricSse.textContent = "0 frames";
       metricEvents.textContent = "0 agent events";
       composerStatus.textContent = "Running";
       agentStatePill.textContent = "running";
+      cancelButton.disabled = false;
       setRunBoard("running");
       renderReceiptList([["request", "sending"], ["delivery", "pending"], ["transport", "opening"]]);
       addEvent("Request", "POST /v1/chat/stream", "pending");
-      let response = await postChatStream(streamChatEndpoint, token, prompt);
+      let response = await postChatStream(streamChatEndpoint, token, prompt, currentTurnId);
       if (!response.ok && response.status === 503) {{
         const preview = await response.clone().text();
         if (preview.includes("streaming_chat_disabled")) {{
           addEvent("Streaming route disabled", "Falling back to POST /v1/chat/completions", "pending");
-          response = await postChatStream(legacyChatEndpoint, token, prompt);
+          response = await postChatStream(legacyChatEndpoint, token, prompt, currentTurnId);
         }}
       }}
       if (!response.ok) {{
@@ -1584,6 +1677,8 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
         addEvent("Request failed", assistant.textContent, "error");
         composerStatus.textContent = "Blocked";
         agentStatePill.textContent = "blocked";
+        cancelButton.disabled = true;
+        currentTurnId = null;
         setRunBoard("blocked");
         renderReceiptList([["request", "failed"], ["delivery", "blocked"], ["transport", String(response.status)]]);
         return;
@@ -1605,6 +1700,8 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       }}
       composerStatus.textContent = "Ready to run";
       agentStatePill.textContent = "ready";
+      cancelButton.disabled = true;
+      currentTurnId = null;
       setRunBoard("ready");
     }}
 
@@ -1670,6 +1767,10 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
 
     document.getElementById("refresh-health").addEventListener("click", () => {{
       checkHealth();
+    }});
+
+    cancelButton.addEventListener("click", () => {{
+      cancelCurrentRun();
     }});
 
     checkHealth();

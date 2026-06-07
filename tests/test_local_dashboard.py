@@ -148,6 +148,33 @@ def test_local_dashboard_has_polished_channel_shell_navigation() -> None:
     assert "First-party local tools and harness packs" in html
 
 
+def test_local_dashboard_has_chat_console_visual_system() -> None:
+    response = _client().get("/dashboard")
+    html = response.text
+
+    assert 'data-visual-system="agent-console"' in html
+    assert "chat-viewport" in html
+    assert "message-stack" in html
+    assert "composer-toolbar" in html
+    assert 'aria-label="Conversation controls"' in html
+    assert "--canvas: #0f141c" in html
+    assert "--accent: #21c17a" in html
+    assert ":focus-visible" in html
+    assert "@media (prefers-reduced-motion: reduce)" in html
+
+
+def test_local_dashboard_adds_existing_cancel_endpoint_control() -> None:
+    response = _client().get("/dashboard")
+    html = response.text
+
+    assert 'id="cancel-run"' in html
+    assert 'id="active-session-id"' in html
+    assert 'id="transport-status"' in html
+    assert "let currentTurnId = null;" in html
+    assert "function cancelCurrentRun()" in html
+    assert "fetch(cancelEndpoint" in html
+
+
 def test_local_dashboard_renders_source_and_control_request_panels() -> None:
     response = _client().get("/dashboard")
     html = response.text
