@@ -392,11 +392,22 @@ def build_registry(cwd: str) -> CommandRegistryImpl:
     Registers the already-deduped discovered commands. Registry ``register`` is
     also first-wins, so this composes safely even though the list is already
     deduped (belt-and-suspenders; the explicit merge is the canonical shadow).
+
+    After registering discovered commands, also calls
+    ``register_control_commands`` to wire the four runtime-control seams
+    (``/model``, ``/agent``, ``/mcp``, ``/new``) with their gated predicates.
+    Those commands are default-off (hidden from ``list_for`` until a controller
+    is wired on ``ctx.runtime``) but always findable via ``lookup`` so dispatch
+    stays total and safe.
     """
+    # Lazy import inside the function keeps module import cheap and side-effect-
+    # free; ``control`` is only loaded when a registry is actually built.
+    from magi_agent.cli.commands.control import register_control_commands
 
     registry = CommandRegistryImpl()
     for command in discover_commands(cwd):
         registry.register(command)
+    register_control_commands(registry)
     return registry
 
 
