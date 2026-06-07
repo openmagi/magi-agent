@@ -650,6 +650,7 @@ class Gate5B4C3LiveRunnerBoundary:
                 next_message: object = message
                 while True:
                     function_calls: list[Mapping[str, object]] = []
+                    function_call_keys: set[str] = set()
                     function_responses_seen = False
                     current_run_kwargs = {**run_kwargs, "new_message": next_message}
                     async for event in runner.run_async(
@@ -663,7 +664,12 @@ class Gate5B4C3LiveRunnerBoundary:
                         if chunk:
                             output_chunks.append(chunk)
                         event_function_calls = _event_function_calls(event)
-                        function_calls.extend(event_function_calls)
+                        for function_call in event_function_calls:
+                            function_call_key = _json_dumps(function_call)
+                            if function_call_key in function_call_keys:
+                                continue
+                            function_call_keys.add(function_call_key)
+                            function_calls.append(function_call)
                         event_function_responses = _event_function_responses(event)
                         if event_function_calls or event_function_responses:
                             tool_only_events_seen = True
@@ -678,7 +684,8 @@ class Gate5B4C3LiveRunnerBoundary:
                     # cause of fail-closed "runner_incomplete" turns. Continue while
                     # the model still has unsatisfied tool-call intent we can run.
                     if (
-                        not function_calls
+                        event_count >= 64
+                        or not function_calls
                         or function_responses_seen
                         or not self._adk_tools
                         or not selected_full_toolhost
