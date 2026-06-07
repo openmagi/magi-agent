@@ -134,7 +134,20 @@ class MemoryWriteToolHost:
 
         target_file = str(arguments.get("target_file", "MEMORY.md")).strip()
         if target_file not in {"MEMORY.md", "USER.md"}:
-            target_file = "MEMORY.md"
+            return ToolResult(
+                status="blocked",
+                error_code="memory_write_forbidden_target",
+                error_message=(
+                    f"target_file {target_file!r} is not writable by the agent"
+                    " (allowed: MEMORY.md, USER.md)."
+                ),
+                metadata={
+                    "toolName": "MemoryWrite",
+                    "reason": "forbidden_target",
+                    "requestedTarget": target_file,
+                    "allowedTargets": ["MEMORY.md", "USER.md"],
+                },
+            )
 
         turn_id = context.turn_id or _DEFAULT_TURN_ID
         provider_id = _resolve_provider_id(self.provider)
