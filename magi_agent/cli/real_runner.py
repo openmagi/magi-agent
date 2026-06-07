@@ -213,7 +213,13 @@ def build_cli_model_runner(
     # both runners cannot drift. The full runtime profile enables first-party
     # controls by default; safe/minimal profiles or explicit false env values
     # leave the plane present but behaviorally empty.
-    plane_plugin = build_default_plugin()
+    plane_plugin = build_default_plugin(
+        general_automation_receipts=receipt_store,
+        contract_required=_required_deliverable_evidence_from_assembly(
+            runner_policy_assembly
+        ),
+        agent_role="general",
+    )
     app = App(name=_app_identifier(app_name), root_agent=agent, plugins=[plane_plugin])
     runner = Runner(
         app=app,
@@ -310,6 +316,40 @@ def _default_run_config() -> object:
     from google.adk.agents.run_config import RunConfig, StreamingMode  # noqa: PLC0415
 
     return RunConfig(streaming_mode=StreamingMode.SSE)
+
+
+def _required_deliverable_evidence_from_assembly(
+    assembly: RunnerPolicyAssembly | None,
+) -> object | None:
+    """Map a policy assembly's evidence-requirement labels to RequiredDeliverableEvidence.
+
+    ``assembly.evidence_requirements`` is a tuple of public evidence *labels*
+    (e.g. ``"artifact_delivery_ref"``, ``"office_preview"``, ``"source_ledger"``),
+    not booleans. The GA completion verifier (task_completion.py) tracks two
+    deliverable kinds — artifact refs and snapshot refs — so we map the label
+    vocabulary onto those booleans:
+
+    * ``requires_artifact_ref`` — any label mentioning ``"artifact"`` (e.g.
+      ``"artifact_delivery_ref"``).
+    * ``requires_snapshot_ref`` — any label mentioning ``"snapshot"``. No current
+      first-party label uses ``"snapshot"`` and snapshot enforcement is disabled
+      in the verifier (``ENFORCE_SNAPSHOT_REQUIREMENT=False``), so this stays
+      ``False`` in practice — kept for forward-compat with the label vocabulary.
+
+    Returns ``None`` when no assembly is available, so the constraint control is
+    not registered (byte-identical to ``main``).
+    """
+    if assembly is None:
+        return None
+    from magi_agent.harness.general_automation.task_completion import (  # noqa: PLC0415
+        RequiredDeliverableEvidence,
+    )
+
+    labels = tuple(getattr(assembly, "evidence_requirements", ()) or ())
+    return RequiredDeliverableEvidence(
+        requires_artifact_ref=any("artifact" in label for label in labels),
+        requires_snapshot_ref=any("snapshot" in label for label in labels),
+    )
 
 
 def _build_default_runner_policy_assembly(

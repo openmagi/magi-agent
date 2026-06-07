@@ -194,6 +194,16 @@ class ToolDispatcher:
                     ga_outcome.receipt,
                     gate=self._general_automation_live_gate,
                 )
+            # Retain any open control projection (e.g. approval_required) for the
+            # per-turn constraint reminder. Read-only retention; no authority is
+            # granted. Guarded by getattr so older stores without the accumulator
+            # remain inert rather than erroring.
+            if ga_outcome.control_projection is not None:
+                append_control = getattr(
+                    self.general_automation_receipts, "append_control", None
+                )
+                if callable(append_control):
+                    append_control(context, ga_outcome.control_projection)
             ga_result = _general_automation_gate_result(
                 manifest,
                 mode,
