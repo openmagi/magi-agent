@@ -115,7 +115,12 @@ __all__ = [
     "EDIT_CLASS_TOOLS",
 ]
 
-PermissionMode = Literal["default", "acceptEdits", "bypassPermissions"]
+PermissionMode = Literal[
+    "default",
+    "acceptEdits",
+    "bypassPermissions",
+    "smartApprove",
+]
 
 # Tools auto-allowed in ``acceptEdits`` mode (no frame emitted). These are the
 # file-mutating tools whose individual approvals are noise once the operator has

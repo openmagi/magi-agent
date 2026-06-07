@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from magi_agent.tools.manifest import RuntimeMode, ToolManifest
+    from magi_agent.tools.registry import ToolRegistry
 
 # ---------------------------------------------------------------------------
 # Light, import-clean imports only at module top.
@@ -209,7 +210,12 @@ def build_headless_runtime(
     # prompt_sink drives gate prompting in non-bypass modes; bypass keeps its own no-frame sink.
     if prompt_sink is not None and permission_mode != "bypassPermissions":
         gate_sinks = [prompt_sink]
-    gate = RulesPermissionGate(sinks=gate_sinks)
+    smart_approve = (
+        _build_smart_approve_classifier(model=model, mode=mode)
+        if permission_mode == "smartApprove"
+        else None
+    )
+    gate = RulesPermissionGate(sinks=gate_sinks, smart_approve=smart_approve)
 
     # (D) Command registry — install discovery once (idempotent), then build
     #     the per-cwd registry.
@@ -260,6 +266,36 @@ def _build_runner_policy_assembly(
         model_label=label,
         live_policy_callback_attached=False,
     )
+
+
+def _build_smart_approve_classifier(
+    *,
+    model: str | None,
+    mode: "RuntimeMode",
+) -> object:
+    from magi_agent.cli.providers import resolve_provider_config  # noqa: PLC0415
+    from magi_agent.cli.readonly_classifier import ReadOnlyClassifier  # noqa: PLC0415
+
+    return ReadOnlyClassifier(
+        registry=_build_smart_approve_tool_registry(mode=mode),
+        provider_config=resolve_provider_config(model_override=model),
+    )
+
+
+def _build_smart_approve_tool_registry(
+    *,
+    mode: "RuntimeMode",
+) -> "ToolRegistry | None":
+    _ = mode
+    if not _first_party_tools_enabled():
+        return None
+
+    from magi_agent.runtime.openmagi_runtime import (  # noqa: PLC0415
+        _build_core_tool_registry,
+        _build_default_plugin_state,
+    )
+
+    return _build_core_tool_registry(_build_default_plugin_state())
 
 
 def _build_default_runner(

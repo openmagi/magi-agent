@@ -619,7 +619,7 @@ async def run_headless(
     session_id: str | None = None,
     stream: IO[str] | None = None,
     permission_mode: Literal[
-        "default", "acceptEdits", "bypassPermissions"
+        "default", "acceptEdits", "bypassPermissions", "smartApprove"
     ] = "default",
     model: str | None = None,
     input_stream: IO[str] | None = None,
