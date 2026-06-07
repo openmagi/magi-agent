@@ -169,7 +169,7 @@ class ReviewCandidate(BaseModel):
     )
 
     kind: ReviewCandidateKind
-    proposal: str
+    proposal: str = Field(..., max_length=1024)
     provenance_digest: str = Field(alias="provenanceDigest")
     confidence: float
     session_id: str = Field(alias="sessionId")
@@ -431,8 +431,13 @@ async def _run_review_fork(
             mode=mode,
         )
         for candidate in parsed:
-            candidate_sink.receive(candidate)
-            candidates_emitted += 1
+            try:
+                candidate_sink.receive(candidate)
+                candidates_emitted += 1
+            except Exception:
+                logging.getLogger(__name__).exception(
+                    "self_review: sink.receive raised — candidate dropped"
+                )
 
     elapsed = (time.monotonic() - start) * 1000
     evidence = _build_review_evidence(
@@ -479,19 +484,41 @@ def _parse_fork_output(
     import json as _json
     import re as _re
 
+    _parse_logger = logging.getLogger(__name__)
+    _PROPOSAL_MAX = 1024
+
     candidates: list[ReviewCandidate] = []
     # Find all {...} blobs in the output (greedy-safe: one level only).
     for match in _re.finditer(r"\{[^{}]*\}", output):
+        blob = match.group()
         try:
-            obj = _json.loads(match.group())
+            obj = _json.loads(blob)
         except _json.JSONDecodeError:
+            _parse_logger.debug(
+                "self_review: _parse_fork_output — JSON decode failed, skipping blob: %.80r",
+                blob,
+            )
             continue
         kind_raw = obj.get("kind", "")
         if kind_raw not in ("memory", "skill"):
+            _parse_logger.debug(
+                "self_review: _parse_fork_output — invalid kind %r, skipping", kind_raw
+            )
             continue
         proposal = str(obj.get("proposal", "")).strip()
         if not proposal:
+            _parse_logger.debug(
+                "self_review: _parse_fork_output — empty proposal, skipping"
+            )
             continue
+        # Truncate oversize proposals (guards against prompt-injected large strings).
+        if len(proposal) > _PROPOSAL_MAX:
+            _parse_logger.debug(
+                "self_review: _parse_fork_output — proposal truncated from %d to %d chars",
+                len(proposal),
+                _PROPOSAL_MAX,
+            )
+            proposal = proposal[:_PROPOSAL_MAX]
         try:
             confidence = float(obj.get("confidence", 0.5))
         except (TypeError, ValueError):
@@ -509,6 +536,9 @@ def _parse_fork_output(
                 mode=mode,
             )
         except Exception:
+            _parse_logger.debug(
+                "self_review: _parse_fork_output — ReviewCandidate construction failed, skipping"
+            )
             continue
         candidates.append(candidate)
     return candidates
