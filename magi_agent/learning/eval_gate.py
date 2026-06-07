@@ -41,7 +41,9 @@ mutation is PR7).
 from __future__ import annotations
 
 import hashlib
-from typing import Protocol, runtime_checkable
+import math
+import statistics
+from typing import Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -69,6 +71,111 @@ MIN_EVAL_SAMPLE_SIZE: int = 4
 # NOTE(PR7): real LLM scores carry float noise (~1e-9..1e-6); revisit this strict
 # 0.0 band / introduce an epsilon when the live evaluator lands.
 MAX_REGRESSION_BAND: float = 0.0
+
+
+# ---------------------------------------------------------------------------
+# Paired significance verdict (Task 1 — dormant foundation, not yet wired)
+# ---------------------------------------------------------------------------
+
+#: One of four classifications of a paired before/after measurement.  Maps to a
+#: future gate decision: ``improved`` → promote, ``regressed`` → reject,
+#: ``inconclusive`` → hold, ``underpowered`` → defer (need more samples).  Task 2
+#: wires this into ``run_eval_gate``; Task 1 only provides the pure function.
+Verdict = Literal["improved", "inconclusive", "regressed", "underpowered"]
+
+
+class PairedVerdict(BaseModel):
+    """Frozen result of a paired one-sided significance test on per-case deltas.
+
+    ``delta`` is the mean of ``d_i = after_i - before_i`` (positive = the
+    candidate improved).  ``ci_low``/``ci_high`` are the ``z``-scaled confidence
+    bounds on ``delta``; ``verdict`` is derived from where that interval falls
+    relative to 0.  When the sample is underpowered the interval collapses to a
+    point at ``delta`` (``se=0``) and the verdict is ``"underpowered"``.
+    """
+
+    model_config = ConfigDict(
+        frozen=True,
+        populate_by_name=True,
+        extra="forbid",
+        validate_default=True,
+    )
+
+    verdict: Verdict
+    delta: float
+    se: float
+    ci_low: float = Field(alias="ciLow")
+    ci_high: float = Field(alias="ciHigh")
+    n: int
+
+
+def paired_verdict(
+    before: tuple[float, ...],
+    after: tuple[float, ...],
+    *,
+    z: float = 1.96,
+    min_n: int = MIN_EVAL_SAMPLE_SIZE,
+) -> PairedVerdict:
+    """Paired one-sided significance verdict on per-case deltas.
+
+    Computes ``d_i = after_i - before_i`` (each score in ``[0, 1]``, higher
+    better) and tests whether the mean delta is significantly non-zero using a
+    ``z``-scaled confidence interval on ``mean(d)``.
+
+    - ``len(before) != len(after)`` → ``ValueError`` (incomparable samples;
+      mirrors ``run_eval_gate``'s length-mismatch guard).
+    - ``n < min_n`` OR ``n < 2`` → ``"underpowered"`` with ``se=0`` and the CI
+      collapsed to a point at ``delta`` (can't test → defer later).
+    - Otherwise ``se = stdev(d) / sqrt(n)`` (sample stdev),
+      ``ci = delta ± z*se``; ``"improved"`` if ``ci_low > 0``, ``"regressed"``
+      if ``ci_high < 0``, else ``"inconclusive"``.  When every delta is equal
+      (``stdev=0`` → ``se=0``) the interval is a point at ``delta``, so a
+      non-zero ``delta`` classifies as improved/regressed and exactly ``0`` as
+      inconclusive — this falls out of the same comparisons.
+
+    This function is pure (no I/O, no store, no policy) and is NOT yet wired
+    into ``run_eval_gate`` — Task 1 is the dormant foundation only.
+    """
+    if len(before) != len(after):
+        raise ValueError(
+            "paired_verdict got mismatched before/after lengths "
+            f"({len(before)} != {len(after)}); the evaluator is producing "
+            "incomparable samples."
+        )
+
+    n = len(before)
+    deltas = [a - b for b, a in zip(before, after)]
+    delta = sum(deltas) / n if n else 0.0
+
+    if n < min_n or n < 2:
+        return PairedVerdict(
+            verdict="underpowered",
+            delta=delta,
+            se=0.0,
+            ciLow=delta,
+            ciHigh=delta,
+            n=n,
+        )
+
+    se = statistics.stdev(deltas) / math.sqrt(n)
+    ci_low = delta - z * se
+    ci_high = delta + z * se
+
+    if ci_low > 0:
+        verdict: Verdict = "improved"
+    elif ci_high < 0:
+        verdict = "regressed"
+    else:
+        verdict = "inconclusive"
+
+    return PairedVerdict(
+        verdict=verdict,
+        delta=delta,
+        se=se,
+        ciLow=ci_low,
+        ciHigh=ci_high,
+        n=n,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -142,6 +249,22 @@ class EvalGateConfig(BaseModel):
         default=MAX_REGRESSION_BAND, alias="maxRegressionBand"
     )
 
+    #: Which decision path the gate uses.  ``"strict_band"`` (default) preserves
+    #: today's exact behavior (mean-regression vs ``max_regression_band``).
+    #: ``"paired_significance"`` selects the paired-CI path — DORMANT in Task 1;
+    #: it is not consulted by ``run_eval_gate`` until Task 2 wires it in.
+    decision_rule: Literal["strict_band", "paired_significance"] = Field(
+        default="strict_band", alias="decisionRule"
+    )
+    #: z multiplier for the paired-significance confidence interval (Task 2).
+    z: float = 1.96
+    #: Number of paired eval repeats per candidate (Task 4).  Default ``1``
+    #: reproduces the single-shot strict-band measurement.
+    n_repeats: int = Field(default=1, alias="nRepeats")
+    #: Upper bound on adaptive repeats when escalating an inconclusive result
+    #: (Task 4).  Default ``1`` disables escalation.
+    max_repeats: int = Field(default=1, alias="maxRepeats")
+
 
 # ---------------------------------------------------------------------------
 # Decision result
@@ -178,6 +301,20 @@ class EvalGateDecision(BaseModel):
     skipped: bool = False
     #: Human-readable explanation when ``skipped`` is True (else empty).
     reason: str = ""
+    #: Paired-significance verdict (Task 2).  Empty string on the strict-band
+    #: path, which is the only path Task 1 exercises.
+    verdict: str = ""
+    #: Mean per-case delta (after - before) from the paired path (Task 2).
+    delta: float = 0.0
+    #: Standard error of the mean delta from the paired path (Task 2).
+    se: float = 0.0
+    #: Lower confidence bound on the mean delta (Task 2).
+    ci_low: float = Field(default=0.0, alias="ciLow")
+    #: Upper confidence bound on the mean delta (Task 2).
+    ci_high: float = Field(default=0.0, alias="ciHigh")
+    #: Number of paired eval repeats performed (Task 4).  ``1`` for the
+    #: single-shot strict-band path.
+    repeats: int = 1
 
 
 # ---------------------------------------------------------------------------
@@ -394,6 +531,9 @@ __all__ = [
     "CheckSet",
     "EvalGateConfig",
     "EvalGateDecision",
+    "PairedVerdict",
     "StaticCheckSet",
+    "Verdict",
+    "paired_verdict",
     "run_eval_gate",
 ]
