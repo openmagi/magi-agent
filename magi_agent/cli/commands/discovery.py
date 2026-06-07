@@ -393,21 +393,28 @@ def build_registry(cwd: str) -> CommandRegistryImpl:
     also first-wins, so this composes safely even though the list is already
     deduped (belt-and-suspenders; the explicit merge is the canonical shadow).
 
-    After registering discovered commands, also calls
-    ``register_control_commands`` to wire the four runtime-control seams
-    (``/model``, ``/agent``, ``/mcp``, ``/new``) with their gated predicates.
-    Those commands are default-off (hidden from ``list_for`` until a controller
-    is wired on ``ctx.runtime``) but always findable via ``lookup`` so dispatch
-    stays total and safe.
+    After registering discovered commands, also calls:
+    - ``register_control_commands`` to wire the four runtime-control seams
+      (``/model``, ``/agent``, ``/mcp``, ``/new``) with their gated predicates.
+    - ``register_session_history_commands`` to wire the five session-history
+      seams (``/fork``, ``/undo``, ``/redo``, ``/share``, ``/unshare``) with
+      their gated predicates.
+    All seam commands are default-off (hidden from ``list_for`` until a
+    controller is wired on ``ctx.runtime``) but always findable via ``lookup``
+    so dispatch stays total and safe.
     """
-    # Lazy import inside the function keeps module import cheap and side-effect-
-    # free; ``control`` is only loaded when a registry is actually built.
+    # Lazy imports inside the function keep module import cheap and side-effect-
+    # free; these modules are only loaded when a registry is actually built.
     from magi_agent.cli.commands.control import register_control_commands
+    from magi_agent.cli.commands.session_history import (
+        register_session_history_commands,
+    )
 
     registry = CommandRegistryImpl()
     for command in discover_commands(cwd):
         registry.register(command)
     register_control_commands(registry)
+    register_session_history_commands(registry)
     return registry
 
 
