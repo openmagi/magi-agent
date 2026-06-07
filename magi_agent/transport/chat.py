@@ -1020,98 +1020,11 @@ def register_chat_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
                 reason="malformed_json",
                 runtime=runtime,
             )
-        gate_error = _canary_gate_error(runtime, route_config)
-        if gate_error is not None:
-            status_code = 409 if gate_error == "invalid_authority" else 503
-            return _fallback_response(
-                status_code=status_code,
-                status=gate_error,
-                reason=_reason_for_gate_error(gate_error),
-                runtime=runtime,
-            )
-        gate1a_bundle = _gate1a_readonly_tool_bundle(runtime, route_config)
-        gate5b_full_bundle = _gate5b_full_toolhost_bundle(runtime, route_config)
-        tool_bundle = (
-            gate5b_full_bundle
-            if gate5b_full_bundle.status == "ready"
-            else gate1a_bundle
+        return await run_gate5b_user_visible_chat_response(
+            runtime,
+            payload,
+            request=request,
         )
-        # Bundles are created per-request; the gate5b host may lazily spawn
-        # language-server subprocesses on the first code-file write. Tear them
-        # down at the end of the request so we never leak FDs/processes/memory
-        # across requests in a long-lived worker pod. Fail-open: shutdown errors
-        # never affect the response.
-        try:
-            if research_first_selected_canary_active(payload):
-                try:
-                    research_first = build_research_first_selected_response(
-                        payload,
-                        bot_id=runtime.config.bot_id,
-                        user_id=runtime.config.user_id,
-                        environment=route_config.environment,
-                        now_ms=int(time.time() * 1000),
-                        request_digest=request.headers.get("x-gate5b-canary-request-digest"),
-                    )
-                    shadow_config = _shadow_generation_route_config(runtime)
-                    if shadow_config.counter_store is None:
-                        return _fallback_response(
-                            status_code=503,
-                            status="python_error",
-                            reason="counter_store_unavailable",
-                            runtime=runtime,
-                        )
-                    source_ledger = research_first.metadata.get("sourceLedger")
-                    source_ledger_digest = (
-                        source_ledger.get("ledgerDigest")
-                        if isinstance(source_ledger, Mapping)
-                        else None
-                    )
-                    if not isinstance(source_ledger_digest, str):
-                        raise ValueError("research-first source ledger digest missing")
-                    counter_state = (
-                        shadow_config.counter_store.record_gate8_research_first_canary_evidence(
-                            request_digest=str(research_first.metadata["requestDigest"]),
-                            selected_bot_digest=_sha256_digest(runtime.config.bot_id),
-                            trusted_owner_user_id_digest=_sha256_digest(runtime.config.user_id),
-                            environment=route_config.environment,
-                            source_ledger_digest=source_ledger_digest,
-                            output_digest=research_first.final_gate_result.final_answer_digest,
-                        )
-                    )
-                except (KeyError, OSError, ValidationError, ValueError, TypeError):
-                    return _fallback_response(
-                        status_code=422,
-                        status="python_error",
-                        reason="research_first_projection_failed",
-                        runtime=runtime,
-                    )
-                return _python_ready_response(
-                    runtime=runtime,
-                    content=research_first.content,
-                    event_count=research_first.event_count,
-                    adk_invoked=False,
-                    runner_attempted=False,
-                    model_call_attempted=False,
-                    mocked_runner_invoked=False,
-                    counter_state=counter_state,
-                    counter_status="research_first_completed",
-                    public_events=research_first.public_events,
-                    research_first_metadata=research_first.metadata,
-                )
-            if route_config.mocked_runner is not None:
-                return _run_mocked_chat_runner(runtime, route_config, payload, tool_bundle)
-            return await _run_live_chat_runner(
-                runtime,
-                route_config,
-                payload,
-                request=request,
-                gate1a_bundle=tool_bundle,
-            )
-        finally:
-            try:
-                gate5b_full_bundle.host.shutdown()
-            except Exception:  # noqa: BLE001 — teardown must never break a response
-                pass
 
     @app.post("/v1/chat/inject")
     async def chat_inject(request: Request) -> JSONResponse:
@@ -1436,6 +1349,121 @@ def register_chat_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
                 "responseAuthority": "typescript",
             },
         )
+
+
+async def run_gate5b_user_visible_chat_response(
+    runtime: OpenMagiRuntime,
+    payload: object,
+    *,
+    request: Request,
+) -> JSONResponse:
+    """Run the selected Gate5B user-visible chat path for HTTP adapters.
+
+    This preserves the existing completions-route boundary in one place so
+    additive surfaces such as ``/v1/chat/stream`` can reuse the same selected
+    canary gates, ToolHost attachment, evidence, counters, and fallback
+    diagnostics without minting a second runtime path.
+    """
+    route_config = _route_config(runtime)
+    if not route_config.enabled:
+        return _fallback_response(
+            status_code=503,
+            status="python_disabled",
+            reason="canary_gate_disabled",
+            runtime=runtime,
+        )
+    gate_error = _canary_gate_error(runtime, route_config)
+    if gate_error is not None:
+        status_code = 409 if gate_error == "invalid_authority" else 503
+        return _fallback_response(
+            status_code=status_code,
+            status=gate_error,
+            reason=_reason_for_gate_error(gate_error),
+            runtime=runtime,
+        )
+    gate1a_bundle = _gate1a_readonly_tool_bundle(runtime, route_config)
+    gate5b_full_bundle = _gate5b_full_toolhost_bundle(runtime, route_config)
+    tool_bundle = (
+        gate5b_full_bundle
+        if gate5b_full_bundle.status == "ready"
+        else gate1a_bundle
+    )
+    # Bundles are created per-request; the gate5b host may lazily spawn
+    # language-server subprocesses on the first code-file write. Tear them down
+    # at the end of the request so we never leak FDs/processes/memory across
+    # requests in a long-lived worker pod. Fail-open: shutdown errors never
+    # affect the response.
+    try:
+        if research_first_selected_canary_active(payload):
+            try:
+                research_first = build_research_first_selected_response(
+                    payload,
+                    bot_id=runtime.config.bot_id,
+                    user_id=runtime.config.user_id,
+                    environment=route_config.environment,
+                    now_ms=int(time.time() * 1000),
+                    request_digest=request.headers.get("x-gate5b-canary-request-digest"),
+                )
+                shadow_config = _shadow_generation_route_config(runtime)
+                if shadow_config.counter_store is None:
+                    return _fallback_response(
+                        status_code=503,
+                        status="python_error",
+                        reason="counter_store_unavailable",
+                        runtime=runtime,
+                    )
+                source_ledger = research_first.metadata.get("sourceLedger")
+                source_ledger_digest = (
+                    source_ledger.get("ledgerDigest")
+                    if isinstance(source_ledger, Mapping)
+                    else None
+                )
+                if not isinstance(source_ledger_digest, str):
+                    raise ValueError("research-first source ledger digest missing")
+                counter_state = (
+                    shadow_config.counter_store.record_gate8_research_first_canary_evidence(
+                        request_digest=str(research_first.metadata["requestDigest"]),
+                        selected_bot_digest=_sha256_digest(runtime.config.bot_id),
+                        trusted_owner_user_id_digest=_sha256_digest(runtime.config.user_id),
+                        environment=route_config.environment,
+                        source_ledger_digest=source_ledger_digest,
+                        output_digest=research_first.final_gate_result.final_answer_digest,
+                    )
+                )
+            except (KeyError, OSError, ValidationError, ValueError, TypeError):
+                return _fallback_response(
+                    status_code=422,
+                    status="python_error",
+                    reason="research_first_projection_failed",
+                    runtime=runtime,
+                )
+            return _python_ready_response(
+                runtime=runtime,
+                content=research_first.content,
+                event_count=research_first.event_count,
+                adk_invoked=False,
+                runner_attempted=False,
+                model_call_attempted=False,
+                mocked_runner_invoked=False,
+                counter_state=counter_state,
+                counter_status="research_first_completed",
+                public_events=research_first.public_events,
+                research_first_metadata=research_first.metadata,
+            )
+        if route_config.mocked_runner is not None:
+            return _run_mocked_chat_runner(runtime, route_config, payload, tool_bundle)
+        return await _run_live_chat_runner(
+            runtime,
+            route_config,
+            payload,
+            request=request,
+            gate1a_bundle=tool_bundle,
+        )
+    finally:
+        try:
+            gate5b_full_bundle.host.shutdown()
+        except Exception:  # noqa: BLE001 — teardown must never break a response
+            pass
 
 
 def _route_config(runtime: OpenMagiRuntime) -> Gate5BUserVisibleChatRouteConfig:
@@ -4417,5 +4445,6 @@ __all__ = [
     "build_public_identity_policy",
     "gate5b_user_visible_chat_gate_active",
     "register_chat_routes",
+    "run_gate5b_user_visible_chat_response",
     "sanitize_gate5b_model_visible_identity_text",
 ]
