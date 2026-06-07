@@ -2,7 +2,7 @@
 
 Complete reference for RuntimeConfig (config/env.py), PythonMemoryAdapterConfig, PythonToolHostAttachmentConfig, PythonRuntimeAuthorityConfig, and all Literal[False] safety invariants.
 
-Every RuntimeConfig sub-model, its fields, types, defaults, and Literal[False] safety invariants. RuntimeConfig is constructed from env vars by parse_runtime_env() in main.py and carries: bot_id, user_id, gateway_token, service URLs, model, runtime='core-agent', runtime_engine='adk-python', build info, memory config, toolhost config, and authority config (all authority flags False).
+Every RuntimeConfig sub-model, its fields, types, defaults, and Literal[False] safety invariants. RuntimeConfig is constructed from env vars by parse_runtime_env() in main.py and carries: bot_id, user_id, gateway_token, service URLs, model, runtime='magi-agent', runtime_engine='adk-python', build info, memory config, toolhost config, and authority config (all authority flags False).
 
 > The Literal[False] authority flags below scope the **enforcement/governance layer and external delivery** (when a boundary may block/gate behavior, write to channels, or attach to production) — they do **not** mean the runtime is inert. With a provider key, the local `magi` CLI runs a real model + first-party tools today; see [What works today](/docs/what-works-today).
 
@@ -17,7 +17,7 @@ RuntimeConfig is the frozen Pydantic model that carries the full runtime configu
 - chat_proxy_url (AnyUrl, alias chatProxyUrl) — URL of the chat proxy service, required.
 - redis_url (AnyUrl, alias redisUrl) — URL of the Redis instance, required.
 - model (str) — LLM model identifier (e.g. claude-sonnet-4-20250514), required.
-- runtime (Literal["core-agent"], default "core-agent") — Runtime engine identifier.
+- runtime (Literal["magi-agent"], default "magi-agent") — Runtime engine identifier.
 - runtime_engine (Literal["adk-python"], alias runtimeEngine, default "adk-python") — Engine variant.
 - build (BuildInfo) — Version, build SHA, image repo/tag/digest metadata.
 - memory (PythonMemoryAdapterConfig) — Memory adapter configuration.
