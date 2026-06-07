@@ -230,6 +230,64 @@ class StaticCheckSet(BaseModel):
         return self.before, self.after
 
 
+class RepeatedCheckSet:
+    """CheckSet wrapper that runs an inner ``CheckSet`` ``repeats`` times and
+    averages the per-case scores element-wise (Task 4).
+
+    A real agent-driven evaluator is NONDETERMINISTIC, so a single eval is
+    noisy.  Averaging ``repeats`` runs shrinks the per-case variance → shrinks
+    the paired delta's standard error → tightens the verdict CI, which can
+    resolve an ``inconclusive`` single-shot result into ``improved``/
+    ``regressed`` WITHOUT changing the case identity (same length/cases as the
+    inner).  For a deterministic inner (e.g. ``StaticCheckSet``) the average
+    equals the single result, so a default of ``repeats=1`` is exactly the
+    inner's single run.
+
+    Every inner run must return equal-length ``before``/``after`` tuples, and
+    all runs must agree on that length (mirrors ``run_eval_gate``'s
+    length-mismatch guard) — otherwise the averaged samples would be
+    incomparable, so this raises ``ValueError`` instead of silently averaging
+    over a min-length slice.
+    """
+
+    def __init__(self, *, inner: CheckSet, repeats: int) -> None:
+        if repeats < 1:
+            raise ValueError(
+                f"RepeatedCheckSet requires repeats >= 1 (got {repeats})."
+            )
+        self.inner = inner
+        self.repeats = repeats
+
+    def run(
+        self, candidate: LearningCandidate
+    ) -> tuple[tuple[float, ...], tuple[float, ...]]:
+        before_runs: list[tuple[float, ...]] = []
+        after_runs: list[tuple[float, ...]] = []
+        case_n: int | None = None
+        for _ in range(self.repeats):
+            before, after = self.inner.run(candidate)
+            if len(before) != len(after):
+                raise ValueError(
+                    "RepeatedCheckSet inner returned mismatched before/after "
+                    f"lengths ({len(before)} != {len(after)}); the evaluator "
+                    "is producing incomparable samples."
+                )
+            if case_n is None:
+                case_n = len(before)
+            elif len(before) != case_n:
+                raise ValueError(
+                    "RepeatedCheckSet inner returned inconsistent case counts "
+                    f"across repeats ({len(before)} != {case_n}); cannot "
+                    "average incomparable samples."
+                )
+            before_runs.append(before)
+            after_runs.append(after)
+
+        avg_before = tuple(sum(col) / self.repeats for col in zip(*before_runs))
+        avg_after = tuple(sum(col) / self.repeats for col in zip(*after_runs))
+        return avg_before, avg_after
+
+
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
@@ -480,26 +538,50 @@ def run_eval_gate(
             )
             continue
 
-        before, after = checkset.run(candidate)
-        # Guard: a mismatched evaluator that returns different-length before/after
-        # tuples would make mean(before) - mean(after) compare different sample
-        # populations.  Surface the broken evaluator early rather than silently
-        # averaging over a min-length slice.
-        if len(before) != len(after):
-            raise ValueError(
-                "eval checkset returned mismatched before/after lengths "
-                f"({len(before)} != {len(after)}) for item {item.id!r}; "
-                "the evaluator is producing incomparable samples."
-            )
         # Decision: ``strict_band`` (default) reproduces today's mean-regression
         # vs band test BYTE-IDENTICALLY; ``paired_significance`` uses the paired
         # one-sided verdict (harm-gated, abstaining).  ``pv`` is None on the
         # strict-band path so the new EvalGateDecision fields stay at defaults.
         pv: PairedVerdict | None = None
+        # Final repeat count actually performed (Task 4).  Recorded on the
+        # decision + observation stats; ``1`` on the single-shot strict-band path.
+        repeats = 1
         if config.decision_rule == "paired_significance":
+            # Adaptive repeated evaluation (Task 4).  Start at ``n_repeats`` and,
+            # while the verdict is ``inconclusive`` and there is headroom below
+            # ``max_repeats``, average MORE inner runs to shrink the per-case
+            # noise → shrink the delta SE → tighten the CI, which can resolve
+            # ``inconclusive`` into ``improved``/``regressed``.  ``underpowered``
+            # is NOT escalated (more repeats add SAMPLES per case, not CASES, so
+            # it cannot cross the ``min_n`` floor); ``improved``/``regressed`` are
+            # already decisive.  The ``repeats < max_repeats`` bound guarantees
+            # termination.  With ``n_repeats=max_repeats=1`` this is exactly one
+            # inner run (no loop) — identical to the pre-Task-4 single-shot path.
+            repeats = config.n_repeats
+            before, after = RepeatedCheckSet(
+                inner=checkset, repeats=repeats
+            ).run(candidate)
+            # Length guard (mirrors the strict-band path): a mismatched evaluator
+            # that returns different-length before/after tuples would compare
+            # different sample populations.  RepeatedCheckSet already guards each
+            # inner run, but keep the item-scoped message for the averaged result.
+            if len(before) != len(after):
+                raise ValueError(
+                    "eval checkset returned mismatched before/after lengths "
+                    f"({len(before)} != {len(after)}) for item {item.id!r}; "
+                    "the evaluator is producing incomparable samples."
+                )
             pv = paired_verdict(
                 before, after, z=config.z, min_n=config.min_sample_size
             )
+            while pv.verdict == "inconclusive" and repeats < config.max_repeats:
+                repeats = min(repeats + 1, config.max_repeats)
+                before, after = RepeatedCheckSet(
+                    inner=checkset, repeats=repeats
+                ).run(candidate)
+                pv = paired_verdict(
+                    before, after, z=config.z, min_n=config.min_sample_size
+                )
             sample_n = pv.n
             # Back-compat sign: regression = mean(before) - mean(after) = -delta.
             regression = -pv.delta
@@ -509,6 +591,17 @@ def run_eval_gate(
             # the gate records it but does NOT roll back here.
             passed = pv.verdict == "improved"
         else:
+            before, after = checkset.run(candidate)
+            # Guard: a mismatched evaluator that returns different-length
+            # before/after tuples would make mean(before) - mean(after) compare
+            # different sample populations.  Surface the broken evaluator early
+            # rather than silently averaging over a min-length slice.
+            if len(before) != len(after):
+                raise ValueError(
+                    "eval checkset returned mismatched before/after lengths "
+                    f"({len(before)} != {len(after)}) for item {item.id!r}; "
+                    "the evaluator is producing incomparable samples."
+                )
             sample_n = len(before)
             regression = _mean(before) - _mean(after)
             passed = (
@@ -531,9 +624,9 @@ def run_eval_gate(
                 "ci_high": pv.ci_high,
                 "verdict": pv.verdict,
                 "z": config.z,
-                # The decision's repeat count — currently single-shot (1);
-                # Task 4 raises this when adaptive repeats land.
-                "repeats": 1,
+                # The decision's FINAL repeat count (Task 4): how many inner
+                # runs were averaged before the verdict was decided.
+                "repeats": repeats,
             }
         else:
             before_obs = {"mean": _mean(before), "n": len(before)}
@@ -586,6 +679,8 @@ def run_eval_gate(
                 se=pv.se if pv is not None else 0.0,
                 ciLow=pv.ci_low if pv is not None else 0.0,
                 ciHigh=pv.ci_high if pv is not None else 0.0,
+                # Final adaptive repeat count (Task 4); ``1`` on strict_band.
+                repeats=repeats,
             )
         )
 
@@ -600,6 +695,7 @@ __all__ = [
     "EvalGateConfig",
     "EvalGateDecision",
     "PairedVerdict",
+    "RepeatedCheckSet",
     "StaticCheckSet",
     "Verdict",
     "paired_verdict",
