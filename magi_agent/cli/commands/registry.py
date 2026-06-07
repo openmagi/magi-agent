@@ -138,7 +138,15 @@ class CommandRegistryImpl(CommandRegistry):
         for entry in self._entries.values():
             if not _surface_permits(surface, entry.command.surface):
                 continue
-            if not entry.is_enabled(eval_ctx):
+            try:
+                enabled = entry.is_enabled(eval_ctx)
+            except Exception:
+                # Fail-safe: a buggy or hostile predicate (e.g. a session-history
+                # visibility check that calls controller methods on a partially-wired
+                # runtime) must NOT break rendering of the entire command list.
+                # Hide only this command, let the rest through.
+                continue
+            if not enabled:
                 continue
             out.append(entry.command)
         return out

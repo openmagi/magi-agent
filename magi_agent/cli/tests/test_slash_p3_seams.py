@@ -212,6 +212,16 @@ class TestLookupHelpers:
         ctx = _ctx(runtime=FakeRuntime(session_revert=fake))
         assert _session_revert(ctx) is fake
 
+    def test_revert_none_when_wrong_type(self) -> None:
+        """FIX 5: mirror of forker/share wrong-type tests — a wrong-typed
+        session_revert attribute must return None (not the attribute)."""
+
+        class NotARevert:
+            pass
+
+        ctx = _ctx(runtime=FakeRuntime(session_revert=NotARevert()))
+        assert _session_revert(ctx) is None
+
     def test_share_none_when_runtime_is_none(self) -> None:
         assert _session_share(_ctx(runtime=None)) is None
 

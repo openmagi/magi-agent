@@ -201,6 +201,13 @@ class HelpCommand(LocalCommand):
 
     Not a boundary command (not in the recognized set), so it does NOT call
     ``project()``; it simply renders the static builtin name list.
+
+    Note: this command lists BUILTIN_COMMAND_NAMES only. Discovered commands
+    (``/init``, ``/review``, skill commands) and gated control/session-history
+    seams (``/model``, ``/fork``, etc.) are NOT included here. The full command
+    surface — including those commands — is exposed via autocomplete and
+    ``registry.list_for``; a full ``/help`` implementation would render from
+    there rather than from this static list.
     """
 
     async def call(self, args: object, ctx: CommandContext) -> LocalResult:  # type: ignore[override]

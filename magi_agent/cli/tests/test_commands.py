@@ -165,6 +165,30 @@ def test_default_predicate_always_true() -> None:
     assert reg.list_for(TUI) == [cmd]
 
 
+def test_list_for_raising_predicate_hides_only_its_own_command() -> None:
+    """FIX 1: a raising is_enabled predicate must NOT propagate; only that
+    command is excluded (fail-safe). A sibling command with a normal predicate
+    must still appear.
+    """
+    reg = CommandRegistryImpl()
+    bad_cmd = _LocalCmd(name="bad", surface=TUI)
+    good_cmd = _LocalCmd(name="good", surface=TUI)
+
+    def _raises(_ctx: object) -> bool:
+        raise RuntimeError("simulated predicate failure")
+
+    reg.register(bad_cmd, is_enabled=_raises)
+    reg.register(good_cmd)
+
+    # Must not raise despite the buggy predicate.
+    result = reg.list_for(TUI)
+
+    # The raising command is silently excluded (fail-safe).
+    assert bad_cmd not in result
+    # The sibling command with a normal (always-true) predicate is still included.
+    assert good_cmd in result
+
+
 # ---------------------------------------------------------------------------
 # Dispatch behavior
 # ---------------------------------------------------------------------------

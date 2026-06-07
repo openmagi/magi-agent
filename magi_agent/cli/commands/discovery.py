@@ -411,6 +411,11 @@ def build_registry(cwd: str) -> CommandRegistryImpl:
     )
 
     registry = CommandRegistryImpl()
+    # MCP prompt commands are intentionally NOT passed here (no mcp_commands=
+    # argument). They require an injected, enabled local-fake or live MCP
+    # provider which is default-off. The live-wiring seam threads them in by
+    # calling discover_commands(cwd, mcp_commands=...) directly, outside this
+    # default path.
     for command in discover_commands(cwd):
         registry.register(command)
     register_control_commands(registry)

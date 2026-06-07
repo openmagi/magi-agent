@@ -125,14 +125,15 @@ delivers almost no commands.
   into the `plugin` tier, args mapped `$1..$N` to prompt arguments (opencode
   `command/index.ts:112-139` pattern). Lazy template resolution.
 
-### 6.2 `/model`, `/agent`, `/mcp` (TUI widgets)
-- `WidgetCommand`s (TUI-only; headless dispatch already rejects widgets):
-  - `/model` → model picker; needs a runtime "set active model" seam (none
-    found — must be added in the runner/session layer).
-  - `/agent` → agent switch/cycle; same, needs an "active agent" seam.
-  - `/mcp` → toggle MCP servers for the session.
-- Headless equivalents (optional): accept an explicit arg (`/model <id>`) as a
-  `LocalCommand` so headless users aren't blocked by the widget-only path.
+### 6.2 `/model`, `/agent`, `/mcp` (shipped as `LocalCommand` seams)
+- These shipped as `LocalCommand`s (both TUI + headless) in
+  `magi_agent/cli/commands/control.py` (PR4), NOT as `WidgetCommand`s (TUI-only)
+  as originally specced. They are default-off protocol seams: always findable via
+  `lookup`, hidden from `list_for` until a real controller is wired onto
+  `ctx.runtime`. See §7 for the full default-off seam description.
+- When a live runtime-switch seam is added (runtime "set active model" etc.),
+  the command can be upgraded to a `WidgetCommand` in TUI if an interactive
+  picker is desired; for now the `LocalCommand` path serves both surfaces cleanly.
 
 ### 6.3 `/new`
 - `LocalCommand` (or runner control) that starts a fresh session via the

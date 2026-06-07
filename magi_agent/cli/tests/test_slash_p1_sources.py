@@ -348,6 +348,35 @@ class TestMarkdownArgSubstitution:
         blocks = asyncio.run(cmd.build_prompt("a b", _ctx()))
         assert blocks[0].text == "a and a b"
 
+    def test_two_digit_positional_substitution(self) -> None:
+        """$10 must substitute the 10th positional arg, NOT $1 followed by '0'.
+
+        The single-pass regex _TOKEN_RE matches $ARGUMENTS | $([1-9][0-9]*),
+        so '$10' is one token capturing group '10' (index 9), not '$1'+'0'.
+        """
+        cmd = MarkdownPromptCommand(
+            name="test",
+            surface=CommandSurface(tui=True, headless=True),
+            text="$1 $10",
+        )
+        # 10 tokens: a b c d e f g h i j
+        args = "a b c d e f g h i j"
+        blocks = asyncio.run(cmd.build_prompt(args, _ctx()))
+        text = blocks[0].text
+        # $1 -> first token 'a'; $10 -> tenth token 'j'
+        assert text == "a j", f"expected 'a j', got {text!r}"
+
+    def test_two_digit_positional_reversed_order(self) -> None:
+        """$10 then $1: still 10th then 1st, not any re-expansion artefact."""
+        cmd = MarkdownPromptCommand(
+            name="test",
+            surface=CommandSurface(tui=True, headless=True),
+            text="$10 then $1",
+        )
+        args = "a b c d e f g h i j"
+        blocks = asyncio.run(cmd.build_prompt(args, _ctx()))
+        assert blocks[0].text == "j then a"
+
 
 class TestMarkdownHints:
     def _make_cmd(self, tmp_path: Path, body: str) -> MarkdownPromptCommand:
