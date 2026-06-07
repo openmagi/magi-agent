@@ -73,7 +73,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import AsyncGenerator, AsyncIterator, Mapping
+from collections.abc import AsyncGenerator, AsyncIterator, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -89,6 +89,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only, never imported at runtime
         RecoveryAttemptState,
         RecoveryEngine,
     )
+    from magi_agent.runtime.goal_nudge import GoalNudge
 
 
 @dataclass(frozen=True)
@@ -245,6 +246,31 @@ def build_engine_recovery_policy(env: object = None) -> "EngineRecoveryPolicy | 
 # A sane default cap so a runaway stream can't yield forever. Mirrors the spirit
 # of RunnerSessionBoundaryConfig.max_event_count but headless can tolerate more.
 _DEFAULT_MAX_EVENT_COUNT = 4096
+
+
+def _goal_is_met(nudge: "GoalNudge", *, evidence_records: object) -> bool:
+    """Thin wrapper around :func:`~magi_agent.runtime.goal_nudge.goal_is_met`.
+
+    Extracted as a module-level function so test suites can monkeypatch it
+    without needing to stub the full evidence layer.  Import is deferred so
+    ``import cli.engine`` stays cold-clean even when ``runtime.goal_nudge``
+    is not installed.
+    """
+    from magi_agent.runtime.goal_nudge import goal_is_met  # noqa: PLC0415
+
+    return goal_is_met(nudge, evidence_records=evidence_records)  # type: ignore[arg-type]
+
+
+def _build_nudge_message(nudge: "GoalNudge") -> str:
+    """Thin wrapper around :func:`~magi_agent.runtime.goal_nudge.build_nudge_message`.
+
+    Extracted as a module-level function mirroring the ``_goal_is_met`` pattern
+    so that the import is deferred (cold-clean at ``import cli.engine`` time) and
+    test suites can monkeypatch it without stubbing the full goal_nudge module.
+    """
+    from magi_agent.runtime.goal_nudge import build_nudge_message  # noqa: PLC0415
+
+    return build_nudge_message(nudge)
 
 # Map a projected public-event dict's "type" -> RuntimeEvent EventKind. Anything
 # not listed defaults to "status".
@@ -522,6 +548,8 @@ class MagiEngineDriver:
         recovery: "EngineRecoveryPolicy | None" = None,
         runner_policy_assembly: RunnerPolicyAssembly | None = None,
         event_sink: object | None = None,
+        goal_nudge: "GoalNudge | None" = None,
+        evidence_collector: Callable[[str], Sequence[object]] | None = None,
     ) -> None:
         self._runner = runner
         self._max_event_count = max(1, int(max_event_count))
@@ -535,6 +563,18 @@ class MagiEngineDriver:
         # Optional observability sink, called with (payload, session_id, turn_id)
         # for each sanitized public event. None keeps the default path a no-op.
         self._event_sink = event_sink
+        # PR4 goal-nudge continuation. ``None`` (default) -> no nudge logic;
+        # ``_drive`` behaves byte-identically to pre-PR4.
+        self._goal_nudge: "GoalNudge | None" = goal_nudge
+        # Optional evidence-collector DI seam (PR4 follow-up). When set,
+        # _collect_evidence delegates to this callable instead of returning ().
+        # The engine driver does NOT own a ledger; the harness layer above wires
+        # one here when it wants evidence-backed GoalNudge goals to be checkable.
+        # When None (the default), _collect_evidence returns () — byte-identical
+        # to pre-seam behaviour.
+        self._evidence_collector: Callable[[str], Sequence[object]] | None = (
+            evidence_collector
+        )
         # Shared across all turns of this driver instance: single-flight per
         # session id. Lazily built so construction stays cheap + import-clean.
         self._registry: object | None = None
@@ -660,6 +700,7 @@ class MagiEngineDriver:
             initial_messages=initial_messages,
             cancel=cancel,
             gate=gate,
+            goal_nudge=self._goal_nudge,
         )
         try:
             async for item in driver_gen:
@@ -684,6 +725,7 @@ class MagiEngineDriver:
         initial_messages: list | None = None,
         cancel: asyncio.Event,
         gate: "PermissionGate | None" = None,
+        goal_nudge: "GoalNudge | None" = None,
     ) -> AsyncGenerator[RuntimeEvent, EngineResult]:
         # PR3/Stream B: feed initial_messages via SessionContinuityBoundary.
         # Read here (so the seam is plumbed end-to-end) but NOT yet fed into the
@@ -778,6 +820,13 @@ class MagiEngineDriver:
         recovery_state: "RecoveryAttemptState | None" = None
         recovery_attempts = 0
 
+        # PR4 goal-nudge state. Only active when goal_nudge is not None.
+        # nudges_used: hard cap counter (anti-infinite-loop).
+        # goal_check_pending: mode="goal" latch — True after one nudge fires per
+        # consecutive clean stop; reset to False when a tool fires (re-arm).
+        nudges_used = 0
+        goal_check_pending = False
+
         try:
             while True:
                 # (Re-)invoke the run: a FRESH ``adapter.run_turn`` is a fresh
@@ -811,6 +860,11 @@ class MagiEngineDriver:
                                 continue
                             self._collect_public_refs(safe, observed_public_refs)
                             self._track_pending_tool(safe, pending_tool_ids)
+                            # PR4 goal-nudge: reset the goal-mode latch whenever a
+                            # tool fires so the next clean stop is eligible for a
+                            # nudge again (re-arm).
+                            if goal_nudge is not None and safe.get("type") == "tool_start":
+                                goal_check_pending = False
                             attempt_yielded += 1
                             yielded_events += 1
                             self._observe_event(safe, session_id, turn_id)
@@ -830,6 +884,46 @@ class MagiEngineDriver:
                 if cancelled:
                     break
                 if attempt_error is None:
+                    # PR4 goal-nudge: at the clean-break path, check whether a
+                    # nudge re-invocation is warranted before breaking.
+                    if goal_nudge is not None and nudges_used < goal_nudge.max_nudges:
+                        if not _goal_is_met(
+                            goal_nudge,
+                            evidence_records=self._collect_evidence(turn_id),
+                        ):
+                            if goal_nudge.mode == "goal" and goal_check_pending:
+                                # Latch has already fired once since the last
+                                # tool event — break without another nudge.
+                                break
+                            # Arm the latch (goal mode) or keep it reset (grind).
+                            goal_check_pending = True
+                            nudges_used += 1
+                            # Build a fresh runner_input with the nudge as the
+                            # new message, reusing the SAME re-invocation
+                            # machinery the recovery path uses (build + continue).
+                            nudge_text = _build_nudge_message(goal_nudge)
+                            runner_input = runner_turn_input_cls(
+                                userId=self._user_id,
+                                sessionId=session_id,
+                                turnId=turn_id,
+                                invocationId=turn_id,
+                                newMessage=types.Content(  # type: ignore[attr-defined]
+                                    role="user",
+                                    parts=[types.Part(text=nudge_text)],  # type: ignore[attr-defined]
+                                ),
+                                harnessState=effective_harness_state,
+                            )
+                            yield RuntimeEvent(
+                                type="status",
+                                payload={
+                                    "type": "goal_nudge",
+                                    "mode": goal_nudge.mode,
+                                    "nudge": nudges_used,
+                                    "max": goal_nudge.max_nudges,
+                                },
+                                turn_id=turn_id,
+                            )
+                            continue  # re-invoke run_async (genuine new model call)
                     break
 
                 # The run invocation raised. Decide whether to GENUINELY retry.
@@ -928,6 +1022,26 @@ class MagiEngineDriver:
             session_id=session_id,
             turn_id=turn_id,
         )
+
+    def _collect_evidence(self, turn_id: str) -> tuple[object, ...]:
+        """Return evidence records for the given turn.
+
+        The engine driver does not own an evidence ledger (that lives at the
+        recipe/harness layer above).  When no ``evidence_collector`` was
+        provided at construction time, returns an empty tuple — ``_goal_is_met``
+        then falls through to the ``required_evidence``-empty path (relying on
+        the synthetic self-check turn), which is byte-identical to pre-seam
+        behaviour.
+
+        When the driver was constructed with an ``evidence_collector`` callable
+        (the DI seam), delegates to it: ``evidence_collector(turn_id)`` → a
+        sequence of evidence records → returned as a tuple.  The harness layer
+        above the engine uses this seam to make evidence-backed :class:`GoalNudge`
+        goals functional without coupling the engine to a concrete ledger type.
+        """
+        if self._evidence_collector is not None:
+            return tuple(self._evidence_collector(turn_id))
+        return ()
 
     async def _attempt_run_recovery(
         self,
