@@ -331,6 +331,20 @@ def _mean(scores: tuple[float, ...]) -> float:
     return sum(scores) / len(scores) if scores else 0.0
 
 
+def _summary_with_std(scores: tuple[float, ...]) -> dict[str, object]:
+    """``{"mean", "n"}`` plus ``"std"`` when computable (>=2 samples).
+
+    Used only on the paired-significance path so the persisted observation
+    carries dispersion alongside the mean.  ``statistics.stdev`` needs at least
+    two data points, so the ``"std"`` key is omitted for ``n<2`` rather than
+    stored as ``0``/``None`` (an absent key reads as "not computable").
+    """
+    summary: dict[str, object] = {"mean": _mean(scores), "n": len(scores)}
+    if len(scores) >= 2:
+        summary["std"] = statistics.stdev(scores)
+    return summary
+
+
 def _candidate_item_id(candidate: LearningCandidate, *, tenant_id: str = "local") -> str:
     """Derive a stable, collision-free store id for *candidate*.
 
@@ -502,13 +516,38 @@ def run_eval_gate(
                 and regression <= config.max_regression_band
             )
 
+        # Persist the observation.  The strict_band path stays BYTE-IDENTICAL to
+        # today (no std, stats=None).  The paired_significance path enriches the
+        # record so a reviewer can see whether a promotion was significant or
+        # noise: before/after gain a "std" (when >=2 samples) and the
+        # significance stats (delta/se/ci/verdict/z/repeats) are persisted.
+        if pv is not None:
+            before_obs = _summary_with_std(before)
+            after_obs = _summary_with_std(after)
+            stats = {
+                "delta": pv.delta,
+                "se": pv.se,
+                "ci_low": pv.ci_low,
+                "ci_high": pv.ci_high,
+                "verdict": pv.verdict,
+                "z": config.z,
+                # The decision's repeat count — currently single-shot (1);
+                # Task 4 raises this when adaptive repeats land.
+                "repeats": 1,
+            }
+        else:
+            before_obs = {"mean": _mean(before), "n": len(before)}
+            after_obs = {"mean": _mean(after), "n": len(after)}
+            stats = None
+
         eval_ref = store.record_eval_observation(
             item_id=item.id,
-            before={"mean": _mean(before), "n": len(before)},
-            after={"mean": _mean(after), "n": len(after)},
+            before=before_obs,
+            after=after_obs,
             sample_n=sample_n,
             passed=passed,
             tenant_id=tenant_id,
+            stats=stats,
         )
 
         activated = False
