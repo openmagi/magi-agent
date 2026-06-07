@@ -46,6 +46,10 @@ def test_fireworks_uses_fireworks_ai_litellm_prefix() -> None:
     cfg = resolve_provider_config(env={"FIREWORKS_API_KEY": "f"}, config={})
     assert cfg is not None
     assert cfg.provider == "fireworks"
+    assert cfg.model == "accounts/fireworks/models/kimi-k2-instruct"
+    assert cfg.litellm_model == (
+        "fireworks_ai/accounts/fireworks/models/kimi-k2-instruct"
+    )
     assert cfg.litellm_model.startswith("fireworks_ai/")
 
 

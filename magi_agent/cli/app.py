@@ -188,7 +188,7 @@ def agent(
     model: Optional[str] = typer.Option(
         None,
         "--model",
-        help="Model to use (reserved; not yet fully wired).",
+        help="claude-sonnet-4-6 model override; provider default when unset.",
     ),
     mode: AgentMode = typer.Option(
         AgentMode.act,
@@ -418,7 +418,7 @@ def legalbench(
     model: Optional[str] = typer.Option(
         None,
         "--model",
-        help="Model override (e.g. claude-sonnet-4-5). Defaults to provider default.",
+        help="claude-sonnet-4-6 model override; provider default when unset.",
     ),
     ablation: bool = typer.Option(
         False,

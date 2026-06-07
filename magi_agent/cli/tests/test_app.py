@@ -380,6 +380,33 @@ class TestAgentDefaultCommand:
         assert result.exit_code == 0, result.output
         assert "smartApprove" in result.output
 
+    def test_agent_model_help_uses_current_default_example(self) -> None:
+        runner = CliRunner()
+        result = runner.invoke(
+            _make_app(),
+            ["agent", "--help"],
+            catch_exceptions=False,
+            terminal_width=120,
+        )
+
+        assert result.exit_code == 0, result.output
+        assert "claude-sonnet-4-6" in result.output
+        assert "not yet fully wired" not in result.output
+        assert "claude-sonnet-4-5" not in result.output
+
+    def test_legalbench_model_help_uses_current_default_example(self) -> None:
+        runner = CliRunner()
+        result = runner.invoke(
+            _make_app(),
+            ["legalbench", "--help"],
+            catch_exceptions=False,
+            terminal_width=120,
+        )
+
+        assert result.exit_code == 0, result.output
+        assert "claude-sonnet-4-6" in result.output
+        assert "claude-sonnet-4-5" not in result.output
+
     def test_smart_approve_permission_mode_reaches_headless(
         self,
         monkeypatch: pytest.MonkeyPatch,
