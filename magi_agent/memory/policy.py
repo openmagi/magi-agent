@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import os
 from collections.abc import Mapping
 from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
 
 from .contracts import RecallRequest
+
+
+MAGI_MEMORY_PROJECTION_ENABLED_ENV: str = "MAGI_MEMORY_PROJECTION_ENABLED"
 
 
 MemoryMode = Literal["normal", "read_only", "incognito"]
@@ -221,4 +225,91 @@ def evaluate_memory_policy(
         prompt_projection_allowed=False,
         public_projection_allowed=public_projection_allowed,
         reason_codes=tuple(dict.fromkeys(reasons)),
+    )
+
+
+class MemoryProjectionGateDecision(BaseModel):
+    """Result of the gated projection-tier check (D3).
+
+    Unlike :class:`MemoryPolicyDecision`, this type allows
+    ``prompt_projection_allowed=True`` — but only when the env gate is ON
+    and the channel is not incognito.  The base
+    :func:`evaluate_memory_policy` / :class:`MemoryPolicyDecision` remain
+    pinned to ``False``; this decision type is *additive*.
+    """
+
+    model_config = _MODEL_CONFIG
+
+    prompt_projection_allowed: bool = Field(alias="promptProjectionAllowed")
+    reason_codes: tuple[str, ...] = Field(alias="reasonCodes")
+
+    @classmethod
+    def model_construct(
+        cls,
+        _fields_set: set[str] | None = None,
+        **values: Any,
+    ) -> Self:
+        _ = _fields_set
+        return cls.model_validate(values)
+
+    def model_copy(
+        self,
+        *,
+        update: Mapping[str, Any] | None = None,
+        deep: bool = False,
+    ) -> Self:
+        _ = deep
+        payload = self.model_dump(by_alias=True, mode="python", warnings=False)
+        if update:
+            payload.update(dict(update))
+        return type(self).model_validate(payload)
+
+
+def _projection_gate_open() -> bool:
+    """Return True when ``MAGI_MEMORY_PROJECTION_ENABLED`` is set to a truthy value."""
+    return os.environ.get(MAGI_MEMORY_PROJECTION_ENABLED_ENV, "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+
+
+def evaluate_memory_policy_with_gate(
+    request: RecallRequest,
+    policy: MemoryPolicy,
+) -> MemoryProjectionGateDecision:
+    """Evaluate whether gated prompt-projection is allowed for *policy*.
+
+    Gate-off (default): always returns ``prompt_projection_allowed=False`` —
+    byte-identical to today.
+
+    Gate-on (``MAGI_MEMORY_PROJECTION_ENABLED=1``): returns
+    ``prompt_projection_allowed=True`` ONLY when ``memory_mode`` is NOT
+    ``"incognito"``.  Incognito always blocks projection regardless of the gate.
+
+    The underlying :func:`evaluate_memory_policy` / :class:`MemoryPolicyDecision`
+    remain unchanged; this function is the *gated tier* (D3 §1).
+    """
+    _ = request
+    reasons: list[str] = []
+
+    if not _projection_gate_open():
+        reasons.append("projection_gate_off")
+        return MemoryProjectionGateDecision(
+            promptProjectionAllowed=False,
+            reasonCodes=tuple(reasons),
+        )
+
+    if policy.memory_mode == "incognito":
+        reasons.append("incognito_blocks_projection")
+        return MemoryProjectionGateDecision(
+            promptProjectionAllowed=False,
+            reasonCodes=tuple(reasons),
+        )
+
+    reasons.append("projection_gate_on")
+    return MemoryProjectionGateDecision(
+        promptProjectionAllowed=True,
+        reasonCodes=tuple(reasons),
     )
