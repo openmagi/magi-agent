@@ -274,8 +274,8 @@ def test_paired_path_persists_stats_and_std(tmp_path) -> None:
     assert stats["repeats"] == 1
 
     # before/after enriched with std (>=2 samples).
-    before = json.loads(obs["before_json"])
-    after = json.loads(obs["after_json"])
+    before = obs["before"]
+    after = obs["after"]
     assert "std" in before
     assert "std" in after
     assert before["n"] == 4
@@ -296,9 +296,27 @@ def test_strict_band_path_records_null_stats_and_no_std(tmp_path) -> None:
 
     assert obs is not None
     assert obs["stats"] is None
-    before = json.loads(obs["before_json"])
-    after = json.loads(obs["after_json"])
+    before = obs["before"]
+    after = obs["after"]
     # strict_band path unchanged — no std key added.
     assert "std" not in before
     assert "std" not in after
     assert before == {"mean": 0.5, "n": 4}
+
+
+def test_paired_underpowered_n1_omits_std(tmp_path) -> None:
+    # n<2 → stdev undefined → _summary_with_std must omit the "std" key (not crash).
+    store = _store(tmp_path)
+    decisions = run_eval_gate(
+        (_candidate(kind="example"),),
+        store=store,
+        checkset=StaticCheckSet(before=(0.5,), after=(0.9,)),
+        config=EvalGateConfig(decisionRule="paired_significance"),
+    )
+    obs = store.get_eval_observation(decisions[0].eval_observation_ref)
+    store.close()
+
+    assert decisions[0].verdict == "underpowered"
+    assert "std" not in obs["before"]
+    assert "std" not in obs["after"]
+    assert obs["before"] == {"mean": 0.5, "n": 1}

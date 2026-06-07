@@ -745,10 +745,9 @@ class SqliteLearningStore:
     def get_eval_observation(self, ref: str) -> dict[str, object] | None:
         """Read back a recorded eval observation by *ref*.
 
-        Returns ``None`` when no observation with that ref exists.  ``stats`` is
-        parsed back to a dict (or ``None`` when the row predates / omits stats);
-        ``before``/``after`` are returned both parsed (``before``/``after``) and
-        raw (``before_json``/``after_json``) so callers can inspect either form.
+        Returns ``None`` when no observation with that ref exists.  ``before`` and
+        ``after`` are parsed dicts; ``stats`` is parsed back to a dict (or ``None``
+        when the row predates / omits stats).
         """
         conn = self._get_conn()
         row = conn.execute(
@@ -761,8 +760,6 @@ class SqliteLearningStore:
         return {
             "ref": row["ref"],
             "item_id": row["item_id"],
-            "before_json": row["before_json"],
-            "after_json": row["after_json"],
             "before": json.loads(row["before_json"]),
             "after": json.loads(row["after_json"]),
             "sample_n": row["sample_n"],
