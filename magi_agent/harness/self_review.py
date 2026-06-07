@@ -195,7 +195,10 @@ class CandidateSink(Protocol):
     Sinks that need async work must buffer internally.
     """
 
-    def receive(self, candidate: ReviewCandidate) -> None: ...  # pragma: no cover
+    def receive(self, candidate: ReviewCandidate) -> object: ...  # pragma: no cover
+    # Return type is ``object`` (not ``None``) so implementations such as
+    # ``LearningPipelineSink`` may return a decision object; C1 callers ignore
+    # the return value.
 
 
 # ---------------------------------------------------------------------------

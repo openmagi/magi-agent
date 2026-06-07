@@ -52,7 +52,7 @@ from magi_agent.learning.store import SqliteLearningStore
 
 def _tmp_store() -> SqliteLearningStore:
     """Create an in-memory SQLite learning store for test isolation."""
-    tmp = tempfile.mktemp(suffix=".db")
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".db").name
     return SqliteLearningStore(db_path=tmp, workspace_root="")
 
 
@@ -97,6 +97,7 @@ def _make_skill_candidate(
 def _passing_checkset() -> StaticCheckSet:
     """Returns a checkset that passes: before <= after, >= MIN_EVAL_SAMPLE_SIZE samples."""
     scores = tuple(0.5 for _ in range(MIN_EVAL_SAMPLE_SIZE))
+    # 0.0 regression satisfies <=MAX_REGRESSION_BAND (equal before/after scores)
     return StaticCheckSet(before=scores, after=scores)
 
 
@@ -135,12 +136,24 @@ class TestCandidateMapping:
         lc = _map_candidate(rc)
         assert lc.kind == "example"
 
-    def test_proposal_becomes_content_situation_and_behavior(self) -> None:
+    def test_proposal_becomes_content_behavior_only(self) -> None:
+        """behavior == proposal; situation is a distinct provenance descriptor."""
         proposal = "User prefers bullet points."
         rc = _make_memory_candidate(proposal=proposal)
         lc = _map_candidate(rc)
-        assert lc.content["situation"] == proposal
+        # behavior must equal the raw proposal
         assert lc.content["behavior"] == proposal
+        # situation must NOT duplicate the raw proposal (distinct, non-inflating)
+        assert lc.content["situation"] != proposal
+
+    def test_situation_and_behavior_are_distinct(self) -> None:
+        """situation != behavior for every candidate kind to prevent self-scoring."""
+        for make_fn in (_make_memory_candidate, _make_skill_candidate):
+            rc = make_fn()
+            lc = _map_candidate(rc)
+            assert lc.content["situation"] != lc.content["behavior"], (
+                f"situation and behavior must differ (kind={rc.kind})"
+            )
 
     def test_proposal_becomes_rationale(self) -> None:
         proposal = "Always verify before committing."
