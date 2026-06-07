@@ -79,6 +79,18 @@ class _FailGate:
         return EvidenceGateVerdict(passed=False, reason="evidence_missing")
 
 
+class _RaisesGate:
+    """Fake EvidenceGate whose check() always raises RuntimeError."""
+
+    def check(
+        self,
+        goal: str,
+        transcript_excerpt: str,
+        goal_state: object,
+    ) -> EvidenceGateVerdict:
+        raise RuntimeError("verifier exploded")
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -347,6 +359,53 @@ class TestGateOnEvidenceFailExhaustion:
             _input(store=store, judge=_AlwaysSatisfied(), evidence_gate=_FailGate())
         )
         assert store.get_goal("s1").turns_used == 5
+
+
+# ---------------------------------------------------------------------------
+# Gate raises → treated as evidence_unmet (safety: a broken verifier must
+# never let the loop falsely declare success).
+# ---------------------------------------------------------------------------
+
+
+class TestGateRaises:
+    def test_gate_raises_continues_evidence_unmet(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A gate that raises must result in decision=continue, reason=evidence_unmet.
+
+        This is the opposite of the old (wrong) behaviour where a raising gate
+        was treated as gate_passed=True and the loop would prematurely stop.
+        """
+        monkeypatch.setenv(EVIDENCE_GATE_ENV_VAR, "true")
+        store = _store_with_goal(max_turns=10)
+        result = decide_loop_continuation(
+            _input(store=store, judge=_AlwaysSatisfied(), evidence_gate=_RaisesGate())
+        )
+        assert result.decision == "continue"
+        assert result.reason == "evidence_unmet"
+
+    def test_gate_raises_does_not_declare_satisfied(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv(EVIDENCE_GATE_ENV_VAR, "true")
+        store = _store_with_goal(max_turns=10)
+        decide_loop_continuation(
+            _input(store=store, judge=_AlwaysSatisfied(), evidence_gate=_RaisesGate())
+        )
+        assert store.get_goal("s1").status == "active"
+
+    def test_gate_raises_at_boundary_exhausts(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """At the turn boundary, a raising gate must exhaust — not stop as satisfied."""
+        monkeypatch.setenv(EVIDENCE_GATE_ENV_VAR, "true")
+        store = _store_with_goal(turns_used=4, max_turns=5)
+        result = decide_loop_continuation(
+            _input(store=store, judge=_AlwaysSatisfied(), evidence_gate=_RaisesGate())
+        )
+        assert result.decision == "stop"
+        assert result.reason == "exhausted"
+        assert store.get_goal("s1").status == "exhausted"
 
 
 # ---------------------------------------------------------------------------

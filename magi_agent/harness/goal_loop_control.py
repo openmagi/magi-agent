@@ -23,11 +23,13 @@ State machine (priority order)
 5. **Judge satisfied** (B4 evidence gate OFF or no gate injected): set status
    ``satisfied`` (idempotent), ``stop`` reason ``satisfied``.
    **Judge satisfied + B4 evidence gate ON + gate injected**:
-     - evidence-gate PASSES → same as above (strong stop).
-     - evidence-gate FAILS → do NOT declare satisfied; instead ``advance`` and
-       ``continue`` with reason ``evidence_unmet`` (prevents premature "done" on
-       judge's word alone); if advancing would exhaust → ``stop`` reason
-       ``exhausted``.
+     - evidence-gate PASSES (``passed`` is strictly ``True``) → same as above
+       (strong stop).
+     - evidence-gate FAILS or RAISES → do NOT declare satisfied; instead
+       ``advance`` and ``continue`` with reason ``evidence_unmet`` (prevents
+       premature "done" on judge's word alone); if advancing would exhaust →
+       ``stop`` reason ``exhausted``.  A raising or non-bool verifier is treated
+       as evidence-unmet — it must never let the loop falsely declare success.
 6. **Judge NOT satisfied**:
      - if ``advance`` would exhaust (``turns_used + 1 >= max_turns``): set status
        ``exhausted``, ``stop`` reason ``exhausted``.
@@ -190,12 +192,14 @@ class EvidenceGateVerdict(BaseModel):
     clean string, e.g. "evidence_confirmed" / "evidence_missing").
     Raw goal text and transcript are NEVER passed through this model; the caller
     (EvidenceGate implementor) is responsible for not embedding them.
+    ``reason`` is capped at 200 characters so a buggy or malicious verifier cannot
+    bloat the evidence record via an unbounded string.
     """
 
     model_config = _MODEL_CONFIG
 
     passed: bool
-    reason: str
+    reason: str = Field(..., max_length=200)
 
 
 @runtime_checkable
@@ -207,10 +211,14 @@ class EvidenceGate(Protocol):
     goal string, transcript excerpt, and current GoalState — it MUST NOT embed
     raw text in any returned verdict field (callers redact; see _build_loop_evidence).
 
-    Maps onto verifier_bus concepts: a VerifierResultMetadata with status="pass"
-    corresponds to EvidenceGateVerdict(passed=True), status="failed"/"missing"
-    corresponds to EvidenceGateVerdict(passed=False).  The caller that wraps a
-    real VerifierResultMetadata into an EvidenceGateVerdict owns the mapping.
+    Maps onto verifier_bus concepts (VerifierStatus → passed):
+      - ``pass``                → ``passed=True``  (confirmed, loop may stop)
+      - ``failed`` / ``missing`` → ``passed=False`` (not confirmed, continue)
+      - ``approval_required``   → ``passed=False`` (human approval needed; not confirmed)
+      - ``audit``               → ``passed=False`` (audit-flagged; not confirmed)
+    The caller that wraps a real VerifierResultMetadata into an EvidenceGateVerdict
+    owns this mapping.  Any status not explicitly listed above should default to
+    ``passed=False`` so the loop never prematurely stops on an ambiguous verdict.
     """
 
     def check(
@@ -368,6 +376,58 @@ def _set_status(store: GoalStateStore, session_id: str, status: str) -> GoalStat
 
 
 # ---------------------------------------------------------------------------
+# Shared advance-or-exhaust helper (deduplicates evidence_unmet / not_satisfied
+# / parse_failure_fail_open branches — all three share the same
+# "advance + continue, or exhaust if at boundary" pattern).
+# ---------------------------------------------------------------------------
+
+
+def _advance_continue_or_exhaust(
+    loop_input: LoopControlInput,
+    *,
+    store: GoalStateStore,
+    session_id: str,
+    state: "GoalState",
+    failure_count_after: int,
+    observe_only: bool,
+    continue_reason: LoopContinueReason,
+    gate_passed: "bool | None" = None,
+) -> LoopControlResult:
+    """Advance the goal state, then return continue or exhausted.
+
+    If ``turns_used + 1 >= max_turns``, the advance brings the goal to
+    exhaustion and the loop stops.  Otherwise the loop continues with
+    ``continue_reason`` and a fresh continuation prompt.
+
+    All three "keep going" branches (``evidence_unmet``, ``not_satisfied``,
+    ``parse_failure_fail_open``) share exactly this pattern, so extracting it
+    here de-risks B5 from accidental behavioral divergence across branches.
+    """
+    if state.turns_used + 1 >= state.max_turns:
+        updated = store.advance(session_id)
+        return _result(
+            loop_input,
+            decision="stop",
+            reason="exhausted",
+            goal_state_after=updated,
+            failure_count_after=failure_count_after,
+            observe_only=observe_only,
+            gate_passed=gate_passed,
+        )
+    updated = store.advance(session_id)
+    return _result(
+        loop_input,
+        decision="continue",
+        reason=continue_reason,
+        goal_state_after=updated,
+        failure_count_after=failure_count_after,
+        observe_only=observe_only,
+        continuation_prompt=build_continuation_prompt(state.goal),
+        gate_passed=gate_passed,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Loop-control decision (pure over injected seams)
 # ---------------------------------------------------------------------------
 
@@ -457,32 +517,24 @@ def decide_loop_continuation(loop_input: LoopControlInput) -> LoopControlResult:
                         loop_input.transcript_excerpt,
                         state,
                     )
-                    gate_passed = gate_verdict.passed
-                except Exception:  # noqa: BLE001 — fail-open: treat as pass
-                    gate_passed = True
+                    # A gate returning a non-bool or None passed value is treated
+                    # as not-confirmed — only a strictly True value is a pass.
+                    gate_passed = gate_verdict.passed if gate_verdict.passed is True else False
+                except Exception:  # noqa: BLE001
+                    # A broken/raising verifier must never let the loop falsely
+                    # declare success; treat as evidence-unmet and continue.
+                    gate_passed = False
                 if not gate_passed:
-                    # Evidence gate failed: do NOT declare satisfied.
+                    # Evidence gate did not confirm: do NOT declare satisfied.
                     # Advance (or exhaust) and continue as evidence_unmet.
-                    if state.turns_used + 1 >= state.max_turns:
-                        updated = store.advance(session_id)
-                        return _result(
-                            loop_input,
-                            decision="stop",
-                            reason="exhausted",
-                            goal_state_after=updated,
-                            failure_count_after=failure_count_after,
-                            observe_only=observe_only,
-                            gate_passed=gate_passed,
-                        )
-                    updated = store.advance(session_id)
-                    return _result(
+                    return _advance_continue_or_exhaust(
                         loop_input,
-                        decision="continue",
-                        reason="evidence_unmet",
-                        goal_state_after=updated,
+                        store=store,
+                        session_id=session_id,
+                        state=state,
                         failure_count_after=failure_count_after,
                         observe_only=observe_only,
-                        continuation_prompt=build_continuation_prompt(state.goal),
+                        continue_reason="evidence_unmet",
                         gate_passed=gate_passed,
                     )
             # Gate off, no gate, or gate passed — strong satisfied stop.
@@ -497,25 +549,14 @@ def decide_loop_continuation(loop_input: LoopControlInput) -> LoopControlResult:
                 gate_passed=gate_passed,
             )
         # Not satisfied — advance, or exhaust if this advance hits the cap.
-        if state.turns_used + 1 >= state.max_turns:
-            updated = store.advance(session_id)  # B1 sets status="exhausted"
-            return _result(
-                loop_input,
-                decision="stop",
-                reason="exhausted",
-                goal_state_after=updated,
-                failure_count_after=failure_count_after,
-                observe_only=observe_only,
-            )
-        updated = store.advance(session_id)
-        return _result(
+        return _advance_continue_or_exhaust(
             loop_input,
-            decision="continue",
-            reason="not_satisfied",
-            goal_state_after=updated,
+            store=store,
+            session_id=session_id,
+            state=state,
             failure_count_after=failure_count_after,
             observe_only=observe_only,
-            continuation_prompt=build_continuation_prompt(state.goal),
+            continue_reason="not_satisfied",
         )
 
     # Parse failure (unparseable OR judge raised). B2 threaded the budget:
@@ -534,25 +575,14 @@ def decide_loop_continuation(loop_input: LoopControlInput) -> LoopControlResult:
 
     # Fail-open continue: advance and re-inject the continuation prompt — unless
     # advancing would exhaust the budget (treat like exhaustion).
-    if state.turns_used + 1 >= state.max_turns:
-        updated = store.advance(session_id)
-        return _result(
-            loop_input,
-            decision="stop",
-            reason="exhausted",
-            goal_state_after=updated,
-            failure_count_after=failure_count_after,
-            observe_only=observe_only,
-        )
-    updated = store.advance(session_id)
-    return _result(
+    return _advance_continue_or_exhaust(
         loop_input,
-        decision="continue",
-        reason="parse_failure_fail_open",
-        goal_state_after=updated,
+        store=store,
+        session_id=session_id,
+        state=state,
         failure_count_after=failure_count_after,
         observe_only=observe_only,
-        continuation_prompt=build_continuation_prompt(state.goal),
+        continue_reason="parse_failure_fail_open",
     )
 
 
