@@ -70,11 +70,11 @@ These are optional and usually set by release or container builds.
 ## Authority and rollout flags
 
 The authority flags below correspond to PythonRuntimeAuthorityConfig fields and
-are read from the hosted runtime only (the local CLI does not read them). All
-must be `false` or omitted. The `Literal[False]` type annotation means the runtime
-structurally rejects attempts to set them to true, and the env parser raises if
-any is set truthy. The env var names carry the `CORE_AGENT_PYTHON_` prefix
-(`magi_agent/config/env.py`):
+are read by packaged server deployments only (the local CLI does not read them).
+All must be `false` or omitted. The `Literal[False]` type annotation means the
+runtime structurally rejects attempts to set them to true, and the env parser
+raises if any is set truthy. The env var names carry the `CORE_AGENT_PYTHON_`
+prefix (`magi_agent/config/env.py`):
 
 - `CORE_AGENT_PYTHON_TRANSCRIPT_WRITE` — Must be false. Transcript write authority.
 - `CORE_AGENT_PYTHON_SSE_WRITE` — Must be false. SSE write authority.
