@@ -288,16 +288,42 @@ def test_registry_builtins_exactly_match_channel_type_literal() -> None:
     The ChannelType Literal in contract.py and the 4 built-in registry entries
     are kept in sync only by author discipline. This test makes any desync an
     immediate CI failure.
+
+    Invariant (E4 update)
+    ---------------------
+    The 4 Literal-backed types ("web", "app", "telegram", "discord") must
+    exactly match the registry's *built-in* entries.  Extension platforms added
+    by E4+ modules (e.g. "slack", "email") live in the registry but are NOT part
+    of the ChannelType Literal — that is the whole point of the extensibility
+    seam.  Comparing ``literal_types`` against ALL registry entries would falsely
+    fail once E4 modules are imported; instead we compare against the known
+    built-in set explicitly.
+
+    To add a new built-in (Literal + registry at the same time) this test MUST
+    be updated — by design, since it is an intentional coupling point.
     """
     from typing import get_args
 
     from magi_agent.channels.contract import ChannelType
 
+    _BUILTIN_CHANNEL_TYPES: frozenset[str] = frozenset({"web", "app", "telegram", "discord"})
+
     literal_types = set(get_args(ChannelType))
-    registry_builtin_types = {e.channel_type for e in get_default_registry().list_entries()}
+    # Only check the built-in entries, not extension entries (slack, email, …).
+    registry_builtin_types = {
+        e.channel_type
+        for e in get_default_registry().list_entries()
+        if e.channel_type in _BUILTIN_CHANNEL_TYPES
+    }
     assert literal_types == registry_builtin_types, (
         f"Literal-only: {literal_types - registry_builtin_types}, "
-        f"Registry-only: {registry_builtin_types - literal_types}"
+        f"Registry-only (builtins): {registry_builtin_types - literal_types}"
+    )
+    # Also assert every Literal type is in the registry (guards against removal).
+    all_registry_types = {e.channel_type for e in get_default_registry().list_entries()}
+    missing_from_registry = literal_types - all_registry_types
+    assert not missing_from_registry, (
+        f"ChannelType Literal members missing from registry: {missing_from_registry}"
     )
 
 
