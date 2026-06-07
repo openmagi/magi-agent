@@ -1,0 +1,32 @@
+[
+  {
+    "name": "Missing Deadline",
+    "pattern": "A task, ticket, or commitment references a due date that has passed (or is imminent) without any record of completion or follow-up.",
+    "evidence_flow": "A task/commitment item names a date, and no later item records its completion or extension before that date elapses."
+  },
+  {
+    "name": "Version Conflict",
+    "pattern": "Two or more documents or messages assert different values for the same fact (a number, status, owner, or decision) without reconciliation.",
+    "evidence_flow": "One evidence item states a value for a field; a second item states a contradicting value for the same field, and neither supersedes the other."
+  },
+  {
+    "name": "Stale Meeting",
+    "pattern": "A recurring or scheduled meeting persists even though its agenda, attendees, or driving project is no longer active or relevant.",
+    "evidence_flow": "A meeting/event item references a project or owner that another item marks as closed, departed, or deprioritized."
+  },
+  {
+    "name": "Missing Record",
+    "pattern": "An action or decision is referenced as having happened, but the expected artifact, log entry, or confirming record cannot be found.",
+    "evidence_flow": "One item asserts an action occurred and points to where its record should live; no item provides that record."
+  },
+  {
+    "name": "Risky Dependency",
+    "pattern": "A deliverable or workflow depends on an external party, system, or input that is flagged as unreliable, delayed, or out of the team's control.",
+    "evidence_flow": "A plan/task item names a dependency, and another item describes that dependency as blocked, late, or unowned."
+  },
+  {
+    "name": "Owner Ambiguity",
+    "pattern": "A task or area of responsibility has no clear single owner, or multiple parties each assume someone else holds it.",
+    "evidence_flow": "A responsibility item lacks a named owner, or two items each delegate the same responsibility to a different (or unnamed) party."
+  }
+]

@@ -2592,6 +2592,13 @@ def _first_party_packs() -> tuple[RecipePackManifest, ...]:
         # ``recipes/first_party/learning_usage.py`` (imported lazily to avoid a
         # circular import, since that module imports ``RecipePackManifest``).
         _build_learning_usage_pack(),
+        # discovery: default-OFF static-injection pack carrying the
+        # ``instruction:discovery:iterative`` ref.  Selected only when a task
+        # profile asks for ``discovery``; registering it leaves the OFF compiled
+        # snapshot byte-identical.  The builder + instruction text live in
+        # ``recipes/first_party/discovery.py`` (imported lazily to avoid a
+        # circular import, since that module imports ``RecipePackManifest``).
+        _build_discovery_pack(),
     )
 
 
@@ -2602,3 +2609,12 @@ def _build_learning_usage_pack() -> RecipePackManifest:
     from magi_agent.recipes.first_party.learning_usage import build_learning_usage_pack
 
     return build_learning_usage_pack()
+
+
+def _build_discovery_pack() -> RecipePackManifest:
+    # Lazy import breaks the compiler ↔ discovery circular import:
+    # ``discovery`` imports ``RecipePackManifest`` from this module, so a
+    # top-level import here would form a cycle at module load.
+    from magi_agent.recipes.first_party.discovery import build_discovery_pack
+
+    return build_discovery_pack()
