@@ -92,6 +92,34 @@ def test_local_dashboard_renders_workbench_not_empty_mockup() -> None:
     assert "Run local agent work from one dashboard." not in html
 
 
+def test_local_dashboard_restores_historical_stream_chat_components() -> None:
+    response = _client().get("/dashboard")
+    html = response.text
+
+    assert (
+        'data-historical-stream-source="legacy-stream:220e54ea4+5fcadc4cd"'
+        in html
+    )
+    assert "StreamChatContainer" in html
+    assert "StreamTranscript" in html
+    assert "AssistantBubble" in html
+    assert "ThinkingBlock" in html
+    assert "ToolCallCard" in html
+    assert "TodoListCard" in html
+    assert "ActivityList" in html
+    assert "ApprovalModal" in html
+    assert "TerminalNotice" in html
+    assert "createAgentSseTokenizer" in html
+    assert "foldRuntimeEvent" in html
+    assert "nextQueueOnTurnEnd" in html
+    assert "control_request" in html
+    assert "tool_start" in html
+    assert "tool_end" in html
+    assert "thinking_delta" in html
+    assert "queued-messages" in html
+    assert "approval-modal" in html
+
+
 def test_local_dashboard_has_operational_work_stream_metrics() -> None:
     response = _client().get("/dashboard")
     html = response.text
@@ -272,8 +300,9 @@ def test_local_dashboard_exposes_digest_safe_runtime_bootstrap() -> None:
     }
 
 
-def test_local_dashboard_chat_route_streams_local_adk_events(monkeypatch) -> None:
+def test_local_dashboard_chat_route_streams_local_adk_events(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("MAGI_AGENT_LOCAL_CHAT_ROUTE", "on")
+    monkeypatch.setenv("MAGI_CONFIG", str(tmp_path / "missing-config.toml"))
     client = _client()
 
     response = client.post(
