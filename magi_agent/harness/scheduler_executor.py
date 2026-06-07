@@ -38,7 +38,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal, Protocol, runtime_checkable
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from magi_agent.harness.scheduler_runtime import SchedulerLease, validate_scheduler_lease
 from magi_agent.missions.schedule_grammar import ScheduleSpec, next_run_at, parse_schedule
@@ -159,6 +159,22 @@ class ScheduledJobRecord(BaseModel):
     schedule_expr: str = Field(alias="scheduleExpr")
     last_fire: datetime | None = Field(default=None, alias="lastFire")
     next_run: datetime = Field(alias="nextRun")
+
+    @field_validator("next_run", "last_fire", mode="before")
+    @classmethod
+    def _require_aware(cls, v: object) -> object:
+        """Reject naive datetimes at construction time (belt-and-suspenders).
+
+        A naive datetime passed to SqliteScheduledJobSource's _iso_utc() is
+        silently converted assuming LOCAL time — on a non-UTC host this produces
+        an incorrect ISO key, making due_jobs return wrong results.  Catching it
+        here turns a silent-wrong into a loud-correct at the earliest opportunity.
+        """
+        if isinstance(v, datetime) and v.tzinfo is None:
+            raise ValueError(
+                f"datetime must be timezone-aware (tzinfo must not be None), got naive: {v!r}"
+            )
+        return v
 
     def _parsed_spec(self) -> ScheduleSpec:
         return parse_schedule(self.schedule_expr)

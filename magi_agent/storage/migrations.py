@@ -46,6 +46,26 @@ MIGRATIONS: Sequence[tuple[int, str]] = (
         );
         """,
     ),
+    (
+        4,
+        # A-driver: persistent ScheduledJobSource backing store.  Each row holds
+        # the full ScheduledJobRecord JSON (job_json) so a fresh
+        # SqliteScheduledJobSource instance can reconstruct scheduled jobs after a
+        # restart.  next_run_utc is a denormalized ISO-8601 UTC string mirrored
+        # from the record so due_jobs() can range-scan in SQL.  No FK to sessions:
+        # scheduled jobs are session-independent (they may outlive any session).
+        """
+        CREATE TABLE IF NOT EXISTS scheduled_jobs (
+            job_id TEXT PRIMARY KEY,
+            schedule_expr TEXT NOT NULL,
+            next_run_utc TEXT NOT NULL,
+            job_json TEXT NOT NULL,
+            updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_scheduled_jobs_next_run
+            ON scheduled_jobs(next_run_utc);
+        """,
+    ),
 )
 
 
