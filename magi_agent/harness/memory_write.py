@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import time
 from collections.abc import Mapping, Sequence
-from typing import Literal, Self, TypeAlias
+from typing import Any, Literal, Self, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator, model_validator
 
@@ -18,6 +20,7 @@ from magi_agent.memory.write_boundary import (
     _sanitize_path_ref,
     _sanitize_public_text,
 )
+from magi_agent.memory.declarative_filter import is_declarative_result
 
 
 MemoryWriteHarnessStatus: TypeAlias = Literal[
@@ -288,6 +291,28 @@ class MemoryWriteRequest(BaseModel):
         return sha256_hex(source)
 
 
+class MemoryWriteEvidenceRecord(BaseModel):
+    """Lightweight evidence anchor for a memory write outcome (real or simulated).
+
+    This is a simplified local evidence record — NOT the full ``EvidenceRecord``
+    from ``magi_agent.evidence.types`` (which requires ADK deps on the import
+    path).  The harness emits this for every write attempt so that callers can
+    audit the outcome without touching production-write-protected fields.
+    """
+
+    model_config = _MODEL_CONFIG
+
+    type: str = "MemoryWriteAttempt"
+    status: Literal["ok", "failed", "blocked", "simulated"] = "simulated"
+    is_real_write: bool = Field(default=False, alias="isRealWrite")
+    is_declarative: bool = Field(default=True, alias="isDeclarative")
+    provider_id: str = Field(alias="providerId")
+    turn_id: str = Field(alias="turnId")
+    operation: str
+    observed_at: float = Field(alias="observedAt")
+    rejection_reason: str | None = Field(default=None, alias="rejectionReason")
+
+
 class MemoryWriteHarnessResult(BaseModel):
     model_config = _MODEL_CONFIG
 
@@ -298,6 +323,11 @@ class MemoryWriteHarnessResult(BaseModel):
     authority_flags: MemoryWriteAuthorityFlags = Field(
         default_factory=MemoryWriteAuthorityFlags,
         alias="authorityFlags",
+    )
+    # D2: lightweight evidence record — present for every write attempt
+    evidence_record: MemoryWriteEvidenceRecord | None = Field(
+        default=None,
+        alias="evidenceRecord",
     )
 
     @field_validator("reason_codes", mode="before")
@@ -326,7 +356,17 @@ class MemoryWriteHarnessResult(BaseModel):
 
 
 class MemoryWriteHarness:
-    """Default-off policy boundary for future ADK MemoryService writes."""
+    """Default-off policy boundary for future ADK MemoryService writes.
+
+    D2 extension: when MAGI_MEMORY_WRITE_ENABLED is set AND a writable
+    LocalFileMemoryProvider is injected as ``adapter``, the harness calls
+    ``adapter.remember(...)`` to persist the fact to disk.  When the env gate
+    is off (default) or no provider is injected the behaviour is byte-identical
+    to D1 (simulated local-fake receipt only — no file written).
+
+    Declarative-only gate (D2): facts matching task-state patterns (PR numbers,
+    commit SHAs, "done/merged/in progress") are rejected before any write.
+    """
 
     def __init__(
         self,
@@ -390,17 +430,64 @@ class MemoryWriteHarness:
                 policy_snapshot_digest=policy_digest,
             )
 
+        # ------------------------------------------------------------------ #
+        # D2: Declarative-only gate — reject task-state facts before writing  #
+        # ------------------------------------------------------------------ #
+        body = safe_request.content or ""
+        if body:
+            filter_result = is_declarative_result(body)
+            if not filter_result.accepted:
+                ev = MemoryWriteEvidenceRecord(
+                    status="blocked",
+                    isRealWrite=False,
+                    isDeclarative=False,
+                    providerId=safe_request.provider_id,
+                    turnId=safe_request.turn_id,
+                    operation=core_operation,
+                    observedAt=time.time(),
+                    rejectionReason=filter_result.rejection_reason,
+                )
+                return _result(
+                    status="blocked",
+                    reason_codes=("non_declarative_fact_rejected",),
+                    receipt=planned_receipt,
+                    policy_snapshot_digest=policy_digest,
+                    evidence_record=ev,
+                )
+
+        # ------------------------------------------------------------------ #
+        # D2: Gated real-write path — both env gate AND injected provider     #
+        # ------------------------------------------------------------------ #
+        real_write_attempted = False
+        if body and self.adapter is not None:
+            real_write_attempted = await _attempt_real_write(self.adapter, body, core_operation)
+
         receipt = fake_successful_test_receipt(
             provider_id=safe_request.provider_id,
             turn_id=safe_request.turn_id,
             operation=core_operation,  # type: ignore[arg-type]
             target_sha256=safe_request.target_hash(),
         )
+        ev = MemoryWriteEvidenceRecord(
+            status="ok" if real_write_attempted else "simulated",
+            isRealWrite=real_write_attempted,
+            isDeclarative=True,
+            providerId=safe_request.provider_id,
+            turnId=safe_request.turn_id,
+            operation=core_operation,
+            observedAt=time.time(),
+        )
+        reason = (
+            "memory_write_real_provider_receipt"
+            if real_write_attempted
+            else "local_fake_memory_write_receipt"
+        )
         return _result(
             status="success",
-            reason_codes=("local_fake_memory_write_receipt",),
+            reason_codes=(reason,),
             receipt=receipt,
             policy_snapshot_digest=policy_digest,
+            evidence_record=ev,
         )
 
 
@@ -458,6 +545,7 @@ def _result(
     reason_codes: Sequence[str],
     receipt: MemoryMutationReceipt | None,
     policy_snapshot_digest: str,
+    evidence_record: MemoryWriteEvidenceRecord | None = None,
 ) -> MemoryWriteHarnessResult:
     return MemoryWriteHarnessResult(
         status=status,
@@ -465,7 +553,50 @@ def _result(
         receipt=receipt,
         policySnapshotDigest=policy_snapshot_digest,
         authorityFlags=MemoryWriteAuthorityFlags(),
+        evidenceRecord=evidence_record,
     )
+
+
+async def _attempt_real_write(
+    adapter: object,
+    body: str,
+    operation: str,
+) -> bool:
+    """Attempt a real write via the injected provider.
+
+    Returns True if the write was attempted and succeeded; False otherwise.
+    Fails-open (returns False) if the provider raises or is not writable.
+
+    The write gate is ultimately enforced by D1's LocalFileMemoryProvider:
+    - provider._write_active must be True (set by MAGI_MEMORY_WRITE_ENABLED or
+      explicit write_enabled=True in config)
+    - If the gate is off the provider raises UnsupportedMemoryOperationError
+      and we silently fall back to the simulated path.
+    """
+    # Import here to avoid circular imports; lazy import also keeps the
+    # harness boundary clean at module load time.
+    from magi_agent.memory.adapters.local_file_writable import LocalFileMemoryProvider
+    from magi_agent.memory.contracts import UnsupportedMemoryOperationError
+
+    if not isinstance(adapter, LocalFileMemoryProvider):
+        return False
+    if not adapter._write_active:
+        return False
+
+    try:
+        await adapter.remember({
+            "body": body,
+            "kind": "fact",
+            "target_file": "MEMORY.md",
+        })
+        return True
+    except UnsupportedMemoryOperationError:
+        # Gate is off on the provider side — fall back to simulated
+        return False
+    except Exception:  # noqa: BLE001
+        # Any other error (size cap, path error…) → fall back to simulated,
+        # never crash the write boundary
+        return False
 
 
 def _policy_snapshot_digest(policy: MemoryWritePolicy | None) -> str:
@@ -582,6 +713,7 @@ __all__ = [
     "MemoryWriteHarness",
     "MemoryWriteHarnessConfig",
     "MemoryWriteHarnessResult",
+    "MemoryWriteEvidenceRecord",
     "build_gated_live_learning_write_harness",
     "MemoryWritePolicy",
     "MemoryWriteRequest",
