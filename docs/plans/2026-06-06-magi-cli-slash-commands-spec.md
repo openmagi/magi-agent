@@ -125,32 +125,53 @@ delivers almost no commands.
   into the `plugin` tier, args mapped `$1..$N` to prompt arguments (opencode
   `command/index.ts:112-139` pattern). Lazy template resolution.
 
-### 6.2 `/model`, `/agent`, `/mcp` (TUI widgets)
-- `WidgetCommand`s (TUI-only; headless dispatch already rejects widgets):
-  - `/model` → model picker; needs a runtime "set active model" seam (none
-    found — must be added in the runner/session layer).
-  - `/agent` → agent switch/cycle; same, needs an "active agent" seam.
-  - `/mcp` → toggle MCP servers for the session.
-- Headless equivalents (optional): accept an explicit arg (`/model <id>`) as a
-  `LocalCommand` so headless users aren't blocked by the widget-only path.
+### 6.2 `/model`, `/agent`, `/mcp` (shipped as `LocalCommand` seams)
+- These shipped as `LocalCommand`s (both TUI + headless) in
+  `magi_agent/cli/commands/control.py` (PR4), NOT as `WidgetCommand`s (TUI-only)
+  as originally specced. They are default-off protocol seams: always findable via
+  `lookup`, hidden from `list_for` until a real controller is wired onto
+  `ctx.runtime`. See §7 for the full default-off seam description.
+- When a live runtime-switch seam is added (runtime "set active model" etc.),
+  the command can be upgraded to a `WidgetCommand` in TUI if an interactive
+  picker is desired; for now the `LocalCommand` path serves both surfaces cleanly.
 
 ### 6.3 `/new`
 - `LocalCommand` (or runner control) that starts a fresh session via the
   existing `session_continuity` / `session_identity` layer.
 
-## 7. Phase 3 — deferred seams (design only, do not implement)
+## 7. Phase 3 — deferred seams
 
-These are documented as interfaces + dependencies; **no implementation** in
-this spec.
+**Status (2026-06-07):** shipped as default-off protocol seams in
+`magi_agent/cli/commands/session_history.py` (PR5). All five commands
+(`/fork`, `/undo`, `/redo`, `/share`, `/unshare`) are registered by
+`build_registry` via `register_session_history_commands`, always findable via
+`lookup`, and hidden from `list_for` until a real controller is wired onto
+`ctx.runtime`. Live activation is deferred (no real fork/revert/share logic in
+this module).
 
+**`/fork` reclassification:** the original spec listed `runtime/fork_runner.py`
+as the substrate for `/fork`. This is incorrect — `fork_runner.py` is a
+prompt-cache parallel-child primitive (runs independent sub-tasks), NOT session
+branching. The real substrate for session forking is the `cli/session_log.py`
+DAG: its `append` method already supports a `parent_uuid` parameter enabling
+tree-shaped history, but no session manager wires that path today. The
+`SessionForker` protocol seam defines the contract a future session manager
+must satisfy.
+
+**Phase-2 runtime-switch commands** (`/model`, `/agent`, `/mcp`, `/new`) also
+shipped as default-off protocol seams in `magi_agent/cli/commands/control.py`
+(PR4), following the same pattern.
+
+Remaining dependencies before live activation:
 - **`/undo`, `/redo`:** require a per-message **revert/checkpoint** subsystem
-  that does not exist (no message-level snapshot in `runtime/`). Seam:
-  a `SessionRevert` protocol (`revert_to(message_id)`, `redo()`), plus a
-  checkpoint store. Until built, these commands are absent from the registry.
-- **`/share`, `/unshare`:** session sharing produces a public URL, which is a
-  **hosted (Clawy Pro)** concern, outside the OSS runtime. Seam: an optional
-  `SessionShareProvider` interface the hosted layer implements; OSS ships the
-  interface + a `None` provider (command hidden when no provider is wired).
+  (no message-level snapshot exists in `runtime/`). The `SessionRevert`
+  protocol seam (`can_undo`, `undo`, `can_redo`, `redo`) defines the contract.
+  Visibility predicates are context-sensitive: `/undo` shown only when
+  `can_undo()` is True; `/redo` only when `can_redo()` is True.
+- **`/share`, `/unshare`:** session sharing produces a public URL — a hosted
+  (Clawy Pro) concern outside the OSS runtime. The `SessionShareProvider`
+  protocol seam defines the contract. `/unshare` is shown only when
+  `shared_url()` is not None (session is currently shared).
 
 ## 8. Testing
 

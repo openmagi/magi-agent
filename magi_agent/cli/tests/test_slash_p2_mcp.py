@@ -383,6 +383,70 @@ class TestMcpPromptResolverGating:
 # ===========================================================================
 
 
+class FakeMultiServerPromptProvider(FakePromptProvider):
+    """Local-fake provider exposing different prompts per server_ref."""
+
+    def list_prompts(self, server_ref: str) -> list[dict[str, object]]:
+        if server_ref == "mcp:server_a":
+            return [{"name": "prompt_from_a", "description": "From A", "arguments": []}]
+        if server_ref == "mcp:server_b":
+            return [{"name": "prompt_from_b", "description": "From B", "arguments": [{"name": "q"}]}]
+        return []
+
+    def get_prompt(self, server_ref: str, prompt_name: str, arguments) -> dict[str, object]:
+        return {"messages": [{"role": "user", "content": {"type": "text", "text": f"{server_ref}:{prompt_name}"}}]}
+
+
+class TestMcpPromptCommandsMultiServer:
+    """FIX 5 — mcp_prompt_commands with multiple server_refs and empty server_refs."""
+
+    def _adapter(self) -> McpAdapter:
+        return McpAdapter(McpAdapterConfig(enabled=True, localFakeProviderEnabled=True))
+
+    def _manifests(self) -> dict[str, object]:
+        return {
+            "mcp:server_a": {
+                "serverRef": "mcp:server_a",
+                "trustLevel": "local_dev",
+                "sandboxMode": "in_process_contract_only",
+                "allowedPermissions": ("read",),
+                "supplyChainDigest": "sha256:" + "b" * 64,
+            },
+            "mcp:server_b": {
+                "serverRef": "mcp:server_b",
+                "trustLevel": "local_dev",
+                "sandboxMode": "in_process_contract_only",
+                "allowedPermissions": ("read",),
+                "supplyChainDigest": "sha256:" + "c" * 64,
+            },
+        }
+
+    def test_multiple_server_refs_yields_commands_from_both(self) -> None:
+        """Commands from BOTH servers must appear when two server_refs are supplied."""
+        adapter = self._adapter()
+        result = mcp_prompt_commands(
+            adapter,
+            FakeMultiServerPromptProvider(),
+            ["mcp:server_a", "mcp:server_b"],
+            self._manifests(),
+        )
+        names = {c.name for c in result}
+        assert "mcp.server_a.prompt_from_a" in names, f"server_a command missing; got {names}"
+        assert "mcp.server_b.prompt_from_b" in names, f"server_b command missing; got {names}"
+        assert len(result) == 2
+
+    def test_empty_server_refs_yields_empty_list(self) -> None:
+        """An empty server_refs list must yield [] without error."""
+        adapter = self._adapter()
+        result = mcp_prompt_commands(
+            adapter,
+            FakeMultiServerPromptProvider(),
+            [],
+            self._manifests(),
+        )
+        assert result == []
+
+
 class TestDiscoveryIntegration:
     def _mcp_cmds(self):
         adapter = McpAdapter(McpAdapterConfig(enabled=True, localFakeProviderEnabled=True))
