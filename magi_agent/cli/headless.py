@@ -798,14 +798,25 @@ def _text_mode_body(result_frame: ResultFrame) -> str:
         return result_frame.result
     if result_frame.is_error:
         detail = next((e for e in (result_frame.errors or []) if e), "unknown error")
-        return (
-            f"Error: {detail}\n"
-            "The model call did not return a reply. Check that your provider API "
-            "key is valid and that the model id exists. Configure a provider via "
-            "~/.magi/config.toml or environment variables (e.g. ANTHROPIC_API_KEY, "
-            "OPENAI_API_KEY, GEMINI_API_KEY/GOOGLE_API_KEY, FIREWORKS_API_KEY), and "
-            "optionally MAGI_PROVIDER / MAGI_MODEL to override the defaults."
-        )
+        # Tailor the hint to the actual failure. A verification/evidence gate
+        # block is NOT a model-connectivity problem, so don't send the user
+        # chasing their API key — that hint only fits genuine model-call failures.
+        if detail == "pre_final_evidence_gate_blocked":
+            hint = (
+                "The turn produced a reply but a verification gate blocked it "
+                "because required evidence/validators were not observed (the "
+                "dev-coding final gate). Provide the expected evidence, or run a "
+                "non-coding turn / a permissive mode if a gate is not wanted."
+            )
+        else:
+            hint = (
+                "The model call did not return a reply. Check that your provider "
+                "API key is valid and that the model id exists. Configure a "
+                "provider via ~/.magi/config.toml or environment variables (e.g. "
+                "ANTHROPIC_API_KEY, OPENAI_API_KEY, GEMINI_API_KEY/GOOGLE_API_KEY, "
+                "FIREWORKS_API_KEY), and optionally MAGI_PROVIDER / MAGI_MODEL."
+            )
+        return f"Error: {detail}\n{hint}"
     return ""
 
 
