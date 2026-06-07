@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import re
 from datetime import datetime, timezone
-from ipaddress import IPv4Address, ip_address, ip_network
+from ipaddress import IPv4Address, IPv6Address, ip_address, ip_network
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 
@@ -133,19 +133,9 @@ def url_policy_error(url: str) -> str | None:
     except ValueError:
         parsed_ip = None
     if parsed_ip is not None:
-        if str(parsed_ip) in _METADATA_HOSTS:
-            return "metadata_url_blocked"
-        if parsed_ip.is_loopback or parsed_ip.is_link_local or parsed_ip.is_unspecified:
-            return "local_url_blocked"
-        if parsed_ip in _CGNAT_NETWORK:
-            return "private_url_blocked"
-        if (
-            parsed_ip.is_private
-            or parsed_ip.is_reserved
-            or parsed_ip.is_multicast
-            or not parsed_ip.is_global
-        ):
-            return "private_url_blocked"
+        ip_block = _classify_blocked_ip(parsed_ip)
+        if ip_block is not None:
+            return ip_block
     sensitive_keys = {key.casefold() for key, _value in parse_qsl(parts.query, keep_blank_values=True)}
     if sensitive_keys.intersection(_SENSITIVE_QUERY_KEYS) or any(
         any(part in key.replace("-", "").replace("_", "") for part in _SENSITIVE_QUERY_KEY_PARTS)
@@ -156,6 +146,47 @@ def url_policy_error(url: str) -> str | None:
     if "captcha" in lowered:
         return "captcha_flow_blocked"
     return None
+
+
+def _classify_blocked_ip(parsed_ip: object) -> str | None:
+    """Shared private/metadata/reserved/CGNAT classification for a parsed IP.
+
+    Pure (no DNS / no network). Returns the same reason codes
+    ``url_policy_error`` historically returned inline so the literal-URL
+    firewall and the DNS-rebinding egress resolver share one source of truth.
+    The DNS resolver lives in ``live_fetch_provider`` (network), not here.
+    """
+    if not isinstance(parsed_ip, IPv4Address | IPv6Address):
+        return None
+    if str(parsed_ip) in _METADATA_HOSTS:
+        return "metadata_url_blocked"
+    if parsed_ip.is_loopback or parsed_ip.is_link_local or parsed_ip.is_unspecified:
+        return "local_url_blocked"
+    if isinstance(parsed_ip, IPv4Address) and parsed_ip in _CGNAT_NETWORK:
+        return "private_url_blocked"
+    if (
+        parsed_ip.is_private
+        or parsed_ip.is_reserved
+        or parsed_ip.is_multicast
+        or not parsed_ip.is_global
+    ):
+        return "private_url_blocked"
+    return None
+
+
+def is_blocked_ip(ip_str: str) -> bool:
+    """Return True if ``ip_str`` is a blocked egress target.
+
+    Wraps the same classification used by ``url_policy_error`` so the
+    DNS-rebinding egress guard cannot drift from the literal-URL firewall.
+    Pure (no network); the caller resolves the host first.
+    """
+    try:
+        parsed = ip_address(ip_str)
+    except ValueError:
+        # Unparseable address is treated as blocked (fail-safe).
+        return True
+    return _classify_blocked_ip(parsed) is not None
 
 
 def normalize_public_url(url: str) -> str:
@@ -303,6 +334,7 @@ def _parse_legacy_ipv4_part(part: str) -> int | None:
 __all__ = [
     "content_digest",
     "evidence_ref",
+    "is_blocked_ip",
     "normalize_public_url",
     "normalize_query",
     "redact_public_text",
