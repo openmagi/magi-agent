@@ -1,0 +1,15 @@
+[
+  {"task_id": "abercrombie", "reasoning_type": "rule-conclusion"},
+  {"task_id": "hearsay", "reasoning_type": "rule-application"},
+  {"task_id": "learned_hands_benefits", "reasoning_type": "issue"},
+  {"task_id": "learned_hands_business", "reasoning_type": "issue"},
+  {"task_id": "learned_hands_consumer", "reasoning_type": "issue"},
+  {"task_id": "contract_nli_explicit_identification", "reasoning_type": "rule-application"},
+  {"task_id": "contract_nli_notice_on_compelled_disclosure", "reasoning_type": "rule-application"},
+  {"task_id": "definition_classification", "reasoning_type": "interpretation"},
+  {"task_id": "privacy_policy_entailment", "reasoning_type": "interpretation"},
+  {"task_id": "rule_qa", "reasoning_type": "rule-recall"},
+  {"task_id": "statutory_reasoning_assessment", "reasoning_type": "rule-recall"},
+  {"task_id": "canada_tax_court_outcomes", "reasoning_type": "rhetorical"},
+  {"task_id": "citation_prediction_open", "reasoning_type": "rhetorical"}
+]
