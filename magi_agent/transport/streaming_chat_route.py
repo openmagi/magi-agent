@@ -37,6 +37,17 @@ from typing import Callable
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
+from magi_agent.channels.workflow_confirm_store import (
+    InMemoryPendingConfirmationStore,
+    PendingConfirmationStore,
+)
+from magi_agent.channels.workflow_gate import channel_workflows_enabled
+from magi_agent.channels.taskkind_classifier import FixedClassifier, TaskKindClassifier
+from magi_agent.channels.workflow_orchestrator import (
+    resolve_confirmation,
+    route_inbound,
+    start_research,
+)
 from magi_agent.cli.protocol import ControlResponse
 from magi_agent.ops.health import _truthy_env
 from magi_agent.transport.active_turn import ACTIVE_TURNS, ActiveTurn
@@ -48,6 +59,12 @@ __all__ = [
     "_streaming_chat_enabled",
     "_extract_prompt_text",
 ]
+
+_DEFAULT_PER_CHILD_TOKENS = 8000
+_DEFAULT_MODEL_MICROCENTS_PER_1K = 120
+# Process-wide default store so a confirmation prompt issued on one /v1/chat/stream
+# request survives until the user's yes/no arrives on the NEXT request.
+_DEFAULT_CONFIRM_STORE: PendingConfirmationStore = InMemoryPendingConfirmationStore()
 
 # Maximum allowed size (bytes) of the JSON-serialised ``response`` dict in
 # a control-response request.  Protects against oversized payloads.
@@ -113,6 +130,8 @@ def register_streaming_chat_routes(
     runtime: object,
     *,
     engine_builder: Callable[[str, object], tuple[object, object]] | None = None,
+    confirm_store: PendingConfirmationStore | None = None,
+    eligibility_classifier: object | None = None,
 ) -> None:
     """Mount the three streaming-chat routes on *app*.
 
@@ -128,6 +147,15 @@ def register_streaming_chat_routes(
         When omitted the default uses :func:`~magi_agent.cli.wiring.build_headless_runtime`
         with ``permission_mode="default"`` and ``MAGI_AGENT_WORKSPACE`` or
         ``os.getcwd()`` as ``cwd``.
+    confirm_store:
+        Optional :class:`~magi_agent.channels.workflow_confirm_store.PendingConfirmationStore`
+        for workflow confirmation state. Defaults to the module-level
+        ``_DEFAULT_CONFIRM_STORE`` (in-memory, process-scoped).
+    eligibility_classifier:
+        Optional async classifier with ``aclassify(message_text) -> str``. Defaults
+        to :class:`~magi_agent.channels.taskkind_classifier.TaskKindClassifier` with
+        no model factory (auto-detect inert; returns ``"general"`` until a live model
+        is injected). The explicit ``/research`` path works regardless.
     """
 
     def _default_engine_builder(session_id: str, sink: object) -> tuple[object, object]:
@@ -153,6 +181,59 @@ def register_streaming_chat_routes(
         return rt.engine, rt.gate
 
     builder = engine_builder if engine_builder is not None else _default_engine_builder
+
+    store = confirm_store if confirm_store is not None else _DEFAULT_CONFIRM_STORE
+    # Default classifier has NO model_factory → aclassify() returns "general"
+    # (auto-detect inert until a live model is wired). The explicit "/research"
+    # path works regardless. A hosted deployment injects a model-backed classifier.
+    classifier = eligibility_classifier if eligibility_classifier is not None else TaskKindClassifier()
+
+    async def _maybe_handle_workflow(prompt: str, session_id: str) -> Response | None:
+        """Workflow pre-check for /v1/chat/stream. Returns a JSONResponse to
+        short-circuit the normal turn, or None to proceed normally.
+        Guarded by the channel flag; fail-open (any error → None → normal turn)."""
+        if not channel_workflows_enabled():
+            return None
+        try:
+            # If a confirmation is pending for this session, treat THIS message
+            # as the yes/no answer.
+            resolved = await resolve_confirmation(prompt, session_id=session_id, store=store)
+            if resolved.outcome == "executed":
+                return JSONResponse(
+                    status_code=200,
+                    content={"workflow": "executed", "executorStatus": resolved.executor_status},
+                )
+            if resolved.outcome == "declined":
+                return JSONResponse(
+                    status_code=200,
+                    content={"workflow": "declined", "message": resolved.message},
+                )
+            # resolved.outcome == "not_pending" → no pending; treat as new inbound.
+            rates = dict(
+                per_child_token_estimate=_DEFAULT_PER_CHILD_TOKENS,
+                model_microcents_per_1k=_DEFAULT_MODEL_MICROCENTS_PER_1K,
+            )
+            stripped = prompt.strip()
+            if stripped.startswith("/research"):
+                query = stripped[len("/research"):].strip() or stripped
+                out = start_research(query, session_id=session_id, store=store, **rates)
+            else:
+                label = await classifier.aclassify(prompt)
+                out = route_inbound(
+                    prompt,
+                    session_id=session_id,
+                    classifier=FixedClassifier(label),
+                    store=store,
+                    **rates,
+                )
+            if out.outcome == "awaiting_confirmation":
+                return JSONResponse(
+                    status_code=200,
+                    content={"workflow": "awaiting_confirmation", "message": out.message},
+                )
+            return None  # normal_llm → fall through to the streaming turn
+        except Exception:
+            return None  # FAIL-OPEN — never break normal chat
 
     def _auth_ok(request: Request) -> bool:
         token = getattr(getattr(runtime, "config", None), "gateway_token", None)
@@ -188,6 +269,10 @@ def register_streaming_chat_routes(
             session_id = uuid.uuid4().hex
         turn_id = _body_string(body, "turnId", f"{session_id}:turn")
         prompt = _extract_prompt_text(body)
+
+        wf = await _maybe_handle_workflow(prompt, session_id)
+        if wf is not None:
+            return wf
 
         queue: asyncio.Queue[object] = asyncio.Queue()
         sink = build_streaming_prompt_sink(queue, turn_id=turn_id)
