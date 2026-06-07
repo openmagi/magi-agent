@@ -144,7 +144,7 @@ class MemoryWriteToolHost:
                 metadata={
                     "toolName": "MemoryWrite",
                     "reason": "forbidden_target",
-                    "requestedTarget": target_file,
+                    "requestedTarget": target_file[:64],
                     "allowedTargets": ["MEMORY.md", "USER.md"],
                 },
             )

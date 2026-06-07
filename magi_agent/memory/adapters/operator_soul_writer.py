@@ -33,6 +33,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from magi_agent.memory.adapters.hipocampus_readonly import (
     _validate_workspace_root,
+    _resolve_workspace_path,
     UnsafeMemoryPathError,
 )
 from magi_agent.memory.adapters.local_file_writable import _redact_for_write
@@ -144,17 +145,13 @@ class OperatorSoulWriter:
 
         safe_body = _redact_for_write(body)
 
-        # Resolve path — must stay inside workspace root.
-        target_path = self.workspace_root / _SOUL_FILENAME
-        # Safety: confirm resolved path is within workspace (no symlink escapes).
-        try:
-            resolved = target_path.resolve()
-            ws_resolved = self.workspace_root.resolve()
-            resolved.relative_to(ws_resolved)
-        except ValueError as exc:
+        # Resolve path using the D1 helper — reuses the same workspace-containment
+        # logic (production-path check + symlink-safe relative_to) as the agent path.
+        target_path = _resolve_workspace_path(self.workspace_root, _SOUL_FILENAME)
+        if target_path is None:
             raise ValueError(
                 f"OperatorSoulWriter: path safety violation for {_SOUL_FILENAME!r}"
-            ) from exc
+            )
 
         entry = f"\n- [operator] {safe_body}\n"
         with target_path.open("a", encoding="utf-8") as fh:

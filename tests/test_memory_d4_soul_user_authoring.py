@@ -199,6 +199,60 @@ def test_identical_profile_line_not_appended_twice(tmp_path: Path) -> None:
     assert count == 1, f"Expected deduplicated USER.md but found {count} occurrences of {fact!r}"
 
 
+def test_short_fact_not_swallowed_by_longer_existing_entry(tmp_path: Path) -> None:
+    """Dedup is exact-entry based, not substring-based.
+
+    Writing body='vim' must NOT be skipped when the file already contains a line
+    like '- [profile] User uses vim-like keybindings' (which contains 'vim' as a
+    substring).  Only the truly identical formatted entry should be skipped.
+    """
+    from magi_agent.memory.adapters.local_file_writable import (
+        LocalFileMemoryProvider,
+        LocalFileMemoryConfig,
+    )
+
+    config = LocalFileMemoryConfig(
+        workspace_root=tmp_path,
+        enabled=True,
+        write_enabled=True,
+    )
+    provider = LocalFileMemoryProvider(config)
+
+    # Pre-populate USER.md with a longer entry that contains "vim" as a substring
+    (tmp_path / "USER.md").write_text(
+        "\n- [profile] User uses vim-like keybindings\n",
+        encoding="utf-8",
+    )
+
+    # Writing the short fact "vim" — must NOT be swallowed by the longer line
+    asyncio.run(provider.remember({
+        "body": "vim",
+        "kind": "profile",
+        "target_file": "USER.md",
+    }))
+
+    content = (tmp_path / "USER.md").read_text(encoding="utf-8")
+    # Both lines should be present: the original and the new short entry
+    assert "User uses vim-like keybindings" in content, (
+        "Original longer entry should still be present"
+    )
+    assert "\n- [profile] vim\n" in content, (
+        "Short 'vim' entry should be appended — it is NOT a duplicate of the longer line"
+    )
+
+    # Now write "vim" a second time — the exact entry is already there, so it IS skipped
+    asyncio.run(provider.remember({
+        "body": "vim",
+        "kind": "profile",
+        "target_file": "USER.md",
+    }))
+    content2 = (tmp_path / "USER.md").read_text(encoding="utf-8")
+    # The exact entry "\n- [profile] vim\n" should appear exactly once
+    assert content2.count("\n- [profile] vim\n") == 1, (
+        "Truly identical entry should be deduplicated on the second write"
+    )
+
+
 def test_different_profile_lines_both_appended(tmp_path: Path) -> None:
     """Two distinct profile facts are both present in USER.md."""
     provider = _make_provider(tmp_path)
