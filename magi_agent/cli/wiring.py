@@ -215,10 +215,21 @@ def build_headless_runtime(
     # prompt_sink drives gate prompting in non-bypass modes; bypass keeps its own no-frame sink.
     if prompt_sink is not None and permission_mode != "bypassPermissions":
         gate_sinks = [prompt_sink]
+    # Read-only auto-allow (CC/OpenCode parity): every non-bypass mode gets the
+    # manifest-first classifier so genuinely read-only tools (FileRead/Glob/Grep)
+    # run WITHOUT a prompt, while mutating/dangerous tools (FileWrite/FileEdit/
+    # PatchApply/Bash) still fall through to ``ask``. Without this the default
+    # mode sends EVERY tool to ``ask`` → headless safe-denies them and the agent
+    # reports "tools restricted". The LLM classification path (for unknown tools)
+    # is reserved for the explicit ``smartApprove`` mode; other modes are
+    # manifest-only (deterministic, no provider calls). ``bypassPermissions``
+    # already auto-allows via its sink, so it needs no classifier.
     smart_approve = (
-        _build_smart_approve_classifier(model=model, mode=mode)
-        if permission_mode == "smartApprove"
-        else None
+        None
+        if permission_mode == "bypassPermissions"
+        else _build_smart_approve_classifier(
+            model=model, mode=mode, use_llm=(permission_mode == "smartApprove")
+        )
     )
     gate = RulesPermissionGate(sinks=gate_sinks, smart_approve=smart_approve)
 
@@ -282,13 +293,22 @@ def _build_smart_approve_classifier(
     *,
     model: str | None,
     mode: "RuntimeMode",
+    use_llm: bool = False,
 ) -> object:
-    from magi_agent.cli.providers import resolve_provider_config  # noqa: PLC0415
     from magi_agent.cli.readonly_classifier import ReadOnlyClassifier  # noqa: PLC0415
+
+    # Manifest-first always works deterministically for known tools. The LLM
+    # path (provider_config) is wired ONLY for the ``smartApprove`` mode so the
+    # default mode never makes a provider call just to classify a tool.
+    provider_config = None
+    if use_llm:
+        from magi_agent.cli.providers import resolve_provider_config  # noqa: PLC0415
+
+        provider_config = resolve_provider_config(model_override=model)
 
     return ReadOnlyClassifier(
         registry=_build_smart_approve_tool_registry(mode=mode),
-        provider_config=resolve_provider_config(model_override=model),
+        provider_config=provider_config,
     )
 
 

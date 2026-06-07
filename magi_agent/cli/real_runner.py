@@ -109,6 +109,14 @@ class CliModelRunner:
         user_id = _as_str(kwargs.get("user_id"), self._default_user_id)
         session_id = _as_str(kwargs.get("session_id"), self._default_session_id)
         await self._ensure_session(user_id=user_id, session_id=session_id)
+        # Stream tokens. The event bridge intentionally keeps the FINAL
+        # consolidated text on the (governed) transcript channel only and emits
+        # redacted ``partial`` deltas on the public stream — which the CLI
+        # surfaces. Without streaming a non-streaming model returns its whole
+        # reply as a single final event, so the public stream gets no text and
+        # the user sees nothing. Default to SSE streaming so deltas flow.
+        if "run_config" not in kwargs:
+            kwargs["run_config"] = _default_run_config()
         async for event in self._runner.run_async(**kwargs):  # type: ignore[attr-defined]
             yield event
 
@@ -294,6 +302,14 @@ def _app_identifier(app_name: str) -> str:
 
 def _as_str(value: object, default: str) -> str:
     return value if isinstance(value, str) and value else default
+
+
+def _default_run_config() -> object:
+    """SSE streaming so the model emits partial token deltas (public stream)."""
+
+    from google.adk.agents.run_config import RunConfig, StreamingMode  # noqa: PLC0415
+
+    return RunConfig(streaming_mode=StreamingMode.SSE)
 
 
 def _build_default_runner_policy_assembly(
