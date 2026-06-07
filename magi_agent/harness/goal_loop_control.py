@@ -1,4 +1,4 @@
-"""B3 — Continuation loop control + after-turn hook (the Ralph loop).
+"""B3/B4 — Continuation loop control + after-turn hook (the Ralph loop).
 
 This module wires the decision that fires AFTER an agent turn completes and
 decides whether the persistent goal loop CONTINUES (re-run the goal with a
@@ -20,8 +20,16 @@ State machine (priority order)
    with the matching reason.
 4. **New user message pending**: ``stop`` reason ``preempted`` (the user steers
    away — the loop yields to live interaction).
-5. **Judge satisfied**: set status ``satisfied`` (idempotent), ``stop`` reason
-   ``satisfied``.
+5. **Judge satisfied** (B4 evidence gate OFF or no gate injected): set status
+   ``satisfied`` (idempotent), ``stop`` reason ``satisfied``.
+   **Judge satisfied + B4 evidence gate ON + gate injected**:
+     - evidence-gate PASSES (``passed`` is strictly ``True``) → same as above
+       (strong stop).
+     - evidence-gate FAILS or RAISES → do NOT declare satisfied; instead
+       ``advance`` and ``continue`` with reason ``evidence_unmet`` (prevents
+       premature "done" on judge's word alone); if advancing would exhaust →
+       ``stop`` reason ``exhausted``.  A raising or non-bool verifier is treated
+       as evidence-unmet — it must never let the loop falsely declare success.
 6. **Judge NOT satisfied**:
      - if ``advance`` would exhaust (``turns_used + 1 >= max_turns``): set status
        ``exhausted``, ``stop`` reason ``exhausted``.
@@ -29,6 +37,13 @@ State machine (priority order)
 7. **Judge parse-failure** (unparseable output OR judge raised): fail-open
    ``continue`` (advance), but the B2 parse-failure budget is threaded — on the
    Nth consecutive failure the loop ``stop``s with reason ``judge_budget``.
+
+B4 Evidence gate
+----------------
+``MAGI_GOAL_LOOP_EVIDENCE_GATE`` env var (default OFF).  When OFF, or when
+``LoopControlInput.evidence_gate`` is None, the satisfied path is byte-identical
+to B3.  When ON and a gate is injected, see step 5 above.  The gate verdict is
+recorded in the result's ``evidence`` record (``gatePassed`` field, digests only).
 
 Counter reset
 -------------
@@ -94,6 +109,11 @@ from magi_agent.tools.manifest import ToolSource
 GOAL_LOOP_ENABLED_ENV_VAR = "MAGI_GOAL_LOOP_ENABLED"
 """Master gate. Default OFF — when unset/false the hook/decision is a no-op."""
 
+EVIDENCE_GATE_ENV_VAR = "MAGI_GOAL_LOOP_EVIDENCE_GATE"
+"""B4 evidence-gate env switch. Default OFF. When ON AND an EvidenceGate is
+injected via LoopControlInput.evidence_gate, judge-satisfied requires the gate
+to also pass before the loop stops with reason='satisfied'."""
+
 #: USER-role continuation prompt template re-injected when the loop continues.
 #: This is a *user* message (not a system change) — see the prefix-cache
 #: invariant in the module docstring.  ``{goal}`` is the only substitution.
@@ -114,7 +134,7 @@ LoopStopReason = Literal[
     "cleared",
     "judge_budget",
 ]
-LoopContinueReason = Literal["not_satisfied", "parse_failure_fail_open"]
+LoopContinueReason = Literal["not_satisfied", "parse_failure_fail_open", "evidence_unmet"]
 LoopReason = Literal[
     "disabled",
     "spend_capped",
@@ -125,6 +145,7 @@ LoopReason = Literal[
     "judge_budget",
     "not_satisfied",
     "parse_failure_fail_open",
+    "evidence_unmet",
 ]
 
 _MODEL_CONFIG = ConfigDict(
@@ -159,6 +180,67 @@ class SpendCapProbe(Protocol):
 
 
 # ---------------------------------------------------------------------------
+# B4: EvidenceGate seam + verdict
+# ---------------------------------------------------------------------------
+
+
+class EvidenceGateVerdict(BaseModel):
+    """Frozen verdict returned by an EvidenceGate.check() call.
+
+    ``passed``: True if the evidence gate confirms the goal is actually achieved.
+    ``reason``: short audit label (not the raw goal or transcript — caller-supplied
+    clean string, e.g. "evidence_confirmed" / "evidence_missing").
+    Raw goal text and transcript are NEVER passed through this model; the caller
+    (EvidenceGate implementor) is responsible for not embedding them.
+    ``reason`` is capped at 200 characters so a buggy or malicious verifier cannot
+    bloat the evidence record via an unbounded string.
+    """
+
+    model_config = _MODEL_CONFIG
+
+    passed: bool
+    reason: str = Field(..., max_length=200)
+
+
+@runtime_checkable
+class EvidenceGate(Protocol):
+    """B4 seam: checks whether evidence actually supports "goal achieved".
+
+    Injected via LoopControlInput.evidence_gate.  Tests use fakes.  This module
+    never constructs a real verifier/model client.  The gate receives only the
+    goal string, transcript excerpt, and current GoalState — it MUST NOT embed
+    raw text in any returned verdict field (callers redact; see _build_loop_evidence).
+
+    Maps onto verifier_bus concepts (VerifierStatus → passed):
+      - ``pass``                → ``passed=True``  (confirmed, loop may stop)
+      - ``failed`` / ``missing`` → ``passed=False`` (not confirmed, continue)
+      - ``approval_required``   → ``passed=False`` (human approval needed; not confirmed)
+      - ``audit``               → ``passed=False`` (audit-flagged; not confirmed)
+    The caller that wraps a real VerifierResultMetadata into an EvidenceGateVerdict
+    owns this mapping.  Any status not explicitly listed above should default to
+    ``passed=False`` so the loop never prematurely stops on an ambiguous verdict.
+    """
+
+    def check(
+        self,
+        goal: str,
+        transcript_excerpt: str,
+        goal_state: GoalState,
+    ) -> EvidenceGateVerdict:
+        """Return a verdict.  Must be synchronous.  Must not raise (callers fail-open)."""
+        ...
+
+
+def _evidence_gate_enabled() -> bool:
+    """Return True if the B4 evidence gate is enabled via env (default OFF)."""
+    raw = os.environ.get(EVIDENCE_GATE_ENV_VAR)
+    if raw is None:
+        return False
+    clean = raw.strip().lower()
+    return clean not in {"0", "false", ""}
+
+
+# ---------------------------------------------------------------------------
 # Input / result models
 # ---------------------------------------------------------------------------
 
@@ -184,6 +266,10 @@ class LoopControlInput(BaseModel):
     spend_probe: SpendCapProbe = Field(alias="spendProbe")
     enabled: bool = Field(default=False)
     shadow: bool | None = Field(default=None)
+    evidence_gate: EvidenceGate | None = Field(default=None, alias="evidenceGate")
+    """B4 optional evidence gate.  When None (default) or env gate is OFF, the
+    satisfied path behaves exactly as B3.  When set AND env gate is ON, the gate
+    must also confirm before the loop stops with reason='satisfied'."""
 
 
 class LoopControlResult(BaseModel):
@@ -236,35 +322,41 @@ def _build_loop_evidence(
     goal_state_after: GoalState,
     consecutive_parse_failures_after: int,
     observe_only: bool,
+    gate_passed: bool | None = None,
     now: datetime | None = None,
 ) -> EvidenceRecord:
     """Build a redacted EvidenceRecord for one loop decision.
 
     Raw goal text and raw transcript are NEVER stored — only SHA-256 digests and
     the transcript byte-length (mirrors B2 ``build_judge_evidence``).
+    When B4 gate is active, ``gate_passed`` is included as a boolean field.
     """
     ts = now or datetime.now(UTC)
     observed_at = int(ts.astimezone(UTC).timestamp() * 1000)
     goal_digest = "sha256:" + hashlib.sha256(goal.encode()).hexdigest()
     transcript_digest = "sha256:" + hashlib.sha256(transcript_excerpt.encode()).hexdigest()
 
+    fields: dict[str, object] = {
+        "decision": decision,
+        "reason": reason,
+        "goalDigest": goal_digest,
+        "transcriptDigest": transcript_digest,
+        "transcriptLen": len(transcript_excerpt),
+        "turnsUsed": goal_state_after.turns_used,
+        "maxTurns": goal_state_after.max_turns,
+        "statusAfter": goal_state_after.status,
+        "consecutiveParseFailuresAfter": consecutive_parse_failures_after,
+        "observeOnly": observe_only,
+    }
+    if gate_passed is not None:
+        fields["gatePassed"] = gate_passed
+
     return EvidenceRecord(
         type="custom:GoalLoopDecision",
         status="ok",
         observedAt=observed_at,
         source=EvidenceSource(kind="verifier"),
-        fields={
-            "decision": decision,
-            "reason": reason,
-            "goalDigest": goal_digest,
-            "transcriptDigest": transcript_digest,
-            "transcriptLen": len(transcript_excerpt),
-            "turnsUsed": goal_state_after.turns_used,
-            "maxTurns": goal_state_after.max_turns,
-            "statusAfter": goal_state_after.status,
-            "consecutiveParseFailuresAfter": consecutive_parse_failures_after,
-            "observeOnly": observe_only,
-        },
+        fields=fields,
     )
 
 
@@ -281,6 +373,58 @@ def _set_status(store: GoalStateStore, session_id: str, status: str) -> GoalStat
     updated = current.model_copy(update={"status": status})
     store.upsert(updated)
     return updated
+
+
+# ---------------------------------------------------------------------------
+# Shared advance-or-exhaust helper (deduplicates evidence_unmet / not_satisfied
+# / parse_failure_fail_open branches — all three share the same
+# "advance + continue, or exhaust if at boundary" pattern).
+# ---------------------------------------------------------------------------
+
+
+def _advance_continue_or_exhaust(
+    loop_input: LoopControlInput,
+    *,
+    store: GoalStateStore,
+    session_id: str,
+    state: "GoalState",
+    failure_count_after: int,
+    observe_only: bool,
+    continue_reason: LoopContinueReason,
+    gate_passed: "bool | None" = None,
+) -> LoopControlResult:
+    """Advance the goal state, then return continue or exhausted.
+
+    If ``turns_used + 1 >= max_turns``, the advance brings the goal to
+    exhaustion and the loop stops.  Otherwise the loop continues with
+    ``continue_reason`` and a fresh continuation prompt.
+
+    All three "keep going" branches (``evidence_unmet``, ``not_satisfied``,
+    ``parse_failure_fail_open``) share exactly this pattern, so extracting it
+    here de-risks B5 from accidental behavioral divergence across branches.
+    """
+    if state.turns_used + 1 >= state.max_turns:
+        updated = store.advance(session_id)
+        return _result(
+            loop_input,
+            decision="stop",
+            reason="exhausted",
+            goal_state_after=updated,
+            failure_count_after=failure_count_after,
+            observe_only=observe_only,
+            gate_passed=gate_passed,
+        )
+    updated = store.advance(session_id)
+    return _result(
+        loop_input,
+        decision="continue",
+        reason=continue_reason,
+        goal_state_after=updated,
+        failure_count_after=failure_count_after,
+        observe_only=observe_only,
+        continuation_prompt=build_continuation_prompt(state.goal),
+        gate_passed=gate_passed,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -364,6 +508,36 @@ def decide_loop_continuation(loop_input: LoopControlInput) -> LoopControlResult:
         # not auto-reset; the caller owns this).
         failure_count_after = 0
         if verdict.satisfied:
+            # B4: optionally require evidence gate to also confirm (default OFF).
+            gate_passed: bool | None = None
+            if _evidence_gate_enabled() and loop_input.evidence_gate is not None:
+                try:
+                    gate_verdict = loop_input.evidence_gate.check(
+                        state.goal,
+                        loop_input.transcript_excerpt,
+                        state,
+                    )
+                    # A gate returning a non-bool or None passed value is treated
+                    # as not-confirmed — only a strictly True value is a pass.
+                    gate_passed = gate_verdict.passed if gate_verdict.passed is True else False
+                except Exception:  # noqa: BLE001
+                    # A broken/raising verifier must never let the loop falsely
+                    # declare success; treat as evidence-unmet and continue.
+                    gate_passed = False
+                if not gate_passed:
+                    # Evidence gate did not confirm: do NOT declare satisfied.
+                    # Advance (or exhaust) and continue as evidence_unmet.
+                    return _advance_continue_or_exhaust(
+                        loop_input,
+                        store=store,
+                        session_id=session_id,
+                        state=state,
+                        failure_count_after=failure_count_after,
+                        observe_only=observe_only,
+                        continue_reason="evidence_unmet",
+                        gate_passed=gate_passed,
+                    )
+            # Gate off, no gate, or gate passed — strong satisfied stop.
             updated = _set_status(store, session_id, "satisfied")
             return _result(
                 loop_input,
@@ -372,27 +546,17 @@ def decide_loop_continuation(loop_input: LoopControlInput) -> LoopControlResult:
                 goal_state_after=updated,
                 failure_count_after=failure_count_after,
                 observe_only=observe_only,
+                gate_passed=gate_passed,
             )
         # Not satisfied — advance, or exhaust if this advance hits the cap.
-        if state.turns_used + 1 >= state.max_turns:
-            updated = store.advance(session_id)  # B1 sets status="exhausted"
-            return _result(
-                loop_input,
-                decision="stop",
-                reason="exhausted",
-                goal_state_after=updated,
-                failure_count_after=failure_count_after,
-                observe_only=observe_only,
-            )
-        updated = store.advance(session_id)
-        return _result(
+        return _advance_continue_or_exhaust(
             loop_input,
-            decision="continue",
-            reason="not_satisfied",
-            goal_state_after=updated,
+            store=store,
+            session_id=session_id,
+            state=state,
             failure_count_after=failure_count_after,
             observe_only=observe_only,
-            continuation_prompt=build_continuation_prompt(state.goal),
+            continue_reason="not_satisfied",
         )
 
     # Parse failure (unparseable OR judge raised). B2 threaded the budget:
@@ -411,25 +575,14 @@ def decide_loop_continuation(loop_input: LoopControlInput) -> LoopControlResult:
 
     # Fail-open continue: advance and re-inject the continuation prompt — unless
     # advancing would exhaust the budget (treat like exhaustion).
-    if state.turns_used + 1 >= state.max_turns:
-        updated = store.advance(session_id)
-        return _result(
-            loop_input,
-            decision="stop",
-            reason="exhausted",
-            goal_state_after=updated,
-            failure_count_after=failure_count_after,
-            observe_only=observe_only,
-        )
-    updated = store.advance(session_id)
-    return _result(
+    return _advance_continue_or_exhaust(
         loop_input,
-        decision="continue",
-        reason="parse_failure_fail_open",
-        goal_state_after=updated,
+        store=store,
+        session_id=session_id,
+        state=state,
         failure_count_after=failure_count_after,
         observe_only=observe_only,
-        continuation_prompt=build_continuation_prompt(state.goal),
+        continue_reason="parse_failure_fail_open",
     )
 
 
@@ -442,6 +595,7 @@ def _result(
     failure_count_after: int,
     observe_only: bool,
     continuation_prompt: str | None = None,
+    gate_passed: bool | None = None,
 ) -> LoopControlResult:
     evidence = _build_loop_evidence(
         goal=goal_state_after.goal,
@@ -451,6 +605,7 @@ def _result(
         goal_state_after=goal_state_after,
         consecutive_parse_failures_after=failure_count_after,
         observe_only=observe_only,
+        gate_passed=gate_passed,
     )
     return LoopControlResult(
         decision=decision,
@@ -548,7 +703,10 @@ def build_after_turn_goal_loop_hook(
 
 __all__ = [
     "CONTINUATION_PROMPT_TEMPLATE",
+    "EVIDENCE_GATE_ENV_VAR",
     "GOAL_LOOP_ENABLED_ENV_VAR",
+    "EvidenceGate",
+    "EvidenceGateVerdict",
     "LoopControlDecisionSink",
     "LoopControlInput",
     "LoopControlInputProvider",
