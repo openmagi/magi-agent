@@ -655,11 +655,25 @@ def _runtime():
 
 
 def test_router_not_mounted_when_disabled(tmp_path, monkeypatch) -> None:
+    # PR9a: the dashboard mounts by default; OFF is via the master switch
+    # ``MAGI_LEARNING_ENABLED=false`` (byte-identical to the legacy unset-env
+    # not-mounted state).
     monkeypatch.delenv("MAGI_LEARNING_DASHBOARD_ENABLED", raising=False)
+    monkeypatch.setenv("MAGI_LEARNING_ENABLED", "false")
     monkeypatch.chdir(tmp_path)
     app = create_app(_runtime())
     paths = {route.path for route in app.routes}
     assert not any(p.startswith("/v1/learning") for p in paths)
+
+
+def test_router_mounted_by_default(tmp_path, monkeypatch) -> None:
+    # PR9a: with nothing set, the safe tier is ON and the dashboard mounts.
+    monkeypatch.delenv("MAGI_LEARNING_DASHBOARD_ENABLED", raising=False)
+    monkeypatch.delenv("MAGI_LEARNING_ENABLED", raising=False)
+    monkeypatch.chdir(tmp_path)
+    app = create_app(_runtime())
+    paths = {route.path for route in app.routes}
+    assert any(p.startswith("/v1/learning") for p in paths)
 
 
 def test_router_mounted_when_enabled(tmp_path, monkeypatch) -> None:

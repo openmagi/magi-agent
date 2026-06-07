@@ -36,6 +36,11 @@ from magi_agent.learning.candidates import (
     LocalFakeTranscriptSource,
     SessionTrace,
 )
+from magi_agent.learning.config import ENV_MASTER as _MASTER_ENV_VAR
+
+# PR9a (layered opt-out): the safe tier is now default-ON.  OFF is asserted via
+# the master switch ``MAGI_LEARNING_ENABLED=false`` (byte-identical to the
+# legacy unset-env OFF), not by leaving the reflection env var unset.
 
 
 # ---------------------------------------------------------------------------
@@ -62,9 +67,19 @@ def _make_trace(
 
 
 class TestReflectionDisabledByDefault:
-    def test_env_gate_off_by_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_master_off_disables_reflection(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # PR9a: unset env now resolves ON; OFF is via the master switch.
         monkeypatch.delenv(_REFLECTION_ENV_VAR, raising=False)
+        monkeypatch.setenv(_MASTER_ENV_VAR, "false")
         assert _reflection_enabled() is False
+
+    def test_reflection_on_by_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # PR9a: with nothing set, the safe tier is ON (default opt-out).
+        monkeypatch.delenv(_REFLECTION_ENV_VAR, raising=False)
+        monkeypatch.delenv(_MASTER_ENV_VAR, raising=False)
+        assert _reflection_enabled() is True
 
     def test_env_gate_on_with_truthy_values(
         self, monkeypatch: pytest.MonkeyPatch
@@ -83,7 +98,7 @@ class TestReflectionDisabledByDefault:
     def test_disabled_returns_disabled_status(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.delenv(_REFLECTION_ENV_VAR, raising=False)
+        monkeypatch.setenv(_MASTER_ENV_VAR, "false")
         source = LocalFakeTranscriptSource(traces=(_make_trace(),))
         result = asyncio.run(run_reflection(source=source))
         assert result.status == "disabled"
@@ -91,14 +106,14 @@ class TestReflectionDisabledByDefault:
     def test_disabled_returns_empty_candidates(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.delenv(_REFLECTION_ENV_VAR, raising=False)
+        monkeypatch.setenv(_MASTER_ENV_VAR, "false")
         source = LocalFakeTranscriptSource(traces=(_make_trace(),))
         result = asyncio.run(run_reflection(source=source))
         assert result.candidates == ()
 
     def test_disabled_does_zero_work(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """When OFF, transcript source must never be read."""
-        monkeypatch.delenv(_REFLECTION_ENV_VAR, raising=False)
+        """When OFF (master off), transcript source must never be read."""
+        monkeypatch.setenv(_MASTER_ENV_VAR, "false")
         read_calls: list[str] = []
 
         class TrackingSource(LocalFakeTranscriptSource):
@@ -113,7 +128,7 @@ class TestReflectionDisabledByDefault:
     def test_disabled_counters_are_zero(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.delenv(_REFLECTION_ENV_VAR, raising=False)
+        monkeypatch.setenv(_MASTER_ENV_VAR, "false")
         source = LocalFakeTranscriptSource(traces=(_make_trace(),))
         result = asyncio.run(run_reflection(source=source))
         assert result.counters["traces_read"] == 0
@@ -215,7 +230,7 @@ class TestWatermarkBehavior:
     def test_watermark_none_when_disabled(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.delenv(_REFLECTION_ENV_VAR, raising=False)
+        monkeypatch.setenv(_MASTER_ENV_VAR, "false")
         source = LocalFakeTranscriptSource(traces=(_make_trace(),))
         result = asyncio.run(run_reflection(source=source))
         assert result.watermark is None
@@ -544,8 +559,12 @@ class TestDoubleGate:
     def test_env_off_config_enabled_returns_disabled(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Env gate OFF but config.enabled=True → disabled no-op."""
-        monkeypatch.delenv(_REFLECTION_ENV_VAR, raising=False)
+        """Env-resolved gate OFF (master off) but config.enabled=True → disabled.
+
+        PR9a: an unset reflection env now resolves ON, so the env-off arm of the
+        double gate is exercised via the master switch.
+        """
+        monkeypatch.setenv(_MASTER_ENV_VAR, "false")
         source = LocalFakeTranscriptSource(traces=(_make_trace("s1"),))
         result = asyncio.run(
             run_reflection(

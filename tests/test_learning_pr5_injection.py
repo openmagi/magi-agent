@@ -432,9 +432,12 @@ def test_harness_enabled_injects_scope_matched_learning_text(tmp_path) -> None:
 
 
 def test_reflection_cron_not_scheduled_when_off(monkeypatch) -> None:
+    # PR9a flipped the reflection tier to default-ON; "off" is now the master
+    # opt-out switch rather than an unset env var.
     from magi_agent.harness.cron_runtime import LearningReflectionCronJob
 
     monkeypatch.delenv(_REFLECTION_ENV_VAR, raising=False)
+    monkeypatch.setenv("MAGI_LEARNING_ENABLED", "false")
     job = LearningReflectionCronJob()
     assert job.scheduled is False
     assert job.next_fire_at(now=0) is None
@@ -573,8 +576,11 @@ def test_manual_trigger_error_leaves_watermark_unchanged_and_warns(
 
 def test_manual_trigger_off_is_disabled_noop(monkeypatch, tmp_path) -> None:
     from magi_agent.harness.cron_runtime import LearningReflectionCronJob
+    from magi_agent.learning.config import ENV_MASTER
 
+    # PR9a: the executor's reflection gate is default-ON; OFF is via master off.
     monkeypatch.delenv(_REFLECTION_ENV_VAR, raising=False)
+    monkeypatch.setenv(ENV_MASTER, "false")
     job = LearningReflectionCronJob(config=LearningReflectionConfig(enabled=True))
     result = asyncio.run(job.trigger_now())
     assert result.status == "disabled"

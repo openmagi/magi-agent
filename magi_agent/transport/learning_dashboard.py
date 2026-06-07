@@ -32,6 +32,7 @@ from magi_agent.learning.api import (
     LearningApiError,
     LearningGovernanceService,
 )
+from magi_agent.learning.config import resolve_learning_config
 from magi_agent.learning.models import LearningItem, LearningScope
 from magi_agent.learning.store import SqliteLearningStore
 
@@ -64,8 +65,15 @@ _TRUE_STRINGS = frozenset({"1", "true", "yes", "on"})
 
 
 def learning_dashboard_enabled() -> bool:
-    """True when the learning governance dashboard router should be mounted."""
-    return os.environ.get(_DASHBOARD_ENV_VAR, "").lower() in _TRUE_STRINGS
+    """True when the learning governance dashboard router should be mounted.
+
+    PR9a layered opt-out: the dashboard is now mounted **by default** (safe
+    tier).  It is OFF only when the master switch ``MAGI_LEARNING_ENABLED`` is
+    explicitly falsy or ``MAGI_LEARNING_DASHBOARD_ENABLED`` is explicitly falsy.
+    Resolution flows through :func:`resolve_learning_config`; master-off makes
+    the surface byte-identical to the PR1–PR8 not-mounted state.
+    """
+    return resolve_learning_config().dashboard_effective
 
 
 _MODEL_CONFIG = ConfigDict(

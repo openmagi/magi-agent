@@ -63,6 +63,57 @@ class LearningReadinessConfig(BaseModel):
         return False
 
 
+#: Reflect-tier execution mode (PR9a).  Distinct from the authority-tier
+#: ``disabled``/``shadow``/``live`` ladder in ``learning_live_readiness``.  The
+#: reflect tier covers ONLY the safe operations: real LOCAL session read +
+#: deterministic label + propose to the LOCAL store.  It carries NO live
+#: authority — ``reflect_authority`` stays ``Literal[False]`` and the three
+#: frozen attestation flags on ``LearningReflectionConfig`` stay False.
+LearningReflectTierMode = Literal["disabled", "reflect"]
+
+
+def resolve_learning_reflect_tier_mode(
+    config: object | None = None,
+) -> LearningReflectTierMode:
+    """Resolve the reflect-tier execution mode under PR9a layered opt-out.
+
+    The reflect tier (real local session read → deterministic label → propose to
+    the LOCAL store) is **ready by default** when the safe tier is on, i.e. when
+    the resolved :class:`~magi_agent.learning.config.LearningConfig` has
+    ``enabled AND reflection_enabled`` (``reflection_effective``).  This is
+    achieved WITHOUT flipping any ``Literal[False]`` flag —
+    ``reflect_authority`` / ``llm_attached`` / ``production_write_enabled`` /
+    ``real_transcript_source_attached`` all stay locked False.  The real
+    transcript binding (PR9b) is attested through the existing DI + audit path,
+    exactly like PR7; this resolver only reports the *tier* the bootstrap should
+    run in.
+
+    Returns ``"reflect"`` when the safe tier is on, else ``"disabled"``.
+
+    Args:
+        config: Optional resolved ``LearningConfig``.  When ``None`` it is
+            resolved from the environment via ``resolve_learning_config()`` so
+            an unconfigured install resolves to ``"reflect"`` (default-ready).
+    """
+    # Imported lazily to avoid a learning↔gates import cycle at module load.
+    from magi_agent.learning.config import (
+        LearningConfig,
+        resolve_learning_config,
+    )
+
+    resolved: LearningConfig
+    if config is None:
+        resolved = resolve_learning_config()
+    elif isinstance(config, LearningConfig):
+        resolved = config
+    else:  # pragma: no cover - defensive; callers pass LearningConfig or None
+        raise TypeError(
+            "resolve_learning_reflect_tier_mode expects a LearningConfig or None"
+        )
+
+    return "reflect" if resolved.reflection_effective else "disabled"
+
+
 def learning_readiness_health_metadata(
     config: LearningReadinessConfig,
 ) -> dict[str, object]:
@@ -108,5 +159,7 @@ def _reason_codes(config: LearningReadinessConfig) -> tuple[str, ...]:
 
 __all__ = [
     "LearningReadinessConfig",
+    "LearningReflectTierMode",
     "learning_readiness_health_metadata",
+    "resolve_learning_reflect_tier_mode",
 ]
