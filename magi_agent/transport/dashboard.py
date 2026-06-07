@@ -716,6 +716,11 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       background: var(--surface-2);
     }}
     .token-field {{
+      display: grid;
+      gap: 8px;
+      min-width: 0;
+    }}
+    .token-row {{
       display: flex;
       align-items: center;
       gap: 8px;
@@ -735,6 +740,21 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       padding: 0 10px;
       color: var(--ink);
       background: var(--surface-2);
+    }}
+    .token-field.has-error input {{
+      border-color: #e49aaa;
+      background: #fff8fa;
+    }}
+    .token-help,
+    .token-error {{
+      display: block;
+      color: var(--soft);
+      font-size: 11px;
+      line-height: 1.35;
+    }}
+    .token-error {{
+      min-height: 15px;
+      color: #8a2638;
     }}
     .send {{
       min-width: 86px;
@@ -1128,7 +1148,7 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       .composer-strip {{ align-items: flex-start; flex-direction: column; padding: 12px 14px; }}
       .composer-actions {{ grid-template-columns: 1fr; }}
       .select-field {{ width: 100%; }}
-      .token-field {{ align-items: stretch; flex-direction: column; gap: 6px; }}
+      .token-row {{ align-items: stretch; flex-direction: column; gap: 6px; }}
       .send {{ width: 100%; }}
     }}
     @media (prefers-reduced-motion: reduce) {{
@@ -1255,9 +1275,13 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
             <select class="select-field" id="model-select" aria-label="Model">
               <option>local-dev</option>
             </select>
-            <div class="token-field">
-              <label for="gateway-token">Gateway token</label>
-              <input id="gateway-token" type="password" autocomplete="current-password" placeholder="local-dev-token">
+            <div class="token-field" id="token-field">
+              <div class="token-row">
+                <label for="gateway-token">Gateway token</label>
+                <input id="gateway-token" type="password" autocomplete="current-password" placeholder="local-dev-token" aria-describedby="token-help token-error">
+              </div>
+              <span class="token-help" id="token-help">Use local-dev-token by default, or the GATEWAY_TOKEN value you started the server with.</span>
+              <span class="token-error" id="token-error" role="status" aria-live="polite"></span>
             </div>
             <button class="send" id="send-button" type="submit" aria-label="Send prompt">Send</button>
           </div>
@@ -1367,7 +1391,9 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
     const workStreamEvents = document.getElementById("work-stream-events");
     const form = document.getElementById("chat-form");
     const promptInput = document.getElementById("prompt");
+    const tokenField = document.getElementById("token-field");
     const tokenInput = document.getElementById("gateway-token");
+    const tokenError = document.getElementById("token-error");
     const sendButton = document.getElementById("send-button");
     const modelSelect = document.getElementById("model-select");
     const composerStatus = document.getElementById("composer-status");
@@ -1476,6 +1502,28 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
         node.innerHTML = `<strong>${{escapeText(name)}}</strong><span>${{escapeText(status)}}</span>`;
         receiptList.appendChild(node);
       }}
+    }}
+
+    function setTokenError(message) {{
+      tokenError.textContent = message || "";
+      tokenField.classList.toggle("has-error", Boolean(message));
+    }}
+
+    function describeChatFailure(response, text) {{
+      let code = text.trim();
+      try {{
+        const parsed = JSON.parse(text);
+        if (parsed && parsed.error) code = String(parsed.error);
+      }} catch (error) {{
+        // Plain-text failures are already captured in code.
+      }}
+      if (response.status === 401) {{
+        return "Unauthorized. Enter the gateway token from GATEWAY_TOKEN, then send again.";
+      }}
+      if (response.status === 503 && code === "chat_route_disabled") {{
+        return "Local chat route is disabled. Start with MAGI_AGENT_LOCAL_CHAT_ROUTE=on, then refresh.";
+      }}
+      return code ? `Request failed (${{response.status}}): ${{code}}` : `Request failed: ${{response.status}}`;
     }}
 
     function addMessage(role, text, tone) {{
@@ -1633,6 +1681,19 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
     async function sendPrompt(prompt) {{
       const token = tokenInput.value.trim();
       localStorage.setItem(tokenKey, token);
+      setTokenError("");
+      if (!token) {{
+        const message = "Gateway token required. Enter the gateway token from GATEWAY_TOKEN, then send again.";
+        setTokenError(message);
+        tokenInput.focus();
+        addMessage("assistant", message, "error");
+        addEvent("Token required", "Request was not sent because the bearer token is empty.", "error");
+        composerStatus.textContent = "Blocked";
+        agentStatePill.textContent = "blocked";
+        setRunBoard("blocked");
+        renderReceiptList([["request", "not sent"], ["delivery", "blocked"], ["transport", "token required"]]);
+        return;
+      }}
       const assistant = addMessage("assistant", "");
       sseFrameCount = 0;
       agentEventCount = 0;
@@ -1649,22 +1710,40 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
         ["Receipts", "Collecting delivery state"],
       ]);
       renderTransportLog([["POST /v1/chat/completions", "opening local SSE request", "pending"]]);
-      const response = await fetch("/v1/chat/completions", {{
-        method: "POST",
-        headers: {{
-          "Content-Type": "application/json",
-          ...(token ? {{ "Authorization": `Bearer ${{token}}` }} : {{}}),
-        }},
-        body: JSON.stringify({{
-          model: modelSelect.value || bootstrap.model,
-          messages: [{{ role: "user", content: prompt }}],
-          stream: true,
-        }}),
-      }});
+      let response;
+      try {{
+        response = await fetch("/v1/chat/completions", {{
+          method: "POST",
+          headers: {{
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${{token}}`,
+          }},
+          body: JSON.stringify({{
+            model: modelSelect.value || bootstrap.model,
+            messages: [{{ role: "user", content: prompt }}],
+            stream: true,
+          }}),
+        }});
+      }} catch (error) {{
+        const message = "Runtime request failed before the SSE stream opened. Check /healthz, then try again.";
+        assistant.className = "message assistant error";
+        assistant.textContent = message;
+        addEvent("Request failed", message, "error");
+        composerStatus.textContent = "Blocked";
+        agentStatePill.textContent = "blocked";
+        setRunBoard("blocked");
+        renderReceiptList([["request", "failed"], ["delivery", "unavailable"], ["transport", "network"]]);
+        return;
+      }}
       if (!response.ok) {{
         const text = await response.text();
+        const message = describeChatFailure(response, text);
+        if (response.status === 401) {{
+          setTokenError(message);
+          tokenInput.focus();
+        }}
         assistant.className = "message assistant error";
-        assistant.textContent = text || `Request failed: ${{response.status}}`;
+        assistant.textContent = message;
         addEvent("Request failed", assistant.textContent, "error");
         composerStatus.textContent = "Blocked";
         agentStatePill.textContent = "blocked";
@@ -1712,6 +1791,10 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
         sendButton.disabled = false;
         promptInput.focus();
       }}
+    }});
+
+    tokenInput.addEventListener("input", () => {{
+      if (tokenError.textContent) setTokenError("");
     }});
 
     promptInput.addEventListener("keydown", (event) => {{
