@@ -477,13 +477,30 @@ def run_eval_gate(
                 f"({len(before)} != {len(after)}) for item {item.id!r}; "
                 "the evaluator is producing incomparable samples."
             )
-        sample_n = len(before)
-        regression = _mean(before) - _mean(after)
-
-        passed = (
-            sample_n >= config.min_sample_size
-            and regression <= config.max_regression_band
-        )
+        # Decision: ``strict_band`` (default) reproduces today's mean-regression
+        # vs band test BYTE-IDENTICALLY; ``paired_significance`` uses the paired
+        # one-sided verdict (harm-gated, abstaining).  ``pv`` is None on the
+        # strict-band path so the new EvalGateDecision fields stay at defaults.
+        pv: PairedVerdict | None = None
+        if config.decision_rule == "paired_significance":
+            pv = paired_verdict(
+                before, after, z=config.z, min_n=config.min_sample_size
+            )
+            sample_n = pv.n
+            # Back-compat sign: regression = mean(before) - mean(after) = -delta.
+            regression = -pv.delta
+            # Back-compat boolean: only an ``improved`` verdict passes.
+            # ``inconclusive``/``underpowered`` defer (leave proposed); a
+            # ``regressed`` verdict is itself the downstream rollback signal —
+            # the gate records it but does NOT roll back here.
+            passed = pv.verdict == "improved"
+        else:
+            sample_n = len(before)
+            regression = _mean(before) - _mean(after)
+            passed = (
+                sample_n >= config.min_sample_size
+                and regression <= config.max_regression_band
+            )
 
         eval_ref = store.record_eval_observation(
             item_id=item.id,
@@ -523,6 +540,13 @@ def run_eval_gate(
                 evalObservationRef=eval_ref,
                 sampleN=sample_n,
                 regression=regression,
+                # Paired-significance fields — populated only on that path; the
+                # strict-band path leaves them at their empty/zero defaults.
+                verdict=pv.verdict if pv is not None else "",
+                delta=pv.delta if pv is not None else 0.0,
+                se=pv.se if pv is not None else 0.0,
+                ciLow=pv.ci_low if pv is not None else 0.0,
+                ciHigh=pv.ci_high if pv is not None else 0.0,
             )
         )
 
