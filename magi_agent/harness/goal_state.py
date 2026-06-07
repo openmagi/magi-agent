@@ -28,6 +28,7 @@ from typing import Literal, Protocol, runtime_checkable
 from pydantic import BaseModel, ConfigDict, Field
 
 from magi_agent.harness.goal_loop import GoalLoopOptOutState
+from magi_agent.storage.migrations import run_migrations
 
 
 # ---------------------------------------------------------------------------
@@ -37,15 +38,6 @@ from magi_agent.harness.goal_loop import GoalLoopOptOutState
 DEFAULT_GOAL_LOOP_MAX_TURNS: int = 20
 
 GoalStateStatus = Literal["active", "satisfied", "exhausted", "preempted", "cleared"]
-
-_GOAL_STATES_MIGRATION_VERSION = 3
-_GOAL_STATES_DDL = """
-CREATE TABLE IF NOT EXISTS goal_states (
-    session_id TEXT PRIMARY KEY,
-    goal_json TEXT NOT NULL,
-    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-);
-"""
 
 
 # ---------------------------------------------------------------------------
@@ -185,32 +177,6 @@ class InMemoryGoalStateStore:
 # SqliteGoalStateStore
 # ---------------------------------------------------------------------------
 
-def _ensure_goal_states_table(conn: sqlite3.Connection) -> None:
-    """Create goal_states table if absent.
-
-    Uses the same _schema_version tracking table as storage/migrations.py
-    (migration version 3) to stay compatible with SessionSqliteStore.
-    """
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS _schema_version (
-            version INTEGER PRIMARY KEY,
-            applied_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
-        )
-        """
-    )
-    row = conn.execute(
-        "SELECT 1 FROM _schema_version WHERE version = ?",
-        (_GOAL_STATES_MIGRATION_VERSION,),
-    ).fetchone()
-    if row is None:
-        conn.execute(_GOAL_STATES_DDL)
-        conn.execute(
-            "INSERT OR IGNORE INTO _schema_version (version) VALUES (?)",
-            (_GOAL_STATES_MIGRATION_VERSION,),
-        )
-        conn.commit()
-
 
 class SqliteGoalStateStore:
     """SQLite-backed GoalState store.
@@ -245,7 +211,7 @@ class SqliteGoalStateStore:
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA foreign_keys=ON")
         conn.execute("PRAGMA busy_timeout=5000")
-        _ensure_goal_states_table(conn)
+        run_migrations(conn)
         self._conn = conn
         return conn
 

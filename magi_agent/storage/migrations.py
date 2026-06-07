@@ -36,6 +36,16 @@ MIGRATIONS: Sequence[tuple[int, str]] = (
         );
         """,
     ),
+    (
+        3,
+        """
+        CREATE TABLE IF NOT EXISTS goal_states (
+            session_id TEXT PRIMARY KEY,
+            goal_json TEXT NOT NULL,
+            updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+        );
+        """,
+    ),
 )
 
 
