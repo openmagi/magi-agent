@@ -14,6 +14,7 @@ from .transport.shadow_invocations import register_shadow_invocation_routes
 from .transport.debug_trace import router as debug_trace_router
 from .transport.learning_dashboard import register_learning_dashboard_routes
 from .transport.tools import register_tool_admin_routes
+from magi_agent.observability import register_observability
 
 
 def create_app(runtime: OpenMagiRuntime) -> FastAPI:
@@ -39,5 +40,8 @@ def create_app(runtime: OpenMagiRuntime) -> FastAPI:
     # leaving the default app surface byte-identical.
     register_learning_dashboard_routes(app, runtime)
     app.include_router(debug_trace_router)
+    # Default-OFF: mounts only when MAGI_OBSERVABILITY_ENABLED is truthy,
+    # leaving the default app surface byte-identical.
+    register_observability(app, runtime)
 
     return app
