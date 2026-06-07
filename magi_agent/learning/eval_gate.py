@@ -135,6 +135,11 @@ def paired_verdict(
 
     This function is pure (no I/O, no store, no policy) and is NOT yet wired
     into ``run_eval_gate`` — Task 1 is the dormant foundation only.
+
+    NOTE(PR7): scores are assumed finite and in ``[0, 1]``. The live
+    agent-driven evaluator must validate the score domain before calling this;
+    NaN/inf inputs would make the comparisons False and silently classify as
+    ``"inconclusive"``.
     """
     if len(before) != len(after):
         raise ValueError(

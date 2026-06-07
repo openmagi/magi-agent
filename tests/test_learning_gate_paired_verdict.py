@@ -232,3 +232,11 @@ def test_decision_accepts_new_fields_via_alias() -> None:
     assert d.ci_low == 0.18
     assert d.ci_high == 0.22
     assert d.repeats == 3
+
+
+def test_empty_inputs_are_underpowered() -> None:
+    # equal (zero) lengths reach the n<min_n short-circuit; no divide-by-zero
+    v = paired_verdict((), ())
+    assert v.verdict == "underpowered"
+    assert v.n == 0
+    assert v.delta == 0.0
