@@ -221,11 +221,15 @@ def test_is_registered_channel_type_rejects_unknown() -> None:
 
 def test_new_platform_self_registers_without_editing_core() -> None:
     """A third-party platform can register itself using only the public API
-    (PlatformEntry + get_default_registry().register) — no core edits required.
+    (PlatformEntry + PlatformRegistry().register) — no core edits required.
 
-    This is the fundamental contract of E1: the registry is the seam.
+    The "without editing core" property is proven by using only the public
+    register()/lookup() API on a FRESH registry instance, not the shared
+    singleton. This avoids any risk of polluting _DEFAULT_REGISTRY if the
+    test fails before cleanup.
     """
-    registry = get_default_registry()
+    # Use a fresh registry — not the shared singleton — to prove isolation
+    registry = PlatformRegistry()
 
     # Simulate what a future E3/E4 platform module would do at import time:
     email_entry = PlatformEntry(
@@ -240,19 +244,23 @@ def test_new_platform_self_registers_without_editing_core() -> None:
 
     # Not yet registered
     assert registry.lookup("email") is None
-    assert is_registered_channel_type("email") is False
 
-    # Self-register — the only "edit" is calling register() on the shared registry
+    # Self-register — the only "edit" is calling register() on the registry
     registry.register(email_entry)
 
-    # Now valid via registry
+    # Now discoverable via the public lookup() API
     assert registry.lookup("email") == email_entry
-    assert is_registered_channel_type("email") is True
 
-    # Clean up so other tests are not affected by this module-level state mutation
+    # Unregister also works via public API
     registry.unregister("email")
     assert registry.lookup("email") is None
-    assert is_registered_channel_type("email") is False
+
+
+def test_default_registry_is_prepopulated_with_four_builtins() -> None:
+    """The default singleton is pre-populated with exactly the 4 built-ins."""
+    registry = get_default_registry()
+    types = {e.channel_type for e in registry.list_entries()}
+    assert {"web", "app", "telegram", "discord"} <= types
 
 
 def test_registry_unregister_removes_entry() -> None:
@@ -267,6 +275,30 @@ def test_registry_unregister_removes_entry() -> None:
 def test_registry_unregister_noop_for_missing() -> None:
     registry = PlatformRegistry()
     registry.unregister("never-registered")  # should not raise
+
+
+# ---------------------------------------------------------------------------
+# Drift guard: ChannelType Literal must exactly match registry built-ins
+# ---------------------------------------------------------------------------
+
+
+def test_registry_builtins_exactly_match_channel_type_literal() -> None:
+    """Guard against Literal↔registry drift introduced by E2/E3/E4 additions.
+
+    The ChannelType Literal in contract.py and the 4 built-in registry entries
+    are kept in sync only by author discipline. This test makes any desync an
+    immediate CI failure.
+    """
+    from typing import get_args
+
+    from magi_agent.channels.contract import ChannelType
+
+    literal_types = set(get_args(ChannelType))
+    registry_builtin_types = {e.channel_type for e in get_default_registry().list_entries()}
+    assert literal_types == registry_builtin_types, (
+        f"Literal-only: {literal_types - registry_builtin_types}, "
+        f"Registry-only: {registry_builtin_types - literal_types}"
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -30,6 +30,8 @@ Adding a new platform (e.g. Slack / E4) requires:
 """
 from __future__ import annotations
 
+import threading
+
 from pydantic import BaseModel, ConfigDict, field_validator
 
 
@@ -109,17 +111,19 @@ class PlatformRegistry:
 
     def __init__(self) -> None:
         self._entries: dict[str, PlatformEntry] = {}
+        self._lock = threading.Lock()
 
     def register(self, entry: PlatformEntry) -> None:
-        existing = self._entries.get(entry.channel_type)
-        if existing is not None:
-            if existing == entry:
-                return  # idempotent — same value
-            raise ValueError(
-                f"channel_type '{entry.channel_type}' already registered with a different entry; "
-                f"existing={existing!r}, new={entry!r}"
-            )
-        self._entries[entry.channel_type] = entry
+        with self._lock:
+            existing = self._entries.get(entry.channel_type)
+            if existing is not None:
+                if existing == entry:
+                    return  # idempotent — same value
+                raise ValueError(
+                    f"channel_type '{entry.channel_type}' already registered with a different entry; "
+                    f"existing={existing!r}, new={entry!r}"
+                )
+            self._entries[entry.channel_type] = entry
 
     def lookup(self, channel_type: str) -> PlatformEntry | None:
         return self._entries.get(channel_type)
@@ -128,7 +132,8 @@ class PlatformRegistry:
         return tuple(self._entries.values())
 
     def unregister(self, channel_type: str) -> None:
-        self._entries.pop(channel_type, None)
+        with self._lock:
+            self._entries.pop(channel_type, None)
 
 
 # ---------------------------------------------------------------------------
@@ -202,9 +207,10 @@ def get_default_registry() -> PlatformRegistry:
 def is_registered_channel_type(channel_type: str) -> bool:
     """Registry-driven validator: True iff channel_type is registered.
 
-    This is the extensibility alternative to checking against the hardcoded
-    ``ChannelType`` literal.  Use this in new adapter configs and E2+ platform
-    modules instead of ``channel_type in get_args(ChannelType)``.
+    Use this INSTEAD of ``channel_type in get_args(ChannelType)`` — the
+    registry covers both the 4 built-ins and any platforms added by E2+
+    modules, whereas ``get_args(ChannelType)`` is frozen at the literal
+    definition and will not reflect dynamically registered platforms.
     """
     return _DEFAULT_REGISTRY.lookup(channel_type) is not None
 
