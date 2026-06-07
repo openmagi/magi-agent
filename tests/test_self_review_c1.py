@@ -1004,3 +1004,177 @@ class TestCandidateSinkProtocol:
         assert len(sink.received) == 1
         assert sink.received[0].session_id == "sess-propagate"
         assert sink.received[0].turn_id == "turn-propagate"
+
+
+# ---------------------------------------------------------------------------
+# 15. Raising sink — C1 guard: dropping candidate doesn't re-raise or lose count
+# ---------------------------------------------------------------------------
+
+
+class TestRaisingSink:
+    """Important 1: a raising sink drops that one candidate but doesn't abort the hook."""
+
+    def test_raising_sink_does_not_reraise(self) -> None:
+        """run_self_review_hook must return a result (not None) even if sink.receive raises."""
+
+        class RaisingSink:
+            def receive(self, candidate: ReviewCandidate) -> None:
+                raise RuntimeError("injected sink failure")
+
+        config = SelfReviewConfig(enabled=True, shadow=True)
+        sink = RaisingSink()
+        runner = FakeForkRunner(
+            child_output=json.dumps(
+                {"kind": "memory", "proposal": "A fact.", "confidence": 0.8}
+            )
+        )
+        result = _run(
+            run_self_review_hook(
+                session_id="sess-raise",
+                turn_id="turn-raise",
+                system_prompt_blocks=_make_system_blocks(),
+                parent_assistant_message=_make_assistant_message(),
+                fork_runner=runner,
+                candidate_sink=sink,
+                config=config,
+                now=_NOW,
+            )
+        )
+        # Hook completes without re-raising — returns a ForkReviewResult, not None.
+        assert result is not None
+
+    def test_raising_sink_dropped_candidate_not_counted(self) -> None:
+        """A candidate that causes the sink to raise must not be counted in candidates_emitted."""
+
+        class RaisingSink:
+            def receive(self, candidate: ReviewCandidate) -> None:
+                raise RuntimeError("injected sink failure")
+
+        config = SelfReviewConfig(enabled=True, shadow=True)
+        sink = RaisingSink()
+        runner = FakeForkRunner(
+            child_output=json.dumps(
+                {"kind": "memory", "proposal": "A fact.", "confidence": 0.8}
+            )
+        )
+        result = _run(
+            run_self_review_hook(
+                session_id="sess-raise-count",
+                turn_id="turn-raise-count",
+                system_prompt_blocks=_make_system_blocks(),
+                parent_assistant_message=_make_assistant_message(),
+                fork_runner=runner,
+                candidate_sink=sink,
+                config=config,
+                now=_NOW,
+            )
+        )
+        assert result is not None
+        # The raising candidate was dropped — count is 0.
+        assert result.candidates_emitted == 0
+
+    def test_raising_sink_non_raising_candidates_still_received(self) -> None:
+        """Non-raising candidates must still reach the sink even if an earlier one raised."""
+
+        class PartialRaisingSink:
+            """Raises on the first receive call; accepts subsequent calls."""
+
+            def __init__(self) -> None:
+                self.call_count = 0
+                self.received: list[ReviewCandidate] = []
+
+            def receive(self, candidate: ReviewCandidate) -> None:
+                self.call_count += 1
+                if self.call_count == 1:
+                    raise RuntimeError("first sink call fails")
+                self.received.append(candidate)
+
+        two_candidates = " ".join(
+            json.dumps(o)
+            for o in [
+                {"kind": "memory", "proposal": "Fact one.", "confidence": 0.8},
+                {"kind": "skill", "proposal": "Skill two.", "confidence": 0.7},
+            ]
+        )
+        config = SelfReviewConfig(enabled=True, shadow=True)
+        sink = PartialRaisingSink()
+        runner = FakeForkRunner(child_output=two_candidates)
+        result = _run(
+            run_self_review_hook(
+                session_id="sess-partial-raise",
+                turn_id="turn-partial-raise",
+                system_prompt_blocks=_make_system_blocks(),
+                parent_assistant_message=_make_assistant_message(),
+                fork_runner=runner,
+                candidate_sink=sink,
+                config=config,
+                now=_NOW,
+            )
+        )
+        assert result is not None
+        # First candidate dropped (raised), second received successfully.
+        assert result.candidates_emitted == 1
+        assert len(sink.received) == 1
+        assert sink.received[0].proposal == "Skill two."
+
+
+# ---------------------------------------------------------------------------
+# 16. Proposal length bound — Important 2
+# ---------------------------------------------------------------------------
+
+
+class TestProposalLengthBound:
+    """Important 2: oversize proposals are truncated to 1024 chars, not dropped or crashed."""
+
+    def test_oversize_proposal_truncated_to_1024(self) -> None:
+        oversize = "x" * 2048
+        output = json.dumps({"kind": "memory", "proposal": oversize, "confidence": 0.8})
+        result = _parse_fork_output(
+            output=output,
+            session_id="s",
+            turn_id="t",
+            provenance_digest="digest",
+            mode="shadow",
+        )
+        assert len(result) == 1
+        assert len(result[0].proposal) == 1024
+
+    def test_oversize_proposal_not_dropped(self) -> None:
+        """An oversize proposal produces a candidate (truncated), not an empty list."""
+        oversize = "A" * 5000
+        output = json.dumps({"kind": "skill", "proposal": oversize, "confidence": 0.6})
+        result = _parse_fork_output(
+            output=output,
+            session_id="s",
+            turn_id="t",
+            provenance_digest="digest",
+            mode="shadow",
+        )
+        assert len(result) == 1
+
+    def test_exact_1024_proposal_not_truncated(self) -> None:
+        """A proposal of exactly 1024 chars must pass through unchanged."""
+        exact = "B" * 1024
+        output = json.dumps({"kind": "memory", "proposal": exact, "confidence": 0.5})
+        result = _parse_fork_output(
+            output=output,
+            session_id="s",
+            turn_id="t",
+            provenance_digest="digest",
+            mode="shadow",
+        )
+        assert len(result) == 1
+        assert result[0].proposal == exact
+
+    def test_short_proposal_unchanged(self) -> None:
+        short = "Short proposal."
+        output = json.dumps({"kind": "memory", "proposal": short, "confidence": 0.9})
+        result = _parse_fork_output(
+            output=output,
+            session_id="s",
+            turn_id="t",
+            provenance_digest="digest",
+            mode="shadow",
+        )
+        assert len(result) == 1
+        assert result[0].proposal == short
