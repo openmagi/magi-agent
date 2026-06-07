@@ -16,7 +16,7 @@ Use the source checkout only when developing the runtime itself.
 
 - To configure a provider today, set ONE provider env key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY` / `GOOGLE_API_KEY`, or `FIREWORKS_API_KEY`), or create `~/.magi/config.toml` (override the path with `MAGI_CONFIG`). Either one builds a real model-backed runner; with neither, the CLI falls back to a model-free stub.
 - The installed commands are `magi` for CLI work and `magi-agent` for serving the local HTTP API/dashboard.
-- Open Magi Cloud remains optional managed hosting, not required for the local app flow.
+- A local install does not require a cloud account.
 
 ### Homebrew install
 
@@ -65,9 +65,14 @@ The Python ADK runtime is the forward substrate for Magi Agent runtime contracts
 Use ADK docs here to understand the architecture: policy snapshot, context projection, ToolHost, source ledger, validators, repair policy, governed output projection, and audit.
 
 - The LOCAL `magi` CLI runs a real model plus first-party local tools (file read/write/edit, patch, Bash) once a provider key is set, behind permission-mode prompts. This is not gated off.
-- The default-off authority refers to hosted production traffic routing, external delivery/integrations (MCP, browser, channel), and the enforcement boundary layer — not to whether the local agent can run a task.
-- Docs may describe the contract and migration direction, but must not imply ungated hosted production activation.
+- The default-off authority refers to external delivery/integrations (MCP,
+  browser, channel) and the enforcement boundary layer — not to whether the
+  local agent can run a task.
+- Docs may describe the contract and rollout direction, but must not imply
+  ungated external authority.
 
-## Managed-hosting CLI boundary
+## Cloud CLI boundary
 
-`packages/openmagi` is currently an optional managed-hosting CLI with `openmagi cloud <login|run|chat>`. It does not install or start the local OSS runtime, so local docs should keep it separate from Magi Agent source setup.
+`packages/openmagi` is a separate cloud CLI surface. It does not install or start
+the local OSS runtime, so local docs should keep it separate from Magi Agent
+source setup.

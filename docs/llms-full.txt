@@ -35,130 +35,78 @@ uv run --extra dev pytest -q
 
 The source checkout is for contributors developing the runtime. Normal users install via Homebrew.
 
+
 ## Docs Index
 
 - OpenMagi Docs: https://openmagi.ai/docs/overview - Open-source documentation for the Magi Agent programmable AI agent runtime.
-
 - Getting Started: https://openmagi.ai/docs/getting-started - Status: ✅ Active — Homebrew install plus one provider key gives a real local model and first-party tools today.
-
 - Quickstart: https://openmagi.ai/docs/quickstart - Status: ✅ Active — Homebrew install plus one provider key runs a real model-backed task today.
-
-- CLI: https://openmagi.ai/docs/cli - Type: Guide — what the Magi Agent CLI is and the happy-path commands. For the full flag, output-mode, exit-code, and sub-command reference, see [magi CLI](/docs/cli/magi).
-
-- Configuration: https://openmagi.ai/docs/configuration - Status: ✅ Active — the local CLI is configured with a single provider key or a `~/.magi/config.toml`; runtime-enforced control/authority is hosted-only.
-
+- CLI: https://openmagi.ai/docs/cli - Type: Guide — what the Magi Agent CLI is and the happy-path commands. For the full flag, output-mode, exit-code, and sub-command reference, see
+- Configuration: https://openmagi.ai/docs/configuration - Status: ✅ Active — the local CLI is configured with a single provider key or a `~/.magi/config.toml`; runtime-enforced control and authority are explicit policy surfaces.
 - Customization: https://openmagi.ai/docs/customization - Customize Magi Agent with recipes, harnesses, hooks, and projection rules.
-
 - Runtime: https://openmagi.ai/docs/runtime - How Magi Agent turns model proposals into governed state transitions via the Python ADK runtime.
-
 - Tools: https://openmagi.ai/docs/tools - Status: ✅ Active — first-party tools are registered and on by default; file/search/edit/patch/Bash run live once a provider key is set (`magi_agent/tools/catalog.py`, `core_toolhost.py`).
-
 - Contracts: https://openmagi.ai/docs/contracts - Contracts define the runtime obligations for a governed agent run.
-
 - Hooks: https://openmagi.ai/docs/hooks - Hooks are useful lifecycle surfaces, but not the whole determinism model.
-
 - Memory: https://openmagi.ai/docs/memory - Memory is projected runtime state, not raw transcript storage. The memory subsystem (memory/ directory, 9 files) enforces read-only access with all writes blocked.
-
 - Skills: https://openmagi.ai/docs/skills - Status: ✅ Active — 14 first-party skills ship bundled under `magi_agent/skills/bundled/superpowers/`; each is a `SKILL.md` the model can load to follow a procedure.
-
 - Automation: https://openmagi.ai/docs/automation - Automation runs through task contracts and durable checkpoints.
-
 - Integrations: https://openmagi.ai/docs/integrations - Status: 🚧 Default-off — external side-effect surfaces (chat channels, Composio) ship gated; they require explicit scope, credentials, and approval, and most run in shadow / record-intent mode today.
-
 - API: https://openmagi.ai/docs/api - API clients request work and inspect projections; the runtime owns authority.
-
 - Deployment: https://openmagi.ai/docs/deployment - Status: ✅ Active — local self-host runs today; enforcement boundaries are default-off (shadow).
-
 - Security: https://openmagi.ai/docs/security - Status: ✅ Active — boundaries, default-off authority, and projection control are the security model.
-
 - Architecture: https://openmagi.ai/docs/architecture - The two-plane architecture behind Magi Agent composable determinism.
-
 - Reference: https://openmagi.ai/docs/reference - Names and vocabulary used by the Magi Agent runtime docs.
-
-- Troubleshooting: https://openmagi.ai/docs/troubleshooting - Status: ✅ Active — covers the local `magi` CLI path; hosted-runtime failures are called out in their own subsections.
-
+- Troubleshooting: https://openmagi.ai/docs/troubleshooting - Status: ✅ Active — covers the local `magi` CLI and dashboard path.
 - Learning Path: https://openmagi.ai/docs/learning-path - Status: ✅ Active — Homebrew ships now; the user track installs and runs a real task today.
-
 - Sessions: https://openmagi.ai/docs/sessions - How Magi Agent sessions manage state, context, and continuity across turns.
-
 - Checkpoints: https://openmagi.ai/docs/checkpoints - Durable checkpoints for resuming, inspecting, and auditing governed agent runs.
-
 - Work Console: https://openmagi.ai/docs/work-console - The local dashboard for inspecting, approving, and managing agent work.
-
 - Boundaries: https://openmagi.ai/docs/boundaries - Status: 🚧 Default-off — boundary enforcement ships in shadow/observe-only mode; production authority is attached separately.
-
 - Evidence: https://openmagi.ai/docs/evidence - Evidence ledger entries, source receipts, claim graphs, and evidence contracts that back runtime decisions.
-
 - Projection: https://openmagi.ai/docs/projection - How runtime state is projected into model-visible context and user-visible output.
-
 - Repair and Fallback: https://openmagi.ai/docs/repair-fallback - How the runtime handles missing evidence: retry, downgrade, approve, fallback, abstain, or block.
-
-- Recipes: https://openmagi.ai/docs/recipes - Status: 🚧 Default-off — recipe packs compile to metadata/policy snapshots only; there is no runtime execution engine that consumes a snapshot to enforce policy during a live run yet (`magi_agent/recipes/`).
-
-- Harnesses: https://openmagi.ai/docs/harnesses - Runtime policy extensions that own state, boundaries, evidence, and projection rules.
-
+- Recipes: https://openmagi.ai/docs/recipes - Recipes are the public way to describe reusable agent workflows. A recipe names the work class, selects the policy and harness surfaces that apply, declares the allowed tools, and records which evidence must exist before output can be
+- Harnesses: https://openmagi.ai/docs/harnesses - Harnesses are reusable runtime contracts that make a workflow checkable. A harness does not replace the model. It defines boundaries around the model: which actions are allowed, which evidence is required, when repair is possible,
 - Build a Recipe: https://openmagi.ai/docs/build-a-recipe - Step-by-step guide to creating a new recipe pack with tool, evidence, and validator refs.
-
 - Build a Harness: https://openmagi.ai/docs/build-a-harness - Step-by-step guide to creating evidence contracts and attaching them to the harness engine.
-
 - Source-Verified Research: https://openmagi.ai/docs/source-verified-research - Worked example of a research recipe requiring SourceInspection and WebSearch evidence before claims.
-
 - Coding Verification: https://openmagi.ai/docs/coding-verification - Worked example of a coding recipe requiring GitDiff, TestRun, and CodeDiagnostics evidence.
-
 - General Automation: https://openmagi.ai/docs/general-automation - Worked example covering approval gates, delivery boundaries, artifact verification, and commit boundaries using openmagi.office-automation and openmagi.spreadsheet-automation packs.
-
+- First-party Packs: https://openmagi.ai/docs/first-party-packs - First-party packs are Magi-owned recipe, harness, plugin, and tool surfaces for common work classes. They make useful agent behavior available without moving workflow-specific policy into the generic runtime core.
 - Multi-Recipe Composition: https://openmagi.ai/docs/multi-recipe-composition - How multiple recipe packs compose via profile resolution, and how harness scoping selects evidence contracts by role.
-
 - Runtime Interfaces: https://openmagi.ai/docs/runtime-interfaces - Python interfaces exposed by the Magi Agent runtime for extension.
-
 - Hook Points: https://openmagi.ai/docs/hook-points - Lifecycle hook points with HookRegistry registration and HookBus dispatch.
-
 - ToolHost: https://openmagi.ai/docs/toolhost - Tool catalog, ToolManifest schema, ToolRegistry, and governed tool dispatch.
-
 - Evidence Contracts: https://openmagi.ai/docs/evidence-contracts - Define and test evidence contracts that declare required evidence for agent actions.
-
 - Plugin Manifest: https://openmagi.ai/docs/plugin-manifest - Package and distribute runtime extensions as plugins with a declared manifest.
-
 - Testing Recipes: https://openmagi.ai/docs/testing-recipes - Test recipes and harnesses with deterministic replay, contract tests, and shadow runs.
-
 - Default-Off Gates: https://openmagi.ai/docs/default-off-gates - Status: 🚧 Default-off — this document describes the enforcement-boundary rollout, which ships in shadow/observe-only mode by design.
-
 - Config Reference: https://openmagi.ai/docs/config-reference - Complete reference for RuntimeConfig (config/env.py), PythonMemoryAdapterConfig, PythonToolHostAttachmentConfig, PythonRuntimeAuthorityConfig, and all Literal[False] safety invariants.
-
-- Environment Variable Reference: https://openmagi.ai/docs/env-reference - Status: ✅ Active (local CLI) / 🚧 Default-off (hosted authority/gate flags) — the local `magi` CLI runs with a single provider key; hosted runtime variables are read only by the managed deployment.
-
+- Environment Variable Reference: https://openmagi.ai/docs/env-reference - Status: ✅ Active — the local `magi` CLI and dashboard run with a single provider key or `~/.magi/config.toml`.
 - Recipe Schema Reference: https://openmagi.ai/docs/recipe-schema - Complete schema reference for RecipePackManifest, RecipeSnapshot, and ProfileResolutionRequest.
-
 - Harness Schema Reference: https://openmagi.ai/docs/harness-schema - Complete schema reference for HarnessEngine, HarnessResolutionRequest, ResolvedHarnessPresetState, EvidenceContractScope, and BuiltinHarnessPreset.
-
 - Hook Points Reference: https://openmagi.ai/docs/hook-points-reference - Complete reference for all 15 HookPoint enum values, their camelCase keys, firing conditions, payloads, and blocking behavior.
-
 - Evidence Types Reference: https://openmagi.ai/docs/evidence-types-reference - Complete reference for all 15 built-in evidence types, their producers, typical fields, and the EvidenceFieldMatcher for requirement matching.
-
 - ToolHost API Reference: https://openmagi.ai/docs/toolhost-api - Reference for ToolManifest full schema (tools/manifest.py), ToolRegistry (tools/registry.py), tool execution flow, ToolEvidenceRecord, and governed dispatch status.
-
 - Runtime Events Reference: https://openmagi.ai/docs/runtime-events - Reference for runtime event kinds, their payloads, and how events relate to SSE streaming, boundary decisions, and evidence recording.
-
+- Streaming Events: https://openmagi.ai/docs/streaming-events - Magi Agent streams public runtime progress through Server-Sent Events and CLI `stream-json` output. Streaming is a projection surface: it should show useful operator-visible progress without leaking hidden reasoning, credentials, raw
 - Frequently Asked Questions: https://openmagi.ai/docs/faq - Answers to common questions about Magi Agent: recipes vs harnesses, default-off boundaries, local testing, repair decisions, model compatibility, and custom evidence types.
-
 - What Works Today: https://openmagi.ai/docs/what-works-today - Status: ✅ Active — with a provider key, the local `magi` CLI runs a real model and first-party tools today.
-
 - Common Tasks: https://openmagi.ai/docs/common-tasks - Status: ✅ Active — the local `magi` CLI runs a real model and first-party tools once a provider key is set (`magi_agent/cli/app.py`, `magi_agent/tools/catalog.py`).
-
 - Channels (Telegram, Discord): https://openmagi.ai/docs/channels - Status: 🚧 Default-off — channel code (Telegram, Discord) ships in shadow / local-fake mode; live send/receive is gated and produces intent + receipt records, not real delivery (`magi_agent/channels/telegram_adapter.py`, `contract.py`).
-
-- CLI Reference: https://openmagi.ai/docs/cli-reference - Type: Reference — the full flag, output-mode, exit-code, keybinding, and sub-command reference. For the concise overview and happy-path guide, see [CLI](/docs/cli).
-
+- CLI Reference: https://openmagi.ai/docs/cli-reference - Type: Reference — the full flag, output-mode, exit-code, keybinding, and sub-command reference. For the concise overview and happy-path guide, see
 - Changelog: https://openmagi.ai/docs/changelog - Status: ✅ Active — this page tracks user-facing changes; tagged builds are on GitHub Releases.
-
 - Upgrading: https://openmagi.ai/docs/upgrading - Status: ✅ Active — covers upgrading the Homebrew install and source checkouts.
-
 - Glossary: https://openmagi.ai/docs/glossary - Status: ✅ Active — definitions of the core Magi Agent terms.
-
-
 - Contributing: https://openmagi.ai/docs/contributing - Thank you for your interest in contributing!
 
 ---
+
+
+# OpenMagi Docs
+
+Source: https://github.com/openmagi/magi-agent/blob/main/docs/README.md
 
 # OpenMagi Docs
 
@@ -166,24 +114,35 @@ Open-source documentation for the Magi Agent programmable AI agent runtime.
 
 Build agents that actually get things done by configuring the runtime around the model: context, tools, evidence, approvals, repair, projection, and audit.
 
+[Website](https://openmagi.ai) · [Source](https://github.com/openmagi/magi-agent)
+
 ## What Magi Agent and OpenMagi are
 
 Magi Agent is an open-source AI assistant that runs on your machine. Unlike prompt-only AI tools, it proves its work — verifying sources, testing code, and getting approval before taking action — so you can trust the results.
 
 Magi Agent is a programmable AI agent runtime for agents that actually get things done. It treats the model as a proposer inside a governed runtime, not as the authority for tools, memory, artifacts, or external side effects.
 
-OpenMagi is the platform and site. Open Magi Cloud is optional managed hosting for teams that want Magi Agent operated for them.
+OpenMagi is the platform and site. Open Magi Cloud is optional cloud service for teams that want Magi Agent operated for them.
 
-Start from source with git clone https://github.com/openmagi/magi-agent.git, then install dependencies and use the local Magi Agent CLI.
+Start with Homebrew:
+
+```bash
+brew install --force-bottle openmagi/tap/magi-agent
+magi-agent serve --port 8080
+open http://localhost:8080/dashboard
+```
+
+Then use the local `magi` CLI for tasks. Source checkout is for contributors developing the runtime.
 
 - Model proposes plans, claims, tool calls, and draft output.
 - Runtime-enforced control decides which proposals become state, evidence, output, memory, artifacts, or side effects.
 - Harnesses and recipes compose policy instead of relying on prompt text alone.
 - Machine-readable docs are published for coding agents and documentation crawlers.
 
-- [Start from source](/docs/getting-started)
+- [Install with Homebrew](/docs/getting-started)
 - [Read architecture](/docs/architecture)
 - [Read runtime](/docs/runtime)
+- [Visit openmagi.ai](https://openmagi.ai)
 - [View source](https://github.com/openmagi/magi-agent)
 
 ## The determinism problem
@@ -299,7 +258,10 @@ Use the compact text docs for orientation and the full text docs when an AI codi
 - [/docs/llms.txt](/docs/llms.txt)
 - [/docs/llms-full.txt](/docs/llms-full.txt)
 
----
+
+# Getting Started
+
+Source: https://github.com/openmagi/magi-agent/blob/main/docs/getting-started.md
 
 # Getting Started
 
@@ -319,7 +281,7 @@ Use the source checkout only when developing the runtime itself.
 
 - To configure a provider today, set ONE provider env key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY` / `GOOGLE_API_KEY`, or `FIREWORKS_API_KEY`), or create `~/.magi/config.toml` (override the path with `MAGI_CONFIG`). Either one builds a real model-backed runner; with neither, the CLI falls back to a model-free stub.
 - The installed commands are `magi` for CLI work and `magi-agent` for serving the local HTTP API/dashboard.
-- Open Magi Cloud remains optional managed hosting, not required for the local app flow.
+- A local install does not require a cloud account.
 
 ### Homebrew install
 
@@ -368,14 +330,22 @@ The Python ADK runtime is the forward substrate for Magi Agent runtime contracts
 Use ADK docs here to understand the architecture: policy snapshot, context projection, ToolHost, source ledger, validators, repair policy, governed output projection, and audit.
 
 - The LOCAL `magi` CLI runs a real model plus first-party local tools (file read/write/edit, patch, Bash) once a provider key is set, behind permission-mode prompts. This is not gated off.
-- The default-off authority refers to hosted production traffic routing, external delivery/integrations (MCP, browser, channel), and the enforcement boundary layer — not to whether the local agent can run a task.
-- Docs may describe the contract and migration direction, but must not imply ungated hosted production activation.
+- The default-off authority refers to external delivery/integrations (MCP,
+  browser, channel) and the enforcement boundary layer — not to whether the
+  local agent can run a task.
+- Docs may describe the contract and rollout direction, but must not imply
+  ungated external authority.
 
-## Managed-hosting CLI boundary
+## Cloud CLI boundary
 
-`packages/openmagi` is currently an optional managed-hosting CLI with `openmagi cloud <login|run|chat>`. It does not install or start the local OSS runtime, so local docs should keep it separate from Magi Agent source setup.
+`packages/openmagi` is a separate cloud CLI surface. It does not install or start
+the local OSS runtime, so local docs should keep it separate from Magi Agent
+source setup.
 
----
+
+# Quickstart
+
+Source: https://github.com/openmagi/magi-agent/blob/main/docs/quickstart.md
 
 # Quickstart
 
@@ -512,7 +482,10 @@ Each layer of the runtime handled a different concern in this scenario:
 - Enforcement boundary — evaluated contract verdicts and determined audit/block/pass actions
 - Output projection — allowed only supported claims with citation references to reach the user
 
----
+
+# CLI
+
+Source: https://github.com/openmagi/magi-agent/blob/main/docs/cli.md
 
 # CLI
 
@@ -578,12 +551,15 @@ sub-commands are documented in the reference:
 
 - [magi CLI — full reference](/docs/cli/magi)
 
----
+
+# Configuration
+
+Source: https://github.com/openmagi/magi-agent/blob/main/docs/configuration.md
 
 # Configuration
 
 Status: ✅ Active — the local CLI is configured with a single provider key or a
-`~/.magi/config.toml`; runtime-enforced control/authority is hosted-only.
+`~/.magi/config.toml`.
 
 Configure runtime-enforced control over context, tools, evidence, approvals, repair, projection, and audit.
 
@@ -631,23 +607,8 @@ api_key = "<your-key>"
 
 With neither set, `magi` still launches but uses a model-free stub runner.
 
-### Hosted/managed only
-
-> The variables below are read by the hosted/managed deployment, **not** by the
-> local CLI. Do not set them for local use.
-
-```
-# Hosted runtime profile (managed deployment only)
-CORE_AGENT_MODEL=<model-id>
-CORE_AGENT_API_PROXY_URL=http://localhost:8081
-CORE_AGENT_CHAT_PROXY_URL=http://localhost:8082
-CORE_AGENT_REDIS_URL=redis://localhost:6379
-BOT_ID=<bot-id>
-USER_ID=<user-id>
-GATEWAY_TOKEN=<gateway-token>
-```
-
-See the [environment variable reference](/docs/env-reference) for the full hosted list.
+See the [environment variable reference](/docs/env-reference) for the local
+provider, server, build, and authority flags.
 
 ## Model-visible context
 
@@ -661,7 +622,10 @@ Runtime-only evidence and claim state includes source ledgers, claim graphs, app
 
 This state exists so deterministic surfaces can be composed without stuffing every control record back into the model prompt.
 
----
+
+# Customization
+
+Source: https://github.com/openmagi/magi-agent/blob/main/docs/customization.md
 
 # Customization
 
@@ -685,13 +649,16 @@ Harnesses compose by declaring the state they own and the boundaries they gate. 
 - Repair behavior defines retry, downgrade, abstain, block, or approval.
 - Projection rules define what enters context, output, memory, artifacts, or channels.
 
----
+
+# Runtime
+
+Source: https://github.com/openmagi/magi-agent/blob/main/docs/runtime.md
 
 # Runtime
 
 How Magi Agent turns model proposals into governed state transitions via the Python ADK runtime.
 
-The runtime is the engine that governs every agent action. The runtime loop separates model-visible context from runtime-only evidence and claim state. A local run with a configured provider key builds a model-backed ADK runner, then flows through session boundaries, model routing, message building, event streaming, projection validation, and error classification. Hosted production routing, external delivery, and high-authority mutations remain governed by explicit gates.
+The runtime is the engine that governs every agent action. The runtime loop separates model-visible context from runtime-only evidence and claim state. A local run with a configured provider key builds a model-backed ADK runner, then flows through session boundaries, model routing, message building, event streaming, projection validation, and error classification. External delivery and high-authority mutations remain governed by explicit gates.
 
 ## Runtime loop
 
@@ -732,7 +699,7 @@ User-visible projection   <-------- Output projector + audit checkpoint
 
 Each turn is modeled as a TurnInput (from runtime/turn_controller.py) with fields: user_id, session_id, turn_id, message_text, and harness_state. The RunnerSessionBoundary (runtime/runner_session_boundary.py) manages session concurrency and error classification for each turn.
 
-The runtime uses two layers: runtime/openmagi_runtime.py is the core container, and the adk_bridge/ directory provides the adapter, callback, plugin, context-compaction, and tool-attachment surfaces used when a live ADK runner is built. Local CLI/dashboard runs can use those surfaces directly; hosted production authority is still controlled separately by deployment policy.
+The runtime uses two layers: runtime/openmagi_runtime.py is the core container, and the adk_bridge/ directory provides the adapter, callback, plugin, context-compaction, and tool-attachment surfaces used when a live ADK runner is built. Local CLI/dashboard runs can use those surfaces directly; external production authority is controlled by deployment policy.
 
 ## Boundary validation
 
@@ -756,7 +723,10 @@ When evidence is missing, Magi Agent should not silently project the unsupported
 
 Repair is bounded and auditable. The append-only audit ledger should show the failed validation, attempted repair, final projection, and any remaining caveat.
 
----
+
+# Tools
+
+Source: https://github.com/openmagi/magi-agent/blob/main/docs/tools.md
 
 # Tools
 
@@ -838,7 +808,10 @@ Validators check claims and actions against receipts. They should run close to t
 
 Guardrails are runtime checks over state transitions. They are stronger than asking the model to remember a rule.
 
----
+
+# Contracts
+
+Source: https://github.com/openmagi/magi-agent/blob/main/docs/contracts.md
 
 # Contracts
 
@@ -885,7 +858,10 @@ claimState:
       spanId: pricing_table.rows.competitor_a.seat_price
 ```
 
----
+
+# Hooks
+
+Source: https://github.com/openmagi/magi-agent/blob/main/docs/hooks.md
 
 # Hooks
 
@@ -913,7 +889,10 @@ Even when raw logs are available, reconstructing the whole run at the end is exp
 
 Coding agents are reliable because their core loop owns file reads, edits, diffs, tests, stale-edit checks, and commit gates. Magi Agent exposes that first-party level of control as composable runtime surfaces, so users can add domain-specific harnesses without forking the agent core.
 
----
+
+# Memory
+
+Source: https://github.com/openmagi/magi-agent/blob/main/docs/memory.md
 
 # Memory
 
@@ -931,7 +910,10 @@ Implementation: the memory write boundary governs all memory mutations. MemoryMu
 - Use runtime-only evidence and claim state for verification records.
 - Use projected memory for durable facts, decisions, preferences, and workflow state.
 
----
+
+# Skills
+
+Source: https://github.com/openmagi/magi-agent/blob/main/docs/skills.md
 
 # Skills
 
@@ -991,7 +973,10 @@ forbids writing any code until a design is presented and the user approves it.
 The skill supplies the procedure; the runtime's boundaries and evidence
 contracts supply the enforcement.
 
----
+
+# Automation
+
+Source: https://github.com/openmagi/magi-agent/blob/main/docs/automation.md
 
 # Automation
 
@@ -1009,7 +994,10 @@ Durable checkpoints let the runtime resume, repair, or explain work without copy
 - Background child work needs parent-safe summaries and receipt-backed imports.
 - Long-running tasks need checkpoints that separate private state from user-visible projection.
 
----
+
+# Integrations
+
+Source: https://github.com/openmagi/magi-agent/blob/main/docs/integrations.md
 
 # Integrations
 
@@ -1047,7 +1035,10 @@ Channel delivery is also a projection boundary. User-visible messages should be 
   before they are surfaced. Treat it as a gated surface — enabling it does not
   bypass the side-effect boundary above.
 
----
+
+# API
+
+Source: https://github.com/openmagi/magi-agent/blob/main/docs/api.md
 
 # API
 
@@ -1059,9 +1050,13 @@ The API should expose safe control and inspection surfaces while preserving runt
 
 API callers can submit tasks, answer approvals, inspect public projections, and fetch artifacts. They should not bypass ToolHost, validators, approval receipts, memory projection, or audit checkpoints.
 
-For docs accuracy, distinguish hosted cloud API calls from local source development commands and component-level runtime APIs.
+For docs accuracy, distinguish cloud API calls from local source development
+commands and component-level runtime APIs.
 
----
+
+# Deployment
+
+Source: https://github.com/openmagi/magi-agent/blob/main/docs/deployment.md
 
 # Deployment
 
@@ -1095,9 +1090,8 @@ docker build -t magi-agent .
 docker run --rm -p 8080:8080 -e ANTHROPIC_API_KEY=... magi-agent
 ```
 
-Pass the provider key (or mount a config file) as the only required configuration
-for a local run. The hosted runtime's `BOT_ID` / `GATEWAY_TOKEN` / `CORE_AGENT_*`
-/ service-URL / Redis variables are not required for a standalone container.
+Pass the provider key or mount a config file as the only required configuration
+for a standalone container.
 
 ## Self-host posture
 
@@ -1116,12 +1110,16 @@ agent's ability to run work. Enable additional authority only after contract
 tests, replay, shadow/canary evidence, security review, and a rollback plan are in
 place.
 
-## Managed hosting
+## Operated services
 
-Open Magi Cloud remains optional managed hosting for teams that do not want to
-operate the runtime themselves.
+If you run Magi Agent as part of a larger service, keep service identity,
+database, queue, and proxy credentials outside this repository and document them
+in your own deployment layer.
 
----
+
+# Security
+
+Source: https://github.com/openmagi/magi-agent/blob/main/docs/security.md
 
 # Security
 
@@ -1173,7 +1171,10 @@ Before enabling any production authority, review this checklist.
 - Evidence enforcement is set to audit mode by default. Switch to block_final_answer only after testing.
 - Memory writes are blocked. Read-only memory adapters are the only supported mode.
 
----
+
+# Architecture
+
+Source: https://github.com/openmagi/magi-agent/blob/main/docs/architecture.md
 
 # Architecture
 
@@ -1228,7 +1229,10 @@ A hook can inspect a lifecycle payload. It usually cannot define first-class sou
 
 Magi Agent exposes first-party level of control as composable runtime surfaces so a harness can define state, evidence, boundaries, repair, and projection directly.
 
----
+
+# Reference
+
+Source: https://github.com/openmagi/magi-agent/blob/main/docs/reference.md
 
 # Reference
 
@@ -1258,12 +1262,14 @@ Current docs should present Homebrew as the normal install path. Source checkout
 
 Do not say the current cloud CLI installs or starts a local runtime.
 
----
 
 # Troubleshooting
 
-Status: ✅ Active — covers the local `magi` CLI path; hosted-runtime failures are
-called out in their own subsections.
+Source: https://github.com/openmagi/magi-agent/blob/main/docs/troubleshooting.md
+
+# Troubleshooting
+
+Status: ✅ Active — covers the local `magi` CLI and dashboard path.
 
 Debug Magi Agent by locating the failed runtime boundary.
 
@@ -1286,7 +1292,8 @@ Treat the failure as a runtime state problem first, not a prompt wording problem
 
 If docs claim a package-manager, Homebrew, shell-pipe, create-app, or one-command runtime path is currently available, verify it against package entrypoints and tests first. Today, the normal user path is Homebrew plus `magi` for CLI work and `magi-agent serve --port 8080` for the dashboard; a source checkout runs the same commands through `uv` (for example `uv run --extra cli magi doctor`), not npm.
 
-Keep source checkout, local Homebrew, and optional managed hosting language separate so users know which environment they are operating.
+Keep source checkout and local Homebrew instructions separate so users know
+which environment they are operating.
 
 ## Local CLI will not run
 
@@ -1300,15 +1307,14 @@ If `magi` launches but answers with a model-free stub, no provider key was found
 
 If a provider key is set but the turn returns an install hint instead of a model answer, the optional `litellm` dependency is missing (the CLI raises a provider-dependency error and stays usable on the stub runner). `magi doctor` reports `litellm` as not importable. Reinstall `magi-agent` so its default runtime dependencies are present, or from a source checkout install the CLI extra: `uv run --extra cli magi ...` (the `cli` extra pulls the provider runtime in).
 
-### Hosted runtime
-
-The hosted/managed runtime additionally requires BOT_ID, USER_ID, GATEWAY_TOKEN, CORE_AGENT_MODEL, and the CORE_AGENT_*_PROXY_URL / CORE_AGENT_REDIS_URL service URLs. These are read only by the managed deployment and do not affect the local CLI. See the [environment variable reference](/docs/env-reference).
-
 ## Agent gives wrong or unsupported answers
 
 Verify that evidence contracts are active for your task type. Research tasks should have SourceInspection requirements; coding tasks should have TestRun and GitDiff requirements. Check the evidence ledger for missing or failed evidence records. If enforcement is set to audit, the agent logs issues but does not block — switch to block_final_answer for stricter enforcement.
 
----
+
+# Learning Path
+
+Source: https://github.com/openmagi/magi-agent/blob/main/docs/learning-path.md
 
 # Learning Path
 
@@ -1357,12 +1363,15 @@ The runtime exposes typed hook points (hooks/manifest.py, 15 HookPoint values), 
 Magi Agent installs via Homebrew today; contributors can also run from a source checkout with uv. Self-hosting starts with install and configuration.
 
 - Install: See [Getting Started](/docs/getting-started) for the Homebrew install and the contributor-only `uv sync` / `uv run --extra cli magi` source path.
-- Deployment options: See [Deployment](/docs/deployment) for local-first operation and optional managed hosting.
+- Deployment options: See [Deployment](/docs/deployment) for local-first operation and optional cloud service.
 - Configuration: Set one provider env key or create `~/.magi/config.toml`; see [Getting Started](/docs/getting-started) for details.
 - Security hardening: See [Security](/docs/security) for the default-off model and how to enable boundaries for production.
 - Activation gates: See [Default-Off Gates](/docs/default-off-gates) for the staged rollout pattern from disabled to production authority.
 
----
+
+# Sessions
+
+Source: https://github.com/openmagi/magi-agent/blob/main/docs/sessions.md
 
 # Sessions
 
@@ -1394,7 +1403,10 @@ Session state is persisted to the workspace PVC so that sessions can survive pod
 
 Session management is implemented and active. A dedicated public session API for external consumers to create, query, or manipulate sessions is planned but not yet exposed as an extension point. Currently, sessions are managed internally by the runtime and accessed through the ADK bridge.
 
----
+
+# Checkpoints
+
+Source: https://github.com/openmagi/magi-agent/blob/main/docs/checkpoints.md
 
 # Checkpoints
 
@@ -1430,7 +1442,10 @@ The checkpoint hook receives the current evidence ledger state, allowing hooks t
 
 The evidence ledger is implemented and active as the checkpoint mechanism. Explicit rollback-to-checkpoint (rewinding runtime state to a previous checkpoint and replaying from there) is planned but not yet implemented. Currently, checkpoints are write-forward: the ledger records what happened, and contracts gate what can happen next, but there is no mechanism to undo or replay from a prior checkpoint.
 
----
+
+# Work Console
+
+Source: https://github.com/openmagi/magi-agent/blob/main/docs/work-console.md
 
 # Work Console
 
@@ -1464,7 +1479,10 @@ The Python ADK runtime exposes transport routes via FastAPI (transport/ director
 
 SSE streaming is implemented in the Node.js chat-proxy. The Python ADK runtime events (EventKind: status, token, tool, control, artifact, error) are internal to the agent process and are surfaced to the chat-proxy through the agent's stdout event stream. A dedicated work console UI is planned as part of the local app installer but is not yet shipped.
 
----
+
+# Boundaries
+
+Source: https://github.com/openmagi/magi-agent/blob/main/docs/boundaries.md
 
 # Boundaries
 
@@ -1586,7 +1604,10 @@ The commit boundary (runtime/commit_boundary.py) plans the sequence of intents t
 - build_before_commit_block_plan() creates a blocked plan when a verifier rejects the turn, with retryable flag and reason codes extracted from the block reason.
 - build_abort_plan() creates an aborted plan with reject_pending_asks, turn_aborted, and onAbort intents.
 
----
+
+# Evidence
+
+Source: https://github.com/openmagi/magi-agent/blob/main/docs/evidence.md
 
 # Evidence
 
@@ -1683,7 +1704,10 @@ The flow is: tool call -> ToolEvidenceRecord -> EvidenceRecord -> contract match
 - Step 4: Verdict summarizes pass/fail with matched evidence and missing requirements.
 - Step 5: Enforcement boundary maps verdict to action: pass, audit, repair, escalate, or block_intent.
 
----
+
+# Projection
+
+Source: https://github.com/openmagi/magi-agent/blob/main/docs/projection.md
 
 # Projection
 
@@ -1731,7 +1755,10 @@ Memory writes follow a separate projection path through the memory write boundar
 
 Similarly, ChildRunnerResult, ArtifactChannelDeliveryDecision, and EvidenceEnforcementDecision all provide public_projection() methods that strip private metadata before the result is returned to the model.
 
----
+
+# Repair and Fallback
+
+Source: https://github.com/openmagi/magi-agent/blob/main/docs/repair-fallback.md
 
 # Repair and Fallback
 
@@ -1785,163 +1812,304 @@ The current repair mechanism is implicit in the enforcement decision flow and co
 
 A future explicit repair framework would unify the enforcement boundary repair_required action, commit boundary retryable block plans, and harness repair policy into a single orchestrated repair loop with configurable strategies per evidence contract.
 
----
 
 # Recipes
 
-Status: 🚧 Default-off — recipe packs compile to metadata/policy snapshots only; there is no runtime execution engine that consumes a snapshot to enforce policy during a live run yet (`magi_agent/recipes/`).
+Source: https://github.com/openmagi/magi-agent/blob/main/docs/recipes.md
 
-> **There is no `--recipe` flag.** Recipes are not something you "run" from the
-> CLI today. `docs/cli/magi.md` exposes no recipe flag, and nothing reads a
-> `RecipeSnapshot` to apply tool permissions, evidence rules, or projection at
-> runtime. Recipes describe *what policy would apply*; enforcement comes from
-> harnesses and evidence contracts (see [harnesses.md](harnesses.md)).
+# Recipes
 
-Composable workflow definitions that declare policy, evidence rules, and projection for a task type.
+Recipes are the public way to describe reusable agent workflows. A recipe names
+the work class, selects the policy and harness surfaces that apply, declares the
+allowed tools, and records which evidence must exist before output can be
+trusted.
 
-Recipes compile metadata snapshots that declare what packs, evidence, tools, validators, and projection rules apply to a run. The recipe system is implemented and active for metadata compilation; runtime execution of recipe policy is planned.
+Think of a recipe as "plan-as-data": it is not a prompt snippet that asks the
+model to behave. It is a governed contract that the runtime can compile,
+validate, materialize, and project through public-safe events.
 
-## What recipes are
+## Recipe model
 
-A recipe is a preset for how the agent handles a specific type of task. For example, the coding recipe requires the agent to run tests before claiming it fixed a bug. The research recipe requires source inspection before making factual claims. You can combine multiple recipes, and the runtime enforces all of them automatically.
+A useful recipe defines:
 
-Recipes compile into metadata that configures the harness engine. The recipe execution engine (which would apply recipes as live runtime policy) is planned but not yet implemented — current enforcement happens through the harness and evidence contract system.
+- a stable recipe id and version;
+- the work role, such as research, coding, office automation, or browser
+  inspection;
+- the tool categories the model may request;
+- permission ceilings and approval requirements;
+- evidence requirements for claims, mutations, calculations, deliveries, and
+  child results;
+- validators and repair policy;
+- projection policy for user-visible output;
+- safe metadata for UI, audit, and saved workflow reuse.
 
-Implementation: the recipe metadata compilation pipeline (RecipePackManifest, ProfileResolutionRequest, ResolvedRecipeProfile, RecipeSnapshot) is implemented and active. Recipe packs compile into snapshots with resolved profiles, selected pack IDs, composition policy, and merged refs. However, no runtime execution engine consumes these snapshots to enforce policy during live runs. Enforcement today comes from harnesses and evidence contracts, not from recipe snapshots.
+Runtime-private inputs, raw tool output, hidden prompts, credentials, private
+paths, and provider payloads do not belong in recipe metadata. Public recipe
+projection should use identifiers, digests, reason codes, and short safe labels.
 
-## RecipeSnapshot compilation
+## Selection flow
 
-RecipeSnapshot is the compiled output of recipe resolution. It captures the resolved profile, selected and opted-out pack IDs, merged instruction/tool/callback/validator/evidence/audit refs, composition policy metadata, and attachment flags.
+Recipe selection usually follows this flow:
 
-The snapshot is metadata-only: it records what policy would apply, but does not itself execute or enforce that policy at runtime. All attachment flags (trafficAttached, executionAttached, routeAttached, runnerAttached, liveToolsAttached, liveCallbacksAttached) are locked to false.
+1. The user request, CLI mode, route, or explicit recipe reference proposes one
+   or more candidate recipes.
+2. The recipe compiler checks ids, versions, digests, dependencies, runtime
+   contract compatibility, and hard invariants.
+3. The runtime builds an effective policy snapshot from the admitted recipes.
+4. Tool, evidence, approval, repair, and projection behavior is derived from the
+   snapshot.
+5. A public `recipe_selection` event may show requested, applied, or omitted
+   recipes with reason codes.
 
-### RecipeSnapshot fields (Python, implemented)
+If an explicitly requested recipe is malformed, disabled, unauthorized,
+incompatible, or missing a dependency, it should be omitted with a public reason
+code instead of silently widening authority.
 
-```
-class RecipeSnapshot(BaseModel):
-    snapshot_id: str
-    resolved_profile: Mapping[str, object]
-    selected_pack_ids: tuple[str, ...]
-    opted_out_pack_ids: tuple[str, ...]
-    non_opt_out_pack_ids: tuple[str, ...]
-    composition_policy_metadata: CompositionPolicyMetadata
-    recipe_selection: RecipeSelectionMetadata
-    instruction_refs: tuple[str, ...]
-    tool_refs: tuple[str, ...]
-    callback_refs: tuple[str, ...]
-    validator_refs: tuple[str, ...]
-    approval_gate_refs: tuple[str, ...]
-    evidence_refs: tuple[str, ...]
-    audit_refs: tuple[str, ...]
-    attachment_flags: RecipeAttachmentFlags  # all false
-```
+## Composition rules
 
-## RecipePackManifest and first-party packs
+Multiple recipes can be composed when their contracts are compatible. Composition
+should narrow authority or add evidence; it should not smuggle in broader tool
+access.
 
-Each recipe pack is declared as a RecipePackManifest (recipes/compiler.py) with a pack_id, display name, description, task profile selectors, depends_on_pack_ids, and refs to instructions, tools, callbacks, validators, approval gates, evidence, and audit. Packs enforce a metadata-only invariant: live_tool_refs, live_callback_refs, and runner_route_refs must be empty. All attachment_flags are False.
+Good composition patterns:
 
-The runtime defines 16 first-party packs: openmagi.context-safety (hard safety), openmagi.evidence (hard safety), openmagi.agent-methodology (superpowers-compatible), openmagi.superpowers-compat, openmagi.web-acquisition, openmagi.research, openmagi.dev-coding, openmagi.missions (metadata-only), openmagi.memory-agentmemory, openmagi.office-automation, openmagi.spreadsheet-automation, openmagi.browser-automation, openmagi.document-review, openmagi.lightweight-scripting, plus 2 framework packs.
+- adding a source-proof harness to a research workflow;
+- adding a delivery-receipt requirement to an office automation workflow;
+- adding a human approval gate to a file mutation workflow;
+- adding a coding evidence gate before completion claims;
+- adding output-budget references for long automation results.
 
-- pack_id: unique identifier (dotted safe ID format, e.g. openmagi.dev-coding)
-- hard_safety: if true, opt_out_allowed and customizable must be false (openmagi.context-safety, openmagi.evidence)
-- opt_out_allowed: whether users can disable this pack (default true for non-hard-safety)
-- task_profile_selectors: task types this pack applies to
-- depends_on_pack_ids: pack dependencies resolved before compilation
-- tool_refs, evidence_refs, validator_refs: metadata refs to pack components
-- attachment_flags: all False (trafficAttached, executionAttached, routeAttached, runnerAttached, liveToolsAttached, liveCallbacksAttached)
+Blocked composition patterns:
 
-## Profile resolution
+- raw private config projected as recipe metadata;
+- duplicated non-idempotent hooks;
+- grant and deny collisions;
+- unbounded retry loops;
+- evidence weakening;
+- implicit recipe fallback when an explicit required recipe was rejected.
 
-ProfileResolutionRequest provides five configuration layers: userProfile, workspacePolicy, taskProfile, recipePackConfig, and runtimeContext. These layers are deep-merged (with sensitive key sanitization) to produce a ResolvedRecipeProfile.
+## Saved workflows
 
-The resolved profile records selected_pack_ids, opted_out_pack_ids, and a CompositionPolicyMetadata that captures merge semantics (validatorMerge: all_of, evidenceMerge: union), budget caps, memory mode, side-effect posture, and provider/tool conflict detection.
+A saved workflow can be represented as a recipe-backed command. The saved entry
+should keep:
 
-## What recipes do not do today
+- workflow id and version;
+- owner-safe reference;
+- source digest;
+- compatible runtime contract version;
+- promotion history;
+- selected recipe refs;
+- policy snapshot digest.
 
-Recipes do not execute policy. There is no recipe execution engine that reads a RecipeSnapshot and enforces tool permissions, evidence requirements, or projection rules during a live run. That enforcement comes from harnesses (HarnessEngine) and evidence contracts (EvidenceContract), which are fully implemented and active.
+Invoking the saved workflow should re-materialize and re-validate the recipe
+instead of trusting stale compiled state.
 
-The conceptual interfaces ToolHostRequest, ToolHostReceipt, RepairDecision, ProjectionResult, and ValidationResult are not implemented. The real enforcement boundaries are the 15 hook points (HookPoint enum) and the dedicated boundary modules (evidence/tool_boundary.py, evidence/enforcement_boundary.py, memory/write_boundary.py, runtime/commit_boundary.py, artifacts/delivery_boundary.py, runtime/child_runner_boundary.py, runtime/projection_write_boundary.py).
+## First-party recipes
 
-## How recipes relate to harnesses
+Magi Agent includes first-party recipes and recipe contracts for these public
+work classes:
 
-Recipes and harnesses sit on two sides of the same gap:
+- Research: `openmagi.research` style selection, research agents, and research
+  child runner recipes. Governs source proof, claim graph, synthesis,
+  cross-review, and final projection.
+- Coding: coding mutation, coding evidence gate, coding subagents, and coding
+  ownership manifest. Governs read-before-edit, stale rejection, patch/diff/test
+  evidence, role-scoped child work, and false-success blocking.
+- General automation: `automation.*` presets and package boundaries. Governs
+  planning, research, files, office, browser inspection/action, scout work,
+  approvals, and receipts.
+- Memory: memory recall and memory write recipes. Governs recall authority,
+  write boundaries, compaction, and source authority.
+- Self-improvement: review and promotion recipes. Governs eval capture, review
+  gates, rollback, and drift watch.
+- Learning usage: learning usage recipes. Governs local evaluation and safe
+  usage contracts.
 
-- A **recipe** is the *declaration* — a compiled `RecipeSnapshot` that says which
-  packs, tools, validators, evidence, and projection rules *should* apply to a
-  task type. It is metadata, with every attachment flag locked to `False`.
-- A **harness** is the *enforcer* — `HarnessEngine` plus the evidence-contract
-  and boundary modules actually gate tool calls, evidence, and projection during
-  a run.
+First-party recipes are public docs and contract examples, not deployment
+instructions. They should remain usable for local, source, and self-hosted
+runtime operators.
 
-Today the bridge between them is missing: no execution engine reads a recipe
-snapshot and configures a harness from it. So you author and inspect recipe
-metadata via the compilation pipeline, but you get enforcement by configuring a
-harness directly. See [harnesses.md](harnesses.md) and
-[build-a-harness.md](build-a-harness.md).
+## Authoring checklist
 
----
+- Use a public recipe id such as `vendor.workflow-name`.
+- Keep versions explicit.
+- Prefer tool categories over raw implementation details.
+- Declare the evidence that must exist before a claim can be projected.
+- Require approval for mutation, delivery, spend, high-authority credentials,
+  browser actions, and external side effects.
+- Use public reason codes for blocked or omitted behavior.
+- Keep recipe output digest-safe.
+- Test composition with both allowed and rejected cases.
+
+## Related docs
+
+- [Harnesses](harnesses.md)
+- [First-party packs](first-party-packs.md)
+- [Runtime](runtime.md)
+- [Tools](tools.md)
+- [Contracts](contracts.md)
+
 
 # Harnesses
 
-Runtime policy extensions that own state, boundaries, evidence, and projection rules.
+Source: https://github.com/openmagi/magi-agent/blob/main/docs/harnesses.md
 
-Harnesses are the active enforcement layer. They resolve which evidence contracts apply to each agent turn based on the agent's role, task depth, and run context, then attach scoped hooks to enforce them.
+# Harnesses
 
-## What harnesses are
+Harnesses are reusable runtime contracts that make a workflow checkable. A
+harness does not replace the model. It defines boundaries around the model:
+which actions are allowed, which evidence is required, when repair is possible,
+and what can become public output.
 
-A harness is a runtime policy extension that owns evidence contracts, hook scoping, and preset state. Unlike recipes (which compile metadata snapshots), harnesses actively resolve and enforce evidence requirements during runs.
+## Harness lifecycle
 
-HarnessEngine is fully implemented. It takes hook manifests, evidence contract scopes, and a rollout mode, then resolves a HarnessResolutionRequest into scoped hooks and a ResolvedHarnessPresetState.
+A governed run normally passes through these harness stages:
 
-## HarnessEngine resolution
+1. **Admission.** Select a recipe, validate dependencies, freeze policy, and
+   reject incompatible authority.
+2. **Context projection.** Build the model-visible packet from allowed request,
+   session, memory, source, and workspace refs.
+3. **Tool boundary.** Route tool proposals through permission, workspace,
+   approval, and provider policy.
+4. **Evidence capture.** Record source, file, calculation, test, approval,
+   browser, delivery, artifact, or child-result receipts.
+5. **Intermediate validation.** Check child output, summaries, memory writes,
+   and artifact drafts before they become next-step context.
+6. **Repair.** Retry, ask, inspect another allowed source, downgrade wording,
+   or block the run when evidence is missing.
+7. **Final projection.** Render only public-safe, supported output and the
+   relevant receipt refs or blockers.
 
-HarnessEngine.resolve() takes a HarnessResolutionRequest (agent_role, spawn_depth, run_on, opted_out_evidence_contract_ids) and returns a tuple of (selected hooks, resolved harness state). The engine delegates to build_default_resolved_harness_state for evidence contract resolution and resolve_scoped_harness_hooks for hook filtering.
+## Harness matrix
 
-### HarnessEngine (Python, implemented and active)
+- Research determinism: blocks unsupported research claims. Typical evidence:
+  opened source proof, snapshot digest, span refs, claim graph, acceptance
+  criteria, verifier result.
+- Coding: blocks false coding completion claims and unsafe mutations. Typical
+  evidence: read ledger, stale-read check, patch receipt, diff summary, test
+  run, rollback proof, diagnostics.
+- General automation: keeps broad automation observable, approved, and
+  reversible. Typical evidence: control request, approval receipt, path/shell
+  decision, browser artifact, spreadsheet evidence, delivery receipt.
+- Scheduler: models due-work checks without hidden background authority. Typical
+  evidence: schedule ref, lease digest, tick decision, due turn ref, delivery
+  decision.
+- Background task: represents long-running work without promising invisible
+  execution. Typical evidence: task ref, checkpoint ref, resume approval,
+  completion projection.
+- Memory: scopes recall and write behavior to source authority. Typical
+  evidence: namespace ref, source refs, write boundary, compaction digest.
+- Meta-orchestration: accepts or rejects delegated child work. Typical evidence:
+  child envelope, role, evidence refs, inspection verdict, final assembly plan.
+- Browser: separates inspection from side-effectful browser actions. Typical
+  evidence: page artifact ref, screenshot digest, action decision, approval
+  receipt.
+- Office automation: makes generated documents and spreadsheets auditable.
+  Typical evidence: schema check, formula presence, reconciliation totals, write
+  evidence, delivery ref.
 
-```
-class HarnessEngine:
-    def __init__(self, *,
-        hooks: tuple[HookManifest, ...] = (),
-        evidence_contracts: tuple[EvidenceContractScope, ...] = (),
-        evidence_rollout_mode: EvidenceRolloutMode = 'audit',
-    ) -> None: ...
+## Research harness
 
-    def resolve(
-        self, request: HarnessResolutionRequest,
-    ) -> tuple[tuple[HookManifest, ...], ResolvedHarnessPresetState]: ...
+Research harnesses treat source-sensitive claims as evidence-bearing objects.
+Reliable research needs more than a URL in the final answer.
 
-class HarnessResolutionRequest(BaseModel):
-    agent_role: AgentRole = 'general'  # 'general' | 'coding' | 'research'
-    spawn_depth: int = 0
-    run_on: RunOn | None = None  # 'main' | 'child'
-    opted_out_evidence_contract_ids: tuple[str, ...] = ()
-```
+The public contract expects:
 
-## Evidence contract scoping
+- action proof for research verbs such as searched, read, reviewed, compared,
+  confirmed, analyzed, and summarized;
+- opened-source proof with snapshot, digest, timestamp, and citeable span refs;
+- rejection of URL-only citations and unopened sources;
+- freshness checks when the claim depends on current information;
+- claim graph support mapping;
+- weak-claim downgrade;
+- unsupported-claim blocking;
+- acceptance criteria extraction;
+- child evidence envelope acceptance before parent synthesis;
+- final projection that omits raw source bodies and private tool payloads.
 
-EvidenceContractScope defines when an evidence contract applies based on agent_roles (general, coding, research), run_on (main, child), and spawn_depth range (minDepth, maxDepth). The scope resolution produces an EvidenceScopeDecision with applies, effective_enforcement, opt_out_applied, and hard_safety flags.
+Repair actions can inspect another allowed source, request clarification,
+downgrade a claim, remove the claim, or report the missing work.
 
-Contracts with hard_safety=true cannot be opted out. Contracts with enforcement=block_final_answer require audit_before_block=true. Third-party evidence scope defaults enforce traffic-free operation (trafficAttached=false, executionAttached=false).
+## Coding harness
 
-- AgentRole: 'general' | 'coding' | 'research' -- determines which contracts apply
-- RunOn: 'main' | 'child' -- main runs use spawnDepth=0, child runs use spawnDepth>0
-- SpawnDepthRange: minDepth (default 0), maxDepth (optional) -- filters by nesting level
-- EvidenceEnforcement: 'off' | 'audit' | 'block_final_answer' -- what happens on missing evidence
+Coding harnesses model code work as an evidence-producing transaction. The
+runtime should not project "fixed", "tested", or "complete" unless the required
+evidence exists.
 
-## ResolvedHarnessPresetState and RuntimeProfile
+The public contract expects:
 
-The resolved state (harness/resolved.py, build_default_resolved_harness_state()) includes three built-in harness packs (coding, research, verification), hard safety gates, effective hooks and packs lists, evidence contract snapshots, and verdict readiness metadata. The default profile is RuntimeProfile('openmagi-opinionated') from harness/profiles.py.
+- read-before-edit and stale-read rejection;
+- patch, file change, and mutation receipts;
+- diff evidence before a completion claim;
+- test or diagnostic evidence for verification claims;
+- safe shell/test-run policy;
+- bounded repair loops;
+- coding subagent roles for inspection, review, and implementation;
+- code intelligence reports using public refs and redacted diagnostics;
+- final projection that can downgrade unsupported success claims.
 
-RuntimeProfile defines a HardSafetyPolicy with 5 gates (permission-arbiter, path-safety, secret-safety, sealed-file-policy, git-safety) and 5 FeaturePacks (coding, research, verification, local-tools, cloud). The coding pack includes tools (FileRead, FileEdit, PatchApply), hooks (coding-verification, completion-evidence), and child agent review. The research pack includes tools (WebSearch, WebFetch, KnowledgeSearch), hooks (source-authority, claim-citation, fact-grounding), and citation-required delivery.
+## General automation harness
 
-## How harnesses differ from prompts, hooks, and skills
+General automation is intentionally broader than coding or research, so it
+needs explicit boundaries. The harness owns:
 
-Prompts ask the model to cooperate. Hooks observe lifecycle events and can block them. Skills teach procedures. Harnesses own state: they define evidence contracts with triggers and requirements, resolve them against the run context, and produce enforcement verdicts.
+- plan/act transitions;
+- question and approval tools;
+- path and external-directory policy;
+- shell policy and shell receipts;
+- browser evidence and side-effect decisions;
+- spreadsheet read, validation, write, and delivery evidence;
+- output-budget references for large artifacts;
+- background task projection;
+- public control and event projection;
+- package manifests and tool projection for automation packs.
 
-A hook can inspect a payload and block a boundary. A harness defines what evidence must exist before that boundary, what happens when evidence is missing (audit or block), and which contracts can be opted out. This is why harnesses compose determinism while hooks compose observation.
+The harness should return a concrete artifact, receipt, control request, or
+blocker. A generated promise that work will happen later is not automation.
 
----
+## Scheduler harness
+
+Scheduler contracts keep periodic work explicit. A schedule tick should produce
+a public-safe decision describing whether due work was found and whether
+execution or delivery was allowed.
+
+Useful public fields include:
+
+- schedule or source ref;
+- request digest;
+- owner/session-safe digests;
+- lease ref or lease decision;
+- due turn refs;
+- reason codes;
+- delivery status;
+- authority flags.
+
+Scheduler docs should describe local and self-hosted contracts only. Keep
+deployment-specific rollout internals out of public OSS docs.
+
+## Verification
+
+Harness changes should be covered with fixture tests that prove:
+
+- private text, private paths, credentials, and raw provider payloads are not
+  projected;
+- default-off authority stays default-off until explicitly enabled;
+- public projections use refs, digests, statuses, and reason codes;
+- rejected cases fail closed;
+- supported cases produce the expected evidence or event payload.
+
+## Related docs
+
+- [Recipes](recipes.md)
+- [First-party packs](first-party-packs.md)
+- [Streaming events](streaming-events.md)
+- [Contracts](contracts.md)
+- [Security](security.md)
+
+
+# Build a Recipe
+
+Source: https://github.com/openmagi/magi-agent/blob/main/docs/build-a-recipe.md
 
 # Build a Recipe
 
@@ -2128,7 +2296,10 @@ This recipe is under 100 lines. It defines one pack manifest, two evidence contr
 
 Compare this with the built-in research domain (~16,000 lines) which adds source ledger tracking with 9 source kinds and trust tiers, citation auditing with pass/failure/missing per citation, claim graph dependency tracking, multi-layer scope enforcement with child agent delegation, and repair policies with retry backoff. The built-in coding domain (~3,800 lines) adds git diff verification, test run validation with exit code checks, diagnostics integration, and planner command alignment. Most custom recipes need far less; the under-100-line pattern above covers the typical case.
 
----
+
+# Build a Harness
+
+Source: https://github.com/openmagi/magi-agent/blob/main/docs/build-a-harness.md
 
 # Build a Harness
 
@@ -2257,7 +2428,10 @@ record = EvidenceRecord(
 # Use record in contract evaluation tests
 ```
 
----
+
+# Source-Verified Research
+
+Source: https://github.com/openmagi/magi-agent/blob/main/docs/source-verified-research.md
 
 # Source-Verified Research
 
@@ -2337,7 +2511,10 @@ The evidence contract system (EvidenceContract, EvidenceContractScope, EvidenceR
 
 The recipe metadata layer (RecipePackManifest with evidenceRefs for source verification) compiles but does not execute. Runtime enforcement comes from the harness and evidence system, not from recipe snapshots.
 
----
+
+# Coding Verification
+
+Source: https://github.com/openmagi/magi-agent/blob/main/docs/coding-verification.md
 
 # Coding Verification
 
@@ -2418,7 +2595,10 @@ When the beforeCommit trigger fires, the runtime evaluates each active evidence 
 
 In audit mode (the default), missing evidence is logged but does not block the commit. In block_final_answer mode, the runtime prevents the final answer when evidence is missing. The audit_before_block=true default ensures contracts run in audit mode before being promoted to blocking.
 
----
+
+# General Automation
+
+Source: https://github.com/openmagi/magi-agent/blob/main/docs/general-automation.md
 
 # General Automation
 
@@ -2488,7 +2668,178 @@ The 15 lifecycle hook points (HookPoint enum) are: beforeTurnStart, afterTurnEnd
 
 For automation tasks, the most relevant triggers are afterToolUse (check evidence after each operation), beforeCommit (validate before committing), onTaskCheckpoint (record progress), and onArtifactCreated (verify artifacts before delivery).
 
----
+
+# First-party Packs
+
+Source: https://github.com/openmagi/magi-agent/blob/main/docs/first-party-packs.md
+
+# First-party Packs
+
+First-party packs are Magi-owned recipe, harness, plugin, and tool surfaces for
+common work classes. They make useful agent behavior available without moving
+workflow-specific policy into the generic runtime core.
+
+## Pack rules
+
+First-party packs should:
+
+- stay public and self-hostable;
+- declare authority through recipes, harnesses, and tool metadata;
+- start default-off when they need live providers, external writes, browser
+  side effects, delivery, or long-running execution;
+- expose digest-safe public projections;
+- use approval gates for high-authority work;
+- avoid raw secrets, private paths, hidden prompts, raw provider payloads, and
+  deployment-specific rollout details.
+
+The core runtime provides common primitives. The pack owns the work-class
+semantics.
+
+## General automation presets
+
+The general automation pack exposes these recipe-owned presets:
+
+- `automation.plan`: planning, decomposition, and user questions. Permission
+  ceiling: `read`, `meta`. No mutation tools.
+- `automation.research`: web and source research for automation tasks.
+  Permission ceiling: `read`, `net`, `meta`.
+- `automation.files`: workspace file work. Permission ceiling: `read`, `write`,
+  `meta`. Workspace writes and external directories require approval.
+- `automation.office`: document and spreadsheet work. Permission ceiling:
+  `read`, `write`, `meta`. Artifact evidence and delivery receipts apply.
+- `automation.browser-inspect`: open, snapshot, and scrape browser pages.
+  Permission ceiling: `read`, `net`, `meta`. Inspection only.
+- `automation.browser-act`: click, fill, download, and submit browser actions.
+  Permission ceiling: `read`, `write`, `net`, `meta`. Side-effectful actions
+  require approval.
+- `automation.scout`: broad scouting with constrained tools. Permission
+  ceiling: `read`, `net`, `meta`. No mutation tools.
+
+Alias metadata cannot escalate non-mutating presets into mutating browser
+actions. Public preset projection shows ignored escalation attempts with reason
+codes.
+
+## Automation tools
+
+The general automation harness and plugins define public contracts for:
+
+- user questions and resumable answers;
+- plan-to-act transitions after approval;
+- path access checks;
+- external-directory approval receipts;
+- shell policy and shell policy receipts;
+- browser evidence and side-effect decisions;
+- spreadsheet evidence;
+- web source receipts;
+- background task completion projection;
+- output references for large generated results;
+- package manifests and package tool projection.
+
+These surfaces are designed so a run can show what happened without exposing
+raw tool input, raw browser state, private filesystem paths, or credentials.
+
+## Web acquisition pack
+
+The web acquisition pack separates search, fetch, reader, and browser fallback
+operations from provider implementation details.
+
+Public expectations:
+
+- disabled config returns a disabled decision without provider calls;
+- untrusted providers are blocked;
+- live network access must be explicitly enabled;
+- provider names must be allowlisted;
+- SSRF-sensitive URLs are blocked before provider calls;
+- redirects and blocked markers produce public reason codes;
+- source records use safe refs and digests, not raw page bodies.
+
+Use web acquisition for source discovery and source opening. Use the research
+harness to decide whether the resulting source proof supports a claim.
+
+## Browser pack
+
+Browser pack actions are split into inspection and action surfaces.
+
+Inspection actions include opening pages, snapshots, scraping, and screenshots.
+Action surfaces include click, fill, scroll, download, and submit behavior.
+Side-effectful actions should require an approval receipt tied to the request
+digest.
+
+Public browser output should include safe URL/title text, artifact refs, content
+digests, and reason codes. Raw browser protocol payloads, form values, cookies,
+auth headers, and screenshots containing private material must not be projected
+as public text.
+
+## Office pack
+
+Office automation uses evidence, not promises. Spreadsheet and document work
+should record:
+
+- read evidence for inputs;
+- schema checks for expected columns or sections;
+- formula presence checks when formulas matter;
+- reconciliation totals for numeric claims;
+- validation evidence;
+- write evidence for generated files;
+- delivery claim decisions before claiming a file was sent or attached.
+
+The same pattern applies to other generated artifacts: create the artifact,
+record the ref, verify the claim, then project the result.
+
+## Coding pack
+
+The coding pack owns coding-specific reliability behavior:
+
+- read ledger and stale-read rejection;
+- mutation intent and patch application;
+- diff and test evidence;
+- formatter and diagnostics helpers;
+- code intelligence projection;
+- coding subagent roles;
+- repair loops;
+- final projection that blocks or downgrades unsupported success claims.
+
+It should not grant mutation authority just because the model asks for it. File
+changes, shell commands, and verification claims must pass their contracts.
+
+## Research pack
+
+The research pack owns source-sensitive reasoning:
+
+- local, web, and source-ledger research tool grants;
+- scout research profiles;
+- research child runner envelopes;
+- claim graph construction;
+- source proof verification;
+- repair planning;
+- final projection gates;
+- meta-orchestration roles for multi-child synthesis.
+
+Research output should cite opened source refs and span evidence. Discovery,
+link text, or model memory alone is not enough for source-backed claims.
+
+## Native plugin catalog
+
+Native plugin surfaces group built-in tools by work class. Public categories
+include artifacts, browser, coding, documents, knowledge, missions, scheduled
+work, skills, source ledger, subagents, taskboard, and web.
+
+Native plugins should be described as local runtime capabilities. Availability
+can depend on install extras, feature flags, credentials, provider trust, and
+runtime mode.
+
+## Related docs
+
+- [Recipes](recipes.md)
+- [Harnesses](harnesses.md)
+- [Automation](automation.md)
+- [Tools](tools.md)
+- [Integrations](integrations.md)
+
+
+# Multi-Recipe Composition
+
+Source: https://github.com/openmagi/magi-agent/blob/main/docs/multi-recipe-composition.md
 
 # Multi-Recipe Composition
 
@@ -2541,7 +2892,10 @@ Recipe pack compilation, profile resolution, composition policy, dependency mana
 
 The gap: compiled RecipeSnapshots are not consumed by a runtime execution engine. Harness enforcement (via HarnessEngine, evidence contracts, and boundary modules) is the active enforcement path. Recipe metadata and harness enforcement can coexist: packs declare intent via recipes, and contracts enforce requirements via harnesses.
 
----
+
+# Runtime Interfaces
+
+Source: https://github.com/openmagi/magi-agent/blob/main/docs/runtime-interfaces.md
 
 # Runtime Interfaces
 
@@ -2630,7 +2984,10 @@ The following interface names appear in design documents or are referenced conce
 - ProjectionResult: projection writes always return ProjectionWriteBoundaryResult with allowed=False. No separate ProjectionResult type exists.
 - ValidationResult: validation is expressed through EvidenceContractVerdict and EvidenceEnforcementDecision, not a separate ValidationResult type.
 
----
+
+# Hook Points
+
+Source: https://github.com/openmagi/magi-agent/blob/main/docs/hook-points.md
 
 # Hook Points
 
@@ -2712,7 +3069,10 @@ class HookManifest(BaseModel):
     opt_out: bool = True   # can be opted out of
 ```
 
----
+
+# ToolHost
+
+Source: https://github.com/openmagi/magi-agent/blob/main/docs/toolhost.md
 
 # ToolHost
 
@@ -2784,7 +3144,10 @@ The runtime includes 5 builtin preset identifiers that can be activated via Harn
 
 The conceptual ToolHostRequest and ToolHostReceipt types do not exist in the codebase. Tool execution uses the ADK tool execution path with hook-based policy enforcement and ToolEvidenceRecord as the output. A dedicated ToolHost abstraction that wraps tool execution with its own request/receipt types is a potential future design but is not implemented.
 
----
+
+# Evidence Contracts
+
+Source: https://github.com/openmagi/magi-agent/blob/main/docs/evidence-contracts.md
 
 # Evidence Contracts
 
@@ -2901,7 +3264,10 @@ A complete evidence contract that requires a passing test run after any code cha
 }
 ```
 
----
+
+# Plugin Manifest
+
+Source: https://github.com/openmagi/magi-agent/blob/main/docs/plugin-manifest.md
 
 # Plugin Manifest
 
@@ -2977,7 +3343,10 @@ All manifest types use Pydantic's strict validation with frozen=True models. Inv
 
 Manifest loading is currently internal to the runtime. An external plugin registry for discovering and installing third-party plugins is planned but not yet available. Plugins are loaded from the local filesystem or bundled with the runtime image. Native plugins from native_catalog.py are the only active plugin source.
 
----
+
+# Testing Recipes
+
+Source: https://github.com/openmagi/magi-agent/blob/main/docs/testing-recipes.md
 
 # Testing Recipes
 
@@ -3015,7 +3384,10 @@ Run pytest from the `openmagi/magi-agent` checkout. The test suite includes runt
 
 The shadow/ directory (52 files) provides staged diagnostic testing infrastructure: gate1 (basic healthcheck, simple assistant text), gate2 (fixture infrastructure), gate3a (recorded replay with input bundles and output reports), gate3b (real-time simulation), gate4 (dry-run shadows + comparison reports), gate5a (memory-free canary testing), gate5b (user-visible routing canary with mocked runner). A packaged third-party test harness for external recipe authors is planned but not yet available.
 
----
+
+# Default-Off Gates
+
+Source: https://github.com/openmagi/magi-agent/blob/main/docs/default-off-gates.md
 
 # Default-Off Gates
 
@@ -3058,7 +3430,10 @@ The evidence enforcement boundary (evidence/enforcement_boundary.py) accepts con
 
 All gates are implemented in the codebase. Production authority attachment is managed externally and is not configurable through magi-agent.yaml or environment variables alone.
 
----
+
+# Config Reference
+
+Source: https://github.com/openmagi/magi-agent/blob/main/docs/config-reference.md
 
 # Config Reference
 
@@ -3129,7 +3504,7 @@ Controls whether the Python ToolHost subsystem is attached. Two fields are struc
 
 ## PythonRuntimeAuthorityConfig
 
-Top-level runtime authority flags. Eight fields are structurally locked to Literal[False] using the _FalseOnlyModel pattern, meaning the runtime cannot escalate to write authority regardless of configuration input. Two additional fields (user_visible_output_allowed, canary_routing_allowed) are boolean but force-reset to False on model_construct and model_copy. These flags govern the hosted enforcement/governance boundary — whether that layer is attached to live production writes and routing — not whether the local CLI can run a model or first-party tools (it can; see [What works today](/docs/what-works-today)).
+Top-level runtime authority flags. Eight fields are structurally locked to Literal[False] using the _FalseOnlyModel pattern, meaning the runtime cannot escalate to write authority regardless of configuration input. Two additional fields (user_visible_output_allowed, canary_routing_allowed) are boolean but force-reset to False on model_construct and model_copy. These flags govern the enforcement/governance boundary — whether that layer is attached to live production writes and routing — not whether the local CLI can run a model or first-party tools (it can; see [What works today](/docs/what-works-today)).
 
 - user_visible_output_allowed (bool, alias userVisibleOutputAllowed, default False) — Whether user-visible output is allowed. Force-reset on construct/copy.
 - canary_routing_allowed (bool, alias canaryRoutingAllowed, default False) — Whether canary routing is allowed. Force-reset on construct/copy.
@@ -3157,17 +3532,19 @@ Controls the evidence enforcement boundary. Two fields are structurally locked t
 - [Evidence concepts](/docs/evidence)
 - [Evidence contracts](/docs/evidence-contracts)
 
----
 
 # Environment Variable Reference
 
-Status: ✅ Active (local CLI) / 🚧 Default-off (hosted authority/gate flags) — the
-local `magi` CLI runs with a single provider key; hosted runtime variables are
-read only by the managed deployment.
+Source: https://github.com/openmagi/magi-agent/blob/main/docs/env-reference.md
 
-Environment variables grouped by where they apply: the **Local CLI** (everything
-a local user needs) and the **Hosted / managed runtime** (read by the managed
-deployment only — a local CLI never needs them).
+# Environment Variable Reference
+
+Status: ✅ Active — the local `magi` CLI and dashboard run with a single
+provider key or `~/.magi/config.toml`.
+
+This page lists the environment variables a local user or self-hosted operator
+needs. Platform-specific deployment variables are intentionally outside this
+public local reference.
 
 ## Local CLI — required: one provider key
 
@@ -3202,62 +3579,31 @@ Useful local toggles:
 - `MAGI_TOOL_CONCURRENCY_ENABLED` (default `0`) — set to `1` to allow concurrent tool execution within a turn.
 - `MAGI_MAX_TOOL_CONCURRENCY` (default `8`) — maximum concurrent tool executions per turn.
 
-That is all a local user needs. Everything below is for the hosted deployment.
+## Local server
 
-## Hosted / managed runtime only (NOT needed for local CLI)
+- `CORE_AGENT_PORT` (default `8080`) — HTTP port used by `magi-agent serve`.
 
-> The local `magi` CLI does **not** read or require any variable in this section.
-> These populate `RuntimeConfig` and related configs in the hosted/managed
-> deployment. Setting them locally has no effect on the local CLI.
+## Build metadata
 
-### Hosted identity and services
+These are optional and usually set by release or container builds.
 
-- `BOT_ID` — Bot identifier. Maps to RuntimeConfig.bot_id.
-- `USER_ID` — Owner user identifier. Maps to RuntimeConfig.user_id.
-- `GATEWAY_TOKEN` — API gateway bearer token. Maps to RuntimeConfig.gateway_token.
-- `CORE_AGENT_API_PROXY_URL` — URL of the API proxy service. Maps to RuntimeConfig.api_proxy_url.
-- `CORE_AGENT_CHAT_PROXY_URL` — URL of the chat proxy service. Maps to RuntimeConfig.chat_proxy_url.
-- `CORE_AGENT_REDIS_URL` — URL of the Redis instance. Maps to RuntimeConfig.redis_url.
-- `CORE_AGENT_MODEL` — LLM model identifier for the hosted runtime. Maps to RuntimeConfig.model.
+- `CORE_AGENT_VERSION` — Semantic version string.
+- `CORE_AGENT_BUILD_SHA` — Git commit SHA.
+- `IMAGE_REPO` — Container image repository.
+- `IMAGE_TAG` — Container image tag.
+- `IMAGE_DIGEST` — Container image digest.
 
-### Hosted server
+## Local memory and ToolHost options
 
-- `CORE_AGENT_PORT` (default 8080) — HTTP port the hosted agent server listens on.
-
-### Hosted build provenance
-
-Build metadata. These populate BuildInfo and are typically set by CI/CD pipelines.
-
-- `CORE_AGENT_VERSION` — Semantic version string. Falls back to "0.1.0-adk-scaffold".
-- `CORE_AGENT_BUILD_SHA` — Git commit SHA. Fallback chain: CORE_AGENT_BUILD_SHA -> git rev-parse HEAD -> None.
-- `IMAGE_REPO` — Container image repository (for public examples, ghcr.io/openmagi/magi-agent-runtime).
-- `IMAGE_TAG` — Container image tag (e.g. 0.19.70).
-- `IMAGE_DIGEST` — Container image digest (sha256:...).
-
-### Hosted memory adapter
-
-Control the Python memory adapter subsystem. These populate PythonMemoryAdapterConfig.
-
-- `CORE_AGENT_PYTHON_MEMORY_ADAPTER` (default "off") — Adapter provider ref. Values: "off", "hipocampus_qmd_readonly".
-- `MEMORY_ADAPTER_MODE` (default "disabled") — Operating mode. Values: "disabled", "readonly_fixture", "readonly_local".
 - `MEMORY_WORKSPACE_ROOT` — Workspace root path for local memory adapters.
+- `MAGI_FIRST_PARTY_TOOLS_ENABLED` — Disable first-party tools when set to
+  `0`/`false`/`no`/`off`.
 
-### Hosted ToolHost attachment
+## Authority and rollout flags
 
-Control the Python ToolHost attachment subsystem. These populate PythonToolHostAttachmentConfig.
-
-- `CORE_AGENT_PYTHON_ADK_TOOLHOST_ATTACH` (default "0") — Whether to attach the ToolHost. Set to "1" to enable.
-- `TOOLHOST_MODE` (default "disabled") — ToolHost operating mode. Values: "disabled", "shadow_readonly".
-
-### Hosted output mode
-
-Control what the hosted Python runtime is allowed to output.
-
-- `CORE_AGENT_PYTHON_OUTPUT_MODE` (default "off") — Output mode. Values: "diagnostic_only" (internal diagnostics only), "health_only" (health endpoint only), "off" (no output), "user_visible_canary" (canary user-visible output).
-
-### Hosted authority flags
-
-These correspond to PythonRuntimeAuthorityConfig fields. All must be "false" (or omitted, as the default is False). The Literal[False] type annotation means the runtime structurally rejects any attempt to set them to true.
+The authority flags below correspond to PythonRuntimeAuthorityConfig fields. All
+must be `false` or omitted. The `Literal[False]` type annotation means the runtime
+structurally rejects attempts to set them to true.
 
 - `TRANSCRIPT_WRITE` — Must be false. Controls transcript write authority.
 - `SSE_WRITE` — Must be false. Controls SSE write authority.
@@ -3268,18 +3614,13 @@ These correspond to PythonRuntimeAuthorityConfig fields. All must be "false" (or
 - `MISSION_RUNTIME` — Must be false. Controls mission runtime authority.
 - `EVIDENCE_BLOCK_MODE` — Must be false. Controls evidence blocking mode.
 
-### Hosted gate readiness (Gate 5B canary / Gate 3A replay)
-
-Gate readiness configurations use environment variables to control per-gate kill switches, environment allowlists, and canary selection. Each gate (2 through 8) has its own readiness config with structurally-false authority flags.
-
-- Gate 5B canary flags: GATE5_KILL_SWITCH_ENABLED (default true), GATE5_ENVIRONMENT, GATE5_ENVIRONMENT_ALLOWLIST, GATE5_MAX_SHADOW_CHECKS (default 0).
-- Gate 3A replay flags: GATE3_KILL_SWITCH_ENABLED (default true), GATE3_ENVIRONMENT, GATE3_ENVIRONMENT_ALLOWLIST, GATE3_MAX_REPLAY_BUNDLES (default 0).
-- All gate readiness configs share the pattern: enabled, kill_switch_enabled, selected_bot_digest, selected_owner_user_id_digest, environment, environment_allowlist, plus gate-specific limits.
-
 - [Default-off gates](/docs/default-off-gates)
 - [Config reference](/docs/config-reference)
 
----
+
+# Recipe Schema Reference
+
+Source: https://github.com/openmagi/magi-agent/blob/main/docs/recipe-schema.md
 
 # Recipe Schema Reference
 
@@ -3341,7 +3682,10 @@ RecipePackManifest is a metadata-only declaration. The live_tool_refs, live_call
 
 - [Multi-recipe composition](/docs/multi-recipe-composition)
 
----
+
+# Harness Schema Reference
+
+Source: https://github.com/openmagi/magi-agent/blob/main/docs/harness-schema.md
 
 # Harness Schema Reference
 
@@ -3420,7 +3764,10 @@ The builtin preset catalog defines all standard harness presets. Each preset dec
 
 - [Hook points reference](/docs/hook-points-reference)
 
----
+
+# Hook Points Reference
+
+Source: https://github.com/openmagi/magi-agent/blob/main/docs/hook-points-reference.md
 
 # Hook Points Reference
 
@@ -3487,7 +3834,10 @@ HookManifest declares a single hook registration. It specifies which point to fi
 - [Hook points concepts](/docs/hook-points)
 - [Harness schema](/docs/harness-schema)
 
----
+
+# Evidence Types Reference
+
+Source: https://github.com/openmagi/magi-agent/blob/main/docs/evidence-types-reference.md
 
 # Evidence Types Reference
 
@@ -3545,7 +3895,10 @@ EvidenceFieldMatcher is used in EvidenceRequirement.fields to declare what value
 
 Custom evidence types use the custom:PascalCaseName naming convention (e.g. custom:DeploymentVerification). The name must be at most 80 characters and match ^custom:[A-Z][A-Za-z0-9]*(?:[._-][A-Za-z0-9]+)*$. Custom types are validated by the same EvidenceFieldMatcher rules as built-in types.
 
----
+
+# ToolHost API Reference
+
+Source: https://github.com/openmagi/magi-agent/blob/main/docs/toolhost-api.md
 
 # ToolHost API Reference
 
@@ -3603,7 +3956,10 @@ The ToolHostRequest and ToolHostReceipt types referenced in the architecture doc
 - [Evidence contracts](/docs/evidence-contracts)
 - [Hook points reference](/docs/hook-points-reference)
 
----
+
+# Runtime Events Reference
+
+Source: https://github.com/openmagi/magi-agent/blob/main/docs/runtime-events.md
 
 # Runtime Events Reference
 
@@ -3642,7 +3998,141 @@ Evidence records are created from runtime events by the evidence extraction laye
 - [ToolHost API](/docs/toolhost-api)
 - [Boundaries overview](/docs/boundaries)
 
----
+
+# Streaming Events
+
+Source: https://github.com/openmagi/magi-agent/blob/main/docs/streaming-events.md
+
+# Streaming Events
+
+Magi Agent streams public runtime progress through Server-Sent Events and CLI
+`stream-json` output. Streaming is a projection surface: it should show useful
+operator-visible progress without leaking hidden reasoning, credentials, raw
+provider payloads, private paths, or unredacted tool data.
+
+## Wire formats
+
+HTTP streaming uses SSE frames:
+
+```text
+event: agent
+data: {"type":"text_delta","delta":"Visible text"}
+
+event: agent
+data: {"type":"turn_result","terminal":"completed","usage":{"input_tokens":5}}
+
+data: [DONE]
+```
+
+The CLI can emit line-delimited stream records:
+
+```bash
+magi --output stream-json --include-partial-messages "Stream progress"
+```
+
+API clients can use:
+
+```bash
+curl -N http://localhost:8080/v1/chat/stream \
+  -H "Authorization: Bearer $GATEWAY_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"messages":[{"role":"user","content":"Run a visible task"}]}'
+```
+
+## Event classes
+
+Common public event classes include:
+
+| Class | Examples | Public purpose |
+| --- | --- | --- |
+| Turn lifecycle | `turn_start`, `turn_phase`, `turn_end`, `turn_result`, `heartbeat` | Show where the run is and how it ended |
+| Text | `text_delta`, `response_clear`, `llm_progress` | Stream visible answer progress |
+| Tools | `tool_start`, `tool_progress`, `tool_end`, `patch_preview` | Show tool progress and safe summaries |
+| Evidence | `source_inspected`, `rule_check`, `citation_gate`, `runtime_trace` | Show proof, validation, and audit progress |
+| Recipes | `recipe_selection` | Show requested, applied, omitted, or blocked recipe refs |
+| Control | `control_event`, `control_request`, `ask_user`, `plan_ready` | Ask for approval or clarification |
+| Delegation | `spawn_started`, `spawn_result`, `child_started`, `child_progress`, `child_completed` | Show child-agent lifecycle |
+| Automation | `task_board`, `mission_event`, `cron_run`, `background_task` | Show scheduled and mission progress |
+| Artifacts | `document_draft`, `browser_frame` | Show safe artifact previews and browser observations |
+
+Some internal event shapes may be intentionally unsupported, projected as an
+alias, or blocked until their public contract is safe. The public stream should
+fail closed when an event is unclassified.
+
+## Sanitization
+
+Public stream projection should:
+
+- drop hidden reasoning and private provider events;
+- remove raw tool arguments and raw tool results;
+- redact private paths and credential-shaped text;
+- keep only public refs, digests, statuses, reason codes, safe labels, and safe
+  previews;
+- scrub terminal errors before sending `turn_result`;
+- emit `[DONE]` after the terminal frame.
+
+For example, a `recipe_selection` event can expose recipe ids, versions,
+digests, selection source, omission reason codes, and policy snapshot digest.
+It should not expose raw policy snapshots or hidden prompt material.
+
+## Control events
+
+Approval and question events should include enough information for the operator
+to decide, but not enough to leak secrets. Good control payloads use:
+
+- control type;
+- public subject ref;
+- action summary;
+- reason codes;
+- approval or resume refs;
+- request digest;
+- allowed options.
+
+The actual mutation, delivery, or side effect should wait for the approval path
+defined by the harness.
+
+## Completion events
+
+The terminal `turn_result` frame should describe:
+
+- terminal state;
+- usage;
+- cost if known;
+- session id;
+- turn id;
+- redacted error when the run failed.
+
+Completion text should not claim that background work, delivery, tests, or
+external actions occurred unless the corresponding receipt exists.
+
+## Dashboard use
+
+The local dashboard consumes the same public event stream as API clients. Use it
+to inspect:
+
+- phase changes;
+- visible answer deltas;
+- tool progress;
+- control requests;
+- evidence and validation events;
+- terminal state.
+
+If a debugging workflow needs raw private payloads, inspect them locally with
+the appropriate redaction discipline. Do not send them through public streaming
+events.
+
+## Related docs
+
+- [Runtime](runtime.md)
+- [API](api.md)
+- [Harnesses](harnesses.md)
+- [Tools](tools.md)
+- [Security](security.md)
+
+
+# Frequently Asked Questions
+
+Source: https://github.com/openmagi/magi-agent/blob/main/docs/faq.md
 
 # Frequently Asked Questions
 
@@ -3665,7 +4155,7 @@ Magi Agent is model-agnostic. Configure any supported provider and model via COR
 
 ## Does it cost money?
 
-Magi Agent is open source and free to run. You pay only for the model API calls to your chosen provider (Anthropic, OpenAI, Google, etc.). Open Magi Cloud is optional managed hosting for teams that do not want to self-host.
+Magi Agent is open source and free to run. You pay only for the model API calls to your chosen provider (Anthropic, OpenAI, Google, etc.). Open Magi Cloud is optional cloud service for teams that do not want to self-host.
 
 ## How is this different from ChatGPT or Claude?
 
@@ -3740,7 +4230,10 @@ However, because final_answer_blocking_enabled is Literal[False] in EvidenceEnfo
 - [Evidence contracts](/docs/evidence-contracts)
 - [Default-off gates](/docs/default-off-gates)
 
----
+
+# What Works Today
+
+Source: https://github.com/openmagi/magi-agent/blob/main/docs/what-works-today.md
 
 # What Works Today
 
@@ -3756,7 +4249,7 @@ A scannable map of what the local `magi` CLI can actually do right now, what shi
 |---|---|---|
 | Real model calls — 4 providers (Anthropic / OpenAI / Gemini / Fireworks) via LiteLlm [^1] | Evidence / governance enforcement boundaries (observe-only / local-fake) [^3] | Live enforcement authority attached to traffic (Stage 3) [^3] |
 | First-party local tools: file read/write/edit, patch apply, Bash — on by default [^2] | External channel delivery (Telegram / Discord live send) | Cross-boundary repair orchestration across multiple contracts |
-| Permission prompts gating tools (`default` / `acceptEdits` / `bypassPermissions`) [^2] | External integrations (Composio) | Hosted production authority (Open Magi Cloud) |
+| Permission prompts gating tools (`default` / `acceptEdits` / `bypassPermissions`) [^2] | External integrations (Composio) | Live production authority attached to external systems |
 | Sessions, headless NDJSON + interactive TUI | Recipe execution engine (manifests are metadata-only today) | |
 | Local HTTP dashboard (`magi-agent serve`) | | |
 
@@ -3777,13 +4270,16 @@ A scannable map of what the local `magi` CLI can actually do right now, what shi
 ### ❌ Planned
 
 - Live enforcement authority attached to real traffic and decisions ("Stage 3").
-- Hosted production authority via Open Magi Cloud.
+- Live production authority attached to external systems.
 
 [^1]: `magi_agent/cli/wiring.py::_build_default_runner` selects a real model-backed ADK runner when a provider key or `~/.magi/config.toml` is configured (`magi_agent/cli/real_runner.py`), otherwise falls back to the model-free stub (`magi_agent/cli/local_runner.py`).
 [^2]: `magi_agent/cli/wiring.py::_build_first_party_adk_tools` / `_first_party_tools_enabled` (True unless `MAGI_FIRST_PARTY_TOOLS_ENABLED` is off); permission modes in `magi_agent/cli/permissions.py`.
 [^3]: `magi_agent/evidence/rollout.py::EvidenceRolloutMetadata` — `traffic_attached` / `execution_attached` are `Literal[False]`, meaning the enforcement boundary is not attached to live traffic/decisions. These flags govern whether the governance layer blocks/gates the agent, not whether the agent can execute tasks.
 
----
+
+# Common Tasks
+
+Source: https://github.com/openmagi/magi-agent/blob/main/docs/common-tasks.md
 
 # Common tasks → command
 
@@ -3823,7 +4319,10 @@ rather than performing the live side effect (see
   (Anthropic / OpenAI / Gemini / Fireworks) before any of the above will call a
   model. See [getting-started.md](getting-started.md).
 
----
+
+# Channels (Telegram, Discord)
+
+Source: https://github.com/openmagi/magi-agent/blob/main/docs/channels.md
 
 # Channels
 
@@ -3955,7 +4454,10 @@ Treat it as shadow until live delivery authority is attached.
 - [integrations.md](integrations.md) — side-effect boundary philosophy.
 - [boundaries.md](boundaries.md) — the authority-flag model channels build on.
 
----
+
+# CLI Reference
+
+Source: https://github.com/openmagi/magi-agent/blob/main/docs/cli/magi.md
 
 # magi CLI
 
@@ -4220,9 +4722,9 @@ magi -p "apply the patch" --permission-mode acceptEdits
 
 ## `MAGI_CLI_ENABLED`
 
-The CLI is enabled by default. Set `MAGI_CLI_ENABLED=0` (or `false` / `no` /
-`off`) to disable it; the process exits immediately with code 2 without writing
-any output to stdout.
+The CLI is **default-ON** as of Track 18 Stream F. Set `MAGI_CLI_ENABLED=0` (or
+`false` / `no` / `off`) to disable it; the process exits immediately with code 2
+without writing any output to stdout.
 
 ```sh
 MAGI_CLI_ENABLED=0 magi -p "test"   # exits 2 immediately
@@ -4288,7 +4790,10 @@ magi mcp      # manage MCP connections (stub)
 magi auth     # manage authentication (stub)
 ```
 
----
+
+# Changelog
+
+Source: https://github.com/openmagi/magi-agent/blob/main/docs/changelog.md
 
 # Changelog
 
@@ -4313,13 +4818,16 @@ Versions follow the tags published on GitHub Releases.
 - Documentation now clearly separates the local CLI's real execution (a provider
   key enables a real model plus first-party tools behind permission prompts) from
   the enforcement/governance layer, which ships default-off (shadow).
-- Configuration docs split local CLI setup (one provider key) from hosted-runtime
+- Configuration docs split local CLI setup (one provider key) from deployment
   variables that the local CLI does not need.
 
 > Earlier history predates this changelog. Use `git log` and GitHub Releases for
 > a complete record.
 
----
+
+# Upgrading
+
+Source: https://github.com/openmagi/magi-agent/blob/main/docs/upgrading.md
 
 # Upgrading
 
@@ -4377,7 +4885,10 @@ See [troubleshooting](/docs/troubleshooting). Common post-upgrade issues are a
 missing `litellm` dependency (reinstall the CLI extra) or a provider key that is
 no longer in the environment (`magi doctor` reports both).
 
----
+
+# Glossary
+
+Source: https://github.com/openmagi/magi-agent/blob/main/docs/glossary.md
 
 # Glossary
 
@@ -4451,7 +4962,10 @@ fuller treatment where one exists.
 - **Spawn depth** — the nesting level of a run: `0` for the main agent, `>0` for
   child agents. Used to scope which contracts apply.
 
----
+
+# Contributing
+
+Source: https://github.com/openmagi/magi-agent/blob/main/CONTRIBUTING.md
 
 # Contributing to Magi
 

@@ -10,7 +10,6 @@ MANIFEST = DOCS / "manifest.json"
 PRIVATE_DOC_PREFIXES = (
     "docs/notes/",
     "docs/plans/",
-    "docs/architecture/parity/",
     "docs/superpowers/",
 )
 PLANNING_ONLY_MARKERS = (
@@ -20,8 +19,10 @@ PLANNING_ONLY_MARKERS = (
     "implementation session",
     "stacked PR retarget",
     "worktree:",
-    "PR #145",
-    "Track 18 Stream",
+    "worktree at",
+    "magi-agent-oss-worktrees",
+    "Track 19",
+    "PR #",
 )
 STALE_RUNTIME_MARKERS = (
     "ADK invocation is scaffolded but disabled",
@@ -36,6 +37,22 @@ STALE_RUNTIME_MARKERS = (
     "TypeScript and Python interfaces exposed",
     "policyTypes.ts",
     "npm run magi",
+)
+STALE_TYPESCRIPT_OR_NODE_MARKERS = (
+    "TypeScript strict mode",
+    "No `any` type",
+    "npm install",
+    "npm run dev",
+    "npm test",
+    "npm run lint",
+    "Node.js version",
+)
+INTERNAL_HOSTED_MARKERS = (
+    "hosted runtime",
+    "hosted deployment",
+    "hosted-runtime",
+    "managed deployment",
+    "selected-bot rollout",
 )
 
 
@@ -67,12 +84,21 @@ def test_public_docs_keep_recipe_and_harness_guides_visible() -> None:
     assert {
         "recipes",
         "harnesses",
+        "first-party-packs",
         "build-a-recipe",
         "build-a-harness",
         "source-verified-research",
         "coding-verification",
         "general-automation",
+        "streaming-events",
     } <= slugs
+
+
+def test_docs_landing_pages_link_to_openmagi_site_and_source() -> None:
+    for path in (ROOT / "README.md", DOCS / "README.md"):
+        text = path.read_text(encoding="utf-8")
+        assert "https://openmagi.ai" in text, path.relative_to(ROOT)
+        assert "https://github.com/openmagi/magi-agent" in text, path.relative_to(ROOT)
 
 
 def test_machine_readable_docs_do_not_include_planning_only_markers() -> None:
@@ -89,4 +115,34 @@ def test_public_docs_do_not_describe_stale_disabled_or_typescript_runtime_state(
     for path in public_docs:
         text = path.read_text(encoding="utf-8")
         for marker in STALE_RUNTIME_MARKERS:
+            assert marker not in text, f"{marker!r} leaked into {path.relative_to(ROOT)}"
+
+
+def test_public_docs_do_not_include_internal_worktree_pr_or_track_residue() -> None:
+    public_docs = [ROOT / page["path"] for page in _manifest_pages()]
+    public_docs.extend((ROOT / "README.md", DOCS / "llms.txt", DOCS / "llms-full.txt"))
+
+    for path in public_docs:
+        text = path.read_text(encoding="utf-8")
+        for marker in PLANNING_ONLY_MARKERS:
+            assert marker not in text, f"{marker!r} leaked into {path.relative_to(ROOT)}"
+
+
+def test_public_docs_do_not_include_stale_node_or_typescript_contributor_residue() -> None:
+    public_docs = [ROOT / page["path"] for page in _manifest_pages()]
+    public_docs.extend((ROOT / "README.md", DOCS / "llms.txt", DOCS / "llms-full.txt"))
+
+    for path in public_docs:
+        text = path.read_text(encoding="utf-8")
+        for marker in STALE_TYPESCRIPT_OR_NODE_MARKERS:
+            assert marker not in text, f"{marker!r} leaked into {path.relative_to(ROOT)}"
+
+
+def test_public_docs_do_not_include_internal_hosted_rollout_residue() -> None:
+    public_docs = [ROOT / page["path"] for page in _manifest_pages()]
+    public_docs.extend((ROOT / "README.md", DOCS / "llms.txt", DOCS / "llms-full.txt"))
+
+    for path in public_docs:
+        text = path.read_text(encoding="utf-8").lower()
+        for marker in INTERNAL_HOSTED_MARKERS:
             assert marker not in text, f"{marker!r} leaked into {path.relative_to(ROOT)}"

@@ -35,13 +35,14 @@ uv run --extra dev pytest -q
 
 The source checkout is for contributors developing the runtime. Normal users install via Homebrew.
 
+
 ## Docs Index
 
 - OpenMagi Docs: https://openmagi.ai/docs/overview - Open-source documentation for the Magi Agent programmable AI agent runtime.
 - Getting Started: https://openmagi.ai/docs/getting-started - Status: ✅ Active — Homebrew install plus one provider key gives a real local model and first-party tools today.
 - Quickstart: https://openmagi.ai/docs/quickstart - Status: ✅ Active — Homebrew install plus one provider key runs a real model-backed task today.
-- CLI: https://openmagi.ai/docs/cli - Type: Guide — what the Magi Agent CLI is and the happy-path commands. For the full flag, output-mode, exit-code, and sub-command reference, see [magi CLI](/docs/cli/magi).
-- Configuration: https://openmagi.ai/docs/configuration - Status: ✅ Active — the local CLI is configured with a single provider key or a `~/.magi/config.toml`; runtime-enforced control/authority is hosted-only.
+- CLI: https://openmagi.ai/docs/cli - Type: Guide — what the Magi Agent CLI is and the happy-path commands. For the full flag, output-mode, exit-code, and sub-command reference, see
+- Configuration: https://openmagi.ai/docs/configuration - Status: ✅ Active — the local CLI is configured with a single provider key or a `~/.magi/config.toml`; runtime-enforced control and authority are explicit policy surfaces.
 - Customization: https://openmagi.ai/docs/customization - Customize Magi Agent with recipes, harnesses, hooks, and projection rules.
 - Runtime: https://openmagi.ai/docs/runtime - How Magi Agent turns model proposals into governed state transitions via the Python ADK runtime.
 - Tools: https://openmagi.ai/docs/tools - Status: ✅ Active — first-party tools are registered and on by default; file/search/edit/patch/Bash run live once a provider key is set (`magi_agent/tools/catalog.py`, `core_toolhost.py`).
@@ -56,7 +57,7 @@ The source checkout is for contributors developing the runtime. Normal users ins
 - Security: https://openmagi.ai/docs/security - Status: ✅ Active — boundaries, default-off authority, and projection control are the security model.
 - Architecture: https://openmagi.ai/docs/architecture - The two-plane architecture behind Magi Agent composable determinism.
 - Reference: https://openmagi.ai/docs/reference - Names and vocabulary used by the Magi Agent runtime docs.
-- Troubleshooting: https://openmagi.ai/docs/troubleshooting - Status: ✅ Active — covers the local `magi` CLI path; hosted-runtime failures are called out in their own subsections.
+- Troubleshooting: https://openmagi.ai/docs/troubleshooting - Status: ✅ Active — covers the local `magi` CLI and dashboard path.
 - Learning Path: https://openmagi.ai/docs/learning-path - Status: ✅ Active — Homebrew ships now; the user track installs and runs a real task today.
 - Sessions: https://openmagi.ai/docs/sessions - How Magi Agent sessions manage state, context, and continuity across turns.
 - Checkpoints: https://openmagi.ai/docs/checkpoints - Durable checkpoints for resuming, inspecting, and auditing governed agent runs.
@@ -65,13 +66,14 @@ The source checkout is for contributors developing the runtime. Normal users ins
 - Evidence: https://openmagi.ai/docs/evidence - Evidence ledger entries, source receipts, claim graphs, and evidence contracts that back runtime decisions.
 - Projection: https://openmagi.ai/docs/projection - How runtime state is projected into model-visible context and user-visible output.
 - Repair and Fallback: https://openmagi.ai/docs/repair-fallback - How the runtime handles missing evidence: retry, downgrade, approve, fallback, abstain, or block.
-- Recipes: https://openmagi.ai/docs/recipes - Status: 🚧 Default-off — recipe packs compile to metadata/policy snapshots only; there is no runtime execution engine that consumes a snapshot to enforce policy during a live run yet (`magi_agent/recipes/`).
-- Harnesses: https://openmagi.ai/docs/harnesses - Runtime policy extensions that own state, boundaries, evidence, and projection rules.
+- Recipes: https://openmagi.ai/docs/recipes - Recipes are the public way to describe reusable agent workflows. A recipe names the work class, selects the policy and harness surfaces that apply, declares the allowed tools, and records which evidence must exist before output can be
+- Harnesses: https://openmagi.ai/docs/harnesses - Harnesses are reusable runtime contracts that make a workflow checkable. A harness does not replace the model. It defines boundaries around the model: which actions are allowed, which evidence is required, when repair is possible,
 - Build a Recipe: https://openmagi.ai/docs/build-a-recipe - Step-by-step guide to creating a new recipe pack with tool, evidence, and validator refs.
 - Build a Harness: https://openmagi.ai/docs/build-a-harness - Step-by-step guide to creating evidence contracts and attaching them to the harness engine.
 - Source-Verified Research: https://openmagi.ai/docs/source-verified-research - Worked example of a research recipe requiring SourceInspection and WebSearch evidence before claims.
 - Coding Verification: https://openmagi.ai/docs/coding-verification - Worked example of a coding recipe requiring GitDiff, TestRun, and CodeDiagnostics evidence.
 - General Automation: https://openmagi.ai/docs/general-automation - Worked example covering approval gates, delivery boundaries, artifact verification, and commit boundaries using openmagi.office-automation and openmagi.spreadsheet-automation packs.
+- First-party Packs: https://openmagi.ai/docs/first-party-packs - First-party packs are Magi-owned recipe, harness, plugin, and tool surfaces for common work classes. They make useful agent behavior available without moving workflow-specific policy into the generic runtime core.
 - Multi-Recipe Composition: https://openmagi.ai/docs/multi-recipe-composition - How multiple recipe packs compose via profile resolution, and how harness scoping selects evidence contracts by role.
 - Runtime Interfaces: https://openmagi.ai/docs/runtime-interfaces - Python interfaces exposed by the Magi Agent runtime for extension.
 - Hook Points: https://openmagi.ai/docs/hook-points - Lifecycle hook points with HookRegistry registration and HookBus dispatch.
@@ -81,18 +83,19 @@ The source checkout is for contributors developing the runtime. Normal users ins
 - Testing Recipes: https://openmagi.ai/docs/testing-recipes - Test recipes and harnesses with deterministic replay, contract tests, and shadow runs.
 - Default-Off Gates: https://openmagi.ai/docs/default-off-gates - Status: 🚧 Default-off — this document describes the enforcement-boundary rollout, which ships in shadow/observe-only mode by design.
 - Config Reference: https://openmagi.ai/docs/config-reference - Complete reference for RuntimeConfig (config/env.py), PythonMemoryAdapterConfig, PythonToolHostAttachmentConfig, PythonRuntimeAuthorityConfig, and all Literal[False] safety invariants.
-- Environment Variable Reference: https://openmagi.ai/docs/env-reference - Status: ✅ Active (local CLI) / 🚧 Default-off (hosted authority/gate flags) — the local `magi` CLI runs with a single provider key; hosted runtime variables are read only by the managed deployment.
+- Environment Variable Reference: https://openmagi.ai/docs/env-reference - Status: ✅ Active — the local `magi` CLI and dashboard run with a single provider key or `~/.magi/config.toml`.
 - Recipe Schema Reference: https://openmagi.ai/docs/recipe-schema - Complete schema reference for RecipePackManifest, RecipeSnapshot, and ProfileResolutionRequest.
 - Harness Schema Reference: https://openmagi.ai/docs/harness-schema - Complete schema reference for HarnessEngine, HarnessResolutionRequest, ResolvedHarnessPresetState, EvidenceContractScope, and BuiltinHarnessPreset.
 - Hook Points Reference: https://openmagi.ai/docs/hook-points-reference - Complete reference for all 15 HookPoint enum values, their camelCase keys, firing conditions, payloads, and blocking behavior.
 - Evidence Types Reference: https://openmagi.ai/docs/evidence-types-reference - Complete reference for all 15 built-in evidence types, their producers, typical fields, and the EvidenceFieldMatcher for requirement matching.
 - ToolHost API Reference: https://openmagi.ai/docs/toolhost-api - Reference for ToolManifest full schema (tools/manifest.py), ToolRegistry (tools/registry.py), tool execution flow, ToolEvidenceRecord, and governed dispatch status.
 - Runtime Events Reference: https://openmagi.ai/docs/runtime-events - Reference for runtime event kinds, their payloads, and how events relate to SSE streaming, boundary decisions, and evidence recording.
+- Streaming Events: https://openmagi.ai/docs/streaming-events - Magi Agent streams public runtime progress through Server-Sent Events and CLI `stream-json` output. Streaming is a projection surface: it should show useful operator-visible progress without leaking hidden reasoning, credentials, raw
 - Frequently Asked Questions: https://openmagi.ai/docs/faq - Answers to common questions about Magi Agent: recipes vs harnesses, default-off boundaries, local testing, repair decisions, model compatibility, and custom evidence types.
 - What Works Today: https://openmagi.ai/docs/what-works-today - Status: ✅ Active — with a provider key, the local `magi` CLI runs a real model and first-party tools today.
 - Common Tasks: https://openmagi.ai/docs/common-tasks - Status: ✅ Active — the local `magi` CLI runs a real model and first-party tools once a provider key is set (`magi_agent/cli/app.py`, `magi_agent/tools/catalog.py`).
 - Channels (Telegram, Discord): https://openmagi.ai/docs/channels - Status: 🚧 Default-off — channel code (Telegram, Discord) ships in shadow / local-fake mode; live send/receive is gated and produces intent + receipt records, not real delivery (`magi_agent/channels/telegram_adapter.py`, `contract.py`).
-- CLI Reference: https://openmagi.ai/docs/cli-reference - Type: Reference — the full flag, output-mode, exit-code, keybinding, and sub-command reference. For the concise overview and happy-path guide, see [CLI](/docs/cli).
+- CLI Reference: https://openmagi.ai/docs/cli-reference - Type: Reference — the full flag, output-mode, exit-code, keybinding, and sub-command reference. For the concise overview and happy-path guide, see
 - Changelog: https://openmagi.ai/docs/changelog - Status: ✅ Active — this page tracks user-facing changes; tagged builds are on GitHub Releases.
 - Upgrading: https://openmagi.ai/docs/upgrading - Status: ✅ Active — covers upgrading the Homebrew install and source checkouts.
 - Glossary: https://openmagi.ai/docs/glossary - Status: ✅ Active — definitions of the core Magi Agent terms.

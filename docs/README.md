@@ -4,6 +4,8 @@ Open-source documentation for the Magi Agent programmable AI agent runtime.
 
 Build agents that actually get things done by configuring the runtime around the model: context, tools, evidence, approvals, repair, projection, and audit.
 
+[Website](https://openmagi.ai) · [Source](https://github.com/openmagi/magi-agent)
+
 ## What Magi Agent and OpenMagi are
 
 Magi Agent is an open-source AI assistant that runs on your machine. Unlike prompt-only AI tools, it proves its work — verifying sources, testing code, and getting approval before taking action — so you can trust the results.
@@ -12,16 +14,25 @@ Magi Agent is a programmable AI agent runtime for agents that actually get thing
 
 OpenMagi is the platform and site. Open Magi Cloud is optional managed hosting for teams that want Magi Agent operated for them.
 
-Start from source with git clone https://github.com/openmagi/magi-agent.git, then install dependencies and use the local Magi Agent CLI.
+Start with Homebrew:
+
+```bash
+brew install --force-bottle openmagi/tap/magi-agent
+magi-agent serve --port 8080
+open http://localhost:8080/dashboard
+```
+
+Then use the local `magi` CLI for tasks. Source checkout is for contributors developing the runtime.
 
 - Model proposes plans, claims, tool calls, and draft output.
 - Runtime-enforced control decides which proposals become state, evidence, output, memory, artifacts, or side effects.
 - Harnesses and recipes compose policy instead of relying on prompt text alone.
 - Machine-readable docs are published for coding agents and documentation crawlers.
 
-- [Start from source](/docs/getting-started)
+- [Install with Homebrew](/docs/getting-started)
 - [Read architecture](/docs/architecture)
 - [Read runtime](/docs/runtime)
+- [Visit openmagi.ai](https://openmagi.ai)
 - [View source](https://github.com/openmagi/magi-agent)
 
 ## The determinism problem

@@ -1,7 +1,7 @@
 # Configuration
 
 Status: ✅ Active — the local CLI is configured with a single provider key or a
-`~/.magi/config.toml`; runtime-enforced control/authority is hosted-only.
+`~/.magi/config.toml`.
 
 Configure runtime-enforced control over context, tools, evidence, approvals, repair, projection, and audit.
 
@@ -49,23 +49,8 @@ api_key = "<your-key>"
 
 With neither set, `magi` still launches but uses a model-free stub runner.
 
-### Hosted/managed only
-
-> The variables below are read by the hosted/managed deployment, **not** by the
-> local CLI. Do not set them for local use.
-
-```
-# Hosted runtime profile (managed deployment only)
-CORE_AGENT_MODEL=<model-id>
-CORE_AGENT_API_PROXY_URL=http://localhost:8081
-CORE_AGENT_CHAT_PROXY_URL=http://localhost:8082
-CORE_AGENT_REDIS_URL=redis://localhost:6379
-BOT_ID=<bot-id>
-USER_ID=<user-id>
-GATEWAY_TOKEN=<gateway-token>
-```
-
-See the [environment variable reference](/docs/env-reference) for the full hosted list.
+See the [environment variable reference](/docs/env-reference) for the local
+provider, server, build, and authority flags.
 
 ## Model-visible context
 

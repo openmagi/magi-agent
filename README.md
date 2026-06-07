@@ -393,8 +393,8 @@ leak-safe evidence before an external action is enabled.
 
 A provider key does enable the real local model plus first-party local tools
 (file read/write/edit, patch, Bash, behind permission prompts); what stays
-default-off is external delivery/integrations and the hosted production
-enforcement authority.
+default-off is external delivery/integrations and production enforcement
+authority.
 
 Install optional Composio dependencies only when you are developing that surface
 from a source checkout.
@@ -408,8 +408,8 @@ configuration, preflight checks, approvals, and durable evidence.
 
 For local CLI use, a provider key plus the permission-mode prompts already give
 you a real model and first-party local tools. The default-off authority above
-refers to external delivery/integrations and the hosted production enforcement
-boundary, not to whether the local agent can run a task.
+refers to external delivery/integrations and production enforcement boundaries,
+not to whether the local agent can run a task.
 
 Operators should treat HTTP success and SSE completion as transport evidence
 only. Acceptance for governed workflows comes from durable records: delivery
