@@ -41,7 +41,11 @@ mutation is PR7).
 from __future__ import annotations
 
 import hashlib
-from typing import Protocol, runtime_checkable
+import math
+import os
+import statistics
+from collections.abc import Mapping
+from typing import Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -69,6 +73,143 @@ MIN_EVAL_SAMPLE_SIZE: int = 4
 # NOTE(PR7): real LLM scores carry float noise (~1e-9..1e-6); revisit this strict
 # 0.0 band / introduce an epsilon when the live evaluator lands.
 MAX_REGRESSION_BAND: float = 0.0
+
+
+# ---------------------------------------------------------------------------
+# Paired significance verdict (Task 1 — dormant foundation, not yet wired)
+# ---------------------------------------------------------------------------
+
+#: One of four classifications of a paired before/after measurement.  Maps to a
+#: future gate decision: ``improved`` → promote, ``regressed`` → reject,
+#: ``inconclusive`` → hold, ``underpowered`` → defer (need more samples).  Task 2
+#: wires this into ``run_eval_gate``; Task 1 only provides the pure function.
+Verdict = Literal["improved", "inconclusive", "regressed", "underpowered"]
+
+
+class PairedVerdict(BaseModel):
+    """Frozen result of a paired one-sided significance test on per-case deltas.
+
+    ``delta`` is the mean of ``d_i = after_i - before_i`` (positive = the
+    candidate improved).  ``ci_low``/``ci_high`` are the ``z``-scaled confidence
+    bounds on ``delta``; ``verdict`` is derived from where that interval falls
+    relative to 0.  When the sample is underpowered the interval collapses to a
+    point at ``delta`` (``se=0``) and the verdict is ``"underpowered"``.
+    """
+
+    model_config = ConfigDict(
+        frozen=True,
+        populate_by_name=True,
+        extra="forbid",
+        validate_default=True,
+    )
+
+    verdict: Verdict
+    delta: float
+    se: float
+    ci_low: float = Field(alias="ciLow")
+    ci_high: float = Field(alias="ciHigh")
+    n: int
+
+
+def paired_verdict(
+    before: tuple[float, ...],
+    after: tuple[float, ...],
+    *,
+    z: float = 1.96,
+    min_n: int = MIN_EVAL_SAMPLE_SIZE,
+) -> PairedVerdict:
+    """Paired one-sided significance verdict on per-case deltas.
+
+    Computes ``d_i = after_i - before_i`` (each score in ``[0, 1]``, higher
+    better) and tests whether the mean delta is significantly non-zero using a
+    ``z``-scaled confidence interval on ``mean(d)``.
+
+    - ``len(before) != len(after)`` → ``ValueError`` (incomparable samples;
+      mirrors ``run_eval_gate``'s length-mismatch guard).
+    - Any non-finite score (NaN/inf) in ``before``/``after`` →
+      ``"underpowered"`` (safe defer) with ``se=0`` and the CI collapsed to a
+      point at ``0`` — a degenerate sample cannot support any decision, so the
+      gate must NOT promote nor silently treat it as a passable result.
+    - ``n < min_n`` OR ``n < 2`` → ``"underpowered"`` with ``se=0`` and the CI
+      collapsed to a point at ``delta`` (can't test → defer later).
+    - Otherwise ``se = stdev(d) / sqrt(n)`` (sample stdev),
+      ``ci = delta ± z*se``; ``"improved"`` if ``ci_low > 0``, ``"regressed"``
+      if ``ci_high < 0``, else ``"inconclusive"``.  When every delta is equal
+      (``stdev=0`` → ``se=0``) the interval is a point at ``delta``, so a
+      non-zero ``delta`` classifies as improved/regressed and exactly ``0`` as
+      inconclusive — this falls out of the same comparisons.
+
+    This function is pure (no I/O, no store, no policy) and is NOT yet wired
+    into ``run_eval_gate`` — Task 1 is the dormant foundation only.
+
+    STATISTICAL CAVEAT (small-n): the CI uses a normal-approximation ``z``
+    multiplier, which is valid only asymptotically.  At the default
+    ``min_sample_size=4`` (df=3) a proper two-sided 95% t-interval multiplier is
+    ~3.18, so ``z=1.96`` yields a CI that is too NARROW (anti-conservative) —
+    it UNDER-COVERS at small n.  For a true 95% no-regression posture at small
+    samples, raise ``z`` (e.g. ``>=3`` for n≈4) or raise ``min_sample_size``.
+    Implementing a proper per-n t-multiplier is a deliberate follow-up (it would
+    change tested verdict semantics) and is NOT done here.
+
+    NOTE(PR7): scores are assumed in ``[0, 1]``.  Non-finite (NaN/inf) inputs
+    now DEFER as ``"underpowered"`` (see above) rather than silently classifying
+    as ``"inconclusive"``; the live agent-driven evaluator should still validate
+    the score domain before calling this.
+    """
+    if len(before) != len(after):
+        raise ValueError(
+            "paired_verdict got mismatched before/after lengths "
+            f"({len(before)} != {len(after)}); the evaluator is producing "
+            "incomparable samples."
+        )
+
+    # Finiteness guard: a NaN/inf score makes every CI comparison False, which
+    # would silently classify as ``"inconclusive"`` — and a NaN-scored genuine
+    # regression would escape the rollback signal.  Defer such degenerate
+    # samples as ``"underpowered"`` (safe defer) instead.
+    if not all(math.isfinite(x) for x in (*before, *after)):
+        return PairedVerdict(
+            verdict="underpowered",
+            delta=0.0,
+            se=0.0,
+            ciLow=0.0,
+            ciHigh=0.0,
+            n=len(before),
+        )
+
+    n = len(before)
+    deltas = [a - b for b, a in zip(before, after)]
+    delta = sum(deltas) / n if n else 0.0
+
+    if n < min_n or n < 2:
+        return PairedVerdict(
+            verdict="underpowered",
+            delta=delta,
+            se=0.0,
+            ciLow=delta,
+            ciHigh=delta,
+            n=n,
+        )
+
+    se = statistics.stdev(deltas) / math.sqrt(n)
+    ci_low = delta - z * se
+    ci_high = delta + z * se
+
+    if ci_low > 0:
+        verdict: Verdict = "improved"
+    elif ci_high < 0:
+        verdict = "regressed"
+    else:
+        verdict = "inconclusive"
+
+    return PairedVerdict(
+        verdict=verdict,
+        delta=delta,
+        se=se,
+        ciLow=ci_low,
+        ciHigh=ci_high,
+        n=n,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -118,6 +259,83 @@ class StaticCheckSet(BaseModel):
         return self.before, self.after
 
 
+def _average_runs(
+    runs: list[tuple[tuple[float, ...], tuple[float, ...]]],
+) -> tuple[tuple[float, ...], tuple[float, ...]]:
+    """Element-wise per-case mean of accumulated ``(before, after)`` inner runs.
+
+    Shared by ``RepeatedCheckSet.run`` and ``run_eval_gate``'s adaptive
+    escalation loop (DRY) so both compute the averaged samples identically.
+
+    Every run must return equal-length ``before``/``after`` tuples, and all runs
+    must agree on that length (mirrors ``run_eval_gate``'s length-mismatch
+    guard) — otherwise the averaged samples would be incomparable, so this
+    raises ``ValueError`` instead of silently averaging over a min-length slice.
+    Averaging over ``k`` identical deterministic runs equals the single result,
+    so a single accumulated run is exactly the inner's single output.
+    """
+    if not runs:
+        raise ValueError("_average_runs requires at least one run.")
+    case_n: int | None = None
+    for before, after in runs:
+        if len(before) != len(after):
+            raise ValueError(
+                "RepeatedCheckSet inner returned mismatched before/after "
+                f"lengths ({len(before)} != {len(after)}); the evaluator "
+                "is producing incomparable samples."
+            )
+        if case_n is None:
+            case_n = len(before)
+        elif len(before) != case_n:
+            raise ValueError(
+                "RepeatedCheckSet inner returned inconsistent case counts "
+                f"across repeats ({len(before)} != {case_n}); cannot "
+                "average incomparable samples."
+            )
+
+    k = len(runs)
+    before_runs = [before for before, _ in runs]
+    after_runs = [after for _, after in runs]
+    avg_before = tuple(sum(col) / k for col in zip(*before_runs))
+    avg_after = tuple(sum(col) / k for col in zip(*after_runs))
+    return avg_before, avg_after
+
+
+class RepeatedCheckSet:
+    """CheckSet wrapper that runs an inner ``CheckSet`` ``repeats`` times and
+    averages the per-case scores element-wise (Task 4).
+
+    A real agent-driven evaluator is NONDETERMINISTIC, so a single eval is
+    noisy.  Averaging ``repeats`` runs shrinks the per-case variance → shrinks
+    the paired delta's standard error → tightens the verdict CI, which can
+    resolve an ``inconclusive`` single-shot result into ``improved``/
+    ``regressed`` WITHOUT changing the case identity (same length/cases as the
+    inner).  For a deterministic inner (e.g. ``StaticCheckSet``) the average
+    equals the single result, so a default of ``repeats=1`` is exactly the
+    inner's single run.
+
+    Every inner run must return equal-length ``before``/``after`` tuples, and
+    all runs must agree on that length (mirrors ``run_eval_gate``'s
+    length-mismatch guard) — otherwise the averaged samples would be
+    incomparable, so this raises ``ValueError`` instead of silently averaging
+    over a min-length slice.
+    """
+
+    def __init__(self, *, inner: CheckSet, repeats: int) -> None:
+        if repeats < 1:
+            raise ValueError(
+                f"RepeatedCheckSet requires repeats >= 1 (got {repeats})."
+            )
+        self.inner = inner
+        self.repeats = repeats
+
+    def run(
+        self, candidate: LearningCandidate
+    ) -> tuple[tuple[float, ...], tuple[float, ...]]:
+        runs = [self.inner.run(candidate) for _ in range(self.repeats)]
+        return _average_runs(runs)
+
+
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
@@ -137,9 +355,158 @@ class EvalGateConfig(BaseModel):
         validate_default=True,
     )
 
+    #: Minimum paired sample count before a verdict is trusted.  CAVEAT: the
+    #: paired-significance CI is a normal-approximation (``z``) interval valid
+    #: only asymptotically; at the default ``4`` (df=3) it UNDER-COVERS (a true
+    #: 95% t-interval multiplier is ~3.18 vs ``z=1.96``).  Raise this (or ``z``)
+    #: for a genuine 95% no-regression posture at small n.  A proper t-interval
+    #: is a follow-up.
     min_sample_size: int = Field(default=MIN_EVAL_SAMPLE_SIZE, alias="minSampleSize")
     max_regression_band: float = Field(
         default=MAX_REGRESSION_BAND, alias="maxRegressionBand"
+    )
+
+    #: Which decision path the gate uses.  ``"strict_band"`` (default) preserves
+    #: today's exact behavior (mean-regression vs ``max_regression_band``).
+    #: ``"paired_significance"`` selects the paired-CI path — DORMANT in Task 1;
+    #: it is not consulted by ``run_eval_gate`` until Task 2 wires it in.
+    decision_rule: Literal["strict_band", "paired_significance"] = Field(
+        default="strict_band", alias="decisionRule"
+    )
+    #: z multiplier for the paired-significance confidence interval (Task 2).
+    #: This is a NORMAL-APPROXIMATION multiplier, valid asymptotically.  At small
+    #: ``min_sample_size`` it under-covers — e.g. at n≈4 a true 95% t-interval
+    #: needs ~3.18, so the default ``1.96`` gives a CI that is too NARROW
+    #: (anti-conservative).  Raise ``z`` (``>=3`` for n≈4) or ``min_sample_size``
+    #: for a real 95% no-regression posture.  A proper t-interval is a follow-up.
+    z: float = 1.96
+    #: Number of paired eval repeats per candidate (Task 4).  Default ``1``
+    #: reproduces the single-shot strict-band measurement.  Escalation (when a
+    #: verdict is ``inconclusive``) accumulates ADDITIONAL inner runs from
+    #: ``n_repeats`` up to ``max_repeats``, so ``n_repeats >= max_repeats``
+    #: simply disables escalation (fixed repeats, exactly ``n_repeats`` runs).
+    n_repeats: int = Field(default=1, alias="nRepeats")
+    #: Upper bound on adaptive repeats when escalating an inconclusive result
+    #: (Task 4).  Default ``1`` disables escalation.  Escalation runs from
+    #: ``n_repeats`` up to ``max_repeats``; when ``n_repeats >= max_repeats``
+    #: there is no headroom, so the gate performs exactly ``n_repeats`` inner
+    #: runs and never escalates (a valid "fixed repeats" config, not an error).
+    max_repeats: int = Field(default=1, alias="maxRepeats")
+
+
+# ---------------------------------------------------------------------------
+# Env-driven config factory (Task 5 — operator rule selection, NO default flip)
+# ---------------------------------------------------------------------------
+
+#: Env var → ``decision_rule``.  Unset or any value other than the two accepted
+#: rules falls back to ``"strict_band"`` (the safe default — never raises).
+GATE_RULE_ENV_VAR = "MAGI_LEARNING_GATE_RULE"
+#: Env var → ``z`` (paired-CI multiplier).  Invalid/unset → field default 1.96.
+GATE_Z_ENV_VAR = "MAGI_LEARNING_GATE_Z"
+#: Env var → ``n_repeats``.  Invalid/unset → field default 1.
+GATE_N_REPEATS_ENV_VAR = "MAGI_LEARNING_GATE_N_REPEATS"
+#: Env var → ``max_repeats``.  Invalid/unset → field default 1.
+GATE_MAX_REPEATS_ENV_VAR = "MAGI_LEARNING_GATE_MAX_REPEATS"
+
+#: The decision rules an operator may select via env.  Anything else (typo,
+#: empty string, legacy value) safely degrades to ``"strict_band"``.
+_VALID_DECISION_RULES = frozenset({"strict_band", "paired_significance"})
+
+
+def _parse_float(env: Mapping[str, str], key: str, default: float) -> float:
+    """Parse ``env[key]`` as a float, defaulting on absence or malformed input.
+
+    Defensive by design: a bad operator env value must NEVER crash the gate, so
+    a missing key or an unparseable string both fall back to *default*.
+    """
+    raw = env.get(key)
+    if raw is None:
+        return default
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return default
+
+
+def _parse_int(env: Mapping[str, str], key: str, default: int) -> int:
+    """Parse ``env[key]`` as an int, defaulting on absence or malformed input.
+
+    Like :func:`_parse_float`, this never raises — a malformed value (including
+    a float-looking string such as ``"1.5"``) falls back to *default* so a bad
+    env can't crash the gate.
+    """
+    raw = env.get(key)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return default
+
+
+def eval_gate_config_from_env(
+    env: Mapping[str, str] = os.environ,
+) -> EvalGateConfig:
+    """Build an :class:`EvalGateConfig` from operator env (Task 5).
+
+    This lets a fleet operator SELECT the eval-gate decision rule and its
+    operating point WITHOUT flipping any default.  With NO env vars set this
+    returns a ``strict_band`` config byte-identical to ``EvalGateConfig()`` — the
+    gate's behavior stays exactly as today.  The gate is a NO-REGRESSION safety
+    mechanism whose default is, and stays, strict; paired significance is an
+    opt-in for nondeterministic evaluators, not a relaxation of that posture.
+
+    Env vars (all optional; parsed defensively — a malformed value falls back to
+    the field default and never raises):
+
+    - ``MAGI_LEARNING_GATE_RULE`` → ``decision_rule``.  Accepts exactly
+      ``"strict_band"`` or ``"paired_significance"``.  Unset or ANY invalid value
+      (typo, empty string, legacy token) → ``"strict_band"`` (safe default).
+    - ``MAGI_LEARNING_GATE_Z`` → ``z`` (float; unset/malformed → 1.96).
+    - ``MAGI_LEARNING_GATE_N_REPEATS`` → ``n_repeats`` (int; unset/malformed → 1).
+    - ``MAGI_LEARNING_GATE_MAX_REPEATS`` → ``max_repeats`` (int; unset/malformed
+      → 1).
+
+    Operating-point guidance:
+
+    - Enable ``paired_significance`` once the evaluator is NONDETERMINISTIC (real
+      agent-driven scores carry run-to-run noise).  The strict-band rule treats
+      any mean drop as a regression, so noise alone can block a genuinely-neutral
+      candidate; the paired rule abstains (``inconclusive``) instead of failing
+      on noise, and only promotes when the per-case improvement is significant.
+    - Raising ``z`` (e.g. 1.96 → 2.5) WIDENS the inconclusive band → fewer
+      promotions clear the bar → MORE conservative promotion.  Lowering it is
+      more permissive; keep it ``>= 1.96`` for a real no-regression posture.
+    - ``n_repeats`` / ``max_repeats`` shrink evaluator noise: averaging repeated
+      runs tightens each candidate's delta CI, which can resolve an
+      ``inconclusive`` single-shot result into a decisive verdict WITHOUT
+      changing the cases.  ``n_repeats`` is the baseline repeat count;
+      ``max_repeats`` is the adaptive ceiling the gate may escalate to on an
+      inconclusive verdict.  ``n_repeats >= max_repeats`` disables escalation
+      (fixed repeats).  Both default to ``1`` (single-shot — exactly today).
+
+    An explicitly-constructed ``EvalGateConfig`` passed by a caller always wins;
+    the live executor only falls back to this factory when no config is supplied
+    (see ``harness/learning_executor.run_reflection``).  Direct/test callers of
+    ``run_eval_gate`` that pass ``config=None`` still get the ``EvalGateConfig()``
+    strict default — this factory does not change that path.
+    """
+    raw_rule = env.get(GATE_RULE_ENV_VAR)
+    # Pre-validate against the known rules so an unknown/typo env value degrades
+    # to the safe default instead of raising in EvalGateConfig's Literal check.
+    # Pydantic narrows the plain str to the Literal field at construction.
+    rule = raw_rule if raw_rule in _VALID_DECISION_RULES else "strict_band"
+    # ``z`` guard: a non-positive z would invert/collapse the CI (``delta ± z*se``
+    # with z<=0 flips the bounds, breaking the improved/regressed comparisons).
+    # Treat a parsed ``z <= 0`` as invalid and fall back to the safe default.
+    z = _parse_float(env, GATE_Z_ENV_VAR, 1.96)
+    if z <= 0:
+        z = 1.96
+    return EvalGateConfig(
+        decision_rule=rule,
+        z=z,
+        n_repeats=_parse_int(env, GATE_N_REPEATS_ENV_VAR, 1),
+        max_repeats=_parse_int(env, GATE_MAX_REPEATS_ENV_VAR, 1),
     )
 
 
@@ -178,6 +545,20 @@ class EvalGateDecision(BaseModel):
     skipped: bool = False
     #: Human-readable explanation when ``skipped`` is True (else empty).
     reason: str = ""
+    #: Paired-significance verdict (Task 2).  Empty string on the strict-band
+    #: path, which is the only path Task 1 exercises.
+    verdict: str = ""
+    #: Mean per-case delta (after - before) from the paired path (Task 2).
+    delta: float = 0.0
+    #: Standard error of the mean delta from the paired path (Task 2).
+    se: float = 0.0
+    #: Lower confidence bound on the mean delta (Task 2).
+    ci_low: float = Field(default=0.0, alias="ciLow")
+    #: Upper confidence bound on the mean delta (Task 2).
+    ci_high: float = Field(default=0.0, alias="ciHigh")
+    #: Number of paired eval repeats performed (Task 4).  ``1`` for the
+    #: single-shot strict-band path.
+    repeats: int = 1
 
 
 # ---------------------------------------------------------------------------
@@ -187,6 +568,20 @@ class EvalGateDecision(BaseModel):
 
 def _mean(scores: tuple[float, ...]) -> float:
     return sum(scores) / len(scores) if scores else 0.0
+
+
+def _summary_with_std(scores: tuple[float, ...]) -> dict[str, object]:
+    """``{"mean", "n"}`` plus ``"std"`` when computable (>=2 samples).
+
+    Used only on the paired-significance path so the persisted observation
+    carries dispersion alongside the mean.  ``statistics.stdev`` needs at least
+    two data points, so the ``"std"`` key is omitted for ``n<2`` rather than
+    stored as ``0``/``None`` (an absent key reads as "not computable").
+    """
+    summary: dict[str, object] = {"mean": _mean(scores), "n": len(scores)}
+    if len(scores) >= 2:
+        summary["std"] = statistics.stdev(scores)
+    return summary
 
 
 def _candidate_item_id(candidate: LearningCandidate, *, tenant_id: str = "local") -> str:
@@ -324,32 +719,131 @@ def run_eval_gate(
             )
             continue
 
-        before, after = checkset.run(candidate)
-        # Guard: a mismatched evaluator that returns different-length before/after
-        # tuples would make mean(before) - mean(after) compare different sample
-        # populations.  Surface the broken evaluator early rather than silently
-        # averaging over a min-length slice.
-        if len(before) != len(after):
-            raise ValueError(
-                "eval checkset returned mismatched before/after lengths "
-                f"({len(before)} != {len(after)}) for item {item.id!r}; "
-                "the evaluator is producing incomparable samples."
+        # Decision: ``strict_band`` (default) reproduces today's mean-regression
+        # vs band test BYTE-IDENTICALLY; ``paired_significance`` uses the paired
+        # one-sided verdict (harm-gated, abstaining).  ``pv`` is None on the
+        # strict-band path so the new EvalGateDecision fields stay at defaults.
+        pv: PairedVerdict | None = None
+        # Final repeat count actually performed (Task 4).  Recorded on the
+        # decision + observation stats; ``1`` on the single-shot strict-band path.
+        repeats = 1
+        if config.decision_rule == "paired_significance":
+            # Adaptive repeated evaluation (Task 4).  Start by accumulating
+            # ``n_repeats`` inner runs and, while the verdict is ``inconclusive``
+            # and there is headroom below ``max_repeats``, run the inner ONE more
+            # time and re-average over ALL accumulated runs to shrink the
+            # per-case noise → shrink the delta SE → tighten the CI, which can
+            # resolve ``inconclusive`` into ``improved``/``regressed``.
+            # Accumulation is INCREMENTAL: each escalation step is exactly one
+            # ADDITIONAL inner call (NOT a fresh re-run from scratch), so total
+            # inner calls == final ``repeats`` (LINEAR, not quadratic).
+            # ``underpowered`` is NOT escalated (more repeats add SAMPLES per
+            # case, not CASES, so it cannot cross the ``min_n`` floor);
+            # ``improved``/``regressed`` are already decisive.  The
+            # ``len(runs) < max_repeats`` bound guarantees termination.  With
+            # ``n_repeats=max_repeats=1`` this is exactly one inner run (no loop)
+            # — identical to the pre-Task-4 single-shot path.
+            #
+            # Robustness: clamp the seed count and escalation cap to >= 1.  An
+            # explicitly-constructed ``EvalGateConfig(n_repeats=0)`` (or negative)
+            # would otherwise produce an EMPTY ``runs`` list → ``_average_runs([])``
+            # raises.  A non-positive repeat count is meaningless, so run exactly
+            # one repeat rather than crashing the gate.
+            repeats0 = max(1, config.n_repeats)
+            max_repeats = max(1, config.max_repeats)
+            runs: list[tuple[tuple[float, ...], tuple[float, ...]]] = [
+                checkset.run(candidate) for _ in range(repeats0)
+            ]
+            before, after = _average_runs(runs)
+            # Length guard (mirrors the strict-band path): a mismatched evaluator
+            # that returns different-length before/after tuples would compare
+            # different sample populations.  ``_average_runs`` already guards each
+            # inner run, but keep the item-scoped message for the averaged result.
+            if len(before) != len(after):
+                raise ValueError(
+                    "eval checkset returned mismatched before/after lengths "
+                    f"({len(before)} != {len(after)}) for item {item.id!r}; "
+                    "the evaluator is producing incomparable samples."
+                )
+            pv = paired_verdict(
+                before, after, z=config.z, min_n=config.min_sample_size
             )
-        sample_n = len(before)
-        regression = _mean(before) - _mean(after)
+            # NOTE(optional-stopping): this loop re-decides after each ADDED
+            # repeat and stops on the first decisive verdict.  That is sequential
+            # testing — it inflates Type-I (false-positive) error under a
+            # NONDETERMINISTIC evaluator.  With the current deterministic averaged
+            # checkset the averaged samples are identical across repeats, so there
+            # is no sequential-testing risk.  Once the live (PR7) nondeterministic
+            # evaluator lands, escalation must use a FIXED repeat budget or an
+            # alpha-spending schedule to avoid these sequential false positives.
+            while pv.verdict == "inconclusive" and len(runs) < max_repeats:
+                runs.append(checkset.run(candidate))
+                before, after = _average_runs(runs)
+                pv = paired_verdict(
+                    before, after, z=config.z, min_n=config.min_sample_size
+                )
+            # Final repeat count == number of accumulated inner runs == total
+            # inner calls (linear).
+            repeats = len(runs)
+            sample_n = pv.n
+            # Back-compat sign: regression = mean(before) - mean(after) = -delta.
+            regression = -pv.delta
+            # Back-compat boolean: only an ``improved`` verdict passes.
+            # ``inconclusive``/``underpowered`` defer (leave proposed); a
+            # ``regressed`` verdict is itself the downstream rollback signal —
+            # the gate records it but does NOT roll back here.
+            passed = pv.verdict == "improved"
+        else:
+            before, after = checkset.run(candidate)
+            # Guard: a mismatched evaluator that returns different-length
+            # before/after tuples would make mean(before) - mean(after) compare
+            # different sample populations.  Surface the broken evaluator early
+            # rather than silently averaging over a min-length slice.
+            if len(before) != len(after):
+                raise ValueError(
+                    "eval checkset returned mismatched before/after lengths "
+                    f"({len(before)} != {len(after)}) for item {item.id!r}; "
+                    "the evaluator is producing incomparable samples."
+                )
+            sample_n = len(before)
+            regression = _mean(before) - _mean(after)
+            passed = (
+                sample_n >= config.min_sample_size
+                and regression <= config.max_regression_band
+            )
 
-        passed = (
-            sample_n >= config.min_sample_size
-            and regression <= config.max_regression_band
-        )
+        # Persist the observation.  The strict_band path stays BYTE-IDENTICAL to
+        # today (no std, stats=None).  The paired_significance path enriches the
+        # record so a reviewer can see whether a promotion was significant or
+        # noise: before/after gain a "std" (when >=2 samples) and the
+        # significance stats (delta/se/ci/verdict/z/repeats) are persisted.
+        if pv is not None:
+            before_obs = _summary_with_std(before)
+            after_obs = _summary_with_std(after)
+            stats = {
+                "delta": pv.delta,
+                "se": pv.se,
+                "ci_low": pv.ci_low,
+                "ci_high": pv.ci_high,
+                "verdict": pv.verdict,
+                "z": config.z,
+                # The decision's FINAL repeat count (Task 4): how many inner
+                # runs were averaged before the verdict was decided.
+                "repeats": repeats,
+            }
+        else:
+            before_obs = {"mean": _mean(before), "n": len(before)}
+            after_obs = {"mean": _mean(after), "n": len(after)}
+            stats = None
 
         eval_ref = store.record_eval_observation(
             item_id=item.id,
-            before={"mean": _mean(before), "n": len(before)},
-            after={"mean": _mean(after), "n": len(after)},
+            before=before_obs,
+            after=after_obs,
             sample_n=sample_n,
             passed=passed,
             tenant_id=tenant_id,
+            stats=stats,
         )
 
         activated = False
@@ -381,6 +875,15 @@ def run_eval_gate(
                 evalObservationRef=eval_ref,
                 sampleN=sample_n,
                 regression=regression,
+                # Paired-significance fields — populated only on that path; the
+                # strict-band path leaves them at their empty/zero defaults.
+                verdict=pv.verdict if pv is not None else "",
+                delta=pv.delta if pv is not None else 0.0,
+                se=pv.se if pv is not None else 0.0,
+                ciLow=pv.ci_low if pv is not None else 0.0,
+                ciHigh=pv.ci_high if pv is not None else 0.0,
+                # Final adaptive repeat count (Task 4); ``1`` on strict_band.
+                repeats=repeats,
             )
         )
 
@@ -394,6 +897,11 @@ __all__ = [
     "CheckSet",
     "EvalGateConfig",
     "EvalGateDecision",
+    "PairedVerdict",
+    "RepeatedCheckSet",
     "StaticCheckSet",
+    "Verdict",
+    "eval_gate_config_from_env",
+    "paired_verdict",
     "run_eval_gate",
 ]

@@ -18,7 +18,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Protocol, runtime_checkable
+from typing import Mapping, Protocol, runtime_checkable
 
 from magi_agent.learning.models import LearningItem, LearningKind, LearningScope, LearningStatus
 from magi_agent.learning.policy import assert_activation_allowed
@@ -66,6 +66,7 @@ _MIGRATIONS: list[tuple[int, str]] = [
             after_json  TEXT NOT NULL DEFAULT '{}',
             sample_n    INTEGER NOT NULL DEFAULT 0,
             passed      INTEGER NOT NULL DEFAULT 0,
+            stats_json  TEXT,
             created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
         );
         CREATE INDEX IF NOT EXISTS idx_eval_obs_item_id
@@ -185,7 +186,38 @@ _MIGRATIONS: list[tuple[int, str]] = [
             ON learning_curator_snapshots (tenant_id);
         """,
     ),
+    (
+        8,
+        # Additive, back-compatible: persist paired-significance statistics
+        # (delta/se/ci/verdict/z/repeats) alongside the eval observation so a
+        # reviewer/dashboard can tell a significant promotion from noise.
+        #
+        # Migration 2 (above) now creates the column for fresh DBs, so on a new
+        # database this ALTER would collide.  The skip guard below makes it a
+        # no-op when the column already exists; on a pre-existing DB (table
+        # created before migration 2 carried the column) the ALTER adds it.
+        # The column is nullable with no DEFAULT so old rows read back NULL.
+        """
+        ALTER TABLE learning_eval_observations ADD COLUMN stats_json TEXT;
+        """,
+    ),
 ]
+
+
+def _has_eval_obs_stats_column(conn: sqlite3.Connection) -> bool:
+    """True when ``learning_eval_observations`` already has ``stats_json``.
+
+    Used to skip the migration-8 ``ADD COLUMN`` when the column is already
+    present (fresh DBs get it from migration 2's CREATE TABLE), keeping the
+    ALTER idempotent and crash-safe on re-run (SQLite ALTER has no IF NOT
+    EXISTS).
+    """
+    return any(
+        row[1] == "stats_json"
+        for row in conn.execute(
+            "PRAGMA table_info(learning_eval_observations)"
+        ).fetchall()
+    )
 
 # Statements inside these migrations require special idempotency handling
 # because SQLite's ALTER TABLE does not support IF NOT EXISTS.  Each entry
@@ -229,6 +261,13 @@ _MIGRATION_SKIP_GUARDS: dict[tuple[int, str], object] = {
     (5, "INSERT INTO learning_items_new"): _has_composite_pk,
     (5, "DROP TABLE learning_items"): _has_composite_pk,
     (5, "ALTER TABLE learning_items_new RENAME TO learning_items"): _has_composite_pk,
+    # Migration 8 adds stats_json to the eval-observation table.  Skip when the
+    # column already exists (fresh DBs get it from migration 2's CREATE TABLE,
+    # or a crashed re-run already applied the ALTER).
+    (
+        8,
+        "ALTER TABLE learning_eval_observations ADD COLUMN stats_json",
+    ): _has_eval_obs_stats_column,
 }
 
 
@@ -319,7 +358,9 @@ class LearningStore(Protocol):
         sample_n: int,
         passed: bool,
         tenant_id: str = "local",
+        stats: Mapping[str, object] | None = None,
     ) -> str: ...
+    def get_eval_observation(self, ref: str) -> dict[str, object] | None: ...
     def approve(
         self,
         item_id: str,
@@ -660,22 +701,33 @@ class SqliteLearningStore:
         sample_n: int,
         passed: bool,
         tenant_id: str = "local",
+        stats: Mapping[str, object] | None = None,
     ) -> str:
         """Persist an eval observation and return its ref string.
 
         Tenant-scoped: the target item must exist under *tenant_id* or a
         ``KeyError`` is raised — an observation can never be recorded against
         another tenant's item by id.
+
+        *stats* (optional) carries paired-significance statistics
+        (``delta``/``se``/``ci_low``/``ci_high``/``verdict``/``z``/``repeats``)
+        so a reviewer can tell a significant promotion from noise.  It is stored
+        in the nullable ``stats_json`` column; ``None`` (the default, and what
+        every existing caller passes) is persisted as SQL NULL and read back as
+        ``None`` — fully back-compatible with the pre-stats schema.
         """
         conn = self._get_conn()
         # Tenant guard at the query level — never touch another tenant's row.
         self._require_item(conn, item_id, tenant_id=tenant_id)
         ref = f"eval-obs:{uuid.uuid4().hex}"
+        # ``None`` → SQL NULL (not the JSON string "null") so a stats-less
+        # observation reads back as ``None``.
+        stats_json = json.dumps(dict(stats)) if stats is not None else None
         conn.execute(
             """
             INSERT INTO learning_eval_observations
-                (ref, item_id, before_json, after_json, sample_n, passed)
-            VALUES (?, ?, ?, ?, ?, ?)
+                (ref, item_id, before_json, after_json, sample_n, passed, stats_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 ref,
@@ -684,10 +736,37 @@ class SqliteLearningStore:
                 json.dumps(after),
                 sample_n,
                 int(passed),
+                stats_json,
             ),
         )
         conn.commit()
         return ref
+
+    def get_eval_observation(self, ref: str) -> dict[str, object] | None:
+        """Read back a recorded eval observation by *ref*.
+
+        Returns ``None`` when no observation with that ref exists.  ``before`` and
+        ``after`` are parsed dicts; ``stats`` is parsed back to a dict (or ``None``
+        when the row predates / omits stats).
+        """
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT * FROM learning_eval_observations WHERE ref = ?",
+            (ref,),
+        ).fetchone()
+        if row is None:
+            return None
+        stats_json = row["stats_json"]
+        return {
+            "ref": row["ref"],
+            "item_id": row["item_id"],
+            "before": json.loads(row["before_json"]),
+            "after": json.loads(row["after_json"]),
+            "sample_n": row["sample_n"],
+            "passed": bool(row["passed"]),
+            "stats": json.loads(stats_json) if stats_json is not None else None,
+            "created_at": row["created_at"],
+        }
 
     def approve(
         self,
