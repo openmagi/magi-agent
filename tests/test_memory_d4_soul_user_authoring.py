@@ -6,13 +6,16 @@ A. USER.md profile writes — agent can write profile facts to USER.md via the
 B. Profile-line deduplication — identical lines are NOT appended twice.
 C. SOUL.md agent rejection — any agent write to SOUL.md is rejected by:
      (a) the D1 allowlist (ValueError from _extract_target_file)
-     (b) the D2 tool (target_file rejected, falls back to MEMORY.md — not SOUL)
+     (b) the D2 tool (target_file loudly rejected with memory_write_forbidden_target;
+         NOT silently redirected to MEMORY.md)
      (c) the OperatorSoulWriter is unreachable from the agent tool/gate path
 D. OperatorSoulWriter — separate operator authority; can write SOUL.md when
    operator_enabled=True; is default-off; its gate does NOT interact with
    MAGI_MEMORY_WRITE_ENABLED.
 E. Default-off inertness — all gates closed by default.
 F. D3 projection still covers USER.md after a profile write.
+G. Tool forbidden-target rejection — unknown/forbidden targets blocked loudly;
+   absent target_file defaults to MEMORY.md; USER.md proceeds normally.
 """
 from __future__ import annotations
 
@@ -263,19 +266,17 @@ def test_soul_md_not_in_allowed_write_files() -> None:
     assert "SOUL.md" not in _ALLOWED_WRITE_FILES
 
 
-def test_agent_tool_cannot_write_soul_md(tmp_path: Path) -> None:
-    """D2 tool: target_file=SOUL.md is sanitized to MEMORY.md, not written as SOUL.md."""
+def _make_tool_host(tmp_path: Path):
+    """Helper: create a ToolRegistry with MemoryWriteToolHost bound and enabled."""
     from magi_agent.harness.memory_write_tool import (
         MemoryWriteToolHostConfig,
         MemoryWriteToolHost,
     )
     from magi_agent.tools.registry import ToolRegistry
     from magi_agent.tools.catalog import register_core_tool_manifests
-    from magi_agent.tools.context import ToolContext
     from magi_agent.memory.adapters.local_file_writable import (
         LocalFileMemoryConfig,
         LocalFileMemoryProvider,
-        MAGI_MEMORY_WRITE_ENABLED_ENV,
     )
 
     provider_config = LocalFileMemoryConfig(
@@ -289,6 +290,15 @@ def test_agent_tool_cannot_write_soul_md(tmp_path: Path) -> None:
     config = MemoryWriteToolHostConfig(enabled=True)
     host = MemoryWriteToolHost(config, provider=provider)
     host.bind(registry)
+    return registry
+
+
+def test_agent_tool_cannot_write_soul_md(tmp_path: Path) -> None:
+    """D2 tool: target_file=SOUL.md returns a blocked ToolResult with
+    memory_write_forbidden_target; SOUL.md and MEMORY.md are NOT created."""
+    from magi_agent.tools.context import ToolContext
+
+    registry = _make_tool_host(tmp_path)
 
     async def run():
         ctx = ToolContext(botId="test-bot", workspace_root=str(tmp_path))
@@ -296,16 +306,105 @@ def test_agent_tool_cannot_write_soul_md(tmp_path: Path) -> None:
         assert registration is not None
         assert registration.handler is not None
         return await registration.handler(
-            {"fact": "User prefers dark mode", "target_file": "SOUL.md"},
+            {"fact": "Injected soul content", "target_file": "SOUL.md"},
             ctx,
         )
 
     result = asyncio.run(run())
 
-    # The tool must either block or succeed — but SOUL.md must NEVER be created
+    # Must be loudly rejected — not silently redirected
+    assert result.status == "blocked", (
+        f"Expected blocked ToolResult but got status={result.status!r}"
+    )
+    assert result.error_code == "memory_write_forbidden_target", (
+        f"Expected error_code 'memory_write_forbidden_target' but got {result.error_code!r}"
+    )
+    assert "SOUL.md" in (result.error_message or ""), (
+        "Error message should name the forbidden target"
+    )
+
+    # Neither SOUL.md nor MEMORY.md should be created (request rejected, not redirected)
     assert not (tmp_path / "SOUL.md").exists(), (
         "SOUL.md must not be created by the agent tool under any circumstances"
     )
+    assert not (tmp_path / "MEMORY.md").exists(), (
+        "MEMORY.md must not be written when the request is rejected (no silent redirect)"
+    )
+
+
+def test_agent_tool_rejects_arbitrary_forbidden_target(tmp_path: Path) -> None:
+    """D2 tool: target_file='random.md' returns blocked with forbidden-target error code."""
+    from magi_agent.tools.context import ToolContext
+
+    registry = _make_tool_host(tmp_path)
+
+    async def run():
+        ctx = ToolContext(botId="test-bot", workspace_root=str(tmp_path))
+        registration = registry.resolve_registration("MemoryWrite")
+        assert registration is not None
+        assert registration.handler is not None
+        return await registration.handler(
+            {"fact": "Some fact", "target_file": "random.md"},
+            ctx,
+        )
+
+    result = asyncio.run(run())
+
+    assert result.status == "blocked"
+    assert result.error_code == "memory_write_forbidden_target"
+    assert not (tmp_path / "random.md").exists()
+    assert not (tmp_path / "MEMORY.md").exists()
+
+
+def test_agent_tool_absent_target_file_defaults_to_memory_md(tmp_path: Path) -> None:
+    """D2 tool: absent target_file defaults to MEMORY.md and write proceeds."""
+    from magi_agent.tools.context import ToolContext
+
+    registry = _make_tool_host(tmp_path)
+
+    async def run():
+        ctx = ToolContext(botId="test-bot", workspace_root=str(tmp_path))
+        registration = registry.resolve_registration("MemoryWrite")
+        assert registration is not None
+        assert registration.handler is not None
+        # No target_file key — should default to MEMORY.md
+        return await registration.handler(
+            {"fact": "Default target fact"},
+            ctx,
+        )
+
+    result = asyncio.run(run())
+
+    assert result.status == "ok", (
+        f"Expected ok when target_file absent (defaults to MEMORY.md) but got {result.status!r}"
+    )
+    assert result.output is not None
+    assert result.output.get("targetFile") == "MEMORY.md"
+
+
+def test_agent_tool_user_md_target_proceeds(tmp_path: Path) -> None:
+    """D2 tool: target_file='USER.md' is allowed and write proceeds."""
+    from magi_agent.tools.context import ToolContext
+
+    registry = _make_tool_host(tmp_path)
+
+    async def run():
+        ctx = ToolContext(botId="test-bot", workspace_root=str(tmp_path))
+        registration = registry.resolve_registration("MemoryWrite")
+        assert registration is not None
+        assert registration.handler is not None
+        return await registration.handler(
+            {"fact": "User prefers concise answers", "target_file": "USER.md"},
+            ctx,
+        )
+
+    result = asyncio.run(run())
+
+    assert result.status == "ok", (
+        f"Expected ok for USER.md write but got {result.status!r}"
+    )
+    assert result.output is not None
+    assert result.output.get("targetFile") == "USER.md"
 
 
 def test_magi_memory_write_enabled_does_not_open_soul_write(
