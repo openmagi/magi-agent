@@ -126,6 +126,10 @@ def paired_verdict(
 
     - ``len(before) != len(after)`` → ``ValueError`` (incomparable samples;
       mirrors ``run_eval_gate``'s length-mismatch guard).
+    - Any non-finite score (NaN/inf) in ``before``/``after`` →
+      ``"underpowered"`` (safe defer) with ``se=0`` and the CI collapsed to a
+      point at ``0`` — a degenerate sample cannot support any decision, so the
+      gate must NOT promote nor silently treat it as a passable result.
     - ``n < min_n`` OR ``n < 2`` → ``"underpowered"`` with ``se=0`` and the CI
       collapsed to a point at ``delta`` (can't test → defer later).
     - Otherwise ``se = stdev(d) / sqrt(n)`` (sample stdev),
@@ -138,16 +142,39 @@ def paired_verdict(
     This function is pure (no I/O, no store, no policy) and is NOT yet wired
     into ``run_eval_gate`` — Task 1 is the dormant foundation only.
 
-    NOTE(PR7): scores are assumed finite and in ``[0, 1]``. The live
-    agent-driven evaluator must validate the score domain before calling this;
-    NaN/inf inputs would make the comparisons False and silently classify as
-    ``"inconclusive"``.
+    STATISTICAL CAVEAT (small-n): the CI uses a normal-approximation ``z``
+    multiplier, which is valid only asymptotically.  At the default
+    ``min_sample_size=4`` (df=3) a proper two-sided 95% t-interval multiplier is
+    ~3.18, so ``z=1.96`` yields a CI that is too NARROW (anti-conservative) —
+    it UNDER-COVERS at small n.  For a true 95% no-regression posture at small
+    samples, raise ``z`` (e.g. ``>=3`` for n≈4) or raise ``min_sample_size``.
+    Implementing a proper per-n t-multiplier is a deliberate follow-up (it would
+    change tested verdict semantics) and is NOT done here.
+
+    NOTE(PR7): scores are assumed in ``[0, 1]``.  Non-finite (NaN/inf) inputs
+    now DEFER as ``"underpowered"`` (see above) rather than silently classifying
+    as ``"inconclusive"``; the live agent-driven evaluator should still validate
+    the score domain before calling this.
     """
     if len(before) != len(after):
         raise ValueError(
             "paired_verdict got mismatched before/after lengths "
             f"({len(before)} != {len(after)}); the evaluator is producing "
             "incomparable samples."
+        )
+
+    # Finiteness guard: a NaN/inf score makes every CI comparison False, which
+    # would silently classify as ``"inconclusive"`` — and a NaN-scored genuine
+    # regression would escape the rollback signal.  Defer such degenerate
+    # samples as ``"underpowered"`` (safe defer) instead.
+    if not all(math.isfinite(x) for x in (*before, *after)):
+        return PairedVerdict(
+            verdict="underpowered",
+            delta=0.0,
+            se=0.0,
+            ciLow=0.0,
+            ciHigh=0.0,
+            n=len(before),
         )
 
     n = len(before)
@@ -328,6 +355,12 @@ class EvalGateConfig(BaseModel):
         validate_default=True,
     )
 
+    #: Minimum paired sample count before a verdict is trusted.  CAVEAT: the
+    #: paired-significance CI is a normal-approximation (``z``) interval valid
+    #: only asymptotically; at the default ``4`` (df=3) it UNDER-COVERS (a true
+    #: 95% t-interval multiplier is ~3.18 vs ``z=1.96``).  Raise this (or ``z``)
+    #: for a genuine 95% no-regression posture at small n.  A proper t-interval
+    #: is a follow-up.
     min_sample_size: int = Field(default=MIN_EVAL_SAMPLE_SIZE, alias="minSampleSize")
     max_regression_band: float = Field(
         default=MAX_REGRESSION_BAND, alias="maxRegressionBand"
@@ -341,6 +374,11 @@ class EvalGateConfig(BaseModel):
         default="strict_band", alias="decisionRule"
     )
     #: z multiplier for the paired-significance confidence interval (Task 2).
+    #: This is a NORMAL-APPROXIMATION multiplier, valid asymptotically.  At small
+    #: ``min_sample_size`` it under-covers — e.g. at n≈4 a true 95% t-interval
+    #: needs ~3.18, so the default ``1.96`` gives a CI that is too NARROW
+    #: (anti-conservative).  Raise ``z`` (``>=3`` for n≈4) or ``min_sample_size``
+    #: for a real 95% no-regression posture.  A proper t-interval is a follow-up.
     z: float = 1.96
     #: Number of paired eval repeats per candidate (Task 4).  Default ``1``
     #: reproduces the single-shot strict-band measurement.  Escalation (when a
@@ -458,9 +496,15 @@ def eval_gate_config_from_env(
     # to the safe default instead of raising in EvalGateConfig's Literal check.
     # Pydantic narrows the plain str to the Literal field at construction.
     rule = raw_rule if raw_rule in _VALID_DECISION_RULES else "strict_band"
+    # ``z`` guard: a non-positive z would invert/collapse the CI (``delta ± z*se``
+    # with z<=0 flips the bounds, breaking the improved/regressed comparisons).
+    # Treat a parsed ``z <= 0`` as invalid and fall back to the safe default.
+    z = _parse_float(env, GATE_Z_ENV_VAR, 1.96)
+    if z <= 0:
+        z = 1.96
     return EvalGateConfig(
         decision_rule=rule,
-        z=_parse_float(env, GATE_Z_ENV_VAR, 1.96),
+        z=z,
         n_repeats=_parse_int(env, GATE_N_REPEATS_ENV_VAR, 1),
         max_repeats=_parse_int(env, GATE_MAX_REPEATS_ENV_VAR, 1),
     )
@@ -699,8 +743,16 @@ def run_eval_gate(
             # ``len(runs) < max_repeats`` bound guarantees termination.  With
             # ``n_repeats=max_repeats=1`` this is exactly one inner run (no loop)
             # — identical to the pre-Task-4 single-shot path.
+            #
+            # Robustness: clamp the seed count and escalation cap to >= 1.  An
+            # explicitly-constructed ``EvalGateConfig(n_repeats=0)`` (or negative)
+            # would otherwise produce an EMPTY ``runs`` list → ``_average_runs([])``
+            # raises.  A non-positive repeat count is meaningless, so run exactly
+            # one repeat rather than crashing the gate.
+            repeats0 = max(1, config.n_repeats)
+            max_repeats = max(1, config.max_repeats)
             runs: list[tuple[tuple[float, ...], tuple[float, ...]]] = [
-                checkset.run(candidate) for _ in range(config.n_repeats)
+                checkset.run(candidate) for _ in range(repeats0)
             ]
             before, after = _average_runs(runs)
             # Length guard (mirrors the strict-band path): a mismatched evaluator
@@ -716,7 +768,15 @@ def run_eval_gate(
             pv = paired_verdict(
                 before, after, z=config.z, min_n=config.min_sample_size
             )
-            while pv.verdict == "inconclusive" and len(runs) < config.max_repeats:
+            # NOTE(optional-stopping): this loop re-decides after each ADDED
+            # repeat and stops on the first decisive verdict.  That is sequential
+            # testing — it inflates Type-I (false-positive) error under a
+            # NONDETERMINISTIC evaluator.  With the current deterministic averaged
+            # checkset the averaged samples are identical across repeats, so there
+            # is no sequential-testing risk.  Once the live (PR7) nondeterministic
+            # evaluator lands, escalation must use a FIXED repeat budget or an
+            # alpha-spending schedule to avoid these sequential false positives.
+            while pv.verdict == "inconclusive" and len(runs) < max_repeats:
                 runs.append(checkset.run(candidate))
                 before, after = _average_runs(runs)
                 pv = paired_verdict(

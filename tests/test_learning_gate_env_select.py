@@ -86,6 +86,17 @@ def test_malformed_z_falls_back_to_default() -> None:
     assert cfg.z == 1.96
 
 
+def test_negative_z_falls_back_to_default() -> None:
+    # z <= 0 would invert/collapse the CI → treat as invalid, use the default.
+    cfg = eval_gate_config_from_env(env={"MAGI_LEARNING_GATE_Z": "-1"})
+    assert cfg.z == 1.96
+
+
+def test_zero_z_falls_back_to_default() -> None:
+    cfg = eval_gate_config_from_env(env={"MAGI_LEARNING_GATE_Z": "0"})
+    assert cfg.z == 1.96
+
+
 def test_malformed_n_repeats_falls_back_to_default() -> None:
     cfg = eval_gate_config_from_env(env={"MAGI_LEARNING_GATE_N_REPEATS": "1.5"})
     assert cfg.n_repeats == 1

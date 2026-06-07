@@ -240,3 +240,37 @@ def test_empty_inputs_are_underpowered() -> None:
     assert v.verdict == "underpowered"
     assert v.n == 0
     assert v.delta == 0.0
+
+
+# ---------------------------------------------------------------------------
+# paired_verdict — non-finite (NaN/inf) inputs defer as underpowered
+# ---------------------------------------------------------------------------
+
+
+def test_nan_in_before_defers_underpowered() -> None:
+    """A NaN score in ``before`` defers as underpowered (not inconclusive)."""
+    before = (0.40, math.nan, 0.41, 0.39)
+    after = (0.80, 0.82, 0.81, 0.79)
+    v = paired_verdict(before, after)
+    assert v.verdict == "underpowered"
+    assert v.se == 0.0
+    assert v.ci_low == v.ci_high == 0.0
+
+
+def test_inf_in_after_defers_underpowered() -> None:
+    """An inf score in ``after`` defers as underpowered (not a passable result)."""
+    before = (0.40, 0.42, 0.41, 0.39)
+    after = (0.80, math.inf, 0.81, 0.79)
+    v = paired_verdict(before, after)
+    assert v.verdict == "underpowered"
+    assert v.se == 0.0
+    assert v.ci_low == v.ci_high == 0.0
+
+
+def test_nan_scored_regression_does_not_classify_regressed() -> None:
+    """A would-be regression with a NaN score defers rather than reporting a
+    decisive verdict — the degenerate sample is not trusted."""
+    before = (0.80, 0.82, 0.81, 0.79)
+    after = (0.40, math.nan, 0.41, 0.39)
+    v = paired_verdict(before, after)
+    assert v.verdict == "underpowered"

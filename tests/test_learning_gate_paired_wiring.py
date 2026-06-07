@@ -274,6 +274,65 @@ def test_improved_eval_not_auto_activated(tmp_path) -> None:
     assert item.status == "proposed"
 
 
+def test_regressed_rule_not_activated_stays_proposed(tmp_path) -> None:
+    # closes the verdict×kind matrix: a regressed rule is not activated and the
+    # gate records the verdict without rolling back.
+    store = _store(tmp_path)
+    decisions = run_eval_gate(
+        (_candidate(kind="rule"),),
+        store=store,
+        checkset=_regressed_checkset(),
+        config=_paired_config(),
+    )
+    decision = decisions[0]
+    item = store.get(decision.item_id)
+    store.close()
+
+    assert decision.verdict == "regressed"
+    assert decision.passed is False
+    assert decision.activated is False
+    assert item is not None
+    assert item.status == "proposed"
+
+
+def test_inconclusive_eval_not_activated_stays_proposed(tmp_path) -> None:
+    # closes the verdict×kind matrix: an inconclusive eval defers (stays proposed).
+    store = _store(tmp_path)
+    decisions = run_eval_gate(
+        (_candidate(kind="eval"),),
+        store=store,
+        checkset=_inconclusive_checkset(),
+        config=_paired_config(),
+    )
+    decision = decisions[0]
+    item = store.get(decision.item_id)
+    store.close()
+
+    assert decision.verdict == "inconclusive"
+    assert decision.passed is False
+    assert decision.activated is False
+    assert item is not None
+    assert item.status == "proposed"
+
+
+def test_paired_n_repeats_zero_runs_one_repeat(tmp_path) -> None:
+    # Robustness: an explicitly-constructed n_repeats=0 must NOT crash
+    # (empty runs → _average_runs([]) would raise); it clamps to exactly one run.
+    store = _store(tmp_path)
+    decisions = run_eval_gate(
+        (_candidate(kind="example"),),
+        store=store,
+        checkset=_improved_checkset(),
+        config=EvalGateConfig(decisionRule="paired_significance", nRepeats=0),
+    )
+    decision = decisions[0]
+    store.close()
+
+    assert decision.repeats == 1
+    assert decision.verdict == "improved"
+    assert decision.passed is True
+
+
 def test_config_z_plumbing_flips_borderline(tmp_path) -> None:
     # deltas 0.5, 0.0, 0.4, -0.1 → delta 0.2, se ≈ 0.147: the verdict depends on z.
     # Proves config.z is actually plumbed through to paired_verdict.
