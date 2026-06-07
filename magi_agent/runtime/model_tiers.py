@@ -52,12 +52,36 @@ _MODEL_CONFIG = ConfigDict(
     hide_input_in_errors=True,
 )
 _PROVIDER_RE = re.compile(r"^[a-z][a-z0-9-]{0,31}$")
-_MODEL_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,95}$")
+_MODEL_RE = re.compile(
+    r"^(?=.{1,128}$)[a-z0-9][a-z0-9._-]*(?:/[a-z0-9][a-z0-9._-]*){0,5}$"
+)
 _UNSAFE_LABEL_RE = re.compile(
     r"(?:"
     r"^\s*$|"
     r"\s|"
     r"[\\/'\"`$=;|&<>]|"
+    r"\.\.|"
+    r"~|"
+    r"://|"
+    r"^sk-|"
+    r"^xox[a-z]-|"
+    r"^gh[opusr]_|"
+    r"^github_pat_|"
+    r"^AIza|"
+    r"\bbearer\b|"
+    r"api[_-]?key|"
+    r"secret|"
+    r"token|"
+    r"password|"
+    r"private[_-]?key"
+    r")",
+    re.IGNORECASE,
+)
+_UNSAFE_MODEL_LABEL_RE = re.compile(
+    r"(?:"
+    r"^\s*$|"
+    r"\s|"
+    r"[\\'\"`$=;|&<>]|"
     r"\.\.|"
     r"~|"
     r"://|"
@@ -181,6 +205,29 @@ class ModelTierRegistry:
                     ),
                 ),
                 _ModelTierRecord(
+                    provider="gemini",
+                    model="gemini-3.5-flash",
+                    tier="cheap",
+                    capabilities=(
+                        "streaming",
+                        "json_schema",
+                        "function_calling",
+                        "low_latency",
+                    ),
+                ),
+                _ModelTierRecord(
+                    provider="anthropic",
+                    model="claude-sonnet-4-6",
+                    tier="sota",
+                    capabilities=(
+                        "streaming",
+                        "tool_use",
+                        "long_context",
+                        "coding",
+                        "reasoning",
+                    ),
+                ),
+                _ModelTierRecord(
                     provider="anthropic",
                     model="haiku",
                     tier="cheap",
@@ -195,6 +242,12 @@ class ModelTierRegistry:
                 _ModelTierRecord(
                     provider="fireworks",
                     model="kimi-k2p6",
+                    tier="cheap",
+                    capabilities=("streaming", "coding", "long_context"),
+                ),
+                _ModelTierRecord(
+                    provider="fireworks",
+                    model="accounts/fireworks/models/kimi-k2-instruct",
                     tier="cheap",
                     capabilities=("streaming", "coding", "long_context"),
                 ),
@@ -259,7 +312,7 @@ def _validate_provider(value: str) -> str:
 
 def _validate_model(value: str) -> str:
     clean = value.strip().casefold()
-    if _UNSAFE_LABEL_RE.search(clean) or not _MODEL_RE.fullmatch(clean):
+    if _UNSAFE_MODEL_LABEL_RE.search(clean) or not _MODEL_RE.fullmatch(clean):
         raise ValueError("model label must be a safe server-side model label")
     return clean
 
