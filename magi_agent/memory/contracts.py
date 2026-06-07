@@ -102,15 +102,31 @@ class MemoryProviderCapabilities(BaseModel):
     max_result_bytes: int = Field(default=32_768, alias="maxResultBytes", ge=1)
     max_write_bytes: int = Field(default=0, alias="maxWriteBytes", ge=0)
     policy_required: tuple[str, ...] = Field(default=(), alias="policyRequired")
+    # Gated write tier — must be explicitly set to "gated_write" to unlock
+    # supports_write=True + max_write_bytes>0.  The default "read_only" preserves
+    # the original invariant byte-for-byte.
+    write_tier: Literal["read_only", "gated_write"] = Field(
+        default="read_only",
+        alias="writeTier",
+    )
 
     @model_validator(mode="after")
     def _validate_readonly_scaffold(self) -> "MemoryProviderCapabilities":
-        if self.supports_write:
-            raise ValueError("Python memory scaffold supports read-only providers only")
         if self.supports_delete != "none":
             raise ValueError("Python memory scaffold does not expose delete operations")
-        if self.max_write_bytes != 0:
-            raise ValueError("read-only memory providers must set maxWriteBytes=0")
+        if self.write_tier == "read_only":
+            # Original invariant: unchanged for all providers that do not opt in.
+            if self.supports_write:
+                raise ValueError("Python memory scaffold supports read-only providers only")
+            if self.max_write_bytes != 0:
+                raise ValueError("read-only memory providers must set maxWriteBytes=0")
+        else:
+            # Gated write tier: supports_write may be True but max_write_bytes must be >0.
+            if self.supports_write and self.max_write_bytes == 0:
+                raise ValueError(
+                    "gated_write providers must set max_write_bytes > 0 "
+                    "to bound the write surface"
+                )
         return self
 
 
