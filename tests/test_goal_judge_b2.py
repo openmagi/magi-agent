@@ -541,3 +541,92 @@ class TestRunJudgeShadowGate:
             shadow=None,  # let env var decide
         )
         assert decision.acted is True
+
+
+# ---------------------------------------------------------------------------
+# Important 1 — failure_count reset-on-success contract
+# ---------------------------------------------------------------------------
+
+
+class TestFailureCountNoAutoReset:
+    """run_judge does NOT auto-reset failure_count on a successful parse.
+
+    The CALLER (B3) is responsible for resetting its running counter to 0
+    after a satisfied/parsed verdict.  Verifies the documented contract.
+    """
+
+    def test_successful_parse_returns_input_failure_count_unchanged(self) -> None:
+        """On a successful parse, failure_count == the input consecutive_parse_failures."""
+        judge = _AlwaysSatisfied()
+        input_failures = 2  # caller had 2 prior failures before this successful call
+        decision = run_judge(
+            judge,
+            goal="task",
+            transcript_excerpt="done",
+            consecutive_parse_failures=input_failures,
+            shadow=False,
+        )
+        # Verdict parsed successfully — failure_count must equal input, NOT 0
+        assert decision.verdict is not None, "expected a parsed verdict"
+        assert decision.failure_count == input_failures, (
+            f"run_judge must NOT auto-reset failure_count: "
+            f"expected {input_failures}, got {decision.failure_count}"
+        )
+
+    def test_successful_parse_with_zero_input_failures(self) -> None:
+        """With 0 prior failures, a successful parse still returns 0 (trivially unchanged)."""
+        judge = _AlwaysSatisfied()
+        decision = run_judge(
+            judge,
+            goal="task",
+            transcript_excerpt="done",
+            consecutive_parse_failures=0,
+            shadow=False,
+        )
+        assert decision.verdict is not None
+        assert decision.failure_count == 0
+
+
+# ---------------------------------------------------------------------------
+# Minor 3 — _JSON_SATISFIED_RE no IGNORECASE: uppercase key goes to token path
+# ---------------------------------------------------------------------------
+
+
+class TestJsonRegexNoCaseInsensitive:
+    """Uppercase JSON key {"SATISFIED": true} must NOT be consumed by the JSON path.
+
+    With IGNORECASE removed, the JSON regex only matches lowercase "satisfied".
+    An uppercase key falls through to the token path, which handles it via
+    _SATISFIED_RE (which keeps IGNORECASE) — so the final result is still
+    satisfied=True, but via the correct path.  This avoids the silent overlap
+    where JSON regex matches but obj.get("satisfied") returns None.
+    """
+
+    def test_uppercase_json_key_returns_satisfied_via_token_path(self) -> None:
+        """{"SATISFIED": true} — uppercase key — must be handled, result satisfied=True."""
+        raw = '{"SATISFIED": true}'
+        result = parse_verdict(raw)
+        # The token path picks up "SATISFIED" as a bare token → satisfied=True
+        assert result is not None, f"parse_verdict returned None for {raw!r}"
+        assert result.satisfied is True
+
+    def test_lowercase_json_key_still_uses_json_path(self) -> None:
+        """{"satisfied": true} — lowercase key — must still parse correctly."""
+        raw = '{"satisfied": true}'
+        result = parse_verdict(raw)
+        assert result is not None
+        assert result.satisfied is True
+
+    def test_lowercase_json_false_still_parses(self) -> None:
+        """{"satisfied": false} — lowercase key — still returns satisfied=False."""
+        raw = '{"satisfied": false}'
+        result = parse_verdict(raw)
+        assert result is not None
+        assert result.satisfied is False
+
+    def test_uppercase_json_key_false_returns_not_satisfied(self) -> None:
+        """{"NOT_SATISFIED": true} as prose — token path resolves it."""
+        raw = "NOT_SATISFIED"
+        result = parse_verdict(raw)
+        assert result is not None
+        assert result.satisfied is False

@@ -77,10 +77,11 @@ _SHADOW_ENV_VAR = "MAGI_GOAL_LOOP_JUDGE_SHADOW"
 _NOT_SATISFIED_RE = re.compile(r"\bNOT_SATISFIED\b", re.IGNORECASE)
 _SATISFIED_RE = re.compile(r"\bSATISFIED\b", re.IGNORECASE)
 
-# JSON extraction: look for {"satisfied": true/false} anywhere in the text
+# JSON extraction: look for {"satisfied": true/false} anywhere in the text.
+# No IGNORECASE — the JSON key is spec-defined lowercase "satisfied".  Uppercase
+# variants like {"SATISFIED": true} fall through to the token path (correct).
 _JSON_SATISFIED_RE = re.compile(
     r'\{[^{}]*"satisfied"\s*:\s*(true|false)[^{}]*\}',
-    re.IGNORECASE,
 )
 
 
@@ -120,7 +121,10 @@ class JudgeDecision(BaseModel):
 
     ``acted`` is False in shadow mode (verdict observed but not acted on).
     ``failure_count`` is the CURRENT consecutive-parse-failure count AFTER
-    this invocation (0 if a verdict was successfully parsed).
+    this invocation.  On a successful parse this equals the input
+    ``consecutive_parse_failures`` (unchanged — no auto-reset).  The CALLER
+    (B3) is responsible for resetting its running counter to 0 after a
+    satisfied/parsed verdict is received.
     ``reason`` documents why ``acted`` has its value (for audit logs).
     """
 
@@ -338,6 +342,10 @@ def run_judge(
 
     On any exception from the judge, verdict is treated as None (unparseable)
     and failure_count is incremented in the returned decision.
+
+    Evidence is the caller's responsibility: ``run_judge`` does NOT persist
+    or attach evidence to the returned ``JudgeDecision``.  B4 owns the
+    evidence bus and calls ``build_judge_evidence`` directly.
     """
     is_shadow = _judge_shadow_enabled() if shadow is None else shadow
     ts = now or datetime.now(UTC)
@@ -371,7 +379,7 @@ def run_judge(
             failure_count=new_failure_count,
             now=ts,
         )
-        _ = evidence  # recorded for audit; caller may retrieve from decision
+        _ = evidence  # evidence computed for audit; NOT attached to decision — B4 calls build_judge_evidence directly
         return JudgeDecision(
             verdict=verdict,
             acted=False,
