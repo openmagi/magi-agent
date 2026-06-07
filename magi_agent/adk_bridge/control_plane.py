@@ -22,8 +22,9 @@ Design
 * ``on_after_tool``  — may override the tool result (returns ``dict | None``).
 * ``on_before_model`` — may mutate the outgoing ``LlmRequest`` in place (returns
   ``None``).
+* ``on_after_agent`` — may observe the completed turn (returns ``None``).
 
-``BaseLoopControl`` — abstract base with no-op defaults for all three hooks;
+``BaseLoopControl`` — abstract base with no-op defaults for all hooks;
 concrete controls override only the hooks they need.
 
 ``ControlPlane`` — ordered registry of ``LoopControl`` instances. Fan-out:
@@ -33,6 +34,7 @@ concrete controls override only the hooks they need.
 * ``_after_tool``: ordered; first non-``None`` override wins.
 * ``_before_model``: all controls run (mutations accumulate); always returns
   ``None``.
+* ``_after_agent``: all observers run; always returns ``None``.
 
 ``ControlPlanePlugin`` — thin ADK ``BasePlugin`` wrapper that forwards each ADK
 callback to the ``ControlPlane``. Registered in ``App(plugins=[...])`` once per
@@ -75,21 +77,32 @@ The following controls CANNOT be expressed via ADK callbacks and remain
 * **stop-on-goal re-entry after end_turn** — ``end_turn`` finalises the ADK
   runner; re-entry requires a new ``run_async`` call.
 
-The plane covers ``before_tool`` (deny/rewrite), ``after_tool`` (override), and
-``before_model`` (mutation, incl. tool-disable) ONLY.
+The plane covers plugin-level callbacks that can be expressed as one-way
+fan-out without bypassing the permission gate.
 """
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import os
-from dataclasses import dataclass, field
+from collections.abc import Callable, Coroutine
+from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Literal, runtime_checkable
 
 from typing import Protocol
 
 from google.adk.plugins.base_plugin import BasePlugin
 
+from magi_agent.hooks.manifest import HookManifest, HookPoint
+from magi_agent.tools.manifest import ToolSource
+
 CONTROL_PLANE_PLUGIN_NAME = "magi_control_plane"
+SELF_REVIEW_AFTER_TURN_CONTROL_NAME = "magi_self_review_after_turn"
+SELF_REVIEW_ENABLED_ENV = "MAGI_SELF_REVIEW_ENABLED"
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # ToolDecision
@@ -153,6 +166,14 @@ class LoopControl(Protocol):
     ) -> None:
         ...
 
+    async def on_after_agent(
+        self,
+        *,
+        agent: Any,
+        callback_context: Any,
+    ) -> None:
+        ...
+
 
 # ---------------------------------------------------------------------------
 # BaseLoopControl
@@ -191,6 +212,14 @@ class BaseLoopControl:
         *,
         callback_context: Any,
         llm_request: Any,
+    ) -> None:
+        return None
+
+    async def on_after_agent(
+        self,
+        *,
+        agent: Any,
+        callback_context: Any,
     ) -> None:
         return None
 
@@ -287,6 +316,20 @@ class ControlPlane:
             )
         return None
 
+    async def _after_agent(
+        self,
+        *,
+        agent: Any,
+        callback_context: Any,
+    ) -> None:
+        """Fan-out after_agent observers; they cannot alter the ADK response."""
+        for control in self._controls:
+            await control.on_after_agent(
+                agent=agent,
+                callback_context=callback_context,
+            )
+        return None
+
 
 # ---------------------------------------------------------------------------
 # ControlPlanePlugin
@@ -348,6 +391,19 @@ class ControlPlanePlugin(BasePlugin):
         """Forward to plane._before_model; always returns None (mutations only)."""
         await self._p._before_model(
             callback_context=callback_context, llm_request=llm_request
+        )
+        return None
+
+    async def after_agent_callback(
+        self,
+        *,
+        agent: Any,
+        callback_context: Any,
+    ) -> None:
+        """Forward ADK's post-agent callback to the control plane."""
+        await self._p._after_agent(
+            agent=agent,
+            callback_context=callback_context,
         )
         return None
 
@@ -435,6 +491,261 @@ class MaxStepsBrakeControl(BaseLoopControl):
                 except Exception:
                     pass
         return None
+
+
+# ---------------------------------------------------------------------------
+# SelfReviewAfterTurnControl (default-OFF, shadow-first, no writes)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class _SelfReviewTurnSnapshot:
+    session_id: str
+    turn_id: str
+    system_prompt_blocks: list[dict[str, Any]]
+    parent_assistant_message: dict[str, Any]
+
+
+class _NoopSelfReviewCandidateSink:
+    def receive(self, _candidate: object) -> None:
+        return None
+
+
+class SelfReviewAfterTurnControl(BaseLoopControl):
+    """ADK post-turn adapter for C1 self-review.
+
+    The control is registered only when ``MAGI_SELF_REVIEW_ENABLED`` is true.
+    It schedules the C1 hook in the background and returns ``None`` immediately,
+    so the ADK post-turn callback remains observational and cannot alter the
+    parent turn. The default sink is a no-op, preserving C1's no-write contract
+    until a later stage injects a real candidate sink.
+    """
+
+    name = SELF_REVIEW_AFTER_TURN_CONTROL_NAME
+
+    def __init__(
+        self,
+        *,
+        fork_runner: Any | None = None,
+        candidate_sink: Any | None = None,
+        config: Any | None = None,
+        now: datetime | None = None,
+        scheduler: Callable[[Coroutine[Any, Any, None]], None] | None = None,
+    ) -> None:
+        self.manifest = _self_review_after_turn_manifest()
+        self._fork_runner = fork_runner
+        self._candidate_sink = candidate_sink or _NoopSelfReviewCandidateSink()
+        self._config = config
+        self._now = now
+        self._scheduler = scheduler
+        self._background_tasks: set[asyncio.Task[None]] = set()
+
+    async def on_after_agent(
+        self,
+        *,
+        agent: Any,
+        callback_context: Any,
+    ) -> None:
+        try:
+            snapshot = _extract_self_review_turn_snapshot(
+                agent=agent,
+                callback_context=callback_context,
+            )
+        except Exception:
+            logger.debug(
+                "self-review after-turn context extraction failed",
+                exc_info=True,
+            )
+            return None
+        if snapshot is None:
+            return None
+
+        self._schedule(self._run_self_review(snapshot))
+        return None
+
+    def _schedule(self, coro: Coroutine[Any, Any, None]) -> None:
+        if self._scheduler is not None:
+            try:
+                self._scheduler(coro)
+            except Exception:
+                coro.close()
+                logger.debug("self-review after-turn scheduler failed", exc_info=True)
+            return
+
+        try:
+            task = asyncio.create_task(coro)
+        except RuntimeError:
+            coro.close()
+            logger.debug(
+                "self-review after-turn schedule skipped: no running loop",
+                exc_info=True,
+            )
+            return
+        self._background_tasks.add(task)
+        task.add_done_callback(self._on_background_task_done)
+
+    def _on_background_task_done(self, task: asyncio.Task[None]) -> None:
+        self._background_tasks.discard(task)
+        try:
+            task.result()
+        except asyncio.CancelledError:
+            return
+        except Exception:
+            logger.debug("self-review after-turn background task failed", exc_info=True)
+
+    async def _run_self_review(self, snapshot: _SelfReviewTurnSnapshot) -> None:
+        from magi_agent.harness.self_review import run_self_review_hook
+
+        await run_self_review_hook(
+            session_id=snapshot.session_id,
+            turn_id=snapshot.turn_id,
+            system_prompt_blocks=snapshot.system_prompt_blocks,
+            parent_assistant_message=snapshot.parent_assistant_message,
+            fork_runner=self._fork_runner_or_default(),
+            candidate_sink=self._candidate_sink,
+            config=self._config,
+            now=self._now,
+        )
+
+    def _fork_runner_or_default(self) -> Any:
+        if self._fork_runner is None:
+            from magi_agent.runtime.fork_runner import ForkRunner
+
+            self._fork_runner = ForkRunner()
+        return self._fork_runner
+
+
+def _extract_self_review_turn_snapshot(
+    *,
+    agent: Any,
+    callback_context: Any,
+) -> _SelfReviewTurnSnapshot | None:
+    session = getattr(callback_context, "session", None)
+    session_id = _non_empty_str(getattr(session, "id", None))
+    turn_id = _non_empty_str(getattr(callback_context, "invocation_id", None))
+    if turn_id is None:
+        turn_id = _latest_event_invocation_id(session)
+    if session_id is None or turn_id is None:
+        return None
+
+    parent_message = _latest_assistant_message(session=session, turn_id=turn_id)
+    if parent_message is None:
+        return None
+
+    return _SelfReviewTurnSnapshot(
+        session_id=session_id,
+        turn_id=turn_id,
+        system_prompt_blocks=_system_prompt_blocks_from_agent(agent),
+        parent_assistant_message=parent_message,
+    )
+
+
+def _self_review_after_turn_manifest() -> HookManifest:
+    return HookManifest(
+        name="builtin:self-review-after-turn",
+        point=HookPoint.AFTER_TURN_END,
+        description="Runs the C1 self-review fork after an agent turn.",
+        source=ToolSource(
+            kind="builtin",
+            package="magi_agent.harness.self_review",
+        ),
+        executionType="handler",
+        enabled=True,
+        blocking=False,
+        failOpen=True,
+        priority=80,
+        optOut=True,
+    )
+
+
+def _system_prompt_blocks_from_agent(agent: Any) -> list[dict[str, Any]]:
+    instruction = getattr(agent, "instruction", None)
+    if isinstance(instruction, str) and instruction.strip():
+        return [{"type": "text", "text": instruction}]
+    return []
+
+
+def _latest_event_invocation_id(session: Any) -> str | None:
+    events = getattr(session, "events", None)
+    if not isinstance(events, list | tuple):
+        return None
+    for event in reversed(events):
+        turn_id = _non_empty_str(getattr(event, "invocation_id", None))
+        if turn_id is not None:
+            return turn_id
+    return None
+
+
+def _latest_assistant_message(
+    *,
+    session: Any,
+    turn_id: str,
+) -> dict[str, Any] | None:
+    events = getattr(session, "events", None)
+    if not isinstance(events, list | tuple):
+        return None
+
+    for event in reversed(events):
+        event_turn_id = _non_empty_str(getattr(event, "invocation_id", None))
+        if event_turn_id is not None and event_turn_id != turn_id:
+            continue
+        if _is_user_event(event):
+            continue
+        message = _content_to_assistant_message(getattr(event, "content", None))
+        if message is not None:
+            return message
+    return None
+
+
+def _is_user_event(event: Any) -> bool:
+    author = _non_empty_str(getattr(event, "author", None))
+    content = getattr(event, "content", None)
+    role = _non_empty_str(getattr(content, "role", None))
+    return author == "user" or role == "user"
+
+
+def _content_to_assistant_message(content: Any) -> dict[str, Any] | None:
+    if _non_empty_str(getattr(content, "role", None)) == "user":
+        return None
+    parts = getattr(content, "parts", None)
+    if not isinstance(parts, list | tuple):
+        return None
+
+    blocks: list[dict[str, Any]] = []
+    for part in parts:
+        text = _non_empty_str(getattr(part, "text", None))
+        if text is not None:
+            blocks.append({"type": "text", "text": text})
+            continue
+        function_call = getattr(part, "function_call", None)
+        if function_call is not None:
+            blocks.append(
+                _function_call_block(function_call, fallback_index=len(blocks))
+            )
+
+    if not blocks:
+        return None
+    return {"role": "assistant", "content": blocks}
+
+
+def _function_call_block(function_call: Any, *, fallback_index: int) -> dict[str, Any]:
+    name = _non_empty_str(getattr(function_call, "name", None)) or "tool"
+    raw_args = getattr(function_call, "args", None)
+    args = dict(raw_args) if isinstance(raw_args, dict) else {}
+    tool_id = (
+        _non_empty_str(getattr(function_call, "id", None))
+        or f"{name}-{fallback_index}"
+    )
+    return {
+        "type": "tool_use",
+        "id": tool_id,
+        "name": name,
+        "input": args,
+    }
+
+
+def _non_empty_str(value: object) -> str | None:
+    return value if isinstance(value, str) and value else None
 
 
 # ---------------------------------------------------------------------------
@@ -705,6 +1016,10 @@ def build_default_plane(
         # an engine.py concern (PR4 scope); here we only prove the seam is wired.
         plane.register(MaxStepsBrakeControl(max_iterations=0, iteration=0))
 
+    # 5. Self-review C1 (MAGI_SELF_REVIEW_ENABLED, default OFF).
+    if _is_true(env.get(SELF_REVIEW_ENABLED_ENV, "")):
+        plane.register(SelfReviewAfterTurnControl())
+
     return plane
 
 
@@ -735,6 +1050,9 @@ __all__ = [
     "MAX_STEPS_BRAKE_CONTROL_NAME",
     "MAX_STEPS_BRAKE_ENABLED_ENV",
     "MaxStepsBrakeControl",
+    "SELF_REVIEW_AFTER_TURN_CONTROL_NAME",
+    "SELF_REVIEW_ENABLED_ENV",
+    "SelfReviewAfterTurnControl",
     "ToolDecision",
     "build_default_plane",
     "build_default_plugin",
