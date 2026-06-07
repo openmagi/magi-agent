@@ -240,6 +240,7 @@ def run_eval_gate(
     checkset: CheckSet,
     config: EvalGateConfig | None = None,
     tenant_id: str = "local",
+    auto_activate_examples: bool = True,
 ) -> tuple[EvalGateDecision, ...]:
     """Run each candidate through propose → A/B eval → policy-gated activation.
 
@@ -256,6 +257,15 @@ def run_eval_gate(
 
     All activations go through ``policy.assert_activation_allowed`` (enforced by
     the store's ``auto_activate``).  No direct ``status="active"`` writes.
+
+    Args:
+        auto_activate_examples: When ``True`` (default — preserves all existing
+            PR4 behaviour) a passing ``example`` is auto-activated.  When
+            ``False`` a passing ``example`` is NOT auto-activated; it stays
+            ``proposed`` and awaits human approval (the bootstrap / default-ON
+            reflect tier passes ``False`` so nothing activates without review).
+            The eval observation is recorded either way, so a later human
+            approval or real-eval pass has the measurement data.
     """
     if config is None:
         config = EvalGateConfig()
@@ -343,11 +353,16 @@ def run_eval_gate(
         )
 
         activated = False
-        if passed and item.kind == "example":
+        if passed and item.kind == "example" and auto_activate_examples:
             # policy:eval-observation-required satisfied by eval_ref; no human
             # needed for examples.  assert_activation_allowed runs inside the
             # store's auto_activate (defense in depth) — call it here too so the
             # gate is unambiguously the policy-enforcement point.
+            #
+            # GOVERNANCE: when ``auto_activate_examples`` is False (bootstrap /
+            # default-ON reflect tier) this branch is skipped so EVERY kind stays
+            # ``proposed`` and awaits human approval.  The eval observation above
+            # is still recorded, so the later human-approval path has the data.
             assert_activation_allowed(item, eval_observation_ref=eval_ref)
             store.auto_activate(
                 item.id, eval_observation_ref=eval_ref, tenant_id=tenant_id
