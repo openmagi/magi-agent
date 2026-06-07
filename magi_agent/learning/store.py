@@ -155,6 +155,36 @@ _MIGRATIONS: list[tuple[int, str]] = [
             ON learning_items (tenant_id, scope_task_kind);
         """,
     ),
+    (
+        6,
+        # Add ``pinned`` column (default 0/False).  Pinned items are exempt from
+        # the inactivity-triggered skill curator pass (C3).  The ALTER TABLE guard
+        # (see _MIGRATION_SKIP_GUARDS) makes this idempotent on re-run.
+        """
+        ALTER TABLE learning_items ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;
+        """,
+    ),
+    (
+        7,
+        # Curator state table: persists last_run_at per tenant_id so the
+        # inactivity trigger survives process restarts.  Curator snapshots store
+        # pre-archive item states (JSON blob) for reversibility.
+        """
+        CREATE TABLE IF NOT EXISTS learning_curator_state (
+            tenant_id   TEXT NOT NULL,
+            last_run_at TEXT,
+            PRIMARY KEY (tenant_id)
+        );
+        CREATE TABLE IF NOT EXISTS learning_curator_snapshots (
+            snapshot_ref TEXT PRIMARY KEY,
+            tenant_id    TEXT NOT NULL,
+            created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+            items_json   TEXT NOT NULL DEFAULT '[]'
+        );
+        CREATE INDEX IF NOT EXISTS idx_curator_snapshots_tenant
+            ON learning_curator_snapshots (tenant_id);
+        """,
+    ),
 ]
 
 # Statements inside these migrations require special idempotency handling
@@ -183,6 +213,11 @@ def _has_composite_pk(conn: sqlite3.Connection) -> bool:
 _MIGRATION_SKIP_GUARDS: dict[tuple[int, str], object] = {
     (4, "ALTER TABLE learning_items"): lambda conn: any(
         row[1] == "scope_task_kind"
+        for row in conn.execute("PRAGMA table_xinfo(learning_items)").fetchall()
+    ),
+    # Migration 6: skip ADD COLUMN pinned if the column already exists.
+    (6, "ALTER TABLE learning_items ADD COLUMN pinned"): lambda conn: any(
+        row[1] == "pinned"
         for row in conn.execute("PRAGMA table_xinfo(learning_items)").fetchall()
     ),
     # Migration 5 rebuilds the table for a composite PK.  Skip the CREATE/INSERT/
@@ -318,6 +353,10 @@ def _now_iso() -> str:
 
 
 def _row_to_item(row: sqlite3.Row) -> LearningItem:
+    # ``pinned`` was added in migration 6; guard against old rows without
+    # the column by defaulting to False (keys() exposes available columns).
+    row_keys = row.keys()
+    pinned_val = bool(row["pinned"]) if "pinned" in row_keys else False
     payload: dict[str, object] = {
         "id": row["id"],
         "tenantId": row["tenant_id"],
@@ -333,6 +372,7 @@ def _row_to_item(row: sqlite3.Row) -> LearningItem:
         "stats": json.loads(row["stats_json"]),
         "evalObservationRef": row["eval_observation_ref"],
         "approvalRef": row["approval_ref"],
+        "pinned": pinned_val,
     }
     return LearningItem.model_validate(payload)
 
@@ -353,6 +393,7 @@ def _item_to_row_dict(item: LearningItem) -> dict[str, object]:
         "stats_json": json.dumps(item.stats.model_dump(by_alias=True)),
         "eval_observation_ref": item.eval_observation_ref,
         "approval_ref": item.approval_ref,
+        "pinned": int(item.pinned),
         "updated_at": _now_iso(),
     }
 
@@ -459,11 +500,11 @@ class SqliteLearningStore:
             INSERT INTO learning_items (
                 id, tenant_id, kind, status, scope_json, content_json,
                 rationale, provenance_json, version, supersedes, embedding_ref,
-                stats_json, eval_observation_ref, approval_ref, updated_at
+                stats_json, eval_observation_ref, approval_ref, pinned, updated_at
             ) VALUES (
                 :id, :tenant_id, :kind, :status, :scope_json, :content_json,
                 :rationale, :provenance_json, :version, :supersedes, :embedding_ref,
-                :stats_json, :eval_observation_ref, :approval_ref, :updated_at
+                :stats_json, :eval_observation_ref, :approval_ref, :pinned, :updated_at
             )
             ON CONFLICT(id, tenant_id) DO UPDATE SET
                 kind       = excluded.kind,
@@ -478,6 +519,7 @@ class SqliteLearningStore:
                 stats_json = excluded.stats_json,
                 eval_observation_ref = excluded.eval_observation_ref,
                 approval_ref = excluded.approval_ref,
+                pinned     = excluded.pinned,
                 updated_at = excluded.updated_at
             """,
             row,
@@ -787,11 +829,11 @@ class SqliteLearningStore:
             INSERT INTO learning_items (
                 id, tenant_id, kind, status, scope_json, content_json,
                 rationale, provenance_json, version, supersedes, embedding_ref,
-                stats_json, eval_observation_ref, approval_ref, updated_at
+                stats_json, eval_observation_ref, approval_ref, pinned, updated_at
             ) VALUES (
                 :id, :tenant_id, :kind, :status, :scope_json, :content_json,
                 :rationale, :provenance_json, :version, :supersedes, :embedding_ref,
-                :stats_json, :eval_observation_ref, :approval_ref, :updated_at
+                :stats_json, :eval_observation_ref, :approval_ref, :pinned, :updated_at
             )
             """,
             row,

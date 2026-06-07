@@ -68,6 +68,9 @@ class LearningItem(BaseModel):
     stats: LearningStats = Field(default_factory=LearningStats)
     eval_observation_ref: str | None = Field(default=None, alias="evalObservationRef")
     approval_ref: str | None = Field(default=None, alias="approvalRef")
+    # Pinned items are exempt from the inactivity-triggered curator pass.
+    # Defaults to False; set to True to protect an item from automatic archival.
+    pinned: bool = False
 
     @model_validator(mode="after")
     def _validate_content_per_kind(self) -> "LearningItem":
