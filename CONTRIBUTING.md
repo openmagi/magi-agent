@@ -7,33 +7,30 @@ Thank you for your interest in contributing!
 ```bash
 git clone https://github.com/openmagi/magi-agent.git
 cd magi-agent
-npm install
-npm run dev
+uv sync --extra dev --extra cli
+uv run --extra cli magi --help
 ```
 
 ## Running Tests
 
 ```bash
-npm test            # Run all tests
-npm run test:watch  # Watch mode
-npm run lint        # Type check
+uv run --extra dev pytest -q
+uv run --extra dev ruff check .
+uv run --extra dev mypy magi_agent
 ```
 
 ## Code Style
 
-- TypeScript strict mode
-- No `any` type
-- Explicit return types for exported functions
-- `const` over `let`
-- Files: kebab-case
-- Components/classes: PascalCase
-- Constants: UPPER_SNAKE_CASE
+- Prefer typed Python APIs with clear return types at public boundaries.
+- Keep runtime changes scoped to the canonical `magi_agent` package.
+- Follow the existing module structure before adding new abstractions.
+- Keep public docs focused on user-facing behavior and stable contracts.
 
 ## Pull Requests
 
 1. Fork the repo and create a feature branch
 2. Write tests for new functionality
-3. Ensure `npm test` and `npm run lint` pass
+3. Ensure the relevant `uv run --extra dev ...` checks pass
 4. Submit a PR with a clear description
 
 ## Reporting Issues
@@ -41,4 +38,4 @@ npm run lint        # Type check
 Use [GitHub Issues](https://github.com/openmagi/magi-agent/issues). Include:
 - Steps to reproduce
 - Expected vs actual behavior
-- Node.js version and OS
+- Magi Agent version, Python version, and OS

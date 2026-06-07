@@ -10,6 +10,7 @@ MANIFEST = DOCS / "manifest.json"
 PRIVATE_DOC_PREFIXES = (
     "docs/notes/",
     "docs/plans/",
+    "docs/architecture/parity/",
     "docs/superpowers/",
 )
 PLANNING_ONLY_MARKERS = (
@@ -19,6 +20,8 @@ PLANNING_ONLY_MARKERS = (
     "implementation session",
     "stacked PR retarget",
     "worktree:",
+    "PR #145",
+    "Track 18 Stream",
 )
 STALE_RUNTIME_MARKERS = (
     "ADK invocation is scaffolded but disabled",

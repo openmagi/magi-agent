@@ -96,5 +96,4 @@ The source checkout is for contributors developing the runtime. Normal users ins
 - Changelog: https://openmagi.ai/docs/changelog - Status: ✅ Active — this page tracks user-facing changes; tagged builds are on GitHub Releases.
 - Upgrading: https://openmagi.ai/docs/upgrading - Status: ✅ Active — covers upgrading the Homebrew install and source checkouts.
 - Glossary: https://openmagi.ai/docs/glossary - Status: ✅ Active — definitions of the core Magi Agent terms.
-- CLI Streaming Parity: https://openmagi.ai/docs/cli-streaming-parity - A reference for the OSS/local **Magi Agent web chat GUI** that must stream model and tool output the way the `magi` CLI already does: incremental assistant tokens, tool-call / tool-result rendering, permission approval prompts, and cancellation.
 - Contributing: https://openmagi.ai/docs/contributing - Thank you for your interest in contributing!
