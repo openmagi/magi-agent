@@ -245,6 +245,13 @@ class LocalFileMemoryProvider:
                 f"({current_size} + {len(entry_bytes)} > {self.config.max_file_bytes})"
             )
 
+        # USER.md profile deduplication: skip if identical body line already present.
+        # YAGNI — exact-string match only, no structured KV store.
+        if target_file == "USER.md" and target_path.exists():
+            existing = target_path.read_text(encoding="utf-8")
+            if safe_body in existing:
+                return
+
         # Append entry
         with target_path.open("a", encoding="utf-8") as fh:
             fh.write(entry)
