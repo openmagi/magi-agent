@@ -454,11 +454,12 @@ def eval_gate_config_from_env(
     strict default — this factory does not change that path.
     """
     raw_rule = env.get(GATE_RULE_ENV_VAR)
-    decision_rule: Literal["strict_band", "paired_significance"] = (
-        raw_rule if raw_rule in _VALID_DECISION_RULES else "strict_band"  # type: ignore[assignment]
-    )
+    # Pre-validate against the known rules so an unknown/typo env value degrades
+    # to the safe default instead of raising in EvalGateConfig's Literal check.
+    # Pydantic narrows the plain str to the Literal field at construction.
+    rule = raw_rule if raw_rule in _VALID_DECISION_RULES else "strict_band"
     return EvalGateConfig(
-        decision_rule=decision_rule,
+        decision_rule=rule,
         z=_parse_float(env, GATE_Z_ENV_VAR, 1.96),
         n_repeats=_parse_int(env, GATE_N_REPEATS_ENV_VAR, 1),
         max_repeats=_parse_int(env, GATE_MAX_REPEATS_ENV_VAR, 1),
