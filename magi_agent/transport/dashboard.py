@@ -839,6 +839,57 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       flex-direction: column;
       gap: 8px;
     }}
+    .work-group {{
+      display: grid;
+      gap: 8px;
+      margin-bottom: 12px;
+      min-width: 0;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+      padding: 10px;
+      box-shadow: 0 1px 6px rgba(15, 23, 42, 0.04);
+    }}
+    .work-group.status {{
+      border-color: #d9ccff;
+      background: #fbf9ff;
+    }}
+    .work-group.mission {{
+      border-color: #cbe7f6;
+      background: #f6fbfe;
+    }}
+    .work-group.action {{
+      border-color: var(--line);
+      background: var(--surface);
+    }}
+    .work-row {{
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      gap: 8px;
+      align-items: start;
+      min-height: 34px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: rgba(255,255,255,0.68);
+      padding: 8px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.35;
+    }}
+    .work-row strong {{
+      display: block;
+      color: var(--ink);
+      font-size: 12px;
+      margin-bottom: 3px;
+    }}
+    .work-row code {{
+      display: block;
+      overflow-wrap: anywhere;
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 11px;
+      line-height: 1.4;
+    }}
     .panel-heading {{
       display: flex;
       align-items: center;
@@ -1101,16 +1152,16 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
         <div class="brand-meta"><span class="dot" id="runtime-dot"></span><span id="runtime-label">Checking runtime</span></div>
         <p class="brand-subtitle">Local workspace for chat, work events, knowledge, first-party tools, and evidence receipts.</p>
       </div>
-      <nav class="channel-list" aria-label="Local channels">
+      <nav class="channel-list" aria-label="Local channels" data-shell-region="channel-nav">
         <p class="section-label">General</p>
-        <button class="channel active" type="button" data-target-panel="work"><span>#</span><span>general</span><span class="channel-count">1</span></button>
-        <button class="channel" type="button" data-target-panel="work"><span>#</span><span>research</span><span class="channel-count">0</span></button>
-        <button class="channel" type="button" data-target-panel="work"><span>#</span><span>coding</span><span class="channel-count">0</span></button>
-        <button class="channel" type="button" data-target-panel="work"><span>#</span><span>automation</span><span class="channel-count">0</span></button>
+        <button class="channel active" type="button" data-target-panel="work" data-channel="general" aria-pressed="true"><span>#</span><span>general</span><span class="channel-count">1</span></button>
+        <button class="channel" type="button" data-target-panel="work" data-channel="research" aria-pressed="false"><span>#</span><span>research</span><span class="channel-count">0</span></button>
+        <button class="channel" type="button" data-target-panel="work" data-channel="coding" aria-pressed="false"><span>#</span><span>coding</span><span class="channel-count">0</span></button>
+        <button class="channel" type="button" data-target-panel="work" data-channel="automation" aria-pressed="false"><span>#</span><span>automation</span><span class="channel-count">0</span></button>
         <p class="section-label" style="margin-top:18px">Runtime</p>
-        <button class="channel" type="button" data-target-panel="knowledge"><span>*</span><span>Memory</span><span class="channel-count">on</span></button>
-        <button class="channel" type="button" data-target-panel="knowledge"><span>*</span><span>Tools</span><span class="channel-count">72</span></button>
-        <button class="channel" type="button" data-target-panel="settings"><span>*</span><span>Settings</span><span class="channel-count">local</span></button>
+        <button class="channel" type="button" data-target-panel="knowledge" data-channel="memory" aria-pressed="false"><span>*</span><span>Memory</span><span class="channel-count">on</span></button>
+        <button class="channel" type="button" data-target-panel="knowledge" data-channel="tools" aria-pressed="false"><span>*</span><span>Tools</span><span class="channel-count">72</span></button>
+        <button class="channel" type="button" data-target-panel="settings" data-channel="settings" aria-pressed="false"><span>*</span><span>Settings</span><span class="channel-count">local</span></button>
       </nav>
       <div class="sidebar-footer">
         <div class="footer-row"><span>Runtime</span><strong id="footer-runtime">magi-agent</strong></div>
@@ -1131,7 +1182,7 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
         </div>
       </header>
 
-      <section class="messages" id="messages" aria-live="polite">
+      <section class="messages" id="messages" aria-live="polite" data-shell-region="chat-transcript">
         <div class="thread-list" id="thread-list">
         <div class="empty-state" id="empty-state">
           <div class="welcome-message message assistant">
@@ -1214,7 +1265,7 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       </section>
     </main>
 
-    <aside class="inspector">
+    <aside class="inspector" data-shell-region="work-stream">
       <div class="inspector-head">
         <h2>Work Stream</h2>
         <div class="brand-meta">Runtime events, tool progress, evidence, and SSE state.</div>
@@ -1231,31 +1282,40 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       </div>
       <div class="panel">
         <div id="panel-work" class="timeline" role="tabpanel" aria-labelledby="tab-work">
-          <p class="panel-heading"><span>Agents</span><span class="mini-pill">1 agent</span></p>
-          <div class="agent-card">
-            <div class="agent-card-head">
-              <div>
-                <strong>Main</strong>
-                <span>current local session</span>
+          <section class="work-group status" id="work-group-now" aria-label="Now">
+            <p class="panel-heading"><span>Now</span><span class="mini-pill">1 agent</span></p>
+            <div class="agent-card">
+              <div class="agent-card-head">
+                <div>
+                  <strong>Main</strong>
+                  <span>current local session</span>
+                </div>
+                <span class="mini-pill" id="agent-state-pill">ready</span>
               </div>
-              <span class="mini-pill" id="agent-state-pill">ready</span>
+              <small>Public ADK events, tool progress, evidence receipts, and transport state appear here during a run.</small>
             </div>
-            <small>Public ADK events, tool progress, evidence receipts, and transport state appear here during a run.</small>
-          </div>
-          <p class="panel-heading"><span>Work in progress</span></p>
-          <div class="event-grid" aria-label="Run metrics">
-            <div class="event-metric"><span>SSE</span><strong id="metric-sse">0 frames</strong></div>
-            <div class="event-metric"><span>Events</span><strong id="metric-events">0 agent events</strong></div>
-            <div class="event-metric"><span>Tools</span><strong id="metric-tools">idle</strong></div>
-            <div class="event-metric"><span>Receipts</span><strong id="metric-receipts">pending</strong></div>
-          </div>
-          <div class="event pending"><strong>No active run</strong><code>Submit a prompt to start a local ADK turn</code></div>
-          <p class="panel-heading">Main session</p>
-          <div class="timeline" id="work-stream-events">
-            <div class="event pending"><strong>Runtime check</strong><code>Waiting for /healthz</code></div>
-            <div class="event"><strong>First-party surfaces</strong><code>Research, coding, documents, browser, scheduler, memory, skills</code></div>
-            <div class="event"><strong>Transport</strong><code>SSE frames and public ADK events render here during a run</code></div>
-          </div>
+            <div class="event-grid" aria-label="Run metrics">
+              <div class="event-metric"><span>SSE</span><strong id="metric-sse">0 frames</strong></div>
+              <div class="event-metric"><span>Events</span><strong id="metric-events">0 agent events</strong></div>
+              <div class="event-metric"><span>Tools</span><strong id="metric-tools">idle</strong></div>
+              <div class="event-metric"><span>Receipts</span><strong id="metric-receipts">pending</strong></div>
+            </div>
+          </section>
+          <section class="work-group" id="work-group-runtime-checks" aria-label="Runtime checks">
+            <p class="panel-heading"><span>Runtime checks</span><span>Main session</span></p>
+            <div class="work-row"><span class="dot"></span><div><strong>Runtime check</strong><code>Waiting for /healthz</code></div></div>
+            <div class="work-row"><span class="dot ready"></span><div><strong>First-party surfaces</strong><code>Research, coding, documents, browser, scheduler, memory, skills</code></div></div>
+            <div class="work-row"><span class="dot"></span><div><strong>Transport</strong><code>SSE frames and public ADK events render here during a run</code></div></div>
+          </section>
+          <section class="work-group action" id="work-group-current-steps" aria-label="Current steps">
+            <p class="panel-heading"><span>Current steps</span><span>Work in progress</span></p>
+            <div class="event pending"><strong>No active run</strong><code>Submit a prompt to start a local ADK turn</code></div>
+            <div class="timeline" id="work-stream-events"></div>
+          </section>
+          <section class="work-group mission" id="work-group-missions" aria-label="Missions">
+            <p class="panel-heading"><span>Missions</span><span class="mini-pill">local</span></p>
+            <div class="work-row"><span class="dot"></span><div><strong>No active mission</strong><code>Long-running goals and delegated work appear here when the local runtime emits them.</code></div></div>
+          </section>
         </div>
         <div id="panel-knowledge" class="hidden" role="tabpanel" aria-labelledby="tab-knowledge">
           <p class="brand-meta">Local knowledge and artifacts are exposed by runtime contracts when enabled.</p>
