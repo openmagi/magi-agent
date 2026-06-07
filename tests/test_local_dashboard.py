@@ -108,6 +108,25 @@ def test_local_dashboard_has_operational_work_stream_metrics() -> None:
     assert "renderReceiptList" in html
 
 
+def test_local_dashboard_restores_hosted_style_three_column_work_shell() -> None:
+    response = _client().get("/dashboard")
+    html = response.text
+
+    assert 'data-shell-region="channel-nav"' in html
+    assert 'data-shell-region="chat-transcript"' in html
+    assert 'data-shell-region="work-stream"' in html
+    assert 'data-channel="general"' in html
+    assert 'data-channel="research"' in html
+    assert 'id="work-group-now"' in html
+    assert 'id="work-group-runtime-checks"' in html
+    assert 'id="work-group-current-steps"' in html
+    assert 'id="work-group-missions"' in html
+    assert "Now" in html
+    assert "Runtime checks" in html
+    assert "Current steps" in html
+    assert "Missions" in html
+
+
 def test_local_dashboard_prefills_default_local_gateway_token() -> None:
     response = _client_with_gateway_token("local-dev-token").get("/dashboard")
     html = response.text
