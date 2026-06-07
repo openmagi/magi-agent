@@ -8,13 +8,11 @@ Coverage:
 3. env_gate kill-switch short-circuit (MAGI_GOAL_LOOP_KILL_SWITCH_ENABLED default on).
 4. Env gate disabled short-circuit (MAGI_GOAL_LOOP_ENABLED default off).
 5. resolve_goal_loop_execution_mode convenience.
-6. Canary gate spec: build_goal_loop_canary_gate_spec returns a CanaryGateSpec with the
-   correct gate_id, slug, readiness package, and default_off. Gate id is 5 (mirroring
-   scheduler_executor) — the goal loop rides the same canary-ladder position because it
-   is the mission-continuation analogue of the scheduler mission gate.
+6. _CANARY_LIVE_GATE constant equals 5 (mirrors scheduler_executor); the main 0-9
+   registry is untouched. No standalone canary factory (matches scheduler precedent).
 7. Spawn-depth enforcement: check_goal_loop_spawn_depth rejects exceeding
    DEFAULT_GOAL_LOOP_MAX_SPAWN_DEPTH=2 and accepts valid depths.
-8. Ownership enforcement: check_goal_loop_ownership_invariants rejects child agents
+8. Ownership enforcement: check_goal_loop_ownership_assignment rejects child agents
    owning persistence/scheduling and accepts main agents.
 9. B1-B4 safety invariants asserted in readiness: default-off verified; continuation
    is USER-role (cache-safe); spend-guard wired; judge fail-open budget present;
@@ -177,6 +175,21 @@ class TestGoalLoopReadinessHealthMetadata:
         assert meta["executionMode"] == "disabled"
         assert "kill_switch_enabled" in meta["reasonCodes"]
 
+    def test_kill_switch_enabled_with_env_on_yields_blocked_status(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """env_on=True + kill_switch_enabled=True → status=='blocked' (not 'disabled').
+
+        When the env gate IS on but the kill switch is engaged the loop is
+        actively blocked (not merely off), so status must be 'blocked' —
+        paralleling the existing env-off→'disabled' test which checks the
+        complementary case.
+        """
+        monkeypatch.setenv("MAGI_GOAL_LOOP_ENABLED", "1")
+        meta = self._make(monkeypatch, killSwitchEnabled=True)
+        assert meta["status"] == "blocked"
+        assert meta["executionMode"] == "disabled"
+
     def test_shadow_mode_disabled_blocks(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("MAGI_GOAL_LOOP_ENABLED", "1")
         meta = self._make(monkeypatch, shadowModeEnabled=False)
@@ -310,88 +323,34 @@ class TestResolveGoalLoopExecutionMode:
 
 
 # ---------------------------------------------------------------------------
-# 4. Canary gate spec registration
+# 4. Canary live-gate constant + registry invariant
 # ---------------------------------------------------------------------------
 
-class TestGoalLoopCanaryGateSpec:
-    def test_build_goal_loop_canary_gate_spec_returns_canary_gate_spec(self) -> None:
-        from magi_agent.gates.goal_loop_readiness import build_goal_loop_canary_gate_spec
-        from magi_agent.gates.api_canary_ladder import CanaryGateSpec
-
-        spec = build_goal_loop_canary_gate_spec()
-        assert isinstance(spec, CanaryGateSpec)
-
-    def test_canary_gate_spec_gate_id_is_5(self) -> None:
-        """Gate id 5 is the canary-live promotion gate (mirrors scheduler executor).
-        Both features use gate5 as the live-promotion threshold — the goal loop is
-        the mission-continuation analogue of the scheduler mission gate. The spec
-        carries a distinct slug so it is distinguishable from gate5_scheduler_cron_mission.
-        """
-        from magi_agent.gates.goal_loop_readiness import build_goal_loop_canary_gate_spec
-
-        spec = build_goal_loop_canary_gate_spec()
-        assert spec.gate_id == 5
-
-    def test_canary_gate_spec_slug_contains_goal_loop(self) -> None:
-        from magi_agent.gates.goal_loop_readiness import build_goal_loop_canary_gate_spec
-
-        spec = build_goal_loop_canary_gate_spec()
-        assert "goal_loop" in spec.slug or "goal-loop" in spec.slug
-
-    def test_canary_gate_spec_default_off_is_true(self) -> None:
-        from magi_agent.gates.goal_loop_readiness import build_goal_loop_canary_gate_spec
-
-        spec = build_goal_loop_canary_gate_spec()
-        assert spec.default_off is True
-
-    def test_canary_gate_spec_has_readiness_package(self) -> None:
-        from magi_agent.gates.goal_loop_readiness import build_goal_loop_canary_gate_spec
-
-        spec = build_goal_loop_canary_gate_spec()
-        assert spec.readiness_package is not None
-
-    def test_readiness_package_blockers_mention_goal_loop_invariants(self) -> None:
-        from magi_agent.gates.goal_loop_readiness import build_goal_loop_canary_gate_spec
-
-        spec = build_goal_loop_canary_gate_spec()
-        pkg = spec.readiness_package
-        assert pkg is not None
-        blockers_text = " ".join(pkg.implementation_blockers).lower()
-        assert any(
-            kw in blockers_text
-            for kw in ("spend", "evidence", "spawn", "owner", "hook", "default-off", "default_off")
-        ), f"Unexpected blockers: {blockers_text!r}"
-
-    def test_readiness_package_activation_env_references_goal_loop_env_var(self) -> None:
-        from magi_agent.gates.goal_loop_readiness import build_goal_loop_canary_gate_spec
-
-        spec = build_goal_loop_canary_gate_spec()
-        pkg = spec.readiness_package
-        assert pkg is not None
-        env_text = " ".join(pkg.activation_env)
-        assert "MAGI_GOAL_LOOP" in env_text
-
-    def test_readiness_package_stop_conditions_present(self) -> None:
-        from magi_agent.gates.goal_loop_readiness import build_goal_loop_canary_gate_spec
-
-        spec = build_goal_loop_canary_gate_spec()
-        pkg = spec.readiness_package
-        assert pkg is not None
-        assert len(pkg.stop_conditions) >= 2
-
+class TestGoalLoopCanaryLiveGate:
     def test_canary_live_gate_constant_equals_5(self) -> None:
-        """_CANARY_LIVE_GATE must equal 5 — same as scheduler_executor."""
+        """_CANARY_LIVE_GATE must equal 5 — same as scheduler_executor.
+        The goal loop rides the shared gate-5 threshold; no standalone factory
+        is needed (mirrors the scheduler precedent of using only the constant).
+        """
         import importlib
         mod = importlib.import_module("magi_agent.gates.goal_loop_readiness")
         assert mod._CANARY_LIVE_GATE == 5  # type: ignore[attr-defined]
 
     def test_main_registry_still_defines_gate0_to_9_unchanged(self) -> None:
-        """Adding the goal loop spec factory must NOT alter the main 0-9 registry."""
+        """The main 0-9 registry must be untouched — goal loop adds no new entry."""
         from magi_agent.gates.api_canary_ladder import build_canary_gate_registry
 
         registry = build_canary_gate_registry()
         assert tuple(gate.gate_id for gate in registry.gates) == tuple(range(10))
         assert registry.gates[5].slug == "gate5_scheduler_cron_mission"
+
+    def test_build_goal_loop_canary_gate_spec_does_not_exist(self) -> None:
+        """The unused factory must be absent — YAGNI, matches scheduler precedent."""
+        import magi_agent.gates.goal_loop_readiness as mod
+        assert not hasattr(mod, "build_goal_loop_canary_gate_spec"), (
+            "build_goal_loop_canary_gate_spec was deleted as unused; "
+            "it must not be re-added without a real call-site"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -445,41 +404,41 @@ class TestGoalLoopSpawnDepthEnforcement:
 
 
 # ---------------------------------------------------------------------------
-# 6. Ownership enforcement
+# 6. Ownership assignment gate
 # ---------------------------------------------------------------------------
 
-class TestGoalLoopOwnershipEnforcement:
+class TestGoalLoopOwnershipAssignment:
     def test_main_agent_at_depth_0_is_allowed(self) -> None:
-        from magi_agent.gates.goal_loop_readiness import check_goal_loop_ownership_invariants
+        from magi_agent.gates.goal_loop_readiness import check_goal_loop_ownership_assignment
 
-        result = check_goal_loop_ownership_invariants(agent_scope="main", spawn_depth=0)
+        result = check_goal_loop_ownership_assignment(agent_scope="main", spawn_depth=0)
         assert result["ownershipValid"] is True
 
     def test_child_agent_cannot_own_persistence(self) -> None:
-        from magi_agent.gates.goal_loop_readiness import check_goal_loop_ownership_invariants
+        from magi_agent.gates.goal_loop_readiness import check_goal_loop_ownership_assignment
 
-        result = check_goal_loop_ownership_invariants(agent_scope="child", spawn_depth=1)
+        result = check_goal_loop_ownership_assignment(agent_scope="child", spawn_depth=1)
         assert result["ownershipValid"] is False
         assert "child_cannot_own" in result["reasonCode"] or "ownership" in result["reasonCode"].lower()
 
     def test_child_agent_at_depth_0_is_invalid(self) -> None:
         """Child agents at depth 0 are invalid — child must have spawn_depth > 0."""
-        from magi_agent.gates.goal_loop_readiness import check_goal_loop_ownership_invariants
+        from magi_agent.gates.goal_loop_readiness import check_goal_loop_ownership_assignment
 
-        result = check_goal_loop_ownership_invariants(agent_scope="child", spawn_depth=0)
+        result = check_goal_loop_ownership_assignment(agent_scope="child", spawn_depth=0)
         assert result["ownershipValid"] is False
 
     def test_main_agent_at_depth_1_is_invalid(self) -> None:
         """Main agents must use spawn_depth=0."""
-        from magi_agent.gates.goal_loop_readiness import check_goal_loop_ownership_invariants
+        from magi_agent.gates.goal_loop_readiness import check_goal_loop_ownership_assignment
 
-        result = check_goal_loop_ownership_invariants(agent_scope="main", spawn_depth=1)
+        result = check_goal_loop_ownership_assignment(agent_scope="main", spawn_depth=1)
         assert result["ownershipValid"] is False
 
     def test_result_includes_required_fields(self) -> None:
-        from magi_agent.gates.goal_loop_readiness import check_goal_loop_ownership_invariants
+        from magi_agent.gates.goal_loop_readiness import check_goal_loop_ownership_assignment
 
-        result = check_goal_loop_ownership_invariants(agent_scope="main", spawn_depth=0)
+        result = check_goal_loop_ownership_assignment(agent_scope="main", spawn_depth=0)
         assert "ownershipValid" in result
         assert "agentScope" in result
         assert "spawnDepth" in result

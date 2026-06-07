@@ -33,22 +33,21 @@ model defaults ``kill_switch_enabled=True`` so the default config blocks live).
 
 Canary gate
 -----------
-:func:`build_goal_loop_canary_gate_spec` returns a :class:`CanaryGateSpec` anchored at
-gate_id=5, which is the canary-live promotion gate shared with the scheduler mission
-gate (``gate5_scheduler_cron_mission`` in the main registry).  The goal loop is the
-mission-continuation analogue of the scheduler mission gate — it rides the same
-canary-ladder live-promotion threshold.  The spec carries a distinct slug
-(``gate5_goal_loop_continuation``) so it is distinguishable from the scheduler spec,
-but it does NOT add a new entry to the main 0-9 registry (which is fixed and
-regression-tested).
+The goal loop rides the same canary-ladder live-promotion threshold as the scheduler
+mission gate (gate_id=5, ``gate5_scheduler_cron_mission`` in the main registry).
+The ``_CANARY_LIVE_GATE = 5`` constant is the single reference point — live dispatch
+requires ``promoted_gate >= _CANARY_LIVE_GATE AND canary_promotion_confirmed``.
+No standalone factory is needed (and none exists, matching the scheduler precedent
+which also only uses the constant).
 
 Spawn-depth + ownership enforcement
 ------------------------------------
 :func:`check_goal_loop_spawn_depth_gate` surfaces the spawn-depth cap (reuses
 ``DEFAULT_GOAL_LOOP_MAX_SPAWN_DEPTH=2`` from ``goal_loop.py``).
-:func:`check_goal_loop_ownership_invariants` enforces the ownership rule: main agents
-own persistence/scheduling; child agents cannot own a goal loop.  Both reuse models
-from ``goal_loop.py`` (``GoalLoopSpawnDepthPolicy``, ``GoalLoopOwnershipScope``) — no
+:func:`check_goal_loop_ownership_assignment` gates OWNERSHIP ASSIGNMENT only: main
+(``depth=0``) may own scheduling/persistence; child agents can NEVER own (participation
+in iteration is a separate concern not gated here).  Both reuse models from
+``goal_loop.py`` (``GoalLoopSpawnDepthPolicy``, ``GoalLoopOwnershipScope``) — no
 duplication.
 
 B1–B4 safety invariants asserted
@@ -70,7 +69,6 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
 
-from magi_agent.gates.api_canary_ladder import CanaryGateSpec, CanaryReadinessPackage
 from magi_agent.harness.goal_loop import (
     DEFAULT_GOAL_LOOP_MAX_SPAWN_DEPTH,
     GoalLoopAgentScope,
@@ -255,77 +253,6 @@ def resolve_goal_loop_execution_mode(
 
 
 # ---------------------------------------------------------------------------
-# Canary gate spec
-# ---------------------------------------------------------------------------
-
-def build_goal_loop_canary_gate_spec() -> CanaryGateSpec:
-    """Return the goal-loop ``CanaryGateSpec`` for gate5 (the live-promotion gate).
-
-    The spec is anchored at gate_id=5 (``_CANARY_LIVE_GATE``), which is the
-    canary-live promotion threshold shared with the scheduler mission gate.  The
-    goal loop is the mission-continuation analogue of the scheduler mission gate
-    and rides the same promotion threshold.
-
-    This function returns a standalone spec — it does NOT mutate the main 0-9
-    registry produced by :func:`api_canary_ladder.build_canary_gate_registry`.
-    Callers (e.g. an ops projection or a readiness reporter) can compose it with
-    the registry by slug or embed it in a separate goal-loop readiness report.
-    """
-    pkg = CanaryReadinessPackage(
-        implementationBlockers=(
-            "default-off GoalLoopPolicy verified (traffic_attached/execution_attached=Literal[False])",
-            "spend-guard wired via SpendCapProbe seam (no runaway spend)",
-            "evidence-gate fails-toward-continue (never premature satisfied stop)",
-            "judge fail-open budget present (DEFAULT_JUDGE_PARSE_FAILURE_BUDGET)",
-            "after-turn hook is non-blocking and fail-open (AFTER_TURN_END, blocking=False, failOpen=True)",
-            "spawn-depth cap enforced (DEFAULT_GOAL_LOOP_MAX_SPAWN_DEPTH=2)",
-            "ownership rule enforced: main owns persistence/scheduling, child cannot own",
-        ),
-        requiredTestSinks=(
-            "fake GoalStateStore",
-            "fake GoalJudge",
-            "fake SpendCapProbe",
-            "fake EvidenceGate",
-            "shadow continuation record sink",
-        ),
-        activationEnv=(
-            "MAGI_GOAL_LOOP_ENABLED=1",
-            "MAGI_GOAL_LOOP_KILL_SWITCH_ENABLED=0",
-            "OPENMAGI_CANARY_GATE=5",
-        ),
-        counterRequirements=(
-            "continued",
-            "stopped",
-            "spend_capped",
-            "judge_budget_exhausted",
-            "evidence_unmet",
-            "preempted",
-        ),
-        rollback=(
-            "disable MAGI_GOAL_LOOP_ENABLED",
-            "re-enable kill switch (MAGI_GOAL_LOOP_KILL_SWITCH_ENABLED=1)",
-            "restore TypeScript fallback (no loop continuation)",
-        ),
-        stopConditions=(
-            "runaway spend cap NOT enforced",
-            "child agent owns goal loop persistence or scheduling",
-            "spawn depth exceeds DEFAULT_GOAL_LOOP_MAX_SPAWN_DEPTH=2",
-            "continuation prompt emitted as system message (cache invalidation risk)",
-            "judge failure causes premature satisfied stop (fail-open violation)",
-            "evidence gate failure stops loop instead of continuing (evidence_unmet violated)",
-            "after-turn hook blocks a normal turn on error",
-        ),
-    )
-    return CanaryGateSpec(
-        gateId=5,
-        slug="gate5_goal_loop_continuation",
-        title="Goal-loop continuation and mission runtime (Ralph loop)",
-        requiredStage="mocked_runtime",
-        readinessPackage=pkg,
-    )
-
-
-# ---------------------------------------------------------------------------
 # Spawn-depth enforcement
 # ---------------------------------------------------------------------------
 
@@ -381,24 +308,29 @@ def check_goal_loop_spawn_depth_gate(
 # Ownership enforcement
 # ---------------------------------------------------------------------------
 
-def check_goal_loop_ownership_invariants(
+def check_goal_loop_ownership_assignment(
     agent_scope: GoalLoopAgentScope,
     spawn_depth: int,
 ) -> dict[str, object]:
-    """Enforce the goal-loop ownership invariant.
+    """Gate OWNERSHIP ASSIGNMENT for the goal loop.
 
-    The rule (from ``GoalLoopOwnershipScope`` / ``GoalLoopParticipantScope``):
-      - ``main`` agent must use ``spawn_depth=0``.
-      - ``child`` agents must use ``spawn_depth > 0`` BUT can never own scheduling
-        or persistence — only main agents own the goal loop.
+    This function gates *ownership assignment only* — it does NOT gate
+    participation in iteration (child agents may participate in a goal-loop
+    iteration driven by the main agent; that is a separate concern not checked
+    here).
+
+    Ownership assignment rules:
+      - ``main`` agent (``spawn_depth=0``) MAY own scheduling and persistence.
+      - ``child`` agents (``spawn_depth > 0``) can NEVER own scheduling or
+        persistence — only the main agent owns the goal loop.
 
     Reuses :class:`GoalLoopAgentScope` from ``goal_loop.py`` — no duplication.
 
     Returns a dict with:
-      ownershipValid — True when the invariant holds.
+      ownershipValid — True only when the agent is the main agent at depth 0.
       agentScope     — the provided agent scope.
       spawnDepth     — the provided spawn depth.
-      reasonCode     — short code when invalid.
+      reasonCode     — short code when ownership assignment is rejected.
     """
     if agent_scope == "main":
         if spawn_depth != 0:
@@ -512,8 +444,7 @@ def _digest_present(value: object) -> bool:
 __all__ = [
     "GoalLoopExecutionMode",
     "GoalLoopReadinessConfig",
-    "build_goal_loop_canary_gate_spec",
-    "check_goal_loop_ownership_invariants",
+    "check_goal_loop_ownership_assignment",
     "check_goal_loop_spawn_depth_gate",
     "goal_loop_readiness_health_metadata",
     "resolve_goal_loop_execution_mode",
