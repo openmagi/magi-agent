@@ -347,6 +347,12 @@
       "group": "Reference"
     },
     {
+      "slug": "cli-commands",
+      "title": "In-session Commands",
+      "path": "docs/cli-commands.md",
+      "group": "Reference"
+    },
+    {
       "slug": "changelog",
       "title": "Changelog",
       "path": "docs/changelog.md",

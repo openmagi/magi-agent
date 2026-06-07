@@ -162,8 +162,9 @@ magi -p "What is 2+2?"
 
 Setting one provider key builds a real model-backed runner. With no key (and no
 `~/.magi/config.toml`), the CLI falls back to a model-free stub. The default
-model per provider is `claude-sonnet-4-5` (anthropic), `gpt-4o` (openai),
-`gemini-2.0-flash` (gemini), and the Fireworks Llama 3.1 70B instruct model.
+model per provider is `claude-sonnet-4-6` (anthropic), `gpt-5.5` (openai),
+`gemini-3.5-flash` (gemini), and `accounts/fireworks/models/kimi-k2-instruct`
+(fireworks). Model ids drift; override with `MAGI_MODEL` or `[model].model`.
 
 For a task that uses tools (file read/write/edit, patch, Bash), tool execution
 is gated by Claude-Code-style permission modes. Headless `-p` runs use the

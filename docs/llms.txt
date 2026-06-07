@@ -95,6 +95,7 @@ The source checkout is for contributors developing the runtime. Normal users ins
 - Common Tasks: https://openmagi.ai/docs/common-tasks - Status: ✅ Active — the local `magi` CLI runs a real model and first-party tools once a provider key is set (`magi_agent/cli/app.py`, `magi_agent/tools/catalog.py`).
 - Channels (Telegram, Discord): https://openmagi.ai/docs/channels - Status: 🚧 Default-off — channel code (Telegram, Discord) ships in shadow / local-fake mode; live send/receive is gated and produces intent + receipt records, not real delivery (`magi_agent/channels/telegram_adapter.py`, `contract.py`).
 - CLI Reference: https://openmagi.ai/docs/cli-reference - Type: Reference — the full flag, output-mode, exit-code, keybinding, and
+- In-session Commands: https://openmagi.ai/docs/cli-commands - The `/`-prefixed slash commands available inside a `magi` session (builtins, bundled, and project-discovered).
 - Changelog: https://openmagi.ai/docs/changelog - Status: ✅ Active — this page tracks user-facing changes; tagged builds are on GitHub Releases.
 - Upgrading: https://openmagi.ai/docs/upgrading - Status: ✅ Active — covers upgrading the Homebrew install and source checkouts.
 - Glossary: https://openmagi.ai/docs/glossary - Status: ✅ Active — definitions of the core Magi Agent terms.

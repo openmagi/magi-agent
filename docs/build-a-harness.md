@@ -8,7 +8,7 @@ Walk through defining an EvidenceContract with triggers, requirements, and on_mi
 
 An EvidenceContract declares what evidence must be present at specific lifecycle points. It has an id, triggers (when to check), requirements (what evidence to look for), and on_missing (what to do when evidence is absent).
 
-Triggers are lifecycle hook points: 'afterToolUse' checks after each tool execution, 'beforeCommit' checks before committing results. Requirements specify evidence types (from the 15 builtin types or custom:PascalCaseName), optional field matchers, and after constraints.
+Triggers are lifecycle hook points: 'afterToolUse' checks after each tool execution, 'beforeCommit' checks before committing results. Requirements specify evidence types (from the 17 builtin types or custom:PascalCaseName), optional field matchers, and after constraints.
 
 Pydantic models use populate_by_name=True, so both snake_case field names and camelCase aliases work. Examples here use snake_case for consistency with Python conventions.
 
