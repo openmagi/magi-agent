@@ -19,7 +19,8 @@ Design
   ``session_lifecycle``. When ``ctx.runtime`` is ``None`` or lacks the
   attribute, the helper returns ``None`` and the command returns ``Skip()``.
 - ``isinstance``-checks against ``runtime_checkable`` Protocols guard the
-  lookup so duck-typing alone cannot smuggle a structurally-wrong object in.
+  lookup so an object lacking the expected methods is rejected (note:
+  ``runtime_checkable`` checks method *presence* only, not signatures).
 - ``is_enabled`` predicates passed to ``register_control_commands`` mirror
   the lookup helpers, so visibility is live and re-evaluated every
   ``list_for`` call.
@@ -29,6 +30,7 @@ Design
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
@@ -291,19 +293,46 @@ class NewSessionCommand(LocalCommand):
 # ---------------------------------------------------------------------------
 
 
+def _control_specs() -> list[tuple[LocalCommand, Callable[[CommandContext], bool]]]:
+    """Single source of truth: each control command + its ``is_enabled`` predicate.
+
+    Returns FRESH command instances on every call (no shared mutable state).
+    The four predicates are written as distinct tuple-literal lambdas, each
+    closing over its OWN module-level helper — they are NOT built in a loop over
+    a shared variable, so there is no late-binding closure-capture bug. Both
+    ``control_commands()`` and ``register_control_commands`` consume this list so
+    the name↔class↔predicate mapping lives in exactly one place.
+    """
+
+    return [
+        (
+            ModelCommand(name="model", surface=_CONTROL_BOTH),
+            lambda ctx: _model_selector(ctx) is not None,
+        ),
+        (
+            AgentCommand(name="agent", surface=_CONTROL_BOTH),
+            lambda ctx: _agent_selector(ctx) is not None,
+        ),
+        (
+            McpCommand(name="mcp", surface=_CONTROL_BOTH),
+            lambda ctx: _mcp_controller(ctx) is not None,
+        ),
+        (
+            NewSessionCommand(name="new", surface=_CONTROL_BOTH),
+            lambda ctx: _session_lifecycle(ctx) is not None,
+        ),
+    ]
+
+
 def control_commands() -> list[LocalCommand]:
     """Return fresh instances of all four runtime-control commands.
 
     A factory (not module-level singletons) so each registry gets its own
-    instances with no shared mutable state.
+    instances with no shared mutable state. Derived from :func:`_control_specs`
+    (the single definition site).
     """
 
-    return [
-        ModelCommand(name="model", surface=_CONTROL_BOTH),
-        AgentCommand(name="agent", surface=_CONTROL_BOTH),
-        McpCommand(name="mcp", surface=_CONTROL_BOTH),
-        NewSessionCommand(name="new", surface=_CONTROL_BOTH),
-    ]
+    return [command for command, _ in _control_specs()]
 
 
 def register_control_commands(registry: object) -> None:
@@ -323,21 +352,5 @@ def register_control_commands(registry: object) -> None:
     ``CommandRegistryImpl.register``.
     """
 
-    reg = registry  # alias for clarity
-
-    reg.register(
-        ModelCommand(name="model", surface=_CONTROL_BOTH),
-        is_enabled=lambda ctx: _model_selector(ctx) is not None,
-    )
-    reg.register(
-        AgentCommand(name="agent", surface=_CONTROL_BOTH),
-        is_enabled=lambda ctx: _agent_selector(ctx) is not None,
-    )
-    reg.register(
-        McpCommand(name="mcp", surface=_CONTROL_BOTH),
-        is_enabled=lambda ctx: _mcp_controller(ctx) is not None,
-    )
-    reg.register(
-        NewSessionCommand(name="new", surface=_CONTROL_BOTH),
-        is_enabled=lambda ctx: _session_lifecycle(ctx) is not None,
-    )
+    for command, is_enabled in _control_specs():
+        registry.register(command, is_enabled=is_enabled)
