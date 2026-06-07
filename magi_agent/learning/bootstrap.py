@@ -107,6 +107,9 @@ class LearningBootstrap:
 
         # Resolved-at-start state.
         self._cron: object | None = None
+        self._labeler: Labeler | None = None
+        self._store: LearningStore | None = None
+        self._reader: SessionPersistenceReader | None = None
         self._active = False
         self._interval_seconds: int = 0
         self._labeler_kind: LabelerKind = "deterministic"
@@ -114,7 +117,6 @@ class LearningBootstrap:
         # Background timer + non-reentrancy guard.
         self._task: asyncio.Task[None] | None = None
         self._lock = asyncio.Lock()
-        self._running = False
 
     # ------------------------------------------------------------------
     # Observable state (for tests / health surfaces)
@@ -181,6 +183,9 @@ class LearningBootstrap:
             store=reader, app_name=self._app_name, user_id=self._user_id
         )
 
+        # Keep direct refs so stop() can close the underlying connections.
+        self._store = store
+        self._reader = reader
         # The cron job's trigger_now() uses run_reflection's DEFAULT
         # (deterministic) labeler; when an explicit non-default labeler is
         # selected it is applied via _run_reflection_with_labeler in run_once().
@@ -193,28 +198,46 @@ class LearningBootstrap:
             config=LearningReflectionConfig(enabled=True),
             watermark=None,
         )
+        # ``reflection_interval_hours`` is validated ``gt=0`` by the config model;
+        # the ``max(1, ...)`` is defensive belt-and-suspenders against a forged
+        # non-validated config so the loop never busy-spins on a zero interval.
         self._interval_seconds = max(1, config.reflection_interval_hours) * 3600
         self._active = True
 
         # Schedule the thin background timer.  Tests drive run_once() directly,
         # so the loop only sleeps then triggers — no heavy work inline.
-        self._task = asyncio.ensure_future(self._loop())
+        self._task = asyncio.create_task(
+            self._loop(), name="learning-bootstrap-loop"
+        )
 
     async def stop(self) -> None:
-        """Cancel the background task cleanly (idempotent, never raises)."""
+        """Cancel the background task + close store/reader (idempotent, safe)."""
         task = self._task
         self._task = None
-        if task is None:
-            return
-        task.cancel()
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
-        except Exception:  # noqa: BLE001 - never raise on shutdown
-            logger.warning(
-                "learning bootstrap stop encountered an error", exc_info=True
-            )
+        if task is not None:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+            except Exception:  # noqa: BLE001 - never raise on shutdown
+                logger.warning(
+                    "learning bootstrap stop encountered an error", exc_info=True
+                )
+
+        # Close the learning store + session reader connections we own.  Each is
+        # best-effort: a missing/raising close() must never propagate on shutdown.
+        for resource in (self._store, self._reader):
+            close = getattr(resource, "close", None)
+            if callable(close):
+                try:
+                    close()
+                except Exception:  # noqa: BLE001 - never raise on shutdown
+                    logger.warning(
+                        "learning bootstrap resource close failed", exc_info=True
+                    )
+        self._store = None
+        self._reader = None
 
     # ------------------------------------------------------------------
     # Reflection pass
@@ -232,14 +255,14 @@ class LearningBootstrap:
         if not self._active or self._cron is None:
             return None
 
-        # Non-reentrancy: a non-blocking try-acquire so an overlapping call skips
-        # instead of queueing behind the in-flight pass.
-        if self._running:
-            return None
+        # Non-reentrancy: fast-path skip if a pass is already in flight.  The
+        # cooperative single-threaded asyncio model makes the locked()-check +
+        # acquire race-free (no preemption between them), so an overlapping call
+        # skips instead of queueing behind the in-flight pass or double-advancing
+        # the watermark.
         if self._lock.locked():
             return None
         async with self._lock:
-            self._running = True
             try:
                 return await self._trigger()
             except Exception:  # noqa: BLE001 - fail-open per pass
@@ -248,19 +271,22 @@ class LearningBootstrap:
                     exc_info=True,
                 )
                 return None
-            finally:
-                self._running = False
 
     async def _trigger(self) -> "LearningReflectionResult | None":
         cron = self._cron
         assert cron is not None  # guarded by run_once()
-        labeler = getattr(self, "_labeler", None)
+        labeler = self._labeler
         if labeler is not None and self._labeler_kind != "deterministic":
             # Non-default labeler selected → run reflection directly so the
             # labeler is threaded through (the cron job's trigger_now does not
             # accept a labeler).  Watermark handled here to stay incremental.
             return await self._run_reflection_with_labeler(cron, labeler)
-        return await cron.trigger_now(tenant_id=self._tenant_id)
+        # GOVERNANCE: auto_activate_examples=False so the default-ON reflect tier
+        # leaves EVERY produced item ``proposed`` for human approval — nothing is
+        # auto-activated (and thus injectable) without review.
+        return await cron.trigger_now(
+            tenant_id=self._tenant_id, auto_activate_examples=False
+        )
 
     async def _run_reflection_with_labeler(
         self, cron: object, labeler: "Labeler"
@@ -274,6 +300,8 @@ class LearningBootstrap:
             store=getattr(cron, "_store", None),
             labeler=labeler,
             tenant_id=self._tenant_id,
+            # GOVERNANCE: same as the trigger_now path — never auto-activate.
+            auto_activate_examples=False,
         )
         if result.status == "ok" and result.watermark is not None:
             cron.watermark = result.watermark  # type: ignore[attr-defined]
@@ -291,7 +319,9 @@ class LearningBootstrap:
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001 - loop must never die loudly
-            logger.warning("learning bootstrap loop exited on error", exc_info=True)
+            # An exited loop means NO MORE PASSES will run — escalate to error so
+            # the silent degradation is at least visible in logs.
+            logger.error("learning bootstrap loop exited on error", exc_info=True)
 
     # ------------------------------------------------------------------
     # Dep resolution

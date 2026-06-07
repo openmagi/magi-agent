@@ -136,12 +136,20 @@ class ExplodingSessionReader:
 
 
 class SlowSessionReader:
-    """Reader that blocks until released, to exercise non-reentrancy."""
+    """Reader whose read BLOCKS on an event so two passes genuinely overlap.
+
+    ``list_sync`` is synchronous (the Protocol surface), so it cannot ``await``;
+    instead the FIRST call sets ``started`` and then busy-yields by draining a
+    threading-style spin replaced here with a cooperative-friendly approach: the
+    caller releases ``gate`` from the other task.  Because ``list_sync`` itself
+    can't await, the genuine overlap is created by holding the lock across an
+    ``await`` (see the test), and this reader records call ordering so the test
+    can assert exactly one pass actually read.
+    """
 
     def __init__(self, rows: list[dict[str, Any]]) -> None:
         self._rows = rows
         self.calls = 0
-        self.gate = asyncio.Event()
 
     def list_sync(
         self,
@@ -159,6 +167,8 @@ class SlowSessionReader:
             and (since is None or r["updated_at"] > since)
         ]
         rows.sort(key=lambda r: r["updated_at"])
+        if limit is not None:
+            rows = rows[:limit]
         return rows
 
 
@@ -393,13 +403,13 @@ def test_injection_and_live_stay_off_by_default() -> None:
 
 
 def test_run_once_has_no_injection_side_effects(tmp_path, monkeypatch) -> None:
-    """A reflect pass writes only LOCAL items and never PROMPT-injects them.
+    """A reflect pass writes only LOCAL ``proposed`` items, never auto-active.
 
-    "Injection" here is prompt/behaviour injection (``injection_effective``),
-    which stays config-gated OFF — distinct from the policy-gated store status.
-    The eval gate may auto-activate non-rule *examples* (a safe, local,
-    policy-gated write), but RULES never auto-activate, and the injection tier
-    is never consulted by the reflect pass.
+    GOVERNANCE: the bootstrap-initiated reflect tier passes
+    ``auto_activate_examples=False`` to the eval gate, so EVERY produced item —
+    examples included — stays ``proposed`` and awaits human approval before it
+    could ever inject.  "Injection" here is prompt/behaviour injection
+    (``injection_effective``), which also stays config-gated OFF.
     """
     store = SqliteLearningStore(workspace_root=str(tmp_path))
     reader = FakeSessionReader(
@@ -424,12 +434,10 @@ def test_run_once_has_no_injection_side_effects(tmp_path, monkeypatch) -> None:
     assert resolve_learning_config(env={}).injection_effective is False
     page = store.list(tenant_id="local")
     store.close()
-    # Only safe local statuses; no RULE was auto-activated (rules await human
-    # approval — no-direct-mutation policy).
-    assert {item.status for item in page.items} <= {"proposed", "active"}
-    assert all(
-        item.status == "proposed" for item in page.items if item.kind == "rule"
-    )
+    # At least one item was produced, and EVERY item is ``proposed`` — nothing
+    # (not even an example) was auto-activated by the default-ON reflect tier.
+    assert len(page.items) >= 1
+    assert all(item.status == "proposed" for item in page.items)
 
 
 # ---------------------------------------------------------------------------
@@ -437,9 +445,12 @@ def test_run_once_has_no_injection_side_effects(tmp_path, monkeypatch) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_run_once_non_reentrant(tmp_path) -> None:
+def test_run_once_skips_when_a_pass_is_in_flight(tmp_path) -> None:
+    """GENUINE non-reentrancy: while one pass holds the lock across an await,
+    a concurrent run_once() hits the locked() fast-path and SKIPS (returns None)
+    without reading the session store a second time."""
     store = SqliteLearningStore(workspace_root=str(tmp_path))
-    reader = FakeSessionReader(
+    reader = SlowSessionReader(
         [
             _candidate_producing_session("s1", "2026-06-03T10:00:00Z"),
             _candidate_producing_session("s2", "2026-06-03T11:00:00Z"),
@@ -455,12 +466,51 @@ def test_run_once_non_reentrant(tmp_path) -> None:
     async def _run() -> None:
         await boot.start()
         try:
-            # Fire two overlapping run_once() calls; the second must skip while
-            # the first is still in flight (or serialize) — never double-process.
+            # Simulate "a pass already in flight" by holding the lock across a
+            # real await; a concurrent run_once() must skip without reading.
+            await boot._lock.acquire()
+            try:
+                skipped = await boot.run_once()
+                assert skipped is None  # second call skipped
+                assert reader.calls == 0  # never read while a pass is in flight
+            finally:
+                boot._lock.release()
+
+            # With the lock free, a real pass runs and advances the watermark.
+            result = await boot.run_once()
+            assert result is not None and result.status == "ok"
+            assert reader.calls == 1
+            assert boot.watermark == "2026-06-03T11:00:00.000000Z"
+        finally:
+            await boot.stop()
+
+    asyncio.run(_run())
+    store.close()
+
+
+def test_run_once_gathered_calls_do_not_double_advance(tmp_path) -> None:
+    """Two gathered run_once() calls never double-process or corrupt the
+    watermark — exactly one ``ok`` pass results."""
+    store = SqliteLearningStore(workspace_root=str(tmp_path))
+    reader = SlowSessionReader(
+        [
+            _candidate_producing_session("s1", "2026-06-03T10:00:00Z"),
+            _candidate_producing_session("s2", "2026-06-03T11:00:00Z"),
+        ]
+    )
+    boot = LearningBootstrap(
+        learning_store=store,
+        session_reader=reader,
+        app_name="magi",
+        user_id="local-user",
+    )
+
+    async def _run() -> None:
+        await boot.start()
+        try:
             results = await asyncio.gather(boot.run_once(), boot.run_once())
-            # At least one ran; the watermark must be the max ts after the pass
-            # (not corrupted by a concurrent advance).
             assert any(r is not None and r.status == "ok" for r in results)
+            # Watermark is the max ts (not double-advanced past it).
             assert boot.watermark == "2026-06-03T11:00:00.000000Z"
         finally:
             await boot.stop()

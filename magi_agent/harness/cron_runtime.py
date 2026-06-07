@@ -574,7 +574,9 @@ class LearningReflectionCronJob:
             return None
         return now + self.interval_ms  # now: milliseconds since epoch
 
-    async def trigger_now(self, *, tenant_id: str = "local") -> LearningReflectionResult:
+    async def trigger_now(
+        self, *, tenant_id: str = "local", auto_activate_examples: bool = True
+    ) -> LearningReflectionResult:
         """Run one incremental reflection pass on demand.
 
         Calls ``run_reflection`` seeded with the current watermark.  Advances
@@ -589,6 +591,11 @@ class LearningReflectionCronJob:
                 ``run_reflection`` so a non-``"local"`` tenant's run stays inside
                 its own tenant.  Defaults to ``"local"`` (single-tenant path
                 byte-identical).
+            auto_activate_examples: Threaded into ``run_reflection`` /
+                ``run_eval_gate``.  Default ``True`` preserves PR4 behaviour
+                (passing examples auto-activate).  The bootstrap passes ``False``
+                so the default-ON reflect tier leaves EVERY kind ``proposed`` for
+                human approval (governance: no auto-activation without review).
 
         NOT re-entrant: it mutates ``self.watermark`` without a lock, so a real
         scheduler (PR7/PR8) MUST serialize concurrent ``trigger_now`` calls.
@@ -601,6 +608,7 @@ class LearningReflectionCronJob:
             checkset=self._checkset,
             eval_gate_config=self._eval_gate_config,
             tenant_id=tenant_id,
+            auto_activate_examples=auto_activate_examples,
         )
         if result.status == "ok" and result.watermark is not None:
             self.watermark = result.watermark
