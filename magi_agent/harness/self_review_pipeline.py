@@ -182,16 +182,33 @@ def _map_candidate(rc: ReviewCandidate) -> LearningCandidate:
 
     Field mapping:
     - ``rc.kind`` ("memory"/"skill") → ``lc.kind`` ("example")
-    - ``rc.proposal`` → ``lc.content`` {"situation": proposal, "behavior": proposal}
+    - ``rc.proposal`` → ``lc.content["behavior"]`` (the proposed action)
+    - ``lc.content["situation"]`` → short provenance/context descriptor (NOT the raw proposal)
     - ``rc.proposal`` → ``lc.rationale``
     - ``rc.provenance_digest`` → included in ``lc.source_signal_ref``
     - ``rc.session_id`` → ``lc.provenance.session_ids``
     - ``rc.confidence`` is noted in ``source_signal_ref`` for traceability
     - ``lc.scope.task_kind`` = "self-review" (well-known tag for retrieval routing)
     - ``lc.provenance.derived_by`` = "reflection"
+
+    Content mapping rationale
+    -------------------------
+    Downstream checksets read ``situation`` as the probe context and ``behavior``
+    as the proposed action.  Putting the same raw proposal in both slots caused
+    every candidate to self-score against itself, producing an inflated pass rate.
+    ``situation`` is now a short non-duplicating descriptor derived from metadata
+    so the eval-gate can distinguish context from proposed action.
+
+    # TODO(C3): enrich situation/behavior from structured ReviewCandidate fields
+    #            once the fork emits them.
     """
     kind = _REVIEW_KIND_TO_LEARNING_KIND.get(rc.kind, "example")
     proposal = rc.proposal
+    provenance_digest = rc.provenance_digest
+    # situation: short provenance/context descriptor — NOT the raw proposal.
+    situation = (
+        f"self-review candidate from session {provenance_digest[:16]} ({rc.kind})"
+    )
     # Use current UTC timestamp for provenance.created_at
     created_at = datetime.now(tz=UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -202,7 +219,7 @@ def _map_candidate(rc: ReviewCandidate) -> LearningCandidate:
             tags=(rc.kind,),
         ),
         content={
-            "situation": proposal,
+            "situation": situation,
             "behavior": proposal,
         },
         rationale=proposal,
@@ -213,7 +230,7 @@ def _map_candidate(rc: ReviewCandidate) -> LearningCandidate:
         ),
         # Source signal ref: includes the provenance digest for traceability;
         # digest is a SHA-256 hex — safe to record.
-        sourceSignalRef=f"self-review:{rc.kind}:{rc.provenance_digest[:16]}@{rc.session_id}",
+        sourceSignalRef=f"self-review:{rc.kind}:{provenance_digest[:16]}@{rc.session_id}",
     )
 
 
@@ -282,11 +299,16 @@ class LearningPipelineSink:
 
     Implements ``CandidateSink`` (synchronous ``receive`` method).
 
+    The caller owns the injected store lifecycle: open the store before
+    constructing this sink and close it (via ``sink.close()``) when done.
+    This sink does NOT open a new store per ``receive()`` call.
+
     Parameters
     ----------
     store:
         An injectable ``LearningStore`` (``SqliteLearningStore`` in production,
-        in-memory SQLite for tests).
+        in-memory SQLite for tests).  Must already be open; the caller is
+        responsible for closing it (or call ``sink.close()``).
     checkset:
         Injectable ``CheckSet`` for eval-gate scoring.  Defaults to a
         ``StaticCheckSet`` that immediately fails (no samples), which ensures
@@ -325,6 +347,19 @@ class LearningPipelineSink:
             eval_gate_config if eval_gate_config is not None else EvalGateConfig()
         )
         self._tenant_id = tenant_id
+
+    # -- Lifecycle -----------------------------------------------------------
+
+    def close(self) -> None:
+        """Close the injected store if it exposes a ``close()`` method.
+
+        The caller owns the store lifecycle; this is a convenience passthrough
+        so the sink can be used as a context-manager participant without the
+        caller needing a direct reference to the store.
+        """
+        close_fn = getattr(self._store, "close", None)
+        if callable(close_fn):
+            close_fn()
 
     # -- CandidateSink protocol -------------------------------------------
 
