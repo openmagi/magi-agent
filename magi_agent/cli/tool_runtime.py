@@ -18,6 +18,9 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Callable
 
 if TYPE_CHECKING:
+    from magi_agent.harness.general_automation.live_gate import (
+        GeneralAutomationReceiptLedgerStore,
+    )
     from magi_agent.tools.context import ToolContext
     from magi_agent.tools.dispatcher import ToolDispatcher
     from magi_agent.tools.manifest import RuntimeMode
@@ -33,12 +36,14 @@ class CliToolRuntime:
     registry: "ToolRegistry"
     dispatcher: "ToolDispatcher"
     tool_context_factory: "Callable[[object], ToolContext]"
+    general_automation_receipts: "GeneralAutomationReceiptLedgerStore"
 
 
 def build_cli_tool_runtime(
     *,
     workspace_root: str,
     session_id: str = "cli-session",
+    general_automation_receipts: "GeneralAutomationReceiptLedgerStore | None" = None,
 ) -> CliToolRuntime:
     """Assemble the registry, dispatcher, and tool-context factory.
 
@@ -55,6 +60,9 @@ def build_cli_tool_runtime(
     from magi_agent.tools.dispatcher import ToolDispatcher  # noqa: PLC0415
     from magi_agent.tools.registry import ToolRegistry  # noqa: PLC0415
     from magi_agent.tools import register_core_tool_manifests  # noqa: PLC0415
+    from magi_agent.harness.general_automation.live_gate import (  # noqa: PLC0415
+        GeneralAutomationReceiptLedgerStore,
+    )
 
     registry = ToolRegistry()
     register_core_tool_manifests(registry)
@@ -75,7 +83,11 @@ def build_cli_tool_runtime(
         register_file_tool_manifests(registry)
         bind_file_toolhost_handlers(registry)
 
-    dispatcher = ToolDispatcher(registry)
+    receipt_store = general_automation_receipts or GeneralAutomationReceiptLedgerStore()
+    dispatcher = ToolDispatcher(
+        registry,
+        general_automation_receipts=receipt_store,
+    )
 
     def tool_context_factory(adk_tool_context: object) -> ToolContext:
         return ToolContext(
@@ -83,6 +95,7 @@ def build_cli_tool_runtime(
             session_id=session_id,
             turn_id="cli",
             workspace_root=workspace_root,
+            execution_contract={"agentRole": "general"},
             adk_tool_context=adk_tool_context,
         )
 
@@ -90,6 +103,7 @@ def build_cli_tool_runtime(
         registry=registry,
         dispatcher=dispatcher,
         tool_context_factory=tool_context_factory,
+        general_automation_receipts=receipt_store,
     )
 
 
@@ -98,6 +112,7 @@ def build_cli_adk_tools(
     workspace_root: str,
     session_id: str = "cli-session",
     mode: "RuntimeMode" = "act",
+    general_automation_receipts: "GeneralAutomationReceiptLedgerStore | None" = None,
 ) -> list[object]:
     """Build the ADK FunctionTools exposing the real core tools for the CLI."""
 
@@ -108,6 +123,7 @@ def build_cli_adk_tools(
     runtime = build_cli_tool_runtime(
         workspace_root=workspace_root,
         session_id=session_id,
+        general_automation_receipts=general_automation_receipts,
     )
     return build_adk_function_tools_for_registry(
         runtime.registry,

@@ -38,6 +38,10 @@ If `magi` launches but answers with a model-free stub, no provider key was found
 
 If a provider key is set but the turn returns an install hint instead of a model answer, the optional `litellm` dependency is missing (the CLI raises a provider-dependency error and stays usable on the stub runner). `magi doctor` reports `litellm` as not importable. Reinstall `magi-agent` so its default runtime dependencies are present, or from a source checkout install the CLI extra: `uv run --extra cli magi ...` (the `cli` extra pulls the provider runtime in).
 
+### Recipe phase routing
+
+Local CLI and dashboard runs consume the first-party recipe materializer's phase-routing plan by default. The route is local-only: it can select the active recipe phase, add route context to the runner state, and narrow already-available local tools for read/research phases, but it does not grant production writes or attach external integrations. Set `MAGI_RUNNER_POLICY_ROUTING_ENABLED=0` to opt out while debugging runner behavior.
+
 ## Agent gives wrong or unsupported answers
 
 Verify that evidence contracts are active for your task type. Research tasks should have SourceInspection requirements; coding tasks should have TestRun and GitDiff requirements. Check the evidence ledger for missing or failed evidence records. If enforcement is set to audit, the agent logs issues but does not block — switch to block_final_answer for stricter enforcement.

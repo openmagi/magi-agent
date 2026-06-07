@@ -156,14 +156,21 @@ class GeneralAutomationLiveGate:
         # Intentionally-unwired seam: the dispatch path must call this to persist
         # the receipt to the EvidenceLedger in a later PR (without it, the
         # completion verifier's artifact check can't see receipts).
+        public_receipt = receipt.public_projection()
         if isinstance(receipt, ShellPolicyReceipt):
             return ledger.append_control_ref(
                 receipt.command_digest,
-                metadata={"shellPolicyReceipt": receipt.public_projection()},
+                metadata={
+                    "generalAutomationReceipt": public_receipt,
+                    "shellPolicyReceipt": public_receipt,
+                },
             )
         return ledger.append_control_ref(
             receipt.approval_ref,
-            metadata={"externalDirectoryApprovalReceipt": receipt.public_projection()},
+            metadata={
+                "generalAutomationReceipt": public_receipt,
+                "externalDirectoryApprovalReceipt": public_receipt,
+            },
         )
 
     # ------------------------------------------------------------------
@@ -315,6 +322,58 @@ class GeneralAutomationLiveGate:
 
 
 # ---------------------------------------------------------------------------
+# Dispatch receipt ledger store
+# ---------------------------------------------------------------------------
+
+
+class GeneralAutomationReceiptLedgerStore:
+    """In-memory per-turn ledger for GA dispatch receipts.
+
+    The CLI and local dashboard runner path is local-only and single-process, so
+    this store intentionally stays small and ephemeral. It gives the real
+    dispatcher somewhere to retain GA gate receipts without granting execution,
+    route, traffic, or production-write authority.
+    """
+
+    def __init__(self) -> None:
+        self._ledgers: dict[tuple[str, str], EvidenceLedger] = {}
+
+    def append_receipt(
+        self,
+        context: ToolContext,
+        receipt: GeneralAutomationReceipt,
+        *,
+        gate: GeneralAutomationLiveGate | None = None,
+    ) -> EvidenceLedger:
+        key = _ledger_key(context)
+        ledger = self._ledgers.get(key)
+        if ledger is None:
+            ledger = _new_dispatch_ledger(context, session_id=key[0], turn_id=key[1])
+        updated = (gate or GeneralAutomationLiveGate()).append_receipt_to_ledger(
+            ledger,
+            receipt,
+        )
+        self._ledgers[key] = updated
+        return updated
+
+    def ledger_for_turn(
+        self,
+        *,
+        session_id: str,
+        turn_id: str,
+    ) -> EvidenceLedger | None:
+        return self._ledgers.get((session_id, turn_id))
+
+    def entries_for_turn(self, turn_id: str) -> tuple[object, ...]:
+        return tuple(
+            entry
+            for (_session_id, stored_turn_id), ledger in self._ledgers.items()
+            if stored_turn_id == turn_id
+            for entry in ledger.entries
+        )
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
@@ -361,6 +420,40 @@ def _agent_role(context: ToolContext) -> str:
     return ""
 
 
+def _ledger_key(context: ToolContext) -> tuple[str, str]:
+    session_id = (
+        context.session_id
+        or context.session_key
+        or context.bot_id
+        or "local-session"
+    )
+    turn_id = context.turn_id or "local-turn"
+    return (session_id, turn_id)
+
+
+def _new_dispatch_ledger(
+    context: ToolContext,
+    *,
+    session_id: str,
+    turn_id: str,
+) -> EvidenceLedger:
+    agent_role = _agent_role(context) or "general"
+    return EvidenceLedger(
+        ledgerId=f"ledger:{session_id}:{turn_id}:ga-dispatch",
+        sessionId=session_id,
+        turnId=turn_id,
+        runOn="main",
+        agentRole=agent_role,
+        spawnDepth=context.spawn_depth,
+        sourceKind="tool_trace",
+        producerSurface="tool_host",
+        trafficAttached=False,
+        executionAttached=False,
+        routeAttached=False,
+        metadata={"source": _SOURCE_HOOK},
+    )
+
+
 def _workspace_root(context: ToolContext) -> str:
     root = context.workspace_root
     if isinstance(root, str) and root.startswith("/"):
@@ -396,6 +489,7 @@ __all__ = [
     "GateDecision",
     "GeneralAutomationGateOutcome",
     "GeneralAutomationLiveGate",
+    "GeneralAutomationReceiptLedgerStore",
     "GeneralAutomationReceipt",
     "general_automation_live_gate_enabled",
 ]

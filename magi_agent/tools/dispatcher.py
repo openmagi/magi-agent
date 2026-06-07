@@ -10,6 +10,7 @@ from magi_agent.evidence.coding_tool_receipts import (
 from magi_agent.harness.general_automation.live_gate import (
     GeneralAutomationGateOutcome,
     GeneralAutomationLiveGate,
+    GeneralAutomationReceiptLedgerStore,
 )
 from magi_agent.telemetry.trace_context import get_trace
 
@@ -29,6 +30,7 @@ class ToolDispatcher:
         permission_policy: ToolPermissionPolicy | None = None,
         coding_receipt_boundary: CodingToolReceiptBoundary | None = None,
         general_automation_live_gate: GeneralAutomationLiveGate | None = None,
+        general_automation_receipts: GeneralAutomationReceiptLedgerStore | None = None,
         readonly_offload_enabled: bool | None = None,
         max_offload_concurrency: int | None = None,
     ) -> None:
@@ -37,6 +39,9 @@ class ToolDispatcher:
         self._coding_receipt_boundary = coding_receipt_boundary or CodingToolReceiptBoundary()
         self._general_automation_live_gate = (
             general_automation_live_gate or GeneralAutomationLiveGate()
+        )
+        self.general_automation_receipts = (
+            general_automation_receipts or GeneralAutomationReceiptLedgerStore()
         )
         # PR14 — readonly offload. Google ADK already fans out same-turn function
         # calls concurrently (asyncio.gather over create_task), but magi's
@@ -177,11 +182,24 @@ class ToolDispatcher:
                 },
             )
 
+        ga_arguments = _general_automation_arguments(manifest, arguments)
         ga_outcome = self._general_automation_live_gate.classify_pre(
-            name, arguments, context, mode=mode
+            name, ga_arguments, context, mode=mode
         )
         if ga_outcome.active and ga_outcome.decision != "allow":
-            ga_result = _general_automation_gate_result(manifest, mode, ga_outcome)
+            receipt_ledger = None
+            if ga_outcome.receipt is not None:
+                receipt_ledger = self.general_automation_receipts.append_receipt(
+                    context,
+                    ga_outcome.receipt,
+                    gate=self._general_automation_live_gate,
+                )
+            ga_result = _general_automation_gate_result(
+                manifest,
+                mode,
+                ga_outcome,
+                receipt_ledger=receipt_ledger,
+            )
             if trace is not None:
                 trace.record(
                     "tool",
@@ -301,6 +319,8 @@ def _general_automation_gate_result(
     manifest: ToolManifest,
     mode: RuntimeMode,
     outcome: GeneralAutomationGateOutcome,
+    *,
+    receipt_ledger: object | None = None,
 ) -> ToolResult:
     """Project a GA live-gate deny/ask outcome onto a ToolResult.
 
@@ -325,6 +345,20 @@ def _general_automation_gate_result(
         metadata["controlProjection"] = outcome.control_projection.public_projection()
     if outcome.receipt is not None:
         metadata["generalAutomationReceipt"] = outcome.receipt.public_projection()
+    if receipt_ledger is not None:
+        entries = getattr(receipt_ledger, "entries", ())
+        if entries:
+            latest = entries[-1]
+            metadata["generalAutomationReceiptLedgerRef"] = getattr(
+                latest,
+                "evidence_ref",
+                None,
+            )
+            metadata["generalAutomationReceiptLedgerEntry"] = latest.model_dump(
+                by_alias=True,
+                mode="json",
+                warnings=False,
+            )
 
     if outcome.decision == "deny":
         return ToolResult(status="blocked", metadata=metadata)
@@ -340,3 +374,32 @@ def _available_tool_names(
     if exposed_tool_names is not None:
         return tuple(sorted(dict.fromkeys(exposed_tool_names)))
     return tuple(tool.name for tool in registry.list_available(mode=mode))
+
+
+def _general_automation_arguments(
+    manifest: ToolManifest,
+    arguments: dict[str, object],
+) -> dict[str, object]:
+    if "operationClass" in arguments or "operation_class" in arguments:
+        return arguments
+    if not any(
+        key in arguments
+        for key in ("path", "file_path", "filePath", "target_path", "targetPath")
+    ):
+        return arguments
+    operation_class = _general_automation_operation_class(manifest)
+    if operation_class is None:
+        return arguments
+    return {**arguments, "operationClass": operation_class}
+
+
+def _general_automation_operation_class(manifest: ToolManifest) -> str | None:
+    if manifest.permission == "read":
+        if manifest.name in {"Glob", "Grep"}:
+            return "list"
+        return "read"
+    if manifest.permission == "write" or manifest.mutates_workspace:
+        return "write"
+    if manifest.permission == "execute" or manifest.dangerous:
+        return "execute"
+    return None

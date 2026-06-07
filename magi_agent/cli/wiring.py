@@ -93,6 +93,9 @@ class HeadlessRuntime:
     composio:
         Optional Composio MCP toolset bundle, inactive when not configured or
         when optional packages are unavailable.
+    general_automation_receipts:
+        Local-only GA dispatch receipt ledger store retained by the active
+        first-party tool dispatcher, when present.
     mcp_servers:
         Labels for active MCP servers surfaced in protocol metadata.
     """
@@ -102,6 +105,7 @@ class HeadlessRuntime:
     commands: CommandRegistry
     session_log: SessionLog
     composio: ComposioToolsetBundle
+    general_automation_receipts: object | None = None
     mcp_servers: tuple[str, ...] = ()
 
 
@@ -195,6 +199,7 @@ def build_headless_runtime(
             mode=mode,
         ),
         event_sink=event_sink,
+        evidence_collector=_general_automation_evidence_collector(effective_runner),
     )
 
     # (C) Permission gate — default stays sink-less and therefore fail-safe on
@@ -232,6 +237,11 @@ def build_headless_runtime(
         commands=commands,
         session_log=session_log,
         composio=composio_bundle,
+        general_automation_receipts=getattr(
+            effective_runner,
+            "general_automation_receipts",
+            None,
+        ),
         mcp_servers=mcp_servers,
     )
 
@@ -328,14 +338,24 @@ def _build_default_runner(
         CliProviderDependencyError,
         build_cli_model_runner,
     )
+    from magi_agent.harness.general_automation.live_gate import (  # noqa: PLC0415
+        GeneralAutomationReceiptLedgerStore,
+    )
 
     # Identity is loaded from the SAME cwd used to root the tools.
     workspace_root = str(cwd) if cwd is not None else os.getcwd()
+    general_automation_receipts = GeneralAutomationReceiptLedgerStore()
     try:
         return build_cli_model_runner(
             config,
-            tools=_build_first_party_adk_tools(cwd=cwd, session_id=session_id, mode=mode),
+            tools=_build_first_party_adk_tools(
+                cwd=cwd,
+                session_id=session_id,
+                mode=mode,
+                general_automation_receipts=general_automation_receipts,
+            ),
             workspace_root=workspace_root,
+            general_automation_receipts=general_automation_receipts,
         )
     except CliProviderDependencyError as exc:
         # Key configured but the provider dependency is missing: keep the CLI
@@ -348,6 +368,7 @@ def _build_first_party_adk_tools(
     cwd: str | os.PathLike[str] | None,
     session_id: str,
     mode: "RuntimeMode" = "act",
+    general_automation_receipts: object | None = None,
 ) -> list[object]:
     """Build default first-party local ADK tools for the CLI real runner.
 
@@ -369,10 +390,21 @@ def _build_first_party_adk_tools(
     )
     from magi_agent.tools.context import ToolContext  # noqa: PLC0415
     from magi_agent.tools.dispatcher import ToolDispatcher  # noqa: PLC0415
+    from magi_agent.harness.general_automation.live_gate import (  # noqa: PLC0415
+        GeneralAutomationReceiptLedgerStore,
+    )
 
     workspace_root = str(cwd) if cwd is not None else os.getcwd()
     registry = _build_core_tool_registry(_build_default_plugin_state())
-    dispatcher = ToolDispatcher(registry)
+    receipt_store = (
+        general_automation_receipts
+        if isinstance(general_automation_receipts, GeneralAutomationReceiptLedgerStore)
+        else GeneralAutomationReceiptLedgerStore()
+    )
+    dispatcher = ToolDispatcher(
+        registry,
+        general_automation_receipts=receipt_store,
+    )
     exposed_tool_names = tuple(
         registration.manifest.name
         for registration in (
@@ -408,6 +440,7 @@ def _build_first_party_adk_tools(
                 "mode": "selected_full_toolhost",
                 "source": "selected_full_toolhost",
             },
+            execution_contract={"agentRole": "general"},
             adk_tool_context=adk_tool_context,
             adk_context=adk_tool_context,
             tool_use_id=tool_use_id if isinstance(tool_use_id, str) else None,
@@ -422,6 +455,12 @@ def _build_first_party_adk_tools(
         attach_enabled=True,
         exposed_tool_names=exposed_tool_names,
     )
+
+
+def _general_automation_evidence_collector(runner: object) -> object | None:
+    store = getattr(runner, "general_automation_receipts", None)
+    collector = getattr(store, "entries_for_turn", None)
+    return collector if callable(collector) else None
 
 
 def _context_lookup(value: object, key: str) -> object | None:
@@ -490,10 +529,10 @@ def _tool_context_turn_id(
         _context_lookup(_context_lookup(adk_tool_context, "event"), "invocation_id"),
     ):
         if isinstance(value, str) and value.strip():
-            return f"{session_id}:{value.strip()}"
+            return value.strip()
     if tool_use_id:
-        return f"{session_id}:tool:{tool_use_id}"
-    return f"{session_id}:local-turn"
+        return f"tool:{tool_use_id}"
+    return "local-turn"
 
 
 def _first_party_tools_enabled() -> bool:
