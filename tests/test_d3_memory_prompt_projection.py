@@ -247,7 +247,7 @@ def test_snapshot_is_bounded_by_max_bytes(
     big_content = "x" * 200_000
     _make_workspace(tmp_path, memory=big_content)
     result = project_memory_snapshot(workspace_root=tmp_path, max_bytes=4096)
-    assert len(result.snapshot_block.encode("utf-8")) <= 4096 + 200  # fence overhead
+    assert len(result.snapshot_block.encode("utf-8")) <= 4096
 
 
 def test_snapshot_result_records_evidence_digests(
@@ -415,7 +415,7 @@ def test_multi_kb_memory_projects_more_than_400_chars(tmp_path: Path) -> None:
         "400-char tool-preview cap may still be active."
     )
     # And still within the budget.
-    assert content_len <= 8_192 + 200  # fence overhead
+    assert content_len <= 8_192
 
 
 def test_oversized_memory_capped_at_max_bytes(tmp_path: Path) -> None:
@@ -431,7 +431,7 @@ def test_oversized_memory_capped_at_max_bytes(tmp_path: Path) -> None:
     elapsed = time.monotonic() - t0
 
     assert result.enabled is True
-    assert len(result.snapshot_block.encode("utf-8")) <= 4_096 + 200  # fence overhead
+    assert len(result.snapshot_block.encode("utf-8")) <= 4_096
     assert elapsed < 2.0, f"Projection took {elapsed:.2f}s — ReDoS guard may be missing"
 
 
@@ -457,3 +457,115 @@ def test_secret_in_memory_md_is_redacted_from_snapshot(tmp_path: Path) -> None:
     )
     # Non-secret content should still be present.
     assert "dark mode" in result.snapshot_block
+
+
+# ---------------------------------------------------------------------------
+# 10. Token/secret redaction via bare labels (D3 review gap fix)
+#
+# Before this fix, _redact_snapshot_content only applied the 9 projection
+# regexes; it OMITTED the token-specific patterns from sanitize_tool_preview
+# (Bearer/GitHub/OpenAI/Stripe/key-value/session).  A MEMORY.md line like
+#   "OpenAI key: sk-proj-abc123"  or  "Stripe key: sk_live_abc123"
+# would be projected UNREDACTED.  These tests prove each class is now covered.
+# ---------------------------------------------------------------------------
+
+
+def test_snapshot_redacts_openai_key_bare_label(tmp_path: Path) -> None:
+    """'OpenAI key: sk-proj-ABC123...' — bare 'key' label must be redacted."""
+    secret = "sk-proj-ABC123XYZlongtoken987"
+    content = (
+        "## Config\n"
+        f"OpenAI key: {secret}\n"
+        "Prefers concise answers.\n"
+    )
+    _make_workspace(tmp_path, memory=content)
+    projector = MemoryPromptProjector(workspace_root=tmp_path, enabled=True, max_bytes=8_192)
+    result = projector.project()
+
+    assert result.enabled is True
+    assert secret not in result.snapshot_block, (
+        f"OpenAI sk-proj- token must be redacted; got: {result.snapshot_block!r}"
+    )
+    assert "concise answers" in result.snapshot_block
+
+
+def test_snapshot_redacts_stripe_key_bare_label(tmp_path: Path) -> None:
+    """'Stripe key: sk_live_ABC123' — bare 'key' label must be redacted."""
+    secret = "sk_live_ABC123XYZ789stripe"
+    content = (
+        "## Billing\n"
+        f"Stripe key: {secret}\n"
+        "Monthly budget: $500.\n"
+    )
+    _make_workspace(tmp_path, memory=content)
+    projector = MemoryPromptProjector(workspace_root=tmp_path, enabled=True, max_bytes=8_192)
+    result = projector.project()
+
+    assert result.enabled is True
+    assert secret not in result.snapshot_block, (
+        f"Stripe sk_live_ token must be redacted; got: {result.snapshot_block!r}"
+    )
+    assert "Monthly budget" in result.snapshot_block
+
+
+def test_snapshot_redacts_github_token_bare_label(tmp_path: Path) -> None:
+    """'GitHub: ghp_ABC123...' — GitHub PAT must be redacted."""
+    secret = "ghp_ABC123XYZlongpat456789abcdef"
+    content = (
+        "## Access\n"
+        f"GitHub: {secret}\n"
+        "Use read-only scopes.\n"
+    )
+    _make_workspace(tmp_path, memory=content)
+    projector = MemoryPromptProjector(workspace_root=tmp_path, enabled=True, max_bytes=8_192)
+    result = projector.project()
+
+    assert result.enabled is True
+    assert secret not in result.snapshot_block, (
+        f"GitHub ghp_ token must be redacted; got: {result.snapshot_block!r}"
+    )
+    assert "read-only scopes" in result.snapshot_block
+
+
+def test_snapshot_redacts_bearer_token_bare_label(tmp_path: Path) -> None:
+    """'Authorization: Bearer abc.def.ghi' — Bearer token must be redacted.
+
+    Note: the _drop_private_projection_lines step also treats Authorization
+    header lines as private and strips them entirely; the token therefore never
+    reaches the projected block.  The non-secret prose is placed BEFORE the
+    Authorization line so it survives the private-line drop.
+    """
+    secret = "abc.def.ghi_bearer_payload_xyz"
+    content = (
+        "## Auth header\n"
+        "Rotate every 30 days.\n"
+        f"Authorization: Bearer {secret}\n"
+    )
+    _make_workspace(tmp_path, memory=content)
+    projector = MemoryPromptProjector(workspace_root=tmp_path, enabled=True, max_bytes=8_192)
+    result = projector.project()
+
+    assert result.enabled is True
+    assert secret not in result.snapshot_block, (
+        f"Bearer token payload must be redacted; got: {result.snapshot_block!r}"
+    )
+    assert "Rotate every 30 days" in result.snapshot_block
+
+
+def test_snapshot_redacts_session_key_assignment(tmp_path: Path) -> None:
+    """'session_key = abcdef123456' — key-value session secret must be redacted."""
+    secret = "abcdef123456sessionval"
+    content = (
+        "## Session\n"
+        f"session_key = {secret}\n"
+        "Expires after 24h.\n"
+    )
+    _make_workspace(tmp_path, memory=content)
+    projector = MemoryPromptProjector(workspace_root=tmp_path, enabled=True, max_bytes=8_192)
+    result = projector.project()
+
+    assert result.enabled is True
+    assert secret not in result.snapshot_block, (
+        f"session_key value must be redacted; got: {result.snapshot_block!r}"
+    )
+    assert "Expires after 24h" in result.snapshot_block

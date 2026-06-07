@@ -14,9 +14,7 @@ projection entirely.
 from __future__ import annotations
 
 import hashlib
-import os
 from pathlib import Path
-from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -41,6 +39,13 @@ from magi_agent.memory.projection import (
     _drop_private_projection_lines,
     _redact_private_path,
 )
+from magi_agent.transport.tool_preview import MAX_TOOL_PREVIEW, redact_secret_tokens
+
+# ReDoS guard for per-line token redaction: some patterns in redact_secret_tokens
+# have superlinear backtracking; cap each line to a safe length before running
+# them.  Secrets are never multi-line, so per-line processing is semantically
+# correct.  The cap matches sanitize_tool_preview's own input ceiling.
+_TOKEN_REDACT_LINE_LIMIT = MAX_TOOL_PREVIEW + 200
 
 
 # Re-export so tests can import from here directly.
@@ -161,15 +166,36 @@ def project_memory_snapshot(
 def _redact_snapshot_content(raw: str) -> str:
     """Apply secret/private redaction to snapshot content WITHOUT a 400-char cap.
 
-    Applies the same redaction rules as ``_sanitize_memory_snippet`` in
-    ``memory/projection.py`` — same regexes, same private-line dropping — but
-    does NOT call ``sanitize_tool_preview`` at the end, so the output length is
-    bounded only by the projection's own ``content_budget``.
+    Redaction is a SUPERSET of ``_sanitize_memory_snippet`` in
+    ``memory/projection.py``:
 
-    The ReDoS guard is applied by the caller: ``raw`` must already be
-    pre-truncated to ``content_budget`` bytes before this function is called.
+      Layer 1 — the 9 projection regexes (same as ``_sanitize_memory_snippet``):
+        _SENSITIVE_REF_RE, _COOKIE_HEADER_RE, _SECRET_TEXT_RE,
+        _CHILD_PROMPT_RE, _RAW_TOOL_LOG_RE, _HIDDEN_REASONING_RE,
+        _drop_private_projection_lines, _PRIVATE_PATH_RE,
+        _PRIVATE_PATH_ALIAS_RE
 
-    # keep in sync with memory/projection._sanitize_memory_snippet
+      Layer 2 — token/secret patterns from ``transport/tool_preview.redact_secret_tokens``:
+        Bearer tokens, Authorization headers, Cookie headers,
+        GitHub tokens (ghp_/gho_/ghs_/ghu_/ghr_), OpenAI keys (sk-proj-/sk-),
+        Stripe keys (sk_live_/rk_test_/…), quoted/unquoted key=value pairs for
+        api_key/secret/token/client_secret/session_key/…, session assignments.
+
+    The 400-char length cap from ``sanitize_tool_preview`` is intentionally
+    NOT applied here; the caller enforces the byte bound via ``content_budget``
+    / ``_slice_utf8``.
+
+    ReDoS guards:
+      - The caller pre-truncates ``raw`` to ``content_budget`` bytes (layer 1
+        regexes run on bounded input).
+      - Layer 2 applies ``redact_secret_tokens`` per-line, capping each line to
+        ``_TOKEN_REDACT_LINE_LIMIT`` chars, because some token patterns have
+        superlinear backtracking on long uniform strings (secrets are never
+        multi-line so per-line processing is semantically correct).
+
+    # keep in sync: snapshot redaction = 9 projection regexes (layer 1)
+    #   + redact_secret_tokens() token/secret patterns (layer 2, per-line),
+    #   minus ONLY the 400-char length cap.
     """
     sanitized = _SENSITIVE_REF_RE.sub("[redacted-ref]", raw)
     sanitized = _COOKIE_HEADER_RE.sub("[redacted-cookie]", sanitized)
@@ -180,8 +206,14 @@ def _redact_snapshot_content(raw: str) -> str:
     sanitized = "\n".join(_drop_private_projection_lines(sanitized.splitlines()))
     sanitized = _PRIVATE_PATH_RE.sub(_redact_private_path, sanitized)
     sanitized = _PRIVATE_PATH_ALIAS_RE.sub("[private_path]", sanitized)
-    # No sanitize_tool_preview call — the caller enforces the byte cap via
-    # content_budget / _slice_utf8, which is the correct bound for snapshots.
+    # Layer 2: token/secret patterns (Bearer/GitHub/OpenAI/Stripe/key-value/session)
+    # — single source of truth in transport/tool_preview.redact_secret_tokens.
+    # ReDoS guard: apply per-line, capping each line to _TOKEN_REDACT_LINE_LIMIT
+    # before running the patterns (secrets are never multi-line).
+    sanitized = "\n".join(
+        redact_secret_tokens(line[:_TOKEN_REDACT_LINE_LIMIT])
+        for line in sanitized.splitlines()
+    )
     return sanitized
 
 

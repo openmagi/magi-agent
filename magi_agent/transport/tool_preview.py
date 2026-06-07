@@ -88,15 +88,27 @@ _SESSION_ASSIGNMENT_RE = re.compile(
 )
 
 
-def sanitize_tool_preview(preview: str) -> str:
-    # ReDoS guard: pre-truncate input so catastrophic-backtracking regexes
-    # cannot run over unbounded strings.  The output is always ≤ MAX_TOOL_PREVIEW
-    # (~400 chars); redaction substitutions ("[redacted]") are never longer than
-    # matched tokens, so a ceiling of MAX_TOOL_PREVIEW + 200 characters is safe.
-    _INPUT_LIMIT = MAX_TOOL_PREVIEW + 200
-    if len(preview) > _INPUT_LIMIT:
-        preview = preview[:_INPUT_LIMIT]
-    redacted = _BEARER_TOKEN_RE.sub(r"\1[redacted]", preview)
+def redact_secret_tokens(text: str) -> str:
+    """Apply all token/secret redaction patterns to *text* WITHOUT length truncation.
+
+    This is the single source of truth for secret-token redaction — shared by
+    both ``sanitize_tool_preview`` (which adds a 400-char length cap afterwards)
+    and ``_redact_snapshot_content`` in ``memory/prompt_projection.py`` (which
+    uses the projection's own ``max_bytes`` budget as the only length bound).
+
+    Patterns covered:
+      - Bearer tokens (``Authorization: Bearer …``)
+      - Authorization headers (``Authorization: <scheme> <token>``)
+      - Cookie / Set-Cookie headers
+      - GitHub tokens (``ghp_``, ``gho_``, ``ghs_``, ``ghu_``, ``ghr_``)
+      - OpenAI keys (``sk-proj-…``, ``sk-…``)
+      - Stripe keys (``sk_live_…``, ``rk_test_…``, etc.)
+      - Quoted/unquoted public-credential key=value pairs
+      - Quoted/unquoted generic secret key=value pairs
+        (``api_key``, ``secret``, ``token``, ``client_secret``, ``session_key``, …)
+      - Bare ``session = <value>`` assignments
+    """
+    redacted = _BEARER_TOKEN_RE.sub(r"\1[redacted]", text)
     redacted = _AUTHORIZATION_HEADER_RE.sub(r"\1[redacted]", redacted)
     redacted = _COOKIE_HEADER_RE.sub(r"\1[redacted]", redacted)
     redacted = _GITHUB_TOKEN_RE.sub("[redacted]", redacted)
@@ -115,6 +127,18 @@ def sanitize_tool_preview(preview: str) -> str:
     redacted = _SINGLE_QUOTED_KEY_VALUE_SECRET_RE.sub(r"\1'[redacted]'", redacted)
     redacted = _UNQUOTED_KEY_VALUE_SECRET_RE.sub(r"\1[redacted]", redacted)
     redacted = _SESSION_ASSIGNMENT_RE.sub(r"\1[redacted]", redacted)
+    return redacted
+
+
+def sanitize_tool_preview(preview: str) -> str:
+    # ReDoS guard: pre-truncate input so catastrophic-backtracking regexes
+    # cannot run over unbounded strings.  The output is always ≤ MAX_TOOL_PREVIEW
+    # (~400 chars); redaction substitutions ("[redacted]") are never longer than
+    # matched tokens, so a ceiling of MAX_TOOL_PREVIEW + 200 characters is safe.
+    _INPUT_LIMIT = MAX_TOOL_PREVIEW + 200
+    if len(preview) > _INPUT_LIMIT:
+        preview = preview[:_INPUT_LIMIT]
+    redacted = redact_secret_tokens(preview)
     if len(redacted) > MAX_TOOL_PREVIEW:
         return f"{redacted[:MAX_TOOL_PREVIEW - 3]}..."
     return redacted
