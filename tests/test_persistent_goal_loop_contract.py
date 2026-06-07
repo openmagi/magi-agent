@@ -225,6 +225,37 @@ def test_spawn_depth_policy_rejects_invalid_ranges_and_depths() -> None:
         GoalLoopSpawnDepthPolicy(minDepth=2, maxDepth=1)
 
 
+def test_goal_loop_policy_authority_flags_not_forgeable_via_model_copy() -> None:
+    """HIGH: model_copy(update={...}) must NOT be able to set authority flags to True.
+
+    ``traffic_attached`` and ``execution_attached`` are ``Literal[False]`` with a
+    ``field_validator(mode="before")`` that coerces any value to False.  Pydantic's
+    ``model_copy(update={...})`` re-validates via the validator, so a forged True
+    is coerced back to False.
+    """
+    policy = build_goal_loop_policy()
+    assert policy.traffic_attached is False
+    assert policy.execution_attached is False
+
+    # model_copy with a forged True must be coerced back to False
+    assert policy.model_copy(update={"traffic_attached": True}).traffic_attached is False
+    assert policy.model_copy(update={"execution_attached": True}).execution_attached is False
+
+    # Direct field assignment raises (frozen model)
+    from pydantic import ValidationError as _VE
+    with pytest.raises((_VE, TypeError)):
+        policy.traffic_attached = True  # type: ignore[misc]
+    with pytest.raises((_VE, TypeError)):
+        policy.execution_attached = True  # type: ignore[misc]
+
+    # model_validate with truthy values is also coerced
+    coerced = GoalLoopPolicy.model_validate(
+        {"featureKey": "persistent-goal-loop", "trafficAttached": True, "executionAttached": True}
+    )
+    assert coerced.traffic_attached is False
+    assert coerced.execution_attached is False
+
+
 def test_goal_loop_import_boundary_does_not_load_adk_runner_routes_dispatcher_or_hookbus() -> None:
     completed = subprocess.run(
         [

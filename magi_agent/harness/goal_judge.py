@@ -72,6 +72,10 @@ DEFAULT_JUDGE_PARSE_FAILURE_BUDGET: int = 3
 """Number of consecutive parse failures before the policy gives up and stops the loop."""
 
 _SHADOW_ENV_VAR = "MAGI_GOAL_LOOP_JUDGE_SHADOW"
+# Shadow-mode gate for the judge (default ON = shadow-first).
+# A LIVE loop requires BOTH ``MAGI_GOAL_LOOP_ENABLED=1`` AND
+# ``MAGI_GOAL_LOOP_JUDGE_SHADOW=0``.  When shadow is ON (default), all judge
+# decisions are observe-only and no continuation is dispatched.
 
 # Regex: whole-word NOT_SATISFIED / SATISFIED (case-insensitive)
 _NOT_SATISFIED_RE = re.compile(r"\bNOT_SATISFIED\b", re.IGNORECASE)
@@ -371,15 +375,10 @@ def run_judge(
     )
 
     if is_shadow:
-        # Shadow: record verdict but do not act
-        evidence = build_judge_evidence(
-            goal=goal,
-            transcript_excerpt=transcript_excerpt,
-            verdict=verdict,
-            failure_count=new_failure_count,
-            now=ts,
-        )
-        _ = evidence  # evidence computed for audit; NOT attached to decision — B4 calls build_judge_evidence directly
+        # Shadow: verdict observed but not acted on.  Evidence is owned by B3's
+        # _build_loop_evidence (called via _result); build_judge_evidence is
+        # exported for callers that want it but must NOT be called here — the
+        # call was wasted (result discarded) and is removed to keep this path clean.
         return JudgeDecision(
             verdict=verdict,
             acted=False,
