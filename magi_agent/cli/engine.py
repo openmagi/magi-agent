@@ -259,6 +259,74 @@ class RunnerPolicyAssembly:
             "schedulerIntents": list(self.scheduler_intents),
         }
 
+    def phase_route_decision(self) -> dict[str, object] | None:
+        """Distill the materialized phase routing into a consumable decision.
+
+        ``phase_routing`` is the raw ``PhaseRoutingPlan.model_dump(by_alias=True)``
+        threaded in by the recipe materializer; until D1 nothing read it. This
+        normalizes it into the routing *hints* the engine/CLI surfaces actually
+        consume (per-phase model selection, escalation policy, denial state).
+        Returns ``None`` when no routing was materialized, so the OFF / stub path
+        stays byte-identical.
+        """
+
+        routing = self.phase_routing
+        if not routing:
+            return None
+
+        phase_routes = _routing_field(routing, "phaseRoutes", "phase_routes") or {}
+        phase_models: dict[str, dict[str, str]] = {}
+        escalation_policies: dict[str, str] = {}
+        verifier_tiers: dict[str, str] = {}
+        denied_phases: list[str] = []
+        requires_stronger_verifier = False
+        if isinstance(phase_routes, Mapping):
+            for phase, route in phase_routes.items():
+                if not isinstance(route, Mapping):
+                    continue
+                phase_key = str(phase)
+                provider = route.get("provider")
+                model = route.get("model")
+                tier = route.get("tier")
+                if (
+                    isinstance(provider, str)
+                    and isinstance(model, str)
+                    and isinstance(tier, str)
+                ):
+                    phase_models[phase_key] = {
+                        "provider": provider,
+                        "model": model,
+                        "tier": tier,
+                    }
+                policy = _routing_field(route, "escalationPolicy", "escalation_policy")
+                if isinstance(policy, str) and policy:
+                    escalation_policies[phase_key] = policy
+                    if policy == "bounded_stronger_verifier":
+                        requires_stronger_verifier = True
+                verifier_tier = _routing_field(route, "verifierTier", "verifier_tier")
+                if isinstance(verifier_tier, str) and verifier_tier:
+                    verifier_tiers[phase_key] = verifier_tier
+                if bool(_routing_field(route, "routeDenied", "route_denied")):
+                    denied_phases.append(phase_key)
+
+        max_sota = _routing_field(routing, "maxSotaEscalations", "max_sota_escalations")
+        denial_reason = _routing_field(routing, "denialReason", "denial_reason")
+        return {
+            "routeDenied": bool(_routing_field(routing, "routeDenied", "route_denied")),
+            "denialReason": denial_reason if isinstance(denial_reason, str) else None,
+            "fallbackToTypeScript": bool(
+                _routing_field(routing, "fallbackToTypeScript", "fallback_to_typescript")
+            ),
+            "maxSotaEscalations": (
+                int(max_sota) if isinstance(max_sota, int) and not isinstance(max_sota, bool) else 0
+            ),
+            "phaseModels": phase_models,
+            "escalationPolicies": escalation_policies,
+            "verifierTiers": verifier_tiers,
+            "deniedPhases": tuple(denied_phases),
+            "requiresStrongerVerifier": requires_stronger_verifier,
+        }
+
 
 def build_engine_recovery_policy(env: object = None) -> "EngineRecoveryPolicy | None":
     """Build the recovery policy from env, or ``None`` when recovery is OFF.
@@ -861,6 +929,28 @@ class MagiEngineDriver:
                 turn_id=turn_id,
             )
 
+        # D1: consume the materialized phase route. The recipe materializer
+        # already routes per-phase model/tier + verifier escalation into the
+        # assembly; until now it was inert metadata. Surface a distilled routing
+        # decision so CLI / dashboard / observability surfaces can act on it.
+        # This is a routing HINT only — it does not change which model executes,
+        # which tools are exposed, or grant any production authority.
+        route_decision = (
+            self._runner_policy_assembly.phase_route_decision()
+            if self._runner_policy_assembly is not None
+            else None
+        )
+        if route_decision is not None:
+            yield RuntimeEvent(
+                type="status",
+                payload={
+                    "type": "phase_route_decision",
+                    "turnId": turn_id,
+                    **route_decision,
+                },
+                turn_id=turn_id,
+            )
+
         # Permission interception (Stream F): attach a before_tool_callback to
         # the runner's agent so the gate intercepts every tool BEFORE it runs.
         # The agent is per-RUNNER (not per-turn); two concurrent turns sharing
@@ -1440,6 +1530,28 @@ class MagiEngineDriver:
             ref for ref in assembly.required_validators if ref not in observed_public_refs
         ]
         decision = "block" if missing_evidence or missing_validators else "pass"
+
+        # D1: consume the phase route's verifier-escalation decision. When the
+        # materialized route requires a bounded stronger verifier for a review
+        # phase, an already-blocking gate upgrades its remediation from a weak
+        # "audit" to "repair_required". This NEVER changes pass→block (it only
+        # fires on a turn the gate already blocks), so the default-on behavior is
+        # a safe routing/policy hint, not new authority.
+        route_decision = assembly.phase_route_decision()
+        effective_action = assembly.missing_evidence_action
+        effective_repair_policy = dict(assembly.repair_policy)
+        phase_route_escalation = (
+            route_decision is not None
+            and decision == "block"
+            and bool(route_decision["requiresStrongerVerifier"])
+            and effective_action != "repair_required"
+        )
+        if phase_route_escalation:
+            effective_action = "repair_required"
+            effective_repair_policy["action"] = "repair_required"
+            effective_repair_policy["phaseRouteEscalation"] = True
+            effective_repair_policy.setdefault("source", "phase-route-escalation")
+
         payload: dict[str, object] = {
             "type": "pre_final_evidence_gate",
             "turnId": turn_id,
@@ -1447,18 +1559,28 @@ class MagiEngineDriver:
             "matchedRefs": sorted(observed_public_refs),
             "missingEvidence": missing_evidence,
             "missingValidators": missing_validators,
-            "missingEvidenceAction": assembly.missing_evidence_action,
-            "repairPolicy": dict(assembly.repair_policy),
+            "missingEvidenceAction": effective_action,
+            "repairPolicy": effective_repair_policy,
             "attachmentFlags": dict(assembly.attachment_flags),
         }
+        if route_decision is not None:
+            payload["phaseRoute"] = {
+                "routeDenied": route_decision["routeDenied"],
+                "denialReason": route_decision["denialReason"],
+                "requiresStrongerVerifier": route_decision["requiresStrongerVerifier"],
+                "escalationPolicies": route_decision["escalationPolicies"],
+                "deniedPhases": route_decision["deniedPhases"],
+            }
+        if phase_route_escalation:
+            payload["phaseRouteEscalation"] = True
         payload["verifierBus"] = _build_pre_final_verifier_bus_payload(
             decision=decision,
             missing_evidence=missing_evidence,
             missing_validators=missing_validators,
         )
-        if decision == "block" and assembly.missing_evidence_action == "repair_required":
+        if decision == "block" and effective_action == "repair_required":
             payload["repairDecision"] = _build_coding_repair_decision_payload(
-                assembly.repair_policy
+                effective_repair_policy
             )
         return payload
 
@@ -1690,6 +1812,20 @@ def _str_tuple(values: object) -> tuple[str, ...]:
     if not isinstance(values, list | tuple):
         return ()
     return tuple(str(value) for value in values if str(value))
+
+
+def _routing_field(source: object, alias: str, snake: str) -> object:
+    """Read a phase-routing field by its alias or snake_case key.
+
+    The materialized plan is dumped ``by_alias=True`` (camelCase), but a
+    hand-built plan or a future ``mode="python"`` dump may use snake_case.
+    """
+
+    if not isinstance(source, Mapping):
+        return None
+    if alias in source:
+        return source[alias]
+    return source.get(snake)
 
 
 def _authority_safe_attachment_flags(flags: Mapping[str, bool]) -> dict[str, bool]:
