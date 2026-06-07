@@ -44,7 +44,12 @@ _TASK_STATE_VERB_RE = re.compile(
     r"in\s+progress|in_progress|"
     r"deployed|deploying|deployment|"
     r"rolled\s+out|rolled_out|"
-    r"landed|committed|pushed"
+    r"landed|committed|pushed|"
+    r"shipped|shipping|"
+    r"released|releasing|"
+    r"rolling\s+out|"
+    r"reverted|rolled\s+back|"
+    r"cut\s+a\s+release"
     r")\b",
     re.IGNORECASE,
 )
@@ -192,19 +197,26 @@ _COMMIT_CONTEXT_RE = re.compile(
     re.IGNORECASE,
 )
 _LONG_SHA_RE = re.compile(r"\b[0-9a-f]{40}\b")
-_SHORT_SHA_RE = re.compile(r"\b[0-9a-f]{7}\b")
+# Standalone hex token: 7–40 chars, all lowercase hex, AND at least one digit.
+# Requiring ≥1 digit avoids rejecting common all-letter English words that happen
+# to be valid hex (e.g. "facade", "decade", "added") while still catching the
+# vast majority of commit SHAs which always contain at least one digit.
+_BARE_SHA_RE = re.compile(r"\b(?=[0-9a-f]*[0-9])[0-9a-f]{7,40}\b")
 
 
 def _is_commit_sha_reference(text: str) -> bool:
     """Return True if the text contains a reference to a commit SHA.
 
-    We require EITHER:
+    We accept any of:
     * a full 40-hex-char SHA anywhere in the text, OR
-    * a 7-char short SHA AND a context word (commit/sha/hash/rev/revision/patch).
+    * a standalone hex token 7–40 chars that contains at least one digit
+      (overwhelmingly a commit SHA rather than an English word), OR
+    * a 7-char short SHA with a context word (commit/sha/hash/rev/revision/patch)
+      — kept for backwards-compatibility; now largely subsumed by the rule above.
     """
     if _LONG_SHA_RE.search(text):
         return True
-    if _SHORT_SHA_RE.search(text) and _COMMIT_CONTEXT_RE.search(text):
+    if _BARE_SHA_RE.search(text):
         return True
     return False
 
