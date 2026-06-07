@@ -1161,6 +1161,103 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
         animation-iteration-count: 1 !important;
       }}
     }}
+    .thinking-block {{
+      align-self: flex-start;
+      max-width: 980px;
+      margin: 2px 0 6px;
+      padding: 8px 12px;
+      border-radius: var(--radius);
+      border: 1px dashed var(--line);
+      background: rgba(31, 38, 52, 0.03);
+      color: var(--muted);
+      font-size: 13px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }}
+    .thinking-block summary {{ cursor: pointer; font-weight: 600; }}
+    .thinking-block .thinking-body {{ margin-top: 6px; }}
+    .tool-card {{
+      align-self: flex-start;
+      max-width: 980px;
+      margin: 4px 0;
+      padding: 10px 12px;
+      border-radius: var(--radius);
+      border: 1px solid var(--line);
+      background: var(--surface);
+      font-size: 13px;
+    }}
+    .tool-card .tool-head {{ display: flex; gap: 8px; align-items: center; }}
+    .tool-card .tool-name {{ font-weight: 600; }}
+    .tool-card .tool-status {{
+      margin-left: auto;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--muted);
+    }}
+    .tool-card .tool-detail {{
+      margin-top: 6px;
+      color: var(--muted);
+      white-space: pre-wrap;
+      word-break: break-word;
+    }}
+    .tool-card.rejected {{ border-color: #f2bfca; background: #fff4f6; }}
+    .tool-card.rejected .tool-status {{ color: #8a2638; }}
+    .tool-card.done {{ border-color: #bfe3c7; }}
+    .tool-card .todo-item {{ display: flex; gap: 6px; align-items: baseline; }}
+    .phase-chip {{
+      align-self: flex-start;
+      margin: 2px 0;
+      padding: 2px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: var(--accent-soft);
+      color: var(--muted);
+      font-size: 11px;
+      letter-spacing: 0.03em;
+    }}
+    .modal-backdrop {{
+      position: fixed;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      background: rgba(15, 19, 28, 0.45);
+      z-index: 60;
+      padding: 18px;
+    }}
+    .modal-backdrop.open {{ display: flex; }}
+    .modal-card {{
+      width: min(520px, 100%);
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: 0 18px 48px rgba(15, 19, 28, 0.28);
+      padding: 18px 20px;
+    }}
+    .modal-card h3 {{ margin: 0 0 8px; font-size: 16px; }}
+    .modal-card .modal-row {{ margin: 8px 0; font-size: 13px; }}
+    .modal-card .modal-row code {{
+      display: block;
+      margin-top: 4px;
+      padding: 8px 10px;
+      border-radius: 8px;
+      background: rgba(31, 38, 52, 0.05);
+      white-space: pre-wrap;
+      word-break: break-word;
+    }}
+    .modal-card .modal-feedback {{ width: 100%; margin-top: 6px; }}
+    .modal-actions {{ display: flex; gap: 10px; justify-content: flex-end; margin-top: 14px; }}
+    .modal-actions button {{
+      padding: 8px 16px;
+      border-radius: 10px;
+      border: 1px solid var(--line);
+      cursor: pointer;
+      font-weight: 600;
+    }}
+    .modal-actions .allow {{ background: var(--accent-soft); border-color: #ddceff; }}
+    .modal-actions .deny {{ background: #fff4f6; border-color: #f2bfca; color: #8a2638; }}
+    .send.stop {{ background: #fff4f6; border-color: #f2bfca; color: #8a2638; }}
   </style>
 </head>
 <body>
@@ -1284,10 +1381,27 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
               <span class="token-error" id="token-error" role="status" aria-live="polite"></span>
             </div>
             <button class="send" id="send-button" type="submit" aria-label="Send prompt">Send</button>
+            <button class="send stop" id="stop-button" type="button" aria-label="Stop run" hidden>Stop</button>
           </div>
         </form>
       </section>
     </main>
+
+    <div class="modal-backdrop" id="approval-modal" role="dialog" aria-modal="true" aria-labelledby="approval-title" hidden>
+      <div class="modal-card">
+        <h3 id="approval-title">Tool approval required</h3>
+        <div class="modal-row">Tool: <strong id="approval-tool"></strong></div>
+        <div class="modal-row">Arguments<code id="approval-args"></code></div>
+        <div class="modal-row" id="approval-reason-row" hidden>Reason: <span id="approval-reason"></span></div>
+        <label class="modal-row" for="approval-feedback">Deny feedback (optional)
+          <textarea class="modal-feedback" id="approval-feedback" rows="2" placeholder="Why are you denying this tool?"></textarea>
+        </label>
+        <div class="modal-actions">
+          <button class="deny" id="approval-deny" type="button">Deny</button>
+          <button class="allow" id="approval-allow" type="button">Allow</button>
+        </div>
+      </div>
+    </div>
 
     <aside class="inspector" data-shell-region="work-stream">
       <div class="inspector-head">
@@ -1420,8 +1534,22 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
     const activityLane = document.getElementById("activity-lane");
     const transportLog = document.getElementById("transport-log");
     const tokenKey = "magi-agent:gateway-token";
+    const stopButton = document.getElementById("stop-button");
+    const approvalModal = document.getElementById("approval-modal");
+    const approvalTool = document.getElementById("approval-tool");
+    const approvalArgs = document.getElementById("approval-args");
+    const approvalReasonRow = document.getElementById("approval-reason-row");
+    const approvalReason = document.getElementById("approval-reason");
+    const approvalFeedback = document.getElementById("approval-feedback");
+    const approvalAllow = document.getElementById("approval-allow");
+    const approvalDeny = document.getElementById("approval-deny");
     let sseFrameCount = 0;
     let agentEventCount = 0;
+    // Stable per-tab streaming session id (single-channel /v1/chat/stream contract).
+    const sessionId = "local-dashboard:main";
+    let toolMetricCount = 0;
+    let activeController = null;
+    let pendingApproval = null;
 
     document.getElementById("footer-runtime").textContent = bootstrap.runtime;
     document.getElementById("footer-version").textContent = bootstrap.version;
@@ -1520,8 +1648,8 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       if (response.status === 401) {{
         return "Unauthorized. Enter the gateway token from GATEWAY_TOKEN, then send again.";
       }}
-      if (response.status === 503 && code === "chat_route_disabled") {{
-        return "Local chat route is disabled. Start with MAGI_AGENT_LOCAL_CHAT_ROUTE=on, then refresh.";
+      if (response.status === 503 && (code === "streaming_chat_disabled" || code === "chat_route_disabled")) {{
+        return "Streaming chat route disabled. Start with MAGI_STREAMING_CHAT=on (and MAGI_AGENT_LOCAL_CHAT_ROUTE=on), then refresh.";
       }}
       return code ? `Request failed (${{response.status}}): ${{code}}` : `Request failed: ${{response.status}}`;
     }}
@@ -1616,11 +1744,274 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       }}
     }}
 
-    function appendDelta(target, payload) {{
-      const choices = payload && payload.choices;
-      const delta = choices && choices[0] && choices[0].delta;
-      const content = delta && delta.content;
-      if (content) target.textContent += content;
+    // ---- Streaming-chat reducer state (single-channel /v1/chat/stream) ----
+    // Per-turn correlation: assistant bubble, optional thinking block, tool cards by id.
+    const REJECTED_STATUSES = new Set([
+      "error", "blocked", "interrupted", "needs_approval",
+      "cancelled", "timeout", "denied",
+    ]);
+    let turnState = null;
+
+    function newTurnState(assistant) {{
+      return {{
+        assistant: assistant,
+        assistantText: "",
+        thinkingBlock: null,
+        thinkingBody: null,
+        toolCards: new Map(),
+        sawTool: false,
+        done: false,
+      }};
+    }}
+
+    function bumpAgentMetric() {{
+      agentEventCount += 1;
+      metricEvents.textContent = `${{agentEventCount}} agent event${{agentEventCount === 1 ? "" : "s"}}`;
+    }}
+
+    function flushAssistantBeforeTool() {{
+      // Flush-before-tool rule: commit in-flight assistant text
+      // (and thinking block) ahead of the first tool card of the run.
+      if (!turnState || turnState.sawTool) return;
+      turnState.sawTool = true;
+    }}
+
+    function ensureThinkingBlock() {{
+      if (turnState.thinkingBlock) return turnState.thinkingBody;
+      const details = document.createElement("details");
+      details.className = "thinking-block";
+      const summary = document.createElement("summary");
+      summary.textContent = "Thinking";
+      const body = document.createElement("div");
+      body.className = "thinking-body";
+      details.appendChild(summary);
+      details.appendChild(body);
+      messages.insertBefore(details, turnState.assistant);
+      turnState.thinkingBlock = details;
+      turnState.thinkingBody = body;
+      return body;
+    }}
+
+    function setToolStatus(card, status) {{
+      const pill = card.querySelector(".tool-status");
+      if (pill) pill.textContent = status || "running";
+      card.classList.remove("rejected", "done");
+      if (REJECTED_STATUSES.has(String(status))) {{
+        card.classList.add("rejected");
+      }} else if (status === "ok" || status === "success" || status === "completed") {{
+        card.classList.add("done");
+      }}
+    }}
+
+    function renderTodoCard(card, input) {{
+      const detail = card.querySelector(".tool-detail");
+      detail.innerHTML = "";
+      let todos = input && input.todos;
+      if (!Array.isArray(todos)) todos = [];
+      for (const todo of todos) {{
+        const row = document.createElement("div");
+        row.className = "todo-item";
+        const status = (todo && todo.status) || "pending";
+        const text = (todo && (todo.content || todo.title || todo.text)) || "";
+        row.innerHTML = `<span>${{escapeText(status)}}</span><span>${{escapeText(text)}}</span>`;
+        detail.appendChild(row);
+      }}
+      if (!todos.length) detail.textContent = "No todo items reported.";
+    }}
+
+    function openToolCard(payload) {{
+      flushAssistantBeforeTool();
+      const id = payload && payload.id;
+      const name = (payload && payload.name) || "tool";
+      const card = document.createElement("div");
+      card.className = "tool-card";
+      card.dataset.toolId = id != null ? String(id) : "";
+      card.dataset.toolName = name;
+      const isTodo = name === "TodoWrite";
+      card.innerHTML = `<div class="tool-head">`
+        + `<span class="tool-name">${{escapeText(isTodo ? "Todo" : name)}}</span>`
+        + `<span class="tool-status">running</span></div>`
+        + `<div class="tool-detail"></div>`;
+      const detail = card.querySelector(".tool-detail");
+      if (isTodo) {{
+        renderTodoCard(card, payload && payload.input);
+      }} else if (payload && payload.input_preview) {{
+        detail.textContent = payload.input_preview;
+      }}
+      messages.appendChild(card);
+      messages.scrollTop = messages.scrollHeight;
+      if (id != null) turnState.toolCards.set(String(id), card);
+      toolMetricCount += 1;
+      metricTools.textContent = `${{toolMetricCount}} tool${{toolMetricCount === 1 ? "" : "s"}}`;
+      return card;
+    }}
+
+    function updateToolCard(payload, finalize) {{
+      const id = payload && payload.id;
+      const card = id != null ? turnState.toolCards.get(String(id)) : null;
+      if (!card) return;
+      if (payload.status) setToolStatus(card, payload.status);
+      const detail = card.querySelector(".tool-detail");
+      const note = payload.output_preview || payload.label;
+      if (note && card.dataset.toolName !== "TodoWrite") {{
+        detail.textContent = note;
+      }}
+      if (finalize) {{
+        if (!payload.status) setToolStatus(card, "completed");
+        if (payload.durationMs != null) {{
+          const dur = document.createElement("div");
+          dur.className = "tool-detail";
+          dur.textContent = `Duration: ${{payload.durationMs}}ms`;
+          card.appendChild(dur);
+        }}
+      }}
+    }}
+
+    function renderPhaseChip(payload) {{
+      const turn = payload.turnId || payload.turn_id || "";
+      const label = payload.label || payload.phase || "phase";
+      const chip = document.createElement("div");
+      chip.className = "phase-chip";
+      chip.textContent = turn ? `${{label}} · ${{turn}}` : String(label);
+      messages.appendChild(chip);
+      messages.scrollTop = messages.scrollHeight;
+    }}
+
+    function closeApprovalModal() {{
+      approvalModal.classList.remove("open");
+      approvalModal.hidden = true;
+      pendingApproval = null;
+      approvalFeedback.value = "";
+    }}
+
+    function openApprovalModal(payload) {{
+      pendingApproval = {{
+        request_id: payload.request_id,
+        tool_name: payload.tool_name,
+      }};
+      approvalTool.textContent = payload.tool_name || "tool";
+      approvalArgs.textContent = typeof payload.arguments === "string"
+        ? payload.arguments
+        : compactJson(payload.arguments || {{}});
+      if (payload.reason) {{
+        approvalReason.textContent = payload.reason;
+        approvalReasonRow.hidden = false;
+      }} else {{
+        approvalReasonRow.hidden = true;
+      }}
+      approvalFeedback.value = "";
+      approvalModal.hidden = false;
+      approvalModal.classList.add("open");
+      approvalAllow.focus();
+    }}
+
+    async function sendControlResponse(decision) {{
+      if (!pendingApproval) return;
+      const token = tokenInput.value.trim();
+      const request_id = pendingApproval.request_id;
+      const response = {{ decision: decision }};
+      if (decision === "deny" && approvalFeedback.value.trim()) {{
+        response.feedback = approvalFeedback.value.trim();
+      }}
+      closeApprovalModal();
+      try {{
+        await fetch("/v1/chat/control-response", {{
+          method: "POST",
+          headers: {{
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${{token}}`,
+            "x-openclaw-session-key": sessionId,
+          }},
+          body: JSON.stringify({{ sessionId: sessionId, request_id: request_id, response: response }}),
+        }});
+        addEvent("Control response", `${{decision}} → ${{request_id}}`, decision === "allow" ? "ok" : "error");
+      }} catch (error) {{
+        addEvent("Control response failed", String(error), "error");
+      }}
+    }}
+
+    function foldAgentEvent(payload) {{
+      if (!payload || !turnState) return;
+      const type = String(payload.type || "");
+      if (type === "text_delta") {{
+        const chunk = payload.delta != null ? payload.delta : payload.text;
+        if (chunk) {{
+          turnState.assistantText += chunk;
+          turnState.assistant.textContent = turnState.assistantText;
+          messages.scrollTop = messages.scrollHeight;
+        }}
+        return;
+      }}
+      if (type === "thinking_delta") {{
+        const chunk = payload.delta != null ? payload.delta : payload.text;
+        if (chunk) {{
+          const body = ensureThinkingBlock();
+          body.textContent += chunk;
+        }}
+        return;
+      }}
+      if (type === "tool_start") {{
+        bumpAgentMetric();
+        openToolCard(payload);
+        addEvent(summarizeAgentEvent(payload), compactJson(payload));
+        return;
+      }}
+      if (type === "tool_progress") {{
+        bumpAgentMetric();
+        updateToolCard(payload, false);
+        addEvent(summarizeAgentEvent(payload), compactJson(payload));
+        return;
+      }}
+      if (type === "tool_end") {{
+        bumpAgentMetric();
+        updateToolCard(payload, true);
+        addEvent(summarizeAgentEvent(payload), compactJson(payload));
+        return;
+      }}
+      if (type === "turn_phase") {{
+        bumpAgentMetric();
+        renderPhaseChip(payload);
+        return;
+      }}
+      if (type === "control_request") {{
+        bumpAgentMetric();
+        openApprovalModal(payload);
+        addEvent("Approval requested", compactJson(payload), "pending");
+        return;
+      }}
+      if (type === "turn_result") {{
+        bumpAgentMetric();
+        finalizeTurn(payload);
+        return;
+      }}
+      // Unknown inner type — keep the work stream populated.
+      bumpAgentMetric();
+      addEvent(summarizeAgentEvent(payload), compactJson(payload));
+    }}
+
+    function finalizeTurn(payload) {{
+      closeApprovalModal();
+      const terminal = (payload && payload.terminal) || "completed";
+      const isError = terminal === "error";
+      const isAborted = terminal === "aborted";
+      if (isError && payload.error) {{
+        const node = document.createElement("div");
+        node.className = "message system error";
+        node.textContent = String(payload.error);
+        messages.appendChild(node);
+      }}
+      if (payload && payload.usage) {{
+        addEvent("Usage", compactJson(payload.usage), "ok");
+      }}
+      if (payload && payload.cost_usd != null) {{
+        metricReceipts.textContent = `$${{payload.cost_usd}}`;
+      }}
+      renderReceiptList([
+        ["request", "sent"],
+        ["delivery", isError ? "errored" : (isAborted ? "aborted" : "served")],
+        ["transport", terminal],
+      ]);
+      addEvent("Turn result", `terminal: ${{terminal}}`, isError ? "error" : "ok");
     }}
 
     function summarizeAgentEvent(payload) {{
@@ -1643,33 +2034,31 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       return titleByType[type] || String(type).replace(/_/g, " ");
     }}
 
-    function renderSseBlock(target, block) {{
-      sseFrameCount += 1;
-      metricSse.textContent = `${{sseFrameCount}} frame${{sseFrameCount === 1 ? "" : "s"}}`;
+    function renderSseBlock(block) {{
+      // Parse one SSE frame from the single-channel /v1/chat/stream contract:
+      // an `event: agent` frame whose `data` is a RuntimeEvent JSON payload,
+      // or the terminal `data: [DONE]` sentinel. `:` comment lines are heartbeats.
       let eventName = "message";
       const data = [];
       for (const line of block.split(/\\r?\\n/)) {{
+        if (line.startsWith(":")) continue;
         if (line.startsWith("event:")) eventName = line.slice(6).trim();
         if (line.startsWith("data:")) data.push(line.slice(5).trim());
       }}
       const rawData = data.join("\\n");
       if (!rawData) return false;
+      sseFrameCount += 1;
+      metricSse.textContent = `${{sseFrameCount}} frame${{sseFrameCount === 1 ? "" : "s"}}`;
       if (rawData === "[DONE]") {{
         addEvent("Completed", "SSE stream finished", "ok");
-        renderReceiptList([["request", "sent"], ["delivery", "served"], ["transport", "done"]]);
         return true;
       }}
       try {{
         const parsed = JSON.parse(rawData);
-        appendDelta(target, parsed);
         if (eventName === "agent") {{
-          agentEventCount += 1;
-          metricEvents.textContent = `${{agentEventCount}} agent event${{agentEventCount === 1 ? "" : "s"}}`;
-          if (parsed && String(parsed.type || "").includes("tool")) metricTools.textContent = summarizeAgentEvent(parsed);
-          addEvent(summarizeAgentEvent(parsed), compactJson(parsed));
-        }} else if (eventName !== "message" || parsed.type || parsed.event || parsed.status) {{
-          agentEventCount += 1;
-          metricEvents.textContent = `${{agentEventCount}} agent event${{agentEventCount === 1 ? "" : "s"}}`;
+          foldAgentEvent(parsed);
+        }} else {{
+          bumpAgentMetric();
           addEvent(`event: ${{eventName}}`, compactJson(parsed));
         }}
       }} catch (error) {{
@@ -1695,36 +2084,54 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
         return;
       }}
       const assistant = addMessage("assistant", "");
+      turnState = newTurnState(assistant);
       sseFrameCount = 0;
       agentEventCount = 0;
+      toolMetricCount = 0;
       metricSse.textContent = "0 frames";
       metricEvents.textContent = "0 agent events";
+      metricTools.textContent = "0 tools";
       composerStatus.textContent = "Running";
       agentStatePill.textContent = "running";
       setRunBoard("running");
+      setStreaming(true);
       renderReceiptList([["request", "sending"], ["delivery", "pending"], ["transport", "opening"]]);
-      addEvent("Request", "POST /v1/chat/completions", "pending");
+      addEvent("Request", "POST /v1/chat/stream", "pending");
       renderActivityLane([
-        ["Prompt", "Submitted to local route"],
+        ["Prompt", "Submitted to streaming route"],
         ["Runtime", "Streaming ADK events"],
         ["Receipts", "Collecting delivery state"],
       ]);
-      renderTransportLog([["POST /v1/chat/completions", "opening local SSE request", "pending"]]);
+      renderTransportLog([["POST /v1/chat/stream", "opening local SSE request", "pending"]]);
+      activeController = new AbortController();
       let response;
       try {{
-        response = await fetch("/v1/chat/completions", {{
+        response = await fetch("/v1/chat/stream", {{
           method: "POST",
+          signal: activeController.signal,
           headers: {{
             "Content-Type": "application/json",
             "Authorization": `Bearer ${{token}}`,
+            "x-openclaw-session-key": sessionId,
           }},
           body: JSON.stringify({{
+            sessionId: sessionId,
             model: modelSelect.value || bootstrap.model,
             messages: [{{ role: "user", content: prompt }}],
-            stream: true,
           }}),
         }});
       }} catch (error) {{
+        setStreaming(false);
+        closeApprovalModal();
+        if (error && error.name === "AbortError") {{
+          assistant.className = "message assistant";
+          if (!turnState.assistantText.trim()) assistant.textContent = "Run stopped.";
+          composerStatus.textContent = "Stopped";
+          agentStatePill.textContent = "ready";
+          setRunBoard("ready");
+          renderReceiptList([["request", "sent"], ["delivery", "aborted"], ["transport", "cancelled"]]);
+          return;
+        }}
         const message = "Runtime request failed before the SSE stream opened. Check /healthz, then try again.";
         assistant.className = "message assistant error";
         assistant.textContent = message;
@@ -1736,6 +2143,7 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
         return;
       }}
       if (!response.ok) {{
+        setStreaming(false);
         const text = await response.text();
         const message = describeChatFailure(response, text);
         if (response.status === 401) {{
@@ -1755,16 +2163,24 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
-      while (true) {{
-        const chunk = await reader.read();
-        if (chunk.done) break;
-        buffer += decoder.decode(chunk.value, {{ stream: true }});
-        const parts = buffer.split(/\\n\\n/);
-        buffer = parts.pop() || "";
-        for (const part of parts) renderSseBlock(assistant, part);
+      try {{
+        while (true) {{
+          const chunk = await reader.read();
+          if (chunk.done) break;
+          buffer += decoder.decode(chunk.value, {{ stream: true }});
+          const parts = buffer.split(/\\n\\n/);
+          buffer = parts.pop() || "";
+          for (const part of parts) renderSseBlock(part);
+        }}
+        if (buffer.trim()) renderSseBlock(buffer);
+      }} catch (error) {{
+        if (!(error && error.name === "AbortError")) {{
+          addEvent("Stream error", String(error), "error");
+        }}
       }}
-      if (buffer.trim()) renderSseBlock(assistant, buffer);
-      if (!assistant.textContent.trim()) {{
+      setStreaming(false);
+      closeApprovalModal();
+      if (!turnState.assistantText.trim() && assistant.className.indexOf("error") === -1) {{
         assistant.textContent = "The runtime completed without user-visible text. Check the work stream for events and receipts.";
       }}
       composerStatus.textContent = "Ready to run";
@@ -1776,6 +2192,33 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
         ["Receipts", "Delivery state rendered"],
       ]);
       renderTransportLog([["SSE Transport", `${{sseFrameCount}} frame${{sseFrameCount === 1 ? "" : "s"}} read`, "ok"]]);
+    }}
+
+    function setStreaming(active) {{
+      stopButton.hidden = !active;
+      sendButton.hidden = active;
+      if (!active) activeController = null;
+    }}
+
+    async function cancelRun() {{
+      const token = tokenInput.value.trim();
+      addEvent("Cancel requested", "POST /v1/chat/cancel", "pending");
+      try {{
+        await fetch("/v1/chat/cancel", {{
+          method: "POST",
+          headers: {{
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${{token}}`,
+            "x-openclaw-session-key": sessionId,
+          }},
+          body: JSON.stringify({{ sessionId: sessionId }}),
+        }});
+      }} catch (error) {{
+        addEvent("Cancel failed", String(error), "error");
+      }}
+      // Abort the in-flight fetch so the reader loop unwinds; the server emits a
+      // synthesized turn_end + aborted turn_result that finalizes the UI.
+      if (activeController) activeController.abort();
     }}
 
     form.addEventListener("submit", async (event) => {{
@@ -1791,6 +2234,18 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
         sendButton.disabled = false;
         promptInput.focus();
       }}
+    }});
+
+    stopButton.addEventListener("click", () => {{
+      cancelRun();
+    }});
+
+    approvalAllow.addEventListener("click", () => {{
+      sendControlResponse("allow");
+    }});
+
+    approvalDeny.addEventListener("click", () => {{
+      sendControlResponse("deny");
     }});
 
     tokenInput.addEventListener("input", () => {{

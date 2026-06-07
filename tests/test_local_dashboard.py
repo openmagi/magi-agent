@@ -64,9 +64,30 @@ def test_local_dashboard_route_serves_adk_local_app_shell() -> None:
     assert "current local session" in html
     assert 'id="agent-state-pill"' in html
     assert "class=\"status-band\"" in html
-    assert "/v1/chat/completions" in html
+    assert "/v1/chat/stream" in html
     assert "/healthz" in html
     assert "ADK runtime" in html
+
+
+def test_local_dashboard_chat_panel_uses_streaming_chat_contract() -> None:
+    response = _client().get("/dashboard")
+    html = response.text
+
+    # Chat panel posts the single-channel streaming contract, not OpenAI deltas.
+    assert "/v1/chat/stream" in html
+    assert "/v1/chat/control-response" in html
+    assert "/v1/chat/cancel" in html
+    assert "x-openclaw-session-key" in html
+    assert "foldAgentEvent" in html
+    assert "local-dashboard" in html
+    # Approval modal + cancel wiring are present.
+    assert 'id="approval-modal"' in html
+    assert "AbortController" in html
+    # Updated disabled-route guidance for the streaming flag.
+    assert "MAGI_STREAMING_CHAT=on" in html
+    # The OpenAI choices[].delta path no longer drives chat text.
+    assert "appendDelta" not in html
+    assert "choices[0].delta" not in html
 
 
 def test_local_dashboard_renders_workbench_not_empty_mockup() -> None:
