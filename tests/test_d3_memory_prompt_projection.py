@@ -383,3 +383,77 @@ def test_blocks_mode_snapshot_in_dynamic_block(tmp_path: Path) -> None:
     static_part, dynamic_part = combined_text.split(PROMPT_DYNAMIC_BOUNDARY, 1)
     assert MEMORY_CONTEXT_OPEN not in static_part
     assert MEMORY_CONTEXT_OPEN in dynamic_part
+
+
+# ---------------------------------------------------------------------------
+# 9. Budget governs output size, NOT the 400-char tool-preview cap (D3 fix)
+# ---------------------------------------------------------------------------
+
+
+def test_multi_kb_memory_projects_more_than_400_chars(tmp_path: Path) -> None:
+    """A multi-KB MEMORY.md must project substantially MORE than 400 chars.
+
+    Before the D3 fix, _sanitize_memory_snippet called sanitize_tool_preview
+    which hard-capped output to MAX_TOOL_PREVIEW (~400 chars).  With the fix,
+    the only cap is the projection's own max_bytes budget.
+    """
+    # Build ~4 KiB of normal prose (no secrets, no private paths).
+    line = "This is a normal memory line with useful context about the project.\n"
+    content = line * 60  # ~4 KiB
+    assert len(content.encode()) > 4_000
+
+    _make_workspace(tmp_path, memory=content)
+    projector = MemoryPromptProjector(workspace_root=tmp_path, enabled=True, max_bytes=8_192)
+    result = projector.project()
+
+    assert result.enabled is True
+    # The projected content inside the fence must be substantially longer than
+    # the old 400-char hard cap.
+    content_len = len(result.snapshot_block.encode("utf-8"))
+    assert content_len > 1_000, (
+        f"Expected >1000 bytes in snapshot (budget governs), got {content_len}. "
+        "400-char tool-preview cap may still be active."
+    )
+    # And still within the budget.
+    assert content_len <= 8_192 + 200  # fence overhead
+
+
+def test_oversized_memory_capped_at_max_bytes(tmp_path: Path) -> None:
+    """A 200 KB MEMORY.md must be capped at max_bytes and complete fast."""
+    import time
+
+    big_content = "x" * 200_000
+    _make_workspace(tmp_path, memory=big_content)
+    projector = MemoryPromptProjector(workspace_root=tmp_path, enabled=True, max_bytes=4_096)
+
+    t0 = time.monotonic()
+    result = projector.project()
+    elapsed = time.monotonic() - t0
+
+    assert result.enabled is True
+    assert len(result.snapshot_block.encode("utf-8")) <= 4_096 + 200  # fence overhead
+    assert elapsed < 2.0, f"Projection took {elapsed:.2f}s — ReDoS guard may be missing"
+
+
+def test_secret_in_memory_md_is_redacted_from_snapshot(tmp_path: Path) -> None:
+    """A secret in MEMORY.md must be absent from the projected snapshot block.
+
+    This validates that redaction still works even without sanitize_tool_preview.
+    """
+    secret = "sk-live-ABCDEFGH1234"
+    content = (
+        "## User preferences\n"
+        "- Prefers dark mode\n"
+        f"- api_key = {secret}\n"
+        "- Enjoys hiking\n"
+    )
+    _make_workspace(tmp_path, memory=content)
+    projector = MemoryPromptProjector(workspace_root=tmp_path, enabled=True, max_bytes=8_192)
+    result = projector.project()
+
+    assert result.enabled is True
+    assert secret not in result.snapshot_block, (
+        "Secret token must be redacted from the snapshot block"
+    )
+    # Non-secret content should still be present.
+    assert "dark mode" in result.snapshot_block
