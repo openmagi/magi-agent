@@ -73,6 +73,10 @@ magi_agent = [
   "skills/bundled/superpowers/*/scripts/*",
   "skills/bundled/superpowers/*/examples/*",
   "skills/bundled/superpowers/*/*.dot",
+  # Bundled slash-command prompt templates loaded via importlib.resources at
+  # import time (cli/commands/bundled.py). Without this they are missing from
+  # the wheel/bottle and the TUI crashes on launch with FileNotFoundError.
+  "cli/commands/templates/*.txt",
 ]
 
 [tool.pytest.ini_options]
