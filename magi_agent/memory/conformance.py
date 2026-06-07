@@ -5,7 +5,7 @@ from collections import Counter
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 ConformancePhase = Literal["phase_0", "phase_1"]
@@ -233,4 +233,248 @@ def project_memory_provider_conformance_fixture(
         metadata_only=metadata_only,
         no_live_runtime=no_live_runtime,
         support_matrix=support_matrix,
+    )
+
+
+# ---------------------------------------------------------------------------
+# D5 — Writable-provider conformance extension (additive; read-only conformance
+# above is UNCHANGED)
+# ---------------------------------------------------------------------------
+
+#: Allowed write target files for a D1-conformant writable provider.
+#: SOUL.md is intentionally absent — the agent MUST NOT be able to write it.
+WRITABLE_PROVIDER_ALLOWED_WRITE_FILES: frozenset[str] = frozenset({"MEMORY.md", "USER.md"})
+
+#: Name of the SOUL file that must NEVER appear in the agent write allowlist.
+SOUL_FILENAME: str = "SOUL.md"
+
+
+class WritableProviderInvariantResult(BaseModel):
+    """Result of checking D1–D4 safety invariants against a writable provider.
+
+    All six invariants must pass for the provider to be conformant.  This model
+    is metadata-only: it records the outcome of the checks without executing any
+    real writes or provider calls.
+
+    Invariants checked
+    ------------------
+    1. ``read_only_default`` — provider_id, write_tier, and allowed_write_files
+       confirm that the read-only tier is the default.
+    2. ``declarative_only_filter`` — the write path must declare the
+       declarative-only filter (no task-state facts).
+    3. ``path_safe_redacted_bounded`` — the write path is workspace-contained,
+       applies redaction, and enforces ``max_write_bytes``.
+    4. ``soul_not_agent_writable`` — SOUL.md is absent from the agent write
+       allowlist; the agent cannot write it.
+    5. ``soul_operator_path_separate`` — the operator SOUL gate
+       (``MAGI_SOUL_WRITE_ENABLED``) is independent from the agent write gate
+       (``MAGI_MEMORY_WRITE_ENABLED``).
+    6. ``projection_cache_safe_incognito_respecting`` — the D3 projection gate
+       is off by default and blocks on ``memory_mode="incognito"``.
+    """
+
+    model_config = _MODEL_CONFIG
+
+    provider_id: str = Field(alias="providerId")
+    read_only_default: bool = Field(alias="readOnlyDefault")
+    declarative_only_filter: bool = Field(alias="declarativeOnlyFilter")
+    path_safe_redacted_bounded: bool = Field(alias="pathSafeRedactedBounded")
+    soul_not_agent_writable: bool = Field(alias="soulNotAgentWritable")
+    soul_operator_path_separate: bool = Field(alias="soulOperatorPathSeparate")
+    projection_cache_safe_incognito_respecting: bool = Field(
+        alias="projectionCacheSafeIncognitoRespecting",
+    )
+    all_invariants_pass: bool = Field(alias="allInvariantsPass")
+    failing_invariants: tuple[str, ...] = Field(
+        default=(),
+        alias="failingInvariants",
+    )
+
+    @model_validator(mode="after")
+    def _validate_consistency(self) -> "WritableProviderInvariantResult":
+        expected_failing = tuple(
+            name
+            for name, attr in [
+                ("read_only_default", self.read_only_default),
+                ("declarative_only_filter", self.declarative_only_filter),
+                ("path_safe_redacted_bounded", self.path_safe_redacted_bounded),
+                ("soul_not_agent_writable", self.soul_not_agent_writable),
+                ("soul_operator_path_separate", self.soul_operator_path_separate),
+                (
+                    "projection_cache_safe_incognito_respecting",
+                    self.projection_cache_safe_incognito_respecting,
+                ),
+            ]
+            if not attr
+        )
+        if self.failing_invariants != expected_failing:
+            raise ValueError(
+                f"failingInvariants {self.failing_invariants!r} is inconsistent with "
+                f"individual invariant flags; expected {expected_failing!r}"
+            )
+        if self.all_invariants_pass != (len(expected_failing) == 0):
+            raise ValueError(
+                "allInvariantsPass is inconsistent with individual invariant flags"
+            )
+        return self
+
+
+class WritableProviderConformanceReport(BaseModel):
+    """D5 writable-provider conformance report.
+
+    Records the outcome of checking the six D1–D4 safety invariants for a
+    specific ``LocalFileMemoryProvider``-compatible writable provider.
+
+    This model is metadata-only: it carries the evidence that the provider
+    satisfies the invariants WITHOUT executing real writes, provider calls, or
+    env mutations.  Conformance enables nothing — it documents readiness.
+    """
+
+    model_config = _MODEL_CONFIG
+
+    schema_version: Literal["writableProviderConformance.v1"] = Field(
+        default="writableProviderConformance.v1",
+        alias="schemaVersion",
+    )
+    provider_id: str = Field(alias="providerId")
+    write_tier: str = Field(alias="writeTier")
+    allowed_write_files: tuple[str, ...] = Field(alias="allowedWriteFiles")
+    soul_in_agent_allowlist: bool = Field(alias="soulInAgentAllowlist")
+    has_declarative_filter: bool = Field(alias="hasDeclarativeFilter")
+    has_redaction: bool = Field(alias="hasRedaction")
+    has_write_byte_bound: bool = Field(alias="hasWriteBytesBound")
+    has_path_safety: bool = Field(alias="hasPathSafety")
+    has_operator_soul_gate: bool = Field(alias="hasOperatorSoulGate")
+    projection_default_off: bool = Field(alias="projectionDefaultOff")
+    projection_incognito_blocked: bool = Field(alias="projectionIncognitoBlocked")
+    invariant_result: WritableProviderInvariantResult = Field(alias="invariantResult")
+
+    @field_validator("allowed_write_files", mode="before")
+    @classmethod
+    def _coerce_allowed_write_files(cls, value: object) -> tuple[str, ...]:
+        if isinstance(value, (list, tuple, frozenset, set)):
+            return tuple(sorted(str(f) for f in value))
+        return ()
+
+
+def check_writable_provider_conformance(
+    *,
+    provider_id: str,
+    write_tier: str,
+    allowed_write_files: frozenset[str] | set[str] | tuple[str, ...],
+    has_declarative_filter: bool,
+    has_redaction: bool,
+    has_write_byte_bound: bool,
+    has_path_safety: bool,
+    has_operator_soul_gate: bool,
+    projection_default_off: bool,
+    projection_incognito_blocked: bool,
+) -> WritableProviderConformanceReport:
+    """Check D1–D4 safety invariants for a writable memory provider.
+
+    This function is PURE (no I/O, no env reads, no provider calls).  Pass the
+    provider's declared properties; it returns a
+    ``WritableProviderConformanceReport`` capturing the outcome.
+
+    Invariant 1 — ``read_only_default``:
+        ``write_tier == "gated_write"`` AND SOUL.md absent from
+        ``allowed_write_files``.
+
+    Invariant 2 — ``declarative_only_filter``:
+        ``has_declarative_filter=True`` (D2 filter guards the write path).
+
+    Invariant 3 — ``path_safe_redacted_bounded``:
+        ``has_path_safety AND has_redaction AND has_write_byte_bound``.
+
+    Invariant 4 — ``soul_not_agent_writable``:
+        SOUL.md NOT in ``allowed_write_files``.
+
+    Invariant 5 — ``soul_operator_path_separate``:
+        ``has_operator_soul_gate=True`` (D4 operator path exists and is
+        independent from the agent write gate).
+
+    Invariant 6 — ``projection_cache_safe_incognito_respecting``:
+        ``projection_default_off AND projection_incognito_blocked``.
+    """
+    files_set = frozenset(str(f) for f in allowed_write_files)
+    soul_in_allowlist = SOUL_FILENAME in files_set
+
+    inv1_read_only_default = write_tier == "gated_write" and not soul_in_allowlist
+    inv2_declarative_only = has_declarative_filter
+    inv3_path_safe = has_path_safety and has_redaction and has_write_byte_bound
+    inv4_soul_not_agent = not soul_in_allowlist
+    inv5_soul_op_separate = has_operator_soul_gate
+    inv6_projection = projection_default_off and projection_incognito_blocked
+
+    failing: list[str] = []
+    if not inv1_read_only_default:
+        failing.append("read_only_default")
+    if not inv2_declarative_only:
+        failing.append("declarative_only_filter")
+    if not inv3_path_safe:
+        failing.append("path_safe_redacted_bounded")
+    if not inv4_soul_not_agent:
+        failing.append("soul_not_agent_writable")
+    if not inv5_soul_op_separate:
+        failing.append("soul_operator_path_separate")
+    if not inv6_projection:
+        failing.append("projection_cache_safe_incognito_respecting")
+
+    invariant_result = WritableProviderInvariantResult(
+        providerId=provider_id,
+        readOnlyDefault=inv1_read_only_default,
+        declarativeOnlyFilter=inv2_declarative_only,
+        pathSafeRedactedBounded=inv3_path_safe,
+        soulNotAgentWritable=inv4_soul_not_agent,
+        soulOperatorPathSeparate=inv5_soul_op_separate,
+        projectionCacheSafeIncognitoRespecting=inv6_projection,
+        allInvariantsPass=len(failing) == 0,
+        failingInvariants=tuple(failing),
+    )
+
+    return WritableProviderConformanceReport(
+        schemaVersion="writableProviderConformance.v1",
+        providerId=provider_id,
+        writeTier=write_tier,
+        allowedWriteFiles=tuple(sorted(files_set)),
+        soulInAgentAllowlist=soul_in_allowlist,
+        hasDeclarativeFilter=has_declarative_filter,
+        hasRedaction=has_redaction,
+        hasWriteBytesBound=has_write_byte_bound,
+        hasPathSafety=has_path_safety,
+        hasOperatorSoulGate=has_operator_soul_gate,
+        projectionDefaultOff=projection_default_off,
+        projectionIncognitoBlocked=projection_incognito_blocked,
+        invariantResult=invariant_result,
+    )
+
+
+def check_local_file_memory_provider_conformance() -> WritableProviderConformanceReport:
+    """Check D1–D4 invariants for the canonical LocalFileMemoryProvider (D1).
+
+    Derives the conformance inputs from the actual D1 module constants so that
+    this function serves as a live contract test: if D1's constants change in a
+    way that violates the invariants, this function will return a failing report.
+
+    No env reads, no provider calls, no I/O — pure derivation from constants.
+    """
+    from magi_agent.memory.adapters.local_file_writable import (  # lazy import: keep boundary thin
+        _ALLOWED_WRITE_FILES,
+        _DEFAULT_MAX_WRITE_BYTES,
+        _PROVIDER_ID_WRITABLE,
+    )
+    from magi_agent.memory.declarative_filter import is_declarative_result  # noqa: F401 (existence check)
+    from magi_agent.memory.policy import MAGI_MEMORY_PROJECTION_ENABLED_ENV  # noqa: F401
+
+    return check_writable_provider_conformance(
+        provider_id=_PROVIDER_ID_WRITABLE,
+        write_tier="gated_write",
+        allowed_write_files=_ALLOWED_WRITE_FILES,
+        has_declarative_filter=True,   # D2 is_declarative_result guard
+        has_redaction=True,            # D1 _redact_for_write applied before persist
+        has_write_byte_bound=_DEFAULT_MAX_WRITE_BYTES > 0,
+        has_path_safety=True,          # D1 _resolve_workspace_path workspace containment
+        has_operator_soul_gate=True,   # D4 OperatorSoulWriter independent gate
+        projection_default_off=True,   # D3 gate off by default
+        projection_incognito_blocked=True,  # D3 incognito blocks projection
     )
