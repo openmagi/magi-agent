@@ -70,6 +70,22 @@ def test_public_docs_manifest_paths_resolve_and_do_not_expose_internal_notes() -
         assert (ROOT / path).is_file(), path
 
 
+def test_public_docs_manifest_paths_and_slugs_are_unique() -> None:
+    pages = _manifest_pages()
+    for key in ("path", "slug"):
+        values = [page[key] for page in pages]
+        assert len(values) == len(set(values)), key
+
+
+def test_every_markdown_doc_is_manifest_linked_public_corpus() -> None:
+    manifest_paths = {page["path"] for page in _manifest_pages()}
+    markdown_paths = {
+        path.relative_to(ROOT).as_posix()
+        for path in DOCS.rglob("*.md")
+    }
+    assert markdown_paths <= manifest_paths
+
+
 def test_public_docs_tree_has_no_internal_plan_or_memory_corpus() -> None:
     for prefix in PRIVATE_DOC_PREFIXES:
         directory = ROOT / prefix.rstrip("/")
