@@ -83,8 +83,6 @@ ChannelLiveExecutionMode = Literal["disabled", "shadow", "live"]
 _DIGEST_RE = re.compile(r"^sha256:[a-f0-9]{64}$")
 _SAFE_ENVIRONMENTS = frozenset({"local", "development", "staging", "production"})
 
-_TRUE_STRINGS = frozenset({"1", "true", "yes", "on"})
-
 #: Gate at which live (canary) dispatch first becomes eligible.  Mirrors
 #: scheduler_executor_readiness: shadow runs through gate1-5, canary at gate5.
 _CANARY_LIVE_GATE: int = 5
@@ -326,8 +324,14 @@ def _platform_gate_states() -> dict[str, bool]:
 
 
 def _is_truthy_env(var: str) -> bool:
+    # Permissive check: any non-empty value that is not an explicit falsy word is
+    # treated as truthy.  This matches the per-platform adapter semantics
+    # (``is_live_slack_enabled``, ``is_live_email_enabled``, etc.) so that
+    # ``platformGateStates`` in the health metadata always reflects whether the
+    # adapter would actually send — values like "enabled" or "2" are ON here just
+    # as they are in the adapters, preventing a dashboard-vs-reality mismatch.
     raw = os.environ.get(var, "")
-    return bool(raw) and raw.lower() in _TRUE_STRINGS
+    return bool(raw) and raw.lower() not in {"0", "false", "no", "off"}
 
 
 def _kill_switch_active() -> bool:
@@ -405,8 +409,10 @@ def _digest_present(value: object) -> bool:
 __all__ = [
     "ChannelLiveExecutionMode",
     "ChannelLiveReadinessConfig",
-    "_CANARY_LIVE_GATE",
     "channel_live_readiness_health_metadata",
     "dispatch_live",
     "resolve_channel_live_execution_mode",
 ]
+# Note: _CANARY_LIVE_GATE is intentionally private (leading underscore) and is
+# NOT listed in __all__.  Tests that need it can still import it directly:
+#   from magi_agent.gates.channel_live_readiness import _CANARY_LIVE_GATE

@@ -46,6 +46,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 from typing import Any, Protocol
 
 from magi_agent.harness.scheduler_delivery import is_silent_output
@@ -176,7 +177,6 @@ def deliver(
         return True
     except Exception as exc:
         # Redact: store only a safe excerpt, never raw exception with credentials.
-        import re
         safe_err = re.sub(
             r"\b[A-Za-z0-9_-]{20,}\b", "[redacted]", str(exc)[:120]
         )

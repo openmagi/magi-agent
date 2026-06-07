@@ -314,6 +314,42 @@ def test_readiness_platform_gate_states_present(monkeypatch: pytest.MonkeyPatch)
     assert "email" in gate_states
     assert gate_states["telegram"] is True
     assert gate_states["discord"] is False
+    assert gate_states["slack"] is False
+    assert gate_states["email"] is False
+
+
+# ---------------------------------------------------------------------------
+# E5-14: platformGateStates uses permissive truthy-env (mirrors adapter gating)
+# ---------------------------------------------------------------------------
+
+def test_readiness_platform_gate_state_permissive_matches_adapter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """MAGI_CHANNEL_LIVE_SLACK='enabled' must make platformGateStates['slack'] True.
+
+    This mirrors ``is_live_slack_enabled()``'s permissive check: any non-empty
+    value that is not one of {"0","false","no","off"} is treated as ON.
+    Without this alignment the health dashboard can misreport while the adapter
+    actually sends (ops-consistency bug I1).
+    """
+    monkeypatch.setenv("MAGI_CHANNEL_LIVE_SLACK", "enabled")
+    monkeypatch.delenv("MAGI_CHANNEL_LIVE_TELEGRAM", raising=False)
+    monkeypatch.delenv("MAGI_CHANNEL_LIVE_DISCORD", raising=False)
+    monkeypatch.delenv("MAGI_CHANNEL_LIVE_EMAIL", raising=False)
+
+    from magi_agent.gates.channel_live_readiness import channel_live_readiness_health_metadata
+    from magi_agent.channels.slack_live import is_live_slack_enabled
+
+    cfg = _make_config(enabled=True)
+    meta = channel_live_readiness_health_metadata(cfg, bot_id="b", user_id="u")
+    gate_states: dict[str, object] = meta.get("platformGateStates", {})  # type: ignore[assignment]
+
+    # The adapter says True for "enabled" — the readiness gate must agree.
+    adapter_says = is_live_slack_enabled()
+    assert adapter_says is True, "adapter should treat 'enabled' as truthy"
+    assert gate_states.get("slack") is True, (
+        "platformGateStates['slack'] must match is_live_slack_enabled() for 'enabled' value"
+    )
 
 
 # ---------------------------------------------------------------------------
