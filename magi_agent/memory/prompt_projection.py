@@ -29,8 +29,18 @@ from magi_agent.memory.adapters.hipocampus_readonly import (
     _resolve_workspace_path,
     _safe_snippet,
 )
-from magi_agent.memory.projection import _sanitize_memory_snippet
-from magi_agent.transport.tool_preview import MAX_TOOL_PREVIEW
+from magi_agent.memory.projection import (
+    _SENSITIVE_REF_RE,
+    _COOKIE_HEADER_RE,
+    _SECRET_TEXT_RE,
+    _CHILD_PROMPT_RE,
+    _RAW_TOOL_LOG_RE,
+    _HIDDEN_REASONING_RE,
+    _PRIVATE_PATH_RE,
+    _PRIVATE_PATH_ALIAS_RE,
+    _drop_private_projection_lines,
+    _redact_private_path,
+)
 
 
 # Re-export so tests can import from here directly.
@@ -148,6 +158,33 @@ def project_memory_snapshot(
 # ---------------------------------------------------------------------------
 
 
+def _redact_snapshot_content(raw: str) -> str:
+    """Apply secret/private redaction to snapshot content WITHOUT a 400-char cap.
+
+    Applies the same redaction rules as ``_sanitize_memory_snippet`` in
+    ``memory/projection.py`` — same regexes, same private-line dropping — but
+    does NOT call ``sanitize_tool_preview`` at the end, so the output length is
+    bounded only by the projection's own ``content_budget``.
+
+    The ReDoS guard is applied by the caller: ``raw`` must already be
+    pre-truncated to ``content_budget`` bytes before this function is called.
+
+    # keep in sync with memory/projection._sanitize_memory_snippet
+    """
+    sanitized = _SENSITIVE_REF_RE.sub("[redacted-ref]", raw)
+    sanitized = _COOKIE_HEADER_RE.sub("[redacted-cookie]", sanitized)
+    sanitized = _SECRET_TEXT_RE.sub("[redacted]", sanitized)
+    sanitized = _CHILD_PROMPT_RE.sub("[redacted child prompt]", sanitized)
+    sanitized = _RAW_TOOL_LOG_RE.sub("[redacted tool log]", sanitized)
+    sanitized = _HIDDEN_REASONING_RE.sub("[redacted hidden reasoning]", sanitized)
+    sanitized = "\n".join(_drop_private_projection_lines(sanitized.splitlines()))
+    sanitized = _PRIVATE_PATH_RE.sub(_redact_private_path, sanitized)
+    sanitized = _PRIVATE_PATH_ALIAS_RE.sub("[private_path]", sanitized)
+    # No sanitize_tool_preview call — the caller enforces the byte cap via
+    # content_budget / _slice_utf8, which is the correct bound for snapshots.
+    return sanitized
+
+
 def _build_snapshot(
     workspace_root: Path,
     *,
@@ -159,8 +196,11 @@ def _build_snapshot(
     budget = max(max_bytes, 1)
 
     # Pre-compute content_budget so we can pre-truncate raw files before
-    # passing them to the sanitizer (which contains regexes with catastrophic
-    # backtracking on large inputs).
+    # passing them to the sanitizer.
+    # ReDoS guard: we pre-truncate each file to content_budget before running
+    # regexes, so regex input is bounded by a few KiB, never by unbounded file
+    # size.  The final _slice_utf8(combined, content_budget) enforces the exact
+    # byte cap over all combined files.
     headroom = len(MEMORY_CONTEXT_OPEN.encode()) + len(MEMORY_CONTEXT_CLOSE.encode()) + 4
     content_budget = max(budget - headroom, 0)
 
@@ -169,17 +209,10 @@ def _build_snapshot(
         if path is None or not path.is_file():
             continue
         raw = path.read_text(encoding="utf-8", errors="replace")
-        # Bound BEFORE sanitizing: several regexes inside _sanitize_memory_snippet
-        # (and the final sanitize_tool_preview call) exhibit catastrophic
-        # backtracking on large inputs.  _sanitize_memory_snippet terminates with
-        # sanitize_tool_preview, which itself caps output to MAX_TOOL_PREVIEW
-        # (~400 chars).  Pre-truncating each file to MAX_TOOL_PREVIEW + 200
-        # (matching the ReDoS guard in sanitize_tool_preview) is therefore
-        # behaviour-preserving: no useful content beyond that limit survives the
-        # sanitiser pipeline.  The final _slice_utf8(combined, content_budget)
-        # below enforces the exact byte cap over all combined files.
-        raw = _slice_utf8(raw, MAX_TOOL_PREVIEW + 200)
-        redacted = _sanitize_memory_snippet(raw)
+        # ReDoS guard: pre-truncate to content_budget BEFORE running regexes,
+        # so regex input is bounded by the budget (a few KiB), never unbounded.
+        raw = _slice_utf8(raw, content_budget)
+        redacted = _redact_snapshot_content(raw)
         if not redacted.strip():
             continue
         parts.append(f"<!-- {rel_path} -->\n{redacted}")
