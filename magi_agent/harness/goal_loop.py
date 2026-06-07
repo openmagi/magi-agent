@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from typing import Literal
+from collections.abc import Mapping
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator, model_validator
 
 
 GOAL_LOOP_FEATURE_KEY = "persistent-goal-loop"
@@ -133,8 +134,41 @@ class GoalLoopPolicy(BaseModel):
         default_factory=GoalLoopSpawnDepthPolicy,
         alias="spawnDepthPolicy",
     )
-    traffic_attached: bool = Field(default=False, alias="trafficAttached")
-    execution_attached: bool = Field(default=False, alias="executionAttached")
+    #: LOCKED authority — model_copy(update={"traffic_attached": True}) is coerced to
+    #: False by the field_validator below, so forged upgrades via model_copy are blocked.
+    traffic_attached: Literal[False] = Field(default=False, alias="trafficAttached")
+    #: LOCKED authority — same enforcement as traffic_attached (see field_validator).
+    execution_attached: Literal[False] = Field(default=False, alias="executionAttached")
+
+    @field_validator("traffic_attached", "execution_attached", mode="before")
+    @classmethod
+    def _force_authority_flags_false(cls, _value: object) -> bool:
+        # Any forged truthy value (including via model_copy) is coerced to False.
+        # Authority is gate-derived (B5 readiness), never field-set.
+        return False
+
+    @field_serializer("traffic_attached", "execution_attached")
+    def _serialize_authority_false(self, _value: object) -> bool:
+        return False
+
+    def model_copy(
+        self,
+        *,
+        update: Mapping[str, Any] | None = None,
+        deep: bool = False,
+    ) -> "GoalLoopPolicy":
+        """Override model_copy to prevent forged authority flags.
+
+        Pydantic v2's model_copy bypasses field validators, so a caller could
+        forge ``traffic_attached=True`` or ``execution_attached=True`` via
+        ``model_copy(update={...})``.  This override intercepts the update dict
+        and clears any attempt to set the locked authority flags before delegating
+        to the base implementation.
+        """
+        _LOCKED = frozenset({"traffic_attached", "execution_attached"})
+        if update:
+            update = {k: (False if k in _LOCKED else v) for k, v in update.items()}
+        return super().model_copy(update=update, deep=deep)
 
     @model_validator(mode="after")
     def _validate_traffic_free_policy(self) -> GoalLoopPolicy:

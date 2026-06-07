@@ -529,6 +529,49 @@ class TestImportBoundary:
 
 
 # ---------------------------------------------------------------------------
+# Multi-turn termination integration (LOW 2)
+# ---------------------------------------------------------------------------
+
+
+class TestMultiTurnTermination:
+    """Integration test: consecutive calls on the SAME store prove that the
+    loop terminates as a sequence, not just as two separate units."""
+
+    def test_loop_continues_until_max_turns_then_exhausts(self) -> None:
+        """With max_turns=3 and a judge that never satisfies:
+        - Turn 1 (turns_used=0 → 1): continue  reason=not_satisfied
+        - Turn 2 (turns_used=1 → 2): continue  reason=not_satisfied
+        - Turn 3 (turns_used=2 → 3): stop      reason=exhausted
+        """
+        max_turns = 3
+        store = _store_with_goal(max_turns=max_turns)
+        judge = _AlwaysNotSatisfied()
+
+        results = []
+        for _ in range(max_turns):
+            result = decide_loop_continuation(
+                _input(store=store, judge=judge, shadow=False)
+            )
+            results.append(result)
+
+        # First (max_turns-1) decisions must be continue
+        for i, r in enumerate(results[:-1]):
+            assert r.decision == "continue", f"turn {i + 1} expected continue, got {r.decision}"
+            assert r.reason == "not_satisfied"
+
+        # Final decision must be stop/exhausted
+        final = results[-1]
+        assert final.decision == "stop"
+        assert final.reason == "exhausted"
+        assert final.continuation_prompt is None
+
+        # Store reflects exhaustion
+        state = store.get_goal("s1")
+        assert state.status == "exhausted"
+        assert state.turns_used == max_turns
+
+
+# ---------------------------------------------------------------------------
 # Sqlite-backed store durability (terminal status via _persist)
 # ---------------------------------------------------------------------------
 
