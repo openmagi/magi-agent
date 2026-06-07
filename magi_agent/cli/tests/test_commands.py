@@ -21,6 +21,13 @@ from magi_agent.cli.commands import (
     markdown_commands,
 )
 from magi_agent.cli.commands import builtins as builtins_mod
+from magi_agent.cli.commands.builtins import (
+    BUILTIN_COMMAND_NAMES,
+    GoalCommand,
+    OnboardingCommand,
+    PlanCommand,
+    SuperpowersCommand,
+)
 from magi_agent.cli.commands.discovery import (
     DiscoverySources,
     MarkdownPromptCommand,
@@ -355,12 +362,15 @@ def test_markdown_dispatch_yields_content_blocks(tmp_path) -> None:
 def test_builtins_present_in_discovery() -> None:
     discovered = discover_commands("/tmp/no-such-cwd")
     names = {c.name for c in discovered}
-    assert {"status", "reset", "compact", "help"} <= names
+    assert {"status", "reset", "compact", "help", "plan", "goal", "onboarding", "superpowers"} <= names
 
 
-def test_builtin_commands_factory_returns_four_local() -> None:
+def test_builtin_commands_factory_returns_eight_local() -> None:
     cmds = builtin_commands()
-    assert {c.name for c in cmds} == {"status", "reset", "compact", "help"}
+    assert {c.name for c in cmds} == {
+        "status", "reset", "compact", "help",
+        "plan", "goal", "onboarding", "superpowers",
+    }
     assert all(isinstance(c, LocalCommand) for c in cmds)
     assert all(c.surface == BOTH for c in cmds)
 
@@ -456,3 +466,159 @@ def test_install_discovery_wires_builder_and_no_import_side_effects(tmp_path) ->
     finally:
         # Restore the default empty builder so other tests are unaffected.
         set_registry_builder(registry_mod._default_builder)
+
+
+# ===========================================================================
+# P1.4: magi-native builtins (plan, goal, onboarding, superpowers)
+# ===========================================================================
+
+_MAGI_NATIVE_NAMES = {"plan", "goal", "onboarding", "superpowers"}
+_ALL_EIGHT = {"status", "reset", "compact", "help"} | _MAGI_NATIVE_NAMES
+
+
+# ---------------------------------------------------------------------------
+# BUILTIN_COMMAND_NAMES and /help listing
+# ---------------------------------------------------------------------------
+def test_builtin_command_names_has_all_eight() -> None:
+    """BUILTIN_COMMAND_NAMES must expose all eight builtins."""
+    assert set(BUILTIN_COMMAND_NAMES) == _ALL_EIGHT
+    assert len(BUILTIN_COMMAND_NAMES) == 8
+
+
+def test_help_lists_all_eight() -> None:
+    """/help text must include every name in BUILTIN_COMMAND_NAMES."""
+    reg = build_registry("/tmp/no-such-cwd")
+    out = asyncio.run(dispatch(reg, "help", None, _ctx(), surface=HEADLESS))
+    assert isinstance(out, Text)
+    for name in _ALL_EIGHT:
+        assert name in out.text, f"'/help' output missing builtin: {name}"
+
+
+# ---------------------------------------------------------------------------
+# Factory: eight fresh LocalCommand instances, all BOTH-surface
+# ---------------------------------------------------------------------------
+def test_builtin_commands_returns_eight_instances() -> None:
+    cmds = builtin_commands()
+    assert len(cmds) == 8
+    assert {c.name for c in cmds} == _ALL_EIGHT
+
+
+def test_builtin_commands_factory_returns_fresh_instances() -> None:
+    """Each call returns NEW instances (no shared mutable singletons)."""
+    first = builtin_commands()
+    second = builtin_commands()
+    for a, b in zip(sorted(first, key=lambda c: c.name), sorted(second, key=lambda c: c.name)):
+        assert a is not b
+
+
+# ---------------------------------------------------------------------------
+# Each new command: projects through boundary, returns Text with intent info
+# ---------------------------------------------------------------------------
+def test_plan_command_returns_command_intent() -> None:
+    reg = build_registry("/tmp/no-such-cwd")
+    out = asyncio.run(dispatch(reg, "plan", None, _ctx(), surface=HEADLESS))
+    assert isinstance(out, Text)
+    assert "command_intent" in out.text
+
+
+def test_plan_command_includes_recipe_and_checkpoint() -> None:
+    reg = build_registry("/tmp/no-such-cwd")
+    out = asyncio.run(dispatch(reg, "plan", None, _ctx(), surface=HEADLESS))
+    assert isinstance(out, Text)
+    assert "openmagi.agent-methodology" in out.text
+    assert "checkpoint:agent-methodology:plan" in out.text
+
+
+def test_goal_command_returns_command_intent() -> None:
+    reg = build_registry("/tmp/no-such-cwd")
+    out = asyncio.run(dispatch(reg, "goal", None, _ctx(), surface=HEADLESS))
+    assert isinstance(out, Text)
+    assert "command_intent" in out.text
+
+
+def test_goal_command_includes_recipe_and_checkpoint() -> None:
+    reg = build_registry("/tmp/no-such-cwd")
+    out = asyncio.run(dispatch(reg, "goal", None, _ctx(), surface=HEADLESS))
+    assert isinstance(out, Text)
+    assert "openmagi.agent-methodology" in out.text
+    assert "checkpoint:agent-methodology:goal" in out.text
+
+
+def test_onboarding_command_returns_command_intent() -> None:
+    reg = build_registry("/tmp/no-such-cwd")
+    out = asyncio.run(dispatch(reg, "onboarding", None, _ctx(), surface=HEADLESS))
+    assert isinstance(out, Text)
+    assert "command_intent" in out.text
+
+
+def test_onboarding_command_includes_recipe_and_checkpoint() -> None:
+    reg = build_registry("/tmp/no-such-cwd")
+    out = asyncio.run(dispatch(reg, "onboarding", None, _ctx(), surface=HEADLESS))
+    assert isinstance(out, Text)
+    assert "openmagi.agent-methodology" in out.text
+    assert "checkpoint:agent-methodology:onboarding" in out.text
+
+
+def test_superpowers_command_returns_command_intent() -> None:
+    """/superpowers must be recognized by the boundary (superpowers: prefix path)."""
+    reg = build_registry("/tmp/no-such-cwd")
+    out = asyncio.run(dispatch(reg, "superpowers", None, _ctx(), surface=HEADLESS))
+    assert isinstance(out, Text)
+    assert "command_intent" in out.text
+
+
+def test_superpowers_command_includes_recipe_and_checkpoint() -> None:
+    reg = build_registry("/tmp/no-such-cwd")
+    out = asyncio.run(dispatch(reg, "superpowers", None, _ctx(), surface=HEADLESS))
+    assert isinstance(out, Text)
+    assert "openmagi.agent-methodology" in out.text
+    assert "checkpoint:agent-methodology:superpowers" in out.text
+
+
+def test_superpowers_command_with_subcommand() -> None:
+    """/superpowers with args still hits the boundary's superpowers: prefix path."""
+    ctx = _ctx()
+    cmd = SuperpowersCommand(name="superpowers", surface=BOTH)
+    out = asyncio.run(cmd.call("search", ctx))
+    assert isinstance(out, Text)
+    assert "command_intent" in out.text
+
+
+# ---------------------------------------------------------------------------
+# Delegation check: all four magi-native commands call the boundary
+# ---------------------------------------------------------------------------
+def test_magi_native_builtins_delegate_to_boundary(monkeypatch) -> None:
+    """All four new commands must delegate to SlashControlBoundary.project."""
+    calls: list[str] = []
+    real_project = builtins_mod.SlashControlBoundary.project
+
+    def _spy(self, request):  # type: ignore[no-untyped-def]
+        calls.append(request.text)
+        return real_project(self, request)
+
+    monkeypatch.setattr(builtins_mod.SlashControlBoundary, "project", _spy)
+    ctx = _ctx()
+
+    for name in ("plan", "goal", "onboarding", "superpowers"):
+        asyncio.run(dispatch(build_registry(f"/tmp/d2-{name}"), name, None, ctx, surface=HEADLESS))
+
+    # Each command must have triggered exactly one boundary call.
+    assert any(t.startswith("/plan") for t in calls), "plan did not call boundary"
+    assert any(t.startswith("/goal") for t in calls), "goal did not call boundary"
+    assert any(t.startswith("/onboarding") for t in calls), "onboarding did not call boundary"
+    assert any(t.startswith("/superpowers:") for t in calls), "superpowers did not call boundary"
+
+
+# ---------------------------------------------------------------------------
+# __all__ exports the four new command classes
+# ---------------------------------------------------------------------------
+def test_builtins_module_exports_new_command_classes() -> None:
+    assert "PlanCommand" in builtins_mod.__all__
+    assert "GoalCommand" in builtins_mod.__all__
+    assert "OnboardingCommand" in builtins_mod.__all__
+    assert "SuperpowersCommand" in builtins_mod.__all__
+    # Classes are importable from the module
+    assert PlanCommand is builtins_mod.PlanCommand
+    assert GoalCommand is builtins_mod.GoalCommand
+    assert OnboardingCommand is builtins_mod.OnboardingCommand
+    assert SuperpowersCommand is builtins_mod.SuperpowersCommand

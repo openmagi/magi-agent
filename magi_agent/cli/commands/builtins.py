@@ -1,7 +1,13 @@
 """Seed *local* builtin slash-commands for the Magi CLI (Stream D, PR-D2).
 
 These are the always-present, model-free commands every surface (TUI + headless)
-exposes: ``status``, ``reset``, ``compact`` and ``help``.
+exposes. The original seed group is ``status``, ``reset``, ``compact`` and
+``help``; the *magi-native* group ``plan``, ``goal``, ``onboarding`` and
+``superpowers`` was added on top. The magi-native commands project their
+``recipePackRef`` / ``checkpointRef`` intent through the boundary and only
+*acknowledge* it (intent-only, exactly like ``reset`` — no recipe pack is
+loaded, no methodology activated, no checkpoint written here; that is gated
+runtime authority for a later phase).
 
 Design rationale
 ----------------
@@ -31,7 +37,7 @@ Design rationale
   recognized set (``compact/reset/status/...``), so it does not call
   ``project()``; it simply returns a ``Text`` listing the builtin names.
 
-All four builtins carry ``surface=CommandSurface(tui=True, headless=True)`` —
+All eight builtins carry ``surface=CommandSurface(tui=True, headless=True)`` —
 they are useful in both surfaces and perform no model round-trip.
 """
 
@@ -61,6 +67,10 @@ __all__ = [
     "ResetCommand",
     "CompactCommand",
     "HelpCommand",
+    "PlanCommand",
+    "GoalCommand",
+    "OnboardingCommand",
+    "SuperpowersCommand",
     "builtin_commands",
 ]
 
@@ -68,7 +78,16 @@ __all__ = [
 BUILTIN_BOTH = CommandSurface(tui=True, headless=True)
 
 # Stable, ordered list of builtin names. ``help`` lists exactly these.
-BUILTIN_COMMAND_NAMES: tuple[str, ...] = ("status", "reset", "compact", "help")
+BUILTIN_COMMAND_NAMES: tuple[str, ...] = (
+    "status",
+    "reset",
+    "compact",
+    "help",
+    "plan",
+    "goal",
+    "onboarding",
+    "superpowers",
+)
 
 
 def _make_boundary() -> SlashControlBoundary:
@@ -99,6 +118,22 @@ def _project(name: str, args: object, ctx: CommandContext) -> SlashControlDecisi
     text = f"/{name} {argument}".rstrip()
     request = SlashControlRequest(text=text, sessionKey=ctx.cwd or "cli")
     return _make_boundary().project(request)
+
+
+def _intent_refs(proj: dict[str, object]) -> tuple[str, str]:
+    """Return ``(recipePackRef, checkpointRef)`` from a public projection.
+
+    The magi-native methodology builtins all read these two refs the same way:
+    ``public_projection()`` nests them under the ``"intent"`` key. Centralized
+    here so the four commands stay thin and a projection-shape change is a
+    single edit. Missing/non-dict intents fold to empty strings (redaction-safe;
+    only ``public_projection()`` output is ever read).
+    """
+
+    intent = proj.get("intent") or {}
+    if not isinstance(intent, dict):
+        return "", ""
+    return str(intent.get("recipePackRef") or ""), str(intent.get("checkpointRef") or "")
 
 
 @dataclass
@@ -174,8 +209,95 @@ class HelpCommand(LocalCommand):
         return Text(text=f"available commands: {names}")
 
 
+@dataclass
+class PlanCommand(LocalCommand):
+    """``/plan`` — acknowledge a plan-mode intent via the boundary.
+
+    Projects ``/plan`` through the boundary and surfaces the recognized intent,
+    including the ``recipePackRef`` and ``checkpointRef`` provided by the
+    boundary for magi-native methodology commands. The actual plan-mode
+    activation is gated behind runtime authority (a later phase); this builtin
+    is intent-only, mirroring the maturity of ``/reset``.
+    """
+
+    async def call(self, args: object, ctx: CommandContext) -> LocalResult:  # type: ignore[override]
+        decision = _project("plan", args, ctx)
+        proj = decision.public_projection()
+        recipe, checkpoint = _intent_refs(proj)
+        return Text(
+            text=f"plan: {proj.get('status')} | recipe: {recipe} | checkpoint: {checkpoint}"
+        )
+
+
+@dataclass
+class GoalCommand(LocalCommand):
+    """``/goal`` — acknowledge a goal-setting intent via the boundary.
+
+    Projects ``/goal`` through the boundary and surfaces the recognized intent
+    with ``recipePackRef`` and ``checkpointRef``. Intent-only (no runtime
+    goal mutation) — the real goal-write is gated behind authority flags.
+    """
+
+    async def call(self, args: object, ctx: CommandContext) -> LocalResult:  # type: ignore[override]
+        decision = _project("goal", args, ctx)
+        proj = decision.public_projection()
+        recipe, checkpoint = _intent_refs(proj)
+        return Text(
+            text=f"goal: {proj.get('status')} | recipe: {recipe} | checkpoint: {checkpoint}"
+        )
+
+
+@dataclass
+class OnboardingCommand(LocalCommand):
+    """``/onboarding`` — acknowledge an onboarding intent via the boundary.
+
+    Projects ``/onboarding`` through the boundary and surfaces the recognized
+    intent with ``recipePackRef`` and ``checkpointRef``. Intent-only; the
+    actual onboarding flow is gated behind runtime authority.
+    """
+
+    async def call(self, args: object, ctx: CommandContext) -> LocalResult:  # type: ignore[override]
+        decision = _project("onboarding", args, ctx)
+        proj = decision.public_projection()
+        recipe, checkpoint = _intent_refs(proj)
+        return Text(
+            text=f"onboarding: {proj.get('status')} | recipe: {recipe} | checkpoint: {checkpoint}"
+        )
+
+
+@dataclass
+class SuperpowersCommand(LocalCommand):
+    """``/superpowers`` — acknowledge a superpowers intent via the boundary.
+
+    The boundary recognizes ``superpowers`` via a ``superpowers:`` prefix on
+    the raw command (see ``_parse_command``). A bare ``/superpowers`` produces
+    the raw command ``superpowers`` which does NOT match the ``superpowers:``
+    prefix rule — so we project as ``/superpowers:invoke`` to ensure the
+    boundary's prefix check triggers. Optionally a sub-command may be passed
+    via ``args``; we fold it in as ``superpowers:<args>`` when present.
+
+    Returns a ``Text`` summarising the recognized intent with ``recipePackRef``
+    and ``checkpointRef``. Intent-only — no runtime superpowers invocation.
+    """
+
+    async def call(self, args: object, ctx: CommandContext) -> LocalResult:  # type: ignore[override]
+        # The boundary's _parse_command matches ``superpowers:`` via a prefix
+        # check on the lowercased raw command group. A bare ``/superpowers``
+        # leaves the colon off, so normalized ``superpowers`` doesn't hit the
+        # prefix branch. We project as ``/superpowers:invoke`` (or
+        # ``/superpowers:<args>`` when the user supplied a sub-command) so the
+        # boundary's recognition always fires.
+        sub = str(args).strip() if args else "invoke"
+        decision = _project(f"superpowers:{sub}", None, ctx)
+        proj = decision.public_projection()
+        recipe, checkpoint = _intent_refs(proj)
+        return Text(
+            text=f"superpowers: {proj.get('status')} | recipe: {recipe} | checkpoint: {checkpoint}"
+        )
+
+
 def builtin_commands() -> list[LocalCommand]:
-    """Return fresh instances of all four seed builtins (both-surface).
+    """Return fresh instances of all eight builtins (both-surface).
 
     A factory (not module-level singletons) so each registry/cwd gets its own
     instances and there is no shared mutable state across registries.
@@ -186,4 +308,8 @@ def builtin_commands() -> list[LocalCommand]:
         ResetCommand(name="reset", surface=BUILTIN_BOTH),
         CompactCommand(name="compact", surface=BUILTIN_BOTH),
         HelpCommand(name="help", surface=BUILTIN_BOTH),
+        PlanCommand(name="plan", surface=BUILTIN_BOTH),
+        GoalCommand(name="goal", surface=BUILTIN_BOTH),
+        OnboardingCommand(name="onboarding", surface=BUILTIN_BOTH),
+        SuperpowersCommand(name="superpowers", surface=BUILTIN_BOTH),
     ]
