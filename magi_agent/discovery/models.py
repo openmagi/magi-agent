@@ -14,7 +14,7 @@ Vocabulary (TIDE paper):
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from typing import ClassVar
+from typing import ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -36,6 +36,12 @@ class DiscoveryPrediction(BaseModel):
     problem_class:
         Name of the matched :class:`DiscoveryTemplate`, or ``None`` when the
         model did not (or could not) label the prediction.
+    grounding_status:
+        Advisory tag set by the grounding verifier post-pass (see
+        ``magi_agent/discovery/grounding.py``): ``"grounded"`` when every
+        evidence id exists in the corpus, ``"partial"`` when only some do, and
+        ``"ungrounded"`` when none do (or there is no evidence at all). ``None``
+        until the verifier runs, so existing construction is unaffected.
     """
 
     model_config = _MODEL_CONFIG
@@ -44,6 +50,7 @@ class DiscoveryPrediction(BaseModel):
     evidence_ids: tuple[str, ...] = ()
     action: str = ""
     problem_class: str | None = None
+    grounding_status: Literal["grounded", "partial", "ungrounded"] | None = None
 
 
 class DiscoveryCorpus(BaseModel):
