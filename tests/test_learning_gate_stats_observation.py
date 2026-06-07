@@ -166,12 +166,13 @@ def test_existing_rows_without_stats_column_still_read(tmp_path) -> None:
     assert obs["passed"] is False
 
 
-def test_migration_6_adds_stats_json_to_preexisting_db(tmp_path) -> None:
+def test_migration_8_adds_stats_json_to_preexisting_db(tmp_path) -> None:
     """A DB created BEFORE the stats_json column existed gets it via the additive
-    ALTER (migration 6), and records then round-trip with stats."""
+    ALTER (migration 8), and records then round-trip with stats."""
     db_path = tmp_path / "old.db"
-    # Hand-build a pre-migration-6 schema: eval-observation table WITHOUT
-    # stats_json, version pinned at 5 so migration 6 is the only one to run.
+    # Hand-build a pre-stats_json schema: eval-observation table WITHOUT
+    # stats_json, version pinned at 5 so migrations 6-8 run; migration 8 (the
+    # learning_eval_observations ADD COLUMN stats_json) is the one under test.
     conn = sqlite3.connect(str(db_path))
     conn.executescript(
         """
@@ -221,7 +222,8 @@ def test_migration_6_adds_stats_json_to_preexisting_db(tmp_path) -> None:
     conn.close()
     assert "stats_json" not in cols_before  # precondition: old schema
 
-    # Opening through the store runs migration 6 (the additive ALTER).
+    # Opening through the store runs migrations 6-8; migration 8 is the additive
+    # stats_json ALTER on learning_eval_observations.
     store = _store(tmp_path, name="old.db")
     proposed = _proposed_rule(store)
     ref = store.record_eval_observation(
