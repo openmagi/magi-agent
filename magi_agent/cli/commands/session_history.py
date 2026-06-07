@@ -113,10 +113,16 @@ class SessionRevert(Protocol):
 
     A future revert/checkpoint subsystem wires a concrete implementation onto
     ``ctx.runtime.session_revert``; until then the commands return ``Skip()``.
+
+    Contract: ``can_undo``/``can_redo`` are called from ``list_for`` visibility
+    predicates (every command-list render), so they MUST be cheap and MUST NOT
+    raise — ``registry.list_for`` does not guard predicate exceptions, and a
+    raise there would break rendering of the whole command list, not just this
+    command.
     """
 
     def can_undo(self) -> bool:
-        """Return True if there is a step available to undo."""
+        """Return True if there is a step available to undo (must not raise)."""
         ...
 
     def undo(self) -> bool:
@@ -139,10 +145,15 @@ class SessionShareProvider(Protocol):
     The hosted (Clawy Pro) layer wires a concrete implementation onto
     ``ctx.runtime.session_share``; the OSS runtime ships no implementation
     (``/share`` and ``/unshare`` are permanently hidden without it).
+
+    Contract: ``shared_url`` is called from the ``/unshare`` ``list_for``
+    visibility predicate (every command-list render), so it MUST be cheap and
+    MUST NOT raise — an exception there would break rendering of the whole
+    command list (``registry.list_for`` does not guard predicate exceptions).
     """
 
     def shared_url(self) -> str | None:
-        """Return the current share URL, or None if the session is not shared."""
+        """Return the current share URL, or None if not shared (must not raise)."""
         ...
 
     def share(self) -> str:
