@@ -8,12 +8,15 @@ Verdict-parsing contract
 ------------------------
 ``parse_verdict`` inspects the raw model output for ONE of two signals (in order):
 
-1. **Token match** — looks for the literal tokens ``NOT_SATISFIED`` or ``SATISFIED``
-   (case-insensitive, whole-word boundary via \\b).  ``NOT_SATISFIED`` takes
-   precedence: if both tokens appear, the answer is "not satisfied".
-
-2. **JSON match** — scans for an embedded JSON object containing
+1. **JSON match** — scans for an embedded JSON object containing
    ``{"satisfied": true|false}``.  The first match wins; extra fields are ignored.
+   JSON-first is required so ``{"satisfied": false}`` is not misread by the token
+   path (which would see the ``satisfied`` key as a bare token).
+
+2. **Token match** — looks for the literal tokens ``NOT_SATISFIED`` or ``SATISFIED``
+   (case-insensitive, whole-word boundary via \\b).  ``NOT_SATISFIED`` takes
+   precedence: if both tokens appear, the answer is "not satisfied".  Tokens are
+   only consulted when no JSON object is present in the text.
 
 If neither signal is found, ``parse_verdict`` returns ``None`` (unparseable).
 
@@ -227,8 +230,11 @@ def apply_judge_policy(
     verdict_or_none:
         A successfully parsed JudgeVerdict, or None (unparseable / judge raised).
     consecutive_parse_failures:
-        The number of consecutive None-verdict results seen so far
-        (BEFORE counting this call — callers increment AFTER calling this).
+        The number of consecutive None-verdict results seen so far,
+        INCLUDING the current call (post-increment).  When called from
+        ``run_judge``, this is ``new_failure_count`` after adding 1 for the
+        current failure.  The ``>=`` check therefore fires on exactly the
+        Nth consecutive failure (where N = budget).
     budget:
         Max consecutive parse failures before giving up (default = module constant).
 
@@ -352,7 +358,7 @@ def run_judge(
 
     policy = apply_judge_policy(
         verdict_or_none=verdict,
-        consecutive_parse_failures=new_failure_count - parse_failure_added,
+        consecutive_parse_failures=new_failure_count,
         budget=DEFAULT_JUDGE_PARSE_FAILURE_BUDGET,
     )
 

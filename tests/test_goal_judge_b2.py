@@ -31,6 +31,7 @@ from magi_agent.harness.goal_judge import (
     apply_judge_policy,
     build_judge_evidence,
     parse_verdict,
+    run_judge,
 )
 
 
@@ -390,3 +391,153 @@ class TestImportBoundary:
         assert result.stdout.strip() == "[]", (
             f"Forbidden modules leaked into top-level imports: {result.stdout.strip()}"
         )
+
+
+# ---------------------------------------------------------------------------
+# run_judge — budget boundary (Issue 1 TDD) and shadow/live gate (Issue 2)
+# ---------------------------------------------------------------------------
+
+
+class _AlwaysUnparseable:
+    """Fake GoalJudge that always returns a raw string that parse_verdict cannot parse."""
+
+    def judge(self, goal: str, transcript_excerpt: str) -> JudgeVerdict:
+        return JudgeVerdict(satisfied=False, raw="<<no signal here>>")
+
+
+class _AlwaysSatisfied:
+    """Fake GoalJudge that always returns a clearly parseable SATISFIED verdict."""
+
+    def judge(self, goal: str, transcript_excerpt: str) -> JudgeVerdict:
+        return JudgeVerdict(satisfied=True, raw="SATISFIED")
+
+
+class TestRunJudgeBudgetBoundary:
+    """Issue 1 — STOP fires on exactly the Nth consecutive parse failure (not N+1).
+
+    B3 threads the running consecutive_parse_failures count across calls.
+    This class mirrors that caller pattern: each call passes the failure_count
+    returned by the previous call so the accumulation is identical to production.
+    """
+
+    def test_stop_fires_on_nth_failure_not_n_plus_1(self) -> None:
+        """With budget=3, the 3rd consecutive unparseable call must return action=stop."""
+        judge = _AlwaysUnparseable()
+        budget = DEFAULT_JUDGE_PARSE_FAILURE_BUDGET  # 3
+        failure_count = 0
+
+        for call_number in range(1, budget + 1):
+            decision = run_judge(
+                judge,
+                goal="finish the task",
+                transcript_excerpt="...",
+                consecutive_parse_failures=failure_count,
+                shadow=False,
+            )
+            failure_count = decision.failure_count
+            if call_number < budget:
+                # Calls 1 and 2: budget not yet exhausted — loop continues
+                assert decision.reason == "parse_failure_fail_open", (
+                    f"call {call_number}: expected fail_open, got {decision.reason}"
+                )
+            else:
+                # Call 3 (= budget): must stop NOW, not on call 4
+                assert decision.reason == "parse_failure_budget_exhausted", (
+                    f"call {call_number}: expected budget_exhausted on exactly the "
+                    f"{budget}th failure, got {decision.reason}"
+                )
+
+    def test_stop_does_not_fire_before_nth_failure(self) -> None:
+        """With budget=3, calls 1 and 2 must continue (not stop early)."""
+        judge = _AlwaysUnparseable()
+        budget = DEFAULT_JUDGE_PARSE_FAILURE_BUDGET
+        failure_count = 0
+        for call_number in range(1, budget):  # calls 1 .. budget-1
+            decision = run_judge(
+                judge,
+                goal="finish the task",
+                transcript_excerpt="...",
+                consecutive_parse_failures=failure_count,
+                shadow=False,
+            )
+            failure_count = decision.failure_count
+            assert decision.reason != "parse_failure_budget_exhausted", (
+                f"call {call_number}: budget should NOT be exhausted yet "
+                f"(fires on call {budget})"
+            )
+
+    def test_failure_count_increments_per_call(self) -> None:
+        """Each unparseable call increments failure_count by exactly 1."""
+        judge = _AlwaysUnparseable()
+        failure_count = 0
+        for expected_count in range(1, DEFAULT_JUDGE_PARSE_FAILURE_BUDGET + 1):
+            decision = run_judge(
+                judge,
+                goal="task",
+                transcript_excerpt="...",
+                consecutive_parse_failures=failure_count,
+                shadow=False,
+            )
+            failure_count = decision.failure_count
+            assert failure_count == expected_count
+
+
+class TestRunJudgeShadowGate:
+    """Issue 2 — shadow=True sets acted=False; shadow=False (live) sets acted=True."""
+
+    def test_shadow_true_acted_false(self) -> None:
+        """Explicit shadow=True: verdict is observed but acted is False."""
+        judge = _AlwaysSatisfied()
+        decision = run_judge(
+            judge,
+            goal="finish the task",
+            transcript_excerpt="Agent: Done.",
+            consecutive_parse_failures=0,
+            shadow=True,
+        )
+        assert decision.acted is False, (
+            "shadow=True must set acted=False regardless of verdict"
+        )
+        # The verdict is still recorded (for audit)
+        assert decision.verdict is not None
+        assert decision.verdict.satisfied is True
+
+    def test_shadow_false_acted_true(self) -> None:
+        """Explicit shadow=False (live mode): acted is True."""
+        judge = _AlwaysSatisfied()
+        decision = run_judge(
+            judge,
+            goal="finish the task",
+            transcript_excerpt="Agent: Done.",
+            consecutive_parse_failures=0,
+            shadow=False,
+        )
+        assert decision.acted is True, "shadow=False must set acted=True"
+        assert decision.verdict is not None
+        assert decision.verdict.satisfied is True
+
+    def test_shadow_env_on_sets_acted_false(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """MAGI_GOAL_LOOP_JUDGE_SHADOW=1 (env default) → shadow mode → acted=False."""
+        monkeypatch.setenv("MAGI_GOAL_LOOP_JUDGE_SHADOW", "1")
+        judge = _AlwaysSatisfied()
+        decision = run_judge(
+            judge,
+            goal="task",
+            transcript_excerpt="done",
+            consecutive_parse_failures=0,
+            shadow=None,  # let env var decide
+        )
+        assert decision.acted is False
+
+    def test_shadow_env_off_sets_acted_true(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """MAGI_GOAL_LOOP_JUDGE_SHADOW=0 → live mode → acted=True."""
+        monkeypatch.setenv("MAGI_GOAL_LOOP_JUDGE_SHADOW", "0")
+        judge = _AlwaysSatisfied()
+        decision = run_judge(
+            judge,
+            goal="task",
+            transcript_excerpt="done",
+            consecutive_parse_failures=0,
+            shadow=None,  # let env var decide
+        )
+        assert decision.acted is True
