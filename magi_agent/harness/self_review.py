@@ -403,11 +403,15 @@ async def _run_review_fork(
     )
 
     # Run the fork (fail-open: if fork_runner raises, we swallow it below).
+    # REVIEW_DISABLED_TOOLSETS is passed here so the fork runner records and
+    # forwards it to the child executor, which MUST strip those tools before
+    # the child LLM call.  This is enforcement, not advisory text.
     fork_results, _fork_evidence = await fork_runner.fork(
         parent_turn_id=fork_input.turn_id,
         system_prompt_blocks=system_prompt_blocks,
         parent_assistant_message=fork_input.parent_assistant_message,
         child_directives=[directive],
+        disabled_toolsets=REVIEW_DISABLED_TOOLSETS,
     )
 
     provenance_digest = _turn_provenance_digest(

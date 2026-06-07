@@ -54,6 +54,25 @@ class FakeCandidateSink:
         self.received.append(candidate)
 
 
+class FakeForkCall:
+    """Captures the kwargs from a single ``FakeForkRunner.fork()`` invocation."""
+
+    def __init__(
+        self,
+        *,
+        parent_turn_id: str,
+        system_prompt_blocks: list[dict[str, Any]],
+        parent_assistant_message: dict[str, Any],
+        child_directives: list[str],
+        disabled_toolsets: tuple[str, ...],
+    ) -> None:
+        self.parent_turn_id = parent_turn_id
+        self.system_prompt_blocks = system_prompt_blocks
+        self.parent_assistant_message = parent_assistant_message
+        self.child_directives = child_directives
+        self.disabled_toolsets = disabled_toolsets
+
+
 class FakeForkRunner:
     """Fake ForkRunner: returns pre-configured ChildResult list."""
 
@@ -67,7 +86,7 @@ class FakeForkRunner:
         self._output = child_output
         self._status = status
         self._raise_on_fork = raise_on_fork
-        self.fork_calls: list[dict[str, Any]] = []
+        self.fork_calls: list[FakeForkCall] = []
 
     async def fork(
         self,
@@ -76,14 +95,16 @@ class FakeForkRunner:
         system_prompt_blocks: list[dict[str, Any]],
         parent_assistant_message: dict[str, Any],
         child_directives: list[str],
+        disabled_toolsets: tuple[str, ...] = (),
     ) -> tuple[list[ChildResult], ForkCacheShareEvidence]:
         self.fork_calls.append(
-            {
-                "parent_turn_id": parent_turn_id,
-                "system_prompt_blocks": system_prompt_blocks,
-                "parent_assistant_message": parent_assistant_message,
-                "child_directives": child_directives,
-            }
+            FakeForkCall(
+                parent_turn_id=parent_turn_id,
+                system_prompt_blocks=system_prompt_blocks,
+                parent_assistant_message=parent_assistant_message,
+                child_directives=child_directives,
+                disabled_toolsets=disabled_toolsets,
+            )
         )
         if self._raise_on_fork:
             raise RuntimeError("injected fork failure")
@@ -97,6 +118,7 @@ class FakeForkRunner:
             parentTurnId=parent_turn_id,
             childCount=len(child_directives),
             sharedPrefixFingerprint="fake-fp",
+            disabledToolsets=disabled_toolsets,
             status="ok",
             elapsedMs=0.1,
         )
@@ -437,12 +459,24 @@ class TestRestrictedToolSurface:
         sched_tools = {"CronCreate", "TaskCreate"}
         assert sched_tools.issubset(set(REVIEW_DISABLED_TOOLSETS))
 
-    def test_evidence_records_disabled_toolsets(self) -> None:
-        """The evidence record must include disabledToolsets for audit."""
+    def test_fork_runner_receives_disabled_toolsets(self) -> None:
+        """ENFORCEMENT: fork_runner.fork() must be called with REVIEW_DISABLED_TOOLSETS.
+
+        This test replaces the previous tautological evidence-record check.
+        The evidence record only confirmed the constant was written into the
+        evidence dict — it did not verify the restriction was actually passed
+        to the fork runner (the enforcement boundary).  A misbehaving fork
+        child could have ignored the advisory text and called BashTool anyway.
+
+        Now we assert that ``fork_runner.fork()`` is called with
+        ``disabled_toolsets=REVIEW_DISABLED_TOOLSETS``.  The fork runner
+        records and forwards this to the child executor, which MUST strip
+        those tools before the child LLM call.
+        """
         config = SelfReviewConfig(enabled=True, shadow=True)
         sink = FakeCandidateSink()
         runner = FakeForkRunner(child_output="")
-        result = _run(
+        _run(
             run_self_review_hook(
                 session_id="sess-tools",
                 turn_id="turn-tools",
@@ -454,11 +488,30 @@ class TestRestrictedToolSurface:
                 now=_NOW,
             )
         )
+        assert len(runner.fork_calls) == 1
+        assert runner.fork_calls[0].disabled_toolsets == REVIEW_DISABLED_TOOLSETS
+
+    def test_evidence_also_records_disabled_toolsets(self) -> None:
+        """The evidence record must include disabledToolsets for audit (secondary check)."""
+        config = SelfReviewConfig(enabled=True, shadow=True)
+        sink = FakeCandidateSink()
+        runner = FakeForkRunner(child_output="")
+        result = _run(
+            run_self_review_hook(
+                session_id="sess-tools-ev",
+                turn_id="turn-tools-ev",
+                system_prompt_blocks=_make_system_blocks(),
+                parent_assistant_message=_make_assistant_message(),
+                fork_runner=runner,
+                candidate_sink=sink,
+                config=config,
+                now=_NOW,
+            )
+        )
         assert result is not None
         fields = dict(result.evidence.fields)
         assert "disabledToolsets" in fields
-        disabled = fields["disabledToolsets"]
-        assert "BashTool" in disabled
+        assert "BashTool" in fields["disabledToolsets"]
 
 
 # ---------------------------------------------------------------------------
@@ -612,11 +665,17 @@ class TestForkRunnerDisabled:
 
         # Simulate a fork runner that returns [] (ForkRunner disabled path).
         class EmptyForkRunner:
-            async def fork(self, **_: Any) -> tuple[list[ChildResult], ForkCacheShareEvidence]:
+            async def fork(
+                self,
+                *,
+                disabled_toolsets: tuple[str, ...] = (),
+                **_: Any,
+            ) -> tuple[list[ChildResult], ForkCacheShareEvidence]:
                 evidence = ForkCacheShareEvidence(
                     parentTurnId="t1",
                     childCount=1,
                     sharedPrefixFingerprint="",
+                    disabledToolsets=disabled_toolsets,
                     status="disabled",
                     elapsedMs=0.0,
                 )

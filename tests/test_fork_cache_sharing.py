@@ -178,7 +178,7 @@ class TestForkRunner:
 
             call_log: list[str] = []
 
-            async def fake_executor(*, system_prompt_blocks, messages, directive):
+            async def fake_executor(*, system_prompt_blocks, messages, directive, disabled_toolsets=()):
                 call_log.append(directive)
                 return f"result for {directive}"
 
@@ -207,7 +207,7 @@ class TestForkRunner:
 
             captured_blocks: list[list[dict]] = []
 
-            async def capture_executor(*, system_prompt_blocks, messages, directive):
+            async def capture_executor(*, system_prompt_blocks, messages, directive, disabled_toolsets=()):
                 captured_blocks.append(system_prompt_blocks)
                 return "ok"
 
@@ -233,7 +233,7 @@ class TestForkRunner:
         try:
             from magi_agent.runtime.fork_runner import ForkRunner
 
-            async def failing_executor(*, system_prompt_blocks, messages, directive):
+            async def failing_executor(*, system_prompt_blocks, messages, directive, disabled_toolsets=()):
                 if directive == "fail":
                     raise RuntimeError("child failed")
                 return "ok"
@@ -261,7 +261,7 @@ class TestForkRunner:
         try:
             from magi_agent.runtime.fork_runner import ForkRunner
 
-            async def noop_executor(*, system_prompt_blocks, messages, directive):
+            async def noop_executor(*, system_prompt_blocks, messages, directive, disabled_toolsets=()):
                 return "done"
 
             runner = ForkRunner(child_executor=noop_executor)

@@ -23,6 +23,12 @@ class ForkCacheShareEvidence(BaseModel):
     parent_turn_id: str = Field(alias="parentTurnId")
     child_count: int = Field(alias="childCount")
     shared_prefix_fingerprint: str = Field(alias="sharedPrefixFingerprint")
+    #: Toolset names forwarded to the child executor for stripping.
+    #: The concrete executor MUST strip these from the child tool list before
+    #: the LLM call.  An empty tuple means no restriction.
+    disabled_toolsets: tuple[str, ...] = Field(
+        default=(), alias="disabledToolsets"
+    )
     status: ForkCacheShareStatus
     elapsed_ms: float = Field(alias="elapsedMs")
 
@@ -43,6 +49,19 @@ class ForkRunner:
 
     Creates one FrozenPromptSnapshot from parent, builds forked messages
     per child directive, and runs them concurrently via asyncio.gather().
+
+    Tool-surface restriction contract
+    ----------------------------------
+    Callers that need to restrict the child's tool surface pass
+    ``disabled_toolsets`` to ``fork()``.  The ``ForkRunner`` itself records
+    and forwards the tuple to each child executor invocation; the *concrete*
+    child executor is responsible for stripping those tool names from the
+    tool list it builds before invoking the child LLM.  This makes the
+    restriction enforced (not advisory): a misbehaving executor would have
+    to explicitly ignore the parameter to bypass it.
+
+    This mirrors the scheduler's ``CRON_DISABLED_TOOLSETS`` pattern: the
+    fork runner is the transport layer; the executor is the enforcement layer.
     """
 
     def __init__(self, *, child_executor: Any = None) -> None:
@@ -62,7 +81,20 @@ class ForkRunner:
         system_prompt_blocks: list[dict[str, Any]],
         parent_assistant_message: dict[str, Any],
         child_directives: list[str],
+        disabled_toolsets: tuple[str, ...] = (),
     ) -> tuple[list[ChildResult], ForkCacheShareEvidence]:
+        """Run fork children, each with the shared prompt-cache prefix.
+
+        Parameters
+        ----------
+        disabled_toolsets:
+            Toolset names that MUST be stripped from the child's tool list by
+            the concrete child executor before the LLM call.  Default ``()``
+            leaves the existing callers unaffected.  The fork runner records
+            this tuple in the evidence and passes it to every executor call;
+            the executor is the enforcement point — it MUST NOT invoke the
+            child LLM with any tool whose name appears in this tuple.
+        """
         start = time.monotonic()
 
         if not self._enabled:
@@ -70,6 +102,7 @@ class ForkRunner:
                 parentTurnId=parent_turn_id,
                 childCount=len(child_directives),
                 sharedPrefixFingerprint="",
+                disabledToolsets=disabled_toolsets,
                 status="disabled",
                 elapsedMs=0.0,
             )
@@ -91,6 +124,7 @@ class ForkRunner:
                     system_prompt_blocks=blocks,
                     messages=messages,
                     directive=directive,
+                    disabled_toolsets=disabled_toolsets,
                 )
                 for (blocks, messages), directive in zip(
                     child_message_sets, child_directives
@@ -133,6 +167,7 @@ class ForkRunner:
             parentTurnId=parent_turn_id,
             childCount=len(child_directives),
             sharedPrefixFingerprint=snapshot.fingerprint,
+            disabledToolsets=disabled_toolsets,
             status=status,
             elapsedMs=round(elapsed, 2),
         )
