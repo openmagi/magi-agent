@@ -155,6 +155,36 @@ _MIGRATIONS: list[tuple[int, str]] = [
             ON learning_items (tenant_id, scope_task_kind);
         """,
     ),
+    (
+        6,
+        # Add ``pinned`` column (default 0/False).  Pinned items are exempt from
+        # the inactivity-triggered skill curator pass (C3).  The ALTER TABLE guard
+        # (see _MIGRATION_SKIP_GUARDS) makes this idempotent on re-run.
+        """
+        ALTER TABLE learning_items ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0;
+        """,
+    ),
+    (
+        7,
+        # Curator state table: persists last_run_at per tenant_id so the
+        # inactivity trigger survives process restarts.  Curator snapshots store
+        # pre-archive item states (JSON blob) for reversibility.
+        """
+        CREATE TABLE IF NOT EXISTS learning_curator_state (
+            tenant_id   TEXT NOT NULL,
+            last_run_at TEXT,
+            PRIMARY KEY (tenant_id)
+        );
+        CREATE TABLE IF NOT EXISTS learning_curator_snapshots (
+            snapshot_ref TEXT PRIMARY KEY,
+            tenant_id    TEXT NOT NULL,
+            created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+            items_json   TEXT NOT NULL DEFAULT '[]'
+        );
+        CREATE INDEX IF NOT EXISTS idx_curator_snapshots_tenant
+            ON learning_curator_snapshots (tenant_id);
+        """,
+    ),
 ]
 
 # Statements inside these migrations require special idempotency handling
@@ -183,6 +213,11 @@ def _has_composite_pk(conn: sqlite3.Connection) -> bool:
 _MIGRATION_SKIP_GUARDS: dict[tuple[int, str], object] = {
     (4, "ALTER TABLE learning_items"): lambda conn: any(
         row[1] == "scope_task_kind"
+        for row in conn.execute("PRAGMA table_xinfo(learning_items)").fetchall()
+    ),
+    # Migration 6: skip ADD COLUMN pinned if the column already exists.
+    (6, "ALTER TABLE learning_items ADD COLUMN pinned"): lambda conn: any(
+        row[1] == "pinned"
         for row in conn.execute("PRAGMA table_xinfo(learning_items)").fetchall()
     ),
     # Migration 5 rebuilds the table for a composite PK.  Skip the CREATE/INSERT/
@@ -309,8 +344,13 @@ class LearningStore(Protocol):
         tenant_id: str = "local",
     ) -> LearningItem: ...
     def archive(
-        self, item_id: str, *, actor: str, tenant_id: str = "local"
-    ) -> LearningItem: ...
+        self,
+        item_id: str,
+        *,
+        actor: str,
+        tenant_id: str = "local",
+        expected_status: str | None = None,
+    ) -> LearningItem | None: ...
 
 
 def _now_iso() -> str:
@@ -318,6 +358,10 @@ def _now_iso() -> str:
 
 
 def _row_to_item(row: sqlite3.Row) -> LearningItem:
+    # ``pinned`` was added in migration 6; guard against old rows without
+    # the column by defaulting to False (keys() exposes available columns).
+    row_keys = row.keys()
+    pinned_val = bool(row["pinned"]) if "pinned" in row_keys else False
     payload: dict[str, object] = {
         "id": row["id"],
         "tenantId": row["tenant_id"],
@@ -333,6 +377,7 @@ def _row_to_item(row: sqlite3.Row) -> LearningItem:
         "stats": json.loads(row["stats_json"]),
         "evalObservationRef": row["eval_observation_ref"],
         "approvalRef": row["approval_ref"],
+        "pinned": pinned_val,
     }
     return LearningItem.model_validate(payload)
 
@@ -353,6 +398,7 @@ def _item_to_row_dict(item: LearningItem) -> dict[str, object]:
         "stats_json": json.dumps(item.stats.model_dump(by_alias=True)),
         "eval_observation_ref": item.eval_observation_ref,
         "approval_ref": item.approval_ref,
+        "pinned": int(item.pinned),
         "updated_at": _now_iso(),
     }
 
@@ -362,7 +408,18 @@ class SqliteLearningStore:
 
     Thread-safety: sqlite3 connection created with check_same_thread=False
     and WAL journal mode, consistent with SessionSqliteStore patterns.
+
+    In-memory databases
+    -------------------
+    Pass ``db_path=":memory:"`` to obtain a pure in-memory SQLite database
+    that is created directly via ``sqlite3.connect(":memory:")`` without any
+    path joining.  In-memory databases are scoped to a single connection and
+    are NOT shared across ``SqliteLearningStore`` instances — each instance
+    gets its own isolated in-memory database.  Suitable for tests; NOT
+    suitable for production multi-process scenarios.
     """
+
+    _MEMORY_PATH = ":memory:"
 
     def __init__(
         self,
@@ -375,6 +432,10 @@ class SqliteLearningStore:
 
     @property
     def db_full_path(self) -> Path:
+        if self._db_path == self._MEMORY_PATH:
+            # Caller wants an in-memory DB; return a sentinel path that is
+            # never used for an actual filesystem open (see _get_conn).
+            return Path(self._MEMORY_PATH)
         root = Path(self._workspace_root) if self._workspace_root else Path.cwd()
         return root / self._db_path
 
@@ -382,10 +443,15 @@ class SqliteLearningStore:
         if self._conn is not None:
             return self._conn
 
-        db_path = self.db_full_path
-        db_path.parent.mkdir(parents=True, exist_ok=True)
+        if self._db_path == self._MEMORY_PATH:
+            # Pure in-memory: pass ":memory:" directly to sqlite3 — no path
+            # joining, no parent mkdir (would corrupt the ":memory:" sentinel).
+            conn = sqlite3.connect(":memory:", timeout=10, check_same_thread=False)
+        else:
+            db_path = self.db_full_path
+            db_path.parent.mkdir(parents=True, exist_ok=True)
+            conn = sqlite3.connect(str(db_path), timeout=10, check_same_thread=False)
 
-        conn = sqlite3.connect(str(db_path), timeout=10, check_same_thread=False)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA foreign_keys=ON")
@@ -459,11 +525,11 @@ class SqliteLearningStore:
             INSERT INTO learning_items (
                 id, tenant_id, kind, status, scope_json, content_json,
                 rationale, provenance_json, version, supersedes, embedding_ref,
-                stats_json, eval_observation_ref, approval_ref, updated_at
+                stats_json, eval_observation_ref, approval_ref, pinned, updated_at
             ) VALUES (
                 :id, :tenant_id, :kind, :status, :scope_json, :content_json,
                 :rationale, :provenance_json, :version, :supersedes, :embedding_ref,
-                :stats_json, :eval_observation_ref, :approval_ref, :updated_at
+                :stats_json, :eval_observation_ref, :approval_ref, :pinned, :updated_at
             )
             ON CONFLICT(id, tenant_id) DO UPDATE SET
                 kind       = excluded.kind,
@@ -478,6 +544,7 @@ class SqliteLearningStore:
                 stats_json = excluded.stats_json,
                 eval_observation_ref = excluded.eval_observation_ref,
                 approval_ref = excluded.approval_ref,
+                pinned     = excluded.pinned,
                 updated_at = excluded.updated_at
             """,
             row,
@@ -787,11 +854,11 @@ class SqliteLearningStore:
             INSERT INTO learning_items (
                 id, tenant_id, kind, status, scope_json, content_json,
                 rationale, provenance_json, version, supersedes, embedding_ref,
-                stats_json, eval_observation_ref, approval_ref, updated_at
+                stats_json, eval_observation_ref, approval_ref, pinned, updated_at
             ) VALUES (
                 :id, :tenant_id, :kind, :status, :scope_json, :content_json,
                 :rationale, :provenance_json, :version, :supersedes, :embedding_ref,
-                :stats_json, :eval_observation_ref, :approval_ref, :updated_at
+                :stats_json, :eval_observation_ref, :approval_ref, :pinned, :updated_at
             )
             """,
             row,
@@ -800,21 +867,124 @@ class SqliteLearningStore:
         return new_item
 
     def archive(
-        self, item_id: str, *, actor: str, tenant_id: str = "local"
-    ) -> LearningItem:
+        self,
+        item_id: str,
+        *,
+        actor: str,
+        tenant_id: str = "local",
+        expected_status: str | None = None,
+    ) -> LearningItem | None:
+        """Set *item_id* status to ``"archived"``.
+
+        Parameters
+        ----------
+        actor:
+            Who is requesting the archive (logged, not stored).
+        tenant_id:
+            Tenant scope — cross-tenant ops silently return None / raise KeyError.
+        expected_status:
+            Optional TOCTOU guard.  When provided the UPDATE gains an extra
+            ``AND status = ?`` predicate.  If the item's status changed
+            between the SELECT and this UPDATE (e.g. auto-activated between
+            the curator's would-archive scan and the per-item archive call),
+            rowcount will be 0 and this method returns ``None`` instead of
+            raising ``KeyError``.  Callers that do not pass ``expected_status``
+            keep the original behaviour (0 rowcount → KeyError).
+
+        Returns
+        -------
+        LearningItem
+            The item in its post-archive state, or ``None`` when
+            ``expected_status`` was provided and the item had already
+            transitioned to a different status.
+        """
         # Tenant-scoped: ``AND tenant_id = ?`` makes a cross-tenant archive a
-        # no-op (rowcount 0 → KeyError); another tenant's row is never touched.
+        # no-op (rowcount 0 → KeyError or None); another tenant's row is never
+        # touched.
         conn = self._get_conn()
-        cur = conn.execute(
-            """
-            UPDATE learning_items
-            SET status = 'archived', updated_at = ?
-            WHERE id = ? AND tenant_id = ?
-            """,
-            (_now_iso(), item_id, tenant_id),
-        )
-        if cur.rowcount == 0:
-            raise KeyError(f"LearningItem not found: {item_id!r}")
+        if expected_status is not None:
+            cur = conn.execute(
+                """
+                UPDATE learning_items
+                SET status = 'archived', updated_at = ?
+                WHERE id = ? AND tenant_id = ? AND status = ?
+                """,
+                (_now_iso(), item_id, tenant_id, expected_status),
+            )
+            if cur.rowcount == 0:
+                # Item either doesn't exist or changed status — caller should
+                # treat this as a benign skip (TOCTOU-safe).
+                return None
+        else:
+            cur = conn.execute(
+                """
+                UPDATE learning_items
+                SET status = 'archived', updated_at = ?
+                WHERE id = ? AND tenant_id = ?
+                """,
+                (_now_iso(), item_id, tenant_id),
+            )
+            if cur.rowcount == 0:
+                raise KeyError(f"LearningItem not found: {item_id!r}")
+        conn.commit()
+        return self._require_item(conn, item_id, tenant_id=tenant_id)
+
+    def _set_status_internal(
+        self,
+        item_id: str,
+        status: str,
+        *,
+        tenant_id: str = "local",
+        expected_status: str | None = None,
+    ) -> LearningItem | None:
+        """Low-level escape hatch: set *item_id* to *status* with optional CAS guard.
+
+        PRIVATE — only for use by ``SkillCurator.restore_from_snapshot`` to
+        un-archive items back to their pre-archive status.  It intentionally
+        bypasses ``assert_activation_allowed``; do NOT use for normal
+        status transitions (use approve() / auto_activate() / archive() instead).
+
+        Parameters
+        ----------
+        item_id:
+            Target item.
+        status:
+            New status string (e.g. ``"proposed"``).
+        tenant_id:
+            Tenant scope.
+        expected_status:
+            Optional CAS guard — the UPDATE adds ``AND status = ?``.  If the
+            item's current status differs, returns ``None`` (no-op) instead of
+            raising.  Callers without the guard get a ``KeyError`` on miss.
+
+        Returns
+        -------
+        LearningItem | None
+            Updated item, or ``None`` when the CAS guard prevented the write.
+        """
+        conn = self._get_conn()
+        if expected_status is not None:
+            cur = conn.execute(
+                """
+                UPDATE learning_items
+                SET status = ?, updated_at = ?
+                WHERE id = ? AND tenant_id = ? AND status = ?
+                """,
+                (status, _now_iso(), item_id, tenant_id, expected_status),
+            )
+            if cur.rowcount == 0:
+                return None
+        else:
+            cur = conn.execute(
+                """
+                UPDATE learning_items
+                SET status = ?, updated_at = ?
+                WHERE id = ? AND tenant_id = ?
+                """,
+                (status, _now_iso(), item_id, tenant_id),
+            )
+            if cur.rowcount == 0:
+                raise KeyError(f"LearningItem not found: {item_id!r}")
         conn.commit()
         return self._require_item(conn, item_id, tenant_id=tenant_id)
 
