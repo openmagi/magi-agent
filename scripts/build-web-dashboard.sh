@@ -21,4 +21,14 @@ npm run build
 
 rm -rf "$DEST"
 cp -R "$WEB/dist" "$DEST"
+find "$DEST" -type f \( \
+  -name '*.css' -o \
+  -name '*.html' -o \
+  -name '*.js' -o \
+  -name '*.json' -o \
+  -name '*.svg' -o \
+  -name '*.txt' -o \
+  -name '*.webmanifest' -o \
+  -name '*.xml' \
+\) -print0 | xargs -0 perl -0pi -e 's/[ \t]+(?=\r?\n|$)//g'
 echo "Synced $WEB/dist -> $DEST"
