@@ -1161,10 +1161,163 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
         animation-iteration-count: 1 !important;
       }}
     }}
+    .historical-stream-transcript {{
+      display: grid;
+      gap: 12px;
+      width: 100%;
+    }}
+    .assistant-bubble {{
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+      box-shadow: var(--shadow-soft);
+      padding: 14px 16px;
+      color: var(--ink);
+      line-height: 1.55;
+      white-space: pre-wrap;
+    }}
+    .thinking-block,
+    .tool-card,
+    .todo-card,
+    .terminal-notice {{
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface-2);
+      padding: 12px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.45;
+    }}
+    .thinking-block button {{
+      border: 0;
+      background: transparent;
+      color: var(--accent);
+      font-weight: 800;
+      padding: 0;
+    }}
+    .thinking-body {{
+      margin-top: 8px;
+      color: var(--ink);
+      white-space: pre-wrap;
+    }}
+    .tool-card header,
+    .todo-card header {{
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 8px;
+      color: var(--ink);
+      font-weight: 800;
+    }}
+    .tool-card pre,
+    .todo-card pre {{
+      margin: 8px 0 0;
+      overflow: auto;
+      white-space: pre-wrap;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+      color: var(--muted);
+    }}
+    .tool-card.rejected,
+    .terminal-notice.error {{
+      border-color: #f2bfca;
+      background: #fff7f9;
+      color: #8a1f34;
+    }}
+    .activity-list {{
+      display: grid;
+      gap: 8px;
+    }}
+    .activity-list .activity-item {{
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+      padding: 10px;
+      color: var(--muted);
+      font-size: 12px;
+    }}
+    .queued-messages {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      min-height: 0;
+      padding: 0 0 8px;
+    }}
+    .queue-chip {{
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      max-width: 100%;
+      border: 1px solid #d8ccff;
+      border-radius: 999px;
+      background: #fbf9ff;
+      color: var(--accent);
+      padding: 5px 9px;
+      font-size: 12px;
+      font-weight: 700;
+    }}
+    .queue-chip button {{
+      border: 0;
+      background: transparent;
+      color: inherit;
+      font-weight: 900;
+      padding: 0;
+    }}
+    .approval-backdrop {{
+      position: fixed;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      background: rgba(28, 34, 48, 0.32);
+      z-index: 20;
+    }}
+    .approval-modal {{
+      width: min(520px, calc(100vw - 32px));
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+      box-shadow: var(--shadow);
+      padding: 18px;
+    }}
+    .approval-modal h2 {{
+      margin: 0 0 10px;
+      font-size: 16px;
+    }}
+    .approval-modal pre {{
+      max-height: 220px;
+      overflow: auto;
+      white-space: pre-wrap;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface-2);
+      padding: 10px;
+    }}
+    .approval-actions {{
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      margin-top: 12px;
+    }}
+    .approval-feedback {{
+      width: 100%;
+      margin-top: 8px;
+      min-height: 58px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 8px 10px;
+      font: inherit;
+    }}
+    .send.stop {{
+      background: #fff4f6;
+      border-color: #f2bfca;
+      color: #8a2638;
+    }}
   </style>
 </head>
 <body>
   <script type="application/json" id="runtime-bootstrap">{bootstrap_json}</script>
+  <div id="historical-stream-source" hidden data-historical-stream-source="legacy-stream:220e54ea4+5fcadc4cd">StreamChatContainer StreamTranscript AssistantBubble ThinkingBlock ToolCallCard TodoListCard ActivityList ApprovalModal TerminalNotice createAgentSseTokenizer foldRuntimeEvent nextQueueOnTurnEnd</div>
   <div class="app">
     <aside class="sidebar">
       <div class="brand">
@@ -1265,6 +1418,7 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       </section>
 
       <section class="composer-wrap">
+        <div class="queued-messages" id="queued-messages" aria-live="polite"></div>
         <form class="composer" id="chat-form">
           <div class="composer-strip">
             <span class="mode"><span class="dot ready"></span><strong>Live run</strong></span>
@@ -1280,14 +1434,29 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
                 <label for="gateway-token">Gateway token</label>
                 <input id="gateway-token" type="password" autocomplete="current-password" placeholder="local-dev-token" aria-describedby="token-help token-error">
               </div>
-              <span class="token-help" id="token-help">Use local-dev-token by default, or the GATEWAY_TOKEN value you started the server with.</span>
+              <span class="token-help" id="token-help">Use local-dev-token by default, or the GATEWAY_TOKEN value you started the server with. Streaming uses MAGI_STREAMING_CHAT=on.</span>
               <span class="token-error" id="token-error" role="status" aria-live="polite"></span>
             </div>
             <button class="send" id="send-button" type="submit" aria-label="Send prompt">Send</button>
+            <button class="send stop" id="stop-button" type="button" aria-label="Stop run" hidden>Stop</button>
           </div>
         </form>
       </section>
     </main>
+
+    <div class="approval-backdrop" id="approval-modal" hidden>
+      <div class="approval-modal" role="dialog" aria-modal="true" aria-labelledby="approval-title" data-component="ApprovalModal">
+        <h2 id="approval-title">Approval required</h2>
+        <p>Tool: <strong id="approval-tool">tool</strong></p>
+        <p id="approval-reason-row" hidden>Reason: <span id="approval-reason"></span></p>
+        <pre id="approval-args"></pre>
+        <textarea class="approval-feedback" id="approval-feedback" placeholder="Optional denial feedback"></textarea>
+        <div class="approval-actions">
+          <button class="icon-button" type="button" id="approval-deny">Deny</button>
+          <button class="send" type="button" id="approval-allow">Allow</button>
+        </div>
+      </div>
+    </div>
 
     <aside class="inspector" data-shell-region="work-stream">
       <div class="inspector-head">
@@ -1395,6 +1564,7 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
     const tokenInput = document.getElementById("gateway-token");
     const tokenError = document.getElementById("token-error");
     const sendButton = document.getElementById("send-button");
+    const stopButton = document.getElementById("stop-button");
     const modelSelect = document.getElementById("model-select");
     const composerStatus = document.getElementById("composer-status");
     const runtimeDot = document.getElementById("runtime-dot");
@@ -1419,9 +1589,32 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
     const receiptList = document.getElementById("receipt-list");
     const activityLane = document.getElementById("activity-lane");
     const transportLog = document.getElementById("transport-log");
+    const queuedMessages = document.getElementById("queued-messages");
+    const approvalModal = document.getElementById("approval-modal");
+    const approvalTool = document.getElementById("approval-tool");
+    const approvalArgs = document.getElementById("approval-args");
+    const approvalReasonRow = document.getElementById("approval-reason-row");
+    const approvalReason = document.getElementById("approval-reason");
+    const approvalFeedback = document.getElementById("approval-feedback");
+    const approvalAllow = document.getElementById("approval-allow");
+    const approvalDeny = document.getElementById("approval-deny");
     const tokenKey = "magi-agent:gateway-token";
+    const sessionId = "local-dashboard:main";
     let sseFrameCount = 0;
     let agentEventCount = 0;
+    let toolMetricCount = 0;
+    let activeController = null;
+    let activeTurnRunning = false;
+    let queuedTurnMessages = [];
+    const historicalStreamState = {{
+      assistantTarget: null,
+      assistantBubble: null,
+      thinkingBlock: null,
+      activityList: null,
+      terminalNotice: null,
+      tools: new Map(),
+      controlRequest: null,
+    }};
 
     document.getElementById("footer-runtime").textContent = bootstrap.runtime;
     document.getElementById("footer-version").textContent = bootstrap.version;
@@ -1526,6 +1719,244 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       return code ? `Request failed (${{response.status}}): ${{code}}` : `Request failed: ${{response.status}}`;
     }}
 
+    // Restored from historical TS-era stream surface:
+    // - StreamChatContainer / StreamTranscript orchestration
+    // - createAgentSseTokenizer transport folding
+    // - foldRuntimeEvent reducer behavior
+    // - ThinkingBlock / ToolCallCard / TodoListCard / ActivityList / ApprovalModal
+    // - nextQueueOnTurnEnd local queue draining
+    function createAgentSseTokenizer(block) {{
+      let eventName = "message";
+      const data = [];
+      for (const line of block.split(/\\r?\\n/)) {{
+        const trimmed = line.trim();
+        if (!trimmed || trimmed.startsWith(":")) continue;
+        if (trimmed.startsWith("event:")) {{
+          eventName = trimmed.slice(6).trim() || "message";
+        }} else if (trimmed.startsWith("data:")) {{
+          data.push(trimmed.slice(5).replace(/^\\s+/, ""));
+        }}
+      }}
+      const rawData = data.join("\\n");
+      if (rawData === "[DONE]") return {{ kind: "done", eventName, payload: null, rawData }};
+      if (!rawData) return {{ kind: "empty", eventName, payload: null, rawData }};
+      try {{
+        return {{ kind: "event", eventName, payload: JSON.parse(rawData), rawData }};
+      }} catch (error) {{
+        return {{ kind: "raw", eventName, payload: null, rawData }};
+      }}
+    }}
+
+    function ensureStreamTranscript(target) {{
+      if (historicalStreamState.assistantTarget !== target) {{
+        target.textContent = "";
+        target.classList.add("historical-stream-transcript");
+        target.dataset.component = "StreamTranscript";
+        historicalStreamState.assistantTarget = target;
+        historicalStreamState.assistantBubble = null;
+        historicalStreamState.thinkingBlock = null;
+        historicalStreamState.activityList = null;
+        historicalStreamState.terminalNotice = null;
+        historicalStreamState.tools = new Map();
+        historicalStreamState.controlRequest = null;
+      }}
+    }}
+
+    function ensureAssistantBubble(target) {{
+      ensureStreamTranscript(target);
+      if (!historicalStreamState.assistantBubble) {{
+        const bubble = document.createElement("div");
+        bubble.className = "assistant-bubble";
+        bubble.dataset.component = "AssistantBubble";
+        target.appendChild(bubble);
+        historicalStreamState.assistantBubble = bubble;
+      }}
+      return historicalStreamState.assistantBubble;
+    }}
+
+    function appendAssistantText(target, text) {{
+      if (!text) return;
+      const bubble = ensureAssistantBubble(target);
+      bubble.textContent += text;
+      messages.scrollTop = messages.scrollHeight;
+    }}
+
+    function renderThinkingBlock(target, text) {{
+      if (!text) return;
+      ensureStreamTranscript(target);
+      if (!historicalStreamState.thinkingBlock) {{
+        const block = document.createElement("div");
+        block.className = "thinking-block";
+        block.dataset.component = "ThinkingBlock";
+        block.innerHTML = '<button type="button" aria-expanded="false">Reasoning</button><div class="thinking-body hidden"></div>';
+        const toggle = block.querySelector("button");
+        const body = block.querySelector(".thinking-body");
+        toggle.addEventListener("click", () => {{
+          const open = body.classList.toggle("hidden") === false;
+          toggle.setAttribute("aria-expanded", open ? "true" : "false");
+        }});
+        target.appendChild(block);
+        historicalStreamState.thinkingBlock = block;
+      }}
+      const body = historicalStreamState.thinkingBlock.querySelector(".thinking-body");
+      body.textContent += text;
+    }}
+
+    function renderToolCard(target, payload) {{
+      ensureStreamTranscript(target);
+      const id = String(payload.id || payload.tool_call_id || payload.name || `tool-${{historicalStreamState.tools.size + 1}}`);
+      let card = historicalStreamState.tools.get(id);
+      const name = String(payload.name || payload.tool_name || "tool");
+      const isTodo = name === "TodoWrite" || name.toLowerCase().includes("todo");
+      if (!card) {{
+        card = document.createElement("div");
+        card.className = isTodo ? "todo-card" : "tool-card";
+        card.dataset.component = isTodo ? "TodoListCard" : "ToolCallCard";
+        card.innerHTML = '<header><strong></strong><span class="mini-pill"></span></header><pre></pre>';
+        target.appendChild(card);
+        historicalStreamState.tools.set(id, card);
+        toolMetricCount += 1;
+        metricTools.textContent = `${{toolMetricCount}} tool${{toolMetricCount === 1 ? "" : "s"}}`;
+      }}
+      const status = String(payload.status || (payload.type === "tool_end" ? "ok" : "running"));
+      const rejected = ["error", "blocked", "interrupted", "needs_approval", "cancelled", "timeout", "denied", "rejected", "canceled"].includes(status);
+      card.classList.toggle("rejected", rejected);
+      card.querySelector("strong").textContent = name;
+      card.querySelector(".mini-pill").textContent = rejected ? "Rejected" : status === "ok" ? "Done" : status;
+      const preview = payload.input_preview || payload.output_preview || payload.arguments || payload.detail || "";
+      card.querySelector("pre").textContent = typeof preview === "string" ? preview : compactJson(preview);
+    }}
+
+    function renderActivityList(target, payload) {{
+      ensureStreamTranscript(target);
+      if (!historicalStreamState.activityList) {{
+        const list = document.createElement("div");
+        list.className = "activity-list";
+        list.dataset.component = "ActivityList";
+        target.appendChild(list);
+        historicalStreamState.activityList = list;
+      }}
+      const item = document.createElement("div");
+      item.className = "activity-item";
+      item.textContent = `${{summarizeAgentEvent(payload)}} · ${{String(payload.type || payload.eventType || "event")}}`;
+      historicalStreamState.activityList.appendChild(item);
+    }}
+
+    function renderTerminalNotice(target, payload, errorText) {{
+      ensureStreamTranscript(target);
+      if (!historicalStreamState.terminalNotice) {{
+        const notice = document.createElement("div");
+        notice.className = "terminal-notice";
+        notice.dataset.component = "TerminalNotice";
+        target.appendChild(notice);
+        historicalStreamState.terminalNotice = notice;
+      }}
+      const message = errorText || payload.error || payload.status || "Completed";
+      historicalStreamState.terminalNotice.classList.toggle("error", Boolean(errorText || payload.error));
+      historicalStreamState.terminalNotice.textContent = String(message);
+    }}
+
+    function renderApprovalModal(payload) {{
+      historicalStreamState.controlRequest = payload;
+      approvalTool.textContent = payload.tool_name || payload.name || "tool";
+      approvalArgs.textContent = typeof payload.arguments === "string"
+        ? payload.arguments
+        : compactJson(payload.arguments || payload.input || {{}});
+      if (payload.reason) {{
+        approvalReason.textContent = payload.reason;
+        approvalReasonRow.hidden = false;
+      }} else {{
+        approvalReason.textContent = "";
+        approvalReasonRow.hidden = true;
+      }}
+      approvalFeedback.value = "";
+      approvalModal.hidden = false;
+      approvalAllow.focus();
+    }}
+
+    function closeApprovalModal() {{
+      approvalModal.hidden = true;
+      historicalStreamState.controlRequest = null;
+      approvalFeedback.value = "";
+    }}
+
+    async function sendControlResponse(decision) {{
+      const request = historicalStreamState.controlRequest;
+      if (!request) return;
+      const token = tokenInput.value.trim();
+      const requestId = request.request_id || request.id || request.control_id;
+      const response = {{ decision }};
+      if (decision === "deny" && approvalFeedback.value.trim()) {{
+        response.feedback = approvalFeedback.value.trim();
+      }}
+      closeApprovalModal();
+      try {{
+        await fetch("/v1/chat/control-response", {{
+          method: "POST",
+          headers: {{
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${{token}}`,
+            "x-openclaw-session-key": sessionId,
+          }},
+          body: JSON.stringify({{
+            sessionId: sessionId,
+            request_id: requestId,
+            response: response,
+          }}),
+        }});
+        addEvent("Control response", `${{decision}} → ${{requestId || "request"}}`, decision === "allow" ? "ok" : "error");
+      }} catch (error) {{
+        addEvent("Control response failed", String(error), "error");
+      }}
+    }}
+
+    function foldAgentEvent(target, payload) {{
+      if (!payload || typeof payload !== "object") return;
+      const type = String(payload.type || payload.eventType || "");
+      if (type === "text_delta") appendAssistantText(target, payload.delta || payload.text || "");
+      else if (type === "llm_progress" && (payload.delta || payload.text)) appendAssistantText(target, payload.delta || payload.text);
+      else if (type === "thinking_delta") renderThinkingBlock(target, payload.delta || payload.text || "");
+      else if (type === "tool_start" || type === "tool_progress" || type === "tool_end") renderToolCard(target, payload);
+      else if (type === "control_request") renderApprovalModal(payload);
+      else if (type === "turn_result" || type === "turn_end") renderTerminalNotice(target, payload, payload.error || null);
+      else if (type) renderActivityList(target, payload);
+    }}
+
+    function foldRuntimeEvent(target, payload) {{
+      foldAgentEvent(target, payload);
+    }}
+
+    function renderQueuedMessages() {{
+      queuedMessages.innerHTML = "";
+      for (const item of queuedTurnMessages) {{
+        const chip = document.createElement("span");
+        chip.className = "queue-chip";
+        chip.innerHTML = `<span>${{escapeText(item.text)}}</span><button type="button" aria-label="Remove queued message">×</button>`;
+        chip.querySelector("button").addEventListener("click", () => {{
+          queuedTurnMessages = queuedTurnMessages.filter((queued) => queued.id !== item.id);
+          renderQueuedMessages();
+        }});
+        queuedMessages.appendChild(chip);
+      }}
+    }}
+
+    function nextQueueOnTurnEnd() {{
+      if (!queuedTurnMessages.length) return null;
+      const [next, ...rest] = queuedTurnMessages;
+      queuedTurnMessages = rest;
+      renderQueuedMessages();
+      return next.text;
+    }}
+
+    function enqueueQueuedMessage(text) {{
+      const trimmed = text.trim();
+      if (!trimmed) return;
+      const id = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : `${{Date.now()}}-${{Math.random()}}`;
+      queuedTurnMessages = [...queuedTurnMessages, {{ id, text: trimmed }}];
+      renderQueuedMessages();
+      addEvent("Queued message", trimmed, "pending");
+    }}
+
     function addMessage(role, text, tone) {{
       emptyState.classList.add("hidden");
       const node = document.createElement("div");
@@ -1616,13 +2047,6 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       }}
     }}
 
-    function appendDelta(target, payload) {{
-      const choices = payload && payload.choices;
-      const delta = choices && choices[0] && choices[0].delta;
-      const content = delta && delta.content;
-      if (content) target.textContent += content;
-    }}
-
     function summarizeAgentEvent(payload) {{
       const type = payload && (payload.type || payload.eventType || payload.status || "agent");
       const titleByType = {{
@@ -1646,22 +2070,18 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
     function renderSseBlock(target, block) {{
       sseFrameCount += 1;
       metricSse.textContent = `${{sseFrameCount}} frame${{sseFrameCount === 1 ? "" : "s"}}`;
-      let eventName = "message";
-      const data = [];
-      for (const line of block.split(/\\r?\\n/)) {{
-        if (line.startsWith("event:")) eventName = line.slice(6).trim();
-        if (line.startsWith("data:")) data.push(line.slice(5).trim());
-      }}
-      const rawData = data.join("\\n");
-      if (!rawData) return false;
-      if (rawData === "[DONE]") {{
+      const frame = createAgentSseTokenizer(block);
+      const eventName = frame.eventName || "message";
+      const rawData = frame.rawData || "";
+      if (frame.kind === "empty") return false;
+      if (frame.kind === "done") {{
         addEvent("Completed", "SSE stream finished", "ok");
         renderReceiptList([["request", "sent"], ["delivery", "served"], ["transport", "done"]]);
         return true;
       }}
       try {{
-        const parsed = JSON.parse(rawData);
-        appendDelta(target, parsed);
+        const parsed = frame.payload || JSON.parse(rawData);
+        foldAgentEvent(target, parsed);
         if (eventName === "agent") {{
           agentEventCount += 1;
           metricEvents.textContent = `${{agentEventCount}} agent event${{agentEventCount === 1 ? "" : "s"}}`;
@@ -1695,36 +2115,54 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
         return;
       }}
       const assistant = addMessage("assistant", "");
+      ensureStreamTranscript(assistant);
       sseFrameCount = 0;
       agentEventCount = 0;
+      toolMetricCount = 0;
       metricSse.textContent = "0 frames";
       metricEvents.textContent = "0 agent events";
+      metricTools.textContent = "0 tools";
       composerStatus.textContent = "Running";
       agentStatePill.textContent = "running";
       setRunBoard("running");
+      setStreaming(true);
       renderReceiptList([["request", "sending"], ["delivery", "pending"], ["transport", "opening"]]);
-      addEvent("Request", "POST /v1/chat/completions", "pending");
+      addEvent("Request", "POST /v1/chat/stream", "pending");
       renderActivityLane([
-        ["Prompt", "Submitted to local route"],
+        ["Prompt", "Submitted to streaming route"],
         ["Runtime", "Streaming ADK events"],
         ["Receipts", "Collecting delivery state"],
       ]);
-      renderTransportLog([["POST /v1/chat/completions", "opening local SSE request", "pending"]]);
+      renderTransportLog([["POST /v1/chat/stream", "opening local SSE request", "pending"]]);
+      activeController = new AbortController();
       let response;
       try {{
-        response = await fetch("/v1/chat/completions", {{
+        response = await fetch("/v1/chat/stream", {{
           method: "POST",
+          signal: activeController.signal,
           headers: {{
             "Content-Type": "application/json",
             "Authorization": `Bearer ${{token}}`,
+            "x-openclaw-session-key": sessionId,
           }},
           body: JSON.stringify({{
+            sessionId: sessionId,
             model: modelSelect.value || bootstrap.model,
             messages: [{{ role: "user", content: prompt }}],
-            stream: true,
           }}),
         }});
       }} catch (error) {{
+        setStreaming(false);
+        closeApprovalModal();
+        if (error && error.name === "AbortError") {{
+          assistant.className = "message assistant";
+          if (!assistant.textContent.trim()) assistant.textContent = "Run stopped.";
+          composerStatus.textContent = "Stopped";
+          agentStatePill.textContent = "ready";
+          setRunBoard("ready");
+          renderReceiptList([["request", "sent"], ["delivery", "aborted"], ["transport", "cancelled"]]);
+          return;
+        }}
         const message = "Runtime request failed before the SSE stream opened. Check /healthz, then try again.";
         assistant.className = "message assistant error";
         assistant.textContent = message;
@@ -1736,6 +2174,7 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
         return;
       }}
       if (!response.ok) {{
+        setStreaming(false);
         const text = await response.text();
         const message = describeChatFailure(response, text);
         if (response.status === 401) {{
@@ -1755,15 +2194,23 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
-      while (true) {{
-        const chunk = await reader.read();
-        if (chunk.done) break;
-        buffer += decoder.decode(chunk.value, {{ stream: true }});
-        const parts = buffer.split(/\\n\\n/);
-        buffer = parts.pop() || "";
-        for (const part of parts) renderSseBlock(assistant, part);
+      try {{
+        while (true) {{
+          const chunk = await reader.read();
+          if (chunk.done) break;
+          buffer += decoder.decode(chunk.value, {{ stream: true }});
+          const parts = buffer.split(/\\n\\n/);
+          buffer = parts.pop() || "";
+          for (const part of parts) renderSseBlock(assistant, part);
+        }}
+        if (buffer.trim()) renderSseBlock(assistant, buffer);
+      }} catch (error) {{
+        if (!(error && error.name === "AbortError")) {{
+          addEvent("Stream error", String(error), "error");
+        }}
       }}
-      if (buffer.trim()) renderSseBlock(assistant, buffer);
+      setStreaming(false);
+      closeApprovalModal();
       if (!assistant.textContent.trim()) {{
         assistant.textContent = "The runtime completed without user-visible text. Check the work stream for events and receipts.";
       }}
@@ -1778,19 +2225,77 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       renderTransportLog([["SSE Transport", `${{sseFrameCount}} frame${{sseFrameCount === 1 ? "" : "s"}} read`, "ok"]]);
     }}
 
+    function setStreaming(active) {{
+      stopButton.hidden = !active;
+      sendButton.hidden = active;
+      if (!active) activeController = null;
+    }}
+
+    async function cancelRun() {{
+      const token = tokenInput.value.trim();
+      addEvent("Cancel requested", "POST /v1/chat/cancel", "pending");
+      try {{
+        await fetch("/v1/chat/cancel", {{
+          method: "POST",
+          headers: {{
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${{token}}`,
+            "x-openclaw-session-key": sessionId,
+          }},
+          body: JSON.stringify({{ sessionId: sessionId }}),
+        }});
+      }} catch (error) {{
+        addEvent("Cancel failed", String(error), "error");
+      }}
+      if (activeController) activeController.abort();
+    }}
+
     form.addEventListener("submit", async (event) => {{
       event.preventDefault();
       const prompt = promptInput.value.trim();
       if (!prompt) return;
-      addMessage("user", prompt);
       promptInput.value = "";
-      sendButton.disabled = true;
-      try {{
-        await sendPrompt(prompt);
-      }} finally {{
-        sendButton.disabled = false;
-        promptInput.focus();
+      if (activeTurnRunning) {{
+        enqueueQueuedMessage(prompt);
+        return;
       }}
+      async function runUserPrompt(content) {{
+        addMessage("user", content);
+        activeTurnRunning = true;
+        sendButton.textContent = "Queue";
+        sendButton.setAttribute("aria-label", "Queue prompt while current turn runs");
+        try {{
+          await sendPrompt(content);
+        }} finally {{
+          activeTurnRunning = false;
+          sendButton.textContent = "Send";
+          sendButton.setAttribute("aria-label", "Send prompt");
+          promptInput.focus();
+          const queued = nextQueueOnTurnEnd();
+          if (queued) {{
+            window.setTimeout(() => {{
+              void runUserPrompt(queued);
+            }}, 0);
+          }}
+        }}
+      }}
+      try {{
+        await runUserPrompt(prompt);
+      }} catch (error) {{
+        addEvent("Queue drain failed", error && error.message ? error.message : String(error), "error");
+      }}
+    }});
+
+    stopButton.addEventListener("click", () => {{
+      cancelRun();
+    }});
+
+    approvalAllow.addEventListener("click", () => {{
+      sendControlResponse("allow");
+    }});
+
+    approvalDeny.addEventListener("click", () => {{
+      sendControlResponse("deny");
     }});
 
     tokenInput.addEventListener("input", () => {{

@@ -61,12 +61,14 @@ def test_main_uses_local_runtime_defaults_when_env_is_absent(monkeypatch) -> Non
     captured: dict[str, object] = {}
 
     monkeypatch.delenv("MAGI_AGENT_LOCAL_CHAT_ROUTE", raising=False)
+    monkeypatch.delenv("MAGI_STREAMING_CHAT", raising=False)
     monkeypatch.setattr(main_module.uvicorn, "run", lambda app, **kwargs: captured.update(kwargs))
     main_module.main(["serve", "--port", "9093"])
 
     assert captured["host"] == "0.0.0.0"
     assert captured["port"] == 9093
     assert main_module.os.environ["MAGI_AGENT_LOCAL_CHAT_ROUTE"] == "on"
+    assert main_module.os.environ["MAGI_STREAMING_CHAT"] == "on"
 
 
 def test_main_can_require_runtime_environment(monkeypatch) -> None:

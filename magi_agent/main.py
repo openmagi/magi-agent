@@ -55,6 +55,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     config = _parse_runtime_config(os.environ)
     if _local_runtime_defaults_active(config):
         os.environ.setdefault("MAGI_AGENT_LOCAL_CHAT_ROUTE", "on")
+        os.environ.setdefault("MAGI_STREAMING_CHAT", "on")
         _print_local_startup_notice(port)
     runtime = OpenMagiRuntime(config=config)
     runtime.gate5b4c3_shadow_generation_route_config = (
