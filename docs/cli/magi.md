@@ -261,9 +261,9 @@ magi -p "apply the patch" --permission-mode acceptEdits
 
 ## `MAGI_CLI_ENABLED`
 
-The CLI is **default-ON** as of Track 18 Stream F. Set `MAGI_CLI_ENABLED=0` (or
-`false` / `no` / `off`) to disable it; the process exits immediately with code 2
-without writing any output to stdout.
+The CLI is enabled by default. Set `MAGI_CLI_ENABLED=0` (or `false` / `no` /
+`off`) to disable it; the process exits immediately with code 2 without writing
+any output to stdout.
 
 ```sh
 MAGI_CLI_ENABLED=0 magi -p "test"   # exits 2 immediately

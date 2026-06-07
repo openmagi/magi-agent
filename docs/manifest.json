@@ -359,12 +359,6 @@
       "group": "Reference"
     },
     {
-      "slug": "cli-streaming-parity",
-      "title": "CLI Streaming Parity",
-      "path": "docs/architecture/parity/cli-streaming-for-web-frontend.md",
-      "group": "Developer"
-    },
-    {
       "slug": "contributing",
       "title": "Contributing",
       "path": "CONTRIBUTING.md",
