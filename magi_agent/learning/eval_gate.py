@@ -42,7 +42,9 @@ from __future__ import annotations
 
 import hashlib
 import math
+import os
 import statistics
+from collections.abc import Mapping
 from typing import Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -352,6 +354,115 @@ class EvalGateConfig(BaseModel):
     #: there is no headroom, so the gate performs exactly ``n_repeats`` inner
     #: runs and never escalates (a valid "fixed repeats" config, not an error).
     max_repeats: int = Field(default=1, alias="maxRepeats")
+
+
+# ---------------------------------------------------------------------------
+# Env-driven config factory (Task 5 — operator rule selection, NO default flip)
+# ---------------------------------------------------------------------------
+
+#: Env var → ``decision_rule``.  Unset or any value other than the two accepted
+#: rules falls back to ``"strict_band"`` (the safe default — never raises).
+GATE_RULE_ENV_VAR = "MAGI_LEARNING_GATE_RULE"
+#: Env var → ``z`` (paired-CI multiplier).  Invalid/unset → field default 1.96.
+GATE_Z_ENV_VAR = "MAGI_LEARNING_GATE_Z"
+#: Env var → ``n_repeats``.  Invalid/unset → field default 1.
+GATE_N_REPEATS_ENV_VAR = "MAGI_LEARNING_GATE_N_REPEATS"
+#: Env var → ``max_repeats``.  Invalid/unset → field default 1.
+GATE_MAX_REPEATS_ENV_VAR = "MAGI_LEARNING_GATE_MAX_REPEATS"
+
+#: The decision rules an operator may select via env.  Anything else (typo,
+#: empty string, legacy value) safely degrades to ``"strict_band"``.
+_VALID_DECISION_RULES = frozenset({"strict_band", "paired_significance"})
+
+
+def _parse_float(env: Mapping[str, str], key: str, default: float) -> float:
+    """Parse ``env[key]`` as a float, defaulting on absence or malformed input.
+
+    Defensive by design: a bad operator env value must NEVER crash the gate, so
+    a missing key or an unparseable string both fall back to *default*.
+    """
+    raw = env.get(key)
+    if raw is None:
+        return default
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return default
+
+
+def _parse_int(env: Mapping[str, str], key: str, default: int) -> int:
+    """Parse ``env[key]`` as an int, defaulting on absence or malformed input.
+
+    Like :func:`_parse_float`, this never raises — a malformed value (including
+    a float-looking string such as ``"1.5"``) falls back to *default* so a bad
+    env can't crash the gate.
+    """
+    raw = env.get(key)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return default
+
+
+def eval_gate_config_from_env(
+    env: Mapping[str, str] = os.environ,
+) -> EvalGateConfig:
+    """Build an :class:`EvalGateConfig` from operator env (Task 5).
+
+    This lets a fleet operator SELECT the eval-gate decision rule and its
+    operating point WITHOUT flipping any default.  With NO env vars set this
+    returns a ``strict_band`` config byte-identical to ``EvalGateConfig()`` — the
+    gate's behavior stays exactly as today.  The gate is a NO-REGRESSION safety
+    mechanism whose default is, and stays, strict; paired significance is an
+    opt-in for nondeterministic evaluators, not a relaxation of that posture.
+
+    Env vars (all optional; parsed defensively — a malformed value falls back to
+    the field default and never raises):
+
+    - ``MAGI_LEARNING_GATE_RULE`` → ``decision_rule``.  Accepts exactly
+      ``"strict_band"`` or ``"paired_significance"``.  Unset or ANY invalid value
+      (typo, empty string, legacy token) → ``"strict_band"`` (safe default).
+    - ``MAGI_LEARNING_GATE_Z`` → ``z`` (float; unset/malformed → 1.96).
+    - ``MAGI_LEARNING_GATE_N_REPEATS`` → ``n_repeats`` (int; unset/malformed → 1).
+    - ``MAGI_LEARNING_GATE_MAX_REPEATS`` → ``max_repeats`` (int; unset/malformed
+      → 1).
+
+    Operating-point guidance:
+
+    - Enable ``paired_significance`` once the evaluator is NONDETERMINISTIC (real
+      agent-driven scores carry run-to-run noise).  The strict-band rule treats
+      any mean drop as a regression, so noise alone can block a genuinely-neutral
+      candidate; the paired rule abstains (``inconclusive``) instead of failing
+      on noise, and only promotes when the per-case improvement is significant.
+    - Raising ``z`` (e.g. 1.96 → 2.5) WIDENS the inconclusive band → fewer
+      promotions clear the bar → MORE conservative promotion.  Lowering it is
+      more permissive; keep it ``>= 1.96`` for a real no-regression posture.
+    - ``n_repeats`` / ``max_repeats`` shrink evaluator noise: averaging repeated
+      runs tightens each candidate's delta CI, which can resolve an
+      ``inconclusive`` single-shot result into a decisive verdict WITHOUT
+      changing the cases.  ``n_repeats`` is the baseline repeat count;
+      ``max_repeats`` is the adaptive ceiling the gate may escalate to on an
+      inconclusive verdict.  ``n_repeats >= max_repeats`` disables escalation
+      (fixed repeats).  Both default to ``1`` (single-shot — exactly today).
+
+    An explicitly-constructed ``EvalGateConfig`` passed by a caller always wins;
+    the live executor only falls back to this factory when no config is supplied
+    (see ``harness/learning_executor.run_reflection``).  Direct/test callers of
+    ``run_eval_gate`` that pass ``config=None`` still get the ``EvalGateConfig()``
+    strict default — this factory does not change that path.
+    """
+    raw_rule = env.get(GATE_RULE_ENV_VAR)
+    decision_rule: Literal["strict_band", "paired_significance"] = (
+        raw_rule if raw_rule in _VALID_DECISION_RULES else "strict_band"  # type: ignore[assignment]
+    )
+    return EvalGateConfig(
+        decision_rule=decision_rule,
+        z=_parse_float(env, GATE_Z_ENV_VAR, 1.96),
+        n_repeats=_parse_int(env, GATE_N_REPEATS_ENV_VAR, 1),
+        max_repeats=_parse_int(env, GATE_MAX_REPEATS_ENV_VAR, 1),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -729,6 +840,7 @@ __all__ = [
     "RepeatedCheckSet",
     "StaticCheckSet",
     "Verdict",
+    "eval_gate_config_from_env",
     "paired_verdict",
     "run_eval_gate",
 ]

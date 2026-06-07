@@ -49,6 +49,7 @@ from magi_agent.learning.eval_gate import (
     EvalGateConfig,
     EvalGateDecision,
     StaticCheckSet,
+    eval_gate_config_from_env,
     run_eval_gate,
 )
 from magi_agent.learning.store import LearningStore
@@ -279,7 +280,11 @@ async def run_reflection(
         checkset: Injected deterministic checkset used by the eval gate.  Only
             consulted when *store* is provided.
         eval_gate_config: Optional eval-gate thresholds.  Only consulted when
-            *store* is provided.
+            *store* is provided.  When ``None``, the gate config is read from
+            env via ``eval_gate_config_from_env()`` so an operator can SELECT the
+            decision rule (``MAGI_LEARNING_GATE_RULE``) without a default flip —
+            env unset → strict_band → byte-identical to today.  An explicit
+            config always wins over env.
         labeler: Optional injected ``Labeler``.  When ``None`` (default) the
             deterministic ``LocalFakeLabeler`` is used — byte-identical to
             PR1–PR6.  PR7's gated live layer injects the real
@@ -377,11 +382,20 @@ async def run_reflection(
     gate_decisions: tuple[EvalGateDecision, ...] | None = None
     if store is not None:
         gate_checkset = checkset if checkset is not None else _DEFAULT_GATE_CHECKSET
+        # Honor an explicitly-passed config; otherwise let an operator SELECT the
+        # decision rule via env (Task 5).  With NO ``MAGI_LEARNING_GATE_*`` env
+        # set, ``eval_gate_config_from_env()`` returns a strict_band config — so
+        # the env-unset path stays byte-identical to today (no default flip).
+        resolved_gate_config = (
+            eval_gate_config
+            if eval_gate_config is not None
+            else eval_gate_config_from_env()
+        )
         gate_decisions = run_eval_gate(
             candidates,
             store=store,
             checkset=gate_checkset,
-            config=eval_gate_config,
+            config=resolved_gate_config,
             tenant_id=tenant_id,
             auto_activate_examples=auto_activate_examples,
         )
