@@ -124,6 +124,11 @@ class RunnerPolicyAssembly:
     attachment_flags: Mapping[str, bool]
     task_profile: Mapping[str, object]
     phase_routing: Mapping[str, object]
+    provider_intents: tuple[str, ...]
+    tool_intents: tuple[str, ...]
+    channel_intents: tuple[str, ...]
+    artifact_intents: tuple[str, ...]
+    scheduler_intents: tuple[str, ...]
 
     def __init__(
         self,
@@ -148,6 +153,16 @@ class RunnerPolicyAssembly:
         task_profile: Mapping[str, object] | None = None,
         phaseRouting: Mapping[str, object] | None = None,
         phase_routing: Mapping[str, object] | None = None,
+        providerIntents: tuple[str, ...] | list[str] = (),
+        provider_intents: tuple[str, ...] | list[str] = (),
+        toolIntents: tuple[str, ...] | list[str] = (),
+        tool_intents: tuple[str, ...] | list[str] = (),
+        channelIntents: tuple[str, ...] | list[str] = (),
+        channel_intents: tuple[str, ...] | list[str] = (),
+        artifactIntents: tuple[str, ...] | list[str] = (),
+        artifact_intents: tuple[str, ...] | list[str] = (),
+        schedulerIntents: tuple[str, ...] | list[str] = (),
+        scheduler_intents: tuple[str, ...] | list[str] = (),
     ) -> None:
         object.__setattr__(
             self,
@@ -199,6 +214,31 @@ class RunnerPolicyAssembly:
             "phase_routing",
             dict(phase_routing or phaseRouting or {}),
         )
+        object.__setattr__(
+            self,
+            "provider_intents",
+            _str_tuple(provider_intents or providerIntents),
+        )
+        object.__setattr__(
+            self,
+            "tool_intents",
+            _str_tuple(tool_intents or toolIntents),
+        )
+        object.__setattr__(
+            self,
+            "channel_intents",
+            _str_tuple(channel_intents or channelIntents),
+        )
+        object.__setattr__(
+            self,
+            "artifact_intents",
+            _str_tuple(artifact_intents or artifactIntents),
+        )
+        object.__setattr__(
+            self,
+            "scheduler_intents",
+            _str_tuple(scheduler_intents or schedulerIntents),
+        )
 
     def to_public_payload(self) -> dict[str, object]:
         return {
@@ -212,6 +252,11 @@ class RunnerPolicyAssembly:
             "attachmentFlags": dict(self.attachment_flags),
             "taskProfile": dict(self.task_profile),
             "phaseRouting": dict(self.phase_routing),
+            "providerIntents": list(self.provider_intents),
+            "toolIntents": list(self.tool_intents),
+            "channelIntents": list(self.channel_intents),
+            "artifactIntents": list(self.artifact_intents),
+            "schedulerIntents": list(self.scheduler_intents),
         }
 
 
@@ -744,6 +789,12 @@ class MagiEngineDriver:
             )
             return
 
+        route_selection = self._runner_policy_route_selection(
+            runner=runner,
+            prompt=prompt,
+            harness_state=harness_state,
+        )
+
         try:
             deps = _lazy_engine_deps()
         except Exception as exc:  # pragma: no cover - import failure path
@@ -762,7 +813,10 @@ class MagiEngineDriver:
         bridge = deps["OpenMagiEventBridge"](live_compatible=True)  # type: ignore[operator]
         sanitize = deps["sanitize_agent_event"]
         runner_turn_input_cls = deps["RunnerTurnInput"]
-        effective_harness_state = self._with_runner_policy_harness_state(harness_state)
+        effective_harness_state = self._with_runner_policy_harness_state(
+            harness_state,
+            route_selection=route_selection,
+        )
 
         runner_input = runner_turn_input_cls(
             userId=self._user_id,
@@ -796,6 +850,16 @@ class MagiEngineDriver:
                 },
                 turn_id=turn_id,
             )
+        if route_selection is not None:
+            yield RuntimeEvent(
+                type="status",
+                payload={
+                    "type": "runner_policy_route_selection",
+                    "turnId": turn_id,
+                    **route_selection,
+                },
+                turn_id=turn_id,
+            )
 
         # Permission interception (Stream F): attach a before_tool_callback to
         # the runner's agent so the gate intercepts every tool BEFORE it runs.
@@ -807,6 +871,10 @@ class MagiEngineDriver:
         # restored in the ``finally`` below, on every exit path.
         gate_attach = self._attach_gate_callback(
             runner=runner, gate=gate, turn_id=turn_id, cancel=cancel
+        )
+        route_attach = self._attach_runner_policy_route(
+            runner=runner,
+            route_selection=route_selection,
         )
 
         cancelled = False
@@ -949,6 +1017,7 @@ class MagiEngineDriver:
                 engine_error = str(attempt_error) or attempt_error.__class__.__name__
                 break
         finally:
+            self._restore_runner_policy_route(route_attach)
             self._restore_gate_callback(gate_attach)
 
         if cancelled:
@@ -1193,20 +1262,159 @@ class MagiEngineDriver:
             return None
         return self._runner_policy_assembly.to_public_payload()
 
-    def _with_runner_policy_harness_state(self, harness_state: object | None) -> object | None:
+    def _with_runner_policy_harness_state(
+        self,
+        harness_state: object | None,
+        *,
+        route_selection: Mapping[str, object] | None = None,
+    ) -> object | None:
         policy_payload = self._runner_policy_payload()
-        if policy_payload is None:
+        if policy_payload is None and route_selection is None:
             return harness_state
+        additions: dict[str, object] = {}
+        if policy_payload is not None:
+            additions["runnerPolicyAssembly"] = policy_payload
+        if route_selection is not None:
+            additions["activeRunnerRoute"] = dict(route_selection)
         if harness_state is None:
-            return {"runnerPolicyAssembly": policy_payload}
+            return additions
         if isinstance(harness_state, Mapping):
             merged = dict(harness_state)
-            merged.setdefault("runnerPolicyAssembly", policy_payload)
+            for key, value in additions.items():
+                merged.setdefault(key, value)
             return merged
         return {
             "resolvedHarnessStateType": harness_state.__class__.__name__,
-            "runnerPolicyAssembly": policy_payload,
+            **additions,
         }
+
+    def _runner_policy_route_selection(
+        self,
+        *,
+        runner: object,
+        prompt: str,
+        harness_state: object | None,
+    ) -> dict[str, object] | None:
+        assembly = self._runner_policy_assembly
+        if assembly is None or not _runner_policy_routing_enabled():
+            return None
+        phase_routes = _phase_routes(assembly.phase_routing)
+        if not phase_routes:
+            return None
+        phase = _select_policy_phase(
+            phases=tuple(phase_routes.keys()),
+            prompt=prompt,
+            harness_state=harness_state,
+            assembly=assembly,
+        )
+        route = phase_routes.get(phase)
+        if not isinstance(route, Mapping):
+            return None
+        local_tool_names = _local_tool_names_for_route(
+            runner=runner,
+            assembly=assembly,
+            phase=phase,
+            route=route,
+        )
+        return {
+            "schemaVersion": "openmagi.localRunnerRouteSelection.v1",
+            "source": "recipe-materializer.phase-routing",
+            "phase": phase,
+            "modelProvider": _non_empty_str(route.get("provider"), assembly.model_provider),
+            "modelLabel": _non_empty_str(route.get("model"), assembly.model_label),
+            "modelTier": _non_empty_str(route.get("tier"), "standard"),
+            "runtimeSurface": "local_oss_cli",
+            "toolIntents": list(assembly.tool_intents),
+            "providerIntents": list(assembly.provider_intents),
+            "localToolNames": list(local_tool_names),
+            "routeDenied": bool(route.get("routeDenied") or route.get("route_denied")),
+            "reasonCodes": list(_str_tuple(route.get("reasonCodes") or route.get("reason_codes"))),
+            "authority": {
+                "providerCalled": False,
+                "productionWriteAllowed": False,
+                "externalIntegrationAttached": False,
+            },
+        }
+
+    def _attach_runner_policy_route(
+        self,
+        *,
+        runner: object,
+        route_selection: Mapping[str, object] | None,
+    ) -> "_RunnerRouteAttachment | None":
+        if route_selection is None or route_selection.get("routeDenied") is True:
+            return None
+        agent = getattr(runner, "agent", None)
+        if agent is None:
+            return None
+
+        original_tools = getattr(agent, "tools", _MISSING)
+        original_instruction = getattr(agent, "instruction", _MISSING)
+        original_agent_route = getattr(agent, "_magi_active_runner_route_selection", _MISSING)
+        original_runner_route = getattr(runner, "_magi_active_runner_route_selection", _MISSING)
+
+        local_tool_names = set(_str_tuple(route_selection.get("localToolNames")))
+        if isinstance(original_tools, list) and local_tool_names:
+            routed_tools = [
+                tool for tool in original_tools if _tool_name(tool) in local_tool_names
+            ]
+            if routed_tools:
+                try:
+                    agent.tools = routed_tools
+                except Exception:
+                    pass
+
+        if isinstance(original_instruction, str):
+            try:
+                agent.instruction = (
+                    f"{original_instruction}\n\n"
+                    f"<runner_policy_route>\n"
+                    f"Local recipe route phase: {route_selection.get('phase')}. "
+                    f"Policy model route: {route_selection.get('modelProvider')}/"
+                    f"{route_selection.get('modelLabel')}. "
+                    "Use only the tools exposed by this local route. "
+                    "This route does not grant production write authority or "
+                    "external integration authority.\n"
+                    f"</runner_policy_route>"
+                )
+            except Exception:
+                pass
+
+        for target in (agent, runner):
+            try:
+                setattr(
+                    target,
+                    "_magi_active_runner_route_selection",
+                    dict(route_selection),
+                )
+            except Exception:
+                pass
+
+        return _RunnerRouteAttachment(
+            agent=agent,
+            runner=runner,
+            original_tools=original_tools,
+            original_instruction=original_instruction,
+            original_agent_route=original_agent_route,
+            original_runner_route=original_runner_route,
+        )
+
+    @staticmethod
+    def _restore_runner_policy_route(attachment: "_RunnerRouteAttachment | None") -> None:
+        if attachment is None:
+            return
+        _restore_attr(attachment.agent, "tools", attachment.original_tools)
+        _restore_attr(attachment.agent, "instruction", attachment.original_instruction)
+        _restore_attr(
+            attachment.agent,
+            "_magi_active_runner_route_selection",
+            attachment.original_agent_route,
+        )
+        _restore_attr(
+            attachment.runner,
+            "_magi_active_runner_route_selection",
+            attachment.original_runner_route,
+        )
 
     def _pre_final_gate_payload(
         self,
@@ -1402,6 +1610,36 @@ class _GateAttachment:
         self.original = original
 
 
+class _RunnerRouteAttachment:
+    """Restoration handle for a local runner route attachment."""
+
+    __slots__ = (
+        "agent",
+        "runner",
+        "original_tools",
+        "original_instruction",
+        "original_agent_route",
+        "original_runner_route",
+    )
+
+    def __init__(
+        self,
+        *,
+        agent: object,
+        runner: object,
+        original_tools: object,
+        original_instruction: object,
+        original_agent_route: object,
+        original_runner_route: object,
+    ) -> None:
+        self.agent = agent
+        self.runner = runner
+        self.original_tools = original_tools
+        self.original_instruction = original_instruction
+        self.original_agent_route = original_agent_route
+        self.original_runner_route = original_runner_route
+
+
 class _Sentinel:
     __slots__ = ("_name",)
 
@@ -1414,6 +1652,32 @@ class _Sentinel:
 
 _EXHAUSTED = _Sentinel("adk_stream_exhausted")
 _CANCELLED = _Sentinel("adk_stream_cancelled")
+_MISSING = _Sentinel("missing")
+_RUNNER_POLICY_ROUTING_ENV = "MAGI_RUNNER_POLICY_ROUTING_ENABLED"
+_CODING_PHASES = frozenset(
+    {"code_search", "patch_planning", "patch_generation", "test_interpretation"}
+)
+_LOCAL_READONLY_TOOL_NAMES = frozenset(
+    {
+        "ArtifactList",
+        "ArtifactRead",
+        "Calculation",
+        "Clock",
+        "FileRead",
+        "GitDiff",
+        "Glob",
+        "Grep",
+    }
+)
+_TOOL_INTENT_ALIASES: Mapping[str, tuple[str, ...]] = {
+    "tool:file.read": ("FileRead",),
+    "tool:test.run": ("TestRun",),
+    "tool:git.diff": ("GitDiff",),
+    "tool:FileDeliver": ("FileDeliver",),
+    "tool:FileSend": ("FileSend",),
+    "tool:ChannelDispatcher": ("ChannelDispatcher",),
+    "tool:NotifyUser": ("NotifyUser",),
+}
 
 
 def _non_empty_str(value: object, default: str) -> str:
@@ -1433,6 +1697,130 @@ def _authority_safe_attachment_flags(flags: Mapping[str, bool]) -> dict[str, boo
     safe["productionWriteAllowed"] = False
     safe["userVisibleOutputAllowed"] = False
     return safe
+
+
+def _runner_policy_routing_enabled() -> bool:
+    import os
+
+    raw = os.environ.get(_RUNNER_POLICY_ROUTING_ENV)
+    if raw is None:
+        return True
+    return raw.strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _phase_routes(phase_routing: Mapping[str, object]) -> dict[str, Mapping[str, object]]:
+    raw = phase_routing.get("phaseRoutes") or phase_routing.get("phase_routes")
+    if not isinstance(raw, Mapping):
+        return {}
+    routes: dict[str, Mapping[str, object]] = {}
+    for key, value in raw.items():
+        if isinstance(key, str) and isinstance(value, Mapping):
+            routes[key] = value
+    return routes
+
+
+def _select_policy_phase(
+    *,
+    phases: tuple[str, ...],
+    prompt: str,
+    harness_state: object | None,
+    assembly: RunnerPolicyAssembly,
+) -> str:
+    phase_set = set(phases)
+    task_types = {
+        _normalize_task_type(item)
+        for item in (
+            _extract_task_types(harness_state)
+            or _extract_task_types({"taskProfile": assembly.task_profile})
+        )
+    }
+    prompt_lower = prompt.lower()
+    coding_requested = bool(task_types & _CODING_TASK_TYPES) or any(
+        marker in prompt_lower for marker in _CODING_PROMPT_MARKERS
+    )
+    if coding_requested:
+        for phase in ("patch_generation", "code_search", "test_interpretation"):
+            if phase in phase_set:
+                return phase
+
+    research_requested = bool(
+        task_types & {"research", "web-acquisition", "browser-automation"}
+    ) or any(marker in prompt_lower for marker in ("research", "source", "cite", "web"))
+    if research_requested:
+        for phase in ("source_acquisition", "source_extraction"):
+            if phase in phase_set:
+                return phase
+
+    if "final_answer_drafting" in phase_set:
+        return "final_answer_drafting"
+    if "intent_classification" in phase_set:
+        return "intent_classification"
+    return phases[0]
+
+
+def _local_tool_names_for_route(
+    *,
+    runner: object,
+    assembly: RunnerPolicyAssembly,
+    phase: str,
+    route: Mapping[str, object],
+) -> tuple[str, ...]:
+    available = _available_agent_tool_names(runner)
+    if not available:
+        return ()
+
+    selected = set(assembly.selected_pack_ids)
+    capabilities = set(_str_tuple(route.get("capabilities")))
+    coding_route = (
+        phase in _CODING_PHASES
+        or "coding" in capabilities
+        or "openmagi.dev-coding" in selected
+    )
+    if coding_route:
+        return ()
+
+    desired = set(_LOCAL_READONLY_TOOL_NAMES)
+    for intent in assembly.tool_intents:
+        desired.update(_tool_names_for_intent(intent))
+
+    return tuple(name for name in available if name in desired)
+
+
+def _available_agent_tool_names(runner: object) -> tuple[str, ...]:
+    agent = getattr(runner, "agent", None)
+    tools = getattr(agent, "tools", None)
+    if not isinstance(tools, list):
+        return ()
+    return tuple(name for tool in tools if (name := _tool_name(tool)) is not None)
+
+
+def _tool_name(tool: object) -> str | None:
+    name = getattr(tool, "name", None)
+    return name if isinstance(name, str) and name else None
+
+
+def _tool_names_for_intent(intent: str) -> tuple[str, ...]:
+    aliased = _TOOL_INTENT_ALIASES.get(intent)
+    if aliased is not None:
+        return aliased
+    if not intent.startswith("tool:"):
+        return ()
+    raw = intent.removeprefix("tool:")
+    if not raw:
+        return ()
+    if "." in raw:
+        return ()
+    return (raw,)
+
+
+def _restore_attr(target: object, name: str, original: object) -> None:
+    try:
+        if original is _MISSING:
+            delattr(target, name)
+        else:
+            setattr(target, name, original)
+    except Exception:
+        pass
 
 
 class _suppress_cancel:

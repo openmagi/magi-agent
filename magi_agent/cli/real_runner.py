@@ -346,6 +346,11 @@ def _build_default_runner_policy_assembly(
             mode="json",
             warnings=False,
         ),
+        providerIntents=plan.provider_intents,
+        toolIntents=plan.tool_intents,
+        channelIntents=plan.channel_intents,
+        artifactIntents=plan.artifact_intents,
+        schedulerIntents=plan.scheduler_intents,
     )
 
 
