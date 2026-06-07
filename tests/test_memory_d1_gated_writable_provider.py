@@ -457,3 +457,136 @@ def test_local_file_provider_env_gate_on_enables_write(
 
     content = (tmp_path / "MEMORY.md").read_text(encoding="utf-8")
     assert "Env-gated write should land" in content
+
+
+# ---------------------------------------------------------------------------
+# E. New quality-review tests (D1 code-quality pass)
+# ---------------------------------------------------------------------------
+
+
+def test_cumulative_file_cap_raises_when_exceeded(tmp_path: Path) -> None:
+    """Repeated small writes that exceed max_file_bytes must raise ValueError."""
+    from magi_agent.memory.adapters.local_file_writable import (
+        LocalFileMemoryProvider,
+        LocalFileMemoryConfig,
+    )
+
+    # Set a very small cumulative cap (256 bytes)
+    config = LocalFileMemoryConfig(
+        workspace_root=tmp_path,
+        enabled=True,
+        write_enabled=True,
+        max_file_bytes=256,
+    )
+    provider = LocalFileMemoryProvider(config)
+
+    # Write entries until we hit the cap
+    hit_cap = False
+    for i in range(50):
+        try:
+            asyncio.run(provider.remember({
+                "body": f"Entry number {i} with some padding text to fill bytes.",
+                "kind": "note",
+                "target_file": "MEMORY.md",
+            }))
+        except ValueError as exc:
+            assert "max_file_bytes" in str(exc)
+            hit_cap = True
+            break
+
+    assert hit_cap, "Expected ValueError for exceeding cumulative file cap"
+    # Verify the file is not grown past the cap
+    actual_size = (tmp_path / "MEMORY.md").stat().st_size
+    assert actual_size <= 256
+
+
+def test_cumulative_file_cap_default_is_4mib(tmp_path: Path) -> None:
+    """Default max_file_bytes is 4 MiB (4_194_304)."""
+    from magi_agent.memory.adapters.local_file_writable import LocalFileMemoryConfig
+
+    config = LocalFileMemoryConfig(workspace_root=tmp_path)
+    assert config.max_file_bytes == 4_194_304
+
+
+def test_extract_target_file_raises_on_unknown_target(tmp_path: Path) -> None:
+    """remember() with an unknown target_file raises ValueError (not silently redirects)."""
+    from magi_agent.memory.adapters.local_file_writable import (
+        LocalFileMemoryProvider,
+        LocalFileMemoryConfig,
+    )
+
+    config = LocalFileMemoryConfig(workspace_root=tmp_path, enabled=True, write_enabled=True)
+    provider = LocalFileMemoryProvider(config)
+
+    with pytest.raises(ValueError, match="unknown write target"):
+        asyncio.run(provider.remember({
+            "body": "should not be written",
+            "target_file": "notes.md",
+        }))
+
+
+def test_extract_target_file_raises_on_path_traversal(tmp_path: Path) -> None:
+    """Path-traversal attempts produce a basename not in allowlist → raises ValueError."""
+    from magi_agent.memory.adapters.local_file_writable import (
+        LocalFileMemoryProvider,
+        LocalFileMemoryConfig,
+    )
+
+    config = LocalFileMemoryConfig(workspace_root=tmp_path, enabled=True, write_enabled=True)
+    provider = LocalFileMemoryProvider(config)
+
+    with pytest.raises(ValueError, match="unknown write target"):
+        asyncio.run(provider.remember({
+            "body": "should not be written",
+            "target_file": "../../etc/passwd",
+        }))
+
+
+def test_extract_target_file_allows_memory_md(tmp_path: Path) -> None:
+    """MEMORY.md remains a valid write target after the allowlist change."""
+    from magi_agent.memory.adapters.local_file_writable import (
+        LocalFileMemoryProvider,
+        LocalFileMemoryConfig,
+    )
+
+    config = LocalFileMemoryConfig(workspace_root=tmp_path, enabled=True, write_enabled=True)
+    provider = LocalFileMemoryProvider(config)
+
+    asyncio.run(provider.remember({"body": "valid write", "target_file": "MEMORY.md"}))
+    assert (tmp_path / "MEMORY.md").exists()
+
+
+def test_extract_target_file_allows_user_md(tmp_path: Path) -> None:
+    """USER.md remains a valid write target after the allowlist change."""
+    from magi_agent.memory.adapters.local_file_writable import (
+        LocalFileMemoryProvider,
+        LocalFileMemoryConfig,
+    )
+
+    config = LocalFileMemoryConfig(workspace_root=tmp_path, enabled=True, write_enabled=True)
+    provider = LocalFileMemoryProvider(config)
+
+    asyncio.run(provider.remember({"body": "valid write", "target_file": "USER.md"}))
+    assert (tmp_path / "USER.md").exists()
+
+
+def test_secret_looking_kind_is_redacted_on_disk(tmp_path: Path) -> None:
+    """A secret-looking kind value (e.g. sk-live-...) is redacted in the [label] on disk."""
+    from magi_agent.memory.adapters.local_file_writable import (
+        LocalFileMemoryProvider,
+        LocalFileMemoryConfig,
+    )
+
+    config = LocalFileMemoryConfig(workspace_root=tmp_path, enabled=True, write_enabled=True)
+    provider = LocalFileMemoryProvider(config)
+
+    asyncio.run(provider.remember({
+        "body": "some innocuous content",
+        "kind": "sk-live-supersecretkey12345",
+        "target_file": "MEMORY.md",
+    }))
+
+    content = (tmp_path / "MEMORY.md").read_text(encoding="utf-8")
+    # The secret pattern should not appear verbatim in the [kind] label
+    assert "sk-live-supersecretkey12345" not in content
+    assert "[redacted]" in content

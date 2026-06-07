@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import os
 import re
-import hashlib
 from pathlib import Path
 from typing import Any, Literal, Sequence
 
@@ -119,8 +118,12 @@ class LocalFileMemoryConfig(BaseModel):
         alias="maxResultBytes",
         ge=1,
     )
+    max_file_bytes: int = Field(
+        default=4_194_304,
+        alias="maxFileBytes",
+        ge=1,
+    )
     max_records: int = Field(default=5, alias="maxRecords", ge=1, le=20)
-
 
 
 # ---------------------------------------------------------------------------
@@ -230,9 +233,19 @@ class LocalFileMemoryProvider:
                 provider_id=provider_id,
             )
 
-        # Append entry
-        kind = _extract_kind(payload)
+        # Cumulative file-size cap: check BEFORE writing
+        kind_raw = _extract_kind(payload)
+        kind = _SECRET_RE.sub("[redacted]", kind_raw)
         entry = f"\n- [{kind}] {safe_body}\n"
+        entry_bytes = entry.encode("utf-8")
+        current_size = target_path.stat().st_size if target_path.exists() else 0
+        if current_size + len(entry_bytes) > self.config.max_file_bytes:
+            raise ValueError(
+                f"remember: appending would exceed max_file_bytes "
+                f"({current_size} + {len(entry_bytes)} > {self.config.max_file_bytes})"
+            )
+
+        # Append entry
         with target_path.open("a", encoding="utf-8") as fh:
             fh.write(entry)
 
@@ -381,7 +394,9 @@ def _extract_target_file(payload: Any) -> str:  # noqa: ANN401
         raw = _DEFAULT_WRITE_TARGET
     name = Path(raw).name
     if name not in _ALLOWED_WRITE_FILES:
-        return _DEFAULT_WRITE_TARGET
+        raise ValueError(
+            f"unknown write target: {name!r} (allowed: MEMORY.md, USER.md)"
+        )
     return name
 
 
