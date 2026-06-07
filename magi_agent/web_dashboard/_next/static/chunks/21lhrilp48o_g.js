@@ -1,0 +1,1 @@
+(globalThis.TURBOPACK||(globalThis.TURBOPACK=[])).push(["object"==typeof document?document.currentScript:void 0,78928,e=>{"use strict";var t=e.i(18566),l=e.i(71645);e.s(["default",0,function(){let e=(0,t.useRouter)();return(0,l.useEffect)(()=>{e.replace("/dashboard/local/chat/general")},[e]),null}])}]);

@@ -1,0 +1,1 @@
+(globalThis.TURBOPACK||(globalThis.TURBOPACK=[])).push(["object"==typeof document?document.currentScript:void 0,43839,e=>{"use strict";var t=e.i(71645),u=e.i(18566);e.s(["default",0,function({params:e}){let{botId:r}=(0,t.use)(e),c=(0,u.useRouter)();return(0,t.useEffect)(()=>{c.replace(`/dashboard/${r}/chat/general`)},[c,r]),null}])}]);

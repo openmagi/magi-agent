@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Privacy Policy | Open Magi</title>
+<meta name="description" content="Privacy Policy for the Open Magi provider-neutral AI agent platform.">
+<style>
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;max-width:800px;margin:0 auto;padding:24px;line-height:1.6;color:#222;background:#fff}
+h1{font-size:28px;margin-bottom:4px}
+h2{font-size:18px;margin-top:32px}
+h3{font-size:16px;margin-top:16px}
+table{width:100%;border-collapse:collapse;margin:12px 0;font-size:14px}
+th,td{border:1px solid #ddd;padding:8px;text-align:left}
+th{background:#f5f5f5;font-weight:600}
+ul{margin:8px 0;padding-left:24px}
+li{margin:4px 0}
+a{color:#4f46e5}
+.meta{color:#666;font-size:14px;margin-bottom:8px}
+.note{background:#f9f9f9;padding:16px;border-radius:8px;margin:12px 0}
+</style>
+</head>
+<body>
+<p><a href="/">&larr; Back to Home</a></p>
+<h1>Privacy Policy</h1>
+<p class="meta">Last updated: March 5, 2026</p>
+<p class="meta">This policy is available in English. For Korean users, key provisions required under the Personal Information Protection Act (PIPA) are included below.</p>
+
+<h2>1. Introduction</h2>
+<p>Open Magi ("we", "us", or "our") operates the Open Magi platform at openmagi.ai. This Privacy Policy explains how we collect, use, store, and protect your personal information when you use our Service, in accordance with the Korean Personal Information Protection Act ("PIPA", Article 30), the California Consumer Privacy Act ("CCPA/CPRA"), and other applicable data protection laws.</p>
+
+<h2>2. Information We Collect, Purpose &amp; Retention</h2>
+<p>We collect the minimum personal information necessary to provide the Service. The following table details the categories of data, their processing purpose, and retention period.</p>
+<table>
+<thead>
+<tr><th>Category</th><th>Items Collected</th><th>Purpose</th><th>Retention</th></tr>
+</thead>
+<tbody>
+<tr><td>Account</td><td>Name, email, profile picture (from OAuth provider), wallet address</td><td>User authentication, account management</td><td>Until account deletion</td></tr>
+<tr><td>Bot Configuration</td><td>AI model selection, Telegram bot token (encrypted), bot purpose, API keys (encrypted)</td><td>Bot provisioning &amp; operation</td><td>Until bot deletion or account termination</td></tr>
+<tr><td>Usage Data</td><td>Token counts, API call metrics, feature usage</td><td>Usage dashboard, billing, service improvement</td><td>90 days (aggregated data retained longer)</td></tr>
+<tr><td>Payment</td><td>Stripe customer ID, subscription status, transaction history, USDC wallet address &amp; tx hashes</td><td>Payment processing, subscription management</td><td>7 years (legal/accounting requirement)</td></tr>
+<tr><td>Bot Memory</td><td>AI-generated summaries and context notes created by your bot</td><td>Bot context continuity across sessions</td><td>Stored only in your isolated container; deleted within 30 days of termination</td></tr>
+<tr><td>Access Logs</td><td>IP address, browser/device info, access timestamps</td><td>Security monitoring, abuse prevention</td><td>1 year</td></tr>
+</tbody>
+</table>
+<p><small><strong>Conversation data:</strong> We do not collect or store your chat messages. Messages are transmitted directly from your bot container to AI providers for real-time inference and are not retained by Open Magi. Your bot may independently generate summary notes and memory files within its own isolated container for context continuity; Open Magi does not access or process these files.</small></p>
+<p><small>We do not collect sensitive information (race, religion, health data, biometrics) or government-issued identification numbers.</small></p>
+
+<h2>3. How We Use Your Information</h2>
+<ul>
+<li>Provide, operate, and maintain the Service</li>
+<li>Process payments and manage subscriptions</li>
+<li>Display usage statistics and billing information</li>
+<li>Send service-related notifications (e.g., trial expiration, bot updates)</li>
+<li>Improve and develop the platform</li>
+<li>Detect and prevent fraud or abuse</li>
+<li>Comply with legal obligations</li>
+</ul>
+<p>We do not use your personal information for purposes beyond those listed above. If the purpose changes, we will notify you and obtain consent where required.</p>
+
+<h2>4. Third-Party Data Sharing</h2>
+<p>We share your data with the following third parties only as necessary to provide the Service:</p>
+<table>
+<thead>
+<tr><th>Recipient</th><th>Data Shared</th><th>Purpose</th></tr>
+</thead>
+<tbody>
+<tr><td>Supabase (US)</td><td>Account info, bot config</td><td>Authentication, database hosting</td></tr>
+<tr><td>Stripe (US)</td><td>Payment info</td><td>Payment processing</td></tr>
+<tr><td>Anthropic (US)</td><td>Bot messages</td><td>AI model inference</td></tr>
+<tr><td>Fireworks AI (US)</td><td>Bot messages</td><td>AI model inference (Kimi K2.6, MiniMax M2.5)</td></tr>
+<tr><td>Telegram (UAE/UK)</td><td>Bot messages, Telegram user ID</td><td>Messaging platform</td></tr>
+<tr><td>PostHog (US)</td><td>Usage analytics (anonymized)</td><td>Product analytics</td></tr>
+<tr><td>Brave Search (US)</td><td>Search queries from bot</td><td>Web search capability</td></tr>
+</tbody>
+</table>
+<p><strong>We do not sell your personal data.</strong> We may disclose information if required by law, court order, or to protect our rights and safety.</p>
+
+<h2>5. Data Processing Entrustment</h2>
+<p>We entrust certain data processing tasks to the following service providers. These entities process data only for the purposes specified and under contractual obligations to protect your information:</p>
+<table>
+<thead>
+<tr><th>Entrusted Party</th><th>Entrusted Tasks</th></tr>
+</thead>
+<tbody>
+<tr><td>Supabase Inc.</td><td>Cloud database hosting, user authentication</td></tr>
+<tr><td>Stripe Inc.</td><td>Payment processing, subscription billing</td></tr>
+<tr><td>Hetzner Online GmbH</td><td>Server infrastructure hosting (Germany)</td></tr>
+<tr><td>Vercel Inc.</td><td>Web application hosting &amp; deployment</td></tr>
+</tbody>
+</table>
+
+<h2>6. Data Security Measures</h2>
+<p>We implement the following technical and organizational measures to ensure the safety of your personal information:</p>
+<ul>
+<li><strong>Encryption at rest:</strong> API keys and bot tokens encrypted with AES-256-GCM</li>
+<li><strong>Encryption in transit:</strong> All communications secured via TLS</li>
+<li><strong>Access control:</strong> Row-Level Security (RLS) enforced on all database tables; authentication required for all API routes</li>
+<li><strong>Container isolation:</strong> Each bot runs in an isolated Kubernetes pod with non-root privileges and read-only filesystem</li>
+<li><strong>Network isolation:</strong> Pod-to-pod communication blocked via NetworkPolicy</li>
+<li><strong>Access logging:</strong> Database and system access logs maintained and reviewed</li>
+</ul>
+
+<h2>7. Data Destruction Procedures</h2>
+<p>When personal information is no longer needed, we destroy it without delay:</p>
+<ul>
+<li><strong>Account deletion:</strong> Upon request, account data is marked for deletion and permanently removed within 30 days.</li>
+<li><strong>Bot termination:</strong> Bot containers (including bot memory files and workspace data) are destroyed within 30 days of subscription cancellation.</li>
+<li><strong>Encrypted data:</strong> API keys and tokens are securely overwritten before deletion.</li>
+<li><strong>Electronic records:</strong> Destroyed using technical methods that render recovery impossible.</li>
+<li><strong>Exceptions:</strong> Billing records required for tax/accounting compliance are retained for up to 7 years as permitted by law, then destroyed.</li>
+</ul>
+
+<h2>8. Your Rights</h2>
+<p>You (and your legal representative) have the following rights regarding your personal information:</p>
+<ul>
+<li><strong>Right to access:</strong> Request details of your personal data we hold</li>
+<li><strong>Right to correction:</strong> Request correction of inaccurate data</li>
+<li><strong>Right to deletion:</strong> Request deletion of your personal data</li>
+<li><strong>Right to suspend processing:</strong> Request that we stop processing your data</li>
+<li><strong>Right to data portability:</strong> Request your data in a machine-readable format</li>
+<li><strong>Right to withdraw consent:</strong> Withdraw consent for analytics tracking at any time</li>
+</ul>
+
+<h3>For California Residents (CCPA/CPRA)</h3>
+<p>In addition to the above, California residents have the right to:</p>
+<ul>
+<li>Know the categories and specific pieces of personal information collected</li>
+<li>Opt out of the sale or sharing of personal information (we do not sell your data)</li>
+<li>Non-discrimination for exercising privacy rights</li>
+</ul>
+<p>We will respond to verified requests within <strong>30 days</strong> (PIPA) or <strong>45 days</strong> (CCPA). To exercise any right, contact us at <a href="mailto:support@openmagi.ai">support@openmagi.ai</a>.</p>
+
+<h2>9. Cookies &amp; Automatic Data Collection</h2>
+<p>We use the following cookies and automatic data collection technologies:</p>
+<table>
+<thead>
+<tr><th>Type</th><th>Purpose</th><th>Required</th></tr>
+</thead>
+<tbody>
+<tr><td>Session cookies (httpOnly)</td><td>User authentication, session management</td><td>Essential</td></tr>
+<tr><td>PostHog analytics</td><td>Feature usage tracking, product improvement</td><td>Optional</td></tr>
+</tbody>
+</table>
+<p><strong>How to refuse cookies:</strong> You can disable non-essential cookies through your browser settings (Settings &gt; Privacy &gt; Cookies). Disabling essential cookies may prevent you from using the Service. You may also opt out of PostHog analytics by contacting us.</p>
+
+<h2>10. International Data Transfers</h2>
+<p>Your data may be processed in the following locations where our infrastructure and service providers are hosted:</p>
+<ul>
+<li><strong>United States</strong> — Supabase, Stripe, Vercel, Anthropic, Fireworks AI, PostHog, Brave Search</li>
+<li><strong>Germany</strong> — Hetzner (Kubernetes cluster hosting bot containers)</li>
+</ul>
+<p>By using the Service, you consent to the transfer and processing of your data in these locations. We ensure all service providers maintain adequate data protection standards through contractual agreements.</p>
+
+<h2>11. Children's Privacy</h2>
+<p>The Service is not intended for users under 14 years of age (under 16 in certain jurisdictions). We do not knowingly collect personal information from children. If we discover that a child's data has been collected, we will delete it promptly.</p>
+
+<h2>12. Privacy Officer &amp; Grievance Contact</h2>
+<p>We have designated the following person as our Privacy Officer to handle all matters related to personal information protection and to address grievances:</p>
+<div class="note">
+<p><strong>Privacy Officer (개인정보 보호책임자)</strong></p>
+<p>Email: <a href="mailto:support@openmagi.ai">support@openmagi.ai</a></p>
+</div>
+<p>If you are unsatisfied with our response, you may file a complaint with the following organizations:</p>
+<ul>
+<li>Korea: Personal Information Protection Commission (PIPC) — <a href="https://www.pipc.go.kr" target="_blank" rel="noopener noreferrer">pipc.go.kr</a> / 1833-6972</li>
+<li>Korea: Korea Internet &amp; Security Agency (KISA) — <a href="https://privacy.kisa.or.kr" target="_blank" rel="noopener noreferrer">privacy.kisa.or.kr</a> / 118</li>
+<li>US: Federal Trade Commission (FTC) — <a href="https://www.ftc.gov" target="_blank" rel="noopener noreferrer">ftc.gov</a></li>
+</ul>
+
+<h2>13. Changes to This Policy</h2>
+<p>We may update this Privacy Policy from time to time. Material changes will be announced at least <strong>7 days in advance</strong> through the Service or via email. The revised policy takes effect on the posted date. Continued use of the Service constitutes acceptance.</p>
+<ul>
+<li>Announcement date: March 5, 2026</li>
+<li>Effective date: March 5, 2026</li>
+</ul>
+
+<h2>14. Contact</h2>
+<p>For questions about this Privacy Policy, contact us at <a href="mailto:support@openmagi.ai">support@openmagi.ai</a>.</p>
+</body>
+</html>

@@ -80,6 +80,10 @@ magi_agent = [
   # import time (cli/commands/bundled.py). Without this they are missing from
   # the wheel/bottle and the TUI crashes on launch with FileNotFoundError.
   "cli/commands/templates/*.txt",
+  # Restored static web dashboard bundle (apps/web static export). Served at
+  # /dashboard by `magi-agent serve`; must ship in the wheel/bottle so a clean
+  # install exposes the UI with no Node runtime. See transport/web_dashboard.py.
+  "web_dashboard/**/*",
 ]
 
 [tool.pytest.ini_options]
