@@ -8,3 +8,10 @@ benchmarks/swebench/results/
 # LegalBench per-task dataset files are NOT committed (CC BY 4.0; large files).
 # manifest.v1.json and README.md in data/legalbench/ are tracked.
 data/legalbench/*/
+
+# Web dashboard build artifacts. Source lives in apps/web/; the built static
+# export is committed at magi_agent/web_dashboard/ (see scripts/build-web-dashboard.sh).
+apps/web/node_modules/
+apps/web/dist/
+apps/web/.next/
+*.tsbuildinfo

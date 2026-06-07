@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 from .learning.bootstrap import LearningBootstrap
 from .runtime.openmagi_runtime import OpenMagiRuntime
 from .transport.chat import register_chat_routes
+from .transport.control_requests import register_control_request_routes
 from .transport.streaming_chat_route import register_streaming_chat_routes
 from .transport.dashboard import register_dashboard_routes
 from .transport.health import health_payload, healthz_payload
@@ -93,6 +94,7 @@ def create_app(runtime: OpenMagiRuntime) -> FastAPI:
 
     register_chat_routes(app, runtime)
     register_streaming_chat_routes(app, runtime)
+    register_control_request_routes(app, runtime)
     register_shadow_invocation_routes(app, runtime)
     register_shadow_generation_routes(app, runtime)
     register_tool_admin_routes(app, runtime)
