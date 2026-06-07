@@ -335,7 +335,6 @@ __all__ = [
     "MemoryWriteReadinessConfig",
     "memory_write_readiness_health_metadata",
     "resolve_memory_write_execution_mode",
-    "_CANARY_LIVE_GATE",
     "MAGI_MEMORY_WRITE_ENABLED_ENV",
     "MAGI_MEMORY_PROJECTION_ENABLED_ENV",
     "MAGI_SOUL_WRITE_ENABLED_ENV",
