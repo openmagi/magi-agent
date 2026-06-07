@@ -17,6 +17,10 @@ from magi_agent.cli.real_runner import (
     build_cli_model_runner,
 )
 from magi_agent.cli.wiring import _build_default_runner, _build_first_party_adk_tools
+from magi_agent.harness.general_automation.task_completion import (
+    RequiredDeliverableEvidence,
+    TaskCompletionVerifier,
+)
 
 _PROVIDER_ENV = (
     "ANTHROPIC_API_KEY",
@@ -198,9 +202,54 @@ def test_default_runner_attaches_first_party_tools_when_provider_configured(
     assert "ToolSearch" not in tool_names
 
 
-def test_first_party_cli_tools_run_mutations_with_per_invocation_scope(
+def test_headless_default_runner_records_ga_dispatch_receipts(
+    monkeypatch,
     tmp_path,
 ) -> None:
+    from magi_agent.cli.wiring import build_headless_runtime
+
+    monkeypatch.setattr(real_runner, "_build_litellm_model", _fake_model_factory)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-x")
+    monkeypatch.setenv("MAGI_GA_LIVE_ENABLED", "1")
+
+    runtime = build_headless_runtime(cwd=tmp_path, session_id="sid-ga-headless")
+    runner = runtime.engine.runner
+    assert isinstance(runner, CliModelRunner)
+    bash = _tool_by_name(runner.agent.tools, "Bash")
+
+    result = _run_adk_tool(
+        bash,
+        {"command": f"rm -rf {tmp_path / 'data'}"},
+        invocation_id="turn-ga",
+        call_id="call-ga",
+    )
+
+    assert result["status"] == "blocked"
+    assert result["metadata"]["generalAutomationReceipt"]["status"] == "blocked"
+    assert set(
+        result["metadata"]["generalAutomationReceipt"]["authorityFlags"].values()
+    ) == {False}
+    ledger = runner.general_automation_receipts.ledger_for_turn(
+        session_id="sid-ga-headless",
+        turn_id="turn-ga",
+    )
+    assert ledger is not None
+    assert ledger.entries[0].metadata["generalAutomationReceipt"]["status"] == "blocked"
+    collected = runtime.engine._collect_evidence("turn-ga")
+    assert len(collected) == 1
+    assert collected[0].metadata["generalAutomationReceipt"]["status"] == "blocked"
+    assert runtime.general_automation_receipts is runner.general_automation_receipts
+    assert TaskCompletionVerifier().evaluate(
+        ledger,
+        RequiredDeliverableEvidence(),
+    ).status == "pass"
+
+
+def test_first_party_cli_tools_run_mutations_with_per_invocation_scope(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setenv("MAGI_GA_LIVE_ENABLED", "0")
     tools = _build_first_party_adk_tools(cwd=tmp_path, session_id="sid-tools")
     file_write = _tool_by_name(tools, "FileWrite")
 

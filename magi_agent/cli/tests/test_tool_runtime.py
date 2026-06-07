@@ -5,6 +5,12 @@ import asyncio
 from magi_agent.cli.tool_runtime import (
     build_cli_adk_tools,
     build_cli_instruction,
+    build_cli_tool_runtime,
+)
+from magi_agent.adk_bridge.tool_adapter import build_adk_function_tools_for_registry
+from magi_agent.harness.general_automation.task_completion import (
+    RequiredDeliverableEvidence,
+    TaskCompletionVerifier,
 )
 
 
@@ -68,11 +74,72 @@ def test_tool_error_is_structured_not_raised(tmp_path) -> None:
 
 
 def test_tool_context_factory_returns_workspace_root_directly(tmp_path) -> None:
-    from magi_agent.cli.tool_runtime import build_cli_tool_runtime
-
     runtime = build_cli_tool_runtime(workspace_root=str(tmp_path))
     context = runtime.tool_context_factory(object())
     assert context.workspace_root == str(tmp_path)
+
+
+def test_cli_tool_runtime_records_ga_dispatch_receipt_for_completion_verifier(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setenv("MAGI_GA_LIVE_ENABLED", "1")
+    runtime = build_cli_tool_runtime(workspace_root=str(tmp_path), session_id="sid-ga")
+    bash = _find_tool(
+        build_adk_function_tools_for_registry(
+            runtime.registry,
+            runtime.dispatcher,
+            mode="act",
+            tool_context_factory=runtime.tool_context_factory,
+            attach_enabled=True,
+            exposed_tool_names=("Bash",),
+        ),
+        "Bash",
+    )
+
+    result = asyncio.run(
+        bash.func({"command": f"rm -rf {tmp_path / 'data'}"}, object())
+    )
+
+    assert result["status"] == "blocked"
+    assert result["metadata"]["generalAutomationReceipt"]["status"] == "blocked"
+    assert set(
+        result["metadata"]["generalAutomationReceipt"]["authorityFlags"].values()
+    ) == {False}
+    ledger = runtime.general_automation_receipts.ledger_for_turn(
+        session_id="sid-ga",
+        turn_id="cli",
+    )
+    assert ledger is not None
+    assert len(ledger.entries) == 1
+    assert ledger.entries[0].metadata["generalAutomationReceipt"]["status"] == "blocked"
+    assert TaskCompletionVerifier().evaluate(
+        ledger,
+        RequiredDeliverableEvidence(),
+    ).status == "pass"
+
+
+def test_cli_tool_runtime_infers_write_operation_for_ga_workspace_file_write(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setenv("MAGI_GA_LIVE_ENABLED", "1")
+    tools = build_cli_adk_tools(workspace_root=str(tmp_path), session_id="sid-write")
+    file_write = _find_tool(tools, "FileWrite")
+
+    result = asyncio.run(
+        file_write.func(
+            {"path": "notes/out.txt", "content": "blocked until approved\n"},
+            object(),
+        )
+    )
+
+    assert result["status"] == "needs_approval"
+    assert result["metadata"]["generalAutomationLiveGate"] is True
+    assert result["metadata"]["reason"] == (
+        "general_automation_workspace_write_requires_approval"
+    )
+    assert not (tmp_path / "notes" / "out.txt").exists()
 
 
 def test_build_cli_instruction_is_real_system_prompt(tmp_path) -> None:
