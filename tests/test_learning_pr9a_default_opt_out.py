@@ -26,6 +26,7 @@ from magi_agent.learning.config import (
     ENV_LIVE,
     ENV_MASTER,
     ENV_REFLECTION,
+    ENV_REFLECTION_INTERVAL,
     ENV_TELEMETRY,
     LearningConfig,
     resolve_learning_config,
@@ -171,6 +172,26 @@ class TestResolutionPrecedence:
     def test_interval_invalid_env_falls_back(self) -> None:
         cfg = resolve_learning_config(env={"MAGI_LEARNING_REFLECTION_INTERVAL": "-3"})
         assert cfg.reflection_interval_hours == 24
+
+    def test_empty_string_master_env_forces_layer_off(self) -> None:
+        # An exported-but-empty master var is "present" ⇒ forces the whole layer off.
+        cfg = resolve_learning_config(env={ENV_MASTER: ""})
+        assert cfg.enabled is False
+        assert cfg.reflection_effective is False
+        assert cfg.dashboard_effective is False
+
+    def test_override_beats_env_for_labeler(self) -> None:
+        cfg = resolve_learning_config(
+            env={ENV_LABELER: "llm"}, overrides={"labeler": "deterministic"}
+        )
+        assert cfg.labeler == "deterministic"
+
+    def test_override_beats_env_for_interval(self) -> None:
+        cfg = resolve_learning_config(
+            env={ENV_REFLECTION_INTERVAL: "6"},
+            overrides={"reflection_interval_hours": 12},
+        )
+        assert cfg.reflection_interval_hours == 12
 
     @pytest.mark.parametrize("truthy", ["1", "true", "yes", "on", "TRUE", "On"])
     def test_truthy_tokens(self, truthy: str) -> None:
@@ -445,3 +466,35 @@ def test_reflect_tier_mode_rejects_bad_arg() -> None:
 
     with pytest.raises(TypeError):
         resolve_learning_reflect_tier_mode("not-a-config")  # type: ignore[arg-type]
+
+
+class TestCronReflectionJobGateMatchesExecutor:
+    """The cron job's ``scheduled`` gate must track the PR9a default-ON flip
+    (it previously read the env directly and stayed default-OFF)."""
+
+    def test_scheduled_on_by_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        for var in _ALL_ENV:
+            monkeypatch.delenv(var, raising=False)
+        from magi_agent.harness.cron_runtime import LearningReflectionCronJob
+
+        assert LearningReflectionCronJob().scheduled is True
+
+    def test_scheduled_off_when_master_off(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        for var in _ALL_ENV:
+            monkeypatch.delenv(var, raising=False)
+        monkeypatch.setenv(ENV_MASTER, "false")
+        from magi_agent.harness.cron_runtime import LearningReflectionCronJob
+
+        assert LearningReflectionCronJob().scheduled is False
+
+    def test_scheduled_off_when_reflection_gate_off(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        for var in _ALL_ENV:
+            monkeypatch.delenv(var, raising=False)
+        monkeypatch.setenv(ENV_REFLECTION, "false")
+        from magi_agent.harness.cron_runtime import LearningReflectionCronJob
+
+        assert LearningReflectionCronJob().scheduled is False

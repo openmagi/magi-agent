@@ -34,7 +34,13 @@ DEFAULT_REFLECTION_INTERVAL_SECONDS: int = 86_400
 
 
 def _reflection_enabled() -> bool:
-    return os.environ.get(_REFLECTION_ENV_VAR, "").lower() in _TRUE_STRINGS
+    # PR9a layered opt-out: the reflection tier is ON by default; route through
+    # the shared resolver so ``CronReflectionJob.scheduled`` matches the executor
+    # gate (master ``MAGI_LEARNING_ENABLED=false`` or an explicit reflection-gate
+    # override forces it off).
+    from magi_agent.learning.config import resolve_learning_config
+
+    return resolve_learning_config().reflection_effective
 
 
 def _reflection_interval_seconds() -> int:
