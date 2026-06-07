@@ -647,3 +647,256 @@ class TestInactivityGateIntegration:
 
         persisted = curator.get_last_run_at(tenant_id="local")
         assert persisted is None
+
+
+# ---------------------------------------------------------------------------
+# 10. TOCTOU-safe archive guard (Important 1)
+# ---------------------------------------------------------------------------
+
+class TestTocTouArchiveGuard:
+    """Item promoted to active between SELECT scan and per-item archive call."""
+
+    def test_item_promoted_to_active_before_archive_is_skipped(self) -> None:
+        """TOCTOU: item flipped active after would-archive set computed → curator skips it."""
+        store = _in_memory_store()
+
+        # Propose + backdate so the item appears in the would-archive scan
+        stale = _propose_stale(store)
+
+        # Also add a passing eval observation so we can activate the item
+        obs_ref = store.record_eval_observation(
+            item_id=stale.id,
+            before={},
+            after={"score": 0.95},
+            sample_n=5,
+            passed=True,
+            tenant_id="local",
+        )
+
+        # Monkey-patch the store's archive() so that BEFORE it runs, the item
+        # is activated (simulating a concurrent auto_activate between SELECT and archive).
+        original_archive = store.archive
+
+        activated_flag: list[bool] = []
+
+        def _racing_archive(
+            item_id: str,
+            *,
+            actor: str,
+            tenant_id: str = "local",
+            expected_status: str | None = None,
+        ):
+            if not activated_flag:
+                # Activate the item once, racing with the curator
+                store.auto_activate(stale.id, eval_observation_ref=obs_ref, tenant_id="local")
+                activated_flag.append(True)
+            return original_archive(
+                item_id,
+                actor=actor,
+                tenant_id=tenant_id,
+                expected_status=expected_status,
+            )
+
+        store.archive = _racing_archive  # type: ignore[method-assign]
+
+        curator = SkillCurator(store=store)
+        result = curator.run(
+            now=_now(),
+            tenant_id="local",
+            config=CuratorConfig(enabled=True, shadow=False),
+        )
+
+        # After the race, item should still be active (not archived)
+        found = store.get(stale.id, tenant_id="local")
+        assert found is not None
+        assert found.status == "active", (
+            f"Expected 'active' but got {found.status!r} — "
+            "TOCTOU guard failed: active item was archived"
+        )
+        # Curator should NOT count the skipped item as archived
+        assert result.archived_count == 0
+
+    def test_store_archive_with_expected_status_returns_none_on_mismatch(self) -> None:
+        """Unit test: store.archive(expected_status='proposed') → None when item is active."""
+        store = _in_memory_store()
+        stale = _propose_stale(store)
+
+        obs_ref = store.record_eval_observation(
+            item_id=stale.id,
+            before={},
+            after={"score": 0.9},
+            sample_n=3,
+            passed=True,
+            tenant_id="local",
+        )
+        store.auto_activate(stale.id, eval_observation_ref=obs_ref, tenant_id="local")
+
+        # Now try to archive with expected_status="proposed" — should return None (not raise)
+        result = store.archive(
+            stale.id,
+            actor="test",
+            tenant_id="local",
+            expected_status="proposed",
+        )
+        assert result is None
+
+        # Item remains active
+        found = store.get(stale.id, tenant_id="local")
+        assert found is not None
+        assert found.status == "active"
+
+    def test_store_archive_without_expected_status_raises_on_not_found(self) -> None:
+        """Existing callers without expected_status still get KeyError on miss."""
+        store = _in_memory_store()
+
+        import pytest
+        with pytest.raises(KeyError):
+            store.archive("nonexistent-id", actor="test", tenant_id="local")
+
+
+# ---------------------------------------------------------------------------
+# 11. Shadow contract + last_run_at (Important 2)
+# ---------------------------------------------------------------------------
+
+class TestShadowContract:
+    def test_shadow_persists_last_run_at_no_snapshot_no_archive(self) -> None:
+        """Shadow run: last_run_at is persisted; no snapshot row written; no item archived."""
+        store = _in_memory_store()
+        stale = _propose_stale(store)
+        curator = SkillCurator(store=store)
+
+        result = curator.run(
+            now=_now(),
+            tenant_id="local",
+            config=CuratorConfig(enabled=True, shadow=True),
+        )
+
+        # last_run_at MUST be persisted even in shadow mode
+        persisted = curator.get_last_run_at(tenant_id="local")
+        assert persisted is not None, "shadow run must persist last_run_at"
+
+        # No snapshot row written (shadow writes no mutation backup)
+        assert result.snapshot_ref is None
+
+        # No item archived
+        assert result.archived_count == 0
+        found = store.get(stale.id, tenant_id="local")
+        assert found is not None
+        assert found.status == "proposed"
+
+
+# ---------------------------------------------------------------------------
+# 12. restore_from_snapshot (Minor 1)
+# ---------------------------------------------------------------------------
+
+class TestRestoreFromSnapshot:
+    def test_restore_from_snapshot_reverts_archived_items_to_proposed(self) -> None:
+        """Live pass archives N items; restore_from_snapshot brings them back."""
+        store = _in_memory_store()
+        stale1 = _propose_stale(store)
+        stale2 = _propose_stale(store)
+
+        curator = SkillCurator(store=store)
+        result = curator.run(
+            now=_now(),
+            tenant_id="local",
+            config=CuratorConfig(enabled=True, shadow=False),
+        )
+
+        assert result.archived_count == 2
+        assert result.snapshot_ref is not None
+
+        # Restore
+        restored = curator.restore_from_snapshot(result.snapshot_ref, tenant_id="local")
+        assert restored == 2
+
+        # Items should be back to proposed
+        assert store.get(stale1.id, tenant_id="local").status == "proposed"
+        assert store.get(stale2.id, tenant_id="local").status == "proposed"
+
+    def test_restore_is_idempotent(self) -> None:
+        """Calling restore twice on the same snapshot is a no-op the second time."""
+        store = _in_memory_store()
+        _propose_stale(store)
+
+        curator = SkillCurator(store=store)
+        result = curator.run(
+            now=_now(),
+            tenant_id="local",
+            config=CuratorConfig(enabled=True, shadow=False),
+        )
+        assert result.snapshot_ref is not None
+
+        first = curator.restore_from_snapshot(result.snapshot_ref, tenant_id="local")
+        second = curator.restore_from_snapshot(result.snapshot_ref, tenant_id="local")
+
+        assert first == 1
+        assert second == 0  # items are already proposed, CAS guard skips them
+
+    def test_restore_raises_on_unknown_snapshot(self) -> None:
+        store = _in_memory_store()
+        curator = SkillCurator(store=store)
+
+        import pytest
+        with pytest.raises(KeyError, match="Snapshot not found"):
+            curator.restore_from_snapshot("curator-snap:does-not-exist")
+
+
+# ---------------------------------------------------------------------------
+# 13. :memory: store footgun fixed (Minor 2)
+# ---------------------------------------------------------------------------
+
+class TestMemoryStorePath:
+    def test_memory_store_works_without_filesystem(self) -> None:
+        """:memory: store must NOT try to create or open a real file."""
+        from magi_agent.learning.store import SqliteLearningStore
+
+        # Provide a workspace_root that should be IGNORED for :memory:
+        store = SqliteLearningStore(db_path=":memory:", workspace_root="/tmp/nonexistent-dir-xyz")
+        # Must be able to connect and run migrations without touching the filesystem
+        conn = store._get_conn()
+        assert conn is not None
+
+        # Basic smoke: propose + retrieve
+        item = _make_example()
+        proposed = store.propose(item)
+        assert store.get(proposed.id, tenant_id="local") is not None
+
+    def test_memory_store_instances_are_isolated(self) -> None:
+        """Two :memory: instances should NOT share data."""
+        from magi_agent.learning.store import SqliteLearningStore
+
+        store_a = SqliteLearningStore(db_path=":memory:")
+        store_b = SqliteLearningStore(db_path=":memory:")
+
+        item = _make_example()
+        store_a.propose(item)
+
+        # store_b must not see store_a's item
+        assert store_b.get(item.id, tenant_id="local") is None
+
+
+# ---------------------------------------------------------------------------
+# 14. from_env env-var wiring (Minor 3)
+# ---------------------------------------------------------------------------
+
+class TestFromEnvWiring:
+    def test_interval_hours_wired(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("MAGI_SKILL_CURATOR_INTERVAL_HOURS", "48.5")
+        cfg = CuratorConfig.from_env()
+        assert cfg.interval_hours == 48.5
+
+    def test_idle_threshold_seconds_wired(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("MAGI_SKILL_CURATOR_IDLE_THRESHOLD_SECONDS", "7200.0")
+        cfg = CuratorConfig.from_env()
+        assert cfg.idle_threshold_seconds == 7200.0
+
+    def test_invalid_interval_hours_falls_back_to_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("MAGI_SKILL_CURATOR_INTERVAL_HOURS", "not-a-number")
+        cfg = CuratorConfig.from_env()
+        assert cfg.interval_hours == 168.0  # _DEFAULT_INTERVAL_HOURS
+
+    def test_invalid_idle_threshold_falls_back_to_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("MAGI_SKILL_CURATOR_IDLE_THRESHOLD_SECONDS", "bad")
+        cfg = CuratorConfig.from_env()
+        assert cfg.idle_threshold_seconds == 3600.0  # _DEFAULT_IDLE_THRESHOLD_SECONDS
