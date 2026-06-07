@@ -1,17 +1,27 @@
 from __future__ import annotations
 
+import fnmatch
 import json
 from pathlib import Path
+
+import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
 DOCS = ROOT / "docs"
 MANIFEST = DOCS / "manifest.json"
-PRIVATE_DOC_PREFIXES = (
+BANNED_PUBLIC_DOC_PREFIXES = (
+    "docs/architecture/parity/",
+    "docs/internal/",
     "docs/notes/",
     "docs/plans/",
     "docs/superpowers/",
 )
+INTERNAL_PLANNING_DOC_NAME_PATTERNS = (
+    "*-handoff*.md",
+    "*-plan.md",
+)
+INTERNAL_PLANNING_DOC_NAME_ALLOWLIST: frozenset[str] = frozenset()
 PLANNING_ONLY_MARKERS = (
     "Draft for review",
     "REQUIRED SUB-SKILL",
@@ -63,10 +73,26 @@ def _manifest_pages() -> list[dict[str, str]]:
     return pages
 
 
-def test_public_docs_manifest_paths_resolve_and_do_not_expose_internal_notes() -> None:
+def _is_banned_public_doc_path(path: str) -> bool:
+    if path.startswith(BANNED_PUBLIC_DOC_PREFIXES):
+        return True
+    if (
+        path not in INTERNAL_PLANNING_DOC_NAME_ALLOWLIST
+        and path.startswith("docs/")
+        and path.endswith(".md")
+    ):
+        filename = Path(path).name
+        return any(
+            fnmatch.fnmatch(filename, pattern)
+            for pattern in INTERNAL_PLANNING_DOC_NAME_PATTERNS
+        )
+    return False
+
+
+def test_public_docs_manifest_paths_resolve_and_do_not_expose_banned_internal_docs() -> None:
     for page in _manifest_pages():
         path = page["path"]
-        assert not path.startswith(PRIVATE_DOC_PREFIXES), path
+        assert not _is_banned_public_doc_path(path), path
         assert (ROOT / path).is_file(), path
 
 
@@ -86,13 +112,43 @@ def test_every_markdown_doc_is_manifest_linked_public_corpus() -> None:
     assert markdown_paths <= manifest_paths
 
 
-def test_public_docs_tree_has_no_internal_plan_or_memory_corpus() -> None:
-    for prefix in PRIVATE_DOC_PREFIXES:
-        directory = ROOT / prefix.rstrip("/")
-        if not directory.exists():
+def test_public_docs_tree_has_no_banned_internal_docs_or_planning_names() -> None:
+    leaked_files: list[str] = []
+    for path in DOCS.rglob("*"):
+        if not path.is_file():
             continue
-        leaked_files = [path for path in directory.rglob("*") if path.is_file()]
-        assert leaked_files == []
+        relative_path = path.relative_to(ROOT).as_posix()
+        if _is_banned_public_doc_path(relative_path):
+            leaked_files.append(relative_path)
+
+    assert leaked_files == []
+
+
+@pytest.mark.parametrize(
+    "path",
+    (
+        "docs/plans/2026-06-06-magi-cli-slash-commands-spec.md",
+        "docs/notes/runtime-decision.md",
+        "docs/superpowers/specs/guard-design.md",
+        "docs/internal/release-checklist.md",
+        "docs/architecture/parity/runtime-parity.md",
+    ),
+)
+def test_internal_public_doc_directories_are_explicitly_banned(path: str) -> None:
+    assert _is_banned_public_doc_path(path)
+
+
+@pytest.mark.parametrize(
+    "path",
+    (
+        "docs/magi-cli-plan.md",
+        "docs/architecture/runtime-plan.md",
+        "docs/release-handoff.md",
+        "docs/architecture/runtime-handoff-2026.md",
+    ),
+)
+def test_internal_planning_doc_names_are_explicitly_banned(path: str) -> None:
+    assert _is_banned_public_doc_path(path)
 
 
 def test_public_docs_keep_recipe_and_harness_guides_visible() -> None:
