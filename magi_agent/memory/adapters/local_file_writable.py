@@ -245,6 +245,15 @@ class LocalFileMemoryProvider:
                 f"({current_size} + {len(entry_bytes)} > {self.config.max_file_bytes})"
             )
 
+        # USER.md profile deduplication: skip only if this exact entry line already exists.
+        # Compare the fully-formatted entry (not a raw-body substring) so that
+        # short facts like "vim" are not swallowed by longer lines that merely
+        # contain the word (e.g. "User uses vim-like keybindings").
+        if target_file == "USER.md" and target_path.exists():
+            existing = target_path.read_text(encoding="utf-8")
+            if entry in existing:
+                return
+
         # Append entry
         with target_path.open("a", encoding="utf-8") as fh:
             fh.write(entry)
