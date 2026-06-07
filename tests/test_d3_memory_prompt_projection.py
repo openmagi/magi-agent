@@ -1,0 +1,571 @@
+"""D3 — gated memory prompt projection into dynamic tier.
+
+Test contract:
+  1. gate-OFF  → no <memory-context> in prompt, prompt_projection_allowed=False,
+                  static prefix byte-identical
+  2. gate-ON   → snapshot injected in dynamic tier, fenced, bounded
+  3. incognito → no projection even when gate is on
+  4. snapshot  → reflects MEMORY.md/USER.md content (redacted, bounded)
+  5. cache-stability → static prefix unchanged by projection
+  6. evidence/redaction → sensitive tokens stripped, digest recorded
+  7. evaluate_memory_policy_with_gate → only gate-ON+non-incognito allows True
+"""
+from __future__ import annotations
+
+import os
+import textwrap
+from pathlib import Path
+from datetime import UTC, datetime
+
+import pytest
+
+from magi_agent.memory.policy import (
+    MemoryPolicy,
+    evaluate_memory_policy_with_gate,
+)
+from magi_agent.memory.contracts import RecallRequest
+from magi_agent.memory.prompt_projection import (
+    MAGI_MEMORY_PROJECTION_ENABLED_ENV,
+    MEMORY_CONTEXT_OPEN,
+    MEMORY_CONTEXT_CLOSE,
+    MemoryPromptProjector,
+    MemoryProjectionResult,
+    project_memory_snapshot,
+)
+from magi_agent.runtime.message_builder import (
+    build_system_prompt,
+    build_system_prompt_blocks,
+    PROMPT_DYNAMIC_BOUNDARY,
+)
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _make_workspace(tmp_path: Path, *, memory: str = "", user: str = "") -> Path:
+    if memory:
+        (tmp_path / "MEMORY.md").write_text(memory, encoding="utf-8")
+    if user:
+        (tmp_path / "USER.md").write_text(user, encoding="utf-8")
+    return tmp_path
+
+
+def _recall_request() -> RecallRequest:
+    return RecallRequest(
+        scope={},
+        query="recall",
+        purpose="plan_task",
+        limit=5,
+        max_bytes=32768,
+    )
+
+
+def _gate_on(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(MAGI_MEMORY_PROJECTION_ENABLED_ENV, "1")
+
+
+def _gate_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv(MAGI_MEMORY_PROJECTION_ENABLED_ENV, raising=False)
+
+
+# ---------------------------------------------------------------------------
+# 1. Gate-OFF: no projection, policy still False
+# ---------------------------------------------------------------------------
+
+
+def test_gate_off_projection_result_is_disabled(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _gate_off(monkeypatch)
+    _make_workspace(tmp_path, memory="## User preferences\n- Prefers dark mode")
+    result = project_memory_snapshot(workspace_root=tmp_path)
+    assert result.enabled is False
+    assert result.snapshot_block == ""
+    assert result.prompt_projection_allowed is False
+
+
+def test_gate_off_no_memory_context_in_system_prompt(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _gate_off(monkeypatch)
+    _make_workspace(tmp_path, memory="User prefers early morning meetings.")
+    prompt = build_system_prompt(
+        session_key="s",
+        turn_id="t",
+        memory_snapshot_block="",  # gate-off passes empty
+    )
+    assert MEMORY_CONTEXT_OPEN not in prompt
+    assert MEMORY_CONTEXT_CLOSE not in prompt
+
+
+def test_gate_off_evaluate_policy_with_gate_returns_false(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _gate_off(monkeypatch)
+    policy = MemoryPolicy(memory_mode="normal", source_authority="long_term_allowed")
+    decision = evaluate_memory_policy_with_gate(_recall_request(), policy)
+    assert decision.prompt_projection_allowed is False
+    assert "projection_gate_off" in decision.reason_codes
+
+
+# ---------------------------------------------------------------------------
+# 2. Gate-ON: snapshot injected in dynamic tier, fenced, bounded
+# ---------------------------------------------------------------------------
+
+
+def test_gate_on_projection_result_is_enabled(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _gate_on(monkeypatch)
+    _make_workspace(tmp_path, memory="## Preferences\n- Dark mode", user="Name: Alice")
+    result = project_memory_snapshot(workspace_root=tmp_path)
+    assert result.enabled is True
+    assert result.prompt_projection_allowed is True
+    assert MEMORY_CONTEXT_OPEN in result.snapshot_block
+    assert MEMORY_CONTEXT_CLOSE in result.snapshot_block
+
+
+def test_gate_on_snapshot_appears_in_dynamic_section(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _gate_on(monkeypatch)
+    _make_workspace(tmp_path, memory="## Long-term context\nProject alpha in progress.")
+    result = project_memory_snapshot(workspace_root=tmp_path)
+
+    prompt = build_system_prompt(
+        session_key="s",
+        turn_id="t",
+        memory_snapshot_block=result.snapshot_block,
+    )
+    assert MEMORY_CONTEXT_OPEN in prompt
+    assert MEMORY_CONTEXT_CLOSE in prompt
+    # Must appear AFTER the dynamic boundary
+    static_part, dynamic_part = prompt.split(PROMPT_DYNAMIC_BOUNDARY, 1)
+    assert MEMORY_CONTEXT_OPEN not in static_part
+    assert MEMORY_CONTEXT_OPEN in dynamic_part
+
+
+def test_gate_on_evaluate_policy_with_gate_allows_projection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _gate_on(monkeypatch)
+    policy = MemoryPolicy(memory_mode="normal", source_authority="long_term_allowed")
+    decision = evaluate_memory_policy_with_gate(_recall_request(), policy)
+    assert decision.prompt_projection_allowed is True
+    assert "projection_gate_on" in decision.reason_codes
+
+
+# ---------------------------------------------------------------------------
+# 3. Incognito: no projection even with gate on
+# ---------------------------------------------------------------------------
+
+
+def test_incognito_blocks_projection_even_when_gate_on(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _gate_on(monkeypatch)
+    _make_workspace(tmp_path, memory="Secret project notes.")
+    result = project_memory_snapshot(workspace_root=tmp_path, memory_mode="incognito")
+    assert result.enabled is False
+    assert result.snapshot_block == ""
+    assert result.prompt_projection_allowed is False
+
+
+def test_incognito_evaluate_policy_with_gate_returns_false(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _gate_on(monkeypatch)
+    policy = MemoryPolicy(memory_mode="incognito", source_authority="long_term_allowed")
+    decision = evaluate_memory_policy_with_gate(_recall_request(), policy)
+    assert decision.prompt_projection_allowed is False
+    assert "incognito_blocks_projection" in decision.reason_codes
+
+
+# ---------------------------------------------------------------------------
+# 4. Snapshot reflects MEMORY.md/USER.md content (redacted, bounded)
+# ---------------------------------------------------------------------------
+
+
+def test_snapshot_contains_memory_md_content(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _gate_on(monkeypatch)
+    content = "## Preferences\n- Prefers concise summaries"
+    _make_workspace(tmp_path, memory=content)
+    result = project_memory_snapshot(workspace_root=tmp_path)
+    assert "Prefers concise summaries" in result.snapshot_block
+
+
+def test_snapshot_contains_user_md_content_when_present(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _gate_on(monkeypatch)
+    _make_workspace(tmp_path, user="Name: Bob\nRole: Developer")
+    result = project_memory_snapshot(workspace_root=tmp_path)
+    assert "Name: Bob" in result.snapshot_block
+
+
+def test_snapshot_is_empty_when_no_files_exist(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _gate_on(monkeypatch)
+    result = project_memory_snapshot(workspace_root=tmp_path)
+    # No files → empty or minimal block; no injection needed
+    assert result.snapshot_block == ""
+
+
+def test_snapshot_redacts_bearer_tokens(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _gate_on(monkeypatch)
+    _make_workspace(
+        tmp_path,
+        memory="Token: Bearer sk-test-super-secret-token-abc123\nother content",
+    )
+    result = project_memory_snapshot(workspace_root=tmp_path)
+    assert "sk-test-super-secret-token-abc123" not in result.snapshot_block
+
+
+def test_snapshot_redacts_private_paths(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _gate_on(monkeypatch)
+    _make_workspace(
+        tmp_path,
+        memory="Config at /Users/kevin/secret/config.yaml\nsome visible content",
+    )
+    result = project_memory_snapshot(workspace_root=tmp_path)
+    assert "/Users/kevin/secret" not in result.snapshot_block
+
+
+def test_snapshot_is_bounded_by_max_bytes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _gate_on(monkeypatch)
+    big_content = "x" * 200_000
+    _make_workspace(tmp_path, memory=big_content)
+    result = project_memory_snapshot(workspace_root=tmp_path, max_bytes=4096)
+    assert len(result.snapshot_block.encode("utf-8")) <= 4096
+
+
+def test_snapshot_result_records_evidence_digests(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _gate_on(monkeypatch)
+    _make_workspace(tmp_path, memory="## Notes\n- Remember to check logs")
+    result = project_memory_snapshot(workspace_root=tmp_path)
+    # Evidence: snapshot_digest must be a sha256 digest string
+    assert result.snapshot_digest.startswith("sha256:")
+    assert len(result.snapshot_digest) == len("sha256:") + 64
+
+
+# ---------------------------------------------------------------------------
+# 5. Cache-stability: static prefix unchanged by projection
+# ---------------------------------------------------------------------------
+
+
+def test_static_prefix_unchanged_regardless_of_gate(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Gate-off and gate-on must produce identical static prefixes."""
+    _make_workspace(tmp_path, memory="## Notes\n- Memory content here")
+
+    _gate_off(monkeypatch)
+    prompt_off = build_system_prompt(
+        session_key="s",
+        turn_id="t",
+        memory_snapshot_block="",
+    )
+
+    _gate_on(monkeypatch)
+    result = project_memory_snapshot(workspace_root=tmp_path)
+    prompt_on = build_system_prompt(
+        session_key="s",
+        turn_id="t",
+        memory_snapshot_block=result.snapshot_block,
+    )
+
+    def _static(prompt: str) -> str:
+        return prompt.split(PROMPT_DYNAMIC_BOUNDARY, 1)[0]
+
+    assert _static(prompt_off) == _static(prompt_on)
+
+
+def test_memory_context_never_in_static_prefix(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _gate_on(monkeypatch)
+    _make_workspace(tmp_path, memory="## Long-term notes\n- Deploy infra first")
+    result = project_memory_snapshot(workspace_root=tmp_path)
+    prompt = build_system_prompt(
+        session_key="s",
+        turn_id="t",
+        memory_snapshot_block=result.snapshot_block,
+    )
+    static_part = prompt.split(PROMPT_DYNAMIC_BOUNDARY, 1)[0]
+    assert MEMORY_CONTEXT_OPEN not in static_part
+
+
+# ---------------------------------------------------------------------------
+# 6. Fencing: no user-visible confusion
+# ---------------------------------------------------------------------------
+
+
+def test_snapshot_block_is_clearly_fenced(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _gate_on(monkeypatch)
+    _make_workspace(tmp_path, memory="Deploy infra notes.")
+    result = project_memory_snapshot(workspace_root=tmp_path)
+    assert result.snapshot_block.startswith(MEMORY_CONTEXT_OPEN)
+    assert result.snapshot_block.rstrip().endswith(MEMORY_CONTEXT_CLOSE)
+
+
+# ---------------------------------------------------------------------------
+# 7. Projector via class interface
+# ---------------------------------------------------------------------------
+
+
+def test_projector_class_respects_gate(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _make_workspace(tmp_path, memory="## Notes\n- hello world")
+    projector = MemoryPromptProjector(workspace_root=tmp_path)
+
+    _gate_off(monkeypatch)
+    off = projector.project()
+    assert off.enabled is False
+
+    _gate_on(monkeypatch)
+    on = projector.project()
+    assert on.enabled is True
+    assert "hello world" in on.snapshot_block
+
+
+def test_projector_class_with_explicit_enabled_true(tmp_path: Path) -> None:
+    """Pass enabled=True directly (no env mutation needed — for unit tests)."""
+    _make_workspace(tmp_path, memory="## Preferences\n- concise answers")
+    projector = MemoryPromptProjector(workspace_root=tmp_path, enabled=True)
+    result = projector.project()
+    assert result.enabled is True
+    assert "concise answers" in result.snapshot_block
+
+
+def test_projector_explicit_enabled_incognito_still_blocked(tmp_path: Path) -> None:
+    _make_workspace(tmp_path, memory="Private notes.")
+    projector = MemoryPromptProjector(workspace_root=tmp_path, enabled=True)
+    result = projector.project(memory_mode="incognito")
+    assert result.enabled is False
+    assert result.snapshot_block == ""
+
+
+# ---------------------------------------------------------------------------
+# 8. build_system_prompt_blocks dynamic tier also includes snapshot
+# ---------------------------------------------------------------------------
+
+
+def test_blocks_mode_snapshot_in_dynamic_block(tmp_path: Path) -> None:
+    """build_system_prompt_blocks with cache_enabled=False must include snapshot in dynamic."""
+    _make_workspace(tmp_path, memory="## Notes\n- project alpha in progress")
+    projector = MemoryPromptProjector(workspace_root=tmp_path, enabled=True)
+    result = projector.project()
+
+    blocks = build_system_prompt_blocks(
+        session_key="s",
+        turn_id="t",
+        memory_snapshot_block=result.snapshot_block,
+        cache_enabled=False,
+    )
+    assert len(blocks) == 1
+    combined_text = blocks[0]["text"]
+    static_part, dynamic_part = combined_text.split(PROMPT_DYNAMIC_BOUNDARY, 1)
+    assert MEMORY_CONTEXT_OPEN not in static_part
+    assert MEMORY_CONTEXT_OPEN in dynamic_part
+
+
+# ---------------------------------------------------------------------------
+# 9. Budget governs output size, NOT the 400-char tool-preview cap (D3 fix)
+# ---------------------------------------------------------------------------
+
+
+def test_multi_kb_memory_projects_more_than_400_chars(tmp_path: Path) -> None:
+    """A multi-KB MEMORY.md must project substantially MORE than 400 chars.
+
+    Before the D3 fix, _sanitize_memory_snippet called sanitize_tool_preview
+    which hard-capped output to MAX_TOOL_PREVIEW (~400 chars).  With the fix,
+    the only cap is the projection's own max_bytes budget.
+    """
+    # Build ~4 KiB of normal prose (no secrets, no private paths).
+    line = "This is a normal memory line with useful context about the project.\n"
+    content = line * 60  # ~4 KiB
+    assert len(content.encode()) > 4_000
+
+    _make_workspace(tmp_path, memory=content)
+    projector = MemoryPromptProjector(workspace_root=tmp_path, enabled=True, max_bytes=8_192)
+    result = projector.project()
+
+    assert result.enabled is True
+    # The projected content inside the fence must be substantially longer than
+    # the old 400-char hard cap.
+    content_len = len(result.snapshot_block.encode("utf-8"))
+    assert content_len > 1_000, (
+        f"Expected >1000 bytes in snapshot (budget governs), got {content_len}. "
+        "400-char tool-preview cap may still be active."
+    )
+    # And still within the budget.
+    assert content_len <= 8_192
+
+
+def test_oversized_memory_capped_at_max_bytes(tmp_path: Path) -> None:
+    """A 200 KB MEMORY.md must be capped at max_bytes and complete fast."""
+    import time
+
+    big_content = "x" * 200_000
+    _make_workspace(tmp_path, memory=big_content)
+    projector = MemoryPromptProjector(workspace_root=tmp_path, enabled=True, max_bytes=4_096)
+
+    t0 = time.monotonic()
+    result = projector.project()
+    elapsed = time.monotonic() - t0
+
+    assert result.enabled is True
+    assert len(result.snapshot_block.encode("utf-8")) <= 4_096
+    assert elapsed < 2.0, f"Projection took {elapsed:.2f}s — ReDoS guard may be missing"
+
+
+def test_secret_in_memory_md_is_redacted_from_snapshot(tmp_path: Path) -> None:
+    """A secret in MEMORY.md must be absent from the projected snapshot block.
+
+    This validates that redaction still works even without sanitize_tool_preview.
+    """
+    secret = "sk-live-ABCDEFGH1234"
+    content = (
+        "## User preferences\n"
+        "- Prefers dark mode\n"
+        f"- api_key = {secret}\n"
+        "- Enjoys hiking\n"
+    )
+    _make_workspace(tmp_path, memory=content)
+    projector = MemoryPromptProjector(workspace_root=tmp_path, enabled=True, max_bytes=8_192)
+    result = projector.project()
+
+    assert result.enabled is True
+    assert secret not in result.snapshot_block, (
+        "Secret token must be redacted from the snapshot block"
+    )
+    # Non-secret content should still be present.
+    assert "dark mode" in result.snapshot_block
+
+
+# ---------------------------------------------------------------------------
+# 10. Token/secret redaction via bare labels (D3 review gap fix)
+#
+# Before this fix, _redact_snapshot_content only applied the 9 projection
+# regexes; it OMITTED the token-specific patterns from sanitize_tool_preview
+# (Bearer/GitHub/OpenAI/Stripe/key-value/session).  A MEMORY.md line like
+#   "OpenAI key: sk-proj-abc123"  or  "Stripe key: sk_live_abc123"
+# would be projected UNREDACTED.  These tests prove each class is now covered.
+# ---------------------------------------------------------------------------
+
+
+def test_snapshot_redacts_openai_key_bare_label(tmp_path: Path) -> None:
+    """'OpenAI key: sk-proj-ABC123...' — bare 'key' label must be redacted."""
+    secret = "sk-proj-ABC123XYZlongtoken987"
+    content = (
+        "## Config\n"
+        f"OpenAI key: {secret}\n"
+        "Prefers concise answers.\n"
+    )
+    _make_workspace(tmp_path, memory=content)
+    projector = MemoryPromptProjector(workspace_root=tmp_path, enabled=True, max_bytes=8_192)
+    result = projector.project()
+
+    assert result.enabled is True
+    assert secret not in result.snapshot_block, (
+        f"OpenAI sk-proj- token must be redacted; got: {result.snapshot_block!r}"
+    )
+    assert "concise answers" in result.snapshot_block
+
+
+def test_snapshot_redacts_stripe_key_bare_label(tmp_path: Path) -> None:
+    """'Stripe key: sk_live_ABC123' — bare 'key' label must be redacted."""
+    secret = "sk_live_ABC123XYZ789stripe"
+    content = (
+        "## Billing\n"
+        f"Stripe key: {secret}\n"
+        "Monthly budget: $500.\n"
+    )
+    _make_workspace(tmp_path, memory=content)
+    projector = MemoryPromptProjector(workspace_root=tmp_path, enabled=True, max_bytes=8_192)
+    result = projector.project()
+
+    assert result.enabled is True
+    assert secret not in result.snapshot_block, (
+        f"Stripe sk_live_ token must be redacted; got: {result.snapshot_block!r}"
+    )
+    assert "Monthly budget" in result.snapshot_block
+
+
+def test_snapshot_redacts_github_token_bare_label(tmp_path: Path) -> None:
+    """'GitHub: ghp_ABC123...' — GitHub PAT must be redacted."""
+    secret = "ghp_ABC123XYZlongpat456789abcdef"
+    content = (
+        "## Access\n"
+        f"GitHub: {secret}\n"
+        "Use read-only scopes.\n"
+    )
+    _make_workspace(tmp_path, memory=content)
+    projector = MemoryPromptProjector(workspace_root=tmp_path, enabled=True, max_bytes=8_192)
+    result = projector.project()
+
+    assert result.enabled is True
+    assert secret not in result.snapshot_block, (
+        f"GitHub ghp_ token must be redacted; got: {result.snapshot_block!r}"
+    )
+    assert "read-only scopes" in result.snapshot_block
+
+
+def test_snapshot_redacts_bearer_token_bare_label(tmp_path: Path) -> None:
+    """'Authorization: Bearer abc.def.ghi' — Bearer token must be redacted.
+
+    Note: the _drop_private_projection_lines step also treats Authorization
+    header lines as private and strips them entirely; the token therefore never
+    reaches the projected block.  The non-secret prose is placed BEFORE the
+    Authorization line so it survives the private-line drop.
+    """
+    secret = "abc.def.ghi_bearer_payload_xyz"
+    content = (
+        "## Auth header\n"
+        "Rotate every 30 days.\n"
+        f"Authorization: Bearer {secret}\n"
+    )
+    _make_workspace(tmp_path, memory=content)
+    projector = MemoryPromptProjector(workspace_root=tmp_path, enabled=True, max_bytes=8_192)
+    result = projector.project()
+
+    assert result.enabled is True
+    assert secret not in result.snapshot_block, (
+        f"Bearer token payload must be redacted; got: {result.snapshot_block!r}"
+    )
+    assert "Rotate every 30 days" in result.snapshot_block
+
+
+def test_snapshot_redacts_session_key_assignment(tmp_path: Path) -> None:
+    """'session_key = abcdef123456' — key-value session secret must be redacted."""
+    secret = "abcdef123456sessionval"
+    content = (
+        "## Session\n"
+        f"session_key = {secret}\n"
+        "Expires after 24h.\n"
+    )
+    _make_workspace(tmp_path, memory=content)
+    projector = MemoryPromptProjector(workspace_root=tmp_path, enabled=True, max_bytes=8_192)
+    result = projector.project()
+
+    assert result.enabled is True
+    assert secret not in result.snapshot_block, (
+        f"session_key value must be redacted; got: {result.snapshot_block!r}"
+    )
+    assert "Expires after 24h" in result.snapshot_block

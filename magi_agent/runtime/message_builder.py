@@ -400,6 +400,7 @@ def _assemble_prompt_sections(
     coding_agent: bool,
     model: str,
     model_aware_prompts_enabled: bool,
+    memory_snapshot_block: str = "",
 ) -> tuple[list[str], list[str]]:
     """Single source of truth for system-prompt section assembly.
 
@@ -450,6 +451,8 @@ def _assemble_prompt_sections(
     memory_mode_block = _memory_mode_block(channel)
     if memory_mode_block:
         dynamic_parts.append(memory_mode_block)
+    if memory_snapshot_block:
+        dynamic_parts.append(memory_snapshot_block)
     addendum = _system_prompt_addendum(user_message)
     if addendum:
         dynamic_parts.append(addendum)
@@ -647,6 +650,7 @@ def build_system_prompt(
     harness_state: "ResolvedHarnessPresetState | None" = None,
     hook_context: "object | None" = None,
     evidence_sink: "Callable[[Mapping[str, object]], None] | None" = None,
+    memory_snapshot_block: str = "",
 ) -> str:
     runtime_now = _coerce_utc(now)
     static_parts, dynamic_parts = _assemble_prompt_sections(
@@ -660,6 +664,7 @@ def build_system_prompt(
         coding_agent=coding_agent,
         model=model,
         model_aware_prompts_enabled=model_aware_prompts_enabled,
+        memory_snapshot_block=memory_snapshot_block,
     )
 
     static_parts = _apply_prompt_transform(
@@ -694,6 +699,7 @@ def build_system_prompt_blocks(
     harness_state: "ResolvedHarnessPresetState | None" = None,
     hook_context: "object | None" = None,
     evidence_sink: "Callable[[Mapping[str, object]], None] | None" = None,
+    memory_snapshot_block: str = "",
 ) -> list[dict[str, object]]:
     """Build the system prompt as a list of structured blocks with optional cache markers.
 
@@ -758,6 +764,7 @@ def build_system_prompt_blocks(
         coding_agent=coding_agent,
         model=model if model_aware_prompts_enabled else "",
         model_aware_prompts_enabled=model_aware_prompts_enabled,
+        memory_snapshot_block=memory_snapshot_block,
     )
     static_parts = _apply_prompt_transform(
         static_parts,
