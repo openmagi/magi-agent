@@ -7,6 +7,7 @@ from collections.abc import AsyncIterator
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
+from .learning.bootstrap import LearningBootstrap
 from .runtime.openmagi_runtime import OpenMagiRuntime
 from .transport.chat import register_chat_routes
 from .transport.streaming_chat_route import register_streaming_chat_routes
@@ -22,7 +23,7 @@ from .transport.tools import register_tool_admin_routes
 logger = logging.getLogger(__name__)
 
 
-def _build_learning_bootstrap(runtime: OpenMagiRuntime) -> object | None:
+def _build_learning_bootstrap(runtime: OpenMagiRuntime) -> LearningBootstrap | None:
     """Construct the learning bootstrap, fail-open.
 
     PR9b: on a default install the SAFE reflect tier runs in the background
@@ -34,8 +35,6 @@ def _build_learning_bootstrap(runtime: OpenMagiRuntime) -> object | None:
     flipped.
     """
     try:
-        from .learning.bootstrap import LearningBootstrap
-
         return LearningBootstrap(
             app_name="magi",
             user_id=runtime.config.user_id,
@@ -59,7 +58,7 @@ def create_app(runtime: OpenMagiRuntime) -> FastAPI:
         # crash app startup or shutdown.
         if bootstrap is not None:
             try:
-                await bootstrap.start()  # type: ignore[attr-defined]
+                await bootstrap.start()
             except Exception:  # noqa: BLE001 - fail-open
                 logger.warning(
                     "learning bootstrap start failed; learning layer inert",
@@ -70,7 +69,7 @@ def create_app(runtime: OpenMagiRuntime) -> FastAPI:
         finally:
             if bootstrap is not None:
                 try:
-                    await bootstrap.stop()  # type: ignore[attr-defined]
+                    await bootstrap.stop()
                 except Exception:  # noqa: BLE001 - never raise on shutdown
                     logger.warning(
                         "learning bootstrap stop failed", exc_info=True

@@ -173,6 +173,50 @@ def test_pass_example_auto_activates_with_eval_ref(tmp_path) -> None:
     assert item.eval_observation_ref == decision.eval_observation_ref
 
 
+def test_auto_activate_examples_true_preserves_pr4_behaviour(tmp_path) -> None:
+    """GOVERNANCE: the default ``auto_activate_examples=True`` keeps the original
+    PR4 behaviour — a passing example auto-activates."""
+    store = _store(tmp_path)
+    decisions = run_eval_gate(
+        (_candidate(kind="example"),),
+        store=store,
+        checkset=_passing_checkset(),
+        auto_activate_examples=True,  # explicit; equals the default
+    )
+    decision = decisions[0]
+    item = store.get(decision.item_id)
+    store.close()
+    assert decision.activated is True
+    assert item is not None
+    assert item.status == "active"
+
+
+def test_auto_activate_examples_false_leaves_example_proposed(tmp_path) -> None:
+    """GOVERNANCE: with ``auto_activate_examples=False`` a passing example is NOT
+    auto-activated — it stays ``proposed`` (awaits human approval) BUT the eval
+    observation is still recorded so a later approval has the measurement data."""
+    store = _store(tmp_path)
+    decisions = run_eval_gate(
+        (_candidate(kind="example"),),
+        store=store,
+        checkset=_passing_checkset(),
+        auto_activate_examples=False,
+    )
+    decision = decisions[0]
+    item = store.get(decision.item_id)
+    store.close()
+    # The eval passed, but nothing was activated.
+    assert decision.passed is True
+    assert decision.activated is False
+    # The eval observation is still recorded (data preserved for later approval).
+    # The ref lives in the observations table; the item row only carries it once
+    # a human approval / auto-activation stamps it, so the proposed item's own
+    # ``eval_observation_ref`` stays unset here.
+    assert decision.eval_observation_ref
+    assert item is not None
+    assert item.status == "proposed"
+
+
 def test_pass_rule_stays_proposed_with_eval_ref(tmp_path) -> None:
     store = _store(tmp_path)
     decisions = run_eval_gate(

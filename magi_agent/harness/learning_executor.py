@@ -248,6 +248,7 @@ async def run_reflection(
     eval_gate_config: EvalGateConfig | None = None,
     labeler: Labeler | None = None,
     tenant_id: str = "local",
+    auto_activate_examples: bool = True,
 ) -> LearningReflectionResult:
     """Run a reflection pass over session transcripts.
 
@@ -288,6 +289,11 @@ async def run_reflection(
             Threaded into ``run_eval_gate`` so a non-``"local"`` tenant's
             reflection run writes inside its own tenant.  Defaults to ``"local"``
             so the single-tenant path stays byte-identical.
+        auto_activate_examples: Threaded into ``run_eval_gate``.  When ``True``
+            (default — preserves PR4 behaviour) passing examples auto-activate.
+            The bootstrap / default-ON reflect tier passes ``False`` so EVERY
+            kind stays ``proposed`` for human approval (governance: no
+            auto-activation without review).
 
     Returns:
         ``LearningReflectionResult`` with ``status``, ``candidates``,
@@ -377,6 +383,7 @@ async def run_reflection(
             checkset=gate_checkset,
             config=eval_gate_config,
             tenant_id=tenant_id,
+            auto_activate_examples=auto_activate_examples,
         )
 
     # --- Step 4: advance watermark ---
