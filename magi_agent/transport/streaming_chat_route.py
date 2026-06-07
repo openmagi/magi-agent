@@ -15,8 +15,10 @@ Three FastAPI routes wired additively (no edit to ``chat.py``):
 Registration
 ------------
 Call :func:`register_streaming_chat_routes` in ``app.py`` right after the
-existing ``register_chat_routes`` call. The routes are mounted additively; this
-module does NOT import or modify ``magi_agent.transport.chat``.
+existing ``register_chat_routes`` call. The routes are mounted additively. When
+the selected Gate5B user-visible canary gate is active, the stream route reuses
+the selected ``chat.py`` handler and adapts its safe public response into the
+single-channel SSE stream.
 
 Feature gate
 ------------
@@ -31,15 +33,22 @@ import asyncio
 import json
 import os
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import AsyncIterator, Mapping, Sequence
 from typing import Callable
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
+from magi_agent.cli.contracts import EngineResult, Terminal
 from magi_agent.cli.protocol import ControlResponse
 from magi_agent.ops.health import _truthy_env
+from magi_agent.runtime.events import RuntimeEvent
 from magi_agent.transport.active_turn import ACTIVE_TURNS, ActiveTurn
+from magi_agent.transport.chat import (
+    gate5b_user_visible_chat_gate_active,
+    run_gate5b_user_visible_chat_response,
+)
+from magi_agent.transport.streaming_chat import frame_for_event, frame_for_terminal
 from magi_agent.transport.streaming_driver import drive_streaming_chat
 from magi_agent.transport.streaming_sink import build_streaming_prompt_sink
 
@@ -102,6 +111,139 @@ def _extract_prompt_text(body: object) -> str:
                     if isinstance(text, str):
                         text_parts.append(text)
     return "\n".join(part.strip() for part in text_parts if part.strip())
+
+
+def _selected_gate5b_stream_active(runtime: object) -> bool:
+    if os.environ.get("CORE_AGENT_PYTHON_CHAT_ROUTE", "off").lower() != "on":
+        return False
+    try:
+        return gate5b_user_visible_chat_gate_active(runtime)
+    except Exception:
+        return False
+
+
+def _json_response_mapping(response: JSONResponse) -> dict[str, object]:
+    raw_body = getattr(response, "body", b"")
+    if isinstance(raw_body, bytes):
+        text = raw_body.decode("utf-8")
+    else:
+        text = str(raw_body)
+    parsed = json.loads(text)
+    return dict(parsed) if isinstance(parsed, Mapping) else {}
+
+
+def _assistant_content_from_chat_response(payload: Mapping[str, object]) -> str:
+    choices = payload.get("choices")
+    if not isinstance(choices, Sequence) or isinstance(choices, (str, bytes)):
+        return ""
+    if not choices:
+        return ""
+    first = choices[0]
+    if not isinstance(first, Mapping):
+        return ""
+    message = first.get("message")
+    if not isinstance(message, Mapping):
+        return ""
+    content = message.get("content")
+    return content if isinstance(content, str) else ""
+
+
+def _selected_failure_reason(payload: Mapping[str, object]) -> str:
+    for key in ("reason", "error", "status"):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return "selected_stream_failed"
+
+
+def _runtime_event_frame(payload: Mapping[str, object], *, turn_id: str) -> bytes | None:
+    return frame_for_event(
+        RuntimeEvent(
+            type="status",
+            payload=dict(payload),
+            turn_id=turn_id,
+        )
+    )
+
+
+async def _drive_selected_gate5b_stream(
+    runtime: object,
+    body: object,
+    request: Request,
+    *,
+    session_id: str,
+    turn_id: str,
+) -> AsyncIterator[bytes]:
+    """Adapt the selected Gate5B chat response to the streaming SSE contract."""
+    try:
+        response = await run_gate5b_user_visible_chat_response(
+            runtime,
+            body,
+            request=request,
+        )
+        payload = _json_response_mapping(response)
+    except Exception:
+        reason = "selected_stream_bridge_error"
+        frame = _runtime_event_frame(
+            {"type": "error", "code": reason, "message": reason},
+            turn_id=turn_id,
+        )
+        if frame is not None:
+            yield frame
+        for chunk in frame_for_terminal(
+            EngineResult(
+                terminal=Terminal.error,
+                error=reason,
+                session_id=session_id,
+                turn_id=turn_id,
+            )
+        ):
+            yield chunk
+        return
+
+    if response.status_code == 200 and payload.get("status") == "python_ready":
+        public_events = payload.get("publicEvents")
+        if isinstance(public_events, Sequence) and not isinstance(public_events, (str, bytes)):
+            for public_event in public_events:
+                if not isinstance(public_event, Mapping):
+                    continue
+                frame = _runtime_event_frame(public_event, turn_id=turn_id)
+                if frame is not None:
+                    yield frame
+        content = _assistant_content_from_chat_response(payload)
+        if content:
+            frame = _runtime_event_frame(
+                {"type": "text_delta", "delta": content},
+                turn_id=turn_id,
+            )
+            if frame is not None:
+                yield frame
+        for chunk in frame_for_terminal(
+            EngineResult(
+                terminal=Terminal.completed,
+                session_id=session_id,
+                turn_id=turn_id,
+            )
+        ):
+            yield chunk
+        return
+
+    reason = _selected_failure_reason(payload)
+    frame = _runtime_event_frame(
+        {"type": "error", "code": reason, "message": reason},
+        turn_id=turn_id,
+    )
+    if frame is not None:
+        yield frame
+    for chunk in frame_for_terminal(
+        EngineResult(
+            terminal=Terminal.error,
+            error=reason,
+            session_id=session_id,
+            turn_id=turn_id,
+        )
+    ):
+        yield chunk
 
 
 # ---------------------------------------------------------------------------
@@ -188,6 +330,18 @@ def register_streaming_chat_routes(
             session_id = uuid.uuid4().hex
         turn_id = _body_string(body, "turnId", f"{session_id}:turn")
         prompt = _extract_prompt_text(body)
+
+        if _selected_gate5b_stream_active(runtime):
+            return StreamingResponse(
+                _drive_selected_gate5b_stream(
+                    runtime,
+                    body,
+                    request,
+                    session_id=session_id,
+                    turn_id=turn_id,
+                ),
+                media_type="text/event-stream",
+            )
 
         queue: asyncio.Queue[object] = asyncio.Queue()
         sink = build_streaming_prompt_sink(queue, turn_id=turn_id)

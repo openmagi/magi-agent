@@ -14,16 +14,35 @@ from __future__ import annotations
 
 import asyncio
 import json
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
 from fastapi import FastAPI
 
+from magi_agent.shadow.gate5b4c3_live_runner_boundary import (
+    Gate5B4C3LiveAdkPrimitives,
+)
+from magi_agent.shadow.gate5b4c3_shadow_generation_contract import (
+    Gate5B4C3ShadowGenerationConfig,
+)
+from magi_agent.shadow.gate5b4c3_shadow_counter_store import (
+    Gate5B4C3ShadowCounterStore,
+)
 from magi_agent.cli.contracts import EngineResult, Terminal
 from magi_agent.cli.protocol import ControlResponse
 from magi_agent.config.models import BuildInfo, PythonRuntimeAuthorityConfig, RuntimeConfig
+from magi_agent.gates.gate5b_full_toolhost import (
+    GATE5B_FULL_TOOLHOST_TOOL_NAMES,
+    Gate5BFullToolHostConfig,
+)
 from magi_agent.runtime.events import RuntimeEvent
 from magi_agent.runtime.openmagi_runtime import OpenMagiRuntime
+from magi_agent.transport.chat import Gate5BUserVisibleChatRouteConfig
+from magi_agent.transport.shadow_generations import (
+    Gate5B4C3ShadowGenerationRouteConfig,
+)
 from magi_agent.transport.active_turn import ACTIVE_TURNS, ActiveTurn
 from magi_agent.transport.streaming_chat_route import (
     register_streaming_chat_routes,
@@ -37,7 +56,11 @@ from magi_agent.transport.streaming_sink import build_streaming_prompt_sink
 # Fixtures / helpers
 # ---------------------------------------------------------------------------
 
-def _make_runtime(*, gateway_token: str = "test-token") -> OpenMagiRuntime:
+def _make_runtime(
+    *,
+    gateway_token: str = "test-token",
+    authority: PythonRuntimeAuthorityConfig | None = None,
+) -> OpenMagiRuntime:
     return OpenMagiRuntime(
         config=RuntimeConfig(
             bot_id="bot-stream-test",
@@ -48,7 +71,7 @@ def _make_runtime(*, gateway_token: str = "test-token") -> OpenMagiRuntime:
             redis_url="redis://redis.local:6379/0",
             model="gpt-5.2",
             build=BuildInfo(version="0.1.0-test", build_sha="sha-test"),
-            authority=PythonRuntimeAuthorityConfig(),
+            authority=authority or PythonRuntimeAuthorityConfig(),
         )
     )
 
@@ -69,6 +92,12 @@ def _auth_headers(token: str = "test-token") -> dict[str, str]:
     return {"authorization": f"Bearer {token}"}
 
 
+def _sha256(value: str) -> str:
+    import hashlib
+
+    return "sha256:" + hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
 def _ev(event_type: str, **payload: object) -> RuntimeEvent:
     return RuntimeEvent(
         type="status",
@@ -87,6 +116,130 @@ def _data_lines(text: str) -> list[dict]:
                 continue
             out.append(json.loads(body))
     return out
+
+
+class _FakePart:
+    def __init__(self, text: str) -> None:
+        self.text = text
+
+    @classmethod
+    def from_text(cls, *, text: str) -> "_FakePart":
+        return cls(text)
+
+
+class _FakeContent:
+    def __init__(self, *, parts: list[_FakePart], role: str | None = None) -> None:
+        self.parts = parts
+        self.role = role
+
+
+class _FakeAgent:
+    created_kwargs: dict[str, object] = {}
+
+    def __init__(self, **kwargs: object) -> None:
+        type(self).created_kwargs = kwargs
+
+
+class _FakeSessionService:
+    pass
+
+
+class _FakeGenerateContentConfig:
+    def __init__(self, **kwargs: object) -> None:
+        self.kwargs = kwargs
+
+
+class _FakeRunner:
+    created_kwargs: dict[str, object] = {}
+    run_kwargs: dict[str, object] = {}
+    event_text = "selected full-toolhost ADK stream answer"
+
+    def __init__(self, **kwargs: object) -> None:
+        type(self).created_kwargs = kwargs
+
+    async def run_async(self, **kwargs: object) -> object:
+        type(self).run_kwargs = kwargs
+        yield SimpleNamespace(
+            content=SimpleNamespace(parts=[SimpleNamespace(text=self.event_text)])
+        )
+
+
+def _fake_primitives() -> Gate5B4C3LiveAdkPrimitives:
+    _FakeAgent.created_kwargs = {}
+    _FakeRunner.created_kwargs = {}
+    _FakeRunner.run_kwargs = {}
+    return Gate5B4C3LiveAdkPrimitives(
+        Agent=_FakeAgent,
+        Runner=_FakeRunner,
+        InMemorySessionService=_FakeSessionService,
+        Content=_FakeContent,
+        Part=_FakePart,
+        GenerateContentConfig=_FakeGenerateContentConfig,
+    )
+
+
+def _selected_runtime(
+    tmp_path: Path,
+    *,
+    mocked_runner=None,
+    full_toolhost: bool = False,
+) -> OpenMagiRuntime:
+    runtime = _make_runtime(
+        authority=PythonRuntimeAuthorityConfig(
+            userVisibleOutputAllowed=True,
+            canaryRoutingAllowed=True,
+        )
+    )
+    runtime.gate5b_user_visible_chat_route_config = Gate5BUserVisibleChatRouteConfig(
+        enabled=True,
+        killSwitchEnabled=False,
+        selectedBotDigest=_sha256("bot-stream-test"),
+        selectedOwnerUserIdDigest=_sha256("user-stream-test"),
+        environment="production",
+        environmentAllowlist=("production",),
+        mockedRunner=mocked_runner,
+        adkPrimitivesLoader=None if mocked_runner is not None else _fake_primitives,
+    )
+    if full_toolhost:
+        runtime.gate5b_full_toolhost_config = Gate5BFullToolHostConfig.model_validate(
+            {
+                "enabled": True,
+                "killSwitchEnabled": False,
+                "routeAttachmentEnabled": True,
+                "selectedBotDigest": _sha256("bot-stream-test"),
+                "selectedOwnerDigest": _sha256("user-stream-test"),
+                "environment": "production",
+                "environmentAllowlist": ("production",),
+                "allowedToolNames": GATE5B_FULL_TOOLHOST_TOOL_NAMES,
+                "maxToolCallsPerTurn": 8,
+            }
+        )
+    runtime.gate5b4c3_shadow_generation_route_config = (
+        Gate5B4C3ShadowGenerationRouteConfig(
+            liveRunnerBoundaryEnabled=True,
+            counterStore=Gate5B4C3ShadowCounterStore(tmp_path / "counters.json"),
+            generationConfig=Gate5B4C3ShadowGenerationConfig(
+                enabled=True,
+                killSwitchActive=False,
+                capStateInitialized=True,
+                providerProjectSpendControlsVerified=True,
+                selectedBotDigest=_sha256("bot-stream-test"),
+                trustedOwnerUserIdDigest=_sha256("user-stream-test"),
+                environment="production",
+                allowedProviderLabels=("google",),
+                allowedModelLabels=("gemini-3.5-flash",),
+                allowedModelRoutes=("google:gemini-3.5-flash",),
+                allowedShadowCredentialRefs=("gate5b-google-api-key-smoke-v1",),
+                providerCredentialBindingRequired=False,
+                approvedBudgets={
+                    "maxDailyGenerationRuns": 4,
+                    "maxDailyGenerationCostUsd": 0.05,
+                    "maxCostUsd": 0.05,
+                },
+            ),
+        )
+    )
+    return runtime
 
 
 # ---------------------------------------------------------------------------
@@ -188,6 +341,134 @@ def test_stream_returns_event_stream_and_done(monkeypatch) -> None:
     assert types[-1] == "turn_result"
     turn_result = payloads[-1]
     assert turn_result["terminal"] == "completed"
+
+
+def test_selected_full_toolhost_stream_uses_selected_canary_path(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
+    monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
+    monkeypatch.setenv("CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_WORKSPACE_ROOT", str(tmp_path))
+
+    class HeadlessEngine:
+        async def run_turn_stream(self, runtime, turn_input, *, cancel, gate):
+            yield _ev("text_delta", delta="headless stream should not run")
+            yield EngineResult(
+                terminal=Terminal.completed,
+                session_id="s-selected",
+                turn_id="t-selected",
+            )
+
+    def headless_builder(session_id: str, sink: object) -> tuple[object, object]:
+        return HeadlessEngine(), None
+
+    client = TestClient(
+        _make_app(
+            runtime=_selected_runtime(tmp_path, full_toolhost=True),
+            engine_builder=headless_builder,
+        )
+    )
+
+    response = client.post(
+        "/v1/chat/stream",
+        headers=_auth_headers(),
+        json={
+            "sessionId": "s-selected",
+            "turnId": "t-selected",
+            "messages": [{"role": "user", "content": "Use the selected toolhost."}],
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    payloads = _data_lines(response.text)
+    serialized = response.text
+    assert "headless stream should not run" not in serialized
+    assert "selected full-toolhost ADK stream answer" in serialized
+    assert "Selected first-party toolhost active" in serialized
+    assert [payload["type"] for payload in payloads][-1] == "turn_result"
+    assert payloads[-1]["terminal"] == "completed"
+
+
+def test_selected_stream_failure_does_not_fall_back_to_headless_success(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
+    monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
+
+    def failing_runner(request: object) -> dict[str, object]:
+        raise ValueError("selected runner failed")
+
+    class HeadlessEngine:
+        async def run_turn_stream(self, runtime, turn_input, *, cancel, gate):
+            yield _ev("text_delta", delta="headless success must not appear")
+            yield EngineResult(
+                terminal=Terminal.completed,
+                session_id="s-selected-fail",
+                turn_id="t-selected-fail",
+            )
+
+    def headless_builder(session_id: str, sink: object) -> tuple[object, object]:
+        return HeadlessEngine(), None
+
+    client = TestClient(
+        _make_app(
+            runtime=_selected_runtime(tmp_path, mocked_runner=failing_runner),
+            engine_builder=headless_builder,
+        )
+    )
+
+    response = client.post(
+        "/v1/chat/stream",
+        headers=_auth_headers(),
+        json={
+            "sessionId": "s-selected-fail",
+            "turnId": "t-selected-fail",
+            "messages": [{"role": "user", "content": "Selected canary failure."}],
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    payloads = _data_lines(response.text)
+    assert "headless success must not appear" not in response.text
+    assert any(payload["type"] == "error" for payload in payloads)
+    assert payloads[-1]["type"] == "turn_result"
+    assert payloads[-1]["terminal"] == "error"
+    assert payloads[-1]["error"] == "mocked_runner_error"
+
+
+def test_stream_selected_gate_off_uses_headless_engine(monkeypatch) -> None:
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
+    monkeypatch.delenv("CORE_AGENT_PYTHON_CHAT_ROUTE", raising=False)
+
+    class HeadlessEngine:
+        async def run_turn_stream(self, runtime, turn_input, *, cancel, gate):
+            yield _ev("text_delta", delta="headless default stream")
+            yield EngineResult(
+                terminal=Terminal.completed,
+                session_id="s-headless",
+                turn_id="t-headless",
+            )
+
+    def headless_builder(session_id: str, sink: object) -> tuple[object, object]:
+        return HeadlessEngine(), None
+
+    client = TestClient(_make_app(engine_builder=headless_builder))
+
+    response = client.post(
+        "/v1/chat/stream",
+        headers=_auth_headers(),
+        json={
+            "sessionId": "s-headless",
+            "turnId": "t-headless",
+            "messages": [{"role": "user", "content": "Default path."}],
+        },
+    )
+
+    assert response.status_code == 200
+    assert "headless default stream" in response.text
+    assert _data_lines(response.text)[-1]["terminal"] == "completed"
 
 
 # ---------------------------------------------------------------------------
