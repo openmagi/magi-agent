@@ -120,6 +120,7 @@ class PermMode(str, Enum):
     default = "default"
     accept_edits = "acceptEdits"
     bypass = "bypassPermissions"
+    smart_approve = "smartApprove"
 
 
 class AgentMode(str, Enum):
@@ -168,7 +169,10 @@ def agent(
     permission_mode: PermMode = typer.Option(
         PermMode.default,
         "--permission-mode",
-        help="Permission mode: default | acceptEdits | bypassPermissions.",
+        help=(
+            "Permission mode: default | acceptEdits | bypassPermissions | "
+            "smartApprove."
+        ),
     ),
     resume: Optional[str] = typer.Option(
         None,

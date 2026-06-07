@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import io
 import sys
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -86,6 +87,50 @@ class TestBuildHeadlessRuntime:
         )
 
         assert decision.kind == "allow"
+
+    def test_smart_approve_permission_mode_wires_classifier_gate(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path,
+    ) -> None:
+        import asyncio
+
+        from magi_agent.cli.contracts import ControlRequest
+
+        monkeypatch.setenv("MAGI_COMPOSIO_ENABLED", "off")
+
+        rt = build_headless_runtime(
+            cwd=tmp_path,
+            session_id="sid-smart",
+            permission_mode="smartApprove",  # type: ignore[arg-type]
+            runner=MagicMock(),
+        )
+
+        readonly_decision = asyncio.run(
+            rt.gate.check(
+                ControlRequest(
+                    request_id="req-read",
+                    turn_id="turn-smart",
+                    tool_name="FileRead",
+                    arguments={"path": "README.md"},
+                    reason="tool_use",
+                )
+            )
+        )
+        mutating_decision = asyncio.run(
+            rt.gate.check(
+                ControlRequest(
+                    request_id="req-write",
+                    turn_id="turn-smart",
+                    tool_name="FileWrite",
+                    arguments={"path": "out.txt", "content": "nope"},
+                    reason="tool_use",
+                )
+            )
+        )
+
+        assert readonly_decision.kind == "allow"
+        assert mutating_decision.kind == "deny"
 
     def test_accepts_runner_injection(self) -> None:
         """Accepting an explicit runner passes it through to MagiEngineDriver."""
@@ -328,6 +373,56 @@ class TestModeBranchInteractive:
 # ---------------------------------------------------------------------------
 
 class TestAgentDefaultCommand:
+    def test_permission_mode_help_exposes_smart_approve(self) -> None:
+        runner = CliRunner()
+        result = runner.invoke(_make_app(), ["agent", "--help"], catch_exceptions=False)
+
+        assert result.exit_code == 0, result.output
+        assert "smartApprove" in result.output
+
+    def test_smart_approve_permission_mode_reaches_headless(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path,
+    ) -> None:
+        """The public CLI must accept and forward --permission-mode smartApprove."""
+        monkeypatch.setenv("MAGI_CLI_ENABLED", "1")
+        monkeypatch.setenv("MAGI_CLI_SESSION_DIR", str(tmp_path))
+        captured: dict[str, object] = {}
+
+        def fake_build_headless_runtime(**kwargs: object) -> object:
+            captured["build_permission_mode"] = kwargs["permission_mode"]
+            return SimpleNamespace(
+                gate=object(),
+                commands=object(),
+                engine=StubEngineDriver(text="ok"),
+                session_log=SimpleNamespace(path=tmp_path / "sid-smart"),
+                mcp_servers=(),
+            )
+
+        async def fake_headless(prompt: str, **kwargs: object) -> int:
+            captured["prompt"] = prompt
+            captured["run_permission_mode"] = kwargs["permission_mode"]
+            return 0
+
+        runner = CliRunner()
+        with patch(
+            "magi_agent.cli.app.build_headless_runtime",
+            fake_build_headless_runtime,
+        ), patch("magi_agent.cli.app.run_headless", fake_headless):
+            result = runner.invoke(
+                _make_app(),
+                ["--permission-mode", "smartApprove", "hello"],
+                catch_exceptions=False,
+            )
+
+        assert result.exit_code == 0, result.output
+        assert captured == {
+            "build_permission_mode": "smartApprove",
+            "prompt": "hello",
+            "run_permission_mode": "smartApprove",
+        }
+
     def test_agent_command_runs_headless_turn(self, monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
         """The default agent command runs run_headless via the real wiring, exit 0."""
         monkeypatch.setenv("MAGI_CLI_ENABLED", "1")

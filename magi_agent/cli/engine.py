@@ -1447,9 +1447,47 @@ class _suppress_cancel:
         )
 
 
+def build_smart_approve_gate(
+    *,
+    provider_config: object = None,
+    tool_registry: object = None,
+    evidence_sink=None,
+) -> "PermissionGate":
+    """Build a ``RulesPermissionGate`` with the SmartApprove classifier wired in.
+
+    This is the ONLY code path that activates the optional ``smartApprove``
+    permission mode (parallel to goose's ``SmartApprove``). The caller is
+    responsible for passing this gate into ``run_turn_stream(gate=...)`` when
+    the mode is selected. The default mode leaves ``smart_approve=None``
+    (OFF), so default behavior is byte-identical to today.
+
+    Parameters
+    ----------
+    provider_config:
+        Optional ``ProviderConfig`` — forwarded to ``ReadOnlyClassifier`` so it
+        can build a real LiteLlm model when no ``model_factory`` is injected.
+    tool_registry:
+        Optional ``ToolRegistry`` — forwarded so the classifier can make
+        manifest-first decisions without any LLM call for known tools.
+    evidence_sink:
+        Optional callable for evidence logging; forwarded to the classifier.
+    """
+    # Deferred imports keep this module import-clean (no ADK at module load).
+    from magi_agent.cli.permissions import RulesPermissionGate  # noqa: PLC0415
+    from magi_agent.cli.readonly_classifier import ReadOnlyClassifier  # noqa: PLC0415
+
+    classifier = ReadOnlyClassifier(
+        registry=tool_registry,  # type: ignore[arg-type]
+        provider_config=provider_config,
+        evidence_sink=evidence_sink,
+    )
+    return RulesPermissionGate(smart_approve=classifier)
+
+
 __all__ = [
     "EngineRecoveryPolicy",
     "MagiEngineDriver",
     "RunnerPolicyAssembly",
     "build_engine_recovery_policy",
+    "build_smart_approve_gate",
 ]
