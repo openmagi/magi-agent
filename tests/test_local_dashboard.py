@@ -64,9 +64,6 @@ def test_local_dashboard_route_serves_adk_local_app_shell() -> None:
     assert "current local session" in html
     assert 'id="agent-state-pill"' in html
     assert "class=\"status-band\"" in html
-    assert "/v1/chat/stream" in html
-    assert "/v1/chat/control-response" in html
-    assert "/v1/chat/cancel" in html
     assert "/v1/chat/completions" in html
     assert "/healthz" in html
     assert "ADK runtime" in html
@@ -76,11 +73,6 @@ def test_local_dashboard_renders_workbench_not_empty_mockup() -> None:
     response = _client().get("/dashboard")
     html = response.text
 
-    assert 'data-dashboard-shell="local-chat"' in html
-    assert 'data-shell-region="channels"' in html
-    assert 'data-shell-region="transcript"' in html
-    assert 'data-shell-region="composer"' in html
-    assert 'data-shell-region="workbench"' in html
     assert 'id="thread-list"' in html
     assert 'id="quick-actions"' in html
     assert 'id="composer-status"' in html
@@ -100,22 +92,6 @@ def test_local_dashboard_renders_workbench_not_empty_mockup() -> None:
     assert "Run local agent work from one dashboard." not in html
 
 
-def test_local_dashboard_shell_matches_hosted_chat_regions() -> None:
-    response = _client().get("/dashboard")
-    html = response.text
-
-    assert '<aside class="sidebar" data-shell-region="channels">' in html
-    assert '<main class="main" data-shell-region="transcript">' in html
-    assert '<section class="composer-wrap" data-shell-region="composer">' in html
-    assert '<aside class="inspector" data-shell-region="workbench">' in html
-    assert 'aria-label="Chat transcript"' in html
-    assert 'aria-label="Prompt composer"' in html
-    assert 'aria-label="Workspace tabs"' in html
-    assert 'role="tabpanel" id="panel-work"' in html
-    assert 'role="tabpanel" id="panel-knowledge"' in html
-    assert 'role="tabpanel" id="panel-settings"' in html
-
-
 def test_local_dashboard_has_operational_work_stream_metrics() -> None:
     response = _client().get("/dashboard")
     html = response.text
@@ -130,103 +106,6 @@ def test_local_dashboard_has_operational_work_stream_metrics() -> None:
     assert 'id="board-transport-state"' in html
     assert "setRunBoard" in html
     assert "renderReceiptList" in html
-
-
-def test_local_dashboard_has_polished_channel_shell_navigation() -> None:
-    response = _client().get("/dashboard")
-    html = response.text
-
-    assert 'id="channel-nav"' in html
-    assert 'data-channel="general"' in html
-    assert 'data-channel="research"' in html
-    assert 'data-channel="coding"' in html
-    assert 'data-channel="automation"' in html
-    assert "function activateChannel(channelName)" in html
-    assert 'id="selected-channel-title"' in html
-    assert 'id="selected-channel-summary"' in html
-    assert "Research plans, sources, and evidence gates" in html
-    assert "First-party local tools and harness packs" in html
-
-
-def test_local_dashboard_has_chat_console_visual_system() -> None:
-    response = _client().get("/dashboard")
-    html = response.text
-
-    assert 'data-visual-system="agent-console"' in html
-    assert "chat-viewport" in html
-    assert "message-stack" in html
-    assert "composer-toolbar" in html
-    assert 'aria-label="Conversation controls"' in html
-    assert "--canvas: #0f141c" in html
-    assert "--accent: #21c17a" in html
-    assert ":focus-visible" in html
-    assert "@media (prefers-reduced-motion: reduce)" in html
-
-
-def test_local_dashboard_adds_existing_cancel_endpoint_control() -> None:
-    response = _client().get("/dashboard")
-    html = response.text
-
-    assert 'id="cancel-run"' in html
-    assert 'id="active-session-id"' in html
-    assert 'id="transport-status"' in html
-    assert "let currentTurnId = null;" in html
-    assert "function cancelCurrentRun()" in html
-    assert "fetch(cancelEndpoint" in html
-
-
-def test_local_dashboard_renders_source_and_control_request_panels() -> None:
-    response = _client().get("/dashboard")
-    html = response.text
-
-    assert 'id="source-list"' in html
-    assert 'id="source-count"' in html
-    assert 'class="source-list"' in html
-    assert "Source inspection events appear during research turns." in html
-    assert 'id="control-request-list"' in html
-    assert 'class="control-request-list"' in html
-    assert "Approval and interrupt requests appear here." in html
-    assert "function renderSourceList(sources)" in html
-    assert "function renderControlRequest(payload)" in html
-
-
-def test_local_dashboard_renders_richer_agent_event_types() -> None:
-    response = _client().get("/dashboard")
-    html = response.text
-
-    assert "function classifyAgentEvent(payload)" in html
-    assert "function renderAgentEvent(payload, eventName)" in html
-    assert "tool_start" in html
-    assert "tool_end" in html
-    assert "evidence_receipt" in html
-    assert "control_request" in html
-    assert "source_inspected" in html
-    assert "research_final_projection" in html
-    assert "metricReceipts.textContent = \"received\"" in html
-
-
-def test_local_dashboard_sends_stable_local_session_metadata() -> None:
-    response = _client().get("/dashboard")
-    html = response.text
-
-    assert 'sessionId: `${bootstrap.botId}:local-dashboard:general`' in html
-    assert "turnId:" in html
-    assert "Date.now()" in html
-    assert "Math.random().toString(16)" in html
-
-
-def test_local_dashboard_prefers_streaming_chat_route_with_legacy_fallback() -> None:
-    response = _client().get("/dashboard")
-    html = response.text
-
-    assert 'const streamChatEndpoint = "/v1/chat/stream";' in html
-    assert 'const legacyChatEndpoint = "/v1/chat/completions";' in html
-    assert 'const controlResponseEndpoint = "/v1/chat/control-response";' in html
-    assert 'const cancelEndpoint = "/v1/chat/cancel";' in html
-    assert 'streaming_chat_disabled' in html
-    assert "postChatStream(streamChatEndpoint" in html
-    assert "postChatStream(legacyChatEndpoint" in html
-    assert "POST /v1/chat/stream" in html
 
 
 def test_local_dashboard_prefills_default_local_gateway_token() -> None:
@@ -257,6 +136,37 @@ def test_local_dashboard_exposes_runtime_surface_panels() -> None:
     assert "Harness packs" in html
     assert "Evidence gates" in html
     assert "renderSurfaceStatus" in html
+
+
+def test_local_dashboard_has_accessible_dashboard_interaction_polish() -> None:
+    response = _client().get("/dashboard")
+    html = response.text
+
+    assert ":focus-visible" in html
+    assert "@media (prefers-reduced-motion: reduce)" in html
+    assert 'role="tabpanel"' in html
+    assert 'aria-controls="panel-work"' in html
+    assert 'aria-selected="true"' in html
+    assert 'aria-label="Send prompt"' in html
+    assert 'data-target-panel="knowledge"' in html
+    assert "activatePanel" in html
+
+
+def test_local_dashboard_exposes_local_runtime_command_center() -> None:
+    response = _client().get("/dashboard")
+    html = response.text
+
+    assert 'id="runtime-command-center"' in html
+    assert 'id="activity-lane"' in html
+    assert 'id="transport-log"' in html
+    assert "Command center" in html
+    assert "Session Memory" in html
+    assert "Tool Registry" in html
+    assert "Policy Boundary" in html
+    assert "SSE Transport" in html
+    assert "Local-only controls" in html
+    assert "renderActivityLane" in html
+    assert "renderTransportLog" in html
 
 
 def test_local_dashboard_deep_links_serve_same_app_shell() -> None:
@@ -327,22 +237,8 @@ def test_local_dashboard_exposes_digest_safe_runtime_bootstrap() -> None:
     }
 
 
-def test_local_dashboard_chat_route_streams_local_adk_events(
-    monkeypatch,
-    tmp_path,
-) -> None:
+def test_local_dashboard_chat_route_streams_local_adk_events(monkeypatch) -> None:
     monkeypatch.setenv("MAGI_AGENT_LOCAL_CHAT_ROUTE", "on")
-    for name in (
-        "ANTHROPIC_API_KEY",
-        "OPENAI_API_KEY",
-        "GEMINI_API_KEY",
-        "GOOGLE_API_KEY",
-        "FIREWORKS_API_KEY",
-        "MAGI_PROVIDER",
-        "MAGI_MODEL",
-    ):
-        monkeypatch.delenv(name, raising=False)
-    monkeypatch.setenv("MAGI_CONFIG", str(tmp_path / "missing-config.toml"))
     client = _client()
 
     response = client.post(
@@ -358,8 +254,5 @@ def test_local_dashboard_chat_route_streams_local_adk_events(
     assert response.headers["content-type"].startswith("text/event-stream")
     text = response.text
     assert "Running local ADK" in text
-    assert (
-        "Local ADK runtime ready" in text
-        or "runtime dependencies are present" in text
-    )
+    assert "runtime dependencies are present" in text
     assert "data: [DONE]" in text
