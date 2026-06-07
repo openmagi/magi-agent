@@ -322,6 +322,65 @@ class TestSqliteGoalStateStore:
 
 
 # ---------------------------------------------------------------------------
+# upsert tests (B1 Protocol promotion)
+# ---------------------------------------------------------------------------
+
+
+class TestInMemoryUpsert:
+    def test_upsert_round_trips(self) -> None:
+        store = InMemoryGoalStateStore()
+        gs = GoalState(goal="write tests", session_id="s1", status="active")
+        result = store.upsert(gs)
+        assert result is gs
+        assert store.get_goal("s1") is gs
+
+    def test_upsert_overwrites_existing_state(self) -> None:
+        store = InMemoryGoalStateStore()
+        store.set_goal("s1", "old goal")
+        store.advance("s1")
+        updated = GoalState(goal="new goal", session_id="s1", turns_used=5, max_turns=20, status="satisfied")
+        store.upsert(updated)
+        got = store.get_goal("s1")
+        assert got is not None
+        assert got.goal == "new goal"
+        assert got.turns_used == 5
+        assert got.status == "satisfied"
+
+
+class TestSqliteUpsert:
+    def test_upsert_round_trips(self, tmp_path: Path) -> None:
+        db = tmp_path / "goals.db"
+        store = SqliteGoalStateStore(db)
+        _insert_session(store, "s1")
+        gs = GoalState(goal="upsert goal", session_id="s1", status="active")
+        result = store.upsert(gs)
+        assert result.goal == gs.goal
+        assert result.status == gs.status
+        got = store.get_goal("s1")
+        assert got is not None
+        assert got.goal == "upsert goal"
+        store.close()
+
+    def test_upsert_overwrites_existing_state(self, tmp_path: Path) -> None:
+        db = tmp_path / "goals.db"
+        store = SqliteGoalStateStore(db)
+        _insert_session(store, "s1")
+        store.set_goal("s1", "original goal")
+        store.advance("s1")
+        updated = GoalState(goal="replaced goal", session_id="s1", turns_used=3, max_turns=20, status="satisfied")
+        store.upsert(updated)
+        # Read back through a fresh store to confirm durability.
+        store.close()
+        fresh = SqliteGoalStateStore(db)
+        got = fresh.get_goal("s1")
+        assert got is not None
+        assert got.goal == "replaced goal"
+        assert got.turns_used == 3
+        assert got.status == "satisfied"
+        fresh.close()
+
+
+# ---------------------------------------------------------------------------
 # Import boundary test
 # ---------------------------------------------------------------------------
 
