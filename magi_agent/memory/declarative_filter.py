@@ -30,11 +30,7 @@ _PR_ISSUE_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Commit SHAs — 7-64 hex digits that look like a git hash
-# Require word boundary + lowercase hex to reduce false positives on hex IDs
-_COMMIT_SHA_RE = re.compile(
-    r"\b[0-9a-f]{7,64}\b",
-)
+# Commit SHAs — see _LONG_SHA_RE / _BARE_SHA_RE below (used via _is_commit_sha_reference)
 
 # Explicit task-state verbs / phrases
 _TASK_STATE_VERB_RE = re.compile(

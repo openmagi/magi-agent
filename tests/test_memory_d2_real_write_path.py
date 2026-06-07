@@ -452,9 +452,7 @@ def test_real_write_result_carries_evidence_ref(
 
     # Result must expose evidence provenance
     assert result.receipt is not None
-    assert hasattr(result, "evidence_record") or hasattr(result, "evidence_ref") or (
-        result.receipt is not None  # receipt itself is the evidence anchor
-    )
+    assert result.evidence_record is not None
 
 
 def test_simulated_write_result_also_has_receipt(tmp_path: Path) -> None:
@@ -685,4 +683,59 @@ def test_memory_write_tool_host_gate_on_rejects_task_state(
     result = asyncio.run(run())
     assert result.status == "blocked"
     # No file written
+    assert not (tmp_path / "MEMORY.md").exists()
+
+
+# ---------------------------------------------------------------------------
+# I3 regression — provider ValueError must surface as FAILED, not simulated-success
+# ---------------------------------------------------------------------------
+
+
+def test_provider_write_rejected_by_byte_cap_is_failed_not_simulated(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Gate ON + fact exceeds max_write_bytes → harness result is blocked/failed,
+    evidence_record.status is 'failed', and NO partial content on disk."""
+    from magi_agent.memory.adapters.local_file_writable import (
+        LocalFileMemoryConfig,
+        LocalFileMemoryProvider,
+        MAGI_MEMORY_WRITE_ENABLED_ENV,
+    )
+    from magi_agent.harness.memory_write import MemoryWriteHarness, MemoryWriteHarnessConfig
+
+    monkeypatch.setenv(MAGI_MEMORY_WRITE_ENABLED_ENV, "1")
+
+    # Configure provider with a very small per-write cap (10 bytes)
+    provider_config = LocalFileMemoryConfig(
+        workspace_root=tmp_path,
+        enabled=True,
+        write_enabled=True,
+        maxWriteBytes=10,
+    )
+    provider = LocalFileMemoryProvider(provider_config)
+
+    harness_config = MemoryWriteHarnessConfig(enabled=True, localFakeAdapterEnabled=True)
+    harness = MemoryWriteHarness(harness_config, adapter=provider)
+
+    # A declarative fact that is well over the 10-byte cap
+    oversized_fact = "User prefers dark mode in all editors"
+    request = _make_request(oversized_fact)
+    policy = _make_policy()
+
+    result = asyncio.run(harness.write(request=request, policy=policy))
+
+    # Must NOT be success — provider rejected the write
+    assert result.status != "success", (
+        f"Expected blocked/failed but got 'success' — provider rejection was masked! "
+        f"status={result.status!r}"
+    )
+    assert result.status == "blocked"
+
+    # Evidence record must reflect the failure
+    assert result.evidence_record is not None
+    assert result.evidence_record.status == "failed"
+    assert result.evidence_record.is_real_write is False
+
+    # No partial content on disk
     assert not (tmp_path / "MEMORY.md").exists()

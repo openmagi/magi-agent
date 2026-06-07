@@ -212,8 +212,8 @@ class MemoryWriteToolHost:
 def _resolve_provider_id(provider: object | None) -> str:
     if provider is None:
         return "local-file-memory-unattached"
-    provider_id = getattr(provider, "_write_active", None)
-    if provider_id:
+    is_active = getattr(provider, "_write_active", False)
+    if is_active:
         return "local-file-memory-writable"
     return "local-file-memory-readonly"
 
