@@ -273,5 +273,6 @@ def test_local_dashboard_chat_route_streams_local_adk_events(monkeypatch) -> Non
     assert response.headers["content-type"].startswith("text/event-stream")
     text = response.text
     assert "Running local ADK" in text
-    assert "runtime dependencies are present" in text
+    assert "Set a provider or API proxy configuration" in text
+    assert "enable generated replies" in text
     assert "data: [DONE]" in text
