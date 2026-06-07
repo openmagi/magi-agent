@@ -62,7 +62,7 @@ The model-visible context is intentionally smaller than the runtime state. The m
 
 Magi Agent uses a two-plane architecture. The left side is what the model can see and propose. The right side is runtime-only control state used to decide whether proposals can advance.
 
-Google ADK is the substrate for model/tool orchestration work. Magi Agent is the product/runtime contract that compiles policy and governs context, tools, evidence, repair, projection, and audit. The Python ADK migration remains gated and default-off for live production authority until the separate rollout gates pass.
+Google ADK is the substrate for model/tool orchestration work. Magi Agent is the product/runtime contract that compiles policy and governs context, tools, evidence, repair, projection, and audit.
 
 ### Two-plane architecture
 

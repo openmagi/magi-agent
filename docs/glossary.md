@@ -44,7 +44,7 @@ fuller treatment where one exists.
 - **Boundary** — a runtime checkpoint that can gate an action (tool, child result,
   memory write, delivery, final answer). Enforcement boundaries ship default-off
   (shadow) today. See [boundaries](/docs/boundaries) and
-  [default-off gates](/docs/default-off-gates).
+  [boundaries](/docs/boundaries).
 
 - **Evidence** — durable receipts recorded for actions and claims (source, file,
   calculation, test, approval, delivery). See [evidence](/docs/evidence).

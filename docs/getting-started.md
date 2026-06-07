@@ -50,29 +50,13 @@ uv sync --extra dev --extra cli
 uv run --extra cli magi --help
 ```
 
-## Packaging follow-up
+## Runtime contract
 
-Homebrew installation exists. The remaining packaging work is improving the local dashboard onboarding, workspace volume management, local secret storage, and upgrade/rollback behavior.
+The Python ADK runtime is the substrate for Magi Agent runtime contracts. Use the
+runtime docs to understand policy snapshots, context projection, ToolHost, source
+ledgers, validators, repair policy, governed output projection, and audit.
 
-- The standalone CLI package has tested `magi` and `magi-agent` entrypoints.
-- Docker image/compose bundle publishing for multi-service local stacks remains separate from the Homebrew single-runtime path.
-- Local dashboard onboarding, local secret storage, workspace volume management, and upgrade/rollback behavior remain follow-up work.
-
-## Python ADK runtime status
-
-The Python ADK runtime is the forward substrate for Magi Agent runtime contracts, but current live authority is still gated. Public docs should describe ADK as the substrate and Magi Agent as the governing runtime contract without implying production traffic has moved to ADK by default.
-
-Use ADK docs here to understand the architecture: policy snapshot, context projection, ToolHost, source ledger, validators, repair policy, governed output projection, and audit.
-
-- The LOCAL `magi` CLI runs a real model plus first-party local tools (file read/write/edit, patch, Bash) once a provider key is set, behind permission-mode prompts. This is not gated off.
-- The default-off authority refers to external delivery/integrations (MCP,
-  browser, channel) and the enforcement boundary layer — not to whether the
-  local agent can run a task.
-- Docs may describe the contract and rollout direction, but must not imply
-  ungated external authority.
-
-## Cloud CLI boundary
-
-`packages/openmagi` is a separate cloud CLI surface. It does not install or start
-the local OSS runtime, so local docs should keep it separate from Magi Agent
-source setup.
+The local `magi` CLI runs a real model plus first-party local tools once a
+provider key is set, behind permission-mode prompts. External delivery,
+integrations, and high-authority mutations require explicit configuration,
+credentials, and approval policy.

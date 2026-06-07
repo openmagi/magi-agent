@@ -43,7 +43,7 @@ User-visible projection   <-------- Output projector + audit checkpoint
 
 Google ADK provides model/tool orchestration primitives. Magi Agent defines the higher-level runtime contract: policy snapshot, context projection, ToolHost, source ledger, claim graph, validators, repair/fallback policy, output projector, and append-only audit ledger.
 
-Where ADK-backed surfaces are marked default-off, docs should describe architecture and contracts without implying live production authority is enabled.
+Where ADK-backed surfaces are marked default-off, docs should describe architecture and contracts without implying external authority is enabled.
 
 ## Why hooks alone are not enough
 

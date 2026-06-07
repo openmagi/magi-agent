@@ -48,4 +48,4 @@ Magi Agent installs via Homebrew today; contributors can also run from a source 
 - Deployment options: See [Deployment](/docs/deployment) for local-first operation and optional managed hosting.
 - Configuration: Set one provider env key or create `~/.magi/config.toml`; see [Getting Started](/docs/getting-started) for details.
 - Security hardening: See [Security](/docs/security) for the default-off model and how to enable boundaries for production.
-- Activation gates: See [Default-Off Gates](/docs/default-off-gates) for the staged rollout pattern from disabled to production authority.
+- Authority posture: See [Security](/docs/security) and [Boundaries](/docs/boundaries) for least-privilege tools, approvals, and default-off boundary behavior.

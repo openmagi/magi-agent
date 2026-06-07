@@ -11,7 +11,7 @@ Yes. With a provider key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY
 What's default-off is the **enforcement/governance layer** (the boundary modules that can block or gate behavior) plus **external delivery and integrations** (Telegram/Discord live send, Composio) — not the agent's ability to do work. See [What works today](/docs/what-works-today).
 
 - [What works today](/docs/what-works-today)
-- [Default-off gates](/docs/default-off-gates)
+- [Boundaries](/docs/boundaries)
 
 ## What models does Magi Agent support?
 
@@ -42,7 +42,7 @@ Structural safety via Literal[False] authority flags. PythonRuntimeAuthorityConf
 
 This means the Python runtime structurally cannot perform write operations, deliver to channels, execute child agents, or block on evidence. The boundary is not a policy decision that can be overridden; it is a type-level invariant enforced by the _FalseOnlyModel base class.
 
-- [Default-off gates](/docs/default-off-gates)
+- [Security](/docs/security)
 - [Config reference](/docs/config-reference)
 
 ## How do I test a recipe locally?
@@ -92,4 +92,4 @@ The behavior depends on the on_missing field of the EvidenceContract. When set t
 However, because final_answer_blocking_enabled is Literal[False] in EvidenceEnforcementConfig, the block_final_answer enforcement is currently recorded as a "block_ready_local_fake" intent without actually blocking output. This structural safety ensures that evidence contracts can be developed and tested without risk of silently blocking production output.
 
 - [Evidence contracts](/docs/evidence-contracts)
-- [Default-off gates](/docs/default-off-gates)
+- [Boundaries](/docs/boundaries)
