@@ -143,6 +143,22 @@ def test_local_dashboard_does_not_expose_custom_gateway_token() -> None:
     assert '"gatewayToken":""' in html
 
 
+def test_local_dashboard_guides_gateway_token_failures() -> None:
+    response = _client_with_gateway_token("custom-secret-token").get("/dashboard")
+    html = response.text
+
+    assert 'id="token-help"' in html
+    assert 'id="token-error"' in html
+    assert 'aria-describedby="token-help token-error"' in html
+    assert "function setTokenError(message)" in html
+    assert "function describeChatFailure(response, text)" in html
+    assert "response.status === 401" in html
+    assert "Enter the gateway token from GATEWAY_TOKEN" in html
+    assert "Gateway token required" in html
+    assert "tokenInput.focus()" in html
+    assert "custom-secret-token" not in html
+
+
 def test_local_dashboard_exposes_runtime_surface_panels() -> None:
     response = _client().get("/dashboard")
     html = response.text
