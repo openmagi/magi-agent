@@ -3,6 +3,7 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   output: "export",
   distDir: "dist",
+  generateBuildId: async () => "magi-agent-local-dashboard",
   // All pages are client-rendered — no SSR needed for local agent dashboard
   images: {
     unoptimized: true,
