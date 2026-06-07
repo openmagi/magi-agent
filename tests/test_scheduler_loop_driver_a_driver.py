@@ -203,3 +203,93 @@ def test_run_forever_already_stopped_runs_zero_ticks(tmp_path: Path, monkeypatch
         assert asyncio.run(_run()) == 0
     finally:
         store.close()
+
+
+# ---------------------------------------------------------------------------
+# run_forever — tick exception resilience (Minor fix)
+# ---------------------------------------------------------------------------
+
+def test_run_forever_continues_after_tick_exception(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A tick that raises must NOT terminate the loop; the loop logs and continues.
+
+    The driver uses asyncio.to_thread(self.run_once), so exceptions from that
+    thread are caught and logged at WARNING level; the loop proceeds to the next
+    interval.  The loop stops only when stop_event is set.
+    """
+    import logging
+
+    monkeypatch.delenv("MAGI_SCHEDULER_EXECUTOR_ENABLED", raising=False)
+
+    tick_count = 0
+    logged_warnings: list[str] = []
+
+    class _BrokenOnFirst:
+        """Fails on the first call, succeeds afterwards."""
+        def run_once(self, **_: Any) -> Any:
+            nonlocal tick_count
+            tick_count += 1
+            if tick_count == 1:
+                raise RuntimeError("transient tick error")
+            from magi_agent.harness.scheduler_job_execution import JobExecutionResult, TickResult
+            from magi_agent.harness.scheduler_runtime import SchedulerTickResult
+            tick_result = SchedulerTickResult(
+                status="tick_skipped_lock_held",
+                firedJobIds=(),
+                skippedJobIds=(),
+                evidenceDigest="",
+            )
+            return JobExecutionResult(tickResult=tick_result, executions=())
+
+    from magi_agent.harness.scheduler_loop_driver import SchedulerLoopDriver
+
+    store = _make_store(tmp_path)
+
+    # Patch the logger to capture warnings.
+    orig_warning = logging.getLogger("magi_agent.harness.scheduler_loop_driver").warning
+
+    def _capture_warning(msg: str, *args: Any, **kwargs: Any) -> None:
+        logged_warnings.append(msg)
+        orig_warning(msg, *args, **kwargs)
+
+    logging.getLogger("magi_agent.harness.scheduler_loop_driver").warning = _capture_warning  # type: ignore[method-assign]
+
+    broken = _BrokenOnFirst()
+
+    async def _run() -> int:
+        stop = asyncio.Event()
+        driver = SchedulerLoopDriver(
+            source=store,
+            runner=_FakeRunner(),
+            owner_digest="owner:loop",
+            lock_dir=tmp_path / "lock",
+            lease_factory=_lease,
+        )
+        # Monkey-patch run_once to the broken version so we control tick behavior
+        # without triggering real execute_due_jobs machinery.
+        driver.run_once = broken.run_once  # type: ignore[method-assign]
+
+        async def _stopper() -> None:
+            # Wait until at least 2 ticks have been attempted, then stop.
+            import asyncio as _a
+            while tick_count < 2:
+                await _a.sleep(0.01)
+            stop.set()
+
+        stopper = asyncio.create_task(_stopper())
+        ticks = await asyncio.wait_for(
+            driver.run_forever(interval_seconds=0.01, stop_event=stop),
+            timeout=3.0,
+        )
+        await stopper
+        return ticks
+
+    try:
+        ticks = asyncio.run(_run())
+        # Loop ran at least 2 ticks (first raised, second succeeded) — did not die.
+        assert ticks >= 2, f"Expected >=2 ticks, got {ticks}"
+        # The warning was logged.
+        assert any("tick" in w.lower() or "scheduler" in w.lower() for w in logged_warnings), \
+            f"Expected a warning to be logged, got: {logged_warnings}"
+    finally:
+        store.close()
+        logging.getLogger("magi_agent.harness.scheduler_loop_driver").warning = orig_warning  # type: ignore[method-assign]

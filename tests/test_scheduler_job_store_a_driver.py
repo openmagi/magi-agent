@@ -241,6 +241,100 @@ def test_tick_integration_against_persistent_source(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Naive datetime rejection (Important 2)
+# ---------------------------------------------------------------------------
+
+def test_iso_utc_rejects_naive_datetime() -> None:
+    """_iso_utc must raise ValueError for a naive (tzinfo=None) datetime.
+
+    Silently accepting a naive datetime would cause astimezone() to assume LOCAL
+    time — on a non-UTC host the ISO key would be hours off, making due_jobs
+    return wrong results and a later aware==naive CAS comparison raise TypeError.
+    """
+    from datetime import datetime
+
+    from magi_agent.harness.scheduler_job_store import _iso_utc
+
+    naive = datetime(2026, 1, 1, 12, 0, 0)  # no tzinfo
+    try:
+        _iso_utc(naive)
+        assert False, "_iso_utc should have raised ValueError for naive datetime"
+    except ValueError as exc:
+        assert "naive" in str(exc).lower() or "timezone-aware" in str(exc).lower(), str(exc)
+
+
+def test_iso_utc_accepts_aware_datetime() -> None:
+    """_iso_utc must accept timezone-aware datetimes without error."""
+    from datetime import UTC, datetime, timezone, timedelta
+
+    from magi_agent.harness.scheduler_job_store import _iso_utc
+
+    utc_dt = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
+    result = _iso_utc(utc_dt)
+    assert "2026-01-01" in result
+    assert "+00:00" in result or "Z" in result.upper() or "00:00" in result
+
+    # Also works for non-UTC aware datetimes (normalized to UTC).
+    kst = datetime(2026, 1, 1, 21, 0, 0, tzinfo=timezone(timedelta(hours=9)))
+    result_kst = _iso_utc(kst)
+    assert "2026-01-01T12:00:00" in result_kst
+
+
+def test_scheduled_job_record_rejects_naive_next_run() -> None:
+    """ScheduledJobRecord field_validator must reject naive next_run at construction."""
+    from datetime import datetime
+
+    import pytest
+
+    from magi_agent.harness.scheduler_executor import ScheduledJobRecord
+
+    with pytest.raises((ValueError, Exception)) as exc_info:
+        ScheduledJobRecord(
+            jobId="job:naive",
+            scheduleExpr="every 60s",
+            nextRun=datetime(2026, 1, 1, 12, 0, 0),  # naive — no tzinfo
+        )
+    assert "naive" in str(exc_info.value).lower() or "timezone" in str(exc_info.value).lower(), \
+        f"Expected clear error message, got: {exc_info.value}"
+
+
+def test_scheduled_job_record_accepts_aware_next_run() -> None:
+    """ScheduledJobRecord must accept timezone-aware next_run."""
+    from datetime import UTC, datetime
+
+    from magi_agent.harness.scheduler_executor import ScheduledJobRecord
+
+    rec = ScheduledJobRecord(
+        jobId="job:aware",
+        scheduleExpr="every 60s",
+        nextRun=datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC),
+    )
+    assert rec.next_run.tzinfo is not None
+
+
+def test_create_with_naive_next_run_raises(tmp_path: Path) -> None:
+    """SqliteScheduledJobSource.create must reject a record with naive next_run
+    (belt-and-suspenders: caught at ScheduledJobRecord construction or _iso_utc)."""
+    from datetime import datetime
+
+    import pytest
+
+    from magi_agent.harness.scheduler_executor import ScheduledJobRecord
+    from magi_agent.harness.scheduler_job_store import SqliteScheduledJobSource
+
+    store = SqliteScheduledJobSource(tmp_path / "jobs.db")
+    try:
+        with pytest.raises((ValueError, Exception)):
+            ScheduledJobRecord(
+                jobId="job:naive",
+                scheduleExpr="every 60s",
+                nextRun=datetime(2026, 1, 1, 12, 0, 0),  # naive
+            )
+    finally:
+        store.close()
+
+
+# ---------------------------------------------------------------------------
 # Import purity (mirrors A2/A3 boundary contract)
 # ---------------------------------------------------------------------------
 

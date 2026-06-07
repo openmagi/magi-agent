@@ -46,7 +46,15 @@ def _iso_utc(value: datetime) -> str:
     Normalizing to UTC means a lexicographic string compare matches a chronological
     compare (all keys share the same +00:00 offset), so ``next_run_utc <= ?`` is a
     correct due-filter.
+
+    Raises ``ValueError`` for naive datetimes: a naive datetime passed to
+    ``astimezone()`` is silently converted assuming LOCAL time, which on a non-UTC
+    host produces an incorrect ISO key (due_jobs returns wrong results) and a later
+    ``aware == naive`` comparison in the CAS raises ``TypeError``.  Rejecting at
+    the boundary turns a silent wrong into a loud correct.
     """
+    if value.tzinfo is None:
+        raise ValueError(f"datetime must be timezone-aware, got naive: {value!r}")
     return value.astimezone(UTC).isoformat()
 
 

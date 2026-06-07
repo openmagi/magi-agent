@@ -43,10 +43,13 @@ module top level (the runner/source are injected) — verified by test.
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
+
+_log = logging.getLogger(__name__)
 
 from magi_agent.harness.scheduler_executor import ScheduledJobSource
 from magi_agent.harness.scheduler_job_execution import (
@@ -155,7 +158,10 @@ class SchedulerLoopDriver:
 
         ticks = 0
         while not stop_event.is_set():
-            await asyncio.to_thread(self.run_once)
+            try:
+                await asyncio.to_thread(self.run_once)
+            except Exception:  # noqa: BLE001 — transient errors must not kill the loop
+                _log.warning("scheduler loop tick failed", exc_info=True)
             ticks += 1
             if stop_event.is_set():
                 break

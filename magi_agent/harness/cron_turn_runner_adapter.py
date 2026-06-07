@@ -70,9 +70,17 @@ class _RunnerAdapterPort(Protocol):
 
 
 def _safe_session_suffix(job_id: str) -> str:
-    """Normalize a job id into an identifier-safe session/invocation suffix."""
+    """Normalize a job id into an identifier-safe, collision-free session/invocation suffix.
+
+    A short sha256 hash of the ORIGINAL job_id is appended so that distinct ids
+    differing only by separator (``job:a`` vs ``job-a`` vs ``job_a``) all produce
+    *different* suffixes.  Without the hash all three normalize to ``job_a``, which
+    would assign identical session_id/turn_id/invocation_id to different jobs and
+    corrupt each other's ADK session state.
+    """
+    h = hashlib.sha256(job_id.encode()).hexdigest()[:8]
     cleaned = re.sub(r"[^A-Za-z0-9_.:-]", "_", job_id)
-    return cleaned or "job"
+    return f"{cleaned or 'job'}:{h}"
 
 
 class CronTurnRunnerAdapter:

@@ -181,6 +181,64 @@ def test_timeout_via_execute_due_jobs_path() -> None:
 
 
 # ---------------------------------------------------------------------------
+# session-id collision safety (Important 1)
+# ---------------------------------------------------------------------------
+
+def test_safe_session_suffix_distinct_for_separator_variants() -> None:
+    """job ids differing only by separator char must produce DIFFERENT synthetic ids.
+
+    Before the fix, ``job:a``, ``job-a``, and ``job_a`` all normalized to
+    ``job_a`` → identical session_id/turn_id/invocation_id → potential ADK
+    session state corruption.  The sha256 hash suffix prevents this.
+    """
+    from magi_agent.harness.cron_turn_runner_adapter import _safe_session_suffix
+
+    colon  = _safe_session_suffix("job:a")
+    dash   = _safe_session_suffix("job-a")
+    under  = _safe_session_suffix("job_a")
+
+    # All three must be pairwise distinct.
+    assert colon != dash,  f"colon suffix == dash suffix: {colon!r}"
+    assert colon != under, f"colon suffix == underscore suffix: {colon!r}"
+    assert dash  != under, f"dash suffix == underscore suffix: {dash!r}"
+
+
+def test_safe_session_suffix_stable_for_same_job_id() -> None:
+    """The same job_id must always yield the same suffix (deterministic)."""
+    from magi_agent.harness.cron_turn_runner_adapter import _safe_session_suffix
+
+    assert _safe_session_suffix("job:a") == _safe_session_suffix("job:a")
+    assert _safe_session_suffix("my-job") == _safe_session_suffix("my-job")
+
+
+def test_run_turn_distinct_job_ids_get_distinct_session_ids() -> None:
+    """End-to-end: two plans with separator-variant job ids → different sessionIds."""
+    from magi_agent.harness.cron_turn_runner_adapter import CronTurnRunnerAdapter
+    from magi_agent.harness.scheduler_job_execution import CronTurnPlan
+
+    calls: list[Any] = []
+
+    class _RecordingAdapter:
+        async def collect_events(self, turn_input: Any) -> list[Any]:
+            calls.append(turn_input)
+            return []
+
+    adapter = CronTurnRunnerAdapter(runner_adapter=_RecordingAdapter())
+
+    for jid in ("job:a", "job-a", "job_a"):
+        asyncio.run(adapter.run_turn(
+            CronTurnPlan(jobId=jid, prompt="p", disabledToolsets=(), timeoutSeconds=10.0)
+        ))
+
+    session_ids = [c.session_id for c in calls]
+    assert len(set(session_ids)) == 3, f"Expected 3 distinct session_ids, got: {session_ids}"
+    turn_ids = [c.turn_id for c in calls]
+    assert len(set(turn_ids)) == 3, f"Expected 3 distinct turn_ids, got: {turn_ids}"
+    inv_ids = [c.invocation_id for c in calls]
+    assert len(set(inv_ids)) == 3, f"Expected 3 distinct invocation_ids, got: {inv_ids}"
+
+
+# ---------------------------------------------------------------------------
 # Import purity
 # ---------------------------------------------------------------------------
 
