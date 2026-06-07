@@ -11,7 +11,9 @@ MAGI_SKILL_CURATOR_ENABLED   default OFF.  When off the run() is a pure no-op;
                               no reads, no writes, gate_off=True in the result.
 MAGI_SKILL_CURATOR_SHADOW    default ON (shadow-first).  When on, the would-
                               archive set is computed but NO store mutations occur.
-                              shadow=True in the result.
+                              shadow performs NO mutation to learning_items and
+                              writes NO snapshot; it DOES persist last_run_at to
+                              prevent re-fire thrash.  shadow=True in the result.
 
 Conservative archive rule
 --------------------------
@@ -158,9 +160,19 @@ class CuratorConfig(BaseModel):
 
     @classmethod
     def from_env(cls) -> CuratorConfig:
-        """Build config from env vars (evaluated at runtime)."""
+        """Build config from env vars (evaluated at runtime).
+
+        Env vars read
+        -------------
+        MAGI_SKILL_CURATOR_ENABLED              truthy string → enabled (default OFF)
+        MAGI_SKILL_CURATOR_SHADOW               falsy string → live (default ON/shadow)
+        MAGI_SKILL_CURATOR_STALE_DAYS           integer days (default 30)
+        MAGI_SKILL_CURATOR_INTERVAL_HOURS       float hours between runs (default 168)
+        MAGI_SKILL_CURATOR_IDLE_THRESHOLD_SECONDS  float seconds idle before firing (default 3600)
+        """
         enabled = _env_flag(_ENV_ENABLED, default=False)
         shadow = _env_shadow_flag(_ENV_SHADOW, default=True)
+
         stale_days_raw = os.environ.get("MAGI_SKILL_CURATOR_STALE_DAYS")
         stale_days = _DEFAULT_STALE_DAYS
         if stale_days_raw:
@@ -168,10 +180,29 @@ class CuratorConfig(BaseModel):
                 stale_days = int(stale_days_raw)
             except (TypeError, ValueError):
                 pass
+
+        interval_hours_raw = os.environ.get("MAGI_SKILL_CURATOR_INTERVAL_HOURS")
+        interval_hours = _DEFAULT_INTERVAL_HOURS
+        if interval_hours_raw:
+            try:
+                interval_hours = float(interval_hours_raw)
+            except (TypeError, ValueError):
+                pass
+
+        idle_threshold_raw = os.environ.get("MAGI_SKILL_CURATOR_IDLE_THRESHOLD_SECONDS")
+        idle_threshold_seconds = _DEFAULT_IDLE_THRESHOLD_SECONDS
+        if idle_threshold_raw:
+            try:
+                idle_threshold_seconds = float(idle_threshold_raw)
+            except (TypeError, ValueError):
+                pass
+
         return cls(
             enabled=enabled,
             shadow=shadow,
             staleDays=stale_days,
+            intervalHours=interval_hours,
+            idleThresholdSeconds=idle_threshold_seconds,
         )
 
 
@@ -406,6 +437,58 @@ class SkillCurator:
         items = json.loads(row[0])
         return {"items": items}
 
+    def restore_from_snapshot(
+        self, snapshot_ref: str, *, tenant_id: str = "local"
+    ) -> int:
+        """Restore items archived in a curator pass back to their pre-archive status.
+
+        Reads the snapshot's ``{id, status, kind}`` rows and flips each item
+        back to the captured pre-archive status via ``store._set_status_internal``.  Only
+        items that are currently ``"archived"`` are touched — an item already
+        back in ``"proposed"`` or ``"active"`` is silently skipped (idempotent).
+
+        Parameters
+        ----------
+        snapshot_ref:
+            The ``snapshotRef`` from a prior ``CuratorResult``.
+        tenant_id:
+            Tenant scope.  Items outside this tenant are ignored.
+
+        Returns
+        -------
+        int
+            Number of items successfully restored.
+
+        Raises
+        ------
+        KeyError
+            If *snapshot_ref* is not found.
+        """
+        snap = self.get_snapshot(snapshot_ref)
+        if snap is None:
+            raise KeyError(f"Snapshot not found: {snapshot_ref!r}")
+
+        restored = 0
+        for entry in snap["items"]:
+            item_id = entry["id"]
+            target_status = entry.get("status", "proposed")
+            try:
+                result = self._store._set_status_internal(
+                    item_id,
+                    target_status,
+                    tenant_id=tenant_id,
+                    expected_status="archived",
+                )
+                if result is not None:
+                    restored += 1
+                # else: item was not archived (already restored or different status) — skip
+            except KeyError:
+                logger.warning(
+                    "SkillCurator.restore_from_snapshot: item %r not found — skipping",
+                    item_id,
+                )
+        return restored
+
     # ------------------------------------------------------------------
     # Internal
     # ------------------------------------------------------------------
@@ -488,10 +571,26 @@ class SkillCurator:
                 conn, candidates=candidates, tenant_id=tenant_id, now=now
             )
 
+            skipped_toctou = 0
             for item in candidates:
                 try:
-                    self._store.archive(item.id, actor="skill_curator", tenant_id=tenant_id)
-                    archived_ids.append(item.id)
+                    result_item = self._store.archive(
+                        item.id,
+                        actor="skill_curator",
+                        tenant_id=tenant_id,
+                        expected_status="proposed",
+                    )
+                    if result_item is None:
+                        # Item changed status between the SELECT scan and now
+                        # (e.g. auto-activated in a concurrent call) — skip it.
+                        skipped_toctou += 1
+                        logger.info(
+                            "SkillCurator: item %r changed status before archive"
+                            " (TOCTOU) — skipping (item left as-is)",
+                            item.id,
+                        )
+                    else:
+                        archived_ids.append(item.id)
                 except Exception:
                     logger.warning(
                         "SkillCurator: failed to archive item %r — skipping",
