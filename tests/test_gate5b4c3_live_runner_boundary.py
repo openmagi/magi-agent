@@ -376,6 +376,23 @@ class _FunctionCallThenFinalRunner(_FakeRunner):
         yield _FakeEvent("final answer after manual tool execution")
 
 
+class _TextAndFunctionCallEvent:
+    """A single model turn that emits preamble text AND a pending tool call.
+
+    This is the shape that produced "promise without delivery": the model says
+    it will do the work and emits the function call in the same turn.
+    """
+
+    def __init__(self) -> None:
+        self.content = _FakeContent(
+            parts=[
+                _FakePart("재무제표 분석을 진행하겠습니다."),
+                _FunctionCallOnlyPart(),
+            ],
+            role="model",
+        )
+
+
 class _FunctionResponseOnlyPart:
     function_response = {"name": "Calculation", "response": {"status": "ok"}}
 
@@ -874,6 +891,28 @@ def test_live_boundary_runs_manual_full_toolhost_continuation_for_function_call_
     assert _ManualCalculationTool.calls == [{"expression": "1 + 1"}]
     assert len(_FunctionCallThenFinalRunner.calls) == 2
     assert result.runner_error_diagnostic is None
+
+
+def test_live_boundary_executes_pending_tool_calls_emitted_with_preamble_text() -> None:
+    # Root-cause guard: when the model emits preamble text AND a tool call in the
+    # same turn, the runtime must still execute the tool and let the model finish
+    # — not short-circuit on the text and serve the unfulfilled promise.
+    primitives = _function_call_then_final_primitives()
+    _FunctionCallThenFinalRunner.event_factory = _TextAndFunctionCallEvent
+
+    result = Gate5B4C3LiveRunnerBoundary(
+        lambda: primitives,
+        adk_tools=(_ManualCalculationTool,),
+    ).invoke(_selected_full_toolhost_request(), config=_enabled_config())
+
+    assert result.status == "completed"
+    assert result.reason == "runner_completed"
+    # The pending tool call was executed, not discarded.
+    assert _ManualCalculationTool.calls == [{"expression": "1 + 1"}]
+    assert len(_FunctionCallThenFinalRunner.calls) == 2
+    assert "final answer after manual tool execution" in (
+        result.output_text_internal or ""
+    )
 
 
 def test_live_boundary_runs_manual_full_toolhost_continuation_for_candidate_function_call_event() -> None:

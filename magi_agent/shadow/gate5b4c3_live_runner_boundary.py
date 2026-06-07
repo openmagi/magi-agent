@@ -671,9 +671,14 @@ class Gate5B4C3LiveRunnerBoundary:
                             function_responses_seen = True
                         if event_count >= 64:
                             break
+                    # Drive pending tool calls to execution even when the model
+                    # also emitted preamble text in the same turn. Short-circuiting
+                    # on `output_chunks` here discarded the model's unexecuted tool
+                    # calls, leaving only a "I'll do it" promise — the structural
+                    # cause of fail-closed "runner_incomplete" turns. Continue while
+                    # the model still has unsatisfied tool-call intent we can run.
                     if (
-                        output_chunks
-                        or not function_calls
+                        not function_calls
                         or function_responses_seen
                         or not self._adk_tools
                         or not selected_full_toolhost
