@@ -35,11 +35,17 @@ def test_local_dashboard_route_serves_adk_local_app_shell() -> None:
     assert 'id="chat-form"' in html
     assert 'class="app"' in html
     assert 'class="sidebar"' in html
+    assert 'class="channel-group"' in html
+    assert 'class="channel-meta"' in html
+    assert 'class="composer-toolbar"' in html
     assert 'class="inspector"' in html
+    assert "work-card" in html
     assert 'id="panel-work"' in html
     assert 'id="panel-knowledge"' in html
     assert 'id="panel-settings"' in html
     assert "Work Stream" in html
+    assert "Live Workbench" in html
+    assert "Run Queue" in html
     assert "Open Magi Agent is ready." in html
     assert "Runtime surfaces" in html
     assert "class=\"status-band\"" in html

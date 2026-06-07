@@ -27,17 +27,18 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
   <style>
     :root {{
       color-scheme: light;
-      --bg: #f5f6fa;
+      --bg: #f4f5f7;
       --surface: #ffffff;
-      --surface-2: #fbfcff;
-      --surface-3: #eef1f6;
-      --ink: #222736;
-      --muted: #6d7484;
-      --soft: #9aa3b5;
-      --line: #dde2eb;
-      --line-strong: #cfd6e2;
-      --accent: #7047d8;
-      --accent-soft: #efe8ff;
+      --surface-2: #fafafa;
+      --surface-3: #eceff3;
+      --ink: #1f242d;
+      --muted: #667085;
+      --soft: #98a2b3;
+      --line: #e1e5ea;
+      --line-strong: #c8d0d9;
+      --accent: #256f77;
+      --accent-soft: #e8f5f6;
+      --accent-line: #b9dde1;
       --green: #2fbf7b;
       --red: #d9495f;
       --amber: #b7791f;
@@ -95,10 +96,15 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
     .dot.error {{ background: var(--red); }}
     .channel-list {{
       overflow: auto;
-      padding: 18px 12px;
+      padding: 14px 10px 18px;
+    }}
+    .channel-group {{
+      display: grid;
+      gap: 4px;
+      margin-bottom: 18px;
     }}
     .section-label {{
-      margin: 0 0 10px 8px;
+      margin: 4px 0 6px 8px;
       color: var(--soft);
       font-size: 12px;
       font-weight: 700;
@@ -108,12 +114,12 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
     .channel {{
       width: 100%;
       display: grid;
-      grid-template-columns: 22px minmax(0, 1fr) auto;
-      align-items: center;
+      grid-template-columns: 24px minmax(0, 1fr) auto;
+      align-items: start;
       gap: 8px;
-      min-height: 40px;
+      min-height: 46px;
       margin: 2px 0;
-      padding: 0 10px;
+      padding: 7px 9px;
       border: 0;
       border-radius: var(--radius);
       background: transparent;
@@ -127,6 +133,47 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
     .channel.active {{
       color: var(--ink);
       background: var(--accent-soft);
+      font-weight: 700;
+    }}
+    .channel-icon {{
+      display: grid;
+      place-items: center;
+      width: 24px;
+      height: 24px;
+      color: var(--soft);
+      font-weight: 800;
+    }}
+    .channel-main {{
+      min-width: 0;
+    }}
+    .channel-title {{
+      display: block;
+      line-height: 1.2;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }}
+    .channel-meta {{
+      display: block;
+      margin-top: 3px;
+      color: var(--soft);
+      font-size: 11px;
+      font-weight: 500;
+      line-height: 1.25;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }}
+    .channel-count {{
+      min-width: 18px;
+      height: 18px;
+      display: inline-grid;
+      place-items: center;
+      margin-top: 2px;
+      border-radius: 999px;
+      background: var(--surface-3);
+      color: var(--soft);
+      font-size: 11px;
       font-weight: 700;
     }}
     .channel .badge {{
@@ -160,6 +207,16 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       padding: 0 24px;
       background: var(--surface);
       border-bottom: 1px solid var(--line);
+    }}
+    .crumbs {{
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 2px;
+      color: var(--soft);
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
     }}
     .topbar-title {{
       min-width: 0;
@@ -218,6 +275,21 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       margin: 12px auto 0;
       color: var(--muted);
       text-align: left;
+    }}
+    .activity-kicker {{
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 28px;
+      margin-bottom: 14px;
+      padding: 0 10px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface-2);
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
     }}
     .empty-state h3 {{
       margin: 0 0 8px;
@@ -289,8 +361,9 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       align-self: flex-end;
       padding: 12px 14px;
       border-radius: var(--radius);
-      background: var(--accent-soft);
-      border: 1px solid #ddceff;
+      background: var(--ink);
+      border: 1px solid var(--ink);
+      color: white;
     }}
     .message.assistant {{
       align-self: flex-start;
@@ -325,7 +398,7 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       background: var(--surface);
       box-shadow: var(--shadow);
     }}
-    .composer-strip {{
+    .composer-toolbar {{
       display: flex;
       align-items: center;
       justify-content: space-between;
@@ -340,6 +413,26 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       gap: 8px;
       color: var(--muted);
       font-size: 13px;
+    }}
+    .composer-tools {{
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }}
+    .tool-chip {{
+      min-height: 26px;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 0 9px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface-2);
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
     }}
     textarea {{
       width: 100%;
@@ -441,6 +534,12 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       overflow: auto;
       padding: 0 14px 18px;
     }}
+    .work-card {{
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--surface);
+      box-shadow: 0 5px 18px rgba(31, 38, 52, 0.04);
+    }}
     .timeline {{
       display: flex;
       flex-direction: column;
@@ -455,8 +554,8 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       color: var(--muted);
     }}
     .event.pending {{
-      border-color: #d8ccff;
-      background: #fbf9ff;
+      border-color: var(--accent-line);
+      background: var(--accent-soft);
     }}
     .event strong {{
       display: block;
@@ -560,15 +659,47 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
         <div class="brand-meta"><span class="dot" id="runtime-dot"></span><span id="runtime-label">Checking runtime</span></div>
       </div>
       <nav class="channel-list" aria-label="Local channels">
-        <p class="section-label">General</p>
-        <button class="channel active" type="button"><span>#</span><span>general</span><span class="badge"></span></button>
-        <button class="channel" type="button"><span>#</span><span>research</span><span class="badge"></span></button>
-        <button class="channel" type="button"><span>#</span><span>coding</span><span class="badge"></span></button>
-        <button class="channel" type="button"><span>#</span><span>automation</span><span class="badge"></span></button>
-        <p class="section-label" style="margin-top:18px">Runtime</p>
-        <button class="channel" type="button"><span>*</span><span>Memory</span><span></span></button>
-        <button class="channel" type="button"><span>*</span><span>Tools</span><span></span></button>
-        <button class="channel" type="button"><span>*</span><span>Evidence</span><span></span></button>
+        <div class="channel-group">
+          <p class="section-label">General</p>
+          <button class="channel active" type="button">
+            <span class="channel-icon">#</span>
+            <span class="channel-main"><span class="channel-title">general</span><span class="channel-meta">Live local workspace</span></span>
+            <span class="badge"></span>
+          </button>
+          <button class="channel" type="button">
+            <span class="channel-icon">#</span>
+            <span class="channel-main"><span class="channel-title">research</span><span class="channel-meta">Evidence and citations</span></span>
+            <span class="channel-count">0</span>
+          </button>
+          <button class="channel" type="button">
+            <span class="channel-icon">#</span>
+            <span class="channel-main"><span class="channel-title">coding</span><span class="channel-meta">Patches and tests</span></span>
+            <span class="channel-count">0</span>
+          </button>
+          <button class="channel" type="button">
+            <span class="channel-icon">#</span>
+            <span class="channel-main"><span class="channel-title">automation</span><span class="channel-meta">Plans and long-running work</span></span>
+            <span class="channel-count">0</span>
+          </button>
+        </div>
+        <div class="channel-group">
+          <p class="section-label">Runtime</p>
+          <button class="channel" type="button">
+            <span class="channel-icon">*</span>
+            <span class="channel-main"><span class="channel-title">Memory</span><span class="channel-meta">Receipts and recall</span></span>
+            <span></span>
+          </button>
+          <button class="channel" type="button">
+            <span class="channel-icon">*</span>
+            <span class="channel-main"><span class="channel-title">Tools</span><span class="channel-meta">Available local actions</span></span>
+            <span></span>
+          </button>
+          <button class="channel" type="button">
+            <span class="channel-icon">*</span>
+            <span class="channel-main"><span class="channel-title">Evidence</span><span class="channel-meta">Inspectable outputs</span></span>
+            <span></span>
+          </button>
+        </div>
       </nav>
       <div class="sidebar-footer">
         <span id="footer-runtime">magi-agent</span>
@@ -579,6 +710,7 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
     <main class="main">
       <header class="topbar">
         <div class="topbar-title">
+          <div class="crumbs"><span>Dashboard</span><span>/</span><span>Local Agent</span></div>
           <h2># general</h2>
           <p id="route-summary">Local Magi Agent workspace</p>
         </div>
@@ -591,6 +723,7 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
 
       <section class="messages" id="messages" aria-live="polite">
         <div class="empty-state" id="empty-state">
+          <div class="activity-kicker"><span class="dot ready"></span><span>Live Workbench</span></div>
           <div class="welcome-message">
             <h3>Open Magi Agent is ready.</h3>
             <p>Run research, coding, document review, planning, and automation from this local workspace.</p>
@@ -611,9 +744,13 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
 
       <section class="composer-wrap">
         <form class="composer" id="chat-form">
-          <div class="composer-strip">
+          <div class="composer-toolbar">
             <span class="mode"><span class="dot ready"></span>Live run</span>
-            <span class="mode">Streams ADK events when the runtime emits them</span>
+            <span class="composer-tools" aria-label="Composer tools">
+              <span class="tool-chip">Run Queue</span>
+              <span class="tool-chip">SSE</span>
+              <span class="tool-chip">ADK</span>
+            </span>
           </div>
           <textarea id="prompt" placeholder="Ask the local agent to inspect, write, research, or plan..."></textarea>
           <div class="composer-actions">
@@ -644,7 +781,7 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
       </div>
       <div class="panel">
         <div id="panel-work" class="timeline">
-          <div class="event pending"><strong>Runtime check</strong><code>Waiting for /healthz</code></div>
+          <div class="event pending work-card"><strong>Runtime check</strong><code>Waiting for /healthz</code></div>
         </div>
         <div id="panel-knowledge" class="hidden">
           <p class="brand-meta">Local knowledge and artifacts are exposed by runtime contracts when enabled.</p>
@@ -712,7 +849,7 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
 
     function addEvent(title, detail, tone) {{
       const node = document.createElement("div");
-      node.className = tone === "pending" ? "event pending" : "event";
+      node.className = tone === "pending" ? "event pending work-card" : "event work-card";
       const safeDetail = detail ? `<code>${{escapeText(detail)}}</code>` : "";
       node.innerHTML = `<strong>${{escapeText(title)}}</strong>${{safeDetail}}`;
       if (tone === "error") node.style.borderColor = "#f2bfca";
