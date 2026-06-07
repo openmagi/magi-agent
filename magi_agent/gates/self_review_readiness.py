@@ -34,14 +34,16 @@ Safety invariants asserted:
     the whole track and is a first-class checkable criterion here).
   • C3 curator archive-only + snapshot-backed (conservative rule, NOT hard-delete).
 
-Env gate: ``MAGI_SELF_REVIEW_KILL_SWITCH_ENABLED`` (default OFF means kill-switch
-is OFF — i.e. not blocking).  The primary enable gate is ``MAGI_SELF_REVIEW_LIVE_ENABLED``
-(default OFF).  When the env gate is OFF the resolved mode is ``disabled``
-regardless of config — exactly like ``learning_live_readiness``'s short-circuit.
+Env gate: ``MAGI_SELF_REVIEW_LIVE_ENABLED`` (default OFF).  When this env gate
+is OFF the resolved mode is ``disabled`` regardless of config — exactly like
+``learning_live_readiness``'s short-circuit.  There is no kill-switch env var;
+the kill switch is the config field ``kill_switch_enabled`` (default ``True`` =
+blocking/safe).  An operator sets it ``False`` in config to allow promotion.
 
-Triple default-OFF: the env gate is OFF, the config ``enabled=False``, and
-the kill-switch defaults to ON (blocking) — three independent defaults that must
-all be deliberately cleared before any live promotion is possible.
+Triple default-OFF: the env gate is OFF, the config ``enabled=False``, and the
+config field ``kill_switch_enabled=True`` (blocking) — three independent
+defaults that must all be deliberately cleared before any live promotion is
+possible.
 
 Human-approval invariant
 ------------------------
@@ -100,8 +102,6 @@ _SAFE_ENVIRONMENTS = frozenset({"local", "development", "staging", "production"}
 
 #: Env variable that enables the live self-review layer (default OFF).
 _LIVE_ENV_VAR: str = "MAGI_SELF_REVIEW_LIVE_ENABLED"
-#: Env variable for the self-review kill-switch (default ON = blocking).
-_KILL_SWITCH_ENV_VAR: str = "MAGI_SELF_REVIEW_KILL_SWITCH_ENABLED"
 #: Env variable that enables self-review telemetry (default OFF).
 _TELEMETRY_ENV_VAR: str = "MAGI_SELF_REVIEW_TELEMETRY_ENABLED"
 
@@ -415,8 +415,6 @@ def emit_self_review_rollout_staging_event(
         return None
 
     try:
-        from collections.abc import Callable as _Callable
-
         event = DeterministicRuntimeEvent(
             eventId="self_review.rollout.staging",
             runId="self_review.rollout",
@@ -451,8 +449,6 @@ def emit_self_review_rollout_staging_event(
         return None
 
     if sink is not None:
-        from collections.abc import Callable as _Callable2
-
         if callable(sink):
             sink(event)  # type: ignore[operator]
     else:
