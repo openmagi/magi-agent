@@ -72,6 +72,11 @@ True the decision is computed and recorded but ``observe_only`` is set so the
 driver treats it as observe-only (no real re-injection).  Default OFF behavior
 is governed by the env gate, not shadow.
 
+NOTE: No production loop driver currently calls the next turn — the goal-loop
+driver (Track A 'A-driver' follow-on) is pending.  Until then this layer only
+emits decisions; the gate stays default-OFF.  (Mirrors
+``scheduler_job_execution.py``'s style for undischarged drivers.)
+
 Authority
 ---------
 This module computes a decision and advances ``GoalState`` (B1 store).  It does
@@ -107,7 +112,14 @@ from magi_agent.tools.manifest import ToolSource
 # ---------------------------------------------------------------------------
 
 GOAL_LOOP_ENABLED_ENV_VAR = "MAGI_GOAL_LOOP_ENABLED"
-"""Master gate. Default OFF — when unset/false the hook/decision is a no-op."""
+"""Master gate. Default OFF — when unset/false the hook/decision is a no-op.
+
+A LIVE loop (decisions that are acted on, not merely observed) requires BOTH:
+  * ``MAGI_GOAL_LOOP_ENABLED=1``  — this gate ON, AND
+  * ``MAGI_GOAL_LOOP_JUDGE_SHADOW=0``  — shadow gate OFF.
+If shadow is ON (the default), all decisions are ``observe_only`` and no
+continuation is dispatched — the loop runs in dry-run mode only.
+"""
 
 EVIDENCE_GATE_ENV_VAR = "MAGI_GOAL_LOOP_EVIDENCE_GATE"
 """B4 evidence-gate env switch. Default OFF. When ON AND an EvidenceGate is
@@ -404,6 +416,9 @@ def _advance_continue_or_exhaust(
     here de-risks B5 from accidental behavioral divergence across branches.
     """
     if state.turns_used + 1 >= state.max_turns:
+        # NOTE: advance() is called even in observe_only/shadow mode by design —
+        # shadow runs consume turns_used so the state machine stays accurate; it
+        # is the driver (not this layer) that no-ops on observe_only results.
         updated = store.advance(session_id)
         return _result(
             loop_input,
@@ -414,6 +429,7 @@ def _advance_continue_or_exhaust(
             observe_only=observe_only,
             gate_passed=gate_passed,
         )
+    # NOTE: same as above — advance() runs in shadow/observe_only mode by design.
     updated = store.advance(session_id)
     return _result(
         loop_input,
