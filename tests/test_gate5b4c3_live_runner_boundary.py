@@ -393,6 +393,30 @@ class _TextAndFunctionCallEvent:
         )
 
 
+class _DuplicateTextAndFunctionCallRunner(_FakeRunner):
+    calls: list[dict[str, object]] = []
+
+    async def run_async(self, **kwargs: object) -> object:
+        type(self).run_kwargs = kwargs
+        type(self).calls.append(kwargs)
+        if len(type(self).calls) == 1:
+            yield _TextAndFunctionCallEvent()
+            yield _TextAndFunctionCallEvent()
+            return
+        message = kwargs["new_message"]
+        assert isinstance(message, _FakeContent)
+        assert "Tool execution results" in message.parts[0].text
+        yield _FakeEvent("final answer after one manual tool execution")
+
+
+class _EventCapTextAndFunctionCallRunner(_FakeRunner):
+    async def run_async(self, **kwargs: object) -> object:
+        type(self).run_kwargs = kwargs
+        for _ in range(63):
+            yield _FakeEvent("")
+        yield _TextAndFunctionCallEvent()
+
+
 class _FunctionResponseOnlyPart:
     function_response = {"name": "Calculation", "response": {"status": "ok"}}
 
@@ -634,6 +658,39 @@ def _function_call_then_final_primitives() -> Gate5B4C3LiveAdkPrimitives:
     return Gate5B4C3LiveAdkPrimitives(
         Agent=_FakeAgent,
         Runner=_FunctionCallThenFinalRunner,
+        InMemorySessionService=_FakeSessionService,
+        Content=_FakeContent,
+        Part=_FakePart,
+        GenerateContentConfig=_FakeGenerateContentConfig,
+    )
+
+
+def _duplicate_text_and_function_call_primitives() -> Gate5B4C3LiveAdkPrimitives:
+    _FakeAgent.created_kwargs = {}
+    _DuplicateTextAndFunctionCallRunner.created_kwargs = {}
+    _DuplicateTextAndFunctionCallRunner.run_kwargs = {}
+    _DuplicateTextAndFunctionCallRunner.calls = []
+    _ManualCalculationTool.calls = []
+    _FakeGenerateContentConfig.created_kwargs = {}
+    return Gate5B4C3LiveAdkPrimitives(
+        Agent=_FakeAgent,
+        Runner=_DuplicateTextAndFunctionCallRunner,
+        InMemorySessionService=_FakeSessionService,
+        Content=_FakeContent,
+        Part=_FakePart,
+        GenerateContentConfig=_FakeGenerateContentConfig,
+    )
+
+
+def _event_cap_text_and_function_call_primitives() -> Gate5B4C3LiveAdkPrimitives:
+    _FakeAgent.created_kwargs = {}
+    _EventCapTextAndFunctionCallRunner.created_kwargs = {}
+    _EventCapTextAndFunctionCallRunner.run_kwargs = {}
+    _ManualCalculationTool.calls = []
+    _FakeGenerateContentConfig.created_kwargs = {}
+    return Gate5B4C3LiveAdkPrimitives(
+        Agent=_FakeAgent,
+        Runner=_EventCapTextAndFunctionCallRunner,
         InMemorySessionService=_FakeSessionService,
         Content=_FakeContent,
         Part=_FakePart,
@@ -913,6 +970,32 @@ def test_live_boundary_executes_pending_tool_calls_emitted_with_preamble_text() 
     assert "final answer after manual tool execution" in (
         result.output_text_internal or ""
     )
+
+
+def test_live_boundary_deduplicates_pending_tool_calls_across_events() -> None:
+    result = Gate5B4C3LiveRunnerBoundary(
+        _duplicate_text_and_function_call_primitives,
+        adk_tools=(_ManualCalculationTool,),
+    ).invoke(_selected_full_toolhost_request(), config=_enabled_config())
+
+    assert result.status == "completed"
+    assert _ManualCalculationTool.calls == [{"expression": "1 + 1"}]
+    assert len(_DuplicateTextAndFunctionCallRunner.calls) == 2
+    assert "final answer after one manual tool execution" in (
+        result.output_text_internal or ""
+    )
+
+
+def test_live_boundary_does_not_execute_manual_tool_at_event_cap() -> None:
+    result = Gate5B4C3LiveRunnerBoundary(
+        _event_cap_text_and_function_call_primitives,
+        adk_tools=(_ManualCalculationTool,),
+    ).invoke(_selected_full_toolhost_request(), config=_enabled_config())
+
+    assert result.status == "error"
+    assert result.reason == "runner_incomplete"
+    assert result.event_count == 64
+    assert _ManualCalculationTool.calls == []
 
 
 def test_live_boundary_runs_manual_full_toolhost_continuation_for_candidate_function_call_event() -> None:
