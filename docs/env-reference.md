@@ -16,11 +16,14 @@ model-free stub runner.
 
 Provider keys (the CLI auto-detects the first one present, in this order):
 
-- `ANTHROPIC_API_KEY` — selects the `anthropic` provider. Default model `claude-sonnet-4-5`.
-- `OPENAI_API_KEY` — selects the `openai` provider. Default model `gpt-4o`.
-- `GEMINI_API_KEY` — selects the `gemini` provider. Default model `gemini-2.0-flash`.
+- `ANTHROPIC_API_KEY` — selects the `anthropic` provider. Default model `claude-sonnet-4-6`.
+- `OPENAI_API_KEY` — selects the `openai` provider. Default model `gpt-5.5`.
+- `GEMINI_API_KEY` — selects the `gemini` provider. Default model `gemini-3.5-flash`.
 - `GOOGLE_API_KEY` — alias accepted for the `gemini` provider (used when `GEMINI_API_KEY` is unset).
-- `FIREWORKS_API_KEY` — selects the `fireworks` provider. Default model `accounts/fireworks/models/llama-v3p1-70b-instruct`.
+- `FIREWORKS_API_KEY` — selects the `fireworks` provider. Default model `accounts/fireworks/models/kimi-k2-instruct`.
+
+> Default model ids drift as providers retire names; override with `MAGI_MODEL`
+> or `[model].model`. The authoritative defaults live in `magi_agent/cli/providers.py`.
 
 Provider / model selection:
 
@@ -39,6 +42,10 @@ Useful local toggles:
 - `MAGI_FIRST_PARTY_TOOLS_ENABLED` (default on) — set to `0`/`false`/`no`/`off` to disable Magi's first-party local tools once a real model runner is configured.
 - `MAGI_TOOL_CONCURRENCY_ENABLED` (default `0`) — set to `1` to allow concurrent tool execution within a turn.
 - `MAGI_MAX_TOOL_CONCURRENCY` (default `8`) — maximum concurrent tool executions per turn.
+- `MAGI_RUNTIME_PROFILE` — selects a runtime profile (`magi_agent/config/env.py`).
+- `MAGI_MEMORY_WRITE_ENABLED` (default off) — gates the `MemoryWrite` tool; memory is read-only unless enabled.
+- `MAGI_EDIT_FUZZY_MATCH_ENABLED` — enables fuzzy matching for the edit tool.
+- `MAGI_EDIT_MATCH_EVIDENCE_ENFORCEMENT` — enables edit-match evidence enforcement.
 
 ## Local server
 
@@ -62,18 +69,21 @@ These are optional and usually set by release or container builds.
 
 ## Authority and rollout flags
 
-The authority flags below correspond to PythonRuntimeAuthorityConfig fields. All
+The authority flags below correspond to PythonRuntimeAuthorityConfig fields and
+are read from the hosted runtime only (the local CLI does not read them). All
 must be `false` or omitted. The `Literal[False]` type annotation means the runtime
-structurally rejects attempts to set them to true.
+structurally rejects attempts to set them to true, and the env parser raises if
+any is set truthy. The env var names carry the `CORE_AGENT_PYTHON_` prefix
+(`magi_agent/config/env.py`):
 
-- `TRANSCRIPT_WRITE` — Must be false. Controls transcript write authority.
-- `SSE_WRITE` — Must be false. Controls SSE write authority.
-- `CHANNEL_DELIVERY` — Must be false. Controls channel delivery authority.
-- `DB_WRITE` — Must be false. Controls database write authority.
-- `WORKSPACE_MUTATION` — Must be false. Controls workspace mutation authority.
-- `CHILD_EXECUTION` — Must be false. Controls child agent execution authority.
-- `MISSION_RUNTIME` — Must be false. Controls mission runtime authority.
-- `EVIDENCE_BLOCK_MODE` — Must be false. Controls evidence blocking mode.
+- `CORE_AGENT_PYTHON_TRANSCRIPT_WRITE` — Must be false. Transcript write authority.
+- `CORE_AGENT_PYTHON_SSE_WRITE` — Must be false. SSE write authority.
+- `CORE_AGENT_PYTHON_CHANNEL_DELIVERY` — Must be false. Channel delivery authority.
+- `CORE_AGENT_PYTHON_DB_WRITE` — Must be false. Database write authority.
+- `CORE_AGENT_PYTHON_WORKSPACE_MUTATION` — Must be false. Workspace mutation authority.
+- `CORE_AGENT_PYTHON_CHILD_EXECUTION` — Must be false. Child agent execution authority.
+- `CORE_AGENT_PYTHON_MISSION_RUNTIME` — Must be false. Mission runtime authority.
+- `CORE_AGENT_PYTHON_EVIDENCE_BLOCK_MODE` — Must be false. Evidence blocking mode.
 
 - [Security](/docs/security)
 - [Config reference](/docs/config-reference)

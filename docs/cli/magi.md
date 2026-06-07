@@ -12,7 +12,7 @@ Magi is the headless and interactive CLI for Magi Agent. It uses the same
 Install Magi Agent with Homebrew:
 
 ```sh
-brew install openmagi/tap/magi-agent
+brew install --force-bottle openmagi/tap/magi-agent
 ```
 
 That installs both commands:
@@ -319,12 +319,24 @@ what is and is not configured before running a turn. It checks:
 magi doctor
 ```
 
-## Stub sub-commands
+## Other sub-commands
 
-The following sub-commands resolve but are not yet implemented:
+```sh
+magi auth composio status   # show Composio authentication status (implemented)
+magi legalbench ...         # run the LegalBench evaluation harness (implemented)
+```
+
+`magi auth composio status` reports whether the optional Composio integration is
+configured. `magi legalbench` drives the LegalBench measurement harness; it
+requires `MAGI_LEGAL_HARNESS_ENABLED=1` and a dataset under `--data-root`
+(`--manifest`, `--max-tasks`, `--ablation` options), and prints harness/baseline/
+lift as JSON.
+
+### Stub sub-commands
+
+These resolve but are not yet implemented:
 
 ```sh
 magi config   # manage configuration (stub)
 magi mcp      # manage MCP connections (stub)
-magi auth     # manage authentication (stub)
 ```

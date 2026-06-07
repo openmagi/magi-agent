@@ -117,7 +117,7 @@ spreadsheet_pack = RecipePackManifest(
 source_contract = EvidenceContract(
     id="myorg.spreadsheet-factcheck.source-required",
     description="Require source inspection before citing numbers.",
-    triggers=("after_tool_use", "before_commit"),
+    triggers=("afterToolUse", "beforeCommit"),
     requirements=(
         EvidenceRequirement(
             type="SourceInspection",
@@ -131,7 +131,7 @@ source_contract = EvidenceContract(
 calculation_contract = EvidenceContract(
     id="myorg.spreadsheet-factcheck.calculation-verified",
     description="Require Calculation evidence for derived figures.",
-    triggers=("before_commit",),
+    triggers=("beforeCommit",),
     requirements=(
         EvidenceRequirement(
             type="Calculation",
@@ -179,6 +179,6 @@ test_evidence = EvidenceRecord(
 
 ## How this compares to built-in recipes
 
-This recipe is under 100 lines. It defines one pack manifest, two evidence contracts, two scopes, and a local test. When activated, the harness engine resolves these contracts, the hook bus evaluates them at after_tool_use and before_commit, and the enforcement boundary logs audit events for missing evidence.
+This recipe is under 100 lines. It defines one pack manifest, two evidence contracts, two scopes, and a local test. When activated, the harness engine resolves these contracts, the hook bus evaluates them at afterToolUse and beforeCommit, and the enforcement boundary logs audit events for missing evidence.
 
 Compare this with the built-in research domain (~16,000 lines) which adds source ledger tracking with 9 source kinds and trust tiers, citation auditing with pass/failure/missing per citation, claim graph dependency tracking, multi-layer scope enforcement with child agent delegation, and repair policies with retry backoff. The built-in coding domain (~3,800 lines) adds git diff verification, test run validation with exit code checks, diagnostics integration, and planner command alignment. Most custom recipes need far less; the under-100-line pattern above covers the typical case.
