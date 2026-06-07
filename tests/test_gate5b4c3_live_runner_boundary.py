@@ -11,6 +11,7 @@ from magi_agent.shadow.gate5b4c3_live_runner_boundary import (
     Gate5B4C3LiveAdkPrimitives,
     Gate5B4C3LiveRunnerBoundary,
     Gate5B4C3LiveRunnerBoundaryResult,
+    _looks_like_incomplete_full_toolhost_output,
 )
 from magi_agent.shadow.gate5b4c3_shadow_generation_contract import (
     Gate5B4C3ShadowGenerationBudgets,
@@ -1483,3 +1484,46 @@ def test_live_boundary_source_keeps_adk_imports_inside_boundary_loader_only() ->
     assert "os.system" not in source
     assert "exec(" not in source
     assert "eval(" not in source
+
+
+# ── Incomplete-output heuristic: guard against false positives on long answers ──
+
+
+def test_short_promise_only_output_is_incomplete() -> None:
+    # A one-line "I'll run the report" stub with no delivered substance is the
+    # genuine incomplete case the heuristic must keep catching.
+    stub = "선정된 종목들에 대해 multibagger 분석을 실행하겠습니다."
+    assert _looks_like_incomplete_full_toolhost_output(stub) is True
+
+
+def test_wait_phrasing_output_is_incomplete() -> None:
+    assert (
+        _looks_like_incomplete_full_toolhost_output(
+            "분석을 진행하겠습니다. 잠시만 기다려 주세요."
+        )
+        is True
+    )
+
+
+def test_long_substantive_korean_analysis_is_not_incomplete() -> None:
+    # A delivered financial analysis legitimately uses polite future-tense
+    # ("진행하겠습니다") and work references ("분석") without literally writing a
+    # completion token. It must NOT be flagged incomplete just for that phrasing.
+    delivered = (
+        "내외디스틸러리 재무제표 분석 내용을 정리해 드립니다. "
+        + "법인은 2025년 4월 14일부터 12월 31일까지 매출이 발생했으며 "
+        + "초기 시설투자로 인해 결손 상태입니다. "
+        * 30
+        + "추가로 필요한 검토는 다음과 같이 진행하겠습니다."
+    )
+    assert len(" ".join(delivered.split())) > 600
+    assert _looks_like_incomplete_full_toolhost_output(delivered) is False
+
+
+def test_completion_token_output_is_not_incomplete() -> None:
+    assert (
+        _looks_like_incomplete_full_toolhost_output(
+            "분석을 실행하겠습니다. 결과는 다음과 같습니다."
+        )
+        is False
+    )

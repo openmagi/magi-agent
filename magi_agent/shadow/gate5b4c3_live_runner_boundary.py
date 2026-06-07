@@ -164,6 +164,10 @@ _COMPLETION_EVIDENCE_RE = re.compile(
     r"(?:완료|끝났|마쳤|결과|final\s+answer|completed|done)",
     re.IGNORECASE,
 )
+# Promise+work-reference phrasing only signals an incomplete stub for short
+# outputs; longer answers that carry real delivered content are treated as
+# complete even without an explicit completion token.
+_INCOMPLETE_PROMISE_MAX_OUTPUT_CHARS = 600
 _PRE_PROVIDER_EXCEPTION_CATEGORIES = frozenset(
     {
         "provider_client_setup_failure",
@@ -1084,6 +1088,14 @@ def _looks_like_incomplete_full_toolhost_output(output_text: str) -> bool:
         return False
     if _INCOMPLETE_WAIT_OUTPUT_RE.search(normalized):
         return True
+    # A "promise to do work" phrase ("...분석을 실행하겠습니다") only marks an
+    # incomplete stub when the turn delivered little else. A substantive answer
+    # (e.g. a finished Korean financial analysis) legitimately mixes polite
+    # future-tense with work references and rarely contains a literal completion
+    # token, so only short promise-dominated output should be treated as
+    # incomplete — otherwise real answers fail closed as "runner_incomplete".
+    if len(normalized) > _INCOMPLETE_PROMISE_MAX_OUTPUT_CHARS:
+        return False
     return bool(
         _INCOMPLETE_PROMISE_OUTPUT_RE.search(normalized)
         and _INCOMPLETE_WORK_REF_RE.search(normalized)
