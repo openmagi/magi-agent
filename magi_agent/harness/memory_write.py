@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import re
 import time
 from collections.abc import Mapping, Sequence
@@ -460,7 +459,31 @@ class MemoryWriteHarness:
         # ------------------------------------------------------------------ #
         real_write_attempted = False
         if body and self.adapter is not None:
-            real_write_attempted = await _attempt_real_write(self.adapter, body, core_operation)
+            try:
+                real_write_attempted = await _attempt_real_write(
+                    self.adapter, body, core_operation
+                )
+            except _ProviderWriteRejectedError as exc:
+                # Provider explicitly rejected the write (e.g. byte cap exceeded).
+                # Surface as FAILED — do NOT fall through to simulated-success.
+                planned_receipt = _planned_receipt_for_request(safe_request)
+                ev = MemoryWriteEvidenceRecord(
+                    status="failed",
+                    isRealWrite=False,
+                    isDeclarative=True,
+                    providerId=safe_request.provider_id,
+                    turnId=safe_request.turn_id,
+                    operation=core_operation,
+                    observedAt=time.time(),
+                    rejectionReason=exc.reason,
+                )
+                return _result(
+                    status="blocked",
+                    reason_codes=("provider_write_rejected",),
+                    receipt=planned_receipt,
+                    policy_snapshot_digest=policy_digest,
+                    evidence_record=ev,
+                )
 
         receipt = fake_successful_test_receipt(
             provider_id=safe_request.provider_id,
@@ -557,6 +580,20 @@ def _result(
     )
 
 
+class _ProviderWriteRejectedError(Exception):
+    """Raised by ``_attempt_real_write`` when the provider rejects the write
+    with a ``ValueError`` (e.g. per-write or cumulative byte cap exceeded).
+
+    Distinct from ``UnsupportedMemoryOperationError`` (gate-off) so the
+    caller can surface a FAILED outcome rather than masking it as a simulated
+    success.
+    """
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
 async def _attempt_real_write(
     adapter: object,
     body: str,
@@ -564,8 +601,14 @@ async def _attempt_real_write(
 ) -> bool:
     """Attempt a real write via the injected provider.
 
-    Returns True if the write was attempted and succeeded; False otherwise.
-    Fails-open (returns False) if the provider raises or is not writable.
+    Returns True if the write was attempted and succeeded; False if the
+    provider is not writable or the gate is off (caller falls back to
+    simulated path).
+
+    Raises ``_ProviderWriteRejectedError`` if the provider raises
+    ``ValueError`` (byte-cap exceeded or other validation failure) so that
+    the caller can surface a FAILED outcome rather than masking it as a
+    simulated success.
 
     The write gate is ultimately enforced by D1's LocalFileMemoryProvider:
     - provider._write_active must be True (set by MAGI_MEMORY_WRITE_ENABLED or
@@ -593,9 +636,13 @@ async def _attempt_real_write(
     except UnsupportedMemoryOperationError:
         # Gate is off on the provider side — fall back to simulated
         return False
+    except ValueError as exc:
+        # Provider rejected the write (byte cap, path safety, etc.) —
+        # re-raise as a typed error so the harness reports FAILED, not simulated
+        raise _ProviderWriteRejectedError(str(exc)) from exc
     except Exception:  # noqa: BLE001
-        # Any other error (size cap, path error…) → fall back to simulated,
-        # never crash the write boundary
+        # Unexpected I/O or other runtime error — fail-open, return False
+        # so the caller can still fall back to simulated without crashing.
         return False
 
 

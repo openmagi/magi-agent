@@ -343,6 +343,7 @@ _CORE_TOOL_MANIFESTS: tuple[ToolManifest, ...] = (
                         "The declarative fact to remember. "
                         "Must be a stable user preference or trait, not a task event."
                     ),
+                    "maxLength": 2000,
                 },
                 "target_file": {
                     "type": "string",
@@ -355,7 +356,7 @@ _CORE_TOOL_MANIFESTS: tuple[ToolManifest, ...] = (
         budget=Budget(max_calls_per_turn=5, max_parallel=1),
         dangerous=False,
         is_concurrency_safe=False,
-        mutates_workspace=False,
+        mutates_workspace=True,
         parallel_safety="unsafe",
         available_in_modes=("act",),
         tags=("memory", "write", "declarative"),
