@@ -1,0 +1,33 @@
+# Open Magi
+
+Open-source agents for real work, with hosted cloud when you want it.
+
+## Canonical Links
+
+- Website: https://openmagi.ai
+- Source: https://github.com/openmagi/magi-agent
+- Docs: https://openmagi.ai/docs
+- Full agent docs: https://openmagi.ai/docs/llms-full.txt
+
+## Install
+
+```bash
+git clone https://github.com/openmagi/magi-agent.git
+cd magi-agent
+npm install
+npm run dev
+```
+
+## Docs Index
+
+- Open Magi Docs: https://openmagi.ai/docs - Open-source runtime first, managed cloud when you want hosted accounts, credits, storage, and operations.
+- Getting Started: https://openmagi.ai/docs/getting-started - Clone the open-source runtime, install dependencies, run it locally, then decide whether to keep self-hosting or use Open Magi Cloud.
+- Configuration: https://openmagi.ai/docs/configuration - Configure provider-neutral model routing, Knowledge Base, secrets, tools, channels, and hosted cloud behavior.
+- Architecture: https://openmagi.ai/docs/architecture - Understand runtime state, execution contracts, memory, cloud hosting, and evidence gates.
+
+## Core Concepts
+
+- Open-source runtime with hosted Open Magi Cloud when managed infrastructure is preferred.
+- Provider-neutral model routing across Claude, GPT, Gemini, local models, and OpenAI-compatible endpoints.
+- Knowledge Base for durable workspace context and source-grounded work.
+- Execution contracts and evidence gates for reliable completion.

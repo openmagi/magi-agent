@@ -1840,6 +1840,17 @@ def _dashboard_html(runtime: OpenMagiRuntime) -> str:
 
 
 def register_dashboard_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
+    from magi_agent.transport import web_dashboard
+
+    # Preferred path: serve the restored static dashboard bundle (the rich
+    # historical apps/web UI, statically exported and committed into the
+    # package). Falls back to the inline workbench shell below only when the
+    # bundle is absent (e.g. a source checkout that has not run the web build).
+    if web_dashboard.bundle_available():
+        web_dashboard.register_root_redirect(app)
+        web_dashboard.register_web_dashboard_routes(app, runtime)
+        return
+
     @app.get("/", response_class=RedirectResponse)
     def root_dashboard() -> RedirectResponse:
         return RedirectResponse("/dashboard", status_code=307)
