@@ -1,7 +1,6 @@
 # Troubleshooting
 
-Status: ✅ Active — covers the local `magi` CLI path; hosted-runtime failures are
-called out in their own subsections.
+Status: ✅ Active — covers the local `magi` CLI and dashboard path.
 
 Debug Magi Agent by locating the failed runtime boundary.
 
@@ -24,7 +23,8 @@ Treat the failure as a runtime state problem first, not a prompt wording problem
 
 If docs claim a package-manager, Homebrew, shell-pipe, create-app, or one-command runtime path is currently available, verify it against package entrypoints and tests first. Today, the normal user path is Homebrew plus `magi` for CLI work and `magi-agent serve --port 8080` for the dashboard; a source checkout runs the same commands through `uv` (for example `uv run --extra cli magi doctor`), not npm.
 
-Keep source checkout, local Homebrew, and optional managed hosting language separate so users know which environment they are operating.
+Keep source checkout and local Homebrew instructions separate so users know
+which environment they are operating.
 
 ## Local CLI will not run
 
@@ -37,10 +37,6 @@ If `magi` launches but answers with a model-free stub, no provider key was found
 ### litellm not installed
 
 If a provider key is set but the turn returns an install hint instead of a model answer, the optional `litellm` dependency is missing (the CLI raises a provider-dependency error and stays usable on the stub runner). `magi doctor` reports `litellm` as not importable. Reinstall `magi-agent` so its default runtime dependencies are present, or from a source checkout install the CLI extra: `uv run --extra cli magi ...` (the `cli` extra pulls the provider runtime in).
-
-### Hosted runtime
-
-The hosted/managed runtime additionally requires BOT_ID, USER_ID, GATEWAY_TOKEN, CORE_AGENT_MODEL, and the CORE_AGENT_*_PROXY_URL / CORE_AGENT_REDIS_URL service URLs. These are read only by the managed deployment and do not affect the local CLI. See the [environment variable reference](/docs/env-reference).
 
 ## Agent gives wrong or unsupported answers
 

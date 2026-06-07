@@ -21,7 +21,7 @@ Versions follow the tags published on GitHub Releases.
 - Documentation now clearly separates the local CLI's real execution (a provider
   key enables a real model plus first-party tools behind permission prompts) from
   the enforcement/governance layer, which ships default-off (shadow).
-- Configuration docs split local CLI setup (one provider key) from hosted-runtime
+- Configuration docs split local CLI setup (one provider key) from deployment
   variables that the local CLI does not need.
 
 > Earlier history predates this changelog. Use `git log` and GitHub Releases for

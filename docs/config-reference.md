@@ -67,7 +67,7 @@ Controls whether the Python ToolHost subsystem is attached. Two fields are struc
 
 ## PythonRuntimeAuthorityConfig
 
-Top-level runtime authority flags. Eight fields are structurally locked to Literal[False] using the _FalseOnlyModel pattern, meaning the runtime cannot escalate to write authority regardless of configuration input. Two additional fields (user_visible_output_allowed, canary_routing_allowed) are boolean but force-reset to False on model_construct and model_copy. These flags govern the hosted enforcement/governance boundary — whether that layer is attached to live production writes and routing — not whether the local CLI can run a model or first-party tools (it can; see [What works today](/docs/what-works-today)).
+Top-level runtime authority flags. Eight fields are structurally locked to Literal[False] using the _FalseOnlyModel pattern, meaning the runtime cannot escalate to write authority regardless of configuration input. Two additional fields (user_visible_output_allowed, canary_routing_allowed) are boolean but force-reset to False on model_construct and model_copy. These flags govern the enforcement/governance boundary — whether that layer is attached to live production writes and routing — not whether the local CLI can run a model or first-party tools (it can; see [What works today](/docs/what-works-today)).
 
 - user_visible_output_allowed (bool, alias userVisibleOutputAllowed, default False) — Whether user-visible output is allowed. Force-reset on construct/copy.
 - canary_routing_allowed (bool, alias canaryRoutingAllowed, default False) — Whether canary routing is allowed. Force-reset on construct/copy.

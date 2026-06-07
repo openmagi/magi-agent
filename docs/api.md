@@ -8,4 +8,5 @@ The API should expose safe control and inspection surfaces while preserving runt
 
 API callers can submit tasks, answer approvals, inspect public projections, and fetch artifacts. They should not bypass ToolHost, validators, approval receipts, memory projection, or audit checkpoints.
 
-For docs accuracy, distinguish hosted cloud API calls from local source development commands and component-level runtime APIs.
+For docs accuracy, distinguish cloud API calls from local source development
+commands and component-level runtime APIs.

@@ -215,6 +215,12 @@
       "group": "Recipes"
     },
     {
+      "slug": "first-party-packs",
+      "title": "First-party Packs",
+      "path": "docs/first-party-packs.md",
+      "group": "Recipes"
+    },
+    {
       "slug": "multi-recipe-composition",
       "title": "Multi-Recipe Composition",
       "path": "docs/multi-recipe-composition.md",
@@ -308,6 +314,12 @@
       "slug": "runtime-events",
       "title": "Runtime Events Reference",
       "path": "docs/runtime-events.md",
+      "group": "Reference"
+    },
+    {
+      "slug": "streaming-events",
+      "title": "Streaming Events",
+      "path": "docs/streaming-events.md",
       "group": "Reference"
     },
     {

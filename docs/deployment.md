@@ -30,9 +30,8 @@ docker build -t magi-agent .
 docker run --rm -p 8080:8080 -e ANTHROPIC_API_KEY=... magi-agent
 ```
 
-Pass the provider key (or mount a config file) as the only required configuration
-for a local run. The hosted runtime's `BOT_ID` / `GATEWAY_TOKEN` / `CORE_AGENT_*`
-/ service-URL / Redis variables are not required for a standalone container.
+Pass the provider key or mount a config file as the only required configuration
+for a standalone container.
 
 ## Self-host posture
 
@@ -51,7 +50,8 @@ agent's ability to run work. Enable additional authority only after contract
 tests, replay, shadow/canary evidence, security review, and a rollback plan are in
 place.
 
-## Managed hosting
+## Operated services
 
-Open Magi Cloud remains optional managed hosting for teams that do not want to
-operate the runtime themselves.
+If you run Magi Agent as part of a larger service, keep service identity,
+database, queue, and proxy credentials outside this repository and document them
+in your own deployment layer.

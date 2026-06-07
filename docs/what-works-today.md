@@ -12,7 +12,7 @@ A scannable map of what the local `magi` CLI can actually do right now, what shi
 |---|---|---|
 | Real model calls — 4 providers (Anthropic / OpenAI / Gemini / Fireworks) via LiteLlm [^1] | Evidence / governance enforcement boundaries (observe-only / local-fake) [^3] | Live enforcement authority attached to traffic (Stage 3) [^3] |
 | First-party local tools: file read/write/edit, patch apply, Bash — on by default [^2] | External channel delivery (Telegram / Discord live send) | Cross-boundary repair orchestration across multiple contracts |
-| Permission prompts gating tools (`default` / `acceptEdits` / `bypassPermissions`) [^2] | External integrations (Composio) | Hosted production authority (Open Magi Cloud) |
+| Permission prompts gating tools (`default` / `acceptEdits` / `bypassPermissions`) [^2] | External integrations (Composio) | Live production authority attached to external systems |
 | Sessions, headless NDJSON + interactive TUI | Recipe execution engine (manifests are metadata-only today) | |
 | Local HTTP dashboard (`magi-agent serve`) | | |
 
@@ -33,7 +33,7 @@ A scannable map of what the local `magi` CLI can actually do right now, what shi
 ### ❌ Planned
 
 - Live enforcement authority attached to real traffic and decisions ("Stage 3").
-- Hosted production authority via Open Magi Cloud.
+- Live production authority attached to external systems.
 
 [^1]: `magi_agent/cli/wiring.py::_build_default_runner` selects a real model-backed ADK runner when a provider key or `~/.magi/config.toml` is configured (`magi_agent/cli/real_runner.py`), otherwise falls back to the model-free stub (`magi_agent/cli/local_runner.py`).
 [^2]: `magi_agent/cli/wiring.py::_build_first_party_adk_tools` / `_first_party_tools_enabled` (True unless `MAGI_FIRST_PARTY_TOOLS_ENABLED` is off); permission modes in `magi_agent/cli/permissions.py`.
