@@ -317,6 +317,52 @@ _CORE_TOOL_MANIFESTS: tuple[ToolManifest, ...] = (
         tags=("cron", "background", "meta"),
         parallel_safety="readonly",
     ),
+    # D2: agent-callable declarative memory write — default OFF, act-mode only.
+    # Only DECLARATIVE facts (stable preferences, user traits) may be persisted.
+    # Task-state (PR numbers, SHAs, "done/merged") is rejected at the boundary.
+    # Real writes require MAGI_MEMORY_WRITE_ENABLED=1 AND an injected provider.
+    ToolManifest(
+        name="MemoryWrite",
+        description=(
+            "Persist a declarative fact about the user or session to long-term memory. "
+            "Only stable preferences and user-level facts are accepted — task-state "
+            "(PR numbers, commit SHAs, 'done/merged/in progress') is rejected. "
+            "Writes are gated: real persistence requires MAGI_MEMORY_WRITE_ENABLED=1."
+        ),
+        kind="core",
+        source=CORE_TOOL_SOURCE,
+        permission="write",
+        input_schema={
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["fact"],
+            "properties": {
+                "fact": {
+                    "type": "string",
+                    "description": (
+                        "The declarative fact to remember. "
+                        "Must be a stable user preference or trait, not a task event."
+                    ),
+                    "maxLength": 2000,
+                },
+                "target_file": {
+                    "type": "string",
+                    "description": "Target file: 'MEMORY.md' (default) or 'USER.md'.",
+                    "enum": ["MEMORY.md", "USER.md"],
+                },
+            },
+        },
+        timeout_ms=10_000,
+        budget=Budget(max_calls_per_turn=5, max_parallel=1),
+        dangerous=False,
+        is_concurrency_safe=False,
+        mutates_workspace=True,
+        parallel_safety="unsafe",
+        available_in_modes=("act",),
+        tags=("memory", "write", "declarative"),
+        enabled_by_default=False,  # gate-off by default
+        opt_out=True,
+    ),
 )
 
 

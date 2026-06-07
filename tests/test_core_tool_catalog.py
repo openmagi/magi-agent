@@ -38,7 +38,14 @@ EXPECTED_CORE_TOOL_NAMES = (
     "TaskGet",
     "TaskOutput",
     "CronList",
+    # D2: gated declarative memory write — default OFF
+    "MemoryWrite",
 )
+
+# Tools that are default-OFF (gate-disabled) by design
+_DEFAULT_OFF_TOOL_NAMES = frozenset({"MemoryWrite"})
+# Tools with structured input schemas (not the loose additionalProperties default)
+_STRUCTURED_SCHEMA_TOOL_NAMES = frozenset({"TodoWrite", "FileRead", "MemoryWrite"})
 
 
 def make_context() -> ToolContext:
@@ -63,15 +70,22 @@ def test_core_tool_catalog_seed_set_is_immutable_builtin_core_metadata() -> None
         assert manifest.kind == "core"
         assert manifest.source.kind == "builtin"
         assert manifest.source.package == "openmagi.core"
-        assert manifest.enabled_by_default is True
+        # Most tools default ON; gate-controlled tools (e.g. MemoryWrite) default OFF
+        if manifest.name not in _DEFAULT_OFF_TOOL_NAMES:
+            assert manifest.enabled_by_default is True
+        else:
+            assert manifest.enabled_by_default is False
         assert manifest.opt_out is True
-        if manifest.name == "TodoWrite":
-            # TodoWrite carries a structured payload schema, not the loose
-            # additionalProperties default shared by the other core tools.
+        if manifest.name not in _STRUCTURED_SCHEMA_TOOL_NAMES:
+            assert manifest.input_schema == {"type": "object", "additionalProperties": True}
+        elif manifest.name == "TodoWrite":
+            # TodoWrite carries a structured payload schema
             assert manifest.input_schema["type"] == "object"
             assert "todos" in manifest.input_schema["properties"]  # type: ignore[index]
-        else:
-            assert manifest.input_schema == {"type": "object", "additionalProperties": True}
+        elif manifest.name in {"FileRead", "MemoryWrite"}:
+            # FileRead and MemoryWrite carry structured input schemas
+            assert manifest.input_schema["type"] == "object"
+            assert "properties" in manifest.input_schema
 
 
 def test_core_tool_manifests_returns_defensive_manifest_and_schema_copies() -> None:
@@ -182,22 +196,19 @@ def test_register_core_tool_manifests_keeps_catalog_enabled_and_protected() -> N
 
     assert tuple(manifest.name for manifest in manifests) == EXPECTED_CORE_TOOL_NAMES
     assert [tool.name for tool in registry.list_all()] == sorted(EXPECTED_CORE_TOOL_NAMES)
+    # list_available only includes enabled tools — MemoryWrite is default-OFF
+    _act_only_tools = {"FileWrite", "FileEdit", "PatchApply", "Bash", "TestRun", "ExitPlanMode", "ArtifactCreate", "MemoryWrite"}
     assert {tool.name for tool in registry.list_available(mode="plan")} == {
         name
         for name in EXPECTED_CORE_TOOL_NAMES
-        if name
-        not in {
-            "FileWrite",
-            "FileEdit",
-            "PatchApply",
-            "Bash",
-            "TestRun",
-            "ExitPlanMode",
-            "ArtifactCreate",
-        }
+        if name not in _act_only_tools and name not in _DEFAULT_OFF_TOOL_NAMES
     }
-    assert {tool.name for tool in registry.list_available(mode="act")} == set(EXPECTED_CORE_TOOL_NAMES)
-    assert all(registry.is_enabled(name) is True for name in EXPECTED_CORE_TOOL_NAMES)
+    assert {tool.name for tool in registry.list_available(mode="act")} == {
+        name for name in EXPECTED_CORE_TOOL_NAMES if name not in _DEFAULT_OFF_TOOL_NAMES
+    }
+    assert all(registry.is_enabled(name) is True for name in EXPECTED_CORE_TOOL_NAMES if name not in _DEFAULT_OFF_TOOL_NAMES)
+    # Default-OFF tools should be disabled in registry
+    assert all(registry.is_enabled(name) is False for name in _DEFAULT_OFF_TOOL_NAMES)
 
     with pytest.raises(ValueError, match="core/builtin"):
         registry.unregister("FileRead")
