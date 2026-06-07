@@ -42,12 +42,12 @@ for a standalone container.
 - Keep mutation surfaces least-privilege and require approval for external side
   effects.
 
-## Default-off rollout posture
+## Authority posture
 
-Enforcement boundaries and external delivery/integrations start default-off (see
-[default-off gates](/docs/default-off-gates)). This governs *enforcement*, not the
-agent's ability to run work. Enable additional authority only after contract
-tests, replay, shadow/canary evidence, security review, and a rollback plan are in
+Enforcement boundaries and external delivery/integrations start disabled or
+record-intent only. This governs external authority, not the agent's ability to
+run local work. Enable additional authority only after contract tests,
+deterministic replay, security review, and an operator-owned rollback plan are in
 place.
 
 ## Operated services

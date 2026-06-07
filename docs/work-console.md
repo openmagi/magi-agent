@@ -10,7 +10,9 @@ The work console is planned as part of the local app installer. The information 
 
 During a run, the runtime emits events that surface progress to the work console. Tool evidence records (ToolEvidenceRecord) show each tool call with its status, duration, and sanitized argument/result summaries. Evidence contract verdicts show whether required evidence has been collected. Boundary decisions show whether side effects were allowed or blocked.
 
-These events are streamed via SSE (Server-Sent Events) from the Node.js chat-proxy to connected clients. The chat-proxy observes the agent's SSE output and enriches it with skill tracking metadata and pipeline status.
+These events are streamed through public runtime event surfaces. The console
+should display sanitized progress, receipts, and blockers without exposing
+hidden reasoning, credentials, or raw provider payloads.
 
 ## Evidence records as work receipts
 
@@ -26,6 +28,11 @@ These decisions are part of the runtime-only control plane and are not visible t
 
 ## Transport routes and SSE streaming
 
-The Python ADK runtime exposes transport routes via FastAPI (transport/ directory, 9 files): health.py provides /health and /healthz endpoints, chat.py provides POST /v1/chat/completions with Gate5B canary checks, and shadow_generations.py / shadow_invocations.py provide diagnostic testing routes. Additional admin routes in transport/plugins.py and transport/tools.py expose metadata.
+The Python ADK runtime exposes transport routes via FastAPI: health.py provides
+/health and /healthz endpoints, chat.py provides POST /v1/chat/completions, and
+additional admin routes in transport/plugins.py and transport/tools.py expose
+metadata.
 
-SSE streaming is implemented in the Node.js chat-proxy. The Python ADK runtime events (EventKind: status, token, tool, control, artifact, error) are internal to the agent process and are surfaced to the chat-proxy through the agent's stdout event stream. A dedicated work console UI is planned as part of the local app installer but is not yet shipped.
+The Python ADK runtime emits public event kinds such as status, token, tool,
+control, artifact, and error. A dedicated work console UI is planned as part of
+the local app installer but is not yet shipped.

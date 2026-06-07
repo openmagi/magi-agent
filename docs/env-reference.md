@@ -75,5 +75,5 @@ structurally rejects attempts to set them to true.
 - `MISSION_RUNTIME` — Must be false. Controls mission runtime authority.
 - `EVIDENCE_BLOCK_MODE` — Must be false. Controls evidence blocking mode.
 
-- [Default-off gates](/docs/default-off-gates)
+- [Security](/docs/security)
 - [Config reference](/docs/config-reference)

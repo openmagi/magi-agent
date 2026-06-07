@@ -80,7 +80,7 @@ Top-level runtime authority flags. Eight fields are structurally locked to Liter
 - mission_runtime_allowed (Literal[False], alias missionRuntimeAllowed) — Structurally false.
 - evidence_block_mode_allowed (Literal[False], alias evidenceBlockModeAllowed) — Structurally false.
 
-- [Default-off gates](/docs/default-off-gates)
+- [Security](/docs/security)
 
 ## EvidenceEnforcementConfig
 

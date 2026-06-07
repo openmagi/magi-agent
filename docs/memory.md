@@ -1,15 +1,58 @@
 # Memory
 
-Memory is projected runtime state, not raw transcript storage. The memory subsystem (memory/ directory, 9 files) enforces read-only access with all writes blocked.
+Memory gives the runtime durable context beyond one turn.
 
-Magi Agent recalls information from previous sessions while keeping memory read-only by default for safety.
+## Memory vs Context
 
-## Memory projection boundary
+Context is what the model sees during a run. Memory is durable state that can be
+recalled later. Keep them separate. A transcript line can be useful context
+without becoming permanent memory.
 
-Magi Agent can recall information from previous sessions. Memory is read-only by default for safety — the agent can look up past decisions, notes, and facts, but cannot silently modify its own memory without explicit authorization.
+## Good memory
 
-Implementation: the memory write boundary governs all memory mutations. MemoryMutationIntent describes the proposed operation (remember, write, redact, delete, compact, decay, export) and produces a MemoryMutationReceipt with status blocked, approval_required, unsupported, or success. ALL writes are blocked by default. The memory contracts define MemoryRecord with scope (user/bot/org/project/session/task) and kind (event/note/fact/decision/preference/reasoning/artifact/relation). RecallRequest queries memory; RecallResult returns records with write access blocked by default.
+Useful memory captures stable facts, preferences, decisions, project
+constraints, and reusable context. It should be inspectable and correctable.
 
-- Use model-visible context for what the next model call may see.
-- Use runtime-only evidence and claim state for verification records.
-- Use projected memory for durable facts, decisions, preferences, and workflow state.
+Examples:
+
+- user preferences that remain valid across sessions;
+- durable project constraints;
+- decisions with dates and owners;
+- reusable source references;
+- known environment setup notes.
+
+## Bad memory
+
+Do not save every transcript line as durable memory. Avoid storing secrets,
+temporary guesses, unsupported claims, or raw private payloads.
+
+Also avoid storing:
+
+- provider keys or auth tokens;
+- unverified facts that should remain tied to source evidence;
+- short-lived operational state;
+- raw logs with private paths or customer data;
+- hidden reasoning or provider payloads.
+
+## Knowledge
+
+Knowledge files and source material should remain distinguishable from memory.
+When a factual answer depends on a source, keep the answer tied to source
+evidence rather than a vague memory.
+
+## Memory Receipts
+
+A memory write should record public-safe evidence:
+
+- what kind of memory was written;
+- why it is durable;
+- where it is stored;
+- whether the user or policy allowed it;
+- how it can be corrected or removed.
+
+## Compaction
+
+Transcript compaction should preserve task contracts, unresolved blockers,
+artifact references, source evidence, and user-visible decisions. It should drop
+noise, duplicates, hidden chain-of-thought style material, and private payloads
+that are not needed for future work.

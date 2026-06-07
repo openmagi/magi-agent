@@ -263,12 +263,6 @@
       "group": "Developer"
     },
     {
-      "slug": "default-off-gates",
-      "title": "Default-Off Gates",
-      "path": "docs/default-off-gates.md",
-      "group": "Developer"
-    },
-    {
       "slug": "config-reference",
       "title": "Config Reference",
       "path": "docs/config-reference.md",

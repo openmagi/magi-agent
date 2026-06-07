@@ -1,6 +1,6 @@
 # Boundaries
 
-Status: 🚧 Default-off — boundary enforcement ships in shadow/observe-only mode; production authority is attached separately.
+Status: 🚧 Default-off — boundary enforcement ships disabled or observe-only until explicitly configured.
 
 Runtime boundaries that govern when model proposals become state, output, or side effects.
 
@@ -12,12 +12,12 @@ Boundaries are control points that prevent the agent from taking action without 
 
 Every boundary module follows the same structure: a typed Intent describes what the model or runtime wants to do, the boundary evaluates the intent against its configuration and authority flags, and a typed Receipt or Decision records what actually happened. This separates description from execution.
 
-All boundary modules include an AuthorityFlags model (e.g. MemoryWriteAuthorityFlags, ChildRunnerAuthorityFlags) where every field is typed as Literal[False] and defaults to False. The model_construct and model_copy methods are overridden to always return all-False instances. This makes it structurally impossible for code inside the boundary to grant itself production authority.
+All boundary modules include an AuthorityFlags model (e.g. MemoryWriteAuthorityFlags, ChildRunnerAuthorityFlags) where every field is typed as Literal[False] and defaults to False. The model_construct and model_copy methods are overridden to always return all-False instances. This makes it structurally impossible for code inside the boundary to grant itself external authority.
 
 - Intent types describe the proposed action with all relevant metadata.
 - Receipt/Decision types record the outcome: status, reason codes, diagnostic metadata, and authority flags.
 - Authority flags are always Literal[False] with enforced serialization to False.
-- Boundaries default to disabled. Enabling requires explicit configuration, and even enabled boundaries only run local fake evaluation unless production authority is externally attached.
+- Boundaries default to disabled. Enabling requires explicit configuration, and even enabled boundaries only run local fake evaluation unless an explicit authority path is provided.
 
 ## Tool evidence boundary
 

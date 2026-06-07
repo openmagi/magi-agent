@@ -1,27 +1,80 @@
 # Reference
 
-Names and vocabulary used by the Magi Agent runtime docs.
+## Commands
 
-Use this page for exact terms: policy snapshot, model-visible context, runtime-only evidence and claim state, ToolHost, validators, repair, projection, and audit.
+```bash
+magi
+magi --help
+magi --version
+magi --output text "Summarize this repository"
+magi --mode plan "Inspect and propose"
+magi --mode act "Apply the approved change"
+magi-agent --help
+magi-agent serve --port 8080
+```
 
-## Runtime vocabulary
+## Common environment variables
 
-Policy snapshot: the effective tool, approval, evidence, repair, projection, and audit rules for a run.
+```bash
+GATEWAY_TOKEN=...
+MAGI_AGENT_REQUIRE_ENV=1
+MAGI_AGENT_WORKSPACE=...
+MAGI_STREAMING_CHAT=1
+MAGI_FIRST_PARTY_TOOLS_ENABLED=1
+OPENAI_API_KEY=...
+ANTHROPIC_API_KEY=...
+GOOGLE_API_KEY=...
+CORE_AGENT_MODEL=...
+COMPOSIO_API_KEY=...
+MAGI_COMPOSIO_ENABLED=auto
+```
 
-Model-visible context: allowed input packet sent to the model.
+## Package names
 
-Runtime-only evidence and claim state: ledgers, claim graphs, receipts, rejected claims, repair queues, and projection decisions withheld from the model unless safely summarized.
+- Product/runtime name: `Magi Agent`
+- Python package/import name: `magi_agent`
+- CLI commands: `magi`, `magi-agent`
+- Repository: `openmagi/magi-agent`
 
-ToolHost / activity boundary: the execution boundary that turns approved proposals into receipts.
+Avoid legacy or internal names in public docs and new code.
 
-Governed output projection: the public-safe rendering of supported claims, artifacts, citations, warnings, and receipts.
+## Local URLs
 
-append-only audit ledger: the durable record of policy snapshots, receipts, validator decisions, repair attempts, approvals, projections, and checkpoints.
+```text
+http://localhost:8080/dashboard
+http://localhost:8080/health
+http://localhost:8080/healthz
+```
 
-## Install documentation guardrails
+## Output Formats
 
-Document Homebrew install as the normal user path and source checkout as the development fallback.
+```text
+text
+json
+stream-json
+```
 
-Current docs should present Homebrew as the normal install path. Source checkout instructions are for contributors and should use `uv` plus the Python entrypoints, not the old JavaScript runtime command names.
+`stream-json` is the CLI-friendly streaming format. HTTP clients should use the
+SSE routes documented in [API](api.md) and [Streaming events](streaming-events.md).
 
-Do not say the current cloud CLI installs or starts a local runtime.
+## Runtime Modes
+
+```text
+plan
+act
+```
+
+## Permission Modes
+
+```text
+default
+acceptEdits
+bypassPermissions
+```
+
+## First-party documentation
+
+- [Recipes](recipes.md)
+- [Harnesses](harnesses.md)
+- [First-party packs](first-party-packs.md)
+- [Streaming events](streaming-events.md)

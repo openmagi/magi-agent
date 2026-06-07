@@ -39,11 +39,11 @@ Runtime-enforced control should be auditable through receipts and append-only au
 
 ## Security checklist
 
-Before enabling any production authority, review this checklist.
+Before enabling additional external authority, review this checklist.
 
 - API keys are stored in environment variables or `~/.magi/config.toml` (kept out of source control), never committed to git.
 - Default-off boundaries remain disabled unless you have explicitly reviewed and enabled them.
 - Dangerous tools (Bash, TestRun) require approval before execution.
-- Authority flags in RuntimeConfig are all Literal[False] — production authority is a separate rollout step.
+- Authority flags and integration scopes stay least-privilege.
 - Evidence enforcement is set to audit mode by default. Switch to block_final_answer only after testing.
 - Memory writes are blocked. Read-only memory adapters are the only supported mode.
