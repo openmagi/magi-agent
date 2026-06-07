@@ -89,6 +89,13 @@ _SESSION_ASSIGNMENT_RE = re.compile(
 
 
 def sanitize_tool_preview(preview: str) -> str:
+    # ReDoS guard: pre-truncate input so catastrophic-backtracking regexes
+    # cannot run over unbounded strings.  The output is always ≤ MAX_TOOL_PREVIEW
+    # (~400 chars); redaction substitutions ("[redacted]") are never longer than
+    # matched tokens, so a ceiling of MAX_TOOL_PREVIEW + 200 characters is safe.
+    _INPUT_LIMIT = MAX_TOOL_PREVIEW + 200
+    if len(preview) > _INPUT_LIMIT:
+        preview = preview[:_INPUT_LIMIT]
     redacted = _BEARER_TOKEN_RE.sub(r"\1[redacted]", preview)
     redacted = _AUTHORIZATION_HEADER_RE.sub(r"\1[redacted]", redacted)
     redacted = _COOKIE_HEADER_RE.sub(r"\1[redacted]", redacted)

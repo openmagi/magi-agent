@@ -30,6 +30,7 @@ from magi_agent.memory.adapters.hipocampus_readonly import (
     _safe_snippet,
 )
 from magi_agent.memory.projection import _sanitize_memory_snippet
+from magi_agent.transport.tool_preview import MAX_TOOL_PREVIEW
 
 
 # Re-export so tests can import from here directly.
@@ -157,11 +158,27 @@ def _build_snapshot(
     files_loaded: list[str] = []
     budget = max(max_bytes, 1)
 
+    # Pre-compute content_budget so we can pre-truncate raw files before
+    # passing them to the sanitizer (which contains regexes with catastrophic
+    # backtracking on large inputs).
+    headroom = len(MEMORY_CONTEXT_OPEN.encode()) + len(MEMORY_CONTEXT_CLOSE.encode()) + 4
+    content_budget = max(budget - headroom, 0)
+
     for rel_path in _SNAPSHOT_FILES:
         path = _resolve_workspace_path(workspace_root, rel_path)
         if path is None or not path.is_file():
             continue
         raw = path.read_text(encoding="utf-8", errors="replace")
+        # Bound BEFORE sanitizing: several regexes inside _sanitize_memory_snippet
+        # (and the final sanitize_tool_preview call) exhibit catastrophic
+        # backtracking on large inputs.  _sanitize_memory_snippet terminates with
+        # sanitize_tool_preview, which itself caps output to MAX_TOOL_PREVIEW
+        # (~400 chars).  Pre-truncating each file to MAX_TOOL_PREVIEW + 200
+        # (matching the ReDoS guard in sanitize_tool_preview) is therefore
+        # behaviour-preserving: no useful content beyond that limit survives the
+        # sanitiser pipeline.  The final _slice_utf8(combined, content_budget)
+        # below enforces the exact byte cap over all combined files.
+        raw = _slice_utf8(raw, MAX_TOOL_PREVIEW + 200)
         redacted = _sanitize_memory_snippet(raw)
         if not redacted.strip():
             continue
@@ -179,10 +196,7 @@ def _build_snapshot(
 
     combined = "\n\n".join(parts)
 
-    # Apply byte cap (UTF-8 aware slice)
-    # Leave headroom for fences (~60 bytes) and digest comment.
-    headroom = len(MEMORY_CONTEXT_OPEN.encode()) + len(MEMORY_CONTEXT_CLOSE.encode()) + 4
-    content_budget = max(budget - headroom, 0)
+    # Apply byte cap (UTF-8 aware slice).
     truncated = _slice_utf8(combined, content_budget)
 
     # Build the fenced block.
