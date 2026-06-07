@@ -130,13 +130,44 @@ class TestInMemoryGoalStateStore:
         assert gs.status == "exhausted"
 
     def test_advance_beyond_max_turns_stays_exhausted(self) -> None:
+        """Once exhausted, advance is a no-op — turns_used must NOT increment."""
         store = InMemoryGoalStateStore()
         store.set_goal("sess-1", "goal", max_turns=2)
         store.advance("sess-1")
-        store.advance("sess-1")
+        gs_exhausted = store.advance("sess-1")
+        assert gs_exhausted.status == "exhausted"
+        assert gs_exhausted.turns_used == 2
+        # Extra advance on an already-exhausted goal must return unchanged state.
+        gs_again = store.advance("sess-1")
+        assert gs_again.status == "exhausted"
+        assert gs_again.turns_used == 2  # NOT incremented past max
+
+    def test_advance_on_satisfied_goal_is_noop(self) -> None:
+        """advance() on a satisfied goal must return the goal unchanged."""
+        store = InMemoryGoalStateStore()
+        store.set_goal("sess-1", "goal", max_turns=10)
+        # Manually inject a satisfied state (B2 would do this via model_copy).
+        from magi_agent.harness.goal_state import GoalState
+        satisfied = GoalState(
+            goal="goal", session_id="sess-1", turns_used=3, max_turns=10, status="satisfied"
+        )
+        store._states["sess-1"] = satisfied
         gs = store.advance("sess-1")
-        assert gs.status == "exhausted"
-        assert gs.turns_used == 3  # turns_used still increments past max
+        assert gs.status == "satisfied"
+        assert gs.turns_used == 3  # unchanged
+
+    def test_advance_on_preempted_goal_is_noop(self) -> None:
+        """advance() on a preempted goal must return the goal unchanged."""
+        store = InMemoryGoalStateStore()
+        store.set_goal("sess-1", "goal", max_turns=10)
+        from magi_agent.harness.goal_state import GoalState
+        preempted = GoalState(
+            goal="goal", session_id="sess-1", turns_used=5, max_turns=10, status="preempted"
+        )
+        store._states["sess-1"] = preempted
+        gs = store.advance("sess-1")
+        assert gs.status == "preempted"
+        assert gs.turns_used == 5  # unchanged
 
     def test_advance_missing_session_raises(self) -> None:
         store = InMemoryGoalStateStore()
@@ -186,72 +217,100 @@ class TestInMemoryGoalStateStore:
 # ---------------------------------------------------------------------------
 
 
+def _insert_session(store: SqliteGoalStateStore, session_id: str) -> None:
+    """Insert a minimal sessions row so goal_states FK constraint is satisfied."""
+    conn = store._get_conn()
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO sessions (id, app_name, user_id)
+        VALUES (?, 'test-app', 'test-user')
+        """,
+        (session_id,),
+    )
+    conn.commit()
+
+
 class TestSqliteGoalStateStore:
     def test_set_get_round_trip(self, tmp_path: Path) -> None:
         db = tmp_path / "goals.db"
         store = SqliteGoalStateStore(db)
+        _insert_session(store, "sess-1")
         gs = store.set_goal("sess-1", "persistent goal")
         got = store.get_goal("sess-1")
         assert got is not None
         assert got.goal == "persistent goal"
         assert got.session_id == "sess-1"
+        store.close()
 
     def test_persistence_survives_fresh_store_instance(self, tmp_path: Path) -> None:
         db = tmp_path / "goals.db"
         store1 = SqliteGoalStateStore(db)
+        _insert_session(store1, "sess-1")
         store1.set_goal("sess-1", "survive restart")
         store1.advance("sess-1")
-        del store1
+        store1.close()
 
         store2 = SqliteGoalStateStore(db)
         got = store2.get_goal("sess-1")
         assert got is not None
         assert got.goal == "survive restart"
         assert got.turns_used == 1
+        store2.close()
 
     def test_advance_persisted(self, tmp_path: Path) -> None:
         db = tmp_path / "goals.db"
         store = SqliteGoalStateStore(db)
+        _insert_session(store, "s1")
         store.set_goal("s1", "g", max_turns=5)
         store.advance("s1")
         store.advance("s1")
+        store.close()
 
         store2 = SqliteGoalStateStore(db)
         gs = store2.get_goal("s1")
         assert gs is not None
         assert gs.turns_used == 2
+        store2.close()
 
     def test_advance_exhaustion_persisted(self, tmp_path: Path) -> None:
         db = tmp_path / "goals.db"
         store = SqliteGoalStateStore(db)
+        _insert_session(store, "s1")
         store.set_goal("s1", "g", max_turns=2)
         store.advance("s1")
         store.advance("s1")
+        store.close()
 
         store2 = SqliteGoalStateStore(db)
         gs = store2.get_goal("s1")
         assert gs is not None
         assert gs.status == "exhausted"
+        store2.close()
 
     def test_clear_persisted(self, tmp_path: Path) -> None:
         db = tmp_path / "goals.db"
         store = SqliteGoalStateStore(db)
+        _insert_session(store, "s1")
         store.set_goal("s1", "g")
         store.clear("s1")
+        store.close()
 
         store2 = SqliteGoalStateStore(db)
         assert store2.get_goal("s1") is None
+        store2.close()
 
     def test_get_missing_returns_none(self, tmp_path: Path) -> None:
         db = tmp_path / "goals.db"
         store = SqliteGoalStateStore(db)
         assert store.get_goal("nope") is None
+        store.close()
 
     def test_advance_missing_raises(self, tmp_path: Path) -> None:
         db = tmp_path / "goals.db"
         store = SqliteGoalStateStore(db)
         with pytest.raises(KeyError):
             store.advance("no-such-session")
+        store.close()
 
     def test_opt_out_blocks_set_goal(self, tmp_path: Path) -> None:
         db = tmp_path / "goals.db"
@@ -259,6 +318,7 @@ class TestSqliteGoalStateStore:
         opt_out = GoalLoopOptOutState(opted_out=True, disabled_reason="blocked")
         with pytest.raises(ValueError, match="opted out"):
             store.set_goal("s1", "goal", opt_out=opt_out)
+        store.close()
 
 
 # ---------------------------------------------------------------------------

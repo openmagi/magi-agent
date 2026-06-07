@@ -20,7 +20,6 @@ Forbidden imports: google.adk, network, agent-spawn (verified by test).
 """
 from __future__ import annotations
 
-import json
 import sqlite3
 from pathlib import Path
 from typing import Literal, Protocol, runtime_checkable
@@ -119,7 +118,25 @@ def _check_opt_out(opt_out: GoalLoopOptOutState | None) -> None:
         )
 
 
+_TERMINAL_STATUSES: frozenset[GoalStateStatus] = frozenset(
+    {"exhausted", "satisfied", "preempted", "cleared"}
+)
+
+
 def _advance_state(current: GoalState) -> GoalState:
+    """Return a new GoalState with turns_used incremented by 1.
+
+    Contract:
+    - If ``current.status`` is a terminal status (``"exhausted"``,
+      ``"satisfied"``, ``"preempted"``, or ``"cleared"``) the state is
+      returned UNCHANGED — no counter increment, no status clobber.
+      This prevents piling turns_used past max on an exhausted goal and
+      protects terminal statuses written by B2/B5 (satisfy/preempt/clear).
+    - Only an ``"active"`` goal advances.  When turns_used reaches
+      max_turns the status transitions to ``"exhausted"``.
+    """
+    if current.status in _TERMINAL_STATUSES:
+        return current
     new_turns = current.turns_used + 1
     new_status: GoalStateStatus = (
         "exhausted" if new_turns >= current.max_turns else current.status
@@ -199,7 +216,9 @@ class SqliteGoalStateStore:
         if workspace_root:
             self._db_path = Path(workspace_root) / db_path
         else:
-            self._db_path = Path(db_path)
+            # Consistent with session_store.py: fall back to cwd so a bare
+            # relative path like "goals.db" resolves predictably.
+            self._db_path = Path.cwd() / db_path if not Path(db_path).is_absolute() else Path(db_path)
         self._conn: sqlite3.Connection | None = None
 
     def _get_conn(self) -> sqlite3.Connection:
@@ -216,9 +235,17 @@ class SqliteGoalStateStore:
         return conn
 
     def close(self) -> None:
+        """Close the SQLite connection if open.  Safe to call multiple times."""
         if self._conn is not None:
             self._conn.close()
             self._conn = None
+
+    def __del__(self) -> None:
+        """Defensive close on GC — avoids connection leak if close() was not called."""
+        try:
+            self.close()
+        except Exception:  # noqa: BLE001
+            pass
 
     def _load_raw(self, session_id: str) -> GoalState | None:
         conn = self._get_conn()
