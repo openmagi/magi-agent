@@ -119,6 +119,102 @@ def test_is_declarative_whitespace_only_rejected() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Gap 1 — task-completion verbs: shipped / released / rolled out / reverted
+# ---------------------------------------------------------------------------
+
+
+def test_is_declarative_rejects_shipped_verb() -> None:
+    from magi_agent.memory.declarative_filter import is_declarative
+
+    assert is_declarative("shipped the auth feature") is False
+
+
+def test_is_declarative_rejects_released_verb() -> None:
+    from magi_agent.memory.declarative_filter import is_declarative
+
+    assert is_declarative("released v2") is False
+
+
+def test_is_declarative_rejects_rolled_out_verb() -> None:
+    from magi_agent.memory.declarative_filter import is_declarative
+
+    assert is_declarative("rolled out the change") is False
+
+
+def test_is_declarative_rejects_reverted_verb() -> None:
+    from magi_agent.memory.declarative_filter import is_declarative
+
+    assert is_declarative("reverted the migration") is False
+
+
+def test_is_declarative_rejects_rolled_back_verb() -> None:
+    from magi_agent.memory.declarative_filter import is_declarative
+
+    assert is_declarative("rolled back the deploy") is False
+
+
+def test_is_declarative_rejects_shipping_progressive() -> None:
+    from magi_agent.memory.declarative_filter import is_declarative
+
+    assert is_declarative("shipping the feature now") is False
+
+
+def test_is_declarative_rejects_releasing_progressive() -> None:
+    from magi_agent.memory.declarative_filter import is_declarative
+
+    assert is_declarative("releasing the new version") is False
+
+
+def test_is_declarative_rejects_cut_a_release() -> None:
+    from magi_agent.memory.declarative_filter import is_declarative
+
+    assert is_declarative("cut a release for 2.0") is False
+
+
+def test_is_declarative_rejects_rolling_out_progressive() -> None:
+    from magi_agent.memory.declarative_filter import is_declarative
+
+    assert is_declarative("rolling out the change to production") is False
+
+
+# ---------------------------------------------------------------------------
+# Gap 2 — bare short SHA without context word
+# ---------------------------------------------------------------------------
+
+
+def test_is_declarative_rejects_bare_sha_in_fix_sentence() -> None:
+    from magi_agent.memory.declarative_filter import is_declarative
+
+    assert is_declarative("the fix is in abc1234") is False
+
+
+def test_is_declarative_rejects_bare_sha_see_for_details() -> None:
+    from magi_agent.memory.declarative_filter import is_declarative
+
+    assert is_declarative("see abc1234 for details") is False
+
+
+def test_is_declarative_rejects_bare_sha_is_live() -> None:
+    from magi_agent.memory.declarative_filter import is_declarative
+
+    assert is_declarative("a1b2c3d is live") is False
+
+
+def test_is_declarative_accepts_user_prefers_dark_mode() -> None:
+    """Plain declarative fact with no hex token must still be accepted."""
+    from magi_agent.memory.declarative_filter import is_declarative
+
+    assert is_declarative("User prefers dark mode") is True
+
+
+def test_is_declarative_accepts_user_id_no_hex_run() -> None:
+    """'alice' is all-letter (no digit), so it does not trigger the SHA rule."""
+    from magi_agent.memory.declarative_filter import is_declarative
+
+    assert is_declarative("User's id is alice") is True
+
+
+# ---------------------------------------------------------------------------
 # B. MemoryWriteHarness real-write path
 # ---------------------------------------------------------------------------
 
