@@ -230,6 +230,48 @@ class StaticCheckSet(BaseModel):
         return self.before, self.after
 
 
+def _average_runs(
+    runs: list[tuple[tuple[float, ...], tuple[float, ...]]],
+) -> tuple[tuple[float, ...], tuple[float, ...]]:
+    """Element-wise per-case mean of accumulated ``(before, after)`` inner runs.
+
+    Shared by ``RepeatedCheckSet.run`` and ``run_eval_gate``'s adaptive
+    escalation loop (DRY) so both compute the averaged samples identically.
+
+    Every run must return equal-length ``before``/``after`` tuples, and all runs
+    must agree on that length (mirrors ``run_eval_gate``'s length-mismatch
+    guard) — otherwise the averaged samples would be incomparable, so this
+    raises ``ValueError`` instead of silently averaging over a min-length slice.
+    Averaging over ``k`` identical deterministic runs equals the single result,
+    so a single accumulated run is exactly the inner's single output.
+    """
+    if not runs:
+        raise ValueError("_average_runs requires at least one run.")
+    case_n: int | None = None
+    for before, after in runs:
+        if len(before) != len(after):
+            raise ValueError(
+                "RepeatedCheckSet inner returned mismatched before/after "
+                f"lengths ({len(before)} != {len(after)}); the evaluator "
+                "is producing incomparable samples."
+            )
+        if case_n is None:
+            case_n = len(before)
+        elif len(before) != case_n:
+            raise ValueError(
+                "RepeatedCheckSet inner returned inconsistent case counts "
+                f"across repeats ({len(before)} != {case_n}); cannot "
+                "average incomparable samples."
+            )
+
+    k = len(runs)
+    before_runs = [before for before, _ in runs]
+    after_runs = [after for _, after in runs]
+    avg_before = tuple(sum(col) / k for col in zip(*before_runs))
+    avg_after = tuple(sum(col) / k for col in zip(*after_runs))
+    return avg_before, avg_after
+
+
 class RepeatedCheckSet:
     """CheckSet wrapper that runs an inner ``CheckSet`` ``repeats`` times and
     averages the per-case scores element-wise (Task 4).
@@ -261,31 +303,8 @@ class RepeatedCheckSet:
     def run(
         self, candidate: LearningCandidate
     ) -> tuple[tuple[float, ...], tuple[float, ...]]:
-        before_runs: list[tuple[float, ...]] = []
-        after_runs: list[tuple[float, ...]] = []
-        case_n: int | None = None
-        for _ in range(self.repeats):
-            before, after = self.inner.run(candidate)
-            if len(before) != len(after):
-                raise ValueError(
-                    "RepeatedCheckSet inner returned mismatched before/after "
-                    f"lengths ({len(before)} != {len(after)}); the evaluator "
-                    "is producing incomparable samples."
-                )
-            if case_n is None:
-                case_n = len(before)
-            elif len(before) != case_n:
-                raise ValueError(
-                    "RepeatedCheckSet inner returned inconsistent case counts "
-                    f"across repeats ({len(before)} != {case_n}); cannot "
-                    "average incomparable samples."
-                )
-            before_runs.append(before)
-            after_runs.append(after)
-
-        avg_before = tuple(sum(col) / self.repeats for col in zip(*before_runs))
-        avg_after = tuple(sum(col) / self.repeats for col in zip(*after_runs))
-        return avg_before, avg_after
+        runs = [self.inner.run(candidate) for _ in range(self.repeats)]
+        return _average_runs(runs)
 
 
 # ---------------------------------------------------------------------------
@@ -322,10 +341,16 @@ class EvalGateConfig(BaseModel):
     #: z multiplier for the paired-significance confidence interval (Task 2).
     z: float = 1.96
     #: Number of paired eval repeats per candidate (Task 4).  Default ``1``
-    #: reproduces the single-shot strict-band measurement.
+    #: reproduces the single-shot strict-band measurement.  Escalation (when a
+    #: verdict is ``inconclusive``) accumulates ADDITIONAL inner runs from
+    #: ``n_repeats`` up to ``max_repeats``, so ``n_repeats >= max_repeats``
+    #: simply disables escalation (fixed repeats, exactly ``n_repeats`` runs).
     n_repeats: int = Field(default=1, alias="nRepeats")
     #: Upper bound on adaptive repeats when escalating an inconclusive result
-    #: (Task 4).  Default ``1`` disables escalation.
+    #: (Task 4).  Default ``1`` disables escalation.  Escalation runs from
+    #: ``n_repeats`` up to ``max_repeats``; when ``n_repeats >= max_repeats``
+    #: there is no headroom, so the gate performs exactly ``n_repeats`` inner
+    #: runs and never escalates (a valid "fixed repeats" config, not an error).
     max_repeats: int = Field(default=1, alias="maxRepeats")
 
 
@@ -547,23 +572,28 @@ def run_eval_gate(
         # decision + observation stats; ``1`` on the single-shot strict-band path.
         repeats = 1
         if config.decision_rule == "paired_significance":
-            # Adaptive repeated evaluation (Task 4).  Start at ``n_repeats`` and,
-            # while the verdict is ``inconclusive`` and there is headroom below
-            # ``max_repeats``, average MORE inner runs to shrink the per-case
-            # noise → shrink the delta SE → tighten the CI, which can resolve
-            # ``inconclusive`` into ``improved``/``regressed``.  ``underpowered``
-            # is NOT escalated (more repeats add SAMPLES per case, not CASES, so
-            # it cannot cross the ``min_n`` floor); ``improved``/``regressed`` are
-            # already decisive.  The ``repeats < max_repeats`` bound guarantees
-            # termination.  With ``n_repeats=max_repeats=1`` this is exactly one
-            # inner run (no loop) — identical to the pre-Task-4 single-shot path.
-            repeats = config.n_repeats
-            before, after = RepeatedCheckSet(
-                inner=checkset, repeats=repeats
-            ).run(candidate)
+            # Adaptive repeated evaluation (Task 4).  Start by accumulating
+            # ``n_repeats`` inner runs and, while the verdict is ``inconclusive``
+            # and there is headroom below ``max_repeats``, run the inner ONE more
+            # time and re-average over ALL accumulated runs to shrink the
+            # per-case noise → shrink the delta SE → tighten the CI, which can
+            # resolve ``inconclusive`` into ``improved``/``regressed``.
+            # Accumulation is INCREMENTAL: each escalation step is exactly one
+            # ADDITIONAL inner call (NOT a fresh re-run from scratch), so total
+            # inner calls == final ``repeats`` (LINEAR, not quadratic).
+            # ``underpowered`` is NOT escalated (more repeats add SAMPLES per
+            # case, not CASES, so it cannot cross the ``min_n`` floor);
+            # ``improved``/``regressed`` are already decisive.  The
+            # ``len(runs) < max_repeats`` bound guarantees termination.  With
+            # ``n_repeats=max_repeats=1`` this is exactly one inner run (no loop)
+            # — identical to the pre-Task-4 single-shot path.
+            runs: list[tuple[tuple[float, ...], tuple[float, ...]]] = [
+                checkset.run(candidate) for _ in range(config.n_repeats)
+            ]
+            before, after = _average_runs(runs)
             # Length guard (mirrors the strict-band path): a mismatched evaluator
             # that returns different-length before/after tuples would compare
-            # different sample populations.  RepeatedCheckSet already guards each
+            # different sample populations.  ``_average_runs`` already guards each
             # inner run, but keep the item-scoped message for the averaged result.
             if len(before) != len(after):
                 raise ValueError(
@@ -574,14 +604,15 @@ def run_eval_gate(
             pv = paired_verdict(
                 before, after, z=config.z, min_n=config.min_sample_size
             )
-            while pv.verdict == "inconclusive" and repeats < config.max_repeats:
-                repeats = min(repeats + 1, config.max_repeats)
-                before, after = RepeatedCheckSet(
-                    inner=checkset, repeats=repeats
-                ).run(candidate)
+            while pv.verdict == "inconclusive" and len(runs) < config.max_repeats:
+                runs.append(checkset.run(candidate))
+                before, after = _average_runs(runs)
                 pv = paired_verdict(
                     before, after, z=config.z, min_n=config.min_sample_size
                 )
+            # Final repeat count == number of accumulated inner runs == total
+            # inner calls (linear).
+            repeats = len(runs)
             sample_n = pv.n
             # Back-compat sign: regression = mean(before) - mean(after) = -delta.
             regression = -pv.delta

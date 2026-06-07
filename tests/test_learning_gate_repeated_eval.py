@@ -9,7 +9,9 @@ These tests pin:
   * ``RepeatedCheckSet`` averaging semantics (deterministic, multi-value,
     length-guard);
   * adaptive escalation in ``run_eval_gate`` (inconclusive → escalate up to the
-    cap → improved; the final repeat count surfaces on the decision + stats);
+    cap → improved; the final repeat count surfaces on the decision + stats;
+    escalation is INCREMENTAL so total inner calls == final repeats, LINEAR);
+  * a fixed-repeats config (``n_repeats >= max_repeats``) disables escalation;
   * underpowered does NOT escalate (more repeats can't add cases);
   * the ``n_repeats=1, max_repeats=1`` default is byte-identical to single-shot.
 """
@@ -201,9 +203,9 @@ def test_escalation_resolves_inconclusive_to_improved(tmp_path) -> None:
     assert obs["stats"]["repeats"] == d.repeats
     # the averaged SE is small (noise collapsed by averaging).
     assert d.se < 0.05
-    # Each escalation re-runs the averaged eval from scratch (repeats=1, then 2,
-    # ... up to the final), so cumulative inner calls = sum(1..final_repeats).
-    assert inner.calls == sum(range(1, d.repeats + 1))
+    # Each escalation accumulates ONE additional inner run (incremental), so
+    # total inner calls == final repeats (LINEAR, not quadratic).
+    assert inner.calls == d.repeats
 
 
 def test_escalation_caps_at_max_repeats_when_still_inconclusive(tmp_path) -> None:
@@ -230,8 +232,8 @@ def test_escalation_caps_at_max_repeats_when_still_inconclusive(tmp_path) -> Non
     assert d.verdict == "inconclusive"
     assert d.passed is False
     assert d.repeats == 5
-    # cumulative inner calls = sum(1..5) (fresh re-run at each escalation step).
-    assert inner.calls == sum(range(1, 6))
+    # incremental accumulation: total inner calls == final repeats (LINEAR).
+    assert inner.calls == d.repeats
 
 
 def test_underpowered_does_not_escalate(tmp_path) -> None:
@@ -274,6 +276,29 @@ def test_start_at_n_repeats_above_one(tmp_path) -> None:
     d = decisions[0]
     assert d.repeats == 3
     assert inner.calls == 3
+
+
+def test_n_repeats_above_max_repeats_disables_escalation(tmp_path) -> None:
+    # Misconfig n_repeats > max_repeats is a sensible "fixed repeats, no
+    # escalation" config — NOT an error.  Escalation runs from n_repeats up to
+    # max_repeats, so with no headroom the gate does exactly n_repeats inner
+    # runs and never escalates (even on an inconclusive verdict).
+    store = _store(tmp_path)
+    inner = _SequenceCheckSet(_noisy_improving_sequence())
+    decisions = run_eval_gate(
+        (_candidate(),),
+        store=store,
+        checkset=inner,
+        config=EvalGateConfig(
+            decisionRule="paired_significance",
+            nRepeats=5,
+            maxRepeats=3,
+        ),
+    )
+    store.close()
+    d = decisions[0]
+    assert d.repeats == 5
+    assert inner.calls == 5
 
 
 def test_default_config_single_run(tmp_path) -> None:
