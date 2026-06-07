@@ -253,3 +253,49 @@ def test_strict_band_default_unchanged_on_same_tuples(tmp_path) -> None:
     assert decision.se == 0.0
     assert decision.ci_low == 0.0
     assert decision.ci_high == 0.0
+
+
+def test_improved_eval_not_auto_activated(tmp_path) -> None:
+    # closes the verdict×kind matrix: eval kind never auto-activates either.
+    store = _store(tmp_path)
+    decisions = run_eval_gate(
+        (_candidate(kind="eval"),),
+        store=store,
+        checkset=_improved_checkset(),
+        config=_paired_config(),
+    )
+    decision = decisions[0]
+    item = store.get(decision.item_id)
+    store.close()
+
+    assert decision.verdict == "improved"
+    assert decision.activated is False
+    assert item is not None
+    assert item.status == "proposed"
+
+
+def test_config_z_plumbing_flips_borderline(tmp_path) -> None:
+    # deltas 0.5, 0.0, 0.4, -0.1 → delta 0.2, se ≈ 0.147: the verdict depends on z.
+    # Proves config.z is actually plumbed through to paired_verdict.
+    borderline = StaticCheckSet(before=(0.3, 0.5, 0.4, 0.6), after=(0.8, 0.5, 0.8, 0.5))
+
+    store_wide = SqliteLearningStore(db_path="wide.db", workspace_root=str(tmp_path))
+    wide = run_eval_gate(
+        (_candidate(kind="example", sid="z-wide"),),
+        store=store_wide,
+        checkset=borderline,
+        config=EvalGateConfig(decisionRule="paired_significance", z=1.96),
+    )[0]
+    store_wide.close()
+
+    store_tight = SqliteLearningStore(db_path="tight.db", workspace_root=str(tmp_path))
+    tight = run_eval_gate(
+        (_candidate(kind="example", sid="z-tight"),),
+        store=store_tight,
+        checkset=borderline,
+        config=EvalGateConfig(decisionRule="paired_significance", z=1.0),
+    )[0]
+    store_tight.close()
+
+    assert wide.verdict == "inconclusive"  # CI straddles 0 at z=1.96
+    assert tight.verdict == "improved"  # CI lower bound clears 0 at z=1.0
