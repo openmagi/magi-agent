@@ -357,6 +357,20 @@ class TestShadow:
         )
         assert store.get_goal("s1").turns_used == 1
 
+    def test_shadow_satisfied_mutates_store_observe_only(self) -> None:
+        # shadow=True + satisfied: store IS mutated to status="satisfied"
+        # while observe_only=True (decision recorded, driver no-ops).
+        store = _store_with_goal(max_turns=5)
+        result = decide_loop_continuation(
+            _input(store=store, judge=_AlwaysSatisfied(), shadow=True)
+        )
+        assert result.observe_only is True
+        assert result.decision == "stop"
+        assert result.reason == "satisfied"
+        # Store state is mutated regardless of shadow — the driver no-ops, not
+        # the state machine.
+        assert store.get_goal("s1").status == "satisfied"
+
 
 # ---------------------------------------------------------------------------
 # Prefix-cache invariant

@@ -70,6 +70,7 @@ subprocess — none appear at top level (verified by test).
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -270,37 +271,16 @@ def _build_loop_evidence(
 def _set_status(store: GoalStateStore, session_id: str, status: str) -> GoalState:
     """Persist a terminal status transition via model_copy on the stored state.
 
-    The B1 store has no direct status setter, but ``set_goal``/``advance`` keep
-    the JSON; we re-validate through the store by reading + replacing the row.
-    InMemory and Sqlite stores both expose get_goal; we round-trip through a
-    fresh GoalState so the terminal status is durable.
+    Reads the current state, derives an updated copy with the new status, and
+    writes it back through the public ``store.upsert`` seam so both InMemory
+    and Sqlite backends are covered without accessing private attributes.
     """
     current = store.get_goal(session_id)
     if current is None:  # pragma: no cover - guarded by callers
         raise KeyError(session_id)
     updated = current.model_copy(update={"status": status})
-    _persist(store, updated)
+    store.upsert(updated)
     return updated
-
-
-def _persist(store: GoalStateStore, state: GoalState) -> None:
-    """Write *state* back through whichever concrete store backs the protocol.
-
-    Both concrete B1 stores accept a direct write: InMemory via its ``_states``
-    dict, Sqlite via ``_save_raw``.  We avoid widening the public Protocol (B1
-    is sealed) and instead use the concrete write path that already exists.
-    """
-    save_raw = getattr(store, "_save_raw", None)
-    if callable(save_raw):
-        save_raw(state)
-        return
-    states = getattr(store, "_states", None)
-    if states is not None:
-        states[state.session_id] = state
-        return
-    raise TypeError(  # pragma: no cover - defensive
-        "GoalStateStore implementation does not expose a known write path"
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -499,13 +479,6 @@ LoopControlInputProvider = Callable[[HookContext], "LoopControlInput | None"]
 LoopControlDecisionSink = Callable[["LoopControlResult"], None]
 
 
-def _goal_loop_enabled_from_env() -> bool:
-    raw = os.environ.get(GOAL_LOOP_ENABLED_ENV_VAR)
-    if raw is None:
-        return False
-    return raw.strip().lower() in {"1", "true", "yes", "on"}
-
-
 def build_after_turn_goal_loop_hook(
     *,
     input_provider: LoopControlInputProvider,
@@ -543,7 +516,9 @@ def build_after_turn_goal_loop_hook(
             try:
                 decision_sink(result)
             except Exception:  # noqa: BLE001 — sink failure must not break the turn
-                pass
+                logging.getLogger(__name__).warning(
+                    "goal_loop: decision_sink raised", exc_info=True
+                )
         return HookResult(
             action="continue",
             reason=f"goal_loop:{result.decision}:{result.reason}",

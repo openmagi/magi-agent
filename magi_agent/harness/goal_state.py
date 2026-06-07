@@ -102,6 +102,15 @@ class GoalStateStore(Protocol):
         """
         ...
 
+    def upsert(self, state: GoalState) -> GoalState:
+        """Write *state* directly to the store, replacing any existing entry.
+
+        Intended for callers that hold a ``GoalState`` derived via
+        ``model_copy`` and need to persist it without going through
+        ``set_goal`` or ``advance``.  Returns the written state unchanged.
+        """
+        ...
+
     def clear(self, session_id: str) -> None:
         """Remove the goal for *session_id*.  No-op if none exists."""
         ...
@@ -185,6 +194,10 @@ class InMemoryGoalStateStore:
         updated = _advance_state(current)
         self._states[session_id] = updated
         return updated
+
+    def upsert(self, state: GoalState) -> GoalState:
+        self._states[state.session_id] = state
+        return state
 
     def clear(self, session_id: str) -> None:
         self._states.pop(session_id, None)
@@ -300,6 +313,10 @@ class SqliteGoalStateStore:
         updated = _advance_state(current)
         self._save_raw(updated)
         return updated
+
+    def upsert(self, state: GoalState) -> GoalState:
+        self._save_raw(state)
+        return state
 
     def clear(self, session_id: str) -> None:
         conn = self._get_conn()
