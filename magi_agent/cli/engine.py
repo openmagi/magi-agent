@@ -72,12 +72,15 @@ the streaming path is byte-for-byte identical to pre-PR12.
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import AsyncGenerator, AsyncIterator, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from magi_agent.cli.contracts import ControlRequest, EngineResult, Terminal
 from magi_agent.runtime.events import RuntimeEvent
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:  # pragma: no cover - typing only, never imported at runtime
     from magi_agent.cli.contracts import PermissionGate
@@ -518,6 +521,7 @@ class MagiEngineDriver:
         user_id: str = "cli",
         recovery: "EngineRecoveryPolicy | None" = None,
         runner_policy_assembly: RunnerPolicyAssembly | None = None,
+        event_sink: object | None = None,
     ) -> None:
         self._runner = runner
         self._max_event_count = max(1, int(max_event_count))
@@ -528,6 +532,9 @@ class MagiEngineDriver:
         # backed-off and the run is RE-INVOKED (fresh run_async).
         self._recovery = recovery
         self._runner_policy_assembly = runner_policy_assembly
+        # Optional observability sink, called with (payload, session_id, turn_id)
+        # for each sanitized public event. None keeps the default path a no-op.
+        self._event_sink = event_sink
         # Shared across all turns of this driver instance: single-flight per
         # session id. Lazily built so construction stays cheap + import-clean.
         self._registry: object | None = None
@@ -539,6 +546,15 @@ class MagiEngineDriver:
     @property
     def runner_policy_assembly(self) -> RunnerPolicyAssembly | None:
         return self._runner_policy_assembly
+
+    def _observe_event(self, payload: dict, session_id: str, turn_id: str) -> None:
+        sink = self._event_sink
+        if sink is None:
+            return
+        try:
+            sink(payload, session_id, turn_id)
+        except Exception:
+            logger.debug("observability event sink failed", exc_info=True)
 
     def _get_registry(self) -> object:
         if self._registry is None:
@@ -797,6 +813,7 @@ class MagiEngineDriver:
                             self._track_pending_tool(safe, pending_tool_ids)
                             attempt_yielded += 1
                             yielded_events += 1
+                            self._observe_event(safe, session_id, turn_id)
                             yield RuntimeEvent(
                                 type=_map_event_kind(safe.get("type")),
                                 payload=safe,

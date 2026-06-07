@@ -117,6 +117,7 @@ def build_headless_runtime(
     runner: object | None = None,
     model: str | None = None,
     mode: "RuntimeMode" = "act",
+    event_sink: object | None = None,
     prompt_sink: "PromptSink | None" = None,
 ) -> HeadlessRuntime:
     """Construct the complete headless dependency set.
@@ -177,6 +178,13 @@ def build_headless_runtime(
     #     iterated; construction is free/cheap. The genuine error-recovery
     #     retry wrapper is flag-gated from env (MAGI_ERROR_RECOVERY_ENABLED);
     #     ``None`` (the default OFF) leaves streaming byte-for-byte identical.
+    if event_sink is None:
+        try:
+            from magi_agent.observability.runtime_sink import get_active_sink
+
+            event_sink = get_active_sink()
+        except Exception:
+            event_sink = None
     engine = MagiEngineDriver(
         runner=effective_runner,
         recovery=build_engine_recovery_policy(),
@@ -185,6 +193,7 @@ def build_headless_runtime(
             model=model,
             mode=mode,
         ),
+        event_sink=event_sink,
     )
 
     # (C) Permission gate — default stays sink-less and therefore fail-safe on
