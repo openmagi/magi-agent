@@ -1,7 +1,5 @@
 # Glossary
 
-Status: ✅ Active — definitions of the core Magi Agent terms.
-
 Short definitions of the terms used throughout these docs. Each links to the
 fuller treatment where one exists.
 

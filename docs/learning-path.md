@@ -1,7 +1,5 @@
 # Learning Path
 
-Status: ✅ Active — Homebrew ships now; the user track installs and runs a real task today.
-
 Guided learning paths for users, recipe authors, runtime extenders, and self-hosters.
 
 Choose your path through the Magi Agent documentation based on your role and goals.

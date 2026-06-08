@@ -1,6 +1,6 @@
 # Channels
 
-Status: 🚧 Default-off — channel code (Telegram, Discord) ships in shadow / local-fake mode; live send/receive is gated and produces intent + receipt records, not real delivery (`magi_agent/channels/telegram_adapter.py`, `contract.py`).
+> **Note — default-off / shadow today.** Channel code (Telegram, Discord) ships in shadow / local-fake mode; live send/receive is gated and produces intent + receipt records, not real delivery (`magi_agent/channels/telegram_adapter.py`, `contract.py`).
 
 Channels are how an agent run reaches an outside surface — Telegram, Discord,
 the web chat, or the mobile app. The channel layer is the side-effect boundary
@@ -44,7 +44,7 @@ the structural reason channels are default-off, not just a runtime setting.
 
 ## Telegram
 
-Status: 🚧 Default-off — `telegram_adapter.py` runs in shadow / local-fake mode.
+> **Note — default-off / shadow today.** `telegram_adapter.py` runs in shadow / local-fake mode.
 
 ### How a Telegram channel is referenced
 
@@ -115,7 +115,7 @@ this adapter reaches Telegram** — today it produces a local-fake receipt only.
 
 ## Discord
 
-Status: 🚧 Default-off — same shadow posture as Telegram.
+> **Note — default-off / shadow today.** Same shadow posture as Telegram.
 
 `discord_adapter.py` follows the same adapter → boundary → dispatcher pattern,
 the same default-off manifest invariant (`max_text_chars=2000`), and the same

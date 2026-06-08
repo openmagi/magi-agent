@@ -1,7 +1,5 @@
 # What Works Today
 
-Status: ✅ Active — with a provider key, the local `magi` CLI runs a real model and first-party tools today.
-
 A scannable map of what the local `magi` CLI can actually do right now, what ships in shadow/observe-only mode by design, and what is still planned.
 
 "Default-off" in this project describes the **enforcement/governance layer** — the boundary modules that can block, modify, or gate agent behavior — **not** the agent's ability to do work. With a provider key configured, the local CLI executes real model calls and real first-party tools today. The shadow posture exists because untested enforcement is worse than no enforcement; see [Boundaries](/docs/boundaries).

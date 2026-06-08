@@ -1,6 +1,6 @@
 # Integrations
 
-Status: 🚧 Default-off — external side-effect surfaces (chat channels, Composio) ship gated; they require explicit scope, credentials, and approval, and most run in shadow / record-intent mode today.
+> **Note — default-off.** External side-effect surfaces (chat channels, Composio) ship gated; they require explicit scope, credentials, and approval, and most run in shadow / record-intent mode today.
 
 Integrations are side-effect surfaces controlled by ToolHost and policy.
 

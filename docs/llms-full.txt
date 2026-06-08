@@ -39,30 +39,30 @@ The source checkout is for contributors developing the runtime. Normal users ins
 ## Docs Index
 
 - OpenMagi Docs: https://openmagi.ai/docs/overview - Open-source documentation for the Magi Agent programmable AI agent runtime.
-- Getting Started: https://openmagi.ai/docs/getting-started - Status: ✅ Active — Homebrew install plus one provider key gives a real local model and first-party tools today.
-- Quickstart: https://openmagi.ai/docs/quickstart - Status: ✅ Active — Homebrew install plus one provider key runs a real model-backed task today.
+- Getting Started: https://openmagi.ai/docs/getting-started - Homebrew install plus one provider key gives a real local model and first-party tools today.
+- Quickstart: https://openmagi.ai/docs/quickstart - Homebrew install plus one provider key runs a real model-backed task today.
 - CLI: https://openmagi.ai/docs/cli - Type: Guide — what the Magi Agent CLI is and the happy-path commands. For the
-- Configuration: https://openmagi.ai/docs/configuration - Status: ✅ Active — the local CLI is configured with a single provider key or a
+- Configuration: https://openmagi.ai/docs/configuration - the local CLI is configured with a single provider key or a
 - Customization: https://openmagi.ai/docs/customization - Customize Magi Agent with skills, hooks, model profiles, and workflow policy.
 - Runtime: https://openmagi.ai/docs/runtime - How Magi Agent turns model proposals into governed state transitions via the Python ADK runtime.
-- Tools: https://openmagi.ai/docs/tools - Status: ✅ Active — first-party tools are registered and on by default; file/search/edit/patch/Bash run live once a provider key is set (`magi_agent/tools/catalog.py`, `core_toolhost.py`).
+- Tools: https://openmagi.ai/docs/tools - first-party tools are registered and on by default; file/search/edit/patch/Bash run live once a provider key is set (`magi_agent/tools/catalog.py`, `core_toolhost.py`).
 - Contracts: https://openmagi.ai/docs/contracts - Contracts define the runtime obligations for a governed agent run.
 - Hooks: https://openmagi.ai/docs/hooks - Hooks let projects attach policy and evidence behavior without rewriting the
 - Memory: https://openmagi.ai/docs/memory - Memory gives the runtime durable context beyond one turn.
-- Skills: https://openmagi.ai/docs/skills - Status: ✅ Active — 14 first-party skills ship bundled under `magi_agent/skills/bundled/superpowers/`; each is a `SKILL.md` the model can load to follow a procedure.
+- Skills: https://openmagi.ai/docs/skills - 14 first-party skills ship bundled under `magi_agent/skills/bundled/superpowers/`; each is a `SKILL.md` the model can load to follow a procedure.
 - Automation: https://openmagi.ai/docs/automation - Automation covers scheduled work, background tasks, delegated work, and
-- Integrations: https://openmagi.ai/docs/integrations - Status: 🚧 Default-off — external side-effect surfaces (chat channels, Composio) ship gated; they require explicit scope, credentials, and approval, and most run in shadow / record-intent mode today.
+- Integrations: https://openmagi.ai/docs/integrations - (default-off) external side-effect surfaces (chat channels, Composio) ship gated; they require explicit scope, credentials, and approval, and most run in shadow / record-intent mode today.
 - API: https://openmagi.ai/docs/api - `magi-agent serve` exposes the local runtime API and dashboard.
-- Deployment: https://openmagi.ai/docs/deployment - Status: ✅ Active — local self-host runs today; enforcement boundaries are default-off (shadow).
-- Security: https://openmagi.ai/docs/security - Status: ✅ Active — boundaries, default-off authority, and projection control are the security model.
+- Deployment: https://openmagi.ai/docs/deployment - local self-host runs today; enforcement boundaries are default-off (shadow).
+- Security: https://openmagi.ai/docs/security - boundaries, default-off authority, and projection control are the security model.
 - Architecture: https://openmagi.ai/docs/architecture - The two-plane architecture behind Magi Agent composable determinism.
 - Reference: https://openmagi.ai/docs/reference - magi
-- Troubleshooting: https://openmagi.ai/docs/troubleshooting - Status: ✅ Active — covers the local `magi` CLI and dashboard path.
-- Learning Path: https://openmagi.ai/docs/learning-path - Status: ✅ Active — Homebrew ships now; the user track installs and runs a real task today.
+- Troubleshooting: https://openmagi.ai/docs/troubleshooting - covers the local `magi` CLI and dashboard path.
+- Learning Path: https://openmagi.ai/docs/learning-path - Homebrew ships now; the user track installs and runs a real task today.
 - Sessions: https://openmagi.ai/docs/sessions - How Magi Agent sessions manage state, context, and continuity across turns.
 - Checkpoints: https://openmagi.ai/docs/checkpoints - Durable checkpoints for resuming, inspecting, and auditing governed agent runs.
 - Work Console: https://openmagi.ai/docs/work-console - The local dashboard for inspecting, approving, and managing agent work.
-- Boundaries: https://openmagi.ai/docs/boundaries - Status: 🚧 Default-off — boundary enforcement ships disabled or observe-only until explicitly configured.
+- Boundaries: https://openmagi.ai/docs/boundaries - (default-off) boundary enforcement ships disabled or observe-only until explicitly configured.
 - Evidence: https://openmagi.ai/docs/evidence - Evidence ledger entries, source receipts, claim graphs, and evidence contracts that back runtime decisions.
 - Projection: https://openmagi.ai/docs/projection - How runtime state is projected into model-visible context and user-visible output.
 - Repair and Fallback: https://openmagi.ai/docs/repair-fallback - How the runtime handles missing evidence: retry, downgrade, approve, fallback, abstain, or block.
@@ -82,7 +82,7 @@ The source checkout is for contributors developing the runtime. Normal users ins
 - Plugin Manifest: https://openmagi.ai/docs/plugin-manifest - Package and distribute runtime extensions as plugins with a declared manifest.
 - Testing Recipes: https://openmagi.ai/docs/testing-recipes - Test recipes and harnesses with deterministic replay, contract tests, and shadow runs.
 - Config Reference: https://openmagi.ai/docs/config-reference - Complete reference for RuntimeConfig (config/env.py), PythonMemoryAdapterConfig, PythonToolHostAttachmentConfig, PythonRuntimeAuthorityConfig, and all Literal[False] safety invariants.
-- Environment Variable Reference: https://openmagi.ai/docs/env-reference - Status: ✅ Active — the local `magi` CLI and dashboard run with a single
+- Environment Variable Reference: https://openmagi.ai/docs/env-reference - the local `magi` CLI and dashboard run with a single
 - Recipe Schema Reference: https://openmagi.ai/docs/recipe-schema - Complete schema reference for RecipePackManifest, RecipeSnapshot, and ProfileResolutionRequest.
 - Harness Schema Reference: https://openmagi.ai/docs/harness-schema - Complete schema reference for HarnessEngine, HarnessResolutionRequest, ResolvedHarnessPresetState, EvidenceContractScope, and BuiltinHarnessPreset.
 - Hook Points Reference: https://openmagi.ai/docs/hook-points-reference - Complete reference for all 15 HookPoint enum values, their camelCase keys, firing conditions, payloads, and blocking behavior.
@@ -91,13 +91,13 @@ The source checkout is for contributors developing the runtime. Normal users ins
 - Runtime Events Reference: https://openmagi.ai/docs/runtime-events - Reference for runtime event kinds, their payloads, and how events relate to SSE streaming, boundary decisions, and evidence recording.
 - Streaming Events: https://openmagi.ai/docs/streaming-events - Magi Agent streams public runtime progress through Server-Sent Events and CLI
 - Frequently Asked Questions: https://openmagi.ai/docs/faq - Answers to common questions about Magi Agent: recipes vs harnesses, default-off boundaries, local testing, repair decisions, model compatibility, and custom evidence types.
-- What Works Today: https://openmagi.ai/docs/what-works-today - Status: ✅ Active — with a provider key, the local `magi` CLI runs a real model and first-party tools today.
-- Common Tasks: https://openmagi.ai/docs/common-tasks - Status: ✅ Active — the local `magi` CLI runs a real model and first-party tools once a provider key is set (`magi_agent/cli/app.py`, `magi_agent/tools/catalog.py`).
-- Channels (Telegram, Discord): https://openmagi.ai/docs/channels - Status: 🚧 Default-off — channel code (Telegram, Discord) ships in shadow / local-fake mode; live send/receive is gated and produces intent + receipt records, not real delivery (`magi_agent/channels/telegram_adapter.py`, `contract.py`).
+- What Works Today: https://openmagi.ai/docs/what-works-today - with a provider key, the local `magi` CLI runs a real model and first-party tools today.
+- Common Tasks: https://openmagi.ai/docs/common-tasks - the local `magi` CLI runs a real model and first-party tools once a provider key is set (`magi_agent/cli/app.py`, `magi_agent/tools/catalog.py`).
+- Channels (Telegram, Discord): https://openmagi.ai/docs/channels - (default-off) channel code (Telegram, Discord) ships in shadow / local-fake mode; live send/receive is gated and produces intent + receipt records, not real delivery (`magi_agent/channels/telegram_adapter.py`, `contract.py`).
 - CLI Reference: https://openmagi.ai/docs/cli-reference - Type: Reference — the full flag, output-mode, exit-code, keybinding, and
-- Changelog: https://openmagi.ai/docs/changelog - Status: ✅ Active — this page tracks user-facing changes; tagged builds are on GitHub Releases.
-- Upgrading: https://openmagi.ai/docs/upgrading - Status: ✅ Active — covers upgrading the Homebrew install and source checkouts.
-- Glossary: https://openmagi.ai/docs/glossary - Status: ✅ Active — definitions of the core Magi Agent terms.
+- Changelog: https://openmagi.ai/docs/changelog - this page tracks user-facing changes; tagged builds are on GitHub Releases.
+- Upgrading: https://openmagi.ai/docs/upgrading - covers upgrading the Homebrew install and source checkouts.
+- Glossary: https://openmagi.ai/docs/glossary - definitions of the core Magi Agent terms.
 - Contributing: https://openmagi.ai/docs/contributing - Thank you for your interest in contributing!
 
 
@@ -263,8 +263,6 @@ Source: https://github.com/openmagi/magi-agent/blob/main/docs/getting-started.md
 
 # Getting Started
 
-Status: ✅ Active — Homebrew install plus one provider key gives a real local model and first-party tools today.
-
 Install Magi Agent locally, open the dashboard, or fall back to a source checkout for development.
 
 Install with Homebrew, run `magi-agent serve --port 8080`, and open the local dashboard. Source checkout remains available for development.
@@ -329,8 +327,6 @@ credentials, and approval policy.
 Source: https://github.com/openmagi/magi-agent/blob/main/docs/quickstart.md
 
 # Quickstart
-
-Status: ✅ Active — Homebrew install plus one provider key runs a real model-backed task today.
 
 The fastest happy path from install to your first answered task.
 
@@ -537,7 +533,6 @@ Source: https://github.com/openmagi/magi-agent/blob/main/docs/configuration.md
 
 # Configuration
 
-Status: ✅ Active — the local CLI is configured with a single provider key or a
 `~/.magi/config.toml`.
 
 Configure runtime-enforced control over context, tools, evidence, approvals, repair, projection, and audit.
@@ -771,8 +766,6 @@ Repair is bounded and auditable. The append-only audit ledger should show the fa
 Source: https://github.com/openmagi/magi-agent/blob/main/docs/tools.md
 
 # Tools
-
-Status: ✅ Active — first-party tools are registered and on by default; file/search/edit/patch/Bash run live once a provider key is set (`magi_agent/tools/catalog.py`, `core_toolhost.py`).
 
 Tools are the controlled activity surface, not direct model authority.
 
@@ -1051,8 +1044,6 @@ Source: https://github.com/openmagi/magi-agent/blob/main/docs/skills.md
 
 # Skills
 
-Status: ✅ Active — 14 first-party skills ship bundled under `magi_agent/skills/bundled/superpowers/`; each is a `SKILL.md` the model can load to follow a procedure.
-
 Skills package workflow knowledge and can participate in runtime policy.
 
 Magi Agent skills should explain procedures while harnesses and runtime surfaces enforce evidence, approvals, repair, projection, and audit.
@@ -1188,7 +1179,7 @@ Source: https://github.com/openmagi/magi-agent/blob/main/docs/integrations.md
 
 # Integrations
 
-Status: 🚧 Default-off — external side-effect surfaces (chat channels, Composio) ship gated; they require explicit scope, credentials, and approval, and most run in shadow / record-intent mode today.
+> **Note — default-off.** external side-effect surfaces (chat channels, Composio) ship gated; they require explicit scope, credentials, and approval, and most run in shadow / record-intent mode today.
 
 Integrations are side-effect surfaces controlled by ToolHost and policy.
 
@@ -1309,8 +1300,6 @@ Source: https://github.com/openmagi/magi-agent/blob/main/docs/deployment.md
 
 # Deployment
 
-Status: ✅ Active — local self-host runs today; enforcement boundaries are default-off (shadow).
-
 This page covers running Magi Agent yourself. The local CLI and HTTP server run a
 real model and first-party tools today (see [what works today](/docs/what-works-today));
 what ships default-off is the enforcement/governance layer, external channel
@@ -1370,8 +1359,6 @@ in your own deployment layer.
 Source: https://github.com/openmagi/magi-agent/blob/main/docs/security.md
 
 # Security
-
-Status: ✅ Active — boundaries, default-off authority, and projection control are the security model.
 
 Security starts with runtime boundaries, default-off authority, and projection control.
 
@@ -1567,8 +1554,6 @@ Source: https://github.com/openmagi/magi-agent/blob/main/docs/troubleshooting.md
 
 # Troubleshooting
 
-Status: ✅ Active — covers the local `magi` CLI and dashboard path.
-
 Debug Magi Agent by locating the failed runtime boundary.
 
 Most failures belong to a boundary: missing evidence, blocked approval, unsupported claim, stale context, tool denial, projection rejection, or install documentation drift.
@@ -1614,8 +1599,6 @@ Verify that evidence contracts are active for your task type. Research tasks sho
 Source: https://github.com/openmagi/magi-agent/blob/main/docs/learning-path.md
 
 # Learning Path
-
-Status: ✅ Active — Homebrew ships now; the user track installs and runs a real task today.
 
 Guided learning paths for users, recipe authors, runtime extenders, and self-hosters.
 
@@ -1786,7 +1769,7 @@ Source: https://github.com/openmagi/magi-agent/blob/main/docs/boundaries.md
 
 # Boundaries
 
-Status: 🚧 Default-off — boundary enforcement ships disabled or observe-only until explicitly configured.
+> **Note — default-off.** boundary enforcement ships disabled or observe-only until explicitly configured.
 
 Runtime boundaries that govern when model proposals become state, output, or side effects.
 
@@ -3773,7 +3756,6 @@ Source: https://github.com/openmagi/magi-agent/blob/main/docs/env-reference.md
 
 # Environment Variable Reference
 
-Status: ✅ Active — the local `magi` CLI and dashboard run with a single
 provider key or `~/.magi/config.toml`.
 
 This page lists the environment variables a local user or self-hosted operator
@@ -4462,8 +4444,6 @@ Source: https://github.com/openmagi/magi-agent/blob/main/docs/what-works-today.m
 
 # What Works Today
 
-Status: ✅ Active — with a provider key, the local `magi` CLI runs a real model and first-party tools today.
-
 A scannable map of what the local `magi` CLI can actually do right now, what ships in shadow/observe-only mode by design, and what is still planned.
 
 "Default-off" in this project describes the **enforcement/governance layer** — the boundary modules that can block, modify, or gate agent behavior — **not** the agent's ability to do work. With a provider key configured, the local CLI executes real model calls and real first-party tools today. The shadow posture exists because untested enforcement is worse than no enforcement; see [Boundaries](/docs/boundaries).
@@ -4507,8 +4487,6 @@ Source: https://github.com/openmagi/magi-agent/blob/main/docs/common-tasks.md
 
 # Common tasks → command
 
-Status: ✅ Active — the local `magi` CLI runs a real model and first-party tools once a provider key is set (`magi_agent/cli/app.py`, `magi_agent/tools/catalog.py`).
-
 A task-oriented index: find what you want to do, copy the command, follow the
 linked doc. Rows tagged 🚧 are default-off / shadow surfaces — they record intent
 rather than performing the live side effect (see
@@ -4549,7 +4527,7 @@ Source: https://github.com/openmagi/magi-agent/blob/main/docs/channels.md
 
 # Channels
 
-Status: 🚧 Default-off — channel code (Telegram, Discord) ships in shadow / local-fake mode; live send/receive is gated and produces intent + receipt records, not real delivery (`magi_agent/channels/telegram_adapter.py`, `contract.py`).
+> **Note — default-off.** channel code (Telegram, Discord) ships in shadow / local-fake mode; live send/receive is gated and produces intent + receipt records, not real delivery (`magi_agent/channels/telegram_adapter.py`, `contract.py`).
 
 Channels are how an agent run reaches an outside surface — Telegram, Discord,
 the web chat, or the mobile app. The channel layer is the side-effect boundary
@@ -4593,7 +4571,7 @@ the structural reason channels are default-off, not just a runtime setting.
 
 ## Telegram
 
-Status: 🚧 Default-off — `telegram_adapter.py` runs in shadow / local-fake mode.
+> **Note — default-off.** `telegram_adapter.py` runs in shadow / local-fake mode.
 
 ### How a Telegram channel is referenced
 
@@ -4664,7 +4642,7 @@ this adapter reaches Telegram** — today it produces a local-fake receipt only.
 
 ## Discord
 
-Status: 🚧 Default-off — same shadow posture as Telegram.
+> **Note — default-off.** same shadow posture as Telegram.
 
 `discord_adapter.py` follows the same adapter → boundary → dispatcher pattern,
 the same default-off manifest invariant (`max_text_chars=2000`), and the same
@@ -5018,8 +4996,6 @@ Source: https://github.com/openmagi/magi-agent/blob/main/docs/changelog.md
 
 # Changelog
 
-Status: ✅ Active — this page tracks user-facing changes; tagged builds are on GitHub Releases.
-
 Open Magi Agent is in early beta. For the authoritative list of tagged builds and
 their assets, see [GitHub Releases](https://github.com/openmagi/magi-agent/releases).
 This page summarizes notable user-facing changes between releases.
@@ -5050,8 +5026,6 @@ Versions follow the tags published on GitHub Releases.
 Source: https://github.com/openmagi/magi-agent/blob/main/docs/upgrading.md
 
 # Upgrading
-
-Status: ✅ Active — covers upgrading the Homebrew install and source checkouts.
 
 Open Magi Agent is in early beta; interfaces may change between releases. Check the
 [changelog](/docs/changelog) and [GitHub Releases](https://github.com/openmagi/magi-agent/releases)
@@ -5110,8 +5084,6 @@ no longer in the environment (`magi doctor` reports both).
 Source: https://github.com/openmagi/magi-agent/blob/main/docs/glossary.md
 
 # Glossary
-
-Status: ✅ Active — definitions of the core Magi Agent terms.
 
 Short definitions of the terms used throughout these docs. Each links to the
 fuller treatment where one exists.

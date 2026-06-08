@@ -1,7 +1,5 @@
 # Common tasks → command
 
-Status: ✅ Active — the local `magi` CLI runs a real model and first-party tools once a provider key is set (`magi_agent/cli/app.py`, `magi_agent/tools/catalog.py`).
-
 A task-oriented index: find what you want to do, copy the command, follow the
 linked doc. Rows tagged 🚧 are default-off / shadow surfaces — they record intent
 rather than performing the live side effect (see

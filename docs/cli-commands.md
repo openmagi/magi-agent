@@ -1,6 +1,6 @@
 # In-session Commands (slash commands)
 
-Status: 🚧 Default-off — the slash-command surface is early; several builtins record an *intent* via the boundary rather than performing a full action yet (`magi_agent/cli/commands/builtins.py`).
+> **Note — early surface.** Several builtins record an *intent* via the boundary rather than performing a full action yet (`magi_agent/cli/commands/builtins.py`).
 
 Inside an interactive `magi` session (and the chat surface) you can type `/`-prefixed
 commands. These are distinct from the `magi <subcommand>` CLI commands documented in

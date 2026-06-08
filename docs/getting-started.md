@@ -1,7 +1,5 @@
 # Getting Started
 
-Status: ✅ Active — Homebrew install plus one provider key gives a real local model and first-party tools today.
-
 Install Magi Agent locally, open the dashboard, or fall back to a source checkout for development.
 
 Install with Homebrew, run `magi-agent serve --port 8080`, and open the local dashboard. Source checkout remains available for development.

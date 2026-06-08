@@ -1,7 +1,5 @@
 # Skills
 
-Status: ✅ Active — 14 first-party skills ship bundled under `magi_agent/skills/bundled/superpowers/`; each is a `SKILL.md` the model can load to follow a procedure.
-
 Skills package workflow knowledge and can participate in runtime policy.
 
 Magi Agent skills should explain procedures while harnesses and runtime surfaces enforce evidence, approvals, repair, projection, and audit.

@@ -1,7 +1,5 @@
 # Security
 
-Status: ✅ Active — boundaries, default-off authority, and projection control are the security model.
-
 Security starts with runtime boundaries, default-off authority, and projection control.
 
 Keep secrets out of model-visible context, make tools least-privilege, require approvals for side effects, and audit every governed transition.

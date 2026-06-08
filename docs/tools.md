@@ -1,7 +1,5 @@
 # Tools
 
-Status: ✅ Active — first-party tools are registered and on by default; file/search/edit/patch/Bash run live once a provider key is set (`magi_agent/tools/catalog.py`, `core_toolhost.py`).
-
 Tools are the controlled activity surface, not direct model authority.
 
 ToolHost / activity boundary checks decide whether source, file, delivery, child, memory, artifact, workspace, and integration operations can execute and what receipts they produce.
