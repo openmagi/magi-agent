@@ -17,6 +17,12 @@ from magi_agent.adk_bridge.local_toolhost import (
     is_local_fake_receipt_adk_tool,
 )
 from magi_agent.adk_bridge.session_service import WorkspaceSessionService
+from magi_agent.harness.general_automation.live_gate import (
+    GeneralAutomationReceiptLedgerStore,
+)
+from magi_agent.harness.general_automation.task_completion import (
+    RequiredDeliverableEvidence,
+)
 
 LOCAL_ADK_RUNNER_FLAG = "CORE_AGENT_PYTHON_LOCAL_ADK_RUNNER"
 LOCAL_INERT_MODEL_NAME = "openmagi-local-inert"
@@ -96,11 +102,15 @@ def build_local_adk_runner(
     session_service = WorkspaceSessionService(app_name=app_name)
     memory_service = InMemoryMemoryService()
     artifact_service = InMemoryArtifactService()
-    # Build the control plane from the same env flags as before, but via the
-    # shared helper so real_runner and local_runner cannot drift.  All existing
-    # flags keep their default-OFF values; the plane returns a ControlPlanePlugin
-    # regardless (empty plane == zero-overhead no-op, identical to plugins=[]).
-    plane_plugin = build_default_plugin()
+    # Build the control plane from the same env flags as real_runner so the two
+    # construction paths cannot drift. Full local profile enables first-party
+    # controls by default; safe/minimal profiles keep the plane behaviorally
+    # empty.
+    plane_plugin = build_default_plugin(
+        general_automation_receipts=GeneralAutomationReceiptLedgerStore(),
+        contract_required=RequiredDeliverableEvidence(),
+        agent_role="general",
+    )
     # ADK 1.33 deprecates ``Runner(plugins=...)``; the supported path wraps the
     # agent and plugins in an ``App``. An App with an empty plugins list behaves
     # identically to the old no-plugin runner (no deprecation warning, no plugin

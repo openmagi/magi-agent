@@ -20,8 +20,11 @@ from magi_agent.coding.repair_loop import (
     CodingRepairLoopResult,
     CodingRepairLoopState,
     CodingRepairReasonCode,
+    build_repair_continuation_message,
+    coding_repair_loop_enabled,
     evaluate_repair_decision,
     project_repair_decision_event,
+    repair_max_attempts,
 )
 
 
@@ -257,6 +260,58 @@ class TestDefaultOff:
     def test_default_config_is_disabled(self) -> None:
         config = CodingRepairLoopConfig()
         assert config.enabled is False
+
+
+# ---------------------------------------------------------------------------
+# Test: Live bounded retry enablement helpers
+# ---------------------------------------------------------------------------
+
+class TestLiveRepairHelpers:
+    def test_live_retry_defaults_on_for_full_local_profile(self) -> None:
+        assert coding_repair_loop_enabled({}) is True
+        assert coding_repair_loop_enabled({"MAGI_RUNTIME_PROFILE": "full"}) is True
+
+    def test_safe_profiles_keep_projection_only_behavior(self) -> None:
+        assert coding_repair_loop_enabled({"MAGI_RUNTIME_PROFILE": "safe"}) is False
+        assert coding_repair_loop_enabled({"MAGI_RUNTIME_PROFILE": "minimal"}) is False
+        assert coding_repair_loop_enabled({"MAGI_RUNTIME_PROFILE": "off"}) is False
+
+    def test_explicit_env_overrides_profile(self) -> None:
+        assert coding_repair_loop_enabled(
+            {
+                "MAGI_RUNTIME_PROFILE": "safe",
+                "MAGI_CODING_REPAIR_LOOP_ENABLED": "1",
+            }
+        ) is True
+        assert coding_repair_loop_enabled(
+            {
+                "MAGI_RUNTIME_PROFILE": "full",
+                "MAGI_CODING_REPAIR_LOOP_ENABLED": "0",
+            }
+        ) is False
+        assert coding_repair_loop_enabled(
+            {"MAGI_CODING_REPAIR_LOOP_ENABLED": "definitely"}
+        ) is False
+
+    def test_repair_max_attempts_is_bounded(self) -> None:
+        assert repair_max_attempts({}) == 3
+        assert repair_max_attempts({"maxAttempts": 2}) == 2
+        assert repair_max_attempts({"max_attempts": 4}) == 4
+        assert repair_max_attempts({"maxAttempts": 99}) == 10
+        assert repair_max_attempts({"maxAttempts": -5}) == 0
+
+    def test_repair_continuation_message_hashes_non_public_refs(self) -> None:
+        message = build_repair_continuation_message(
+            missing_evidence=("evidence:git-diff", "/Users/kevin/secret.patch"),
+            missing_validators=("verifier:dev-coding:test-evidence",),
+            attempt=1,
+            max_attempts=3,
+        )
+        assert "evidence:git-diff" in message
+        assert "verifier:dev-coding:test-evidence" in message
+        assert "/Users/" not in message
+        assert "secret.patch" not in message
+        assert "ref:sha256:" in message
 
 
 # ---------------------------------------------------------------------------

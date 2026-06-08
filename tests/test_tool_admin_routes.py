@@ -61,6 +61,7 @@ EXPECTED_NATIVE_TOOL_NAMES = {
     "KnowledgeWrite",
     "knowledge-write",
     "MemoryRedact",
+    "MemoryWrite",
     "MissionLedger",
     "NotifyUser",
     "PackageDependencyResolve",
@@ -149,7 +150,14 @@ def make_custom_manifest(name: str) -> ToolManifest:
 def test_admin_tool_routes_require_gateway_token() -> None:
     client = make_client()
 
-    for path in ("/v1/admin/tools", "/v1/admin/tools/stats", "/v1/admin/tools/FileRead"):
+    for path in (
+        "/v1/admin/tools",
+        "/v1/admin/tools/stats",
+        "/v1/admin/tools/FileRead",
+        "/api/tools",
+        "/api/tools/stats",
+        "/api/tools/FileRead",
+    ):
         missing = client.get(path)
         assert missing.status_code == 401
         assert missing.json() == {"error": "unauthorized"}
@@ -180,7 +188,11 @@ def test_list_tools_returns_enabled_first_party_catalog_metadata() -> None:
     assert file_read["dangerous"] is False
     assert file_read["mutatesWorkspace"] is False
     assert file_read["availableInModes"] == ["plan", "act"]
-    assert file_read["inputSchema"] == {"type": "object", "additionalProperties": True}
+    file_read_schema = file_read["inputSchema"]
+    assert isinstance(file_read_schema, dict)
+    assert file_read_schema["type"] == "object"
+    assert file_read_schema["required"] == ["path"]
+    assert file_read_schema["properties"]["path"]["type"] == "string"
     assert file_read["outputSchema"] is None
     assert file_read["pluginId"] is None
     assert file_read["optOut"] is True
@@ -273,6 +285,59 @@ def test_tool_stats_returns_zero_stub_stats_for_registered_tools() -> None:
         "avgDurationMs": 0,
         "lastCallAt": 0,
     }
+
+
+def test_local_dashboard_api_tools_alias_matches_admin_catalog() -> None:
+    client = make_client()
+
+    admin_response = client.get("/v1/admin/tools", headers=admin_headers())
+    dashboard_response = client.get("/api/tools", headers=admin_headers())
+
+    assert admin_response.status_code == 200
+    assert dashboard_response.status_code == 200
+    assert dashboard_response.json() == admin_response.json()
+
+
+def test_local_dashboard_api_tools_alias_supports_detail_and_stats() -> None:
+    client = make_client()
+
+    detail = client.get("/api/tools/FileRead", headers=admin_headers())
+    stats = client.get("/api/tools/stats", headers=admin_headers())
+
+    assert detail.status_code == 200
+    assert detail.json()["tool"]["name"] == "FileRead"
+    assert stats.status_code == 200
+    assert set(stats.json()["stats"]) == EXPECTED_DEFAULT_TOOL_NAMES
+
+
+def test_local_dashboard_api_tools_can_toggle_registry_state() -> None:
+    client = make_client()
+
+    disabled = client.post("/api/tools/FileRead/disable", headers=admin_headers())
+    detail_disabled = client.get("/api/tools/FileRead", headers=admin_headers())
+    enabled = client.post("/api/tools/FileRead/enable", headers=admin_headers())
+    detail_enabled = client.get("/api/tools/FileRead", headers=admin_headers())
+
+    assert disabled.status_code == 200
+    assert disabled.json() == {"tool": "FileRead", "enabled": False}
+    assert detail_disabled.status_code == 200
+    assert detail_disabled.json()["tool"]["enabled"] is False
+    assert enabled.status_code == 200
+    assert enabled.json() == {"tool": "FileRead", "enabled": True}
+    assert detail_enabled.status_code == 200
+    assert detail_enabled.json()["tool"]["enabled"] is True
+
+
+def test_local_dashboard_api_tools_toggle_requires_gateway_token() -> None:
+    client = make_client()
+
+    missing = client.post("/api/tools/FileRead/disable")
+    wrong = client.post("/api/tools/FileRead/disable", headers=admin_headers("wrong-token"))
+
+    assert missing.status_code == 401
+    assert missing.json() == {"error": "unauthorized"}
+    assert wrong.status_code == 401
+    assert wrong.json() == {"error": "unauthorized"}
 
 
 def test_admin_tool_routes_do_not_scaffold_mutating_routes() -> None:

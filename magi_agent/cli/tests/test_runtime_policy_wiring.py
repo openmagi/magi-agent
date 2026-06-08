@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Mapping
 from typing import AsyncIterator
 
 from google.adk.models import BaseLlm, LlmResponse
@@ -91,6 +92,21 @@ class _FakeAdapter:
             yield object()
 
 
+class _RepairAwareAdapter(_FakeAdapter):
+    async def run_turn(self, runner_input: object) -> AsyncIterator[object]:
+        self.runner.invocations += 1
+        index = self.runner.invocations - 1
+        events = (
+            self.runner.events_by_invocation[index]
+            if index < len(self.runner.events_by_invocation)
+            else []
+        )
+        for event in events:
+            yield event
+        if False:
+            yield runner_input
+
+
 class _RouteCapturingAdapter(_FakeAdapter):
     async def run_turn(self, runner_input: object) -> AsyncIterator[object]:
         agent = getattr(self.runner, "agent")
@@ -111,6 +127,14 @@ class _FakeBridge:
 
     def project_adk_event(self, adk_event: object, *, turn_id: str) -> object:
         del adk_event, turn_id
+        return type("Projection", (), {"agent_events": []})()
+
+
+class _RepairAwareBridge(_FakeBridge):
+    def project_adk_event(self, adk_event: object, *, turn_id: str) -> object:
+        del turn_id
+        if isinstance(adk_event, Mapping):
+            return type("Projection", (), {"agent_events": [dict(adk_event)]})()
         return type("Projection", (), {"agent_events": []})()
 
 
@@ -142,6 +166,13 @@ def _route_capturing_engine_deps() -> dict[str, object]:
     return deps
 
 
+def _repair_engine_deps() -> dict[str, object]:
+    deps = dict(_fake_engine_deps())
+    deps["OpenMagiRunnerAdapter"] = _RepairAwareAdapter
+    deps["OpenMagiEventBridge"] = _RepairAwareBridge
+    return deps
+
+
 def _callback_names(agent: object) -> list[str]:
     callback = getattr(agent, "before_tool_callback", None)
     if callback is None:
@@ -168,6 +199,37 @@ def _coding_policy_assembly() -> RunnerPolicyAssembly:
             "livePolicyCallbackAttached": True,
         },
     )
+
+
+def _coding_policy_assembly_with_repair_attempts(max_attempts: int) -> RunnerPolicyAssembly:
+    return RunnerPolicyAssembly(
+        modelProvider="anthropic",
+        modelLabel="anthropic/claude-opus-4-1",
+        selectedPackIds=("openmagi.dev-coding",),
+        evidenceRequirements=("evidence:git-diff",),
+        requiredValidators=("verifier:dev-coding:test-evidence",),
+        missingEvidenceAction="repair_required",
+        repairPolicy={
+            "action": "repair_required",
+            "source": "recipe-materializer",
+            "maxAttempts": max_attempts,
+        },
+        attachmentFlags={
+            "providerCalled": False,
+            "routeAttached": False,
+            "adkRunnerInvoked": False,
+            "productionWriteAllowed": False,
+            "userVisibleOutputAllowed": False,
+            "livePolicyCallbackAttached": True,
+        },
+        taskProfile={"taskType": "coding"},
+    )
+
+
+class _RepairAwareRunner(_NoopRunner):
+    def __init__(self, *, events_by_invocation: list[list[dict[str, object]]]) -> None:
+        self.events_by_invocation = events_by_invocation
+        self.invocations = 0
 
 
 def test_cli_model_runner_attaches_first_party_policy_callback_by_default(
@@ -243,6 +305,7 @@ def test_engine_blocks_completed_turn_when_policy_evidence_is_missing(
     monkeypatch,
 ) -> None:
     _CapturedRunnerInput.captured = []
+    monkeypatch.setenv("MAGI_CODING_REPAIR_LOOP_ENABLED", "0")
     monkeypatch.setattr(engine_module, "_lazy_engine_deps", _fake_engine_deps)
     assembly = _coding_policy_assembly()
     driver = MagiEngineDriver(runner=_NoopRunner(), runner_policy_assembly=assembly)
@@ -294,6 +357,297 @@ def test_engine_blocks_completed_turn_when_policy_evidence_is_missing(
         "dev-coding-verification-audit": "missing",
     }
     assert gate_event["attachmentFlags"]["productionWriteAllowed"] is False
+
+
+def test_engine_executes_pre_final_verifier_bus_when_evidence_collector_attached(
+    monkeypatch,
+) -> None:
+    _CapturedRunnerInput.captured = []
+    monkeypatch.setenv("MAGI_CODING_REPAIR_LOOP_ENABLED", "0")
+    monkeypatch.setattr(engine_module, "_lazy_engine_deps", _fake_engine_deps)
+    calls: list[str] = []
+
+    def _collect(turn_id: str) -> tuple[object, ...]:
+        calls.append(turn_id)
+        return ()
+
+    driver = MagiEngineDriver(
+        runner=_NoopRunner(),
+        runner_policy_assembly=_coding_policy_assembly(),
+        evidence_collector=_collect,
+    )
+
+    async def _drive() -> list[object]:
+        return [
+            item
+            async for item in driver.run_turn_stream(
+                runtime=object(),
+                turn_input={
+                    "prompt": "finish the patch",
+                    "session_id": "s1",
+                    "turn_id": "t1",
+                },
+                cancel=asyncio.Event(),
+            )
+        ]
+
+    items = asyncio.run(_drive())
+    events = [item for item in items if isinstance(item, RuntimeEvent)]
+    terminal = items[-1]
+    gate_event = events[-1].payload
+
+    assert calls == ["t1"]
+    assert isinstance(terminal, EngineResult)
+    assert terminal.terminal == Terminal.error
+    assert terminal.error == "pre_final_evidence_gate_blocked"
+    assert gate_event["decision"] == "block"
+    assert gate_event["missingEvidence"] == ["evidence:git-diff"]
+    assert gate_event["missingValidators"] == ["verifier:dev-coding:test-evidence"]
+    assert gate_event["verifierBus"]["metadataOnly"] is False
+    assert gate_event["verifierBus"]["executionAttached"] is True
+    assert gate_event["verifierBus"]["trafficAttached"] is False
+    assert gate_event["verifierBus"]["evidenceRecordCount"] == 0
+    assert {
+        result["verifierId"]: result["status"]
+        for result in gate_event["verifierBus"]["results"]
+    } == {
+        "tool-evidence-contract": "missing",
+        "dev-coding-verification-audit": "missing",
+    }
+
+
+def test_engine_pre_final_verifier_bus_passes_with_collected_evidence(
+    monkeypatch,
+) -> None:
+    _CapturedRunnerInput.captured = []
+    monkeypatch.setattr(engine_module, "_lazy_engine_deps", _fake_engine_deps)
+    evidence_records = (
+        {"evidenceRef": "evidence:git-diff"},
+        {"evidenceRef": "verifier:dev-coding:test-evidence"},
+    )
+
+    driver = MagiEngineDriver(
+        runner=_NoopRunner(),
+        runner_policy_assembly=_coding_policy_assembly(),
+        evidence_collector=lambda turn_id: evidence_records if turn_id == "t1" else (),
+    )
+
+    async def _drive() -> list[object]:
+        return [
+            item
+            async for item in driver.run_turn_stream(
+                runtime=object(),
+                turn_input={
+                    "prompt": "finish the patch",
+                    "session_id": "s1",
+                    "turn_id": "t1",
+                },
+                cancel=asyncio.Event(),
+            )
+        ]
+
+    items = asyncio.run(_drive())
+    events = [item for item in items if isinstance(item, RuntimeEvent)]
+    terminal = items[-1]
+    gate_event = events[-1].payload
+
+    assert isinstance(terminal, EngineResult)
+    assert terminal.terminal == Terminal.completed
+    assert terminal.error is None
+    assert gate_event["decision"] == "pass"
+    assert gate_event["missingEvidence"] == []
+    assert gate_event["missingValidators"] == []
+    assert gate_event["matchedRefs"] == [
+        "evidence:git-diff",
+        "verifier:dev-coding:test-evidence",
+    ]
+    assert gate_event["verifierBus"]["metadataOnly"] is False
+    assert gate_event["verifierBus"]["executionAttached"] is True
+    assert gate_event["verifierBus"]["evidenceRecordCount"] == 2
+    assert {
+        result["verifierId"]: result["status"]
+        for result in gate_event["verifierBus"]["results"]
+    } == {"pre-final-evidence-gate": "pass"}
+
+
+def test_engine_reinvokes_once_for_bounded_repair_when_second_run_adds_evidence(
+    monkeypatch,
+) -> None:
+    _CapturedRunnerInput.captured = []
+    monkeypatch.delenv("MAGI_CODING_REPAIR_LOOP_ENABLED", raising=False)
+    monkeypatch.delenv("MAGI_RUNTIME_PROFILE", raising=False)
+    monkeypatch.setattr(engine_module, "_lazy_engine_deps", _repair_engine_deps)
+    runner = _RepairAwareRunner(
+        events_by_invocation=[
+            [],
+            [
+                {
+                    "type": "tool_end",
+                    "id": "diff-1",
+                    "name": "GitDiff",
+                    "status": "ok",
+                    "output": {
+                        "evidenceRef": "evidence:git-diff",
+                        "validatorRef": "verifier:dev-coding:test-evidence",
+                    },
+                }
+            ],
+        ]
+    )
+    driver = MagiEngineDriver(
+        runner=runner,
+        runner_policy_assembly=_coding_policy_assembly_with_repair_attempts(2),
+    )
+
+    async def _drive() -> list[object]:
+        return [
+            item
+            async for item in driver.run_turn_stream(
+                runtime=object(),
+                turn_input={
+                    "prompt": "fix the failing tests",
+                    "session_id": "s-repair",
+                    "turn_id": "t-repair",
+                },
+                cancel=asyncio.Event(),
+            )
+        ]
+
+    items = asyncio.run(_drive())
+    events = [item for item in items if isinstance(item, RuntimeEvent)]
+    terminal = items[-1]
+
+    assert runner.invocations == 2
+    assert len(_CapturedRunnerInput.captured) == 2
+    second_message = _CapturedRunnerInput.captured[1].kwargs["newMessage"]
+    assert "repair" in second_message.parts[0].text.lower()
+    assert "evidence:git-diff" in second_message.parts[0].text
+    assert isinstance(terminal, EngineResult)
+    assert terminal.terminal == Terminal.completed
+    gate_events = [
+        event.payload
+        for event in events
+        if event.payload.get("type") == "pre_final_evidence_gate"
+    ]
+    assert [gate["decision"] for gate in gate_events] == ["block", "pass"]
+    retry_events = [
+        event.payload
+        for event in events
+        if event.payload.get("type") == "coding_repair_retry_scheduled"
+    ]
+    assert retry_events == [
+        {
+            "type": "coding_repair_retry_scheduled",
+            "turnId": "t-repair",
+            "attempt": 1,
+            "maxAttempts": 2,
+            "missingEvidence": ["evidence:git-diff"],
+            "missingValidators": ["verifier:dev-coding:test-evidence"],
+        }
+    ]
+
+
+def test_engine_bounded_repair_stops_at_max_attempts(monkeypatch) -> None:
+    _CapturedRunnerInput.captured = []
+    monkeypatch.delenv("MAGI_CODING_REPAIR_LOOP_ENABLED", raising=False)
+    monkeypatch.delenv("MAGI_RUNTIME_PROFILE", raising=False)
+    monkeypatch.setattr(engine_module, "_lazy_engine_deps", _repair_engine_deps)
+    runner = _RepairAwareRunner(events_by_invocation=[[], []])
+    driver = MagiEngineDriver(
+        runner=runner,
+        runner_policy_assembly=_coding_policy_assembly_with_repair_attempts(1),
+    )
+
+    async def _drive() -> list[object]:
+        return [
+            item
+            async for item in driver.run_turn_stream(
+                runtime=object(),
+                turn_input={
+                    "prompt": "fix the failing tests",
+                    "session_id": "s-repair-cap",
+                    "turn_id": "t-repair-cap",
+                },
+                cancel=asyncio.Event(),
+            )
+        ]
+
+    items = asyncio.run(_drive())
+    events = [item for item in items if isinstance(item, RuntimeEvent)]
+    terminal = items[-1]
+
+    assert runner.invocations == 2
+    assert isinstance(terminal, EngineResult)
+    assert terminal.terminal == Terminal.error
+    gate_events = [
+        event.payload
+        for event in events
+        if event.payload.get("type") == "pre_final_evidence_gate"
+    ]
+    assert [gate["decision"] for gate in gate_events] == ["block", "block"]
+    assert gate_events[-1]["repairDecision"]["action"] == "ask_user"
+    assert gate_events[-1]["repairDecision"]["attemptCount"] == 1
+    retry_events = [
+        event.payload
+        for event in events
+        if event.payload.get("type") == "coding_repair_retry_scheduled"
+    ]
+    assert len(retry_events) == 1
+
+
+def test_engine_repair_retry_disabled_in_safe_profile(monkeypatch) -> None:
+    _CapturedRunnerInput.captured = []
+    monkeypatch.delenv("MAGI_CODING_REPAIR_LOOP_ENABLED", raising=False)
+    monkeypatch.setenv("MAGI_RUNTIME_PROFILE", "safe")
+    monkeypatch.setattr(engine_module, "_lazy_engine_deps", _repair_engine_deps)
+    runner = _RepairAwareRunner(
+        events_by_invocation=[
+            [],
+            [
+                {
+                    "type": "tool_end",
+                    "id": "diff-1",
+                    "name": "GitDiff",
+                    "status": "ok",
+                    "output": {
+                        "evidenceRef": "evidence:git-diff",
+                        "validatorRef": "verifier:dev-coding:test-evidence",
+                    },
+                }
+            ],
+        ]
+    )
+    driver = MagiEngineDriver(
+        runner=runner,
+        runner_policy_assembly=_coding_policy_assembly_with_repair_attempts(2),
+    )
+
+    async def _drive() -> list[object]:
+        return [
+            item
+            async for item in driver.run_turn_stream(
+                runtime=object(),
+                turn_input={
+                    "prompt": "fix the failing tests",
+                    "session_id": "s-repair-safe",
+                    "turn_id": "t-repair-safe",
+                },
+                cancel=asyncio.Event(),
+            )
+        ]
+
+    items = asyncio.run(_drive())
+    events = [item for item in items if isinstance(item, RuntimeEvent)]
+    terminal = items[-1]
+
+    assert runner.invocations == 1
+    assert isinstance(terminal, EngineResult)
+    assert terminal.terminal == Terminal.error
+    assert [
+        event.payload
+        for event in events
+        if event.payload.get("type") == "coding_repair_retry_scheduled"
+    ] == []
 
 
 def test_engine_does_not_block_general_chat_when_coding_policy_is_available(
@@ -512,3 +866,118 @@ def test_engine_runner_policy_route_selection_can_be_disabled(
         for event in events
         if event.payload.get("type") == "runner_policy_route_selection"
     ] == []
+
+
+def test_engine_blocks_active_phase_when_materialized_route_is_denied(
+    monkeypatch,
+) -> None:
+    _CapturedRunnerInput.captured = []
+    monkeypatch.setattr(engine_module, "_lazy_engine_deps", _route_capturing_engine_deps)
+    runner = _RouteAwareRunner()
+    assembly = RunnerPolicyAssembly(
+        modelProvider="anthropic",
+        modelLabel="anthropic/claude-sonnet-4-5",
+        selectedPackIds=("openmagi.research", "openmagi.web-acquisition"),
+        evidenceRequirements=(),
+        requiredValidators=(),
+        missingEvidenceAction="audit",
+        repairPolicy={"action": "audit", "source": "recipe-materializer"},
+        taskProfile={"taskType": "research"},
+        providerIntents=("provider:web.search", "provider:web.fetch"),
+        toolIntents=("tool:file.read",),
+        phaseRouting={
+            "phaseRoutes": {
+                "source_acquisition": {
+                    "phase": "source_acquisition",
+                    "provider": "google",
+                    "model": "gemini-3.5-flash",
+                    "tier": "cheap",
+                    "capabilities": ["streaming"],
+                    "escalationPolicy": "none",
+                    "routeDenied": True,
+                    "reasonCodes": ["phase:source_acquisition:budget_denied"],
+                    "estimatedCostUsd": 0.002,
+                },
+                "final_answer_drafting": {
+                    "phase": "final_answer_drafting",
+                    "provider": "anthropic",
+                    "model": "haiku",
+                    "tier": "cheap",
+                    "capabilities": ["streaming", "tool_use"],
+                    "escalationPolicy": "none",
+                    "routeDenied": False,
+                    "reasonCodes": [],
+                    "estimatedCostUsd": 0.002,
+                },
+            },
+            "routeDenied": True,
+            "denialReason": "budget_too_low",
+            "reasonCodes": ["python_phase_route_budget_too_low"],
+        },
+    )
+    driver = MagiEngineDriver(runner=runner, runner_policy_assembly=assembly)
+
+    async def _drive() -> list[object]:
+        return [
+            item
+            async for item in driver.run_turn_stream(
+                runtime=object(),
+                turn_input={
+                    "prompt": "research this source and cite it",
+                    "session_id": "s-route-denied",
+                    "turn_id": "t-route-denied",
+                },
+                cancel=asyncio.Event(),
+            )
+        ]
+
+    items = asyncio.run(_drive())
+    events = [item for item in items if isinstance(item, RuntimeEvent)]
+    terminal = items[-1]
+
+    assert isinstance(terminal, EngineResult)
+    assert terminal.terminal == Terminal.error
+    assert terminal.error == "runner_policy_route_denied"
+    assert _CapturedRunnerInput.captured == []
+    assert runner.route_seen_by_adapter is None
+    assert runner.tools_seen_by_adapter == []
+    route_event = next(
+        event.payload
+        for event in events
+        if event.payload.get("type") == "runner_policy_route_selection"
+    )
+    assert route_event["routeDenied"] is True
+    assert route_event["phase"] == "source_acquisition"
+    assert route_event["reasonCodes"] == ["phase:source_acquisition:budget_denied"]
+    phase_event = next(
+        event.payload
+        for event in events
+        if event.payload.get("type") == "phase_route_decision"
+    )
+    assert phase_event["routeDenied"] is True
+    assert phase_event["denialReason"] == "budget_too_low"
+    assert phase_event["deniedPhases"] == ("source_acquisition",)
+    block_event = next(
+        event.payload
+        for event in events
+        if event.payload.get("type") == "runner_policy_route_blocked"
+    )
+    assert block_event == {
+        "type": "runner_policy_route_blocked",
+        "turnId": "t-route-denied",
+        "phase": "source_acquisition",
+        "reasonCodes": ["phase:source_acquisition:budget_denied"],
+        "routeDecision": "blocked_before_provider_call",
+        "authority": {
+            "providerCalled": False,
+            "productionWriteAllowed": False,
+            "externalIntegrationAttached": False,
+        },
+    }
+    types_in_order = [event.payload.get("type") for event in events]
+    assert types_in_order == [
+        "runner_policy_assembly",
+        "runner_policy_route_selection",
+        "phase_route_decision",
+        "runner_policy_route_blocked",
+    ]

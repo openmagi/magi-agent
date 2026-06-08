@@ -48,6 +48,7 @@ describe("agentFetch", () => {
     );
     const [, options] = fetchMock.mock.calls[1]!;
     expect((options?.headers as Headers).get("Authorization")).toBe("Bearer loopback-token");
+    expect((options?.headers as Headers).get("x-gateway-token")).toBe("loopback-token");
   });
 
   it("honors explicit env URL and token overrides", async () => {
@@ -64,5 +65,23 @@ describe("agentFetch", () => {
     );
     const [, options] = fetchMock.mock.calls[0]!;
     expect((options?.headers as Headers).get("Authorization")).toBe("Bearer env-token");
+    expect((options?.headers as Headers).get("x-gateway-token")).toBe("env-token");
+  });
+
+  it("preserves caller-provided auth headers", async () => {
+    vi.stubEnv("NEXT_PUBLIC_AGENT_TOKEN", "env-token");
+    const fetchMock = vi.fn(async () => new Response("{}", { status: 200 }));
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    await agentFetch("/v1/admin/tools", {
+      headers: {
+        Authorization: "Bearer custom-bearer",
+        "x-gateway-token": "custom-gateway",
+      },
+    });
+
+    const [, options] = fetchMock.mock.calls[0]!;
+    expect((options?.headers as Headers).get("Authorization")).toBe("Bearer custom-bearer");
+    expect((options?.headers as Headers).get("x-gateway-token")).toBe("custom-gateway");
   });
 });

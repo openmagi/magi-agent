@@ -14,6 +14,7 @@ import pytest
 
 from magi_agent.adk_bridge.control_plane import (
     CONTROL_PLANE_PLUGIN_NAME,
+    GA_CONSTRAINT_REINJECTION_CONTROL_NAME,
     ControlPlanePlugin,
 )
 from magi_agent.adk_bridge.local_runner import LocalInertLlm, LOCAL_INERT_MODEL_NAME
@@ -192,6 +193,7 @@ def test_both_runners_register_same_default_controls(
     assert any("edit_retry" in name for name in real_control_names)
     assert any("resilience" in name for name in real_control_names)
     assert any("compaction" in name for name in real_control_names)
+    assert GA_CONSTRAINT_REINJECTION_CONTROL_NAME in real_control_names
 
 
 def test_both_runners_empty_plane_in_safe_profile(
