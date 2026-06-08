@@ -261,6 +261,11 @@ class EventProjection:
 class OpenMagiEventBridge:
     def __init__(self, *, live_compatible: bool = False) -> None:
         self.live_compatible = live_compatible
+        # True once this turn has streamed partial `text_delta` events whose
+        # non-partial aggregate has not yet been seen — used to drop the duplicate
+        # aggregate that arrives alongside a trailing tool call. See
+        # ``_project_content_parts``.
+        self._streamed_partial_text = False
 
     def project_runner_start_event(
         self,
@@ -435,11 +440,18 @@ class OpenMagiEventBridge:
             )
 
         prefix_events = _project_response_clear_events(event, turn_id=turn_id)
+        if prefix_events:
+            # A response_clear restarts the visible text; any in-flight partial-text
+            # run is void, so the next non-partial aggregate is not a duplicate.
+            self._streamed_partial_text = False
+        partial_run = [self._streamed_partial_text]
         content_projection = _project_content_parts(
             event,
             turn_id=turn_id,
             live_compatible=self.live_compatible,
+            partial_run=partial_run,
         )
+        self._streamed_partial_text = partial_run[0]
         if (
             content_projection.agent_events
             or content_projection.legacy_deltas
@@ -649,6 +661,7 @@ def _project_content_parts(
     *,
     turn_id: str,
     live_compatible: bool,
+    partial_run: list[bool],
 ) -> EventProjection:
     agent_events: list[dict[str, object]] = []
     legacy_deltas: list[str] = []
@@ -665,6 +678,8 @@ def _project_content_parts(
         final_text_chunks.clear()
         public_text = _public_stream_text(text)
         if is_final_response:
+            # The final reply's text was already streamed as partials; close the run.
+            partial_run[0] = False
             transcript_entries.append(
                 AssistantTextEntry(ts=_event_ts(event), turn_id=turn_id, text=public_text)
             )
@@ -684,6 +699,16 @@ def _project_content_parts(
             )
             return
         if not public_if_non_final:
+            return
+        if partial_run[0]:
+            # Streaming already delivered this segment token-by-token as partial
+            # `text_delta` events; the aggregated NON-partial event that carries a
+            # trailing tool call repeats the whole text, which would duplicate it in
+            # the client transcript (e.g. "…subagent.…subagent." right before a tool
+            # call). Drop the aggregate. When the text was NOT streamed first — a
+            # single mixed text+tool event with no preceding partials — ``partial_run``
+            # is False and the text is emitted normally.
+            partial_run[0] = False
             return
         agent_events.append({"type": "text_delta", "delta": public_text})
         normalized_events.append(
@@ -711,6 +736,7 @@ def _project_content_parts(
             if event.partial:
                 public_text = _public_stream_text(text)
                 agent_events.append({"type": "text_delta", "delta": public_text})
+                partial_run[0] = True
                 normalized_events.append(
                     NormalizedEvent(
                         type="model.message.delta",
