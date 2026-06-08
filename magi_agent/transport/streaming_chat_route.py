@@ -47,6 +47,7 @@ from magi_agent.channels.workflow_confirm_store import (
 from magi_agent.channels.workflow_gate import channel_workflows_enabled
 from magi_agent.channels.taskkind_classifier import FixedClassifier, TaskKindClassifier
 from magi_agent.channels.workflow_orchestrator import (
+    WorkflowOrchestratorResult,
     resolve_confirmation,
     route_inbound,
     start_research,
@@ -263,6 +264,57 @@ async def _drive_selected_gate5b_stream(
         yield chunk
 
 
+async def _drive_workflow_result_stream(
+    result: WorkflowOrchestratorResult,
+    *,
+    session_id: str,
+    turn_id: str,
+) -> AsyncIterator[bytes]:
+    """Project workflow confirmation/execution results onto the SSE contract."""
+    if result.outcome == "awaiting_confirmation":
+        phase = "planning"
+        message = result.message or "Confirm workflow execution."
+    elif result.outcome == "executed":
+        phase = "committed"
+        suffix = f": {result.executor_status}" if result.executor_status else ""
+        message = f"Workflow executed{suffix}."
+    elif result.outcome == "declined":
+        phase = "committed"
+        message = result.message or "Workflow declined."
+    else:
+        phase = "committed"
+        message = result.message or "Workflow handled."
+
+    phase_frame = _runtime_event_frame(
+        {
+            "type": "turn_phase",
+            "eventId": f"{turn_id}:workflow:{result.outcome}",
+            "turnId": turn_id,
+            "phase": phase,
+            "status": result.outcome,
+            "message": message,
+        },
+        turn_id=turn_id,
+    )
+    if phase_frame is not None:
+        yield phase_frame
+    if message:
+        text_frame = _runtime_event_frame(
+            {"type": "text_delta", "delta": message},
+            turn_id=turn_id,
+        )
+        if text_frame is not None:
+            yield text_frame
+    for chunk in frame_for_terminal(
+        EngineResult(
+            terminal=Terminal.completed,
+            session_id=session_id,
+            turn_id=turn_id,
+        )
+    ):
+        yield chunk
+
+
 # ---------------------------------------------------------------------------
 # Registration
 # ---------------------------------------------------------------------------
@@ -330,9 +382,13 @@ def register_streaming_chat_routes(
     # path works regardless. A hosted deployment injects a model-backed classifier.
     classifier = eligibility_classifier if eligibility_classifier is not None else TaskKindClassifier()
 
-    async def _maybe_handle_workflow(prompt: str, session_id: str) -> Response | None:
-        """Workflow pre-check for /v1/chat/stream. Returns a JSONResponse to
-        short-circuit the normal turn, or None to proceed normally.
+    async def _maybe_handle_workflow(
+        prompt: str, session_id: str
+    ) -> WorkflowOrchestratorResult | None:
+        """Workflow pre-check for /v1/chat/stream.
+
+        Returns a workflow result to short-circuit the normal turn, or None to
+        proceed normally.
         Guarded by the channel flag; fail-open (any error → None → normal turn)."""
         if not channel_workflows_enabled():
             return None
@@ -341,15 +397,9 @@ def register_streaming_chat_routes(
             # as the yes/no answer.
             resolved = await resolve_confirmation(prompt, session_id=session_id, store=store)
             if resolved.outcome == "executed":
-                return JSONResponse(
-                    status_code=200,
-                    content={"workflow": "executed", "executorStatus": resolved.executor_status},
-                )
+                return resolved
             if resolved.outcome == "declined":
-                return JSONResponse(
-                    status_code=200,
-                    content={"workflow": "declined", "message": resolved.message},
-                )
+                return resolved
             # resolved.outcome == "not_pending" → no pending; treat as new inbound.
             rates = dict(
                 per_child_token_estimate=_DEFAULT_PER_CHILD_TOKENS,
@@ -369,10 +419,7 @@ def register_streaming_chat_routes(
                     **rates,
                 )
             if out.outcome == "awaiting_confirmation":
-                return JSONResponse(
-                    status_code=200,
-                    content={"workflow": "awaiting_confirmation", "message": out.message},
-                )
+                return out
             return None  # normal_llm → fall through to the streaming turn
         except Exception:
             return None  # FAIL-OPEN — never break normal chat
@@ -425,7 +472,14 @@ def register_streaming_chat_routes(
             )
         wf = await _maybe_handle_workflow(prompt, session_id)
         if wf is not None:
-            return wf
+            return StreamingResponse(
+                _drive_workflow_result_stream(
+                    wf,
+                    session_id=session_id,
+                    turn_id=turn_id,
+                ),
+                media_type="text/event-stream",
+            )
 
         queue: asyncio.Queue[object] = asyncio.Queue()
         sink = build_streaming_prompt_sink(queue, turn_id=turn_id)

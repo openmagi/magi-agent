@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import asyncio
 import json
 
-import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -62,6 +60,19 @@ def _body(text, session="s1"):
     return {"sessionId": session, "messages": [{"role": "user", "content": text}]}
 
 
+def _sse_payloads(response):
+    payloads = []
+    for frame in response.text.split("\n\n"):
+        for line in frame.splitlines():
+            if not line.startswith("data: "):
+                continue
+            raw = line[len("data: "):]
+            if raw == "[DONE]":
+                continue
+            payloads.append(json.loads(raw))
+    return payloads
+
+
 def teardown_function():
     ACTIVE_TURNS._turns.clear()
 
@@ -85,7 +96,16 @@ def test_eligible_auto_detect_returns_confirm(monkeypatch):
     client = TestClient(_app(store, _FixedAsyncClassifier("source_sensitive_research")))
     r = client.post("/v1/chat/stream", json=_body("compare A vs B", "sA"), headers=_hdr())
     assert r.status_code == 200
-    assert r.json()["workflow"] == "awaiting_confirmation"
+    assert r.headers["content-type"].startswith("text/event-stream")
+    payloads = _sse_payloads(r)
+    assert any(
+        payload.get("type") == "turn_phase"
+        and payload.get("status") == "awaiting_confirmation"
+        for payload in payloads
+    )
+    assert any(payload.get("type") == "text_delta" for payload in payloads)
+    assert payloads[-1]["type"] == "turn_result"
+    assert payloads[-1]["terminal"] == "completed"
     assert store.pop("sA") is not None  # pending stored
 
 
@@ -106,11 +126,19 @@ def test_research_prefix_returns_confirm(monkeypatch):
     store = InMemoryPendingConfirmationStore()
     client = TestClient(_app(store, _FixedAsyncClassifier("general")))
     r = client.post("/v1/chat/stream", json=_body("/research compare A vs B", "sC"), headers=_hdr())
-    assert r.json()["workflow"] == "awaiting_confirmation"
+    payloads = _sse_payloads(r)
+    assert any(
+        payload.get("type") == "turn_phase"
+        and payload.get("status") == "awaiting_confirmation"
+        for payload in payloads
+    )
+    assert any(payload.get("type") == "text_delta" for payload in payloads)
+    assert payloads[-1]["type"] == "turn_result"
+    assert payloads[-1]["terminal"] == "completed"
     assert store.pop("sC") is not None
 
 
-def test_second_message_resolves_pending_decline_when_executor_off(monkeypatch):
+def test_second_message_resolves_pending_decline_when_executor_off_as_sse(monkeypatch):
     monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
     monkeypatch.setenv("MAGI_CHANNEL_WORKFLOWS_ENABLED", "1")
     monkeypatch.delenv("MAGI_WORKFLOW_EXECUTOR_ENABLED", raising=False)
@@ -120,4 +148,15 @@ def test_second_message_resolves_pending_decline_when_executor_off(monkeypatch):
     client.post("/v1/chat/stream", json=_body("/research X", "sD"), headers=_hdr())
     # 2) answer "예" → resolve; executor OFF → declined (never executes)
     r = client.post("/v1/chat/stream", json=_body("예", "sD"), headers=_hdr())
-    assert r.json()["workflow"] == "declined"
+    payloads = _sse_payloads(r)
+    assert any(
+        payload.get("type") == "turn_phase"
+        and payload.get("status") == "declined"
+        for payload in payloads
+    )
+    assert any(
+        payload.get("type") == "text_delta" and "실행할 수 없어요" in payload.get("delta", "")
+        for payload in payloads
+    )
+    assert payloads[-1]["type"] == "turn_result"
+    assert payloads[-1]["terminal"] == "completed"
