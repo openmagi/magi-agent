@@ -524,3 +524,61 @@ def test_app_legacy_richlog_flag_restores_richlog(monkeypatch) -> None:
             assert len(app.query(TranscriptView)) == 0
 
     asyncio.run(_run())
+
+
+def test_tool_event_commits_collapsible_card(monkeypatch) -> None:
+    async def _run() -> None:
+        from magi_agent.cli.tui.tool_render import build_tool_renderers
+        from magi_agent.cli.tui.widgets.tool_card import ToolCard
+
+        # This asserts the widget-list (default) backing, so pin it even when a
+        # full-suite run sets MAGI_TUI_LEGACY_RICHLOG in the environment
+        # (the legacy path is covered by test_tool_event_legacy_richlog_no_card).
+        monkeypatch.delenv("MAGI_TUI_LEGACY_RICHLOG", raising=False)
+        engine = FakeEngineDriver(tokens=["ok"], ask_tool="Bash")
+        app = MagiTuiApp(
+            engine=engine,
+            gate=AllowGate(),
+            commands=FakeRegistry(["compact"]),
+            renderers=build_tool_renderers(),
+        )
+        async with app.run_test() as pilot:
+            app.start_turn("run ls")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            # The Bash tool_end rendered as a collapsed ToolCard in the view.
+            cards = app.query(ToolCard)
+            assert len(cards) >= 1
+            assert all(card.collapsed for card in cards)
+            # Search fidelity: the tool text is still in the committed snapshot.
+            joined = "\n".join(app.controller.committed_blocks_snapshot())
+            assert "Bash" in joined
+
+    asyncio.run(_run())
+
+
+def test_tool_event_legacy_richlog_no_card(monkeypatch) -> None:
+    """Under MAGI_TUI_LEGACY_RICHLOG=1 there is no widget backing, so tool
+    output routes through commit_rich/commit_block (no Collapsible mounted)."""
+
+    async def _run() -> None:
+        from magi_agent.cli.tui.tool_render import build_tool_renderers
+        from magi_agent.cli.tui.widgets.tool_card import ToolCard
+
+        monkeypatch.setenv("MAGI_TUI_LEGACY_RICHLOG", "1")
+        engine = FakeEngineDriver(tokens=["ok"], ask_tool="Bash")
+        app = MagiTuiApp(
+            engine=engine,
+            gate=AllowGate(),
+            commands=FakeRegistry(["compact"]),
+            renderers=build_tool_renderers(),
+        )
+        async with app.run_test() as pilot:
+            app.start_turn("run ls")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert len(app.query(ToolCard)) == 0
+            joined = "\n".join(app.controller.committed_blocks_snapshot())
+            assert "Bash" in joined
+
+    asyncio.run(_run())

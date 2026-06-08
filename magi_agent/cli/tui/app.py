@@ -82,6 +82,7 @@ from magi_agent.cli.tui.transcript import (
     DEFAULT_FLUSH_INTERVAL,
     TranscriptController,
 )
+from magi_agent.cli.tui.widgets.tool_card import ToolCard
 from magi_agent.cli.tui.widgets.transcript_view import TranscriptView
 
 __all__ = ["MagiTuiApp", "TextualSink", "ToolUseConfirm"]
@@ -719,7 +720,8 @@ class MagiTuiApp(App[None]):
         self._commit_render_node(node, tool_name=name)
 
     def _commit_render_node(self, node: object, *, tool_name: str = "") -> None:
-        """Commit a ``RenderNode``: rich renderable when present, else its text.
+        """Commit a ``RenderNode`` as a collapsible ``ToolCard`` (widget backing)
+        or a plain finalized block (legacy ``RichLog`` backing).
 
         The displayed/committed text is annotated with the tool name when the
         renderer's output does not already carry it (the fallback renderer emits
@@ -727,12 +729,20 @@ class MagiTuiApp(App[None]):
         embed their name in the header, so they are left untouched.
         """
 
+        from magi_agent.cli.contracts import RenderNode  # noqa: PLC0415
+
         rich = getattr(node, "rich", None)
         text = getattr(node, "text", "") or ""
         annotated = self._annotate_tool_text(text, tool_name)
+        # Widget-list backing -> collapsible ToolCard (header = annotated text).
+        if self._view is not None:
+            card = ToolCard.from_render_node(RenderNode(rich=rich, text=annotated))
+            self.controller.commit_tool(card, text=annotated)
+            return
+        # Legacy RichLog backing -> the historical commit_rich/commit_block path.
+        # commit_rich keeps the displayed text in the snapshot for
+        # search-fidelity (what is indexed == what is shown).
         if rich is not None:
-            # commit_rich keeps the displayed text in the snapshot for
-            # search-fidelity (what is indexed == what is shown).
             self.controller.commit_rich(rich, text=annotated)
         else:
             self.controller.commit_block(annotated)
