@@ -2094,11 +2094,24 @@ def _authority_safe_attachment_flags(flags: Mapping[str, bool]) -> dict[str, boo
 
 
 def _runner_policy_routing_enabled() -> bool:
+    """Whether runner-policy phase routing (model downgrade + cost-cap denial) runs.
+
+    Default OFF. The phase-routing governance assumes a cheap/standard BASE model
+    with a bounded sota ESCALATION, so it cannot route a turn that uses the
+    operator's configured model without downgrading it (the materializer plans
+    against a cheap canonical model, then denies coding phases on capability, the
+    sota-escalation cap, or the per-turn budget — every provider's default model
+    is denied for a coding-capable task profile). Until that budget/cap/capability
+    interaction is reworked, the turn must run on the configured model as-is, so the
+    routing is OFF unless an operator explicitly opts in with
+    ``MAGI_RUNNER_POLICY_ROUTING_ENABLED=1``. The #291 aggregate-denial fail-close
+    is preserved in code and re-arms the moment the flag is turned back on.
+    """
     import os
 
     raw = os.environ.get(_RUNNER_POLICY_ROUTING_ENV)
     if raw is None:
-        return True
+        return False
     return raw.strip().lower() not in {"0", "false", "no", "off"}
 
 
