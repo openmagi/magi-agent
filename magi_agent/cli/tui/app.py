@@ -455,7 +455,9 @@ class MagiTuiApp(App[None]):
         self._controller: TranscriptController | None = None
         # Terminal of the most recent turn (asserted by tests).
         self.last_terminal: EngineResult | None = None
-        # Last renderable handed to commit_rich (test seam for render parity).
+        # Last renderable handed to commit_rich. Test-observation seam: Textual's
+        # ``RichLog`` doesn't expose the last renderable post-update, so tests
+        # read this to assert render parity. Not cruft — keep it.
         self._last_committed_renderable: object | None = None
 
     # -- composition --------------------------------------------------------

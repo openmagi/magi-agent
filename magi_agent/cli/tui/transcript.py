@@ -60,7 +60,9 @@ class TranscriptController:
         # Markdown renderable (headings/lists/fenced code) instead of plain
         # text. Default False so the bench/legacy paths stay text-only.
         self.markdown_live: bool = False
-        # Last renderable handed to the live widget (test seam for OQ1 parity).
+        # Last renderable handed to the live widget. Test-observation seam:
+        # Textual's ``Static`` doesn't expose the last renderable post-update, so
+        # tests read this to assert OQ1 markdown parity. Not cruft — keep it.
         self.last_live_renderable: object | None = None
 
     # -- live block lifecycle ------------------------------------------------
@@ -70,6 +72,7 @@ class TranscriptController:
         self._pending.clear()
         self._live_text = ""
         self._live_active = True
+        self.last_live_renderable = None
         self._live.update("")
 
     def append_delta(self, text: str) -> None:
