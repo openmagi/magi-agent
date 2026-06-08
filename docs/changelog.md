@@ -12,6 +12,14 @@ Versions follow the tags published on GitHub Releases.
 ## Unreleased
 
 ### Added
+
+### Changed
+
+### Fixed
+
+## 0.1.25
+
+### Added
 - `magi doctor` now runs real environment diagnostics: provider configuration,
   the `litellm` dependency, config-file readability, and workspace writability.
 - Documentation: "What works today" capability page, a "Common tasks → command"
@@ -19,6 +27,8 @@ Versions follow the tags published on GitHub Releases.
   a glossary, and this changelog.
 
 ### Changed
+- Local TUI approval UX now includes the current approval flow improvements and
+  transcript rendering uplift from the post-0.1.24 mainline.
 - Documentation now clearly separates the local CLI's real execution (a provider
   key enables a real model plus first-party tools behind permission prompts) from
   the enforcement/governance layer, which ships default-off (shadow).
@@ -26,6 +36,12 @@ Versions follow the tags published on GitHub Releases.
   variables that the local CLI does not need.
 
 ### Fixed
+- Local dashboard and CLI chat now keep runner policy routing scoped to each
+  runtime driver instance instead of mutating a process-global env override.
+- Hosted phase selection now uses the live task profile for routing decisions.
+- Streaming dashboard control requests now render and resolve correctly.
+- Runner-policy phase routing is no longer default-on, preventing unintended
+  model downgrades from stale routing metadata.
 - Corrected default model ids in the docs to match the runtime
   (`claude-sonnet-4-6`, `gpt-5.5`, `gemini-3.5-flash`, `kimi-k2-instruct`).
 - Authority-flag env vars now documented with the real `CORE_AGENT_PYTHON_` prefix.
