@@ -367,6 +367,59 @@ class TestModeBranchInteractive:
             f"TUI was not launched in interactive mode; headless_called={headless_called}, output={result.output}"
         assert not headless_called, "Headless should not run in interactive mode"
 
+    def _launch_tui(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path, extra_args: list[str]
+    ) -> str:
+        """Invoke the interactive TUI path and return the permission_mode passed."""
+        monkeypatch.setenv("MAGI_CLI_ENABLED", "1")
+        monkeypatch.setenv("MAGI_CLI_SESSION_DIR", str(tmp_path))
+        captured: dict[str, Any] = {}
+
+        def fake_build_tui(*args, **kwargs):
+            captured.update(kwargs)
+            m = MagicMock()
+            m.run = MagicMock()
+            return m
+
+        import magi_agent.cli.app as app_module
+
+        fake_stdin = MagicMock()
+        fake_stdin.isatty.return_value = True
+        fake_stdin.read.return_value = ""
+
+        with patch("magi_agent.cli.app.build_tui_app", fake_build_tui), \
+             patch.object(app_module, "sys", wraps=app_module.sys) as mock_sys:
+            mock_sys.stdin = fake_stdin
+            runner = CliRunner()
+            runner.invoke(app_module.app, extra_args, catch_exceptions=False)
+        return captured.get("permission_mode")
+
+    def test_interactive_default_upgrades_to_accept_edits(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path
+    ) -> None:
+        """Bare `magi` (no --permission-mode) launches the TUI in acceptEdits."""
+        assert self._launch_tui(monkeypatch, tmp_path, []) == "acceptEdits"
+
+    def test_interactive_explicit_mode_is_honored(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path
+    ) -> None:
+        """An explicit non-default --permission-mode is passed through unchanged."""
+        assert (
+            self._launch_tui(
+                monkeypatch, tmp_path, ["--permission-mode", "bypassPermissions"]
+            )
+            == "bypassPermissions"
+        )
+
+    def test_interactive_explicit_default_mode_is_honored(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path
+    ) -> None:
+        """An explicit --permission-mode default keeps strict prompt mode."""
+        assert (
+            self._launch_tui(monkeypatch, tmp_path, ["--permission-mode", "default"])
+            == "default"
+        )
+
 
 # ---------------------------------------------------------------------------
 # Agent default command: real headless turn with stub driver

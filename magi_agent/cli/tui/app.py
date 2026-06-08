@@ -43,6 +43,7 @@ from collections.abc import Callable, Iterable
 
 from textual import work
 from textual.app import App, ComposeResult
+from textual.binding import Binding
 from textual.containers import Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, Input, OptionList, RichLog, Static, TextArea
@@ -199,7 +200,32 @@ class ToolUseConfirm(ModalScreen[PermissionDecision]):
     programmatic seams.
     """
 
-    BINDINGS = [("escape", "deny", "Reject")]
+    # Each action is reachable by its number (1-5), a mnemonic letter, or by
+    # focusing the row (Up/Down) and pressing Enter; Escape rejects. ``show`` is
+    # off so the chooser stays uncluttered (the on-screen hint line lists keys).
+    BINDINGS = [
+        ("escape", "deny", "Reject"),
+        Binding("1", "pick('allow')", "Allow", show=False),
+        Binding("a", "pick('allow')", "Allow", show=False),
+        Binding("2", "pick('allow-remember')", "Allow + remember", show=False),
+        Binding("3", "pick('edit')", "Edit", show=False),
+        Binding("e", "pick('edit')", "Edit", show=False),
+        Binding("4", "pick('deny')", "Reject", show=False),
+        Binding("r", "pick('deny')", "Reject", show=False),
+        Binding("5", "pick('deny-feedback')", "Reject with reason", show=False),
+        Binding("up", "focus_choice(-1)", "Up", show=False),
+        Binding("down", "focus_choice(1)", "Down", show=False),
+    ]
+
+    # Action rows, in display order: (button id, label). The number shown is the
+    # 1-based position, so labels and key bindings stay in lockstep.
+    _CHOICES: tuple[tuple[str, str], ...] = (
+        ("allow", "Allow once"),
+        ("allow-remember", "Allow + remember"),
+        ("edit", "Edit input"),
+        ("deny", "Reject"),
+        ("deny-feedback", "Reject with reason"),
+    )
 
     def __init__(self, req: ControlRequest) -> None:
         super().__init__()
@@ -214,15 +240,12 @@ class ToolUseConfirm(ModalScreen[PermissionDecision]):
                 id="tool-confirm-msg",
             )
             with Vertical(id="confirm-actions"):
-                yield Button("Allow once", id="allow", variant="success")
-                yield Button(
-                    "Allow + remember", id="allow-remember", variant="primary"
-                )
-                yield Button("Edit input", id="edit", variant="warning")
-                yield Button("Reject", id="deny", variant="error")
-                yield Button(
-                    "Reject with reason", id="deny-feedback", variant="error"
-                )
+                for index, (choice_id, label) in enumerate(self._CHOICES, start=1):
+                    yield Button(f"{index}. {label}", id=choice_id)
+            yield Static(
+                "↑/↓ move · Enter or number select · Esc reject",
+                id="confirm-hint",
+            )
             # Inline edit-input editor (hidden until "Edit input" is pressed).
             with Vertical(id="edit-view", classes="confirm-subview"):
                 yield Static("Edit tool arguments (JSON):", id="edit-label")
@@ -239,6 +262,8 @@ class ToolUseConfirm(ModalScreen[PermissionDecision]):
         # Sub-views start hidden; the action buttons are the default view.
         self.query_one("#edit-view").display = False
         self.query_one("#deny-view").display = False
+        # Focus the first action so Enter/Up/Down work without a click.
+        self.query_one("#allow", Button).focus()
 
     def _arguments_json(self) -> str:
         try:
@@ -247,7 +272,11 @@ class ToolUseConfirm(ModalScreen[PermissionDecision]):
             return "{}"
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        choice = event.button.id or "deny"
+        self._activate(event.button.id or "deny")
+
+    def _activate(self, choice: str) -> None:
+        """Route a chosen action (from a click or a key) to its outcome."""
+
         if choice == "edit":
             self._show_subview("edit")
             return
@@ -265,12 +294,42 @@ class ToolUseConfirm(ModalScreen[PermissionDecision]):
             return
         self.dismiss(self._decide(choice))
 
+    def action_pick(self, choice: str) -> None:
+        """Keyboard shortcut: select an action row by number/letter.
+
+        No-op while an inline sub-view (edit/reject-reason) is open so digits and
+        letters typed into those editors are never hijacked as selections.
+        """
+
+        if self._subview_active():
+            return
+        self._activate(choice)
+
+    def action_focus_choice(self, delta: int) -> None:
+        """Move focus between action rows with Up/Down (wrapping)."""
+
+        if self._subview_active():
+            return
+        ids = [choice_id for choice_id, _ in self._CHOICES]
+        focused = self.focused
+        current = focused.id if isinstance(focused, Button) else None
+        index = ids.index(current) if current in ids else 0
+        target = ids[(index + delta) % len(ids)]
+        self.query_one(f"#{target}", Button).focus()
+
+    def _subview_active(self) -> bool:
+        return bool(
+            self.query_one("#edit-view").display
+            or self.query_one("#deny-view").display
+        )
+
     def action_deny(self) -> None:
         self.dismiss(PermissionDecision(kind="deny"))
 
     def _show_subview(self, which: str) -> None:
-        # Hide the base action buttons so the active sub-view stays on-screen.
+        # Hide the base action buttons + chooser hint so the sub-view stands alone.
         self.query_one("#confirm-actions").display = False
+        self.query_one("#confirm-hint").display = False
         self.query_one("#edit-view").display = which == "edit"
         self.query_one("#deny-view").display = which == "deny"
         if which == "edit":
@@ -384,15 +443,37 @@ class MagiTuiApp(App[None]):
         display: none;
     }
     #completions.visible { display: block; }
+    ToolUseConfirm { align: center middle; }
     #tool-confirm {
-        width: 64;
+        width: 72;
+        max-width: 90%;
         height: auto;
         padding: 1 2;
-        background: $panel;
-        border: thick $accent;
+        background: $surface;
+        border: round $primary;
     }
+    #tool-confirm-msg { margin-bottom: 1; color: $text; }
+    #confirm-actions { height: auto; }
+    #confirm-actions Button {
+        width: 100%;
+        height: 1;
+        min-width: 0;
+        border: none;
+        margin: 0;
+        padding: 0 1;
+        background: transparent;
+        color: $text;
+        content-align: left middle;
+        text-align: left;
+    }
+    #confirm-actions Button:focus {
+        background: $primary;
+        color: $text;
+        text-style: bold;
+    }
+    #confirm-hint { margin-top: 1; color: $text-muted; }
     .confirm-subview { height: auto; }
-    #edit-area { height: 6; }
+    #edit-area { height: 8; }
     #edit-error { color: $error; }
     """
 
@@ -436,6 +517,9 @@ class MagiTuiApp(App[None]):
         # Per-turn cancellation event; recreated each turn.
         self._cancel: asyncio.Event = asyncio.Event()
         self._turn_seq = 0
+        # True while an engine turn is in flight; gates Ctrl+C (cancel vs quit).
+        self._turn_active = False
+        self._active_turn_id: str | None = None
         # Keybindings: defaults-only (no user keybindings.json wired in v1).
         # load_keybindings(None) never raises and returns the built-in keymap.
         # VIM mode + hot-reload are explicitly DEFERRED to v1.1.
@@ -609,10 +693,13 @@ class MagiTuiApp(App[None]):
         """Kick off a single engine turn for ``prompt`` in an exclusive worker."""
 
         self._turn_seq += 1
-        self._cancel = asyncio.Event()
         turn_id = f"{self._session_id}-turn-{self._turn_seq}"
+        cancel = asyncio.Event()
+        self._cancel = cancel
+        self._active_turn_id = turn_id
+        self._turn_active = True
         self._echo_user(prompt)
-        self._run_turn(prompt, turn_id)
+        self._run_turn(prompt, turn_id, cancel)
 
     def _echo_user(self, prompt: str) -> None:
         """Echo the user's message into the transcript (CC/OpenCode style)."""
@@ -645,12 +732,14 @@ class MagiTuiApp(App[None]):
                 pass
 
     @work(exclusive=True, group="turn")
-    async def _run_turn(self, prompt: str, turn_id: str) -> None:
+    async def _run_turn(
+        self, prompt: str, turn_id: str, cancel: asyncio.Event
+    ) -> None:
         """Drive ONE ``engine.run_turn_stream`` generator, folding events.
 
         This is the only turn loop. The terminal ``EngineResult`` (the final
         yielded item) ends it. Cancellation is honored by the engine racing the
-        shared ``self._cancel`` event.
+        per-turn cancel event.
         """
 
         controller = self.controller
@@ -659,7 +748,7 @@ class MagiTuiApp(App[None]):
             prompt=prompt, session_id=self._session_id, turn_id=turn_id
         )
         gen = self._engine.run_turn_stream(
-            self._runtime, turn_input, cancel=self._cancel, gate=self._gate
+            self._runtime, turn_input, cancel=cancel, gate=self._gate
         )
         terminal: EngineResult | None = None
         try:
@@ -670,6 +759,9 @@ class MagiTuiApp(App[None]):
                 await self._fold_event(item)
         finally:
             await gen.aclose()
+            if self._active_turn_id == turn_id:
+                self._active_turn_id = None
+                self._turn_active = False
         # Finalize the in-flight assistant block as markdown (commits any
         # streamed text). The plain text is preserved in the committed snapshot
         # for search fidelity.
@@ -782,9 +874,17 @@ class MagiTuiApp(App[None]):
 
     # -- cancellation -------------------------------------------------------
     def action_cancel_turn(self) -> None:
-        """Signal the in-flight turn to abort (engine races this event)."""
+        """Ctrl+C: cancel an in-flight turn, or quit the app when idle.
 
-        self._cancel.set()
+        While a turn runs, this signals the per-turn cancel event so the turn
+        aborts. When no turn is in flight there is nothing to cancel, so Ctrl+C
+        exits the app.
+        """
+
+        if self._active_turn_id is not None or self._turn_active:
+            self._cancel.set()
+        else:
+            self.exit()
 
     # -- keybinding resolution ----------------------------------------------
     def _active_contexts(self) -> list[Context]:

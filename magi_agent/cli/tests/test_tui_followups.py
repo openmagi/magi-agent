@@ -224,6 +224,8 @@ def test_on_key_match_cancel_dispatches_action() -> None:
         async with app.run_test() as pilot:
             await pilot.pause()
             assert app._pending is None
+            # Simulate an in-flight turn so ctrl+c cancels (rather than quits).
+            app._turn_active = True
             event = _FakeKey("ctrl+c")
             app.on_key(event)
             # ctrl+c -> chat:cancel (Global) -> cancel the in-flight turn.
