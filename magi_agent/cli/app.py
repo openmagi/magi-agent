@@ -395,6 +395,151 @@ app.add_typer(auth_app, name="auth")
 
 
 # ---------------------------------------------------------------------------
+# `magi gateway` — always-on daemon (Track F)
+# ---------------------------------------------------------------------------
+
+gateway_app = typer.Typer(
+    name="gateway",
+    help="Always-on gateway daemon (cron + live channels). Default OFF.",
+    invoke_without_command=True,
+    no_args_is_help=False,
+)
+
+
+@gateway_app.callback(invoke_without_command=True)
+def gateway_root(ctx: typer.Context) -> None:
+    """Manage the always-on gateway daemon."""
+    if ctx.invoked_subcommand is None:
+        typer.echo(
+            "magi gateway: use start | install | uninstall | status.", err=False
+        )
+
+
+@gateway_app.command("status")
+def gateway_status() -> None:
+    """Show whether the gateway daemon is enabled (env gate) — no side effects."""
+    from magi_agent.gateway.daemon import is_gateway_daemon_enabled  # noqa: PLC0415
+
+    if is_gateway_daemon_enabled():
+        typer.echo(
+            "gateway daemon: enabled (MAGI_GATEWAY_DAEMON_ENABLED is set). "
+            "Each watcher still respects its own gate."
+        )
+    else:
+        typer.echo(
+            "gateway daemon: disabled — set MAGI_GATEWAY_DAEMON_ENABLED=1 to "
+            "enable always-on (each watcher also needs its own gate)."
+        )
+
+
+@gateway_app.command("start")
+def gateway_start() -> None:
+    """Run the gateway daemon (gated). Gate OFF → prints status and exits.
+
+    With the gate ON this would assemble the operator-wired watcher fleet and
+    block on the run-loop; without operator wiring there are no watchers, so the
+    command reports that the gate is enabled and returns.  Tests never reach a
+    blocking ``uvicorn.run`` — there is none here.
+    """
+    from magi_agent.gateway.daemon import is_gateway_daemon_enabled  # noqa: PLC0415
+
+    if not is_gateway_daemon_enabled():
+        typer.echo(
+            "gateway daemon: disabled (not enabled). Set "
+            "MAGI_GATEWAY_DAEMON_ENABLED=1 to start always-on."
+        )
+        return
+    typer.echo(
+        "gateway daemon: enabled. No operator-wired watchers in this build — "
+        "wire the scheduler driver + channel ports via gateway.watchers, then "
+        "run GatewayDaemon.run(stop_event=...)."
+    )
+
+
+@gateway_app.command("install")
+def gateway_install(
+    target_path: Path = typer.Option(
+        ...,
+        "--target-path",
+        help="Where to write the generated unit/plist (no system dir is touched).",
+    ),
+    manager: Optional[str] = typer.Option(
+        None,
+        "--manager",
+        help="systemd | launchd. Auto-detected from the platform when unset.",
+    ),
+    exec_path: str = typer.Option(
+        "magi",
+        "--exec-path",
+        help="Path to the magi executable used in ExecStart / ProgramArguments.",
+    ),
+) -> None:
+    """Generate + write an OS service file to --target-path (default-off).
+
+    Does NOT run systemctl/launchctl and does NOT set the env gate — installing
+    alone keeps the daemon a no-op until MAGI_GATEWAY_DAEMON_ENABLED is set.
+    """
+    from magi_agent.gateway.service_install import (  # noqa: PLC0415
+        DEFAULT_LAUNCHD_LABEL,
+        ServiceManager,
+        detect_service_manager,
+        install_service,
+    )
+
+    if manager is None:
+        mgr = detect_service_manager()
+    else:
+        try:
+            mgr = ServiceManager(manager.lower())
+        except ValueError:
+            typer.echo(f"unknown --manager: {manager!r}", err=True)
+            raise typer.Exit(code=2)
+
+    if mgr is ServiceManager.SYSTEMD:
+        written = install_service(
+            manager=mgr,
+            target_path=target_path,
+            exec_start=f"{exec_path} gateway start",
+        )
+    elif mgr is ServiceManager.LAUNCHD:
+        written = install_service(
+            manager=mgr,
+            target_path=target_path,
+            program_arguments=[exec_path, "gateway", "start"],
+            label=DEFAULT_LAUNCHD_LABEL,
+        )
+    else:
+        typer.echo(
+            "unsupported platform for service install (need systemd or launchd).",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+
+    typer.echo(f"gateway service written: {written}")
+
+
+@gateway_app.command("uninstall")
+def gateway_uninstall(
+    target_path: Path = typer.Option(
+        ...,
+        "--target-path",
+        help="The unit/plist path to remove (no system dir is touched).",
+    ),
+) -> None:
+    """Remove the service file at --target-path. Does not run systemctl/launchctl."""
+    from magi_agent.gateway.service_install import uninstall_service  # noqa: PLC0415
+
+    removed = uninstall_service(target_path=target_path)
+    if removed:
+        typer.echo(f"gateway service removed: {target_path}")
+    else:
+        typer.echo(f"gateway service not present: {target_path}")
+
+
+app.add_typer(gateway_app, name="gateway")
+
+
+# ---------------------------------------------------------------------------
 # LegalBench evaluation subcommand
 # ---------------------------------------------------------------------------
 
