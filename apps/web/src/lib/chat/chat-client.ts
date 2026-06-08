@@ -949,6 +949,31 @@ export async function fetchControlEvents(
   };
 }
 
+/**
+ * Translate a web control-request response into the vocabulary the local
+ * streaming gate (`/v1/chat/control-response` → `cli/permissions.py`) parses.
+ *
+ * The web decision vocab is `approved` | `denied` | `answered`, but the streaming
+ * tool-permission gate only treats `decision === "allow"` as allow (anything else
+ * is a deny). It also reads snake_case `updated_input`. For a `tool_permission`
+ * request, map `approved`→`allow` / else→`deny` so an approval actually permits the
+ * tool. Other kinds (user_question / plan_approval) are passed through unchanged.
+ */
+function toStreamingGateResponse(
+  request: ControlRequestRecord,
+  payload: ControlRequestResponse & { selectedId?: string; freeText?: string },
+): Record<string, unknown> {
+  if (request.kind !== "tool_permission") {
+    return { ...payload };
+  }
+  const out: Record<string, unknown> = {
+    decision: payload.decision === "approved" ? "allow" : "deny",
+  };
+  if (typeof payload.feedback === "string") out.feedback = payload.feedback;
+  if (payload.updatedInput !== undefined) out.updated_input = payload.updatedInput;
+  return out;
+}
+
 export async function respondToControlRequest(
   botId: string,
   request: ControlRequestRecord,
@@ -963,7 +988,10 @@ export async function respondToControlRequest(
         body: JSON.stringify({
           sessionId: request.sessionKey,
           request_id: request.requestId,
-          response: { ...payload, sessionKey: request.sessionKey },
+          response: {
+            ...toStreamingGateResponse(request, payload),
+            sessionKey: request.sessionKey,
+          },
         }),
       })
     : await chatFetch(
@@ -975,6 +1003,7 @@ export async function respondToControlRequest(
       );
   const data = (await res.json().catch(() => ({}))) as {
     ok?: boolean;
+    status?: string;
     error?: string;
     request?: ControlRequestRecord;
   };
@@ -982,7 +1011,11 @@ export async function respondToControlRequest(
     throw new Error(data.error || `Failed to respond to control request: ${res.status}`);
   }
   if (!data.request) {
-    const local = locallyResolvedControlRequest(request, response, data.ok === true);
+    // The local streaming control-response route returns `{status:"delivered"}`
+    // (no `ok`/`request`), so a 2xx with that ack must count as success — treat any
+    // 2xx-without-error as resolved and reflect the decision locally.
+    const acknowledged = data.ok === true || (res.ok && !data.error);
+    const local = locallyResolvedControlRequest(request, response, acknowledged);
     if (local) return local;
     throw new Error("control request response missing request");
   }
@@ -1253,6 +1286,47 @@ function planReadyToControlRequest(
     proposedInput: { planId: ev.planId, plan: ev.plan },
     createdAt: Date.now(),
     expiresAt: Date.now() + 30 * 60_000,
+  };
+}
+
+/**
+ * Convert the streaming surface's in-band tool-permission ask into a renderable
+ * control request. The streaming driver emits a FLAT
+ * `{type:"control_request", request_id, tool_name, reason, arguments}` frame
+ * (distinct from the nested `control_request_created` polling-event schema), so
+ * without this mapping the dashboard silently drops it and the turn hangs at the
+ * permission gate. Mirrors `legacyAskUserToControlRequest` / `planReadyToControlRequest`.
+ */
+function streamingControlRequestToControlRequest(
+  ev: Record<string, unknown>,
+  sessionKey: string,
+  channelName: string,
+): ControlRequestRecord | null {
+  if (typeof ev.request_id !== "string") {
+    return null;
+  }
+  const toolName = typeof ev.tool_name === "string" && ev.tool_name ? ev.tool_name : "tool";
+  const turnId = typeof ev.turn_id === "string" ? ev.turn_id : undefined;
+  let proposedInput: unknown = ev.arguments;
+  if (typeof proposedInput === "string") {
+    try {
+      proposedInput = JSON.parse(proposedInput);
+    } catch {
+      // keep the raw string when it is not JSON
+    }
+  }
+  return {
+    requestId: ev.request_id,
+    kind: "tool_permission",
+    state: "pending",
+    sessionKey,
+    ...(turnId ? { turnId } : {}),
+    channelName,
+    source: "turn",
+    prompt: `Allow ${toolName}?`,
+    proposedInput,
+    createdAt: Date.now(),
+    expiresAt: Date.now() + 10 * 60_000,
   };
 }
 
@@ -2009,6 +2083,11 @@ export async function sendMessage(
       }
       case "plan_ready": {
         const request = planReadyToControlRequest(ev, sessionKey, channelName);
+        if (request) onControlEvent?.({ type: "control_request_created", request });
+        break;
+      }
+      case "control_request": {
+        const request = streamingControlRequestToControlRequest(ev, sessionKey, channelName);
         if (request) onControlEvent?.({ type: "control_request_created", request });
         break;
       }
