@@ -44,8 +44,20 @@ def test_add_block_scrolls_to_bottom() -> None:
     """Auto-scroll parity: after committing enough tall blocks to exceed the
     viewport, the view must be scrolled to the very bottom (matching the old
     ``RichLog(auto_scroll=True)``). Asserts the real scroll position, not just
-    mount count. The post-refresh scroll only lands after ``pilot.pause()``
-    flushes the layout, so we pause before asserting.
+    mount count.
+
+    HONESTY NOTE (Phase 0 review): this asserts the END-STATE bottom position,
+    not specifically that the POST-REFRESH ``call_after_refresh(scroll_end)``
+    re-scroll fired. Empirically, in this ``run_test`` harness the layout/height
+    is measured synchronously enough that EITHER scroll lands the bottom on its
+    own — commenting out ``call_after_refresh`` alone still passes, and commenting
+    out the synchronous ``scroll_end`` alone still passes; only removing BOTH
+    fails (``scroll_offset.y`` stays 0). So this test cannot single out the
+    post-refresh line. The post-refresh re-scroll is belt-and-suspenders for REAL
+    terminals, where a tall block's height isn't known until layout flushes and
+    the synchronous scroll fires before the new bottom exists. This test's job is
+    the regression guard that SOME scroll-to-bottom happens at all (removing both
+    fails); the ``await pilot.pause()`` flushes layout before we read the offset.
     """
 
     async def _run() -> None:
@@ -106,6 +118,30 @@ def test_tool_card_from_render_node_collapsed_by_default() -> None:
             await pilot.pause()
 
     asyncio.run(_run())
+
+
+def test_tool_card_title_is_first_line_only_for_multiline_edit() -> None:
+    """An Edit's ``RenderNode.text`` is multi-line (``"Edit(file)\\n<diff>"``).
+
+    The single-line ``CollapsibleTitle`` must show ONLY the first line so the
+    whole unified diff is not jammed into the header (it clips/overflows). The
+    body (``node.rich``) still carries the styled header + diff, so the diff is
+    not lost — only the TITLE is trimmed.
+    """
+
+    from rich.console import Group
+    from rich.text import Text
+
+    from magi_agent.cli.contracts import RenderNode
+    from magi_agent.cli.tui.widgets.tool_card import ToolCard
+
+    node = RenderNode(
+        rich=Group(Text("Edit(foo.py)"), Text("- old\n+ new")),
+        text="Edit(foo.py)\n- old\n+ new",
+    )
+    card = ToolCard.from_render_node(node)
+    assert card.title == "Edit(foo.py)"
+    assert "\n" not in card.title
 
 
 def test_tool_card_toggles_open() -> None:

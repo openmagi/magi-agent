@@ -7,7 +7,6 @@ from __future__ import annotations
 
 from rich.markdown import Markdown as RichMarkdown
 from rich.syntax import Syntax
-from rich.text import Text
 
 from magi_agent.cli.tui.render import markdown as md
 
@@ -36,7 +35,22 @@ def test_highlight_code_returns_syntax() -> None:
     assert isinstance(syn, Syntax)
 
 
-def test_highlight_code_unknown_lexer_falls_back_to_text() -> None:
-    # An unknown lexer must never raise; it degrades to plain Text.
-    out = md.highlight_code("¯\\_(ツ)_/¯", lexer="not-a-real-lexer")
-    assert isinstance(out, (Syntax, Text))
+def test_highlight_code_unknown_lexer_degrades_to_unhighlighted() -> None:
+    # NB: ``Syntax(code, lexer)`` does NOT raise on a bad lexer name — Pygments
+    # resolves the lexer lazily, so the ``except`` -> ``Text`` branch in
+    # ``highlight_code`` is unreachable for a plain string + bad lexer name.
+    # Asserting ``isinstance(out, (Syntax, Text))`` would therefore be a
+    # tautology (it can only ever be a Syntax). Instead we assert the REAL
+    # degraded behaviour: the returned Syntax's lexer did NOT resolve (``.lexer``
+    # is ``None``), so the code renders unhighlighted rather than crashing. This
+    # fails if ``highlight_code`` ever stopped degrading gracefully (e.g. started
+    # raising, or silently swapped a real lexer in).
+    out = md.highlight_code("definitely some text", lexer="definitely-not-a-real-lexer")
+    assert isinstance(out, Syntax)
+    assert out.lexer is None  # bad lexer name -> no real Pygments lexer resolved
+
+    # Contrast: a real lexer name DOES resolve, proving the assertion above is
+    # not vacuously true.
+    good = md.highlight_code("print(1)", lexer="python")
+    assert isinstance(good, Syntax)
+    assert good.lexer is not None

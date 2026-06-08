@@ -557,6 +557,46 @@ def test_tool_event_commits_collapsible_card(monkeypatch) -> None:
     asyncio.run(_run())
 
 
+def test_assistant_text_committed_before_tool_card_in_one_turn(monkeypatch) -> None:
+    """Finalize-before-tool ordering (Phase 0 review).
+
+    Within ONE turn, ``app._fold_event`` must flush + finalize the in-flight
+    assistant markdown BEFORE the tool card mounts, so streamed assistant text
+    appears ABOVE the tool output in the transcript. We assert the committed
+    snapshot index of the assistant-text block is strictly LESS than the tool
+    header block's index. (Backing-agnostic; default widget backing here.)
+    """
+
+    async def _run() -> None:
+        from magi_agent.cli.tui.tool_render import build_tool_renderers
+
+        monkeypatch.delenv("MAGI_TUI_LEGACY_RICHLOG", raising=False)
+        # Stream assistant tokens, THEN emit a Bash tool event in the same turn.
+        engine = FakeEngineDriver(tokens=["assistant says hi"], ask_tool="Bash")
+        app = MagiTuiApp(
+            engine=engine,
+            gate=AllowGate(),
+            commands=FakeRegistry(["compact"]),
+            renderers=build_tool_renderers(),
+        )
+        async with app.run_test() as pilot:
+            app.start_turn("run ls")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            blocks = app.controller.committed_blocks_snapshot()
+
+        assistant_idx = next(
+            i for i, b in enumerate(blocks) if "assistant says hi" in b
+        )
+        tool_idx = next(i for i, b in enumerate(blocks) if "Bash" in b)
+        assert assistant_idx < tool_idx, (
+            f"assistant text (idx {assistant_idx}) must be committed before the "
+            f"tool card (idx {tool_idx}); blocks={blocks!r}"
+        )
+
+    asyncio.run(_run())
+
+
 def test_tool_event_legacy_richlog_no_card(monkeypatch) -> None:
     """Under MAGI_TUI_LEGACY_RICHLOG=1 there is no widget backing, so tool
     output routes through commit_rich/commit_block (no Collapsible mounted)."""
