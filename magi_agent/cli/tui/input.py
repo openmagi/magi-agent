@@ -1,8 +1,10 @@
-"""Prompt input widget + submission routing for the Magi TUI (PR-E2).
+"""Prompt input widget + submission routing for the Magi TUI (PR-E2 / PR1.1).
 
-``PromptInput`` wraps a Textual ``Input`` and exposes the pre-cursor text slice
-(everything left of the caret) so the :class:`~.autocomplete.AutocompleteRouter`
-can compute completions. On submit it classifies the line:
+``PromptInput`` wraps a Textual ``TextArea`` (multiline) and exposes the
+pre-cursor text slice (everything left of the caret, across rows) so the
+:class:`~.autocomplete.AutocompleteRouter` can compute completions. Enter
+submits the whole buffer; Shift+Enter inserts a newline. On submit it
+classifies the line:
 
 * a line beginning with ``/`` is a **slash command** -> dispatched via the
   injected :class:`~magi_agent.cli.contracts.CommandRegistry` (looked up
@@ -20,8 +22,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from textual import events
 from textual.message import Message
-from textual.widgets import Input
+from textual.widgets import TextArea
 
 from magi_agent.cli.contracts import Command, CommandRegistry
 
@@ -63,16 +66,21 @@ def classify_line(line: str, commands: CommandRegistry) -> Submission:
     return Submission(kind="prompt", text=line)
 
 
-class PromptInput(Input):
-    """The REPL prompt input widget.
+class PromptInput(TextArea):
+    """The REPL prompt input widget (multiline).
+
+    Backed by ``textual.widgets.TextArea`` so the prompt is multiline: Enter
+    submits the whole buffer; Shift+Enter inserts a newline. The submit/newline
+    keys are intercepted at the widget level (``TextArea`` otherwise consumes
+    Enter as a newline and stops it from bubbling to the App's keybinding
+    resolver) and mirrored by the App's ``Action.CHAT_SUBMIT`` /
+    ``Action.CHAT_NEWLINE`` branches.
 
     Posts a :class:`PromptInput.PromptSubmitted` message (carrying a classified
-    :class:`Submission`) when the user submits a non-empty line, and clears
-    itself. The owning App handles the message.
-
-    Note: we deliberately do NOT shadow ``Input.Submitted`` (Textual's built-in
-    message, posted with positional ``(self, value, ...)`` args) — overriding it
-    would break the base widget's own dispatch.
+    :class:`Submission`) when the user submits a non-empty buffer, and clears
+    itself. The public surface (``precursor`` / ``classify`` /
+    ``PromptSubmitted``) is preserved byte-for-byte so the autocomplete router
+    and App routing are untouched.
     """
 
     class PromptSubmitted(Message):
@@ -83,27 +91,60 @@ class PromptInput(Input):
             super().__init__()
 
     def __init__(self, *, commands: CommandRegistry, **kwargs: object) -> None:
-        super().__init__(placeholder="Message Magi…  (/ for commands)", **kwargs)  # type: ignore[arg-type]
+        super().__init__(**kwargs)  # type: ignore[arg-type]
         self._commands = commands
+        # A single-line-looking prompt by default; grows as the user types.
+        self.show_line_numbers = False
+        self.soft_wrap = True
 
     @property
     def precursor(self) -> str:
-        """The text slice left of the caret — fed to the autocomplete router."""
+        """Text left of the caret, across all rows (autocomplete input)."""
 
-        return self.value[: self.cursor_position]
+        row, col = self.cursor_location
+        lines = self.text.split("\n")
+        if row >= len(lines):
+            return self.text
+        before = lines[:row]
+        current = lines[row][:col]
+        return "\n".join([*before, current])
 
     def classify(self, line: str) -> Submission:
         """Classify ``line`` against the injected registry (exposed for tests)."""
 
         return classify_line(line, self._commands)
 
-    def on_input_submitted(self, event: Input.Submitted) -> None:
-        # Textual fires Input.Submitted on Enter; swallow it and re-post our own
-        # classified message so the App has a single submission surface.
-        event.stop()
-        line = event.value
+    def submit(self) -> None:
+        """Classify + emit the current buffer as a submission, then clear.
+
+        No-op on a blank buffer. Called by the widget's own Enter handler and by
+        the App's ``Action.CHAT_SUBMIT`` resolver branch.
+        """
+
+        line = self.text
         if not line.strip():
             return
         submission = self.classify(line)
-        self.value = ""
+        self.text = ""
         self.post_message(self.PromptSubmitted(submission))
+
+    async def _on_key(self, event: events.Key) -> None:
+        """Intercept Enter (submit) / Shift+Enter (newline) before TextArea.
+
+        ``TextArea._on_key`` (an async handler) maps Enter to a newline insert and
+        stops the event, so the App's keybinding resolver never sees it. We take
+        submission/newline here and otherwise await the base editor's handler so
+        normal printable/edit keys still work.
+        """
+
+        if event.key == "enter":
+            event.stop()
+            event.prevent_default()
+            self.submit()
+            return
+        if event.key == "shift+enter":
+            event.stop()
+            event.prevent_default()
+            self.insert("\n")
+            return
+        await super()._on_key(event)
