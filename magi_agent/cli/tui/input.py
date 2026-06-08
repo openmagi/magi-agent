@@ -70,11 +70,14 @@ class PromptInput(TextArea):
     """The REPL prompt input widget (multiline).
 
     Backed by ``textual.widgets.TextArea`` so the prompt is multiline: Enter
-    submits the whole buffer; Shift+Enter inserts a newline. The submit/newline
-    keys are intercepted at the widget level (``TextArea`` otherwise consumes
-    Enter as a newline and stops it from bubbling to the App's keybinding
-    resolver) and mirrored by the App's ``Action.CHAT_SUBMIT`` /
-    ``Action.CHAT_NEWLINE`` branches.
+    submits the whole buffer; Shift+Enter inserts a newline. This widget's
+    ``_on_key`` is the AUTHORITATIVE submission driver: it intercepts Enter /
+    Shift+Enter at the widget level and calls ``event.stop()`` (``TextArea``
+    otherwise consumes Enter as a newline; without ``event.stop()`` the App's
+    keybinding resolver would also fire). Because the event is stopped while
+    this widget is focused, the App's ``Action.CHAT_SUBMIT`` /
+    ``Action.CHAT_NEWLINE`` resolver branches are NOT reached — they remain only
+    as a fallback for programmatic / non-focused dispatch.
 
     Posts a :class:`PromptInput.PromptSubmitted` message (carrying a classified
     :class:`Submission`) when the user submits a non-empty buffer, and clears
@@ -117,8 +120,11 @@ class PromptInput(TextArea):
     def submit(self) -> None:
         """Classify + emit the current buffer as a submission, then clear.
 
-        No-op on a blank buffer. Called by the widget's own Enter handler and by
-        the App's ``Action.CHAT_SUBMIT`` resolver branch.
+        No-op on a blank buffer. Called by the widget's own Enter handler
+        (``_on_key``, the authoritative driver). The App's
+        ``Action.CHAT_SUBMIT`` resolver branch only calls this as a fallback for
+        programmatic / non-focused dispatch (it is not reached while this widget
+        is focused, since ``_on_key`` stops the event).
         """
 
         line = self.text

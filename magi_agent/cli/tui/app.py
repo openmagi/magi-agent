@@ -673,6 +673,12 @@ class MagiTuiApp(App[None]):
         # on every edit.
         if self._input is None:
             return
+        # Source guard: ONLY the prompt buffer drives completions. Other
+        # ``TextArea``s (e.g. the ``ToolUseConfirm`` modal's ``#edit-area``)
+        # bubble their own ``TextArea.Changed`` here; recomputing off the prompt
+        # precursor for those is spurious, so ignore foreign sources.
+        if event.text_area is not self._input:
+            return
         self._refresh_completions(self._input.precursor)
 
     def _dispatch_command(self, submission: Submission) -> None:
@@ -941,6 +947,10 @@ class MagiTuiApp(App[None]):
             self.action_cancel_turn()
         elif action == Action.GLOBAL_QUIT.value:
             self.exit()
+        # NOTE: these CHAT_SUBMIT/CHAT_NEWLINE branches are NOT reached while
+        # ``PromptInput`` is focused — its ``_on_key`` calls ``event.stop()`` on
+        # Enter/Shift+Enter, so it is the authoritative submission driver. These
+        # remain only as a fallback for programmatic / non-focused dispatch.
         elif action == Action.CHAT_SUBMIT.value:
             self._submit_current_input()
         elif action == Action.CHAT_NEWLINE.value:

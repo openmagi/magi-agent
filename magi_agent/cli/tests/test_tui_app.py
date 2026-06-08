@@ -416,6 +416,52 @@ def test_tool_ask_keyboard_number_selects_allow() -> None:
 
 
 # ---------------------------------------------------------------------------
+# 5d. The change handler is source-guarded: typing into the modal's #edit-area
+#     TextArea must NOT recompute prompt completions (its TextArea.Changed
+#     bubbles to the App but is for a foreign source, not the prompt buffer).
+# ---------------------------------------------------------------------------
+def test_modal_edit_area_change_does_not_refresh_prompt_completions() -> None:
+    async def _run() -> None:
+        engine = FakeEngineDriver(tokens=["working"], ask_tool="Bash")
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            app._gate = SinkGate(app.sink)
+            app.start_turn("run something")
+            await pilot.pause()
+            await pilot.pause()
+            assert isinstance(app.screen, ToolUseConfirm)
+            # Open the edit sub-view so #edit-area is focused.
+            await pilot.click("#edit")
+            await pilot.pause()
+
+            # Spy on the completion recompute: it must NOT fire for edits made to
+            # the modal's #edit-area (only the prompt buffer drives completions).
+            calls: list[str] = []
+            app._refresh_completions = lambda precursor: calls.append(precursor)  # type: ignore[method-assign]
+
+            editor = app.screen.query_one("#edit-area")
+            editor.focus()
+            await pilot.pause()
+            # Type into the modal editor -> posts TextArea.Changed for #edit-area.
+            await pilot.press("x")
+            await pilot.pause()
+
+            assert calls == [], (
+                "typing into the modal #edit-area must not recompute prompt "
+                f"completions; got {calls!r}"
+            )
+            # Completion overlay stays hidden too.
+            assert app._completions is not None
+            assert not app._completions.has_class("visible")
+            # Resolve the awaiting turn cleanly.
+            await pilot.press("escape")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+
+    asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
 # 6. Slash command submission routes through the registry lookup
 # ---------------------------------------------------------------------------
 def test_slash_command_dispatch_via_registry() -> None:
