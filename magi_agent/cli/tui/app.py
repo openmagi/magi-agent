@@ -77,10 +77,13 @@ from magi_agent.cli.tui.autocomplete import (
     CompletionProvider,
 )
 from magi_agent.cli.tui.input import PromptInput, Submission
+from magi_agent.cli.tui.render.markdown import render_markdown
 from magi_agent.cli.tui.transcript import (
     DEFAULT_FLUSH_INTERVAL,
     TranscriptController,
 )
+from magi_agent.cli.tui.widgets.tool_card import ToolCard
+from magi_agent.cli.tui.widgets.transcript_view import TranscriptView
 
 __all__ = ["MagiTuiApp", "TextualSink", "ToolUseConfirm"]
 
@@ -445,26 +448,48 @@ class MagiTuiApp(App[None]):
             file_provider=file_provider,
             channel_provider=channel_provider,
         )
-        # Wired in compose/on_mount.
+        # Wired in compose/on_mount. Exactly ONE of ``_log`` (legacy RichLog) /
+        # ``_view`` (new TranscriptView widget list) is populated, selected by
+        # ``_legacy_richlog`` (the MAGI_TUI_LEGACY_RICHLOG escape hatch, PR0.3).
         self._topbar: Static | None = None
         self._log: RichLog | None = None
+        self._view: TranscriptView | None = None
         self._live: Static | None = None
         self._input: PromptInput | None = None
         self._completions: OptionList | None = None
         self._controller: TranscriptController | None = None
         # Terminal of the most recent turn (asserted by tests).
         self.last_terminal: EngineResult | None = None
+        # Last renderable handed to commit_rich. Test-observation seam: Textual's
+        # ``RichLog`` doesn't expose the last renderable post-update, so tests
+        # read this to assert render parity. Not cruft — keep it.
+        self._last_committed_renderable: object | None = None
+
+    @staticmethod
+    def _legacy_richlog() -> bool:
+        """Whether the legacy RichLog backing is forced (MAGI_TUI_LEGACY_RICHLOG=1)."""
+
+        import os  # noqa: PLC0415
+
+        return os.environ.get("MAGI_TUI_LEGACY_RICHLOG", "") == "1"
 
     # -- composition --------------------------------------------------------
     def compose(self) -> ComposeResult:
         self._topbar = Static(self._topbar_text(), id="topbar")
-        self._log = RichLog(wrap=True, markup=False, auto_scroll=True, id="transcript")
-        self._log.can_focus = False
+        if self._legacy_richlog():
+            self._log = RichLog(
+                wrap=True, markup=False, auto_scroll=True, id="transcript"
+            )
+            self._log.can_focus = False
+            transcript_widget: RichLog | TranscriptView = self._log
+        else:
+            self._view = TranscriptView(id="transcript")
+            transcript_widget = self._view
         self._live = Static("", id="live")
         self._completions = OptionList(id="completions")
         self._input = PromptInput(commands=self._commands, id="prompt")
         yield self._topbar
-        yield self._log
+        yield transcript_widget
         yield self._live
         yield self._completions
         yield self._input
@@ -485,12 +510,18 @@ class MagiTuiApp(App[None]):
         return f"● Magi   {model}   {cwd}   [{mode}]"
 
     def on_mount(self) -> None:
-        assert self._log is not None and self._live is not None
+        assert self._live is not None and (
+            self._log is not None or self._view is not None
+        )
         try:
             self.theme = "tokyo-night"
         except Exception:  # pragma: no cover - theme always present in textual 8.x
             pass
-        self._controller = TranscriptController(log=self._log, live=self._live)
+        if self._view is not None:
+            self._controller = TranscriptController(view=self._view, live=self._live)
+        else:
+            self._controller = TranscriptController(log=self._log, live=self._live)
+        self._controller.markdown_live = True
         self._render_welcome()
         # Coalescing flush timer: repaint buffered token deltas on a fixed
         # cadence so a pure token stream renders incrementally (not just at
@@ -639,9 +670,11 @@ class MagiTuiApp(App[None]):
                 await self._fold_event(item)
         finally:
             await gen.aclose()
-        # Finalize the in-flight assistant block (commits any streamed text).
+        # Finalize the in-flight assistant block as markdown (commits any
+        # streamed text). The plain text is preserved in the committed snapshot
+        # for search fidelity.
         await controller.flush_now()
-        controller.finalize_live()
+        self._finalize_assistant_markdown()
         if terminal is None:
             terminal = EngineResult(terminal=Terminal.error, error="no_terminal")
         self.last_terminal = terminal
@@ -657,7 +690,7 @@ class MagiTuiApp(App[None]):
         # Non-token: close the in-flight assistant block FIRST (so streamed
         # assistant text is committed before any tool render), then render.
         await controller.flush_now()
-        controller.finalize_live()
+        self._finalize_assistant_markdown()
         if event.type == "tool":
             self._render_tool_event(event)
             return
@@ -687,7 +720,8 @@ class MagiTuiApp(App[None]):
         self._commit_render_node(node, tool_name=name)
 
     def _commit_render_node(self, node: object, *, tool_name: str = "") -> None:
-        """Commit a ``RenderNode``: rich renderable when present, else its text.
+        """Commit a ``RenderNode`` as a collapsible ``ToolCard`` (widget backing)
+        or a plain finalized block (legacy ``RichLog`` backing).
 
         The displayed/committed text is annotated with the tool name when the
         renderer's output does not already carry it (the fallback renderer emits
@@ -695,12 +729,20 @@ class MagiTuiApp(App[None]):
         embed their name in the header, so they are left untouched.
         """
 
+        from magi_agent.cli.contracts import RenderNode  # noqa: PLC0415
+
         rich = getattr(node, "rich", None)
         text = getattr(node, "text", "") or ""
         annotated = self._annotate_tool_text(text, tool_name)
+        # Widget-list backing -> collapsible ToolCard (header = annotated text).
+        if self._view is not None:
+            card = ToolCard.from_render_node(RenderNode(rich=rich, text=annotated))
+            self.controller.commit_tool(card, text=annotated)
+            return
+        # Legacy RichLog backing -> the historical commit_rich/commit_block path.
+        # commit_rich keeps the displayed text in the snapshot for
+        # search-fidelity (what is indexed == what is shown).
         if rich is not None:
-            # commit_rich keeps the displayed text in the snapshot for
-            # search-fidelity (what is indexed == what is shown).
             self.controller.commit_rich(rich, text=annotated)
         else:
             self.controller.commit_block(annotated)
@@ -718,6 +760,25 @@ class MagiTuiApp(App[None]):
             return
         suffix = f": {terminal.error}" if terminal.error else ""
         self.controller.commit_block(f"[turn {terminal.terminal.value}{suffix}]")
+
+    def _finalize_assistant_markdown(self) -> None:
+        """Finalize the live assistant block as a markdown renderable.
+
+        Mirrors ``TranscriptController.finalize_live`` but commits the assistant
+        text as a Rich ``Markdown`` (via ``commit_rich``) instead of a plain
+        string (``commit_block``), so headings/lists/fenced code render. The
+        plain ``text=`` snapshot is preserved for search fidelity. An empty live
+        block is a no-op (matches ``finalize_live``).
+        """
+
+        controller = self.controller
+        text = controller.live_text
+        controller.discard_live()
+        if not text:
+            return
+        renderable = render_markdown(text)
+        self._last_committed_renderable = renderable
+        controller.commit_rich(renderable, text=text)
 
     # -- cancellation -------------------------------------------------------
     def action_cancel_turn(self) -> None:

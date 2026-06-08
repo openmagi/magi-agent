@@ -165,6 +165,29 @@ def test_prompt_drives_engine_and_updates_transcript() -> None:
 
 
 # ---------------------------------------------------------------------------
+# 1a. The finalized assistant block is committed as a Rich Markdown renderable
+#     (PR0.1) while the search-fidelity snapshot keeps the plain text.
+# ---------------------------------------------------------------------------
+def test_finalized_assistant_block_is_markdown_renderable() -> None:
+    async def _run() -> None:
+        engine = FakeEngineDriver(tokens=["# Heading\n\n", "body **bold**"])
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            app.start_turn("hi")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+        # The committed snapshot keeps the plain text (search fidelity).
+        blocks = app.controller.committed_blocks_snapshot()
+        assert any("# Heading" in b and "body **bold**" in b for b in blocks)
+        # The last committed renderable is a Rich Markdown, not a plain str.
+        from rich.markdown import Markdown as RichMarkdown
+
+        assert isinstance(app._last_committed_renderable, RichMarkdown)
+
+    asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
 # 1b. The coalescing flush timer repaints buffered token deltas WITHOUT an
 #     explicit flush_now() — proves token streams render incrementally.
 # ---------------------------------------------------------------------------
@@ -456,5 +479,146 @@ def test_tool_ask_edit_input_invalid_json_keeps_modal() -> None:
         decision = engine.gate_decision
         assert decision is not None
         assert decision.kind == "deny"
+
+    asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
+# 8. PR0.3: by default the finalized region is a mounted TranscriptView; the
+#    MAGI_TUI_LEGACY_RICHLOG=1 escape hatch restores the RichLog backing. The
+#    welcome + happy-turn behaviour is identical on both backings.
+# ---------------------------------------------------------------------------
+def test_app_uses_transcript_view_by_default(monkeypatch) -> None:
+    async def _run() -> None:
+        from magi_agent.cli.tui.widgets.transcript_view import TranscriptView
+
+        # Assert the DEFAULT (flag-unset) behaviour regardless of an ambient
+        # MAGI_TUI_LEGACY_RICHLOG in the environment (e.g. a full-suite run with
+        # the escape hatch exported) — the legacy path has its own test.
+        monkeypatch.delenv("MAGI_TUI_LEGACY_RICHLOG", raising=False)
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            # New default: the finalized region is a mounted TranscriptView.
+            assert len(app.query(TranscriptView)) == 1
+            # Welcome still rendered through the widget-list backing.
+            joined = "\n".join(app.controller.committed_blocks_snapshot())
+            assert "Welcome to Magi" in joined
+
+    asyncio.run(_run())
+
+
+def test_app_legacy_richlog_flag_restores_richlog(monkeypatch) -> None:
+    async def _run() -> None:
+        from textual.widgets import RichLog
+
+        from magi_agent.cli.tui.widgets.transcript_view import TranscriptView
+
+        monkeypatch.setenv("MAGI_TUI_LEGACY_RICHLOG", "1")
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            assert len(app.query(RichLog)) == 1
+            assert len(app.query(TranscriptView)) == 0
+
+    asyncio.run(_run())
+
+
+def test_tool_event_commits_collapsible_card(monkeypatch) -> None:
+    async def _run() -> None:
+        from magi_agent.cli.tui.tool_render import build_tool_renderers
+        from magi_agent.cli.tui.widgets.tool_card import ToolCard
+
+        # This asserts the widget-list (default) backing, so pin it even when a
+        # full-suite run sets MAGI_TUI_LEGACY_RICHLOG in the environment
+        # (the legacy path is covered by test_tool_event_legacy_richlog_no_card).
+        monkeypatch.delenv("MAGI_TUI_LEGACY_RICHLOG", raising=False)
+        engine = FakeEngineDriver(tokens=["ok"], ask_tool="Bash")
+        app = MagiTuiApp(
+            engine=engine,
+            gate=AllowGate(),
+            commands=FakeRegistry(["compact"]),
+            renderers=build_tool_renderers(),
+        )
+        async with app.run_test() as pilot:
+            app.start_turn("run ls")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            # The Bash tool_end rendered as a collapsed ToolCard in the view.
+            cards = app.query(ToolCard)
+            assert len(cards) >= 1
+            assert all(card.collapsed for card in cards)
+            # Search fidelity: the tool text is still in the committed snapshot.
+            joined = "\n".join(app.controller.committed_blocks_snapshot())
+            assert "Bash" in joined
+
+    asyncio.run(_run())
+
+
+def test_assistant_text_committed_before_tool_card_in_one_turn(monkeypatch) -> None:
+    """Finalize-before-tool ordering (Phase 0 review).
+
+    Within ONE turn, ``app._fold_event`` must flush + finalize the in-flight
+    assistant markdown BEFORE the tool card mounts, so streamed assistant text
+    appears ABOVE the tool output in the transcript. We assert the committed
+    snapshot index of the assistant-text block is strictly LESS than the tool
+    header block's index. (Backing-agnostic; default widget backing here.)
+    """
+
+    async def _run() -> None:
+        from magi_agent.cli.tui.tool_render import build_tool_renderers
+
+        monkeypatch.delenv("MAGI_TUI_LEGACY_RICHLOG", raising=False)
+        # Stream assistant tokens, THEN emit a Bash tool event in the same turn.
+        engine = FakeEngineDriver(tokens=["assistant says hi"], ask_tool="Bash")
+        app = MagiTuiApp(
+            engine=engine,
+            gate=AllowGate(),
+            commands=FakeRegistry(["compact"]),
+            renderers=build_tool_renderers(),
+        )
+        async with app.run_test() as pilot:
+            app.start_turn("run ls")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            blocks = app.controller.committed_blocks_snapshot()
+
+        assistant_idx = next(
+            i for i, b in enumerate(blocks) if "assistant says hi" in b
+        )
+        tool_idx = next(i for i, b in enumerate(blocks) if "Bash" in b)
+        assert assistant_idx < tool_idx, (
+            f"assistant text (idx {assistant_idx}) must be committed before the "
+            f"tool card (idx {tool_idx}); blocks={blocks!r}"
+        )
+
+    asyncio.run(_run())
+
+
+def test_tool_event_legacy_richlog_no_card(monkeypatch) -> None:
+    """Under MAGI_TUI_LEGACY_RICHLOG=1 there is no widget backing, so tool
+    output routes through commit_rich/commit_block (no Collapsible mounted)."""
+
+    async def _run() -> None:
+        from magi_agent.cli.tui.tool_render import build_tool_renderers
+        from magi_agent.cli.tui.widgets.tool_card import ToolCard
+
+        monkeypatch.setenv("MAGI_TUI_LEGACY_RICHLOG", "1")
+        engine = FakeEngineDriver(tokens=["ok"], ask_tool="Bash")
+        app = MagiTuiApp(
+            engine=engine,
+            gate=AllowGate(),
+            commands=FakeRegistry(["compact"]),
+            renderers=build_tool_renderers(),
+        )
+        async with app.run_test() as pilot:
+            app.start_turn("run ls")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert len(app.query(ToolCard)) == 0
+            joined = "\n".join(app.controller.committed_blocks_snapshot())
+            assert "Bash" in joined
 
     asyncio.run(_run())

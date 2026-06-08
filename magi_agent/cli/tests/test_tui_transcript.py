@@ -152,3 +152,160 @@ def test_bench_runs_and_reports() -> None:
     # Coalescing: far fewer flushes than lines.
     assert result.flush_count < result.lines
     assert result.lines_per_sec > 0.0
+
+
+# ---------------------------------------------------------------------------
+# 7. The coalesced live block renders Rich Markdown when markdown_live is on
+#    (PR0.1, OQ1) and stays plain text otherwise.
+# ---------------------------------------------------------------------------
+def test_live_block_renders_markdown_when_enabled() -> None:
+    async def _run() -> None:
+        from rich.markdown import Markdown as RichMarkdown
+
+        app = TranscriptApp(flush_interval=10.0)
+        async with app.run_test():
+            controller = app.controller
+            controller.markdown_live = True
+            controller.begin_live()
+            controller.append_delta("# Live heading\n\nbody")
+            await controller.flush_now()
+            # The live Static was updated with a Rich Markdown renderable.
+            assert isinstance(controller.last_live_renderable, RichMarkdown)
+            # Plain-text mode (default) stays a str.
+            controller.markdown_live = False
+            controller.begin_live()
+            controller.append_delta("plain")
+            await controller.flush_now()
+            assert isinstance(controller.last_live_renderable, str)
+
+    asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
+# 8. The bench's markdown_live path still coalesces (OQ1 resolution).
+# ---------------------------------------------------------------------------
+def test_bench_markdown_live_still_coalesces() -> None:
+    from magi_agent.cli.tui._bench import run_bench
+
+    result = asyncio.run(
+        run_bench(lines=2000, flush_interval=0.01, markdown_live=True)
+    )
+    assert result.lines == 2000
+    assert result.committed_block_count == 1
+    # Coalescing still holds with the markdown renderable on the live block.
+    assert result.flush_count >= 1
+    assert result.flush_count < result.lines
+    assert result.lines_per_sec > 0.0
+
+
+# ---------------------------------------------------------------------------
+# 9. The controller can back onto a mounted-widget TranscriptView (PR0.3).
+#    Public API, instrumentation counters, and committed_blocks_snapshot are
+#    identical to the RichLog backing — only the backing changes.
+# ---------------------------------------------------------------------------
+def test_controller_backs_onto_transcript_view() -> None:
+    async def _run() -> None:
+        from textual.app import App, ComposeResult
+        from textual.widgets import Static
+
+        from magi_agent.cli.tui.transcript import TranscriptController
+        from magi_agent.cli.tui.widgets.message import StatusLine
+        from magi_agent.cli.tui.widgets.transcript_view import TranscriptView
+
+        class _Host(App[None]):
+            def compose(self) -> ComposeResult:
+                self.view = TranscriptView(id="view")
+                self.live = Static("", id="live")
+                yield self.view
+                yield self.live
+
+            def on_mount(self) -> None:
+                self.controller = TranscriptController(view=self.view, live=self.live)
+
+        app = _Host()
+        async with app.run_test() as pilot:
+            c = app.controller
+            c.commit_block("plain block")
+            from rich.text import Text
+
+            c.commit_rich(Text("rich block"), text="rich block")
+            await pilot.pause()
+            # Backing is the widget list: a StatusLine + a Static were mounted.
+            assert len(app.view.query(StatusLine)) == 1
+            # Snapshot + counters identical to the RichLog backing.
+            assert c.committed_blocks_snapshot() == ("plain block", "rich block")
+            assert c.committed_block_count == 2
+
+    asyncio.run(_run())
+
+
+def test_commit_tool_mounts_card_and_records_text() -> None:
+    async def _run() -> None:
+        from textual.app import App, ComposeResult
+        from textual.widgets import Static
+
+        from magi_agent.cli.contracts import RenderNode
+        from magi_agent.cli.tui.transcript import TranscriptController
+        from magi_agent.cli.tui.widgets.tool_card import ToolCard
+        from magi_agent.cli.tui.widgets.transcript_view import TranscriptView
+
+        class _Host(App[None]):
+            def compose(self) -> ComposeResult:
+                self.view = TranscriptView(id="view")
+                self.live = Static("", id="live")
+                yield self.view
+                yield self.live
+
+            def on_mount(self) -> None:
+                self.controller = TranscriptController(view=self.view, live=self.live)
+
+        app = _Host()
+        async with app.run_test() as pilot:
+            c = app.controller
+            card = ToolCard.from_render_node(RenderNode(rich=None, text="Bash($ ls)"))
+            c.commit_tool(card, text="Bash($ ls)")
+            await pilot.pause()
+            assert len(app.view.query(ToolCard)) == 1
+            assert c.committed_blocks_snapshot() == ("Bash($ ls)",)
+            assert c.committed_block_count == 1
+
+    asyncio.run(_run())
+
+
+def test_commit_tool_legacy_richlog_writes_header_text() -> None:
+    """On the legacy RichLog backing a Collapsible cannot be hosted, so the
+    seam degrades to writing the header text. The snapshot still records it."""
+
+    async def _run() -> None:
+        from textual.app import App, ComposeResult
+        from textual.widgets import RichLog, Static
+
+        from magi_agent.cli.contracts import RenderNode
+        from magi_agent.cli.tui.transcript import TranscriptController
+        from magi_agent.cli.tui.widgets.tool_card import ToolCard
+
+        class _Host(App[None]):
+            def compose(self) -> ComposeResult:
+                self.richlog = RichLog(id="log")
+                self.live = Static("", id="live")
+                yield self.richlog
+                yield self.live
+
+            def on_mount(self) -> None:
+                self.controller = TranscriptController(
+                    log=self.richlog, live=self.live
+                )
+
+        app = _Host()
+        async with app.run_test() as pilot:
+            c = app.controller
+            card = ToolCard.from_render_node(RenderNode(rich=None, text="Bash($ ls)"))
+            c.commit_tool(card, text="Bash($ ls)")
+            await pilot.pause()
+            # No Collapsible mounted into a RichLog.
+            assert len(app.query(ToolCard)) == 0
+            # Header text recorded for search fidelity.
+            assert c.committed_blocks_snapshot() == ("Bash($ ls)",)
+            assert c.committed_block_count == 1
+
+    asyncio.run(_run())

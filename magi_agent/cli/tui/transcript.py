@@ -42,8 +42,20 @@ class TranscriptController:
     committed blocks out.
     """
 
-    def __init__(self, *, log: RichLog, live: Static) -> None:
+    def __init__(
+        self,
+        *,
+        live: Static,
+        log: "RichLog | None" = None,
+        view: "object | None" = None,
+    ) -> None:
+        if log is None and view is None:  # pragma: no cover - construction guard
+            raise ValueError("TranscriptController needs a `log` or a `view`")
         self._log = log
+        # TranscriptView when on the widget-list backing (PR0.3). Typed as
+        # ``object`` to avoid importing the leaf ``widgets`` package here (it
+        # imports lazily inside ``_emit`` to dodge a circular import).
+        self._view = view
         self._live = live
         # Buffer of un-rendered deltas for the current live block.
         self._pending: list[str] = []
@@ -56,6 +68,14 @@ class TranscriptController:
         self.flush_count: int = 0
         self.live_render_count: int = 0
         self.committed_block_count: int = 0
+        # OQ1: when True, the coalesced live block is rendered as a Rich
+        # Markdown renderable (headings/lists/fenced code) instead of plain
+        # text. Default False so the bench/legacy paths stay text-only.
+        self.markdown_live: bool = False
+        # Last renderable handed to the live widget. Test-observation seam:
+        # Textual's ``Static`` doesn't expose the last renderable post-update, so
+        # tests read this to assert OQ1 markdown parity. Not cruft — keep it.
+        self.last_live_renderable: object | None = None
 
     # -- live block lifecycle ------------------------------------------------
     def begin_live(self) -> None:
@@ -64,6 +84,7 @@ class TranscriptController:
         self._pending.clear()
         self._live_text = ""
         self._live_active = True
+        self.last_live_renderable = None
         self._live.update("")
 
     def append_delta(self, text: str) -> None:
@@ -86,10 +107,27 @@ class TranscriptController:
         self._live_text += "".join(self._pending)
         self._pending.clear()
         # Single re-render of the small live block — finalized blocks untouched.
-        self._live.update(self._live_text)
+        renderable = self._live_renderable(self._live_text)
+        self.last_live_renderable = renderable
+        self._live.update(renderable)
         self.flush_count += 1
         self.live_render_count += 1
         return True
+
+    def _live_renderable(self, text: str) -> object:
+        """The live-block renderable for ``text``.
+
+        Markdown when ``markdown_live`` is on (OQ1: Rich renderable in the live
+        block, re-rendered cleanly each coalesced flush), else plain text. The
+        import is lazy so the headless bench has no markdown dependency on the
+        hot path unless it opts in.
+        """
+
+        if not self.markdown_live:
+            return text
+        from magi_agent.cli.tui.render.markdown import render_markdown  # noqa: PLC0415
+
+        return render_markdown(text)
 
     async def flush_now(self) -> bool:
         """Async wrapper around :meth:`flush` for finalize/test call sites.
@@ -115,27 +153,106 @@ class TranscriptController:
         if text:
             self.commit_block(text)
 
+    @property
+    def live_text(self) -> str:
+        """The full text of the current live block (already-rendered + tail)."""
+
+        return self._live_text + "".join(self._pending)
+
+    def discard_live(self) -> None:
+        """Reset the live block WITHOUT committing it.
+
+        Used by callers (e.g. ``app._finalize_assistant_markdown``) that read
+        ``live_text`` and commit a custom renderable themselves. ``finalize_live``
+        remains the plain-text path; this is the "I'll commit it myself" path.
+        """
+
+        self._live_active = False
+        self._live_text = ""
+        self._pending.clear()
+        self._live.update("")
+
     # -- finalized blocks ----------------------------------------------------
+    def _emit(self, widget_or_renderable: object, *, as_status: bool) -> None:
+        """Append a finalized item to the active backing.
+
+        On the ``TranscriptView`` backing (PR0.3), wrap a plain string in a
+        ``StatusLine`` and a Rich renderable in a ``Static``, then ``add_block``.
+        On the legacy ``RichLog`` backing, ``write`` it directly. Imports are
+        lazy so ``transcript`` stays free of a hard ``widgets`` dependency (the
+        ``widgets`` package is a leaf; importing it at module scope would risk a
+        circular import).
+        """
+
+        if self._view is not None:
+            from textual.widgets import Static  # noqa: PLC0415
+
+            from magi_agent.cli.tui.widgets.message import (  # noqa: PLC0415
+                StatusLine,
+            )
+
+            # Phase note: user/assistant blocks are currently wrapped as
+            # generic ``StatusLine``/``Static`` here. Type-aware mapping onto the
+            # dedicated ``UserMessage``/``AssistantMessage`` widgets (already in
+            # the ``widgets.message`` module) lands in a later phase — those two
+            # classes are NOT dead code, just not wired into this seam yet.
+            if as_status and isinstance(widget_or_renderable, str):
+                widget = StatusLine(widget_or_renderable)
+            else:
+                widget = Static(widget_or_renderable)
+            self._view.add_block(widget)
+            return
+        assert self._log is not None
+        self._log.write(widget_or_renderable)
+
     def commit_block(self, text: str) -> None:
-        """Append an immutable finalized block to the ``RichLog`` (renders once)."""
+        """Append an immutable finalized block (renders once).
+
+        Routes through :meth:`_emit`: a ``StatusLine`` on the widget-list
+        backing, ``RichLog.write`` on legacy. Public API + counters unchanged.
+        """
 
         self._committed.append(text)
         self.committed_block_count += 1
-        self._log.write(text)
+        self._emit(text, as_status=True)
 
     def commit_rich(self, renderable: object, *, text: str = "") -> None:
-        """Append a Rich renderable to the ``RichLog`` (renders once).
+        """Append a Rich renderable as a finalized block (renders once).
 
         Mirrors :meth:`commit_block`'s finalize-first ordering contract: callers
         finalize the in-flight live block BEFORE committing a tool render so
         streamed assistant text lands first. The plain ``text`` fallback (the
         displayed ``RenderNode.text``) is recorded in the committed snapshot so
         the search-fidelity / parity assertions can see exactly what was shown.
+        Routes through :meth:`_emit`: a ``Static`` on the widget-list backing,
+        ``RichLog.write`` on legacy.
         """
 
         self._committed.append(text)
         self.committed_block_count += 1
-        self._log.write(renderable)
+        self._emit(renderable, as_status=False)
+
+    def commit_tool(self, card: object, *, text: str = "") -> None:
+        """Append a ``ToolCard`` (Collapsible) as a finalized block (PR0.4).
+
+        Mounts the card into the ``TranscriptView`` (the widget-list backing).
+        On the legacy ``RichLog`` backing — which cannot host a ``Collapsible`` —
+        the header ``text`` is written as a plain block so the seam degrades
+        gracefully. Either way the displayed ``text`` is recorded in the
+        committed snapshot for search fidelity.
+        """
+
+        self._committed.append(text)
+        self.committed_block_count += 1
+        # NB: this deliberately does NOT route through ``_emit`` like
+        # ``commit_block``/``commit_rich`` do — a ``ToolCard`` is already a widget,
+        # and wrapping it in a ``Static`` (as ``_emit`` does) would break the
+        # ``Collapsible``. Hence this third, widget-aware mount call-site.
+        if self._view is not None:
+            self._view.add_block(card)
+            return
+        assert self._log is not None
+        self._log.write(text)
 
     def committed_blocks_snapshot(self) -> tuple[str, ...]:
         """Immutable view of finalized block texts in commit order."""

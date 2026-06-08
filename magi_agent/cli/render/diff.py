@@ -25,7 +25,8 @@ Design notes
   ``on bright_green`` on the changed char ranges, on top of Pygments syntax
   foregrounds. ``rich`` is imported lazily inside the colorize path so the plain
   unified-diff projection works rich-free.
-* **Cache** keys the rendered ``Text`` by ``(file, width, theme, dim, old, new)``
+* **Cache** keys the rendered renderable (a ``Text`` for the unified view, a
+  ``Table`` for the split view) by ``(file, width, theme, dim, split, old, new)``
   so a ``ctrl+o``-style remount/resize does not re-highlight.
 """
 
@@ -50,6 +51,7 @@ __all__ = [
     "word_ranges",
     "build_hunks",
     "unified_diff_text",
+    "resolve_lexer",
     "render_diff",
     "clear_diff_cache",
 ]
@@ -69,6 +71,22 @@ TOKEN_RE = re.compile(r"[^\W_]+|\s+|.", re.UNICODE)
 
 #: Canonical Pygments/Rich theme for syntax highlighting.
 DEFAULT_THEME = "monokai"
+
+
+def resolve_lexer(file: str) -> str:
+    """Resolve a Pygments lexer *name* from a filename/extension.
+
+    Resolved ONCE per diff (from the file extension) rather than re-guessing per
+    line, so every line in a hunk shares the file's language. Falls back to
+    ``"text"`` when the extension is unknown — never raises.
+    """
+
+    try:
+        from pygments.lexers import get_lexer_for_filename  # noqa: PLC0415
+
+        return get_lexer_for_filename(file or "x.txt").aliases[0]
+    except Exception:  # pragma: no cover - unknown extension -> plain text
+        return "text"
 
 #: A half-open ``(start, end)`` char range within a single line.
 Range = tuple[int, int]
@@ -260,8 +278,8 @@ def unified_diff_text(old: str, new: str, *, file: str = "file") -> str:
 # ---------------------------------------------------------------------------
 # Colorized render + cache
 # ---------------------------------------------------------------------------
-# Cache key: (file, width, theme, dim, old, new) -> rich.text.Text.
-_RENDER_CACHE: dict[tuple[str, int, str, bool, str, str], "Text"] = {}
+# Cache key: (file, width, theme, dim, split, old, new) -> rendered renderable.
+_RENDER_CACHE: dict[tuple[str, int, str, bool, bool, str, str], object] = {}
 _CACHE_MAX = 8
 
 
@@ -271,7 +289,9 @@ def clear_diff_cache() -> None:
     _RENDER_CACHE.clear()
 
 
-def _highlight_line(text: str, *, file: str, theme: str) -> "Text":
+def _highlight_line(
+    text: str, *, file: str, theme: str, lexer: str | None = None
+) -> "Text":
     """Syntax-highlight a single line, returning a styled ``rich.text.Text``."""
 
     from rich.syntax import Syntax
@@ -280,8 +300,8 @@ def _highlight_line(text: str, *, file: str, theme: str) -> "Text":
     if not text:
         return Text("")
     try:
-        lexer = Syntax.guess_lexer(file, code=text)
-        highlighted = Syntax.highlight(Syntax(text, lexer, theme=theme), text)
+        chosen = lexer or Syntax.guess_lexer(file, code=text)
+        highlighted = Syntax.highlight(Syntax(text, chosen, theme=theme), text)
         # ``Syntax.highlight`` appends a trailing newline; trim it in place so the
         # per-line ``Text`` stays single-line for our own newline joining.
         highlighted.rstrip()
@@ -290,11 +310,13 @@ def _highlight_line(text: str, *, file: str, theme: str) -> "Text":
         return Text(text)
 
 
-def _render_line(line: DiffLine, *, file: str, theme: str, dim: bool) -> "Text":
+def _render_line(
+    line: DiffLine, *, file: str, theme: str, dim: bool, lexer: str | None = None
+) -> "Text":
     from rich.style import Style
     from rich.text import Text
 
-    base = _highlight_line(line.text, file=file, theme=theme)
+    base = _highlight_line(line.text, file=file, theme=theme, lexer=lexer)
     if line.kind == "context":
         prefix = Text("  ")
         if dim:
@@ -326,32 +348,93 @@ def render_diff(
     width: int = 80,
     theme: str = DEFAULT_THEME,
     dim: bool = False,
-) -> "Text":
-    """Render the whole diff to a single cached ``rich.text.Text``.
+    split: bool = False,
+) -> object:
+    """Render the whole diff to a cached Rich renderable.
 
-    Cached by ``(file, width, theme, dim, old, new)``: the same key returns the
-    SAME object; any key change rebuilds. ``rich`` is imported lazily here so the
+    ``split=False`` (default) returns a single ``rich.text.Text`` unified diff
+    (the historical behavior). ``split=True`` returns a borderless two-column
+    ``rich.table.Table`` (old | new) for a side-by-side view. Cached by
+    ``(file, width, theme, dim, split, old, new)``: the same key returns the SAME
+    object; any key change rebuilds. ``rich`` is imported lazily here so the
     plain ``unified_diff_text`` path stays rich-free.
+
+    ``width`` is ignored when ``split=True`` — the split ``Table`` lays out its
+    two columns via Rich's ratio-based grid, not a fixed width.
     """
 
     from rich.text import Text
 
-    key = (file, width, theme, dim, old, new)
+    key = (file, width, theme, dim, split, old, new)
     cached = _RENDER_CACHE.get(key)
     if cached is not None:
         return cached
 
     hunks = build_hunks(old, new, dim=dim)
-    out = Text(overflow="fold", no_wrap=False)
-    first_line = True
-    for hunk in hunks:
-        for line in hunk.lines:
-            if not first_line:
-                out.append("\n")
-            first_line = False
-            out.append_text(_render_line(line, file=file, theme=theme, dim=dim))
+    lexer = resolve_lexer(file)
+    if split:
+        out: object = _render_split(hunks, file=file, theme=theme, dim=dim, lexer=lexer)
+    else:
+        text = Text(overflow="fold", no_wrap=False)
+        first_line = True
+        for hunk in hunks:
+            for line in hunk.lines:
+                if not first_line:
+                    text.append("\n")
+                first_line = False
+                text.append_text(
+                    _render_line(line, file=file, theme=theme, dim=dim, lexer=lexer)
+                )
+        out = text
 
     if len(_RENDER_CACHE) >= _CACHE_MAX:
         _RENDER_CACHE.clear()
     _RENDER_CACHE[key] = out
     return out
+
+
+def _render_split(
+    hunks: list[Hunk], *, file: str, theme: str, dim: bool, lexer: str
+) -> object:
+    """Build a borderless two-column (old | new) Table from hunks.
+
+    Context lines appear on both sides; a paired del/add run aligns row-by-row;
+    an unmatched del or add leaves the opposite cell blank. Each cell reuses
+    ``_render_line`` so syntax + word-diff highlighting match the unified view.
+    """
+
+    from rich.table import Table
+    from rich.text import Text
+
+    table = Table.grid(padding=(0, 1), expand=True)
+    table.add_column("old", ratio=1)
+    table.add_column("new", ratio=1)
+
+    def cell(line: "DiffLine | None") -> "Text":
+        if line is None:
+            return Text("")
+        return _render_line(line, file=file, theme=theme, dim=dim, lexer=lexer)
+
+    for hunk in hunks:
+        i = 0
+        rows = hunk.lines
+        n = len(rows)
+        while i < n:
+            line = rows[i]
+            if line.kind == "context":
+                table.add_row(cell(line), cell(line))
+                i += 1
+                continue
+            dels: list[DiffLine] = []
+            while i < n and rows[i].kind == "del":
+                dels.append(rows[i])
+                i += 1
+            adds: list[DiffLine] = []
+            while i < n and rows[i].kind == "add":
+                adds.append(rows[i])
+                i += 1
+            for k in range(max(len(dels), len(adds))):
+                d = dels[k] if k < len(dels) else None
+                a = adds[k] if k < len(adds) else None
+                table.add_row(cell(d), cell(a))
+    return table

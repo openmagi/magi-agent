@@ -9,6 +9,8 @@ Plain pytest only — no ``App.run_test()`` needed: diff.py is a pure module.
 
 from __future__ import annotations
 
+import io
+
 from magi_agent.cli.render import diff as diffmod
 
 
@@ -123,6 +125,112 @@ def test_render_diff_cache_rebuilds_on_key_change() -> None:
     # Different width -> rebuild.
     wide = diffmod.render_diff("a\nb\n", "a\nB\n", file="x.py", width=120, dim=False)
     assert wide is not first
+
+
+def test_resolve_lexer_from_extension() -> None:
+    from magi_agent.cli.render import diff as diffmod
+
+    assert diffmod.resolve_lexer("foo.py") == "python"
+    assert diffmod.resolve_lexer("a/b/c.ts") in ("typescript", "ts")
+    # Unknown / extensionless -> a safe default, never raises.
+    assert diffmod.resolve_lexer("Makefile") is not None
+    assert diffmod.resolve_lexer("") is not None
+
+
+def test_render_diff_split_returns_table_renderable() -> None:
+    from rich.table import Table
+
+    from magi_agent.cli.render import diff as diffmod
+
+    diffmod.clear_diff_cache()
+    out = diffmod.render_diff(
+        "alpha\nbeta\n", "alpha\ngamma\n", file="x.py", split=True
+    )
+    # Split mode returns a Rich Table (two columns: old | new).
+    assert isinstance(out, Table)
+    assert len(out.columns) == 2
+
+
+def test_render_diff_unified_still_default() -> None:
+    from rich.text import Text
+
+    from magi_agent.cli.render import diff as diffmod
+
+    diffmod.clear_diff_cache()
+    out = diffmod.render_diff("a\n", "b\n", file="x.py")
+    # Default (split=False) is still the single Text projection.
+    assert isinstance(out, Text)
+
+
+def test_render_diff_split_and_unified_cache_independently() -> None:
+    from magi_agent.cli.render import diff as diffmod
+
+    diffmod.clear_diff_cache()
+    unified = diffmod.render_diff("a\n", "b\n", file="x.py", split=False)
+    split = diffmod.render_diff("a\n", "b\n", file="x.py", split=True)
+    assert unified is not split
+
+
+def test_render_diff_split_row_alignment_unequal_del_add() -> None:
+    # A hunk where a context line is followed by an unequal del/add run:
+    #   old = "a\nb\nc\n"  new = "a\nX\n"
+    # -> context "a" mirrored both sides; then 2 dels (b, c) vs 1 add (X).
+    # The split table must mirror the context line and pad the second deleted
+    # line ("c") with a BLANK new-side cell (no matching add).
+    from rich.console import Console
+    from rich.table import Table
+    from rich.text import Text
+
+    from magi_agent.cli.render import diff as diffmod
+
+    diffmod.clear_diff_cache()
+    old = "a\nb\nc\n"
+    new = "a\nX\n"
+    table = diffmod.render_diff(old, new, file="f.py", split=True)
+    assert isinstance(table, Table)
+    assert len(table.columns) == 2
+
+    old_cells = list(table.columns[0]._cells)
+    new_cells = list(table.columns[1]._cells)
+    # Same number of rows on each side (paired row-by-row).
+    assert len(old_cells) == len(new_cells)
+    # context "a" + max(2 dels, 1 add) = 3 rows.
+    assert len(old_cells) == 3
+
+    def cell_text(c: object) -> str:
+        return c.plain if isinstance(c, Text) else str(c)
+
+    old_text = [cell_text(c) for c in old_cells]
+    new_text = [cell_text(c) for c in new_cells]
+
+    # Row 0: context line "a" mirrored on both sides.
+    assert "a" in old_text[0]
+    assert "a" in new_text[0]
+    assert old_text[0] == new_text[0]
+
+    # The deleted lines b, c appear on the old side.
+    assert any("b" in t for t in old_text)
+    assert any("c" in t for t in old_text)
+    # The single added line X appears on the new side.
+    assert any("X" in t for t in new_text)
+
+    # The unmatched second deleted line ("c") pairs with a BLANK new-side cell:
+    # find the row whose old cell holds "c" and assert its new cell is empty.
+    c_rows = [k for k, t in enumerate(old_text) if "c" in t]
+    assert c_rows, "expected a row carrying the deleted 'c' line"
+    for k in c_rows:
+        assert new_text[k].strip() == "", (
+            f"expected blank new-side cell opposite deleted 'c', got {new_text[k]!r}"
+        )
+
+    # Cross-check via a rendered string: both 'b' and 'X' land on the same row,
+    # 'c' has no neighbour on the new side.
+    console = Console(file=io.StringIO(), width=80, force_terminal=False)
+    console.print(table)
+    rendered = console.file.getvalue()
+    assert "b" in rendered
+    assert "c" in rendered
+    assert "X" in rendered
 
 
 def test_render_diff_dim_skips_word_diff() -> None:
