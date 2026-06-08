@@ -31,6 +31,11 @@ _UNSAFE = re.compile(r"[^A-Za-z0-9._-]+")
 # Default cap on retained history entries (newest-wins ring).
 DEFAULT_MAX_ENTRIES = 500
 
+# Default cap on retained DISTINCT drafts (frecency dict is keyed by text, so
+# this bounds the in-memory entry count; the on-disk JSONL is compacted down to
+# this many distinct entries when it crosses 2*cap appended lines).
+DEFAULT_MAX_DRAFTS = 200
+
 # Minimum draft length worth stashing (01 §5.3).
 MIN_DRAFT_LEN = 20
 
@@ -244,8 +249,10 @@ class DraftStash:
         *,
         session_id: str,
         path: Path | None = _DERIVE,  # type: ignore[assignment]
+        max_drafts: int = DEFAULT_MAX_DRAFTS,
     ) -> None:
         self._session_id = session_id
+        self._max = max(1, int(max_drafts))
         if path is DraftStash._DERIVE:
             # Default (app construction): derive the per-session on-disk path.
             path = draft_path(session_id)
@@ -293,16 +300,55 @@ class DraftStash:
                 fh.write(json.dumps({"text": text}, ensure_ascii=False) + "\n")
         except OSError:
             return
+        # Opportunistic compaction (mirrors InputHistory._append_disk): re-saving
+        # the same draft appends a line each time, so the JSONL grows without
+        # bound even though the in-memory dict dedups. When the file crosses
+        # 2*_max lines, rewrite it down to the current distinct entries
+        # (most-recent-ranked) so _load() cost stays bounded. Same
+        # graceful-degradation discipline: a failed compaction never crashes.
+        self._compact_disk()
+
+    def _compact_disk(self) -> None:
+        if self._path is None:
+            return
+        threshold = 2 * self._max
+        try:
+            # Cheap line-count guard before any read-trim-rewrite work.
+            with open(self._path, "r", encoding="utf-8") as fh:
+                line_count = sum(1 for _ in fh)
+            if line_count <= threshold:
+                return
+            # Keep the most-relevant _max distinct entries, but WRITE them
+            # oldest-relevant LAST so a fresh _load() (which assigns a monotonic
+            # _seq per line in file order) reconstructs the same recency
+            # ranking. recent() returns newest-first, so reverse it for write.
+            entries = list(reversed(self.recent(limit=self._max)))
+            tmp = self._path.with_name(self._path.name + ".tmp")
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                for val in entries:
+                    fh.write(
+                        json.dumps({"text": val}, ensure_ascii=False) + "\n"
+                    )
+            os.replace(tmp, self._path)
+        except OSError:
+            return
 
     # -- public API ------------------------------------------------------
-    def save(self, text: str) -> None:
-        """Stash ``text`` if it is at least :data:`MIN_DRAFT_LEN` chars."""
+    def save(self, text: str) -> bool:
+        """Stash ``text`` if it is at least :data:`MIN_DRAFT_LEN` chars.
+
+        Returns ``True`` only when the draft was actually stored, ``False`` when
+        dropped as too-short/blank. The caller (ctrl+s) uses this to avoid
+        clearing the buffer on a dropped sub-threshold draft (no silent loss).
+        """
 
         text = text.rstrip("\n")
         if len(text) < MIN_DRAFT_LEN:
-            return
+            return False
         self._bump(text)
         self._append_disk(text)
+        return True
 
     def recent(self, limit: int = 10) -> list[str]:
         """Most relevant drafts: by save count, then recency. Newest first."""

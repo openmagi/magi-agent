@@ -286,6 +286,37 @@ def test_draft_stash_persist_and_reload(tmp_path: Path) -> None:
     assert s2.recent() == ["a sufficiently long draft to be persisted"]
 
 
+def test_draft_stash_disk_compaction_bounds_file_growth(tmp_path: Path) -> None:
+    from magi_agent.cli.tui.history import DraftStash
+
+    p = tmp_path / "tui" / "drafts-s.jsonl"
+    max_drafts = 3
+    s = DraftStash(session_id="s", path=p, max_drafts=max_drafts)
+    # Write well past 2*_max DISTINCT long-enough drafts: each save() appends a
+    # line, so without compaction the file grows unbounded.
+    n = 4 * max_drafts  # 12 distinct drafts
+    for i in range(n):
+        s.save(f"draft entry number {i} padded out to twenty plus characters")
+
+    # On-disk file must have been compacted: the appended JSONL can never exceed
+    # the 2*_max threshold once compaction has fired.
+    line_count = sum(
+        1 for line in p.read_text(encoding="utf-8").splitlines() if line.strip()
+    )
+    assert line_count <= 2 * max_drafts, line_count
+
+    # A fresh reload returns drafts in correct ranking (recency, since each
+    # distinct draft was saved once -> equal counts). Surviving distinct entries
+    # are bounded by the on-disk line cap (2*_max), and the most-recent ones rank
+    # first regardless of where the last compaction landed.
+    s2 = DraftStash(session_id="s", path=p, max_drafts=max_drafts)
+    ranked = s2.recent(limit=10)
+    assert len(ranked) <= 2 * max_drafts
+    assert ranked[0] == f"draft entry number {n - 1} padded out to twenty plus characters"
+    assert ranked[1] == f"draft entry number {n - 2} padded out to twenty plus characters"
+    assert ranked[2] == f"draft entry number {n - 3} padded out to twenty plus characters"
+
+
 def test_draft_stash_in_memory_path_none(tmp_path: Path) -> None:
     # ``path=None`` is in-memory only (mirrors InputHistory): no file written.
     from magi_agent.cli.tui.history import DraftStash
@@ -346,9 +377,10 @@ def test_ctrl_s_stashes_then_restores_draft(monkeypatch, tmp_path) -> None:
     asyncio.run(_run())
 
 
-def test_ctrl_s_short_draft_not_stashed_but_cleared(monkeypatch, tmp_path) -> None:
-    # A non-blank but < 20 char draft: ctrl+s clears the buffer (it is a draft
-    # being stashed) but DraftStash drops it as too short, so nothing to restore.
+def test_ctrl_s_short_draft_not_stashed_and_buffer_kept(monkeypatch, tmp_path) -> None:
+    # A non-blank but < 20 char draft: DraftStash drops it as too short, so
+    # nothing is stored AND the buffer is left intact (no silent data loss on a
+    # deliberate ctrl+s keypress).
     monkeypatch.setenv("MAGI_CLI_SESSION_DIR", str(tmp_path))
     from magi_agent.cli.tui.app import MagiTuiApp
 
@@ -367,7 +399,8 @@ def test_ctrl_s_short_draft_not_stashed_but_cleared(monkeypatch, tmp_path) -> No
             app._input.cursor_location = (0, len("tiny"))
             await pilot.press("ctrl+s")
             await pilot.pause()
-            assert app._input.text == ""
+            # buffer kept (not lost), and nothing stashed
+            assert app._input.text == "tiny"
             assert app._drafts.recent() == []
 
     asyncio.run(_run())

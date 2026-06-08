@@ -983,18 +983,23 @@ class MagiTuiApp(App[None]):
         """ctrl+s: stash the current draft, or restore the most recent if empty.
 
         A non-blank buffer is handed to :class:`DraftStash` (which keeps it only
-        if it is at least ``MIN_DRAFT_LEN`` chars) and the buffer is cleared so
-        the operator can start fresh; an empty buffer restores the single most-
-        recent stashed draft (highest count, then recency) and parks the caret at
-        its end. No-op when there is nothing to restore.
+        if it is at least ``MIN_DRAFT_LEN`` chars). The buffer is cleared ONLY
+        when the draft was actually stored — a sub-threshold draft that
+        ``save()`` drops leaves the buffer intact so a deliberate ctrl+s never
+        silently loses the operator's text. An empty buffer restores the single
+        most-recent stashed draft (highest count, then recency) and parks the
+        caret at its end. No-op when there is nothing to restore.
         """
 
         if self._input is None:
             return
         text = self._input.text
         if text.strip():
-            self._drafts.save(text)
-            self._input.text = ""
+            if self._drafts.save(text):
+                self._input.text = ""
+            else:
+                # Too short to stash: keep the buffer so it isn't lost.
+                self.notify("Draft too short to stash", timeout=2)
             return
         recent = self._drafts.recent(limit=1)
         if recent:
