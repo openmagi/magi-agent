@@ -244,6 +244,10 @@ class TranscriptController:
 
         self._committed.append(text)
         self.committed_block_count += 1
+        # NB: this deliberately does NOT route through ``_emit`` like
+        # ``commit_block``/``commit_rich`` do — a ``ToolCard`` is already a widget,
+        # and wrapping it in a ``Static`` (as ``_emit`` does) would break the
+        # ``Collapsible``. Hence this third, widget-aware mount call-site.
         if self._view is not None:
             self._view.add_block(card)
             return

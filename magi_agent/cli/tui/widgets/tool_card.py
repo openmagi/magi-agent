@@ -3,8 +3,8 @@
 A ``ToolCard`` is a ``textual.widgets.Collapsible`` whose header is the tool call
 line (``RenderNode.text``) and whose body is the tool's Rich renderable
 (``RenderNode.rich``) wrapped in a ``Static``. It is collapsed by default;
-Textual's ``CollapsibleTitle`` already binds ``enter`` to toggle and the focused
-title toggles on activation (``space``), so no custom bindings are needed.
+Textual's ``CollapsibleTitle`` already binds ``enter`` (and mouse click) to
+toggle the focused title, so no custom bindings are needed.
 
 Renderers stay pure (no widget imports): ``app._commit_render_node`` calls
 ``ToolCard.from_render_node(node)`` to lift a ``RenderNode`` into a widget at the
