@@ -1,6 +1,5 @@
 # Environment Variable Reference
 
-Status: ✅ Active — the local `magi` CLI and dashboard run with a single
 provider key or `~/.magi/config.toml`.
 
 This page lists the environment variables a local user or self-hosted operator

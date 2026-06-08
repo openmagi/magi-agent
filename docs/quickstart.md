@@ -1,7 +1,5 @@
 # Quickstart
 
-Status: ✅ Active — Homebrew install plus one provider key runs a real model-backed task today.
-
 The fastest happy path from install to your first answered task.
 
 ## Happy path

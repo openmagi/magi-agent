@@ -1,6 +1,5 @@
 # Configuration
 
-Status: ✅ Active — the local CLI is configured with a single provider key or a
 `~/.magi/config.toml`.
 
 Configure runtime-enforced control over context, tools, evidence, approvals, repair, projection, and audit.

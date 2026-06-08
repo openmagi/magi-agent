@@ -1,7 +1,5 @@
 # Deployment
 
-Status: ✅ Active — local self-host runs today; enforcement boundaries are default-off (shadow).
-
 This page covers running Magi Agent yourself. The local CLI and HTTP server run a
 real model and first-party tools today (see [what works today](/docs/what-works-today));
 what ships default-off is the enforcement/governance layer, external channel

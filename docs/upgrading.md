@@ -1,7 +1,5 @@
 # Upgrading
 
-Status: ✅ Active — covers upgrading the Homebrew install and source checkouts.
-
 Open Magi Agent is in early beta; interfaces may change between releases. Check the
 [changelog](/docs/changelog) and [GitHub Releases](https://github.com/openmagi/magi-agent/releases)
 before upgrading.

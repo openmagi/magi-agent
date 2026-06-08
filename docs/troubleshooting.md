@@ -1,7 +1,5 @@
 # Troubleshooting
 
-Status: ✅ Active — covers the local `magi` CLI and dashboard path.
-
 Debug Magi Agent by locating the failed runtime boundary.
 
 Most failures belong to a boundary: missing evidence, blocked approval, unsupported claim, stale context, tool denial, projection rejection, or install documentation drift.

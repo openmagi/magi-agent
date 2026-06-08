@@ -1,6 +1,6 @@
 # Boundaries
 
-Status: 🚧 Default-off — boundary enforcement ships disabled or observe-only until explicitly configured.
+> **Note — default-off.** Boundary enforcement ships disabled or observe-only until explicitly configured.
 
 Runtime boundaries that govern when model proposals become state, output, or side effects.
 

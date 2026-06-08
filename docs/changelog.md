@@ -1,7 +1,5 @@
 # Changelog
 
-Status: ✅ Active — this page tracks user-facing changes; tagged builds are on GitHub Releases.
-
 Open Magi Agent is in early beta. For the authoritative list of tagged builds and
 their assets, see [GitHub Releases](https://github.com/openmagi/magi-agent/releases).
 This page summarizes notable user-facing changes between releases.
