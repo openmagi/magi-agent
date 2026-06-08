@@ -16,6 +16,7 @@ import asyncio
 import logging
 import os
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any, Protocol
 
 from magi_agent.gateway.daemon import GatewayWatcher
@@ -33,9 +34,74 @@ class _LoopDriverLike(Protocol):
     ) -> int: ...
 
 
-def _scheduler_executor_enabled() -> bool:
+def is_scheduler_executor_enabled() -> bool:
     raw = os.environ.get("MAGI_SCHEDULER_EXECUTOR_ENABLED", "")
     return bool(raw) and raw.strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _scheduler_executor_enabled() -> bool:
+    return is_scheduler_executor_enabled()
+
+
+def _scheduler_readiness_mode_from_env() -> str | None:
+    raw = os.environ.get("MAGI_SCHEDULER_READINESS_EXECUTION_MODE", "")
+    clean = raw.strip().lower()
+    if clean in {"disabled", "shadow", "live"}:
+        return clean
+    return None
+
+
+def _scheduler_db_path_from_env() -> Path:
+    raw = os.environ.get("MAGI_SCHEDULER_DB_PATH", "")
+    if raw.strip():
+        return Path(raw).expanduser()
+    state_dir = Path(os.environ.get("MAGI_STATE_DIR", "~/.magi")).expanduser()
+    return state_dir / "scheduler" / "jobs.db"
+
+
+def _scheduler_lock_dir_from_env() -> Path | None:
+    raw = os.environ.get("MAGI_SCHEDULER_LOCK_DIR", "")
+    if raw.strip():
+        return Path(raw).expanduser()
+    return None
+
+
+def _scheduler_owner_digest_from_env() -> str:
+    raw = os.environ.get("MAGI_SCHEDULER_OWNER_DIGEST", "")
+    return raw.strip() or "owner:local-gateway"
+
+
+class _SafeLocalCronTurnRunner:
+    async def run_turn(self, plan: Any) -> Any:
+        from magi_agent.harness.scheduler_job_execution import CronTurnResult
+
+        return CronTurnResult(
+            status="skipped",
+            jobId=plan.job_id,
+            runnerInvoked=False,
+            output="scheduler live runner requires explicit operator wiring",
+        )
+
+
+def build_local_scheduler_cron_driver() -> _LoopDriverLike:
+    """Build the local scheduler driver used by ``magi gateway start``.
+
+    This composes the existing persistent job source and scheduler executor seam.
+    It deliberately uses a safe local runner: even if an operator requests live
+    mode, no ADK/client credentials or network authority are constructed here.
+    """
+    from typing import cast
+
+    from magi_agent.harness.scheduler_loop_driver import SchedulerLoopDriver
+    from magi_agent.harness.scheduler_job_store import SqliteScheduledJobSource
+
+    return SchedulerLoopDriver(
+        source=SqliteScheduledJobSource(_scheduler_db_path_from_env()),
+        runner=_SafeLocalCronTurnRunner(),
+        owner_digest=_scheduler_owner_digest_from_env(),
+        lock_dir=_scheduler_lock_dir_from_env(),
+        readiness_execution_mode=cast(Any, _scheduler_readiness_mode_from_env()),
+    )
 
 
 def build_scheduler_cron_watcher(
@@ -108,4 +174,9 @@ def build_channel_poll_watcher(
     return GatewayWatcher(name=name, run=run, is_enabled=is_enabled)
 
 
-__all__ = ["build_channel_poll_watcher", "build_scheduler_cron_watcher"]
+__all__ = [
+    "build_channel_poll_watcher",
+    "build_local_scheduler_cron_driver",
+    "build_scheduler_cron_watcher",
+    "is_scheduler_executor_enabled",
+]
