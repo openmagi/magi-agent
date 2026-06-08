@@ -8,6 +8,7 @@ from magi_agent.cli.tool_runtime import (
     build_cli_tool_runtime,
 )
 from magi_agent.adk_bridge.tool_adapter import build_adk_function_tools_for_registry
+from magi_agent.evidence.local_tool_collector import LocalToolEvidenceCollector
 from magi_agent.harness.general_automation.task_completion import (
     RequiredDeliverableEvidence,
     TaskCompletionVerifier,
@@ -43,6 +44,29 @@ def test_file_read_tool_performs_real_read(tmp_path) -> None:
     assert result["status"] == "ok"
     assert result["output"]["content"] == "real content here\n"
     assert result["metadata"]["toolName"] == "FileRead"
+
+
+def test_cli_adk_tools_record_local_tool_receipts_for_engine_collector(tmp_path) -> None:
+    class _InvocationContext:
+        invocation_id = "turn-local"
+        function_call = {"id": "call-read", "name": "FileRead"}
+
+    collector = LocalToolEvidenceCollector()
+    (tmp_path / "note.txt").write_text("real content here\n", encoding="utf-8")
+    tools = build_cli_adk_tools(
+        workspace_root=str(tmp_path),
+        session_id="sid-local",
+        local_tool_evidence_collector=collector,
+    )
+    file_read = _find_tool(tools, "FileRead")
+
+    result = asyncio.run(file_read.func({"path": "note.txt"}, _InvocationContext()))
+
+    records = collector.collect_for_turn("turn-local")
+    assert result["status"] == "ok"
+    assert len(records) == 1
+    assert records[0]["schemaVersion"] == "openmagi.localToolEvidenceReceipt.v1"
+    assert records[0]["receipts"]["toolExecutionReceipt"]["toolName"] == "FileRead"
 
 
 def test_tool_context_factory_carries_workspace_root(tmp_path) -> None:

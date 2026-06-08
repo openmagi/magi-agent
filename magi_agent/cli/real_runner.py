@@ -73,6 +73,7 @@ class CliModelRunner:
         model_label: str | None = None,
         runner_policy_assembly: RunnerPolicyAssembly | None = None,
         general_automation_receipts: object | None = None,
+        local_tool_evidence_collector: object | None = None,
     ) -> None:
         self._runner = runner
         self._agent = agent
@@ -84,6 +85,7 @@ class CliModelRunner:
         self._model_label = model_label
         self._runner_policy_assembly = runner_policy_assembly
         self._general_automation_receipts = general_automation_receipts
+        self._local_tool_evidence_collector = local_tool_evidence_collector
 
     @property
     def agent(self) -> object:
@@ -104,6 +106,10 @@ class CliModelRunner:
     @property
     def general_automation_receipts(self) -> object | None:
         return self._general_automation_receipts
+
+    @property
+    def local_tool_evidence_collector(self) -> object | None:
+        return self._local_tool_evidence_collector
 
     async def run_async(self, **kwargs: object) -> AsyncGenerator[object, None]:
         user_id = _as_str(kwargs.get("user_id"), self._default_user_id)
@@ -143,6 +149,7 @@ def build_cli_model_runner(
     workspace_root: str | None = None,
     task_profile: Mapping[str, object] | None = None,
     general_automation_receipts: object | None = None,
+    local_tool_evidence_collector: object | None = None,
 ) -> CliModelRunner:
     """Build a real, model-backed CLI runner from a resolved provider config.
 
@@ -170,10 +177,17 @@ def build_cli_model_runner(
     from magi_agent.harness.general_automation.live_gate import (  # noqa: PLC0415
         GeneralAutomationReceiptLedgerStore,
     )
+    from magi_agent.evidence.local_tool_collector import (  # noqa: PLC0415
+        LocalToolEvidenceCollector,
+    )
 
     build_model = model_factory or _build_litellm_model
     model = build_model(config)
     receipt_store = general_automation_receipts or GeneralAutomationReceiptLedgerStore()
+    tool_evidence_collector = (
+        local_tool_evidence_collector
+        or LocalToolEvidenceCollector(general_automation_receipts=receipt_store)
+    )
 
     effective_workspace_root = workspace_root if workspace_root is not None else os.getcwd()
     effective_tools = (
@@ -183,6 +197,7 @@ def build_cli_model_runner(
             workspace_root=effective_workspace_root,
             session_id=session_id,
             general_automation_receipts=receipt_store,
+            local_tool_evidence_collector=tool_evidence_collector,
         )
     )
     effective_instruction = (
@@ -239,6 +254,7 @@ def build_cli_model_runner(
         model_label=config.litellm_model,
         runner_policy_assembly=runner_policy_assembly,
         general_automation_receipts=receipt_store,
+        local_tool_evidence_collector=tool_evidence_collector,
     )
 
 

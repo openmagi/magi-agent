@@ -14,10 +14,13 @@ enables them via registry policy (no feature flag flip required).
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
+from inspect import isawaitable, signature
 from typing import TYPE_CHECKING, Callable
 
 if TYPE_CHECKING:
+    from magi_agent.evidence.local_tool_collector import LocalToolEvidenceCollector
     from magi_agent.harness.general_automation.live_gate import (
         GeneralAutomationReceiptLedgerStore,
     )
@@ -113,6 +116,7 @@ def build_cli_adk_tools(
     session_id: str = "cli-session",
     mode: "RuntimeMode" = "act",
     general_automation_receipts: "GeneralAutomationReceiptLedgerStore | None" = None,
+    local_tool_evidence_collector: "LocalToolEvidenceCollector | None" = None,
 ) -> list[object]:
     """Build the ADK FunctionTools exposing the real core tools for the CLI."""
 
@@ -125,13 +129,120 @@ def build_cli_adk_tools(
         session_id=session_id,
         general_automation_receipts=general_automation_receipts,
     )
-    return build_adk_function_tools_for_registry(
+    tools = build_adk_function_tools_for_registry(
         runtime.registry,
         runtime.dispatcher,
         mode=mode,
         tool_context_factory=runtime.tool_context_factory,
         attach_enabled=True,
     )
+    return wrap_cli_adk_tools_with_evidence_collector(
+        tools,
+        collector=local_tool_evidence_collector,
+        session_id=session_id,
+    )
+
+
+def wrap_cli_adk_tools_with_evidence_collector(
+    tools: list[object],
+    *,
+    collector: "LocalToolEvidenceCollector | None",
+    session_id: str,
+) -> list[object]:
+    """Record local ADK tool results into the shared CLI evidence collector."""
+
+    if collector is None:
+        return tools
+    record_tool_result = getattr(collector, "record_tool_result", None)
+    if not callable(record_tool_result):
+        return tools
+
+    for tool in tools:
+        original = getattr(tool, "func", None)
+        if not callable(original) or getattr(tool, "_magi_evidence_collector_wrapped", False):
+            continue
+
+        async def _wrapped_func(
+            arguments: dict[str, object],
+            tool_context: object,
+            *,
+            _original: Callable[[dict[str, object], object], object] = original,
+            _tool: object = tool,
+        ) -> object:
+            result = _original(arguments, tool_context)
+            if isawaitable(result):
+                result = await result
+            try:
+                record_tool_result(
+                    session_id=session_id,
+                    turn_id=_adk_tool_context_turn_id(tool_context),
+                    tool_call_id=_tool_call_id(tool_context, result),
+                    tool_name=_tool_name(_tool, result),
+                    result=result,
+                    arguments=arguments,
+                )
+            except Exception:
+                pass
+            return result
+
+        _wrapped_func.__name__ = getattr(original, "__name__", "invoke_openmagi_tool")
+        _wrapped_func.__doc__ = getattr(original, "__doc__", None)
+        try:
+            setattr(_wrapped_func, "__signature__", signature(original))
+        except (TypeError, ValueError):
+            pass
+        try:
+            setattr(tool, "func", _wrapped_func)
+            setattr(tool, "_magi_evidence_collector_wrapped", True)
+        except Exception:
+            continue
+    return tools
+
+
+def _adk_tool_context_turn_id(tool_context: object) -> str:
+    for value in (
+        _context_lookup(tool_context, "invocation_id"),
+        _context_lookup(_context_lookup(tool_context, "invocation_context"), "invocation_id"),
+        _context_lookup(_context_lookup(tool_context, "event"), "invocation_id"),
+    ):
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return "local-turn"
+
+
+def _tool_call_id(tool_context: object, result: object) -> str:
+    metadata = _result_metadata(result)
+    value = metadata.get("toolCallId") or metadata.get("tool_call_id")
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    function_call = _context_lookup(tool_context, "function_call")
+    value = _context_lookup(function_call, "id")
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return "local-tool-call"
+
+
+def _tool_name(tool: object, result: object) -> str:
+    metadata = _result_metadata(result)
+    value = metadata.get("toolName") or metadata.get("tool_name")
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    value = getattr(tool, "name", None)
+    return value if isinstance(value, str) and value.strip() else "unknown_tool"
+
+
+def _result_metadata(result: object) -> Mapping[str, object]:
+    if isinstance(result, Mapping):
+        metadata = result.get("metadata")
+        return metadata if isinstance(metadata, Mapping) else {}
+    metadata = getattr(result, "metadata", None)
+    return metadata if isinstance(metadata, Mapping) else {}
+
+
+def _context_lookup(value: object, key: str) -> object | None:
+    if isinstance(value, Mapping):
+        return value.get(key)
+    return getattr(value, key, None)
 
 
 def build_cli_instruction(
@@ -180,4 +291,5 @@ __all__ = [
     "build_cli_adk_tools",
     "build_cli_instruction",
     "build_cli_tool_runtime",
+    "wrap_cli_adk_tools_with_evidence_collector",
 ]
