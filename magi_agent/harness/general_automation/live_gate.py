@@ -337,6 +337,36 @@ class GeneralAutomationReceiptLedgerStore:
 
     def __init__(self) -> None:
         self._ledgers: dict[tuple[str, str], EvidenceLedger] = {}
+        # Per-turn open control projections (e.g. approval_required) retained so
+        # the per-turn constraint reminder can re-list still-open obligations.
+        # The live gate already builds these projections per call but they were
+        # otherwise dropped; this keeps them addressable by (session, turn).
+        self._open_controls: dict[
+            tuple[str, str], list[GeneralAutomationControlProjection]
+        ] = {}
+
+    def append_control(
+        self,
+        context: ToolContext,
+        projection: GeneralAutomationControlProjection,
+    ) -> None:
+        """Retain an open control projection for the call's (session, turn).
+
+        Read-only retention: no execution / route / approval authority is
+        granted. Used by the dispatch path next to ``append_receipt`` so an
+        ``approval_required`` outcome's projection survives for the per-turn
+        constraint reminder.
+        """
+        key = _ledger_key(context)
+        self._open_controls.setdefault(key, []).append(projection)
+
+    def open_controls_for_turn(
+        self,
+        *,
+        session_id: str,
+        turn_id: str,
+    ) -> list[GeneralAutomationControlProjection]:
+        return list(self._open_controls.get((session_id, turn_id), ()))
 
     def append_receipt(
         self,

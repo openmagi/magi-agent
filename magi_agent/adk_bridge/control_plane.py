@@ -494,6 +494,104 @@ class MaxStepsBrakeControl(BaseLoopControl):
 
 
 # ---------------------------------------------------------------------------
+# GaConstraintReinjectionControl (default-OFF seam — Track 19 PR6 wiring)
+# ---------------------------------------------------------------------------
+
+GA_CONSTRAINT_REINJECTION_CONTROL_NAME = "magi_ga_constraint_reinjection"
+
+
+class GaConstraintReinjectionControl(BaseLoopControl):
+    """Per-turn GA constraint reminder, wired at the live ``on_before_model`` seam.
+
+    Each turn this resolves the active turn's (session_id, turn_id), reads the
+    immutable per-turn evidence ledger and any open ``approval_required`` controls
+    from the :class:`GeneralAutomationReceiptLedgerStore`, and delegates to
+    :func:`ga_constraint_reinjection` (no reminder logic is duplicated here). When
+    that returns a non-empty reminder it is **appended** to ``llm_request.contents``
+    (mirroring :class:`MaxStepsBrakeControl`'s inject mechanism) — but, unlike the
+    max-steps brake, tools are NOT cleared.
+
+    Default-OFF / inert: ``ga_constraint_reinjection`` itself returns ``None`` when
+    ``MAGI_GA_LIVE_ENABLED`` is OFF or ``agent_role != "general"`` or nothing is
+    owed, so this control is a pure no-op in those cases. It is registered ONLY
+    when both a receipts store and a contract requirement are provided, so all
+    no-arg ``build_default_plugin()`` callers are byte-identical to ``main``.
+    """
+
+    name = GA_CONSTRAINT_REINJECTION_CONTROL_NAME
+
+    def __init__(
+        self,
+        *,
+        receipts: Any,
+        contract_required: Any,
+        agent_role: str = "general",
+        env: dict[str, str] | None = None,
+    ) -> None:
+        self._receipts = receipts
+        self._contract_required = contract_required
+        self._agent_role = agent_role
+        self._env = env
+
+    async def on_before_model(
+        self,
+        *,
+        callback_context: Any,
+        llm_request: Any,
+    ) -> None:
+        from magi_agent.harness.general_automation.constraint_reinjection import (
+            ga_constraint_reinjection,
+        )
+
+        session = getattr(callback_context, "session", None)
+        session_id = _non_empty_str(getattr(session, "id", None))
+        turn_id = _non_empty_str(getattr(callback_context, "invocation_id", None))
+        if turn_id is None:
+            turn_id = _latest_event_invocation_id(session)
+        if session_id is None or turn_id is None:
+            return None
+
+        ledger = self._receipts.ledger_for_turn(
+            session_id=session_id, turn_id=turn_id
+        )
+        if ledger is None:
+            return None
+        open_controls = self._receipts.open_controls_for_turn(
+            session_id=session_id, turn_id=turn_id
+        )
+
+        reminder = ga_constraint_reinjection(
+            contract_required=self._contract_required,
+            ledger=ledger,
+            open_controls=open_controls,
+            agent_role=self._agent_role,
+            env=self._env if self._env is not None else dict(os.environ),
+        )
+        if not reminder:
+            return None
+
+        # Append the reminder; mirror MaxStepsBrakeControl's inject mechanism but
+        # do NOT clear tools (this control only adds context, never disables tools).
+        contents = getattr(llm_request, "contents", None)
+        if isinstance(contents, list):
+            try:
+                from google.genai import types as _genai_types
+
+                contents.append(
+                    _genai_types.Content(
+                        role="user",
+                        parts=[_genai_types.Part(text=reminder)],
+                    )
+                )
+            except Exception:
+                contents.append({"role": "user", "content": reminder})
+        elif isinstance(llm_request, dict):
+            llm_request.setdefault("contents", [])
+            llm_request["contents"].append({"role": "user", "content": reminder})
+        return None
+
+
+# ---------------------------------------------------------------------------
 # SelfReviewAfterTurnControl (default-OFF, shadow-first, no writes)
 # ---------------------------------------------------------------------------
 
@@ -941,6 +1039,10 @@ class _ExtendedControlPlanePlugin(ControlPlanePlugin):
 
 def build_default_plane(
     os_environ: dict[str, str] | None = None,
+    *,
+    general_automation_receipts: Any | None = None,
+    contract_required: Any | None = None,
+    agent_role: str = "general",
 ) -> ControlPlane:
     """Build the default ControlPlane from environment flags.
 
@@ -951,6 +1053,14 @@ def build_default_plane(
     Args:
         os_environ: Environment mapping (defaults to ``os.environ``). Injectable
             for tests.
+        general_automation_receipts: Optional per-turn GA receipt/control store.
+            Together with ``contract_required`` this enables the GA constraint
+            reminder control. When either is ``None`` the control is NOT
+            registered, so no-arg callers stay byte-identical to ``main``.
+        contract_required: Optional ``RequiredDeliverableEvidence`` describing the
+            active GA contract's owed deliverables. See above.
+        agent_role: Agent role passed to the reminder gate (default ``"general"``;
+            the reminder is inert for any non-general role).
 
     Returns:
         A configured ``ControlPlane`` with all enabled controls registered.
@@ -1020,20 +1130,49 @@ def build_default_plane(
     if _is_true(env.get(SELF_REVIEW_ENABLED_ENV, "")):
         plane.register(SelfReviewAfterTurnControl())
 
+    # 6. GA constraint reminder (MAGI_GA_LIVE_ENABLED + general role, default OFF).
+    # Registered ONLY when BOTH a receipts store and a contract requirement are
+    # provided — so no-arg callers (local_runner + existing tests) never register
+    # it and stay byte-identical. The control itself is also flag/role/owed-gated
+    # at runtime via ga_constraint_reinjection, so registration alone is inert
+    # when the flag is OFF or nothing is owed.
+    if general_automation_receipts is not None and contract_required is not None:
+        plane.register(
+            GaConstraintReinjectionControl(
+                receipts=general_automation_receipts,
+                contract_required=contract_required,
+                agent_role=agent_role,
+                env=env,
+            )
+        )
+
     return plane
 
 
 def build_default_plugin(
     os_environ: dict[str, str] | None = None,
+    *,
+    general_automation_receipts: Any | None = None,
+    contract_required: Any | None = None,
+    agent_role: str = "general",
 ) -> _ExtendedControlPlanePlugin:
     """Build the single ControlPlanePlugin for runner construction.
 
     Returns an ``_ExtendedControlPlanePlugin`` that forwards all three
     extended callbacks (on_tool_error_callback, on_model_error_callback,
     after_run_callback) via generic fan-out over the plane's registered controls.
+
+    Optional ``general_automation_receipts`` / ``contract_required`` enable the GA
+    constraint reminder control (see :func:`build_default_plane`). When omitted
+    the plugin is byte-identical to ``main``.
     """
     env = os_environ if os_environ is not None else dict(os.environ)
-    plane = build_default_plane(os_environ=env)
+    plane = build_default_plane(
+        os_environ=env,
+        general_automation_receipts=general_automation_receipts,
+        contract_required=contract_required,
+        agent_role=agent_role,
+    )
     return _ExtendedControlPlanePlugin(plane)
 
 
@@ -1046,6 +1185,8 @@ __all__ = [
     "CONTROL_PLANE_PLUGIN_NAME",
     "ControlPlane",
     "ControlPlanePlugin",
+    "GA_CONSTRAINT_REINJECTION_CONTROL_NAME",
+    "GaConstraintReinjectionControl",
     "LoopControl",
     "MAX_STEPS_BRAKE_CONTROL_NAME",
     "MAX_STEPS_BRAKE_ENABLED_ENV",
