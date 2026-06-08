@@ -305,6 +305,117 @@ def test_cancel_interrupts_turn() -> None:
 
 
 # ---------------------------------------------------------------------------
+# 5b. Ctrl+C: cancels an in-flight turn, quits the app when idle
+# ---------------------------------------------------------------------------
+def test_ctrl_c_cancels_when_running_quits_when_idle() -> None:
+    async def _run() -> None:
+        engine = FakeEngineDriver(tokens=["t"])
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            exits: list[bool] = []
+            app.exit = lambda *a, **k: exits.append(True)  # type: ignore[method-assign]
+
+            # Running turn -> cancel (no exit).
+            app._turn_active = True
+            app._cancel = asyncio.Event()
+            app.action_cancel_turn()
+            assert app._cancel.is_set()
+            assert exits == []
+
+            # Idle -> exit.
+            app._turn_active = False
+            app.action_cancel_turn()
+            assert exits == [True]
+            await pilot.pause()
+
+    asyncio.run(_run())
+
+
+def test_ctrl_c_cancels_replacement_turn_after_stale_worker_finishes() -> None:
+    async def _run() -> None:
+        class ReplacementTurnDriver:
+            def __init__(self) -> None:
+                self.calls = 0
+                self.second_entered = asyncio.Event()
+                self.second_cancelled = False
+
+            async def run_turn_stream(self, runtime, turn_input, *, cancel, gate=None):
+                _ = runtime, gate
+                self.calls += 1
+                if self.calls == 1:
+                    yield RuntimeEvent(
+                        type="token",
+                        payload={"delta": "first"},
+                        turn_id=turn_input.turn_id,
+                    )
+                    await asyncio.Event().wait()
+                    return
+
+                self.second_entered.set()
+                yield RuntimeEvent(
+                    type="token",
+                    payload={"delta": "second"},
+                    turn_id=turn_input.turn_id,
+                )
+                await cancel.wait()
+                self.second_cancelled = True
+                yield EngineResult(
+                    terminal=Terminal.aborted,
+                    error="cancelled",
+                    turn_id=turn_input.turn_id,
+                )
+
+        engine = ReplacementTurnDriver()
+        app = _make_app(engine, flush_interval=999)
+        async with app.run_test() as pilot:
+            exits: list[bool] = []
+            app.exit = lambda *a, **k: exits.append(True)  # type: ignore[method-assign]
+
+            app.start_turn("first")
+            await pilot.pause()
+            app.start_turn("second")
+            await asyncio.wait_for(engine.second_entered.wait(), timeout=2)
+            await pilot.pause()
+
+            assert app._turn_active is True
+            app.action_cancel_turn()
+            assert exits == []
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+
+        assert engine.second_cancelled is True
+        assert app.last_terminal is not None
+        assert app.last_terminal.terminal == Terminal.aborted
+
+    asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
+# 5c. Modal selection by keyboard (number key) resolves the turn
+# ---------------------------------------------------------------------------
+def test_tool_ask_keyboard_number_selects_allow() -> None:
+    async def _run() -> None:
+        engine = FakeEngineDriver(tokens=["working"], ask_tool="Bash")
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            app._gate = SinkGate(app.sink)
+            app.start_turn("run something")
+            await pilot.pause()
+            await pilot.pause()
+            assert isinstance(app.screen, ToolUseConfirm)
+            # First action row is focused on mount (Enter works without a click).
+            assert app.focused is app.screen.query_one("#allow")
+            # "1" selects "Allow once" via the keyboard binding.
+            await pilot.press("1")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+        assert engine.gate_decision is not None
+        assert engine.gate_decision.kind == "allow"
+
+    asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
 # 6. Slash command submission routes through the registry lookup
 # ---------------------------------------------------------------------------
 def test_slash_command_dispatch_via_registry() -> None:

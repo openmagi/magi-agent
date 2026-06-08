@@ -269,8 +269,21 @@ def agent(
         # Interactive TUI branch                                           #
         # All textual imports happen lazily inside build_tui_app.         #
         # -------------------------------------------------------------- #
+        # The interactive TUI defaults to acceptEdits when the flag is omitted so
+        # reads/edits run without a prompt and only Bash-class tools raise the
+        # confirm modal. Explicit --permission-mode values, including default,
+        # are honored as-is. Headless (-p) keeps the strict "default" default.
+        permission_mode_source = ctx.get_parameter_source("permission_mode")
+        tui_permission_mode = (
+            "acceptEdits"
+            if (
+                permission_mode is PermMode.default
+                and getattr(permission_mode_source, "name", None) == "DEFAULT"
+            )
+            else permission_mode.value
+        )
         tui = build_tui_app(
-            permission_mode=permission_mode.value,  # type: ignore[arg-type]
+            permission_mode=tui_permission_mode,  # type: ignore[arg-type]
             session_id=resume or "cli-session",
             model=model,
             mode=mode.value,  # type: ignore[arg-type]
