@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import sys
+from collections.abc import Coroutine
+from datetime import UTC, datetime
 from typing import AsyncGenerator
 
 import pytest
@@ -9,6 +11,10 @@ from google.adk.models import BaseLlm, LlmResponse
 from google.genai import types
 
 import magi_agent.cli.real_runner as real_runner
+from magi_agent.adk_bridge.control_plane import (
+    CONTROL_PLANE_PLUGIN_NAME,
+    SELF_REVIEW_AFTER_TURN_CONTROL_NAME,
+)
 from magi_agent.cli.local_runner import LocalCliRunner
 from magi_agent.cli.providers import ProviderConfig
 from magi_agent.cli.real_runner import (
@@ -21,6 +27,11 @@ from magi_agent.harness.general_automation.task_completion import (
     RequiredDeliverableEvidence,
     TaskCompletionVerifier,
 )
+from magi_agent.harness.self_review import (
+    REVIEW_DISABLED_TOOLSETS,
+    ReviewCandidate,
+)
+from magi_agent.runtime.fork_runner import ChildResult, ForkCacheShareEvidence
 
 _PROVIDER_ENV = (
     "ANTHROPIC_API_KEY",
@@ -57,6 +68,60 @@ class _FakeAdkToolContext:
     def __init__(self, *, invocation_id: str, tool_name: str, call_id: str) -> None:
         self.invocation_id = invocation_id
         self.function_call = _FakeFunctionCall(name=tool_name, call_id=call_id)
+
+
+class _FakeSelfReviewSink:
+    def __init__(self) -> None:
+        self.received: list[ReviewCandidate] = []
+
+    def receive(self, candidate: ReviewCandidate) -> None:
+        self.received.append(candidate)
+
+
+class _FakeSelfReviewForkRunner:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    async def fork(
+        self,
+        *,
+        parent_turn_id: str,
+        system_prompt_blocks: list[dict[str, object]],
+        parent_assistant_message: dict[str, object],
+        child_directives: list[str],
+        disabled_toolsets: tuple[str, ...] = (),
+    ) -> tuple[list[ChildResult], ForkCacheShareEvidence]:
+        self.calls.append(
+            {
+                "parent_turn_id": parent_turn_id,
+                "system_prompt_blocks": system_prompt_blocks,
+                "parent_assistant_message": parent_assistant_message,
+                "disabled_toolsets": disabled_toolsets,
+            }
+        )
+        return (
+            [
+                ChildResult(
+                    directive=child_directives[0],
+                    status="ok",
+                    output=(
+                        '{"kind":"memory","proposal":"Remember the real runner '
+                        'self-review hook fired.","confidence":0.9}'
+                    ),
+                )
+            ],
+            ForkCacheShareEvidence(
+                parentTurnId=parent_turn_id,
+                childCount=len(child_directives),
+                sharedPrefixFingerprint="fake-fp",
+                disabledToolsets=disabled_toolsets,
+                status="ok",
+                elapsedMs=0.1,
+            ),
+        )
+
+
+_SELF_REVIEW_NOW = datetime(2026, 6, 8, 12, 0, 0, tzinfo=UTC)
 
 
 def _config() -> ProviderConfig:
@@ -155,6 +220,105 @@ def test_run_async_drives_real_adk_runner_and_autocreates_session() -> None:
 
     events = asyncio.run(_drive())
     assert any("ECHO: hi" in text for text in _collect_text(events))
+
+
+def test_real_runner_self_review_after_turn_runs_when_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MAGI_RUNTIME_PROFILE", "safe")
+    monkeypatch.setenv("MAGI_SELF_REVIEW_ENABLED", "1")
+    monkeypatch.setenv("MAGI_SELF_REVIEW_SHADOW", "1")
+    scheduled: list[Coroutine[object, object, None]] = []
+    fork_runner = _FakeSelfReviewForkRunner()
+    sink = _FakeSelfReviewSink()
+
+    runner = build_cli_model_runner(
+        _config(),
+        model_factory=_fake_model_factory,
+        tools=[],
+        instruction="Self-review real runner instruction.",
+        session_id="sid-self-review",
+        self_review_fork_runner=fork_runner,
+        self_review_candidate_sink=sink,
+        self_review_now=_SELF_REVIEW_NOW,
+        self_review_scheduler=scheduled.append,
+    )
+    plane_plugin = next(
+        plugin
+        for plugin in runner._runner.plugin_manager.plugins
+        if plugin.name == CONTROL_PLANE_PLUGIN_NAME
+    )
+
+    assert SELF_REVIEW_AFTER_TURN_CONTROL_NAME in {
+        control.name for control in plane_plugin._p._controls
+    }
+
+    async def _drive() -> None:
+        async for _event in runner.run_async(
+            user_id="u1",
+            session_id="sid-self-review",
+            new_message=types.Content(role="user", parts=[types.Part(text="hi")]),
+        ):
+            pass
+
+    asyncio.run(_drive())
+
+    assert len(scheduled) == 1
+    asyncio.run(scheduled[0])
+
+    assert len(fork_runner.calls) == 1
+    assert fork_runner.calls[0]["disabled_toolsets"] == REVIEW_DISABLED_TOOLSETS
+    assert fork_runner.calls[0]["system_prompt_blocks"] == [
+        {"type": "text", "text": "Self-review real runner instruction."}
+    ]
+    assert fork_runner.calls[0]["parent_assistant_message"] == {
+        "role": "assistant",
+        "content": [{"type": "text", "text": "ECHO: hi"}],
+    }
+    assert len(sink.received) == 1
+    assert sink.received[0].mode == "shadow"
+    assert sink.received[0].acted is False
+
+
+def test_real_runner_self_review_after_turn_stays_off_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MAGI_RUNTIME_PROFILE", "safe")
+    monkeypatch.delenv("MAGI_SELF_REVIEW_ENABLED", raising=False)
+    scheduled: list[Coroutine[object, object, None]] = []
+
+    runner = build_cli_model_runner(
+        _config(),
+        model_factory=_fake_model_factory,
+        tools=[],
+        instruction="Self-review disabled instruction.",
+        session_id="sid-self-review-off",
+        self_review_fork_runner=_FakeSelfReviewForkRunner(),
+        self_review_candidate_sink=_FakeSelfReviewSink(),
+        self_review_now=_SELF_REVIEW_NOW,
+        self_review_scheduler=scheduled.append,
+    )
+    plane_plugin = next(
+        plugin
+        for plugin in runner._runner.plugin_manager.plugins
+        if plugin.name == CONTROL_PLANE_PLUGIN_NAME
+    )
+
+    assert SELF_REVIEW_AFTER_TURN_CONTROL_NAME not in {
+        control.name for control in plane_plugin._p._controls
+    }
+
+    async def _drive() -> None:
+        async for _event in runner.run_async(
+            user_id="u1",
+            session_id="sid-self-review-off",
+            new_message=types.Content(role="user", parts=[types.Part(text="hi")]),
+        ):
+            pass
+
+    asyncio.run(_drive())
+
+    assert scheduled == []
 
 
 def test_missing_litellm_raises_actionable_error(monkeypatch) -> None:
