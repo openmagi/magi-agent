@@ -232,6 +232,24 @@ class TranscriptController:
         self.committed_block_count += 1
         self._emit(renderable, as_status=False)
 
+    def commit_tool(self, card: object, *, text: str = "") -> None:
+        """Append a ``ToolCard`` (Collapsible) as a finalized block (PR0.4).
+
+        Mounts the card into the ``TranscriptView`` (the widget-list backing).
+        On the legacy ``RichLog`` backing — which cannot host a ``Collapsible`` —
+        the header ``text`` is written as a plain block so the seam degrades
+        gracefully. Either way the displayed ``text`` is recorded in the
+        committed snapshot for search fidelity.
+        """
+
+        self._committed.append(text)
+        self.committed_block_count += 1
+        if self._view is not None:
+            self._view.add_block(card)
+            return
+        assert self._log is not None
+        self._log.write(text)
+
     def committed_blocks_snapshot(self) -> tuple[str, ...]:
         """Immutable view of finalized block texts in commit order."""
 

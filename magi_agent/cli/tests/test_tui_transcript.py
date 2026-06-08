@@ -237,3 +237,75 @@ def test_controller_backs_onto_transcript_view() -> None:
             assert c.committed_block_count == 2
 
     asyncio.run(_run())
+
+
+def test_commit_tool_mounts_card_and_records_text() -> None:
+    async def _run() -> None:
+        from textual.app import App, ComposeResult
+        from textual.widgets import Static
+
+        from magi_agent.cli.contracts import RenderNode
+        from magi_agent.cli.tui.transcript import TranscriptController
+        from magi_agent.cli.tui.widgets.tool_card import ToolCard
+        from magi_agent.cli.tui.widgets.transcript_view import TranscriptView
+
+        class _Host(App[None]):
+            def compose(self) -> ComposeResult:
+                self.view = TranscriptView(id="view")
+                self.live = Static("", id="live")
+                yield self.view
+                yield self.live
+
+            def on_mount(self) -> None:
+                self.controller = TranscriptController(view=self.view, live=self.live)
+
+        app = _Host()
+        async with app.run_test() as pilot:
+            c = app.controller
+            card = ToolCard.from_render_node(RenderNode(rich=None, text="Bash($ ls)"))
+            c.commit_tool(card, text="Bash($ ls)")
+            await pilot.pause()
+            assert len(app.view.query(ToolCard)) == 1
+            assert c.committed_blocks_snapshot() == ("Bash($ ls)",)
+            assert c.committed_block_count == 1
+
+    asyncio.run(_run())
+
+
+def test_commit_tool_legacy_richlog_writes_header_text() -> None:
+    """On the legacy RichLog backing a Collapsible cannot be hosted, so the
+    seam degrades to writing the header text. The snapshot still records it."""
+
+    async def _run() -> None:
+        from textual.app import App, ComposeResult
+        from textual.widgets import RichLog, Static
+
+        from magi_agent.cli.contracts import RenderNode
+        from magi_agent.cli.tui.transcript import TranscriptController
+        from magi_agent.cli.tui.widgets.tool_card import ToolCard
+
+        class _Host(App[None]):
+            def compose(self) -> ComposeResult:
+                self.richlog = RichLog(id="log")
+                self.live = Static("", id="live")
+                yield self.richlog
+                yield self.live
+
+            def on_mount(self) -> None:
+                self.controller = TranscriptController(
+                    log=self.richlog, live=self.live
+                )
+
+        app = _Host()
+        async with app.run_test() as pilot:
+            c = app.controller
+            card = ToolCard.from_render_node(RenderNode(rich=None, text="Bash($ ls)"))
+            c.commit_tool(card, text="Bash($ ls)")
+            await pilot.pause()
+            # No Collapsible mounted into a RichLog.
+            assert len(app.query(ToolCard)) == 0
+            # Header text recorded for search fidelity.
+            assert c.committed_blocks_snapshot() == ("Bash($ ls)",)
+            assert c.committed_block_count == 1
+
+    asyncio.run(_run())
