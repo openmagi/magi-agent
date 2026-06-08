@@ -91,3 +91,88 @@ def test_history_module_import_clean() -> None:
         [sys.executable, "-c", code], capture_output=True, text=True, check=True
     )
     assert result.stdout.strip() == "False", result.stdout
+
+
+# ---------------------------------------------------------------------------
+# App builds a per-session InputHistory and records submissions (PR1.2 t6)
+# ---------------------------------------------------------------------------
+import asyncio  # noqa: E402
+
+
+class _Reg:
+    def lookup(self, name):
+        return None
+
+    def list_for(self, surface):
+        return []
+
+
+class _Eng:
+    async def run_turn_stream(self, *a, **k):
+        if False:
+            yield None
+        return
+
+
+class _Gate:
+    async def evaluate(self, *a, **k):
+        return None
+
+
+class _Rend:
+    def get(self, name):
+        return None
+
+
+def test_app_records_submitted_prompt_into_history(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("MAGI_CLI_SESSION_DIR", str(tmp_path))
+    from magi_agent.cli.tui.app import MagiTuiApp
+
+    async def _run() -> None:
+        app = MagiTuiApp(
+            engine=_Eng(),
+            gate=_Gate(),
+            commands=_Reg(),
+            renderers=_Rend(),
+            session_id="hist-sess",
+        )
+        async with app.run_test() as pilot:
+            app._input.focus()
+            await pilot.pause()
+            app._input.text = "remember me"
+            app._input.cursor_location = (0, len("remember me"))
+            await pilot.press("enter")
+            await pilot.pause()
+            assert app._history.prev("x") == "remember me"
+
+    asyncio.run(_run())
+
+
+def test_app_history_persists_to_session_dir(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("MAGI_CLI_SESSION_DIR", str(tmp_path))
+    from magi_agent.cli.tui.app import MagiTuiApp
+    from magi_agent.cli.tui.history import InputHistory, history_path
+
+    async def _run() -> None:
+        app = MagiTuiApp(
+            engine=_Eng(),
+            gate=_Gate(),
+            commands=_Reg(),
+            renderers=_Rend(),
+            session_id="persist-sess",
+        )
+        async with app.run_test() as pilot:
+            app._input.focus()
+            await pilot.pause()
+            app._input.text = "durable prompt"
+            app._input.cursor_location = (0, len("durable prompt"))
+            await pilot.press("enter")
+            await pilot.pause()
+
+        # The submission was flushed to the per-session JSONL under the
+        # monkeypatched root, and a fresh history reads it back.
+        assert history_path("persist-sess").exists()
+        reloaded = InputHistory(session_id="persist-sess")
+        assert reloaded.prev("x") == "durable prompt"
+
+    asyncio.run(_run())

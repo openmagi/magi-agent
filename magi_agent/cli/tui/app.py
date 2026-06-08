@@ -77,6 +77,7 @@ from magi_agent.cli.tui.autocomplete import (
     Completion,
     CompletionProvider,
 )
+from magi_agent.cli.tui.history import InputHistory
 from magi_agent.cli.tui.input import PromptInput, Submission
 from magi_agent.cli.tui.render.markdown import render_markdown
 from magi_agent.cli.tui.transcript import (
@@ -507,6 +508,8 @@ class MagiTuiApp(App[None]):
         self._renderers = renderers
         self._runtime = runtime
         self._session_id = session_id
+        # Per-session ↑/↓ input history (persisted JSONL under the session root).
+        self._history = InputHistory(session_id=session_id)
         self._model = model
         self._mode = mode
         import os as _os  # noqa: PLC0415
@@ -606,6 +609,9 @@ class MagiTuiApp(App[None]):
         else:
             self._controller = TranscriptController(log=self._log, live=self._live)
         self._controller.markdown_live = True
+        # Wire the prompt's ↑/↓ recall to this session's history ring.
+        if self._input is not None:
+            self._input.attach_history(self._history)
         self._render_welcome()
         # Coalescing flush timer: repaint buffered token deltas on a fixed
         # cadence so a pure token stream renders incrementally (not just at
@@ -661,6 +667,9 @@ class MagiTuiApp(App[None]):
     ) -> None:
         self._hide_completions()
         submission = event.submission
+        # Record every submitted prompt (commands included) into history so ↑/↓
+        # recall them; blank/consecutive-dup entries are filtered by add().
+        self._history.add(submission.text)
         if submission.kind == "command":
             self._dispatch_command(submission)
             return
