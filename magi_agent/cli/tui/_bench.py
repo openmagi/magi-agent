@@ -53,16 +53,19 @@ async def run_bench(
     lines: int = 10_000,
     flush_interval: float = DEFAULT_FLUSH_INTERVAL,
     chunk_chars: int = 0,
+    markdown_live: bool = False,
 ) -> BenchResult:
     """Stream ``lines`` simulated lines through the transcript, headlessly.
 
     ``chunk_chars`` (>0) splits each line into multiple sub-chunks to model a
     token-level stream; 0 means one chunk per line. Throughput counts *lines*.
+    ``markdown_live`` (OQ1) renders the live block as Rich Markdown each flush.
     """
 
     app = TranscriptApp(flush_interval=flush_interval)
     async with app.run_test():
         controller = app.controller
+        controller.markdown_live = markdown_live
         controller.begin_live()
 
         start = perf_counter()
@@ -109,12 +112,18 @@ def main(argv: list[str] | None = None) -> None:
         default=0,
         help="split each line into N-char sub-chunks (0 = one chunk per line)",
     )
+    parser.add_argument(
+        "--markdown-live",
+        action="store_true",
+        help="render the live block as Rich Markdown each flush (OQ1)",
+    )
     args = parser.parse_args(argv)
     result = asyncio.run(
         run_bench(
             lines=args.lines,
             flush_interval=args.flush_interval,
             chunk_chars=args.chunk_chars,
+            markdown_live=args.markdown_live,
         )
     )
     print(result.summary())
