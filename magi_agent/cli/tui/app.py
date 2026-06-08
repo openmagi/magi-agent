@@ -651,10 +651,22 @@ class MagiTuiApp(App[None]):
         welcome.append(".  ", style="dim")
         welcome.append("Ctrl+C", style="#7aa2f7")
         welcome.append(" cancels a turn.\n", style="dim")
+        welcome.append("Keys: ", style="dim")
+        welcome.append("Shift+Enter", style="#7aa2f7")
+        welcome.append(" newline · ", style="dim")
+        welcome.append("↑", style="#7aa2f7")
+        welcome.append(" history · ", style="dim")
+        welcome.append("Ctrl+S", style="#7aa2f7")
+        welcome.append(" draft\n", style="dim")
         welcome.append("Commands: ", style="dim")
         welcome.append(command_line, style="#9ece6a")
         self._controller.commit_rich(
-            welcome, text=f"Welcome to Magi  Commands: {command_line}"
+            welcome,
+            text=(
+                "Welcome to Magi  "
+                "Keys: Shift+Enter newline · ↑ history · Ctrl+S draft  "
+                f"Commands: {command_line}"
+            ),
         )
 
     @property

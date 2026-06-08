@@ -107,6 +107,57 @@ def test_disk_compaction_bounds_file_growth(tmp_path: Path) -> None:
     assert h2.prev(f"entry-{n - 3}") == f"entry-{n - 3}"
 
 
+def test_history_add_graceful_degrade_on_oserror(monkeypatch, tmp_path: Path) -> None:
+    # The module's many ``except OSError`` claims must be real: if every disk
+    # write path raises OSError, construction + add() must NOT propagate and the
+    # in-memory ring must still work (graceful degradation, no silent crash).
+    import magi_agent.cli.tui.history as hist_mod
+    from magi_agent.cli.tui.history import InputHistory
+
+    p = tmp_path / "tui" / "history-s.jsonl"
+
+    def _boom(*_a, **_k):
+        raise OSError("disk write blocked")
+
+    # Block every disk op the persistence path can hit.
+    monkeypatch.setattr(hist_mod.os, "open", _boom)
+    monkeypatch.setattr(hist_mod.os, "replace", _boom)
+    monkeypatch.setattr(hist_mod.Path, "mkdir", _boom)
+
+    # Construction (which may _load) and add() must not raise.
+    h = InputHistory(session_id="s", path=p, max_entries=3)
+    h.add("first entry")
+    h.add("second entry")
+
+    # The in-memory ring still works despite no disk persistence.
+    assert h.prev("draft") == "second entry"
+    assert h.prev("second entry") == "first entry"
+    # And no file was actually written (the writes were all blocked).
+    assert not p.exists()
+
+
+def test_draft_stash_graceful_degrade_on_oserror(monkeypatch, tmp_path: Path) -> None:
+    # Same OSError graceful-degradation guarantee for DraftStash.save().
+    import magi_agent.cli.tui.history as hist_mod
+    from magi_agent.cli.tui.history import DraftStash
+
+    p = tmp_path / "tui" / "drafts-s.jsonl"
+
+    def _boom(*_a, **_k):
+        raise OSError("disk write blocked")
+
+    monkeypatch.setattr(hist_mod.os, "open", _boom)
+    monkeypatch.setattr(hist_mod.os, "replace", _boom)
+    monkeypatch.setattr(hist_mod.Path, "mkdir", _boom)
+
+    s = DraftStash(session_id="s", path=p)
+    # save() returns True (it was stored in memory) and must not raise despite
+    # the disk write being blocked.
+    assert s.save("a long enough draft to be stashed in memory") is True
+    assert s.recent() == ["a long enough draft to be stashed in memory"]
+    assert not p.exists()
+
+
 def test_history_module_import_clean() -> None:
     import subprocess
     import sys
