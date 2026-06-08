@@ -384,7 +384,9 @@ class OpenMagiEventBridge:
         )
 
     def project_adk_event(self, event: Event, *, turn_id: str) -> EventProjection:
-        if event.error_code or event.error_message:
+        if (event.error_code or event.error_message) and not _all_error_fields_benign(
+            event.error_code, event.error_message
+        ):
             message = event.error_message or event.error_code or "adk_error"
             public_message = _public_preview(message)
             agent_events: list[dict[str, object]] = [
@@ -972,6 +974,29 @@ def _event_is_final_response(event: Event) -> bool:
     if callable(is_final_response):
         return bool(is_final_response()) or turn_complete
     return turn_complete
+
+
+# A normal finish status (e.g. Gemini surfacing "completed"/"STOP") can arrive
+# in an ADK event's error_code/error_message fields. That is NOT a turn failure,
+# so it must not project a terminal_abort trace / error / aborted turn_end —
+# doing so renders a spurious "응답 생성이 중단되었습니다: completed" banner
+# downstream even though the answer completed normally.
+_BENIGN_FINISH_SIGNAL_RE = re.compile(
+    r"(?:complete[d]?|committed|done|finished|success(?:ful)?|ok|stop|"
+    r"stop_sequence|end_turn|normal)",
+    re.IGNORECASE,
+)
+
+
+def _is_benign_finish_signal(value: object) -> bool:
+    return isinstance(value, str) and bool(
+        _BENIGN_FINISH_SIGNAL_RE.fullmatch(value.strip())
+    )
+
+
+def _all_error_fields_benign(error_code: object, error_message: object) -> bool:
+    populated = [field for field in (error_code, error_message) if field]
+    return bool(populated) and all(_is_benign_finish_signal(f) for f in populated)
 
 
 def _final_stop_reason(event: Event) -> str:

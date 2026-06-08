@@ -130,3 +130,57 @@ def test_event_bridge_live_compatible_tool_event_id_hashes_unsafe_adk_event_id()
     assert payload["eventId"].startswith(("adk-event-", "event:"))
     assert "/Users/kevin" not in writer.body
     assert "workspace" not in payload["eventId"]
+
+
+def test_event_bridge_treats_benign_finish_in_error_field_as_non_failure() -> None:
+    # Regression: Gemini/ADK can surface a benign finish status ("completed")
+    # in the event error field. That must NOT project a failure (terminal_abort
+    # trace / error event / aborted turn_end), which would render a spurious
+    # "응답 생성이 중단되었습니다: completed" interruption downstream.
+    bridge = OpenMagiEventBridge(live_compatible=True)
+    event = Event(
+        id="event-benign-finish",
+        author="model",
+        error_message="completed",
+        invocation_id="turn-live",
+    )
+
+    projection = bridge.project_adk_event(event, turn_id="turn-live")
+
+    # The error branch must be bypassed: no error event, no terminal_abort
+    # trace, no turn.failed, and no aborted turn_end echoing the benign reason.
+    # (Downstream receipt/content logic still governs the real turn_end.)
+    assert "error" not in {ev.get("type") for ev in projection.agent_events}
+    assert not any(
+        ev.get("type") == "runtime_trace" and ev.get("phase") == "terminal_abort"
+        for ev in projection.agent_events
+    )
+    assert not any(
+        ev.get("type") == "turn_end"
+        and ev.get("status") == "aborted"
+        and ev.get("reason") == "completed"
+        for ev in projection.agent_events
+    )
+    assert not any(
+        ne.type == "turn.failed" for ne in projection.normalized_events
+    )
+
+
+def test_event_bridge_still_reports_a_real_error_field() -> None:
+    bridge = OpenMagiEventBridge(live_compatible=True)
+    event = Event(
+        id="event-real-error",
+        author="model",
+        error_code="SAFETY",
+        error_message="blocked by safety filter",
+        invocation_id="turn-live",
+    )
+
+    projection = bridge.project_adk_event(event, turn_id="turn-live")
+
+    event_types = {ev.get("type") for ev in projection.agent_events}
+    assert "error" in event_types
+    assert any(
+        ev.get("type") == "turn_end" and ev.get("status") == "aborted"
+        for ev in projection.agent_events
+    )
