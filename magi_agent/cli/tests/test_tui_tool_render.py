@@ -109,6 +109,47 @@ def test_rejected_renders_dim_diff() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Edit diff split= opt-in via MAGI_TUI_DIFF_SPLIT
+# ---------------------------------------------------------------------------
+def test_edit_renderer_uses_split_when_env_set(monkeypatch) -> None:
+    from rich.table import Table
+
+    from magi_agent.cli.render import diff as diffmod
+
+    diffmod.clear_diff_cache()
+    monkeypatch.setenv("MAGI_TUI_DIFF_SPLIT", "1")
+    renderer = tool_render.EditRenderer()
+    node = renderer.render_call(
+        {"file_path": "x.py", "old_string": "alpha\nbeta", "new_string": "alpha\ngamma"}
+    )
+    # The diff portion of the grouped renderable is a split Table.
+    from rich.console import Group
+
+    assert isinstance(node.rich, Group)
+    body = node.rich.renderables[-1]
+    assert isinstance(body, Table)
+    # Search-fidelity preserved regardless of split.
+    assert renderer.extract_search_text(node) == node.text
+
+
+def test_edit_renderer_unified_by_default(monkeypatch) -> None:
+    from rich.text import Text
+
+    from magi_agent.cli.render import diff as diffmod
+
+    diffmod.clear_diff_cache()
+    monkeypatch.delenv("MAGI_TUI_DIFF_SPLIT", raising=False)
+    renderer = tool_render.EditRenderer()
+    node = renderer.render_call(
+        {"file_path": "x.py", "old_string": "a", "new_string": "b"}
+    )
+    from rich.console import Group
+
+    assert isinstance(node.rich, Group)
+    assert isinstance(node.rich.renderables[-1], Text)
+
+
+# ---------------------------------------------------------------------------
 # Registry dispatch + fallback
 # ---------------------------------------------------------------------------
 def test_registry_returns_correct_renderer_per_name() -> None:

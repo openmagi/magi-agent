@@ -56,6 +56,14 @@ _RESULT_STYLE = "dim"
 _GUTTER_STYLE = "dim #569cd6"
 
 
+def _diff_split_enabled() -> bool:
+    """Whether Edit diffs render side-by-side (``MAGI_TUI_DIFF_SPLIT=1``)."""
+
+    import os  # noqa: PLC0415
+
+    return os.environ.get("MAGI_TUI_DIFF_SPLIT", "") == "1"
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -266,7 +274,9 @@ class EditRenderer:
         try:
             from rich.console import Group  # noqa: PLC0415
 
-            rich_diff = diffmod.render_diff(old, new, file=file or "file", dim=dim)
+            rich_diff = diffmod.render_diff(
+                old, new, file=file or "file", dim=dim, split=_diff_split_enabled()
+            )
             rich = Group(call.rich, rich_diff) if rich_diff is not None else call.rich
         except Exception:  # pragma: no cover - never fail a render
             rich = call.rich
