@@ -205,3 +205,199 @@ def test_app_history_persists_to_session_dir(monkeypatch, tmp_path) -> None:
         assert reloaded.prev("x") == "durable prompt"
 
     asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
+# DraftStash — save (>= 20 chars) + recency+count recent() (PR1.3 t7)
+# ---------------------------------------------------------------------------
+def test_draft_path_under_magi_root(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("MAGI_CLI_SESSION_DIR", str(tmp_path))
+    from magi_agent.cli.tui.history import draft_path
+
+    p = draft_path("sess-1")
+    assert p == tmp_path / "tui" / "drafts-sess-1.jsonl"
+
+
+def test_draft_stash_ignores_short_drafts(tmp_path: Path) -> None:
+    from magi_agent.cli.tui.history import DraftStash
+
+    p = tmp_path / "tui" / "drafts-s.jsonl"
+    s = DraftStash(session_id="s", path=p)
+    s.save("too short")  # < 20 chars -> ignored
+    assert s.recent() == []
+
+
+def test_draft_stash_saves_long_drafts(tmp_path: Path) -> None:
+    from magi_agent.cli.tui.history import DraftStash
+
+    p = tmp_path / "tui" / "drafts-s.jsonl"
+    s = DraftStash(session_id="s", path=p)
+    s.save("this is a long enough draft to keep around")
+    assert s.recent() == ["this is a long enough draft to keep around"]
+
+
+def test_draft_stash_frecency_count_then_recency(tmp_path: Path) -> None:
+    from magi_agent.cli.tui.history import DraftStash
+
+    p = tmp_path / "tui" / "drafts-s.jsonl"
+    s = DraftStash(session_id="s", path=p)
+    a = "draft alpha that is quite long indeed"
+    b = "draft beta that is also long enough yes"
+    s.save(a)
+    s.save(b)
+    s.save(a)  # alpha saved twice -> higher count, ranks first
+    ranked = s.recent(limit=10)
+    assert ranked[0] == a
+    assert ranked[1] == b
+
+
+def test_draft_stash_recency_breaks_count_ties(tmp_path: Path) -> None:
+    # Equal save counts -> the most-recently-saved draft ranks first.
+    from magi_agent.cli.tui.history import DraftStash
+
+    p = tmp_path / "tui" / "drafts-s.jsonl"
+    s = DraftStash(session_id="s", path=p)
+    older = "an older draft that is long enough to keep"
+    newer = "a newer draft that is also long enough yes"
+    s.save(older)
+    s.save(newer)
+    ranked = s.recent(limit=10)
+    assert ranked[0] == newer
+    assert ranked[1] == older
+
+
+def test_draft_stash_limit(tmp_path: Path) -> None:
+    from magi_agent.cli.tui.history import DraftStash
+
+    p = tmp_path / "tui" / "drafts-s.jsonl"
+    s = DraftStash(session_id="s", path=p)
+    for i in range(5):
+        s.save(f"draft number {i} padded out to twenty plus chars")
+    assert len(s.recent(limit=3)) == 3
+
+
+def test_draft_stash_persist_and_reload(tmp_path: Path) -> None:
+    from magi_agent.cli.tui.history import DraftStash
+
+    p = tmp_path / "tui" / "drafts-s.jsonl"
+    s1 = DraftStash(session_id="s", path=p)
+    s1.save("a sufficiently long draft to be persisted")
+    s2 = DraftStash(session_id="s", path=p)
+    assert s2.recent() == ["a sufficiently long draft to be persisted"]
+
+
+def test_draft_stash_in_memory_path_none(tmp_path: Path) -> None:
+    # ``path=None`` is in-memory only (mirrors InputHistory): no file written.
+    from magi_agent.cli.tui.history import DraftStash
+
+    s = DraftStash(session_id="s", path=None)
+    s.save("an in-memory only draft that is long enough")
+    assert s.recent() == ["an in-memory only draft that is long enough"]
+    assert not (tmp_path / "tui").exists()
+
+
+def test_draft_stash_tolerates_corrupt_lines(tmp_path: Path) -> None:
+    from magi_agent.cli.tui.history import DraftStash
+
+    p = tmp_path / "tui" / "drafts-s.jsonl"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(
+        "not json at all\n"
+        '{"text": "a perfectly valid long enough draft entry"}\n'
+        "{bad json}\n"
+        '{"nottext": "ignored"}\n',
+        encoding="utf-8",
+    )
+    s = DraftStash(session_id="s", path=p)
+    assert s.recent() == ["a perfectly valid long enough draft entry"]
+
+
+# ---------------------------------------------------------------------------
+# App wires CHAT_STASH (ctrl+s) to stash / restore drafts (PR1.3 t8)
+# ---------------------------------------------------------------------------
+def test_ctrl_s_stashes_then_restores_draft(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("MAGI_CLI_SESSION_DIR", str(tmp_path))
+    from magi_agent.cli.tui.app import MagiTuiApp
+
+    long_draft = "an unfinished thought that is plenty long"
+
+    async def _run() -> None:
+        app = MagiTuiApp(
+            engine=_Eng(),
+            gate=_Gate(),
+            commands=_Reg(),
+            renderers=_Rend(),
+            session_id="stash-sess",
+        )
+        async with app.run_test() as pilot:
+            app._input.focus()
+            await pilot.pause()
+            app._input.text = long_draft
+            app._input.cursor_location = (0, len(long_draft))
+            await pilot.press("ctrl+s")  # stash + clear
+            await pilot.pause()
+            assert app._input.text == ""
+            assert app._drafts.recent()[0] == long_draft
+            # empty buffer + ctrl+s restores the most recent draft
+            await pilot.press("ctrl+s")
+            await pilot.pause()
+            assert app._input.text == long_draft
+
+    asyncio.run(_run())
+
+
+def test_ctrl_s_short_draft_not_stashed_but_cleared(monkeypatch, tmp_path) -> None:
+    # A non-blank but < 20 char draft: ctrl+s clears the buffer (it is a draft
+    # being stashed) but DraftStash drops it as too short, so nothing to restore.
+    monkeypatch.setenv("MAGI_CLI_SESSION_DIR", str(tmp_path))
+    from magi_agent.cli.tui.app import MagiTuiApp
+
+    async def _run() -> None:
+        app = MagiTuiApp(
+            engine=_Eng(),
+            gate=_Gate(),
+            commands=_Reg(),
+            renderers=_Rend(),
+            session_id="short-sess",
+        )
+        async with app.run_test() as pilot:
+            app._input.focus()
+            await pilot.pause()
+            app._input.text = "tiny"
+            app._input.cursor_location = (0, len("tiny"))
+            await pilot.press("ctrl+s")
+            await pilot.pause()
+            assert app._input.text == ""
+            assert app._drafts.recent() == []
+
+    asyncio.run(_run())
+
+
+def test_ctrl_s_drafts_persist_to_session_dir(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("MAGI_CLI_SESSION_DIR", str(tmp_path))
+    from magi_agent.cli.tui.app import MagiTuiApp
+    from magi_agent.cli.tui.history import DraftStash, draft_path
+
+    durable = "a durable draft long enough to survive a reload"
+
+    async def _run() -> None:
+        app = MagiTuiApp(
+            engine=_Eng(),
+            gate=_Gate(),
+            commands=_Reg(),
+            renderers=_Rend(),
+            session_id="draft-persist",
+        )
+        async with app.run_test() as pilot:
+            app._input.focus()
+            await pilot.pause()
+            app._input.text = durable
+            app._input.cursor_location = (0, len(durable))
+            await pilot.press("ctrl+s")
+            await pilot.pause()
+
+        assert draft_path("draft-persist").exists()
+        reloaded = DraftStash(session_id="draft-persist")
+        assert reloaded.recent()[0] == durable
+
+    asyncio.run(_run())

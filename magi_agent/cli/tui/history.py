@@ -1,13 +1,13 @@
-"""Per-session input history for the Magi TUI (PR1.2).
+"""Per-session input history + draft stash for the Magi TUI (PR1.2 / PR1.3).
 
 ``InputHistory`` is a bounded ring of submitted prompts, navigated by ↑/↓,
-persisted one JSON object per line. It reuses the ``~/.magi`` root
+persisted one JSON object per line. ``DraftStash`` (PR1.3) is a light
+recency+count restore for abandoned drafts. Both reuse the ``~/.magi`` root
 (``MAGI_CLI_SESSION_DIR`` override) that ``session_log.py`` establishes, under a
-``tui/`` subdir so it never collides with session transcripts.
+``tui/`` subdir so they never collide with session transcripts.
 
 Pure stdlib (json + pathlib). No textual/rich/adk imports, so the module is
-import-clean and unit-testable without an event loop. (``DraftStash`` — the
-frecency draft restore — is PR1.3 and intentionally NOT here yet.)
+import-clean and unit-testable without an event loop.
 """
 
 from __future__ import annotations
@@ -21,13 +21,18 @@ from magi_agent.cli.session_log import _session_root
 
 __all__ = [
     "InputHistory",
+    "DraftStash",
     "history_path",
+    "draft_path",
 ]
 
 _UNSAFE = re.compile(r"[^A-Za-z0-9._-]+")
 
 # Default cap on retained history entries (newest-wins ring).
 DEFAULT_MAX_ENTRIES = 500
+
+# Minimum draft length worth stashing (01 §5.3).
+MIN_DRAFT_LEN = 20
 
 
 def _safe_session(session_id: str) -> str:
@@ -47,6 +52,12 @@ def history_path(session_id: str) -> Path:
     """JSONL path for a session's input history."""
 
     return _tui_dir() / f"history-{_safe_session(session_id)}.jsonl"
+
+
+def draft_path(session_id: str) -> Path:
+    """JSONL path for a session's draft stash (PR1.3)."""
+
+    return _tui_dir() / f"drafts-{_safe_session(session_id)}.jsonl"
 
 
 class InputHistory:
@@ -206,3 +217,99 @@ class InputHistory:
         # past the newest entry -> back to the live draft
         self._cursor = None
         return self._draft
+
+
+class DraftStash:
+    """Light recency+count restore for abandoned drafts (01 §5.3).
+
+    Saves drafts of at least :data:`MIN_DRAFT_LEN` chars; ``recent(limit)`` ranks
+    by a deliberately simple frecency score = save count, ties broken by most-
+    recent save (YAGNI — not a decayed frecency engine). Persisted as JSONL
+    (one ``{"text": ...}`` object per line), so re-saving the same text appends a
+    line that bumps its in-memory count + recency on the next bump/reload.
+
+    Persistence mirrors :class:`InputHistory`: pass an explicit ``path`` (JSONL
+    on disk) or ``path=Ellipsis`` to derive the per-session path via
+    :func:`draft_path`. The default ``path=None`` is IN-MEMORY only (no disk
+    read/write) so pure unit tests and ephemeral hosts never touch ``~/.magi``.
+    On-disk files use the same 0o700 dir / 0o600 file perms and corrupt-line
+    tolerance as ``InputHistory``; a failed read/write degrades gracefully and
+    never crashes the TUI.
+    """
+
+    _DERIVE = object()  # sentinel: derive the on-disk path from session_id
+
+    def __init__(
+        self,
+        *,
+        session_id: str,
+        path: Path | None = _DERIVE,  # type: ignore[assignment]
+    ) -> None:
+        self._session_id = session_id
+        if path is DraftStash._DERIVE:
+            # Default (app construction): derive the per-session on-disk path.
+            path = draft_path(session_id)
+        # ``path=None`` stays None: in-memory only (no persistence).
+        self._path: Path | None = path
+        # text -> (count, last_seq). _seq is a monotonic recency tiebreaker.
+        self._entries: dict[str, tuple[int, int]] = {}
+        self._seq = 0
+        self._load()
+
+    # -- persistence -----------------------------------------------------
+    def _load(self) -> None:
+        if self._path is None or not self._path.exists():
+            return
+        try:
+            with open(self._path, "r", encoding="utf-8") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        obj = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    text = obj.get("text") if isinstance(obj, dict) else None
+                    if isinstance(text, str) and len(text) >= MIN_DRAFT_LEN:
+                        self._bump(text)
+        except OSError:
+            return
+
+    def _bump(self, text: str) -> None:
+        self._seq += 1
+        count, _ = self._entries.get(text, (0, 0))
+        self._entries[text] = (count + 1, self._seq)
+
+    def _append_disk(self, text: str) -> None:
+        if self._path is None:
+            return
+        try:
+            self._path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            fd = os.open(
+                self._path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600
+            )
+            with os.fdopen(fd, "a", encoding="utf-8") as fh:
+                fh.write(json.dumps({"text": text}, ensure_ascii=False) + "\n")
+        except OSError:
+            return
+
+    # -- public API ------------------------------------------------------
+    def save(self, text: str) -> None:
+        """Stash ``text`` if it is at least :data:`MIN_DRAFT_LEN` chars."""
+
+        text = text.rstrip("\n")
+        if len(text) < MIN_DRAFT_LEN:
+            return
+        self._bump(text)
+        self._append_disk(text)
+
+    def recent(self, limit: int = 10) -> list[str]:
+        """Most relevant drafts: by save count, then recency. Newest first."""
+
+        ranked = sorted(
+            self._entries.items(),
+            key=lambda kv: (kv[1][0], kv[1][1]),
+            reverse=True,
+        )
+        return [text for text, _ in ranked[: max(0, int(limit))]]
