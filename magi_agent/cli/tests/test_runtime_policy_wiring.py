@@ -800,6 +800,9 @@ def test_engine_consumes_materialized_phase_route_for_local_runner_selection(
             "providerIntents": ["provider:web.search", "provider:web.fetch"],
             "localToolNames": ["FileRead", "Grep"],
             "routeDenied": False,
+            "phaseRouteDenied": False,
+            "planRouteDenied": False,
+            "denialReason": "",
             "reasonCodes": [],
             "authority": {
                 "providerCalled": False,
@@ -948,7 +951,12 @@ def test_engine_blocks_active_phase_when_materialized_route_is_denied(
     )
     assert route_event["routeDenied"] is True
     assert route_event["phase"] == "source_acquisition"
-    assert route_event["reasonCodes"] == ["phase:source_acquisition:budget_denied"]
+    assert route_event["reasonCodes"] == [
+        "phase:source_acquisition:budget_denied",
+        "python_phase_route_budget_too_low",
+    ]
+    assert route_event["phaseRouteDenied"] is True
+    assert route_event["planRouteDenied"] is True
     phase_event = next(
         event.payload
         for event in events
@@ -966,7 +974,10 @@ def test_engine_blocks_active_phase_when_materialized_route_is_denied(
         "type": "runner_policy_route_blocked",
         "turnId": "t-route-denied",
         "phase": "source_acquisition",
-        "reasonCodes": ["phase:source_acquisition:budget_denied"],
+        "reasonCodes": [
+            "phase:source_acquisition:budget_denied",
+            "python_phase_route_budget_too_low",
+        ],
         "routeDecision": "blocked_before_provider_call",
         "authority": {
             "providerCalled": False,
@@ -981,3 +992,88 @@ def test_engine_blocks_active_phase_when_materialized_route_is_denied(
         "phase_route_decision",
         "runner_policy_route_blocked",
     ]
+
+
+def test_engine_blocks_plan_denial_even_when_selected_phase_is_allowed(
+    monkeypatch,
+) -> None:
+    _CapturedRunnerInput.captured = []
+    monkeypatch.setattr(engine_module, "_lazy_engine_deps", _route_capturing_engine_deps)
+    runner = _RouteAwareRunner()
+    assembly = RunnerPolicyAssembly(
+        modelProvider="anthropic",
+        modelLabel="anthropic/claude-sonnet-4-5",
+        selectedPackIds=("openmagi.research", "openmagi.web-acquisition"),
+        evidenceRequirements=(),
+        requiredValidators=(),
+        missingEvidenceAction="audit",
+        repairPolicy={"action": "audit", "source": "recipe-materializer"},
+        taskProfile={"taskType": "general"},
+        providerIntents=("provider:web.search", "provider:web.fetch"),
+        toolIntents=("tool:file.read",),
+        phaseRouting={
+            "phaseRoutes": {
+                "source_acquisition": {
+                    "phase": "source_acquisition",
+                    "provider": "google",
+                    "model": "gemini-3.5-flash",
+                    "tier": "cheap",
+                    "routeDenied": True,
+                    "reasonCodes": ["phase:source_acquisition:budget_denied"],
+                },
+                "final_answer_drafting": {
+                    "phase": "final_answer_drafting",
+                    "provider": "anthropic",
+                    "model": "haiku",
+                    "tier": "cheap",
+                    "routeDenied": False,
+                    "reasonCodes": [],
+                },
+            },
+            "routeDenied": True,
+            "denialReason": "budget_too_low",
+            "reasonCodes": ["python_phase_route_budget_too_low"],
+        },
+    )
+    driver = MagiEngineDriver(runner=runner, runner_policy_assembly=assembly)
+
+    async def _drive() -> list[object]:
+        return [
+            item
+            async for item in driver.run_turn_stream(
+                runtime=object(),
+                turn_input={
+                    "prompt": "write the final answer",
+                    "session_id": "s-plan-denied",
+                    "turn_id": "t-plan-denied",
+                },
+                cancel=asyncio.Event(),
+            )
+        ]
+
+    items = asyncio.run(_drive())
+    events = [item for item in items if isinstance(item, RuntimeEvent)]
+    terminal = items[-1]
+
+    assert isinstance(terminal, EngineResult)
+    assert terminal.terminal == Terminal.error
+    assert terminal.error == "runner_policy_route_denied"
+    assert _CapturedRunnerInput.captured == []
+    assert runner.route_seen_by_adapter is None
+    route_event = next(
+        event.payload
+        for event in events
+        if event.payload.get("type") == "runner_policy_route_selection"
+    )
+    assert route_event["phase"] == "final_answer_drafting"
+    assert route_event["routeDenied"] is True
+    assert route_event["phaseRouteDenied"] is False
+    assert route_event["planRouteDenied"] is True
+    assert route_event["reasonCodes"] == ["python_phase_route_budget_too_low"]
+    block_event = next(
+        event.payload
+        for event in events
+        if event.payload.get("type") == "runner_policy_route_blocked"
+    )
+    assert block_event["phase"] == "final_answer_drafting"
+    assert block_event["reasonCodes"] == ["python_phase_route_budget_too_low"]

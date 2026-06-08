@@ -68,6 +68,7 @@ __all__ = [
     "register_streaming_chat_routes",
     "_streaming_chat_enabled",
     "_extract_prompt_text",
+    "_local_full_access",
 ]
 
 _DEFAULT_PER_CHILD_TOKENS = 8000
@@ -88,6 +89,21 @@ _MAX_CONTROL_RESPONSE_BYTES = 8192
 def _streaming_chat_enabled() -> bool:
     """Return True when ``MAGI_STREAMING_CHAT`` is truthy. Evaluated per-call."""
     return _truthy_env("MAGI_STREAMING_CHAT")
+
+
+def _local_full_access(runtime: object) -> bool:
+    """Return True for the loopback local ``magi-agent serve`` owner.
+
+    This mirrors ``magi_agent.main`` local defaults without importing main from
+    the transport layer. Hosted/multi-user deployments have real user/bot/token
+    values and therefore keep the normal permission gate.
+    """
+    config = getattr(runtime, "config", None)
+    return (
+        getattr(config, "bot_id", None) == "local-bot"
+        and getattr(config, "user_id", None) == "local-user"
+        and getattr(config, "gateway_token", None) == "local-dev-token"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -365,9 +381,10 @@ def register_streaming_chat_routes(
 
         model = getattr(getattr(runtime, "config", None), "model", None)
         cwd = os.environ.get("MAGI_AGENT_WORKSPACE") or os.getcwd()
+        permission_mode = "bypassPermissions" if _local_full_access(runtime) else "default"
         rt = build_headless_runtime(
             cwd=cwd,
-            permission_mode="default",
+            permission_mode=permission_mode,
             session_id=session_id,
             model=model,
             prompt_sink=sink,

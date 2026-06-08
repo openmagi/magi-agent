@@ -1589,6 +1589,16 @@ class MagiEngineDriver:
         route = phase_routes.get(phase)
         if not isinstance(route, Mapping):
             return None
+        phase_route_denied = bool(route.get("routeDenied") or route.get("route_denied"))
+        phase_reason_codes = list(
+            _str_tuple(route.get("reasonCodes") or route.get("reason_codes"))
+        )
+        plan_route_denied = bool(
+            _routing_field(assembly.phase_routing, "routeDenied", "route_denied")
+        )
+        plan_reason_codes = list(
+            _str_tuple(_routing_field(assembly.phase_routing, "reasonCodes", "reason_codes"))
+        )
         local_tool_names = _local_tool_names_for_route(
             runner=runner,
             assembly=assembly,
@@ -1606,8 +1616,14 @@ class MagiEngineDriver:
             "toolIntents": list(assembly.tool_intents),
             "providerIntents": list(assembly.provider_intents),
             "localToolNames": list(local_tool_names),
-            "routeDenied": bool(route.get("routeDenied") or route.get("route_denied")),
-            "reasonCodes": list(_str_tuple(route.get("reasonCodes") or route.get("reason_codes"))),
+            "routeDenied": phase_route_denied or plan_route_denied,
+            "phaseRouteDenied": phase_route_denied,
+            "planRouteDenied": plan_route_denied,
+            "denialReason": _non_empty_str(
+                _routing_field(assembly.phase_routing, "denialReason", "denial_reason"),
+                "",
+            ),
+            "reasonCodes": list(dict.fromkeys([*phase_reason_codes, *plan_reason_codes])),
             "authority": {
                 "providerCalled": False,
                 "productionWriteAllowed": False,
