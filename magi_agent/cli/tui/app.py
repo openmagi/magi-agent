@@ -77,7 +77,7 @@ from magi_agent.cli.tui.autocomplete import (
     Completion,
     CompletionProvider,
 )
-from magi_agent.cli.tui.history import InputHistory
+from magi_agent.cli.tui.history import DraftStash, InputHistory
 from magi_agent.cli.tui.input import PromptInput, Submission
 from magi_agent.cli.tui.render.markdown import render_markdown
 from magi_agent.cli.tui.transcript import (
@@ -510,6 +510,8 @@ class MagiTuiApp(App[None]):
         self._session_id = session_id
         # Per-session ↑/↓ input history (persisted JSONL under the session root).
         self._history = InputHistory(session_id=session_id)
+        # Per-session draft stash (ctrl+s); persisted JSONL alongside history.
+        self._drafts = DraftStash(session_id=session_id)
         self._model = model
         self._mode = mode
         import os as _os  # noqa: PLC0415
@@ -965,8 +967,10 @@ class MagiTuiApp(App[None]):
         elif action == Action.CHAT_NEWLINE.value:
             if self._input is not None:
                 self._input.insert("\n")
-        # Remaining Action members (CHAT_STASH wired in PR1.3 / AUTOCOMPLETE_* /
-        # CONFIRMATION_*) are owned by widgets or land in later PRs.
+        elif action == Action.CHAT_STASH.value:
+            self._stash_or_restore_draft()
+        # Remaining Action members (AUTOCOMPLETE_* / CONFIRMATION_*) are owned by
+        # widgets or land in later PRs.
 
     def _submit_current_input(self) -> None:
         """Submit the current prompt buffer (classify + route, then clear)."""
@@ -974,6 +978,32 @@ class MagiTuiApp(App[None]):
         if self._input is None:
             return
         self._input.submit()
+
+    def _stash_or_restore_draft(self) -> None:
+        """ctrl+s: stash the current draft, or restore the most recent if empty.
+
+        A non-blank buffer is handed to :class:`DraftStash` (which keeps it only
+        if it is at least ``MIN_DRAFT_LEN`` chars) and the buffer is cleared so
+        the operator can start fresh; an empty buffer restores the single most-
+        recent stashed draft (highest count, then recency) and parks the caret at
+        its end. No-op when there is nothing to restore.
+        """
+
+        if self._input is None:
+            return
+        text = self._input.text
+        if text.strip():
+            self._drafts.save(text)
+            self._input.text = ""
+            return
+        recent = self._drafts.recent(limit=1)
+        if recent:
+            restored = recent[0]
+            self._input.text = restored
+            self._input.cursor_location = (
+                restored.count("\n"),
+                len(restored.split("\n")[-1]),
+            )
 
     # -- autocomplete overlay ----------------------------------------------
     def _refresh_completions(self, precursor: str) -> None:
