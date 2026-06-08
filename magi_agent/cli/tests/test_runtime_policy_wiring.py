@@ -693,6 +693,8 @@ def test_engine_consumes_materialized_phase_route_for_local_runner_selection(
     monkeypatch,
 ) -> None:
     _CapturedRunnerInput.captured = []
+    # Phase routing is opt-in (default off); enable it to exercise the governance.
+    monkeypatch.setenv("MAGI_RUNNER_POLICY_ROUTING_ENABLED", "1")
     monkeypatch.setattr(engine_module, "_lazy_engine_deps", _route_capturing_engine_deps)
     runner = _RouteAwareRunner()
     assembly = RunnerPolicyAssembly(
@@ -875,6 +877,8 @@ def test_engine_blocks_active_phase_when_materialized_route_is_denied(
     monkeypatch,
 ) -> None:
     _CapturedRunnerInput.captured = []
+    # Phase routing is opt-in (default off); enable it to exercise the governance.
+    monkeypatch.setenv("MAGI_RUNNER_POLICY_ROUTING_ENABLED", "1")
     monkeypatch.setattr(engine_module, "_lazy_engine_deps", _route_capturing_engine_deps)
     runner = _RouteAwareRunner()
     assembly = RunnerPolicyAssembly(
@@ -998,6 +1002,8 @@ def test_engine_blocks_plan_denial_even_when_selected_phase_is_allowed(
     monkeypatch,
 ) -> None:
     _CapturedRunnerInput.captured = []
+    # Phase routing is opt-in (default off); enable it to exercise the governance.
+    monkeypatch.setenv("MAGI_RUNNER_POLICY_ROUTING_ENABLED", "1")
     monkeypatch.setattr(engine_module, "_lazy_engine_deps", _route_capturing_engine_deps)
     runner = _RouteAwareRunner()
     assembly = RunnerPolicyAssembly(
@@ -1077,3 +1083,13 @@ def test_engine_blocks_plan_denial_even_when_selected_phase_is_allowed(
     )
     assert block_event["phase"] == "final_answer_drafting"
     assert block_event["reasonCodes"] == ["python_phase_route_budget_too_low"]
+
+
+def test_runner_policy_routing_default_off(monkeypatch) -> None:
+    """Phase routing is opt-in: OFF when unset, ON only when explicitly enabled."""
+    monkeypatch.delenv("MAGI_RUNNER_POLICY_ROUTING_ENABLED", raising=False)
+    assert engine_module._runner_policy_routing_enabled() is False
+    monkeypatch.setenv("MAGI_RUNNER_POLICY_ROUTING_ENABLED", "1")
+    assert engine_module._runner_policy_routing_enabled() is True
+    monkeypatch.setenv("MAGI_RUNNER_POLICY_ROUTING_ENABLED", "off")
+    assert engine_module._runner_policy_routing_enabled() is False
