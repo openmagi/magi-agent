@@ -116,3 +116,45 @@ def test_gateway_start_gate_off_is_noop(monkeypatch: pytest.MonkeyPatch) -> None
     result = runner.invoke(app, ["gateway", "start"])
     assert result.exit_code == 0
     assert "disabled" in result.stdout.lower() or "not enabled" in result.stdout.lower()
+
+
+# ---------------------------------------------------------------------------
+# Single-source-of-truth: is_gateway_daemon_enabled() and
+# gateway_daemon_health_projection()["daemonEnabled"] must NEVER diverge —
+# including for garbage / non-canonical truthy values.
+# ---------------------------------------------------------------------------
+
+def test_gate_and_health_agree_on_garbage_truthy(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`=garbage` → daemon gate ON; health must also report daemonEnabled=True."""
+    from magi_agent.gateway.daemon import is_gateway_daemon_enabled
+
+    monkeypatch.setenv("MAGI_GATEWAY_DAEMON_ENABLED", "garbage")
+    gate_result = is_gateway_daemon_enabled()
+    health_result = gateway_daemon_health_projection()["daemonEnabled"]
+    assert gate_result is True, "is_gateway_daemon_enabled() should be True for 'garbage'"
+    assert health_result is True, "daemonEnabled in health projection should match gate"
+    assert gate_result == health_result, "gate and health must not diverge"
+
+
+def test_gate_and_health_agree_on_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`=off` → both gate and health report False."""
+    from magi_agent.gateway.daemon import is_gateway_daemon_enabled
+
+    monkeypatch.setenv("MAGI_GATEWAY_DAEMON_ENABLED", "off")
+    gate_result = is_gateway_daemon_enabled()
+    health_result = gateway_daemon_health_projection()["daemonEnabled"]
+    assert gate_result is False
+    assert health_result is False
+    assert gate_result == health_result
+
+
+def test_gate_and_health_agree_when_unset(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Unset → both gate and health report False (default-OFF preserved)."""
+    from magi_agent.gateway.daemon import is_gateway_daemon_enabled
+
+    monkeypatch.delenv("MAGI_GATEWAY_DAEMON_ENABLED", raising=False)
+    gate_result = is_gateway_daemon_enabled()
+    health_result = gateway_daemon_health_projection()["daemonEnabled"]
+    assert gate_result is False
+    assert health_result is False
+    assert gate_result == health_result

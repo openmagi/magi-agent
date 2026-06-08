@@ -110,7 +110,11 @@ def gateway_daemon_health_projection(
         watcher_states: Map of ``watcher_name -> {state, restarts, ...}``.  The
             extra keys are intentionally ignored (redaction).
     """
-    enabled = _truthy_env("MAGI_GATEWAY_DAEMON_ENABLED")
+    # Lazy import: avoids circular import (gateway.daemon lazily imports this
+    # module in health_projection()) and keeps health.py's top-level graph clean.
+    from magi_agent.gateway.daemon import is_gateway_daemon_enabled
+
+    enabled = is_gateway_daemon_enabled()
     raw_states = watcher_states or {}
 
     watchers: dict[str, dict[str, object]] = {}
