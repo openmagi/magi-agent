@@ -45,6 +45,7 @@ from magi_agent.cli.wiring import (
     build_tui_app,
     local_runner_policy_routing_enabled_from_env,
 )
+from magi_agent.runtime.local_defaults import apply_local_full_runtime_defaults
 
 __all__ = ["app", "main"]
 
@@ -211,15 +212,7 @@ def agent(
     # with the other commands and possible future use.
     _ = ctx
 
-    # The `magi` CLI is a local single-user surface. Runner-policy phase routing
-    # (default-ON) is hosted budget/tier governance — it downgrades the configured
-    # model to the cheap tier, restricts the toolset, and (post-#291) fail-closes a
-    # turn whose selected phase route is denied. On the local CLI that only hobbles
-    # the agent: a benign prompt classifies as coding via the static capability
-    # profile, selects `patch_generation`, resolves to a cheap model lacking coding
-    # capability, and dies with `runner_policy_route_denied`. Default it OFF for
-    # this local runtime instance; a benchmark/hosted harness can force it back
-    # on with MAGI_RUNNER_POLICY_ROUTING_ENABLED=1.
+    apply_local_full_runtime_defaults(os.environ)
     runner_policy_routing_enabled = local_runner_policy_routing_enabled_from_env()
 
     # ------------------------------------------------------------------ #

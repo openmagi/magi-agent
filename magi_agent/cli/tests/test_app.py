@@ -24,6 +24,14 @@ from magi_agent.cli.headless import StubEngineDriver
 from magi_agent.cli.wiring import build_headless_runtime
 
 
+@pytest.fixture(autouse=True)
+def _restore_process_env_after_test():
+    original = dict(os.environ)
+    yield
+    os.environ.clear()
+    os.environ.update(original)
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -504,12 +512,15 @@ class TestAgentDefaultCommand:
             "run_permission_mode": "smartApprove",
         }
 
-    def test_agent_command_does_not_poison_runner_policy_routing_env(
+    def test_agent_command_applies_local_full_runtime_defaults(
         self,
         monkeypatch: pytest.MonkeyPatch,
         tmp_path,
     ) -> None:
         monkeypatch.delenv("MAGI_RUNNER_POLICY_ROUTING_ENABLED", raising=False)
+        monkeypatch.delenv("MAGI_RUNNER_POLICY_ROUTE_BLOCKING_ENABLED", raising=False)
+        monkeypatch.delenv("MAGI_GA_LIVE_ENABLED", raising=False)
+        monkeypatch.delenv("MAGI_COMPOSIO_ENABLED", raising=False)
         monkeypatch.setenv("MAGI_CLI_ENABLED", "1")
         monkeypatch.setenv("MAGI_CLI_SESSION_DIR", str(tmp_path))
         captured: dict[str, object] = {}
@@ -543,10 +554,13 @@ class TestAgentDefaultCommand:
 
         assert result.exit_code == 0, result.output
         assert captured == {
-            "runner_policy_routing_enabled": False,
+            "runner_policy_routing_enabled": True,
             "prompt": "hello",
         }
-        assert "MAGI_RUNNER_POLICY_ROUTING_ENABLED" not in os.environ
+        assert os.environ["MAGI_RUNNER_POLICY_ROUTING_ENABLED"] == "1"
+        assert os.environ["MAGI_RUNNER_POLICY_ROUTE_BLOCKING_ENABLED"] == "0"
+        assert os.environ["MAGI_GA_LIVE_ENABLED"] == "1"
+        assert "MAGI_COMPOSIO_ENABLED" not in os.environ
 
     def test_agent_command_runs_headless_turn(self, monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
         """The default agent command runs run_headless via the real wiring, exit 0."""
@@ -960,13 +974,16 @@ def test_build_headless_runtime_does_not_report_mcp_when_runner_has_no_agent(
     assert rt.mcp_servers == ()
 
 
-def test_local_serve_does_not_poison_runner_policy_routing_env(
+def test_local_serve_applies_full_runtime_defaults_without_route_hardblock(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import magi_agent.main as main_module
     from magi_agent.config.env import LOCAL_DEV_MODEL_SENTINEL
 
     monkeypatch.delenv("MAGI_RUNNER_POLICY_ROUTING_ENABLED", raising=False)
+    monkeypatch.delenv("MAGI_RUNNER_POLICY_ROUTE_BLOCKING_ENABLED", raising=False)
+    monkeypatch.delenv("MAGI_GA_LIVE_ENABLED", raising=False)
+    monkeypatch.delenv("MAGI_COMPOSIO_ENABLED", raising=False)
     monkeypatch.setenv("BOT_ID", "local-bot")
     monkeypatch.setenv("USER_ID", "local-user")
     monkeypatch.setenv("GATEWAY_TOKEN", "local-dev-token")
@@ -983,4 +1000,7 @@ def test_local_serve_does_not_poison_runner_policy_routing_env(
         main_module.main(["serve", "--port", "0"])
 
     run.assert_called_once()
-    assert "MAGI_RUNNER_POLICY_ROUTING_ENABLED" not in os.environ
+    assert os.environ["MAGI_RUNNER_POLICY_ROUTING_ENABLED"] == "1"
+    assert os.environ["MAGI_RUNNER_POLICY_ROUTE_BLOCKING_ENABLED"] == "0"
+    assert os.environ["MAGI_GA_LIVE_ENABLED"] == "1"
+    assert "MAGI_COMPOSIO_ENABLED" not in os.environ

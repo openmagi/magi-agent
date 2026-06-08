@@ -873,12 +873,13 @@ def test_engine_runner_policy_route_selection_can_be_disabled(
     ] == []
 
 
-def test_engine_blocks_active_phase_when_materialized_route_is_denied(
+def test_engine_audits_active_phase_denial_and_continues_configured_route(
     monkeypatch,
 ) -> None:
     _CapturedRunnerInput.captured = []
-    # Phase routing is opt-in (default off); enable it to exercise the governance.
+    # Installed/local full-runtime config enables routing explicitly.
     monkeypatch.setenv("MAGI_RUNNER_POLICY_ROUTING_ENABLED", "1")
+    monkeypatch.delenv("MAGI_RUNNER_POLICY_ROUTE_BLOCKING_ENABLED", raising=False)
     monkeypatch.setattr(engine_module, "_lazy_engine_deps", _route_capturing_engine_deps)
     runner = _RouteAwareRunner()
     assembly = RunnerPolicyAssembly(
@@ -943,11 +944,12 @@ def test_engine_blocks_active_phase_when_materialized_route_is_denied(
     terminal = items[-1]
 
     assert isinstance(terminal, EngineResult)
-    assert terminal.terminal == Terminal.error
-    assert terminal.error == "runner_policy_route_denied"
-    assert _CapturedRunnerInput.captured == []
+    assert terminal.terminal == Terminal.completed
+    assert terminal.error is None
+    assert len(_CapturedRunnerInput.captured) == 1
+    assert "activeRunnerRoute" not in _CapturedRunnerInput.captured[0].harness_state
     assert runner.route_seen_by_adapter is None
-    assert runner.tools_seen_by_adapter == []
+    assert runner.tools_seen_by_adapter == ["FileRead", "Grep", "PatchApply", "Bash"]
     route_event = next(
         event.payload
         for event in events
@@ -982,9 +984,10 @@ def test_engine_blocks_active_phase_when_materialized_route_is_denied(
             "phase:source_acquisition:budget_denied",
             "python_phase_route_budget_too_low",
         ],
-        "routeDecision": "blocked_before_provider_call",
+        "routeDecision": "audited_configured_model_continues",
         "authority": {
             "providerCalled": False,
+            "configuredModelContinues": True,
             "productionWriteAllowed": False,
             "externalIntegrationAttached": False,
         },
@@ -995,15 +998,17 @@ def test_engine_blocks_active_phase_when_materialized_route_is_denied(
         "runner_policy_route_selection",
         "phase_route_decision",
         "runner_policy_route_blocked",
+        "pre_final_evidence_gate",
     ]
 
 
-def test_engine_blocks_plan_denial_even_when_selected_phase_is_allowed(
+def test_engine_audits_plan_denial_even_when_selected_phase_is_allowed(
     monkeypatch,
 ) -> None:
     _CapturedRunnerInput.captured = []
-    # Phase routing is opt-in (default off); enable it to exercise the governance.
+    # Installed/local full-runtime config enables routing explicitly.
     monkeypatch.setenv("MAGI_RUNNER_POLICY_ROUTING_ENABLED", "1")
+    monkeypatch.delenv("MAGI_RUNNER_POLICY_ROUTE_BLOCKING_ENABLED", raising=False)
     monkeypatch.setattr(engine_module, "_lazy_engine_deps", _route_capturing_engine_deps)
     runner = _RouteAwareRunner()
     assembly = RunnerPolicyAssembly(
@@ -1062,9 +1067,9 @@ def test_engine_blocks_plan_denial_even_when_selected_phase_is_allowed(
     terminal = items[-1]
 
     assert isinstance(terminal, EngineResult)
-    assert terminal.terminal == Terminal.error
-    assert terminal.error == "runner_policy_route_denied"
-    assert _CapturedRunnerInput.captured == []
+    assert terminal.terminal == Terminal.completed
+    assert terminal.error is None
+    assert len(_CapturedRunnerInput.captured) == 1
     assert runner.route_seen_by_adapter is None
     route_event = next(
         event.payload
@@ -1083,13 +1088,91 @@ def test_engine_blocks_plan_denial_even_when_selected_phase_is_allowed(
     )
     assert block_event["phase"] == "final_answer_drafting"
     assert block_event["reasonCodes"] == ["python_phase_route_budget_too_low"]
+    assert block_event["routeDecision"] == "audited_configured_model_continues"
 
 
-def test_runner_policy_routing_default_off(monkeypatch) -> None:
-    """Phase routing is opt-in: OFF when unset, ON only when explicitly enabled."""
+def test_engine_hard_blocks_denied_route_only_when_route_blocking_enabled(
+    monkeypatch,
+) -> None:
+    _CapturedRunnerInput.captured = []
+    monkeypatch.setenv("MAGI_RUNNER_POLICY_ROUTING_ENABLED", "1")
+    monkeypatch.setenv("MAGI_RUNNER_POLICY_ROUTE_BLOCKING_ENABLED", "1")
+    monkeypatch.setattr(engine_module, "_lazy_engine_deps", _route_capturing_engine_deps)
+    runner = _RouteAwareRunner()
+    assembly = RunnerPolicyAssembly(
+        modelProvider="anthropic",
+        modelLabel="anthropic/claude-sonnet-4-5",
+        selectedPackIds=("openmagi.research",),
+        evidenceRequirements=(),
+        requiredValidators=(),
+        missingEvidenceAction="audit",
+        repairPolicy={"action": "audit", "source": "recipe-materializer"},
+        taskProfile={"taskType": "research"},
+        providerIntents=("provider:web.search",),
+        toolIntents=("tool:file.read",),
+        phaseRouting={
+            "phaseRoutes": {
+                "source_acquisition": {
+                    "phase": "source_acquisition",
+                    "provider": "google",
+                    "model": "gemini-3.5-flash",
+                    "tier": "cheap",
+                    "routeDenied": True,
+                    "reasonCodes": ["phase:source_acquisition:budget_denied"],
+                },
+            },
+            "routeDenied": True,
+            "reasonCodes": ["python_phase_route_budget_too_low"],
+        },
+    )
+    driver = MagiEngineDriver(runner=runner, runner_policy_assembly=assembly)
+
+    async def _drive() -> list[object]:
+        return [
+            item
+            async for item in driver.run_turn_stream(
+                runtime=object(),
+                turn_input={
+                    "prompt": "research this source",
+                    "session_id": "s-route-hardblock",
+                    "turn_id": "t-route-hardblock",
+                },
+                cancel=asyncio.Event(),
+            )
+        ]
+
+    items = asyncio.run(_drive())
+    events = [item for item in items if isinstance(item, RuntimeEvent)]
+    terminal = items[-1]
+
+    assert isinstance(terminal, EngineResult)
+    assert terminal.terminal == Terminal.error
+    assert terminal.error == "runner_policy_route_denied"
+    assert _CapturedRunnerInput.captured == []
+    assert runner.tools_seen_by_adapter == []
+    block_event = next(
+        event.payload
+        for event in events
+        if event.payload.get("type") == "runner_policy_route_blocked"
+    )
+    assert block_event["routeDecision"] == "blocked_before_provider_call"
+    assert block_event["authority"]["providerCalled"] is False
+
+
+def test_runner_policy_routing_default_off_with_explicit_config_on(monkeypatch) -> None:
+    """Code defaults OFF; install/canary full config enables routing explicitly."""
     monkeypatch.delenv("MAGI_RUNNER_POLICY_ROUTING_ENABLED", raising=False)
     assert engine_module._runner_policy_routing_enabled() is False
     monkeypatch.setenv("MAGI_RUNNER_POLICY_ROUTING_ENABLED", "1")
     assert engine_module._runner_policy_routing_enabled() is True
     monkeypatch.setenv("MAGI_RUNNER_POLICY_ROUTING_ENABLED", "off")
     assert engine_module._runner_policy_routing_enabled() is False
+
+
+def test_runner_policy_route_blocking_is_explicit_opt_in(monkeypatch) -> None:
+    monkeypatch.delenv("MAGI_RUNNER_POLICY_ROUTE_BLOCKING_ENABLED", raising=False)
+    assert engine_module._runner_policy_route_blocking_enabled() is False
+    monkeypatch.setenv("MAGI_RUNNER_POLICY_ROUTE_BLOCKING_ENABLED", "1")
+    assert engine_module._runner_policy_route_blocking_enabled() is True
+    monkeypatch.setenv("MAGI_RUNNER_POLICY_ROUTE_BLOCKING_ENABLED", "false")
+    assert engine_module._runner_policy_route_blocking_enabled() is False
