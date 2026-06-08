@@ -4,11 +4,14 @@ Exposes ``skill_commands(cwd) -> list[Command]``, which discovers ``SKILL.md``
 files in the standard skill scan locations and converts each into a
 ``SkillPromptCommand`` (a ``PromptCommand`` subclass).
 
-Scan locations (mirrors ``magi_agent.plugins.native.skills._skill_candidates``):
-1. ``<cwd>/skills/**``        (project skills directory)
-2. ``<cwd>/.magi/skills/**``  (magi-local hidden skills directory)
-3. ``<cwd>/docs/superpowers/**`` (superpowers doc skills)
-4. ``magi_agent/skills/bundled/**`` (package-bundled skills, via importlib.resources)
+Scan locations:
+1. ``magi_agent/skills/bundled/**`` (package-bundled skills, via importlib.resources)
+2. ``<cwd>/skills/**``           (project skills directory)
+3. ``<cwd>/.magi/skills/**``     (magi-local hidden skills directory)
+4. ``<cwd>/.claude/skills/**``   (Claude-compatible project skills)
+5. ``<cwd>/docs/superpowers/**`` (superpowers doc skills)
+6. ``~/.magi/skills/**``         (user-global magi skills)
+7. ``~/.claude/skills/**``       (user-global Claude-compatible skills)
 
 For each ``SKILL.md`` found:
 - Frontmatter ``name`` key → command name (fallback: parent directory name).
@@ -159,7 +162,15 @@ def skill_commands(cwd: str) -> list[SkillPromptCommand]:
     1. ``magi_agent/skills/bundled/**``
     2. ``<cwd>/skills/**``
     3. ``<cwd>/.magi/skills/**``
-    4. ``<cwd>/docs/superpowers/**``
+    4. ``<cwd>/.claude/skills/**``  (Claude-compatible project skills)
+    5. ``<cwd>/docs/superpowers/**``
+    6. ``~/.magi/skills/**``        (user-global magi skills)
+    7. ``~/.claude/skills/**``      (user-global Claude-compatible skills)
+
+    The project-local ``.claude/skills`` and the user-global ``~/.claude``/
+    ``~/.magi`` locations are scanned so skills installed the way Claude Code
+    installs them (the common case for our users) surface as slash-commands
+    instead of being silently invisible.
 
     Duplicate skill names are NOT deduplicated here — the discovery layer's
     ``_merge_dedup`` handles that at the ``plugin_skills`` tier level. (In
@@ -167,16 +178,21 @@ def skill_commands(cwd: str) -> list[SkillPromptCommand]:
     in the registry.)
     """
     root = Path(cwd)
+    home = Path.home()
     out: list[SkillPromptCommand] = []
 
     # Bundled skills (package-bundled, always available).
     out.extend(_bundled_skill_commands())
 
-    # On-disk locations.
+    # On-disk locations: project-local first, then user-global. Listed paths
+    # that do not exist are skipped by ``_scan_dir``.
     for subdir in (
         root / "skills",
         root / ".magi" / "skills",
+        root / ".claude" / "skills",
         root / "docs" / "superpowers",
+        home / ".magi" / "skills",
+        home / ".claude" / "skills",
     ):
         out.extend(_scan_dir(subdir))
 

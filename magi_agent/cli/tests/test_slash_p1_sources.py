@@ -486,6 +486,37 @@ class TestSkillCommands:
         names = {c.name for c in result}
         assert "sp-skill" in names
 
+    def test_skill_commands_discovers_claude_skills_dir(self, tmp_path: Path) -> None:
+        """Project ``.claude/skills`` (Claude-compatible) is scanned."""
+        from magi_agent.cli.commands.skill_commands import skill_commands
+
+        skill_dir = tmp_path / ".claude" / "skills" / "cc-skill"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            "---\nname: cc-skill\ndescription: from .claude\n---\nbody",
+            encoding="utf-8",
+        )
+        names = {c.name for c in skill_commands(str(tmp_path))}
+        assert "cc-skill" in names
+
+    def test_skill_commands_discovers_user_home_dirs(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """User-global ``~/.claude/skills`` and ``~/.magi/skills`` are scanned."""
+        from magi_agent.cli.commands import skill_commands as skmod
+
+        fake_home = tmp_path / "home"
+        for base in (".claude", ".magi"):
+            d = fake_home / base / "skills" / f"home-{base.lstrip('.')}"
+            d.mkdir(parents=True)
+            (d / "SKILL.md").write_text(
+                f"---\nname: home-{base.lstrip('.')}\n---\nbody", encoding="utf-8"
+            )
+        monkeypatch.setattr(skmod.Path, "home", classmethod(lambda cls: fake_home))
+        # cwd has no skills; everything must come from the fake home.
+        names = {c.name for c in skmod.skill_commands(str(tmp_path / "proj"))}
+        assert {"home-claude", "home-magi"} <= names
+
     def test_skill_name_fallback_to_dir_name(self, tmp_path: Path) -> None:
         from magi_agent.cli.commands.skill_commands import skill_commands
 
