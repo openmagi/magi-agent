@@ -31,6 +31,10 @@ DEFAULT_MAX_ENTRIES = 500
 
 
 def _safe_session(session_id: str) -> str:
+    # Ordering is intentional: the unsafe-char regex runs FIRST (it preserves
+    # ``.`` so legit dotted ids survive), which guarantees no NEW ``..``
+    # sequence can be synthesized after the subsequent ``replace("..", "-")``.
+    # Do not reorder these two steps.
     cleaned = _UNSAFE.sub("-", session_id).replace("..", "-").lstrip(".-")
     return cleaned or "session"
 
@@ -114,7 +118,49 @@ class InputHistory:
             with os.fdopen(fd, "a", encoding="utf-8") as fh:
                 fh.write(json.dumps({"text": text}, ensure_ascii=False) + "\n")
         except OSError:
-            pass
+            return
+        # Opportunistic compaction: appends grow the JSONL forever (entries are
+        # only trimmed on the NEXT _load). When the file crosses 2*_max lines,
+        # rewrite it down to the most-recent _max entries so a long-lived
+        # session can't grow the file without bound. Same graceful-degradation
+        # discipline as above: a failed compaction must never crash the TUI.
+        self._compact_disk()
+
+    def _compact_disk(self) -> None:
+        if self._path is None:
+            return
+        threshold = 2 * self._max
+        try:
+            # Cheap line-count guard before doing any read-trim-rewrite work.
+            with open(self._path, "r", encoding="utf-8") as fh:
+                line_count = sum(1 for _ in fh)
+            if line_count <= threshold:
+                return
+            # Re-read and keep only the most-recent _max valid entries.
+            entries: list[str] = []
+            with open(self._path, "r", encoding="utf-8") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        obj = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    val = obj.get("text") if isinstance(obj, dict) else None
+                    if isinstance(val, str) and val:
+                        entries.append(val)
+            entries = entries[-self._max :]
+            tmp = self._path.with_name(self._path.name + ".tmp")
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                for val in entries:
+                    fh.write(
+                        json.dumps({"text": val}, ensure_ascii=False) + "\n"
+                    )
+            os.replace(tmp, self._path)
+        except OSError:
+            return
 
     # -- public API ------------------------------------------------------
     def add(self, text: str) -> None:

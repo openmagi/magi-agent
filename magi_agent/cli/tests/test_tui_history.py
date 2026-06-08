@@ -78,6 +78,35 @@ def test_ring_caps_at_max(tmp_path: Path) -> None:
     assert h.prev("b") == "b"  # "a" gone, clamps at "b"
 
 
+def test_disk_compaction_bounds_file_growth(tmp_path: Path) -> None:
+    from magi_agent.cli.tui.history import InputHistory
+
+    p = tmp_path / "tui" / "history-s.jsonl"
+    max_entries = 3
+    h = InputHistory(session_id="s", path=p, max_entries=max_entries)
+    # Write well past 2*_max DISTINCT entries through the public API. (Distinct
+    # values avoid the consecutive-dedup path so every add() hits disk.)
+    n = 4 * max_entries  # 12 distinct entries
+    for i in range(n):
+        h.add(f"entry-{i}")
+
+    # On-disk file must have been compacted down: the appended JSONL can never
+    # exceed the 2*_max threshold once compaction has fired (it rewrites to
+    # _max, then a few more appends may accumulate before the next trigger).
+    line_count = sum(
+        1 for line in p.read_text(encoding="utf-8").splitlines() if line.strip()
+    )
+    assert line_count <= 2 * max_entries, line_count
+
+    # A freshly loaded history still returns the most-recent entries in order.
+    h2 = InputHistory(session_id="s", path=p, max_entries=max_entries)
+    assert h2.prev("x") == f"entry-{n - 1}"  # newest
+    assert h2.prev(f"entry-{n - 1}") == f"entry-{n - 2}"
+    assert h2.prev(f"entry-{n - 2}") == f"entry-{n - 3}"
+    # only _max entries survived; oldest clamps
+    assert h2.prev(f"entry-{n - 3}") == f"entry-{n - 3}"
+
+
 def test_history_module_import_clean() -> None:
     import subprocess
     import sys
