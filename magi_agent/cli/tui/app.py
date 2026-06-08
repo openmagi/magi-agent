@@ -82,6 +82,7 @@ from magi_agent.cli.tui.transcript import (
     DEFAULT_FLUSH_INTERVAL,
     TranscriptController,
 )
+from magi_agent.cli.tui.widgets.transcript_view import TranscriptView
 
 __all__ = ["MagiTuiApp", "TextualSink", "ToolUseConfirm"]
 
@@ -446,9 +447,12 @@ class MagiTuiApp(App[None]):
             file_provider=file_provider,
             channel_provider=channel_provider,
         )
-        # Wired in compose/on_mount.
+        # Wired in compose/on_mount. Exactly ONE of ``_log`` (legacy RichLog) /
+        # ``_view`` (new TranscriptView widget list) is populated, selected by
+        # ``_legacy_richlog`` (the MAGI_TUI_LEGACY_RICHLOG escape hatch, PR0.3).
         self._topbar: Static | None = None
         self._log: RichLog | None = None
+        self._view: TranscriptView | None = None
         self._live: Static | None = None
         self._input: PromptInput | None = None
         self._completions: OptionList | None = None
@@ -460,16 +464,31 @@ class MagiTuiApp(App[None]):
         # read this to assert render parity. Not cruft — keep it.
         self._last_committed_renderable: object | None = None
 
+    @staticmethod
+    def _legacy_richlog() -> bool:
+        """Whether the legacy RichLog backing is forced (MAGI_TUI_LEGACY_RICHLOG=1)."""
+
+        import os  # noqa: PLC0415
+
+        return os.environ.get("MAGI_TUI_LEGACY_RICHLOG", "") == "1"
+
     # -- composition --------------------------------------------------------
     def compose(self) -> ComposeResult:
         self._topbar = Static(self._topbar_text(), id="topbar")
-        self._log = RichLog(wrap=True, markup=False, auto_scroll=True, id="transcript")
-        self._log.can_focus = False
+        if self._legacy_richlog():
+            self._log = RichLog(
+                wrap=True, markup=False, auto_scroll=True, id="transcript"
+            )
+            self._log.can_focus = False
+            transcript_widget: RichLog | TranscriptView = self._log
+        else:
+            self._view = TranscriptView(id="transcript")
+            transcript_widget = self._view
         self._live = Static("", id="live")
         self._completions = OptionList(id="completions")
         self._input = PromptInput(commands=self._commands, id="prompt")
         yield self._topbar
-        yield self._log
+        yield transcript_widget
         yield self._live
         yield self._completions
         yield self._input
@@ -490,12 +509,17 @@ class MagiTuiApp(App[None]):
         return f"● Magi   {model}   {cwd}   [{mode}]"
 
     def on_mount(self) -> None:
-        assert self._log is not None and self._live is not None
+        assert self._live is not None and (
+            self._log is not None or self._view is not None
+        )
         try:
             self.theme = "tokyo-night"
         except Exception:  # pragma: no cover - theme always present in textual 8.x
             pass
-        self._controller = TranscriptController(log=self._log, live=self._live)
+        if self._view is not None:
+            self._controller = TranscriptController(view=self._view, live=self._live)
+        else:
+            self._controller = TranscriptController(log=self._log, live=self._live)
         self._controller.markdown_live = True
         self._render_welcome()
         # Coalescing flush timer: repaint buffered token deltas on a fixed

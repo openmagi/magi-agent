@@ -481,3 +481,46 @@ def test_tool_ask_edit_input_invalid_json_keeps_modal() -> None:
         assert decision.kind == "deny"
 
     asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
+# 8. PR0.3: by default the finalized region is a mounted TranscriptView; the
+#    MAGI_TUI_LEGACY_RICHLOG=1 escape hatch restores the RichLog backing. The
+#    welcome + happy-turn behaviour is identical on both backings.
+# ---------------------------------------------------------------------------
+def test_app_uses_transcript_view_by_default(monkeypatch) -> None:
+    async def _run() -> None:
+        from magi_agent.cli.tui.widgets.transcript_view import TranscriptView
+
+        # Assert the DEFAULT (flag-unset) behaviour regardless of an ambient
+        # MAGI_TUI_LEGACY_RICHLOG in the environment (e.g. a full-suite run with
+        # the escape hatch exported) — the legacy path has its own test.
+        monkeypatch.delenv("MAGI_TUI_LEGACY_RICHLOG", raising=False)
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            # New default: the finalized region is a mounted TranscriptView.
+            assert len(app.query(TranscriptView)) == 1
+            # Welcome still rendered through the widget-list backing.
+            joined = "\n".join(app.controller.committed_blocks_snapshot())
+            assert "Welcome to Magi" in joined
+
+    asyncio.run(_run())
+
+
+def test_app_legacy_richlog_flag_restores_richlog(monkeypatch) -> None:
+    async def _run() -> None:
+        from textual.widgets import RichLog
+
+        from magi_agent.cli.tui.widgets.transcript_view import TranscriptView
+
+        monkeypatch.setenv("MAGI_TUI_LEGACY_RICHLOG", "1")
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            assert len(app.query(RichLog)) == 1
+            assert len(app.query(TranscriptView)) == 0
+
+    asyncio.run(_run())
