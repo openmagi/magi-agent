@@ -37,20 +37,26 @@ Design rationale
   recognized set (``compact/reset/status/...``), so it does not call
   ``project()``; it simply returns a ``Text`` listing the builtin names.
 
-All eight builtins carry ``surface=CommandSurface(tui=True, headless=True)`` —
-they are useful in both surfaces and perform no model round-trip.
+All eight builtin command names carry ``surface=CommandSurface(tui=True,
+headless=True)``. By default they are local and perform no model round-trip;
+when ``MAGI_SUPERPOWERS_RUNTIME_ENABLED`` is explicitly truthy,
+``/superpowers`` becomes a prompt command that injects bundled instructions into
+the next turn.
 """
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 
 from magi_agent.cli.contracts import (
     CommandContext,
     CommandSurface,
     Compact,
+    ContentBlock,
     LocalCommand,
     LocalResult,
+    PromptCommand,
     Text,
 )
 from magi_agent.runtime.slash_control_boundary import (
@@ -71,6 +77,7 @@ __all__ = [
     "GoalCommand",
     "OnboardingCommand",
     "SuperpowersCommand",
+    "SuperpowersRuntimeCommand",
     "builtin_commands",
 ]
 
@@ -88,6 +95,9 @@ BUILTIN_COMMAND_NAMES: tuple[str, ...] = (
     "onboarding",
     "superpowers",
 )
+_SUPERPOWERS_RUNTIME_ENV = "MAGI_SUPERPOWERS_RUNTIME_ENABLED"
+_DEFAULT_SUPERPOWER_SKILL = "using-superpowers"
+_TRUTHY_ENV = {"1", "true", "yes", "on"}
 
 
 def _make_boundary() -> SlashControlBoundary:
@@ -103,6 +113,21 @@ def _make_boundary() -> SlashControlBoundary:
     return SlashControlBoundary(
         SlashControlConfig(enabled=True, localFakeCommandProjectionEnabled=True)
     )
+
+
+def _superpowers_runtime_enabled() -> bool:
+    raw = os.environ.get(_SUPERPOWERS_RUNTIME_ENV)
+    return raw is not None and raw.strip().lower() in _TRUTHY_ENV
+
+
+def _superpower_skill_name(args: object) -> str:
+    if args is None:
+        return _DEFAULT_SUPERPOWER_SKILL
+    raw = str(args).strip()
+    first = raw.split(None, 1)[0] if raw else ""
+    if not first or first == "invoke":
+        return _DEFAULT_SUPERPOWER_SKILL
+    return first.removeprefix("/")
 
 
 def _project(name: str, args: object, ctx: CommandContext) -> SlashControlDecision:
@@ -303,12 +328,54 @@ class SuperpowersCommand(LocalCommand):
         )
 
 
-def builtin_commands() -> list[LocalCommand]:
+@dataclass
+class SuperpowersRuntimeCommand(PromptCommand):
+    """``/superpowers`` runtime path for bundled Superpowers instructions.
+
+    This command is installed only when ``MAGI_SUPERPOWERS_RUNTIME_ENABLED`` is
+    explicitly truthy. It reads a bundled ``SKILL.md`` body and returns it as
+    prompt content for the next model turn; it does not execute skill content or
+    load project/user skill files.
+    """
+
+    description: str = "load bundled Superpowers instructions into the next turn"
+
+    async def build_prompt(  # type: ignore[override]
+        self, args: object, ctx: CommandContext
+    ) -> list[ContentBlock]:
+        _ = ctx
+        from magi_agent.plugins.native.skills import load_bundled_skill_body
+
+        skill_name = _superpower_skill_name(args)
+        loaded = load_bundled_skill_body(skill_name)
+        if loaded is None and skill_name != _DEFAULT_SUPERPOWER_SKILL:
+            loaded = load_bundled_skill_body(_DEFAULT_SUPERPOWER_SKILL)
+        if loaded is None:
+            return [
+                ContentBlock(
+                    type="text",
+                    text="OpenMagi Superpowers runtime is enabled, but no bundled skill instructions were found.",
+                )
+            ]
+
+        path = str(loaded.get("path") or "")
+        body = str(loaded.get("body") or "")
+        text = f"OpenMagi bundled superpower loaded: {path}\n\n{body}"
+        return [ContentBlock(type="text", text=text)]
+
+
+def builtin_commands() -> list[LocalCommand | PromptCommand]:
     """Return fresh instances of all eight builtins (both-surface).
 
     A factory (not module-level singletons) so each registry/cwd gets its own
     instances and there is no shared mutable state across registries.
     """
+
+    superpowers: LocalCommand | PromptCommand
+    if _superpowers_runtime_enabled():
+        superpowers = SuperpowersRuntimeCommand(name="superpowers", surface=BUILTIN_BOTH)
+    else:
+        superpowers = SuperpowersCommand(name="superpowers", surface=BUILTIN_BOTH)
 
     return [
         StatusCommand(name="status", surface=BUILTIN_BOTH),
@@ -318,5 +385,5 @@ def builtin_commands() -> list[LocalCommand]:
         PlanCommand(name="plan", surface=BUILTIN_BOTH),
         GoalCommand(name="goal", surface=BUILTIN_BOTH),
         OnboardingCommand(name="onboarding", surface=BUILTIN_BOTH),
-        SuperpowersCommand(name="superpowers", surface=BUILTIN_BOTH),
+        superpowers,
     ]
