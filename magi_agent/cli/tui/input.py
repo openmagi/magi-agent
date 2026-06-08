@@ -21,12 +21,16 @@ documented stub.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from textual import events
 from textual.message import Message
 from textual.widgets import TextArea
 
 from magi_agent.cli.contracts import Command, CommandRegistry
+
+if TYPE_CHECKING:
+    from magi_agent.cli.tui.history import InputHistory
 
 __all__ = ["Submission", "PromptInput", "classify_line"]
 
@@ -99,6 +103,24 @@ class PromptInput(TextArea):
         # A single-line-looking prompt by default; grows as the user types.
         self.show_line_numbers = False
         self.soft_wrap = True
+        # Per-session ↑/↓ recall ring (wired by the App via attach_history).
+        self._history: "InputHistory | None" = None
+
+    def attach_history(self, history: "InputHistory") -> None:
+        """Wire a per-session :class:`InputHistory` for ↑/↓ recall."""
+
+        self._history = history
+
+    def _last_row(self) -> int:
+        """Row index of the buffer's final line (0-based)."""
+
+        return self.text.count("\n")
+
+    def _set_text(self, text: str) -> None:
+        """Replace the buffer with ``text`` and park the caret at its end."""
+
+        self.text = text
+        self.cursor_location = (text.count("\n"), len(text.split("\n")[-1]))
 
     @property
     def precursor(self) -> str:
@@ -135,12 +157,17 @@ class PromptInput(TextArea):
         self.post_message(self.PromptSubmitted(submission))
 
     async def _on_key(self, event: events.Key) -> None:
-        """Intercept Enter (submit) / Shift+Enter (newline) before TextArea.
+        """Intercept Enter (submit) / Shift+Enter (newline) / ↑↓ (history).
 
         ``TextArea._on_key`` (an async handler) maps Enter to a newline insert and
         stops the event, so the App's keybinding resolver never sees it. We take
         submission/newline here and otherwise await the base editor's handler so
         normal printable/edit keys still work.
+
+        ↑/↓ recall history ONLY at the buffer edges (↑ on the first row, ↓ on the
+        last row); anywhere mid-buffer the keypress falls through to the base
+        editor so multi-line editing still moves the caret up/down a row as
+        normal. With no history attached, ↑/↓ are never hijacked.
         """
 
         if event.key == "enter":
@@ -153,4 +180,20 @@ class PromptInput(TextArea):
             event.prevent_default()
             self.insert("\n")
             return
+        if event.key in ("up", "down") and self._history is not None:
+            row, _col = self.cursor_location
+            if event.key == "up" and row == 0:
+                recalled = self._history.prev(self.text)
+                if recalled is not None:
+                    event.stop()
+                    event.prevent_default()
+                    self._set_text(recalled)
+                    return
+            elif event.key == "down" and row == self._last_row():
+                recalled = self._history.next()
+                if recalled is not None:
+                    event.stop()
+                    event.prevent_default()
+                    self._set_text(recalled)
+                    return
         await super()._on_key(event)

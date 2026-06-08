@@ -253,3 +253,73 @@ def test_router_routes_off_multiline_precursor() -> None:
             assert any(c.value == "/compact" for c in request.results)
 
     asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
+# ↑/↓ history recall at buffer edges (PR1.2 t5)
+# ---------------------------------------------------------------------------
+from magi_agent.cli.tui.history import InputHistory  # noqa: E402
+
+
+def test_up_on_first_row_recalls_history() -> None:
+    async def _run() -> None:
+        app = _InputHostApp(FakeRegistry([]))
+        async with app.run_test() as pilot:
+            app.input.focus()
+            history = InputHistory(session_id="s", path=None)
+            history.add("earlier prompt")
+            app.input.attach_history(history)
+            await pilot.pause()
+            app.input.text = ""
+            app.input.cursor_location = (0, 0)
+            await pilot.press("up")
+            await pilot.pause()
+            assert app.input.text == "earlier prompt"
+
+    asyncio.run(_run())
+
+
+def test_up_mid_multiline_moves_caret_not_history() -> None:
+    async def _run() -> None:
+        app = _InputHostApp(FakeRegistry([]))
+        async with app.run_test() as pilot:
+            app.input.focus()
+            history = InputHistory(session_id="s", path=None)
+            history.add("earlier prompt")
+            app.input.attach_history(history)
+            await pilot.pause()
+            app.input.text = "row0\nrow1"
+            app.input.cursor_location = (1, 2)  # on second row
+            await pilot.press("up")
+            await pilot.pause()
+            # caret moved up a row; text untouched
+            assert app.input.text == "row0\nrow1"
+            assert app.input.cursor_location[0] == 0
+
+    asyncio.run(_run())
+
+
+def test_down_on_last_row_walks_history_forward() -> None:
+    async def _run() -> None:
+        app = _InputHostApp(FakeRegistry([]))
+        async with app.run_test() as pilot:
+            app.input.focus()
+            history = InputHistory(session_id="s", path=None)
+            history.add("older")
+            history.add("newer")
+            app.input.attach_history(history)
+            await pilot.pause()
+            app.input.text = ""
+            app.input.cursor_location = (0, 0)
+            # walk back twice -> "older"
+            await pilot.press("up")
+            await pilot.pause()
+            await pilot.press("up")
+            await pilot.pause()
+            assert app.input.text == "older"
+            # down on the (single) last row walks forward -> "newer"
+            await pilot.press("down")
+            await pilot.pause()
+            assert app.input.text == "newer"
+
+    asyncio.run(_run())
