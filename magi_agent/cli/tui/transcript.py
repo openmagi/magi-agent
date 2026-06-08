@@ -115,6 +115,25 @@ class TranscriptController:
         if text:
             self.commit_block(text)
 
+    @property
+    def live_text(self) -> str:
+        """The full text of the current live block (already-rendered + tail)."""
+
+        return self._live_text + "".join(self._pending)
+
+    def discard_live(self) -> None:
+        """Reset the live block WITHOUT committing it.
+
+        Used by callers (e.g. ``app._finalize_assistant_markdown``) that read
+        ``live_text`` and commit a custom renderable themselves. ``finalize_live``
+        remains the plain-text path; this is the "I'll commit it myself" path.
+        """
+
+        self._live_active = False
+        self._live_text = ""
+        self._pending.clear()
+        self._live.update("")
+
     # -- finalized blocks ----------------------------------------------------
     def commit_block(self, text: str) -> None:
         """Append an immutable finalized block to the ``RichLog`` (renders once)."""

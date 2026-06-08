@@ -165,6 +165,29 @@ def test_prompt_drives_engine_and_updates_transcript() -> None:
 
 
 # ---------------------------------------------------------------------------
+# 1a. The finalized assistant block is committed as a Rich Markdown renderable
+#     (PR0.1) while the search-fidelity snapshot keeps the plain text.
+# ---------------------------------------------------------------------------
+def test_finalized_assistant_block_is_markdown_renderable() -> None:
+    async def _run() -> None:
+        engine = FakeEngineDriver(tokens=["# Heading\n\n", "body **bold**"])
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            app.start_turn("hi")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+        # The committed snapshot keeps the plain text (search fidelity).
+        blocks = app.controller.committed_blocks_snapshot()
+        assert any("# Heading" in b and "body **bold**" in b for b in blocks)
+        # The last committed renderable is a Rich Markdown, not a plain str.
+        from rich.markdown import Markdown as RichMarkdown
+
+        assert isinstance(app._last_committed_renderable, RichMarkdown)
+
+    asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
 # 1b. The coalescing flush timer repaints buffered token deltas WITHOUT an
 #     explicit flush_now() — proves token streams render incrementally.
 # ---------------------------------------------------------------------------

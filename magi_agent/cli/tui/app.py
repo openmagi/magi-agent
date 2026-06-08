@@ -77,6 +77,7 @@ from magi_agent.cli.tui.autocomplete import (
     CompletionProvider,
 )
 from magi_agent.cli.tui.input import PromptInput, Submission
+from magi_agent.cli.tui.render.markdown import render_markdown
 from magi_agent.cli.tui.transcript import (
     DEFAULT_FLUSH_INTERVAL,
     TranscriptController,
@@ -454,6 +455,8 @@ class MagiTuiApp(App[None]):
         self._controller: TranscriptController | None = None
         # Terminal of the most recent turn (asserted by tests).
         self.last_terminal: EngineResult | None = None
+        # Last renderable handed to commit_rich (test seam for render parity).
+        self._last_committed_renderable: object | None = None
 
     # -- composition --------------------------------------------------------
     def compose(self) -> ComposeResult:
@@ -639,9 +642,11 @@ class MagiTuiApp(App[None]):
                 await self._fold_event(item)
         finally:
             await gen.aclose()
-        # Finalize the in-flight assistant block (commits any streamed text).
+        # Finalize the in-flight assistant block as markdown (commits any
+        # streamed text). The plain text is preserved in the committed snapshot
+        # for search fidelity.
         await controller.flush_now()
-        controller.finalize_live()
+        self._finalize_assistant_markdown()
         if terminal is None:
             terminal = EngineResult(terminal=Terminal.error, error="no_terminal")
         self.last_terminal = terminal
@@ -657,7 +662,7 @@ class MagiTuiApp(App[None]):
         # Non-token: close the in-flight assistant block FIRST (so streamed
         # assistant text is committed before any tool render), then render.
         await controller.flush_now()
-        controller.finalize_live()
+        self._finalize_assistant_markdown()
         if event.type == "tool":
             self._render_tool_event(event)
             return
@@ -718,6 +723,25 @@ class MagiTuiApp(App[None]):
             return
         suffix = f": {terminal.error}" if terminal.error else ""
         self.controller.commit_block(f"[turn {terminal.terminal.value}{suffix}]")
+
+    def _finalize_assistant_markdown(self) -> None:
+        """Finalize the live assistant block as a markdown renderable.
+
+        Mirrors ``TranscriptController.finalize_live`` but commits the assistant
+        text as a Rich ``Markdown`` (via ``commit_rich``) instead of a plain
+        string (``commit_block``), so headings/lists/fenced code render. The
+        plain ``text=`` snapshot is preserved for search fidelity. An empty live
+        block is a no-op (matches ``finalize_live``).
+        """
+
+        controller = self.controller
+        text = controller.live_text
+        controller.discard_live()
+        if not text:
+            return
+        renderable = render_markdown(text)
+        self._last_committed_renderable = renderable
+        controller.commit_rich(renderable, text=text)
 
     # -- cancellation -------------------------------------------------------
     def action_cancel_turn(self) -> None:
