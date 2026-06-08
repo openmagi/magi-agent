@@ -191,6 +191,11 @@ class TranscriptController:
                 StatusLine,
             )
 
+            # Phase note: user/assistant blocks are currently wrapped as
+            # generic ``StatusLine``/``Static`` here. Type-aware mapping onto the
+            # dedicated ``UserMessage``/``AssistantMessage`` widgets (already in
+            # the ``widgets.message`` module) lands in a later phase — those two
+            # classes are NOT dead code, just not wired into this seam yet.
             if as_status and isinstance(widget_or_renderable, str):
                 widget = StatusLine(widget_or_renderable)
             else:

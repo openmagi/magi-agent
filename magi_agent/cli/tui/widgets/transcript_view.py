@@ -27,9 +27,19 @@ class TranscriptView(VerticalScroll):
     def add_block(self, widget: Widget) -> object:
         """Mount ``widget`` at the end and scroll to it (auto-scroll parity).
 
+        The synchronous ``scroll_end`` fires BEFORE the just-mounted widget has a
+        measured height, so a tall finalized block would not actually scroll to
+        the new bottom (the old ``RichLog(auto_scroll=True)`` scrolled after the
+        write landed). We therefore also schedule the scroll post-refresh via
+        ``call_after_refresh`` so it runs once the new widget is laid out and the
+        container's max scroll has grown.
+
         Returns the awaitable mount handle so callers can ``await`` it.
         """
 
         await_mount = self.mount(widget)
+        # Optimistic synchronous scroll (cheap, helps when height is already
+        # known) plus a post-refresh scroll once the new widget is measured.
         self.scroll_end(animate=False)
+        self.call_after_refresh(self.scroll_end, animate=False)
         return await_mount
