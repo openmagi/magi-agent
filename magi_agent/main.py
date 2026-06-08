@@ -20,12 +20,16 @@ from .evidence.observed_egress import (
     build_gate1a_observed_egress_evidence_provider_from_env,
 )
 from .runtime.openmagi_runtime import OpenMagiRuntime
+from .runtime.local_defaults import (
+    LOCAL_FULL_RUNTIME_DEFAULTS_ENABLED_ENV,
+    LOCAL_FULL_RUNTIME_ENV_DEFAULTS,
+    apply_local_full_runtime_defaults,
+)
 from .transport.chat import (
     build_gate1a_readonly_tools_config_from_env,
     build_gate5b_full_toolhost_config_from_env,
     build_gate5b_user_visible_chat_route_config_from_env,
 )
-
 
 def resolve_server_port(
     argv: Sequence[str] | None = None,
@@ -54,8 +58,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     port = resolve_server_port(argv)
     config = _parse_runtime_config(os.environ)
     if _local_runtime_defaults_active(config):
-        os.environ.setdefault("MAGI_AGENT_LOCAL_CHAT_ROUTE", "on")
-        os.environ.setdefault("MAGI_STREAMING_CHAT", "on")
+        apply_local_full_runtime_defaults(os.environ)
         _print_local_startup_notice(port)
     runtime = OpenMagiRuntime(config=config)
     runtime.gate5b4c3_shadow_generation_route_config = (

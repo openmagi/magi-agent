@@ -123,9 +123,9 @@ def test_cli_mode_plan_reaches_tool_build(monkeypatch, tmp_path) -> None:
 
     real = _build_first_party_adk_tools
 
-    def spy(*, cwd, session_id, mode="act"):  # type: ignore[no-untyped-def]
+    def spy(*, cwd, session_id, mode="act", **kwargs):  # type: ignore[no-untyped-def]
         captured["mode"] = mode
-        return real(cwd=cwd, session_id=session_id, mode=mode)
+        return real(cwd=cwd, session_id=session_id, mode=mode, **kwargs)
 
     async def fake_headless(prompt, *, output, gate, commands, driver, session_id, stream, **kw):
         return 0
@@ -158,9 +158,9 @@ def test_cli_default_mode_is_act(monkeypatch, tmp_path) -> None:
 
     real = _build_first_party_adk_tools
 
-    def spy(*, cwd, session_id, mode="act"):  # type: ignore[no-untyped-def]
+    def spy(*, cwd, session_id, mode="act", **kwargs):  # type: ignore[no-untyped-def]
         captured["mode"] = mode
-        return real(cwd=cwd, session_id=session_id, mode=mode)
+        return real(cwd=cwd, session_id=session_id, mode=mode, **kwargs)
 
     async def fake_headless(prompt, *, output, gate, commands, driver, session_id, stream, **kw):
         return 0

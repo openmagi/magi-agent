@@ -939,26 +939,29 @@ class MagiEngineDriver:
                 turn_id=turn_id,
             )
 
-        # D1 active route consumption: a denied materialized route is no longer
-        # metadata-only. Fail closed before constructing ADK runner input or
-        # invoking the adapter/provider path. This is still authority-safe:
-        # policy can block or filter, never grant production write/external
-        # integration authority.
+        # D1 active route consumption: a denied materialized route is projected
+        # as an audit event by default, while the turn continues on the
+        # configured model/tools. This keeps the route policy visible without
+        # letting stale conservative cost/capability estimates break live turns.
+        # Operators can explicitly re-arm fail-closed blocking with
+        # MAGI_RUNNER_POLICY_ROUTE_BLOCKING_ENABLED=1.
         route_block = self._runner_policy_route_block_payload(
             route_selection=route_selection,
             turn_id=turn_id,
+            fail_closed=_runner_policy_route_blocking_enabled(),
         )
         if route_block is not None:
             yield RuntimeEvent(type="status", payload=route_block, turn_id=turn_id)
-            yield EngineResult(  # type: ignore[misc]
-                terminal=Terminal.error,
-                usage={},
-                cost_usd=0.0,
-                error="runner_policy_route_denied",
-                session_id=session_id,
-                turn_id=turn_id,
-            )
-            return
+            if route_block.get("routeDecision") == "blocked_before_provider_call":
+                yield EngineResult(  # type: ignore[misc]
+                    terminal=Terminal.error,
+                    usage={},
+                    cost_usd=0.0,
+                    error="runner_policy_route_denied",
+                    session_id=session_id,
+                    turn_id=turn_id,
+                )
+                return
 
         try:
             deps = _lazy_engine_deps()
@@ -1560,7 +1563,7 @@ class MagiEngineDriver:
         additions: dict[str, object] = {}
         if policy_payload is not None:
             additions["runnerPolicyAssembly"] = policy_payload
-        if route_selection is not None:
+        if route_selection is not None and route_selection.get("routeDenied") is not True:
             additions["activeRunnerRoute"] = dict(route_selection)
         if harness_state is None:
             return additions
@@ -1643,6 +1646,7 @@ class MagiEngineDriver:
         *,
         route_selection: Mapping[str, object] | None,
         turn_id: str,
+        fail_closed: bool = False,
     ) -> dict[str, object] | None:
         if route_selection is None or route_selection.get("routeDenied") is not True:
             return None
@@ -1652,9 +1656,14 @@ class MagiEngineDriver:
             "turnId": turn_id,
             "phase": _non_empty_str(route_selection.get("phase"), "unknown"),
             "reasonCodes": reason_codes,
-            "routeDecision": "blocked_before_provider_call",
+            "routeDecision": (
+                "blocked_before_provider_call"
+                if fail_closed
+                else "audited_configured_model_continues"
+            ),
             "authority": {
                 "providerCalled": False,
+                "configuredModelContinues": not fail_closed,
                 "productionWriteAllowed": False,
                 "externalIntegrationAttached": False,
             },
@@ -2034,6 +2043,7 @@ _EXHAUSTED = _Sentinel("adk_stream_exhausted")
 _CANCELLED = _Sentinel("adk_stream_cancelled")
 _MISSING = _Sentinel("missing")
 _RUNNER_POLICY_ROUTING_ENV = "MAGI_RUNNER_POLICY_ROUTING_ENABLED"
+_RUNNER_POLICY_ROUTE_BLOCKING_ENV = "MAGI_RUNNER_POLICY_ROUTE_BLOCKING_ENABLED"
 _CODING_PHASES = frozenset(
     {"code_search", "patch_planning", "patch_generation", "test_interpretation"}
 )
@@ -2094,22 +2104,31 @@ def _authority_safe_attachment_flags(flags: Mapping[str, bool]) -> dict[str, boo
 
 
 def _runner_policy_routing_enabled() -> bool:
-    """Whether runner-policy phase routing (model downgrade + cost-cap denial) runs.
+    """Whether runner-policy phase routing emits and attaches safe routes.
 
-    Default OFF. The phase-routing governance assumes a cheap/standard BASE model
-    with a bounded sota ESCALATION, so it cannot route a turn that uses the
-    operator's configured model without downgrading it (the materializer plans
-    against a cheap canonical model, then denies coding phases on capability, the
-    sota-escalation cap, or the per-turn budget — every provider's default model
-    is denied for a coding-capable task profile). Until that budget/cap/capability
-    interaction is reworked, the turn must run on the configured model as-is, so the
-    routing is OFF unless an operator explicitly opts in with
-    ``MAGI_RUNNER_POLICY_ROUTING_ENABLED=1``. The #291 aggregate-denial fail-close
-    is preserved in code and re-arms the moment the flag is turned back on.
+    The code-level default stays OFF. Installed/local full-runtime profiles and
+    hosted canary profiles should enable this explicitly in their config/env.
     """
     import os
 
     raw = os.environ.get(_RUNNER_POLICY_ROUTING_ENV)
+    if raw is None:
+        return False
+    return raw.strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _runner_policy_route_blocking_enabled() -> bool:
+    """Whether denied materialized routes fail closed before provider calls.
+
+    Route blocking is intentionally NOT part of the default full-runtime profile:
+    materialized route denials can be stale or conservative while the configured
+    model is still capable of finishing the user turn. By default, route denials
+    are emitted as audit metadata and the turn continues on the configured model.
+    Operators can explicitly re-arm the older hard-block boundary with this env.
+    """
+    import os
+
+    raw = os.environ.get(_RUNNER_POLICY_ROUTE_BLOCKING_ENV)
     if raw is None:
         return False
     return raw.strip().lower() not in {"0", "false", "no", "off"}
