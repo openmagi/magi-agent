@@ -135,6 +135,40 @@ def test_resolve_lexer_from_extension() -> None:
     assert diffmod.resolve_lexer("") is not None
 
 
+def test_render_diff_split_returns_table_renderable() -> None:
+    from rich.table import Table
+
+    from magi_agent.cli.render import diff as diffmod
+
+    diffmod.clear_diff_cache()
+    out = diffmod.render_diff(
+        "alpha\nbeta\n", "alpha\ngamma\n", file="x.py", split=True
+    )
+    # Split mode returns a Rich Table (two columns: old | new).
+    assert isinstance(out, Table)
+    assert len(out.columns) == 2
+
+
+def test_render_diff_unified_still_default() -> None:
+    from rich.text import Text
+
+    from magi_agent.cli.render import diff as diffmod
+
+    diffmod.clear_diff_cache()
+    out = diffmod.render_diff("a\n", "b\n", file="x.py")
+    # Default (split=False) is still the single Text projection.
+    assert isinstance(out, Text)
+
+
+def test_render_diff_split_and_unified_cache_independently() -> None:
+    from magi_agent.cli.render import diff as diffmod
+
+    diffmod.clear_diff_cache()
+    unified = diffmod.render_diff("a\n", "b\n", file="x.py", split=False)
+    split = diffmod.render_diff("a\n", "b\n", file="x.py", split=True)
+    assert unified is not split
+
+
 def test_render_diff_dim_skips_word_diff() -> None:
     # When dim=True the word-diff is skipped: paired changed lines are marked
     # whole-line, never with intra-line char ranges. We assert via the structured

@@ -277,8 +277,8 @@ def unified_diff_text(old: str, new: str, *, file: str = "file") -> str:
 # ---------------------------------------------------------------------------
 # Colorized render + cache
 # ---------------------------------------------------------------------------
-# Cache key: (file, width, theme, dim, old, new) -> rich.text.Text.
-_RENDER_CACHE: dict[tuple[str, int, str, bool, str, str], "Text"] = {}
+# Cache key: (file, width, theme, dim, split, old, new) -> rendered renderable.
+_RENDER_CACHE: dict[tuple[str, int, str, bool, bool, str, str], object] = {}
 _CACHE_MAX = 8
 
 
@@ -347,35 +347,90 @@ def render_diff(
     width: int = 80,
     theme: str = DEFAULT_THEME,
     dim: bool = False,
-) -> "Text":
-    """Render the whole diff to a single cached ``rich.text.Text``.
+    split: bool = False,
+) -> object:
+    """Render the whole diff to a cached Rich renderable.
 
-    Cached by ``(file, width, theme, dim, old, new)``: the same key returns the
-    SAME object; any key change rebuilds. ``rich`` is imported lazily here so the
+    ``split=False`` (default) returns a single ``rich.text.Text`` unified diff
+    (the historical behavior). ``split=True`` returns a borderless two-column
+    ``rich.table.Table`` (old | new) for a side-by-side view. Cached by
+    ``(file, width, theme, dim, split, old, new)``: the same key returns the SAME
+    object; any key change rebuilds. ``rich`` is imported lazily here so the
     plain ``unified_diff_text`` path stays rich-free.
     """
 
     from rich.text import Text
 
-    key = (file, width, theme, dim, old, new)
+    key = (file, width, theme, dim, split, old, new)
     cached = _RENDER_CACHE.get(key)
     if cached is not None:
         return cached
 
     hunks = build_hunks(old, new, dim=dim)
     lexer = resolve_lexer(file)
-    out = Text(overflow="fold", no_wrap=False)
-    first_line = True
-    for hunk in hunks:
-        for line in hunk.lines:
-            if not first_line:
-                out.append("\n")
-            first_line = False
-            out.append_text(
-                _render_line(line, file=file, theme=theme, dim=dim, lexer=lexer)
-            )
+    if split:
+        out: object = _render_split(hunks, file=file, theme=theme, dim=dim, lexer=lexer)
+    else:
+        text = Text(overflow="fold", no_wrap=False)
+        first_line = True
+        for hunk in hunks:
+            for line in hunk.lines:
+                if not first_line:
+                    text.append("\n")
+                first_line = False
+                text.append_text(
+                    _render_line(line, file=file, theme=theme, dim=dim, lexer=lexer)
+                )
+        out = text
 
     if len(_RENDER_CACHE) >= _CACHE_MAX:
         _RENDER_CACHE.clear()
     _RENDER_CACHE[key] = out
     return out
+
+
+def _render_split(
+    hunks: list[Hunk], *, file: str, theme: str, dim: bool, lexer: str
+) -> object:
+    """Build a borderless two-column (old | new) Table from hunks.
+
+    Context lines appear on both sides; a paired del/add run aligns row-by-row;
+    an unmatched del or add leaves the opposite cell blank. Each cell reuses
+    ``_render_line`` so syntax + word-diff highlighting match the unified view.
+    """
+
+    from rich.table import Table
+    from rich.text import Text
+
+    table = Table.grid(padding=(0, 1), expand=True)
+    table.add_column("old", ratio=1)
+    table.add_column("new", ratio=1)
+
+    def cell(line: "DiffLine | None") -> "Text":
+        if line is None:
+            return Text("")
+        return _render_line(line, file=file, theme=theme, dim=dim, lexer=lexer)
+
+    for hunk in hunks:
+        i = 0
+        rows = hunk.lines
+        n = len(rows)
+        while i < n:
+            line = rows[i]
+            if line.kind == "context":
+                table.add_row(cell(line), cell(line))
+                i += 1
+                continue
+            dels: list[DiffLine] = []
+            while i < n and rows[i].kind == "del":
+                dels.append(rows[i])
+                i += 1
+            adds: list[DiffLine] = []
+            while i < n and rows[i].kind == "add":
+                adds.append(rows[i])
+                i += 1
+            for k in range(max(len(dels), len(adds))):
+                d = dels[k] if k < len(dels) else None
+                a = adds[k] if k < len(adds) else None
+                table.add_row(cell(d), cell(a))
+    return table
