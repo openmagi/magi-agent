@@ -4,8 +4,10 @@ import type { ComponentType } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
+  Activity,
   Brain,
   Gauge,
+  GraduationCap,
   LayoutDashboard,
   MessageSquare,
   Settings,
@@ -34,6 +36,8 @@ export function SidebarNav({ onNavigate, className }: SidebarNavProps) {
     { href: `${botPrefix}/settings`, label: t.dashboard.settings, icon: Settings },
     { href: `${botPrefix}/customize`, label: t.customize?.tabCustomize ?? "Customize", icon: Wrench },
     { href: `${botPrefix}/usage`, label: t.dashboard.usage, icon: Gauge },
+    { href: `${botPrefix}/observability`, label: "Observability", icon: Activity },
+    { href: `${botPrefix}/learning`, label: "Learning", icon: GraduationCap },
     { href: `${botPrefix}/skills`, label: t.dashboard.skills, icon: Sparkles },
     { href: `${botPrefix}/memory`, label: t.dashboard.memory, icon: Brain },
   ];

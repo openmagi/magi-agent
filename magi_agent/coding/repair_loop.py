@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from collections.abc import Mapping
 from typing import Any, Literal
 
@@ -37,6 +38,13 @@ CodingRepairReasonCode = Literal[
     "repair_loop_disabled",
     "repair_action_selected",
 ]
+
+_TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
+_FALSE_VALUES = frozenset({"0", "false", "no", "off", ""})
+_SAFE_RUNTIME_PROFILES = frozenset({"safe", "off", "minimal", "conservative"})
+_PUBLIC_REF_PREFIXES = ("evidence:", "verifier:", "artifact:", "snapshot:", "receipt:")
+_REPAIR_LOOP_ENV = "MAGI_CODING_REPAIR_LOOP_ENABLED"
+_RUNTIME_PROFILE_ENV = "MAGI_RUNTIME_PROFILE"
 
 # ---------------------------------------------------------------------------
 # Pydantic model config (shared)
@@ -222,6 +230,62 @@ def project_repair_decision_event(
     }
 
 
+def coding_repair_loop_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Return whether live bounded coding repair retries may run.
+
+    The local full runtime profile enables this by default so the OSS runtime can
+    exercise first-party coding harnesses. Safe/minimal/off/conservative
+    profiles keep the projection-only behavior unless explicitly overridden.
+    """
+
+    if env is None:
+        env = os.environ
+    raw = env.get(_REPAIR_LOOP_ENV)
+    if raw is not None:
+        normalized = raw.strip().lower()
+        if normalized in _FALSE_VALUES:
+            return False
+        if normalized in _TRUE_VALUES:
+            return True
+        return False
+    profile = (env.get(_RUNTIME_PROFILE_ENV) or "").strip().lower()
+    return profile not in _SAFE_RUNTIME_PROFILES
+
+
+def repair_max_attempts(
+    repair_policy: Mapping[str, object],
+    *,
+    default: int = 3,
+) -> int:
+    """Extract a bounded repair-attempt cap from a public repair policy."""
+
+    raw = repair_policy.get("maxAttempts") or repair_policy.get("max_attempts")
+    if not isinstance(raw, int):
+        return default
+    return max(0, min(raw, 10))
+
+
+def build_repair_continuation_message(
+    *,
+    missing_evidence: tuple[str, ...],
+    missing_validators: tuple[str, ...],
+    attempt: int,
+    max_attempts: int,
+) -> str:
+    """Build a public-safe repair continuation for a follow-up model call."""
+
+    evidence = ", ".join(_safe_ref(ref) for ref in missing_evidence) or "none"
+    validators = ", ".join(_safe_ref(ref) for ref in missing_validators) or "none"
+    return (
+        "Continue the coding task by repairing the blocked final evidence gate. "
+        f"This is bounded repair attempt {attempt}/{max_attempts}. "
+        f"Missing evidence refs: {evidence}. "
+        f"Missing validator refs: {validators}. "
+        "Do not claim completion until the missing evidence and validator refs "
+        "are produced by the appropriate local tools."
+    )
+
+
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
@@ -265,6 +329,24 @@ def _make_serializable(obj: object) -> object:
     return str(obj)
 
 
+def _safe_ref(value: object) -> str:
+    text = str(value).strip()
+    if text.startswith("sha256:"):
+        digest = text.removeprefix("sha256:").lower()
+        if len(digest) == 64 and all(char in "0123456789abcdef" for char in digest):
+            return f"sha256:{digest}"
+    if text.startswith(_PUBLIC_REF_PREFIXES):
+        allowed = []
+        for char in text[:120]:
+            if char.isalnum() or char in {":", "-", "_", "."}:
+                allowed.append(char)
+            else:
+                allowed.append("_")
+        return "".join(allowed) or "missing"
+    digest = hashlib.sha256(text.encode("utf-8", errors="replace")).hexdigest()
+    return f"ref:sha256:{digest}"
+
+
 __all__ = [
     "CodingRepairAction",
     "CodingRepairDecision",
@@ -272,6 +354,9 @@ __all__ = [
     "CodingRepairLoopResult",
     "CodingRepairLoopState",
     "CodingRepairReasonCode",
+    "build_repair_continuation_message",
+    "coding_repair_loop_enabled",
     "evaluate_repair_decision",
     "project_repair_decision_event",
+    "repair_max_attempts",
 ]

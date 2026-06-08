@@ -95,6 +95,7 @@ from typing import Protocol
 
 from google.adk.plugins.base_plugin import BasePlugin
 
+from magi_agent.config.env import general_automation_live_enabled
 from magi_agent.hooks.manifest import HookManifest, HookPoint
 from magi_agent.tools.manifest import ToolSource
 
@@ -1130,13 +1131,18 @@ def build_default_plane(
     if _is_true(env.get(SELF_REVIEW_ENABLED_ENV, "")):
         plane.register(SelfReviewAfterTurnControl())
 
-    # 6. GA constraint reminder (MAGI_GA_LIVE_ENABLED + general role, default OFF).
+    # 6. GA constraint reminder (MAGI_GA_LIVE_ENABLED + general role).
     # Registered ONLY when BOTH a receipts store and a contract requirement are
-    # provided — so no-arg callers (local_runner + existing tests) never register
-    # it and stay byte-identical. The control itself is also flag/role/owed-gated
-    # at runtime via ga_constraint_reinjection, so registration alone is inert
-    # when the flag is OFF or nothing is owed.
-    if general_automation_receipts is not None and contract_required is not None:
+    # provided and the runtime profile enables GA live controls. Full local
+    # profile defaults ON; safe/minimal profiles or explicit false values keep
+    # the plane conservative. The control itself is also role/owed-gated at
+    # runtime via ga_constraint_reinjection, so registration alone remains inert
+    # when nothing is owed.
+    if (
+        general_automation_receipts is not None
+        and contract_required is not None
+        and general_automation_live_enabled(env)
+    ):
         plane.register(
             GaConstraintReinjectionControl(
                 receipts=general_automation_receipts,

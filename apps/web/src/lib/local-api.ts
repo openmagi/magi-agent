@@ -15,9 +15,10 @@ function joinUrl(base: string, path: string): string {
 }
 
 /**
- * Fetch wrapper that targets the local runtime and attaches the loopback bearer
- * token when available. Drop-in replacement for the cloud `useAuthFetch()`
- * return value.
+ * Fetch wrapper that targets the local runtime and attaches the loopback token
+ * when available. Chat/control routes accept the bearer token; local admin
+ * surfaces such as tools, plugins, and learning governance require the same
+ * value as `x-gateway-token`.
  */
 export async function agentFetch(
   path: string,
@@ -30,6 +31,9 @@ export async function agentFetch(
   const token = await getLocalAccessToken();
   if (token && !headers.has("Authorization")) {
     headers.set("Authorization", `Bearer ${token}`);
+  }
+  if (token && !headers.has("x-gateway-token")) {
+    headers.set("x-gateway-token", token);
   }
   return fetch(url, { ...options, headers });
 }

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any, Literal, Self, TypeVar, get_args, get_origin
 
 from pydantic import Field, field_validator, model_validator
@@ -51,6 +51,7 @@ _STAGE_ORDER: tuple[VerifierStage, ...] = (
 )
 _STAGE_RANK = {stage: index + 1 for index, stage in enumerate(_STAGE_ORDER)}
 _MAX_PUBLIC_TEXT_CHARS = 200
+_PUBLIC_REF_PREFIXES = ("evidence:", "verifier:", "receipt:sha256:", "sha256:")
 
 
 class VerifierBusModel(EvidenceMetadataModel):
@@ -789,6 +790,134 @@ def build_default_verifier_bus_metadata() -> VerifierBusMetadata:
     )
 
 
+def execute_pre_final_verifier_bus(
+    *,
+    required_evidence: Sequence[str],
+    required_validators: Sequence[str],
+    observed_public_refs: Sequence[str],
+    evidence_records: Sequence[object],
+) -> dict[str, object]:
+    """Run the deterministic pre-final evidence verifier over public refs.
+
+    This is the live execution half of the pre-final verifier bus for the local
+    runner. It performs a pure read over already-public refs and already-collected
+    evidence records; it does not call models, external tools, storage, child
+    agents, or production services.
+    """
+
+    matched_refs = set(_valid_public_refs(observed_public_refs))
+    for record in evidence_records:
+        _collect_public_refs(record, matched_refs)
+
+    missing_evidence = [
+        ref for ref in _valid_public_refs(required_evidence) if ref not in matched_refs
+    ]
+    missing_validators = [
+        ref for ref in _valid_public_refs(required_validators) if ref not in matched_refs
+    ]
+    decision = "block" if missing_evidence or missing_validators else "pass"
+
+    results: list[dict[str, object]] = []
+    if missing_evidence:
+        results.append(
+            _live_verifier_result(
+                verifier_id="tool-evidence-contract",
+                status="missing",
+                public_summary="missing required deterministic evidence",
+                retry_message="collect required evidence before final answer",
+            )
+        )
+    if missing_validators:
+        results.append(
+            _live_verifier_result(
+                verifier_id="dev-coding-verification-audit",
+                status="missing",
+                public_summary="missing required validator evidence",
+                retry_message="run required validation before final answer",
+            )
+        )
+    if not results:
+        results.append(
+            _live_verifier_result(
+                verifier_id="pre-final-evidence-gate",
+                status="pass",
+                public_summary="pre-final evidence gate passed",
+            )
+        )
+
+    return {
+        "metadataOnly": False,
+        "decision": decision,
+        "results": results,
+        "trafficAttached": False,
+        "executionAttached": True,
+        "evidenceRecordCount": len(evidence_records),
+        "matchedRefs": sorted(matched_refs),
+        "missingEvidence": missing_evidence,
+        "missingValidators": missing_validators,
+    }
+
+
+def _live_verifier_result(
+    *,
+    verifier_id: str,
+    status: VerifierStatus,
+    public_summary: str | None = None,
+    retry_message: str | None = None,
+) -> dict[str, object]:
+    payload = VerifierResultMetadata(
+        verifierId=verifier_id,
+        status=status,
+        publicSummary=public_summary,
+        retryMessage=retry_message,
+    ).model_dump(by_alias=True, mode="json", warnings=False)
+    # VerifierResultMetadata is intentionally metadata-only; this live local
+    # runner payload records execution at the envelope/result projection layer
+    # without mutating that protected metadata model.
+    payload["metadataOnly"] = False
+    payload["executionAttached"] = True
+    payload["trafficAttached"] = False
+    return payload
+
+
+def _valid_public_refs(values: Sequence[str]) -> tuple[str, ...]:
+    refs: list[str] = []
+    for value in values:
+        if isinstance(value, str) and value.startswith(_PUBLIC_REF_PREFIXES):
+            refs.append(value)
+    return tuple(dict.fromkeys(refs))
+
+
+def _collect_public_refs(value: object, refs: set[str], depth: int = 0) -> None:
+    if depth > 8:
+        return
+    if isinstance(value, str):
+        if value.startswith(_PUBLIC_REF_PREFIXES):
+            refs.add(value)
+        return
+    if isinstance(value, Mapping):
+        for nested in value.values():
+            _collect_public_refs(nested, refs, depth + 1)
+        return
+    if isinstance(value, list | tuple | set | frozenset):
+        for nested in value:
+            _collect_public_refs(nested, refs, depth + 1)
+        return
+
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        try:
+            dumped = model_dump(by_alias=True, mode="python", warnings=False)
+        except TypeError:
+            dumped = model_dump()
+        _collect_public_refs(dumped, refs, depth + 1)
+        return
+
+    for attr in ("evidence_ref", "evidenceRef", "payload", "metadata"):
+        if hasattr(value, attr):
+            _collect_public_refs(getattr(value, attr), refs, depth + 1)
+
+
 __all__ = [
     "ApprovalRequestMetadata",
     "FailureRoutingMetadata",
@@ -798,4 +927,5 @@ __all__ = [
     "VerifierResultMetadata",
     "VerifierStageMetadata",
     "build_default_verifier_bus_metadata",
+    "execute_pre_final_verifier_bus",
 ]

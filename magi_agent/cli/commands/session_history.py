@@ -15,7 +15,7 @@ Why deferred
 - ``/undo``, ``/redo``: require a per-message revert/checkpoint subsystem that
   does not exist (no message-level snapshot in ``runtime/``).
 - ``/share``, ``/unshare``: session sharing produces a public URL, which is a
-  **hosted (Clawy Pro)** concern, outside the OSS runtime.  The OSS layer ships
+  hosted-platform concern, outside the OSS runtime.  The OSS layer ships
   only the Protocol seam and a hidden command; the hosted layer wires the real
   provider.
 
@@ -142,7 +142,7 @@ class SessionRevert(Protocol):
 class SessionShareProvider(Protocol):
     """Controller Protocol for hosted session sharing.
 
-    The hosted (Clawy Pro) layer wires a concrete implementation onto
+    The hosted platform layer wires a concrete implementation onto
     ``ctx.runtime.session_share``; the OSS runtime ships no implementation
     (``/share`` and ``/unshare`` are permanently hidden without it).
 

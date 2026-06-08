@@ -20,6 +20,7 @@ ZERO_TOOL_STATS = {
 
 def register_tool_admin_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
     @app.get("/v1/admin/tools")
+    @app.get("/api/tools")
     async def list_tools(request: Request) -> JSONResponse:
         unauthorized = _unauthorized_response(request, runtime)
         if unauthorized is not None:
@@ -27,6 +28,7 @@ def register_tool_admin_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
         return JSONResponse(content={"tools": _public_tools(runtime)})
 
     @app.get("/v1/admin/tools/stats")
+    @app.get("/api/tools/stats")
     async def tool_stats(request: Request) -> JSONResponse:
         unauthorized = _unauthorized_response(request, runtime)
         if unauthorized is not None:
@@ -37,7 +39,18 @@ def register_tool_admin_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
         }
         return JSONResponse(content={"stats": stats})
 
+    @app.post("/v1/admin/tools/{name}/enable")
+    @app.post("/api/tools/{name}/enable")
+    async def enable_tool(name: str, request: Request) -> JSONResponse:
+        return _set_tool_enabled(runtime, name, request, enabled=True)
+
+    @app.post("/v1/admin/tools/{name}/disable")
+    @app.post("/api/tools/{name}/disable")
+    async def disable_tool(name: str, request: Request) -> JSONResponse:
+        return _set_tool_enabled(runtime, name, request, enabled=False)
+
     @app.get("/v1/admin/tools/{name}")
+    @app.get("/api/tools/{name}")
     async def tool_detail(name: str, request: Request) -> JSONResponse:
         unauthorized = _unauthorized_response(request, runtime)
         if unauthorized is not None:
@@ -90,6 +103,31 @@ def _public_tool_metadata(manifest: ToolManifest, *, enabled: bool) -> dict[str,
         "pluginId": manifest.plugin_id,
         "optOut": manifest.opt_out,
     }
+
+
+def _set_tool_enabled(
+    runtime: OpenMagiRuntime,
+    name: str,
+    request: Request,
+    *,
+    enabled: bool,
+) -> JSONResponse:
+    unauthorized = _unauthorized_response(request, runtime)
+    if unauthorized is not None:
+        return unauthorized
+    if runtime.tool_registry.resolve_registration(name) is None:
+        return JSONResponse(
+            status_code=404,
+            content={
+                "error": "not_found",
+                "message": f'tool "{name}" not found',
+            },
+        )
+    if enabled:
+        runtime.tool_registry.enable(name)
+    else:
+        runtime.tool_registry.disable(name)
+    return JSONResponse(content={"tool": name, "enabled": enabled})
 
 
 def _unauthorized_response(

@@ -507,26 +507,53 @@ def _pre_final_gate_applies(
 
 def _build_coding_repair_decision_payload(
     repair_policy: Mapping[str, object],
+    *,
+    attempt_count: int = 0,
 ) -> dict[str, object]:
     from magi_agent.coding.repair_loop import (
         CodingRepairLoopConfig,
         CodingRepairLoopState,
         evaluate_repair_decision,
         project_repair_decision_event,
+        repair_max_attempts,
     )
 
-    raw_max_attempts = repair_policy.get("maxAttempts") or repair_policy.get(
-        "max_attempts"
-    )
-    max_attempts = 3
-    if isinstance(raw_max_attempts, int):
-        max_attempts = raw_max_attempts
+    max_attempts = repair_max_attempts(repair_policy)
     decision = evaluate_repair_decision(
         config=CodingRepairLoopConfig(enabled=True, maxAttempts=max_attempts),
-        state=CodingRepairLoopState(attemptCount=0),
+        state=CodingRepairLoopState(attemptCount=attempt_count),
         latest_test_evidence=None,
     )
     return project_repair_decision_event(decision)
+
+
+def _coding_repair_loop_enabled() -> bool:
+    from magi_agent.coding.repair_loop import coding_repair_loop_enabled
+
+    return coding_repair_loop_enabled()
+
+
+def _coding_repair_max_attempts(repair_policy: Mapping[str, object]) -> int:
+    from magi_agent.coding.repair_loop import repair_max_attempts
+
+    return repair_max_attempts(repair_policy)
+
+
+def _build_repair_continuation_message(
+    *,
+    missing_evidence: Sequence[str],
+    missing_validators: Sequence[str],
+    attempt: int,
+    max_attempts: int,
+) -> str:
+    from magi_agent.coding.repair_loop import build_repair_continuation_message
+
+    return build_repair_continuation_message(
+        missing_evidence=tuple(missing_evidence),
+        missing_validators=tuple(missing_validators),
+        attempt=attempt,
+        max_attempts=max_attempts,
+    )
 
 
 def _build_pre_final_verifier_bus_payload(
@@ -862,6 +889,69 @@ class MagiEngineDriver:
             prompt=prompt,
             harness_state=harness_state,
         )
+        policy_payload = self._runner_policy_payload()
+        route_decision = (
+            self._runner_policy_assembly.phase_route_decision()
+            if self._runner_policy_assembly is not None
+            else None
+        )
+
+        if policy_payload is not None:
+            yield RuntimeEvent(
+                type="status",
+                payload={
+                    "type": "runner_policy_assembly",
+                    "turnId": turn_id,
+                    **policy_payload,
+                },
+                turn_id=turn_id,
+            )
+        if route_selection is not None:
+            yield RuntimeEvent(
+                type="status",
+                payload={
+                    "type": "runner_policy_route_selection",
+                    "turnId": turn_id,
+                    **route_selection,
+                },
+                turn_id=turn_id,
+            )
+
+        # D1: consume the materialized phase route. The recipe materializer
+        # already routes per-phase model/tier + verifier escalation into the
+        # assembly. Surface a distilled routing decision so CLI / dashboard /
+        # observability surfaces can act on it.
+        if route_decision is not None:
+            yield RuntimeEvent(
+                type="status",
+                payload={
+                    "type": "phase_route_decision",
+                    "turnId": turn_id,
+                    **route_decision,
+                },
+                turn_id=turn_id,
+            )
+
+        # D1 active route consumption: a denied materialized route is no longer
+        # metadata-only. Fail closed before constructing ADK runner input or
+        # invoking the adapter/provider path. This is still authority-safe:
+        # policy can block or filter, never grant production write/external
+        # integration authority.
+        route_block = self._runner_policy_route_block_payload(
+            route_selection=route_selection,
+            turn_id=turn_id,
+        )
+        if route_block is not None:
+            yield RuntimeEvent(type="status", payload=route_block, turn_id=turn_id)
+            yield EngineResult(  # type: ignore[misc]
+                terminal=Terminal.error,
+                usage={},
+                cost_usd=0.0,
+                error="runner_policy_route_denied",
+                session_id=session_id,
+                turn_id=turn_id,
+            )
+            return
 
         try:
             deps = _lazy_engine_deps()
@@ -907,50 +997,6 @@ class MagiEngineDriver:
         usage: dict[str, object] = {}
         observed_public_refs: set[str] = set()
 
-        policy_payload = self._runner_policy_payload()
-        if policy_payload is not None:
-            yield RuntimeEvent(
-                type="status",
-                payload={
-                    "type": "runner_policy_assembly",
-                    "turnId": turn_id,
-                    **policy_payload,
-                },
-                turn_id=turn_id,
-            )
-        if route_selection is not None:
-            yield RuntimeEvent(
-                type="status",
-                payload={
-                    "type": "runner_policy_route_selection",
-                    "turnId": turn_id,
-                    **route_selection,
-                },
-                turn_id=turn_id,
-            )
-
-        # D1: consume the materialized phase route. The recipe materializer
-        # already routes per-phase model/tier + verifier escalation into the
-        # assembly; until now it was inert metadata. Surface a distilled routing
-        # decision so CLI / dashboard / observability surfaces can act on it.
-        # This is a routing HINT only — it does not change which model executes,
-        # which tools are exposed, or grant any production authority.
-        route_decision = (
-            self._runner_policy_assembly.phase_route_decision()
-            if self._runner_policy_assembly is not None
-            else None
-        )
-        if route_decision is not None:
-            yield RuntimeEvent(
-                type="status",
-                payload={
-                    "type": "phase_route_decision",
-                    "turnId": turn_id,
-                    **route_decision,
-                },
-                turn_id=turn_id,
-            )
-
         # Permission interception (Stream F): attach a before_tool_callback to
         # the runner's agent so the gate intercepts every tool BEFORE it runs.
         # The agent is per-RUNNER (not per-turn); two concurrent turns sharing
@@ -977,6 +1023,7 @@ class MagiEngineDriver:
         # its per-strategy budget through this).
         recovery_state: "RecoveryAttemptState | None" = None
         recovery_attempts = 0
+        repair_attempts = 0
 
         # PR4 goal-nudge state. Only active when goal_nudge is not None.
         # nudges_used: hard cap counter (anti-infinite-loop).
@@ -1154,20 +1201,162 @@ class MagiEngineDriver:
             )
             return
 
-        pre_final_gate = self._pre_final_gate_payload(
-            turn_id=turn_id,
-            prompt=prompt,
-            harness_state=effective_harness_state,
-            observed_public_refs=observed_public_refs,
-        )
-        if pre_final_gate is not None:
+        while True:
+            pre_final_gate = self._pre_final_gate_payload(
+                turn_id=turn_id,
+                prompt=prompt,
+                harness_state=effective_harness_state,
+                observed_public_refs=observed_public_refs,
+                repair_attempt_count=repair_attempts,
+            )
+            if pre_final_gate is None:
+                break
             yield RuntimeEvent(type="status", payload=pre_final_gate, turn_id=turn_id)
-            if pre_final_gate["decision"] == "block":
+            if pre_final_gate["decision"] != "block":
+                break
+
+            repair_decision = pre_final_gate.get("repairDecision")
+            repair_policy = pre_final_gate.get("repairPolicy")
+            should_repair = (
+                isinstance(repair_decision, Mapping)
+                and repair_decision.get("action") == "continue_repair"
+                and isinstance(repair_policy, Mapping)
+                and _coding_repair_loop_enabled()
+            )
+            if not should_repair:
                 yield EngineResult(  # type: ignore[misc]
                     terminal=Terminal.error,
                     usage=usage,
                     cost_usd=0.0,
                     error="pre_final_evidence_gate_blocked",
+                    session_id=session_id,
+                    turn_id=turn_id,
+                )
+                return
+
+            max_repair_attempts = _coding_repair_max_attempts(repair_policy)
+            next_repair_attempt = repair_attempts + 1
+            repair_attempts = next_repair_attempt
+            missing_evidence = [
+                str(ref)
+                for ref in pre_final_gate.get("missingEvidence") or []
+                if isinstance(ref, str)
+            ]
+            missing_validators = [
+                str(ref)
+                for ref in pre_final_gate.get("missingValidators") or []
+                if isinstance(ref, str)
+            ]
+            retry_payload = {
+                "type": "coding_repair_retry_scheduled",
+                "turnId": turn_id,
+                "attempt": next_repair_attempt,
+                "maxAttempts": max_repair_attempts,
+                "missingEvidence": missing_evidence,
+                "missingValidators": missing_validators,
+            }
+            yield RuntimeEvent(type="status", payload=retry_payload, turn_id=turn_id)
+
+            repair_message = _build_repair_continuation_message(
+                missing_evidence=missing_evidence,
+                missing_validators=missing_validators,
+                attempt=next_repair_attempt,
+                max_attempts=max_repair_attempts,
+            )
+            runner_input = runner_turn_input_cls(
+                userId=self._user_id,
+                sessionId=session_id,
+                turnId=turn_id,
+                invocationId=turn_id,
+                newMessage=types.Content(  # type: ignore[attr-defined]
+                    role="user",
+                    parts=[types.Part(text=repair_message)],  # type: ignore[attr-defined]
+                ),
+                harnessState=effective_harness_state,
+            )
+
+            repair_gate_attach = self._attach_gate_callback(
+                runner=runner, gate=gate, turn_id=turn_id, cancel=cancel
+            )
+            repair_route_attach = self._attach_runner_policy_route(
+                runner=runner,
+                route_selection=route_selection,
+            )
+            adk_iter = adapter.run_turn(runner_input).__aiter__()  # type: ignore[union-attr]
+            attempt_error: Exception | None = None
+            try:
+                while True:
+                    if cancel.is_set():
+                        cancelled = True
+                        break
+
+                    step = await self._next_adk_event(adk_iter, cancel)
+                    if step is _CANCELLED:
+                        cancelled = True
+                        break
+                    if step is _EXHAUSTED:
+                        break
+
+                    adk_event = step
+                    event_count += 1
+                    projection = bridge.project_adk_event(adk_event, turn_id=turn_id)  # type: ignore[union-attr]
+                    for raw_event in projection.agent_events:  # type: ignore[union-attr]
+                        safe = sanitize(dict(raw_event))  # type: ignore[operator]
+                        if safe is None:
+                            continue
+                        self._collect_public_refs(safe, observed_public_refs)
+                        self._track_pending_tool(safe, pending_tool_ids)
+                        yielded_events += 1
+                        self._observe_event(safe, session_id, turn_id)
+                        yield RuntimeEvent(
+                            type=_map_event_kind(safe.get("type")),
+                            payload=safe,
+                            turn_id=turn_id,
+                        )
+
+                    if event_count >= self._max_event_count:
+                        break
+            except Exception as exc:  # noqa: BLE001 - surface as terminal error
+                attempt_error = exc
+            finally:
+                await self._aclose_iter(adk_iter)
+                self._restore_runner_policy_route(repair_route_attach)
+                self._restore_gate_callback(repair_gate_attach)
+
+            if cancelled:
+                for safe in self._synthesize_orphan_tool_results(
+                    pending_tool_ids, turn_id=turn_id
+                ):
+                    yield RuntimeEvent(type="tool", payload=safe, turn_id=turn_id)
+                yield RuntimeEvent(
+                    type="status",
+                    payload={
+                        "type": "turn_end",
+                        "turnId": turn_id,
+                        "status": "aborted",
+                        "reason": "user_interrupt",
+                    },
+                    turn_id=turn_id,
+                )
+                yield EngineResult(  # type: ignore[misc]
+                    terminal=Terminal.aborted,
+                    usage=usage,
+                    cost_usd=0.0,
+                    error="cancelled",
+                    session_id=session_id,
+                    turn_id=turn_id,
+                )
+                return
+            if attempt_error is not None:
+                for safe in self._synthesize_orphan_tool_results(
+                    pending_tool_ids, turn_id=turn_id
+                ):
+                    yield RuntimeEvent(type="tool", payload=safe, turn_id=turn_id)
+                yield EngineResult(  # type: ignore[misc]
+                    terminal=Terminal.error,
+                    usage=usage,
+                    cost_usd=0.0,
+                    error=str(attempt_error) or attempt_error.__class__.__name__,
                     session_id=session_id,
                     turn_id=turn_id,
                 )
@@ -1426,6 +1615,28 @@ class MagiEngineDriver:
             },
         }
 
+    @staticmethod
+    def _runner_policy_route_block_payload(
+        *,
+        route_selection: Mapping[str, object] | None,
+        turn_id: str,
+    ) -> dict[str, object] | None:
+        if route_selection is None or route_selection.get("routeDenied") is not True:
+            return None
+        reason_codes = list(_str_tuple(route_selection.get("reasonCodes")))
+        return {
+            "type": "runner_policy_route_blocked",
+            "turnId": turn_id,
+            "phase": _non_empty_str(route_selection.get("phase"), "unknown"),
+            "reasonCodes": reason_codes,
+            "routeDecision": "blocked_before_provider_call",
+            "authority": {
+                "providerCalled": False,
+                "productionWriteAllowed": False,
+                "externalIntegrationAttached": False,
+            },
+        }
+
     def _attach_runner_policy_route(
         self,
         *,
@@ -1513,6 +1724,7 @@ class MagiEngineDriver:
         prompt: str,
         harness_state: object | None,
         observed_public_refs: set[str],
+        repair_attempt_count: int = 0,
     ) -> dict[str, object] | None:
         assembly = self._runner_policy_assembly
         if assembly is None:
@@ -1523,6 +1735,21 @@ class MagiEngineDriver:
             harness_state=harness_state,
         ):
             return None
+        evidence_records: tuple[object, ...] = ()
+        verifier_bus: dict[str, object] | None = None
+        if self._evidence_collector is not None:
+            from magi_agent.harness.verifier_bus import execute_pre_final_verifier_bus
+
+            evidence_records = self._collect_evidence(turn_id)
+            verifier_bus = execute_pre_final_verifier_bus(
+                required_evidence=assembly.evidence_requirements,
+                required_validators=assembly.required_validators,
+                observed_public_refs=tuple(sorted(observed_public_refs)),
+                evidence_records=evidence_records,
+            )
+            matched_refs = verifier_bus.get("matchedRefs")
+            if isinstance(matched_refs, list):
+                observed_public_refs = {ref for ref in matched_refs if isinstance(ref, str)}
         missing_evidence = [
             ref for ref in assembly.evidence_requirements if ref not in observed_public_refs
         ]
@@ -1573,14 +1800,22 @@ class MagiEngineDriver:
             }
         if phase_route_escalation:
             payload["phaseRouteEscalation"] = True
-        payload["verifierBus"] = _build_pre_final_verifier_bus_payload(
-            decision=decision,
-            missing_evidence=missing_evidence,
-            missing_validators=missing_validators,
-        )
+        if verifier_bus is None:
+            verifier_bus = _build_pre_final_verifier_bus_payload(
+                decision=decision,
+                missing_evidence=missing_evidence,
+                missing_validators=missing_validators,
+            )
+        else:
+            verifier_bus["decision"] = decision
+            verifier_bus["missingEvidence"] = missing_evidence
+            verifier_bus["missingValidators"] = missing_validators
+            verifier_bus.setdefault("evidenceRecordCount", len(evidence_records))
+        payload["verifierBus"] = verifier_bus
         if decision == "block" and effective_action == "repair_required":
             payload["repairDecision"] = _build_coding_repair_decision_payload(
-                effective_repair_policy
+                effective_repair_policy,
+                attempt_count=repair_attempt_count,
             )
         return payload
 

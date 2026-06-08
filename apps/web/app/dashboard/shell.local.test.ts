@@ -40,6 +40,10 @@ describe("local dashboard shell", () => {
     expect(sidebar).toContain("LayoutDashboard");
     expect(sidebar).toContain("Settings");
     expect(sidebar).toContain("Sparkles");
+    expect(sidebar).toContain("${botPrefix}/learning");
+    expect(sidebar).toContain("${botPrefix}/observability");
+    expect(sidebar).toContain("Learning");
+    expect(sidebar).toContain("Observability");
     expect(sidebar).toContain("Local workspace");
     expect(sidebar).not.toContain("accountNavItems");
     expect(sidebar).not.toContain("accountSection");
