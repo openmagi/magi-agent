@@ -196,3 +196,44 @@ def test_bench_markdown_live_still_coalesces() -> None:
     assert result.flush_count >= 1
     assert result.flush_count < result.lines
     assert result.lines_per_sec > 0.0
+
+
+# ---------------------------------------------------------------------------
+# 9. The controller can back onto a mounted-widget TranscriptView (PR0.3).
+#    Public API, instrumentation counters, and committed_blocks_snapshot are
+#    identical to the RichLog backing — only the backing changes.
+# ---------------------------------------------------------------------------
+def test_controller_backs_onto_transcript_view() -> None:
+    async def _run() -> None:
+        from textual.app import App, ComposeResult
+        from textual.widgets import Static
+
+        from magi_agent.cli.tui.transcript import TranscriptController
+        from magi_agent.cli.tui.widgets.message import StatusLine
+        from magi_agent.cli.tui.widgets.transcript_view import TranscriptView
+
+        class _Host(App[None]):
+            def compose(self) -> ComposeResult:
+                self.view = TranscriptView(id="view")
+                self.live = Static("", id="live")
+                yield self.view
+                yield self.live
+
+            def on_mount(self) -> None:
+                self.controller = TranscriptController(view=self.view, live=self.live)
+
+        app = _Host()
+        async with app.run_test() as pilot:
+            c = app.controller
+            c.commit_block("plain block")
+            from rich.text import Text
+
+            c.commit_rich(Text("rich block"), text="rich block")
+            await pilot.pause()
+            # Backing is the widget list: a StatusLine + a Static were mounted.
+            assert len(app.view.query(StatusLine)) == 1
+            # Snapshot + counters identical to the RichLog backing.
+            assert c.committed_blocks_snapshot() == ("plain block", "rich block")
+            assert c.committed_block_count == 2
+
+    asyncio.run(_run())

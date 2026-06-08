@@ -42,8 +42,20 @@ class TranscriptController:
     committed blocks out.
     """
 
-    def __init__(self, *, log: RichLog, live: Static) -> None:
+    def __init__(
+        self,
+        *,
+        live: Static,
+        log: "RichLog | None" = None,
+        view: "object | None" = None,
+    ) -> None:
+        if log is None and view is None:  # pragma: no cover - construction guard
+            raise ValueError("TranscriptController needs a `log` or a `view`")
         self._log = log
+        # TranscriptView when on the widget-list backing (PR0.3). Typed as
+        # ``object`` to avoid importing the leaf ``widgets`` package here (it
+        # imports lazily inside ``_emit`` to dodge a circular import).
+        self._view = view
         self._live = live
         # Buffer of un-rendered deltas for the current live block.
         self._pending: list[str] = []
@@ -161,26 +173,59 @@ class TranscriptController:
         self._live.update("")
 
     # -- finalized blocks ----------------------------------------------------
+    def _emit(self, widget_or_renderable: object, *, as_status: bool) -> None:
+        """Append a finalized item to the active backing.
+
+        On the ``TranscriptView`` backing (PR0.3), wrap a plain string in a
+        ``StatusLine`` and a Rich renderable in a ``Static``, then ``add_block``.
+        On the legacy ``RichLog`` backing, ``write`` it directly. Imports are
+        lazy so ``transcript`` stays free of a hard ``widgets`` dependency (the
+        ``widgets`` package is a leaf; importing it at module scope would risk a
+        circular import).
+        """
+
+        if self._view is not None:
+            from textual.widgets import Static  # noqa: PLC0415
+
+            from magi_agent.cli.tui.widgets.message import (  # noqa: PLC0415
+                StatusLine,
+            )
+
+            if as_status and isinstance(widget_or_renderable, str):
+                widget = StatusLine(widget_or_renderable)
+            else:
+                widget = Static(widget_or_renderable)
+            self._view.add_block(widget)
+            return
+        assert self._log is not None
+        self._log.write(widget_or_renderable)
+
     def commit_block(self, text: str) -> None:
-        """Append an immutable finalized block to the ``RichLog`` (renders once)."""
+        """Append an immutable finalized block (renders once).
+
+        Routes through :meth:`_emit`: a ``StatusLine`` on the widget-list
+        backing, ``RichLog.write`` on legacy. Public API + counters unchanged.
+        """
 
         self._committed.append(text)
         self.committed_block_count += 1
-        self._log.write(text)
+        self._emit(text, as_status=True)
 
     def commit_rich(self, renderable: object, *, text: str = "") -> None:
-        """Append a Rich renderable to the ``RichLog`` (renders once).
+        """Append a Rich renderable as a finalized block (renders once).
 
         Mirrors :meth:`commit_block`'s finalize-first ordering contract: callers
         finalize the in-flight live block BEFORE committing a tool render so
         streamed assistant text lands first. The plain ``text`` fallback (the
         displayed ``RenderNode.text``) is recorded in the committed snapshot so
         the search-fidelity / parity assertions can see exactly what was shown.
+        Routes through :meth:`_emit`: a ``Static`` on the widget-list backing,
+        ``RichLog.write`` on legacy.
         """
 
         self._committed.append(text)
         self.committed_block_count += 1
-        self._log.write(renderable)
+        self._emit(renderable, as_status=False)
 
     def committed_blocks_snapshot(self) -> tuple[str, ...]:
         """Immutable view of finalized block texts in commit order."""
