@@ -377,17 +377,27 @@ def register_streaming_chat_routes(
         # control-response comes from the gateway-token holder (full bot access).
         # If multi-user / shared-token control-responses are ever introduced here,
         # seed baseline deny rules so rewritten args are re-validated.
-        from magi_agent.cli.wiring import build_headless_runtime  # lazy to avoid cold-start cost
+        from magi_agent.cli.wiring import (  # lazy to avoid cold-start cost
+            build_headless_runtime,
+            local_runner_policy_routing_enabled_from_env,
+        )
 
         model = getattr(getattr(runtime, "config", None), "model", None)
         cwd = os.environ.get("MAGI_AGENT_WORKSPACE") or os.getcwd()
-        permission_mode = "bypassPermissions" if _local_full_access(runtime) else "default"
+        local_full_access = _local_full_access(runtime)
+        permission_mode = "bypassPermissions" if local_full_access else "default"
+        runner_policy_routing_enabled = (
+            local_runner_policy_routing_enabled_from_env()
+            if local_full_access
+            else None
+        )
         rt = build_headless_runtime(
             cwd=cwd,
             permission_mode=permission_mode,
             session_id=session_id,
             model=model,
             prompt_sink=sink,
+            runner_policy_routing_enabled=runner_policy_routing_enabled,
         )
         return rt.engine, rt.gate
 

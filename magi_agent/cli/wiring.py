@@ -62,10 +62,12 @@ __all__ = [
     "HeadlessRuntime",
     "build_headless_runtime",
     "build_tui_app",
+    "local_runner_policy_routing_enabled_from_env",
 ]
 
 # Guard so `install_discovery()` is called at most once per process.
 _discovery_installed = False
+_RUNNER_POLICY_ROUTING_ENV = "MAGI_RUNNER_POLICY_ROUTING_ENABLED"
 
 
 def _ensure_discovery() -> None:
@@ -73,6 +75,13 @@ def _ensure_discovery() -> None:
     if not _discovery_installed:
         install_discovery()
         _discovery_installed = True
+
+
+def local_runner_policy_routing_enabled_from_env() -> bool:
+    raw = os.environ.get(_RUNNER_POLICY_ROUTING_ENV)
+    if raw is None:
+        return False
+    return raw.strip().lower() not in {"0", "false", "no", "off"}
 
 
 @dataclass
@@ -124,6 +133,7 @@ def build_headless_runtime(
     mode: "RuntimeMode" = "act",
     event_sink: object | None = None,
     prompt_sink: "PromptSink | None" = None,
+    runner_policy_routing_enabled: bool | None = None,
 ) -> HeadlessRuntime:
     """Construct the complete headless dependency set.
 
@@ -198,6 +208,7 @@ def build_headless_runtime(
             model=model,
             mode=mode,
         ),
+        runner_policy_routing_enabled=runner_policy_routing_enabled,
         event_sink=event_sink,
         evidence_collector=_general_automation_evidence_collector(effective_runner),
     )
@@ -571,6 +582,7 @@ def build_tui_app(
     model: str | None = None,
     runtime: object | None = None,
     mode: "RuntimeMode" = "act",
+    runner_policy_routing_enabled: bool | None = None,
 ) -> object:
     """Construct and return a fully-wired :class:`MagiTuiApp`.
 
@@ -620,6 +632,7 @@ def build_tui_app(
         runner=effective_runner,
         model=model,
         mode=mode,
+        runner_policy_routing_enabled=runner_policy_routing_enabled,
     )
 
     renderers = build_tool_renderers()

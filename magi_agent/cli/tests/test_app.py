@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import os
 import sys
 from types import SimpleNamespace
 from typing import Any
@@ -503,6 +504,50 @@ class TestAgentDefaultCommand:
             "run_permission_mode": "smartApprove",
         }
 
+    def test_agent_command_does_not_poison_runner_policy_routing_env(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path,
+    ) -> None:
+        monkeypatch.delenv("MAGI_RUNNER_POLICY_ROUTING_ENABLED", raising=False)
+        monkeypatch.setenv("MAGI_CLI_ENABLED", "1")
+        monkeypatch.setenv("MAGI_CLI_SESSION_DIR", str(tmp_path))
+        captured: dict[str, object] = {}
+
+        def fake_build_headless_runtime(**kwargs: object) -> object:
+            captured["runner_policy_routing_enabled"] = kwargs.get(
+                "runner_policy_routing_enabled"
+            )
+            return SimpleNamespace(
+                gate=object(),
+                commands=object(),
+                engine=StubEngineDriver(text="ok"),
+                session_log=SimpleNamespace(path=tmp_path / "sid-policy"),
+                mcp_servers=(),
+            )
+
+        async def fake_headless(prompt: str, **kwargs: object) -> int:
+            captured["prompt"] = prompt
+            return 0
+
+        runner = CliRunner()
+        with patch(
+            "magi_agent.cli.app.build_headless_runtime",
+            fake_build_headless_runtime,
+        ), patch("magi_agent.cli.app.run_headless", fake_headless):
+            result = runner.invoke(
+                _make_app(),
+                ["hello"],
+                catch_exceptions=False,
+            )
+
+        assert result.exit_code == 0, result.output
+        assert captured == {
+            "runner_policy_routing_enabled": False,
+            "prompt": "hello",
+        }
+        assert "MAGI_RUNNER_POLICY_ROUTING_ENABLED" not in os.environ
+
     def test_agent_command_runs_headless_turn(self, monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
         """The default agent command runs run_headless via the real wiring, exit 0."""
         monkeypatch.setenv("MAGI_CLI_ENABLED", "1")
@@ -913,3 +958,29 @@ def test_build_headless_runtime_does_not_report_mcp_when_runner_has_no_agent(
 
     assert rt.composio.status == "ready"
     assert rt.mcp_servers == ()
+
+
+def test_local_serve_does_not_poison_runner_policy_routing_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import magi_agent.main as main_module
+    from magi_agent.config.env import LOCAL_DEV_MODEL_SENTINEL
+
+    monkeypatch.delenv("MAGI_RUNNER_POLICY_ROUTING_ENABLED", raising=False)
+    monkeypatch.setenv("BOT_ID", "local-bot")
+    monkeypatch.setenv("USER_ID", "local-user")
+    monkeypatch.setenv("GATEWAY_TOKEN", "local-dev-token")
+    monkeypatch.setenv("CORE_AGENT_API_PROXY_URL", "http://127.0.0.1:0")
+    monkeypatch.setenv("CORE_AGENT_CHAT_PROXY_URL", "http://127.0.0.1:0")
+    monkeypatch.setenv("CORE_AGENT_REDIS_URL", "redis://127.0.0.1:0/0")
+    monkeypatch.setenv("CORE_AGENT_MODEL", LOCAL_DEV_MODEL_SENTINEL)
+    monkeypatch.setenv("CORE_AGENT_VERSION", "test-local")
+
+    with patch.object(main_module, "create_app", return_value=object()), patch.object(
+        main_module.uvicorn,
+        "run",
+    ) as run, patch.object(main_module, "_print_local_startup_notice"):
+        main_module.main(["serve", "--port", "0"])
+
+    run.assert_called_once()
+    assert "MAGI_RUNNER_POLICY_ROUTING_ENABLED" not in os.environ

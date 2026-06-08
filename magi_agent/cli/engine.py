@@ -687,6 +687,7 @@ class MagiEngineDriver:
         user_id: str = "cli",
         recovery: "EngineRecoveryPolicy | None" = None,
         runner_policy_assembly: RunnerPolicyAssembly | None = None,
+        runner_policy_routing_enabled: bool | None = None,
         event_sink: object | None = None,
         goal_nudge: "GoalNudge | None" = None,
         evidence_collector: Callable[[str], Sequence[object]] | None = None,
@@ -700,6 +701,7 @@ class MagiEngineDriver:
         # backed-off and the run is RE-INVOKED (fresh run_async).
         self._recovery = recovery
         self._runner_policy_assembly = runner_policy_assembly
+        self._runner_policy_routing_enabled = runner_policy_routing_enabled
         # Optional observability sink, called with (payload, session_id, turn_id)
         # for each sanitized public event. None keeps the default path a no-op.
         self._event_sink = event_sink
@@ -726,6 +728,11 @@ class MagiEngineDriver:
     @property
     def runner_policy_assembly(self) -> RunnerPolicyAssembly | None:
         return self._runner_policy_assembly
+
+    def _is_runner_policy_routing_enabled(self) -> bool:
+        if self._runner_policy_routing_enabled is not None:
+            return self._runner_policy_routing_enabled
+        return _runner_policy_routing_enabled()
 
     def _observe_event(self, payload: dict, session_id: str, turn_id: str) -> None:
         sink = self._event_sink
@@ -1575,7 +1582,7 @@ class MagiEngineDriver:
         harness_state: object | None,
     ) -> dict[str, object] | None:
         assembly = self._runner_policy_assembly
-        if assembly is None or not _runner_policy_routing_enabled():
+        if assembly is None or not self._is_runner_policy_routing_enabled():
             return None
         phase_routes = _phase_routes(assembly.phase_routing)
         if not phase_routes:

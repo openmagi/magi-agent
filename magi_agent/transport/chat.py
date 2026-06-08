@@ -827,7 +827,10 @@ async def _local_adk_chat_sse(
     prompt: str,
 ) -> AsyncIterator[str]:
     from magi_agent.cli.contracts import EngineResult
-    from magi_agent.cli.wiring import build_headless_runtime
+    from magi_agent.cli.wiring import (
+        build_headless_runtime,
+        local_runner_policy_routing_enabled_from_env,
+    )
     from magi_agent.config.env import LOCAL_DEV_MODEL_SENTINEL
 
     session_id = _local_chat_string(payload, "sessionId", "local-dashboard")
@@ -865,6 +868,7 @@ async def _local_adk_chat_sse(
         permission_mode="bypassPermissions",
         session_id=session_id,
         model=model_override,
+        runner_policy_routing_enabled=local_runner_policy_routing_enabled_from_env(),
     )
     cancel = asyncio.Event()
     stream = headless.engine.run_turn_stream(
