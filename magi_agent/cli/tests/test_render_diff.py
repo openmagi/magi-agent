@@ -125,6 +125,16 @@ def test_render_diff_cache_rebuilds_on_key_change() -> None:
     assert wide is not first
 
 
+def test_resolve_lexer_from_extension() -> None:
+    from magi_agent.cli.render import diff as diffmod
+
+    assert diffmod.resolve_lexer("foo.py") == "python"
+    assert diffmod.resolve_lexer("a/b/c.ts") in ("typescript", "ts")
+    # Unknown / extensionless -> a safe default, never raises.
+    assert diffmod.resolve_lexer("Makefile") is not None
+    assert diffmod.resolve_lexer("") is not None
+
+
 def test_render_diff_dim_skips_word_diff() -> None:
     # When dim=True the word-diff is skipped: paired changed lines are marked
     # whole-line, never with intra-line char ranges. We assert via the structured

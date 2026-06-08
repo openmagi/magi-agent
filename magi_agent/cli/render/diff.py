@@ -50,6 +50,7 @@ __all__ = [
     "word_ranges",
     "build_hunks",
     "unified_diff_text",
+    "resolve_lexer",
     "render_diff",
     "clear_diff_cache",
 ]
@@ -69,6 +70,22 @@ TOKEN_RE = re.compile(r"[^\W_]+|\s+|.", re.UNICODE)
 
 #: Canonical Pygments/Rich theme for syntax highlighting.
 DEFAULT_THEME = "monokai"
+
+
+def resolve_lexer(file: str) -> str:
+    """Resolve a Pygments lexer *name* from a filename/extension.
+
+    Resolved ONCE per diff (from the file extension) rather than re-guessing per
+    line, so every line in a hunk shares the file's language. Falls back to
+    ``"text"`` when the extension is unknown — never raises.
+    """
+
+    try:
+        from pygments.lexers import get_lexer_for_filename  # noqa: PLC0415
+
+        return get_lexer_for_filename(file or "x.txt").aliases[0]
+    except Exception:  # pragma: no cover - unknown extension -> plain text
+        return "text"
 
 #: A half-open ``(start, end)`` char range within a single line.
 Range = tuple[int, int]
@@ -271,7 +288,9 @@ def clear_diff_cache() -> None:
     _RENDER_CACHE.clear()
 
 
-def _highlight_line(text: str, *, file: str, theme: str) -> "Text":
+def _highlight_line(
+    text: str, *, file: str, theme: str, lexer: str | None = None
+) -> "Text":
     """Syntax-highlight a single line, returning a styled ``rich.text.Text``."""
 
     from rich.syntax import Syntax
@@ -280,8 +299,8 @@ def _highlight_line(text: str, *, file: str, theme: str) -> "Text":
     if not text:
         return Text("")
     try:
-        lexer = Syntax.guess_lexer(file, code=text)
-        highlighted = Syntax.highlight(Syntax(text, lexer, theme=theme), text)
+        chosen = lexer or Syntax.guess_lexer(file, code=text)
+        highlighted = Syntax.highlight(Syntax(text, chosen, theme=theme), text)
         # ``Syntax.highlight`` appends a trailing newline; trim it in place so the
         # per-line ``Text`` stays single-line for our own newline joining.
         highlighted.rstrip()
@@ -290,11 +309,13 @@ def _highlight_line(text: str, *, file: str, theme: str) -> "Text":
         return Text(text)
 
 
-def _render_line(line: DiffLine, *, file: str, theme: str, dim: bool) -> "Text":
+def _render_line(
+    line: DiffLine, *, file: str, theme: str, dim: bool, lexer: str | None = None
+) -> "Text":
     from rich.style import Style
     from rich.text import Text
 
-    base = _highlight_line(line.text, file=file, theme=theme)
+    base = _highlight_line(line.text, file=file, theme=theme, lexer=lexer)
     if line.kind == "context":
         prefix = Text("  ")
         if dim:
@@ -342,6 +363,7 @@ def render_diff(
         return cached
 
     hunks = build_hunks(old, new, dim=dim)
+    lexer = resolve_lexer(file)
     out = Text(overflow="fold", no_wrap=False)
     first_line = True
     for hunk in hunks:
@@ -349,7 +371,9 @@ def render_diff(
             if not first_line:
                 out.append("\n")
             first_line = False
-            out.append_text(_render_line(line, file=file, theme=theme, dim=dim))
+            out.append_text(
+                _render_line(line, file=file, theme=theme, dim=dim, lexer=lexer)
+            )
 
     if len(_RENDER_CACHE) >= _CACHE_MAX:
         _RENDER_CACHE.clear()
