@@ -1092,3 +1092,35 @@ def test_event_bridge_live_compatible_partial_text_uses_agent_channel_only_after
         "private child output",
     ):
         assert leaked not in unsafe_rendered
+
+
+def test_event_bridge_drops_duplicate_aggregate_text_after_streaming_partials() -> None:
+    """A non-partial aggregate that repeats already-streamed partial text (delivered
+    alongside a trailing tool call) must NOT be re-emitted, or the client renders the
+    segment twice (e.g. "…subagent.…subagent." right before a tool call)."""
+    bridge = OpenMagiEventBridge(live_compatible=True)
+
+    # 1) The model streams the text token-by-token as partial events.
+    p1 = bridge.project_adk_event(text_event("Writing state and ", partial=True), turn_id="t1")
+    p2 = bridge.project_adk_event(text_event("dispatching subagent.", partial=True), turn_id="t1")
+    assert [e["delta"] for e in p1.agent_events] == ["Writing state and "]
+    assert [e["delta"] for e in p2.agent_events] == ["dispatching subagent."]
+
+    # 2) The aggregated NON-partial event repeats the full text + a tool call.
+    mixed = Event(
+        author="model",
+        content=types.Content(
+            role="model",
+            parts=[
+                types.Part(text="Writing state and dispatching subagent."),
+                types.Part(
+                    function_call=types.FunctionCall(id="tool-1", name="FileWrite", args={})
+                ),
+            ],
+        ),
+        invocation_id="t1",
+    )
+    projection = bridge.project_adk_event(mixed, turn_id="t1")
+
+    # Only the tool_start survives — the duplicate text aggregate is dropped.
+    assert [e["type"] for e in projection.agent_events] == ["tool_start"]
