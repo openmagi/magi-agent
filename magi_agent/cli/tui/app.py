@@ -666,9 +666,11 @@ class MagiTuiApp(App[None]):
             return
         self.start_turn(submission.text)
 
-    def on_input_changed(self, event: Input.Changed) -> None:
+    def on_text_area_changed(self, event: TextArea.Changed) -> None:
         # Recompute completions for the current pre-cursor slice (debounced via
-        # the exclusive worker so a stale async pass is discarded).
+        # the exclusive worker so a stale async pass is discarded). ``PromptInput``
+        # is a ``TextArea`` so it posts ``TextArea.Changed`` (not ``Input.Changed``)
+        # on every edit.
         if self._input is None:
             return
         self._refresh_completions(self._input.precursor)
@@ -941,21 +943,18 @@ class MagiTuiApp(App[None]):
             self.exit()
         elif action == Action.CHAT_SUBMIT.value:
             self._submit_current_input()
-        # All other Action members (CHAT_NEWLINE / CHAT_STASH / AUTOCOMPLETE_* /
-        # CONFIRMATION_*) are intentionally no-ops in this v1 surface — their
-        # behavior is owned by the Input/OptionList/modal widgets or deferred.
+        elif action == Action.CHAT_NEWLINE.value:
+            if self._input is not None:
+                self._input.insert("\n")
+        # Remaining Action members (CHAT_STASH wired in PR1.3 / AUTOCOMPLETE_* /
+        # CONFIRMATION_*) are owned by widgets or land in later PRs.
 
     def _submit_current_input(self) -> None:
-        """Submit the current prompt-input line (classify + route, then clear)."""
+        """Submit the current prompt buffer (classify + route, then clear)."""
 
         if self._input is None:
             return
-        line = self._input.value
-        if not line.strip():
-            return
-        submission = self._input.classify(line)
-        self._input.value = ""
-        self._input.post_message(PromptInput.PromptSubmitted(submission))
+        self._input.submit()
 
     # -- autocomplete overlay ----------------------------------------------
     def _refresh_completions(self, precursor: str) -> None:
