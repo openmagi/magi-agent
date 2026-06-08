@@ -77,6 +77,7 @@ from magi_agent.cli.tui.autocomplete import (
     Completion,
     CompletionProvider,
 )
+from magi_agent.cli.tui.history import DraftStash, InputHistory
 from magi_agent.cli.tui.input import PromptInput, Submission
 from magi_agent.cli.tui.render.markdown import render_markdown
 from magi_agent.cli.tui.transcript import (
@@ -507,6 +508,10 @@ class MagiTuiApp(App[None]):
         self._renderers = renderers
         self._runtime = runtime
         self._session_id = session_id
+        # Per-session ↑/↓ input history (persisted JSONL under the session root).
+        self._history = InputHistory(session_id=session_id)
+        # Per-session draft stash (ctrl+s); persisted JSONL alongside history.
+        self._drafts = DraftStash(session_id=session_id)
         self._model = model
         self._mode = mode
         import os as _os  # noqa: PLC0415
@@ -606,6 +611,9 @@ class MagiTuiApp(App[None]):
         else:
             self._controller = TranscriptController(log=self._log, live=self._live)
         self._controller.markdown_live = True
+        # Wire the prompt's ↑/↓ recall to this session's history ring.
+        if self._input is not None:
+            self._input.attach_history(self._history)
         self._render_welcome()
         # Coalescing flush timer: repaint buffered token deltas on a fixed
         # cadence so a pure token stream renders incrementally (not just at
@@ -643,10 +651,22 @@ class MagiTuiApp(App[None]):
         welcome.append(".  ", style="dim")
         welcome.append("Ctrl+C", style="#7aa2f7")
         welcome.append(" cancels a turn.\n", style="dim")
+        welcome.append("Keys: ", style="dim")
+        welcome.append("Shift+Enter", style="#7aa2f7")
+        welcome.append(" newline · ", style="dim")
+        welcome.append("↑", style="#7aa2f7")
+        welcome.append(" history · ", style="dim")
+        welcome.append("Ctrl+S", style="#7aa2f7")
+        welcome.append(" draft\n", style="dim")
         welcome.append("Commands: ", style="dim")
         welcome.append(command_line, style="#9ece6a")
         self._controller.commit_rich(
-            welcome, text=f"Welcome to Magi  Commands: {command_line}"
+            welcome,
+            text=(
+                "Welcome to Magi  "
+                "Keys: Shift+Enter newline · ↑ history · Ctrl+S draft  "
+                f"Commands: {command_line}"
+            ),
         )
 
     @property
@@ -661,15 +681,26 @@ class MagiTuiApp(App[None]):
     ) -> None:
         self._hide_completions()
         submission = event.submission
+        # Record every submitted prompt (commands included) into history so ↑/↓
+        # recall them; blank/consecutive-dup entries are filtered by add().
+        self._history.add(submission.text)
         if submission.kind == "command":
             self._dispatch_command(submission)
             return
         self.start_turn(submission.text)
 
-    def on_input_changed(self, event: Input.Changed) -> None:
+    def on_text_area_changed(self, event: TextArea.Changed) -> None:
         # Recompute completions for the current pre-cursor slice (debounced via
-        # the exclusive worker so a stale async pass is discarded).
+        # the exclusive worker so a stale async pass is discarded). ``PromptInput``
+        # is a ``TextArea`` so it posts ``TextArea.Changed`` (not ``Input.Changed``)
+        # on every edit.
         if self._input is None:
+            return
+        # Source guard: ONLY the prompt buffer drives completions. Other
+        # ``TextArea``s (e.g. the ``ToolUseConfirm`` modal's ``#edit-area``)
+        # bubble their own ``TextArea.Changed`` here; recomputing off the prompt
+        # precursor for those is spurious, so ignore foreign sources.
+        if event.text_area is not self._input:
             return
         self._refresh_completions(self._input.precursor)
 
@@ -939,23 +970,57 @@ class MagiTuiApp(App[None]):
             self.action_cancel_turn()
         elif action == Action.GLOBAL_QUIT.value:
             self.exit()
+        # NOTE: these CHAT_SUBMIT/CHAT_NEWLINE branches are NOT reached while
+        # ``PromptInput`` is focused — its ``_on_key`` calls ``event.stop()`` on
+        # Enter/Shift+Enter, so it is the authoritative submission driver. These
+        # remain only as a fallback for programmatic / non-focused dispatch.
         elif action == Action.CHAT_SUBMIT.value:
             self._submit_current_input()
-        # All other Action members (CHAT_NEWLINE / CHAT_STASH / AUTOCOMPLETE_* /
-        # CONFIRMATION_*) are intentionally no-ops in this v1 surface — their
-        # behavior is owned by the Input/OptionList/modal widgets or deferred.
+        elif action == Action.CHAT_NEWLINE.value:
+            if self._input is not None:
+                self._input.insert("\n")
+        elif action == Action.CHAT_STASH.value:
+            self._stash_or_restore_draft()
+        # Remaining Action members (AUTOCOMPLETE_* / CONFIRMATION_*) are owned by
+        # widgets or land in later PRs.
 
     def _submit_current_input(self) -> None:
-        """Submit the current prompt-input line (classify + route, then clear)."""
+        """Submit the current prompt buffer (classify + route, then clear)."""
 
         if self._input is None:
             return
-        line = self._input.value
-        if not line.strip():
+        self._input.submit()
+
+    def _stash_or_restore_draft(self) -> None:
+        """ctrl+s: stash the current draft, or restore the most recent if empty.
+
+        A non-blank buffer is handed to :class:`DraftStash` (which keeps it only
+        if it is at least ``MIN_DRAFT_LEN`` chars). The buffer is cleared ONLY
+        when the draft was actually stored — a sub-threshold draft that
+        ``save()`` drops leaves the buffer intact so a deliberate ctrl+s never
+        silently loses the operator's text. An empty buffer restores the single
+        most-recent stashed draft (highest count, then recency) and parks the
+        caret at its end. No-op when there is nothing to restore.
+        """
+
+        if self._input is None:
             return
-        submission = self._input.classify(line)
-        self._input.value = ""
-        self._input.post_message(PromptInput.PromptSubmitted(submission))
+        text = self._input.text
+        if text.strip():
+            if self._drafts.save(text):
+                self._input.text = ""
+            else:
+                # Too short to stash: keep the buffer so it isn't lost.
+                self.notify("Draft too short to stash", timeout=2)
+            return
+        recent = self._drafts.recent(limit=1)
+        if recent:
+            restored = recent[0]
+            self._input.text = restored
+            self._input.cursor_location = (
+                restored.count("\n"),
+                len(restored.split("\n")[-1]),
+            )
 
     # -- autocomplete overlay ----------------------------------------------
     def _refresh_completions(self, precursor: str) -> None:

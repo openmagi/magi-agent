@@ -1,8 +1,10 @@
-"""Prompt input widget + submission routing for the Magi TUI (PR-E2).
+"""Prompt input widget + submission routing for the Magi TUI (PR-E2 / PR1.1).
 
-``PromptInput`` wraps a Textual ``Input`` and exposes the pre-cursor text slice
-(everything left of the caret) so the :class:`~.autocomplete.AutocompleteRouter`
-can compute completions. On submit it classifies the line:
+``PromptInput`` wraps a Textual ``TextArea`` (multiline) and exposes the
+pre-cursor text slice (everything left of the caret, across rows) so the
+:class:`~.autocomplete.AutocompleteRouter` can compute completions. Enter
+submits the whole buffer; Shift+Enter inserts a newline. On submit it
+classifies the line:
 
 * a line beginning with ``/`` is a **slash command** -> dispatched via the
   injected :class:`~magi_agent.cli.contracts.CommandRegistry` (looked up
@@ -19,11 +21,16 @@ documented stub.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
+from textual import events
 from textual.message import Message
-from textual.widgets import Input
+from textual.widgets import TextArea
 
 from magi_agent.cli.contracts import Command, CommandRegistry
+
+if TYPE_CHECKING:
+    from magi_agent.cli.tui.history import InputHistory
 
 __all__ = ["Submission", "PromptInput", "classify_line"]
 
@@ -63,16 +70,24 @@ def classify_line(line: str, commands: CommandRegistry) -> Submission:
     return Submission(kind="prompt", text=line)
 
 
-class PromptInput(Input):
-    """The REPL prompt input widget.
+class PromptInput(TextArea):
+    """The REPL prompt input widget (multiline).
+
+    Backed by ``textual.widgets.TextArea`` so the prompt is multiline: Enter
+    submits the whole buffer; Shift+Enter inserts a newline. This widget's
+    ``_on_key`` is the AUTHORITATIVE submission driver: it intercepts Enter /
+    Shift+Enter at the widget level and calls ``event.stop()`` (``TextArea``
+    otherwise consumes Enter as a newline; without ``event.stop()`` the App's
+    keybinding resolver would also fire). Because the event is stopped while
+    this widget is focused, the App's ``Action.CHAT_SUBMIT`` /
+    ``Action.CHAT_NEWLINE`` resolver branches are NOT reached — they remain only
+    as a fallback for programmatic / non-focused dispatch.
 
     Posts a :class:`PromptInput.PromptSubmitted` message (carrying a classified
-    :class:`Submission`) when the user submits a non-empty line, and clears
-    itself. The owning App handles the message.
-
-    Note: we deliberately do NOT shadow ``Input.Submitted`` (Textual's built-in
-    message, posted with positional ``(self, value, ...)`` args) — overriding it
-    would break the base widget's own dispatch.
+    :class:`Submission`) when the user submits a non-empty buffer, and clears
+    itself. The public surface (``precursor`` / ``classify`` /
+    ``PromptSubmitted``) is preserved byte-for-byte so the autocomplete router
+    and App routing are untouched.
     """
 
     class PromptSubmitted(Message):
@@ -83,27 +98,102 @@ class PromptInput(Input):
             super().__init__()
 
     def __init__(self, *, commands: CommandRegistry, **kwargs: object) -> None:
-        super().__init__(placeholder="Message Magi…  (/ for commands)", **kwargs)  # type: ignore[arg-type]
+        super().__init__(**kwargs)  # type: ignore[arg-type]
         self._commands = commands
+        # A single-line-looking prompt by default; grows as the user types.
+        self.show_line_numbers = False
+        self.soft_wrap = True
+        # Per-session ↑/↓ recall ring (wired by the App via attach_history).
+        self._history: "InputHistory | None" = None
+
+    def attach_history(self, history: "InputHistory") -> None:
+        """Wire a per-session :class:`InputHistory` for ↑/↓ recall."""
+
+        self._history = history
+
+    def _last_row(self) -> int:
+        """Row index of the buffer's final line (0-based)."""
+
+        return self.text.count("\n")
+
+    def _set_text(self, text: str) -> None:
+        """Replace the buffer with ``text`` and park the caret at its end."""
+
+        self.text = text
+        self.cursor_location = (text.count("\n"), len(text.split("\n")[-1]))
 
     @property
     def precursor(self) -> str:
-        """The text slice left of the caret — fed to the autocomplete router."""
+        """Text left of the caret, across all rows (autocomplete input)."""
 
-        return self.value[: self.cursor_position]
+        row, col = self.cursor_location
+        lines = self.text.split("\n")
+        if row >= len(lines):
+            return self.text
+        before = lines[:row]
+        current = lines[row][:col]
+        return "\n".join([*before, current])
 
     def classify(self, line: str) -> Submission:
         """Classify ``line`` against the injected registry (exposed for tests)."""
 
         return classify_line(line, self._commands)
 
-    def on_input_submitted(self, event: Input.Submitted) -> None:
-        # Textual fires Input.Submitted on Enter; swallow it and re-post our own
-        # classified message so the App has a single submission surface.
-        event.stop()
-        line = event.value
+    def submit(self) -> None:
+        """Classify + emit the current buffer as a submission, then clear.
+
+        No-op on a blank buffer. Called by the widget's own Enter handler
+        (``_on_key``, the authoritative driver). The App's
+        ``Action.CHAT_SUBMIT`` resolver branch only calls this as a fallback for
+        programmatic / non-focused dispatch (it is not reached while this widget
+        is focused, since ``_on_key`` stops the event).
+        """
+
+        line = self.text
         if not line.strip():
             return
         submission = self.classify(line)
-        self.value = ""
+        self.text = ""
         self.post_message(self.PromptSubmitted(submission))
+
+    async def _on_key(self, event: events.Key) -> None:
+        """Intercept Enter (submit) / Shift+Enter (newline) / ↑↓ (history).
+
+        ``TextArea._on_key`` (an async handler) maps Enter to a newline insert and
+        stops the event, so the App's keybinding resolver never sees it. We take
+        submission/newline here and otherwise await the base editor's handler so
+        normal printable/edit keys still work.
+
+        ↑/↓ recall history ONLY at the buffer edges (↑ on the first row, ↓ on the
+        last row); anywhere mid-buffer the keypress falls through to the base
+        editor so multi-line editing still moves the caret up/down a row as
+        normal. With no history attached, ↑/↓ are never hijacked.
+        """
+
+        if event.key == "enter":
+            event.stop()
+            event.prevent_default()
+            self.submit()
+            return
+        if event.key == "shift+enter":
+            event.stop()
+            event.prevent_default()
+            self.insert("\n")
+            return
+        if event.key in ("up", "down") and self._history is not None:
+            row, _col = self.cursor_location
+            if event.key == "up" and row == 0:
+                recalled = self._history.prev(self.text)
+                if recalled is not None:
+                    event.stop()
+                    event.prevent_default()
+                    self._set_text(recalled)
+                    return
+            elif event.key == "down" and row == self._last_row():
+                recalled = self._history.next()
+                if recalled is not None:
+                    event.stop()
+                    event.prevent_default()
+                    self._set_text(recalled)
+                    return
+        await super()._on_key(event)

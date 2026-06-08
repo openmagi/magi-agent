@@ -139,6 +139,10 @@ def test_tui_mount_renders_welcome_state() -> None:
         joined = "\n".join(blocks)
         assert "Welcome to Magi" in joined
         assert "/compact" in joined
+        # Phase 1 keys advertised in the welcome banner (discoverability).
+        assert "Shift+Enter" in joined
+        assert "history" in joined
+        assert "Ctrl+S" in joined
         assert app.last_terminal is None
 
     asyncio.run(_run())
@@ -416,21 +420,117 @@ def test_tool_ask_keyboard_number_selects_allow() -> None:
 
 
 # ---------------------------------------------------------------------------
+# 5d. The change handler is source-guarded: typing into the modal's #edit-area
+#     TextArea must NOT recompute prompt completions (its TextArea.Changed
+#     bubbles to the App but is for a foreign source, not the prompt buffer).
+# ---------------------------------------------------------------------------
+def test_modal_edit_area_change_does_not_refresh_prompt_completions() -> None:
+    async def _run() -> None:
+        engine = FakeEngineDriver(tokens=["working"], ask_tool="Bash")
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            app._gate = SinkGate(app.sink)
+            app.start_turn("run something")
+            await pilot.pause()
+            await pilot.pause()
+            assert isinstance(app.screen, ToolUseConfirm)
+            # Open the edit sub-view so #edit-area is focused.
+            await pilot.click("#edit")
+            await pilot.pause()
+
+            # Spy on the completion recompute: it must NOT fire for edits made to
+            # the modal's #edit-area (only the prompt buffer drives completions).
+            calls: list[str] = []
+            app._refresh_completions = lambda precursor: calls.append(precursor)  # type: ignore[method-assign]
+
+            editor = app.screen.query_one("#edit-area")
+            editor.focus()
+            await pilot.pause()
+            # Type into the modal editor -> posts TextArea.Changed for #edit-area.
+            await pilot.press("x")
+            await pilot.pause()
+
+            assert calls == [], (
+                "typing into the modal #edit-area must not recompute prompt "
+                f"completions; got {calls!r}"
+            )
+            # Completion overlay stays hidden too.
+            assert app._completions is not None
+            assert not app._completions.has_class("visible")
+            # Resolve the awaiting turn cleanly.
+            await pilot.press("escape")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+
+    asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
+# 5e. Autocomplete fires through the live TextArea event path (Pilot)
+#     Typing "/" into the real prompt must surface the completion overlay,
+#     exercising on_text_area_changed -> _refresh_completions end-to-end. This
+#     proves PR1.1's Input.Changed -> TextArea.Changed migration kept the
+#     autocomplete wiring intact (we do NOT call the router directly).
+# ---------------------------------------------------------------------------
+def test_typing_slash_shows_completions_via_textarea_event() -> None:
+    async def _run() -> None:
+        engine = FakeEngineDriver()
+        registry = FakeRegistry(["compact", "reset", "status"])
+        app = _make_app(engine, commands=registry)
+        async with app.run_test() as pilot:
+            app._input.focus()
+            await pilot.pause()
+            # Type a literal "/" -> posts TextArea.Changed for the prompt buffer.
+            await pilot.press("slash")
+            # The completion compute runs in an exclusive worker; let it finish.
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert app._completions is not None
+            # The overlay is shown (visible class) with the registry commands.
+            assert app._completions.has_class("visible"), (
+                "typing '/' must surface the completion overlay via the live "
+                "TextArea.Changed path"
+            )
+            assert app._completions.option_count >= 1
+
+    asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
 # 6. Slash command submission routes through the registry lookup
 # ---------------------------------------------------------------------------
 def test_slash_command_dispatch_via_registry() -> None:
     async def _run() -> None:
         engine = FakeEngineDriver()
         registry = FakeRegistry(["compact"])
+        # Spy on the registry lookup so we prove dispatch actually consulted it.
+        looked_up: list[str] = []
+        original_lookup = registry.lookup
+
+        def _spy_lookup(name: str):
+            looked_up.append(name)
+            return original_lookup(name)
+
+        registry.lookup = _spy_lookup  # type: ignore[method-assign]
+
         app = _make_app(engine, commands=registry)
         async with app.run_test() as pilot:
             app._input.focus()
             await pilot.pause()
-            app._input.value = "/compact"
+            # PR1.1: PromptInput is a TextArea (no ``.value``); set ``.text`` and
+            # park the caret at the end, then drive the REAL submit via Enter.
+            app._input.text = "/compact"
+            app._input.cursor_location = (0, len("/compact"))
             await pilot.press("enter")
             await pilot.pause()
         blocks = app.controller.committed_blocks_snapshot()
-        assert any("/compact" in b for b in blocks)
+        # REAL dispatch evidence: _dispatch_command commits a "[command] /compact"
+        # line. The welcome banner contains "/compact" too, so assert on the
+        # dispatch-specific echo that ONLY the command path produces — this fails
+        # if submission/dispatch did not happen.
+        assert any("[command] /compact" in b for b in blocks), blocks
+        # And the registry lookup path was actually hit by the command name.
+        assert "compact" in looked_up
         # No engine turn was run for a command.
         assert app.last_terminal is None
 
