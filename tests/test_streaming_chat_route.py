@@ -48,6 +48,7 @@ from magi_agent.transport.streaming_chat_route import (
     register_streaming_chat_routes,
     _streaming_chat_enabled,
     _extract_prompt_text,
+    _local_full_access,
 )
 from magi_agent.transport.streaming_sink import build_streaming_prompt_sink
 
@@ -705,6 +706,111 @@ def test_streaming_chat_enabled_flag(monkeypatch) -> None:
     for falsy in ("0", "false", "no", "off", ""):
         monkeypatch.setenv("MAGI_STREAMING_CHAT", falsy)
         assert not _streaming_chat_enabled(), f"expected falsy for {falsy!r}"
+
+
+def test_local_full_access_only_matches_loopback_owner() -> None:
+    local_runtime = OpenMagiRuntime(
+        config=RuntimeConfig(
+            bot_id="local-bot",
+            user_id="local-user",
+            gateway_token="local-dev-token",
+            api_proxy_url="http://api-proxy.local",
+            chat_proxy_url="http://chat-proxy.local",
+            redis_url="redis://redis.local:6379/0",
+            model="gpt-5.2",
+            build=BuildInfo(version="0.1.0-test", build_sha="sha-test"),
+        )
+    )
+    hosted_runtime = _make_runtime(gateway_token="local-dev-token")
+
+    assert _local_full_access(local_runtime)
+    assert not _local_full_access(hosted_runtime)
+
+
+def test_default_stream_builder_bypasses_permissions_for_local_owner(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
+    captured: dict[str, object] = {}
+
+    class FakeEngine:
+        async def run_turn_stream(self, runtime, turn_input, *, cancel, gate):
+            yield EngineResult(
+                terminal=Terminal.completed,
+                session_id=turn_input["session_id"],
+                turn_id=turn_input["turn_id"],
+            )
+
+    def fake_build_headless_runtime(**kwargs: object) -> SimpleNamespace:
+        captured.update(kwargs)
+        return SimpleNamespace(engine=FakeEngine(), gate=None)
+
+    import magi_agent.cli.wiring as wiring
+
+    monkeypatch.setattr(wiring, "build_headless_runtime", fake_build_headless_runtime)
+    runtime = OpenMagiRuntime(
+        config=RuntimeConfig(
+            bot_id="local-bot",
+            user_id="local-user",
+            gateway_token="local-dev-token",
+            api_proxy_url="http://api-proxy.local",
+            chat_proxy_url="http://chat-proxy.local",
+            redis_url="redis://redis.local:6379/0",
+            model="gpt-5.2",
+            build=BuildInfo(version="0.1.0-test", build_sha="sha-test"),
+        )
+    )
+    client = TestClient(_make_app(runtime=runtime))
+
+    response = client.post(
+        "/v1/chat/stream",
+        headers={"authorization": "Bearer local-dev-token"},
+        json={
+            "sessionId": "s-local",
+            "turnId": "t-local",
+            "messages": [{"role": "user", "content": "run local tool"}],
+        },
+    )
+
+    assert response.status_code == 200
+    assert captured["permission_mode"] == "bypassPermissions"
+
+
+def test_default_stream_builder_keeps_default_permissions_for_hosted_runtime(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
+    captured: dict[str, object] = {}
+
+    class FakeEngine:
+        async def run_turn_stream(self, runtime, turn_input, *, cancel, gate):
+            yield EngineResult(
+                terminal=Terminal.completed,
+                session_id=turn_input["session_id"],
+                turn_id=turn_input["turn_id"],
+            )
+
+    def fake_build_headless_runtime(**kwargs: object) -> SimpleNamespace:
+        captured.update(kwargs)
+        return SimpleNamespace(engine=FakeEngine(), gate=None)
+
+    import magi_agent.cli.wiring as wiring
+
+    monkeypatch.setattr(wiring, "build_headless_runtime", fake_build_headless_runtime)
+    client = TestClient(_make_app())
+
+    response = client.post(
+        "/v1/chat/stream",
+        headers=_auth_headers(),
+        json={
+            "sessionId": "s-hosted",
+            "turnId": "t-hosted",
+            "messages": [{"role": "user", "content": "run hosted tool"}],
+        },
+    )
+
+    assert response.status_code == 200
+    assert captured["permission_mode"] == "default"
 
 
 # ---------------------------------------------------------------------------
