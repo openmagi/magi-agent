@@ -25,7 +25,8 @@ Design notes
   ``on bright_green`` on the changed char ranges, on top of Pygments syntax
   foregrounds. ``rich`` is imported lazily inside the colorize path so the plain
   unified-diff projection works rich-free.
-* **Cache** keys the rendered ``Text`` by ``(file, width, theme, dim, old, new)``
+* **Cache** keys the rendered renderable (a ``Text`` for the unified view, a
+  ``Table`` for the split view) by ``(file, width, theme, dim, split, old, new)``
   so a ``ctrl+o``-style remount/resize does not re-highlight.
 """
 
@@ -357,6 +358,9 @@ def render_diff(
     ``(file, width, theme, dim, split, old, new)``: the same key returns the SAME
     object; any key change rebuilds. ``rich`` is imported lazily here so the
     plain ``unified_diff_text`` path stays rich-free.
+
+    ``width`` is ignored when ``split=True`` — the split ``Table`` lays out its
+    two columns via Rich's ratio-based grid, not a fixed width.
     """
 
     from rich.text import Text
