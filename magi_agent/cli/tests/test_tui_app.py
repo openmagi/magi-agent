@@ -395,6 +395,22 @@ def test_ctrl_c_cancels_replacement_turn_after_stale_worker_finishes() -> None:
 
 
 # ---------------------------------------------------------------------------
+# 5b-ii. Ctrl+C binding is priority (preempts Textual's built-in ctrl+c)
+# ---------------------------------------------------------------------------
+def test_ctrl_c_binding_is_priority() -> None:
+    from textual.binding import Binding
+
+    ctrl_c = [
+        b
+        for b in MagiTuiApp.BINDINGS
+        if isinstance(b, Binding) and b.key == "ctrl+c"
+    ]
+    assert ctrl_c, "ctrl+c must be a Binding (not a bare tuple) to set priority"
+    assert ctrl_c[0].priority is True
+    assert ctrl_c[0].action == "cancel_turn"
+
+
+# ---------------------------------------------------------------------------
 # 5c. Modal selection by keyboard (number key) resolves the turn
 # ---------------------------------------------------------------------------
 def test_tool_ask_keyboard_number_selects_allow() -> None:

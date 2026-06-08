@@ -479,7 +479,11 @@ class MagiTuiApp(App[None]):
     """
 
     BINDINGS = [
-        ("ctrl+c", "cancel_turn", "Cancel"),
+        # priority=True so this preempts Textual's built-in ctrl+c (which, when
+        # an Input/TextArea is focused, is "copy", and otherwise only shows a
+        # "press ctrl+q to quit" notice). Without priority the binding never
+        # fires from the prompt and Ctrl+C appears dead.
+        Binding("ctrl+c", "cancel_turn", "Cancel", priority=True),
         ("ctrl+y", "copy_selection", "Copy"),
     ]
 
@@ -633,13 +637,17 @@ class MagiTuiApp(App[None]):
         if self._controller is None:
             return
         command_names = [
-            getattr(command, "name", "")
-            for command in self._commands.list_for(CommandSurface(tui=True, headless=False))
+            name
+            for command in self._commands.list_for(
+                CommandSurface(tui=True, headless=False)
+            )
+            if (name := getattr(command, "name", ""))
         ]
-        commands = ", ".join(f"/{name}" for name in command_names[:5] if name)
-        command_line = (
-            commands if commands else "type / for local commands"
-        )
+        preview = ", ".join(f"/{name}" for name in command_names[:8])
+        extra = len(command_names) - 8
+        if preview and extra > 0:
+            preview = f"{preview}  (+{extra} more — type / to see all)"
+        command_line = preview if preview else "type / for local commands"
         from rich.text import Text  # noqa: PLC0415
 
         welcome = Text()
@@ -650,7 +658,7 @@ class MagiTuiApp(App[None]):
         welcome.append("Enter", style="#7aa2f7")
         welcome.append(".  ", style="dim")
         welcome.append("Ctrl+C", style="#7aa2f7")
-        welcome.append(" cancels a turn.\n", style="dim")
+        welcome.append(" cancels a turn (again to quit).\n", style="dim")
         welcome.append("Keys: ", style="dim")
         welcome.append("Shift+Enter", style="#7aa2f7")
         welcome.append(" newline · ", style="dim")
@@ -658,14 +666,14 @@ class MagiTuiApp(App[None]):
         welcome.append(" history · ", style="dim")
         welcome.append("Ctrl+S", style="#7aa2f7")
         welcome.append(" draft\n", style="dim")
-        welcome.append("Commands: ", style="dim")
+        welcome.append(f"Commands ({len(command_names)}): ", style="dim")
         welcome.append(command_line, style="#9ece6a")
         self._controller.commit_rich(
             welcome,
             text=(
                 "Welcome to Magi  "
                 "Keys: Shift+Enter newline · ↑ history · Ctrl+S draft  "
-                f"Commands: {command_line}"
+                f"Commands ({len(command_names)}): {command_line}"
             ),
         )
 
