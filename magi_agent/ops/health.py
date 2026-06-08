@@ -87,4 +87,61 @@ def scheduler_executor_health_projection(
     return projection
 
 
-__all__ = ["default_runtime_ops_health_metadata", "scheduler_executor_health_projection"]
+def gateway_daemon_health_projection(
+    *,
+    watcher_states: dict[str, dict[str, object]] | None = None,
+) -> dict[str, object]:
+    """Return a redacted health projection for the Track-F gateway daemon.
+
+    Pure projection — reports state WITHOUT enabling anything.  ``daemonEnabled``
+    is derived from ``MAGI_GATEWAY_DAEMON_ENABLED`` (the same gate the daemon
+    reads) so the surface and the runtime can never diverge.
+
+    Per-watcher states are surfaced under ``watchers`` keyed by watcher name.
+    Only the whitelisted fields ``state`` and ``restarts`` survive per watcher —
+    any other key (e.g. a stray token) is dropped so no raw secret leaks into the
+    health surface (redaction invariant).
+
+    A convenience ``cronTicker`` field mirrors the ``scheduler_cron`` watcher's
+    state (or ``"absent"`` when no cron watcher is registered) so dashboards can
+    surface cron-ticker health without parsing the watcher map.
+
+    Args:
+        watcher_states: Map of ``watcher_name -> {state, restarts, ...}``.  The
+            extra keys are intentionally ignored (redaction).
+    """
+    enabled = _truthy_env("MAGI_GATEWAY_DAEMON_ENABLED")
+    raw_states = watcher_states or {}
+
+    watchers: dict[str, dict[str, object]] = {}
+    for name, raw in raw_states.items():
+        state = raw.get("state", "unknown") if isinstance(raw, dict) else "unknown"
+        restarts = raw.get("restarts", 0) if isinstance(raw, dict) else 0
+        watchers[name] = {"state": state, "restarts": restarts}
+
+    cron = watchers.get("scheduler_cron")
+    cron_ticker = {"state": cron["state"]} if cron is not None else {"state": "absent"}
+
+    if not enabled:
+        status = "disabled"
+    elif any(w["state"] == "running" for w in watchers.values()):
+        status = "running"
+    elif watchers and all(w["state"] in {"failed", "disabled"} for w in watchers.values()):
+        status = "degraded"
+    else:
+        status = "idle"
+
+    return {
+        "schemaVersion": "openmagi.ops.gateway.health.v1",
+        "daemonEnabled": enabled,
+        "status": status,
+        "watchers": watchers,
+        "cronTicker": cron_ticker,
+    }
+
+
+__all__ = [
+    "default_runtime_ops_health_metadata",
+    "gateway_daemon_health_projection",
+    "scheduler_executor_health_projection",
+]
