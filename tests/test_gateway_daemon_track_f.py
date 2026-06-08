@@ -263,4 +263,5 @@ def test_clean_shutdown_cancels_watchers(monkeypatch: pytest.MonkeyPatch) -> Non
 
     asyncio.run(_inner())
     health = daemon.health_projection()
-    assert health["watchers"]["w"]["state"] in {"stopped", "running"}
+    assert health["watchers"]["w"]["state"] == "stopped"
+    assert cancelled["flag"] is True

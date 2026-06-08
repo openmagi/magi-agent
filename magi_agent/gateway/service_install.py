@@ -33,6 +33,7 @@ def _xml_escape(value: str) -> str:
         .replace("<", "&lt;")
         .replace(">", "&gt;")
         .replace('"', "&quot;")
+        .replace("'", "&apos;")
     )
 
 

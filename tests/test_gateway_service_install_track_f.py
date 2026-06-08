@@ -143,3 +143,24 @@ def test_install_unsupported_manager_raises(tmp_path: Path) -> None:
             target_path=tmp_path / "x",
             exec_start="/usr/bin/magi gateway start",
         )
+
+
+# ---------------------------------------------------------------------------
+# XML escape — apostrophe and other special chars in plist label/args
+# ---------------------------------------------------------------------------
+
+def test_launchd_plist_xml_escapes_apostrophe_and_special_chars() -> None:
+    """A label/arg containing ' & < must produce &apos; &amp; &lt; in the plist."""
+    plist = render_launchd_plist(
+        label="com.o'malley.magi",
+        program_arguments=["/usr/bin/magi", "run & <check>"],
+    )
+    # apostrophe in label
+    assert "&apos;" in plist
+    assert "com.o'malley.magi" not in plist  # raw form must NOT appear
+    # ampersand and less-than in program argument
+    assert "&amp;" in plist
+    assert "&lt;" in plist
+    assert "run & <check>" not in plist  # raw form must NOT appear
+    # double-escaping guard: & must not become &amp;amp;
+    assert "&amp;amp;" not in plist
