@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import re
 
+import pytest
 from fastapi.testclient import TestClient
 
 from magi_agent.app import create_app
@@ -141,6 +142,65 @@ def test_config_put_writes_toml(tmp_path, monkeypatch) -> None:
     written = (tmp_path / "config.toml").read_text(encoding="utf-8")
     assert 'provider = "openai"' in written
     assert 'api_key = "sk-new"' in written
+
+
+@pytest.mark.parametrize(
+    "llm_payload",
+    [
+        {"provider": "anthropic", "model": "claude-new"},
+        {"provider": "anthropic", "model": "claude-new", "apiKey": ""},
+    ],
+)
+def test_config_put_blank_api_key_preserves_existing_key(
+    tmp_path, monkeypatch, llm_payload
+) -> None:
+    (tmp_path / "config.toml").write_text(
+        (
+            '[model]\nprovider = "anthropic"\nmodel = "claude-old"\n'
+            'api_key = "sk-existing"\n'
+        ),
+        encoding="utf-8",
+    )
+    client = _client(tmp_path, monkeypatch)
+    res = client.put("/v1/app/config", json={"llm": llm_payload})
+    assert res.status_code == 200
+    written = (tmp_path / "config.toml").read_text(encoding="utf-8")
+    assert 'model = "claude-new"' in written
+    assert 'api_key = "sk-existing"' in written
+    assert "sk-existing" not in res.text
+
+
+def test_config_put_maps_google_provider_to_cli_gemini(tmp_path, monkeypatch) -> None:
+    client = _client(tmp_path, monkeypatch)
+    res = client.put(
+        "/v1/app/config",
+        json={"llm": {"provider": "google", "model": "gemini-x", "apiKey": "g-key"}},
+    )
+    assert res.status_code == 200
+    written = (tmp_path / "config.toml").read_text(encoding="utf-8")
+    assert 'provider = "gemini"' in written
+    assert 'api_key = "g-key"' in written
+
+
+def test_config_put_rejects_unsupported_provider_without_overwriting(
+    tmp_path, monkeypatch
+) -> None:
+    original = '[model]\nprovider = "openai"\nmodel = "gpt-x"\napi_key = "sk-existing"\n'
+    (tmp_path / "config.toml").write_text(original, encoding="utf-8")
+    client = _client(tmp_path, monkeypatch)
+    res = client.put(
+        "/v1/app/config",
+        json={
+            "llm": {
+                "provider": "openai-compatible",
+                "model": "local-model",
+                "apiKey": "sk-new",
+            }
+        },
+    )
+    assert res.status_code == 400
+    assert res.json()["error"] == "unsupported_provider"
+    assert (tmp_path / "config.toml").read_text(encoding="utf-8") == original
 
 
 def test_skills_scan_finds_workspace_skill(tmp_path, monkeypatch) -> None:

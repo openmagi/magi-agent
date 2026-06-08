@@ -11,4 +11,19 @@ describe("SettingsForm local runtime wiring", () => {
     expect(source).not.toContain("model_selection");
     expect(source).not.toContain("custom_base_url");
   });
+
+  it("offers only provider ids supported by the local CLI resolver", () => {
+    const source = readFileSync(new URL("./settings-form.tsx", import.meta.url), "utf8");
+
+    expect(source).toContain(
+      'type ProviderName = "anthropic" | "openai" | "gemini" | "fireworks"',
+    );
+    expect(source).toContain('{ value: "anthropic", label: "Anthropic" }');
+    expect(source).toContain('{ value: "openai", label: "OpenAI" }');
+    expect(source).toContain('{ value: "gemini", label: "Gemini" }');
+    expect(source).toContain('{ value: "fireworks", label: "Fireworks" }');
+    expect(source).not.toContain('"google"');
+    expect(source).not.toContain('"openai-compatible"');
+    expect(source).not.toContain("OpenAI-Compatible");
+  });
 });

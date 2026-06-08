@@ -56,6 +56,14 @@ _MAX_SEARCH_BYTES = 200_000
 _PREVIEW_CHARS = 240
 
 
+class _ConfigValidationError(ValueError):
+    """Validation error for dashboard config writes."""
+
+    def __init__(self, error: str) -> None:
+        super().__init__(error)
+        self.error = error
+
+
 # --------------------------------------------------------------------------- #
 # Workspace + path safety helpers
 # --------------------------------------------------------------------------- #
@@ -244,9 +252,15 @@ def _config_snapshot(runtime: OpenMagiRuntime) -> dict[str, Any]:
     except Exception:  # noqa: BLE001 - bad config must not 500 the page
         resolved = None
 
-    provider = resolved.provider if resolved else providers._clean(model_section.get("provider"))
+    provider = (
+        resolved.provider
+        if resolved
+        else _canonical_provider(model_section.get("provider"), strict=False)
+    )
     model = resolved.model if resolved else providers._clean(model_section.get("model"))
-    api_key_set = bool(resolved and resolved.api_key)
+    api_key_set = bool(
+        (resolved and resolved.api_key) or providers._clean(model_section.get("api_key"))
+    )
 
     return {
         "ok": True,
@@ -271,16 +285,40 @@ def _toml_escape(value: str) -> str:
     return value.replace("\\", "\\\\").replace('"', '\\"')
 
 
+def _canonical_provider(value: object, *, strict: bool = True) -> str | None:
+    from magi_agent.cli import providers
+
+    provider = providers._clean(value)
+    if provider is None:
+        return None
+    normalized = provider.lower()
+    if normalized == "google":
+        return "gemini"
+    if normalized in providers.SUPPORTED_PROVIDERS:
+        return normalized
+    if strict:
+        raise _ConfigValidationError("unsupported_provider")
+    return normalized
+
+
 def _write_config(payload: dict[str, Any]) -> None:
     from magi_agent.cli import providers
 
     llm = payload.get("llm") if isinstance(payload.get("llm"), dict) else {}
+    existing = providers._load_config_file()
+    existing_model = providers._section(existing, "model")
+    existing_provider = _canonical_provider(existing_model.get("provider"), strict=False)
+    next_provider = _canonical_provider(llm.get("provider"))
+    next_api_key = providers._clean(llm.get("apiKey"))
+    if next_api_key is None and next_provider == existing_provider:
+        next_api_key = providers._clean(existing_model.get("api_key"))
+
     model_lines: list[str] = []
     for key, value in (
-        ("provider", llm.get("provider")),
+        ("provider", next_provider),
         ("model", llm.get("model")),
         ("base_url", llm.get("baseUrl")),
-        ("api_key", llm.get("apiKey")),
+        ("api_key", next_api_key),
         ("api_key_env", llm.get("apiKeyEnvVar")),
     ):
         if isinstance(value, str) and value.strip():
@@ -387,6 +425,8 @@ def register_app_api_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
             return JSONResponse(status_code=400, content={"error": "invalid_json"})
         try:
             _write_config(payload if isinstance(payload, dict) else {})
+        except _ConfigValidationError as exc:
+            return JSONResponse(status_code=400, content={"error": exc.error})
         except OSError as exc:
             return JSONResponse(status_code=500, content={"error": str(exc)})
         return JSONResponse(content=_config_snapshot(runtime))
