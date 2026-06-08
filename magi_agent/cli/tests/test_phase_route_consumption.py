@@ -297,3 +297,77 @@ def test_pre_final_gate_no_escalation_without_stronger_verifier_route(monkeypatc
     assert gate.get("phaseRouteEscalation", False) is False
     # remediation stays the materialized "audit" action (no stronger-verifier demand).
     assert gate["missingEvidenceAction"] == "audit"
+
+
+# --------------------------------------------------------------------------- #
+# Phase selection must not treat the static capability profile as the task.
+# --------------------------------------------------------------------------- #
+_ALL_PHASES = (
+    "intent_classification",
+    "final_answer_drafting",
+    "source_acquisition",
+    "code_search",
+    "patch_generation",
+    "test_interpretation",
+    "final_verification",
+)
+
+
+def _assembly_with_profile(task_types: list[str]) -> RunnerPolicyAssembly:
+    return RunnerPolicyAssembly(
+        modelProvider="anthropic",
+        modelLabel="anthropic/claude-sonnet-4-6",
+        selectedPackIds=(),
+        evidenceRequirements=(),
+        requiredValidators=(),
+        missingEvidenceAction="audit",
+        repairPolicy={"action": "audit"},
+        attachmentFlags={},
+        phaseRouting={},
+        taskProfile={"taskTypes": task_types},
+    )
+
+
+def test_conversational_prompt_does_not_select_coding_phase() -> None:
+    """A non-coding prompt with no harness task must pick the conversational phase,
+    even when the bot's capability profile (task_profile) advertises 'coding'."""
+    # task_profile is the bot's full CAPABILITY superset (always includes 'coding').
+    assembly = _assembly_with_profile(["coding", "research", "document", "automation"])
+
+    phase = engine_module._select_policy_phase(
+        phases=_ALL_PHASES,
+        prompt="hi",
+        harness_state=None,
+        assembly=assembly,
+    )
+
+    assert phase == "final_answer_drafting"
+    assert phase != "patch_generation"
+
+
+def test_coding_prompt_marker_still_selects_coding_phase() -> None:
+    """A genuine coding request (prompt marker) must still route to coding."""
+    assembly = _assembly_with_profile(["coding"])
+
+    phase = engine_module._select_policy_phase(
+        phases=_ALL_PHASES,
+        prompt="please fix the bug in foo.py",
+        harness_state=None,
+        assembly=assembly,
+    )
+
+    assert phase == "patch_generation"
+
+
+def test_harness_state_coding_task_still_selects_coding_phase() -> None:
+    """A live harness task of type 'coding' must still route to coding."""
+    assembly = _assembly_with_profile([])
+
+    phase = engine_module._select_policy_phase(
+        phases=_ALL_PHASES,
+        prompt="continue",
+        harness_state={"taskProfile": {"taskTypes": ["coding"]}},
+        assembly=assembly,
+    )
+
+    assert phase == "patch_generation"

@@ -2114,12 +2114,17 @@ def _select_policy_phase(
     assembly: RunnerPolicyAssembly,
 ) -> str:
     phase_set = set(phases)
+    # Only the live harness state describes the CURRENT task. ``assembly.task_profile``
+    # is the bot's static CAPABILITY superset (every taskType it could ever do — it
+    # always contains "coding"), so falling back to it made EVERY turn — including a
+    # plain "hi" — classify as coding, select the ``patch_generation`` phase, and
+    # (when the routed model lacks coding capability) fail-closed with
+    # ``runner_policy_route_denied``. Derive the task from harness_state + the prompt
+    # markers below only; with neither signal, fall through to the conversational
+    # ``final_answer_drafting`` phase.
     task_types = {
         _normalize_task_type(item)
-        for item in (
-            _extract_task_types(harness_state)
-            or _extract_task_types({"taskProfile": assembly.task_profile})
-        )
+        for item in (_extract_task_types(harness_state) or ())
     }
     prompt_lower = prompt.lower()
     coding_requested = bool(task_types & _CODING_TASK_TYPES) or any(
