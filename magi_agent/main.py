@@ -56,6 +56,17 @@ def main(argv: Sequence[str] | None = None) -> None:
     if _local_runtime_defaults_active(config):
         os.environ.setdefault("MAGI_AGENT_LOCAL_CHAT_ROUTE", "on")
         os.environ.setdefault("MAGI_STREAMING_CHAT", "on")
+        # Runner-policy phase routing (default-ON) is hosted budget/tier governance:
+        # it downgrades the configured model to the cheap tier, restricts the
+        # toolset, and (post-#291) fail-closes any turn whose selected phase route
+        # is denied. For a local single-user serve the operator already runs as the
+        # full-access owner (see `_local_full_access` → bypassPermissions), so this
+        # governance only hobbles the agent — every turn classifies as coding via
+        # the static capability profile, selects `patch_generation`, resolves to
+        # the cheap model that lacks coding capability, and dies with
+        # `runner_policy_route_denied`. Default it OFF locally; an operator can opt
+        # back in with MAGI_RUNNER_POLICY_ROUTING_ENABLED=1.
+        os.environ.setdefault("MAGI_RUNNER_POLICY_ROUTING_ENABLED", "off")
         _print_local_startup_notice(port)
     runtime = OpenMagiRuntime(config=config)
     runtime.gate5b4c3_shadow_generation_route_config = (

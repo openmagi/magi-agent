@@ -7,7 +7,7 @@ import pytest
 
 from magi_agent.runtime.events import RuntimeEvent
 from magi_agent.cli.contracts import EngineResult, Terminal
-from magi_agent.transport.streaming_chat import sse_frames_for
+from magi_agent.transport.streaming_chat import frame_for_event, sse_frames_for
 
 
 # ---------------------------------------------------------------------------
@@ -188,3 +188,69 @@ def test_terminal_error_none_stays_none():
     assert turn_result_line is not None
     payload = json.loads(turn_result_line[len("data:"):].strip())
     assert payload["error"] is None
+
+
+# ---------------------------------------------------------------------------
+# missing_runtime_receipt reconciliation (streaming surface)
+# ---------------------------------------------------------------------------
+
+def _decode_frame(frame: bytes | None) -> dict:
+    assert frame is not None
+    line = next(
+        line for line in frame.decode().splitlines() if line.startswith("data:")
+    )
+    return json.loads(line[len("data:"):].strip())
+
+
+def test_missing_runtime_receipt_turn_end_is_reconciled_to_committed():
+    """A committed-without-receipt turn_end (projected to aborted/missing_runtime_receipt)
+    must be normalized back to committed on the streaming surface so the client does
+    not surface a terminal error after a fully streamed reply."""
+    event = RuntimeEvent(
+        type="status",
+        payload={
+            "type": "turn_end",
+            "status": "aborted",
+            "reason": "missing_runtime_receipt",
+            "turnId": "t1",
+        },
+        turn_id="t1",
+    )
+    payload = _decode_frame(frame_for_event(event))
+    assert payload["type"] == "turn_end"
+    assert payload["status"] == "committed"
+    assert "reason" not in payload
+    assert payload.get("stopReason") == "end_turn"
+
+
+def test_genuine_aborted_turn_end_is_not_reconciled():
+    """A real abort (non missing_runtime_receipt reason) must stay aborted."""
+    event = RuntimeEvent(
+        type="status",
+        payload={
+            "type": "turn_end",
+            "status": "aborted",
+            "reason": "safety",
+            "turnId": "t1",
+        },
+        turn_id="t1",
+    )
+    payload = _decode_frame(frame_for_event(event))
+    assert payload["status"] == "aborted"
+    assert payload["reason"] == "safety"
+
+
+def test_committed_turn_end_passes_through_unchanged():
+    """An already-committed turn_end must not be altered."""
+    event = RuntimeEvent(
+        type="status",
+        payload={
+            "type": "turn_end",
+            "status": "committed",
+            "stopReason": "end_turn",
+            "turnId": "t1",
+        },
+        turn_id="t1",
+    )
+    payload = _decode_frame(frame_for_event(event))
+    assert payload["status"] == "committed"

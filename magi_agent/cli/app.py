@@ -207,6 +207,17 @@ def agent(
     # with the other commands and possible future use.
     _ = ctx
 
+    # The `magi` CLI is a local single-user surface. Runner-policy phase routing
+    # (default-ON) is hosted budget/tier governance — it downgrades the configured
+    # model to the cheap tier, restricts the toolset, and (post-#291) fail-closes a
+    # turn whose selected phase route is denied. On the local CLI that only hobbles
+    # the agent: a benign prompt classifies as coding via the static capability
+    # profile, selects `patch_generation`, resolves to a cheap model lacking coding
+    # capability, and dies with `runner_policy_route_denied`. Default it OFF for the
+    # CLI; a benchmark/hosted harness can force it back on with
+    # MAGI_RUNNER_POLICY_ROUTING_ENABLED=1.
+    os.environ.setdefault("MAGI_RUNNER_POLICY_ROUTING_ENABLED", "off")
+
     # ------------------------------------------------------------------ #
     # Mode selection                                                       #
     # ------------------------------------------------------------------ #
