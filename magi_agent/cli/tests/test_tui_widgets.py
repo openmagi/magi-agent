@@ -77,3 +77,56 @@ def test_user_message_and_status_line_are_static() -> None:
 
     assert issubclass(UserMessage, Static)
     assert issubclass(StatusLine, Static)
+
+
+def test_tool_card_from_render_node_collapsed_by_default() -> None:
+    async def _run() -> None:
+        from textual.app import App, ComposeResult
+        from textual.widgets import Collapsible
+
+        from magi_agent.cli.contracts import RenderNode
+        from magi_agent.cli.tui.widgets.tool_card import ToolCard
+
+        node = RenderNode(
+            rich=__import__("rich.text", fromlist=["Text"]).Text("body"),
+            text="Bash($ ls)",
+        )
+
+        class _ToolHost(App[None]):
+            def compose(self) -> ComposeResult:
+                yield ToolCard.from_render_node(node)
+
+        app = _ToolHost()
+        async with app.run_test() as pilot:
+            card = app.query_one(ToolCard)
+            assert isinstance(card, Collapsible)
+            # Header is the RenderNode.text; collapsed by default.
+            assert card.title == "Bash($ ls)"
+            assert card.collapsed is True
+            await pilot.pause()
+
+    asyncio.run(_run())
+
+
+def test_tool_card_toggles_open() -> None:
+    async def _run() -> None:
+        from textual.app import App, ComposeResult
+
+        from magi_agent.cli.contracts import RenderNode
+        from magi_agent.cli.tui.widgets.tool_card import ToolCard
+
+        node = RenderNode(rich=None, text="Read(/tmp/x)")
+
+        class _ToolHost(App[None]):
+            def compose(self) -> ComposeResult:
+                yield ToolCard.from_render_node(node)
+
+        app = _ToolHost()
+        async with app.run_test() as pilot:
+            card = app.query_one(ToolCard)
+            assert card.collapsed is True
+            card.collapsed = False
+            await pilot.pause()
+            assert card.collapsed is False
+
+    asyncio.run(_run())
