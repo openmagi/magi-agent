@@ -40,7 +40,11 @@ import typer
 from typer.core import TyperGroup
 
 from magi_agent.cli.headless import run_headless
-from magi_agent.cli.wiring import build_headless_runtime, build_tui_app
+from magi_agent.cli.wiring import (
+    build_headless_runtime,
+    build_tui_app,
+    local_runner_policy_routing_enabled_from_env,
+)
 
 __all__ = ["app", "main"]
 
@@ -207,6 +211,17 @@ def agent(
     # with the other commands and possible future use.
     _ = ctx
 
+    # The `magi` CLI is a local single-user surface. Runner-policy phase routing
+    # (default-ON) is hosted budget/tier governance — it downgrades the configured
+    # model to the cheap tier, restricts the toolset, and (post-#291) fail-closes a
+    # turn whose selected phase route is denied. On the local CLI that only hobbles
+    # the agent: a benign prompt classifies as coding via the static capability
+    # profile, selects `patch_generation`, resolves to a cheap model lacking coding
+    # capability, and dies with `runner_policy_route_denied`. Default it OFF for
+    # this local runtime instance; a benchmark/hosted harness can force it back
+    # on with MAGI_RUNNER_POLICY_ROUTING_ENABLED=1.
+    runner_policy_routing_enabled = local_runner_policy_routing_enabled_from_env()
+
     # ------------------------------------------------------------------ #
     # Mode selection                                                       #
     # ------------------------------------------------------------------ #
@@ -230,6 +245,7 @@ def agent(
             session_id=resume or "cli-session",
             model=model,
             mode=mode.value,  # type: ignore[arg-type]
+            runner_policy_routing_enabled=runner_policy_routing_enabled,
         )
 
         # Resolve prompt: explicit arg, else read from stdin (which then can't
@@ -287,6 +303,7 @@ def agent(
             session_id=resume or "cli-session",
             model=model,
             mode=mode.value,  # type: ignore[arg-type]
+            runner_policy_routing_enabled=runner_policy_routing_enabled,
         )
         tui.run()
 

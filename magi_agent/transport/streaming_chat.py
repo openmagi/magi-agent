@@ -75,11 +75,40 @@ def frame_for_event(event: RuntimeEvent) -> bytes | None:
         # Sanitizer decided this event should be dropped (e.g. thinking_delta).
         return None
 
+    safe = _reconcile_missing_receipt_turn_end(safe)
+
     # Ensure turn_id survives sanitization (sanitizer may strip unknown keys).
     if event.turn_id is not None and "turn_id" not in safe:
         safe = {**safe, "turn_id": event.turn_id}
 
     return _frame(safe)
+
+
+def _reconcile_missing_receipt_turn_end(
+    safe: dict[str, object],
+) -> dict[str, object]:
+    """Treat a ``missing_runtime_receipt`` turn_end as a committed turn.
+
+    The ADK bridge emits the final-response ``turn_end`` with ``status=committed``
+    but no runtime receipt (the local OSS runner has no receipt infrastructure),
+    which the event projection downgrades to ``status=aborted`` /
+    ``reason="missing_runtime_receipt"``. On THIS streaming surface the authoritative
+    terminal is the separate ``turn_result`` frame, so forwarding that contradictory
+    ``aborted`` turn_end makes the dashboard surface a terminal error *after* it has
+    already streamed a complete reply. The turn genuinely committed, so normalize it
+    back to ``committed`` here (transport-surface reconciliation only — the projection
+    and CLI/headless surfaces are untouched).
+    """
+    if (
+        safe.get("type") == "turn_end"
+        and safe.get("status") == "aborted"
+        and safe.get("reason") == "missing_runtime_receipt"
+    ):
+        reconciled = {k: v for k, v in safe.items() if k != "reason"}
+        reconciled["status"] = "committed"
+        reconciled.setdefault("stopReason", "end_turn")
+        return reconciled
+    return safe
 
 
 def frame_for_terminal(terminal: EngineResult) -> Iterator[bytes]:
