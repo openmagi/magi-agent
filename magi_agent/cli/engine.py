@@ -509,6 +509,7 @@ def _build_coding_repair_decision_payload(
     repair_policy: Mapping[str, object],
     *,
     attempt_count: int = 0,
+    latest_test_evidence: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     from magi_agent.coding.repair_loop import (
         CodingRepairLoopConfig,
@@ -522,9 +523,91 @@ def _build_coding_repair_decision_payload(
     decision = evaluate_repair_decision(
         config=CodingRepairLoopConfig(enabled=True, maxAttempts=max_attempts),
         state=CodingRepairLoopState(attemptCount=attempt_count),
-        latest_test_evidence=None,
+        latest_test_evidence=latest_test_evidence,
     )
     return project_repair_decision_event(decision)
+
+
+def _latest_coding_test_evidence(
+    evidence_records: Sequence[object],
+) -> Mapping[str, object] | None:
+    latest: Mapping[str, object] | None = None
+    latest_key: tuple[float, int] | None = None
+    for index, record in enumerate(evidence_records):
+        evidence = _evidence_mapping(record)
+        if evidence is None or not _is_coding_test_evidence(evidence):
+            continue
+        key = (_evidence_observed_at(evidence), index)
+        if latest_key is None or key > latest_key:
+            latest = evidence
+            latest_key = key
+    return latest
+
+
+def _evidence_mapping(record: object) -> Mapping[str, object] | None:
+    if isinstance(record, Mapping):
+        return record
+    model_dump = getattr(record, "model_dump", None)
+    if callable(model_dump):
+        try:
+            dumped = model_dump(by_alias=True, mode="python", warnings=False)
+        except TypeError:
+            dumped = model_dump()
+        return dumped if isinstance(dumped, Mapping) else None
+    return None
+
+
+def _is_coding_test_evidence(evidence: Mapping[str, object]) -> bool:
+    haystack = " ".join(
+        _string_values(
+            evidence,
+            (
+                "type",
+                "evidenceType",
+                "evidence_type",
+                "kind",
+                "evidenceRef",
+                "evidence_ref",
+                "validatorRef",
+                "validator_ref",
+                "verifierId",
+                "verifier_id",
+                "id",
+            ),
+        )
+    ).lower()
+    return any(
+        marker in haystack
+        for marker in (
+            "testrun",
+            "test_run",
+            "test-run",
+            "test evidence",
+            "test-evidence",
+            "dev-coding:test-evidence",
+        )
+    )
+
+
+def _string_values(source: Mapping[str, object], keys: Sequence[str]) -> tuple[str, ...]:
+    values: list[str] = []
+    for key in keys:
+        value = source.get(key)
+        if isinstance(value, str) and value:
+            values.append(value)
+    return tuple(values)
+
+
+def _evidence_observed_at(evidence: Mapping[str, object]) -> float:
+    raw = evidence.get("observedAt", evidence.get("observed_at", 0.0))
+    if isinstance(raw, int | float) and not isinstance(raw, bool):
+        return float(raw)
+    if isinstance(raw, str):
+        try:
+            return float(raw)
+        except ValueError:
+            return 0.0
+    return 0.0
 
 
 def _coding_repair_loop_enabled() -> bool:
@@ -1845,9 +1928,15 @@ class MagiEngineDriver:
             verifier_bus.setdefault("evidenceRecordCount", len(evidence_records))
         payload["verifierBus"] = verifier_bus
         if decision == "block" and effective_action == "repair_required":
+            latest_test_evidence = (
+                _latest_coding_test_evidence(evidence_records)
+                if _coding_repair_loop_enabled()
+                else None
+            )
             payload["repairDecision"] = _build_coding_repair_decision_payload(
                 effective_repair_policy,
                 attempt_count=repair_attempt_count,
+                latest_test_evidence=latest_test_evidence,
             )
         return payload
 
