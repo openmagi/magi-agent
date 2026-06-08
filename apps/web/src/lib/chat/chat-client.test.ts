@@ -2014,6 +2014,40 @@ describe("sendMessage SSE agent events", () => {
     expect(replaySeqs).toEqual([7]);
   });
 
+  it("renders a streaming control_request as a tool_permission card", async () => {
+    mockSseFetch(
+      [
+        "event: agent",
+        'data: {"type":"control_request","request_id":"qa:turn:FileRead:1","tool_name":"FileRead","reason":"tool_use","arguments":"{\\"path\\":\\"memory/state.json\\"}","turn_id":"qa:turn"}',
+        "",
+        "data: [DONE]",
+        "",
+      ].join("\n"),
+    );
+
+    const requests: ControlRequestRecord[] = [];
+
+    await sendMessage("local", "general", [], {
+      onDelta: () => {},
+      onControlEvent: (event) => {
+        if (event.type === "control_request_created") requests.push(event.request);
+      },
+      onDone: () => {},
+      onError: (error) => {
+        throw error;
+      },
+    });
+
+    expect(requests).toHaveLength(1);
+    const req = requests[0];
+    expect(req.requestId).toBe("qa:turn:FileRead:1");
+    expect(req.kind).toBe("tool_permission");
+    expect(req.state).toBe("pending");
+    expect(req.turnId).toBe("qa:turn");
+    expect(req.prompt).toBe("Allow FileRead?");
+    expect(req.proposedInput).toEqual({ path: "memory/state.json" });
+  });
+
   it("preserves bounded redacted tool previews from agent events", async () => {
     mockSseFetch(
       [
@@ -2231,7 +2265,7 @@ describe("control request helpers", () => {
     });
   });
 
-  it("respondToControlRequest posts OSS local decisions to the streaming control endpoint", async () => {
+  it("respondToControlRequest posts OSS local tool_permission approval as gate-vocab allow", async () => {
     const fetchMock = mockFetch(200, { status: "delivered", request_id: "cr_1" });
 
     const out = await respondToControlRequest("local", request, {
@@ -2239,6 +2273,7 @@ describe("control request helpers", () => {
       feedback: "ok",
     });
 
+    // The UI-facing resolved state stays in web vocab…
     expect(out).toMatchObject({
       requestId: "cr_1",
       state: "approved",
@@ -2248,15 +2283,25 @@ describe("control request helpers", () => {
     const [url, opts] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toBe("/v1/chat/control-response");
     expect(opts.method).toBe("POST");
+    // …but the wire payload uses the gate vocab the streaming permission gate parses.
     expect(JSON.parse(opts.body as string)).toEqual({
       sessionId: "agent:main:app:general",
       request_id: "cr_1",
       response: {
-        decision: "approved",
+        decision: "allow",
         sessionKey: "agent:main:app:general",
         feedback: "ok",
       },
     });
+  });
+
+  it("respondToControlRequest posts OSS local tool_permission denial as gate-vocab deny", async () => {
+    const fetchMock = mockFetch(200, { status: "delivered", request_id: "cr_1" });
+
+    await respondToControlRequest("local", request, { decision: "denied" });
+
+    const [, opts] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(opts.body as string).response.decision).toBe("deny");
   });
 
   it("respondToControlRequest preserves a legacy ask_user card when the runtime only returns ok", async () => {
