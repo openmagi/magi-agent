@@ -152,3 +152,47 @@ def test_bench_runs_and_reports() -> None:
     # Coalescing: far fewer flushes than lines.
     assert result.flush_count < result.lines
     assert result.lines_per_sec > 0.0
+
+
+# ---------------------------------------------------------------------------
+# 7. The coalesced live block renders Rich Markdown when markdown_live is on
+#    (PR0.1, OQ1) and stays plain text otherwise.
+# ---------------------------------------------------------------------------
+def test_live_block_renders_markdown_when_enabled() -> None:
+    async def _run() -> None:
+        from rich.markdown import Markdown as RichMarkdown
+
+        app = TranscriptApp(flush_interval=10.0)
+        async with app.run_test():
+            controller = app.controller
+            controller.markdown_live = True
+            controller.begin_live()
+            controller.append_delta("# Live heading\n\nbody")
+            await controller.flush_now()
+            # The live Static was updated with a Rich Markdown renderable.
+            assert isinstance(controller.last_live_renderable, RichMarkdown)
+            # Plain-text mode (default) stays a str.
+            controller.markdown_live = False
+            controller.begin_live()
+            controller.append_delta("plain")
+            await controller.flush_now()
+            assert isinstance(controller.last_live_renderable, str)
+
+    asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
+# 8. The bench's markdown_live path still coalesces (OQ1 resolution).
+# ---------------------------------------------------------------------------
+def test_bench_markdown_live_still_coalesces() -> None:
+    from magi_agent.cli.tui._bench import run_bench
+
+    result = asyncio.run(
+        run_bench(lines=2000, flush_interval=0.01, markdown_live=True)
+    )
+    assert result.lines == 2000
+    assert result.committed_block_count == 1
+    # Coalescing still holds with the markdown renderable on the live block.
+    assert result.flush_count >= 1
+    assert result.flush_count < result.lines
+    assert result.lines_per_sec > 0.0

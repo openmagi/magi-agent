@@ -56,6 +56,12 @@ class TranscriptController:
         self.flush_count: int = 0
         self.live_render_count: int = 0
         self.committed_block_count: int = 0
+        # OQ1: when True, the coalesced live block is rendered as a Rich
+        # Markdown renderable (headings/lists/fenced code) instead of plain
+        # text. Default False so the bench/legacy paths stay text-only.
+        self.markdown_live: bool = False
+        # Last renderable handed to the live widget (test seam for OQ1 parity).
+        self.last_live_renderable: object | None = None
 
     # -- live block lifecycle ------------------------------------------------
     def begin_live(self) -> None:
@@ -86,10 +92,27 @@ class TranscriptController:
         self._live_text += "".join(self._pending)
         self._pending.clear()
         # Single re-render of the small live block — finalized blocks untouched.
-        self._live.update(self._live_text)
+        renderable = self._live_renderable(self._live_text)
+        self.last_live_renderable = renderable
+        self._live.update(renderable)
         self.flush_count += 1
         self.live_render_count += 1
         return True
+
+    def _live_renderable(self, text: str) -> object:
+        """The live-block renderable for ``text``.
+
+        Markdown when ``markdown_live`` is on (OQ1: Rich renderable in the live
+        block, re-rendered cleanly each coalesced flush), else plain text. The
+        import is lazy so the headless bench has no markdown dependency on the
+        hot path unless it opts in.
+        """
+
+        if not self.markdown_live:
+            return text
+        from magi_agent.cli.tui.render.markdown import render_markdown  # noqa: PLC0415
+
+        return render_markdown(text)
 
     async def flush_now(self) -> bool:
         """Async wrapper around :meth:`flush` for finalize/test call sites.

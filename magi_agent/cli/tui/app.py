@@ -494,6 +494,7 @@ class MagiTuiApp(App[None]):
         except Exception:  # pragma: no cover - theme always present in textual 8.x
             pass
         self._controller = TranscriptController(log=self._log, live=self._live)
+        self._controller.markdown_live = True
         self._render_welcome()
         # Coalescing flush timer: repaint buffered token deltas on a fixed
         # cadence so a pure token stream renders incrementally (not just at
