@@ -1,0 +1,162 @@
+"""Per-session input history for the Magi TUI (PR1.2).
+
+``InputHistory`` is a bounded ring of submitted prompts, navigated by ↑/↓,
+persisted one JSON object per line. It reuses the ``~/.magi`` root
+(``MAGI_CLI_SESSION_DIR`` override) that ``session_log.py`` establishes, under a
+``tui/`` subdir so it never collides with session transcripts.
+
+Pure stdlib (json + pathlib). No textual/rich/adk imports, so the module is
+import-clean and unit-testable without an event loop. (``DraftStash`` — the
+frecency draft restore — is PR1.3 and intentionally NOT here yet.)
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+from pathlib import Path
+
+from magi_agent.cli.session_log import _session_root
+
+__all__ = [
+    "InputHistory",
+    "history_path",
+]
+
+_UNSAFE = re.compile(r"[^A-Za-z0-9._-]+")
+
+# Default cap on retained history entries (newest-wins ring).
+DEFAULT_MAX_ENTRIES = 500
+
+
+def _safe_session(session_id: str) -> str:
+    cleaned = _UNSAFE.sub("-", session_id).replace("..", "-").lstrip(".-")
+    return cleaned or "session"
+
+
+def _tui_dir() -> Path:
+    return _session_root() / "tui"
+
+
+def history_path(session_id: str) -> Path:
+    """JSONL path for a session's input history."""
+
+    return _tui_dir() / f"history-{_safe_session(session_id)}.jsonl"
+
+
+class InputHistory:
+    """Bounded ring of submitted prompts, ↑/↓-navigable, persisted as JSONL.
+
+    Navigation model (mirrors a shell): ``prev(current)`` walks toward older
+    entries, stashing ``current`` (the live draft) on the FIRST step so
+    ``next()`` can restore it after the user scrolls past the newest entry.
+    Clamps at the oldest entry (``prev`` returns it repeatedly); ``next()`` past
+    the bottom returns ``None``.
+
+    Persistence is opt-in: pass an explicit ``path`` (JSONL on disk) or
+    ``path=Ellipsis`` to derive the per-session path via :func:`history_path`.
+    The default ``path=None`` is IN-MEMORY only (no disk read/write) so pure
+    unit tests and ephemeral hosts never touch ``~/.magi``.
+    """
+
+    _DERIVE = object()  # sentinel: derive the on-disk path from session_id
+
+    def __init__(
+        self,
+        *,
+        session_id: str,
+        path: Path | None = _DERIVE,  # type: ignore[assignment]
+        max_entries: int = DEFAULT_MAX_ENTRIES,
+    ) -> None:
+        self._session_id = session_id
+        self._max = max(1, int(max_entries))
+        if path is InputHistory._DERIVE:
+            # Default (app construction): derive the per-session on-disk path.
+            path = history_path(session_id)
+        # ``path=None`` stays None: in-memory only (no persistence).
+        self._path: Path | None = path
+        self._entries: list[str] = self._load()
+        # Cursor: None = at the live draft (bottom); else index into _entries.
+        self._cursor: int | None = None
+        self._draft: str = ""
+
+    # -- persistence -----------------------------------------------------
+    def _load(self) -> list[str]:
+        if self._path is None or not self._path.exists():
+            return []
+        out: list[str] = []
+        try:
+            with open(self._path, "r", encoding="utf-8") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        obj = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    text = obj.get("text") if isinstance(obj, dict) else None
+                    if isinstance(text, str) and text:
+                        out.append(text)
+        except OSError:
+            return []
+        return out[-self._max :]
+
+    def _append_disk(self, text: str) -> None:
+        if self._path is None:
+            return
+        try:
+            self._path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            fd = os.open(
+                self._path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600
+            )
+            with os.fdopen(fd, "a", encoding="utf-8") as fh:
+                fh.write(json.dumps({"text": text}, ensure_ascii=False) + "\n")
+        except OSError:
+            pass
+
+    # -- public API ------------------------------------------------------
+    def add(self, text: str) -> None:
+        """Record a submitted prompt; resets navigation to the bottom."""
+
+        text = text.rstrip("\n")
+        if not text.strip():
+            return
+        if self._entries and self._entries[-1] == text:
+            # consecutive duplicate: don't grow, just reset cursor
+            self._cursor = None
+            self._draft = ""
+            return
+        self._entries.append(text)
+        if len(self._entries) > self._max:
+            self._entries = self._entries[-self._max :]
+        self._cursor = None
+        self._draft = ""
+        self._append_disk(text)
+
+    def prev(self, current: str) -> str | None:
+        """Step to an older entry; return it (clamps at the oldest)."""
+
+        if not self._entries:
+            return None
+        if self._cursor is None:
+            # leaving the live draft: stash it so next() can restore it
+            self._draft = current
+            self._cursor = len(self._entries) - 1
+        elif self._cursor > 0:
+            self._cursor -= 1
+        # at index 0 we clamp (stay)
+        return self._entries[self._cursor]
+
+    def next(self) -> str | None:
+        """Step toward newer entries; restore the stashed draft past the end."""
+
+        if self._cursor is None:
+            return None
+        if self._cursor < len(self._entries) - 1:
+            self._cursor += 1
+            return self._entries[self._cursor]
+        # past the newest entry -> back to the live draft
+        self._cursor = None
+        return self._draft
