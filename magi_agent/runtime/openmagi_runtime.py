@@ -156,6 +156,15 @@ class OpenMagiRuntime:
         if tool_registry is None:
             tool_registry = _build_core_tool_registry(self.plugin_state)
         self.tool_registry = tool_registry
+        # Apply persisted tool enable/disable overrides (~/.magi/customize.json;
+        # path honors MAGI_CUSTOMIZE/MAGI_CONFIG). Never let this crash construction.
+        try:
+            from magi_agent.customize.apply import apply_tool_overrides
+            from magi_agent.customize.store import load_overrides
+
+            apply_tool_overrides(self, load_overrides())
+        except Exception:
+            pass
         # TODO(memory): wire hosted ADK prompt assembly to
         # project_memory_snapshot — see docs/plans. The live local-dashboard
         # chat turn (transport.chat._local_adk_chat_sse) already gets the frozen

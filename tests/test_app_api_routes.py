@@ -74,10 +74,14 @@ def _registered_app_templates() -> list[list[str]]:
 def _is_covered(path: str, templates: list[list[str]]) -> bool:
     segments = [seg for seg in path.split("/") if seg]
     for template in templates:
-        if len(template) != len(segments):
-            continue
-        if all(t.startswith("{") or t == s for t, s in zip(template, segments)):
-            return True
+        if len(template) == len(segments):
+            if all(t.startswith("{") or t == s for t, s in zip(template, segments)):
+                return True
+        # JS template-literal truncation: bundle path is the static prefix of a
+        # parametric route whose next (final) segment is an interpolated {param}.
+        if len(template) == len(segments) + 1 and template[-1].startswith("{"):
+            if all(t.startswith("{") or t == s for t, s in zip(template, segments)):
+                return True
     return False
 
 

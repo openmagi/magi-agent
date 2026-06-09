@@ -36,3 +36,38 @@ def test_customize_path_respects_env(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.delenv("MAGI_CUSTOMIZE", raising=False)
     monkeypatch.setenv("MAGI_CONFIG", str(tmp_path / "cfg" / "config.toml"))
     assert customize_path() == tmp_path / "cfg" / "customize.json"
+
+
+def test_save_then_load_roundtrip(tmp_path):
+    from magi_agent.customize.store import load_overrides, save_overrides
+    target = tmp_path / "customize.json"
+    data = load_overrides(target)  # defaults
+    data["tools"]["web_fetch"] = False
+    save_overrides(data, target)
+    assert target.exists()
+    reloaded = load_overrides(target)
+    assert reloaded["tools"] == {"web_fetch": False}
+
+
+def test_save_is_atomic_no_partial_temp_left(tmp_path):
+    from magi_agent.customize.store import DEFAULT_OVERRIDES, save_overrides
+    target = tmp_path / "customize.json"
+    save_overrides(DEFAULT_OVERRIDES, target)
+    # no leftover *.tmp sibling
+    assert list(tmp_path.glob("*.tmp")) == []
+
+
+def test_set_tool_override_creates_and_updates(tmp_path):
+    from magi_agent.customize.store import load_overrides, set_tool_override
+    target = tmp_path / "customize.json"
+    set_tool_override("shell", False, target)
+    assert load_overrides(target)["tools"]["shell"] is False
+    set_tool_override("shell", True, target)
+    assert load_overrides(target)["tools"]["shell"] is True
+
+
+def test_save_creates_parent_dir(tmp_path):
+    from magi_agent.customize.store import DEFAULT_OVERRIDES, save_overrides
+    target = tmp_path / "nested" / "dir" / "customize.json"
+    save_overrides(DEFAULT_OVERRIDES, target)
+    assert target.exists()

@@ -80,6 +80,28 @@ interface UseCustomizeResult {
 }
 
 /**
+ * Persists a single tool enable/disable toggle via `PATCH /v1/app/customize/tools/{name}`.
+ *
+ * Returns the updated `CustomizeOverrides` on success so the caller can
+ * reconcile local state from the backend's authoritative view.
+ * Throws on non-2xx responses so the caller can surface the error and revert.
+ */
+export async function patchToolOverride(
+  fetch: (path: string, init?: RequestInit) => Promise<Response>,
+  name: string,
+  enabled: boolean,
+): Promise<CustomizeOverrides> {
+  const res = await fetch(`/v1/app/customize/tools/${encodeURIComponent(name)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled }),
+  });
+  if (!res.ok) throw new Error(`Failed to update tool (${res.status})`);
+  const data = (await res.json()) as { overrides: CustomizeOverrides };
+  return data.overrides;
+}
+
+/**
  * Loads the local runtime customization snapshot from `/v1/app/customize`.
  *
  * Handles loading/error state and exposes a `reload` callback so the UI can
