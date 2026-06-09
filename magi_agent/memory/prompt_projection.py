@@ -65,20 +65,33 @@ MEMORY_CONTEXT_CLOSE = "</memory-context>"
 # small enough to stay in the cheap volatile section without cache pressure.
 _DEFAULT_MAX_BYTES = 8_192
 
-# Files that contribute to the snapshot (in order).  ``memory/ROOT.md`` is the
-# synthesized root of the 5-level compaction tree (built by
-# :class:`magi_agent.memory.compaction_tree.CompactionTree`); surfacing it here
-# is what lets the tree's output actually reach the model on the next session.
-# It is listed FIRST so the compacted long-horizon summary leads the snapshot;
-# when ROOT.md is absent (tree never ran / gated off) this degrades to the
-# original MEMORY.md/USER.md-only behaviour byte-for-byte.
-_SNAPSHOT_FILES: tuple[str, ...] = ("memory/ROOT.md", "MEMORY.md", "USER.md")
+# Budget priority: the CURATED user files (MEMORY.md, USER.md) are the
+# hand-maintained, durable memory and must NEVER be evicted by the synthesized
+# ROOT.md or the raw daily logs.  So they are budgeted FIRST (they lead the
+# snapshot and claim the budget), and ``memory/ROOT.md`` + recent daily are
+# appended only with the REMAINING headroom (see ``_build_snapshot``).  A large
+# ROOT.md can therefore shrink/drop itself, but can never starve MEMORY/USER.
+_CURATED_FILES: tuple[str, ...] = ("MEMORY.md", "USER.md")
 
-# Most-recent raw daily files to append after the curated files, newest-first.
-# Bounded by ``_DEFAULT_RECENT_DAILY_COUNT`` and the shared byte budget — these
-# are the freshest, not-yet-rolled-up turn logs, useful when ROOT.md lags the
-# current day.  The glob is fixed (``memory/daily/*.md``) and never escapes the
-# workspace (each candidate is re-validated through ``_resolve_workspace_path``).
+# Compaction-tree outputs appended after the curated files with leftover budget.
+# ``memory/ROOT.md`` is the synthesized root of the 5-level compaction tree
+# (built by :class:`magi_agent.memory.compaction_tree.CompactionTree`); surfacing
+# it here is what lets the tree's output reach the model on the next session.
+# When ROOT.md is absent (tree never ran / gated off) the snapshot degrades to
+# the original MEMORY.md/USER.md-only behaviour byte-for-byte.
+_TREE_FILES: tuple[str, ...] = ("memory/ROOT.md",)
+
+# Full ordered file list (curated first, then tree).  Retained as the public
+# ordering reference; ``_build_snapshot`` budgets ``_CURATED_FILES`` before
+# ``_TREE_FILES`` + recent daily so the priority above is enforced.
+_SNAPSHOT_FILES: tuple[str, ...] = (*_CURATED_FILES, *_TREE_FILES)
+
+# Most-recent raw daily files to append after the curated + tree files,
+# newest-first.  Bounded by ``_DEFAULT_RECENT_DAILY_COUNT`` and whatever budget
+# remains after the curated files — these are the freshest, not-yet-rolled-up
+# turn logs, useful when ROOT.md lags the current day.  The glob is fixed
+# (``memory/daily/*.md``) and never escapes the workspace (each candidate is
+# re-validated through ``_resolve_workspace_path``).
 _RECENT_DAILY_GLOB = "memory/daily/*.md"
 _DEFAULT_RECENT_DAILY_COUNT = 2
 
@@ -231,12 +244,53 @@ def _redact_snapshot_content(raw: str) -> str:
     return sanitized
 
 
+def _load_snapshot_part(
+    workspace_root: Path,
+    rel_path: str,
+    *,
+    byte_cap: int,
+) -> tuple[str | None, int]:
+    """Resolve, read, pre-truncate, redact, and render one snapshot part.
+
+    Returns ``(part, used_bytes)`` where ``part`` is the rendered
+    ``<!-- rel_path -->\\n<redacted>`` block (or ``None`` when the file is
+    missing / escapes the workspace / is empty after redaction), and
+    ``used_bytes`` is the UTF-8 size of that rendered part (0 when ``None``).
+
+    ``byte_cap`` bounds the raw read BEFORE redaction (the ReDoS guard) so each
+    file only ever consumes the headroom the caller grants it.
+    """
+    if byte_cap <= 0:
+        return None, 0
+    path = _resolve_workspace_path(workspace_root, rel_path)
+    if path is None or not path.is_file():
+        return None, 0
+    raw = path.read_text(encoding="utf-8", errors="replace")
+    # ReDoS guard: pre-truncate to byte_cap BEFORE running regexes, so regex
+    # input is bounded by the granted budget (a few KiB), never unbounded.
+    raw = _slice_utf8(raw, byte_cap)
+    redacted = _redact_snapshot_content(raw)
+    if not redacted.strip():
+        return None, 0
+    part = f"<!-- {rel_path} -->\n{redacted}"
+    return part, len(part.encode("utf-8"))
+
+
 def _build_snapshot(
     workspace_root: Path,
     *,
     max_bytes: int,
 ) -> MemoryProjectionResult:
-    """Read MEMORY.md / USER.md, redact, bound, and fence as <memory-context>."""
+    """Read MEMORY.md / USER.md, redact, bound, and fence as <memory-context>.
+
+    Budget priority: the curated user files (``_CURATED_FILES``) are read first
+    and claim the budget; the synthesized ``_TREE_FILES`` (ROOT.md) and the
+    recent daily logs are read only with whatever headroom remains.  This is
+    what guarantees a large ROOT.md can never silently evict the curated
+    MEMORY.md/USER.md — the curated files are budgeted before ROOT/daily ever
+    get a byte (the final combined slice then only ever trims the trailing
+    ROOT/daily content, never the curated files at the front).
+    """
     parts: list[str] = []
     files_loaded: list[str] = []
     budget = max(max_bytes, 1)
@@ -250,20 +304,35 @@ def _build_snapshot(
     headroom = len(MEMORY_CONTEXT_OPEN.encode()) + len(MEMORY_CONTEXT_CLOSE.encode()) + 4
     content_budget = max(budget - headroom, 0)
 
-    snapshot_rel_paths = [*_SNAPSHOT_FILES, *_recent_daily_rel_paths(workspace_root)]
-    for rel_path in snapshot_rel_paths:
-        path = _resolve_workspace_path(workspace_root, rel_path)
-        if path is None or not path.is_file():
+    # Pass 1: curated files first, each capped to the FULL remaining content
+    # budget (they are the priority — they get first claim on the bytes).
+    remaining = content_budget
+    for rel_path in _CURATED_FILES:
+        part, used = _load_snapshot_part(
+            workspace_root, rel_path, byte_cap=remaining
+        )
+        if part is None:
             continue
-        raw = path.read_text(encoding="utf-8", errors="replace")
-        # ReDoS guard: pre-truncate to content_budget BEFORE running regexes,
-        # so regex input is bounded by the budget (a few KiB), never unbounded.
-        raw = _slice_utf8(raw, content_budget)
-        redacted = _redact_snapshot_content(raw)
-        if not redacted.strip():
-            continue
-        parts.append(f"<!-- {rel_path} -->\n{redacted}")
+        parts.append(part)
         files_loaded.append(rel_path)
+        # Account for the rendered part plus the "\n\n" join that precedes the
+        # next part, so ROOT/daily only see the bytes the curated files left.
+        remaining = max(remaining - used - len("\n\n".encode("utf-8")), 0)
+
+    # Pass 2: tree (ROOT.md) + recent daily, with only the LEFTOVER budget so
+    # they can shrink/drop themselves but never starve the curated files above.
+    tree_rel_paths = [*_TREE_FILES, *_recent_daily_rel_paths(workspace_root)]
+    for rel_path in tree_rel_paths:
+        if remaining <= 0:
+            break
+        part, used = _load_snapshot_part(
+            workspace_root, rel_path, byte_cap=remaining
+        )
+        if part is None:
+            continue
+        parts.append(part)
+        files_loaded.append(rel_path)
+        remaining = max(remaining - used - len("\n\n".encode("utf-8")), 0)
 
     if not parts:
         # Nothing to inject; return a disabled-style result (no block).
@@ -312,12 +381,15 @@ def _recent_daily_rel_paths(
     """
     if count <= 0:
         return []
-    daily_dir = workspace_root / "memory" / "daily"
+    # Derive the dir + filename pattern from the single ``_RECENT_DAILY_GLOB``
+    # source of truth (``memory/daily/*.md``) so the two never drift.
+    *dir_parts, file_glob = _RECENT_DAILY_GLOB.split("/")
+    daily_dir = workspace_root.joinpath(*dir_parts)
     if not daily_dir.is_dir():
         return []
     try:
         candidates = sorted(
-            (p for p in daily_dir.glob("*.md") if p.is_file()),
+            (p for p in daily_dir.glob(file_glob) if p.is_file()),
             key=lambda p: p.name,
             reverse=True,
         )

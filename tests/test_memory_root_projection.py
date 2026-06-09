@@ -88,3 +88,29 @@ def test_absent_root_degrades_to_memory_only(
 
 def test_recent_daily_empty_when_no_dir(tmp_path: Path) -> None:
     assert _recent_daily_rel_paths(tmp_path) == []
+
+
+def test_oversized_root_does_not_evict_curated_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Budget priority: a ROOT.md large enough to fill the whole budget must
+    NOT starve the curated MEMORY.md / USER.md — those are budgeted first."""
+    monkeypatch.setenv(MAGI_MEMORY_PROJECTION_ENABLED_ENV, "1")
+    _write(tmp_path / "MEMORY.md", "MEMORY_SENTINEL curated fact alpha")
+    _write(tmp_path / "USER.md", "USER_SENTINEL curated profile beta")
+    # ROOT.md bigger than the whole snapshot budget (8 KiB) so, if it led the
+    # snapshot, it would consume the entire budget and evict the curated files.
+    _write(
+        tmp_path / "memory" / "ROOT.md",
+        "ROOT_FILLER line of synthesized history\n" * 1000,
+    )
+
+    result = project_memory_snapshot(workspace_root=tmp_path)
+    assert result.enabled is True
+    # Curated files survive in full despite the oversized ROOT.
+    assert "MEMORY_SENTINEL" in result.snapshot_block
+    assert "USER_SENTINEL" in result.snapshot_block
+    assert "MEMORY.md" in result.files_loaded
+    assert "USER.md" in result.files_loaded
+    # The block still respects the byte budget (ROOT shrank, not the curated).
+    assert result.bytes_used <= result.bytes_budget
