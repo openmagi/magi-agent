@@ -694,6 +694,15 @@ PROVIDER_ROUTER_ENABLED_ENV = "CORE_AGENT_PYTHON_WEB_PROVIDER_ROUTER_ENABLED"
 PLATFORM_SEARCH_PROVIDER_NAME = "platform.search"
 PLATFORM_FETCH_PROVIDER_NAME = "platform.fetch"
 
+# Jina Reader provider — default-OFF, lazily imported.
+JINA_READER_PROVIDER_NAME = "jina.reader"
+JINA_READER_ENABLED_ENV = "CORE_AGENT_PYTHON_JINA_READER_ENABLED"
+MAGI_JINA_API_KEY_ENV = "MAGI_JINA_API_KEY"
+
+# InsaneFetch (curl_cffi WAF-bypass) provider — default-OFF, lazily imported.
+INSANE_FETCH_PROVIDER_NAME = "insane.fetch"
+INSANE_FETCH_ENABLED_ENV = "CORE_AGENT_PYTHON_INSANE_FETCH_ENABLED"
+
 
 def build_live_research_boundary(
     env: Mapping[str, str] | None = None,
@@ -761,6 +770,30 @@ def build_live_research_boundary(
         providers[PLATFORM_FETCH_PROVIDER_NAME] = platform_provider
         provider_names.extend([PLATFORM_SEARCH_PROVIDER_NAME, PLATFORM_FETCH_PROVIDER_NAME])
 
+    # InsaneFetch (curl_cffi WAF-bypass) — fallback fetch provider, default-OFF.
+    # Ordered AFTER platform so platform remains primary; insane.fetch is the
+    # first non-platform fallback for fetch operations.
+    if _is_true(resolved_env.get(INSANE_FETCH_ENABLED_ENV)):
+        from magi_agent.web_acquisition.providers.insane_fetch import (
+            InsaneFetchProvider,
+        )
+
+        insane_fetch_provider = InsaneFetchProvider()
+        providers[INSANE_FETCH_PROVIDER_NAME] = insane_fetch_provider
+        provider_names.append(INSANE_FETCH_PROVIDER_NAME)
+
+    # Jina Reader — fallback reader/fetch provider, default-OFF.
+    # Ordered last so platform + insane.fetch are tried first.
+    if _is_true(resolved_env.get(JINA_READER_ENABLED_ENV)):
+        from magi_agent.web_acquisition.providers.jina_reader import (
+            JinaReaderProvider,
+        )
+
+        jina_api_key = resolved_env.get(MAGI_JINA_API_KEY_ENV) or None
+        jina_reader_provider = JinaReaderProvider(api_key=jina_api_key)
+        providers[JINA_READER_PROVIDER_NAME] = jina_reader_provider
+        provider_names.append(JINA_READER_PROVIDER_NAME)
+
     # Auto-derive configs when not supplied.
     if pack_config is None:
         pack_config = LiveWebAcquisitionPackConfig(
@@ -788,8 +821,13 @@ def build_live_research_boundary(
 
 
 __all__ = [
+    "INSANE_FETCH_ENABLED_ENV",
+    "INSANE_FETCH_PROVIDER_NAME",
+    "JINA_READER_ENABLED_ENV",
+    "JINA_READER_PROVIDER_NAME",
     "LIVE_WEB_ACQUISITION_ENABLED_ENV",
     "LIVE_WEB_ACQUISITION_KILL_SWITCH_ENV",
+    "MAGI_JINA_API_KEY_ENV",
     "MAGI_PLATFORM_API_KEY_ENV",
     "MAGI_PLATFORM_BASE_URL_ENV",
     "PLATFORM_FETCH_PROVIDER_NAME",
