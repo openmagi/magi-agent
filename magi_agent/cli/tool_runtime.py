@@ -352,6 +352,24 @@ def build_cli_instruction(
             memory_mode=memory_mode_value,
         )
 
+    # Append active learnings from the local store (default-OFF gate:
+    # MAGI_LEARNING_INJECTION_ENABLED).  Returns "" when gate is off,
+    # memory_mode is incognito, no db exists, or any error — so the combined
+    # block is byte-identical to pre-wiring when the gate is off.
+    # Scope note: only task_kind="general" learnings surface here today (all
+    # labeler-written items).  A future per-task-kind labeler would need to
+    # thread the current task kind into build_cli_learning_recall_block.
+    from magi_agent.cli.learning_recall import build_cli_learning_recall_block  # noqa: PLC0415
+
+    _learning_block = build_cli_learning_recall_block(
+        workspace_root=workspace_root,
+        memory_mode=memory_mode_value,
+    )
+    if _learning_block:
+        memory_snapshot_block = "\n\n".join(
+            part for part in (memory_snapshot_block, _learning_block) if part
+        )
+
     prompt = build_system_prompt(
         session_key=session_id,
         turn_id="cli",
