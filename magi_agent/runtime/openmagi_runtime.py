@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from importlib import import_module
+from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from magi_agent.adk_bridge.primitives import AdkPrimitiveBoundary
@@ -104,6 +105,35 @@ def _load_tool_handler(entrypoint: str) -> ToolHandler:
     return cast("ToolHandler", value)
 
 
+def _bind_memory_write_host(
+    tool_registry: "ToolRegistry",
+    config: RuntimeConfig,
+) -> None:
+    """Bind the gate-aware MemoryWrite handler to the runtime registry.
+
+    This is called exactly once during ``OpenMagiRuntime.__init__`` after the
+    core tool registry is built.  The handler is always bound (so
+    ``resolve_registration("MemoryWrite").handler`` is never None) but the
+    host config's ``enabled`` flag controls whether calls flow through or are
+    blocked — matching the gate state at startup.
+
+    Workspace root resolution order:
+      1. ``config.memory.workspace_root`` (set by the CLI/dashboard from cwd)
+      2. ``Path.cwd()`` fallback for direct construction in tests
+    """
+    from magi_agent.runtime.memory_write_wiring import build_memory_write_host
+
+    workspace_root_str = config.memory.workspace_root
+    workspace_root = Path(workspace_root_str) if workspace_root_str else Path.cwd()
+
+    host = build_memory_write_host(
+        workspace_root=workspace_root,
+        bot_id=config.bot_id,
+        user_id=config.user_id,
+    )
+    host.bind(tool_registry)
+
+
 class OpenMagiRuntime:
     """Product-owned runtime shell around future ADK primitive adapters."""
 
@@ -126,6 +156,7 @@ class OpenMagiRuntime:
         if tool_registry is None:
             tool_registry = _build_core_tool_registry(self.plugin_state)
         self.tool_registry = tool_registry
+        _bind_memory_write_host(self.tool_registry, config)
 
     def list_active_tools(self) -> list[str]:
         return [tool.name for tool in self.tool_registry.list_available(mode="act")]
