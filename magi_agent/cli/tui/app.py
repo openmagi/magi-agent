@@ -795,7 +795,13 @@ class MagiTuiApp(App[None]):
         # Separate worker group from "turn" so a command never collides with or
         # cancels the exclusive turn worker. The executor itself never drives a
         # turn loop; a prompt command calls back into start_turn (group="turn").
-        await self._executor.run(command, args, ctx)  # type: ignore[arg-type]
+        try:
+            await self._executor.run(command, args, ctx)  # type: ignore[arg-type]
+        except Exception as exc:  # commands are first-party but must never die silently
+            # ``except Exception`` deliberately excludes ``asyncio.CancelledError``
+            # (a ``BaseException`` in modern Python), so cancellation still
+            # propagates and only real command failures surface here.
+            self.controller.commit_block(f"[command failed: {exc}]")
 
     # -- app-opener seam (CommandContext.app) ------------------------------
     def commit_text(self, text: str) -> None:

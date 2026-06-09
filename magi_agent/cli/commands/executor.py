@@ -26,6 +26,7 @@ from magi_agent.cli.contracts import (
     Compact,
     ContentBlock,
     LocalCommand,
+    LocalResult,
     PromptCommand,
     Skip,
     Text,
@@ -66,8 +67,14 @@ class DefaultCommandExecutor(CommandExecutor):
             await self._run_widget(command, args, ctx)
             return
 
+        # The ``Command`` union is exhaustive over the three branches above.
+        # Reaching here means a new kind was added without wiring it in — an
+        # internal contract violation (unknown command NAMES are already handled
+        # upstream in ``_dispatch_command``), so fail loudly rather than silently.
+        raise TypeError(f"unknown command kind: {type(command).__name__}")
+
     @staticmethod
-    def _apply_local(result: object, app: object | None) -> None:
+    def _apply_local(result: LocalResult, app: object | None) -> None:
         if app is None:
             return
         if isinstance(result, Text):
