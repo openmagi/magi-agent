@@ -438,6 +438,21 @@ _ARTIFACT_EVENT_TYPES = frozenset(
 _ERROR_EVENT_TYPES = frozenset({"error"})
 
 
+def _is_turn_end_event(event: Mapping[str, object]) -> bool:
+    return event.get("type") == "turn_end"
+
+
+def _is_continuation_output_event(event: Mapping[str, object]) -> bool:
+    event_type = event.get("type")
+    if event_type in _TOKEN_EVENT_TYPES:
+        return bool(event.get("delta"))
+    if event_type in _TOOL_EVENT_TYPES:
+        return True
+    if event_type in _ARTIFACT_EVENT_TYPES:
+        return True
+    return False
+
+
 def _map_event_kind(event_type: object) -> str:
     if event_type in _TOKEN_EVENT_TYPES:
         return "token"
@@ -1224,9 +1239,24 @@ class MagiEngineDriver:
                             ):
                                 attempt_truncated = True
                         projection = bridge.project_adk_event(adk_event, turn_id=turn_id)  # type: ignore[union-attr]
+                        projected_events: list[Mapping[str, object]] = []
                         for raw_event in projection.agent_events:  # type: ignore[union-attr]
                             safe = sanitize(dict(raw_event))  # type: ignore[operator]
                             if safe is None:
+                                continue
+                            projected_events.append(safe)
+
+                        will_continue_attempt = should_continue(
+                            output_continuation,
+                            truncated=attempt_truncated,
+                            output_seen=attempt_yielded > 0 or any(
+                                _is_continuation_output_event(event)
+                                for event in projected_events
+                            ),
+                            continuations_used=continuations_used,
+                        )
+                        for safe in projected_events:
+                            if will_continue_attempt and _is_turn_end_event(safe):
                                 continue
                             self._collect_public_refs(safe, observed_public_refs)
                             self._track_pending_tool(safe, pending_tool_ids)

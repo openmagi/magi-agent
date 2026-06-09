@@ -121,6 +121,29 @@ def test_truncated_response_is_resumed_and_appended() -> None:
     assert terminal.terminal is Terminal.completed
 
 
+def test_truncated_attempt_does_not_emit_turn_end_before_continuation() -> None:
+    runner = _TruncateThenCompleteRunner()
+    driver = MagiEngineDriver(runner=runner, output_continuation=_config())
+    cancel = asyncio.Event()
+
+    events, _terminal = asyncio.run(
+        drain(driver.run_turn_stream(None, _turn_input("s-cont-order"), cancel=cancel))
+    )
+
+    continuation_index = next(
+        i
+        for i, event in enumerate(events)
+        if event.payload.get("type") == "output_continuation"
+    )
+    early_turn_end_events = [
+        event
+        for event in events[:continuation_index]
+        if event.payload.get("type") == "turn_end"
+    ]
+
+    assert early_turn_end_events == []
+
+
 def test_continuation_budget_bounds_reinvocations() -> None:
     runner = _AlwaysTruncateRunner()
     driver = MagiEngineDriver(
