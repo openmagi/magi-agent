@@ -81,6 +81,7 @@ from magi_agent.cli.tui.autocomplete import (
 )
 from magi_agent.cli.tui.history import DraftStash, InputHistory
 from magi_agent.cli.tui.input import PromptInput, Submission
+from magi_agent.cli.tui.dialogs.help import HelpDialog
 from magi_agent.cli.tui.dialogs.model import ModelPickerDialog, model_choices
 from magi_agent.cli.tui.dialogs.session import (
     SessionEntry,
@@ -498,6 +499,10 @@ class MagiTuiApp(App[None]):
         # fires from the prompt and Ctrl+C appears dead.
         Binding("ctrl+c", "cancel_turn", "Cancel", priority=True),
         ("ctrl+y", "copy_selection", "Copy"),
+        # F1 opens the help dialog. F1 is not in the keybindings defaults
+        # (defaults.py) and (unlike "?") never collides with typed prompt text,
+        # so it is safe to bind globally while the prompt input is focused.
+        ("f1", "open_help", "Help"),
     ]
 
     # Textual's built-in command palette (PR2.1). Ctrl+P is already the 8.2.7
@@ -903,6 +908,20 @@ class MagiTuiApp(App[None]):
         self.resumed_session = ref
         self._session_id = ref
         self.controller.commit_block(f"[resumed session {ref}]")
+
+    # -- help (PR2.5) ------------------------------------------------------
+    def action_open_help(self) -> None:
+        """Open the read-only help dialog (keybindings + command reference).
+
+        Surfaced automatically in the command palette (``AppActionProvider``
+        gates on ``action_open_help`` existing), reachable via
+        ``open_dialog("help")`` (the ``open_dialog`` name maps to
+        ``action_open_<name>``), and bound to ``F1``. The dialog reads the live
+        ``BINDINGS`` + ``COMMAND_PALETTE_BINDING`` + the injected command
+        registry; escape/enter closes it. Read-only — no behavioral change.
+        """
+
+        self.push_screen(HelpDialog.from_app(self))
 
     # -- the ONE engine-driven turn loop -----------------------------------
     def start_turn(self, prompt: str) -> None:

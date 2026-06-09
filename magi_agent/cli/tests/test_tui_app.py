@@ -1113,3 +1113,78 @@ def test_open_session_list_surfaces_in_palette_actions() -> None:
         assert "Sessions" in labels
 
     asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
+# Help dialog (PR2.5) — read-only keybinding + command reference
+# ---------------------------------------------------------------------------
+def test_open_help_shows_help_dialog() -> None:
+    async def _run() -> None:
+        from magi_agent.cli.tui.dialogs.help import HelpDialog
+
+        engine = FakeEngineDriver()
+        app = _make_app(engine, commands=FakeRegistry(["compact", "status"]))
+        async with app.run_test() as pilot:
+            app.action_open_help()
+            await pilot.pause()
+            assert isinstance(app.screen, HelpDialog)
+            body = app.screen.query_one("#help-body")
+            # Textual 8.2.7: Static has no .renderable — use .render().
+            rendered = str(body.render())
+            assert "/compact" in rendered
+            assert "/status" in rendered
+            assert "ctrl+p" in rendered  # COMMAND_PALETTE_BINDING surfaced
+            await pilot.press("escape")
+            await pilot.pause()
+            # Escape dismissed the modal: no HelpDialog left on the stack.
+            assert not any(
+                isinstance(s, HelpDialog) for s in app.screen_stack
+            )
+
+    asyncio.run(_run())
+
+
+def test_open_dialog_help_opens_dialog() -> None:
+    async def _run() -> None:
+        from magi_agent.cli.tui.dialogs.help import HelpDialog
+
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            app.open_dialog("help")
+            await pilot.pause()
+            assert isinstance(app.screen, HelpDialog)
+
+    asyncio.run(_run())
+
+
+def test_open_help_surfaces_in_palette_actions() -> None:
+    async def _run() -> None:
+        from magi_agent.cli.tui.palette import AppActionProvider
+
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            provider = AppActionProvider(app.screen)
+            provider._app_ref = app
+            hits = [h async for h in provider.discover()]
+        labels = [getattr(h, "text", "") or "" for h in hits]
+        assert "Help" in labels
+
+    asyncio.run(_run())
+
+
+def test_f1_opens_help_dialog() -> None:
+    async def _run() -> None:
+        from magi_agent.cli.tui.dialogs.help import HelpDialog
+
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("f1")
+            await pilot.pause()
+            assert isinstance(app.screen, HelpDialog)
+
+    asyncio.run(_run())
