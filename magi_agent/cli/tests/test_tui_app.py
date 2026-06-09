@@ -1001,3 +1001,115 @@ def test_open_model_picker_surfaces_in_palette_actions() -> None:
         assert "Switch model" in labels
 
     asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
+# Session list dialog (PR2.4) — open + resume = a FRESH turn (OQ3, no replay)
+# ---------------------------------------------------------------------------
+def test_open_session_list_resume_starts_fresh_turn() -> None:
+    async def _run() -> None:
+        from magi_agent.cli.tui.dialogs.session import (
+            SessionEntry,
+            SessionListDialog,
+        )
+
+        engine = FakeEngineDriver(tokens=["resumed"])
+        app = _make_app(engine)
+        # Inject a couple of resumable sessions directly (controller seam).
+        app._session_source = lambda: [
+            SessionEntry(ref="s-9", label="earlier work", updated="2026-06-06")
+        ]
+        async with app.run_test() as pilot:
+            app.action_open_session_list()
+            await pilot.pause()
+            assert isinstance(app.screen, SessionListDialog)
+            app.screen.dismiss("s-9")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+        # Resume ran ONE fresh turn (no replay), recorded the resumed ref, and
+        # switched the active session id to it.
+        assert app.resumed_session == "s-9"
+        assert app._session_id == "s-9"
+        assert app.last_terminal is not None
+        assert app.last_terminal.terminal == Terminal.completed
+        # No transcript replay: the only echoed user line is the resume prompt,
+        # not any prior-session transcript content.
+        blocks = app.controller.committed_blocks_snapshot()
+        assert any("resumed session s-9" in b for b in blocks)
+        assert any("Resume session s-9" in b for b in blocks)
+
+    asyncio.run(_run())
+
+
+def test_open_session_list_cancel_keeps_session() -> None:
+    async def _run() -> None:
+        from magi_agent.cli.tui.dialogs.session import (
+            SessionEntry,
+            SessionListDialog,
+        )
+
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        app._session_source = lambda: [
+            SessionEntry(ref="s-9", label="earlier work")
+        ]
+        original = app._session_id
+        async with app.run_test() as pilot:
+            app.action_open_session_list()
+            await pilot.pause()
+            assert isinstance(app.screen, SessionListDialog)
+            app.screen.dismiss(None)
+            await pilot.pause()
+            await pilot.pause()
+        assert app.resumed_session is None
+        assert app._session_id == original
+        assert app.last_terminal is None  # no turn ran on cancel
+
+    asyncio.run(_run())
+
+
+def test_open_session_list_empty_when_no_source() -> None:
+    async def _run() -> None:
+        from magi_agent.cli.tui.dialogs.session import SessionListDialog
+        from textual.widgets import OptionList
+
+        engine = FakeEngineDriver()
+        app = _make_app(engine)  # no runtime, no _session_source -> empty
+        async with app.run_test() as pilot:
+            app.action_open_session_list()
+            await pilot.pause()
+            assert isinstance(app.screen, SessionListDialog)
+            assert app.screen.query_one(OptionList).option_count == 0
+
+    asyncio.run(_run())
+
+
+def test_open_dialog_session_list_opens_dialog() -> None:
+    async def _run() -> None:
+        from magi_agent.cli.tui.dialogs.session import SessionListDialog
+
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            app.open_dialog("session_list")
+            await pilot.pause()
+            assert isinstance(app.screen, SessionListDialog)
+
+    asyncio.run(_run())
+
+
+def test_open_session_list_surfaces_in_palette_actions() -> None:
+    async def _run() -> None:
+        from magi_agent.cli.tui.palette import AppActionProvider
+
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            provider = AppActionProvider(app.screen)
+            provider._app_ref = app
+            hits = [h async for h in provider.discover()]
+        labels = [getattr(h, "text", "") or "" for h in hits]
+        assert "Sessions" in labels
+
+    asyncio.run(_run())

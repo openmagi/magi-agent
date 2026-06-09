@@ -82,6 +82,11 @@ from magi_agent.cli.tui.autocomplete import (
 from magi_agent.cli.tui.history import DraftStash, InputHistory
 from magi_agent.cli.tui.input import PromptInput, Submission
 from magi_agent.cli.tui.dialogs.model import ModelPickerDialog, model_choices
+from magi_agent.cli.tui.dialogs.session import (
+    SessionEntry,
+    SessionListDialog,
+    session_entries,
+)
 from magi_agent.cli.tui.palette import (
     AppActionProvider,
     CommandPaletteProvider,
@@ -542,6 +547,13 @@ class MagiTuiApp(App[None]):
         self._drafts = DraftStash(session_id=session_id)
         self._model = model
         self._mode = mode
+        # Session list (PR2.4) seams. ``_session_source`` is an optional test/
+        # injection hook ``() -> list[SessionEntry]``; when None the dialog reads
+        # the runtime's ``session_lister`` seam via ``session_entries``.
+        # ``resumed_session`` records the most recently resumed session ref
+        # (asserted by tests); None until a resume happens.
+        self._session_source: Callable[[], list[SessionEntry]] | None = None
+        self.resumed_session: str | None = None
         import os as _os  # noqa: PLC0415
 
         self._cwd = cwd if cwd is not None else _os.getcwd()
@@ -855,6 +867,41 @@ class MagiTuiApp(App[None]):
         if self._topbar is not None:
             self._topbar.update(self._topbar_text())
         self.notify(f"Model: {model}", timeout=2)
+
+    # -- session list (PR2.4) ----------------------------------------------
+    def action_open_session_list(self) -> None:
+        """Open the session list; resume the chosen session on dismiss.
+
+        Surfaced automatically in the command palette (``AppActionProvider``
+        gates on ``action_open_session_list`` existing) and reachable via
+        ``open_dialog("session_list")`` (the ``open_dialog`` name maps to
+        ``action_open_<name>``). The resumable list comes from the injected
+        ``_session_source`` test seam when set, else from the runtime's
+        ``session_lister`` seam via ``session_entries``; absent either it is
+        empty and the dialog shows its "No prior sessions." placeholder.
+        """
+
+        if self._session_source is not None:
+            sessions = list(self._session_source())
+        else:
+            sessions = session_entries(self._runtime)
+        self.push_screen(SessionListDialog(sessions=sessions), self._resume_session)
+
+    def _resume_session(self, ref: str | None) -> None:
+        """Resume a chosen session (None on cancel = no-op).
+
+        OQ3: **metadata + a fresh turn**. We switch the active session id to the
+        chosen ref and start ONE new turn — there is NO transcript replay. Full
+        rehydration (``TurnInput.initial_messages``) stays a deferred Stream-B
+        seam; here resume is purely "continue under this session id".
+        """
+
+        if not ref:
+            return
+        self.resumed_session = ref
+        self._session_id = ref
+        self.controller.commit_block(f"[resumed session {ref}]")
+        self.start_turn(f"Resume session {ref}.")
 
     # -- the ONE engine-driven turn loop -----------------------------------
     def start_turn(self, prompt: str) -> None:
