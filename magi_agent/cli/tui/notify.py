@@ -8,11 +8,15 @@ Two concerns:
   notification that itself raises is swallowed (a failed toast must never crash
   a turn). The three severities mirror Textual's ``App.notify`` severity
   strings: ``information`` / ``warning`` / ``error``.
-* **Focus-aware bell** (PR3.4) — ring the terminal bell (``App.bell()``) and
-  optionally emit an OSC 9 desktop notification when the terminal is UNFOCUSED,
-  gated by the ``MAGI_TUI_NOTIFY_BELL`` env flag (default OFF). The bell never
-  fires while focused (the operator is already looking) and is fail-open like
-  the toast helpers.
+* **Focus-aware bell** (PR3.4) — ring the terminal bell (``App.bell()``) when
+  the terminal is UNFOCUSED, gated by the ``MAGI_TUI_NOTIFY_BELL`` env flag
+  (default OFF). The bell never fires while focused (the operator is already
+  looking) and is fail-open like the toast helpers. ``App.bell()`` routes a
+  portable BEL through the Textual driver safely.
+
+Deferred follow-up: a true desktop notification should go through a proper
+Textual driver/app seam (NOT a raw ``sys.stdout`` OSC write, which can corrupt
+a live frame or leak visible escape bytes on a piped stdout).
 """
 
 from __future__ import annotations
@@ -61,7 +65,7 @@ def _notify(app: object, message: str, *, severity: str, timeout: float) -> None
 
 
 # ---------------------------------------------------------------------------
-# Focus-aware bell / desktop notify (PR3.4) — gated by MAGI_TUI_NOTIFY_BELL.
+# Focus-aware bell (PR3.4) — gated by MAGI_TUI_NOTIFY_BELL.
 # ---------------------------------------------------------------------------
 
 #: Env flag gating the focus-aware terminal bell / desktop notify (default OFF).
@@ -85,9 +89,10 @@ def notify_attention(app: object, *, focused: bool, reason: str = "") -> None:
     """Ring the terminal bell when enabled AND the terminal is unfocused.
 
     No-op when the gate is off (default) OR the terminal is focused (the operator
-    is already looking — don't annoy). A best-effort OSC 9 desktop notification
-    is attempted after the bell; any failure (a missing/raising ``bell``, an OSC
-    write error) is swallowed — an attention cue must never crash a turn.
+    is already looking — don't annoy). A missing/raising ``bell`` is swallowed —
+    an attention cue must never crash a turn. ``reason`` is accepted for call-site
+    parity but currently unused (a real desktop notification is a deferred
+    follow-up; see module docstring).
     """
 
     if focused or not bell_enabled():
@@ -99,23 +104,3 @@ def notify_attention(app: object, *, focused: bool, reason: str = "") -> None:
         except Exception:
             # A bell that fails must never crash a turn (fail-open).
             pass
-    _osc_desktop_notify(reason)
-
-
-def _osc_desktop_notify(reason: str) -> None:
-    """Emit an OSC 9 desktop notification (best-effort, terminal-dependent).
-
-    ``OSC 9 ; <text> BEL`` is honored by iTerm2 and several modern terminals and
-    is harmlessly ignored elsewhere. No-op for an empty reason. Any write/flush
-    failure is swallowed (the bell already fired; the desktop toast is a bonus).
-    """
-
-    if not reason:
-        return
-    try:
-        import sys  # noqa: PLC0415
-
-        sys.stdout.write(f"\033]9;{reason}\007")
-        sys.stdout.flush()
-    except Exception:
-        pass
