@@ -160,3 +160,106 @@ def test_flag_off_byte_identical_empty_source_ledger(
     assert context.source_ledger == ()
     result = inspect_self_evidence(query_type="tools_called", context=context)
     assert result["tool_calls"] == []
+
+
+# ---------------------------------------------------------------------------
+# Stage 3 — phase-reached evidence
+# ---------------------------------------------------------------------------
+
+
+def _phase_entries(ledger: EvidenceLedger) -> list[tuple[str, object]]:
+    return [
+        (e.payload["record"]["fields"]["phaseName"], e.payload["record"]["fields"]["reached"])
+        for e in ledger.entries
+        if e.kind == "evidence_record"
+        and e.payload["record"]["type"] == "custom:PhaseReached"
+    ]
+
+
+def test_record_phase_reached_appends_phase_record(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(_ENV, "1")
+    collector = LocalToolEvidenceCollector()
+
+    collector.record_phase_reached("session-1", "turn-1", "patch_generation")
+
+    ledgers = collector.evidence_ledgers_for_session("session-1")
+    assert len(ledgers) == 1
+    assert _phase_entries(ledgers[0]) == [("patch_generation", True)]
+
+
+def test_record_phase_reached_shares_turn_ledger_with_tool_traces(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(_ENV, "1")
+    collector = LocalToolEvidenceCollector()
+
+    _record(collector, turn_id="turn-1", tool_name="Grep")
+    collector.record_phase_reached("session-1", "turn-1", "analysis")
+    _record(collector, turn_id="turn-1", tool_name="Bash")
+
+    ledgers = collector.evidence_ledgers_for_session("session-1")
+    # One single-turn ledger holds BOTH tool traces and the phase marker, with a
+    # contiguous append-only sequence preserved.
+    assert len(ledgers) == 1
+    ledger = ledgers[0]
+    assert [e.sequence for e in ledger.entries] == [1, 2, 3]
+    kinds = [
+        e.payload["record"]["type"]
+        for e in ledger.entries
+        if e.kind == "evidence_record"
+    ]
+    assert kinds == ["custom:ToolTrace", "custom:PhaseReached", "custom:ToolTrace"]
+
+
+def test_record_phase_reached_no_record_when_flag_off(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv(_ENV, raising=False)
+    collector = LocalToolEvidenceCollector()
+
+    collector.record_phase_reached("session-1", "turn-1", "analysis")
+
+    assert collector.evidence_ledgers_for_session("session-1") == ()
+
+
+def test_record_phase_reached_ignores_empty_inputs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(_ENV, "1")
+    collector = LocalToolEvidenceCollector()
+
+    collector.record_phase_reached("", "turn-1", "analysis")
+    collector.record_phase_reached("session-1", "", "analysis")
+    collector.record_phase_reached("session-1", "turn-1", "")
+
+    assert collector.evidence_ledgers_for_session("session-1") == ()
+
+
+def test_end_to_end_phases_via_real_factory(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setenv(_ENV, "1")
+    from magi_agent.cli.tool_runtime import build_cli_tool_runtime
+
+    collector = LocalToolEvidenceCollector()
+    _record(collector, turn_id="turn-7", tool_name="Grep")
+    collector.record_phase_reached("session-1", "turn-7", "patch_generation")
+
+    runtime = build_cli_tool_runtime(
+        workspace_root=str(tmp_path),
+        session_id="session-1",
+        local_tool_evidence_collector=collector,
+    )
+    context = runtime.tool_context_factory(adk_tool_context=None)
+
+    result = inspect_self_evidence(query_type="phases", context=context)
+    phases = result["phases"]
+    assert {(p["name"], p["reached"], p["turn"]) for p in phases} == {
+        ("patch_generation", True, "turn-7"),
+    }
+    # The phase marker did not leak into tool_calls.
+    tools = inspect_self_evidence(query_type="tools_called", context=context)["tool_calls"]
+    assert {(c["name"], c["turn"]) for c in tools} == {("Grep", "turn-7")}

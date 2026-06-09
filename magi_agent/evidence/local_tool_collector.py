@@ -119,6 +119,42 @@ class LocalToolEvidenceCollector:
             if stored_session_id == session_id
         )
 
+    def record_phase_reached(
+        self,
+        session_id: str,
+        turn_id: str,
+        phase_name: str,
+    ) -> None:
+        """Record that the turn reached ``phase_name`` as ledger evidence.
+
+        Appends a ``custom:PhaseReached`` ``EvidenceRecord`` into the SAME
+        per-``(session, turn)`` EvidenceLedger that Stage 1's tool-trace records
+        share, so ``InspectSelfEvidence`` can project the REAL phases the agent
+        went through this turn. Flag-gated on
+        ``MAGI_EVIDENCE_LEDGER_LIFECYCLE_ENABLED`` (default OFF -> no record,
+        byte-identical) and fail-open (never breaks a turn). The record carries
+        NO ``toolName`` so the shared tool-call normalizer ignores it; the phase
+        projection keys off the ``custom:PhaseReached`` type instead.
+        """
+        # Fail-open: phase synthesis/append must NEVER break a turn. Mirrors the
+        # ``_maybe_append_evidence_ledger_record`` convention.
+        try:
+            from magi_agent.config.env import (  # noqa: PLC0415
+                is_evidence_ledger_lifecycle_enabled,
+            )
+
+            if not is_evidence_ledger_lifecycle_enabled():
+                return
+            if not session_id or not turn_id or not phase_name:
+                return
+            self._append_turn_record(
+                session_id=session_id,
+                turn_id=turn_id,
+                record=_synthesize_phase_reached_record(phase_name=phase_name),
+            )
+        except Exception:
+            return
+
     def _maybe_append_evidence_ledger_record(
         self,
         *,
@@ -140,15 +176,34 @@ class LocalToolEvidenceCollector:
                 return
             if not session_id or not turn_id or not tool_name:
                 return
-            key = (session_id, turn_id)
-            ledger = self._ledgers.get(key) or _new_tool_trace_ledger(
+            self._append_turn_record(
                 session_id=session_id,
                 turn_id=turn_id,
+                record=_synthesize_tool_trace_record(
+                    tool_name=tool_name,
+                    status=status,
+                ),
             )
-            record = _synthesize_tool_trace_record(tool_name=tool_name, status=status)
-            self._ledgers[key] = ledger.append_evidence_record(record)
         except Exception:
             return
+
+    def _append_turn_record(
+        self,
+        *,
+        session_id: str,
+        turn_id: str,
+        record: EvidenceRecord,
+    ) -> None:
+        # Shared lazy-ledger construction: phase markers and tool traces append
+        # into ONE single-turn ledger per ``(session, turn)`` so the contiguous
+        # append-only sequence + single-turn constraint hold across both kinds.
+        # Immutable reassign (``append_evidence_record`` returns a fresh ledger).
+        key = (session_id, turn_id)
+        ledger = self._ledgers.get(key) or _new_tool_trace_ledger(
+            session_id=session_id,
+            turn_id=turn_id,
+        )
+        self._ledgers[key] = ledger.append_evidence_record(record)
 
     def collect_for_turn(self, turn_id: str) -> tuple[object, ...]:
         local = tuple(
@@ -418,6 +473,23 @@ def _synthesize_tool_trace_record(*, tool_name: str, status: str) -> EvidenceRec
             "status": _TOOL_STATUS_TO_EVIDENCE_STATUS.get(status, "unknown"),
             "observedAt": time.time(),
             "source": {"kind": "tool_trace", "toolName": tool_name},
+        }
+    )
+
+
+def _synthesize_phase_reached_record(*, phase_name: str) -> EvidenceRecord:
+    # "phase"/"runtime" are NOT valid EvidenceSourceKind values; reuse the
+    # "tool_trace" kind (the only local-origin source kind) but deliberately set
+    # NO ``toolName`` so the shared ``tool_call_from_evidence_record`` normalizer
+    # skips it. The phase projection discriminates on the ``custom:PhaseReached``
+    # type and reads ``fields.phaseName`` / ``fields.reached``.
+    return EvidenceRecord.model_validate(
+        {
+            "type": "custom:PhaseReached",
+            "status": "ok",
+            "observedAt": time.time(),
+            "source": {"kind": "tool_trace"},
+            "fields": {"phaseName": phase_name, "reached": True},
         }
     )
 

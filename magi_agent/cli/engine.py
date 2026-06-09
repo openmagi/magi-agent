@@ -1044,6 +1044,17 @@ class MagiEngineDriver:
             prompt=prompt,
             harness_state=harness_state,
         )
+        # Stage 3: emit a phase-reached evidence record for the phase the route
+        # selection resolved. This is the ONLY live seam where a concrete phase
+        # name is known together with (session_id, turn_id) and the evidence
+        # collector. Flag-gated + fail-open inside the collector; a None route
+        # selection (routing OFF / no phase routes) records nothing.
+        if route_selection is not None:
+            self._record_phase_reached(
+                session_id=session_id,
+                turn_id=turn_id,
+                phase=route_selection.get("phase"),
+            )
         policy_payload = self._runner_policy_payload()
         route_decision = (
             self._runner_policy_assembly.phase_route_decision()
@@ -1622,6 +1633,36 @@ class MagiEngineDriver:
         if self._evidence_collector is not None:
             return tuple(self._evidence_collector(turn_id))
         return ()
+
+    def _record_phase_reached(
+        self,
+        *,
+        session_id: str,
+        turn_id: str,
+        phase: object,
+    ) -> None:
+        """Feed the turn's resolved phase to the evidence collector (Stage 3).
+
+        The collector is wired in as its ``collect_for_turn`` bound method (see
+        ``cli/wiring.py``); recover the owning ``LocalToolEvidenceCollector``
+        instance via ``__self__`` and delegate to its ``record_phase_reached``.
+        Flag-gating + fail-open live in the collector, but this seam is also
+        defensive: a missing collector / method / phase records nothing and
+        never breaks the turn (byte-identical when no phase producer exists).
+        """
+        if not isinstance(phase, str) or not phase:
+            return
+        collector = self._evidence_collector
+        if collector is None:
+            return
+        owner = getattr(collector, "__self__", None)
+        record_phase = getattr(owner, "record_phase_reached", None)
+        if not callable(record_phase):
+            return
+        try:
+            record_phase(session_id, turn_id, phase)
+        except Exception:
+            logger.debug("phase-reached evidence record failed", exc_info=True)
 
     async def _attempt_run_recovery(
         self,

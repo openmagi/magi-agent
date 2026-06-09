@@ -121,22 +121,17 @@ def project_session_evidence(
     """
     files_read: list[FileReadView] = []
     tool_calls: list[ToolCallView] = []
+    phases: list[PhaseView] = []
     verdicts: list[VerdictView] = []
     turns: list[str] = []
 
     for entry in ledger.entries:
         if turn_filter is not None and entry.turn_id != turn_filter:
             continue
-        _categorize_ledger_entry(entry, tool_calls, verdicts, turns)
+        _categorize_ledger_entry(entry, tool_calls, phases, verdicts, turns)
 
     if read_ledger is not None:
         _project_read_ledger(read_ledger, ledger.session_id, turn_filter, files_read, turns)
-
-    # Phase evidence emission is introduced in PR3 (process-invariant phase
-    # markers). Until that producer exists there is no real phase evidence in
-    # the ledger, so we honestly project an empty tuple rather than guess keys.
-    # The ``phases`` field stays in the shared contract for PR3 to populate.
-    phases: tuple[PhaseView, ...] = ()
 
     return SessionEvidenceView(
         scope=SessionScopeView(
@@ -145,14 +140,23 @@ def project_session_evidence(
         ),
         filesRead=tuple(files_read),
         toolCalls=tuple(tool_calls),
-        phases=phases,
+        phases=tuple(phases),
         verdicts=tuple(verdicts),
     )
+
+
+# Phase markers are emitted by the Stage 3 producer
+# (``LocalToolEvidenceCollector.record_phase_reached``) as evidence_records of
+# this type carrying ``fields.phaseName`` / ``fields.reached`` and NO
+# ``source.toolName`` (so the tool-call normalizer skips them). The egress seam
+# (transport/chat.py) has no EvidenceLedger, so it still yields ``phases=()``.
+_PHASE_REACHED_RECORD_TYPE = "custom:PhaseReached"
 
 
 def _categorize_ledger_entry(
     entry: EvidenceLedgerEntry,
     tool_calls: list[ToolCallView],
+    phases: list[PhaseView],
     verdicts: list[VerdictView],
     turns: list[str],
 ) -> None:
@@ -166,6 +170,15 @@ def _categorize_ledger_entry(
     if not isinstance(record, Mapping):
         return
 
+    # Phase markers are evidence_records distinguished by their ``type``. They
+    # carry no ``source.toolName``, so categorize them BEFORE the tool-call
+    # normalizer (which would return None for them anyway) and short-circuit.
+    if record.get("type") == _PHASE_REACHED_RECORD_TYPE:
+        phase_view = _phase_view(record, entry.turn_id)
+        if phase_view is not None:
+            phases.append(phase_view)
+        return
+
     # Tool-call projection is delegated to the SHARED normalization helper
     # (introspection/mapping.py) so this PULL seam and the egress PUSH seam
     # (transport/chat.py) emit an identical ``ToolCallView`` shape + canonical
@@ -173,6 +186,21 @@ def _categorize_ledger_entry(
     tool_view = tool_call_from_evidence_record(record, entry.turn_id)
     if tool_view is not None:
         tool_calls.append(tool_view)
+
+
+def _phase_view(record: Mapping[str, object], turn_id: str) -> PhaseView | None:
+    fields = record.get("fields")
+    if not isinstance(fields, Mapping):
+        return None
+    name = fields.get("phaseName")
+    if not isinstance(name, str) or not name:
+        return None
+    reached = fields.get("reached")
+    return PhaseView(
+        name=name,
+        reached=bool(reached) if isinstance(reached, bool) else True,
+        turnId=turn_id,
+    )
 
 
 def _verdict_view(entry: EvidenceLedgerEntry) -> VerdictView:

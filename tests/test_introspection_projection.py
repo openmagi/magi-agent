@@ -92,9 +92,9 @@ def test_no_read_ledger_means_no_file_reads() -> None:
 
 
 def test_phases_is_empty_for_real_ledger_with_tool_and_verdict_records() -> None:
-    # Documents the honest current state: no evidence-record producer emits a
-    # phase marker, so even a populated ledger projects an empty ``phases``.
-    # PR3 introduces process-invariant phase markers and will populate this.
+    # A ledger carrying only tool-call + verdict records (no phase marker)
+    # projects an empty ``phases``. Stage 3 adds a ``custom:PhaseReached``
+    # producer, but phases stay empty unless such a record is present.
     from magi_agent.evidence.types import EvidenceContractVerdict
 
     ledger = _base_ledger().append_evidence_record(
@@ -136,6 +136,51 @@ def test_tool_calls_are_projected() -> None:
     assert view.tool_calls[0].status == "ok"
     assert view.tool_calls[0].turn_id == "turn-1"
     assert view.phases == ()
+
+
+def _phase_record(
+    *,
+    phase_name: str,
+    reached: bool = True,
+    observed_at: int = 1_779_000_002,
+) -> EvidenceRecord:
+    return EvidenceRecord.model_validate(
+        {
+            "type": "custom:PhaseReached",
+            "status": "ok",
+            "observedAt": observed_at,
+            "source": {"kind": "tool_trace"},
+            "fields": {"phaseName": phase_name, "reached": reached},
+        }
+    )
+
+
+def test_phase_reached_record_is_projected() -> None:
+    ledger = _base_ledger().append_evidence_record(
+        _phase_record(phase_name="patch_generation")
+    )
+
+    view = project_session_evidence(ledger)
+
+    assert len(view.phases) == 1
+    phase = view.phases[0]
+    assert phase.name == "patch_generation"
+    assert phase.reached is True
+    assert phase.turn_id == "turn-1"
+    # A phase marker carries no toolName, so it must NOT leak into tool_calls.
+    assert view.tool_calls == ()
+
+
+def test_phase_and_tool_records_coexist_in_one_ledger() -> None:
+    ledger = _base_ledger().append_evidence_record(
+        _tool_call_record(name="Grep", status="ok")
+    )
+    ledger = ledger.append_evidence_record(_phase_record(phase_name="analysis"))
+
+    view = project_session_evidence(ledger)
+
+    assert [t.name for t in view.tool_calls] == ["Grep"]
+    assert [(p.name, p.reached) for p in view.phases] == [("analysis", True)]
 
 
 def test_failed_tool_call_status_is_normalized_to_error() -> None:
