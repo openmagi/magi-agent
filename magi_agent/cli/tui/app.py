@@ -727,6 +727,16 @@ class MagiTuiApp(App[None]):
     def _on_flush_tick(self) -> None:
         if self._controller is not None:
             self._controller.flush()
+        # While a turn is in flight, advance the footer elapsed so the live
+        # status reads as a running clock (reuses the existing flush timer — no
+        # separate timer needed). Once _render_terminal clears the start stamp
+        # and flips state off "running", this stops contributing.
+        if (
+            self._turn_started_monotonic is not None
+            and self._footer is not None
+            and self._footer.state == "running"
+        ):
+            self._footer.set_elapsed(self._turn_elapsed())
 
     def _render_welcome(self) -> None:
         """Render the initial TUI state so bare ``magi`` never opens blank."""

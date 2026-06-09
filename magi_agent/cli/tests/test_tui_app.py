@@ -1351,3 +1351,30 @@ def test_footer_reflects_turn_state_and_token_usage() -> None:
         assert "123 tok" in text
 
     asyncio.run(_run())
+
+
+def test_footer_elapsed_ticks_during_turn() -> None:
+    async def _run() -> None:
+        import asyncio as _asyncio
+
+        class _SlowEngine(FakeEngineDriver):
+            async def run_turn_stream(self, runtime, turn_input, *, cancel, gate=None):
+                turn_id = getattr(turn_input, "turn_id", "t")
+                # Stream slowly so the footer tick fires at least once mid-turn.
+                for tok in ("a", "b", "c"):
+                    await _asyncio.sleep(0.02)
+                    yield RuntimeEvent(type="token", payload={"delta": tok}, turn_id=turn_id)
+                yield EngineResult(terminal=Terminal.completed, turn_id=turn_id)
+
+        app = _make_app(_SlowEngine(), flush_interval=0.01)
+        async with app.run_test() as pilot:
+            app.start_turn("go")
+            await pilot.pause(0.015)
+            first = app._footer.elapsed
+            await pilot.pause(0.03)
+            second = app._footer.elapsed
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+        assert second > first
+
+    asyncio.run(_run())
