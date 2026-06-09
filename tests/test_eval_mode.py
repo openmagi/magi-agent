@@ -49,3 +49,30 @@ def test_eval_defaults_respect_explicit_override():
     env = {"MAGI_RUNTIME_PROFILE": "eval", "MAGI_SELF_REVIEW_ENABLED": "1"}
     apply_local_eval_runtime_defaults(env)
     assert env["MAGI_SELF_REVIEW_ENABLED"] == "1"  # setdefault must not override
+
+
+from magi_agent.cli.app import resolve_headless_permission_mode
+
+
+def test_eval_default_flag_resolves_to_bypass():
+    assert resolve_headless_permission_mode(
+        permission_mode="default", flag_is_default=True, runtime_profile="eval"
+    ) == "bypassPermissions"
+
+
+def test_eval_explicit_flag_wins():
+    assert resolve_headless_permission_mode(
+        permission_mode="acceptEdits", flag_is_default=False, runtime_profile="eval"
+    ) == "acceptEdits"
+
+
+def test_non_eval_default_flag_stays_default():
+    assert resolve_headless_permission_mode(
+        permission_mode="default", flag_is_default=True, runtime_profile=None
+    ) == "default"
+
+
+def test_full_profile_default_flag_stays_default():
+    assert resolve_headless_permission_mode(
+        permission_mode="default", flag_is_default=True, runtime_profile="full"
+    ) == "default"
