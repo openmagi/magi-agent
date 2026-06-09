@@ -29,6 +29,9 @@ Versions follow the tags published on GitHub Releases.
 - Active learnings are injected into CLI prompts, an introspection evidence
   ledger records lifecycle events, and a cross-verify recipe was added.
 - The runtime can optionally route LiteLLM traffic through the api-proxy gateway.
+- The interactive TUI now includes a dynamic status footer, a toggleable
+  todo/context/files sidebar, edit diff previews in permission prompts, and
+  focus-aware bell/toast notifications.
 
 ### Changed
 - The interactive TUI is quieter and more compact: tool calls/results render as
@@ -44,6 +47,8 @@ Versions follow the tags published on GitHub Releases.
   honors an explicit workspace-root environment override.
 - A read-safe class of complex shell commands is allowed for the local coding
   agent.
+- The TUI footer now resets after turn errors, and the sidebar clears stale
+  todo entries when the latest TodoWrite list is empty.
 
 ## 0.1.28
 
