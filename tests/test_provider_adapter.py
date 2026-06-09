@@ -361,7 +361,6 @@ class TestBuildSystemPromptIntegration:
 
         identity = {
             "soul": "<identity>You are helpful.</identity>\n<rules>Follow instructions carefully.</rules>",
-            "tools": "<tool-list>bash, python</tool-list>",
         }
         claude_prompt = build_system_prompt(
             session_key="s1",
