@@ -37,3 +37,12 @@ def test_unsafe_segments():
     assert _segment_is_read_safe("curl http://x") is False
     assert _segment_is_read_safe("python -c 'import os'") is False
     assert _segment_is_read_safe("") is False
+
+
+def test_returns_none_on_variable_expansion_and_newline():
+    assert _decompose_shell_segments("cat $HOME/secret") is None
+    assert _decompose_shell_segments("cat foo\nls /etc") is None
+
+
+def test_returns_none_on_unbalanced_quotes():
+    assert _decompose_shell_segments("echo 'unterminated") is None

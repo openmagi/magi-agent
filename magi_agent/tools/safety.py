@@ -1560,6 +1560,10 @@ def _decompose_shell_segments(command: str) -> list[str] | None:
     substitution, backticks, parameter expansion, or redirection. Operators
     inside single/double quotes are ignored.
     """
+    if re.search(r"\$[A-Za-z_{]", command):
+        return None  # variable / parameter expansion
+    if "\n" in command or "\r" in command:
+        return None  # newline is a shell command separator
     if any(token in command for token in _SHELL_UNDECOMPOSABLE):
         return None
     segments: list[str] = []
@@ -1602,6 +1606,9 @@ def _decompose_shell_segments(command: str) -> list[str] | None:
     return [s for s in segments if s]
 
 
+_NUMERIC_FLAG_COMMANDS = {"head", "tail"}
+
+
 def _segment_is_read_safe(segment: str) -> bool:
     """True iff a single (already-decomposed) command segment is read-only safe:
     executable in the read-only allowlist, no write/mutating flags, no inline
@@ -1625,7 +1632,6 @@ def _segment_is_read_safe(segment: str) -> bool:
         return False
     # Strip POSIX numeric-only short flags (e.g. -30, -5) for line-count
     # commands before passing to the general flag-denial check.
-    _NUMERIC_FLAG_COMMANDS = {"head", "tail"}
     filtered_args = tuple(
         arg for arg in parts[1:]
         if not (exe in _NUMERIC_FLAG_COMMANDS and arg.startswith("-") and arg[1:].isdigit())
