@@ -1777,6 +1777,21 @@ def parse_provider_repair_enabled(env: Mapping[str, str]) -> bool:
     return _runtime_feature_enabled(env, "MAGI_PROVIDER_REPAIR_ENABLED")
 
 
+def parse_trusted_local_shell_enabled(env: Mapping[str, str]) -> bool:
+    """Whether read-safe complex shell is allowed in the trusted local scope.
+
+    Single source of truth for the ``MAGI_TRUSTED_LOCAL_SHELL_ENABLED`` flag.
+    Default ON in the local full runtime profile. When ON, the first-party local
+    coding agent (``selected_full_toolhost`` Bash scope) permits pipe/compound
+    shell commands whose every segment is read-only safe (e.g. ``grep ... |
+    head``) instead of hard-denying them with ``complex_shell_requires_approval``;
+    destructive or opaque segments still deny. Set
+    ``MAGI_TRUSTED_LOCAL_SHELL_ENABLED=0`` (or ``MAGI_RUNTIME_PROFILE=safe``) to
+    restore the conservative deny-all-complex behavior.
+    """
+    return _runtime_feature_enabled(env, "MAGI_TRUSTED_LOCAL_SHELL_ENABLED")
+
+
 def tool_concurrency_enabled(env: Mapping[str, str]) -> bool:
     """Single source of truth for the ``MAGI_TOOL_CONCURRENCY_ENABLED`` flag.
 
