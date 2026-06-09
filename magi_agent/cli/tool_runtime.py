@@ -97,6 +97,18 @@ def build_cli_tool_runtime(
         register_file_tool_manifests(registry)
         bind_file_toolhost_handlers(registry)
 
+    # Optional autonomous vision browser tool (MAGI_BROWSER_TOOL_ENABLED=true).
+    from magi_agent.config.env import browser_tool_enabled  # noqa: PLC0415
+
+    if browser_tool_enabled():
+        from magi_agent.browser.autonomous.tool import (  # noqa: PLC0415
+            register_browser_tool_manifest,
+            bind_browser_toolhost_handler,
+        )
+
+        register_browser_tool_manifest(registry)
+        bind_browser_toolhost_handler(registry)
+
     receipt_store = general_automation_receipts or GeneralAutomationReceiptLedgerStore()
     dispatcher = ToolDispatcher(
         registry,

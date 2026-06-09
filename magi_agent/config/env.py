@@ -1862,7 +1862,12 @@ def file_tools_enabled(env: Mapping[str, str] | None = None) -> bool:
 
 
 def browser_tool_enabled(env: Mapping[str, str] | None = None) -> bool:
-    """Single source of truth for the ``MAGI_BROWSER_TOOL_ENABLED`` flag.
+    """Single source of truth for the autonomous browser tool gate.
+
+    Returns True iff ``MAGI_BROWSER_TOOL_ENABLED`` is truthy AND the
+    ``MAGI_BROWSER_TOOL_KILL_SWITCH`` is NOT truthy. The kill-switch always
+    wins, so an operator can disable the tool fleet-wide even when the enable
+    flag is set.
 
     Default OFF. When ON (and the ``browser`` extra is installed), the
     ``BrowserTask`` tool is registered and bound. The handler degrades with
@@ -1873,7 +1878,9 @@ def browser_tool_enabled(env: Mapping[str, str] | None = None) -> bool:
         import os as _os
 
         env = _os.environ
-    return _is_true(env.get("MAGI_BROWSER_TOOL_ENABLED"))
+    return _is_true(env.get("MAGI_BROWSER_TOOL_ENABLED")) and not _is_true(
+        env.get("MAGI_BROWSER_TOOL_KILL_SWITCH")
+    )
 
 
 def _is_true(value: str | None) -> bool:
