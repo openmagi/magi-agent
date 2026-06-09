@@ -190,14 +190,18 @@ def _tool_file_path(tool_input: object) -> str | None:
     return None
 
 
-def _todo_contents(tool_input: object) -> list[str]:
-    """Best-effort todo strings from a TodoWrite tool input."""
+def _todo_contents(tool_input: object) -> list[str] | None:
+    """Best-effort todo strings from a TodoWrite tool input.
+
+    ``None`` means "not a TodoWrite-style payload"; an empty list is a valid
+    payload and should clear the sidebar's Todo pane.
+    """
 
     if not isinstance(tool_input, dict):
-        return []
+        return None
     todos = tool_input.get("todos")
     if not isinstance(todos, list):
-        return []
+        return None
     out: list[str] = []
     for item in todos:
         if isinstance(item, dict):
@@ -209,19 +213,14 @@ def _todo_contents(tool_input: object) -> list[str]:
     return out
 
 
-# Coarse default context-window budget (tokens) for the sidebar context pane.
-# Per-model context windows (a model -> window table keyed off ``_model``) are a
-# Phase-4 follow-up seam; v1 returns this single default so the context pane
-# shows a ``usage / limit`` ratio rather than a bare token count.
+# Coarse default context-window budget (tokens) retained as a future sidebar
+# seam. The current sidebar renders an honest bare token count; a future
+# per-model window table can decide when a ratio is accurate enough to surface.
 DEFAULT_CONTEXT_WINDOW = 200_000
 
 
 def _context_limit(_model: str | None) -> int:
-    """Coarse context-window budget for the sidebar context pane (v1).
-
-    Returns :data:`DEFAULT_CONTEXT_WINDOW`. The ``_model`` param is kept for
-    forward-compat with a per-model context-window table (Phase-4 seam).
-    """
+    """Coarse context-window budget for a future per-model context pane ratio."""
 
     return DEFAULT_CONTEXT_WINDOW
 
@@ -1398,7 +1397,7 @@ class MagiTuiApp(App[None]):
             return
         if name == "TodoWrite":
             todos = _todo_contents(tool_input)
-            if todos:
+            if todos is not None:
                 self._sidebar.set_todos(todos)
             return
         if name in ("Read", "Edit", "Write", "MultiEdit"):
@@ -1449,9 +1448,9 @@ class MagiTuiApp(App[None]):
             tokens=tokens,
             elapsed=self._turn_elapsed(),
         )
-        # Mirror the turn's token usage into the sidebar context pane (usage vs a
-        # coarse v1 context-window budget). Folded here next to the footer so the
-        # two stay in lockstep.
+        # Mirror the turn's token usage into the sidebar context pane. The limit
+        # is kept as a future per-model seam, but the sidebar currently renders
+        # only a bare token count to avoid a misleading hardcoded ratio.
         if self._sidebar is not None:
             self._sidebar.set_context(
                 usage=tokens, limit=_context_limit(self._model)

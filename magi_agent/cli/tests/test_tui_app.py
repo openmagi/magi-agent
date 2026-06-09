@@ -1526,6 +1526,44 @@ def test_sidebar_panes_fed_from_tool_and_terminal_events() -> None:
     asyncio.run(_run())
 
 
+def test_sidebar_todowrite_empty_list_clears_todos() -> None:
+    async def _run() -> None:
+        class _ToolEngine(FakeEngineDriver):
+            async def run_turn_stream(self, runtime, turn_input, *, cancel, gate=None):
+                turn_id = getattr(turn_input, "turn_id", "t")
+                yield RuntimeEvent(
+                    type="tool",
+                    payload={
+                        "type": "tool_start",
+                        "name": "TodoWrite",
+                        "input": {"todos": [{"content": "step one"}]},
+                    },
+                    turn_id=turn_id,
+                )
+                yield RuntimeEvent(
+                    type="tool",
+                    payload={
+                        "type": "tool_start",
+                        "name": "TodoWrite",
+                        "input": {"todos": []},
+                    },
+                    turn_id=turn_id,
+                )
+                yield EngineResult(terminal=Terminal.completed, turn_id=turn_id)
+
+        app = _make_app(_ToolEngine())
+        async with app.run_test() as pilot:
+            app.start_turn("clear todos")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            sidebar = app.query_one("#sidebar")
+            text = sidebar.panes_text()
+        assert "step one" not in text
+        assert "Todo\n  (none)" in text
+
+    asyncio.run(_run())
+
+
 # ---------------------------------------------------------------------------
 # PR3.3 — Permission-modal diff preview for Edit/Write + toasts on copy failure
 # ---------------------------------------------------------------------------
