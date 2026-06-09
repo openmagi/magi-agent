@@ -450,3 +450,9 @@ def test_evidence_ledgers_for_session_caps_to_most_recent_k_turns(
     assert [ledger.turn_id for ledger in ledgers] == [
         f"turn-{i:04d}" for i in range(total - _MAX_SESSION_LEDGERS, total)
     ]
+    # Retention is bounded in the process-lifetime backing map too, not just in
+    # the accessor's returned tuple.
+    assert len(collector._ledgers) == _MAX_SESSION_LEDGERS
+    assert [turn_id for _session_id, turn_id in collector._ledgers] == [
+        f"turn-{i:04d}" for i in range(total - _MAX_SESSION_LEDGERS, total)
+    ]

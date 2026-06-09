@@ -127,15 +127,15 @@ class LocalToolEvidenceCollector:
         dropped from the live self-evidence view) to keep the per-dispatch cost
         constant — see ``_MAX_SESSION_LEDGERS``. ``self._ledgers`` is a dict
         keyed by ``(session_id, turn_id)`` whose insertion order is the order
-        each turn was first recorded; we keep that turn order and slice the
-        trailing K, so the result is deterministic and preserves order.
+        each turn was first recorded; older per-session entries are pruned so
+        process-lifetime retention matches the accessor cap.
         """
-        matching = tuple(
+        self._prune_session_ledgers(session_id)
+        return tuple(
             ledger
             for (stored_session_id, _turn_id), ledger in self._ledgers.items()
             if stored_session_id == session_id
         )
-        return matching[-_MAX_SESSION_LEDGERS:]
 
     def record_phase_reached(
         self,
@@ -269,6 +269,14 @@ class LocalToolEvidenceCollector:
             turn_id=turn_id,
         )
         self._ledgers[key] = ledger.append_evidence_record(record)
+        self._prune_session_ledgers(session_id)
+
+    def _prune_session_ledgers(self, session_id: str) -> None:
+        session_keys = [
+            key for key in self._ledgers if key[0] == session_id
+        ]
+        for key in session_keys[:-_MAX_SESSION_LEDGERS]:
+            self._ledgers.pop(key, None)
 
     def collect_for_turn(self, turn_id: str) -> tuple[object, ...]:
         local = tuple(
