@@ -186,9 +186,11 @@ def compute_shadow_parity(
     raw_output: str = python_result.user_visible_output or ""
     python_digest = _sha256_digest(raw_output)
 
-    # --- Python terminal status (safe token derived from status+reason) ---
-    # We combine status and reason into a compact safe label.  Both fields
-    # are already public-safe TypeAlias Literal values from the contract.
+    # --- Python terminal status (public-safe label) ---
+    # Use the terminal `status` only (a public-safe Literal from the contract),
+    # matching the single-label shape the TypeScript side supplies in
+    # `type_script_terminal_status`.  `reason` is intentionally NOT folded in:
+    # a compound label would spuriously mismatch the TS single-label status.
     python_status_label: str = python_result.status
 
     # --- Answer parity ---
