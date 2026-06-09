@@ -15,6 +15,36 @@ Versions follow the tags published on GitHub Releases.
 
 ### Fixed
 
+## 0.1.29
+
+### Added
+- Subagents now run through a real child-runner boundary with a gated live
+  child-runner surface, forwarding the parent's actual objective to the child
+  turn.
+- The CLI `/model` command is wired to the TUI model picker and persists the
+  selection to config; image multimodal input wiring was restored.
+- Document authoring gained a DOCX coverage loop, and new default-OFF,
+  extras-gated modality tools (VideoFrames, MusicNotation, AudioTranscribe-URL)
+  plus a default-OFF autonomous vision browser tool (browser-use).
+- Active learnings are injected into CLI prompts, an introspection evidence
+  ledger records lifecycle events, and a cross-verify recipe was added.
+- The runtime can optionally route LiteLLM traffic through the api-proxy gateway.
+
+### Changed
+- The interactive TUI is quieter and more compact: tool calls/results render as
+  one-line entries instead of large collapsible cards, internal lifecycle
+  diagnostics (routing/policy/turn plumbing) are hidden by default (set
+  `MAGI_TUI_VERBOSE=1` to surface them), and surface backgrounds are transparent
+  so the terminal theme shows through.
+
+### Fixed
+- Tool result previews no longer leak raw `ToolResult` receipt JSON into the TUI
+  transcript; only human-readable output is shown.
+- Memory write redaction is hardened before summarize, and the app API now
+  honors an explicit workspace-root environment override.
+- A read-safe class of complex shell commands is allowed for the local coding
+  agent.
+
 ## 0.1.28
 
 ### Added
