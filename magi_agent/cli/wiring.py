@@ -531,6 +531,10 @@ def _build_first_party_adk_tools(
                 "source": "selected_full_toolhost",
             },
             execution_contract={"agentRole": "general"},
+            source_ledger=_source_ledger_for_session(
+                local_tool_evidence_collector,
+                session_id,
+            ),
             adk_tool_context=adk_tool_context,
             adk_context=adk_tool_context,
             tool_use_id=tool_use_id if isinstance(tool_use_id, str) else None,
@@ -550,6 +554,33 @@ def _build_first_party_adk_tools(
         collector=local_tool_evidence_collector,
         session_id=session_id,
     )
+
+
+def _source_ledger_for_session(
+    collector: object | None,
+    session_id: str,
+) -> tuple[object, ...]:
+    """Thread the collector's per-turn EvidenceLedgers onto ``source_ledger``.
+
+    Flag-gated + fail-open: when ``MAGI_EVIDENCE_LEDGER_LIFECYCLE_ENABLED`` is
+    off (default) this returns the empty tuple so the ToolContext is
+    byte-identical to today. When on, it returns the collector's
+    ``evidence_ledgers_for_session`` so ``InspectSelfEvidence`` can project the
+    REAL tool calls recorded so far. Any failure collapses to an empty tuple.
+    """
+    try:
+        from magi_agent.config.env import (  # noqa: PLC0415
+            is_evidence_ledger_lifecycle_enabled,
+        )
+
+        if not is_evidence_ledger_lifecycle_enabled():
+            return ()
+        ledgers_for_session = getattr(collector, "evidence_ledgers_for_session", None)
+        if not callable(ledgers_for_session):
+            return ()
+        return tuple(ledgers_for_session(session_id))
+    except Exception:
+        return ()
 
 
 def _local_tool_evidence_collector(runner: object) -> object | None:

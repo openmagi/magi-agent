@@ -92,9 +92,9 @@ def test_no_read_ledger_means_no_file_reads() -> None:
 
 
 def test_phases_is_empty_for_real_ledger_with_tool_and_verdict_records() -> None:
-    # Documents the honest current state: no evidence-record producer emits a
-    # phase marker, so even a populated ledger projects an empty ``phases``.
-    # PR3 introduces process-invariant phase markers and will populate this.
+    # A ledger carrying only tool-call + verdict records (no phase marker)
+    # projects an empty ``phases``. Stage 3 adds a ``custom:PhaseReached``
+    # producer, but phases stay empty unless such a record is present.
     from magi_agent.evidence.types import EvidenceContractVerdict
 
     ledger = _base_ledger().append_evidence_record(
@@ -138,7 +138,55 @@ def test_tool_calls_are_projected() -> None:
     assert view.phases == ()
 
 
-def test_failed_tool_call_status_is_preserved() -> None:
+def _phase_record(
+    *,
+    phase_name: str,
+    reached: bool = True,
+    observed_at: int = 1_779_000_002,
+) -> EvidenceRecord:
+    return EvidenceRecord.model_validate(
+        {
+            "type": "custom:PhaseReached",
+            "status": "ok",
+            "observedAt": observed_at,
+            "source": {"kind": "tool_trace"},
+            "fields": {"phaseName": phase_name, "reached": reached},
+        }
+    )
+
+
+def test_phase_reached_record_is_projected() -> None:
+    ledger = _base_ledger().append_evidence_record(
+        _phase_record(phase_name="patch_generation")
+    )
+
+    view = project_session_evidence(ledger)
+
+    assert len(view.phases) == 1
+    phase = view.phases[0]
+    assert phase.name == "patch_generation"
+    assert phase.reached is True
+    assert phase.turn_id == "turn-1"
+    # A phase marker carries no toolName, so it must NOT leak into tool_calls.
+    assert view.tool_calls == ()
+
+
+def test_phase_and_tool_records_coexist_in_one_ledger() -> None:
+    ledger = _base_ledger().append_evidence_record(
+        _tool_call_record(name="Grep", status="ok")
+    )
+    ledger = ledger.append_evidence_record(_phase_record(phase_name="analysis"))
+
+    view = project_session_evidence(ledger)
+
+    assert [t.name for t in view.tool_calls] == ["Grep"]
+    assert [(p.name, p.reached) for p in view.phases] == [("analysis", True)]
+
+
+def test_failed_tool_call_status_is_normalized_to_error() -> None:
+    # The shared normalization (introspection/mapping.py) maps the EvidenceStatus
+    # "failed" onto the canonical "error" token so this PULL seam reports the
+    # same vocabulary as the gate5b egress PUSH seam.
     ledger = _base_ledger().append_evidence_record(
         _tool_call_record(name="Bash", status="failed")
     )
@@ -147,7 +195,7 @@ def test_failed_tool_call_status_is_preserved() -> None:
 
     assert len(view.tool_calls) == 1
     assert view.tool_calls[0].name == "Bash"
-    assert view.tool_calls[0].status == "failed"
+    assert view.tool_calls[0].status == "error"
 
 
 def test_verifier_verdict_is_projected() -> None:
@@ -180,6 +228,75 @@ def test_verifier_verdict_is_projected() -> None:
     assert view.verdicts[0].stage == "tool_evidence_contract"
     assert view.verdicts[0].result == "pass"
     assert view.verdicts[0].turn_id == "turn-1"
+
+
+def _verdict_record(
+    *,
+    stage: str,
+    result: str,
+    observed_at: int = 1_779_000_003,
+) -> EvidenceRecord:
+    return EvidenceRecord.model_validate(
+        {
+            "type": "custom:VerifierVerdict",
+            "status": "ok",
+            "observedAt": observed_at,
+            "source": {"kind": "tool_trace"},
+            "fields": {"stage": stage, "result": result},
+        }
+    )
+
+
+def test_custom_verifier_verdict_record_is_projected() -> None:
+    ledger = _base_ledger().append_evidence_record(
+        _verdict_record(stage="tool_evidence_contract", result="pass")
+    )
+
+    view = project_session_evidence(ledger)
+
+    assert len(view.verdicts) == 1
+    assert view.verdicts[0].stage == "tool_evidence_contract"
+    assert view.verdicts[0].result == "pass"
+    assert view.verdicts[0].turn_id == "turn-1"
+    # A verdict marker carries no toolName, so it must NOT leak into tool_calls.
+    assert view.tool_calls == ()
+    assert view.phases == ()
+
+
+def test_custom_verdict_record_with_missing_fields_is_skipped() -> None:
+    bad = EvidenceRecord.model_validate(
+        {
+            "type": "custom:VerifierVerdict",
+            "status": "ok",
+            "observedAt": 1_779_000_004,
+            "source": {"kind": "tool_trace"},
+            "fields": {"stage": "tool_evidence_contract"},
+        }
+    )
+    ledger = _base_ledger().append_evidence_record(bad)
+
+    view = project_session_evidence(ledger)
+
+    assert view.verdicts == ()
+    assert view.tool_calls == ()
+
+
+def test_custom_verdict_tool_and_phase_records_coexist() -> None:
+    ledger = _base_ledger().append_evidence_record(
+        _tool_call_record(name="Grep", status="ok")
+    )
+    ledger = ledger.append_evidence_record(_phase_record(phase_name="analysis"))
+    ledger = ledger.append_evidence_record(
+        _verdict_record(stage="tool_evidence_contract", result="pass")
+    )
+
+    view = project_session_evidence(ledger)
+
+    assert [t.name for t in view.tool_calls] == ["Grep"]
+    assert [(p.name, p.reached) for p in view.phases] == [("analysis", True)]
+    assert [(v.stage, v.result) for v in view.verdicts] == [
+        ("tool_evidence_contract", "pass")
+    ]
 
 
 def test_turn_filter_restricts_to_one_turn() -> None:

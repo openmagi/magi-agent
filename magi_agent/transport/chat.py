@@ -2508,11 +2508,11 @@ def _build_egress_evidence_view(
     receipts. Phases/verdicts stay empty (no live producer). Pure / read-only;
     never raises.
     """
+    from magi_agent.introspection.mapping import tool_call_from_gate5b_receipt
     from magi_agent.introspection.projection import (
         FileReadView,
         SessionEvidenceView,
         SessionScopeView,
-        ToolCallView,
     )
 
     host = getattr(gate1a_bundle, "host", None)
@@ -2545,19 +2545,20 @@ def _build_egress_evidence_view(
                 )
             )
 
-    # NOTE: tool_calls here are sourced from gate5b ``host.counter.receipts`` (the
-    # egress-time producer), whereas PR2's introspection tool sources tool_calls
-    # from EvidenceLedger records. The two producers can diverge for the same turn
-    # (different status vocabularies / coverage). Unifying onto a single tool-call
-    # source is a documented follow-up; not done here.
+    # TWO-PRODUCER REALITY: tool_calls here are sourced from gate5b
+    # ``host.counter.receipts`` (the egress-time PUSH producer), whereas the
+    # ``InspectSelfEvidence`` tool sources tool_calls from EvidenceLedger
+    # records (the mid-turn PULL producer). These two producers live at
+    # genuinely different runtime seams — there is no EvidenceLedger reachable
+    # here and no gate5b receipt reachable in ToolContext — so the SOURCES
+    # cannot be unified. Instead both seams now delegate to the shared
+    # normalization in ``introspection/mapping.py``, which guarantees an
+    # identical ``ToolCallView`` shape + canonical status vocabulary so the two
+    # producers report comparable outcomes (e.g. a success -> "ok" from either).
     # The receipts carry no per-entry session/turn id at this seam, so the pinned
     # session's placeholder turn id is used for all of them.
     tool_calls = tuple(
-        ToolCallView(
-            name=receipt.tool_name,
-            status=receipt.status,
-            turnId="live-egress-turn",
-        )
+        tool_call_from_gate5b_receipt(receipt, "live-egress-turn")
         for receipt in receipts
     )
     return SessionEvidenceView(

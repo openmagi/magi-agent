@@ -52,6 +52,7 @@ def build_cli_tool_runtime(
     session_id: str = "cli-session",
     memory_mode: "MemoryMode | str" = "normal",
     general_automation_receipts: "GeneralAutomationReceiptLedgerStore | None" = None,
+    local_tool_evidence_collector: "LocalToolEvidenceCollector | None" = None,
 ) -> CliToolRuntime:
     """Assemble the registry, dispatcher, and tool-context factory.
 
@@ -134,6 +135,10 @@ def build_cli_tool_runtime(
                 "source": "selected_full_toolhost",
             },
             execution_contract={"agentRole": "general"},
+            source_ledger=_source_ledger_for_session(
+                local_tool_evidence_collector,
+                session_id,
+            ),
             adk_tool_context=adk_tool_context,
             adk_context=adk_tool_context,
         )
@@ -166,6 +171,7 @@ def build_cli_adk_tools(
         session_id=session_id,
         memory_mode=memory_mode,
         general_automation_receipts=general_automation_receipts,
+        local_tool_evidence_collector=local_tool_evidence_collector,
     )
     tools = build_adk_function_tools_for_registry(
         runtime.registry,
@@ -306,6 +312,33 @@ def _context_lookup(value: object, key: str) -> object | None:
     if isinstance(value, Mapping):
         return value.get(key)
     return getattr(value, key, None)
+
+
+def _source_ledger_for_session(
+    collector: "LocalToolEvidenceCollector | None",
+    session_id: str,
+) -> tuple[object, ...]:
+    """Thread the collector's per-turn EvidenceLedgers onto ``source_ledger``.
+
+    Flag-gated + fail-open: when ``MAGI_EVIDENCE_LEDGER_LIFECYCLE_ENABLED`` is
+    off (default) this returns the empty tuple so the ToolContext is
+    byte-identical to today. When on, it returns the collector's
+    ``evidence_ledgers_for_session`` so ``InspectSelfEvidence`` can project the
+    REAL tool calls recorded so far. Any failure collapses to an empty tuple.
+    """
+    try:
+        from magi_agent.config.env import (  # noqa: PLC0415
+            is_evidence_ledger_lifecycle_enabled,
+        )
+
+        if not is_evidence_ledger_lifecycle_enabled():
+            return ()
+        ledgers_for_session = getattr(collector, "evidence_ledgers_for_session", None)
+        if not callable(ledgers_for_session):
+            return ()
+        return tuple(ledgers_for_session(session_id))
+    except Exception:
+        return ()
 
 
 def build_cli_instruction(

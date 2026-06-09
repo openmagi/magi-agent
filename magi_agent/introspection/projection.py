@@ -22,6 +22,7 @@ from collections.abc import Mapping
 from pydantic import BaseModel, ConfigDict, Field
 
 from magi_agent.evidence.ledger import EvidenceLedger, EvidenceLedgerEntry
+from magi_agent.introspection.mapping import tool_call_from_evidence_record
 from magi_agent.tools.read_ledger import ReadLedger
 
 # File-read source decision (verified against the real producers):
@@ -120,22 +121,17 @@ def project_session_evidence(
     """
     files_read: list[FileReadView] = []
     tool_calls: list[ToolCallView] = []
+    phases: list[PhaseView] = []
     verdicts: list[VerdictView] = []
     turns: list[str] = []
 
     for entry in ledger.entries:
         if turn_filter is not None and entry.turn_id != turn_filter:
             continue
-        _categorize_ledger_entry(entry, tool_calls, verdicts, turns)
+        _categorize_ledger_entry(entry, tool_calls, phases, verdicts, turns)
 
     if read_ledger is not None:
         _project_read_ledger(read_ledger, ledger.session_id, turn_filter, files_read, turns)
-
-    # Phase evidence emission is introduced in PR3 (process-invariant phase
-    # markers). Until that producer exists there is no real phase evidence in
-    # the ledger, so we honestly project an empty tuple rather than guess keys.
-    # The ``phases`` field stays in the shared contract for PR3 to populate.
-    phases: tuple[PhaseView, ...] = ()
 
     return SessionEvidenceView(
         scope=SessionScopeView(
@@ -144,14 +140,33 @@ def project_session_evidence(
         ),
         filesRead=tuple(files_read),
         toolCalls=tuple(tool_calls),
-        phases=phases,
+        phases=tuple(phases),
         verdicts=tuple(verdicts),
     )
+
+
+# Phase markers are emitted by the Stage 3 producer
+# (``LocalToolEvidenceCollector.record_phase_reached``) as evidence_records of
+# this type carrying ``fields.phaseName`` / ``fields.reached`` and NO
+# ``source.toolName`` (so the tool-call normalizer skips them). The egress seam
+# (transport/chat.py) has no EvidenceLedger, so it still yields ``phases=()``.
+_PHASE_REACHED_RECORD_TYPE = "custom:PhaseReached"
+
+# Verifier verdicts are emitted by the Stage 2 producer
+# (``LocalToolEvidenceCollector.record_verifier_verdict``) as evidence_records
+# of this type carrying ``fields.stage`` / ``fields.result`` and NO
+# ``source.toolName`` (so the tool-call normalizer skips them). This sidesteps
+# ``EvidenceLedger.append_verifier_verdict``'s evidence-ref matching constraint,
+# which the verifier bus (public ref strings, not ledger evidence_refs) cannot
+# satisfy. The native ``kind=="verifier_verdict"`` ledger path is left intact
+# below for any real verifier_verdict entries.
+_VERIFIER_VERDICT_RECORD_TYPE = "custom:VerifierVerdict"
 
 
 def _categorize_ledger_entry(
     entry: EvidenceLedgerEntry,
     tool_calls: list[ToolCallView],
+    phases: list[PhaseView],
     verdicts: list[VerdictView],
     turns: list[str],
 ) -> None:
@@ -165,24 +180,63 @@ def _categorize_ledger_entry(
     if not isinstance(record, Mapping):
         return
 
-    tool_view = _tool_call_view(record, entry.turn_id)
+    # Phase markers are evidence_records distinguished by their ``type``. They
+    # carry no ``source.toolName``, so categorize them BEFORE the tool-call
+    # normalizer (which would return None for them anyway) and short-circuit.
+    if record.get("type") == _PHASE_REACHED_RECORD_TYPE:
+        phase_view = _phase_view(record, entry.turn_id)
+        if phase_view is not None:
+            phases.append(phase_view)
+        return
+
+    # Verifier verdicts are evidence_records distinguished by their ``type``.
+    # Like phase markers they carry no ``source.toolName``, so categorize them
+    # BEFORE the tool-call normalizer and short-circuit (no leak into
+    # tool_calls).
+    if record.get("type") == _VERIFIER_VERDICT_RECORD_TYPE:
+        verdict_view = _verdict_view_from_record(record, entry.turn_id)
+        if verdict_view is not None:
+            verdicts.append(verdict_view)
+        return
+
+    # Tool-call projection is delegated to the SHARED normalization helper
+    # (introspection/mapping.py) so this PULL seam and the egress PUSH seam
+    # (transport/chat.py) emit an identical ``ToolCallView`` shape + canonical
+    # status vocabulary even though they read from different producers.
+    tool_view = tool_call_from_evidence_record(record, entry.turn_id)
     if tool_view is not None:
         tool_calls.append(tool_view)
 
 
-def _tool_call_view(record: Mapping[str, object], turn_id: str) -> ToolCallView | None:
-    source = record.get("source")
-    if not isinstance(source, Mapping):
+def _phase_view(record: Mapping[str, object], turn_id: str) -> PhaseView | None:
+    fields = record.get("fields")
+    if not isinstance(fields, Mapping):
         return None
-    tool_name = source.get("toolName")
-    if not isinstance(tool_name, str) or not tool_name:
+    name = fields.get("phaseName")
+    if not isinstance(name, str) or not name:
         return None
-    status = record.get("status")
-    return ToolCallView(
-        name=tool_name,
-        status=status if isinstance(status, str) else "unknown",
+    reached = fields.get("reached")
+    return PhaseView(
+        name=name,
+        reached=bool(reached) if isinstance(reached, bool) else True,
         turnId=turn_id,
     )
+
+
+def _verdict_view_from_record(
+    record: Mapping[str, object],
+    turn_id: str,
+) -> VerdictView | None:
+    fields = record.get("fields")
+    if not isinstance(fields, Mapping):
+        return None
+    stage = fields.get("stage")
+    if not isinstance(stage, str) or not stage:
+        return None
+    result = fields.get("result")
+    if not isinstance(result, str) or not result:
+        return None
+    return VerdictView(stage=stage, result=result, turnId=turn_id)
 
 
 def _verdict_view(entry: EvidenceLedgerEntry) -> VerdictView:
