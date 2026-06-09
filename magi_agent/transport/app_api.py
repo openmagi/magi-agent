@@ -16,8 +16,8 @@ Design notes
   has zero sessions/tasks/crons/artifacts, which is what the dashboard shows.
 * All reads are fail-soft: a missing DB or unreadable file yields empty rather
   than a 500, mirroring the app's fail-open posture elsewhere.
-* The workspace root is the process cwd, which is where ``magi-agent serve``
-  runs and where the local workspace (``MEMORY.md`` etc.) lives.
+* The workspace root is an explicit workspace env var when provided, falling
+  back to the process cwd used by local ``magi-agent serve`` sessions.
 * File reads/writes are confined to the workspace and refuse sealed operator
   files and secret-looking names.
 """
@@ -54,6 +54,11 @@ _RUNTIME_HOOK_POINTS = ("beforeModelCall", "afterToolCall", "beforeCommit", "aft
 _FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
 _MAX_SEARCH_BYTES = 200_000
 _PREVIEW_CHARS = 240
+_WORKSPACE_ENV_VARS = (
+    "MAGI_AGENT_WORKSPACE",
+    "CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_WORKSPACE_ROOT",
+    "CORE_AGENT_WORKSPACE_ROOT",
+)
 
 
 class _ConfigValidationError(ValueError):
@@ -68,6 +73,10 @@ class _ConfigValidationError(ValueError):
 # Workspace + path safety helpers
 # --------------------------------------------------------------------------- #
 def _workspace_root() -> Path:
+    for name in _WORKSPACE_ENV_VARS:
+        value = os.environ.get(name)
+        if value and value.strip():
+            return Path(value.strip()).expanduser().resolve()
     return Path(os.getcwd()).resolve()
 
 

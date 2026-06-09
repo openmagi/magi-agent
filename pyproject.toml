@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "magi-agent"
-version = "0.1.27"
+version = "0.1.28"
 description = "Open Magi agent runtime and CLI for personal AI agents"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -53,11 +53,35 @@ files = [
   "openpyxl>=3.1",
   "pypdf>=4.0",
   "python-docx>=1.1",
+  "python-pptx>=1.0",
 ]
 # Optional audio transcription provider (MAGI_ASR_PROVIDER=openai_whisper).
 # Install with: uv sync --extra audio
 audio = [
   "openai>=1.0",
+]
+# Optional video frame extraction (VideoFrames tool, MAGI_VIDEO_DOWNLOAD_ENABLED=true).
+# yt-dlp handles YouTube/URL download; ffmpeg-python is a Python wrapper around the
+# system ffmpeg binary (ffmpeg must also be installed separately).
+# Install with: uv sync --extra video
+video = [
+  "yt-dlp>=2024.1.0",
+  "ffmpeg-python>=0.2.0",
+]
+# Optional: autonomous vision browser tool (MAGI_BROWSER_TOOL_ENABLED=true).
+# Install with: uv sync --extra browser  &&  uv run playwright install chromium
+# Imported lazily inside magi_agent/browser/autonomous/engine.py so environments
+# without it are unaffected. API surface recorded against browser-use 0.11.x in
+# magi_agent/browser/autonomous/_api_notes.py; floor is pinned to match it.
+browser = [
+  "browser-use>=0.11.13,<0.12",
+  "playwright>=1.45.0",
+]
+# Optional WAF-bypass web fetch provider (InsaneFetchProvider). Uses curl_cffi
+# browser impersonation (TLS/JA3 fingerprint) to bypass fingerprinting WAFs.
+# Lazily imported and default-OFF; install with: uv sync --extra waf
+waf = [
+  "curl_cffi>=0.7",
 ]
 
 [project.scripts]

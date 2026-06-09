@@ -124,6 +124,19 @@ def test_public_docs_tree_has_no_banned_internal_docs_or_planning_names() -> Non
     assert leaked_files == []
 
 
+def test_public_docs_tree_has_no_internal_planning_directories() -> None:
+    banned_directories = (
+        DOCS / "plans",
+        DOCS / "superpowers",
+    )
+    existing_directories = [
+        path.relative_to(ROOT).as_posix()
+        for path in banned_directories
+        if path.exists()
+    ]
+    assert existing_directories == []
+
+
 @pytest.mark.parametrize(
     "path",
     (

@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 
 
 def bind_file_toolhost_handlers(registry: "ToolRegistry") -> tuple[str, ...]:
-    """Bind all four file-tool handlers and enable them via registry policy.
+    """Bind all file-tool handlers and enable them via registry policy.
 
     Returns the names of tools successfully bound.
     """
@@ -28,12 +28,16 @@ def bind_file_toolhost_handlers(registry: "ToolRegistry") -> tuple[str, ...]:
     from .document_tools import document_read  # noqa: PLC0415
     from .image_tools import image_understand  # noqa: PLC0415
     from .audio_tools import audio_transcribe  # noqa: PLC0415
+    from .video_tools import video_frames  # noqa: PLC0415
+    from .music_tools import music_notation  # noqa: PLC0415
 
     _handlers: dict[str, object] = {
         "XLSXRead": xlsx_read,
         "DocumentRead": document_read,
         "ImageUnderstand": image_understand,
         "AudioTranscribe": audio_transcribe,
+        "VideoFrames": video_frames,
+        "MusicNotation": music_notation,
     }
     bound: list[str] = []
     for name, handler in _handlers.items():

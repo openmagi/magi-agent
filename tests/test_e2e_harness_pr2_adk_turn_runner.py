@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from google.adk.agents.run_config import RunConfig, StreamingMode
 from google.genai import types
 
 
@@ -954,15 +955,24 @@ def test_payload_cannot_forge_production_authority_or_adk_kwargs() -> None:
 
     assert result.status == "succeeded"
     assert len(fake_runner.calls) == 1
-    assert set(fake_runner.calls[0]) == {
+    assert set(fake_runner.calls[0]) <= {
         "user_id",
         "session_id",
         "invocation_id",
         "new_message",
+        "run_config",
     }
+    assert {
+        "user_id",
+        "session_id",
+        "invocation_id",
+        "new_message",
+    } <= set(fake_runner.calls[0])
     assert "harness_state" not in fake_runner.calls[0]
     assert "state_delta" not in fake_runner.calls[0]
-    assert "run_config" not in fake_runner.calls[0]
+    if "run_config" in fake_runner.calls[0]:
+        assert isinstance(fake_runner.calls[0]["run_config"], RunConfig)
+        assert fake_runner.calls[0]["run_config"].streaming_mode == StreamingMode.SSE
     _assert_false_authority_and_writes(result)
 
 

@@ -9,6 +9,7 @@ import sys
 
 import pytest
 from google.adk.agents import Agent
+from google.adk.agents.run_config import RunConfig, StreamingMode
 from google.adk.artifacts import InMemoryArtifactService
 from google.adk.memory import InMemoryMemoryService
 from google.adk.models import BaseLlm, LlmRequest, LlmResponse
@@ -226,12 +227,16 @@ def test_adapter_with_official_local_runner_uses_adk_runner_and_blocks_provider_
         asyncio.run(collect_with_official_runner())
 
     assert len(runner_spy.calls) == 1
-    assert set(runner_spy.calls[0]) == ADK_RUNNER_KWARG_ALLOWLIST
+    assert set(runner_spy.calls[0]) <= ADK_RUNNER_KWARG_ALLOWLIST | {"run_config"}
+    assert ADK_RUNNER_KWARG_ALLOWLIST <= set(runner_spy.calls[0])
     assert "openmagi.currentTurnId" not in runner_spy.calls[0]
     assert "evidenceContracts" not in runner_spy.calls[0]
     assert "control" not in runner_spy.calls[0]
     assert "trafficAttached" not in runner_spy.calls[0]
     assert "executionAttached" not in runner_spy.calls[0]
+    if "run_config" in runner_spy.calls[0]:
+        assert isinstance(runner_spy.calls[0]["run_config"], RunConfig)
+        assert runner_spy.calls[0]["run_config"].streaming_mode == StreamingMode.SSE
     assert bundle.traffic_attached is False
     assert bundle.production_attached is False
     assert bundle.route_attached is False

@@ -73,12 +73,18 @@ class AdkTurnRunnerConfig(BaseModel):
     model_tier: ModelTier = Field(default="cheap", alias="modelTier")
     phase: ModelUsagePhase = "planning"
     model_capabilities: tuple[str, ...] = Field(default=(), alias="modelCapabilities")
+    #: Permit a vetted ``LocalAdkLiveChildRunner`` to actually execute. Default
+    #: False keeps the runner replay-only; the child boundary sets this from
+    #: ``real_child_execution_pack_enabled``.
+    live_child_runner_allowed: bool = Field(
+        default=False, alias="liveChildRunnerAllowed"
+    )
 
-    @field_validator("enabled", mode="before")
+    @field_validator("enabled", "live_child_runner_allowed", mode="before")
     @classmethod
     def _reject_enabled_coercion(cls, value: object) -> object:
         if type(value) is not bool:
-            raise ValueError("enabled must be a boolean")
+            raise ValueError("flag must be a boolean")
         return value
 
     @field_validator("timeout_seconds", mode="before")
@@ -155,6 +161,34 @@ class LocalAdkReplayRunner:
             raise
 
 
+class LocalAdkLiveChildRunner:
+    """Vetted, in-module wrapper that drives a REAL model-backed ADK runner for a
+    child turn.
+
+    Admitted as a known local runner *type* so it passes candidate validation,
+    but the turn runner only *executes* it when
+    ``AdkTurnRunnerConfig.live_child_runner_allowed`` is set — which the child
+    boundary derives from ``real_child_execution_pack_enabled``. The enforcement
+    invariants are unchanged: ``AdkTurnResult`` stays ``local_only`` /
+    ``user_visible_output=None`` and every authority flag stays False. The
+    child's work product reaches the parent only through runtime-issued
+    evidence / artifact adoption, never the raw transcript.
+    """
+
+    __slots__ = ("_raw",)
+
+    def __init__(self, *, raw_runner: object) -> None:
+        if not callable(getattr(raw_runner, "run_async", None)):
+            raise TypeError("live child runner requires a runner with run_async")
+        _validate_live_child_raw_runner(raw_runner)
+        self._raw = raw_runner
+
+    async def run_async(self, **kwargs: object):
+        _validate_live_child_raw_runner(self._raw)
+        async for event in self._raw.run_async(**kwargs):
+            yield event
+
+
 class LocalAdkTurnRunnerBoundary:
     __slots__ = ("_attestation", "_runner")
 
@@ -175,6 +209,19 @@ class LocalAdkTurnRunnerBoundary:
             _attestation=_LOCAL_RUNNER_CAPABILITY,
         )
 
+    @classmethod
+    def for_live_child_runner(cls, real_adk_runner: object) -> Self:
+        """Wrap a real ADK runner as a vetted live child runner boundary.
+
+        Structural admission only — actual execution is still gated by
+        ``AdkTurnRunnerConfig.live_child_runner_allowed`` in ``run_turn``.
+        """
+
+        return LocalAdkTurnRunnerBoundary(
+            runner=LocalAdkLiveChildRunner(raw_runner=real_adk_runner),
+            _attestation=_LOCAL_RUNNER_CAPABILITY,
+        )
+
     @property
     def raw_runner(self) -> object:
         if type(self) is not LocalAdkTurnRunnerBoundary:
@@ -185,7 +232,7 @@ class LocalAdkTurnRunnerBoundary:
         return self._runner
 
 
-_LOCAL_RUNNER_TYPES = (LocalAdkReplayRunner,)
+_LOCAL_RUNNER_TYPES = (LocalAdkReplayRunner, LocalAdkLiveChildRunner)
 _REQUEST_SHAPE_PUBLIC_KEYS = frozenset(
     {
         "contextPlanDigest",
@@ -581,6 +628,22 @@ class AdkTurnRunner:
                 error_digest=_digest({"category": attestation}),
             )
 
+        # A vetted live child runner may be wrapped structurally, but it only
+        # executes when the pack flag is set (the boundary derives this from
+        # ``real_child_execution_pack_enabled``). Replay runners are unaffected.
+        if (
+            type(runner.raw_runner) is LocalAdkLiveChildRunner
+            and not active_config.live_child_runner_allowed
+        ):
+            return _result(
+                status="failed",
+                enabled=True,
+                started=started,
+                runner_invoked=False,
+                error_category="live_child_runner_not_permitted",
+                error_digest=_digest({"category": "live_child_runner_not_permitted"}),
+            )
+
         from magi_agent.adk_bridge.runner_adapter import (  # noqa: PLC0415
             OpenMagiRunnerAdapter,
             RunnerTurnInput,
@@ -794,6 +857,8 @@ def _validate_config_boundary(
     data = config.__dict__
     if type(data.get("enabled")) is not bool:
         raise ValueError("enabled must be a boolean")
+    if type(data.get("live_child_runner_allowed")) is not bool:
+        raise ValueError("live_child_runner_allowed must be a boolean")
     timeout = data.get("timeout_seconds")
     if (
         type(timeout) not in {int, float}
@@ -921,6 +986,16 @@ def _validate_known_local_model_route(config: AdkTurnRunnerConfig) -> None:
         raise ValueError("modelTier does not match registry")
 
 
+def _validate_live_child_raw_runner(raw_runner: object) -> None:
+    if not callable(getattr(raw_runner, "run_async", None)):
+        raise ValueError("live child runner requires a runner with run_async")
+    if raw_runner.__class__.__module__ == "magi_agent.adk_bridge.local_runner":
+        raise ValueError("runner_local_attestation_missing")
+    for flag, category in _LIVE_RUNNER_FLAGS:
+        if getattr(raw_runner, flag, False) is not False:
+            raise ValueError(category)
+
+
 def _validate_local_runner_candidate(runner: object) -> None:
     if type(runner) not in _LOCAL_RUNNER_TYPES:
         raise ValueError("local ADK turn runner requires a trusted local runner type")
@@ -931,6 +1006,8 @@ def _validate_local_runner_candidate(runner: object) -> None:
         raise ValueError("local ADK turn runner cannot wrap production local_runner")
     if not callable(getattr(runner, "run_async", None)):
         raise ValueError("local ADK turn runner requires run_async")
+    if type(runner) is LocalAdkLiveChildRunner:
+        _validate_live_child_raw_runner(runner._raw)
     for flag, category in _LIVE_RUNNER_FLAGS:
         if getattr(runner, flag, False) is not False:
             raise ValueError(category)
@@ -960,6 +1037,7 @@ __all__ = [
     "AdkTurnRunnerConfig",
     "AdkTurnStatus",
     "LOCAL_ADK_TURN_RUNNER_ATTESTATION",
+    "LocalAdkLiveChildRunner",
     "LocalAdkReplayRunner",
     "LocalAdkTurnRunnerBoundary",
 ]

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import posixpath
 import re
 import shlex
@@ -82,7 +83,6 @@ _READONLY_SHELL_COMMANDS = {
     "nl",
     "pwd",
     "rg",
-    "sed",
     "tail",
     "wc",
 }
@@ -867,7 +867,15 @@ def _shell_decision(
             scope=scope,
             public_preview=_preview_command(command),
         )
-    if _selected_full_toolhost_scope(scope) and _has_complex_shell_operator(command):
+    if (
+        _selected_full_toolhost_scope(scope)
+        and _has_complex_shell_operator(command)
+        and not (
+            _trusted_local_shell_enabled()
+            and _complex_command_is_read_safe(command)
+            and _complex_command_paths_allowed(command, scope=scope)
+        )
+    ):
         return _decision(
             "deny",
             manifest,
@@ -1432,6 +1440,18 @@ def _readonly_shell_denial(
     *,
     scope: dict[str, object],
 ) -> _PathDecision | str | None:
+    if (
+        _selected_full_toolhost_scope(scope)
+        and _has_complex_shell_operator(command)
+        and _trusted_local_shell_enabled()
+        and _complex_command_is_read_safe(command)
+        and _complex_command_paths_allowed(command, scope=scope)
+    ):
+        # Each segment was already validated read-safe with allowed paths. The
+        # single-command flag/path checks below operate on the flattened command
+        # (e.g. ``head -40`` looks like an unknown grep flag), so skip them for a
+        # vetted trusted-local complex command instead of false-denying.
+        return None
     try:
         parts = shlex.split(command)
     except ValueError:
@@ -1439,6 +1459,8 @@ def _readonly_shell_denial(
     if not parts:
         return None
     exe = parts[0].rsplit("/", 1)[-1]
+    if exe == "sed":
+        return _readonly_argument_denial(exe, tuple(parts[1:]), shell=True)
     if exe not in _READONLY_SHELL_COMMANDS and exe != "git":
         return None
     args = tuple(parts[1:])
@@ -1462,6 +1484,8 @@ def _readonly_shell_denial(
 
 
 def _readonly_argument_denial(exe: str, args: tuple[str, ...], *, shell: bool) -> str | None:
+    if exe == "sed" and _sed_readonly_script_denial(args):
+        return "mutating_shell_flag_denied" if shell else "mutating_command_flag_denied"
     for arg in args:
         if exe == "sed" and (arg == "-i" or arg.startswith("-i") or arg == "--in-place"):
             return "mutating_shell_flag_denied" if shell else "mutating_command_flag_denied"
@@ -1476,6 +1500,98 @@ def _readonly_argument_denial(exe: str, args: tuple[str, ...], *, shell: bool) -
             continue
         return "unsafe_command_flag_denied"
     return None
+
+
+_SED_DIRECT_UNSAFE_COMMAND_RE = re.compile(
+    r"(?:^|[;\n{}])\s*"
+    r"(?:(?:\d+|\$|[,!~+\s]|/[^/\n]*/|\\[^\n]+\\)+)?"
+    r"[eErRwW](?=\s|$)"
+)
+
+
+def _sed_readonly_script_denial(args: tuple[str, ...]) -> bool:
+    """True when sed arguments include an opaque or mutating script.
+
+    A sed executable can be read-only, but sed's script language includes file
+    reads, writes, and shell execution via commands such as ``r``, ``w``, and
+    ``e``. Those effects are not visible to generic shell flag/path checks, so
+    trusted-local read-safe paths inspect inline scripts and reject opaque
+    ``-f`` script files.
+    """
+    scripts: list[str] = []
+    first_positional_script_seen = False
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        if arg in {"-f", "--file"} or arg.startswith("--file="):
+            return True
+        if arg in {"-e", "--expression"}:
+            if index + 1 >= len(args):
+                return True
+            scripts.append(args[index + 1])
+            index += 2
+            continue
+        if arg.startswith("--expression="):
+            scripts.append(arg.split("=", 1)[1])
+            index += 1
+            continue
+        if arg.startswith("-e") and arg != "-e":
+            scripts.append(arg[2:])
+            index += 1
+            continue
+        if arg.startswith("-"):
+            index += 1
+            continue
+        if not first_positional_script_seen:
+            scripts.append(arg)
+            first_positional_script_seen = True
+        index += 1
+    return any(_sed_script_has_write_command(script) for script in scripts)
+
+
+def _sed_script_has_write_command(script: str) -> bool:
+    if _SED_DIRECT_UNSAFE_COMMAND_RE.search(script) is not None:
+        return True
+    return _sed_substitution_has_unsafe_flag(script)
+
+
+def _sed_substitution_has_unsafe_flag(script: str) -> bool:
+    index = 0
+    while index < len(script):
+        if script[index] != "s" or (index > 0 and script[index - 1] == "\\"):
+            index += 1
+            continue
+        if index + 1 >= len(script):
+            index += 1
+            continue
+        delimiter = script[index + 1]
+        if delimiter.isalnum() or delimiter.isspace() or delimiter == "\\":
+            index += 1
+            continue
+        cursor = index + 2
+        delimiters_seen = 0
+        escaped = False
+        while cursor < len(script):
+            ch = script[cursor]
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == delimiter:
+                delimiters_seen += 1
+                if delimiters_seen == 2:
+                    cursor += 1
+                    break
+            cursor += 1
+        if delimiters_seen != 2:
+            index += 1
+            continue
+        while cursor < len(script) and script[cursor].isalpha():
+            if script[cursor] in {"e", "w"}:
+                return True
+            cursor += 1
+        index += 1
+    return False
 
 
 def _readonly_flag_allowed(exe: str, arg: str) -> bool:
@@ -1548,6 +1664,157 @@ def _parsed_command_segments(command: str) -> tuple[tuple[str, ...], ...]:
 
 def _command_basename(command_token: str) -> str:
     return command_token.rsplit("/", 1)[-1]
+
+
+_SHELL_UNDECOMPOSABLE = ("$(", "${", "`", ">", "<", ">>", "<<")
+
+
+def _decompose_shell_segments(command: str) -> list[str] | None:
+    """Split a command into top-level segments on ``| ; && ||``.
+
+    Returns ``None`` (caller must deny) when the command contains command
+    substitution, backticks, parameter expansion, or redirection. Operators
+    inside single/double quotes are ignored.
+    """
+    if re.search(r"\$[A-Za-z_{]", command):
+        return None  # variable / parameter expansion
+    if _SHELL_BACKGROUND_OPERATOR_RE.search(command) is not None:
+        return None  # background jobs are a command separator with hidden tail work
+    if "\n" in command or "\r" in command:
+        return None  # newline is a shell command separator
+    if any(token in command for token in _SHELL_UNDECOMPOSABLE):
+        return None
+    segments: list[str] = []
+    buf: list[str] = []
+    quote: str | None = None
+    i = 0
+    n = len(command)
+    while i < n:
+        ch = command[i]
+        if quote is not None:
+            buf.append(ch)
+            if ch == quote:
+                quote = None
+            i += 1
+            continue
+        if ch in ("'", '"'):
+            quote = ch
+            buf.append(ch)
+            i += 1
+            continue
+        matched = ""
+        for op in ("&&", "||"):
+            if command.startswith(op, i):
+                matched = op
+                break
+        if not matched and ch in ("|", ";"):
+            matched = ch
+        if matched:
+            segments.append("".join(buf).strip())
+            buf = []
+            i += len(matched)
+            continue
+        buf.append(ch)
+        i += 1
+    if quote is not None:
+        return None
+    tail = "".join(buf).strip()
+    if tail:
+        segments.append(tail)
+    return [s for s in segments if s]
+
+
+_NUMERIC_FLAG_COMMANDS = {"head", "tail"}
+
+
+def _segment_is_read_safe(segment: str) -> bool:
+    """True iff a single (already-decomposed) command segment is read-only safe:
+    executable in the read-only allowlist, no write/mutating flags, no inline
+    interpreter, non-empty.
+
+    POSIX numeric-only short flags (e.g. ``head -30``, ``tail -5``) are
+    treated as read-safe line/byte counts and skipped before the general
+    flag-denial check.
+    """
+    segment = segment.strip()
+    if not segment or _has_inline_interpreter_code(segment):
+        return False
+    try:
+        parts = shlex.split(segment)
+    except ValueError:
+        return False
+    if not parts:
+        return False
+    executable = parts[0]
+    if "/" in executable:
+        return False
+    exe = executable
+    if exe not in _READONLY_SHELL_COMMANDS:
+        return False
+    # Strip POSIX numeric-only short flags (e.g. -30, -5) for line-count
+    # commands before passing to the general flag-denial check.
+    filtered_args = tuple(
+        arg for arg in parts[1:]
+        if not (exe in _NUMERIC_FLAG_COMMANDS and arg.startswith("-") and arg[1:].isdigit())
+    )
+    if _readonly_argument_denial(exe, filtered_args, shell=False) is not None:
+        return False
+    return True
+
+
+def _complex_command_is_read_safe(command: str) -> bool:
+    """True iff every top-level segment of a pipe/compound command is read-safe.
+
+    Returns ``False`` when the command cannot be safely decomposed (command
+    substitution, parameter expansion, redirection, etc.) or when any segment is
+    not read-only safe.
+    """
+    segments = _decompose_shell_segments(command)
+    if segments is None:
+        return False
+    return all(_segment_is_read_safe(seg) for seg in segments)
+
+
+def _trusted_local_shell_enabled() -> bool:
+    from magi_agent.config.env import parse_trusted_local_shell_enabled  # noqa: PLC0415
+
+    return parse_trusted_local_shell_enabled(os.environ)
+
+
+def _complex_command_paths_allowed(command: str, *, scope: dict[str, object]) -> bool:
+    """True iff every segment's path args clear sealed/secret/escape classification.
+
+    ``_complex_command_is_read_safe`` only vets executables and flags; it does not
+    run path classification, so a pipeline such as ``cat .env.local | head`` would
+    otherwise bypass the sealed/secret-path protection that the single-command
+    ``_readonly_shell_denial`` enforces. This re-applies just the path checks
+    (shell expansion + ``_classify_path`` deny) per segment so the trusted-local
+    allowance never reads a protected or escaping path. Flag/executable safety is
+    already guaranteed by ``_complex_command_is_read_safe`` (which, unlike
+    ``_readonly_shell_denial``, correctly treats ``head -40`` style numeric flags
+    as read-safe), so flag denial is intentionally not re-checked here.
+    """
+    segments = _decompose_shell_segments(command)
+    if segments is None:
+        return False
+    for segment in segments:
+        try:
+            parts = shlex.split(segment)
+        except ValueError:
+            return False
+        if not parts:
+            return False
+        executable = parts[0]
+        if "/" in executable:
+            return False
+        exe = executable
+        args = tuple(parts[1:])
+        for arg in _path_like_command_args(exe, args):
+            if _has_shell_path_expansion(arg):
+                return False
+            if _classify_path(arg, mutating=False, scope=scope).action == "deny":
+                return False
+    return True
 
 
 def _has_complex_shell_operator(command: str) -> bool:

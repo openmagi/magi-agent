@@ -298,7 +298,35 @@ def _model_retry_kwargs(env: Mapping[str, str] | None = None) -> dict[str, int]:
     }
 
 
-def _build_litellm_model(config: ProviderConfig) -> object:
+def _model_api_base_kwargs(env: Mapping[str, str] | None = None) -> dict[str, object]:
+    """Optional LiteLlm kwargs that route generation through a gateway base URL.
+
+    When ``MAGI_LLM_API_BASE`` is set, every model the runtime builds (the main
+    turn and forked child/subagent models, which share this builder) targets that
+    base instead of the provider's public endpoint — letting one in-cluster
+    api-proxy hold all provider keys, smart-route by model string, and meter
+    spend. ``MAGI_LLM_API_KEY`` becomes the litellm ``api_key`` AND an explicit
+    auth header (``MAGI_LLM_API_HEADER``, default ``x-api-key``) so OpenAI-prefixed
+    models — which would otherwise send ``Authorization: Bearer`` — still present
+    the token the gateway checks. Unset ⇒ ``{}`` ⇒ unchanged direct-to-provider.
+    """
+
+    source = os.environ if env is None else env
+    base = (source.get("MAGI_LLM_API_BASE") or "").strip()
+    if not base:
+        return {}
+    kwargs: dict[str, object] = {"api_base": base}
+    token = (source.get("MAGI_LLM_API_KEY") or "").strip()
+    if token:
+        header = (source.get("MAGI_LLM_API_HEADER") or "").strip() or "x-api-key"
+        kwargs["api_key"] = token
+        kwargs["extra_headers"] = {header: token}
+    return kwargs
+
+
+def _build_litellm_model(
+    config: ProviderConfig, env: Mapping[str, str] | None = None
+) -> object:
     try:
         from google.adk.models.lite_llm import LiteLlm  # noqa: PLC0415
     except Exception as exc:  # ImportError or downstream litellm import errors.
@@ -316,10 +344,13 @@ def _build_litellm_model(config: ProviderConfig) -> object:
         litellm.suppress_debug_info = True
     except Exception:  # pragma: no cover - litellm always present alongside LiteLlm
         pass
+    api_base_kwargs = _model_api_base_kwargs(env)
+    api_key = api_base_kwargs.pop("api_key", config.api_key)
     return LiteLlm(
         model=config.litellm_model,
-        api_key=config.api_key,
-        **_model_retry_kwargs(),
+        api_key=api_key,
+        **_model_retry_kwargs(env),
+        **api_base_kwargs,
     )
 
 

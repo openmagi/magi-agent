@@ -1,10 +1,13 @@
-"""DocumentRead tool — extract text from PDF or DOCX files in the workspace.
+"""DocumentRead tool — extract text from documents in the workspace.
 
-Requires optional extras:
-  - PDF:  ``pypdf>=4.0``   (``uv sync --extra files``)
-  - DOCX: ``python-docx>=1.1`` (``uv sync --extra files``)
+Requires optional extras (``uv sync --extra files``):
+  - PDF:  ``pypdf>=4.0``
+  - DOCX: ``python-docx>=1.1``
+  - PPTX: ``python-pptx>=1.0``
 
-When the relevant package is not installed the handler returns
+XML, CSV, TXT, MD, and RST files use stdlib only (no extra package required).
+
+When a required package is not installed the handler returns
 ``status="blocked"`` with ``errorCode="document_dependency_not_installed"``.
 """
 
@@ -33,7 +36,14 @@ _MAX_DOCUMENT_BYTES = 20 * 1024 * 1024  # 20 MiB
 _DEFAULT_MAX_CHARS = 40_000
 _MAX_CHARS = 200_000
 
-_SUPPORTED_EXTENSIONS = frozenset({".pdf", ".docx"})
+_SUPPORTED_EXTENSIONS_CORE = frozenset({".pdf", ".docx"})
+
+# Extended formats: .pptx requires python-pptx (optional); the rest use stdlib only.
+_SUPPORTED_EXTENSIONS_EXTENDED = frozenset(
+    {".pptx", ".xml", ".csv", ".txt", ".md", ".rst"}
+)
+
+_SUPPORTED_EXTENSIONS = _SUPPORTED_EXTENSIONS_CORE | _SUPPORTED_EXTENSIONS_EXTENDED
 
 
 # ---------------------------------------------------------------------------
@@ -84,7 +94,14 @@ def document_read(arguments: Mapping[str, object], context: ToolContext) -> Tool
 
     if suffix == ".pdf":
         return _read_pdf(resolved, arguments, tool_name, max_chars, byte_size)
-    return _read_docx(resolved, tool_name, max_chars, byte_size)
+    if suffix == ".docx":
+        return _read_docx(resolved, tool_name, max_chars, byte_size)
+    if suffix == ".pptx":
+        return _read_pptx(resolved, tool_name, max_chars, byte_size)
+    if suffix == ".xml":
+        return _read_xml(resolved, tool_name, max_chars, byte_size)
+    # .csv / .txt / .md / .rst — plain UTF-8 text (stdlib only)
+    return _read_text(resolved, tool_name, max_chars, byte_size)
 
 
 # ---------------------------------------------------------------------------
@@ -190,6 +207,138 @@ def _read_docx(
         raw_text = "\n\n".join(parts)
     except Exception:  # noqa: BLE001
         return _error_result(tool_name, "docx_read_error")
+
+    return _finish_document_result(
+        tool_name,
+        raw_text,
+        page_count=None,
+        byte_size=byte_size,
+        max_chars=max_chars,
+        path_ref=resolved.path_ref,
+        content_digest=_digest_path(resolved.path),
+    )
+
+
+# ---------------------------------------------------------------------------
+# PPTX reader
+# ---------------------------------------------------------------------------
+
+
+def _read_pptx(
+    resolved: object,
+    tool_name: str,
+    max_chars: int,
+    byte_size: int,
+) -> ToolResult:
+    from .spreadsheet_tools import _ResolvedPath  # noqa: PLC0415
+
+    assert isinstance(resolved, _ResolvedPath)
+
+    try:
+        from pptx import Presentation  # noqa: PLC0415
+    except ImportError:
+        return _blocked_result(tool_name, "document_dependency_not_installed")
+
+    try:
+        prs = Presentation(str(resolved.path))
+        parts: list[str] = []
+        for slide_idx, slide in enumerate(prs.slides, start=1):
+            slide_texts: list[str] = []
+            for shape in slide.shapes:
+                if not shape.has_text_frame:
+                    continue
+                for para in shape.text_frame.paragraphs:
+                    line = "".join(run.text for run in para.runs).strip()
+                    if line:
+                        slide_texts.append(line)
+            if slide_texts:
+                parts.append(f"[Slide {slide_idx}]\n" + "\n".join(slide_texts))
+        raw_text = "\n\n".join(parts)
+    except Exception:  # noqa: BLE001
+        return _error_result(tool_name, "pptx_read_error")
+
+    return _finish_document_result(
+        tool_name,
+        raw_text,
+        page_count=len(prs.slides),
+        byte_size=byte_size,
+        max_chars=max_chars,
+        path_ref=resolved.path_ref,
+        content_digest=_digest_path(resolved.path),
+    )
+
+
+# ---------------------------------------------------------------------------
+# XML reader
+# ---------------------------------------------------------------------------
+
+
+def _read_xml(
+    resolved: object,
+    tool_name: str,
+    max_chars: int,
+    byte_size: int,
+) -> ToolResult:
+    """Extract text nodes from an XML file using stdlib xml.etree.ElementTree."""
+    import xml.etree.ElementTree as ET  # noqa: PLC0415
+
+    from .spreadsheet_tools import _ResolvedPath  # noqa: PLC0415
+
+    assert isinstance(resolved, _ResolvedPath)
+
+    try:
+        tree = ET.parse(str(resolved.path))  # noqa: S314
+        root = tree.getroot()
+        texts: list[str] = []
+
+        def _collect(element: ET.Element) -> None:
+            # Text content of the element itself
+            if element.text and element.text.strip():
+                texts.append(element.text.strip())
+            # Tail text (text after the closing tag, before the next sibling tag)
+            if element.tail and element.tail.strip():
+                texts.append(element.tail.strip())
+            for child in element:
+                _collect(child)
+
+        _collect(root)
+        raw_text = "\n".join(texts)
+    except ET.ParseError:
+        return _error_result(tool_name, "xml_parse_error")
+    except Exception:  # noqa: BLE001
+        return _error_result(tool_name, "xml_read_error")
+
+    return _finish_document_result(
+        tool_name,
+        raw_text,
+        page_count=None,
+        byte_size=byte_size,
+        max_chars=max_chars,
+        path_ref=resolved.path_ref,
+        content_digest=_digest_path(resolved.path),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Plain-text reader (.csv / .txt / .md / .rst)
+# ---------------------------------------------------------------------------
+
+
+def _read_text(
+    resolved: object,
+    tool_name: str,
+    max_chars: int,
+    byte_size: int,
+) -> ToolResult:
+    """Read a plain-text file (CSV, TXT, MD, RST) as UTF-8."""
+    from .spreadsheet_tools import _ResolvedPath  # noqa: PLC0415
+
+    assert isinstance(resolved, _ResolvedPath)
+
+    try:
+        raw_text = resolved.path.read_text(encoding="utf-8", errors="replace")
+    except Exception:  # noqa: BLE001
+        return _error_result(tool_name, "text_read_error")
 
     return _finish_document_result(
         tool_name,

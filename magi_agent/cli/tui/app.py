@@ -49,9 +49,11 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, Input, OptionList, RichLog, Static, TextArea
 from textual.widgets.option_list import Option
 
+from magi_agent.cli.commands.executor import DefaultCommandExecutor
 from magi_agent.cli.contracts import (
+    CommandContext,
+    CommandExecutor,
     CommandRegistry,
-    CommandSurface,
     ControlRequest,
     EngineDriver,
     EngineResult,
@@ -79,12 +81,23 @@ from magi_agent.cli.tui.autocomplete import (
 )
 from magi_agent.cli.tui.history import DraftStash, InputHistory
 from magi_agent.cli.tui.input import PromptInput, Submission
+from magi_agent.cli.tui.dialogs.help import HelpDialog
+from magi_agent.cli.tui.dialogs.model import ModelPickerDialog, model_choices
+from magi_agent.cli.tui.dialogs.session import (
+    SessionEntry,
+    SessionListDialog,
+    session_entries,
+)
+from magi_agent.cli.tui.palette import (
+    AppActionProvider,
+    CommandPaletteProvider,
+    tui_command_names,
+)
 from magi_agent.cli.tui.render.markdown import render_markdown
 from magi_agent.cli.tui.transcript import (
     DEFAULT_FLUSH_INTERVAL,
     TranscriptController,
 )
-from magi_agent.cli.tui.widgets.tool_card import ToolCard
 from magi_agent.cli.tui.widgets.transcript_view import TranscriptView
 
 __all__ = ["MagiTuiApp", "TextualSink", "ToolUseConfirm"]
@@ -418,21 +431,22 @@ class MagiTuiApp(App[None]):
     ALLOW_SELECT = True
 
     CSS = """
+    Screen { background: transparent; }
     #topbar {
         dock: top;
         height: 1;
         padding: 0 1;
-        background: $primary-darken-2;
-        color: $text;
+        background: transparent;
+        color: $text-muted;
     }
-    #transcript { height: 1fr; padding: 0 1; background: $background; }
-    #live { height: auto; padding: 0 1; background: $background; }
+    #transcript { height: 1fr; padding: 0 1; background: transparent; }
+    #live { height: auto; padding: 0 1; background: transparent; }
     #prompt {
         dock: bottom;
         margin: 1 1;
         padding: 0 1;
         border: round $primary;
-        background: $surface;
+        background: transparent;
         height: auto;
     }
     #prompt:focus { border: round $accent; }
@@ -485,7 +499,19 @@ class MagiTuiApp(App[None]):
         # fires from the prompt and Ctrl+C appears dead.
         Binding("ctrl+c", "cancel_turn", "Cancel", priority=True),
         ("ctrl+y", "copy_selection", "Copy"),
+        # F1 opens the help dialog. F1 is not in the keybindings defaults
+        # (defaults.py) and (unlike "?") never collides with typed prompt text,
+        # so it is safe to bind globally while the prompt input is focused.
+        ("f1", "open_help", "Help"),
     ]
+
+    # Textual's built-in command palette (PR2.1). Ctrl+P is already the 8.2.7
+    # default (verified: ``App.COMMAND_PALETTE_BINDING == "ctrl+p"``); pin it
+    # explicitly (OQ2) so a future Textual default change can't silently move it,
+    # and so it documents intent. No collision with BINDINGS (ctrl+c / ctrl+y)
+    # or the keybindings defaults.
+    COMMANDS = {CommandPaletteProvider, AppActionProvider}
+    COMMAND_PALETTE_BINDING = "ctrl+p"
 
     def __init__(
         self,
@@ -503,12 +529,20 @@ class MagiTuiApp(App[None]):
         channel_provider: (
             CompletionProvider | Callable[[str], Iterable[str]] | None
         ) = None,
+        executor: CommandExecutor | None = None,
         flush_interval: float = DEFAULT_FLUSH_INTERVAL,
     ) -> None:
         super().__init__()
         self._engine = engine
         self._gate = gate
         self._commands = commands
+        # Injected slash-command executor (PR2.2). Defaults to the builtin
+        # DefaultCommandExecutor which maps prompt/local/widget kinds onto the
+        # app openers without ever starting a second engine loop.
+        self._executor: CommandExecutor = executor or DefaultCommandExecutor()
+        # Count of /compact (Compact()) acknowledgements; asserted by tests. Real
+        # compaction is gated runtime authority (Stream B/E).
+        self.compact_requests = 0
         self._renderers = renderers
         self._runtime = runtime
         self._session_id = session_id
@@ -518,6 +552,19 @@ class MagiTuiApp(App[None]):
         self._drafts = DraftStash(session_id=session_id)
         self._model = model
         self._mode = mode
+        # Quiet by default: internal lifecycle/plumbing status events
+        # (runner_policy_*, phase_route_decision, turn_end, …) are dropped from
+        # the transcript. Set MAGI_TUI_VERBOSE=1 to surface them for debugging.
+        import os as _os_verbose  # noqa: PLC0415
+
+        self._verbose = _os_verbose.environ.get("MAGI_TUI_VERBOSE", "") == "1"
+        # Session list (PR2.4) seams. ``_session_source`` is an optional test/
+        # injection hook ``() -> list[SessionEntry]``; when None the dialog reads
+        # the runtime's ``session_lister`` seam via ``session_entries``.
+        # ``resumed_session`` records the most recently resumed session ref
+        # (asserted by tests); None until a resume happens.
+        self._session_source: Callable[[], list[SessionEntry]] | None = None
+        self.resumed_session: str | None = None
         import os as _os  # noqa: PLC0415
 
         self._cwd = cwd if cwd is not None else _os.getcwd()
@@ -636,13 +683,7 @@ class MagiTuiApp(App[None]):
 
         if self._controller is None:
             return
-        command_names = [
-            name
-            for command in self._commands.list_for(
-                CommandSurface(tui=True, headless=False)
-            )
-            if (name := getattr(command, "name", ""))
-        ]
+        command_names = tui_command_names(self._commands)
         preview = ", ".join(f"/{name}" for name in command_names[:8])
         extra = len(command_names) - 8
         if preview and extra > 0:
@@ -665,14 +706,25 @@ class MagiTuiApp(App[None]):
         welcome.append("↑", style="#7aa2f7")
         welcome.append(" history · ", style="dim")
         welcome.append("Ctrl+S", style="#7aa2f7")
-        welcome.append(" draft\n", style="dim")
+        welcome.append(" draft · ", style="dim")
+        welcome.append("Ctrl+P", style="#7aa2f7")
+        welcome.append(" palette · ", style="dim")
+        welcome.append("F1", style="#7aa2f7")
+        welcome.append(" help\n", style="dim")
+        welcome.append("Copy: drag to select · ", style="dim")
+        welcome.append("Ctrl+Y", style="#7aa2f7")
+        welcome.append(" copy (", style="dim")
+        welcome.append("⌥", style="#7aa2f7")
+        welcome.append("-drag for native terminal copy)\n", style="dim")
         welcome.append(f"Commands ({len(command_names)}): ", style="dim")
         welcome.append(command_line, style="#9ece6a")
         self._controller.commit_rich(
             welcome,
             text=(
                 "Welcome to Magi  "
-                "Keys: Shift+Enter newline · ↑ history · Ctrl+S draft  "
+                "Keys: Shift+Enter newline · ↑ history · Ctrl+S draft · "
+                "Ctrl+P palette · F1 help  "
+                "Copy: drag to select · Ctrl+Y copy (⌥-drag for native terminal copy)  "
                 f"Commands ({len(command_names)}): {command_line}"
             ),
         )
@@ -697,6 +749,25 @@ class MagiTuiApp(App[None]):
             return
         self.start_turn(submission.text)
 
+    def submit_command(self, name: str, args: str = "") -> None:
+        """Submit a slash command exactly as if typed at the prompt.
+
+        Builds the SAME ``Submission`` the prompt input's ``classify_line``
+        produces for ``/name args`` (kind/text/command_name/args + the registry
+        ``lookup`` result) and routes it through
+        ``on_prompt_input_prompt_submitted`` → ``_dispatch_command``. This is the
+        single funnel both typed and palette-launched commands use, so PR2.2's
+        executor and the single-turn invariant apply uniformly.
+        """
+
+        from magi_agent.cli.tui.input import classify_line  # noqa: PLC0415
+
+        line = f"/{name} {args}".rstrip()
+        submission = classify_line(line, self._commands)
+        self.on_prompt_input_prompt_submitted(
+            PromptInput.PromptSubmitted(submission)
+        )
+
     def on_text_area_changed(self, event: TextArea.Changed) -> None:
         # Recompute completions for the current pre-cursor slice (debounced via
         # the exclusive worker so a stale async pass is discarded). ``PromptInput``
@@ -713,19 +784,175 @@ class MagiTuiApp(App[None]):
         self._refresh_completions(self._input.precursor)
 
     def _dispatch_command(self, submission: Submission) -> None:
-        """Route a slash command through the registry (execution is Stream D/F).
+        """Run a slash command through the injected executor (PR2.2).
 
-        PR-E2 wires registry ``lookup`` so the App can find the command; actually
-        executing each command KIND (prompt/local/widget) is Stream D's surface.
-        We commit a transcript line documenting the dispatch so the wiring is
-        observable; widget commands are a documented stub.
+        Looks the command up, builds a ``CommandContext`` exposing the app
+        openers, and runs the executor in a NON-turn worker (``group="command"``)
+        so a command never collides with or cancels the exclusive ``group="turn"``
+        worker. ``prompt``-kind commands re-enter ``start_turn`` (the one turn
+        loop); ``local``/``widget`` kinds apply their effect without starting an
+        engine loop.
         """
 
         command = submission.command or self._commands.lookup(submission.command_name)
         if command is None:
-            self.controller.commit_block(f"[command] unknown: /{submission.command_name}")
+            self.controller.commit_block(
+                f"[command] unknown: /{submission.command_name}"
+            )
             return
-        self.controller.commit_block(f"[command] /{submission.command_name}")
+        args = self._command_args(submission)
+        ctx = CommandContext(
+            cwd=self._cwd, runtime=self._runtime, session=self._session_id, app=self
+        )
+        self._run_command(command, args, ctx)
+
+    @staticmethod
+    def _command_args(submission: Submission) -> str:
+        """Argument tail for a command submission.
+
+        ``classify_line`` already splits ``/name args`` and stores the parsed
+        tail on ``Submission.args``, so prefer it. Fall back to re-deriving from
+        ``text`` for any submission built without going through ``classify_line``.
+        """
+
+        if submission.args:
+            return submission.args
+        text = (submission.text or "").strip()
+        if text.startswith("/"):
+            _, _, rest = text.partition(" ")
+            return rest.strip()
+        return ""
+
+    @work(group="command")
+    async def _run_command(
+        self, command: object, args: str, ctx: CommandContext
+    ) -> None:
+        # Separate worker group from "turn" so a command never collides with or
+        # cancels the exclusive turn worker. The executor itself never drives a
+        # turn loop; a prompt command calls back into start_turn (group="turn").
+        try:
+            await self._executor.run(command, args, ctx)  # type: ignore[arg-type]
+        except Exception as exc:  # commands are first-party but must never die silently
+            # ``except Exception`` deliberately excludes ``asyncio.CancelledError``
+            # (a ``BaseException`` in modern Python), so cancellation still
+            # propagates and only real command failures surface here.
+            self.controller.commit_block(f"[command failed: {exc}]")
+
+    # -- app-opener seam (CommandContext.app) ------------------------------
+    def commit_text(self, text: str) -> None:
+        """Commit a local command's ``Text`` result to the transcript."""
+
+        self.controller.commit_block(text)
+
+    def request_compact(self) -> None:
+        """Acknowledge a ``Compact()`` result (real compaction is gated B/E)."""
+
+        self.compact_requests += 1
+        self.controller.commit_block("[compact requested]")
+
+    def open_dialog(self, name: str) -> None:
+        """Open a named dialog (PR2.3/2.4/2.5 register the real openers)."""
+
+        opener = getattr(self, f"action_open_{name}", None)
+        if callable(opener):
+            opener()
+
+    # -- model picker (PR2.3) ----------------------------------------------
+    def action_open_model_picker(self) -> None:
+        """Open the model picker; apply the chosen model on dismiss.
+
+        Surfaced automatically in the command palette (``AppActionProvider``
+        gates on ``action_open_model_picker`` existing) and reachable via
+        ``open_dialog("model_picker")`` (the ``open_dialog`` name maps to
+        ``action_open_<name>``). The plan defers a ``/model`` widget command
+        wiring; the action + palette path is the PR2.3 surface.
+        """
+
+        dialog = ModelPickerDialog(
+            models=model_choices(self._model), current=self._model
+        )
+        self.push_screen(dialog, self._apply_model)
+
+    def _apply_model(self, model: str | None) -> None:
+        """Apply a model selected in the picker (None on cancel = no-op).
+
+        Updates ``self._model`` and refreshes the topbar — cosmetic only in
+        PR2.3. ``TurnInput`` (contracts.py) carries no model field, so the engine
+        does not yet consume the switch; real consumption (threading the model
+        into the next ``TurnInput`` / provider reconfiguration) is a deferred
+        runtime seam, consistent with ``action_open_model_picker``.
+        """
+
+        if not model:
+            return
+        self._model = model
+        if self._topbar is not None:
+            self._topbar.update(self._topbar_text())
+        # Honest toast: the switch is cosmetic. ``TurnInput`` carries no model
+        # field, so the next turn still runs the old model until the runtime
+        # seam is wired (deferred). Don't imply an immediate runtime effect.
+        self.notify(f"Model set to {model} (applies next session)", timeout=2)
+
+    # -- session list (PR2.4) ----------------------------------------------
+    def action_open_session_list(self) -> None:
+        """Open the session list; resume the chosen session on dismiss.
+
+        Surfaced automatically in the command palette (``AppActionProvider``
+        gates on ``action_open_session_list`` existing) and reachable via
+        ``open_dialog("session_list")`` (the ``open_dialog`` name maps to
+        ``action_open_<name>``). The resumable list comes from the injected
+        ``_session_source`` test seam when set, else from the runtime's
+        ``session_lister`` seam via ``session_entries``; absent either it is
+        empty and the dialog shows its "No prior sessions." placeholder.
+        """
+
+        if self._session_source is not None:
+            sessions = list(self._session_source())
+        else:
+            sessions = session_entries(self._runtime)
+        self.push_screen(SessionListDialog(sessions=sessions), self._resume_session)
+
+    def _resume_session(self, ref: str | None) -> None:
+        """Resume a chosen session (None on cancel = no-op).
+
+        OQ3: **marker-only resume**. We switch the active session id to the
+        chosen ref and show a visible ``[resumed session {ref}]`` marker; the
+        prior transcript is NOT replayed and NO synthetic engine turn is sent.
+        The user's next typed prompt naturally runs under the resumed
+        ``_session_id``. Real rehydration (``TurnInput.initial_messages``
+        replay) stays a deferred runtime seam.
+        """
+
+        if not ref:
+            return
+        self.resumed_session = ref
+        self._session_id = ref
+        # Re-bind the per-session history + draft stores to the resumed session.
+        # Both were constructed ONCE in __init__ bound to the ORIGINAL session's
+        # files (history-<id>.jsonl / drafts-<id>.jsonl); without rebuilding them
+        # ↑/↓ recall and ctrl+s drafts would keep reading/writing the OLD
+        # session's files — a silent desync. Match __init__'s construction.
+        self._history = InputHistory(session_id=ref)
+        self._drafts = DraftStash(session_id=ref)
+        # Re-point the prompt's ↑/↓ recall at the new history ring (on_mount
+        # wired the original; the input must follow the resumed session too).
+        if self._input is not None:
+            self._input.attach_history(self._history)
+        self.controller.commit_block(f"[resumed session {ref}]")
+
+    # -- help (PR2.5) ------------------------------------------------------
+    def action_open_help(self) -> None:
+        """Open the read-only help dialog (keybindings + command reference).
+
+        Surfaced automatically in the command palette (``AppActionProvider``
+        gates on ``action_open_help`` existing), reachable via
+        ``open_dialog("help")`` (the ``open_dialog`` name maps to
+        ``action_open_<name>``), and bound to ``F1``. The dialog reads the live
+        ``BINDINGS`` + ``COMMAND_PALETTE_BINDING`` + the injected command
+        registry; escape/enter closes it. Read-only — no behavioral change.
+        """
+
+        self.push_screen(HelpDialog.from_app(self))
 
     # -- the ONE engine-driven turn loop -----------------------------------
     def start_turn(self, prompt: str) -> None:
@@ -825,9 +1052,15 @@ class MagiTuiApp(App[None]):
         if event.type == "tool":
             self._render_tool_event(event)
             return
-        # status / artifact / control / error -> the minimal one-line summary
-        # (only TOOL events get the rich per-tool renderer treatment in F2c).
-        controller.commit_block(_status_summary(event))
+        if event.type == "error":
+            controller.commit_block(_status_summary(event))
+            return
+        # status / artifact / control -> internal diagnostics (routing/policy/
+        # turn-lifecycle plumbing). These flooded the chat with lines like
+        # ``runner_policy_assembly`` / ``phase_route_decision`` / ``turn_end``, so
+        # they are hidden by default and only shown under MAGI_TUI_VERBOSE=1.
+        if self._verbose:
+            controller.commit_block(_status_summary(event))
 
     def _render_tool_event(self, event: RuntimeEvent) -> None:
         """Route a TOOL event through the injected per-tool renderer registry."""
@@ -851,28 +1084,22 @@ class MagiTuiApp(App[None]):
         self._commit_render_node(node, tool_name=name)
 
     def _commit_render_node(self, node: object, *, tool_name: str = "") -> None:
-        """Commit a ``RenderNode`` as a collapsible ``ToolCard`` (widget backing)
-        or a plain finalized block (legacy ``RichLog`` backing).
+        """Commit a ``RenderNode`` as a compact one-line block.
 
-        The displayed/committed text is annotated with the tool name when the
-        renderer's output does not already carry it (the fallback renderer emits
-        only the raw input/result). The real Edit/Bash/Read renderers already
-        embed their name in the header, so they are left untouched.
+        Tools render Claude-Code style: a ``● Name(arg)`` header and a dimmed
+        ``└ preview`` — committed as plain finalized blocks (not collapsible
+        cards), so a turn's tool activity stays scannable instead of stacking
+        large boxes. The displayed/committed text is annotated with the tool name
+        when the renderer's output does not already carry it (the fallback
+        renderer emits only the raw input/result); the real Edit/Bash/Read
+        renderers already embed their name in the header, so they are untouched.
+        ``commit_rich`` keeps the displayed text in the snapshot for
+        search-fidelity (what is indexed == what is shown).
         """
-
-        from magi_agent.cli.contracts import RenderNode  # noqa: PLC0415
 
         rich = getattr(node, "rich", None)
         text = getattr(node, "text", "") or ""
         annotated = self._annotate_tool_text(text, tool_name)
-        # Widget-list backing -> collapsible ToolCard (header = annotated text).
-        if self._view is not None:
-            card = ToolCard.from_render_node(RenderNode(rich=rich, text=annotated))
-            self.controller.commit_tool(card, text=annotated)
-            return
-        # Legacy RichLog backing -> the historical commit_rich/commit_block path.
-        # commit_rich keeps the displayed text in the snapshot for
-        # search-fidelity (what is indexed == what is shown).
         if rich is not None:
             self.controller.commit_rich(rich, text=annotated)
         else:

@@ -26,6 +26,8 @@ Hard rules (from the spec):
 
 from __future__ import annotations
 
+import json
+
 from rich.text import Text
 
 from magi_agent.cli.contracts import (
@@ -94,10 +96,26 @@ def _first_str(data: dict, keys: tuple[str, ...]) -> str:
 def _result_text(result: object) -> str:
     """Best-effort extraction of human-readable text from a tool result.
 
-    Magi tool results are ``ToolResult.model_dump(by_alias=True)`` →
-    ``{"status", "output": {...}, "metadata": {...}}``. Dig the common content
-    fields; fall back to a compact key=value rendering, then ``str``.
+    Tool results reach the TUI as a ``ToolResult`` preview — usually a dict, but
+    when the bridge truncates a large result it arrives as a (possibly invalid)
+    JSON STRING. We dig the human content out of ``output``; we NEVER surface the
+    receipt scaffolding (``artifactRefs`` / ``codingMutationReceipt`` /
+    ``durationMs`` / …). An unrecognized or truncated payload renders as nothing
+    (the caller shows ``(done)``) — dumping raw JSON floods the transcript.
     """
+
+    # A stringified JSON preview -> parse back to the dict first. Plain text
+    # (a short error message, a one-line status) passes straight through; a
+    # truncated/invalid JSON object is opaque scaffolding, so show nothing.
+    if isinstance(result, str):
+        stripped = result.strip()
+        if stripped[:1] in "{[":
+            try:
+                result = json.loads(stripped)
+            except (ValueError, TypeError):
+                return ""
+        else:
+            return result
 
     data = _as_dict(result)
     if not data:
@@ -108,10 +126,10 @@ def _result_text(result: object) -> str:
             value = output.get(key)
             if isinstance(value, str) and value:
                 return value
-        return "\n".join(f"{k}: {v}" for k, v in output.items())
+        return ""
     if isinstance(output, str) and output:
         return output
-    for key in ("stdout", "content", "message", "error_message"):
+    for key in ("stdout", "content", "message", "error_message", "errorMessage"):
         value = data.get(key)
         if isinstance(value, str) and value:
             return value

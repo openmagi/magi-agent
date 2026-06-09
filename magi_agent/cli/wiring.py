@@ -406,6 +406,7 @@ def _build_default_runner(
                 cwd=cwd,
                 session_id=session_id,
                 mode=mode,
+                memory_mode=memory_mode,
                 general_automation_receipts=general_automation_receipts,
                 local_tool_evidence_collector=local_tool_evidence,
             ),
@@ -425,6 +426,7 @@ def _build_first_party_adk_tools(
     cwd: str | os.PathLike[str] | None,
     session_id: str,
     mode: "RuntimeMode" = "act",
+    memory_mode: "MemoryMode | str" = "normal",
     general_automation_receipts: object | None = None,
     local_tool_evidence_collector: object | None = None,
 ) -> list[object]:
@@ -452,11 +454,37 @@ def _build_first_party_adk_tools(
         GeneralAutomationReceiptLedgerStore,
     )
     from magi_agent.cli.tool_runtime import (  # noqa: PLC0415
+        bind_cli_local_full_tool_handlers,
         wrap_cli_adk_tools_with_evidence_collector,
     )
 
+    from magi_agent.tools.memory_mode_guard import (  # noqa: PLC0415
+        normalize_memory_mode,
+    )
+
     workspace_root = str(cwd) if cwd is not None else os.getcwd()
+    memory_mode_value = normalize_memory_mode(memory_mode)
     registry = _build_core_tool_registry(_build_default_plugin_state())
+    bind_cli_local_full_tool_handlers(
+        registry,
+        workspace_root=workspace_root,
+        bot_id="local-cli",
+        user_id="cli",
+    )
+
+    from magi_agent.config.env import file_tools_enabled  # noqa: PLC0415
+
+    if file_tools_enabled():
+        from magi_agent.tools.file_tool_manifests import (  # noqa: PLC0415
+            register_file_tool_manifests,
+        )
+        from magi_agent.tools.file_toolhost import (  # noqa: PLC0415
+            bind_file_toolhost_handlers,
+        )
+
+        register_file_tool_manifests(registry)
+        bind_file_toolhost_handlers(registry)
+
     receipt_store = (
         general_automation_receipts
         if isinstance(general_automation_receipts, GeneralAutomationReceiptLedgerStore)
@@ -496,6 +524,7 @@ def _build_first_party_adk_tools(
             turn_id=turn_id,
             workspace_root=workspace_root,
             workspace_ref="local-cli-workspace",
+            memory_mode=memory_mode_value,
             channel="cli",
             permission_scope={
                 "mode": "selected_full_toolhost",

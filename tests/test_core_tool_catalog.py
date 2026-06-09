@@ -40,12 +40,23 @@ EXPECTED_CORE_TOOL_NAMES = (
     "CronList",
     # D2: gated declarative memory write — default OFF
     "MemoryWrite",
+    # PR2: gated self-introspection tool — default OFF
+    "InspectSelfEvidence",
 )
 
 # Tools that are default-OFF (gate-disabled) by design
-_DEFAULT_OFF_TOOL_NAMES = frozenset({"MemoryWrite"})
+_DEFAULT_OFF_TOOL_NAMES = frozenset({"MemoryWrite", "InspectSelfEvidence"})
 # Tools with structured input schemas (not the loose additionalProperties default)
-_STRUCTURED_SCHEMA_TOOL_NAMES = frozenset({"TodoWrite", "FileRead", "MemoryWrite"})
+_STRUCTURED_SCHEMA_TOOL_NAMES = frozenset(
+    {
+        "TodoWrite",
+        "FileRead",
+        "FileWrite",
+        "FileEdit",
+        "MemoryWrite",
+        "InspectSelfEvidence",
+    }
+)
 
 
 def make_context() -> ToolContext:
@@ -82,57 +93,68 @@ def test_core_tool_catalog_seed_set_is_immutable_builtin_core_metadata() -> None
             # TodoWrite carries a structured payload schema
             assert manifest.input_schema["type"] == "object"
             assert "todos" in manifest.input_schema["properties"]  # type: ignore[index]
-        elif manifest.name in {"FileRead", "MemoryWrite"}:
-            # FileRead and MemoryWrite carry structured input schemas
+        elif manifest.name in {
+            "FileRead",
+            "FileWrite",
+            "FileEdit",
+            "MemoryWrite",
+            "InspectSelfEvidence",
+        }:
             assert manifest.input_schema["type"] == "object"
             assert "properties" in manifest.input_schema
 
 
 def test_core_tool_manifests_returns_defensive_manifest_and_schema_copies() -> None:
     manifests = core_tool_manifests()
-    file_read = manifests[0]
+    tool_search = manifests[0]
 
-    file_read.input_schema["additionalProperties"] = False
-    file_read.input_schema["callerMutation"] = {"nested": True}
-    file_read.input_schema["callerMutation"]["nested"] = False  # type: ignore[index]
+    tool_search.input_schema["additionalProperties"] = False
+    tool_search.input_schema["callerMutation"] = {"nested": True}
+    tool_search.input_schema["callerMutation"]["nested"] = False  # type: ignore[index]
 
-    fresh_file_read = core_tool_manifests()[0]
+    fresh_tool_search = core_tool_manifests()[0]
 
-    assert fresh_file_read is not file_read
-    assert fresh_file_read.input_schema == {"type": "object", "additionalProperties": True}
-    assert fresh_file_read.input_schema is not file_read.input_schema
+    assert fresh_tool_search is not tool_search
+    assert fresh_tool_search.input_schema == {"type": "object", "additionalProperties": True}
+    assert fresh_tool_search.input_schema is not tool_search.input_schema
 
 
 def test_register_core_tool_manifests_uses_defensive_schema_copies() -> None:
-    mutated_file_read = core_tool_manifests()[0]
-    mutated_file_read.input_schema["additionalProperties"] = False
-    mutated_file_read.input_schema["callerMutation"] = True
+    mutated_tool_search = core_tool_manifests()[0]
+    mutated_tool_search.input_schema["additionalProperties"] = False
+    mutated_tool_search.input_schema["callerMutation"] = True
 
     registry = ToolRegistry()
     register_core_tool_manifests(registry)
 
-    registered_file_read = registry.resolve("FileRead")
-    assert registered_file_read is not None
-    assert registered_file_read is not mutated_file_read
-    assert registered_file_read.input_schema == {"type": "object", "additionalProperties": True}
-    assert registered_file_read.input_schema is not mutated_file_read.input_schema
+    registered_tool_search = registry.resolve("ToolSearch")
+    assert registered_tool_search is not None
+    assert registered_tool_search is not mutated_tool_search
+    assert registered_tool_search.input_schema == {
+        "type": "object",
+        "additionalProperties": True,
+    }
+    assert registered_tool_search.input_schema is not mutated_tool_search.input_schema
 
 
 def test_register_core_tool_manifests_returned_manifests_do_not_mutate_registry_schema() -> None:
     registry = ToolRegistry()
     manifests = register_core_tool_manifests(registry)
-    returned_file_read = manifests[0]
+    returned_tool_search = manifests[0]
 
-    returned_file_read.input_schema["additionalProperties"] = False
-    returned_file_read.input_schema["callerMutation"] = {"nested": True}
-    returned_file_read.input_schema["callerMutation"]["nested"] = False  # type: ignore[index]
+    returned_tool_search.input_schema["additionalProperties"] = False
+    returned_tool_search.input_schema["callerMutation"] = {"nested": True}
+    returned_tool_search.input_schema["callerMutation"]["nested"] = False  # type: ignore[index]
 
-    registered_file_read = registry.resolve("FileRead")
+    registered_tool_search = registry.resolve("ToolSearch")
 
-    assert registered_file_read is not None
-    assert registered_file_read is not returned_file_read
-    assert registered_file_read.input_schema == {"type": "object", "additionalProperties": True}
-    assert registered_file_read.input_schema is not returned_file_read.input_schema
+    assert registered_tool_search is not None
+    assert registered_tool_search is not returned_tool_search
+    assert registered_tool_search.input_schema == {
+        "type": "object",
+        "additionalProperties": True,
+    }
+    assert registered_tool_search.input_schema is not returned_tool_search.input_schema
 
 
 def test_core_tool_catalog_uses_conservative_permission_and_mode_metadata() -> None:

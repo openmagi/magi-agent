@@ -6,11 +6,12 @@ import hashlib
 import json
 import logging
 import os
+import posixpath
 import re
 import subprocess
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
-from typing import Any, Literal, Self
+from typing import TYPE_CHECKING, Any, Literal, Self
 
 from magi_agent.config.env import MAGI_EDIT_FUZZY_MATCH_ENABLED as _EDIT_FUZZY_MATCH_ENABLED
 
@@ -48,6 +49,16 @@ from magi_agent.evidence.edit_match_receipts import (
 from magi_agent.tools.context import ToolContext
 from magi_agent.tools.dispatcher import ToolDispatcher
 from magi_agent.tools.manifest import RuntimeMode, ToolManifest, ToolSource
+from magi_agent.tools.memory_mode_guard import (
+    command_may_write_protected_memory,
+    command_mentions_protected_memory,
+    is_incognito_memory_mode,
+    is_long_term_memory_read_disabled,
+    is_long_term_memory_write_disabled,
+    is_protected_memory_path,
+    memory_write_target_paths,
+    normalize_memory_mode,
+)
 from magi_agent.tools.permission import ToolPermissionPolicy
 from magi_agent.tools.read_ledger import (
     ReadLedger,
@@ -58,9 +69,26 @@ from magi_agent.tools.read_ledger import (
 )
 from magi_agent.tools.registry import ToolRegistry
 from magi_agent.tools.result import ToolResult
+from magi_agent.egress_proxy.config import EgressProxyConfig
+from magi_agent.egress_proxy.injection import subprocess_env_overlay
+
+if TYPE_CHECKING:
+    from magi_agent.runtime.session_identity import MemoryMode
 
 
 logger = logging.getLogger(__name__)
+
+
+def _build_bash_env(cfg: EgressProxyConfig | None = None) -> dict[str, str]:
+    """Build the env for the Bash tool subprocess.
+
+    Default-OFF: when the egress proxy is unset, the overlay is empty and the
+    returned env is byte-identical to the legacy ``{"PATH": ...}`` mapping.
+    """
+    cfg = EgressProxyConfig.from_env() if cfg is None else cfg
+    env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin")}
+    env.update(subprocess_env_overlay(cfg))
+    return env
 
 Gate5BFullToolHostStatus = Literal["disabled", "blocked", "ready"]
 Gate5BFullToolOutcomeStatus = Literal["ok", "blocked", "error", "duplicate"]
@@ -76,6 +104,110 @@ _GATE5B_LEGACY_FULL_TOOLHOST_TOOL_NAMES = (
     "PatchApply",
     "Bash",
 )
+
+# Memory-mode enforcement tool groupings. Writes and raw reads obey
+# read_only/incognito. Bash mirrors core_toolhost: incognito blocks protected
+# mentions, while read_only blocks protected writes.
+_MEMORY_WRITE_TOOL_NAMES = frozenset({"FileWrite", "FileEdit", "PatchApply"})
+_MEMORY_READ_TOOL_NAMES = frozenset({"FileRead", "Glob", "Grep"})
+_PROTECTED_GLOB_SENTINELS = (
+    "MEMORY.md",
+    "SCRATCHPAD.md",
+    "WORKING.md",
+    "TASK-QUEUE.md",
+    "memory/example.md",
+)
+
+
+def _memory_read_target_paths(
+    tool_name: str,
+    arguments: Mapping[str, object],
+) -> tuple[str, ...]:
+    """Return candidate paths a read-style tool call would touch.
+
+    Mirrors the core toolhost read preflight: FileRead resolves path aliases,
+    Glob resolves the selector, and Grep resolves the glob/path selector.
+    """
+
+    if tool_name == "FileRead":
+        names = ("path", "file", "filePath")
+    elif tool_name == "Glob":
+        names = ("pattern", "glob")
+    elif tool_name == "Grep":
+        names = ("glob", "path", "patternGlob")
+    else:
+        names = ()
+    paths: list[str] = []
+    for name in names:
+        value = arguments.get(name)
+        if isinstance(value, str) and value:
+            paths.append(value)
+    return tuple(paths)
+
+
+def _grep_glob_may_include_protected_memory(arguments: Mapping[str, object]) -> bool:
+    raw_glob = (
+        arguments.get("glob")
+        or arguments.get("path")
+        or arguments.get("patternGlob")
+        or "**/*"
+    )
+    if not isinstance(raw_glob, str):
+        return True
+    pattern = _normalize_memory_glob(raw_glob)
+    if pattern is None:
+        return False
+    return any(_glob_pattern_matches(path, pattern) for path in _PROTECTED_GLOB_SENTINELS)
+
+
+def _normalize_memory_glob(pattern: str) -> str | None:
+    text = str(pattern or "*").strip().replace("\\", "/")
+    if not text:
+        return "*"
+    if text.startswith(("/", "~")):
+        return None
+    parts = [part for part in text.split("/") if part not in {"", "."}]
+    if any(part == ".." for part in parts):
+        return None
+    normalized = posixpath.normpath("/".join(parts) or "*")
+    return "*" if normalized == "." else normalized
+
+
+def _glob_pattern_matches(relative: str, pattern: str) -> bool:
+    if pattern in {"**", "**/*"}:
+        return True
+    if pattern.startswith("**/"):
+        suffix = pattern[3:]
+        return fnmatch.fnmatchcase(relative, suffix) or fnmatch.fnmatchcase(relative, pattern)
+    if "/" not in pattern and "/" in relative:
+        return False
+    return fnmatch.fnmatchcase(relative, pattern)
+
+
+def _filter_protected_memory_matches(output: object) -> object:
+    if not isinstance(output, Mapping):
+        return output
+    matches = output.get("matches")
+    if not isinstance(matches, list):
+        return output
+    filtered = [
+        match for match in matches if not is_protected_memory_path(_match_path(match))
+    ]
+    if len(filtered) == len(matches):
+        return output
+    updated = dict(output)
+    updated["matches"] = filtered
+    return updated
+
+
+def _match_path(match: object) -> str | None:
+    if isinstance(match, str):
+        return match
+    if isinstance(match, Mapping):
+        path = match.get("path")
+        return path if isinstance(path, str) else None
+    return None
+
 
 _GATE5B_FIRST_PARTY_REGISTRY_TOOL_NAMES = (
     "AgentMemoryRemember",
@@ -175,6 +307,10 @@ _SENSITIVE_RE = re.compile(
     r"raw[_ -]?(?:user|tool|session|auth|cookie|text)|"
     r"hidden[_ -]?reasoning|chain[_ -]?of[_ -]?thought"
     r")",
+    re.IGNORECASE,
+)
+_URL_USERINFO_RE = re.compile(
+    r"\b(?P<scheme>https?://)(?P<userinfo>[^/\s@]+@)(?P<authority>[^/\s]+)",
     re.IGNORECASE,
 )
 
@@ -518,11 +654,13 @@ class Gate5BFullToolHost:
         tool_registry: ToolRegistry | None = None,
         read_ledger_enabled: bool = False,
         diagnostics_provider: DiagnosticsProvider | None = None,
+        memory_mode: "MemoryMode | str" = "normal",
     ) -> None:
         self.config = config
         self.workspace_root = workspace_root.resolve()
         self.exposed_tool_names = exposed_tool_names
         self.now_ms = now_ms
+        self.memory_mode = normalize_memory_mode(memory_mode)
         self.counter = Gate5BFullToolCounter(config)
         self._tool_registry = tool_registry
         self._tool_dispatcher = ToolDispatcher(tool_registry) if tool_registry is not None else None
@@ -572,6 +710,54 @@ class Gate5BFullToolHost:
         if self._owns_lsp_client and isinstance(self._diagnostics_provider, LspClient):
             self._diagnostics_provider.shutdown_all()
 
+    def _enforce_memory_mode(
+        self,
+        tool_name: str,
+        args: Mapping[str, object],
+    ) -> None:
+        """Block protected-memory access the channel memory mode forbids.
+
+        Raises ``Gate5BFullToolRegistryBlocked("memory_mode_blocked")`` so the
+        dispatch loop turns it into a blocked outcome with that reason.
+        """
+
+        mode = self.memory_mode
+        if tool_name in _MEMORY_WRITE_TOOL_NAMES:
+            if not is_long_term_memory_write_disabled(mode):
+                return
+            for path in memory_write_target_paths(tool_name, args):
+                if is_protected_memory_path(path):
+                    raise Gate5BFullToolRegistryBlocked("memory_mode_blocked")
+            return
+        if tool_name == "Bash":
+            command = args.get("command")
+            command_text = command if isinstance(command, str) else ""
+            if (
+                is_incognito_memory_mode(mode)
+                and command_mentions_protected_memory(command_text)
+            ) or (
+                is_long_term_memory_write_disabled(mode)
+                and command_may_write_protected_memory(command_text)
+            ):
+                raise Gate5BFullToolRegistryBlocked("memory_mode_blocked")
+            return
+        if tool_name in _MEMORY_READ_TOOL_NAMES:
+            if not is_long_term_memory_read_disabled(mode):
+                return
+            for path in _memory_read_target_paths(tool_name, args):
+                if is_protected_memory_path(path):
+                    raise Gate5BFullToolRegistryBlocked("memory_mode_blocked")
+            if tool_name == "Grep" and _grep_glob_may_include_protected_memory(args):
+                raise Gate5BFullToolRegistryBlocked("memory_mode_blocked")
+            return
+
+    def _filter_memory_mode_output(self, tool_name: str, output: object) -> object:
+        if tool_name not in {"Glob", "Grep"}:
+            return output
+        if not is_long_term_memory_read_disabled(self.memory_mode):
+            return output
+        return _filter_protected_memory_matches(output)
+
     async def dispatch(
         self,
         tool_name: str,
@@ -603,8 +789,16 @@ class Gate5BFullToolHost:
             # Clear any stale edit-match result from a previous call before
             # invoking the handler so dispatch never reads stale state.
             self._last_edit_match_result = None
+            # Channel memory-mode hard enforcement. The gate5b host executes
+            # FileRead/Grep/FileWrite/FileEdit/PatchApply/Bash directly via
+            # _handle, bypassing the core_toolhost guard, so it must enforce
+            # the same protected-memory rules here. Raised inside the try block
+            # so the existing Gate5BFullToolRegistryBlocked handler surfaces it
+            # as a "memory_mode_blocked" blocked outcome.
+            self._enforce_memory_mode(tool_name, args)
             self._preflight_legacy_tool(tool_name, args, tool_call_id=tool_call_id)
             output = await self._handle(tool_name, args, tool_call_id=tool_call_id)
+            output = self._filter_memory_mode_output(tool_name, output)
             # The diagnostics collection does blocking stdio reads against the
             # language server. Run it off the event loop so a slow/hung server
             # can't stall concurrent requests (mirrors the to_thread pattern in
@@ -874,7 +1068,7 @@ class Gate5BFullToolHost:
                 capture_output=True,
                 text=True,
                 timeout=self.config.command_timeout_ms / 1000,
-                env={"PATH": os.environ.get("PATH", "/usr/bin:/bin")},
+                env=_build_bash_env(),
                 check=False,
             )
             stdout = _redact(completed.stdout)[0 : self.config.max_per_tool_output_bytes]
@@ -910,6 +1104,7 @@ class Gate5BFullToolHost:
                 botId="gate5b-selected-full-toolhost",
                 turnId=f"gate5b-full-toolhost:{tool_call_id}",
                 workspaceRoot=str(self.workspace_root),
+                memoryMode=self.memory_mode,
                 permissionScope={
                     "mode": "selected_full_toolhost",
                     "source": "selected_full_toolhost",
@@ -955,6 +1150,7 @@ class Gate5BFullToolHost:
                 botId="gate5b-selected-full-toolhost",
                 turnId=f"gate5b-full-toolhost:{tool_call_id}",
                 workspaceRoot=str(self.workspace_root),
+                memoryMode=self.memory_mode,
                 permissionScope={
                     "mode": "selected_full_toolhost",
                     "source": "selected_full_toolhost",
@@ -1426,6 +1622,7 @@ def build_gate5b_full_toolhost_bundle(
     tool_registry: ToolRegistry | None = None,
     read_ledger_enabled: bool | None = None,
     diagnostics_provider: DiagnosticsProvider | None = None,
+    memory_mode: "MemoryMode | str" = "normal",
 ) -> Gate5BFullToolBundle:
     safe_config = Gate5BFullToolHostConfig.model_validate(config or {})
     workspace = Path(workspace_root)
@@ -1448,6 +1645,7 @@ def build_gate5b_full_toolhost_bundle(
         tool_registry=tool_registry,
         read_ledger_enabled=read_ledger_enabled,
         diagnostics_provider=diagnostics_provider,
+        memory_mode=memory_mode,
     )
     if selected_scope_error is not None:
         return Gate5BFullToolBundle(
@@ -2072,6 +2270,7 @@ def _sanitize_output(value: object) -> object:
 
 
 def _redact(value: str) -> str:
+    value = _URL_USERINFO_RE.sub(r"\g<scheme>[redacted]@\g<authority>", value)
     return _SENSITIVE_RE.sub("[redacted]", value)
 
 

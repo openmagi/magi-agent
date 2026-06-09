@@ -417,17 +417,36 @@ def _resolve_timeout() -> float:
 # LiteLlm model builder (mirrors real_runner._build_litellm_model)
 # ---------------------------------------------------------------------------
 
-def _build_litellm_for_config(provider_config: object) -> object:
-    """Build a LiteLlm model from a ``ProviderConfig``; raises on failure."""
+def _build_litellm_for_config(
+    provider_config: object,
+    *,
+    model_override: str | None = None,
+) -> object:
+    """Build a LiteLlm model from a ``ProviderConfig``; raises on failure.
+
+    ``model_override`` lets another in-band classifier reuse this exact builder
+    with its OWN fast-model override (e.g. the egress critic). When omitted the
+    SmartApprove ``MAGI_SMART_APPROVE_MODEL`` env override applies, preserving the
+    original behaviour byte-for-byte for existing callers.
+    """
     try:
         from google.adk.models.lite_llm import LiteLlm  # noqa: PLC0415
     except Exception as exc:
         raise RuntimeError("litellm dependency not available") from exc
 
-    # Honour the fast-model override env var
-    model_override = os.environ.get(_ENV_MODEL_OVERRIDE, "").strip()
+    # Honour the fast-model override (explicit arg wins; else the env var).
+    if model_override is not None:
+        model_override = model_override.strip()
+    if not model_override:
+        model_override = os.environ.get(_ENV_MODEL_OVERRIDE, "").strip()
     litellm_model = model_override or getattr(provider_config, "litellm_model", None)
     api_key = getattr(provider_config, "api_key", None)
     if not litellm_model:
         raise RuntimeError("cannot determine litellm model for SmartApprove")
-    return LiteLlm(model=litellm_model, api_key=api_key)
+    # Share the runtime's gateway routing so the classifier egresses through the
+    # same api-proxy as the main turn (see real_runner._model_api_base_kwargs).
+    from magi_agent.cli.real_runner import _model_api_base_kwargs  # noqa: PLC0415
+
+    api_base_kwargs = _model_api_base_kwargs()
+    api_key = api_base_kwargs.pop("api_key", api_key)
+    return LiteLlm(model=litellm_model, api_key=api_key, **api_base_kwargs)

@@ -21,8 +21,10 @@ from __future__ import annotations
 import asyncio
 
 from magi_agent.cli.contracts import (
+    Command,
     CommandSurface,
     EngineResult,
+    LocalCommand,
     PermissionDecision,
     PermissionGate,
     RuntimeEvent,
@@ -195,8 +197,17 @@ def test_tool_end_rejected_renders_rejected_node() -> None:
     asyncio.run(_run())
 
 
-def test_non_tool_event_keeps_one_line_summary() -> None:
-    async def _run() -> None:
+def test_non_tool_status_event_hidden_by_default_shown_when_verbose(
+    monkeypatch,
+) -> None:
+    """Non-tool status events are internal diagnostics: dropped by default,
+    surfaced only under MAGI_TUI_VERBOSE=1."""
+
+    async def _run(verbose: bool) -> tuple[str, ...]:
+        if verbose:
+            monkeypatch.setenv("MAGI_TUI_VERBOSE", "1")
+        else:
+            monkeypatch.delenv("MAGI_TUI_VERBOSE", raising=False)
         events = [
             RuntimeEvent(
                 type="status",
@@ -209,10 +220,13 @@ def test_non_tool_event_keeps_one_line_summary() -> None:
             app.start_turn("status")
             await app.workers.wait_for_complete()
             await pilot.pause()
-        blocks = app.controller.committed_blocks_snapshot()
-        assert any(b.startswith("[status]") for b in blocks)
+        return app.controller.committed_blocks_snapshot()
 
-    asyncio.run(_run())
+    quiet = asyncio.run(_run(verbose=False))
+    assert not any(b.startswith("[status]") for b in quiet)
+
+    loud = asyncio.run(_run(verbose=True))
+    assert any(b.startswith("[status]") for b in loud)
 
 
 # ---------------------------------------------------------------------------
@@ -283,5 +297,54 @@ def test_on_key_unconvertible_event_returns_without_error() -> None:
 
             app.on_key(_Empty())
             assert app._pending is None
+
+    asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
+# Piece 3 — command-execution failures surface (never die silently)
+# ---------------------------------------------------------------------------
+class _BoomLocal(LocalCommand):
+    """A LocalCommand whose ``call`` raises, simulating a broken first-party command."""
+
+    async def call(self, args, ctx):  # type: ignore[override]
+        _ = (args, ctx)
+        raise RuntimeError("boom")
+
+
+class _SingleCommandRegistry:
+    def __init__(self, command: Command) -> None:
+        self._command = command
+
+    def lookup(self, name):
+        return self._command if name == self._command.name else None
+
+    def list_for(self, surface):
+        _ = surface
+        return [self._command]
+
+
+def test_command_execution_failure_commits_a_failure_block() -> None:
+    """A raising command must surface a ``[command failed: ...]`` block, not vanish.
+
+    Without the try/except in ``_run_command`` the ``@work(group="command")``
+    worker fails and swallows the error: the transcript stays empty and the user
+    gets NO feedback. This drives the failure through the real
+    ``submit_command`` -> ``_dispatch_command`` -> command worker path.
+    """
+
+    async def _run() -> None:
+        boom = _BoomLocal(name="boom", surface=TUI)
+        app = _make_app(_Idle())
+        app._commands = _SingleCommandRegistry(boom)  # type: ignore[attr-defined]
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.submit_command("boom")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            # The app survived (no crash); the worker did not bring it down.
+            assert app.is_running
+            blocks = app.controller.committed_blocks_snapshot()
+        assert any(b.startswith("[command failed:") for b in blocks), blocks
 
     asyncio.run(_run())

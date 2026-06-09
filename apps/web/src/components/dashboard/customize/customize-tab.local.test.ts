@@ -7,24 +7,32 @@ const source = readFileSync(
 );
 
 describe("CustomizeRuntimeConsole local runtime contract", () => {
-  it("uses local runtime APIs instead of hosted bot customization endpoints", () => {
-    expect(source).toContain("useAgentFetch");
-    expect(source).toContain("/api/tools");
-    expect(source).toContain("/v1/app/skills");
-    expect(source).toContain("/v1/app/config");
+  it("loads customization from the local /v1/app/customize hook, not hosted bot endpoints", () => {
+    expect(source).toContain("useCustomize");
     expect(source).not.toContain("/api/bots/");
     expect(source).not.toContain("useAuthFetch");
     expect(source).not.toContain("Privy");
   });
 
-  it("surfaces ADK runtime customization concepts instead of TS-era bot settings", () => {
-    expect(source).toContain("Python ADK runtime");
-    expect(source).toContain("FIRST_PARTY_RECIPES");
-    expect(source).toContain("HARNESS_PRESETS");
-    expect(source).toContain("PHASE_ROUTES");
-    expect(source).toContain("REPAIR_CONTROLS");
-    expect(source).toContain("Evidence & repair");
-    expect(source).toContain("openmagi.research");
-    expect(source).toContain("coding.evidence_gate");
+  it("keeps the exported component name + props stable so the page keeps compiling", () => {
+    expect(source).toContain("export function CustomizeRuntimeConsole");
+    expect(source).toContain("botId");
+  });
+
+  it("renders the two-card shell wired to the verification and tools modals", () => {
+    expect(source).toContain("Verification Rules");
+    expect(source).toContain("Custom Tools");
+    expect(source).toContain("VerificationRuleModal");
+    expect(source).toContain("CustomToolModal");
+  });
+
+  it("drops the old runtime-console catalog constants and direct local fetches", () => {
+    expect(source).not.toContain("FIRST_PARTY_RECIPES");
+    expect(source).not.toContain("HARNESS_PRESETS");
+    expect(source).not.toContain("PHASE_ROUTES");
+    expect(source).not.toContain("REPAIR_CONTROLS");
+    expect(source).not.toContain("/api/tools");
+    expect(source).not.toContain("/v1/app/skills");
+    expect(source).not.toContain("/v1/app/config");
   });
 });

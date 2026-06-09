@@ -206,6 +206,144 @@ def test_build_cli_model_runner_attaches_real_tools(tmp_path) -> None:
     assert "<coding-discipline>" in instruction
 
 
+def test_build_cli_model_runner_attaches_local_memory_and_introspection_tools_when_gated(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setenv("MAGI_MEMORY_WRITE_READINESS_ENABLED", "1")
+    monkeypatch.setenv("MAGI_MEMORY_WRITE_ENABLED", "1")
+    monkeypatch.setenv("MAGI_MEMORY_LOCAL_DEV", "1")
+    monkeypatch.setenv("MAGI_SELF_INTROSPECTION_ENABLED", "1")
+
+    runner = build_cli_model_runner(
+        _config(),
+        model_factory=_fake_model_factory,
+        workspace_root=str(tmp_path),
+        session_id="sid-local-tools",
+    )
+
+    names = _tool_names(runner.agent)
+    assert "MemoryWrite" in names
+    assert "InspectSelfEvidence" in names
+
+    memory_result = _run_adk_tool(
+        _tool_by_name(list(getattr(runner.agent, "tools", [])), "MemoryWrite"),
+        {"fact": "user prefers concise answers", "target_file": "MEMORY.md"},
+        invocation_id="turn-memory",
+        call_id="call-memory",
+    )
+    assert memory_result["status"] == "ok"
+    assert memory_result["output"]["realWrite"] is True
+    assert "user prefers concise answers" in (tmp_path / "MEMORY.md").read_text(
+        encoding="utf-8"
+    )
+
+    introspection_result = _run_adk_tool(
+        _tool_by_name(list(getattr(runner.agent, "tools", [])), "InspectSelfEvidence"),
+        {"query_type": "summary"},
+        invocation_id="turn-introspection",
+        call_id="call-introspection",
+    )
+    assert introspection_result["status"] == "ok"
+    assert introspection_result["output"]["scope"]["session_id"] == "sid-local-tools"
+
+
+def test_first_party_adk_tools_attach_memory_and_introspection_when_gated(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setenv("MAGI_MEMORY_WRITE_READINESS_ENABLED", "1")
+    monkeypatch.setenv("MAGI_MEMORY_WRITE_ENABLED", "1")
+    monkeypatch.setenv("MAGI_MEMORY_LOCAL_DEV", "1")
+    monkeypatch.setenv("MAGI_SELF_INTROSPECTION_ENABLED", "1")
+
+    tools = _build_first_party_adk_tools(
+        cwd=tmp_path,
+        session_id="sid-first-party-tools",
+        mode="act",
+    )
+
+    names = {getattr(tool, "name", None) for tool in tools}
+    assert "MemoryWrite" in names
+    assert "InspectSelfEvidence" in names
+
+    memory_result = _run_adk_tool(
+        _tool_by_name(tools, "MemoryWrite"),
+        {"fact": "user prefers direct answers", "target_file": "MEMORY.md"},
+        invocation_id="turn-first-party-memory",
+        call_id="call-first-party-memory",
+    )
+    assert memory_result["status"] == "ok"
+    assert memory_result["output"]["realWrite"] is True
+    assert "user prefers direct answers" in (tmp_path / "MEMORY.md").read_text(
+        encoding="utf-8"
+    )
+
+
+def test_first_party_adk_tools_attach_file_tools_when_gated(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setenv("MAGI_FILE_TOOLS_ENABLED", "1")
+
+    tools = _build_first_party_adk_tools(
+        cwd=tmp_path,
+        session_id="sid-file-tools",
+        mode="act",
+    )
+
+    names = {getattr(tool, "name", None) for tool in tools}
+    assert {
+        "XLSXRead",
+        "DocumentRead",
+        "ImageUnderstand",
+        "AudioTranscribe",
+    }.issubset(names)
+
+    image_result = _run_adk_tool(
+        _tool_by_name(tools, "ImageUnderstand"),
+        {"path": "missing.png"},
+        invocation_id="turn-file-tools",
+        call_id="call-file-tools",
+    )
+    assert image_result["status"] == "blocked"
+    assert image_result["errorCode"] == "path_not_found"
+
+
+@pytest.mark.parametrize(
+    "env",
+    (
+        {"MAGI_RUNTIME_PROFILE": "safe"},
+        {"MAGI_RUNTIME_PROFILE": "minimal"},
+        {"MAGI_RUNTIME_PROFILE": "off"},
+        {"MAGI_RUNTIME_PROFILE": "conservative"},
+        {
+            "MAGI_MEMORY_WRITE_READINESS_ENABLED": "0",
+            "MAGI_SELF_INTROSPECTION_ENABLED": "0",
+        },
+    ),
+)
+def test_first_party_adk_tools_leave_memory_and_introspection_inert(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+    env: dict[str, str],
+) -> None:
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.delenv("MAGI_MEMORY_LOCAL_DEV", raising=False)
+    monkeypatch.delenv("MAGI_MEMORY_WRITE_ENABLED", raising=False)
+
+    tools = _build_first_party_adk_tools(
+        cwd=tmp_path,
+        session_id="sid-safe-tools",
+        mode="act",
+    )
+
+    names = {getattr(tool, "name", None) for tool in tools}
+    assert "MemoryWrite" not in names
+    assert "InspectSelfEvidence" not in names
+
+
 def test_build_cli_model_runner_injects_memory_block_when_gate_on(
     monkeypatch, tmp_path
 ) -> None:

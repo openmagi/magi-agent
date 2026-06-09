@@ -55,6 +55,18 @@ from magi_agent.web_acquisition.policy import (
     redact_public_text,
     url_policy_error,
 )
+from magi_agent.egress_proxy.config import EgressProxyConfig
+from magi_agent.egress_proxy.injection import httpx_client_kwargs
+
+
+def _egress_client_kwargs(cfg: EgressProxyConfig | None = None) -> dict:
+    """Extra httpx.Client kwargs to route web_fetch egress through the proxy.
+
+    Default-OFF: returns ``{}`` when the egress proxy is unset, so the client is
+    constructed exactly as before.
+    """
+    cfg = EgressProxyConfig.from_env() if cfg is None else cfg
+    return httpx_client_kwargs(cfg)
 
 
 # Browser-like default UA (mirrors OpenCode webfetch primary attempt).
@@ -263,7 +275,9 @@ class LiveFetchProvider:
         # follow_redirects=False — a hostile page must not be able to 302 us to
         # an internal IP. ALL redirect handling is the manual guarded loop below.
         client = self._client or httpx.Client(
-            timeout=self.timeout_s, follow_redirects=False
+            timeout=self.timeout_s,
+            follow_redirects=False,
+            **_egress_client_kwargs(),
         )
         try:
             return self._follow_guarded(client, url)
@@ -463,6 +477,12 @@ __all__ = [
     "BROWSER_UA",
     "HONEST_UA",
     "LiveFetchProvider",
+    # Shared helpers also consumed by sibling providers (e.g. insane_fetch); kept
+    # in __all__ so the cross-module contract is explicit, not a silent break.
+    "_MAX_REDIRECT_HOPS",
+    "_REDIRECT_STATUS",
+    "_extract_title",
+    "_html_to_md",
     "redact_metadata_values",
     "resolve_validated_ip",
 ]

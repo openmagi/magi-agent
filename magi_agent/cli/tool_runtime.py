@@ -17,6 +17,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from inspect import isawaitable, signature
+from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
 from magi_agent.runtime.session_identity import MemoryMode
@@ -32,6 +33,7 @@ if TYPE_CHECKING:
     from magi_agent.tools.registry import ToolRegistry
 
 CLI_BOT_ID = "magi-cli"
+CLI_USER_ID = "cli"
 
 
 @dataclass
@@ -48,6 +50,7 @@ def build_cli_tool_runtime(
     *,
     workspace_root: str,
     session_id: str = "cli-session",
+    memory_mode: "MemoryMode | str" = "normal",
     general_automation_receipts: "GeneralAutomationReceiptLedgerStore | None" = None,
 ) -> CliToolRuntime:
     """Assemble the registry, dispatcher, and tool-context factory.
@@ -72,6 +75,12 @@ def build_cli_tool_runtime(
     registry = ToolRegistry()
     register_core_tool_manifests(registry)
     bind_core_toolhost_handlers(registry)
+    bind_cli_local_full_tool_handlers(
+        registry,
+        workspace_root=workspace_root,
+        bot_id=CLI_BOT_ID,
+        user_id=CLI_USER_ID,
+    )
 
     # Optional file & multimodal tools (MAGI_FILE_TOOLS_ENABLED=true).
     # Guarded here so the gate is evaluated at build time, not import time.
@@ -88,20 +97,45 @@ def build_cli_tool_runtime(
         register_file_tool_manifests(registry)
         bind_file_toolhost_handlers(registry)
 
+    # Optional autonomous vision browser tool (MAGI_BROWSER_TOOL_ENABLED=true).
+    from magi_agent.config.env import browser_tool_enabled  # noqa: PLC0415
+
+    if browser_tool_enabled():
+        from magi_agent.browser.autonomous.tool import (  # noqa: PLC0415
+            register_browser_tool_manifest,
+            bind_browser_toolhost_handler,
+        )
+
+        register_browser_tool_manifest(registry)
+        bind_browser_toolhost_handler(registry)
+
     receipt_store = general_automation_receipts or GeneralAutomationReceiptLedgerStore()
     dispatcher = ToolDispatcher(
         registry,
         general_automation_receipts=receipt_store,
     )
+    memory_mode_value = (
+        memory_mode.value if isinstance(memory_mode, MemoryMode) else str(memory_mode)
+    )
 
     def tool_context_factory(adk_tool_context: object) -> ToolContext:
         return ToolContext(
             bot_id=CLI_BOT_ID,
+            user_id=CLI_USER_ID,
             session_id=session_id,
+            session_key=session_id,
             turn_id="cli",
             workspace_root=workspace_root,
+            workspace_ref="local-cli-workspace",
+            memory_mode=memory_mode_value,
+            channel="cli",
+            permission_scope={
+                "mode": "selected_full_toolhost",
+                "source": "selected_full_toolhost",
+            },
             execution_contract={"agentRole": "general"},
             adk_tool_context=adk_tool_context,
+            adk_context=adk_tool_context,
         )
 
     return CliToolRuntime(
@@ -117,6 +151,7 @@ def build_cli_adk_tools(
     workspace_root: str,
     session_id: str = "cli-session",
     mode: "RuntimeMode" = "act",
+    memory_mode: "MemoryMode | str" = "normal",
     general_automation_receipts: "GeneralAutomationReceiptLedgerStore | None" = None,
     local_tool_evidence_collector: "LocalToolEvidenceCollector | None" = None,
 ) -> list[object]:
@@ -129,6 +164,7 @@ def build_cli_adk_tools(
     runtime = build_cli_tool_runtime(
         workspace_root=workspace_root,
         session_id=session_id,
+        memory_mode=memory_mode,
         general_automation_receipts=general_automation_receipts,
     )
     tools = build_adk_function_tools_for_registry(
@@ -143,6 +179,31 @@ def build_cli_adk_tools(
         collector=local_tool_evidence_collector,
         session_id=session_id,
     )
+
+
+def bind_cli_local_full_tool_handlers(
+    registry: "ToolRegistry",
+    *,
+    workspace_root: str | Path,
+    bot_id: str,
+    user_id: str,
+) -> None:
+    """Bind local-full gated tool hosts into a CLI/dashboard registry."""
+
+    from magi_agent.introspection.tool import (  # noqa: PLC0415
+        bind_inspect_self_evidence_handler,
+    )
+    from magi_agent.runtime.memory_write_wiring import (  # noqa: PLC0415
+        build_memory_write_host,
+    )
+
+    bind_inspect_self_evidence_handler(registry)
+    memory_write_host = build_memory_write_host(
+        workspace_root=Path(workspace_root),
+        bot_id=bot_id,
+        user_id=user_id,
+    )
+    memory_write_host.bind(registry)
 
 
 def wrap_cli_adk_tools_with_evidence_collector(
@@ -302,6 +363,20 @@ def build_cli_instruction(
     )
     return (
         f"{prompt}\n\n"
+        "<file_tools>\n"
+        "When the task involves an image, document, spreadsheet, or other "
+        "attached file:\n"
+        "- Use ImageUnderstand(path=..., prompt=...) for image files "
+        "(.png/.jpg/.jpeg/.gif/.webp/.bmp).\n"
+        "- Use DocumentRead(path=...) for document files "
+        "(.pdf/.docx/.pptx/.xml/.csv/.txt/.md/.rst).\n"
+        "- Use XLSXRead(path=...) for spreadsheet files (.xlsx/.xls).\n"
+        "- If a tool returns status='blocked' or status='needs_approval', "
+        "attempt an alternative approach: read the file with Bash (e.g. "
+        "`cat`, `python3`) before concluding the file is inaccessible.\n"
+        "- Never conclude 'unable to determine' solely because a tool returned "
+        "an error; try at least one alternative access path first.\n"
+        "</file_tools>\n\n"
         "<skills>\n"
         "Bundled first-party skills, including superpowers-style workflows, are "
         "available through the SkillLoader tool. Before specialized work such "
@@ -313,9 +388,11 @@ def build_cli_instruction(
 
 __all__ = [
     "CLI_BOT_ID",
+    "CLI_USER_ID",
     "CliToolRuntime",
     "build_cli_adk_tools",
     "build_cli_instruction",
     "build_cli_tool_runtime",
+    "bind_cli_local_full_tool_handlers",
     "wrap_cli_adk_tools_with_evidence_collector",
 ]
