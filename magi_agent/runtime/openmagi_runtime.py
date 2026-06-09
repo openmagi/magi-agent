@@ -1,13 +1,11 @@
 from __future__ import annotations
 
 from importlib import import_module
-from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from magi_agent.adk_bridge.primitives import AdkPrimitiveBoundary
 from magi_agent.config.models import RuntimeConfig
 from magi_agent.harness.profiles import RuntimeProfile, build_default_profile
-from magi_agent.runtime.memory_snapshot_cache import MemorySnapshotCache
 
 _SYNTHETIC_NATIVE_TOOL_HANDLERS: dict[tuple[str, str], str] = {
     (
@@ -128,19 +126,18 @@ class OpenMagiRuntime:
         if tool_registry is None:
             tool_registry = _build_core_tool_registry(self.plugin_state)
         self.tool_registry = tool_registry
-        # Session-scoped frozen snapshot cache for memory recall.
-        # Uses config.memory.workspace_root when set, otherwise cwd.
-        _workspace_root = (
-            Path(config.memory.workspace_root)
-            if config.memory.workspace_root
-            else Path.cwd()
-        )
-        self.memory_snapshot_cache = MemorySnapshotCache(workspace_root=_workspace_root)
-        # NOTE: when session reset becomes live (SlashControlBoundary
-        # session_reset_performed is currently Literal[False], performed by a
-        # higher layer / Stream B/E), call
-        # `self.memory_snapshot_cache.invalidate(old_session_key)` at the reset
-        # site so the frozen snapshot rebuilds for the new session.
+        # TODO(memory): wire hosted ADK prompt assembly to
+        # project_memory_snapshot — see docs/plans. The live local-dashboard
+        # chat turn (transport.chat._local_adk_chat_sse) already gets the frozen
+        # snapshot for free because it builds its runner via
+        # cli.wiring.build_headless_runtime -> cli.real_runner.build_cli_model_runner
+        # -> cli.tool_runtime.build_cli_instruction, which threads the
+        # MemorySnapshotCache block into the Agent instruction. The production
+        # multi-tenant path (transport.chat._run_live_chat_runner) instead routes
+        # through the Gate 5B-4c-3 shadow generation boundary, whose policy
+        # contract forbids memory injection, so it is intentionally NOT wired
+        # here. A runtime-owned snapshot cache attribute would be dead until a
+        # non-shadow hosted prompt-assembly site exists, so it is omitted.
 
     def list_active_tools(self) -> list[str]:
         return [tool.name for tool in self.tool_registry.list_available(mode="act")]
