@@ -15,6 +15,17 @@ Versions follow the tags published on GitHub Releases.
 
 ### Fixed
 
+## 0.1.27
+
+### Fixed
+- Magi now keeps a protected base self-identity and treats repository
+  `CLAUDE.md`/`AGENTS.md` files as project context instead of agent identity, so
+  local runs no longer adopt a workspace's legacy bot persona.
+- Installed workspace skills are now loaded without the previous bundled-skill
+  cap, allowing `magi-agent serve` and the CLI to expose the full trusted
+  workspace skill tree while preserving per-skill body size limits and path
+  safety checks.
+
 ## 0.1.26
 
 ### Added
