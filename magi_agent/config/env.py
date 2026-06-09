@@ -1683,6 +1683,27 @@ def is_egress_gate_enabled(env: Mapping[str, str] | None = None) -> bool:
     return _is_true(source.get(MAGI_EGRESS_GATE_ENABLED_ENV))
 
 
+MAGI_DOCUMENT_AUTHORING_COVERAGE_ENV = "MAGI_DOCUMENT_AUTHORING_COVERAGE"
+
+
+def is_document_authoring_coverage_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Single source of truth for the document-authoring coverage-blocking gate.
+
+    Default OFF (strict truthy opt-in: "1"/"true"/"yes"/"on"). When OFF the
+    ``DocumentCoverage`` evidence emitted by ``docx_write`` (Task B) stays
+    audit-only: the pre-final verifier bus never blocks on it and a non-document
+    turn is byte-identical to today. When ON, the ``document-authoring-coverage``
+    verifier-bus gate blocks turn/commit completion whenever a ``DocumentCoverage``
+    record reports failed coverage (``fields["status"] != "pass"``), pushing the
+    agent to regenerate. Like ``is_self_introspection_enabled`` /
+    ``is_egress_gate_enabled`` this deliberately does NOT follow the
+    runtime-profile default-ON convention — it is an additive, default-disabled,
+    optional-blocking seam.
+    """
+    source = os.environ if env is None else env
+    return _is_true(source.get(MAGI_DOCUMENT_AUTHORING_COVERAGE_ENV))
+
+
 def is_format_on_write_enabled(env: Mapping[str, str]) -> bool:
     """Single source for the format-after-edit flag.
 
