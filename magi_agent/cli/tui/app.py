@@ -49,7 +49,10 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, Input, OptionList, RichLog, Static, TextArea
 from textual.widgets.option_list import Option
 
+from magi_agent.cli.commands.executor import DefaultCommandExecutor
 from magi_agent.cli.contracts import (
+    CommandContext,
+    CommandExecutor,
     CommandRegistry,
     ControlRequest,
     EngineDriver,
@@ -515,12 +518,20 @@ class MagiTuiApp(App[None]):
         channel_provider: (
             CompletionProvider | Callable[[str], Iterable[str]] | None
         ) = None,
+        executor: CommandExecutor | None = None,
         flush_interval: float = DEFAULT_FLUSH_INTERVAL,
     ) -> None:
         super().__init__()
         self._engine = engine
         self._gate = gate
         self._commands = commands
+        # Injected slash-command executor (PR2.2). Defaults to the builtin
+        # DefaultCommandExecutor which maps prompt/local/widget kinds onto the
+        # app openers without ever starting a second engine loop.
+        self._executor: CommandExecutor = executor or DefaultCommandExecutor()
+        # Count of /compact (Compact()) acknowledgements; asserted by tests. Real
+        # compaction is gated runtime authority (Stream B/E).
+        self.compact_requests = 0
         self._renderers = renderers
         self._runtime = runtime
         self._session_id = session_id
@@ -738,19 +749,72 @@ class MagiTuiApp(App[None]):
         self._refresh_completions(self._input.precursor)
 
     def _dispatch_command(self, submission: Submission) -> None:
-        """Route a slash command through the registry (execution is Stream D/F).
+        """Run a slash command through the injected executor (PR2.2).
 
-        PR-E2 wires registry ``lookup`` so the App can find the command; actually
-        executing each command KIND (prompt/local/widget) is Stream D's surface.
-        We commit a transcript line documenting the dispatch so the wiring is
-        observable; widget commands are a documented stub.
+        Looks the command up, builds a ``CommandContext`` exposing the app
+        openers, and runs the executor in a NON-turn worker (``group="command"``)
+        so a command never collides with or cancels the exclusive ``group="turn"``
+        worker. ``prompt``-kind commands re-enter ``start_turn`` (the one turn
+        loop); ``local``/``widget`` kinds apply their effect without starting an
+        engine loop.
         """
 
         command = submission.command or self._commands.lookup(submission.command_name)
         if command is None:
-            self.controller.commit_block(f"[command] unknown: /{submission.command_name}")
+            self.controller.commit_block(
+                f"[command] unknown: /{submission.command_name}"
+            )
             return
-        self.controller.commit_block(f"[command] /{submission.command_name}")
+        args = self._command_args(submission)
+        ctx = CommandContext(
+            cwd=self._cwd, runtime=self._runtime, session=self._session_id, app=self
+        )
+        self._run_command(command, args, ctx)
+
+    @staticmethod
+    def _command_args(submission: Submission) -> str:
+        """Argument tail for a command submission.
+
+        ``classify_line`` already splits ``/name args`` and stores the parsed
+        tail on ``Submission.args``, so prefer it. Fall back to re-deriving from
+        ``text`` for any submission built without going through ``classify_line``.
+        """
+
+        if submission.args:
+            return submission.args
+        text = (submission.text or "").strip()
+        if text.startswith("/"):
+            _, _, rest = text.partition(" ")
+            return rest.strip()
+        return ""
+
+    @work(group="command")
+    async def _run_command(
+        self, command: object, args: str, ctx: CommandContext
+    ) -> None:
+        # Separate worker group from "turn" so a command never collides with or
+        # cancels the exclusive turn worker. The executor itself never drives a
+        # turn loop; a prompt command calls back into start_turn (group="turn").
+        await self._executor.run(command, args, ctx)  # type: ignore[arg-type]
+
+    # -- app-opener seam (CommandContext.app) ------------------------------
+    def commit_text(self, text: str) -> None:
+        """Commit a local command's ``Text`` result to the transcript."""
+
+        self.controller.commit_block(text)
+
+    def request_compact(self) -> None:
+        """Acknowledge a ``Compact()`` result (real compaction is gated B/E)."""
+
+        self.compact_requests += 1
+        self.controller.commit_block("[compact requested]")
+
+    def open_dialog(self, name: str) -> None:
+        """Open a named dialog (PR2.3/2.4/2.5 register the real openers)."""
+
+        opener = getattr(self, f"action_open_{name}", None)
+        if callable(opener):
+            opener()
 
     # -- the ONE engine-driven turn loop -----------------------------------
     def start_turn(self, prompt: str) -> None:

@@ -539,15 +539,15 @@ def test_slash_command_dispatch_via_registry() -> None:
             app._input.cursor_location = (0, len("/compact"))
             await pilot.press("enter")
             await pilot.pause()
-        blocks = app.controller.committed_blocks_snapshot()
-        # REAL dispatch evidence: _dispatch_command commits a "[command] /compact"
-        # line. The welcome banner contains "/compact" too, so assert on the
-        # dispatch-specific echo that ONLY the command path produces — this fails
-        # if submission/dispatch did not happen.
-        assert any("[command] /compact" in b for b in blocks), blocks
+        # REAL dispatch evidence (PR2.2): _dispatch_command now runs the command
+        # through the injected CommandExecutor instead of echoing "[command]
+        # /compact". A bare LocalCommand (FakeRegistry) has no ``call`` override,
+        # so it returns Skip() and nothing is committed for it — the assertion is
+        # therefore on the registry lookup + the absence of an engine turn, not
+        # on a committed echo line. The dispatch happened without crashing.
         # And the registry lookup path was actually hit by the command name.
         assert "compact" in looked_up
-        # No engine turn was run for a command.
+        # No engine turn was run for a command (local Skip()).
         assert app.last_terminal is None
 
     asyncio.run(_run())
@@ -847,5 +847,84 @@ def test_tool_event_legacy_richlog_no_card(monkeypatch) -> None:
             assert len(app.query(ToolCard)) == 0
             joined = "\n".join(app.controller.committed_blocks_snapshot())
             assert "Bash" in joined
+
+    asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
+# PR2.2 — slash-command execution through the injected CommandExecutor
+# ---------------------------------------------------------------------------
+def test_dispatch_prompt_command_starts_turn() -> None:
+    async def _run() -> None:
+        from magi_agent.cli.contracts import (
+            CommandSurface as CS,
+            ContentBlock,
+            PromptCommand,
+        )
+
+        TUI2 = CS(tui=True, headless=False)
+
+        class Greet(PromptCommand):
+            async def build_prompt(self, args, ctx):  # type: ignore[override]
+                return [ContentBlock(type="text", text="do the thing")]
+
+        class Reg:
+            def lookup(self, name):
+                return Greet(name="greet", surface=TUI2) if name == "greet" else None
+
+            def list_for(self, surface):
+                return [Greet(name="greet", surface=TUI2)]
+
+        engine = FakeEngineDriver(tokens=["x"])
+        app = _make_app(engine, commands=Reg())
+        async with app.run_test() as pilot:
+            app.submit_command("greet", "")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+        # A prompt command re-entered the ONE turn loop.
+        assert app.last_terminal is not None
+        assert app.last_terminal.terminal == Terminal.completed
+        blocks = app.controller.committed_blocks_snapshot()
+        assert any("do the thing" in b for b in blocks)
+
+    asyncio.run(_run())
+
+
+def test_dispatch_local_compact_requests_compact() -> None:
+    async def _run() -> None:
+        from magi_agent.cli.commands.builtins import CompactCommand, BUILTIN_BOTH
+
+        class Reg:
+            def lookup(self, name):
+                return (
+                    CompactCommand(name="compact", surface=BUILTIN_BOTH)
+                    if name == "compact"
+                    else None
+                )
+
+            def list_for(self, surface):
+                return [CompactCommand(name="compact", surface=BUILTIN_BOTH)]
+
+        engine = FakeEngineDriver()
+        app = _make_app(engine, commands=Reg())
+        async with app.run_test() as pilot:
+            app.submit_command("compact", "")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+        assert app.compact_requests >= 1
+        assert app.last_terminal is None  # local command runs no engine turn
+
+    asyncio.run(_run())
+
+
+def test_dispatch_unknown_command_warns() -> None:
+    async def _run() -> None:
+        engine = FakeEngineDriver()
+        app = _make_app(engine, commands=FakeRegistry(["compact"]))
+        async with app.run_test() as pilot:
+            app.submit_command("nope", "")
+            await pilot.pause()
+        blocks = app.controller.committed_blocks_snapshot()
+        assert any("unknown" in b and "nope" in b for b in blocks)
 
     asyncio.run(_run())
