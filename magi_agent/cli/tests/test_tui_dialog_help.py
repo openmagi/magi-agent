@@ -14,9 +14,14 @@ from __future__ import annotations
 import asyncio
 
 from textual.app import App
+from textual.binding import Binding
 from textual.widgets import Static
 
-from magi_agent.cli.tui.dialogs.help import HelpDialog, build_help_sections
+from magi_agent.cli.tui.dialogs.help import (
+    HelpDialog,
+    _binding_key_desc,
+    build_help_sections,
+)
 
 
 def test_build_help_sections_includes_keys_and_commands() -> None:
@@ -38,6 +43,36 @@ def test_build_help_sections_drops_empty_sections() -> None:
     )
     titles = [title for title, _lines in sections]
     assert titles == ["Keybindings"]
+
+
+def test_binding_with_show_false_is_omitted() -> None:
+    # A hidden binding yields the empty-key sentinel, which both callers drop.
+    hidden = Binding("ctrl+x", "secret", "Secret action", show=False)
+    assert _binding_key_desc(hidden) == ("", "")
+
+    visible = Binding("ctrl+c", "cancel", "Cancel")
+    binding_pairs = [
+        _binding_key_desc(visible),
+        _binding_key_desc(hidden),
+    ]
+    sections = build_help_sections(bindings=binding_pairs, commands=[])
+    flat = "\n".join(line for _title, lines in sections for line in lines)
+    assert "Cancel" in flat
+    assert "Secret action" not in flat
+    assert "ctrl+x" not in flat
+
+
+def test_multi_key_binding_renders_normalized_form() -> None:
+    # Comma-separated multi-key bindings render as "a / b", not "a,b".
+    binding = Binding("ctrl+c,escape", "close", "Close")
+    key, desc = _binding_key_desc(binding)
+    assert key == "ctrl+c / escape"
+    assert "," not in key
+    assert desc == "Close"
+
+    # Tuple-form multi-key entries are normalized too.
+    tuple_key, _tuple_desc = _binding_key_desc(("a,b", "act", "Act"))
+    assert tuple_key == "a / b"
 
 
 def test_help_dialog_renders_and_escape_dismisses() -> None:

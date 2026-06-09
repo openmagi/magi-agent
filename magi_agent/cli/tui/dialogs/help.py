@@ -124,17 +124,38 @@ class HelpDialog(ModalScreen[None]):
         self.dismiss(None)
 
 
+def _normalize_keys(key: str) -> str:
+    """Render a (possibly comma-separated) key string for the help column.
+
+    Textual allows multi-key bindings like ``"ctrl+c,escape"``. Split on the
+    comma, strip each part, and join with ``" / "`` so the help reads
+    ``ctrl+c / escape`` instead of the raw, overflow-prone ``ctrl+c,escape``.
+    """
+
+    parts = [part.strip() for part in key.split(",")]
+    return " / ".join(part for part in parts if part)
+
+
 def _binding_key_desc(entry: object) -> tuple[str, str]:
     """Best-effort ``(key, description)`` from a Textual ``BINDINGS`` entry.
 
     Entries may be a ``Binding`` instance or a ``(keys, action, description?)``
-    tuple. Returns ``("", "")`` when no key can be derived.
+    tuple. Returns ``("", "")`` when no key can be derived. A ``Binding`` with
+    ``show=False`` is treated as hidden and also returns ``("", "")`` so the
+    caller (``from_app`` / ``build_help_sections``, which both drop empty-key
+    entries) skips it. Tuple-form entries have no ``show`` field, so they are
+    always rendered. Multi-key strings are normalized via ``_normalize_keys``.
     """
 
     if isinstance(entry, Binding):
-        return (str(entry.key), str(entry.description or entry.action))
+        if not getattr(entry, "show", True):
+            return ("", "")
+        return (
+            _normalize_keys(str(entry.key)),
+            str(entry.description or entry.action),
+        )
     if isinstance(entry, tuple) and entry:
-        key = str(entry[0])
+        key = _normalize_keys(str(entry[0]))
         desc = str(entry[2]) if len(entry) >= 3 else (
             str(entry[1]) if len(entry) >= 2 else ""
         )
