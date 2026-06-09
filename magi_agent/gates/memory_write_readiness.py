@@ -44,6 +44,7 @@ Forbidden imports: urllib, socket, subprocess, http, requests — none appear he
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 from typing import Literal
 
@@ -54,6 +55,7 @@ MemoryWriteExecutionMode = Literal["disabled", "shadow", "live"]
 
 _DIGEST_RE = re.compile(r"^sha256:[a-f0-9]{64}$")
 _SAFE_ENVIRONMENTS = frozenset({"local", "development", "staging", "production"})
+_TRUE_STRINGS = frozenset({"1", "true", "yes", "on"})
 
 #: Master readiness env gate (default OFF).  Resolved via
 #: ``magi_agent.memory.config.resolve_memory_config`` (see ``_readiness_env_enabled``).
