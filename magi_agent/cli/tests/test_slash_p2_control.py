@@ -246,46 +246,106 @@ class TestModelCommand:
     def _cmd(self) -> ModelCommand:
         return ModelCommand(name="model", surface=BOTH)
 
-    def test_no_controller_returns_skip(self) -> None:
-        cmd = self._cmd()
-        result = asyncio.run(cmd.call(None, _ctx()))
-        assert isinstance(result, Skip)
+    def test_no_controller_no_arg_no_app_returns_text_list(self, tmp_path) -> None:
+        """No controller + no arg + no app → list of models as Text (not Skip)."""
+        import os as _os
+        old = _os.environ.get("MAGI_CONFIG")
+        try:
+            _os.environ["MAGI_CONFIG"] = str(tmp_path / "config.toml")
+            cmd = self._cmd()
+            result = asyncio.run(cmd.call(None, _ctx()))
+            # No app, no arg → returns Text with available choices + hint.
+            assert isinstance(result, Text)
+            assert "hint" in result.text or "available" in result.text
+        finally:
+            if old is None:
+                _os.environ.pop("MAGI_CONFIG", None)
+            else:
+                _os.environ["MAGI_CONFIG"] = old
 
-    def test_no_controller_no_crash(self) -> None:
-        cmd = self._cmd()
-        result = asyncio.run(cmd.call("gpt-4o", _ctx()))
-        assert isinstance(result, Skip)
+    def test_no_controller_with_arg_persists_and_returns_text(self, tmp_path) -> None:
+        """No controller + explicit id → persist to config + return Text confirm."""
+        import os as _os
+        cfg = tmp_path / "config.toml"
+        old = _os.environ.get("MAGI_CONFIG")
+        try:
+            _os.environ["MAGI_CONFIG"] = str(cfg)
+            cmd = self._cmd()
+            result = asyncio.run(cmd.call("gpt-4o", _ctx()))
+            assert isinstance(result, Text)
+            assert "gpt-4o" in result.text
+        finally:
+            if old is None:
+                _os.environ.pop("MAGI_CONFIG", None)
+            else:
+                _os.environ["MAGI_CONFIG"] = old
 
-    def test_no_arg_lists_current_and_available(self) -> None:
-        fake = FakeModelSelector()
-        ctx = _ctx(runtime=FakeRuntime(model_selector=fake))
-        result = asyncio.run(self._cmd().call(None, ctx))
-        assert isinstance(result, Text)
-        assert "claude-3-5" in result.text
-        assert "gpt-4o" in result.text
-        assert "current" in result.text
+    def test_no_arg_lists_current_and_available(self, tmp_path) -> None:
+        import os as _os
+        old = _os.environ.get("MAGI_CONFIG")
+        try:
+            _os.environ["MAGI_CONFIG"] = str(tmp_path / "config.toml")
+            fake = FakeModelSelector()
+            ctx = _ctx(runtime=FakeRuntime(model_selector=fake))
+            result = asyncio.run(self._cmd().call(None, ctx))
+            assert isinstance(result, Text)
+            assert "claude-3-5" in result.text
+            assert "current" in result.text
+        finally:
+            if old is None:
+                _os.environ.pop("MAGI_CONFIG", None)
+            else:
+                _os.environ["MAGI_CONFIG"] = old
 
-    def test_with_arg_calls_select_model(self) -> None:
-        fake = FakeModelSelector()
-        ctx = _ctx(runtime=FakeRuntime(model_selector=fake))
-        result = asyncio.run(self._cmd().call("gpt-4o", ctx))
-        assert isinstance(result, Text)
-        assert "selected" in result.text
-        assert "gpt-4o" in result.text
-        assert fake.selected == ["gpt-4o"]
+    def test_with_arg_calls_select_model(self, tmp_path) -> None:
+        import os as _os
+        cfg = tmp_path / "config.toml"
+        old = _os.environ.get("MAGI_CONFIG")
+        try:
+            _os.environ["MAGI_CONFIG"] = str(cfg)
+            fake = FakeModelSelector()
+            ctx = _ctx(runtime=FakeRuntime(model_selector=fake))
+            result = asyncio.run(self._cmd().call("gpt-4o", ctx))
+            assert isinstance(result, Text)
+            # Now uses "set" wording and persists; selector is also called.
+            assert "gpt-4o" in result.text
+            assert fake.selected == ["gpt-4o"]
+        finally:
+            if old is None:
+                _os.environ.pop("MAGI_CONFIG", None)
+            else:
+                _os.environ["MAGI_CONFIG"] = old
 
-    def test_with_arg_records_correct_model_id(self) -> None:
-        fake = FakeModelSelector()
-        ctx = _ctx(runtime=FakeRuntime(model_selector=fake))
-        asyncio.run(self._cmd().call("my-custom-model", ctx))
-        assert fake.selected[-1] == "my-custom-model"
+    def test_with_arg_records_correct_model_id(self, tmp_path) -> None:
+        import os as _os
+        old = _os.environ.get("MAGI_CONFIG")
+        try:
+            _os.environ["MAGI_CONFIG"] = str(tmp_path / "config.toml")
+            fake = FakeModelSelector()
+            ctx = _ctx(runtime=FakeRuntime(model_selector=fake))
+            asyncio.run(self._cmd().call("my-custom-model", ctx))
+            assert fake.selected[-1] == "my-custom-model"
+        finally:
+            if old is None:
+                _os.environ.pop("MAGI_CONFIG", None)
+            else:
+                _os.environ["MAGI_CONFIG"] = old
 
-    def test_no_arg_empty_string_triggers_list(self) -> None:
-        fake = FakeModelSelector()
-        ctx = _ctx(runtime=FakeRuntime(model_selector=fake))
-        result = asyncio.run(self._cmd().call("", ctx))
-        assert isinstance(result, Text)
-        assert "current" in result.text
+    def test_no_arg_empty_string_triggers_list(self, tmp_path) -> None:
+        import os as _os
+        old = _os.environ.get("MAGI_CONFIG")
+        try:
+            _os.environ["MAGI_CONFIG"] = str(tmp_path / "config.toml")
+            fake = FakeModelSelector()
+            ctx = _ctx(runtime=FakeRuntime(model_selector=fake))
+            result = asyncio.run(self._cmd().call("", ctx))
+            assert isinstance(result, Text)
+            assert "current" in result.text
+        finally:
+            if old is None:
+                _os.environ.pop("MAGI_CONFIG", None)
+            else:
+                _os.environ["MAGI_CONFIG"] = old
 
     def test_is_local_command(self) -> None:
         assert isinstance(self._cmd(), LocalCommand)

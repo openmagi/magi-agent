@@ -873,25 +873,42 @@ class MagiTuiApp(App[None]):
         )
         self.push_screen(dialog, self._apply_model)
 
-    def _apply_model(self, model: str | None) -> None:
+    def _apply_model(
+        self, model: str | None, *, _config_path: object = None
+    ) -> None:
         """Apply a model selected in the picker (None on cancel = no-op).
 
-        Updates ``self._model`` and refreshes the topbar — cosmetic only in
-        PR2.3. ``TurnInput`` (contracts.py) carries no model field, so the engine
-        does not yet consume the switch; real consumption (threading the model
-        into the next ``TurnInput`` / provider reconfiguration) is a deferred
-        runtime seam, consistent with ``action_open_model_picker``.
+        Updates ``self._model``, persists the choice to ``~/.magi/config.toml``
+        (best-effort: a write failure shows a "couldn't save" note rather than
+        crashing), and refreshes the topbar.  ``TurnInput`` carries no model
+        field, so the engine does not consume the switch mid-session — it takes
+        effect on the NEXT launch.  ``_config_path`` is a test-only seam so
+        tests never touch the real ``~/.magi/config.toml``.
         """
 
         if not model:
             return
+        # Persist to config (best-effort).
+        try:
+            from magi_agent.cli.providers import persist_model  # noqa: PLC0415
+
+            persist_model(model, path=_config_path)
+            saved = True
+        except Exception:
+            saved = False
         self._model = model
         if self._topbar is not None:
             self._topbar.update(self._topbar_text())
-        # Honest toast: the switch is cosmetic. ``TurnInput`` carries no model
-        # field, so the next turn still runs the old model until the runtime
-        # seam is wired (deferred). Don't imply an immediate runtime effect.
-        self.notify(f"Model set to {model} (applies next session)", timeout=2)
+        if saved:
+            self.notify(
+                f"Model set to {model} — saved to config, applies next session",
+                timeout=2,
+            )
+        else:
+            self.notify(
+                f"Model set to {model} (couldn't save to config — applies next session)",
+                timeout=3,
+            )
 
     # -- session list (PR2.4) ----------------------------------------------
     def action_open_session_list(self) -> None:
