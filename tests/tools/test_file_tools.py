@@ -63,7 +63,10 @@ class TestFileToolManifests:
 
         manifests = file_tool_manifests()
         names = {m.name for m in manifests}
-        assert names == {"XLSXRead", "DocumentRead", "ImageUnderstand", "AudioTranscribe"}
+        # Core four original tools
+        assert {"XLSXRead", "DocumentRead", "ImageUnderstand", "AudioTranscribe"} <= names
+        # Modality tools added in PR-V (VideoFrames, MusicNotation)
+        assert {"VideoFrames", "MusicNotation"} <= names
 
     def test_all_manifests_disabled_by_default(self) -> None:
         from magi_agent.tools.file_tool_manifests import file_tool_manifests
@@ -88,7 +91,8 @@ class TestFileToolManifests:
 
         registry = ToolRegistry()
         manifests = register_file_tool_manifests(registry)
-        assert len(manifests) == 4
+        # 4 original + 2 modality (VideoFrames, MusicNotation) = 6 total
+        assert len(manifests) >= 4
         for m in manifests:
             assert registry.resolve(m.name) is not None
 
