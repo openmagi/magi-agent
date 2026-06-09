@@ -1861,6 +1861,21 @@ def file_tools_enabled(env: Mapping[str, str] | None = None) -> bool:
     return _runtime_feature_enabled(env, "MAGI_FILE_TOOLS_ENABLED")
 
 
+def browser_tool_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Single source of truth for the ``MAGI_BROWSER_TOOL_ENABLED`` flag.
+
+    Default OFF. When ON (and the ``browser`` extra is installed), the
+    ``BrowserTask`` tool is registered and bound. The handler degrades with
+    ``status="blocked"`` when the optional dependency is missing rather than
+    crashing.
+    """
+    if env is None:
+        import os as _os
+
+        env = _os.environ
+    return _is_true(env.get("MAGI_BROWSER_TOOL_ENABLED"))
+
+
 def _is_true(value: str | None) -> bool:
     return (value or "").strip().lower() in _TRUE_VALUES
 
