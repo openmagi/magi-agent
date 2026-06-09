@@ -1,6 +1,6 @@
-# Open Magi Agent
+# Open Magi
 
-Open-source Magi Agent runtime for local CLI and dashboard work.
+Open-source agents for real work, with hosted cloud when you want it.
 
 ## Canonical Links
 
@@ -12,27 +12,22 @@ Open-source Magi Agent runtime for local CLI and dashboard work.
 ## Install
 
 ```bash
-brew install --force-bottle openmagi/tap/magi-agent
-magi-agent serve --port 8080
-open http://localhost:8080/dashboard
+git clone https://github.com/openmagi/magi-agent.git
+cd magi-agent
+npm install
+npm run dev
 ```
-
-Source checkouts are for contributors. Normal local use is Homebrew plus one
-provider key, then `magi` for CLI work or `magi-agent serve` for the dashboard.
 
 ## Docs Index
 
-- Open Magi Docs: https://openmagi.ai/docs - Open-source local runtime docs.
-- Getting Started: https://openmagi.ai/docs/getting-started - Homebrew install plus provider-key setup.
-- Quickstart: https://openmagi.ai/docs/quickstart - Run a first `magi -p` task.
-- CLI: https://openmagi.ai/docs/cli - `magi` and `magi-agent serve` usage.
-- Configuration: https://openmagi.ai/docs/configuration - Provider keys, models, local config, and optional integrations.
-- Architecture: https://openmagi.ai/docs/architecture - Runtime state, execution contracts, memory, and evidence gates.
-- Changelog: https://openmagi.ai/docs/changelog - User-facing release notes.
+- Open Magi Docs: https://openmagi.ai/docs - Open-source runtime first, managed cloud when you want hosted accounts, credits, storage, and operations.
+- Getting Started: https://openmagi.ai/docs/getting-started - Clone the open-source runtime, install dependencies, run it locally, then decide whether to keep self-hosting or use Open Magi Cloud.
+- Configuration: https://openmagi.ai/docs/configuration - Configure provider-neutral model routing, Knowledge Base, secrets, tools, channels, and hosted cloud behavior.
+- Architecture: https://openmagi.ai/docs/architecture - Understand runtime state, execution contracts, memory, cloud hosting, and evidence gates.
 
 ## Core Concepts
 
-- Local runtime installed by Homebrew, with both `magi` and `magi-agent`.
-- Provider-neutral model routing across Anthropic, OpenAI, Gemini, and Fireworks.
-- First-party local tools are gated by permission mode.
-- Evidence, hooks, harnesses, memory, and projection make runtime behavior auditable.
+- Open-source runtime with hosted Open Magi Cloud when managed infrastructure is preferred.
+- Provider-neutral model routing across Claude, GPT, Gemini, local models, and OpenAI-compatible endpoints.
+- Knowledge Base for durable workspace context and source-grounded work.
+- Execution contracts and evidence gates for reliable completion.

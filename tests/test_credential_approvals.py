@@ -176,6 +176,16 @@ def test_decide_invalid_decision_returns_400(monkeypatch, tmp_path) -> None:
 def test_register_requires_approval_persists_in_metadata(monkeypatch, tmp_path) -> None:
     _isolate_store(monkeypatch, tmp_path)
     monkeypatch.delenv("MAGI_VAULT_ADMIN_ENABLED", raising=False)
+    monkeypatch.setattr(
+        vault_local,
+        "vault_status",
+        lambda: {"present": True, "healthy": True},
+    )
+    monkeypatch.setattr(
+        vault_local,
+        "register_credential",
+        lambda **_: {"vault_ref": "vault://local/cred-approval"},
+    )
     client = _client()
 
     response = client.post(
@@ -205,6 +215,16 @@ def test_register_requires_approval_persists_in_metadata(monkeypatch, tmp_path) 
 def test_register_requires_approval_defaults_false(monkeypatch, tmp_path) -> None:
     _isolate_store(monkeypatch, tmp_path)
     monkeypatch.delenv("MAGI_VAULT_ADMIN_ENABLED", raising=False)
+    monkeypatch.setattr(
+        vault_local,
+        "vault_status",
+        lambda: {"present": True, "healthy": True},
+    )
+    monkeypatch.setattr(
+        vault_local,
+        "register_credential",
+        lambda **_: {"vault_ref": "vault://local/cred-default"},
+    )
     client = _client()
     response = client.post(
         "/v1/admin/credentials",
@@ -216,6 +236,7 @@ def test_register_requires_approval_defaults_false(monkeypatch, tmp_path) -> Non
             "secret": SECRET_VALUE,
         },
     )
+    assert response.status_code == 200
     assert response.json()["credential"]["requires_approval"] is False
 
 
@@ -290,6 +311,34 @@ def test_no_secret_in_approval_records(monkeypatch, tmp_path) -> None:
         "created_at",
         "decided_at",
     }
+
+
+def test_approval_reason_redacts_secret_text_before_persisting(
+    monkeypatch, tmp_path
+) -> None:
+    _isolate_store(monkeypatch, tmp_path)
+    tainted_reason = f"Authorization: Bearer {SECRET_VALUE}"
+
+    approval = approvals_store.add_approval(
+        credential_id="cred-123",
+        requested_action="use",
+        target_host="api.openai.com",
+        reason=tainted_reason,
+    )
+
+    assert approval["reason"] == "[redacted]"
+    persisted = approvals_store.approvals_path().read_text(encoding="utf-8")
+    assert SECRET_VALUE not in persisted
+    assert tainted_reason not in persisted
+
+    response = _client().get(
+        "/v1/admin/credentials/approvals",
+        headers={"x-gateway-token": "local-token"},
+    )
+    assert response.status_code == 200
+    payload = json.dumps(response.json())
+    assert SECRET_VALUE not in payload
+    assert tainted_reason not in payload
 
 
 def test_decide_never_logs_secret(monkeypatch, tmp_path, caplog) -> None:

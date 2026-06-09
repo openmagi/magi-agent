@@ -18,6 +18,7 @@ from __future__ import annotations
 import copy
 import json
 import os
+import re
 import tempfile
 import uuid
 from datetime import UTC, datetime
@@ -38,6 +39,17 @@ VALID_STATUSES = frozenset(
 DECISION_STATUSES = frozenset({STATUS_APPROVED, STATUS_DENIED})
 
 DEFAULT_DATA: dict[str, Any] = {"approvals": []}
+
+_REDACTED = "[redacted]"
+_SECRET_TEXT_RE = re.compile(
+    r"authorization\s*:|bearer\s+|cookie\s*:|set-cookie\s*:|"
+    r"(?:password|api[_-]?key|auth[_-]?key|session[_-]?key|private[_-]?key|"
+    r"connector[_-]?token|secret|credential|token|signature)\s*[:=]|"
+    r"x-amz-signature|x-goog-signature|sig=|signed[_-]?url|"
+    r"\bsk-[A-Za-z0-9._-]+|gh[opusr]_[A-Za-z0-9_]+|"
+    r"github_pat_[A-Za-z0-9_]+|AKIA[0-9A-Z]{8,}",
+    re.IGNORECASE,
+)
 
 
 def approvals_path() -> Path:
@@ -69,16 +81,21 @@ def public_approval(item: dict[str, Any]) -> dict[str, Any]:
     if status not in VALID_STATUSES:
         status = STATUS_PENDING
     decided_at = item.get("decided_at")
+    reason = str(item.get("reason", ""))
     return {
         "id": str(item.get("id", "")),
         "credential_id": str(item.get("credential_id", "")),
         "requested_action": str(item.get("requested_action", "")),
         "target_host": str(item.get("target_host", "")),
         "status": status,
-        "reason": str(item.get("reason", "")),
+        "reason": _safe_reason(reason),
         "created_at": str(item.get("created_at", "")),
         "decided_at": str(decided_at) if decided_at else None,
     }
+
+
+def _safe_reason(value: str) -> str:
+    return _REDACTED if _SECRET_TEXT_RE.search(value) else value
 
 
 def _normalize(data: dict[str, Any]) -> dict[str, Any]:
