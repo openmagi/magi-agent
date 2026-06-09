@@ -280,7 +280,7 @@ class LocalFileMemoryProvider:
             and current_size + len(entry_bytes)
             >= self.config.resolved_compaction_threshold_bytes()
         ):
-            current_size = self._compact_file(target_path)
+            current_size = self._compact_file(target_path, len(entry_bytes))
 
         if current_size + len(entry_bytes) > self.config.max_file_bytes:
             raise ValueError(
@@ -347,18 +347,26 @@ class LocalFileMemoryProvider:
         env_val = os.environ.get(MAGI_MEMORY_COMPACTION_ENABLED_ENV, "").strip().lower()
         return env_val in {"1", "true", "yes", "on"}
 
-    def _compact_file(self, target_path: Path) -> int:
+    def _compact_file(self, target_path: Path, incoming_entry_size: int) -> int:
         """Archive then consolidate ``target_path`` in place.
 
         1. Read the current content and archive it verbatim under
            ``memory/archive/<NAME>.<content-hash>.md`` (deterministic suffix —
            no clock; the hash makes identical content map to one archive).
-        2. Consolidate (dedup + bound to max_file_bytes) via the pure compactor.
+        2. Consolidate (dedup + bounded) via the pure compactor, reserving
+           ``incoming_entry_size`` bytes of headroom so the subsequent append
+           of the triggering entry cannot breach ``max_file_bytes``.
         3. Atomically replace the file with the consolidated text.
 
         Reuses the same workspace-containment guard as every other write path;
         never touches a path outside the workspace root. Returns the new file
         size in bytes so the caller can re-run its max_file_bytes guard.
+
+        Args:
+            target_path: The memory file to compact in place.
+            incoming_entry_size: UTF-8 byte length of the about-to-be-appended
+                entry. Subtracted from ``max_file_bytes`` so the compacted file
+                leaves guaranteed room for the new entry.
         """
         original = target_path.read_text(encoding="utf-8")
 
@@ -376,8 +384,12 @@ class LocalFileMemoryProvider:
         archive_path.parent.mkdir(parents=True, exist_ok=True)
         archive_path.write_text(original, encoding="utf-8")
 
-        # Consolidate deterministically and write back (bounded by max_file_bytes).
-        result = consolidate(original, max_bytes=self.config.max_file_bytes)
+        # Reserve headroom for the incoming entry so that after consolidation
+        # the subsequent append of that entry cannot breach max_file_bytes.
+        # Without this, on an all-unique near-cap file, consolidate() could fill
+        # all of max_file_bytes and the new fact would still be rejected.
+        headroom_max = max(self.config.max_file_bytes - incoming_entry_size, 0)
+        result = consolidate(original, max_bytes=headroom_max)
         target_path.write_text(result.text, encoding="utf-8")
         return len(result.text.encode("utf-8"))
 

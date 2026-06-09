@@ -146,10 +146,16 @@ def _dedup_preserve_order(entries: list[str]) -> tuple[list[str], list[str]]:
 
 
 def _render(entries: list[str]) -> str:
-    """Render entries back to file text (one entry per line, trailing NL)."""
+    """Render entries back to file text matching the provider's append format.
+
+    The provider appends ``\\n- [{kind}] {body}\\n``, so every entry is
+    preceded by a ``\\n``.  Re-joining with a leading ``\\n`` preserves that
+    structure so the provider's substring-based USER.md dedup check
+    (``if entry in existing``) still works after compaction.
+    """
     if not entries:
         return ""
-    return "\n".join(entries) + "\n"
+    return "\n" + "\n".join(entries) + "\n"
 
 
 def _encoded_len(text: str) -> int:
