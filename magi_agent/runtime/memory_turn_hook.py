@@ -60,6 +60,8 @@ _TRIVIAL_ASSISTANT_CHARS = 80
 #: Sessions whose first-turn compaction trigger has already fired this process.
 #: Mirrors the "once per session" intent; the engine's own cooldown is the real
 #: throttle, this just avoids re-running on every turn within a session.
+#: Intentionally process-lifetime state (never auto-expired); only reset in tests
+#: via :func:`reset_session_compaction_state`.
 _compacted_sessions: set[str] = set()
 
 
@@ -123,6 +125,11 @@ def record_turn(
     """Flush this turn to the daily log and (once per session) build the tree.
 
     Fail-soft: any error is logged and swallowed — never raised into the turn.
+
+    The file IO here is synchronous on the local-chat turn-finalization path: a
+    deliberate, bounded (truncated entry + once-per-session cooldown-throttled
+    build), fail-soft, default-OFF trade-off — simpler than a background queue
+    and inert unless the operator opts in.
 
     Args:
         workspace_root: The workspace dir; ``memory/`` lives under it.

@@ -122,6 +122,72 @@ def test_flags_on_full_loop(
     )
 
 
+def test_record_turn_hook_generates_root_through_wired_trigger(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The HOOK's own compaction trigger (not an out-of-band CompactionTree)
+    must generate ROOT.md.  We drive ROOT generation THROUGH ``record_turn``
+    with ``compaction_enabled=True``: the wired ``_maybe_run_compaction`` calls
+    ``run(force=False)``, so this also proves the path clears the engine's
+    cooldown (fresh workspace => no prior stamp) and rolls up real daily content.
+
+    Seeds enough prior-day daily content (over the tiny daily_threshold) so the
+    in-place daily summarization fires through the injected fake summarizer, and
+    pins the clock for hermetic cooldown bookkeeping.
+    """
+    cfg = _flags_on()
+    today = date(2026, 6, 8)
+    summarizer = _FakeSummarizer()
+
+    # Seed a COMPLETED prior day's raw daily log with enough lines that the
+    # wired compaction (daily_threshold=1) actually summarizes + rolls it into
+    # ROOT — proving real work, not just a touch.
+    daily_dir = tmp_path / "memory" / "daily"
+    daily_dir.mkdir(parents=True, exist_ok=True)
+    (daily_dir / "2026-06-07.md").write_text(
+        "- [turn seed-a] prior work on the auth migration\n"
+        "- [turn seed-b] prior work on the rate limiter\n",
+        encoding="utf-8",
+    )
+
+    # Patch the hook's CompactionTree so the wired ``run(force=False)`` uses a
+    # FIXED clock (hermetic cooldown), while everything else stays the real path.
+    real_tree = memory_turn_hook.CompactionTree
+
+    class _ClockedTree(real_tree):  # type: ignore[misc, valid-type]
+        def __init__(self, *args, **kwargs):  # noqa: ANN002, ANN003
+            kwargs.setdefault(
+                "clock", lambda: datetime(2026, 6, 8, 12, 0, tzinfo=timezone.utc)
+            )
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(memory_turn_hook, "CompactionTree", _ClockedTree)
+
+    # One turn through the wired hook: flushes today's daily AND fires the
+    # once-per-session compaction trigger (run(force=False)) — no out-of-band
+    # CompactionTree, no force=True.
+    record_turn(
+        workspace_root=tmp_path,
+        session_id="hook-session",
+        turn_id="t1",
+        user_text="finish the auth migration and the rate limiter rollout",
+        assistant_text="Completed auth migration; rate limiter shipped.",
+        used_tool=True,
+        config=cfg,
+        today=today,
+        summarizer=summarizer,
+    )
+
+    # The HOOK (not the test) generated ROOT.md from the rolled-up daily content.
+    root = tmp_path / "memory" / "ROOT.md"
+    assert root.is_file(), "wired record_turn trigger must generate ROOT.md"
+    root_text = root.read_text(encoding="utf-8")
+    assert "auth migration" in root_text or "rate limiter" in root_text
+    # The fake summarizer's marker proves the daily tier was actually summarized
+    # (real rollup work), not merely concatenated.
+    assert "SUMMARY::" in root_text
+
+
 def test_master_off_keeps_everything_inert(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
