@@ -23,6 +23,11 @@ from magi_agent.evidence.source_ledger import (
 )
 
 from .context import ToolContext
+from .memory_mode_guard import (
+    is_incognito_memory_mode,
+    is_protected_memory_path,
+    protected_memory_error,
+)
 from .result import ToolResult
 
 
@@ -185,6 +190,9 @@ class LocalReadOnlyToolHost:
         path_text = _string_arg(arguments, "path", "file", "filePath")
         if path_text is None:
             return _blocked_result("FileRead", "path_required")
+        memory_block = _memory_mode_read_block("FileRead", path_text, context)
+        if memory_block is not None:
+            return memory_block
 
         if self._read_quality_enabled:
             missing = self._file_read_did_you_mean(root, path_text, context, arguments)
@@ -405,6 +413,9 @@ class LocalReadOnlyToolHost:
             return _blocked_result("Grep", "grep_pattern_required")
         matcher = re.compile(pattern_text)
         glob_pattern = _string_arg(arguments, "glob", "path", "patternGlob") or "**/*"
+        memory_block = _memory_mode_read_block("Grep", glob_pattern, context)
+        if memory_block is not None:
+            return memory_block
         max_files = _bounded_int(
             arguments.get("maxFiles"),
             default=_DEFAULT_MAX_FILES,
@@ -1037,6 +1048,29 @@ def _blocked_result(tool_name: str, reason: str) -> ToolResult:
         errorCode=reason,
         errorMessage=reason.replace("_", " "),
         metadata=_base_metadata(tool_name, reason=reason),
+    )
+
+
+def _memory_mode_read_block(
+    tool_name: str,
+    path_text: str,
+    context: ToolContext,
+) -> ToolResult | None:
+    """Block incognito reads of an explicitly-targeted protected memory path.
+
+    Only ``incognito`` blocks reads; ``read_only`` permits reads (it only
+    disables writes), so this returns ``None`` for every non-incognito mode.
+    """
+
+    if not is_incognito_memory_mode(context.memory_mode):
+        return None
+    if not is_protected_memory_path(path_text):
+        return None
+    return ToolResult(
+        status="blocked",
+        errorCode="memory_mode_incognito",
+        errorMessage=protected_memory_error(path_text),
+        metadata=_base_metadata(tool_name, reason="memory_mode_incognito"),
     )
 
 

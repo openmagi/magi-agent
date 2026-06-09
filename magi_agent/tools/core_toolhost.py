@@ -7,6 +7,14 @@ from pathlib import Path
 from typing import Any
 
 from .context import ToolContext
+from .memory_mode_guard import (
+    command_may_write_protected_memory,
+    command_mentions_protected_memory,
+    is_incognito_memory_mode,
+    is_long_term_memory_write_disabled,
+    is_protected_memory_path,
+    protected_memory_error,
+)
 from .registry import ToolRegistry
 from .result import ToolResult
 
@@ -71,6 +79,9 @@ class CoreToolhostHandlerSet:
 
     def _handler_for(self, tool_name: str):
         async def handler(arguments: dict[str, object], context: ToolContext) -> ToolResult:
+            blocked = _memory_mode_block(tool_name, arguments, context)
+            if blocked is not None:
+                return blocked
             workspace_root = _workspace_root(context)
             host = self._host_for(workspace_root, context)
             request_digest = _request_digest(context)
@@ -113,6 +124,88 @@ def bind_core_toolhost_handlers(registry: ToolRegistry) -> tuple[str, ...]:
     """
 
     return CoreToolhostHandlerSet().bind(registry)
+
+
+_MEMORY_WRITE_TOOL_NAMES = frozenset({"FileWrite", "FileEdit", "PatchApply"})
+
+
+def _memory_mode_block(
+    tool_name: str,
+    arguments: dict[str, object],
+    context: ToolContext,
+) -> ToolResult | None:
+    """Return a blocked ToolResult when the channel memory mode forbids the call.
+
+    Route-independent: any ToolContext carrying a non-normal memory mode is
+    enforced here, BEFORE the call reaches the underlying toolhost.
+    """
+
+    mode = context.memory_mode
+    if tool_name in _MEMORY_WRITE_TOOL_NAMES:
+        if not is_long_term_memory_write_disabled(mode):
+            return None
+        for path in _memory_mode_target_paths(tool_name, arguments):
+            if is_protected_memory_path(path):
+                return _memory_mode_blocked_result(tool_name, path)
+        return None
+    if tool_name == "Bash":
+        command = arguments.get("command")
+        command_text = command if isinstance(command, str) else ""
+        blocked = (
+            is_incognito_memory_mode(mode)
+            and command_mentions_protected_memory(command_text)
+        ) or (
+            is_long_term_memory_write_disabled(mode)
+            and command_may_write_protected_memory(command_text)
+        )
+        if blocked:
+            return _memory_mode_blocked_result(tool_name, "memory state")
+        return None
+    return None
+
+
+def _memory_mode_target_paths(
+    tool_name: str,
+    arguments: dict[str, object],
+) -> tuple[str, ...]:
+    paths: list[str] = []
+    path_arg = arguments.get("path")
+    if isinstance(path_arg, str) and path_arg:
+        paths.append(path_arg)
+    if tool_name == "PatchApply" and not paths:
+        patch_text = arguments.get("patch") or arguments.get("diff")
+        if isinstance(patch_text, str) and patch_text.strip():
+            paths.extend(_patch_envelope_paths(patch_text))
+    return tuple(paths)
+
+
+def _patch_envelope_paths(patch_text: str) -> tuple[str, ...]:
+    try:
+        from magi_agent.coding.patch_apply import parse_patch_envelope
+
+        files = parse_patch_envelope(patch_text)
+    except Exception:
+        return ()
+    paths: list[str] = []
+    for file_op in files:
+        if isinstance(getattr(file_op, "path", None), str):
+            paths.append(file_op.path)
+        move_to = getattr(file_op, "move_to", None)
+        if isinstance(move_to, str) and move_to:
+            paths.append(move_to)
+    return tuple(paths)
+
+
+def _memory_mode_blocked_result(tool_name: str, path_label: str) -> ToolResult:
+    return ToolResult(
+        status="blocked",
+        errorCode="memory_mode_blocked",
+        errorMessage=protected_memory_error(path_label),
+        metadata={
+            "toolName": tool_name,
+            "reason": "memory_mode_blocked",
+        },
+    )
 
 
 def _workspace_root(context: ToolContext) -> Path:
