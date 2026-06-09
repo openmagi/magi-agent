@@ -928,3 +928,62 @@ def test_dispatch_unknown_command_warns() -> None:
         assert any("unknown" in b and "nope" in b for b in blocks)
 
     asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
+# PR2.3 — model picker dialog opener + apply
+# ---------------------------------------------------------------------------
+def test_open_model_picker_applies_selection() -> None:
+    async def _run() -> None:
+        from magi_agent.cli.tui.dialogs.model import ModelPickerDialog
+
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        app._model = "claude-sonnet-4-6"
+        async with app.run_test() as pilot:
+            app.action_open_model_picker()
+            await pilot.pause()
+            assert isinstance(app.screen, ModelPickerDialog)
+            app.screen.dismiss("gpt-5.5")
+            await pilot.pause()
+            await pilot.pause()
+        assert app._model == "gpt-5.5"
+        assert "gpt-5.5" in app._topbar_text()
+
+    asyncio.run(_run())
+
+
+def test_open_model_picker_cancel_keeps_model() -> None:
+    async def _run() -> None:
+        from magi_agent.cli.tui.dialogs.model import ModelPickerDialog
+
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        app._model = "claude-sonnet-4-6"
+        async with app.run_test() as pilot:
+            app.action_open_model_picker()
+            await pilot.pause()
+            assert isinstance(app.screen, ModelPickerDialog)
+            app.screen.dismiss(None)
+            await pilot.pause()
+            await pilot.pause()
+        assert app._model == "claude-sonnet-4-6"
+
+    asyncio.run(_run())
+
+
+def test_open_model_picker_surfaces_in_palette_actions() -> None:
+    async def _run() -> None:
+        from magi_agent.cli.tui.palette import AppActionProvider
+
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            provider = AppActionProvider(app.screen)
+            provider._app_ref = app
+            hits = [h async for h in provider.discover()]
+        labels = [getattr(h, "text", "") or "" for h in hits]
+        assert "Switch model" in labels
+
+    asyncio.run(_run())

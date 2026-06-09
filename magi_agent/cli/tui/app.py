@@ -81,6 +81,7 @@ from magi_agent.cli.tui.autocomplete import (
 )
 from magi_agent.cli.tui.history import DraftStash, InputHistory
 from magi_agent.cli.tui.input import PromptInput, Submission
+from magi_agent.cli.tui.dialogs.model import ModelPickerDialog, model_choices
 from magi_agent.cli.tui.palette import (
     AppActionProvider,
     CommandPaletteProvider,
@@ -821,6 +822,36 @@ class MagiTuiApp(App[None]):
         opener = getattr(self, f"action_open_{name}", None)
         if callable(opener):
             opener()
+
+    # -- model picker (PR2.3) ----------------------------------------------
+    def action_open_model_picker(self) -> None:
+        """Open the model picker; apply the chosen model on dismiss.
+
+        Surfaced automatically in the command palette (``AppActionProvider``
+        gates on ``action_open_model_picker`` existing) and reachable as the
+        ``model`` ``open_dialog`` name (a ``/model`` widget command routes here).
+        """
+
+        dialog = ModelPickerDialog(
+            models=model_choices(self._model), current=self._model
+        )
+        self.push_screen(dialog, self._apply_model)
+
+    def _apply_model(self, model: str | None) -> None:
+        """Apply a model selected in the picker (None on cancel = no-op).
+
+        Switching the model updates ``self._model`` and the topbar; future turns
+        read ``self._model`` (the engine driver is injected, so this is the field
+        the next ``TurnInput`` surfaces from). No provider reconfiguration is
+        invented here — that is a deferred runtime seam.
+        """
+
+        if not model:
+            return
+        self._model = model
+        if self._topbar is not None:
+            self._topbar.update(self._topbar_text())
+        self.notify(f"Model: {model}", timeout=2)
 
     # -- the ONE engine-driven turn loop -----------------------------------
     def start_turn(self, prompt: str) -> None:
