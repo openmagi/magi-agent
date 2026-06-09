@@ -71,9 +71,10 @@ video = [
 # Optional: autonomous vision browser tool (MAGI_BROWSER_TOOL_ENABLED=true).
 # Install with: uv sync --extra browser  &&  uv run playwright install chromium
 # Imported lazily inside magi_agent/browser/autonomous/engine.py so environments
-# without it are unaffected.
+# without it are unaffected. API surface recorded against browser-use 0.11.x in
+# magi_agent/browser/autonomous/_api_notes.py; floor is pinned to match it.
 browser = [
-  "browser-use>=0.2.0",
+  "browser-use>=0.11.13,<0.12",
   "playwright>=1.45.0",
 ]
 # Optional WAF-bypass web fetch provider (InsaneFetchProvider). Uses curl_cffi
