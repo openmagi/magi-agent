@@ -22,6 +22,7 @@ from collections.abc import Mapping
 from pydantic import BaseModel, ConfigDict, Field
 
 from magi_agent.evidence.ledger import EvidenceLedger, EvidenceLedgerEntry
+from magi_agent.introspection.mapping import tool_call_from_evidence_record
 from magi_agent.tools.read_ledger import ReadLedger
 
 # File-read source decision (verified against the real producers):
@@ -165,24 +166,13 @@ def _categorize_ledger_entry(
     if not isinstance(record, Mapping):
         return
 
-    tool_view = _tool_call_view(record, entry.turn_id)
+    # Tool-call projection is delegated to the SHARED normalization helper
+    # (introspection/mapping.py) so this PULL seam and the egress PUSH seam
+    # (transport/chat.py) emit an identical ``ToolCallView`` shape + canonical
+    # status vocabulary even though they read from different producers.
+    tool_view = tool_call_from_evidence_record(record, entry.turn_id)
     if tool_view is not None:
         tool_calls.append(tool_view)
-
-
-def _tool_call_view(record: Mapping[str, object], turn_id: str) -> ToolCallView | None:
-    source = record.get("source")
-    if not isinstance(source, Mapping):
-        return None
-    tool_name = source.get("toolName")
-    if not isinstance(tool_name, str) or not tool_name:
-        return None
-    status = record.get("status")
-    return ToolCallView(
-        name=tool_name,
-        status=status if isinstance(status, str) else "unknown",
-        turnId=turn_id,
-    )
 
 
 def _verdict_view(entry: EvidenceLedgerEntry) -> VerdictView:

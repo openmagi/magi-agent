@@ -138,7 +138,10 @@ def test_tool_calls_are_projected() -> None:
     assert view.phases == ()
 
 
-def test_failed_tool_call_status_is_preserved() -> None:
+def test_failed_tool_call_status_is_normalized_to_error() -> None:
+    # The shared normalization (introspection/mapping.py) maps the EvidenceStatus
+    # "failed" onto the canonical "error" token so this PULL seam reports the
+    # same vocabulary as the gate5b egress PUSH seam.
     ledger = _base_ledger().append_evidence_record(
         _tool_call_record(name="Bash", status="failed")
     )
@@ -147,7 +150,7 @@ def test_failed_tool_call_status_is_preserved() -> None:
 
     assert len(view.tool_calls) == 1
     assert view.tool_calls[0].name == "Bash"
-    assert view.tool_calls[0].status == "failed"
+    assert view.tool_calls[0].status == "error"
 
 
 def test_verifier_verdict_is_projected() -> None:
