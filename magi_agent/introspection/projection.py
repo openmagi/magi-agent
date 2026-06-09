@@ -24,24 +24,17 @@ from pydantic import BaseModel, ConfigDict, Field
 from magi_agent.evidence.ledger import EvidenceLedger, EvidenceLedgerEntry
 from magi_agent.tools.read_ledger import ReadLedger
 
-# File-read source decision (verified against the real code):
-#   The dedicated ``ReadLedger`` (tools/read_ledger.py) is a SEPARATE structure
-#   NOT reachable from ``EvidenceLedger``. File reads MAY also surface in the
-#   EvidenceLedger as evidence records (e.g. SourceInspection / FileDeliver
-#   carrying path/sha256/sizeBytes in ``fields``). So PR1 projects file reads
-#   from the EvidenceLedger when present AND accepts an OPTIONAL ``read_ledger``
-#   to project the dedicated read-state primitive. Both kept pure / read-only.
+# File-read source decision (verified against the real producers):
+#   The dedicated ``ReadLedger`` (tools/read_ledger.py) is the ONLY real source
+#   of file-read evidence. It is a SEPARATE structure NOT reachable from
+#   ``EvidenceLedger``; its entries carry the genuine path/digest/size/turn
+#   fields. The EvidenceLedger does NOT carry file-read attributes:
+#   ``SourceInspection`` records emit only {sourceId, sourceIds, sourceKind,
+#   inspected} (see evidence/source_ledger.py) and ``FileDeliver`` is a deferred
+#   metadata-only tool projection. So file reads are projected EXCLUSIVELY from
+#   the optional ``read_ledger`` parameter, kept pure / read-only.
 
 _VIEW_NOTE = "projection of session ledger; not raw transcript"
-
-# Evidence-record ``type`` values whose ``fields`` describe a file read.
-_FILE_READ_EVIDENCE_TYPES = frozenset({"SourceInspection", "FileDeliver"})
-# ``fields`` keys (and reasonable aliases) carrying file-read attributes.
-_FILE_PATH_KEYS = ("path", "filePath", "file_path")
-_FILE_SHA_KEYS = ("sha256", "digest", "sha")
-_FILE_BYTES_KEYS = ("sizeBytes", "size_bytes", "bytes")
-# ``fields`` keys that name a workflow phase reached this turn.
-_PHASE_KEYS = ("phase", "phaseName", "phase_name")
 
 _MODEL_CONFIG = ConfigDict(
     frozen=True,
@@ -119,25 +112,30 @@ def project_session_evidence(
             is read directly; no accessor methods are required).
         turn_filter: restrict the projection to a single ``turn_id``. ``None``
             (default) projects the whole session.
-        read_ledger: optional dedicated read-state primitive. File reads that
-            live only in the ``ReadLedger`` are projected when it is provided.
+        read_ledger: optional dedicated read-state primitive — the real source
+            of file-read evidence. When ``None``, ``files_read`` is empty.
 
     Returns:
         A frozen ``SessionEvidenceView``.
     """
     files_read: list[FileReadView] = []
     tool_calls: list[ToolCallView] = []
-    phases: list[PhaseView] = []
     verdicts: list[VerdictView] = []
     turns: list[str] = []
 
     for entry in ledger.entries:
         if turn_filter is not None and entry.turn_id != turn_filter:
             continue
-        _categorize_ledger_entry(entry, files_read, tool_calls, phases, verdicts, turns)
+        _categorize_ledger_entry(entry, tool_calls, verdicts, turns)
 
     if read_ledger is not None:
         _project_read_ledger(read_ledger, ledger.session_id, turn_filter, files_read, turns)
+
+    # Phase evidence emission is introduced in PR3 (process-invariant phase
+    # markers). Until that producer exists there is no real phase evidence in
+    # the ledger, so we honestly project an empty tuple rather than guess keys.
+    # The ``phases`` field stays in the shared contract for PR3 to populate.
+    phases: tuple[PhaseView, ...] = ()
 
     return SessionEvidenceView(
         scope=SessionScopeView(
@@ -146,16 +144,14 @@ def project_session_evidence(
         ),
         filesRead=tuple(files_read),
         toolCalls=tuple(tool_calls),
-        phases=tuple(phases),
+        phases=phases,
         verdicts=tuple(verdicts),
     )
 
 
 def _categorize_ledger_entry(
     entry: EvidenceLedgerEntry,
-    files_read: list[FileReadView],
     tool_calls: list[ToolCallView],
-    phases: list[PhaseView],
     verdicts: list[VerdictView],
     turns: list[str],
 ) -> None:
@@ -168,51 +164,10 @@ def _categorize_ledger_entry(
     record = entry.payload.get("record")
     if not isinstance(record, Mapping):
         return
-    fields = record.get("fields")
-    fields = fields if isinstance(fields, Mapping) else {}
-    record_type = record.get("type")
 
-    file_view = _file_read_view(record_type, fields, entry.turn_id)
-    if file_view is not None:
-        files_read.append(file_view)
-
-    phase_view = _phase_view(fields, entry.turn_id)
-    if phase_view is not None:
-        phases.append(phase_view)
-
-    # Categorization is exclusive: a record already projected as a file read or
-    # a phase marker is not double-counted as a generic tool call.
-    if file_view is None and phase_view is None:
-        tool_view = _tool_call_view(record, entry.turn_id)
-        if tool_view is not None:
-            tool_calls.append(tool_view)
-
-
-def _file_read_view(
-    record_type: object,
-    fields: Mapping[str, object],
-    turn_id: str,
-) -> FileReadView | None:
-    if record_type not in _FILE_READ_EVIDENCE_TYPES:
-        return None
-    path = _first_str(fields, _FILE_PATH_KEYS)
-    sha = _first_str(fields, _FILE_SHA_KEYS)
-    if path is None or sha is None:
-        return None
-    return FileReadView(
-        path=path,
-        sha256=sha,
-        turnId=turn_id,
-        bytes=_first_int(fields, _FILE_BYTES_KEYS) or 0,
-    )
-
-
-def _phase_view(fields: Mapping[str, object], turn_id: str) -> PhaseView | None:
-    name = _first_str(fields, _PHASE_KEYS)
-    if name is None:
-        return None
-    # Presence of a phase marker in the immutable ledger == the phase was reached.
-    return PhaseView(name=name, reached=True, turnId=turn_id)
+    tool_view = _tool_call_view(record, entry.turn_id)
+    if tool_view is not None:
+        tool_calls.append(tool_view)
 
 
 def _tool_call_view(record: Mapping[str, object], turn_id: str) -> ToolCallView | None:
@@ -264,24 +219,6 @@ def _project_read_ledger(
                 bytes=entry.size_bytes,
             )
         )
-
-
-def _first_str(fields: Mapping[str, object], keys: tuple[str, ...]) -> str | None:
-    for key in keys:
-        value = fields.get(key)
-        if isinstance(value, str) and value:
-            return value
-    return None
-
-
-def _first_int(fields: Mapping[str, object], keys: tuple[str, ...]) -> int | None:
-    for key in keys:
-        value = fields.get(key)
-        if isinstance(value, bool):
-            continue
-        if isinstance(value, int):
-            return value
-    return None
 
 
 def _distinct_preserving_order(values: list[str]) -> tuple[str, ...]:

@@ -22,26 +22,8 @@ def _base_ledger(turn_id: str = "turn-1") -> EvidenceLedger:
     )
 
 
-def _file_read_record(
-    *,
-    path: str,
-    digest: str,
-    size_bytes: int,
-    observed_at: int = 1_779_000_000,
-) -> EvidenceRecord:
-    return EvidenceRecord.model_validate(
-        {
-            "type": "SourceInspection",
-            "status": "ok",
-            "observedAt": observed_at,
-            "source": {"kind": "tool_trace", "toolName": "Read"},
-            "fields": {
-                "path": path,
-                "sha256": digest,
-                "sizeBytes": size_bytes,
-            },
-        }
-    )
+def _read_ledger() -> ReadLedger:
+    return ReadLedger(ReadLedgerConfig(enabled=True, localInMemoryEnabled=True))
 
 
 def _tool_call_record(
@@ -61,22 +43,6 @@ def _tool_call_record(
     )
 
 
-def _phase_record(
-    *,
-    name: str,
-    observed_at: int = 1_779_000_002,
-) -> EvidenceRecord:
-    return EvidenceRecord.model_validate(
-        {
-            "type": "PlanVerifier",
-            "status": "ok",
-            "observedAt": observed_at,
-            "source": {"kind": "verifier", "verifierName": "plan"},
-            "fields": {"phase": name},
-        }
-    )
-
-
 def test_empty_ledger_yields_empty_view() -> None:
     view = project_session_evidence(_base_ledger())
 
@@ -90,13 +56,22 @@ def test_empty_ledger_yields_empty_view() -> None:
     assert view.note == "projection of session ledger; not raw transcript"
 
 
-def test_file_read_evidence_is_projected() -> None:
+def test_file_reads_are_projected_from_read_ledger() -> None:
     digest = "sha256:" + "a" * 64
-    ledger = _base_ledger().append_evidence_record(
-        _file_read_record(path="docs/X.md", digest=digest, size_bytes=1234)
+    read_ledger = _read_ledger()
+    read_ledger.record_read(
+        session_id="introspection-session",
+        workspace_ref="ws-ref",
+        path="docs/X.md",
+        digest=digest,
+        size_bytes=1234,
+        mtime_ns=1,
+        read_mode="full",
+        turn_id="turn-1",
+        tool_use_id="tool-1",
     )
 
-    view = project_session_evidence(ledger)
+    view = project_session_evidence(_base_ledger(), read_ledger=read_ledger)
 
     assert len(view.files_read) == 1
     entry = view.files_read[0]
@@ -108,15 +83,51 @@ def test_file_read_evidence_is_projected() -> None:
     assert view.scope.turns_covered == ("turn-1",)
 
 
-def test_tool_calls_phases_and_verdicts_are_projected() -> None:
-    ok_digest = "sha256:" + "b" * 64
-    ledger = (
-        _base_ledger()
-        .append_evidence_record(
-            _file_read_record(path="src/a.py", digest=ok_digest, size_bytes=10)
-        )
-        .append_evidence_record(_tool_call_record(name="Grep", status="ok"))
-        .append_evidence_record(_phase_record(name="B"))
+def test_no_read_ledger_means_no_file_reads() -> None:
+    ledger = _base_ledger().append_evidence_record(_tool_call_record(name="Grep"))
+
+    view = project_session_evidence(ledger)
+
+    assert view.files_read == ()
+
+
+def test_phases_is_empty_for_real_ledger_with_tool_and_verdict_records() -> None:
+    # Documents the honest current state: no evidence-record producer emits a
+    # phase marker, so even a populated ledger projects an empty ``phases``.
+    # PR3 introduces process-invariant phase markers and will populate this.
+    from magi_agent.evidence.types import EvidenceContractVerdict
+
+    ledger = _base_ledger().append_evidence_record(
+        _tool_call_record(name="Grep", status="ok")
+    )
+    matched_record = ledger.entries[0].payload["record"]
+    verdict = EvidenceContractVerdict.model_validate(
+        {
+            "contractId": "tool_evidence_contract",
+            "ok": True,
+            "state": "pass",
+            "enforcement": "audit",
+            "missingRequirements": [],
+            "matchedEvidence": [matched_record],
+            "failures": [],
+        }
+    )
+    ledger = ledger.append_verifier_verdict(
+        verdict,
+        matched_evidence_refs=(ledger.entries[0].evidence_ref,),
+        verdict_id="verdict-1",
+    )
+
+    view = project_session_evidence(ledger)
+
+    assert view.tool_calls
+    assert view.verdicts
+    assert view.phases == ()
+
+
+def test_tool_calls_are_projected() -> None:
+    ledger = _base_ledger().append_evidence_record(
+        _tool_call_record(name="Grep", status="ok")
     )
 
     view = project_session_evidence(ledger)
@@ -124,9 +135,7 @@ def test_tool_calls_phases_and_verdicts_are_projected() -> None:
     assert [t.name for t in view.tool_calls] == ["Grep"]
     assert view.tool_calls[0].status == "ok"
     assert view.tool_calls[0].turn_id == "turn-1"
-    assert [p.name for p in view.phases] == ["B"]
-    assert view.phases[0].reached is True
-    assert view.phases[0].turn_id == "turn-1"
+    assert view.phases == ()
 
 
 def test_failed_tool_call_status_is_preserved() -> None:
@@ -144,9 +153,8 @@ def test_failed_tool_call_status_is_preserved() -> None:
 def test_verifier_verdict_is_projected() -> None:
     from magi_agent.evidence.types import EvidenceContractVerdict
 
-    digest = "sha256:" + "c" * 64
     ledger = _base_ledger().append_evidence_record(
-        _file_read_record(path="docs/Y.md", digest=digest, size_bytes=5)
+        _tool_call_record(name="Grep", status="ok")
     )
     matched_record = ledger.entries[0].payload["record"]
     verdict = EvidenceContractVerdict.model_validate(
@@ -176,12 +184,10 @@ def test_verifier_verdict_is_projected() -> None:
 
 def test_turn_filter_restricts_to_one_turn() -> None:
     # EvidenceLedger entries all belong to one turn, so multi-turn coverage is
-    # expressed by projecting across distinct ledgers / read-ledger entries.
+    # expressed by projecting across distinct read-ledger entries.
     digest_a = "sha256:" + "d" * 64
     digest_b = "sha256:" + "e" * 64
-    read_ledger = ReadLedger(
-        ReadLedgerConfig(enabled=True, localInMemoryEnabled=True)
-    )
+    read_ledger = _read_ledger()
     read_ledger.record_read(
         session_id="introspection-session",
         workspace_ref="ws-ref",
@@ -216,20 +222,14 @@ def test_turn_filter_restricts_to_one_turn() -> None:
     assert filtered.scope.turns_covered == ("turn-4",)
 
 
-def test_read_ledger_file_reads_are_merged_with_ledger_reads() -> None:
-    ledger_digest = "sha256:" + "1" * 64
-    rl_digest = "sha256:" + "2" * 64
-    ledger = _base_ledger().append_evidence_record(
-        _file_read_record(path="docs/ledger.md", digest=ledger_digest, size_bytes=7)
-    )
-    read_ledger = ReadLedger(
-        ReadLedgerConfig(enabled=True, localInMemoryEnabled=True)
-    )
+def test_read_ledger_entries_for_other_sessions_are_ignored() -> None:
+    digest = "sha256:" + "9" * 64
+    read_ledger = _read_ledger()
     read_ledger.record_read(
-        session_id="introspection-session",
+        session_id="some-other-session",
         workspace_ref="ws-ref",
-        path="docs/readledger.md",
-        digest=rl_digest,
+        path="docs/other.md",
+        digest=digest,
         size_bytes=9,
         mtime_ns=1,
         read_mode="full",
@@ -237,23 +237,27 @@ def test_read_ledger_file_reads_are_merged_with_ledger_reads() -> None:
         tool_use_id="tool-1",
     )
 
-    view = project_session_evidence(ledger, read_ledger=read_ledger)
+    view = project_session_evidence(_base_ledger(), read_ledger=read_ledger)
 
-    paths = {f.path for f in view.files_read}
-    assert paths == {"docs/ledger.md", "docs/readledger.md"}
+    assert view.files_read == ()
 
 
 def test_view_round_trips_through_serialization() -> None:
     digest = "sha256:" + "f" * 64
-    ledger = (
-        _base_ledger()
-        .append_evidence_record(
-            _file_read_record(path="docs/Z.md", digest=digest, size_bytes=3)
-        )
-        .append_evidence_record(_tool_call_record(name="Grep"))
-        .append_evidence_record(_phase_record(name="C"))
+    read_ledger = _read_ledger()
+    read_ledger.record_read(
+        session_id="introspection-session",
+        workspace_ref="ws-ref",
+        path="docs/Z.md",
+        digest=digest,
+        size_bytes=3,
+        mtime_ns=1,
+        read_mode="full",
+        turn_id="turn-1",
+        tool_use_id="tool-1",
     )
-    view = project_session_evidence(ledger)
+    ledger = _base_ledger().append_evidence_record(_tool_call_record(name="Grep"))
+    view = project_session_evidence(ledger, read_ledger=read_ledger)
 
     dumped = view.model_dump(by_alias=True, mode="json")
     restored = SessionEvidenceView.model_validate(dumped)
