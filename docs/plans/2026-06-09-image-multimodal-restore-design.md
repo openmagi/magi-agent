@@ -167,6 +167,7 @@ RED → GREEN per layer:
   `google-genai`. Pinned by the converter RED test before wiring L4.
 - **Multiple images** — payload may carry several image blocks; converter and
   L4 must emit one Part each (cap already enforced by `message_builder`).
-- **Default-OFF gating?** — confirm whether image attachment should ride behind
-  an env flag for staged rollout, or ship on by default (TS parity = on). Plan
-  assumes on-by-default with safe drop-on-error; revisit if a gate is wanted.
+- **Rollout: default-ON (decided).** No env gate — this restores a feature that
+  was already on in the TS runtime. Safety comes from drop-on-error: malformed,
+  unsupported, or oversized images are silently dropped and the turn proceeds as
+  text-only, so enabling it cannot 500 or regress text-only turns.
