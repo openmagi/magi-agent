@@ -311,6 +311,23 @@ def test_qmd_reindex_idempotent_refreshes_when_present(
     assert not any(c[1:3] == ["collection", "add"] for c in fake.calls)
 
 
+def test_qmd_reindex_skips_memory_dir_symlink_that_resolves_outside_workspace(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(qmd_module.shutil, "which", lambda name: "/fake/qmd")
+    outside = tmp_path.parent / f"{tmp_path.name}-outside-memory"
+    outside.mkdir()
+    _write(outside, "secret.md", "outside-secret-token")
+    _symlink_or_skip(tmp_path / "memory", outside)
+    fake = _FakeQmd()
+    monkeypatch.setattr(qmd_module.subprocess, "run", fake)
+
+    QmdBackend().reindex(tmp_path)
+
+    assert not any(c[1:3] == ["collection", "add"] for c in fake.calls)
+    assert not any(c[1:2] == ["update"] for c in fake.calls)
+
+
 def test_qmd_search_scopes_to_our_collection_and_maps_paths(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

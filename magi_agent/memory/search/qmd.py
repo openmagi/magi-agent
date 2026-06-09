@@ -93,17 +93,28 @@ class QmdBackend:
     def reindex(self, root: Path) -> None:
         memory_dir = root / "memory"
         self._memory_dir = memory_dir
-        self._collection = collection_name_for(memory_dir)
+        self._collection = None
         if not memory_dir.is_dir():
             # Nothing to index yet; search() will simply return [].
             return
+        root_resolved = root.resolve()
+        memory_resolved = memory_dir.resolve()
+        try:
+            memory_resolved.relative_to(root_resolved)
+        except ValueError:
+            # Do not register a workspace memory/ symlink that points outside the
+            # workspace; qmd would index that external tree before search-time
+            # filtering can help.
+            return
+        self._memory_dir = memory_resolved
+        self._collection = collection_name_for(memory_resolved)
         if self._collection_exists(self._collection):
             # Best-effort refresh of changed files (slow; off the hot path).
             self._run([self._binary, "update", self._collection])
             return
         # First registration also performs the BM25 index (no embed needed).
         self._run(
-            [self._binary, "collection", "add", str(memory_dir), "--name", self._collection]
+            [self._binary, "collection", "add", str(memory_resolved), "--name", self._collection]
         )
 
     def search(self, query: str, *, k: int) -> list[SearchHit]:
