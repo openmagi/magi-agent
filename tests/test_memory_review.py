@@ -16,6 +16,7 @@ These tests inject a FAKE reviewer — no live model is ever called.
 """
 from __future__ import annotations
 
+import asyncio
 import os
 from pathlib import Path
 
@@ -73,10 +74,12 @@ def test_review_disabled_config_short_circuits(
     host = _make_live_write_host(tmp_path)
 
     harness = MemoryReviewHarness(MemoryReviewConfig(enabled=False))
-    receipt = harness.review(
-        [{"role": "user", "content": "hi"}],
-        reviewer=reviewer,
-        write_host=host,
+    receipt = asyncio.run(
+        harness.review(
+            [{"role": "user", "content": "hi"}],
+            reviewer=reviewer,
+            write_host=host,
+        )
     )
 
     assert calls == []  # reviewer never invoked
@@ -101,10 +104,12 @@ def test_review_disabled_env_short_circuits(
     host = _make_live_write_host(tmp_path)
 
     harness = MemoryReviewHarness(MemoryReviewConfig(enabled=True))
-    receipt = harness.review(
-        [{"role": "user", "content": "hi"}],
-        reviewer=reviewer,
-        write_host=host,
+    receipt = asyncio.run(
+        harness.review(
+            [{"role": "user", "content": "hi"}],
+            reviewer=reviewer,
+            write_host=host,
+        )
     )
 
     assert calls == []
@@ -147,10 +152,12 @@ def test_review_enabled_routes_declarative_fact_to_write_host(
     monkeypatch.setattr(host, "_handle", _spy_handle)
 
     harness = MemoryReviewHarness(MemoryReviewConfig(enabled=True))
-    receipt = harness.review(
-        [{"role": "user", "content": "please answer in Korean"}],
-        reviewer=reviewer,
-        write_host=host,
+    receipt = asyncio.run(
+        harness.review(
+            [{"role": "user", "content": "please answer in Korean"}],
+            reviewer=reviewer,
+            write_host=host,
+        )
     )
 
     assert len(calls) == 1  # reviewer called exactly once
@@ -198,10 +205,12 @@ def test_review_drops_task_state_facts(
     monkeypatch.setattr(host, "_handle", _spy_handle)
 
     harness = MemoryReviewHarness(MemoryReviewConfig(enabled=True))
-    receipt = harness.review(
-        [{"role": "assistant", "content": "shipped it"}],
-        reviewer=reviewer,
-        write_host=host,
+    receipt = asyncio.run(
+        harness.review(
+            [{"role": "assistant", "content": "shipped it"}],
+            reviewer=reviewer,
+            write_host=host,
+        )
     )
 
     assert seen == []  # nothing routed to the host
@@ -241,10 +250,12 @@ def test_review_receipt_counts_mixed_batch(
     host = _make_live_write_host(tmp_path)
 
     harness = MemoryReviewHarness(MemoryReviewConfig(enabled=True))
-    receipt = harness.review(
-        [{"role": "user", "content": "context"}],
-        reviewer=reviewer,
-        write_host=host,
+    receipt = asyncio.run(
+        harness.review(
+            [{"role": "user", "content": "context"}],
+            reviewer=reviewer,
+            write_host=host,
+        )
     )
 
     assert receipt.candidates == 4
@@ -269,12 +280,109 @@ def test_review_empty_candidates_yields_zero_writes(
     host = _make_live_write_host(tmp_path)
 
     harness = MemoryReviewHarness(MemoryReviewConfig(enabled=True))
-    receipt = harness.review([], reviewer=reviewer, write_host=host)
+    receipt = asyncio.run(harness.review([], reviewer=reviewer, write_host=host))
 
     assert len(calls) == 1
     assert receipt.status == "reviewed"
     assert receipt.candidates == 0
     assert receipt.attempted_writes == 0
+
+
+# ---------------------------------------------------------------------------
+# Error isolation — a raising reviewer / write_host must not crash the review
+# or leak the exception into the caller's turn.
+# ---------------------------------------------------------------------------
+
+
+def test_review_isolates_raising_reviewer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A reviewer that raises is isolated → reviewed receipt, no propagation."""
+    monkeypatch.setenv("MAGI_MEMORY_REVIEW_ENABLED", "1")
+
+    from magi_agent.harness.memory_review import (
+        MemoryReviewConfig,
+        MemoryReviewHarness,
+    )
+
+    def boom_reviewer(_transcript: list[dict]) -> list[str]:
+        raise RuntimeError("reviewer blew up (secret: hunter2)")
+
+    host = _make_live_write_host(tmp_path)
+    harness = MemoryReviewHarness(MemoryReviewConfig(enabled=True))
+
+    # Must NOT raise.
+    receipt = asyncio.run(
+        harness.review(
+            [{"role": "user", "content": "x"}],
+            reviewer=boom_reviewer,
+            write_host=host,
+        )
+    )
+
+    assert receipt.status == "reviewed"
+    assert receipt.candidates == 0
+    assert receipt.attempted_writes == 0
+    assert receipt.write_receipts == ()
+    assert "reviewer_exception" in receipt.reason_codes
+
+
+def test_review_isolates_raising_write_host_per_fact(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A write_host._handle that raises for ONE fact is isolated to that fact.
+
+    The raising fact yields a ``blocked`` receipt with a generic reason code;
+    the remaining declarative facts are still processed and written.
+    """
+    monkeypatch.setenv("MAGI_MEMORY_REVIEW_ENABLED", "1")
+    monkeypatch.setenv("MAGI_MEMORY_WRITE_READINESS_ENABLED", "1")
+    monkeypatch.setenv("MAGI_MEMORY_WRITE_ENABLED", "1")
+    monkeypatch.setenv("MAGI_MEMORY_LOCAL_DEV", "1")
+
+    from magi_agent.harness.memory_review import (
+        MemoryReviewConfig,
+        MemoryReviewHarness,
+    )
+
+    bad_fact = "user prefers dark mode"
+    good_fact = "user is a solo founder"
+    reviewer, _calls = _spy_reviewer([bad_fact, good_fact])
+
+    host = _make_live_write_host(tmp_path)
+    original_handle = host._handle
+
+    async def _flaky_handle(arguments, context):  # type: ignore[no-untyped-def]
+        if str(arguments.get("fact")) == bad_fact:
+            raise RuntimeError("handle exploded (secret: hunter2)")
+        return await original_handle(arguments, context)
+
+    monkeypatch.setattr(host, "_handle", _flaky_handle)
+
+    harness = MemoryReviewHarness(MemoryReviewConfig(enabled=True))
+    receipt = asyncio.run(
+        harness.review(
+            [{"role": "user", "content": "context"}],
+            reviewer=reviewer,
+            write_host=host,
+        )
+    )
+
+    # Both facts are declarative → both attempted; one blocked, one written.
+    assert receipt.status == "reviewed"
+    assert receipt.candidates == 2
+    assert receipt.dropped_declarative == 0
+    assert receipt.attempted_writes == 2
+    assert receipt.blocked == 1
+    assert receipt.written == 1
+    assert len(receipt.write_receipts) == 2
+
+    by_status = {r.status: r for r in receipt.write_receipts}
+    blocked_receipt = by_status["blocked"]
+    assert blocked_receipt.real_write is False
+    assert "review_write_exception" in blocked_receipt.reason_codes
+    # Generic reason only — the raw exception text (with the secret) must not leak.
+    assert all("hunter2" not in code for code in blocked_receipt.reason_codes)
 
 
 # ---------------------------------------------------------------------------
