@@ -13,6 +13,9 @@ Environment variables:
     CORE_AGENT_PYTHON_LIVE_WEB_ACQUISITION_ENABLED
                                     Set to "1" to enable live web acquisition.
 
+    MAGI_DEEP_WEB_RESEARCH_ENABLED  Set to "1" to enable deep web research
+                                    orchestrator (default-OFF).
+
     MAGI_COMPOSIO_ENABLED           Set to "1" / "true" / "on" / "auto" to
                                     activate Composio (legacy path).
     COMPOSIO_API_KEY                Composio API key. Required when enabled.
@@ -76,6 +79,11 @@ def _build_platform_tools(env: Mapping[str, str]) -> list[object]:
     ``MAGI_PLATFORM_API_KEY`` are present.  The returned object is a thin
     adapter that exposes ``WebSearch``, ``WebFetch``, and ``WebReader`` as
     callable tool objects the harness can pass to the agent runner.
+
+    When ``MAGI_DEEP_WEB_RESEARCH_ENABLED=1`` is also set, a
+    ``DeepWebResearchOrchestrator`` is wired to the boundary and exposed
+    via ``_WebResearchBoundaryAdapter.deep_research_orchestrator`` for
+    harness-level inspection and use.
     """
     base_url = env.get("MAGI_PLATFORM_BASE_URL", "").strip()
     api_key = env.get("MAGI_PLATFORM_API_KEY", "").strip()
@@ -86,7 +94,25 @@ def _build_platform_tools(env: Mapping[str, str]) -> list[object]:
         from magi_agent.web_acquisition.research_tools import build_live_research_boundary
 
         boundary = build_live_research_boundary(env)
-        return [_WebResearchBoundaryAdapter(boundary)]
+        adapter = _WebResearchBoundaryAdapter(boundary)
+
+        # Wire deep research orchestrator when enabled
+        if _is_true(env.get("MAGI_DEEP_WEB_RESEARCH_ENABLED", "")):
+            try:
+                from magi_agent.web_acquisition.deep_research import (
+                    DeepWebResearchOrchestrator,
+                )
+                from magi_agent.web_acquisition.deep_research_config import (
+                    deep_research_config_from_env,
+                )
+
+                dr_config = deep_research_config_from_env()
+                orch = DeepWebResearchOrchestrator(boundary=boundary, config=dr_config)
+                adapter = _WebResearchBoundaryAdapter(boundary, deep_research_orchestrator=orch)
+            except Exception:
+                pass  # fail-open: boundary still usable without deep research
+
+        return [adapter]
     except Exception:
         return []
 
@@ -122,10 +148,23 @@ class _WebResearchBoundaryAdapter:
     The adapter is intentionally minimal: it stores the boundary reference and
     delegates any ``execute_tool`` call to it.  The harness can introspect the
     ``boundary`` attribute for testing.
+
+    Attributes
+    ----------
+    boundary:
+        The ``LocalWebResearchToolBoundary`` instance.
+    deep_research_orchestrator:
+        ``DeepWebResearchOrchestrator`` if ``MAGI_DEEP_WEB_RESEARCH_ENABLED=1``
+        was set when ``build_web_tools()`` was called.  ``None`` otherwise
+        (default-OFF).
     """
 
-    def __init__(self, boundary: object) -> None:
+    def __init__(self, boundary: object, *, deep_research_orchestrator: object = None) -> None:
         self.boundary = boundary
+        self.deep_research_orchestrator = deep_research_orchestrator
 
     def __repr__(self) -> str:
-        return f"_WebResearchBoundaryAdapter(boundary={self.boundary!r})"
+        return (
+            f"_WebResearchBoundaryAdapter(boundary={self.boundary!r}, "
+            f"deep_research_orchestrator={self.deep_research_orchestrator!r})"
+        )
