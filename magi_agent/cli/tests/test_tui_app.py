@@ -1522,3 +1522,139 @@ def test_sidebar_panes_fed_from_tool_and_terminal_events() -> None:
         assert "200,000" in text  # coarse context-window budget (v1)
 
     asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
+# PR3.3 — Permission-modal diff preview for Edit/Write + toasts on copy failure
+# ---------------------------------------------------------------------------
+def test_perm_modal_shows_diff_preview_for_edit() -> None:
+    async def _run() -> None:
+        class _EditAskEngine(FakeEngineDriver):
+            async def run_turn_stream(self, runtime, turn_input, *, cancel, gate=None):
+                turn_id = getattr(turn_input, "turn_id", "t")
+                req = ControlRequest(
+                    requestId="req-1",
+                    turnId=turn_id,
+                    toolName="Edit",
+                    arguments={
+                        "path": "x.py",
+                        "old_string": "a = 1\nb = 2\n",
+                        "new_string": "a = 1\nb = 3\n",
+                    },
+                    reason="edit a file",
+                )
+                self.gate_decision = await gate.check(req)
+                yield EngineResult(terminal=Terminal.completed, turn_id=turn_id)
+
+        app = _make_app(_EditAskEngine())
+        async with app.run_test() as pilot:
+            app._gate = SinkGate(app.sink)
+            app.start_turn("edit it")
+            await pilot.pause()
+            await pilot.pause()
+            assert isinstance(app.screen, ToolUseConfirm)
+            # The diff-preview panel exists and is visible (only for Edit/Write).
+            preview = app.screen.query_one("#tool-diff-preview")
+            assert preview.display is True
+            await pilot.click("#allow")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+        assert app.last_terminal.terminal == Terminal.completed
+
+    asyncio.run(_run())
+
+
+def test_perm_modal_no_diff_preview_for_non_edit() -> None:
+    async def _run() -> None:
+        engine = FakeEngineDriver(tokens=["working"], ask_tool="Bash")
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            app._gate = SinkGate(app.sink)
+            app.start_turn("run something")
+            await pilot.pause()
+            await pilot.pause()
+            assert isinstance(app.screen, ToolUseConfirm)
+            preview = app.screen.query_one("#tool-diff-preview")
+            assert preview.display is False  # Bash has no old/new -> hidden
+            await pilot.click("#deny")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+
+    asyncio.run(_run())
+
+
+def test_perm_modal_shows_diff_preview_for_write_content() -> None:
+    async def _run() -> None:
+        class _WriteAskEngine(FakeEngineDriver):
+            async def run_turn_stream(self, runtime, turn_input, *, cancel, gate=None):
+                turn_id = getattr(turn_input, "turn_id", "t")
+                req = ControlRequest(
+                    requestId="req-w",
+                    turnId=turn_id,
+                    toolName="Write",
+                    arguments={"path": "new.py", "content": "print('hi')\n"},
+                    reason="write a file",
+                )
+                self.gate_decision = await gate.check(req)
+                yield EngineResult(terminal=Terminal.completed, turn_id=turn_id)
+
+        app = _make_app(_WriteAskEngine())
+        async with app.run_test() as pilot:
+            app._gate = SinkGate(app.sink)
+            app.start_turn("write it")
+            await pilot.pause()
+            await pilot.pause()
+            assert isinstance(app.screen, ToolUseConfirm)
+            preview = app.screen.query_one("#tool-diff-preview")
+            assert preview.display is True  # empty -> content renders as added lines
+            await pilot.click("#deny")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+
+    asyncio.run(_run())
+
+
+def test_copy_selection_failure_surfaces_toast() -> None:
+    async def _run() -> None:
+        app = _make_app(FakeEngineDriver())
+        captured: list[tuple[str, str]] = []
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+            def _boom(text):
+                raise RuntimeError("clipboard unavailable")
+
+            def _capture(message, *, severity="information", timeout=None):
+                captured.append((message, severity))
+
+            app.copy_to_clipboard = _boom  # type: ignore[method-assign]
+            app.notify = _capture  # type: ignore[method-assign]
+            # Force a non-empty selection path.
+            app.screen.get_selected_text = lambda: "some text"  # type: ignore[attr-defined]
+            app.action_copy_selection()
+            await pilot.pause()
+        assert any(sev == "warning" for _msg, sev in captured)
+
+    asyncio.run(_run())
+
+
+def test_copy_selection_empty_surfaces_info_toast() -> None:
+    async def _run() -> None:
+        app = _make_app(FakeEngineDriver())
+        captured: list[tuple[str, str]] = []
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+            def _capture(message, *, severity="information", timeout=None):
+                captured.append((message, severity))
+
+            app.notify = _capture  # type: ignore[method-assign]
+            # Nothing selected -> info toast, not a silent return.
+            app.screen.get_selected_text = lambda: ""  # type: ignore[attr-defined]
+            app.action_copy_selection()
+            await pilot.pause()
+        assert any(sev == "information" for _msg, sev in captured)
+
+    asyncio.run(_run())

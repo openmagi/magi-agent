@@ -50,6 +50,7 @@ from textual.widgets import Button, Input, OptionList, RichLog, Static, TextArea
 from textual.widgets.option_list import Option
 
 from magi_agent.cli.commands.executor import DefaultCommandExecutor
+from magi_agent.cli.render.diff import render_diff
 from magi_agent.cli.contracts import (
     CommandContext,
     CommandExecutor,
@@ -79,6 +80,7 @@ from magi_agent.cli.tui.autocomplete import (
     Completion,
     CompletionProvider,
 )
+from magi_agent.cli.tui import notify as _notify
 from magi_agent.cli.tui.history import DraftStash, InputHistory
 from magi_agent.cli.tui.input import PromptInput, Submission
 from magi_agent.cli.tui.footer import StatusFooter
@@ -327,6 +329,10 @@ class ToolUseConfirm(ModalScreen[PermissionDecision]):
                 f"Allow tool: {self._req.tool_name}\n{self._req.reason}",
                 id="tool-confirm-msg",
             )
+            # Diff preview (PR3.3): shows what an Edit/Write would change ABOVE
+            # the action buttons so the operator approves an informed diff, not a
+            # bare tool name. Hidden (display:false) for non-edit tools.
+            yield Static("", id="tool-diff-preview", classes="confirm-diff")
             with Vertical(id="confirm-actions"):
                 for index, (choice_id, label) in enumerate(self._CHOICES, start=1):
                     yield Button(f"{index}. {label}", id=choice_id)
@@ -350,8 +356,57 @@ class ToolUseConfirm(ModalScreen[PermissionDecision]):
         # Sub-views start hidden; the action buttons are the default view.
         self.query_one("#edit-view").display = False
         self.query_one("#deny-view").display = False
+        # Render the Edit/Write diff preview (hidden for non-edit tools).
+        self._render_diff_preview()
         # Focus the first action so Enter/Up/Down work without a click.
         self.query_one("#allow", Button).focus()
+
+    def _render_diff_preview(self) -> None:
+        """Render an Edit/Write diff into the preview panel, else hide it."""
+
+        preview = self.query_one("#tool-diff-preview", Static)
+        rendered = self._diff_renderable()
+        if rendered is None:
+            preview.display = False
+            return
+        preview.update(rendered)
+        preview.display = True
+
+    def _diff_renderable(self) -> object | None:
+        """Build a Rich diff for an Edit/Write request, else ``None``.
+
+        Only Edit/Write/MultiEdit requests carrying ``old_string``/``new_string``
+        (or an empty old + ``content`` for Write) produce a preview. Reuses
+        ``cli/render/diff.py:render_diff`` (cached, syntax-highlighted). Returns
+        ``None`` for any other tool, partial/missing fields, or a no-op edit, so
+        the modal stays diff-free in those cases. Never raises (a failed render
+        falls back to ``None`` rather than crashing the permission prompt).
+        """
+
+        if self._req.tool_name not in ("Edit", "Write", "MultiEdit"):
+            return None
+        args = self._req.arguments
+        if not isinstance(args, dict):
+            return None
+        old = args.get("old_string")
+        new = args.get("new_string")
+        if not isinstance(new, str):
+            # Write: empty old -> full content as the "new" (added) side.
+            content = args.get("content")
+            if isinstance(content, str):
+                old, new = "", content
+            else:
+                return None
+        if not isinstance(old, str):
+            old = ""
+        if old == new:
+            return None
+        path = args.get("path") or args.get("file_path") or "file"
+        file = path if isinstance(path, str) else "file"
+        try:
+            return render_diff(old, new, file=file, width=58)
+        except Exception:  # pragma: no cover - never fail the modal on a diff
+            return None
 
     def _arguments_json(self) -> str:
         try:
@@ -558,6 +613,14 @@ class MagiTuiApp(App[None]):
         border: round $primary;
     }
     #tool-confirm-msg { margin-bottom: 1; color: $text; }
+    #tool-diff-preview {
+        height: auto;
+        max-height: 12;
+        margin: 0 0 1 0;
+        padding: 0 1;
+        background: $panel-darken-1;
+    }
+    .confirm-diff { width: 1fr; }
     #confirm-actions { height: auto; }
     #confirm-actions Button {
         width: 100%;
@@ -1136,7 +1199,14 @@ class MagiTuiApp(App[None]):
         self._controller.commit_rich(block, text=f"› {prompt}")
 
     def action_copy_selection(self) -> None:
-        """Copy the currently selected transcript text to the clipboard."""
+        """Copy the currently selected transcript text to the clipboard.
+
+        Both the empty-selection and clipboard-failure paths now surface a toast
+        (``_notify.info`` / ``_notify.warning``) instead of returning silently —
+        the operator always gets feedback that Ctrl+Y did something (or why it
+        couldn't). Reading the selection itself stays best-effort (a missing
+        selection API is the expected "nothing selected" case, not an error).
+        """
 
         text = ""
         try:
@@ -1146,12 +1216,14 @@ class MagiTuiApp(App[None]):
                 text = self.selected_text or ""  # type: ignore[attr-defined]
             except Exception:
                 text = ""
-        if text:
-            try:
-                self.copy_to_clipboard(text)
-                self.notify("Copied selection", timeout=2)
-            except Exception:
-                pass
+        if not text:
+            _notify.info(self, "Nothing selected to copy")
+            return
+        try:
+            self.copy_to_clipboard(text)
+            _notify.info(self, "Copied selection")
+        except Exception as exc:
+            _notify.warning(self, f"Copy failed: {exc}")
 
     @work(exclusive=True, group="turn")
     async def _run_turn(
