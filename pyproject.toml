@@ -59,6 +59,12 @@ files = [
 audio = [
   "openai>=1.0",
 ]
+# Optional WAF-bypass web fetch provider (InsaneFetchProvider). Uses curl_cffi
+# browser impersonation (TLS/JA3 fingerprint) to bypass fingerprinting WAFs.
+# Lazily imported and default-OFF; install with: uv sync --extra waf
+waf = [
+  "curl_cffi>=0.7",
+]
 
 [project.scripts]
 magi-agent = "magi_agent.main:main"
