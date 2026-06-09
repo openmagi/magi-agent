@@ -379,3 +379,74 @@ def test_end_to_end_verdicts_via_real_factory(
     # The verdict marker did not leak into tool_calls.
     tools = inspect_self_evidence(query_type="tools_called", context=context)["tool_calls"]
     assert {(c["name"], c["turn"]) for c in tools} == {("Grep", "turn-9")}
+
+
+# ---------------------------------------------------------------------------
+# Composition — summary returns all three slices together, no cross-contamination
+# ---------------------------------------------------------------------------
+
+
+def test_end_to_end_summary_composes_all_slices_via_real_factory(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setenv(_ENV, "1")
+    from magi_agent.cli.tool_runtime import build_cli_tool_runtime
+
+    # A single turn carries a tool-trace + a phase + a verifier verdict.
+    collector = LocalToolEvidenceCollector()
+    _record(collector, turn_id="turn-11", tool_name="Grep")
+    collector.record_phase_reached("session-1", "turn-11", "patch_generation")
+    collector.record_verifier_verdict(
+        "session-1", "turn-11", "tool_evidence_contract", "pass"
+    )
+
+    runtime = build_cli_tool_runtime(
+        workspace_root=str(tmp_path),
+        session_id="session-1",
+        local_tool_evidence_collector=collector,
+    )
+    context = runtime.tool_context_factory(adk_tool_context=None)
+
+    result = inspect_self_evidence(query_type="summary", context=context)
+
+    # All THREE slices populated together from the one composed turn ledger.
+    assert {(c["name"], c["status"], c["turn"]) for c in result["tool_calls"]} == {
+        ("Grep", "ok", "turn-11"),
+    }
+    assert {(p["name"], p["reached"], p["turn"]) for p in result["phases"]} == {
+        ("patch_generation", True, "turn-11"),
+    }
+    assert {(v["stage"], v["result"], v["turn"]) for v in result["verdicts"]} == {
+        ("tool_evidence_contract", "pass", "turn-11"),
+    }
+
+    # No cross-contamination: the phase/verdict markers never appear as tool
+    # calls (they carry no toolName, so the tool-call normalizer skips them).
+    tool_names = {c["name"] for c in result["tool_calls"]}
+    assert "patch_generation" not in tool_names
+    assert "tool_evidence_contract" not in tool_names
+
+
+# ---------------------------------------------------------------------------
+# Bounding — evidence_ledgers_for_session caps to the most recent K turns
+# ---------------------------------------------------------------------------
+
+
+def test_evidence_ledgers_for_session_caps_to_most_recent_k_turns(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(_ENV, "1")
+    from magi_agent.evidence.local_tool_collector import _MAX_SESSION_LEDGERS
+
+    collector = LocalToolEvidenceCollector()
+    total = _MAX_SESSION_LEDGERS + 10
+    for i in range(total):
+        _record(collector, turn_id=f"turn-{i:04d}", tool_name="Grep")
+
+    ledgers = collector.evidence_ledgers_for_session("session-1")
+    # Exactly the most recent K turns, in turn (insertion) order — older dropped.
+    assert len(ledgers) == _MAX_SESSION_LEDGERS
+    assert [ledger.turn_id for ledger in ledgers] == [
+        f"turn-{i:04d}" for i in range(total - _MAX_SESSION_LEDGERS, total)
+    ]

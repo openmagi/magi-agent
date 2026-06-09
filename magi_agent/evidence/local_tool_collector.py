@@ -27,6 +27,16 @@ _TEST_COMMAND_PREFIXES = (
     "pnpm run test",
     "yarn test",
 )
+# Cap on how many per-turn EvidenceLedgers ``evidence_ledgers_for_session``
+# exposes to the live self-evidence view. The CLI ``tool_context_factory``
+# calls it on EVERY tool dispatch and ``ToolContext.freeze_source_ledger``
+# deep-freezes the whole returned tuple each time, so returning ALL ledgers is
+# O(N^2) over a long session (N turns x M dispatches). Capping to the most
+# recent K turns bounds per-dispatch cost while keeping recent cross-turn
+# introspection ("did you read X earlier this session"). Older turns are
+# deliberately dropped from the live self-evidence view — a lean cap, not an
+# audit store.
+_MAX_SESSION_LEDGERS = 25
 
 
 class LocalToolEvidenceCollector:
@@ -112,12 +122,20 @@ class LocalToolEvidenceCollector:
         REAL tool calls recorded so far. Returns an empty tuple when the
         lifecycle flag is off (no ledgers are ever built) or no tool result has
         been recorded for the session yet.
+
+        Bounded to the most recent ``_MAX_SESSION_LEDGERS`` turns (older turns
+        dropped from the live self-evidence view) to keep the per-dispatch cost
+        constant — see ``_MAX_SESSION_LEDGERS``. ``self._ledgers`` is a dict
+        keyed by ``(session_id, turn_id)`` whose insertion order is the order
+        each turn was first recorded; we keep that turn order and slice the
+        trailing K, so the result is deterministic and preserves order.
         """
-        return tuple(
+        matching = tuple(
             ledger
             for (stored_session_id, _turn_id), ledger in self._ledgers.items()
             if stored_session_id == session_id
         )
+        return matching[-_MAX_SESSION_LEDGERS:]
 
     def record_phase_reached(
         self,
