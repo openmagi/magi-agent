@@ -34,6 +34,13 @@ def _write(root: Path, rel: str, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
+def _symlink_or_skip(link: Path, target: Path) -> None:
+    try:
+        link.symlink_to(target)
+    except (NotImplementedError, OSError) as exc:
+        pytest.skip(f"symlink creation unavailable: {exc}")
+
+
 @pytest.fixture
 def memory_root(tmp_path: Path) -> Path:
     """A small workspace with a memory/ tree + top-level files."""
@@ -148,6 +155,38 @@ def test_bm25_reindex_reflects_filesystem(tmp_path: Path) -> None:
     _write(tmp_path, "memory/daily/two.md", "gamma gamma delta")
     backend.reindex(tmp_path)
     assert [h.path for h in backend.search("gamma", k=5)] == ["memory/daily/two.md"]
+
+
+def test_bm25_skips_symlinked_memory_markdown_that_resolves_outside_workspace(
+    tmp_path: Path,
+) -> None:
+    _write(tmp_path, "memory/daily/inside.md", "allowedterm stays searchable")
+    outside = tmp_path.parent / f"{tmp_path.name}-outside-secret.md"
+    outside.write_text("escapeterm outside secret must not be indexed", encoding="utf-8")
+    _symlink_or_skip(tmp_path / "memory" / "daily" / "link.md", outside)
+
+    backend = PyBM25Backend()
+    backend.reindex(tmp_path)
+
+    assert backend.search("escapeterm", k=5) == []
+    assert [h.path for h in backend.search("allowedterm", k=5)] == [
+        "memory/daily/inside.md"
+    ]
+
+
+def test_bm25_skips_toplevel_memory_symlink_that_resolves_outside_workspace(
+    tmp_path: Path,
+) -> None:
+    _write(tmp_path, "ROOT.md", "rootok remains searchable")
+    outside = tmp_path.parent / f"{tmp_path.name}-outside-memory.md"
+    outside.write_text("topsecret outside root must not be indexed", encoding="utf-8")
+    _symlink_or_skip(tmp_path / "MEMORY.md", outside)
+
+    backend = PyBM25Backend()
+    backend.reindex(tmp_path)
+
+    assert backend.search("topsecret", k=5) == []
+    assert [h.path for h in backend.search("rootok", k=5)] == ["ROOT.md"]
 
 
 # ---------------------------------------------------------------------------
@@ -282,7 +321,7 @@ def test_qmd_search_scopes_to_our_collection_and_maps_paths(
         {"docid": "#1", "score": 0.2, "file": f"qmd://{name}/daily/a.md", "snippet": "alpha"},
         {"docid": "#2", "score": 0.9, "file": f"qmd://{name}/ROOT.md", "snippet": "root"},
         # foreign collection — must be excluded.
-        {"docid": "#3", "score": 0.99, "file": "qmd://clawy-memory/other.md", "snippet": "nope"},
+        {"docid": "#3", "score": 0.99, "file": "qmd://magi-memory-foreign/other.md", "snippet": "nope"},
     ]
     fake = _FakeQmd(existing={name}, search_rows=rows)
     monkeypatch.setattr(qmd_module.subprocess, "run", fake)
@@ -308,6 +347,30 @@ def test_qmd_search_before_reindex_returns_empty(monkeypatch: pytest.MonkeyPatch
     # No reindex -> no collection scope -> empty, without even shelling out.
     assert QmdBackend().search("q", k=5) == []
     assert not any(c[1:2] == ["search"] for c in fake.calls)
+
+
+def test_qmd_drops_rows_with_traversal_or_empty_uri_suffixes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(qmd_module.shutil, "which", lambda name: "/fake/qmd")
+    root = _mk_memory(tmp_path)
+    name = qmd_module.collection_name_for(root / "memory")
+    rows = [
+        {"score": 0.5, "file": f"qmd://{name}/daily/ok.md", "snippet": "good"},
+        {"score": 0.99, "file": f"qmd://{name}/../outside.md", "snippet": "bad"},
+        {"score": 0.98, "file": f"qmd://{name}/daily/../../outside.md", "snippet": "bad"},
+        {"score": 0.97, "file": f"qmd://{name}//absolute.md", "snippet": "bad"},
+        {"score": 0.96, "file": f"qmd://{name}/", "snippet": "bad"},
+        {"score": 0.95, "file": f"qmd://{name}/daily//empty.md", "snippet": "bad"},
+    ]
+    monkeypatch.setattr(qmd_module.subprocess, "run", _FakeQmd(existing={name}, search_rows=rows))
+
+    backend = QmdBackend()
+    backend.reindex(root)
+
+    assert [(h.path, h.content) for h in backend.search("q", k=10)] == [
+        ("memory/daily/ok.md", "good")
+    ]
 
 
 def test_qmd_respects_k(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

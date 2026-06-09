@@ -46,6 +46,34 @@ def _tokenize(text: str) -> list[str]:
     return [match.group(0) for match in _TOKEN_RE.finditer(text.lower())]
 
 
+def _resolve_existing(path: Path) -> Path | None:
+    try:
+        return path.resolve(strict=True)
+    except (OSError, RuntimeError):
+        return None
+
+
+def _is_relative_to(path: Path, parent: Path) -> bool:
+    try:
+        path.relative_to(parent)
+    except ValueError:
+        return False
+    return True
+
+
+def _is_allowed_memory_target(
+    resolved_path: Path,
+    *,
+    resolved_root: Path,
+    resolved_memory_dir: Path | None,
+) -> bool:
+    if not _is_relative_to(resolved_path, resolved_root):
+        return False
+    if resolved_memory_dir is not None and _is_relative_to(resolved_path, resolved_memory_dir):
+        return True
+    return resolved_path in {resolved_root / name for name in _TOPLEVEL_FILES}
+
+
 class _Document:
     """One indexed file: its workspace-relative path, raw text, and token bag."""
 
@@ -140,14 +168,41 @@ class PyBM25Backend:
 
     @staticmethod
     def _iter_memory_files(root: Path):
+        resolved_root = _resolve_existing(root)
+        if resolved_root is None or not resolved_root.is_dir():
+            return
+
         memory_dir = root / _MEMORY_DIR
-        if memory_dir.is_dir():
+        resolved_memory_dir = _resolve_existing(memory_dir)
+        if (
+            resolved_memory_dir is not None
+            and resolved_memory_dir.is_dir()
+            and _is_relative_to(resolved_memory_dir, resolved_root)
+        ):
             for path in sorted(memory_dir.rglob("*.md")):
-                if path.is_file():
+                resolved_path = _resolve_existing(path)
+                if (
+                    resolved_path is not None
+                    and _is_allowed_memory_target(
+                        resolved_path,
+                        resolved_root=resolved_root,
+                        resolved_memory_dir=resolved_memory_dir,
+                    )
+                    and resolved_path.is_file()
+                ):
                     yield path
         for name in _TOPLEVEL_FILES:
             candidate = root / name
-            if candidate.is_file():
+            resolved_candidate = _resolve_existing(candidate)
+            if (
+                resolved_candidate is not None
+                and _is_allowed_memory_target(
+                    resolved_candidate,
+                    resolved_root=resolved_root,
+                    resolved_memory_dir=resolved_memory_dir,
+                )
+                and resolved_candidate.is_file()
+            ):
                 yield candidate
 
 

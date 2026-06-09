@@ -58,6 +58,15 @@ def collection_name_for(memory_dir: Path) -> str:
     return f"{_COLLECTION_PREFIX}{digest[:12]}"
 
 
+def _memory_path_from_qmd_suffix(suffix: str) -> str | None:
+    if suffix == "" or suffix.startswith("/"):
+        return None
+    parts = suffix.split("/")
+    if any(part in ("", ".", "..") for part in parts):
+        return None
+    return f"memory/{suffix}"
+
+
 class QmdBackend:
     """Search backend that shells out to the external ``qmd`` CLI.
 
@@ -155,7 +164,9 @@ class QmdBackend:
                 content = ""
             # qmd://<name>/<relpath> → workspace-root-relative "memory/<relpath>".
             rel = file_uri[len(prefix):]
-            path = f"memory/{rel}"
+            path = _memory_path_from_qmd_suffix(rel)
+            if path is None:
+                continue
             hits.append(SearchHit(path=path, content=content, score=float(score)))
         hits.sort(key=lambda hit: hit.score, reverse=True)
         return hits[:k]
