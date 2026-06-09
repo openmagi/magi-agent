@@ -454,6 +454,7 @@ def _build_first_party_adk_tools(
         GeneralAutomationReceiptLedgerStore,
     )
     from magi_agent.cli.tool_runtime import (  # noqa: PLC0415
+        bind_cli_local_full_tool_handlers,
         wrap_cli_adk_tools_with_evidence_collector,
     )
 
@@ -464,6 +465,12 @@ def _build_first_party_adk_tools(
     workspace_root = str(cwd) if cwd is not None else os.getcwd()
     memory_mode_value = normalize_memory_mode(memory_mode)
     registry = _build_core_tool_registry(_build_default_plugin_state())
+    bind_cli_local_full_tool_handlers(
+        registry,
+        workspace_root=workspace_root,
+        bot_id="local-cli",
+        user_id="cli",
+    )
     receipt_store = (
         general_automation_receipts
         if isinstance(general_automation_receipts, GeneralAutomationReceiptLedgerStore)

@@ -44,6 +44,10 @@ EXPECTED_LOCAL_FULL_RUNTIME_DEFAULTS = {
     "MAGI_GA_LIVE_ENABLED": "1",
     "MAGI_MESSAGE_CACHE_ENABLED": "1",
     "MAGI_FILE_TOOLS_ENABLED": "1",
+    "MAGI_SELF_INTROSPECTION_ENABLED": "1",
+    "MAGI_MEMORY_WRITE_READINESS_ENABLED": "1",
+    "MAGI_MEMORY_WRITE_ENABLED": "1",
+    "MAGI_MEMORY_LOCAL_DEV": "1",
     "MAGI_PROMPT_TRANSFORM_HOOKS_ENABLED": "1",
     "MAGI_DEFERRED_TOOLS_ENABLED": "1",
     "MAGI_CHANNEL_WORKFLOWS_ENABLED": "1",
@@ -153,6 +157,40 @@ def test_main_local_full_runtime_defaults_respect_safe_profile(
     assert main_module.os.environ["MAGI_RUNTIME_PROFILE"] == "safe"
     assert "MAGI_RUNNER_POLICY_ROUTING_ENABLED" not in main_module.os.environ
     assert "MAGI_WORKFLOW_EXECUTOR_ENABLED" not in main_module.os.environ
+    assert "MAGI_SELF_INTROSPECTION_ENABLED" not in main_module.os.environ
+    assert "MAGI_MEMORY_WRITE_READINESS_ENABLED" not in main_module.os.environ
+    assert "MAGI_MEMORY_WRITE_ENABLED" not in main_module.os.environ
+    assert "MAGI_MEMORY_LOCAL_DEV" not in main_module.os.environ
+
+
+@pytest.mark.parametrize("profile", ("safe", "minimal", "off", "conservative"))
+def test_main_local_full_runtime_defaults_keep_safe_profiles_inert(
+    monkeypatch,
+    tmp_path: Path,
+    profile: str,
+) -> None:
+    captured: dict[str, object] = {}
+
+    for key in EXPECTED_LOCAL_FULL_RUNTIME_DEFAULTS:
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("MAGI_RUNTIME_PROFILE", profile)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        main_module.uvicorn,
+        "run",
+        lambda app, **kwargs: captured.update(kwargs),
+    )
+    main_module.main(["serve", "--port", "9095"])
+
+    assert captured["port"] == 9095
+    assert main_module.os.environ["MAGI_RUNTIME_PROFILE"] == profile
+    for key in (
+        "MAGI_SELF_INTROSPECTION_ENABLED",
+        "MAGI_MEMORY_WRITE_READINESS_ENABLED",
+        "MAGI_MEMORY_WRITE_ENABLED",
+        "MAGI_MEMORY_LOCAL_DEV",
+    ):
+        assert key not in main_module.os.environ
 
 
 def test_main_local_full_runtime_defaults_respect_explicit_opt_out(
