@@ -6,6 +6,7 @@ from magi_agent.cli.providers import (
     SUPPORTED_PROVIDERS,
     ProviderConfig,
     UnknownProviderError,
+    default_model_for,
     resolve_provider_config,
 )
 
@@ -81,6 +82,26 @@ def test_unknown_provider_raises() -> None:
         resolve_provider_config(
             env={"MAGI_PROVIDER": "cohere", "OPENAI_API_KEY": "o"}, config={}
         )
+
+
+def test_default_model_for_returns_provider_default() -> None:
+    assert default_model_for("anthropic") == "claude-sonnet-4-6"
+    assert default_model_for("openai") == "gpt-5.5"
+    assert default_model_for("gemini") == "gemini-3.5-flash"
+    assert (
+        default_model_for("fireworks")
+        == "accounts/fireworks/models/kimi-k2-instruct"
+    )
+
+
+def test_default_model_for_covers_every_supported_provider() -> None:
+    for provider in SUPPORTED_PROVIDERS:
+        assert default_model_for(provider)
+
+
+def test_default_model_for_unknown_provider_raises() -> None:
+    with pytest.raises(UnknownProviderError):
+        default_model_for("cohere")
 
 
 def test_config_providers_section_supplies_key() -> None:

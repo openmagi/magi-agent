@@ -109,18 +109,18 @@ def test_model_picker_empty_models_handled() -> None:
 
 
 def test_model_choices_lists_provider_defaults_current_first() -> None:
-    from magi_agent.cli.providers import _DEFAULT_MODEL, SUPPORTED_PROVIDERS
+    from magi_agent.cli.providers import SUPPORTED_PROVIDERS, default_model_for
 
     choices = model_choices("custom-model")
     assert choices[0] == "custom-model"
     # Every provider default is offered exactly once.
     for provider in SUPPORTED_PROVIDERS:
-        assert _DEFAULT_MODEL[provider] in choices
+        assert default_model_for(provider) in choices
     assert len(choices) == len(set(choices))
 
 
 def test_model_choices_no_current_starts_with_defaults() -> None:
-    from magi_agent.cli.providers import _DEFAULT_MODEL, SUPPORTED_PROVIDERS
+    from magi_agent.cli.providers import SUPPORTED_PROVIDERS, default_model_for
 
     choices = model_choices(None)
-    assert choices[0] == _DEFAULT_MODEL[SUPPORTED_PROVIDERS[0]]
+    assert choices[0] == default_model_for(SUPPORTED_PROVIDERS[0])

@@ -27,14 +27,14 @@ def model_choices(current: str | None = None) -> list[str]:
 
     from magi_agent.cli.providers import (  # noqa: PLC0415
         SUPPORTED_PROVIDERS,
-        _DEFAULT_MODEL,
+        default_model_for,
     )
 
     ids: list[str] = []
     if current:
         ids.append(current)
     for provider in SUPPORTED_PROVIDERS:
-        model = _DEFAULT_MODEL[provider]
+        model = default_model_for(provider)
         if model not in ids:
             ids.append(model)
     return ids

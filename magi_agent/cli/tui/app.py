@@ -842,10 +842,11 @@ class MagiTuiApp(App[None]):
     def _apply_model(self, model: str | None) -> None:
         """Apply a model selected in the picker (None on cancel = no-op).
 
-        Switching the model updates ``self._model`` and the topbar; future turns
-        read ``self._model`` (the engine driver is injected, so this is the field
-        the next ``TurnInput`` surfaces from). No provider reconfiguration is
-        invented here — that is a deferred runtime seam.
+        Updates ``self._model`` and refreshes the topbar — cosmetic only in
+        PR2.3. ``TurnInput`` (contracts.py) carries no model field, so the engine
+        does not yet consume the switch; real consumption (threading the model
+        into the next ``TurnInput`` / provider reconfiguration) is a deferred
+        runtime seam, consistent with ``action_open_model_picker``.
         """
 
         if not model:
