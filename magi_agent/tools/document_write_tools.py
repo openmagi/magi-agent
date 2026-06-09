@@ -116,7 +116,17 @@ def docx_write(arguments: dict[str, object], context: ToolContext) -> ToolResult
     content_digest = "sha256:" + hashlib.sha256(data).hexdigest()
     short_digest = content_digest.removeprefix("sha256:")[:16]
     artifact_ref = "artifact:docx:" + short_digest
-    output = {
+
+    # Deterministic source-content coverage verifier (audit-only here; Task C
+    # adds blocking). Compare against the REDACTED ``safe_source`` — never the raw
+    # input — per the module-level redaction/coverage contract. Fail-open: any
+    # error in coverage building must never fail a successful write.
+    coverage_projection, evidence_declaration = _build_coverage_evidence(
+        document=document,
+        safe_source=safe_source,
+    )
+
+    output: dict[str, object] = {
         "path": relative,
         "pathRef": relative,
         "contentDigest": content_digest,
@@ -126,6 +136,21 @@ def docx_write(arguments: dict[str, object], context: ToolContext) -> ToolResult
         "artifactRef": artifact_ref,
         "artifactRefs": (artifact_ref,),
     }
+    if coverage_projection is not None:
+        output["coverage"] = coverage_projection
+
+    metadata: dict[str, object] = {
+        "toolName": "DocumentWrite",
+        "handler": "first_party_native_local",
+        "outputDigest": digest(output),
+    }
+    if evidence_declaration is not None:
+        # Established emission channel: ``LocalToolEvidenceCollector`` →
+        # ``evidence_from_tool_result`` reads ``metadata["evidence"]`` and builds
+        # the canonical DocumentCoverage ``EvidenceRecord`` consumed by the
+        # verifier-bus (Task C).
+        metadata["evidence"] = evidence_declaration
+
     return ToolResult(
         status="ok",
         output=output,
@@ -135,12 +160,39 @@ def docx_write(arguments: dict[str, object], context: ToolContext) -> ToolResult
             "outputDigest": digest(output),
         },
         artifactRefs=(artifact_ref,),
-        metadata={
-            "toolName": "DocumentWrite",
-            "handler": "first_party_native_local",
-            "outputDigest": digest(output),
-        },
+        metadata=metadata,
     )
+
+
+def _build_coverage_evidence(
+    *,
+    document: object,
+    safe_source: str,
+) -> tuple[dict[str, object] | None, dict[str, object] | None]:
+    """Build the coverage projection + evidence declaration. Fail-open.
+
+    Returns ``(None, None)`` if anything goes wrong so a successful write is never
+    failed by the audit-only coverage step.
+    """
+    try:
+        from magi_agent.evidence.document_coverage import (  # noqa: PLC0415
+            DocumentCoverageBoundary,
+            evidence_declaration_from_record,
+        )
+        from magi_agent.tools.document_tools import extract_docx_text  # noqa: PLC0415
+
+        rendered_text = extract_docx_text(document)
+        record = DocumentCoverageBoundary().build_record(
+            source_markdown=safe_source,
+            doc_text=rendered_text,
+        )
+        declaration = evidence_declaration_from_record(
+            record,
+            tool_name="DocumentWrite",
+        )
+        return record.public_projection(), declaration
+    except Exception:  # noqa: BLE001 — coverage is audit-only; never fail the write.
+        return None, None
 
 
 # ---------------------------------------------------------------------------

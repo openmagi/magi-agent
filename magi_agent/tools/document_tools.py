@@ -173,38 +173,7 @@ def _read_docx(
 
     try:
         doc = Document(str(resolved.path))
-        parts: list[str] = []
-
-        # Iterate body elements in order (paragraphs + tables interleaved).
-        for element in doc.element.body:
-            tag = element.tag.split("}")[-1] if "}" in element.tag else element.tag
-            if tag == "p":
-                # Paragraph
-                from docx.oxml.ns import qn  # noqa: PLC0415
-
-                text_nodes = element.findall(f".//{qn('w:t')}")
-                para_text = "".join(t.text or "" for t in text_nodes)
-                if para_text.strip():
-                    parts.append(para_text)
-            elif tag == "tbl":
-                # Table — find rows/cells and render as markdown
-                from docx.oxml.ns import qn as _qn  # noqa: PLC0415
-
-                rows: list[list[str]] = []
-                for tr in element.findall(f".//{_qn('w:tr')}"):
-                    row_cells: list[str] = []
-                    for tc in tr.findall(f".//{_qn('w:tc')}"):
-                        cell_texts = tc.findall(f".//{_qn('w:t')}")
-                        row_cells.append("".join(t.text or "" for t in cell_texts))
-                    if row_cells:
-                        rows.append(row_cells)
-                if rows:
-                    # Pad rows to uniform width
-                    width = max(len(r) for r in rows)
-                    padded = [r + [""] * (width - len(r)) for r in rows]
-                    parts.append(_markdown_table(padded))
-
-        raw_text = "\n\n".join(parts)
+        raw_text = extract_docx_text(doc)
     except Exception:  # noqa: BLE001
         return _error_result(tool_name, "docx_read_error")
 
@@ -217,6 +186,45 @@ def _read_docx(
         path_ref=resolved.path_ref,
         content_digest=_digest_path(resolved.path),
     )
+
+
+def extract_docx_text(doc: object) -> str:
+    """Extract paragraph + table text from a ``python-docx`` ``Document``.
+
+    Walks the body elements in order (paragraphs + tables interleaved) and
+    renders tables as markdown — the same logic ``document_read`` uses, factored
+    out so other surfaces (e.g. the DocumentWrite coverage verifier) can extract
+    the rendered text from an in-memory ``Document`` without going through disk.
+
+    The ``docx`` import stays lazy (inside this function) so importing this
+    module never pulls ``docx`` into ``sys.modules``; callers already hold a
+    constructed ``Document`` instance.
+    """
+    from docx.oxml.ns import qn  # noqa: PLC0415
+
+    parts: list[str] = []
+    for element in doc.element.body:
+        tag = element.tag.split("}")[-1] if "}" in element.tag else element.tag
+        if tag == "p":
+            text_nodes = element.findall(f".//{qn('w:t')}")
+            para_text = "".join(t.text or "" for t in text_nodes)
+            if para_text.strip():
+                parts.append(para_text)
+        elif tag == "tbl":
+            rows: list[list[str]] = []
+            for tr in element.findall(f".//{qn('w:tr')}"):
+                row_cells: list[str] = []
+                for tc in tr.findall(f".//{qn('w:tc')}"):
+                    cell_texts = tc.findall(f".//{qn('w:t')}")
+                    row_cells.append("".join(t.text or "" for t in cell_texts))
+                if row_cells:
+                    rows.append(row_cells)
+            if rows:
+                width = max(len(r) for r in rows)
+                padded = [r + [""] * (width - len(r)) for r in rows]
+                parts.append(_markdown_table(padded))
+
+    return "\n\n".join(parts)
 
 
 # ---------------------------------------------------------------------------
@@ -440,4 +448,4 @@ def _digest_path(path: Path) -> str:
     return f"sha256:{digest}"
 
 
-__all__ = ["document_read"]
+__all__ = ["document_read", "extract_docx_text"]

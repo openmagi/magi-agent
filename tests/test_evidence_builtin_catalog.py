@@ -30,6 +30,7 @@ EXPECTED_BUILTIN_TYPES = (
     "TelegramDeliveryAck",
     "PromptTransform",
     "EditMatch",
+    "DocumentCoverage",
 )
 
 ALLOWED_PRODUCER_SURFACES = {

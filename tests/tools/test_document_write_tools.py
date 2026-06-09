@@ -215,6 +215,95 @@ class TestDocxWriteTruncation:
         assert result.output["byteCount"] > 0
 
 
+class TestDocxWriteCoverageEvidence:
+    """Task B: docx_write emits a digest-only DocumentCoverage evidence record."""
+
+    def test_happy_path_emits_pass_coverage_via_collector(self, tmp_path: Path) -> None:
+        from magi_agent.evidence.local_tool_collector import LocalToolEvidenceCollector
+
+        result = docx_write(
+            {"content": _MARKDOWN, "path": "cov.docx"}, _context(tmp_path)
+        )
+        assert result.status == "ok", result.error_code
+
+        # Coverage projection is visible in the tool output.
+        coverage = result.output["coverage"]
+        assert coverage["type"] == "DocumentCoverage"
+        assert coverage["status"] == "pass"
+        assert coverage["coverageRatio"] >= 0.95
+        # Digest-only: only digests/numbers, no raw words.
+        assert coverage["sourceDigest"].startswith("sha256:")
+        assert coverage["docDigest"].startswith("sha256:")
+        assert "Quarterly Report" not in repr(coverage)
+
+        # The established emission channel: metadata["evidence"] → collector →
+        # canonical EvidenceRecord consumed by the verifier-bus (Task C).
+        assert "evidence" in result.metadata
+        collector = LocalToolEvidenceCollector()
+        records = collector.record_tool_result(
+            session_id="s1",
+            turn_id="t1",
+            tool_call_id="call-docx",
+            tool_name="DocumentWrite",
+            result=result,
+        )
+        coverage_records = [
+            r for r in records if getattr(r, "type", None) == "DocumentCoverage"
+        ]
+        assert len(coverage_records) == 1
+        evidence = coverage_records[0]
+        assert evidence.status == "ok"
+        assert evidence.fields["status"] == "pass"
+
+    def test_mismatched_render_emits_failed_coverage_but_tool_ok(
+        self, tmp_path: Path
+    ) -> None:
+        # A pipe-heavy source that is NOT a valid table (no separator row) renders
+        # each line as a plain paragraph, but the boundary still tokenizes the
+        # words; construct a case where rendering drops content by feeding source
+        # that the renderer collapses. Easiest deterministic mismatch: monkeypatch
+        # the coverage to compare a faithful source against truncated doc text.
+        from unittest.mock import patch
+
+        from magi_agent.tools import document_tools
+
+        original = document_tools.extract_docx_text
+
+        def _truncating_extract(doc: object) -> str:
+            # Drop everything after the first paragraph to force missing units.
+            full = original(doc)
+            return full.split("\n\n")[0]
+
+        with patch.object(document_tools, "extract_docx_text", _truncating_extract):
+            result = docx_write(
+                {"content": _MARKDOWN, "path": "mismatch.docx"}, _context(tmp_path)
+            )
+
+        # Tool still succeeds (audit-only — no blocking in Task B).
+        assert result.status == "ok", result.error_code
+        coverage = result.output["coverage"]
+        assert coverage["status"] == "failed"
+        assert coverage["coverageRatio"] < 1.0
+        assert len(coverage["missingUnitDigests"]) > 0
+        # Evidence record reflects the failed coverage.
+        assert result.metadata["evidence"]["status"] == "failed"
+
+    def test_redaction_contract_coverage_passes_against_redacted_source(
+        self, tmp_path: Path
+    ) -> None:
+        # Source contains a private path that is redacted before rendering.
+        # Coverage compares against the redacted safe_source, so the redacted
+        # token (present in the rendered doc) counts as covered → pass.
+        source = "# Report\n\nSee /home/user/secret.py for details."
+        result = docx_write(
+            {"content": source, "path": "redact-cov.docx"}, _context(tmp_path)
+        )
+        assert result.status == "ok"
+        coverage = result.output["coverage"]
+        assert coverage["status"] == "pass"
+        assert coverage["coverageRatio"] == 1.0
+
+
 class TestDocumentWriteImportBoundary:
     def test_document_write_tools_import_does_not_load_docx(self) -> None:
         completed = subprocess.run(

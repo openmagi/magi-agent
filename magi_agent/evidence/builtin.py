@@ -185,6 +185,16 @@ _BUILTIN_EVIDENCE_CATALOG: tuple[BuiltInEvidenceType, ...] = (
         producerSurfaces=("tool_host", "transcript"),
         sourceKinds=("tool_trace", "transcript"),
     ),
+    BuiltInEvidenceType(
+        type="DocumentCoverage",
+        description=(
+            "Deterministic source-content coverage evidence produced by the "
+            "document-write boundary, verifying the rendered document contains "
+            "the redacted source units using digest-only missing-unit metadata."
+        ),
+        producerSurfaces=("tool_host", "verifier", "transcript"),
+        sourceKinds=("tool_trace", "verifier", "transcript"),
+    ),
 )
 
 _BUILTIN_EVIDENCE_BY_TYPE: dict[str, BuiltInEvidenceType] = {
