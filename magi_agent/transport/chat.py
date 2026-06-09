@@ -2463,10 +2463,20 @@ def _build_egress_evidence_view(
 
     files_read: list[FileReadView] = []
     turns: list[str] = []
+    # No real session id is threaded to this seam (the builder only receives the
+    # tool bundle, not the chat payload). PR2's projection filters the ReadLedger
+    # by a known session id; here we derive it from the FIRST read entry and skip
+    # any later entries from a different session, keeping the view session-scoped
+    # consistent with PR2. If there are no reads the placeholder is retained.
     session_id = "live-egress-session"
     if read_ledger is not None:
         for entry in read_ledger.iter_entries():
-            session_id = entry.session_id
+            if files_read:
+                # Session pinned to the first entry — skip cross-session entries.
+                if entry.session_id != session_id:
+                    continue
+            else:
+                session_id = entry.session_id
             turns.append(entry.turn_id)
             files_read.append(
                 FileReadView(
@@ -2477,6 +2487,13 @@ def _build_egress_evidence_view(
                 )
             )
 
+    # NOTE: tool_calls here are sourced from gate5b ``host.counter.receipts`` (the
+    # egress-time producer), whereas PR2's introspection tool sources tool_calls
+    # from EvidenceLedger records. The two producers can diverge for the same turn
+    # (different status vocabularies / coverage). Unifying onto a single tool-call
+    # source is a documented follow-up; not done here.
+    # The receipts carry no per-entry session/turn id at this seam, so the pinned
+    # session's placeholder turn id is used for all of them.
     tool_calls = tuple(
         ToolCallView(
             name=receipt.tool_name,
@@ -2567,7 +2584,7 @@ def _egress_critic_model_factory(payload: object) -> Callable[[], object] | None
 # Sensible Haiku-class fallback used ONLY if the resolved provider config cannot
 # yield its own default model string. Keeps the egress critic explicitly resolved
 # rather than ever inheriting SmartApprove's pinned env model.
-_EGRESS_CRITIC_DEFAULT_MODEL = "anthropic/claude-haiku-4-6"
+_EGRESS_CRITIC_DEFAULT_MODEL = "anthropic/claude-haiku-4-5"
 
 
 def _production_egress_critic_model_factory() -> Callable[[], object] | None:

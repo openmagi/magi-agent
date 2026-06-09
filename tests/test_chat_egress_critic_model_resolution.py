@@ -132,14 +132,14 @@ def test_production_factory_honours_haiku_override_env(monkeypatch) -> None:
         return _FakeModel(model=model_override or provider_config.litellm_model)
 
     monkeypatch.setattr(rc, "_build_litellm_for_config", _fake_build)
-    monkeypatch.setenv("MAGI_EGRESS_CRITIC_MODEL", "anthropic/claude-haiku-4-6")
+    monkeypatch.setenv("MAGI_EGRESS_CRITIC_MODEL", "anthropic/claude-haiku-4-5")
 
     factory = chat._egress_critic_model_factory({"messages": []})
     assert factory is not None
     model = factory()
     assert isinstance(model, _FakeModel)
-    assert captured["model_override"] == "anthropic/claude-haiku-4-6"
-    assert model.model == "anthropic/claude-haiku-4-6"
+    assert captured["model_override"] == "anthropic/claude-haiku-4-5"
+    assert model.model == "anthropic/claude-haiku-4-5"
 
 
 def test_production_factory_ignores_smartapprove_env(monkeypatch) -> None:
