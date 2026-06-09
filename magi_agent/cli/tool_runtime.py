@@ -17,6 +17,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from inspect import isawaitable, signature
+from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
 from magi_agent.runtime.session_identity import MemoryMode
@@ -32,6 +33,7 @@ if TYPE_CHECKING:
     from magi_agent.tools.registry import ToolRegistry
 
 CLI_BOT_ID = "magi-cli"
+CLI_USER_ID = "cli"
 
 
 @dataclass
@@ -73,6 +75,12 @@ def build_cli_tool_runtime(
     registry = ToolRegistry()
     register_core_tool_manifests(registry)
     bind_core_toolhost_handlers(registry)
+    bind_cli_local_full_tool_handlers(
+        registry,
+        workspace_root=workspace_root,
+        bot_id=CLI_BOT_ID,
+        user_id=CLI_USER_ID,
+    )
 
     # Optional file & multimodal tools (MAGI_FILE_TOOLS_ENABLED=true).
     # Guarded here so the gate is evaluated at build time, not import time.
@@ -101,12 +109,21 @@ def build_cli_tool_runtime(
     def tool_context_factory(adk_tool_context: object) -> ToolContext:
         return ToolContext(
             bot_id=CLI_BOT_ID,
+            user_id=CLI_USER_ID,
             session_id=session_id,
+            session_key=session_id,
             turn_id="cli",
             workspace_root=workspace_root,
+            workspace_ref="local-cli-workspace",
             memory_mode=memory_mode_value,
+            channel="cli",
+            permission_scope={
+                "mode": "selected_full_toolhost",
+                "source": "selected_full_toolhost",
+            },
             execution_contract={"agentRole": "general"},
             adk_tool_context=adk_tool_context,
+            adk_context=adk_tool_context,
         )
 
     return CliToolRuntime(
@@ -150,6 +167,31 @@ def build_cli_adk_tools(
         collector=local_tool_evidence_collector,
         session_id=session_id,
     )
+
+
+def bind_cli_local_full_tool_handlers(
+    registry: "ToolRegistry",
+    *,
+    workspace_root: str | Path,
+    bot_id: str,
+    user_id: str,
+) -> None:
+    """Bind local-full gated tool hosts into a CLI/dashboard registry."""
+
+    from magi_agent.introspection.tool import (  # noqa: PLC0415
+        bind_inspect_self_evidence_handler,
+    )
+    from magi_agent.runtime.memory_write_wiring import (  # noqa: PLC0415
+        build_memory_write_host,
+    )
+
+    bind_inspect_self_evidence_handler(registry)
+    memory_write_host = build_memory_write_host(
+        workspace_root=Path(workspace_root),
+        bot_id=bot_id,
+        user_id=user_id,
+    )
+    memory_write_host.bind(registry)
 
 
 def wrap_cli_adk_tools_with_evidence_collector(
@@ -320,9 +362,11 @@ def build_cli_instruction(
 
 __all__ = [
     "CLI_BOT_ID",
+    "CLI_USER_ID",
     "CliToolRuntime",
     "build_cli_adk_tools",
     "build_cli_instruction",
     "build_cli_tool_runtime",
+    "bind_cli_local_full_tool_handlers",
     "wrap_cli_adk_tools_with_evidence_collector",
 ]
