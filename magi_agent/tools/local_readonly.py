@@ -23,6 +23,12 @@ from magi_agent.evidence.source_ledger import (
 )
 
 from .context import ToolContext
+from .memory_mode_guard import (
+    is_incognito_memory_mode,
+    is_long_term_memory_read_disabled,
+    is_protected_memory_path,
+    protected_memory_error,
+)
 from .result import ToolResult
 
 
@@ -185,6 +191,9 @@ class LocalReadOnlyToolHost:
         path_text = _string_arg(arguments, "path", "file", "filePath")
         if path_text is None:
             return _blocked_result("FileRead", "path_required")
+        memory_block = _memory_mode_read_block("FileRead", path_text, context)
+        if memory_block is not None:
+            return memory_block
 
         if self._read_quality_enabled:
             missing = self._file_read_did_you_mean(root, path_text, context, arguments)
@@ -373,6 +382,7 @@ class LocalReadOnlyToolHost:
             files = rg_files
         else:
             files = list(_safe_glob_files(root, pattern, max_files=max_matches + 1))
+        files = _memory_mode_filter_readable_files(files, context)
         selected = files[:max_matches]
         source_bundle = self._source_bundle(
             context,
@@ -405,6 +415,9 @@ class LocalReadOnlyToolHost:
             return _blocked_result("Grep", "grep_pattern_required")
         matcher = re.compile(pattern_text)
         glob_pattern = _string_arg(arguments, "glob", "path", "patternGlob") or "**/*"
+        memory_block = _memory_mode_read_block("Grep", glob_pattern, context)
+        if memory_block is not None:
+            return memory_block
         max_files = _bounded_int(
             arguments.get("maxFiles"),
             default=_DEFAULT_MAX_FILES,
@@ -430,6 +443,7 @@ class LocalReadOnlyToolHost:
             files: tuple[_ResolvedPath, ...] = rg_resolved
         else:
             files = _safe_glob_files(root, glob_pattern, max_files=max_files + 1)
+        files = _memory_mode_filter_readable_files(files, context)
         selected_files = files[:max_files]
         matches: list[dict[str, object]] = []
         source_inputs: list[tuple[_ResolvedPath, str]] = []
@@ -1037,6 +1051,43 @@ def _blocked_result(tool_name: str, reason: str) -> ToolResult:
         errorCode=reason,
         errorMessage=reason.replace("_", " "),
         metadata=_base_metadata(tool_name, reason=reason),
+    )
+
+
+def _memory_mode_read_block(
+    tool_name: str,
+    path_text: str,
+    context: ToolContext,
+) -> ToolResult | None:
+    """Block protected memory reads when the channel disables raw memory reads."""
+
+    if not is_long_term_memory_read_disabled(context.memory_mode):
+        return None
+    if not is_protected_memory_path(path_text):
+        return None
+    reason = (
+        "memory_mode_incognito"
+        if is_incognito_memory_mode(context.memory_mode)
+        else "memory_mode_blocked"
+    )
+    return ToolResult(
+        status="blocked",
+        errorCode=reason,
+        errorMessage=protected_memory_error(path_text),
+        metadata=_base_metadata(tool_name, reason=reason),
+    )
+
+
+def _memory_mode_filter_readable_files(
+    files: Sequence[_ResolvedPath],
+    context: ToolContext,
+) -> tuple[_ResolvedPath, ...]:
+    if not is_long_term_memory_read_disabled(context.memory_mode):
+        return tuple(files)
+    return tuple(
+        resolved
+        for resolved in files
+        if not is_protected_memory_path(resolved.relative)
     )
 
 

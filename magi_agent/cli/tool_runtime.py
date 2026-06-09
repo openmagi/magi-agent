@@ -48,6 +48,7 @@ def build_cli_tool_runtime(
     *,
     workspace_root: str,
     session_id: str = "cli-session",
+    memory_mode: "MemoryMode | str" = "normal",
     general_automation_receipts: "GeneralAutomationReceiptLedgerStore | None" = None,
 ) -> CliToolRuntime:
     """Assemble the registry, dispatcher, and tool-context factory.
@@ -93,6 +94,9 @@ def build_cli_tool_runtime(
         registry,
         general_automation_receipts=receipt_store,
     )
+    memory_mode_value = (
+        memory_mode.value if isinstance(memory_mode, MemoryMode) else str(memory_mode)
+    )
 
     def tool_context_factory(adk_tool_context: object) -> ToolContext:
         return ToolContext(
@@ -100,6 +104,7 @@ def build_cli_tool_runtime(
             session_id=session_id,
             turn_id="cli",
             workspace_root=workspace_root,
+            memory_mode=memory_mode_value,
             execution_contract={"agentRole": "general"},
             adk_tool_context=adk_tool_context,
         )
@@ -117,6 +122,7 @@ def build_cli_adk_tools(
     workspace_root: str,
     session_id: str = "cli-session",
     mode: "RuntimeMode" = "act",
+    memory_mode: "MemoryMode | str" = "normal",
     general_automation_receipts: "GeneralAutomationReceiptLedgerStore | None" = None,
     local_tool_evidence_collector: "LocalToolEvidenceCollector | None" = None,
 ) -> list[object]:
@@ -129,6 +135,7 @@ def build_cli_adk_tools(
     runtime = build_cli_tool_runtime(
         workspace_root=workspace_root,
         session_id=session_id,
+        memory_mode=memory_mode,
         general_automation_receipts=general_automation_receipts,
     )
     tools = build_adk_function_tools_for_registry(
