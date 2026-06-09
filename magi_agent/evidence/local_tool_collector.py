@@ -155,6 +155,53 @@ class LocalToolEvidenceCollector:
         except Exception:
             return
 
+    def record_verifier_verdict(
+        self,
+        session_id: str,
+        turn_id: str,
+        stage: str,
+        result: str,
+    ) -> None:
+        """Record a verifier verdict for the turn as ledger evidence.
+
+        Appends a ``custom:VerifierVerdict`` ``EvidenceRecord`` into the SAME
+        per-``(session, turn)`` EvidenceLedger that Stage 1's tool-trace and
+        Stage 3's phase records share, so ``InspectSelfEvidence`` can project
+        the REAL verifier verdicts the turn produced. Flag-gated on
+        ``MAGI_EVIDENCE_LEDGER_LIFECYCLE_ENABLED`` (default OFF -> no record,
+        byte-identical) and fail-open (never breaks a turn).
+
+        Deliberately bypasses ``EvidenceLedger.append_verifier_verdict`` (which
+        requires ``matched_evidence_refs`` pointing at evidence_records in the
+        same per-turn ledger — the verifier bus produces public ref strings, not
+        ledger evidence_refs, so that path would skip-on-mismatch and yield
+        near-always-empty verdicts). The record carries NO ``toolName`` so the
+        shared tool-call normalizer ignores it; the verdict projection keys off
+        the ``custom:VerifierVerdict`` type and reads ``fields.stage`` /
+        ``fields.result``.
+        """
+        # Fail-open: verdict synthesis/append must NEVER break a turn. Mirrors
+        # the ``record_phase_reached`` convention.
+        try:
+            from magi_agent.config.env import (  # noqa: PLC0415
+                is_evidence_ledger_lifecycle_enabled,
+            )
+
+            if not is_evidence_ledger_lifecycle_enabled():
+                return
+            if not session_id or not turn_id or not stage or not result:
+                return
+            self._append_turn_record(
+                session_id=session_id,
+                turn_id=turn_id,
+                record=_synthesize_verifier_verdict_record(
+                    stage=stage,
+                    result=result,
+                ),
+            )
+        except Exception:
+            return
+
     def _maybe_append_evidence_ledger_record(
         self,
         *,
@@ -490,6 +537,24 @@ def _synthesize_phase_reached_record(*, phase_name: str) -> EvidenceRecord:
             "observedAt": time.time(),
             "source": {"kind": "tool_trace"},
             "fields": {"phaseName": phase_name, "reached": True},
+        }
+    )
+
+
+def _synthesize_verifier_verdict_record(*, stage: str, result: str) -> EvidenceRecord:
+    # Mirror the phase-reached pattern: "verifier"/"runtime" are NOT valid
+    # EvidenceSourceKind values; reuse the "tool_trace" kind (the only
+    # local-origin source kind) but deliberately set NO ``toolName`` so the
+    # shared ``tool_call_from_evidence_record`` normalizer skips it. The verdict
+    # projection discriminates on the ``custom:VerifierVerdict`` type and reads
+    # ``fields.stage`` / ``fields.result``.
+    return EvidenceRecord.model_validate(
+        {
+            "type": "custom:VerifierVerdict",
+            "status": "ok",
+            "observedAt": time.time(),
+            "source": {"kind": "tool_trace"},
+            "fields": {"stage": stage, "result": result},
         }
     )
 

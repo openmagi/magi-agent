@@ -263,3 +263,119 @@ def test_end_to_end_phases_via_real_factory(
     # The phase marker did not leak into tool_calls.
     tools = inspect_self_evidence(query_type="tools_called", context=context)["tool_calls"]
     assert {(c["name"], c["turn"]) for c in tools} == {("Grep", "turn-7")}
+
+
+# ---------------------------------------------------------------------------
+# Stage 2 — verifier-verdict evidence
+# ---------------------------------------------------------------------------
+
+
+def _verdict_entries(ledger: EvidenceLedger) -> list[tuple[str, str]]:
+    return [
+        (e.payload["record"]["fields"]["stage"], e.payload["record"]["fields"]["result"])
+        for e in ledger.entries
+        if e.kind == "evidence_record"
+        and e.payload["record"]["type"] == "custom:VerifierVerdict"
+    ]
+
+
+def test_record_verifier_verdict_appends_verdict_record(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(_ENV, "1")
+    collector = LocalToolEvidenceCollector()
+
+    collector.record_verifier_verdict(
+        "session-1", "turn-1", "tool_evidence_contract", "pass"
+    )
+
+    ledgers = collector.evidence_ledgers_for_session("session-1")
+    assert len(ledgers) == 1
+    assert _verdict_entries(ledgers[0]) == [("tool_evidence_contract", "pass")]
+
+
+def test_record_verifier_verdict_no_record_when_flag_off(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv(_ENV, raising=False)
+    collector = LocalToolEvidenceCollector()
+
+    collector.record_verifier_verdict(
+        "session-1", "turn-1", "tool_evidence_contract", "pass"
+    )
+
+    assert collector.evidence_ledgers_for_session("session-1") == ()
+
+
+def test_record_verifier_verdict_ignores_empty_inputs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(_ENV, "1")
+    collector = LocalToolEvidenceCollector()
+
+    collector.record_verifier_verdict("", "turn-1", "stage", "pass")
+    collector.record_verifier_verdict("session-1", "", "stage", "pass")
+    collector.record_verifier_verdict("session-1", "turn-1", "", "pass")
+    collector.record_verifier_verdict("session-1", "turn-1", "stage", "")
+
+    assert collector.evidence_ledgers_for_session("session-1") == ()
+
+
+def test_record_verifier_verdict_shares_turn_ledger_with_tool_and_phase(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(_ENV, "1")
+    collector = LocalToolEvidenceCollector()
+
+    _record(collector, turn_id="turn-1", tool_name="Grep")
+    collector.record_phase_reached("session-1", "turn-1", "analysis")
+    collector.record_verifier_verdict(
+        "session-1", "turn-1", "tool_evidence_contract", "pass"
+    )
+
+    ledgers = collector.evidence_ledgers_for_session("session-1")
+    # One single-turn ledger holds the tool trace, phase marker, and verdict,
+    # with a contiguous append-only sequence preserved.
+    assert len(ledgers) == 1
+    ledger = ledgers[0]
+    assert [e.sequence for e in ledger.entries] == [1, 2, 3]
+    kinds = [
+        e.payload["record"]["type"]
+        for e in ledger.entries
+        if e.kind == "evidence_record"
+    ]
+    assert kinds == [
+        "custom:ToolTrace",
+        "custom:PhaseReached",
+        "custom:VerifierVerdict",
+    ]
+
+
+def test_end_to_end_verdicts_via_real_factory(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setenv(_ENV, "1")
+    from magi_agent.cli.tool_runtime import build_cli_tool_runtime
+
+    collector = LocalToolEvidenceCollector()
+    _record(collector, turn_id="turn-9", tool_name="Grep")
+    collector.record_verifier_verdict(
+        "session-1", "turn-9", "tool_evidence_contract", "pass"
+    )
+
+    runtime = build_cli_tool_runtime(
+        workspace_root=str(tmp_path),
+        session_id="session-1",
+        local_tool_evidence_collector=collector,
+    )
+    context = runtime.tool_context_factory(adk_tool_context=None)
+
+    result = inspect_self_evidence(query_type="verifier_verdicts", context=context)
+    verdicts = result["verdicts"]
+    assert {(v["stage"], v["result"], v["turn"]) for v in verdicts} == {
+        ("tool_evidence_contract", "pass", "turn-9"),
+    }
+    # The verdict marker did not leak into tool_calls.
+    tools = inspect_self_evidence(query_type="tools_called", context=context)["tool_calls"]
+    assert {(c["name"], c["turn"]) for c in tools} == {("Grep", "turn-9")}

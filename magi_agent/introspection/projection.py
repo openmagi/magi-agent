@@ -152,6 +152,16 @@ def project_session_evidence(
 # (transport/chat.py) has no EvidenceLedger, so it still yields ``phases=()``.
 _PHASE_REACHED_RECORD_TYPE = "custom:PhaseReached"
 
+# Verifier verdicts are emitted by the Stage 2 producer
+# (``LocalToolEvidenceCollector.record_verifier_verdict``) as evidence_records
+# of this type carrying ``fields.stage`` / ``fields.result`` and NO
+# ``source.toolName`` (so the tool-call normalizer skips them). This sidesteps
+# ``EvidenceLedger.append_verifier_verdict``'s evidence-ref matching constraint,
+# which the verifier bus (public ref strings, not ledger evidence_refs) cannot
+# satisfy. The native ``kind=="verifier_verdict"`` ledger path is left intact
+# below for any real verifier_verdict entries.
+_VERIFIER_VERDICT_RECORD_TYPE = "custom:VerifierVerdict"
+
 
 def _categorize_ledger_entry(
     entry: EvidenceLedgerEntry,
@@ -179,6 +189,16 @@ def _categorize_ledger_entry(
             phases.append(phase_view)
         return
 
+    # Verifier verdicts are evidence_records distinguished by their ``type``.
+    # Like phase markers they carry no ``source.toolName``, so categorize them
+    # BEFORE the tool-call normalizer and short-circuit (no leak into
+    # tool_calls).
+    if record.get("type") == _VERIFIER_VERDICT_RECORD_TYPE:
+        verdict_view = _verdict_view_from_record(record, entry.turn_id)
+        if verdict_view is not None:
+            verdicts.append(verdict_view)
+        return
+
     # Tool-call projection is delegated to the SHARED normalization helper
     # (introspection/mapping.py) so this PULL seam and the egress PUSH seam
     # (transport/chat.py) emit an identical ``ToolCallView`` shape + canonical
@@ -201,6 +221,22 @@ def _phase_view(record: Mapping[str, object], turn_id: str) -> PhaseView | None:
         reached=bool(reached) if isinstance(reached, bool) else True,
         turnId=turn_id,
     )
+
+
+def _verdict_view_from_record(
+    record: Mapping[str, object],
+    turn_id: str,
+) -> VerdictView | None:
+    fields = record.get("fields")
+    if not isinstance(fields, Mapping):
+        return None
+    stage = fields.get("stage")
+    if not isinstance(stage, str) or not stage:
+        return None
+    result = fields.get("result")
+    if not isinstance(result, str) or not result:
+        return None
+    return VerdictView(stage=stage, result=result, turnId=turn_id)
 
 
 def _verdict_view(entry: EvidenceLedgerEntry) -> VerdictView:

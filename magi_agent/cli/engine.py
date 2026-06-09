@@ -1446,6 +1446,7 @@ class MagiEngineDriver:
 
         while True:
             pre_final_gate = self._pre_final_gate_payload(
+                session_id=session_id,
                 turn_id=turn_id,
                 prompt=prompt,
                 harness_state=effective_harness_state,
@@ -1663,6 +1664,50 @@ class MagiEngineDriver:
             record_phase(session_id, turn_id, phase)
         except Exception:
             logger.debug("phase-reached evidence record failed", exc_info=True)
+
+    def _record_verifier_verdicts(
+        self,
+        *,
+        session_id: str,
+        turn_id: str,
+        verifier_bus: Mapping[str, object],
+    ) -> None:
+        """Feed the turn's verifier-bus verdicts to the collector (Stage 2).
+
+        The verifier bus (``execute_pre_final_verifier_bus``) returns a
+        ``results`` list whose entries carry ``verifierId`` (the verifier
+        stage/contract id) and ``status`` (pass/failed/missing/...). Each is
+        recorded as a ``custom:VerifierVerdict`` evidence_record in the same
+        per-``(session, turn)`` ledger so ``InspectSelfEvidence`` can project
+        the REAL verdicts. Mirrors ``_record_phase_reached``: the collector is
+        wired as its ``collect_for_turn`` bound method, so the owning
+        ``LocalToolEvidenceCollector`` is recovered via ``__self__``. Flag-gating
+        + fail-open live in the collector; this seam is also defensive (missing
+        collector / method records nothing and never breaks the turn).
+        """
+        collector = self._evidence_collector
+        if collector is None:
+            return
+        owner = getattr(collector, "__self__", None)
+        record_verdict = getattr(owner, "record_verifier_verdict", None)
+        if not callable(record_verdict):
+            return
+        results = verifier_bus.get("results")
+        if not isinstance(results, list):
+            return
+        for result in results:
+            if not isinstance(result, Mapping):
+                continue
+            stage = result.get("verifierId")
+            status = result.get("status")
+            if not isinstance(stage, str) or not stage:
+                continue
+            if not isinstance(status, str) or not status:
+                continue
+            try:
+                record_verdict(session_id, turn_id, stage, status)
+            except Exception:
+                logger.debug("verifier-verdict evidence record failed", exc_info=True)
 
     async def _attempt_run_recovery(
         self,
@@ -2015,6 +2060,7 @@ class MagiEngineDriver:
     def _pre_final_gate_payload(
         self,
         *,
+        session_id: str,
         turn_id: str,
         prompt: str,
         harness_state: object | None,
@@ -2056,6 +2102,11 @@ class MagiEngineDriver:
             raw_failed_coverage = verifier_bus.get("failedDocumentCoverage")
             if isinstance(raw_failed_coverage, int):
                 failed_document_coverage = raw_failed_coverage
+            self._record_verifier_verdicts(
+                session_id=session_id,
+                turn_id=turn_id,
+                verifier_bus=verifier_bus,
+            )
         missing_evidence = [
             ref for ref in assembly.evidence_requirements if ref not in observed_public_refs
         ]

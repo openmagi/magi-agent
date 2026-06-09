@@ -230,6 +230,75 @@ def test_verifier_verdict_is_projected() -> None:
     assert view.verdicts[0].turn_id == "turn-1"
 
 
+def _verdict_record(
+    *,
+    stage: str,
+    result: str,
+    observed_at: int = 1_779_000_003,
+) -> EvidenceRecord:
+    return EvidenceRecord.model_validate(
+        {
+            "type": "custom:VerifierVerdict",
+            "status": "ok",
+            "observedAt": observed_at,
+            "source": {"kind": "tool_trace"},
+            "fields": {"stage": stage, "result": result},
+        }
+    )
+
+
+def test_custom_verifier_verdict_record_is_projected() -> None:
+    ledger = _base_ledger().append_evidence_record(
+        _verdict_record(stage="tool_evidence_contract", result="pass")
+    )
+
+    view = project_session_evidence(ledger)
+
+    assert len(view.verdicts) == 1
+    assert view.verdicts[0].stage == "tool_evidence_contract"
+    assert view.verdicts[0].result == "pass"
+    assert view.verdicts[0].turn_id == "turn-1"
+    # A verdict marker carries no toolName, so it must NOT leak into tool_calls.
+    assert view.tool_calls == ()
+    assert view.phases == ()
+
+
+def test_custom_verdict_record_with_missing_fields_is_skipped() -> None:
+    bad = EvidenceRecord.model_validate(
+        {
+            "type": "custom:VerifierVerdict",
+            "status": "ok",
+            "observedAt": 1_779_000_004,
+            "source": {"kind": "tool_trace"},
+            "fields": {"stage": "tool_evidence_contract"},
+        }
+    )
+    ledger = _base_ledger().append_evidence_record(bad)
+
+    view = project_session_evidence(ledger)
+
+    assert view.verdicts == ()
+    assert view.tool_calls == ()
+
+
+def test_custom_verdict_tool_and_phase_records_coexist() -> None:
+    ledger = _base_ledger().append_evidence_record(
+        _tool_call_record(name="Grep", status="ok")
+    )
+    ledger = ledger.append_evidence_record(_phase_record(phase_name="analysis"))
+    ledger = ledger.append_evidence_record(
+        _verdict_record(stage="tool_evidence_contract", result="pass")
+    )
+
+    view = project_session_evidence(ledger)
+
+    assert [t.name for t in view.tool_calls] == ["Grep"]
+    assert [(p.name, p.reached) for p in view.phases] == [("analysis", True)]
+    assert [(v.stage, v.result) for v in view.verdicts] == [
+        ("tool_evidence_contract", "pass")
+    ]
+
+
 def test_turn_filter_restricts_to_one_turn() -> None:
     # EvidenceLedger entries all belong to one turn, so multi-turn coverage is
     # expressed by projecting across distinct read-ledger entries.
