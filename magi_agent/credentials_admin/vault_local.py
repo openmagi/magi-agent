@@ -69,12 +69,17 @@ def register_credential(
     label: str,
     auth_scheme: str,
     secret: str,
+    requires_approval: bool = False,
 ) -> dict[str, object]:
     """Forward a secret to the local vault and return a redacted result.
 
     Returns ``{"vault_ref": "<ref>"}`` when the vault accepted the secret, or
     ``{"disabled": True}`` when the seam is default-OFF. The ``secret`` argument
     is consumed locally and is never returned, logged, or raised.
+
+    ``requires_approval`` marks the credential as guarded: the future vault
+    raises a human-approval request (see ``resolve_approval``) before the agent
+    may use it. It is forwarded to the vault seam body and is non-secret.
     """
     if not vault_admin_enabled():
         # Default-OFF: inert. No network, no vault_ref. The caller records the
@@ -87,6 +92,7 @@ def register_credential(
             label=label,
             auth_scheme=auth_scheme,
             secret=secret,
+            requires_approval=requires_approval,
         )
     except Exception as exc:  # noqa: BLE001 - normalize to a secret-free error
         # Re-raise a scrubbed error: the original exception may have embedded the
@@ -136,12 +142,16 @@ def _forward_to_vault(
     label: str,
     auth_scheme: str,
     secret: str,
+    requires_approval: bool = False,
 ) -> str:
     """Single transport function — the slot for B's real vault admin API.
 
     In this OSS scaffold there is no real backend wired, so even when the flag is
     ON this raises a secret-free error unless ``MAGI_VAULT_ADMIN_URL`` is set.
     The fingerprint proves a secret was handled without exposing it.
+
+    ``requires_approval`` belongs in the (non-secret) vault request body so B's
+    real adapter can register the credential as guarded.
     """
     url = (os.environ.get("MAGI_VAULT_ADMIN_URL") or "").strip()
     if not url:
@@ -153,8 +163,31 @@ def _forward_to_vault(
     _ = _secret_fingerprint(secret)
     raise VaultSeamError(
         "vault admin transport is not wired in the OSS scaffold; "
-        f"service={service!r} scheme={auth_scheme!r}"
+        f"service={service!r} scheme={auth_scheme!r} "
+        f"requires_approval={requires_approval!r}"
     )
+
+
+def resolve_approval(*, approval_id: str, decision: str) -> dict[str, object]:
+    """Forward an operator's approval decision to the vault. No-op when OFF.
+
+    Returns ``{"disabled": True}`` when the seam is default-OFF (the caller has
+    already recorded the decision in the local approvals store, which is the
+    source of truth for the dashboard). When enabled this is the slot where B's
+    real vault admin API is told the guarded credential may (or may not) be used.
+    """
+    if not vault_admin_enabled():
+        return {"disabled": True}
+    return _resolve_in_vault(approval_id=approval_id, decision=decision)
+
+
+def _resolve_in_vault(*, approval_id: str, decision: str) -> dict[str, object]:
+    url = (os.environ.get("MAGI_VAULT_ADMIN_URL") or "").strip()
+    if not url:
+        # Enabled-but-unwired: honest no-op so the local decision still stands.
+        return {"disabled": True}
+    # Real resolve transport lands here in sub-project B.
+    return {"resolved": True, "approval_id": approval_id, "decision": decision}
 
 
 def _revoke_in_vault(*, vault_ref: str) -> None:

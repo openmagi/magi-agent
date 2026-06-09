@@ -21,7 +21,7 @@ import logging
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from magi_agent.credentials_admin import store, vault_local
+from magi_agent.credentials_admin import approvals_store, store, vault_local
 from magi_agent.runtime.openmagi_runtime import OpenMagiRuntime
 from magi_agent.storage.durable_store import DurableStoreSafetyError
 from magi_agent.transport.tools import _unauthorized_response
@@ -63,7 +63,7 @@ def register_credentials_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
         fields = _validate_body(body)
         if isinstance(fields, JSONResponse):
             return fields
-        service, label, auth_scheme, secret = fields
+        service, label, auth_scheme, secret, requires_approval = fields
 
         # Forward the secret to the vault seam, then drop it. The seam never
         # returns, logs, or raises the plaintext.
@@ -73,6 +73,7 @@ def register_credentials_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
                 label=label,
                 auth_scheme=auth_scheme,
                 secret=secret,
+                requires_approval=requires_approval,
             )
         except vault_local.VaultSeamError:
             # Secret-free error: the credential could not be stored in the vault.
@@ -96,6 +97,7 @@ def register_credentials_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
             auth_scheme=auth_scheme,
             status=status,
             vault_ref=vault_ref,
+            requires_approval=requires_approval,
         )
 
         # Exercise (do not bypass) the durable store guard with a digest-only
@@ -143,16 +145,66 @@ def register_credentials_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
             )
         return JSONResponse(content={"credential": updated})
 
+    @app.get("/v1/admin/credentials/approvals")
+    @app.get("/api/credentials/approvals")
+    async def list_approvals(request: Request) -> JSONResponse:
+        unauthorized = _unauthorized_response(request, runtime)
+        if unauthorized is not None:
+            return unauthorized
+        status = request.query_params.get("status")
+        approvals = approvals_store.list_approvals(status=status or None)
+        return JSONResponse(content={"approvals": approvals})
+
+    @app.post("/v1/admin/credentials/approvals/{approval_id}")
+    @app.post("/api/credentials/approvals/{approval_id}")
+    async def decide_approval(approval_id: str, request: Request) -> JSONResponse:
+        unauthorized = _unauthorized_response(request, runtime)
+        if unauthorized is not None:
+            return unauthorized
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse(status_code=400, content={"error": "invalid_json"})
+        if not isinstance(body, dict):
+            return JSONResponse(status_code=400, content={"error": "object_required"})
+        decision = body.get("decision")
+        if decision not in approvals_store.DECISION_STATUSES:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "invalid_decision", "field": "decision"},
+            )
+
+        # Record the operator's decision locally first — the local store is the
+        # source of truth for the dashboard regardless of the vault seam state.
+        updated = approvals_store.decide_approval(approval_id, decision)
+        if updated is None:
+            return JSONResponse(
+                status_code=404,
+                content={"error": "not_found", "message": "approval not found"},
+            )
+
+        # Forward the decision to the vault seam (no-op when default-OFF). Never
+        # surfaces a secret — the approval record is metadata only.
+        vault_local.resolve_approval(approval_id=approval_id, decision=decision)
+
+        return JSONResponse(content={"approval": updated})
+
 
 def _validate_body(
     body: object,
-) -> tuple[str, str, str, str] | JSONResponse:
+) -> tuple[str, str, str, str, bool] | JSONResponse:
     if not isinstance(body, dict):
         return JSONResponse(status_code=400, content={"error": "object_required"})
     service = body.get("service")
     label = body.get("label")
     auth_scheme = body.get("auth_scheme")
     secret = body.get("secret")
+    requires_approval_raw = body.get("requires_approval", False)
+    if not isinstance(requires_approval_raw, bool):
+        return JSONResponse(
+            status_code=400,
+            content={"error": "field_invalid", "field": "requires_approval"},
+        )
     for name, value in (
         ("service", service),
         ("label", label),
@@ -174,6 +226,7 @@ def _validate_body(
         str(label).strip(),
         str(auth_scheme).strip(),
         str(secret),
+        bool(requires_approval_raw),
     )
 
 

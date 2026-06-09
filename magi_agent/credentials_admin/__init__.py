@@ -8,6 +8,6 @@ available, registration is rejected and no metadata row is created.
 
 from __future__ import annotations
 
-from magi_agent.credentials_admin import store, vault_local
+from magi_agent.credentials_admin import approvals_store, store, vault_local
 
-__all__ = ["store", "vault_local"]
+__all__ = ["approvals_store", "store", "vault_local"]
