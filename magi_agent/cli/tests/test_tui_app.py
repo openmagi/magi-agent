@@ -1428,3 +1428,97 @@ def test_footer_resets_when_turn_worker_raises() -> None:
         assert captured.get("started") is None
 
     asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
+# PR3.2 — Sidebar: mount hidden, ctrl+b toggles visibility
+# ---------------------------------------------------------------------------
+def test_ctrl_b_toggles_sidebar_visibility() -> None:
+    async def _run() -> None:
+        app = _make_app(FakeEngineDriver())
+        async with app.run_test() as pilot:
+            sidebar = app.query_one("#sidebar")
+            # Hidden on mount.
+            assert sidebar.display is False
+            await pilot.press("ctrl+b")
+            await pilot.pause()
+            assert sidebar.display is True
+            await pilot.press("ctrl+b")
+            await pilot.pause()
+            assert sidebar.display is False
+
+    asyncio.run(_run())
+
+
+def test_ctrl_b_binding_present_and_no_collision() -> None:
+    """ctrl+b is a real App BINDING and collides with nothing else.
+
+    It must not duplicate ctrl+c / ctrl+y / f1 (the other App BINDINGS) nor any
+    keybindings-default keystroke (defaults.py) — those route through the
+    resolver before BINDINGS, so a collision would silently shadow the toggle.
+    """
+
+    from textual.binding import Binding
+
+    from magi_agent.cli.keybindings.defaults import DEFAULT_SPEC
+
+    def _key(binding: object) -> str:
+        if isinstance(binding, Binding):
+            return binding.key
+        return binding[0]  # bare ("key", action, desc) tuple
+
+    keys = [_key(b) for b in MagiTuiApp.BINDINGS]
+    assert keys.count("ctrl+b") == 1, "ctrl+b must be bound exactly once"
+    # No clash with the keybindings-default keystrokes (which win in on_key).
+    default_keys = {chord for _ctx, chord, _action in DEFAULT_SPEC}
+    assert "ctrl+b" not in default_keys
+
+
+def test_sidebar_panes_fed_from_tool_and_terminal_events() -> None:
+    async def _run() -> None:
+        class _ToolEngine(FakeEngineDriver):
+            async def run_turn_stream(self, runtime, turn_input, *, cancel, gate=None):
+                turn_id = getattr(turn_input, "turn_id", "t")
+                yield RuntimeEvent(
+                    type="tool",
+                    payload={
+                        "type": "tool_start",
+                        "name": "TodoWrite",
+                        "input": {
+                            "todos": [
+                                {"content": "step one"},
+                                {"content": "step two"},
+                            ]
+                        },
+                    },
+                    turn_id=turn_id,
+                )
+                yield RuntimeEvent(
+                    type="tool",
+                    payload={
+                        "type": "tool_start",
+                        "name": "Read",
+                        "input": {"path": "lib/x.py"},
+                    },
+                    turn_id=turn_id,
+                )
+                yield EngineResult(
+                    terminal=Terminal.completed,
+                    usage={"input_tokens": 500, "output_tokens": 40},
+                    turn_id=turn_id,
+                )
+
+        app = _make_app(_ToolEngine())
+        async with app.run_test() as pilot:
+            app.start_turn("do work")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            sidebar = app.query_one("#sidebar")
+            text = sidebar.panes_text()
+        assert "step one" in text
+        assert "step two" in text
+        assert "lib/x.py" in text
+        assert "540" in text  # 500 + 40 token usage folded into context pane
+        assert "200,000" in text  # coarse context-window budget (v1)
+
+    asyncio.run(_run())

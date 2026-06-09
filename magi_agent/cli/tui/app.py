@@ -95,6 +95,7 @@ from magi_agent.cli.tui.palette import (
     tui_command_names,
 )
 from magi_agent.cli.tui.render.markdown import render_markdown
+from magi_agent.cli.tui.sidebar import Sidebar
 from magi_agent.cli.tui.transcript import (
     DEFAULT_FLUSH_INTERVAL,
     TranscriptController,
@@ -491,6 +492,15 @@ class MagiTuiApp(App[None]):
         display: none;
     }
     #completions.visible { display: block; }
+    #sidebar {
+        dock: left;
+        width: 32;
+        padding: 0 1;
+        background: $panel;
+        border-right: solid $primary-darken-2;
+        display: none;
+    }
+    .sidebar-pane { height: auto; padding: 0 0 1 0; }
     ToolUseConfirm { align: center middle; }
     #tool-confirm {
         width: 72;
@@ -532,6 +542,11 @@ class MagiTuiApp(App[None]):
         # fires from the prompt and Ctrl+C appears dead.
         Binding("ctrl+c", "cancel_turn", "Cancel", priority=True),
         ("ctrl+y", "copy_selection", "Copy"),
+        # ctrl+b toggles the left sidebar (PR3.2). priority=True so it preempts
+        # any built-in ctrl+b on the focused Input/TextArea (some widgets map it
+        # to cursor-left); it is NOT in the keybindings defaults (defaults.py),
+        # so on_key resolves it UNBOUND and lets it bubble to this App BINDING.
+        Binding("ctrl+b", "toggle_sidebar", "Sidebar", priority=True),
         # F1 opens the help dialog. F1 is not in the keybindings defaults
         # (defaults.py) and (unlike "?") never collides with typed prompt text,
         # so it is safe to bind globally while the prompt input is focused.
@@ -626,6 +641,9 @@ class MagiTuiApp(App[None]):
         # ``_legacy_richlog`` (the MAGI_TUI_LEGACY_RICHLOG escape hatch, PR0.3).
         self._topbar: Static | None = None
         self._footer: StatusFooter | None = None
+        # Left sidebar (PR3.2): mounted hidden, toggled by ctrl+b. Panes are fed
+        # from folded tool/terminal events (todo / recent files / context usage).
+        self._sidebar: Sidebar | None = None
         # monotonic() stamp marking the in-flight turn's start; None when idle.
         # Used by the footer elapsed clock (set in start_turn, cleared in
         # _render_terminal).
@@ -669,7 +687,13 @@ class MagiTuiApp(App[None]):
         self._footer = StatusFooter(
             model=self._model, cwd=self._topbar_cwd(), id="footer"
         )
+        # Left sidebar (PR3.2): a left-docked sibling, hidden by default (the CSS
+        # sets ``display: none``; ctrl+b flips ``display``). Yielded BEFORE the
+        # transcript so the left dock column is reserved first and the transcript
+        # reflows to the right of it (no extra rule needed — #transcript is 1fr).
+        self._sidebar = Sidebar(id="sidebar")
         yield self._topbar
+        yield self._sidebar
         yield transcript_widget
         yield self._live
         yield self._completions
@@ -1286,6 +1310,14 @@ class MagiTuiApp(App[None]):
         renderable = render_markdown(text)
         self._last_committed_renderable = renderable
         controller.commit_rich(renderable, text=text)
+
+    # -- sidebar toggle (PR3.2) --------------------------------------------
+    def action_toggle_sidebar(self) -> None:
+        """Show/hide the left sidebar (ctrl+b)."""
+
+        if self._sidebar is None:
+            return
+        self._sidebar.display = not self._sidebar.display
 
     # -- cancellation -------------------------------------------------------
     def action_cancel_turn(self) -> None:
