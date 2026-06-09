@@ -164,7 +164,7 @@ class DocumentCoverageBoundary:
         missing_digests: list[str] = []
         for unit in units:
             normalized_unit = _normalize(unit)
-            if normalized_unit and normalized_unit in normalized_doc:
+            if normalized_unit and _unit_in_doc(normalized_unit, normalized_doc):
                 covered += 1
             elif len(missing_digests) < _MAX_MISSING_DIGESTS:
                 missing_digests.append(_compute_digest(unit))
@@ -196,9 +196,23 @@ def evidence_declaration_from_record(
     A tool surfaces a structured :class:`EvidenceRecord` to the
     ``LocalToolEvidenceCollector`` / verifier-bus by placing this declaration
     under ``metadata["evidence"]``; ``evidence_from_tool_result`` then builds the
-    canonical record.  The status mirrors the coverage status so a ``"failed"``
-    coverage produces a ``failed`` evidence record (audit-only here; Task C
-    decides whether to block).
+    canonical record.
+
+    **Dual-status contract** — when this declaration is collected via
+    ``evidence_from_tool_result`` (the production path through
+    ``LocalToolEvidenceCollector``), the resulting ``EvidenceRecord.status``
+    follows ``ToolResult.status`` (``"ok"`` for a successful write), NOT the
+    coverage verdict.  The coverage pass/fail is carried in
+    ``EvidenceRecord.fields["status"]`` (``"pass"`` or ``"failed"``).
+
+    Consumers that need to BLOCK on failed coverage (e.g. a verifier-bus
+    contract, Task C) MUST match on ``fields["status"] == "pass"``, NOT on the
+    record's top-level ``status`` field.
+
+    The ``"status"`` key set here on the *declaration* dict maps to the
+    ``EvidenceRecord.status`` only when the record is built via
+    ``evidence_record_from_record`` directly (the test/utility path), NOT via
+    ``evidence_from_tool_result``.
     """
     source: dict[str, object] = {"kind": "verifier", "verifierName": "document_coverage"}
     if tool_name:
@@ -267,11 +281,41 @@ def _tokenize_units(source: str) -> tuple[str, ...]:
         if "|" in cleaned:
             # Table row: each cell is its own unit (matches per-cell rendering).
             cells = [cell.strip() for cell in cleaned.strip("|").split("|")]
-            units.extend(cell for cell in cells if cell)
+            for cell in cells:
+                if cell and _INLINE_MARKER_RE.sub("", cell).strip():
+                    units.append(cell)
             continue
-        if cleaned:
+        # After stripping inline emphasis markers, if nothing is left (e.g. a
+        # standalone ``**`` or ``_`` line) the line carries no literal words and
+        # must not be counted as a coverage unit (neither covered nor missing).
+        if cleaned and _INLINE_MARKER_RE.sub("", cleaned).strip():
             units.append(cleaned)
     return tuple(units)
+
+
+_WORD_CHAR_RE = re.compile(r"\w")
+
+
+def _unit_in_doc(normalized_unit: str, normalized_doc: str) -> bool:
+    """Return True iff ``normalized_unit`` appears in ``normalized_doc``.
+
+    When the unit both starts and ends with a word character (``\\w``), apply
+    word-boundary anchors so that short tokens like ``"id"`` or ``"us"`` are
+    NOT falsely matched inside larger words (``"identified"``, ``"using"``).
+    Units that start or end with punctuation / non-word chars use plain
+    substring containment, since ``\\b`` placement at non-word boundaries would
+    incorrectly reject valid matches for punctuation-terminated phrases.
+
+    Deterministic and never raises.
+    """
+    if not normalized_unit:
+        return False
+    starts_word = bool(_WORD_CHAR_RE.match(normalized_unit[0]))
+    ends_word = bool(_WORD_CHAR_RE.match(normalized_unit[-1]))
+    if starts_word and ends_word:
+        pattern = r"\b" + re.escape(normalized_unit) + r"\b"
+        return re.search(pattern, normalized_doc) is not None
+    return normalized_unit in normalized_doc
 
 
 def _normalize(text: str) -> str:

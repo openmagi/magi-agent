@@ -207,6 +207,82 @@ class TestEvidenceHelpers:
         assert evidence.fields["coverageRatio"] == 1.0
 
 
+class TestMarkerOnlyLinesDropped:
+    def test_standalone_marker_line_not_counted_as_unit(self) -> None:
+        # A source with a bare ``**`` line (marker-only) followed by real content.
+        # The marker-only line must be invisible: total_units==1, covered==1.
+        source = "**\nReal content"
+        doc = "Real content"
+        record = DocumentCoverageBoundary().build_record(
+            source_markdown=source, doc_text=doc
+        )
+        assert record.total_units == 1
+        assert record.covered_units == 1
+        assert record.status == "pass"
+
+    def test_underscore_only_line_not_counted(self) -> None:
+        source = "_\nActual text"
+        doc = "Actual text"
+        record = DocumentCoverageBoundary().build_record(
+            source_markdown=source, doc_text=doc
+        )
+        assert record.total_units == 1
+        assert record.covered_units == 1
+        assert record.status == "pass"
+
+    def test_mixed_marker_and_real_lines(self) -> None:
+        # Two real lines + one marker-only → total_units==2, not 3.
+        source = "**\nFirst line\n*\nSecond line"
+        doc = "First line\nSecond line"
+        record = DocumentCoverageBoundary().build_record(
+            source_markdown=source, doc_text=doc
+        )
+        assert record.total_units == 2
+        assert record.covered_units == 2
+        assert record.status == "pass"
+
+
+class TestWordBoundaryMatching:
+    def test_short_unit_not_falsely_matched_inside_larger_word(self) -> None:
+        # "id" must NOT be covered by a doc containing only "identified".
+        source = "id"
+        doc = "identified using data"
+        record = DocumentCoverageBoundary().build_record(
+            source_markdown=source, doc_text=doc
+        )
+        assert record.covered_units == 0
+        assert record.status == "failed"
+
+    def test_short_unit_matched_when_present_as_word(self) -> None:
+        # "id" IS covered when the doc contains it as a standalone word.
+        source = "id"
+        doc = "the id was assigned"
+        record = DocumentCoverageBoundary().build_record(
+            source_markdown=source, doc_text=doc
+        )
+        assert record.covered_units == 1
+        assert record.status == "pass"
+
+    def test_unit_not_matched_by_embedded_substring(self) -> None:
+        # "us" inside "using" should not count.
+        source = "us"
+        doc = "using the system"
+        record = DocumentCoverageBoundary().build_record(
+            source_markdown=source, doc_text=doc
+        )
+        assert record.covered_units == 0
+
+    def test_multi_word_unit_matched_exactly(self) -> None:
+        # Multi-word units still match when the phrase appears.
+        source = "revenue growth"
+        doc = "The revenue growth metric"
+        record = DocumentCoverageBoundary().build_record(
+            source_markdown=source, doc_text=doc
+        )
+        assert record.covered_units == 1
+        assert record.status == "pass"
+
+
 class TestRecordIsFrozenDigestOnly:
     def test_record_rejects_non_digest_values(self) -> None:
         import pytest

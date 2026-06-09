@@ -304,6 +304,65 @@ class TestDocxWriteCoverageEvidence:
         assert coverage["coverageRatio"] == 1.0
 
 
+class TestDocxWriteDualStatusContract:
+    """Fix 2: pin the dual-status contract explicitly.
+
+    When coverage is "failed" but the write succeeds, ``EvidenceRecord.status``
+    (top-level) must be ``"ok"`` (following ``ToolResult.status``), while the
+    coverage verdict lives in ``EvidenceRecord.fields["status"] == "failed"``.
+    Consumers that need to block on failed coverage MUST check ``fields["status"]``.
+    """
+
+    def test_failed_coverage_via_collector_ok_top_level_failed_fields(
+        self, tmp_path: Path
+    ) -> None:
+        from unittest.mock import patch
+
+        from magi_agent.evidence.local_tool_collector import LocalToolEvidenceCollector
+        from magi_agent.tools import document_tools
+
+        original = document_tools.extract_docx_text
+
+        def _truncating_extract(doc: object) -> str:
+            # Return only the first paragraph to force many missing units.
+            full = original(doc)
+            return full.split("\n\n")[0] if "\n\n" in full else full[:20]
+
+        with patch.object(document_tools, "extract_docx_text", _truncating_extract):
+            result = docx_write(
+                {"content": _MARKDOWN, "path": "dual-status.docx"}, _context(tmp_path)
+            )
+
+        # Tool write succeeded.
+        assert result.status == "ok", result.error_code
+        # Coverage projection shows failed.
+        assert result.output["coverage"]["status"] == "failed"
+        # Collect through the production path.
+        assert "evidence" in result.metadata
+        collector = LocalToolEvidenceCollector()
+        records = collector.record_tool_result(
+            session_id="s1",
+            turn_id="t1",
+            tool_call_id="call-dual",
+            tool_name="DocumentWrite",
+            result=result,
+        )
+        coverage_records = [
+            r for r in records if getattr(r, "type", None) == "DocumentCoverage"
+        ]
+        assert len(coverage_records) == 1
+        evidence = coverage_records[0]
+        # Dual-status contract: top-level status follows ToolResult.status ("ok").
+        assert evidence.status == "ok", (
+            f"Expected evidence.status=='ok' (follows ToolResult.status), got {evidence.status!r}. "
+            "Consumers checking coverage verdict MUST use fields['status']."
+        )
+        # Coverage verdict lives in fields["status"].
+        assert evidence.fields["status"] == "failed", (
+            f"Expected fields['status']=='failed', got {evidence.fields['status']!r}"
+        )
+
+
 class TestDocumentWriteImportBoundary:
     def test_document_write_tools_import_does_not_load_docx(self) -> None:
         completed = subprocess.run(
