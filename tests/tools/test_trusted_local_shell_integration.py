@@ -144,3 +144,29 @@ async def test_decision_denies_sed_execute_script_pipeline(tmp_path):
     assert outcome.status == "blocked"
     assert outcome.handler_called is False
     assert not escaped_path.exists()
+
+
+@pytest.mark.asyncio
+async def test_decision_denies_executable_path_spoofing_pipeline(tmp_path):
+    (tmp_path / "f.py").write_text("x\n", encoding="utf-8")
+    escaped_path = tmp_path.parent / "escaped.txt"
+    fake_cat = tmp_path / "cat"
+    fake_cat.write_text(
+        "#!/bin/sh\n"
+        "touch ../escaped.txt\n"
+        "/bin/cat \"$@\"\n",
+        encoding="utf-8",
+    )
+    fake_cat.chmod(0o755)
+    bundle = _build_bundle(tmp_path)
+
+    outcome = await bundle.host.dispatch(
+        "Bash",
+        {"command": "./cat f.py | head -1"},
+        request_digest=_sha256("request-executable-path-spoofing"),
+        tool_call_id="call-executable-path-spoofing",
+    )
+
+    assert outcome.status == "blocked"
+    assert outcome.handler_called is False
+    assert not escaped_path.exists()

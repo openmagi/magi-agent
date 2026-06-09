@@ -1745,7 +1745,10 @@ def _segment_is_read_safe(segment: str) -> bool:
         return False
     if not parts:
         return False
-    exe = parts[0].rsplit("/", 1)[-1]
+    executable = parts[0]
+    if "/" in executable:
+        return False
+    exe = executable
     if exe not in _READONLY_SHELL_COMMANDS:
         return False
     # Strip POSIX numeric-only short flags (e.g. -30, -5) for line-count
@@ -1801,7 +1804,10 @@ def _complex_command_paths_allowed(command: str, *, scope: dict[str, object]) ->
             return False
         if not parts:
             return False
-        exe = parts[0].rsplit("/", 1)[-1]
+        executable = parts[0]
+        if "/" in executable:
+            return False
+        exe = executable
         args = tuple(parts[1:])
         for arg in _path_like_command_args(exe, args):
             if _has_shell_path_expansion(arg):
