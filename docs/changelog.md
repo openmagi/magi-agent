@@ -15,6 +15,29 @@ Versions follow the tags published on GitHub Releases.
 
 ### Fixed
 
+## 0.1.26
+
+### Added
+- Local `magi-agent serve` now ships the restored static web dashboard and app
+  API routes in the Python package, so a clean Homebrew install can serve
+  `/dashboard` without a Node or Next.js process.
+- The local CLI real runner now exposes first-party tools, local tool evidence
+  collection, and full-profile runner policy surfaces when a model provider is
+  configured.
+
+### Changed
+- Clean local installs default to the full local runtime profile, enabling the
+  first-party local chat, tool, evidence, policy, repair, learning, scheduler,
+  and observability surfaces unless the operator opts out with
+  `MAGI_RUNTIME_PROFILE=safe|minimal|off|conservative` or
+  `MAGI_AGENT_LOCAL_FULL_RUNTIME_DEFAULTS=0`.
+
+### Fixed
+- Dashboard settings now use local app API routes instead of cloud-only
+  endpoints.
+- First-party runner policy callbacks and control-plane surfaces are now wired
+  through the full-profile local runner path rather than remaining metadata-only.
+
 ## 0.1.25
 
 ### Added
