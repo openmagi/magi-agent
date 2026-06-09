@@ -10,10 +10,12 @@ _FROZEN = ConfigDict(frozen=True, extra="forbid")
 
 
 def pass_hat_k(successes_per_task: list[int], *, trials: int, k: int) -> float:
-    if k > trials or trials <= 0 or not successes_per_task:
+    if trials <= 0:
+        raise ValueError("trials must be >= 1")
+    if k > trials or not successes_per_task:
         return 0.0
     denom = comb(trials, k)
-    per_task = [comb(c, k) / denom for c in successes_per_task]
+    per_task = [comb(min(c, trials), k) / denom for c in successes_per_task]
     return sum(per_task) / len(per_task)
 
 
@@ -28,3 +30,6 @@ def score(*, successes_per_task: list[int], trials: int, rewards: list[float]) -
     phk = {k: pass_hat_k(successes_per_task, trials=trials, k=k) for k in range(1, trials + 1)}
     avg = sum(rewards) / len(rewards) if rewards else 0.0
     return TauReport(trials=trials, pass_hat_k=phk, avg_reward=avg)
+
+
+__all__ = ["pass_hat_k", "score", "TauReport"]

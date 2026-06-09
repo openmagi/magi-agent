@@ -26,3 +26,22 @@ def test_score_reports_pass_hat_1_to_k_and_avg_reward() -> None:
     assert report.pass_hat_k[4] == pytest.approx((1.0 + 0.0) / 2)  # only task A all-4
     assert report.avg_reward == pytest.approx(6 / 8)
     assert report.trials == 4
+
+
+def test_pass_hat_k_zero_when_k_exceeds_trials() -> None:
+    assert pass_hat_k([4], trials=4, k=5) == 0.0
+
+
+def test_pass_hat_k_clamps_successes_above_trials() -> None:
+    # defensive: a miscount c>trials must not yield pass^k > 1.0
+    assert pass_hat_k([5], trials=4, k=1) == 1.0
+
+
+def test_pass_hat_k_raises_on_nonpositive_trials() -> None:
+    with pytest.raises(ValueError):
+        pass_hat_k([1], trials=0, k=1)
+
+
+def test_score_avg_reward_zero_for_empty_rewards() -> None:
+    report = score(successes_per_task=[2], trials=4, rewards=[])
+    assert report.avg_reward == 0.0
