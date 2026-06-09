@@ -54,8 +54,21 @@ def run_gaia_question(
     # 2. Build provider config.
     config = ProviderConfig(provider="anthropic", model=model, api_key=api_key)
 
-    # 3. Build runner.
-    instruction = f"{GAIA_SYSTEM_PROMPT}\n\nQUESTION:\n{question.question}"
+    # 3. Build attachment note (tells the agent about the file in the workspace).
+    attachment_note = ""
+    file_name = question.file_name or (
+        Path(question.attachment_path).name if question.attachment_path else None
+    )
+    if file_name:
+        attachment_note = (
+            f"\n\nNOTE: An attachment file '{file_name}' is present in the working "
+            f"directory. Use the appropriate file tool (ImageUnderstand for images, "
+            f"DocumentRead for documents/PPTX/XML/CSV, XLSXRead for spreadsheets) "
+            f"to read it when answering the question."
+        )
+
+    # 4. Build runner.
+    instruction = f"{GAIA_SYSTEM_PROMPT}\n\nQUESTION:\n{question.question}{attachment_note}"
     runner: CliModelRunner = build_cli_model_runner(
         config,
         instruction=instruction,
@@ -64,7 +77,7 @@ def run_gaia_question(
         tools=extra_tools,
     )
 
-    # 4. Drive runner to completion, collecting all model text parts.
+    # 5. Drive runner to completion, collecting all model text parts.
     async def _drive() -> list[str]:
         new_message = types.Content(
             role="user", parts=[types.Part(text=question.question)]
@@ -85,7 +98,7 @@ def run_gaia_question(
     texts = asyncio.run(_drive())
     joined = "\n".join(texts)
 
-    # 5. Extract and return the final answer.
+    # 6. Extract and return the final answer.
     return extract_final_answer(joined)
 
 
