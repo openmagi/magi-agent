@@ -2,11 +2,19 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 import math
+import os
 import re
 
 from google.genai import types
 from pydantic_core import PydanticSerializationError
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+
+_STREAMING_DISABLED_VALUES = frozenset({"0", "false", "no", "off"})
+
+
+def _adk_streaming_enabled() -> bool:
+    return os.environ.get("MAGI_ADK_STREAMING", "").strip().lower() not in _STREAMING_DISABLED_VALUES
 
 
 ADK_RUNNER_KWARG_ALLOWLIST = frozenset(
@@ -273,24 +281,39 @@ class OpenMagiRunnerAdapter:
     def __init__(self, *, runner: object) -> None:
         self.runner = runner
 
+    def _adapter_run_config(self) -> "object | None":
+        # Lazy import keeps ADK off the cold-start critical path.
+        from google.adk.agents.run_config import RunConfig, StreamingMode  # noqa: PLC0415
+
+        return RunConfig(streaming_mode=StreamingMode.SSE)
+
     def _build_adk_runner_kwargs(self, turn_input: RunnerTurnInput) -> dict[str, object]:
-        kwargs = {
+        # Caller-provided run_config/state_delta remain blocked — they must not
+        # become an ADK side channel. The adapter injects its OWN streaming
+        # RunConfig below, after the allowlist filter, so it cannot be spoofed.
+        kwargs: dict[str, object] = {
             "user_id": turn_input.user_id,
             "session_id": turn_input.session_id,
             "invocation_id": turn_input.invocation_id,
             "new_message": _copy_validated_adk_content(turn_input.new_message),
         }
-        return {
+        filtered = {
             key: value
             for key, value in kwargs.items()
             if key in ADK_RUNNER_KWARG_ALLOWLIST
         }
+        if _adk_streaming_enabled():
+            run_config = self._adapter_run_config()
+            if run_config is not None:
+                filtered["run_config"] = run_config
+        return filtered
 
     async def run_turn(self, turn_input: RunnerTurnInput) -> AsyncIterator[object]:
         # The resolved harness snapshot stays on turn_input for OpenMagi policy
         # boundaries; it is not copied to adapter state or ADK Runner kwargs.
-        # state_delta/run_config are also held back while Runner attachment is
-        # disabled so OpenMagi-only state cannot become an ADK side channel.
+        # Caller-provided state_delta/run_config are held back so OpenMagi-only
+        # state cannot become an ADK side channel. The adapter injects its own
+        # streaming RunConfig(streaming_mode=SSE) so token deltas flow correctly.
         async for event in self.runner.run_async(
             **self._build_adk_runner_kwargs(turn_input)
         ):
