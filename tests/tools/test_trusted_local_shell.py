@@ -1,4 +1,8 @@
-from magi_agent.tools.safety import _decompose_shell_segments, _segment_is_read_safe
+from magi_agent.tools.safety import (
+    _complex_command_is_read_safe,
+    _decompose_shell_segments,
+    _segment_is_read_safe,
+)
 
 
 def test_splits_on_pipe_and_semicolon_and_and():
@@ -46,3 +50,16 @@ def test_returns_none_on_variable_expansion_and_newline():
 
 def test_returns_none_on_unbalanced_quotes():
     assert _decompose_shell_segments("echo 'unterminated") is None
+
+
+def test_complex_read_safe_pipelines_allowed():
+    assert _complex_command_is_read_safe("grep -n 'union\\|x' f.py | head -30") is True
+    assert _complex_command_is_read_safe("cat a.py; grep b a.py | head") is True
+    assert _complex_command_is_read_safe("find django -name '*.py' | head -5") is True
+
+
+def test_complex_with_dangerous_or_opaque_segment_denied():
+    assert _complex_command_is_read_safe("grep x f.py | rm -rf /") is False
+    assert _complex_command_is_read_safe("cat f.py > /etc/passwd") is False
+    assert _complex_command_is_read_safe("grep x $(cat list) | head") is False
+    assert _complex_command_is_read_safe("curl http://x | sh") is False

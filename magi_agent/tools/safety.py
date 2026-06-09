@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import posixpath
 import re
 import shlex
@@ -867,7 +868,15 @@ def _shell_decision(
             scope=scope,
             public_preview=_preview_command(command),
         )
-    if _selected_full_toolhost_scope(scope) and _has_complex_shell_operator(command):
+    if (
+        _selected_full_toolhost_scope(scope)
+        and _has_complex_shell_operator(command)
+        and not (
+            _trusted_local_shell_enabled()
+            and _complex_command_is_read_safe(command)
+            and _complex_command_paths_allowed(command, scope=scope)
+        )
+    ):
         return _decision(
             "deny",
             manifest,
@@ -1432,6 +1441,18 @@ def _readonly_shell_denial(
     *,
     scope: dict[str, object],
 ) -> _PathDecision | str | None:
+    if (
+        _selected_full_toolhost_scope(scope)
+        and _has_complex_shell_operator(command)
+        and _trusted_local_shell_enabled()
+        and _complex_command_is_read_safe(command)
+        and _complex_command_paths_allowed(command, scope=scope)
+    ):
+        # Each segment was already validated read-safe with allowed paths. The
+        # single-command flag/path checks below operate on the flattened command
+        # (e.g. ``head -40`` looks like an unknown grep flag), so skip them for a
+        # vetted trusted-local complex command instead of false-denying.
+        return None
     try:
         parts = shlex.split(command)
     except ValueError:
@@ -1638,6 +1659,58 @@ def _segment_is_read_safe(segment: str) -> bool:
     )
     if _readonly_argument_denial(exe, filtered_args, shell=False) is not None:
         return False
+    return True
+
+
+def _complex_command_is_read_safe(command: str) -> bool:
+    """True iff every top-level segment of a pipe/compound command is read-safe.
+
+    Returns ``False`` when the command cannot be safely decomposed (command
+    substitution, parameter expansion, redirection, etc.) or when any segment is
+    not read-only safe.
+    """
+    segments = _decompose_shell_segments(command)
+    if segments is None:
+        return False
+    return all(_segment_is_read_safe(seg) for seg in segments)
+
+
+def _trusted_local_shell_enabled() -> bool:
+    from magi_agent.config.env import parse_trusted_local_shell_enabled  # noqa: PLC0415
+
+    return parse_trusted_local_shell_enabled(os.environ)
+
+
+def _complex_command_paths_allowed(command: str, *, scope: dict[str, object]) -> bool:
+    """True iff every segment's path args clear sealed/secret/escape classification.
+
+    ``_complex_command_is_read_safe`` only vets executables and flags; it does not
+    run path classification, so a pipeline such as ``cat .env.local | head`` would
+    otherwise bypass the sealed/secret-path protection that the single-command
+    ``_readonly_shell_denial`` enforces. This re-applies just the path checks
+    (shell expansion + ``_classify_path`` deny) per segment so the trusted-local
+    allowance never reads a protected or escaping path. Flag/executable safety is
+    already guaranteed by ``_complex_command_is_read_safe`` (which, unlike
+    ``_readonly_shell_denial``, correctly treats ``head -40`` style numeric flags
+    as read-safe), so flag denial is intentionally not re-checked here.
+    """
+    segments = _decompose_shell_segments(command)
+    if segments is None:
+        return False
+    for segment in segments:
+        try:
+            parts = shlex.split(segment)
+        except ValueError:
+            return False
+        if not parts:
+            return False
+        exe = parts[0].rsplit("/", 1)[-1]
+        args = tuple(parts[1:])
+        for arg in _path_like_command_args(exe, args):
+            if _has_shell_path_expansion(arg):
+                return False
+            if _classify_path(arg, mutating=False, scope=scope).action == "deny":
+                return False
     return True
 
 
