@@ -19,6 +19,8 @@ from dataclasses import dataclass
 from inspect import isawaitable, signature
 from typing import TYPE_CHECKING, Callable
 
+from magi_agent.runtime.session_identity import MemoryMode
+
 if TYPE_CHECKING:
     from magi_agent.evidence.local_tool_collector import LocalToolEvidenceCollector
     from magi_agent.harness.general_automation.live_gate import (
@@ -250,6 +252,7 @@ def build_cli_instruction(
     session_id: str,
     model: str = "",
     workspace_root: str | None = None,
+    memory_mode: "MemoryMode | str" = "normal",
 ) -> str:
     """Build the real system prompt for the CLI agent (coding-agent path).
 
@@ -257,6 +260,10 @@ def build_cli_instruction(
     from the magi-owned ``.magi`` namespace (``~/.magi`` + ``<cwd>/.magi``),
     while repo-root ``AGENTS.md`` / ``CLAUDE.md`` are loaded as project context
     (NOT identity). See :func:`magi_agent.cli.identity.load_identity`.
+
+    ``memory_mode`` defaults to ``"normal"`` (byte-identical to before): only a
+    ``read_only`` / ``incognito`` mode injects the corresponding memory-mode block
+    via the ``channel`` passed to :func:`build_system_prompt`.
     """
     from pathlib import Path  # noqa: PLC0415
 
@@ -269,18 +276,26 @@ def build_cli_instruction(
 
         identity = load_identity(workspace_root)
 
+    memory_mode_value = (
+        memory_mode.value if isinstance(memory_mode, MemoryMode) else str(memory_mode)
+    )
+
     # Compute the frozen memory snapshot once for this session.
     # Falls back to "" when workspace_root is not provided, gate is off, or
     # memory_mode is incognito.
     memory_snapshot_block = ""
     if workspace_root is not None:
         _snapshot_cache = MemorySnapshotCache(workspace_root=Path(workspace_root))
-        memory_snapshot_block = _snapshot_cache.get(session_id, memory_mode="normal")
+        memory_snapshot_block = _snapshot_cache.get(
+            session_id,
+            memory_mode=memory_mode_value,
+        )
 
     prompt = build_system_prompt(
         session_key=session_id,
         turn_id="cli",
         identity=identity,
+        channel={"memoryMode": memory_mode_value},
         coding_agent=True,
         model=model,
         memory_snapshot_block=memory_snapshot_block,

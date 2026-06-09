@@ -31,6 +31,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from magi_agent.runtime.session_identity import MemoryMode
     from magi_agent.tools.manifest import RuntimeMode, ToolManifest
     from magi_agent.tools.registry import ToolRegistry
 
@@ -139,6 +140,7 @@ def build_headless_runtime(
     event_sink: object | None = None,
     prompt_sink: "PromptSink | None" = None,
     runner_policy_routing_enabled: bool | None = None,
+    memory_mode: "MemoryMode | str" = "normal",
 ) -> HeadlessRuntime:
     """Construct the complete headless dependency set.
 
@@ -182,6 +184,7 @@ def build_headless_runtime(
             session_id=session_id,
             model=model,
             mode=mode,
+            memory_mode=memory_mode,
         )
     )
     composio_bundle, composio_attached = _build_composio_bundle_for_mode(
@@ -358,6 +361,7 @@ def _build_default_runner(
     session_id: str = "cli-session",
     model: str | None = None,
     mode: "RuntimeMode" = "act",
+    memory_mode: "MemoryMode | str" = "normal",
 ) -> object:
     """Build the CLI's default runner.
 
@@ -406,6 +410,7 @@ def _build_default_runner(
                 local_tool_evidence_collector=local_tool_evidence,
             ),
             workspace_root=workspace_root,
+            memory_mode=memory_mode,
             general_automation_receipts=general_automation_receipts,
             local_tool_evidence_collector=local_tool_evidence,
         )

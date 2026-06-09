@@ -27,6 +27,7 @@ from typing import Any, AsyncGenerator, Callable
 
 from magi_agent.cli.engine import RunnerPolicyAssembly
 from magi_agent.cli.providers import ProviderConfig
+from magi_agent.runtime.session_identity import MemoryMode
 
 # Type of the model-construction hook (injectable for tests).
 ModelFactory = Callable[[ProviderConfig], object]
@@ -148,6 +149,7 @@ def build_cli_model_runner(
     user_id: str = "cli-user",
     session_id: str = "cli-session",
     workspace_root: str | None = None,
+    memory_mode: "MemoryMode | str" = "normal",
     task_profile: Mapping[str, object] | None = None,
     general_automation_receipts: object | None = None,
     local_tool_evidence_collector: object | None = None,
@@ -213,6 +215,7 @@ def build_cli_model_runner(
             session_id=session_id,
             model=config.litellm_model,
             workspace_root=effective_workspace_root,
+            memory_mode=memory_mode,
         )
     )
 
