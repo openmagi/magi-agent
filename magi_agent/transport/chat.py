@@ -48,6 +48,7 @@ from magi_agent.config.env import is_egress_gate_enabled, is_read_quality_enable
 from magi_agent.introspection.egress_gate import EgressVerifierStatus
 from magi_agent.gates.gate2_readiness import gate2_readiness_health_metadata
 from magi_agent.gates.gate8_readiness import gate8_readiness_health_metadata
+# reuse the established image sanitizer; message_builder exposes no public image API
 from magi_agent.runtime.message_builder import _collect_image_blocks
 from magi_agent.runtime.openmagi_runtime import OpenMagiRuntime
 from magi_agent.runtime.session_identity import _memory_mode_from_header
@@ -3811,7 +3812,7 @@ def _extract_last_user_text(payload: Mapping[str, object]) -> str:
     return ""
 
 
-_DATA_URL_RE = re.compile(r"^data:(?P<mime>[\w.+-]+/[\w.+-]+);base64,(?P<data>.+)$", re.DOTALL)
+_DATA_URL_RE = re.compile(r"^data:(?P<mime>[\w.+-]+/[\w.+-]+);base64,(?P<data>.+)$")
 
 
 def _normalize_image_block(block: object) -> dict | None:
@@ -3839,7 +3840,7 @@ def _normalize_image_block(block: object) -> dict | None:
     return None
 
 
-def _extract_last_user_image_blocks(payload: Mapping[str, object]) -> list[dict]:
+def _extract_last_user_image_blocks(payload: Mapping[str, object]) -> list[dict[str, object]]:
     messages = payload.get("messages")
     if not isinstance(messages, list):
         return []
