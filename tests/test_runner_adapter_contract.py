@@ -3,6 +3,7 @@ import subprocess
 import sys
 
 import pytest
+from google.adk.agents.run_config import RunConfig, StreamingMode
 from google.genai import types
 from pydantic import ValidationError
 
@@ -243,20 +244,24 @@ def test_runner_adapter_calls_adk_runner_without_leaking_harness_state() -> None
 
     events = asyncio.run(collect())
     assert events == [{"type": "fake_adk_event", "text": "hi"}]
-    assert runner.calls == [
-        {
-            "user_id": "user-1",
-            "session_id": "agent:main:app:default",
-            "invocation_id": "turn-1",
-            "new_message": _content(),
-        }
-    ]
-    assert "harness_state" not in runner.calls[0]
-    assert "harnessState" not in runner.calls[0]
-    assert "state_delta" not in runner.calls[0]
-    assert "stateDelta" not in runner.calls[0]
-    assert "run_config" not in runner.calls[0]
-    assert "runConfig" not in runner.calls[0]
+    call = runner.calls[0]
+    # Core identity keys must be present and correct.
+    assert call["user_id"] == "user-1"
+    assert call["session_id"] == "agent:main:app:default"
+    assert call["invocation_id"] == "turn-1"
+    assert call["new_message"] == _content()
+    # Adapter injects its own streaming RunConfig — caller's run_config must NOT
+    # be passed (side-channel block), but the adapter-owned one may appear.
+    assert "harness_state" not in call
+    assert "harnessState" not in call
+    assert "state_delta" not in call
+    assert "stateDelta" not in call
+    assert "runConfig" not in call
+    # The adapter-injected run_config is the only allowed one and must be
+    # an SSE RunConfig (not the caller-supplied dict {"openmagi": ...}).
+    if "run_config" in call:
+        assert isinstance(call["run_config"], RunConfig)
+        assert call["run_config"].streaming_mode == StreamingMode.SSE
     assert not hasattr(adapter, "harness_state")
     assert turn_harness.agent_role == "coding"
 
@@ -295,9 +300,21 @@ def test_runner_adapter_blocks_openmagi_state_delta_and_run_config_leakage() -> 
     asyncio.run(collect())
 
     call = runner.calls[0]
-    assert set(call) == ADK_RUNNER_KWARG_ALLOWLIST
+    # Adapter-owned run_config (SSE) may appear in addition to the allowlist keys.
+    # Caller-supplied openmagi-laden run_config must NOT leak through.
+    allowed_keys = ADK_RUNNER_KWARG_ALLOWLIST | {"run_config"}
+    assert set(call) <= allowed_keys
+    assert ADK_RUNNER_KWARG_ALLOWLIST <= set(call)
+    # The adapter-owned run_config must be the SSE RunConfig, not the caller dict.
+    if "run_config" in call:
+        assert isinstance(call["run_config"], RunConfig)
+        assert call["run_config"].streaming_mode == StreamingMode.SSE
     flattened_call = _flatten_values(call)
-    for forbidden in FORBIDDEN_OPENMAGI_RUNNER_VALUES:
+    # Forbidden openmagi runtime values must not appear anywhere in the call.
+    # "run_config" itself is an allowed key name (adapter-owned), so we skip it
+    # from the forbidden list for the flattened check.
+    openmagi_forbidden = [v for v in FORBIDDEN_OPENMAGI_RUNNER_VALUES if v != "run_config"]
+    for forbidden in openmagi_forbidden:
         assert forbidden not in flattened_call
 
 
@@ -359,7 +376,10 @@ def test_runner_adapter_collect_events_iterates_run_turn_without_bypassing_runne
 
     assert events == [{"type": "fake_adk_event", "text": "hi"}]
     assert len(runner.calls) == 1
-    assert set(runner.calls[0]) == ADK_RUNNER_KWARG_ALLOWLIST
+    # Adapter-owned SSE run_config may also be present.
+    allowed_keys = ADK_RUNNER_KWARG_ALLOWLIST | {"run_config"}
+    assert set(runner.calls[0]) <= allowed_keys
+    assert ADK_RUNNER_KWARG_ALLOWLIST <= set(runner.calls[0])
 
 
 @pytest.mark.parametrize(
@@ -912,3 +932,87 @@ def test_runner_turn_input_rejects_unexpected_top_level_attachment_fields(
             ),
             **{extra_field: "must-not-pass"},
         )
+
+
+# ---------------------------------------------------------------------------
+# Streaming RunConfig injection tests
+# ---------------------------------------------------------------------------
+
+
+def _make_turn_input() -> RunnerTurnInput:
+    return RunnerTurnInput(
+        user_id="user-1",
+        session_id="agent:main:app:default",
+        turn_id="turn-1",
+        invocation_id="turn-1",
+        new_message=_content(),
+        harness_state=build_default_resolved_harness_state(
+            agent_role="coding",
+            spawn_depth=1,
+        ),
+    )
+
+
+def test_adapter_injects_sse_run_config_by_default() -> None:
+    """By default (MAGI_ADK_STREAMING unset) the adapter passes an SSE RunConfig."""
+    runner = FakeRunner()
+    adapter = OpenMagiRunnerAdapter(runner=runner)
+
+    asyncio.run(adapter.collect_events(_make_turn_input()))
+
+    assert len(runner.calls) == 1
+    call = runner.calls[0]
+    assert "run_config" in call
+    assert isinstance(call["run_config"], RunConfig)
+    assert call["run_config"].streaming_mode == StreamingMode.SSE
+
+
+def test_adapter_omits_run_config_when_streaming_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    """MAGI_ADK_STREAMING=0 disables SSE; no run_config is passed to run_async."""
+    monkeypatch.setenv("MAGI_ADK_STREAMING", "0")
+    runner = FakeRunner()
+    adapter = OpenMagiRunnerAdapter(runner=runner)
+
+    asyncio.run(adapter.collect_events(_make_turn_input()))
+
+    assert len(runner.calls) == 1
+    call = runner.calls[0]
+    assert "run_config" not in call
+    assert set(call) == ADK_RUNNER_KWARG_ALLOWLIST
+
+
+def test_adapter_ignores_caller_run_config_and_uses_only_adapter_owned_sse_config() -> None:
+    """The caller-supplied run_config (openmagi dict) must NOT reach run_async.
+
+    Only the adapter-owned SSE RunConfig instance is allowed — not the caller's dict.
+    This verifies the side-channel block is preserved even with streaming enabled.
+    """
+    runner = FakeRunner()
+    adapter = OpenMagiRunnerAdapter(runner=runner)
+    turn_input = RunnerTurnInput(
+        user_id="user-1",
+        session_id="agent:main:app:default",
+        turn_id="turn-1",
+        invocation_id="turn-1",
+        new_message=_content(),
+        # Caller tries to pass a run_config with openmagi control payload.
+        run_config={"openmagi": {"control": "local-only"}, "temperature": 0.5},
+        harness_state=build_default_resolved_harness_state(
+            agent_role="coding",
+            spawn_depth=1,
+        ),
+    )
+
+    asyncio.run(adapter.collect_events(turn_input))
+
+    assert len(runner.calls) == 1
+    call = runner.calls[0]
+    # The adapter-owned RunConfig must be present (streaming default-on).
+    assert "run_config" in call
+    assert isinstance(call["run_config"], RunConfig)
+    assert call["run_config"].streaming_mode == StreamingMode.SSE
+    # The caller's dict payload must NOT appear anywhere in the call.
+    flattened = _flatten_values(call)
+    assert "local-only" not in flattened
+    assert "temperature" not in flattened
+    assert 0.5 not in flattened
