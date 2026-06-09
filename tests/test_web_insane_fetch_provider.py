@@ -133,6 +133,9 @@ def test_200_html_returns_normalized_and_pins_ip_and_impersonates(
     assert call["resolve"] == [f"example.com:443:{_PUBLIC_IP}"], call["resolve"]
     assert call["impersonate"] == "chrome"
     assert call["allow_redirects"] is False
+    # Streamed read with the provider's resolved timeout.
+    assert call["stream"] is True
+    assert call["timeout"] == provider.timeout_s
 
 
 def test_200_uses_explicit_port_in_resolve_pin(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -455,3 +458,93 @@ def test_metadata_never_leaks_final_host(monkeypatch: pytest.MonkeyPatch) -> Non
     meta = result.get("metadata", {})
     assert "secret-host.example.com" not in str(meta)
     assert str(meta.get("finalUrlRef", "")).startswith("url:")
+
+
+# ---------------------------------------------------------------------------
+# _do_get non-stream fallback (session that rejects stream=)
+# ---------------------------------------------------------------------------
+
+
+class _NoStreamSession:
+    """Fake session whose .get raises TypeError when called with stream=.
+
+    Drives the ``_do_get`` non-stream fallback branch (a curl_cffi/session build
+    that does not accept ``stream=True``). The size cap must still be enforced on
+    the buffered body.
+    """
+
+    def __init__(self, response: _FakeResponse) -> None:
+        self.calls: list[dict[str, object]] = []
+        self._response = response
+
+    def get(self, url, **kwargs):  # type: ignore[no-untyped-def]
+        if "stream" in kwargs:
+            raise TypeError("get() got an unexpected keyword argument 'stream'")
+        self.calls.append({"url": url, **kwargs})
+        return self._response
+
+
+def test_do_get_non_stream_fallback_returns_normal_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Session rejecting stream= → fallback retry without it returns a result."""
+    _allow_public_host(monkeypatch)
+    session = _NoStreamSession(
+        _FakeResponse(
+            status_code=200,
+            headers={"content-type": "text/plain"},
+            content=b"fallback body",
+        )
+    )
+    provider = _provider(session)
+    result = provider.fetch(_Req("https://example.com/x"))
+
+    assert "status" not in result, result
+    assert "fallback body" in str(result["content"])
+    # Exactly one successful (non-stream) call was recorded; stream= was rejected.
+    assert len(session.calls) == 1
+    assert "stream" not in session.calls[0]
+
+
+def test_do_get_non_stream_fallback_still_enforces_size_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The buffered fallback body is still hard-capped at max_content_bytes."""
+    _allow_public_host(monkeypatch)
+    session = _NoStreamSession(
+        _FakeResponse(
+            status_code=200,
+            headers={"content-type": "text/plain"},
+            content=b"x" * 5000,
+        )
+    )
+    provider = _provider(session, max_content_bytes=1000)
+    result = provider.fetch(_Req("https://example.com/big"))
+    assert result["status"] == "denied"
+    assert result["reason"] == "content_too_large"
+
+
+# ---------------------------------------------------------------------------
+# 3xx with no Location → terminal response (not a redirect loop)
+# ---------------------------------------------------------------------------
+
+
+def test_redirect_status_without_location_is_terminal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A 3xx with NO Location header is treated as a terminal response."""
+    _allow_public_host(monkeypatch)
+    session = _FakeSession(
+        _FakeResponse(
+            status_code=302,
+            headers={"content-type": "text/plain"},
+            content=b"no location here",
+        )
+    )
+    provider = _provider(session)
+    result = provider.fetch(_Req("https://example.com/x"))
+
+    assert "status" not in result, result
+    assert "no location here" in str(result["content"])
+    # Only one hop was issued — no redirect loop.
+    assert len(session.calls) == 1

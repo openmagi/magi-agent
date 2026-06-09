@@ -34,6 +34,21 @@ Default-OFF / import boundary:
   network side-effects. It is wired in only by the (lazy) registration site
   (Task 3) and MUST NOT be added to any package ``__init__`` imported by sealed
   modules.
+
+Divergences from ``LiveFetchProvider`` (deliberate, not omissions):
+
+* No ``require_pinned_egress`` strict-mode flag. ``LiveFetchProvider`` exposes
+  that flag because httpx/httpcore can leave a residual https DNS-rebinding/TOCTOU
+  window when a transport does not honour connecting-by-IP with pinned SNI. Here
+  the IP pin is handed to libcurl via ``resolve=["host:port:ip"]``, which is
+  honoured at the transport layer and closes the rebinding/TOCTOU window for https
+  at connect time — strictly stronger than httpx's residual-window case — so there
+  is nothing for a strict flag to guard against.
+* No Cloudflare ``cf-mitigated`` honest-UA retry. ``LiveFetchProvider`` retries a
+  cf-challenge 403 with an honest UA because its plain-httpx request can trip the
+  WAF. Here the browser ``impersonate=`` profile (full TLS/JA3 + HTTP/2
+  fingerprint) IS the WAF bypass, so a 403 is treated as a real denial and mapped
+  directly to a ``denied`` status rather than retried.
 """
 
 from __future__ import annotations
