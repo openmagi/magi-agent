@@ -757,3 +757,54 @@ def test_conformance_check_enables_nothing() -> None:
     assert report.invariant_result.all_invariants_pass is True
     # Conformance is purely metadata — no env mutations, no I/O
     assert os.environ.get("MAGI_MEMORY_WRITE_ENABLED", "") == ""
+
+
+# ---------------------------------------------------------------------------
+# K. Local-dev short-circuit: kill-switch wins, three-env requirement
+# ---------------------------------------------------------------------------
+
+
+def test_local_dev_live_requires_all_three_env_gates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Local-dev resolves to 'live' only when LOCAL_DEV + READINESS + WRITE_ENABLED."""
+    monkeypatch.delenv("MAGI_MEMORY_WRITE_KILL_SWITCH_ENABLED", raising=False)
+    monkeypatch.setenv("MAGI_MEMORY_WRITE_READINESS_ENABLED", "1")
+    monkeypatch.setenv("MAGI_MEMORY_LOCAL_DEV", "1")
+    monkeypatch.setenv("MAGI_MEMORY_WRITE_ENABLED", "1")
+
+    mode = resolve_memory_write_execution_mode(
+        MemoryWriteReadinessConfig(), bot_id="bot-a", user_id="user-a"
+    )
+    assert mode == "live"
+
+
+def test_local_dev_not_live_when_write_enabled_unset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Issue 2: docstring requires MAGI_MEMORY_WRITE_ENABLED; without it, NOT live."""
+    monkeypatch.delenv("MAGI_MEMORY_WRITE_KILL_SWITCH_ENABLED", raising=False)
+    monkeypatch.delenv("MAGI_MEMORY_WRITE_ENABLED", raising=False)
+    monkeypatch.setenv("MAGI_MEMORY_WRITE_READINESS_ENABLED", "1")
+    monkeypatch.setenv("MAGI_MEMORY_LOCAL_DEV", "1")
+
+    mode = resolve_memory_write_execution_mode(
+        MemoryWriteReadinessConfig(), bot_id="bot-a", user_id="user-a"
+    )
+    assert mode != "live"
+
+
+def test_kill_switch_wins_over_local_dev_short_circuit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Issue 1 (BLOCKING): kill-switch must win even with local-dev + readiness + write."""
+    monkeypatch.setenv("MAGI_MEMORY_WRITE_KILL_SWITCH_ENABLED", "1")
+    monkeypatch.setenv("MAGI_MEMORY_WRITE_READINESS_ENABLED", "1")
+    monkeypatch.setenv("MAGI_MEMORY_LOCAL_DEV", "1")
+    monkeypatch.setenv("MAGI_MEMORY_WRITE_ENABLED", "1")
+
+    mode = resolve_memory_write_execution_mode(
+        MemoryWriteReadinessConfig(), bot_id="bot-a", user_id="user-a"
+    )
+    assert mode != "live"
+    assert mode == "disabled"
