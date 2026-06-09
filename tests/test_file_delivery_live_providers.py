@@ -155,7 +155,8 @@ def test_artifact_provider_never_raises_on_bad_dir(tmp_path: Path) -> None:
     # Must not raise.
     result = provider.write_artifact(_make_request(content_bytes=content))
     assert isinstance(result, dict)
-    assert result.get("status") in ("ok", "error")
+    assert result["status"] == "error"
+    assert result.get("reason") == "artifact_write_failed"
 
 
 def test_artifact_provider_has_correct_digest_in_return(tmp_path: Path) -> None:
@@ -234,6 +235,7 @@ def test_channel_provider_never_raises_on_bad_outbox(tmp_path: Path) -> None:
     # Must not raise.
     receipt = provider.deliver(_make_request(content_bytes=content))
     assert receipt is not None
+    assert receipt.status == "failed"
 
 
 # ---------------------------------------------------------------------------
@@ -403,6 +405,75 @@ def test_safe_basename_strips_traversal() -> None:
     assert _safe_basename("safe-name.md") == "safe-name.md"
     assert _safe_basename("") == "magi-artifact"
     assert _safe_basename("   ") == "magi-artifact"
+
+
+def test_safe_basename_strips_control_chars() -> None:
+    """Embedded control chars (null byte, newline, etc.) are stripped."""
+    from magi_agent.artifacts.file_delivery_live import _safe_basename
+
+    # Embedded newline: "file\n.txt" → "file.txt"
+    result_newline = _safe_basename("file\n.txt")
+    assert "\n" not in result_newline
+    assert result_newline == "file.txt"
+
+    # Embedded null byte: "file\x00.txt" → "file.txt"
+    result_null = _safe_basename("file\x00.txt")
+    assert "\x00" not in result_null
+    assert result_null == "file.txt"
+
+    # Other control chars are also stripped.
+    result_ctrl = _safe_basename("file\x01\x1f\x7f.txt")
+    assert result_ctrl == "file.txt"
+
+
+def test_control_char_filename_writes_cleanly(tmp_path: Path) -> None:
+    """Filenames with embedded control chars produce a valid file inside output_dir."""
+    from magi_agent.artifacts.file_delivery_live import (
+        LiveFilesystemArtifactProvider,
+        LiveFilesystemChannelProvider,
+    )
+
+    content = b"control char test content"
+
+    # Artifact provider: embedded newline in filename.
+    newline_filename = "report\n.md"
+    artifact_provider = LiveFilesystemArtifactProvider(
+        content_bytes=content,
+        output_dir=tmp_path / "artifacts",
+        filename=newline_filename,
+    )
+    result = artifact_provider.write_artifact(_make_request(content_bytes=content))
+    assert result["status"] == "ok", f"Expected ok, got {result}"
+    # The sanitised file must exist within output_dir — no OSError, no escape.
+    written_files = list((tmp_path / "artifacts").rglob("*"))
+    assert any(f.is_file() for f in written_files)
+    for f in written_files:
+        if f.is_file():
+            assert "\n" not in f.name
+            assert "\x00" not in f.name
+
+    # Channel provider: embedded null byte in filename.
+    null_filename = "deliver\x00.md"
+
+    class _MockRequest:
+        request_id = "ctrl-001"
+        artifact_refs = ("artifact:aaaaaaaaaaaaaaaa",)
+        file_refs = ()
+        filename = null_filename
+        from magi_agent.channels.contract import ChannelRef as _CR
+        channel = _CR(type="web", channelId="web-1")
+
+    channel_provider = LiveFilesystemChannelProvider(
+        content_bytes=content,
+        outbox_dir=tmp_path / "outbox",
+    )
+    receipt = channel_provider.deliver(_MockRequest())
+    assert receipt.status == "sent", f"Expected sent, got {receipt.status}"
+    written_outbox = list((tmp_path / "outbox").rglob("*"))
+    assert any(f.is_file() for f in written_outbox)
+    for f in written_outbox:
+        if f.is_file():
+            assert "\x00" not in f.name
 
 
 # ---------------------------------------------------------------------------

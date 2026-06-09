@@ -57,13 +57,17 @@ def is_live_file_delivery_enabled(env: Mapping[str, str] | None = None) -> bool:
     Evaluated at call time (not import time) so tests can patch ``os.environ``
     without a module reload.
 
+    Both the enabled flag and the kill-switch use explicit allowlisting against
+    ``_TRUTHY``: a value enables/kills only if it is in that set (case-insensitive
+    after strip).  Any other value (including empty string) is treated as false.
+
     :param env: Optional explicit env mapping; defaults to ``os.environ``.
     """
     source: Mapping[str, str] = env if env is not None else os.environ
     enabled_raw = source.get(LIVE_FILE_DELIVERY_ENABLED_ENV, "")
     kill_raw = source.get(LIVE_FILE_DELIVERY_KILL_SWITCH_ENV, "")
-    enabled = bool(enabled_raw) and enabled_raw.lower() not in _FALSY
-    killed = bool(kill_raw) and kill_raw.lower() not in _FALSY
+    enabled = enabled_raw.strip().lower() in _TRUTHY
+    killed = kill_raw.strip().lower() in _TRUTHY
     return enabled and not killed
 
 
@@ -73,6 +77,7 @@ def is_live_file_delivery_enabled(env: Mapping[str, str] | None = None) -> bool:
 
 _UNSAFE_CHARS = re.compile(r"[/\\]")
 _LEADING_DOTS = re.compile(r"^\.+")
+_CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
 
 
 def _safe_basename(filename: str) -> str:
@@ -88,12 +93,39 @@ def _safe_basename(filename: str) -> str:
     # Replace backslashes so pathlib handles them correctly on all platforms.
     normalized = stripped.replace("\\", "/")
     base = pathlib.Path(normalized).name
+    # Strip ASCII control characters (null bytes, newlines, etc.) before any
+    # further processing so they can never reach write_bytes.
+    base = _CONTROL_CHARS.sub("", base)
     # Strip remaining unsafe chars and leading dots.
     base = _UNSAFE_CHARS.sub("_", base)
     base = _LEADING_DOTS.sub("", base)
     base = base.strip(".")
     base = base[:200].strip()
     return base or "magi-artifact"
+
+
+# ---------------------------------------------------------------------------
+# Shared safe-write helper
+# ---------------------------------------------------------------------------
+
+
+def _safe_write_bytes(output_dir: pathlib.Path, filename: str, content: bytes) -> pathlib.Path:
+    """Safely write ``content`` to ``output_dir / safe(filename)``.
+
+    Creates ``output_dir`` (and parents) if needed.  Raises ``ValueError`` with
+    a ``path_escape_blocked:<dest>`` message if the resolved destination would
+    escape ``output_dir``.  Callers are responsible for converting that to an
+    appropriate error return; the outer try/except in each provider handles it.
+    """
+    safe_name = _safe_basename(filename)
+    resolved = output_dir.resolve()
+    resolved.mkdir(parents=True, exist_ok=True)
+    dest = resolved / safe_name
+    dest_resolved = dest.resolve()
+    if resolved not in dest_resolved.parents and dest_resolved != resolved:
+        raise ValueError(f"path_escape_blocked:{dest_resolved}")
+    dest.write_bytes(content)
+    return dest
 
 
 # ---------------------------------------------------------------------------
@@ -138,24 +170,14 @@ class LiveFilesystemArtifactProvider:
 
     def _write_artifact_inner(self, request: Any) -> Mapping[str, object]:
         content_bytes = self._content_bytes
-        # Compute and verify digest before touching the filesystem.
+        # Compute and verify digest BEFORE touching the filesystem.
         actual_digest = "sha256:" + hashlib.sha256(content_bytes).hexdigest()
         expected_digest: str = request.content_digest
         if actual_digest != expected_digest:
             return {"status": "error", "reason": "content_digest_mismatch"}
 
-        safe_name = _safe_basename(self._filename)
-        output_dir = self._output_dir.resolve()
-        output_dir.mkdir(parents=True, exist_ok=True)
-
-        dest = output_dir / safe_name
-        # Safety: ensure dest is strictly under output_dir.
-        dest_resolved = dest.resolve()
-        if output_dir not in dest_resolved.parents and dest_resolved != output_dir:
-            # dest is output_dir itself — shouldn't happen for a file, but guard.
-            return {"status": "error", "reason": "path_escape_blocked"}
-
-        dest.write_bytes(content_bytes)
+        # Delegate safe-path + write to shared helper (raises ValueError on escape).
+        _safe_write_bytes(self._output_dir, self._filename, content_bytes)
 
         # Build the artifactRef: prefer the first element from request.artifact_refs
         # if available, otherwise derive from digest.
@@ -165,7 +187,8 @@ class LiveFilesystemArtifactProvider:
         else:
             artifact_ref = f"artifact:{hashlib.sha1(actual_digest.encode('utf-8')).hexdigest()[:16]}"
 
-        short_digest = hashlib.sha256(content_bytes).hexdigest()[:16]
+        # Reuse already-computed digest hex (strip "sha256:" prefix, take first 16 chars).
+        short_digest = actual_digest[7:23]
         receipt_id = f"fsart:{short_digest}"
 
         return {
@@ -242,24 +265,8 @@ class LiveFilesystemChannelProvider:
         file_refs: tuple[str, ...] = getattr(request, "file_refs", ())
         filename: str = getattr(request, "filename", "magi-artifact")
 
-        safe_name = _safe_basename(filename)
-        outbox_dir = self._outbox_dir.resolve()
-        outbox_dir.mkdir(parents=True, exist_ok=True)
-
-        dest = (outbox_dir / safe_name).resolve()
-        # Safety: ensure dest is strictly under outbox_dir.
-        if outbox_dir not in dest.parents and dest != outbox_dir:
-            return ChannelDeliveryReceipt(
-                receiptId=f"fsout-blocked:{hashlib.sha256(content_bytes).hexdigest()[:16]}",
-                requestId=request_id,
-                channel=channel,
-                status="failed",
-                providerMessageId=None,
-                artifactRefs=(),
-                fileRefs=(),
-            )
-
-        (outbox_dir / safe_name).write_bytes(content_bytes)
+        # Delegate safe-path + write to shared helper (raises ValueError on escape).
+        _safe_write_bytes(self._outbox_dir, filename, content_bytes)
 
         short_digest = hashlib.sha256(content_bytes).hexdigest()[:16]
         provider_message_id = f"fsout:{short_digest}"
