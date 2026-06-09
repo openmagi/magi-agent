@@ -90,6 +90,18 @@ def test_customize_requires_auth(tmp_path, monkeypatch) -> None:
     assert res.status_code == 401
 
 
+def test_patch_tool_unknown_name_returns_404(tmp_path, monkeypatch):
+    monkeypatch.setenv("MAGI_CUSTOMIZE", str(tmp_path / "customize.json"))
+    client = _client(tmp_path)
+    client.headers.update({"x-gateway-token": _TOKEN})
+    resp = client.patch("/v1/app/customize/tools/__definitely_not_a_tool__", json={"enabled": False})
+    assert resp.status_code == 404
+    # nothing persisted
+    import os
+    cfile = tmp_path / "customize.json"
+    assert not cfile.exists() or "__definitely_not_a_tool__" not in cfile.read_text()
+
+
 def test_customize_returns_catalog_and_overrides(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("MAGI_CONFIG", str(tmp_path / "config.toml"))

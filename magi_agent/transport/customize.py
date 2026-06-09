@@ -35,6 +35,11 @@ def register_customize_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
         if not isinstance(body, dict) or not isinstance(body.get("enabled"), bool):
             return JSONResponse(status_code=400, content={"error": "enabled_bool_required"})
         enabled = body["enabled"]
+        if runtime.tool_registry.resolve_registration(name) is None:
+            return JSONResponse(
+                status_code=404,
+                content={"error": "not_found", "message": f'tool "{name}" not found'},
+            )
         overrides = set_tool_override(name, enabled)
         apply_tool_overrides(runtime, {"tools": {name: enabled}})
         return JSONResponse(content={"overrides": overrides})
