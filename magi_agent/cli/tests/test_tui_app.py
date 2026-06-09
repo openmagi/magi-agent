@@ -1004,9 +1004,9 @@ def test_open_model_picker_surfaces_in_palette_actions() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Session list dialog (PR2.4) — open + resume = a FRESH turn (OQ3, no replay)
+# Session list dialog (PR2.4) — resume = marker-only, NO synthetic turn (OQ3)
 # ---------------------------------------------------------------------------
-def test_open_session_list_resume_starts_fresh_turn() -> None:
+def test_open_session_list_resume_is_marker_only_no_turn() -> None:
     async def _run() -> None:
         from magi_agent.cli.tui.dialogs.session import (
             SessionEntry,
@@ -1026,17 +1026,17 @@ def test_open_session_list_resume_starts_fresh_turn() -> None:
             app.screen.dismiss("s-9")
             await app.workers.wait_for_complete()
             await pilot.pause()
-        # Resume ran ONE fresh turn (no replay), recorded the resumed ref, and
-        # switched the active session id to it.
+        # Resume switched the active session id and recorded the resumed ref.
         assert app.resumed_session == "s-9"
         assert app._session_id == "s-9"
-        assert app.last_terminal is not None
-        assert app.last_terminal.terminal == Terminal.completed
-        # No transcript replay: the only echoed user line is the resume prompt,
-        # not any prior-session transcript content.
+        # Marker-only: the visible "[resumed session s-9]" block is committed,
+        # but NO synthetic engine turn was started by the resume itself.
         blocks = app.controller.committed_blocks_snapshot()
         assert any("resumed session s-9" in b for b in blocks)
-        assert any("Resume session s-9" in b for b in blocks)
+        assert app.last_terminal is None  # resume sent no engine turn
+        # The redundant/confusing synthetic "Resume session s-9." prompt is
+        # NOT echoed — the user's NEXT prompt runs under the resumed id.
+        assert not any("Resume session s-9" in b for b in blocks)
 
     asyncio.run(_run())
 

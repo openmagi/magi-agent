@@ -890,10 +890,12 @@ class MagiTuiApp(App[None]):
     def _resume_session(self, ref: str | None) -> None:
         """Resume a chosen session (None on cancel = no-op).
 
-        OQ3: **metadata + a fresh turn**. We switch the active session id to the
-        chosen ref and start ONE new turn — there is NO transcript replay. Full
-        rehydration (``TurnInput.initial_messages``) stays a deferred Stream-B
-        seam; here resume is purely "continue under this session id".
+        OQ3: **marker-only resume**. We switch the active session id to the
+        chosen ref and show a visible ``[resumed session {ref}]`` marker; the
+        prior transcript is NOT replayed and NO synthetic engine turn is sent.
+        The user's next typed prompt naturally runs under the resumed
+        ``_session_id``. Real rehydration (``TurnInput.initial_messages``
+        replay) stays a deferred runtime seam.
         """
 
         if not ref:
@@ -901,7 +903,6 @@ class MagiTuiApp(App[None]):
         self.resumed_session = ref
         self._session_id = ref
         self.controller.commit_block(f"[resumed session {ref}]")
-        self.start_turn(f"Resume session {ref}.")
 
     # -- the ONE engine-driven turn loop -----------------------------------
     def start_turn(self, prompt: str) -> None:
