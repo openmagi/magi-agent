@@ -47,7 +47,7 @@ from magi_agent.cli.wiring import (
 )
 from magi_agent.runtime.local_defaults import apply_local_full_runtime_defaults
 
-__all__ = ["app", "main"]
+__all__ = ["app", "main", "resolve_headless_permission_mode"]
 
 # ---------------------------------------------------------------------------
 # Default-command group
@@ -134,6 +134,26 @@ class AgentMode(str, Enum):
     act = "act"
 
 
+def _normalize_runtime_profile(runtime_profile: str | None) -> str:
+    return (runtime_profile or "").strip().lower()
+
+
+def resolve_headless_permission_mode(
+    *, permission_mode: str, flag_is_default: bool, runtime_profile: str | None
+) -> str:
+    """Resolve the headless permission mode.
+
+    Eval runs are unattended batch scoring (no human approver) in ephemeral
+    sandboxes, so when the operator left ``--permission-mode`` at its default the
+    eval profile defaults to ``bypassPermissions`` (otherwise every write/exec
+    tool is denied for lack of an approver and the run produces an empty result).
+    An explicit ``--permission-mode`` always wins.
+    """
+    if flag_is_default and _normalize_runtime_profile(runtime_profile) == "eval":
+        return "bypassPermissions"
+    return permission_mode
+
+
 def _composio_status_line(prefix: str) -> str:
     from magi_agent.composio.config import resolve_composio_config
     from magi_agent.composio.health import composio_health_metadata
@@ -208,11 +228,16 @@ def agent(
     """
 
     # ``agent`` is the default command (routed to by ``DefaultCommandGroup``
-    # when no explicit subcommand is given). ``ctx`` is accepted for parity
-    # with the other commands and possible future use.
-    _ = ctx
+    # when no explicit subcommand is given). ``ctx`` is used for
+    # get_parameter_source in both the headless and TUI branches below.
 
-    apply_local_full_runtime_defaults(os.environ)
+    runtime_profile = _normalize_runtime_profile(os.environ.get("MAGI_RUNTIME_PROFILE"))
+    if runtime_profile == "eval":
+        from magi_agent.runtime.local_defaults import apply_local_eval_runtime_defaults  # noqa: PLC0415
+
+        apply_local_eval_runtime_defaults(os.environ)
+    else:
+        apply_local_full_runtime_defaults(os.environ)
     runner_policy_routing_enabled = local_runner_policy_routing_enabled_from_env()
 
     # ------------------------------------------------------------------ #
@@ -233,8 +258,17 @@ def agent(
         # -------------------------------------------------------------- #
         # Headless branch                                                  #
         # -------------------------------------------------------------- #
+        permission_mode_source = ctx.get_parameter_source("permission_mode")
+        headless_permission_mode = resolve_headless_permission_mode(
+            permission_mode=permission_mode.value,
+            flag_is_default=(
+                permission_mode is PermMode.default
+                and getattr(permission_mode_source, "name", None) == "DEFAULT"
+            ),
+            runtime_profile=runtime_profile,
+        )
         rt = build_headless_runtime(
-            permission_mode=permission_mode.value,  # type: ignore[arg-type]
+            permission_mode=headless_permission_mode,  # type: ignore[arg-type]
             session_id=resume or "cli-session",
             model=model,
             mode=mode.value,  # type: ignore[arg-type]
@@ -262,7 +296,7 @@ def agent(
                 gate=rt.gate,
                 commands=rt.commands,
                 driver=rt.engine,
-                permission_mode=permission_mode.value,  # type: ignore[arg-type]
+                permission_mode=headless_permission_mode,  # type: ignore[arg-type]
                 session_id=rt.session_log.path.stem
                 if hasattr(rt.session_log, "path")
                 else (resume or "cli-session"),

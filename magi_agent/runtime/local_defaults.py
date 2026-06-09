@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, MutableMapping
 
-SAFE_RUNTIME_PROFILES = frozenset({"safe", "off", "minimal", "conservative"})
+SAFE_RUNTIME_PROFILES = frozenset({"safe", "off", "minimal", "conservative", "eval"})
 LOCAL_FULL_RUNTIME_DEFAULTS_ENABLED_ENV = "MAGI_AGENT_LOCAL_FULL_RUNTIME_DEFAULTS"
 
 LOCAL_FULL_RUNTIME_ENV_DEFAULTS: Mapping[str, str] = {
@@ -62,13 +62,58 @@ LOCAL_FULL_RUNTIME_ENV_DEFAULTS: Mapping[str, str] = {
 }
 
 
+EVAL_RUNTIME_ENV_DEFAULTS: Mapping[str, str] = {
+    # Profile identity
+    "MAGI_RUNTIME_PROFILE": "eval",
+    "MAGI_TASK_TYPES": "coding",
+    # Tool caps
+    "MAGI_TOOL_MAX_OUTPUT_BYTES": "131072",
+    "MAGI_TOOL_COMMAND_TIMEOUT_MS": "30000",
+    # Coding capability ON
+    "MAGI_FIRST_PARTY_TOOLS_ENABLED": "1",
+    "MAGI_EDIT_FUZZY_MATCH_ENABLED": "1",
+    "MAGI_EDIT_RETRY_REFLECTION_ENABLED": "1",
+    "MAGI_READ_LEDGER_ENABLED": "1",
+    "MAGI_EDIT_FORMAT_ON_WRITE_ENABLED": "1",
+    "MAGI_READ_QUALITY_ENABLED": "1",
+    "MAGI_RIPGREP_ENABLED": "1",
+    "MAGI_APPLY_PATCH_ENABLED": "1",
+    "MAGI_MODEL_AWARE_PROMPTS_ENABLED": "1",
+    "MAGI_LOOP_GUARD_ENABLED": "1",
+    "MAGI_ERROR_RECOVERY_ENABLED": "1",
+    "MAGI_TOOL_CONCURRENCY_ENABLED": "1",
+    "MAGI_PROVIDER_REPAIR_ENABLED": "1",
+    "MAGI_MESSAGE_CACHE_ENABLED": "1",
+    "MAGI_FILE_TOOLS_ENABLED": "1",
+    "MAGI_TRUSTED_LOCAL_SHELL_ENABLED": "1",
+    # Delivery machinery OFF
+    "MAGI_EVIDENCE_COMPLETION_GATE_ENABLED": "0",
+    "MAGI_GA_LIVE_ENABLED": "0",
+    "MAGI_CODING_REPAIR_LOOP_ENABLED": "0",
+    "MAGI_SELF_REVIEW_ENABLED": "0",
+    "MAGI_AUTOPILOT": "0",
+    "MAGI_SESSION_PERSISTENCE_ENABLED": "0",
+    "MAGI_CONTEXT_COMPACTION_ENABLED": "0",
+    "MAGI_LEARNING_ENABLED": "false",
+    "MAGI_SKILL_CURATOR_ENABLED": "0",
+    "MAGI_RUNNER_POLICY_ROUTING_ENABLED": "0",
+}
+
+
+def apply_local_eval_runtime_defaults(environ: MutableMapping[str, str]) -> None:
+    """Apply the one-shot eval profile (MAGI_RUNTIME_PROFILE=eval). setdefault
+    semantics: explicit operator env always wins."""
+    for key, value in EVAL_RUNTIME_ENV_DEFAULTS.items():
+        environ.setdefault(key, value)
+
+
 def apply_local_full_runtime_defaults(environ: MutableMapping[str, str]) -> None:
     """Apply the default installed/local profile to a mutable env mapping.
 
     The underlying feature gates can remain conservative for import-time tests
     and custom deployments. A clean local ``magi`` or ``magi-agent serve``
     install should start the full local runtime unless the operator explicitly
-    opts out with ``MAGI_RUNTIME_PROFILE=safe|minimal|off|conservative`` or
+    opts out with ``MAGI_RUNTIME_PROFILE=safe|minimal|off|conservative|eval`` or
     ``MAGI_AGENT_LOCAL_FULL_RUNTIME_DEFAULTS=0``.
     """
 

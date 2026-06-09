@@ -60,7 +60,7 @@ LOCAL_DEV_MODEL_SENTINEL = "local-dev"
 _TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
 _FALSE_VALUES = frozenset({"0", "false", "no", "off", ""})
 RUNTIME_PROFILE_ENV = "MAGI_RUNTIME_PROFILE"
-_SAFE_RUNTIME_PROFILES = frozenset({"safe", "off", "minimal", "conservative"})
+_SAFE_RUNTIME_PROFILES = frozenset({"safe", "off", "minimal", "conservative", "eval"})
 
 # ---------------------------------------------------------------------------
 # Coding: edit fuzzy-match flag
@@ -68,8 +68,8 @@ _SAFE_RUNTIME_PROFILES = frozenset({"safe", "off", "minimal", "conservative"})
 # When set to "1" or "true", gate5b FileEdit uses the 9-stage fuzzy-match
 # cascade (magi_agent.coding.edit_matching) instead of exact-only matching.
 # Default: ON in the local full runtime profile; set
-# MAGI_EDIT_FUZZY_MATCH_ENABLED=0 or MAGI_RUNTIME_PROFILE=safe for conservative
-# runs.
+# MAGI_EDIT_FUZZY_MATCH_ENABLED=0 or MAGI_RUNTIME_PROFILE=safe|eval for
+# conservative/profile-scoped runs.
 MAGI_EDIT_FUZZY_MATCH_ENABLED: bool = (
     (
         os.environ.get("MAGI_EDIT_FUZZY_MATCH_ENABLED")
@@ -1832,6 +1832,11 @@ def parse_trusted_local_shell_enabled(env: Mapping[str, str]) -> bool:
     restore the conservative deny-all-complex behavior.
     """
     return _runtime_feature_enabled(env, "MAGI_TRUSTED_LOCAL_SHELL_ENABLED")
+
+
+def parse_evidence_completion_gate_enabled(env: Mapping[str, str]) -> bool:
+    """MAGI_EVIDENCE_COMPLETION_GATE_ENABLED — gates the recipe-materializer runner-policy assembly (pre-final evidence gate / GA / phase routing / policy callback). Default ON; eval mode turns it off."""
+    return _runtime_feature_enabled(env, "MAGI_EVIDENCE_COMPLETION_GATE_ENABLED")
 
 
 def tool_concurrency_enabled(env: Mapping[str, str]) -> bool:
