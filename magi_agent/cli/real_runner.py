@@ -420,6 +420,11 @@ def _build_default_runner_policy_assembly(
     live_policy_callback_attached: bool,
     task_profile: Mapping[str, object] | None = None,
 ) -> RunnerPolicyAssembly | None:
+    from magi_agent.config.env import parse_evidence_completion_gate_enabled  # noqa: PLC0415
+
+    if not parse_evidence_completion_gate_enabled(os.environ):
+        return None
+
     try:
         from magi_agent.recipes.compiler import (  # noqa: PLC0415
             AgentRecipeCompiler,

@@ -1834,6 +1834,11 @@ def parse_trusted_local_shell_enabled(env: Mapping[str, str]) -> bool:
     return _runtime_feature_enabled(env, "MAGI_TRUSTED_LOCAL_SHELL_ENABLED")
 
 
+def parse_evidence_completion_gate_enabled(env: Mapping[str, str]) -> bool:
+    """MAGI_EVIDENCE_COMPLETION_GATE_ENABLED — gates the recipe-materializer runner-policy assembly (pre-final evidence gate / GA / phase routing / policy callback). Default ON; eval mode turns it off."""
+    return _runtime_feature_enabled(env, "MAGI_EVIDENCE_COMPLETION_GATE_ENABLED")
+
+
 def tool_concurrency_enabled(env: Mapping[str, str]) -> bool:
     """Single source of truth for the ``MAGI_TOOL_CONCURRENCY_ENABLED`` flag.
 
