@@ -21,8 +21,10 @@ from __future__ import annotations
 import asyncio
 
 from magi_agent.cli.contracts import (
+    Command,
     CommandSurface,
     EngineResult,
+    LocalCommand,
     PermissionDecision,
     PermissionGate,
     RuntimeEvent,
@@ -283,5 +285,54 @@ def test_on_key_unconvertible_event_returns_without_error() -> None:
 
             app.on_key(_Empty())
             assert app._pending is None
+
+    asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
+# Piece 3 — command-execution failures surface (never die silently)
+# ---------------------------------------------------------------------------
+class _BoomLocal(LocalCommand):
+    """A LocalCommand whose ``call`` raises, simulating a broken first-party command."""
+
+    async def call(self, args, ctx):  # type: ignore[override]
+        _ = (args, ctx)
+        raise RuntimeError("boom")
+
+
+class _SingleCommandRegistry:
+    def __init__(self, command: Command) -> None:
+        self._command = command
+
+    def lookup(self, name):
+        return self._command if name == self._command.name else None
+
+    def list_for(self, surface):
+        _ = surface
+        return [self._command]
+
+
+def test_command_execution_failure_commits_a_failure_block() -> None:
+    """A raising command must surface a ``[command failed: ...]`` block, not vanish.
+
+    Without the try/except in ``_run_command`` the ``@work(group="command")``
+    worker fails and swallows the error: the transcript stays empty and the user
+    gets NO feedback. This drives the failure through the real
+    ``submit_command`` -> ``_dispatch_command`` -> command worker path.
+    """
+
+    async def _run() -> None:
+        boom = _BoomLocal(name="boom", surface=TUI)
+        app = _make_app(_Idle())
+        app._commands = _SingleCommandRegistry(boom)  # type: ignore[attr-defined]
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.submit_command("boom")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            # The app survived (no crash); the worker did not bring it down.
+            assert app.is_running
+            blocks = app.controller.committed_blocks_snapshot()
+        assert any(b.startswith("[command failed:") for b in blocks), blocks
 
     asyncio.run(_run())

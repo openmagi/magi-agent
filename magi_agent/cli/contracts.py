@@ -76,6 +76,7 @@ __all__ = [
     "WidgetCommand",
     "WidgetDone",
     "Command",
+    "CommandExecutor",
     "CommandRegistry",
     # re-exported runtime type
     "ControlRequest",
@@ -295,6 +296,11 @@ class CommandContext:
     session: object | None = None
     runtime: object | None = None
     emit: "EmitFn | None" = None
+    # App-facing opener seam (TUI). ``app`` exposes start_turn / commit_text /
+    # request_compact / open_dialog. Kept as ``object | None`` so contracts.py
+    # never imports textual; the TUI app structurally satisfies it. Additive,
+    # defaulted last so existing positional/keyword construction stays valid.
+    app: object | None = None
 
 
 # Local command result union.
@@ -390,6 +396,21 @@ class WidgetCommand:
 
 
 Command = Union[PromptCommand, LocalCommand, WidgetCommand]
+
+
+@runtime_checkable
+class CommandExecutor(Protocol):
+    """Executes a looked-up command for an interactive surface.
+
+    NOT a second engine loop. ``prompt``-kind commands re-enter the surface's
+    existing turn loop (``ctx.app.start_turn``); ``local``-kind run their
+    callback and apply the ``LocalResult`` (Text -> commit, Compact -> request
+    compaction, Skip -> nothing); ``widget``-kind open a dialog/palette. The
+    single-turn-loop invariant is preserved — the executor NEVER drives
+    ``run_turn_stream``.
+    """
+
+    async def run(self, command: Command, args: str, ctx: CommandContext) -> None: ...
 
 
 @runtime_checkable

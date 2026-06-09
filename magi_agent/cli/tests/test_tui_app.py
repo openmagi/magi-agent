@@ -143,6 +143,9 @@ def test_tui_mount_renders_welcome_state() -> None:
         assert "Shift+Enter" in joined
         assert "history" in joined
         assert "Ctrl+S" in joined
+        # Phase 2 doors advertised too: command palette + help.
+        assert "Ctrl+P" in joined
+        assert "F1" in joined
         assert app.last_terminal is None
 
     asyncio.run(_run())
@@ -539,15 +542,15 @@ def test_slash_command_dispatch_via_registry() -> None:
             app._input.cursor_location = (0, len("/compact"))
             await pilot.press("enter")
             await pilot.pause()
-        blocks = app.controller.committed_blocks_snapshot()
-        # REAL dispatch evidence: _dispatch_command commits a "[command] /compact"
-        # line. The welcome banner contains "/compact" too, so assert on the
-        # dispatch-specific echo that ONLY the command path produces — this fails
-        # if submission/dispatch did not happen.
-        assert any("[command] /compact" in b for b in blocks), blocks
+        # REAL dispatch evidence (PR2.2): _dispatch_command now runs the command
+        # through the injected CommandExecutor instead of echoing "[command]
+        # /compact". A bare LocalCommand (FakeRegistry) has no ``call`` override,
+        # so it returns Skip() and nothing is committed for it — the assertion is
+        # therefore on the registry lookup + the absence of an engine turn, not
+        # on a committed echo line. The dispatch happened without crashing.
         # And the registry lookup path was actually hit by the command name.
         assert "compact" in looked_up
-        # No engine turn was run for a command.
+        # No engine turn was run for a command (local Skip()).
         assert app.last_terminal is None
 
     asyncio.run(_run())
@@ -847,5 +850,423 @@ def test_tool_event_legacy_richlog_no_card(monkeypatch) -> None:
             assert len(app.query(ToolCard)) == 0
             joined = "\n".join(app.controller.committed_blocks_snapshot())
             assert "Bash" in joined
+
+    asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
+# PR2.2 — slash-command execution through the injected CommandExecutor
+# ---------------------------------------------------------------------------
+def test_dispatch_prompt_command_starts_turn() -> None:
+    async def _run() -> None:
+        from magi_agent.cli.contracts import (
+            CommandSurface as CS,
+            ContentBlock,
+            PromptCommand,
+        )
+
+        TUI2 = CS(tui=True, headless=False)
+
+        class Greet(PromptCommand):
+            async def build_prompt(self, args, ctx):  # type: ignore[override]
+                return [ContentBlock(type="text", text="do the thing")]
+
+        class Reg:
+            def lookup(self, name):
+                return Greet(name="greet", surface=TUI2) if name == "greet" else None
+
+            def list_for(self, surface):
+                return [Greet(name="greet", surface=TUI2)]
+
+        engine = FakeEngineDriver(tokens=["x"])
+        app = _make_app(engine, commands=Reg())
+        async with app.run_test() as pilot:
+            app.submit_command("greet", "")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+        # A prompt command re-entered the ONE turn loop.
+        assert app.last_terminal is not None
+        assert app.last_terminal.terminal == Terminal.completed
+        blocks = app.controller.committed_blocks_snapshot()
+        assert any("do the thing" in b for b in blocks)
+
+    asyncio.run(_run())
+
+
+def test_dispatch_local_compact_requests_compact() -> None:
+    async def _run() -> None:
+        from magi_agent.cli.commands.builtins import CompactCommand, BUILTIN_BOTH
+
+        class Reg:
+            def lookup(self, name):
+                return (
+                    CompactCommand(name="compact", surface=BUILTIN_BOTH)
+                    if name == "compact"
+                    else None
+                )
+
+            def list_for(self, surface):
+                return [CompactCommand(name="compact", surface=BUILTIN_BOTH)]
+
+        engine = FakeEngineDriver()
+        app = _make_app(engine, commands=Reg())
+        async with app.run_test() as pilot:
+            app.submit_command("compact", "")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+        assert app.compact_requests >= 1
+        assert app.last_terminal is None  # local command runs no engine turn
+
+    asyncio.run(_run())
+
+
+def test_dispatch_unknown_command_warns() -> None:
+    async def _run() -> None:
+        engine = FakeEngineDriver()
+        app = _make_app(engine, commands=FakeRegistry(["compact"]))
+        async with app.run_test() as pilot:
+            app.submit_command("nope", "")
+            await pilot.pause()
+        blocks = app.controller.committed_blocks_snapshot()
+        assert any("unknown" in b and "nope" in b for b in blocks)
+
+    asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
+# PR2.3 — model picker dialog opener + apply
+# ---------------------------------------------------------------------------
+def test_open_model_picker_applies_selection() -> None:
+    async def _run() -> None:
+        from magi_agent.cli.tui.dialogs.model import ModelPickerDialog
+
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        app._model = "claude-sonnet-4-6"
+        async with app.run_test() as pilot:
+            app.action_open_model_picker()
+            await pilot.pause()
+            assert isinstance(app.screen, ModelPickerDialog)
+            app.screen.dismiss("gpt-5.5")
+            await pilot.pause()
+            await pilot.pause()
+        assert app._model == "gpt-5.5"
+        assert "gpt-5.5" in app._topbar_text()
+
+    asyncio.run(_run())
+
+
+def test_open_model_picker_cancel_keeps_model() -> None:
+    async def _run() -> None:
+        from magi_agent.cli.tui.dialogs.model import ModelPickerDialog
+
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        app._model = "claude-sonnet-4-6"
+        async with app.run_test() as pilot:
+            app.action_open_model_picker()
+            await pilot.pause()
+            assert isinstance(app.screen, ModelPickerDialog)
+            app.screen.dismiss(None)
+            await pilot.pause()
+            await pilot.pause()
+        assert app._model == "claude-sonnet-4-6"
+
+    asyncio.run(_run())
+
+
+def test_open_dialog_model_picker_opens_dialog() -> None:
+    async def _run() -> None:
+        from magi_agent.cli.tui.dialogs.model import ModelPickerDialog
+
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            app.open_dialog("model_picker")
+            await pilot.pause()
+            assert isinstance(app.screen, ModelPickerDialog)
+
+    asyncio.run(_run())
+
+
+def test_open_model_picker_surfaces_in_palette_actions() -> None:
+    async def _run() -> None:
+        from magi_agent.cli.tui.palette import AppActionProvider
+
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            provider = AppActionProvider(app.screen)
+            provider._app_ref = app
+            hits = [h async for h in provider.discover()]
+        labels = [getattr(h, "text", "") or "" for h in hits]
+        assert "Switch model" in labels
+
+    asyncio.run(_run())
+
+
+def test_apply_model_without_topbar_does_not_crash() -> None:
+    # _apply_model is reachable before the topbar is wired (e.g. programmatic
+    # apply pre-mount). It must not crash and must still update self._model.
+    engine = FakeEngineDriver()
+    app = _make_app(engine)
+    assert app._topbar is None  # not yet composed/mounted
+    app._apply_model("gpt-5.5")
+    assert app._model == "gpt-5.5"
+
+
+def test_ctrl_p_opens_command_palette() -> None:
+    async def _run() -> None:
+        from textual.command import CommandPalette
+
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("ctrl+p")
+            await pilot.pause()
+            # The command palette screen is actually pushed onto the stack.
+            assert any(
+                isinstance(s, CommandPalette) for s in app.screen_stack
+            )
+
+    asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
+# Session list dialog (PR2.4) — resume = marker-only, NO synthetic turn (OQ3)
+# ---------------------------------------------------------------------------
+def test_open_session_list_resume_is_marker_only_no_turn() -> None:
+    async def _run() -> None:
+        from magi_agent.cli.tui.dialogs.session import (
+            SessionEntry,
+            SessionListDialog,
+        )
+
+        engine = FakeEngineDriver(tokens=["resumed"])
+        app = _make_app(engine)
+        # Inject a couple of resumable sessions directly (controller seam).
+        app._session_source = lambda: [
+            SessionEntry(ref="s-9", label="earlier work", updated="2026-06-06")
+        ]
+        async with app.run_test() as pilot:
+            app.action_open_session_list()
+            await pilot.pause()
+            assert isinstance(app.screen, SessionListDialog)
+            app.screen.dismiss("s-9")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+        # Resume switched the active session id and recorded the resumed ref.
+        assert app.resumed_session == "s-9"
+        assert app._session_id == "s-9"
+        # Marker-only: the visible "[resumed session s-9]" block is committed,
+        # but NO synthetic engine turn was started by the resume itself.
+        blocks = app.controller.committed_blocks_snapshot()
+        assert any("resumed session s-9" in b for b in blocks)
+        assert app.last_terminal is None  # resume sent no engine turn
+        # The redundant/confusing synthetic "Resume session s-9." prompt is
+        # NOT echoed — the user's NEXT prompt runs under the resumed id.
+        assert not any("Resume session s-9" in b for b in blocks)
+
+    asyncio.run(_run())
+
+
+def test_resume_rebinds_history_and_drafts_to_new_session() -> None:
+    async def _run() -> None:
+        from magi_agent.cli.tui.dialogs.session import (
+            SessionEntry,
+            SessionListDialog,
+        )
+
+        engine = FakeEngineDriver()
+        app = _make_app(engine, commands=FakeRegistry([]))
+        app._session_source = lambda: [
+            SessionEntry(ref="s-99", label="earlier work")
+        ]
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            old_history = app._history
+            old_drafts = app._drafts
+            # Seed the OLD session's history so we can prove the recall reads the
+            # RESUMED session's ring (which is empty) after the re-bind.
+            old_history.add("old-session-prompt")
+
+            app.action_open_session_list()
+            await pilot.pause()
+            assert isinstance(app.screen, SessionListDialog)
+            app.screen.dismiss("s-99")
+            await pilot.pause()
+            await pilot.pause()
+
+            # New history/drafts objects, bound to the resumed session id.
+            assert app._history is not old_history
+            assert app._drafts is not old_drafts
+            assert app._history._session_id == "s-99"
+            assert app._drafts._session_id == "s-99"
+            assert "s-99" in str(app._history._path)
+            assert "s-99" in str(app._drafts._path)
+
+            # ↑-recall after resume reads the RESUMED session's history (empty),
+            # NOT the old session's "old-session-prompt".
+            recalled = app._history.prev("")
+            assert recalled != "old-session-prompt"
+            assert recalled is None
+            # The prompt input's recall ring follows the resumed session too.
+            assert app._input is not None
+            assert app._input._history is app._history
+
+    asyncio.run(_run())
+
+
+def test_open_session_list_cancel_keeps_session() -> None:
+    async def _run() -> None:
+        from magi_agent.cli.tui.dialogs.session import (
+            SessionEntry,
+            SessionListDialog,
+        )
+
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        app._session_source = lambda: [
+            SessionEntry(ref="s-9", label="earlier work")
+        ]
+        original = app._session_id
+        async with app.run_test() as pilot:
+            app.action_open_session_list()
+            await pilot.pause()
+            assert isinstance(app.screen, SessionListDialog)
+            app.screen.dismiss(None)
+            await pilot.pause()
+            await pilot.pause()
+        assert app.resumed_session is None
+        assert app._session_id == original
+        assert app.last_terminal is None  # no turn ran on cancel
+
+    asyncio.run(_run())
+
+
+def test_open_session_list_empty_when_no_source() -> None:
+    async def _run() -> None:
+        from magi_agent.cli.tui.dialogs.session import SessionListDialog
+        from textual.widgets import OptionList
+
+        engine = FakeEngineDriver()
+        app = _make_app(engine)  # no runtime, no _session_source -> empty
+        async with app.run_test() as pilot:
+            app.action_open_session_list()
+            await pilot.pause()
+            assert isinstance(app.screen, SessionListDialog)
+            assert app.screen.query_one(OptionList).option_count == 0
+
+    asyncio.run(_run())
+
+
+def test_open_dialog_session_list_opens_dialog() -> None:
+    async def _run() -> None:
+        from magi_agent.cli.tui.dialogs.session import SessionListDialog
+
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            app.open_dialog("session_list")
+            await pilot.pause()
+            assert isinstance(app.screen, SessionListDialog)
+
+    asyncio.run(_run())
+
+
+def test_open_session_list_surfaces_in_palette_actions() -> None:
+    async def _run() -> None:
+        from magi_agent.cli.tui.palette import AppActionProvider
+
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            provider = AppActionProvider(app.screen)
+            provider._app_ref = app
+            hits = [h async for h in provider.discover()]
+        labels = [getattr(h, "text", "") or "" for h in hits]
+        assert "Sessions" in labels
+
+    asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
+# Help dialog (PR2.5) — read-only keybinding + command reference
+# ---------------------------------------------------------------------------
+def test_open_help_shows_help_dialog() -> None:
+    async def _run() -> None:
+        from magi_agent.cli.tui.dialogs.help import HelpDialog
+
+        engine = FakeEngineDriver()
+        app = _make_app(engine, commands=FakeRegistry(["compact", "status"]))
+        async with app.run_test() as pilot:
+            app.action_open_help()
+            await pilot.pause()
+            assert isinstance(app.screen, HelpDialog)
+            body = app.screen.query_one("#help-body")
+            # Textual 8.2.7: Static has no .renderable — use .render().
+            rendered = str(body.render())
+            assert "/compact" in rendered
+            assert "/status" in rendered
+            assert "ctrl+p" in rendered  # COMMAND_PALETTE_BINDING surfaced
+            # Phase-1 prompt keys surface via the default PROMPT_KEYS section.
+            assert "Shift+Enter" in rendered
+            assert "Ctrl+S" in rendered
+            assert "History recall" in rendered
+            await pilot.press("escape")
+            await pilot.pause()
+            # Escape dismissed the modal: no HelpDialog left on the stack.
+            assert not any(
+                isinstance(s, HelpDialog) for s in app.screen_stack
+            )
+
+    asyncio.run(_run())
+
+
+def test_open_dialog_help_opens_dialog() -> None:
+    async def _run() -> None:
+        from magi_agent.cli.tui.dialogs.help import HelpDialog
+
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            app.open_dialog("help")
+            await pilot.pause()
+            assert isinstance(app.screen, HelpDialog)
+
+    asyncio.run(_run())
+
+
+def test_open_help_surfaces_in_palette_actions() -> None:
+    async def _run() -> None:
+        from magi_agent.cli.tui.palette import AppActionProvider
+
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            provider = AppActionProvider(app.screen)
+            provider._app_ref = app
+            hits = [h async for h in provider.discover()]
+        labels = [getattr(h, "text", "") or "" for h in hits]
+        assert "Help" in labels
+
+    asyncio.run(_run())
+
+
+def test_f1_opens_help_dialog() -> None:
+    async def _run() -> None:
+        from magi_agent.cli.tui.dialogs.help import HelpDialog
+
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("f1")
+            await pilot.pause()
+            assert isinstance(app.screen, HelpDialog)
 
     asyncio.run(_run())
