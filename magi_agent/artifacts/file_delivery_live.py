@@ -284,13 +284,220 @@ class LiveFilesystemChannelProvider:
 
 
 # ---------------------------------------------------------------------------
+# Inline fake providers (used by build_file_delivery_providers gate-off path)
+# ---------------------------------------------------------------------------
+# These are equivalents of _LocalFakeFileArtifactProvider /
+# _LocalFakeChannelDeliveryProvider in documents.py.  They are duplicated here
+# (rather than imported from documents.py) to avoid a circular import:
+# file_delivery_live ← lazy-import ← documents ← lazy-import ← file_delivery_live.
+
+
+class _FactoryLocalFakeArtifactProvider:
+    openmagi_local_fake_provider = True
+
+    def __init__(self, *, artifact_ref: str, content_digest: str) -> None:
+        self._artifact_ref = artifact_ref
+        self._content_digest = content_digest
+
+    def write_artifact(self, request: Any) -> Mapping[str, object]:
+        request_id: str = getattr(request, "request_id", "unknown")
+        return {
+            "status": "ok",
+            "artifactRef": self._artifact_ref,
+            "contentDigest": self._content_digest,
+            "receiptId": f"artifact-receipt:{hashlib.sha1(request_id.encode('utf-8')).hexdigest()[:16]}",
+        }
+
+
+class _FactoryLocalFakeChannelProvider:
+    openmagi_local_fake_provider = True
+
+    def deliver(self, request: Any) -> "ChannelDeliveryReceipt":
+        channel = request.channel
+        if channel is None:
+            raise ValueError("channel_required")
+        request_id: str = request.request_id
+        artifact_refs: tuple[str, ...] = getattr(request, "artifact_refs", ())
+        file_refs: tuple[str, ...] = getattr(request, "file_refs", ())
+        short = hashlib.sha1(request_id.encode("utf-8")).hexdigest()[:16]
+        return ChannelDeliveryReceipt(
+            receiptId=f"receipt:{short}",
+            requestId=request_id,
+            channel=channel,
+            status="sent",
+            providerMessageId=f"message:{hashlib.sha1((request_id + ':message').encode('utf-8')).hexdigest()[:16]}",
+            artifactRefs=artifact_refs,
+            fileRefs=file_refs,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Env var names for workspace delivery directories
+# ---------------------------------------------------------------------------
+
+MAGI_FILE_DELIVERY_ARTIFACT_DIR_ENV = "MAGI_FILE_DELIVERY_ARTIFACT_DIR"
+MAGI_FILE_DELIVERY_OUTBOX_DIR_ENV = "MAGI_FILE_DELIVERY_OUTBOX_DIR"
+
+_DEFAULT_ARTIFACT_SUBDIR = ".magi/deliveries/artifacts"
+_DEFAULT_OUTBOX_SUBDIR = ".magi/deliveries/outbox"
+
+
+# ---------------------------------------------------------------------------
+# Provider factory
+# ---------------------------------------------------------------------------
+
+
+def build_file_delivery_providers(
+    *,
+    env: Mapping[str, str] | None = None,
+    content_bytes: bytes,
+    filename: str,
+    context: object,
+) -> "tuple[object, object, object]":
+    """Build (FileDeliveryConfig, artifact_provider, channel_provider) from env.
+
+    When ``MAGI_FILE_DELIVERY_LIVE_ENABLED`` is set (and the kill-switch is NOT
+    set), returns live filesystem providers that write files under the workspace.
+    Otherwise returns the local-fake providers used today — byte-identical to
+    current behaviour (default-OFF guarantee).
+
+    Workspace directories
+    ---------------------
+    - Artifact output:  ``<workspace>/.magi/deliveries/artifacts``  (or the path
+      in ``MAGI_FILE_DELIVERY_ARTIFACT_DIR`` relative to the workspace root).
+    - Channel outbox:   ``<workspace>/.magi/deliveries/outbox``  (or
+      ``MAGI_FILE_DELIVERY_OUTBOX_DIR``).
+
+    Both paths are validated via ``safe_child_path(allow_internal=True)`` so they
+    can never escape the workspace.  On any resolution error the factory falls
+    back to the fake path (fail-open, never raises for normal inputs).
+
+    Parameters
+    ----------
+    env:
+        Environment mapping; defaults to ``os.environ``.
+    content_bytes:
+        Raw file bytes (needed to construct the providers).
+    filename:
+        Original filename (used for the artifact provider).
+    context:
+        ``ToolContext`` instance from ``documents.py``.  Passed through to
+        ``safe_child_path`` / ``workspace_root``; typed as ``object`` here so
+        this module does not import ``ToolContext`` at module level.
+    """
+    # Lazy imports — live providers and ToolContext helpers stay out of the
+    # module-level import graph (mirrors research_tools.build_live_research_boundary).
+    from magi_agent.artifacts.file_delivery import FileDeliveryConfig  # noqa: PLC0415
+    from magi_agent.plugins.native._common import (  # noqa: PLC0415
+        safe_child_path,
+        workspace_root,
+    )
+
+    resolved_env: Mapping[str, str] = os.environ if env is None else env
+
+    if not is_live_file_delivery_enabled(resolved_env):
+        # ------------------------------------------------------------------ #
+        # DEFAULT (gate off): return fake providers — identical to today.     #
+        # Fake providers are constructed inline here to avoid a circular      #
+        # import between file_delivery_live and documents.                    #
+        # ------------------------------------------------------------------ #
+        import hashlib as _hashlib  # noqa: PLC0415
+
+        content_digest = "sha256:" + _hashlib.sha256(content_bytes).hexdigest()
+        artifact_ref = f"artifact:{_hashlib.sha1(content_digest.encode('utf-8')).hexdigest()[:16]}"
+        fake_config = FileDeliveryConfig(
+            enabled=True,
+            localFakeArtifactServiceEnabled=True,
+            localFakeChannelDeliveryEnabled=True,
+        )
+        return (
+            fake_config,
+            _FactoryLocalFakeArtifactProvider(
+                artifact_ref=artifact_ref,
+                content_digest=content_digest,
+            ),
+            _FactoryLocalFakeChannelProvider(),
+        )
+
+    # ---------------------------------------------------------------------- #
+    # LIVE path: resolve workspace dirs, construct filesystem providers.      #
+    # ---------------------------------------------------------------------- #
+    try:
+        ws_root = workspace_root(context)  # type: ignore[arg-type]
+
+        artifact_subdir = resolved_env.get(MAGI_FILE_DELIVERY_ARTIFACT_DIR_ENV, "").strip()
+        if not artifact_subdir:
+            artifact_subdir = _DEFAULT_ARTIFACT_SUBDIR
+
+        outbox_subdir = resolved_env.get(MAGI_FILE_DELIVERY_OUTBOX_DIR_ENV, "").strip()
+        if not outbox_subdir:
+            outbox_subdir = _DEFAULT_OUTBOX_SUBDIR
+
+        output_dir = safe_child_path(  # type: ignore[arg-type]
+            context,
+            artifact_subdir,
+            default_name=_DEFAULT_ARTIFACT_SUBDIR,
+            mutating=True,
+            allow_internal=True,
+        )
+        outbox_dir = safe_child_path(  # type: ignore[arg-type]
+            context,
+            outbox_subdir,
+            default_name=_DEFAULT_OUTBOX_SUBDIR,
+            mutating=True,
+            allow_internal=True,
+        )
+        _ = ws_root  # workspace_root validated implicitly via safe_child_path
+    except Exception:  # noqa: BLE001
+        # Path resolution failed — fall back to fake path (fail-open).
+        import hashlib as _hashlib  # noqa: PLC0415
+
+        content_digest = "sha256:" + _hashlib.sha256(content_bytes).hexdigest()
+        artifact_ref = f"artifact:{_hashlib.sha1(content_digest.encode('utf-8')).hexdigest()[:16]}"
+        fake_config = FileDeliveryConfig(
+            enabled=True,
+            localFakeArtifactServiceEnabled=True,
+            localFakeChannelDeliveryEnabled=True,
+        )
+        return (
+            fake_config,
+            _FactoryLocalFakeArtifactProvider(
+                artifact_ref=artifact_ref,
+                content_digest=content_digest,
+            ),
+            _FactoryLocalFakeChannelProvider(),
+        )
+
+    live_config = FileDeliveryConfig(
+        enabled=True,
+        liveArtifactStorageEnabled=True,
+        liveChannelDeliveryEnabled=True,
+    )
+    return (
+        live_config,
+        LiveFilesystemArtifactProvider(
+            content_bytes=content_bytes,
+            output_dir=output_dir,
+            filename=filename,
+        ),
+        LiveFilesystemChannelProvider(
+            content_bytes=content_bytes,
+            outbox_dir=outbox_dir,
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
 # Public exports
 # ---------------------------------------------------------------------------
 
 __all__ = [
     "LIVE_FILE_DELIVERY_ENABLED_ENV",
     "LIVE_FILE_DELIVERY_KILL_SWITCH_ENV",
+    "MAGI_FILE_DELIVERY_ARTIFACT_DIR_ENV",
+    "MAGI_FILE_DELIVERY_OUTBOX_DIR_ENV",
     "LiveFilesystemArtifactProvider",
     "LiveFilesystemChannelProvider",
+    "build_file_delivery_providers",
     "is_live_file_delivery_enabled",
 ]

@@ -6,7 +6,6 @@ from collections.abc import Mapping
 
 from magi_agent.artifacts.file_delivery import (
     FileDeliveryBoundary,
-    FileDeliveryConfig,
     FileDeliveryRequest,
 )
 from magi_agent.channels.contract import ChannelDeliveryReceipt, ChannelRef
@@ -130,19 +129,22 @@ def _file_delivery_result(
             "localOnly": True,
         },
     )
-    decision = FileDeliveryBoundary(
-        FileDeliveryConfig(
-            enabled=True,
-            localFakeArtifactServiceEnabled=True,
-            localFakeChannelDeliveryEnabled=True,
-        )
-    ).execute(
+    # Lazy-import the factory so that file_delivery_live is never pulled in at
+    # module-level (preserves the import-boundary contract tested in
+    # test_import_boundaries and test_file_delivery_live_providers).
+    from magi_agent.artifacts.file_delivery_live import (  # noqa: PLC0415
+        build_file_delivery_providers,
+    )
+
+    delivery_config, artifact_provider, channel_provider = build_file_delivery_providers(
+        content_bytes=content,
+        filename=path.name,
+        context=context,
+    )
+    decision = FileDeliveryBoundary(delivery_config).execute(
         request,
-        artifact_provider=_LocalFakeFileArtifactProvider(
-            artifact_ref=artifact_ref,
-            content_digest=content_digest,
-        ),
-        channel_provider=_LocalFakeChannelDeliveryProvider(),
+        artifact_provider=artifact_provider,
+        channel_provider=channel_provider,
     )
     projection = decision.public_projection()
     if decision.status not in ("delivered_local_fake", "delivered_live") or decision.delivery_receipt is None:
