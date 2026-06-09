@@ -134,6 +134,10 @@ class AgentMode(str, Enum):
     act = "act"
 
 
+def _normalize_runtime_profile(runtime_profile: str | None) -> str:
+    return (runtime_profile or "").strip().lower()
+
+
 def resolve_headless_permission_mode(
     *, permission_mode: str, flag_is_default: bool, runtime_profile: str | None
 ) -> str:
@@ -145,7 +149,7 @@ def resolve_headless_permission_mode(
     tool is denied for lack of an approver and the run produces an empty result).
     An explicit ``--permission-mode`` always wins.
     """
-    if flag_is_default and runtime_profile == "eval":
+    if flag_is_default and _normalize_runtime_profile(runtime_profile) == "eval":
         return "bypassPermissions"
     return permission_mode
 
@@ -227,7 +231,8 @@ def agent(
     # when no explicit subcommand is given). ``ctx`` is used for
     # get_parameter_source in both the headless and TUI branches below.
 
-    if os.environ.get("MAGI_RUNTIME_PROFILE") == "eval":
+    runtime_profile = _normalize_runtime_profile(os.environ.get("MAGI_RUNTIME_PROFILE"))
+    if runtime_profile == "eval":
         from magi_agent.runtime.local_defaults import apply_local_eval_runtime_defaults  # noqa: PLC0415
 
         apply_local_eval_runtime_defaults(os.environ)
@@ -260,7 +265,7 @@ def agent(
                 permission_mode is PermMode.default
                 and getattr(permission_mode_source, "name", None) == "DEFAULT"
             ),
-            runtime_profile=os.environ.get("MAGI_RUNTIME_PROFILE"),
+            runtime_profile=runtime_profile,
         )
         rt = build_headless_runtime(
             permission_mode=headless_permission_mode,  # type: ignore[arg-type]

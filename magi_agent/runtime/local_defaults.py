@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, MutableMapping
 
-SAFE_RUNTIME_PROFILES = frozenset({"safe", "off", "minimal", "conservative"})
+SAFE_RUNTIME_PROFILES = frozenset({"safe", "off", "minimal", "conservative", "eval"})
 LOCAL_FULL_RUNTIME_DEFAULTS_ENABLED_ENV = "MAGI_AGENT_LOCAL_FULL_RUNTIME_DEFAULTS"
 
 LOCAL_FULL_RUNTIME_ENV_DEFAULTS: Mapping[str, str] = {
@@ -113,7 +113,7 @@ def apply_local_full_runtime_defaults(environ: MutableMapping[str, str]) -> None
     The underlying feature gates can remain conservative for import-time tests
     and custom deployments. A clean local ``magi`` or ``magi-agent serve``
     install should start the full local runtime unless the operator explicitly
-    opts out with ``MAGI_RUNTIME_PROFILE=safe|minimal|off|conservative`` or
+    opts out with ``MAGI_RUNTIME_PROFILE=safe|minimal|off|conservative|eval`` or
     ``MAGI_AGENT_LOCAL_FULL_RUNTIME_DEFAULTS=0``.
     """
 

@@ -1,5 +1,13 @@
-from magi_agent.config.env import parse_evidence_completion_gate_enabled
+from magi_agent.cli.app import resolve_headless_permission_mode
 from magi_agent.cli.real_runner import _build_default_runner_policy_assembly
+from magi_agent.config.env import (
+    general_automation_live_enabled,
+    parse_evidence_completion_gate_enabled,
+)
+from magi_agent.runtime.local_defaults import (
+    apply_local_eval_runtime_defaults,
+    apply_local_full_runtime_defaults,
+)
 
 
 def test_gate_default_on():
@@ -20,9 +28,6 @@ def test_assembly_none_when_gate_off(monkeypatch):
         live_policy_callback_attached=False,
     )
     assert result is None
-
-
-from magi_agent.runtime.local_defaults import apply_local_eval_runtime_defaults
 
 
 def test_eval_defaults_disable_delivery_machinery_keep_coding():
@@ -51,12 +56,27 @@ def test_eval_defaults_respect_explicit_override():
     assert env["MAGI_SELF_REVIEW_ENABLED"] == "1"  # setdefault must not override
 
 
-from magi_agent.cli.app import resolve_headless_permission_mode
+def test_eval_profile_alone_is_not_full_runtime_profile():
+    env = {"MAGI_RUNTIME_PROFILE": "eval"}
+    assert parse_evidence_completion_gate_enabled(env) is False
+    assert general_automation_live_enabled(env) is False
+
+
+def test_eval_profile_does_not_activate_local_full_defaults():
+    env = {"MAGI_RUNTIME_PROFILE": "eval"}
+    apply_local_full_runtime_defaults(env)
+    assert env == {"MAGI_RUNTIME_PROFILE": "eval"}
 
 
 def test_eval_default_flag_resolves_to_bypass():
     assert resolve_headless_permission_mode(
         permission_mode="default", flag_is_default=True, runtime_profile="eval"
+    ) == "bypassPermissions"
+
+
+def test_eval_default_flag_normalizes_runtime_profile():
+    assert resolve_headless_permission_mode(
+        permission_mode="default", flag_is_default=True, runtime_profile=" EVAL "
     ) == "bypassPermissions"
 
 
