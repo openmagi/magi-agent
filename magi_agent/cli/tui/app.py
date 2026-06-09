@@ -207,14 +207,21 @@ def _todo_contents(tool_input: object) -> list[str]:
     return out
 
 
+# Coarse default context-window budget (tokens) for the sidebar context pane.
+# Per-model context windows (a model -> window table keyed off ``_model``) are a
+# Phase-4 follow-up seam; v1 returns this single default so the context pane
+# shows a ``usage / limit`` ratio rather than a bare token count.
+DEFAULT_CONTEXT_WINDOW = 200_000
+
+
 def _context_limit(_model: str | None) -> int:
     """Coarse context-window budget for the sidebar context pane (v1).
 
-    A model-specific table is Phase 4 polish; v1 returns a coarse default so the
-    context pane shows a ``usage / limit`` ratio rather than a bare token count.
+    Returns :data:`DEFAULT_CONTEXT_WINDOW`. The ``_model`` param is kept for
+    forward-compat with a per-model context-window table (Phase-4 seam).
     """
 
-    return 200_000
+    return DEFAULT_CONTEXT_WINDOW
 
 
 def _tool_result(payload: dict) -> object:

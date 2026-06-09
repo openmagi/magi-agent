@@ -1517,7 +1517,7 @@ def test_sidebar_panes_fed_from_tool_and_terminal_events() -> None:
             text = sidebar.panes_text()
         assert "step one" in text
         assert "step two" in text
-        assert "lib/x.py" in text
+        assert "x.py" in text  # recent-files pane shows the shortened basename
         assert "540" in text  # 500 + 40 token usage folded into context pane
         assert "200,000" in text  # coarse context-window budget (v1)
 

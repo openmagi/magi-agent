@@ -14,13 +14,36 @@ first), deduped, capped at ``MAX_RECENT_FILES``.
 
 from __future__ import annotations
 
+import os
+
 from textual.app import ComposeResult
 from textual.containers import VerticalScroll
 from textual.widgets import Static
 
-__all__ = ["Sidebar", "MAX_RECENT_FILES"]
+__all__ = ["Sidebar", "MAX_RECENT_FILES", "MAX_FILE_DISPLAY_WIDTH"]
 
 MAX_RECENT_FILES = 10
+
+# Recent-file display width budget. The sidebar dock is ``width: 32`` (see the
+# App CSS); recent files store FULL paths (for dedup integrity) but DISPLAY a
+# shortened basename so a long path like ``lib/services/handlers/foo.py`` does
+# not overflow/wrap the column. Kept under the dock width minus the 2-space
+# indent and a little slack.
+MAX_FILE_DISPLAY_WIDTH = 28
+
+
+def _shorten_file(path: str) -> str:
+    """Shorten a stored full path to a column-friendly display string.
+
+    Renders the basename (most readable for a recent-files list); if even the
+    basename is wider than ``MAX_FILE_DISPLAY_WIDTH`` it is tail-truncated with a
+    leading ``…`` so the file extension stays visible.
+    """
+
+    name = os.path.basename(path.rstrip("/")) or path
+    if len(name) > MAX_FILE_DISPLAY_WIDTH:
+        return "…" + name[-(MAX_FILE_DISPLAY_WIDTH - 1):]
+    return name
 
 
 class Sidebar(VerticalScroll):
@@ -83,7 +106,9 @@ class Sidebar(VerticalScroll):
     def _files_text(self) -> str:
         if not self._recent_files:
             return "Files\n  (none)"
-        lines = "\n".join(f"  {p}" for p in self._recent_files)
+        # Store FULL paths (dedup keys on them) but DISPLAY shortened basenames
+        # so long paths don't overflow the 32-wide sidebar dock.
+        lines = "\n".join(f"  {_shorten_file(p)}" for p in self._recent_files)
         return f"Files\n{lines}"
 
     def panes_text(self) -> str:

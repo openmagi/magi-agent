@@ -52,8 +52,38 @@ def test_sidebar_updates_panes_from_state() -> None:
         assert "write tests" in text
         assert "ship it" in text
         assert "1,280 / 8,000" in text
-        assert "src/app.py" in text
-        assert "src/foo.py" in text
+        # Files display shortened (basename) form, not the full stored path.
+        assert "app.py" in text
+        assert "foo.py" in text
+
+    asyncio.run(_run())
+
+
+def test_sidebar_recent_files_display_shortened_but_keys_full_path() -> None:
+    """A long stored path renders a shortened display, while dedup still keys on
+    the FULL path (re-touching the same full path moves it to top, not dup)."""
+
+    async def _run() -> None:
+        sidebar = Sidebar(id="sidebar")
+        app = _Harness(sidebar)
+        long_path = "lib/services/handlers/foo.py"
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            sidebar.add_file(long_path)
+            sidebar.add_file("other.py")
+            sidebar.add_file(long_path)  # re-touch the SAME full path
+            await pilot.pause()
+            text = sidebar.panes_text()
+            files = sidebar.recent_files()
+
+        # Display is shortened: the basename shows, the full dir prefix does not.
+        assert "foo.py" in text
+        assert "lib/services/handlers/foo.py" not in text
+        # Dedup keyed on the FULL path: stored list keeps the full path, exactly
+        # once, and the re-touch moved it back to most-recent (top).
+        assert files == [long_path, "other.py"]
+        assert files.count(long_path) == 1
+
 
     asyncio.run(_run())
 
