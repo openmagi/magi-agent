@@ -463,6 +463,12 @@ __all__ = [
     "BROWSER_UA",
     "HONEST_UA",
     "LiveFetchProvider",
+    # Shared helpers also consumed by sibling providers (e.g. insane_fetch); kept
+    # in __all__ so the cross-module contract is explicit, not a silent break.
+    "_MAX_REDIRECT_HOPS",
+    "_REDIRECT_STATUS",
+    "_extract_title",
+    "_html_to_md",
     "redact_metadata_values",
     "resolve_validated_ip",
 ]
