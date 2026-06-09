@@ -72,6 +72,7 @@ class _FakeSession:
         raises: BaseException | None = None,
     ) -> None:
         self.calls: list[dict[str, object]] = []
+        self.curl_options: dict[object, object] = {}
         self._raises = raises
         if isinstance(responses, list):
             self._queue = list(responses)
@@ -81,7 +82,9 @@ class _FakeSession:
             self._single = responses
 
     def get(self, url, **kwargs):  # type: ignore[no-untyped-def]
-        self.calls.append({"url": url, **kwargs})
+        self.calls.append(
+            {"url": url, "curl_options": dict(self.curl_options), **kwargs}
+        )
         if self._raises is not None:
             raise self._raises
         if self._queue is not None:
@@ -100,6 +103,13 @@ def _provider(session: object, **kwargs):  # type: ignore[no-untyped-def]
     from magi_agent.web_acquisition.providers.insane_fetch import InsaneFetchProvider
 
     return InsaneFetchProvider(session=session, **kwargs)
+
+
+def _assert_resolve_pin(call: dict[str, object], expected: list[str]) -> None:
+    assert "resolve" not in call
+    curl_options = call.get("curl_options")
+    assert isinstance(curl_options, dict)
+    assert expected in curl_options.values()
 
 
 # ---------------------------------------------------------------------------
@@ -130,7 +140,7 @@ def test_200_html_returns_normalized_and_pins_ip_and_impersonates(
     # Exactly one egress call, pinned to the validated IP and impersonating.
     assert len(session.calls) == 1
     call = session.calls[0]
-    assert call["resolve"] == [f"example.com:443:{_PUBLIC_IP}"], call["resolve"]
+    _assert_resolve_pin(call, [f"example.com:443:{_PUBLIC_IP}"])
     assert call["impersonate"] == "chrome"
     assert call["allow_redirects"] is False
     # Streamed read with the provider's resolved timeout.
@@ -146,7 +156,7 @@ def test_200_uses_explicit_port_in_resolve_pin(monkeypatch: pytest.MonkeyPatch) 
     provider = _provider(session)
     provider.fetch(_Req("https://example.com:8443/page"))
 
-    assert session.calls[0]["resolve"] == [f"example.com:8443:{_PUBLIC_IP}"]
+    _assert_resolve_pin(session.calls[0], [f"example.com:8443:{_PUBLIC_IP}"])
 
 
 def test_200_plain_text_returns_content(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -475,12 +485,15 @@ class _NoStreamSession:
 
     def __init__(self, response: _FakeResponse) -> None:
         self.calls: list[dict[str, object]] = []
+        self.curl_options: dict[object, object] = {}
         self._response = response
 
     def get(self, url, **kwargs):  # type: ignore[no-untyped-def]
         if "stream" in kwargs:
             raise TypeError("get() got an unexpected keyword argument 'stream'")
-        self.calls.append({"url": url, **kwargs})
+        self.calls.append(
+            {"url": url, "curl_options": dict(self.curl_options), **kwargs}
+        )
         return self._response
 
 
@@ -504,6 +517,7 @@ def test_do_get_non_stream_fallback_returns_normal_result(
     # Exactly one successful (non-stream) call was recorded; stream= was rejected.
     assert len(session.calls) == 1
     assert "stream" not in session.calls[0]
+    _assert_resolve_pin(session.calls[0], [f"example.com:443:{_PUBLIC_IP}"])
 
 
 def test_do_get_non_stream_fallback_still_enforces_size_cap(
@@ -548,3 +562,35 @@ def test_redirect_status_without_location_is_terminal(
     assert "no location here" in str(result["content"])
     # Only one hop was issued — no redirect loop.
     assert len(session.calls) == 1
+
+
+class _RejectResolveSession(_FakeSession):
+    """Fake matching curl_cffi's public request shape: no resolve= kwarg."""
+
+    def get(self, url, **kwargs):  # type: ignore[no-untyped-def]
+        if "resolve" in kwargs:
+            raise TypeError("unexpected resolve kwarg")
+        return super().get(url, **kwargs)
+
+
+def test_do_get_uses_curl_options_not_resolve_kwarg_and_restores_options(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _allow_public_host(monkeypatch)
+    session = _RejectResolveSession(
+        _FakeResponse(
+            status_code=200,
+            headers={"content-type": "text/plain"},
+            content=b"curl option body",
+        )
+    )
+    original_options = {"KEEP": "value"}
+    session.curl_options = dict(original_options)
+
+    provider = _provider(session)
+    result = provider.fetch(_Req("https://example.com/x"))
+
+    assert "status" not in result, result
+    assert "curl option body" in str(result["content"])
+    _assert_resolve_pin(session.calls[0], [f"example.com:443:{_PUBLIC_IP}"])
+    assert session.curl_options == original_options
