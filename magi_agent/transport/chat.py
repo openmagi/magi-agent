@@ -48,6 +48,7 @@ from magi_agent.config.env import is_egress_gate_enabled, is_read_quality_enable
 from magi_agent.introspection.egress_gate import EgressVerifierStatus
 from magi_agent.gates.gate2_readiness import gate2_readiness_health_metadata
 from magi_agent.gates.gate8_readiness import gate8_readiness_health_metadata
+from magi_agent.runtime.message_builder import _collect_image_blocks
 from magi_agent.runtime.openmagi_runtime import OpenMagiRuntime
 from magi_agent.runtime.session_identity import _memory_mode_from_header
 
@@ -3654,6 +3655,7 @@ def _build_user_visible_generation_request(
     user_text = _extract_last_user_text(payload)
     if not user_text:
         raise ValueError("chat payload must contain a user message")
+    image_blocks = _extract_last_user_image_blocks(payload)
     tool_bundle_ready = _route_tool_bundle_ready(gate1a_bundle)
     full_toolhost_ready = _route_tool_bundle_full(gate1a_bundle)
     history_messages = _build_gate5b_sanitized_recent_history(
@@ -3709,6 +3711,11 @@ def _build_user_visible_generation_request(
     }
     if history_messages:
         turn_payload["sanitizedRecentHistory"] = history_messages
+    if image_blocks:
+        turn_payload["sanitizedImageBlocks"] = [
+            {"mediaType": b["source"]["media_type"], "data": b["source"]["data"]}
+            for b in image_blocks
+        ]
     redacted_byte_count = len(sanitized_text.encode("utf-8")) + sum(
         len(str(item["sanitizedText"]).encode("utf-8"))
         for item in history_messages
@@ -3802,6 +3809,51 @@ def _extract_last_user_text(payload: Mapping[str, object]) -> str:
                     chunks.append(block["text"])
             return "\n".join(chunks)
     return ""
+
+
+_DATA_URL_RE = re.compile(r"^data:(?P<mime>[\w.+-]+/[\w.+-]+);base64,(?P<data>.+)$", re.DOTALL)
+
+
+def _normalize_image_block(block: object) -> dict | None:
+    if not isinstance(block, Mapping):
+        return None
+    block_type = block.get("type")
+    if block_type == "image":
+        return dict(block)  # already Anthropic-style; sanitized downstream
+    if block_type == "image_url":
+        image_url = block.get("image_url")
+        url = image_url.get("url") if isinstance(image_url, Mapping) else None
+        if not isinstance(url, str):
+            return None
+        match = _DATA_URL_RE.match(url.strip())
+        if not match:
+            return None
+        return {
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": match.group("mime"),
+                "data": match.group("data"),
+            },
+        }
+    return None
+
+
+def _extract_last_user_image_blocks(payload: Mapping[str, object]) -> list[dict]:
+    messages = payload.get("messages")
+    if not isinstance(messages, list):
+        return []
+    for message in reversed(messages):
+        if not isinstance(message, Mapping) or message.get("role") != "user":
+            continue
+        content = message.get("content")
+        if not isinstance(content, list):
+            return []
+        normalized = [
+            nb for nb in (_normalize_image_block(b) for b in content) if nb is not None
+        ]
+        return _collect_image_blocks({"imageBlocks": normalized}, {})
+    return []
 
 
 def _single_config_value(values: tuple[str, ...]) -> str:
