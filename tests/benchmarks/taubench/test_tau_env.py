@@ -5,7 +5,7 @@ import asyncio
 from dataclasses import dataclass, field
 
 from magi_agent.benchmarks.taubench.episode import EpisodeState
-from magi_agent.benchmarks.taubench.tau_env import build_env_tool_callables
+from magi_agent.benchmarks.taubench.tau_env import build_env_function_tools, build_env_tool_callables
 
 
 @dataclass
@@ -43,3 +43,29 @@ def test_tool_callable_routes_to_env_step_and_records_state() -> None:
     assert "order A1" in str(out)
     assert env.steps[0].name == "get_order"
     assert env.steps[0].kwargs == {"id": "A1"}
+
+
+def test_function_tool_declaration_exposes_real_params() -> None:
+    """The ADK declaration must expose the real parameter name ``id``, not just
+    an opaque ``arguments: OBJECT`` with no inner properties."""
+    env = FakeEnv()
+    state = EpisodeState()
+    tools = build_env_function_tools(env, state=state, action_factory=FakeAction)
+    assert len(tools) == 1
+    decl = tools[0]._get_declaration()  # type: ignore[attr-defined]
+    assert decl is not None, "declaration must not be None"
+
+    params = getattr(decl, "parameters", None)
+    assert params is not None, "declaration.parameters must not be None"
+    props = getattr(params, "properties", None)
+    assert isinstance(props, dict), "declaration.parameters.properties must be a dict"
+
+    # The real param "id" must be reachable: either directly top-level or
+    # nested under the "arguments" property (the enrichment path).
+    arg_schema = props.get("arguments", None)
+    nested = getattr(arg_schema, "properties", None) if arg_schema is not None else None
+    assert (nested and "id" in nested) or "id" in props, (
+        f"Parameter 'id' not found in declaration. "
+        f"Top-level props: {list(props.keys())}, "
+        f"nested props: {list(nested.keys()) if nested else None}"
+    )

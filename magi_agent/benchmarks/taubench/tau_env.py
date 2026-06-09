@@ -47,19 +47,44 @@ def build_env_function_tools(
 ) -> list[object]:
     """Wrap each callable as an ADK FunctionTool with the τ-bench parameter schema.
 
-    MIRROR `magi_agent/adk_bridge/tool_adapter.py`:
-    - reuse `_json_schema_to_genai_schema(spec["parameters"])` for the declaration,
-    - set `invoke.__doc__ = description`,
-    - wrap via `google.adk.tools.FunctionTool(invoke, require_confirmation=False)`.
-    CONFIRM the exact way tool_adapter attaches the explicit genai Schema to the
-    FunctionTool (it does so for core tools) and replicate it here. Imports of
-    google.adk / google.genai stay inside this function (cold-start discipline)."""
+    Mirrors ``magi_agent/adk_bridge/tool_adapter.py`` ``_enrich_arguments_schema``:
+    after building a FunctionTool whose invoke signature has a generic
+    ``arguments`` parameter, monkey-patches ``_get_declaration`` so that the
+    ``arguments`` property in the ADK declaration is replaced with the real
+    τ-bench parameter schema.  This exposes the true parameter names (e.g.
+    ``id``) to the model instead of an opaque ``OBJECT``.
+
+    Imports of google.adk / google.genai stay inside this function
+    (cold-start discipline)."""
     from google.adk.tools import FunctionTool  # noqa: PLC0415
+
+    from magi_agent.adk_bridge.tool_adapter import _json_schema_to_genai_schema  # noqa: PLC0415
 
     callables = build_env_tool_callables(env, state=state, action_factory=action_factory)
     specs = {s["name"]: s for s in _tool_specs(env)}
     tools: list[object] = []
     for name, invoke in callables.items():
         invoke.__doc__ = specs[name]["description"]
-        tools.append(FunctionTool(invoke, require_confirmation=False))
+        tool: Any = FunctionTool(invoke, require_confirmation=False)
+
+        # Enrich the ADK declaration so the model sees real parameter names
+        # rather than a single opaque ``arguments: OBJECT``.
+        param_schema = _json_schema_to_genai_schema(specs[name]["parameters"])
+        base_get_declaration = tool._get_declaration  # type: ignore[attr-defined]
+
+        def _make_enriched(base: Any = base_get_declaration, schema: Any = param_schema) -> Any:
+            def _enriched() -> Any:
+                decl = base()
+                if decl is None:
+                    return None
+                params = getattr(decl, "parameters", None)
+                props = getattr(params, "properties", None) if params is not None else None
+                if isinstance(props, dict) and "arguments" in props:
+                    props["arguments"] = schema
+                return decl
+
+            return _enriched
+
+        tool._get_declaration = _make_enriched()  # type: ignore[method-assign,attr-defined]
+        tools.append(tool)
     return tools
