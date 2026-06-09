@@ -8,7 +8,11 @@ interface VerificationRuleModalProps {
   open: boolean;
   onClose: () => void;
   catalog: CustomizeCatalog["verification"];
-  overrides: CustomizeOverrides["verification"];
+  /** Record<id, boolean> — effective state resolved as `recipeOverrides[id] ?? recipe.enabled` */
+  recipeOverrides: Record<string, boolean>;
+  /** Record<id, boolean> — effective state resolved as `presetOverrides[id] ?? preset.enabled` */
+  presetOverrides: Record<string, boolean>;
+  hookOverrides: CustomizeOverrides["verification"]["hooks"];
   onToggleRecipe: (id: string, enabled: boolean) => void;
   onTogglePreset: (id: string, enabled: boolean) => void;
   onToggleHook: (name: string, enabled: boolean) => void;
@@ -77,7 +81,9 @@ export function VerificationRuleModal({
   open,
   onClose,
   catalog,
-  overrides,
+  recipeOverrides,
+  presetOverrides,
+  hookOverrides,
   onToggleRecipe,
   onTogglePreset,
   onToggleHook,
@@ -120,7 +126,7 @@ export function VerificationRuleModal({
             ) : (
               <div className="space-y-2">
                 {catalog.recipes.map((recipe) => {
-                  const enabled = overrides.recipes.includes(recipe.id) || recipe.enabled;
+                  const enabled = recipeOverrides[recipe.id] ?? recipe.enabled;
                   return (
                     <Row
                       key={recipe.id}
@@ -150,7 +156,7 @@ export function VerificationRuleModal({
             ) : (
               <div className="space-y-2">
                 {catalog.harnessPresets.map((preset) => {
-                  const enabled = overrides.harness_presets.includes(preset.id) || preset.enabled;
+                  const enabled = presetOverrides[preset.id] ?? preset.enabled;
                   return (
                     <Row
                       key={preset.id}
@@ -198,7 +204,7 @@ export function VerificationRuleModal({
               <SectionTitle>General</SectionTitle>
               <div className="space-y-2">
                 {generalHooks.map((hook) => {
-                  const enabled = overrides.hooks[hook.name] ?? hook.enabled;
+                  const enabled = hookOverrides[hook.name] ?? hook.enabled;
                   return (
                     <Row
                       key={hook.name}

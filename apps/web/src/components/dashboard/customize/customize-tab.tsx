@@ -59,12 +59,25 @@ export function CustomizeRuntimeConsole({ botId }: CustomizeRuntimeConsoleProps)
 
   // Local-only override state seeded from the backend snapshot. This phase does
   // not persist changes — that lands in a later phase.
-  const [verificationOverrides, setVerificationOverrides] =
-    useState<CustomizeOverrides["verification"]>(EMPTY_VERIFICATION);
+  //
+  // Recipes and presets use Record<string,boolean> (same pattern as hooks) so
+  // that toggling OFF a default-ON item (remove from array) is not shadowed by
+  // the catalog's `enabled: true`. The backend arrays represent "explicitly
+  // enabled" items; we seed them as true and resolve via `record[id] ?? item.enabled`.
+  const [recipeOverrides, setRecipeOverrides] = useState<Record<string, boolean>>({});
+  const [presetOverrides, setPresetOverrides] = useState<Record<string, boolean>>({});
+  const [hookOverrides, setHookOverrides] = useState<CustomizeOverrides["verification"]["hooks"]>({});
   const [toolOverrides, setToolOverrides] = useState<Record<string, boolean>>({});
 
   const openRuleModal = useCallback(() => {
-    setVerificationOverrides(data?.overrides.verification ?? EMPTY_VERIFICATION);
+    const v = data?.overrides.verification ?? EMPTY_VERIFICATION;
+    const recipes: Record<string, boolean> = {};
+    for (const id of v.recipes) recipes[id] = true;
+    const presets: Record<string, boolean> = {};
+    for (const id of v.harness_presets) presets[id] = true;
+    setRecipeOverrides(recipes);
+    setPresetOverrides(presets);
+    setHookOverrides(v.hooks);
     setRuleModalOpen(true);
   }, [data]);
 
@@ -74,28 +87,15 @@ export function CustomizeRuntimeConsole({ botId }: CustomizeRuntimeConsoleProps)
   }, [data]);
 
   const handleToggleRecipe = useCallback((id: string, enabled: boolean) => {
-    setVerificationOverrides((prev) => {
-      const recipes = enabled
-        ? Array.from(new Set([...prev.recipes, id]))
-        : prev.recipes.filter((value) => value !== id);
-      return { ...prev, recipes };
-    });
+    setRecipeOverrides((prev) => ({ ...prev, [id]: enabled }));
   }, []);
 
   const handleTogglePreset = useCallback((id: string, enabled: boolean) => {
-    setVerificationOverrides((prev) => {
-      const harness_presets = enabled
-        ? Array.from(new Set([...prev.harness_presets, id]))
-        : prev.harness_presets.filter((value) => value !== id);
-      return { ...prev, harness_presets };
-    });
+    setPresetOverrides((prev) => ({ ...prev, [id]: enabled }));
   }, []);
 
   const handleToggleHook = useCallback((name: string, enabled: boolean) => {
-    setVerificationOverrides((prev) => ({
-      ...prev,
-      hooks: { ...prev.hooks, [name]: enabled },
-    }));
+    setHookOverrides((prev) => ({ ...prev, [name]: enabled }));
   }, []);
 
   const handleToggleTool = useCallback((name: string, enabled: boolean) => {
@@ -159,7 +159,9 @@ export function CustomizeRuntimeConsole({ botId }: CustomizeRuntimeConsoleProps)
             open={ruleModalOpen}
             onClose={() => setRuleModalOpen(false)}
             catalog={data.catalog.verification}
-            overrides={verificationOverrides}
+            recipeOverrides={recipeOverrides}
+            presetOverrides={presetOverrides}
+            hookOverrides={hookOverrides}
             onToggleRecipe={handleToggleRecipe}
             onTogglePreset={handleTogglePreset}
             onToggleHook={handleToggleHook}
