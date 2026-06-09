@@ -11,3 +11,16 @@ def test_runtime_image_installs_runtime_extras() -> None:
     assert 'python -m pip install --no-cache-dir ".[cli,composio,providers]"' in dockerfile
     assert '".[cli]"' not in dockerfile
     assert '".[cli,composio]"' not in dockerfile
+
+
+def test_build_metadata_args_are_in_final_stage_scope() -> None:
+    dockerfile = DOCKERFILE.read_text(encoding="utf-8")
+    final_stage = dockerfile.split("WORKDIR /app", maxsplit=1)[0]
+
+    for name in (
+        "CORE_AGENT_BUILD_SHA",
+        "CORE_AGENT_IMAGE_REPO",
+        "CORE_AGENT_IMAGE_TAG",
+        "CORE_AGENT_EXPECTED_IMAGE_DIGEST",
+    ):
+        assert final_stage.count(f"ARG {name}") == 2
