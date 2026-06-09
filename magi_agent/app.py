@@ -21,6 +21,7 @@ from .transport.debug_trace import router as debug_trace_router
 from .transport.learning_dashboard import register_learning_dashboard_routes
 from .transport.tools import register_tool_admin_routes
 from .transport.app_api import register_app_api_routes
+from .transport.customize import register_customize_routes
 from magi_agent.observability import register_observability
 
 logger = logging.getLogger(__name__)
@@ -99,6 +100,7 @@ def create_app(runtime: OpenMagiRuntime) -> FastAPI:
     register_shadow_invocation_routes(app, runtime)
     register_shadow_generation_routes(app, runtime)
     register_tool_admin_routes(app, runtime)
+    register_customize_routes(app, runtime)
     register_app_api_routes(app, runtime)
     register_plugin_admin_routes(app, runtime)
     register_dashboard_routes(app, runtime)
