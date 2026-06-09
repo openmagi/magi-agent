@@ -58,7 +58,8 @@ refuses to start (fail-closed).
 - `MAGI_EGRESS_PROXY_URL` — HTTP(S) proxy origin (e.g. `http://127.0.0.1:8888`).
   Required when enabled; must not embed credentials, path, query, or fragment.
 - `MAGI_EGRESS_PROXY_AUTH` — proxy credentials (`user:token`), carried separately
-  from the URL. Optional.
+  from the URL. Optional. Applied only by clients that can send proxy auth
+  outside subprocess env; Bash receives auth-free proxy URLs.
 - `MAGI_EGRESS_PROXY_CA_CERT_PATH` — path to the proxy CA cert to trust. Required
   and must be a readable file when enabled.
 

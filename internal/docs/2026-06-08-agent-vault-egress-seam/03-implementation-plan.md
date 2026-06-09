@@ -242,9 +242,10 @@ def test_overlay_sets_proxy_and_ca(tmp_path):
         assert overlay[k].endswith("ca.pem")
 
 
-def test_overlay_composes_auth_into_url(tmp_path):
+def test_overlay_keeps_auth_out_of_subprocess_proxy_urls(tmp_path):
     overlay = subprocess_env_overlay(_enabled(tmp_path, auth="agent:tok"))
-    assert overlay["HTTPS_PROXY"] == "http://agent:tok@127.0.0.1:8888"
+    assert overlay["HTTPS_PROXY"] == "http://127.0.0.1:8888"
+    assert "agent:tok" not in overlay["HTTPS_PROXY"]
 
 
 def test_httpx_kwargs_empty_when_disabled():
@@ -273,7 +274,6 @@ Expected: FAIL — `ImportError: cannot import name 'subprocess_env_overlay'`
 from __future__ import annotations
 
 import base64
-from urllib.parse import urlsplit, urlunsplit
 
 from magi_agent.egress_proxy.config import EgressProxyConfig
 
@@ -283,18 +283,17 @@ _CA_ENV_KEYS = (
 )
 
 
-def _url_with_auth(url: str, auth: str | None) -> str:
-    if not auth:
-        return url
-    parts = urlsplit(url)
-    netloc = f"{auth}@{parts.netloc}"
-    return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+def _validate_enabled(cfg: EgressProxyConfig) -> bool:
+    if not cfg.enabled:
+        return False
+    cfg.validate()
+    return True
 
 
 def subprocess_env_overlay(cfg: EgressProxyConfig) -> dict[str, str]:
-    if not cfg.enabled or not cfg.proxy_url:
+    if not _validate_enabled(cfg):
         return {}
-    proxy = _url_with_auth(cfg.proxy_url, cfg.proxy_auth)
+    proxy = cfg.proxy_url
     overlay = {"HTTPS_PROXY": proxy, "HTTP_PROXY": proxy, "ALL_PROXY": proxy}
     if cfg.ca_cert_path:
         for key in _CA_ENV_KEYS:
@@ -303,7 +302,7 @@ def subprocess_env_overlay(cfg: EgressProxyConfig) -> dict[str, str]:
 
 
 def httpx_client_kwargs(cfg: EgressProxyConfig) -> dict[str, object]:
-    if not cfg.enabled or not cfg.proxy_url:
+    if not _validate_enabled(cfg):
         return {}
     import httpx
 

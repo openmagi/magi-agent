@@ -42,18 +42,19 @@ Mirror the existing `MAGI_OBSERVABILITY_ENABLED` tri-state convention.
 |---|---|---|
 | `MAGI_EGRESS_PROXY_ENABLED` | — | Master switch (tri-state: on/off/unset→off). |
 | `MAGI_EGRESS_PROXY_URL` | **yes** | Forward proxy origin, e.g. `http://127.0.0.1:8888`. HTTP(S) origin only (no path/query/fragment). |
-| `MAGI_EGRESS_PROXY_AUTH` | no | Proxy session credential (Agent Vault scopes the agent session via proxy auth). Supplied separately from the URL so it is never logged as part of the URL. Form: `user:token` or an opaque token applied as `Proxy-Authorization`. |
+| `MAGI_EGRESS_PROXY_AUTH` | no | Proxy session credential. Supplied separately from the URL so it is never logged as part of the URL. Applied only by non-subprocess clients that can carry `Proxy-Authorization` out of env. |
 | `MAGI_EGRESS_PROXY_CA_CERT_PATH` | **yes** | Filesystem path to the proxy's CA cert (PEM). Must exist and be readable at startup. |
 
 Notes:
-- Unlike `gate1a` model-egress correlation (which forbids credentials in the proxy URL and is digest-only), this seam **must support proxy auth** because that is how Agent Vault scopes a session to a specific agent. Auth is carried out-of-band (`MAGI_EGRESS_PROXY_AUTH` → `Proxy-Authorization`), not embedded in `MAGI_EGRESS_PROXY_URL`, so the URL stays loggable.
+- Unlike `gate1a` model-egress correlation (which forbids credentials in the proxy URL and is digest-only), this seam supports proxy auth where it can be carried out-of-band (`MAGI_EGRESS_PROXY_AUTH` → `Proxy-Authorization`). Auth is never embedded in `MAGI_EGRESS_PROXY_URL`, and it is not exposed to arbitrary Bash subprocess env.
 - When disabled, none of these vars are read and the runtime is unchanged.
 
 ## 5. Functional requirements
 
 ### FR1 — Bash tool egress (primary)
 When enabled, the `Bash` tool subprocess environment (currently `{"PATH": …}` in `gate5b_full_toolhost.py`) gains:
-- `HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY` = configured proxy URL (with auth applied per-scheme as needed for CLI tools that read creds from the URL).
+- `HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY` = configured proxy URL without auth.
+- Post-review hardening: proxy auth is **not** applied to Bash env vars because a normal command such as `printenv HTTPS_PROXY` can expose env values to model-visible stdout. Bash receives only the auth-free proxy origin.
 - CA trust vars so common runtimes verify the proxy CA: `SSL_CERT_FILE`, `CURL_CA_BUNDLE`, `REQUESTS_CA_BUNDLE`, `NODE_EXTRA_CA_CERTS`, `GIT_SSL_CAINFO` = configured CA path.
 - `NO_PROXY` left unset (the proxy decides what to allow); see §6 fail-closed.
 
