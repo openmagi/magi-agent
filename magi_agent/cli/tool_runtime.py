@@ -258,7 +258,9 @@ def build_cli_instruction(
     while repo-root ``AGENTS.md`` / ``CLAUDE.md`` are loaded as project context
     (NOT identity). See :func:`magi_agent.cli.identity.load_identity`.
     """
+    from pathlib import Path  # noqa: PLC0415
 
+    from magi_agent.runtime.memory_snapshot_cache import MemorySnapshotCache  # noqa: PLC0415
     from magi_agent.runtime.message_builder import build_system_prompt  # noqa: PLC0415
 
     identity = None
@@ -267,12 +269,21 @@ def build_cli_instruction(
 
         identity = load_identity(workspace_root)
 
+    # Compute the frozen memory snapshot once for this session.
+    # Falls back to "" when workspace_root is not provided, gate is off, or
+    # memory_mode is incognito.
+    memory_snapshot_block = ""
+    if workspace_root is not None:
+        _snapshot_cache = MemorySnapshotCache(workspace_root=Path(workspace_root))
+        memory_snapshot_block = _snapshot_cache.get(session_id, memory_mode="normal")
+
     prompt = build_system_prompt(
         session_key=session_id,
         turn_id="cli",
         identity=identity,
         coding_agent=True,
         model=model,
+        memory_snapshot_block=memory_snapshot_block,
     )
     return (
         f"{prompt}\n\n"

@@ -206,6 +206,49 @@ def test_build_cli_model_runner_attaches_real_tools(tmp_path) -> None:
     assert "<coding-discipline>" in instruction
 
 
+def test_build_cli_model_runner_injects_memory_block_when_gate_on(
+    monkeypatch, tmp_path
+) -> None:
+    """The frozen memory snapshot reaches the Agent instruction through the
+    production runner factory (build_cli_model_runner), not just the helper.
+
+    This is the same factory the hosted local-dashboard chat turn uses via
+    cli.wiring.build_headless_runtime -> _build_default_runner, so this proves
+    memory recall reaches the model on the live hosted SSE path.
+    """
+    (tmp_path / "MEMORY.md").write_text(
+        "# Memory\nImportant recall data.", encoding="utf-8"
+    )
+    monkeypatch.setenv("MAGI_MEMORY_PROJECTION_ENABLED", "1")
+
+    runner = build_cli_model_runner(
+        _config(),
+        model_factory=_fake_model_factory,
+        workspace_root=str(tmp_path),
+    )
+    instruction = getattr(runner.agent, "instruction", "")
+    assert "<memory-context" in instruction
+    assert "Important recall data" in instruction
+
+
+def test_build_cli_model_runner_no_memory_block_when_gate_off(
+    monkeypatch, tmp_path
+) -> None:
+    """With the projection gate off, no memory-context reaches the Agent."""
+    (tmp_path / "MEMORY.md").write_text(
+        "# Memory\nImportant recall data.", encoding="utf-8"
+    )
+    monkeypatch.delenv("MAGI_MEMORY_PROJECTION_ENABLED", raising=False)
+
+    runner = build_cli_model_runner(
+        _config(),
+        model_factory=_fake_model_factory,
+        workspace_root=str(tmp_path),
+    )
+    instruction = getattr(runner.agent, "instruction", "")
+    assert "<memory-context" not in instruction
+
+
 def test_run_async_drives_real_adk_runner_and_autocreates_session() -> None:
     runner = build_cli_model_runner(_config(), model_factory=_fake_model_factory)
 
