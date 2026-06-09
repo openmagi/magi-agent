@@ -353,6 +353,7 @@ def build_file_delivery_providers(
     content_bytes: bytes,
     filename: str,
     context: object,
+    artifact_ref: str | None = None,
 ) -> "tuple[object, object, object]":
     """Build (FileDeliveryConfig, artifact_provider, channel_provider) from env.
 
@@ -384,6 +385,14 @@ def build_file_delivery_providers(
         ``ToolContext`` instance from ``documents.py``.  Passed through to
         ``safe_child_path`` / ``workspace_root``; typed as ``object`` here so
         this module does not import ``ToolContext`` at module level.
+    artifact_ref:
+        Caller-derived artifact ref (from ``_artifact_ref(arguments,
+        content_digest)`` in ``documents.py``).  When provided, both the fake
+        and live providers use this verbatim, preserving the byte-identical
+        guarantee even when ``arguments["artifactId"]``/``artifactRef`` is
+        supplied.  When ``None``, the factory falls back to deriving the ref
+        from the content digest (the pre-existing behaviour for the common
+        no-artifactId case).
     """
     # Lazy imports — live providers and ToolContext helpers stay out of the
     # module-level import graph (mirrors research_tools.build_live_research_boundary).
@@ -404,7 +413,12 @@ def build_file_delivery_providers(
         import hashlib as _hashlib  # noqa: PLC0415
 
         content_digest = "sha256:" + _hashlib.sha256(content_bytes).hexdigest()
-        artifact_ref = f"artifact:{_hashlib.sha1(content_digest.encode('utf-8')).hexdigest()[:16]}"
+        # Use the caller-derived artifact_ref when provided (preserves byte-
+        # identity when arguments["artifactId"]/artifactRef is supplied).
+        # Fall back to content-digest derivation for the common no-artifactId case.
+        resolved_artifact_ref = artifact_ref if artifact_ref is not None else (
+            f"artifact:{_hashlib.sha1(content_digest.encode('utf-8')).hexdigest()[:16]}"
+        )
         fake_config = FileDeliveryConfig(
             enabled=True,
             localFakeArtifactServiceEnabled=True,
@@ -413,7 +427,7 @@ def build_file_delivery_providers(
         return (
             fake_config,
             _FactoryLocalFakeArtifactProvider(
-                artifact_ref=artifact_ref,
+                artifact_ref=resolved_artifact_ref,
                 content_digest=content_digest,
             ),
             _FactoryLocalFakeChannelProvider(),
@@ -453,7 +467,9 @@ def build_file_delivery_providers(
         import hashlib as _hashlib  # noqa: PLC0415
 
         content_digest = "sha256:" + _hashlib.sha256(content_bytes).hexdigest()
-        artifact_ref = f"artifact:{_hashlib.sha1(content_digest.encode('utf-8')).hexdigest()[:16]}"
+        resolved_artifact_ref = artifact_ref if artifact_ref is not None else (
+            f"artifact:{_hashlib.sha1(content_digest.encode('utf-8')).hexdigest()[:16]}"
+        )
         fake_config = FileDeliveryConfig(
             enabled=True,
             localFakeArtifactServiceEnabled=True,
@@ -462,7 +478,7 @@ def build_file_delivery_providers(
         return (
             fake_config,
             _FactoryLocalFakeArtifactProvider(
-                artifact_ref=artifact_ref,
+                artifact_ref=resolved_artifact_ref,
                 content_digest=content_digest,
             ),
             _FactoryLocalFakeChannelProvider(),

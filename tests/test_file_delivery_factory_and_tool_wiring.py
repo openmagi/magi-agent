@@ -345,6 +345,102 @@ def test_factory_gate_on_custom_artifact_dir_env(
 
 
 # ---------------------------------------------------------------------------
+# Byte-identity regression: artifactId argument must propagate to artifactRefs
+# ---------------------------------------------------------------------------
+
+
+def test_factory_gate_off_with_artifact_id_matches_documents_artifact_ref(tmp_path: Path) -> None:
+    """Regression: gate-OFF factory must use the caller-derived artifact_ref verbatim.
+
+    When arguments contains 'artifactId', _artifact_ref() in documents.py derives
+    the ref from sha1(artifactId) — NOT from the content digest.  The factory must
+    use this exact ref so ToolResult.artifactRefs is byte-identical to what the
+    original _LocalFakeFileArtifactProvider produced.
+    """
+    import hashlib
+
+    from magi_agent.artifacts.file_delivery_live import build_file_delivery_providers
+    from magi_agent.plugins.native.documents import _artifact_ref
+
+    content = b"# Test content for byte-identity check"
+    content_digest = "sha256:" + hashlib.sha256(content).hexdigest()
+    arguments: dict[str, object] = {"artifactId": "my-custom-artifact-id"}
+
+    # This is what the original documents.py helper computes (caller-side).
+    expected_ref = _artifact_ref(arguments, content_digest)
+
+    # Confirm that the caller-derived ref differs from the content-digest-only ref.
+    content_digest_only_ref = f"artifact:{hashlib.sha1(content_digest.encode('utf-8')).hexdigest()[:16]}"
+    assert expected_ref != content_digest_only_ref, (
+        "Test prerequisite: artifactId ref should differ from content-digest-only ref"
+    )
+
+    ctx = _make_tool_context(tmp_path)
+    _config, artifact_provider, _channel_provider = build_file_delivery_providers(
+        env={},  # Gate OFF
+        content_bytes=content,
+        filename="test.md",
+        context=ctx,
+        artifact_ref=expected_ref,  # Pass the caller-derived ref
+    )
+
+    # The fake provider must store and return the caller-derived ref verbatim.
+    assert getattr(artifact_provider, "openmagi_local_fake_provider", False) is True
+
+    from magi_agent.artifacts.file_delivery import FileDeliveryRequest
+    from magi_agent.channels.contract import ChannelRef
+
+    request = FileDeliveryRequest(
+        operation="file.deliver",
+        requestId="byte-identity-req",
+        sessionKey="session:test",
+        channel=ChannelRef(type="web", channelId="web-1"),
+        artifactRefs=(expected_ref,),
+        fileRefs=(),
+        filename="test.md",
+        mimeType="text/markdown",
+        contentDigest=content_digest,
+    )
+    result = artifact_provider.write_artifact(request)
+
+    assert result["status"] == "ok"
+    assert result["artifactRef"] == expected_ref, (
+        f"Byte-identity broken: got {result['artifactRef']!r}, expected {expected_ref!r}"
+    )
+
+
+def test_file_deliver_tool_with_artifact_id_produces_correct_artifact_ref(tmp_path: Path) -> None:
+    """End-to-end regression: file_deliver tool with artifactId yields the
+    correct artifactRef in ToolResult.artifactRefs (byte-identical to
+    _artifact_ref(arguments, content_digest)).
+    """
+    import hashlib
+
+    from magi_agent.plugins.native.documents import _artifact_ref, file_deliver
+
+    content = b"# Artifact ID end-to-end test"
+    artifact_id = "e2e-custom-artifact"
+    test_file = tmp_path / "artifact-id-test.md"
+    test_file.write_bytes(content)
+
+    content_digest = "sha256:" + hashlib.sha256(content).hexdigest()
+    arguments: dict[str, object] = {
+        "path": "artifact-id-test.md",
+        "artifactId": artifact_id,
+    }
+    expected_ref = _artifact_ref(arguments, content_digest)
+
+    ctx = _make_tool_context(tmp_path)
+    result = file_deliver(arguments, ctx)  # type: ignore[arg-type]
+
+    assert result.status == "ok"
+    assert result.artifact_refs == (expected_ref,), (
+        f"Byte-identity broken: artifact_refs={result.artifact_refs!r}, "
+        f"expected=({expected_ref!r},)"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Import boundary: documents must NOT import file_delivery_live at module level
 # ---------------------------------------------------------------------------
 

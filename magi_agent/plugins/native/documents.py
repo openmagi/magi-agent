@@ -140,6 +140,7 @@ def _file_delivery_result(
         content_bytes=content,
         filename=path.name,
         context=context,
+        artifact_ref=artifact_ref,
     )
     decision = FileDeliveryBoundary(delivery_config).execute(
         request,
