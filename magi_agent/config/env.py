@@ -1665,6 +1665,27 @@ def is_self_introspection_enabled(env: Mapping[str, str] | None = None) -> bool:
     return _is_true(source.get(MAGI_SELF_INTROSPECTION_ENABLED_ENV))
 
 
+MAGI_EVIDENCE_LEDGER_LIFECYCLE_ENABLED_ENV = "MAGI_EVIDENCE_LEDGER_LIFECYCLE_ENABLED"
+
+
+def is_evidence_ledger_lifecycle_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Single source of truth for the per-turn EvidenceLedger lifecycle flag.
+
+    Default OFF (strict truthy opt-in: "1"/"true"/"yes"/"on"). When OFF the
+    local tool-evidence collector builds NO ``EvidenceLedger`` objects and the
+    CLI tool-context factories leave ``source_ledger`` byte-identical to today
+    (an empty tuple), so ``InspectSelfEvidence`` keeps returning empty
+    ``tool_calls``. When ON the collector synthesizes a minimal per-turn
+    ``EvidenceLedger`` from each recorded tool result and the factories thread
+    those ledgers onto ``ToolContext.source_ledger`` so the tool reports REAL
+    tool calls. Like ``is_self_introspection_enabled`` this deliberately does
+    NOT follow the runtime-profile default-ON convention — it is an additive,
+    default-disabled seam.
+    """
+    source = os.environ if env is None else env
+    return _is_true(source.get(MAGI_EVIDENCE_LEDGER_LIFECYCLE_ENABLED_ENV))
+
+
 MAGI_EGRESS_GATE_ENABLED_ENV = "MAGI_EGRESS_GATE_ENABLED"
 
 

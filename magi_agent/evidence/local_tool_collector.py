@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import time
 from collections.abc import Mapping
 
 from magi_agent.evidence.extraction import evidence_from_tool_result
+from magi_agent.evidence.ledger import EvidenceLedger
+from magi_agent.evidence.types import EvidenceRecord
 from magi_agent.tools.result import ToolResult
 
 
@@ -38,6 +41,12 @@ class LocalToolEvidenceCollector:
     def __init__(self, *, general_automation_receipts: object | None = None) -> None:
         self._records: dict[tuple[str, str], list[object]] = {}
         self._general_automation_receipts = general_automation_receipts
+        # Per-(session_id, turn_id) immutable EvidenceLedgers, built lazily on
+        # the first recorded tool result for a key when the lifecycle flag is on.
+        # Reused by ``evidence_ledgers_for_session`` to thread onto a
+        # ``ToolContext.source_ledger`` so ``InspectSelfEvidence`` projects REAL
+        # tool calls. Empty (and never built) when the flag is off.
+        self._ledgers: dict[tuple[str, str], EvidenceLedger] = {}
 
     def record_tool_result(
         self,
@@ -83,7 +92,63 @@ class LocalToolEvidenceCollector:
 
         if records:
             self._records.setdefault((session_id, turn_id), []).extend(records)
+
+        self._maybe_append_evidence_ledger_record(
+            session_id=session_id,
+            turn_id=turn_id,
+            tool_name=tool_name,
+            status=tool_result.status,
+        )
         return tuple(records)
+
+    def evidence_ledgers_for_session(
+        self,
+        session_id: str,
+    ) -> tuple[EvidenceLedger, ...]:
+        """Return the per-(session, turn) EvidenceLedgers built for a session.
+
+        Used by the CLI tool-context factories to populate
+        ``ToolContext.source_ledger`` so ``InspectSelfEvidence`` can project the
+        REAL tool calls recorded so far. Returns an empty tuple when the
+        lifecycle flag is off (no ledgers are ever built) or no tool result has
+        been recorded for the session yet.
+        """
+        return tuple(
+            ledger
+            for (stored_session_id, _turn_id), ledger in self._ledgers.items()
+            if stored_session_id == session_id
+        )
+
+    def _maybe_append_evidence_ledger_record(
+        self,
+        *,
+        session_id: str,
+        turn_id: str,
+        tool_name: str,
+        status: str,
+    ) -> None:
+        # Fail-open: ledger synthesis/append must NEVER break a tool call. Any
+        # failure (flag read, record validation, immutable append) is swallowed
+        # and the per-key ledger is simply left untouched, matching the existing
+        # ``except Exception`` convention in this file / tool_runtime.py.
+        try:
+            from magi_agent.config.env import (  # noqa: PLC0415
+                is_evidence_ledger_lifecycle_enabled,
+            )
+
+            if not is_evidence_ledger_lifecycle_enabled():
+                return
+            if not session_id or not turn_id or not tool_name:
+                return
+            key = (session_id, turn_id)
+            ledger = self._ledgers.get(key) or _new_tool_trace_ledger(
+                session_id=session_id,
+                turn_id=turn_id,
+            )
+            record = _synthesize_tool_trace_record(tool_name=tool_name, status=status)
+            self._ledgers[key] = ledger.append_evidence_record(record)
+        except Exception:
+            return
 
     def collect_for_turn(self, turn_id: str) -> tuple[object, ...]:
         local = tuple(
@@ -316,6 +381,44 @@ def _is_test_command(command: str | None) -> bool:
     return any(
         normalized == prefix or normalized.startswith(f"{prefix} ")
         for prefix in _TEST_COMMAND_PREFIXES
+    )
+
+
+# EvidenceStatus is Literal["ok", "failed", "unknown"]; ToolResult.status is
+# Literal["ok", "error", "blocked", "needs_approval"]. Map onto the evidence
+# vocabulary so the downstream ``normalize_tool_status`` consumer
+# (introspection/mapping.py) projects the right canonical token: "ok"->"ok",
+# "error"->"failed"(->"error"), everything else -> "unknown".
+_TOOL_STATUS_TO_EVIDENCE_STATUS: Mapping[str, str] = {
+    "ok": "ok",
+    "error": "failed",
+}
+
+
+def _new_tool_trace_ledger(*, session_id: str, turn_id: str) -> EvidenceLedger:
+    return EvidenceLedger.model_validate(
+        {
+            "ledgerId": f"{session_id}:{turn_id}:evidence",
+            "sessionId": session_id,
+            "turnId": turn_id,
+            "runOn": "main",
+            "agentRole": "general",
+            "spawnDepth": 0,
+            "sourceKind": "tool_trace",
+            "producerSurface": "tool_host",
+            "metadata": {},
+        }
+    )
+
+
+def _synthesize_tool_trace_record(*, tool_name: str, status: str) -> EvidenceRecord:
+    return EvidenceRecord.model_validate(
+        {
+            "type": "custom:ToolTrace",
+            "status": _TOOL_STATUS_TO_EVIDENCE_STATUS.get(status, "unknown"),
+            "observedAt": time.time(),
+            "source": {"kind": "tool_trace", "toolName": tool_name},
+        }
     )
 
 
