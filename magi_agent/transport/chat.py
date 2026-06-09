@@ -898,6 +898,35 @@ async def _local_adk_chat_sse(
         delta = _local_runtime_event_delta(event_payload)
         if delta:
             yield _sse_data({"choices": [{"index": 0, "delta": {"content": delta}}]})
+    # ── BACKGROUND MEMORY-REVIEW WIRING SEAM (A1, PR5) ──────────────────────
+    # This is the turn-finalization point of the live local chat path: the
+    # engine stream has drained, so the assistant turn is complete. A periodic
+    # background memory review (Hermes-style "save what the model forgot") would
+    # be triggered HERE — but DELIBERATELY NOT IN THIS PR, because it needs a
+    # live model-backed reviewer and MUST run OFF this hot path so it never
+    # blocks the user's turn or the SSE stream. When a live reviewer is added,
+    # wire it like this (off-loop, e.g. via the background-task boundary):
+    #
+    #   from magi_agent.harness.memory_review import (
+    #       MemoryReviewConfig, MemoryReviewHarness, should_run_review,
+    #   )
+    #   from magi_agent.runtime.memory_write_wiring import build_memory_write_host
+    #
+    #   cfg = MemoryReviewConfig(enabled=...)   # default-OFF; also gated by
+    #                                           # MAGI_MEMORY_REVIEW_ENABLED env
+    #   if should_run_review(turn_count, interval_turns=cfg.interval_turns,
+    #                        enabled=cfg.enabled):
+    #       host = build_memory_write_host(
+    #           workspace_root=Path(workspace), bot_id=..., user_id=...,
+    #       )
+    #       # Schedule OFF the hot path (own task/thread) — never await here:
+    #       MemoryReviewHarness(cfg).review(
+    #           transcript, reviewer=<live extractor>, write_host=host,
+    #       )
+    #
+    # The harness re-runs the declarative filter + PR2 write gate on every
+    # surfaced fact, so even a buggy reviewer cannot persist task-state or write
+    # without the memory-write gate being live. Do NOT inline it above. ────────
     yield _sse_data({"choices": [{"index": 0, "finish_reason": "stop"}]})
     yield "data: [DONE]\n\n"
 
