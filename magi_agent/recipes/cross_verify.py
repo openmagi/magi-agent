@@ -76,6 +76,7 @@ _MODEL_CONFIG = ConfigDict(
     populate_by_name=True,
     extra="forbid",
     validate_default=True,
+    hide_input_in_errors=True,
 )
 
 
@@ -111,7 +112,14 @@ class CrossVerifyCandidate(BaseModel):
 class CrossVerifyResult(BaseModel):
     """Consensus outcome of fanning one prompt across N models."""
 
-    model_config = ConfigDict(frozen=True, arbitrary_types_allowed=True)
+    model_config = ConfigDict(
+        frozen=True,
+        arbitrary_types_allowed=True,
+        populate_by_name=True,
+        extra="forbid",
+        validate_default=True,
+        hide_input_in_errors=True,
+    )
 
     enabled: bool
     #: The consensus winner summary ("" when disabled / all children failed).
@@ -122,9 +130,14 @@ class CrossVerifyResult(BaseModel):
     models_attempted: int = 0
     #: Number of children that produced a non-empty, countable summary.
     models_counted: int = 0
+    #: Number of candidates that ACTUALLY voted (best_of_n n_attempted after
+    #: budget cap); may be less than ``models_counted`` when a Budget truncates
+    #: the vote width.  Confidence is interpretable as
+    #: ``agreement_count / models_voted``.
+    models_voted: int = 0
     #: Number of candidates that agreed with the consensus winner.
     agreement_count: int = 0
-    #: Fraction of counted candidates agreeing with the winner (0.0 when none).
+    #: Fraction of VOTED candidates agreeing with the winner (0.0 when none).
     confidence: float = 0.0
     #: The consensus mode that produced this result.
     consensus_mode: ConsensusMode = ConsensusMode.PLURALITY
@@ -261,7 +274,7 @@ async def run_cross_verify(
             reason_codes=("cross_verify_fan_out_error",),
         )
 
-    candidates, countable = _collect_candidates(routes, children)
+    candidates, countable = _collect_candidates(routes, children)  # type: ignore[arg-type]
 
     # --- Vote via best_of_n over the pre-computed candidate summaries -----
     consensus = _vote(countable, cfg=cfg, budget=budget)
@@ -272,6 +285,7 @@ async def run_cross_verify(
         candidates=tuple(candidates),
         models_attempted=len(routes),
         models_counted=len(countable),
+        models_voted=consensus.n_attempted,
         agreement_count=consensus.agreement_count,
         confidence=consensus.confidence,
         consensus_mode=cfg.consensus_mode,
@@ -287,7 +301,7 @@ async def _fan_out(
     cfg: CrossVerifyConfig,
     parent_execution_id: str,
     turn_id: str,
-) -> tuple[ChildRunnerResult, ...]:
+) -> tuple[ChildRunnerResult | BaseException, ...]:
     """Run one child per route concurrently under a concurrency clamp."""
     clamp = max(1, min(cfg.max_concurrency, _MAX_MODELS, len(routes)))
     semaphore = asyncio.Semaphore(clamp)
@@ -306,7 +320,8 @@ async def _fan_out(
 
     return tuple(
         await asyncio.gather(
-            *(_run_one(i, route) for i, route in enumerate(routes))
+            *(_run_one(i, route) for i, route in enumerate(routes)),
+            return_exceptions=True,
         )
     )
 
@@ -321,7 +336,11 @@ async def _run_child(
     parent_execution_id: str,
     turn_id: str,
 ) -> ChildRunnerResult:
-    """Run a single route's child through the local boundary (fake-only path)."""
+    """Run a single route's child through the local boundary.
+
+    The boundary executes whatever runner the factory injected — a real model
+    runner at runtime, a fake stub in tests.
+    """
     provider, model = route
     request = ChildTaskRequest(
         parentExecutionId=parent_execution_id,
@@ -355,18 +374,33 @@ async def _run_child(
 
 def _collect_candidates(
     routes: tuple[ModelRoute, ...],
-    children: tuple[ChildRunnerResult, ...],
+    children: tuple[ChildRunnerResult | BaseException, ...],
 ) -> tuple[list[CrossVerifyCandidate], list[str]]:
     """Build per-route candidates + the list of countable (non-empty) summaries.
 
     Failed / blocked / disabled children are recorded but NOT counted in the
     vote (mirrors best_of_n's failed-sample handling).  Summaries are read from
     the boundary's already-sanitised public projection — no raw text is touched.
+
+    Elements that are ``BaseException`` instances (raised inside ``_fan_out``
+    when ``return_exceptions=True``) are treated as failed children with
+    ``status="error"`` and an empty summary.
     """
     candidates: list[CrossVerifyCandidate] = []
     countable: list[str] = []
     for route, child in zip(routes, children, strict=True):
         provider, model = route
+        if isinstance(child, BaseException):
+            candidates.append(
+                CrossVerifyCandidate(
+                    provider=provider,
+                    model=model,
+                    status="error",
+                    summary="",
+                    counted=False,
+                )
+            )
+            continue
         summary = _summary_from_child(child)
         is_countable = child.status == "ok" and bool(summary)
         candidates.append(
@@ -407,12 +441,22 @@ def _vote(
     already-collected summaries WITHOUT re-running any model.  ``enabled=True``
     here is the LOCAL voter switch; the cross-verify gate above already
     authorised the run.
+
+    When ``countable`` is empty (all children failed / were filtered out) the
+    function short-circuits and returns a zero-valued ``BestOfNResult`` directly
+    WITHOUT calling ``run_best_of_n``, avoiding the misleading
+    ``agreement_count=1 / confidence=1.0`` artefact that a disabled n=1 stub
+    would otherwise produce.
     """
     if not countable:
-        return run_best_of_n(
-            lambda *_a, **_k: "",
-            task=None,
-            config=BestOfNConfig(n=1, enabled=False),
+        return BestOfNResult(
+            value="",
+            confidence=0.0,
+            n_attempted=0,
+            n_successful=0,
+            agreement_count=0,
+            samples=(),
+            consensus_mode=cfg.consensus_mode,
         )
 
     candidates = tuple(countable)

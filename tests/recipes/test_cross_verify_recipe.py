@@ -218,6 +218,9 @@ class TestDegradedPaths:
         assert result.models_counted == 0
         assert result.reason_codes == ("cross_verify_no_countable_children",)
         assert all(c.counted is False for c in result.candidates)
+        # Bug fix #1: all-fail must NOT yield spurious agreement_count / confidence.
+        assert result.agreement_count == 0
+        assert result.confidence == 0.0
 
     def test_blocked_child_excluded(self) -> None:
         # A blocked envelope status still produces an "ok" boundary result with a
@@ -352,3 +355,166 @@ class TestClamps:
     def test_max_concurrency_validator_clamps_high(self) -> None:
         with pytest.raises(Exception):
             CrossVerifyConfig(enabled=True, maxConcurrency=99)
+
+
+# ---------------------------------------------------------------------------
+# Bug #1 — all-fail spurious metrics
+# ---------------------------------------------------------------------------
+
+
+class TestAllFailMetrics:
+    def test_all_fail_models_voted_is_zero(self) -> None:
+        """Confirm models_voted=0 when no countable children exist."""
+        routes = [("anthropic", "claude"), ("openai", "gpt")]
+        factory = _factory({r: FakeChildRunner("X", fail=True) for r in routes})
+        cfg = CrossVerifyConfig(enabled=True, models=tuple(routes))
+        result = asyncio.run(
+            run_cross_verify(prompt="q", child_runner_factory=factory, config=cfg)
+        )
+        assert result.models_voted == 0
+        assert result.agreement_count == 0
+        assert result.confidence == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Bug #3 — budget truncation / models_voted
+# ---------------------------------------------------------------------------
+
+
+class TestBudgetModelsVoted:
+    def test_budget_cap_makes_models_voted_less_than_models_counted(self) -> None:
+        """When Budget.max_calls_per_turn < candidate count, models_voted < models_counted."""
+        from magi_agent.tools.manifest import Budget
+
+        routes = [
+            ("anthropic", "claude"),
+            ("openai", "gpt"),
+            ("google", "gemini"),
+            ("meta", "llama"),
+        ]
+        factory = _factory({r: FakeChildRunner("X") for r in routes})
+        cfg = CrossVerifyConfig(enabled=True, models=tuple(routes))
+        # Cap the vote to 2 while there are 4 countable candidates.
+        budget = Budget(max_calls_per_turn=2)
+        result = asyncio.run(
+            run_cross_verify(
+                prompt="q",
+                child_runner_factory=factory,
+                config=cfg,
+                budget=budget,
+            )
+        )
+        assert result.models_counted == 4, "all four models produced answers"
+        assert result.models_voted < result.models_counted, "budget capped the vote"
+        assert result.models_voted == 2, "budget capped to 2"
+        # Confidence should be interpretable against models_voted, not models_counted.
+        assert result.agreement_count <= result.models_voted
+        assert 0.0 <= result.confidence <= 1.0
+
+    def test_no_budget_models_voted_equals_models_counted(self) -> None:
+        """Without a Budget, all countable candidates are voted over."""
+        routes = [("anthropic", "claude"), ("openai", "gpt"), ("google", "gemini")]
+        factory = _factory({r: FakeChildRunner("X") for r in routes})
+        cfg = CrossVerifyConfig(enabled=True, models=tuple(routes))
+        result = asyncio.run(
+            run_cross_verify(prompt="q", child_runner_factory=factory, config=cfg)
+        )
+        assert result.models_voted == result.models_counted
+
+
+# ---------------------------------------------------------------------------
+# Bug #2 — gather fault tolerance
+# ---------------------------------------------------------------------------
+
+
+class TestGatherFaultTolerance:
+    def test_one_raiser_excluded_others_still_vote(self) -> None:
+        """A child whose run_child() raises must not crash the fan-out."""
+
+        class RaisingRunner:
+            openmagi_local_fake_provider = True
+
+            async def run_child(self, request: object) -> dict[str, object]:
+                raise RuntimeError("injected task-level raise")
+
+        routes = [
+            ("anthropic", "claude"),
+            ("openai", "gpt"),
+            ("google", "gemini"),
+        ]
+        factory_map: dict[tuple[str, str], object] = {
+            routes[0]: FakeChildRunner("consensus"),
+            routes[1]: FakeChildRunner("consensus"),
+            routes[2]: RaisingRunner(),
+        }
+
+        def factory(route: tuple[str, str]) -> object:
+            return factory_map[route]
+
+        cfg = CrossVerifyConfig(enabled=True, models=tuple(routes))
+        result = asyncio.run(
+            run_cross_verify(prompt="q", child_runner_factory=factory, config=cfg)
+        )
+        # No exception must escape.
+        assert result.consensus == "consensus"
+        assert result.models_attempted == 3
+        assert result.models_counted == 2, "only the two successful ones counted"
+        raiser_candidate = [c for c in result.candidates if c.model == "gemini"][0]
+        assert raiser_candidate.counted is False
+        assert raiser_candidate.status == "error"
+
+
+# ---------------------------------------------------------------------------
+# Minor #5/#6 — confidence accuracy + tie-break determinism
+# ---------------------------------------------------------------------------
+
+
+class TestConfidenceAndTieBreak:
+    def test_happy_path_confidence_ratio(self) -> None:
+        """confidence == agreement_count / models_voted on a clean majority."""
+        routes = [
+            ("anthropic", "claude"),
+            ("openai", "gpt"),
+            ("google", "gemini"),
+        ]
+        factory = _factory(
+            {
+                routes[0]: FakeChildRunner("X"),
+                routes[1]: FakeChildRunner("X"),
+                routes[2]: FakeChildRunner("Y"),
+            }
+        )
+        cfg = CrossVerifyConfig(enabled=True, models=tuple(routes))
+        result = asyncio.run(
+            run_cross_verify(prompt="q", child_runner_factory=factory, config=cfg)
+        )
+        assert result.agreement_count == 2
+        assert result.models_voted == 3
+        expected_confidence = result.agreement_count / result.models_voted
+        assert abs(result.confidence - expected_confidence) < 1e-9
+
+    def test_all_distinct_tie_break_is_stable(self) -> None:
+        """All distinct answers → first-seen route wins (insertion-order stable)."""
+        routes = [
+            ("anthropic", "claude"),
+            ("openai", "gpt"),
+            ("google", "gemini"),
+        ]
+        factory = _factory(
+            {
+                routes[0]: FakeChildRunner("alpha"),
+                routes[1]: FakeChildRunner("beta"),
+                routes[2]: FakeChildRunner("gamma"),
+            }
+        )
+        cfg = CrossVerifyConfig(enabled=True, models=tuple(routes))
+        # Run twice; winner must be the same both times.
+        result_a = asyncio.run(
+            run_cross_verify(prompt="q", child_runner_factory=factory, config=cfg)
+        )
+        result_b = asyncio.run(
+            run_cross_verify(prompt="q", child_runner_factory=factory, config=cfg)
+        )
+        assert result_a.consensus == result_b.consensus, "tie-break is not stable"
+        # First-seen wins: "alpha" is the first candidate in insertion order.
+        assert result_a.consensus == "alpha"
