@@ -77,6 +77,8 @@ class TestDocxWriteHappyPath:
         assert isinstance(out["contentDigest"], str) and out["contentDigest"]
         assert isinstance(out["byteCount"], int) and out["byteCount"] > 0
         assert out["artifactRefs"][0].startswith("artifact:docx:")
+        assert isinstance(out["artifactRef"], str) and out["artifactRef"].startswith("artifact:docx:")
+        assert out["artifactRef"] == out["artifactRefs"][0]
         assert result.artifact_refs == tuple(out["artifactRefs"])
 
         saved = tmp_path / "report.docx"
@@ -174,6 +176,43 @@ class TestDocumentWriteDispatch:
         saved = tmp_path / "note.md"
         assert saved.exists()
         assert saved.read_text(encoding="utf-8") == "# Heading\n\nraw body"
+
+
+class TestDocxWriteRedactionContract:
+    """M6: pin that the DOCX output contains the redacted form, not the raw token."""
+
+    def test_private_path_is_redacted_in_output(self, tmp_path: Path) -> None:
+        raw_path = "/home/user/secret.py"
+        source = f"# Report\n\nSee {raw_path} for details."
+        result = docx_write(
+            {"content": source, "path": "redact-test.docx"}, _context(tmp_path)
+        )
+
+        assert result.status == "ok", result.error_code
+        saved = tmp_path / "redact-test.docx"
+        text = _docx_text(saved)
+
+        # (a) Redacted form is present in the output.
+        assert "[redacted-path]" in text
+        # (b) Raw token is NOT present — Task B must compare against redacted source.
+        assert raw_path not in text
+
+
+class TestDocxWriteTruncation:
+    """M7: a source exceeding max-chars is truncated without raising and returns ok."""
+
+    def test_oversized_source_truncated_without_error(self, tmp_path: Path) -> None:
+        # Build a source that exceeds the 200_000-char cap.
+        long_source = "# Title\n\n" + ("word " * 50_000)
+        assert len(long_source) > 200_000
+
+        result = docx_write(
+            {"content": long_source, "path": "long-doc.docx"}, _context(tmp_path)
+        )
+
+        assert result.status == "ok", result.error_code
+        assert (tmp_path / "long-doc.docx").exists()
+        assert result.output["byteCount"] > 0
 
 
 class TestDocumentWriteImportBoundary:

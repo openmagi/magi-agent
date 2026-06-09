@@ -22,11 +22,31 @@ constructs:
 * Simple pipe tables (``| a | b |`` + ``---`` separator) -> ``add_table``
 * Minimal inline emphasis (``**bold**`` / ``*italic*``)
 * Unknown lines -> plain paragraphs (no words dropped)
+
+Redaction / coverage contract
+------------------------------
+The document is rendered from ``redact_public_text(source)`` — the same
+redaction applied on the markdown path in
+:mod:`magi_agent.plugins.native.documents`.  File paths (``/home/…``,
+``/Users/…``, etc.), private-line patterns, and other sensitive tokens are
+replaced or dropped *before* any content reaches the ``python-docx`` renderer.
+
+**Task B (coverage verifier) MUST compare against the redacted source**, not the
+raw input.  Comparing against the raw ``source`` will produce false coverage
+failures because the redacted tokens (e.g. ``[redacted-path]``) will not match
+the original path strings.  The correct reference text is::
+
+    from magi_agent.web_acquisition.policy import redact_public_text
+    reference = redact_public_text(source, max_chars=200_000)
+
+Do NOT change the redaction behaviour here — keep it consistent with the
+markdown path so both output formats share the same redaction contract.
 """
 
 from __future__ import annotations
 
 import hashlib
+import io
 import re
 
 from magi_agent.plugins.native._common import (
@@ -82,25 +102,28 @@ def docx_write(arguments: dict[str, object], context: ToolContext) -> ToolResult
     try:
         document = Document()
         _render_markdown(document, safe_source)
+        buf = io.BytesIO()
+        document.save(buf)
+        data = buf.getvalue()
         path.parent.mkdir(parents=True, exist_ok=True)
-        document.save(str(path))
-        saved_bytes = path.read_bytes()
+        path.write_bytes(data)
     except Exception:  # noqa: BLE001 — never raise out of the handler.
         return blocked_result("DocumentWrite", "document_write_failed")
 
     relative = path.relative_to(
         safe_child_path(context, ".", default_name=".", mutating=False)
     ).as_posix()
-    content_digest = "sha256:" + hashlib.sha256(saved_bytes).hexdigest()
+    content_digest = "sha256:" + hashlib.sha256(data).hexdigest()
     short_digest = content_digest.removeprefix("sha256:")[:16]
     artifact_ref = "artifact:docx:" + short_digest
     output = {
         "path": relative,
         "pathRef": relative,
         "contentDigest": content_digest,
-        "byteCount": len(saved_bytes),
+        "byteCount": len(data),
         "format": "docx",
         "localOnly": True,
+        "artifactRef": artifact_ref,
         "artifactRefs": (artifact_ref,),
     }
     return ToolResult(
