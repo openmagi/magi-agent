@@ -225,6 +225,55 @@ class ChildTaskRequest(BaseModel):
         return value
 
 
+def _child_turn_message_text(request: ChildTaskRequest) -> str:
+    """Compose the child's user-message text from the delegated task.
+
+    The objective is the parent-authored task description and is forwarded
+    verbatim as the child's prompt; a non-default role is surfaced as a short
+    framing line so the child adopts the delegated perspective. Plain prompt
+    text only — no OpenMagi/runtime state (the runner adapter rejects state
+    smuggled through ``new_message``).
+    """
+
+    lines: list[str] = []
+    if request.role and request.role != "general":
+        lines.append(f"You are acting as the '{request.role}' subagent.")
+    lines.append(request.objective.strip())
+    return "\n\n".join(line for line in lines if line)
+
+
+def _child_turn_context_refs(
+    request: ChildTaskRequest,
+) -> tuple[tuple[str, ...], tuple[str, ...], str | None]:
+    """Extract typed context refs (input/evidence refs + context-plan digest).
+
+    Sourced from ``request.metadata`` so the parent hands the child opaque
+    artifact/claim refs through the typed request fields rather than smuggling
+    them through the prompt. Non-string / blank entries are dropped; missing
+    keys yield empty tuples / ``None``.
+    """
+
+    def _ref_tuple(value: object) -> tuple[str, ...]:
+        if not isinstance(value, (list, tuple)):
+            return ()
+        return tuple(
+            item.strip() for item in value if isinstance(item, str) and item.strip()
+        )
+
+    metadata = request.metadata or {}
+    digest_raw = metadata.get("contextPlanDigest")
+    context_digest = (
+        digest_raw.strip()
+        if isinstance(digest_raw, str) and digest_raw.strip()
+        else None
+    )
+    return (
+        _ref_tuple(metadata.get("inputRefs")),
+        _ref_tuple(metadata.get("evidenceRefs")),
+        context_digest,
+    )
+
+
 class ChildRunnerEnvelopeRef(BaseModel):
     model_config = _MODEL_CONFIG
 
@@ -503,18 +552,22 @@ class LocalChildRunnerBoundary:
         # failure on the real surface degrades to a blocked/error result rather
         # than leaking partial state.
         try:
+            input_refs, evidence_refs, context_digest = _child_turn_context_refs(request)
             turn_request = AdkTurnRequest(
                 turnId=request.turn_id,
                 userId=request.parent_execution_id,
                 sessionId=request.parent_execution_id,
                 invocationId=request.task_id,
+                # Forward the parent-authored objective (+ role framing) as the
+                # child's prompt; opaque artifact/claim refs ride the typed
+                # request fields, never the prompt or runtime state.
                 newMessage=_genai_types.Content(
                     role="user",
-                    # Redaction-safe skeleton: request.objective / role / budgets
-                    # are intentionally NOT forwarded here yet.  Forwarding the
-                    # real objective is deferred to a later Track 17 PR.
-                    parts=[_genai_types.Part(text="child-turn")],
+                    parts=[_genai_types.Part(text=_child_turn_message_text(request))],
                 ),
+                inputRefs=input_refs,
+                evidenceRefs=evidence_refs,
+                contextPlanDigest=context_digest,
             )
             turn_runner = _AdkTurnRunnerCls()
             turn_result = await turn_runner.run_turn(
