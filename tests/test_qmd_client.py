@@ -126,3 +126,133 @@ def test_endpoint_falls_back_to_env(monkeypatch: pytest.MonkeyPatch) -> None:
     client = QmdClient()
 
     assert client.endpoint == "http://from-env.local/search"
+
+
+# ---------------------------------------------------------------------------
+# Fix 1: non-http(s) scheme rejected by _raw_query (defense-in-depth)
+# ---------------------------------------------------------------------------
+
+
+def test_raw_query_raises_on_file_scheme() -> None:
+    """_raw_query must raise QmdUnavailable for file:// endpoints."""
+    client = QmdClient(endpoint="file:///etc/passwd")
+    with pytest.raises(QmdUnavailable, match="scheme"):
+        client._raw_query("q", collection="clawy-memory", limit=10)
+
+
+def test_query_returns_empty_on_file_scheme() -> None:
+    """query() must fail-open (return []) when the endpoint uses a non-http scheme."""
+    client = QmdClient(endpoint="file:///etc/passwd")
+    assert client.query("q", collection="clawy-memory") == []
+
+
+def test_query_returns_empty_on_ftp_scheme() -> None:
+    """ftp:// endpoints should also be rejected."""
+    client = QmdClient(endpoint="ftp://internal.host/search")
+    assert client.query("q", collection="clawy-memory") == []
+
+
+# ---------------------------------------------------------------------------
+# Fix 2: real _raw_query path exercised via urllib.request.urlopen monkeypatch
+# ---------------------------------------------------------------------------
+
+
+def _make_mock_response(body: bytes, status: int = 200) -> object:
+    """Return a minimal file-like object that urllib_request.urlopen would yield."""
+    import io
+
+    class _MockResponse:
+        def __init__(self, data: bytes) -> None:
+            self._buf = io.BytesIO(data)
+            self.status = status
+
+        def read(self) -> bytes:
+            return self._buf.read()
+
+        def __enter__(self) -> "_MockResponse":
+            return self
+
+        def __exit__(self, *_: object) -> None:
+            pass
+
+    return _MockResponse(body)
+
+
+def test_query_returns_empty_on_http_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """query() returns [] when urlopen raises HTTPError (non-200 response)."""
+    import urllib.error
+    import urllib.request
+
+    def _raise_http(*_args: object, **_kwargs: object) -> None:
+        raise urllib.error.HTTPError(
+            url="http://qmd.local/search",
+            code=503,
+            msg="Service Unavailable",
+            hdrs=None,  # type: ignore[arg-type]
+            fp=None,
+        )
+
+    monkeypatch.setattr(urllib.request, "urlopen", _raise_http)
+
+    client = QmdClient(endpoint="http://qmd.local/search")
+    assert client.query("q", collection="clawy-memory") == []
+
+
+def test_query_returns_empty_on_junk_json_body(monkeypatch: pytest.MonkeyPatch) -> None:
+    """query() returns [] when the response body is not valid JSON."""
+    import urllib.request
+
+    monkeypatch.setattr(
+        urllib.request,
+        "urlopen",
+        lambda *_a, **_kw: _make_mock_response(b"<html>not json</html>"),
+    )
+
+    client = QmdClient(endpoint="http://qmd.local/search")
+    assert client.query("q", collection="clawy-memory") == []
+
+
+def test_query_returns_empty_on_url_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    """query() returns [] when urlopen raises URLError (network-level failure)."""
+    import urllib.error
+    import urllib.request
+
+    def _raise_url(*_args: object, **_kwargs: object) -> None:
+        raise urllib.error.URLError("timed out")
+
+    monkeypatch.setattr(urllib.request, "urlopen", _raise_url)
+
+    client = QmdClient(endpoint="http://qmd.local/search")
+    assert client.query("q", collection="clawy-memory") == []
+
+
+def test_query_returns_results_via_urlopen_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Smoke test: happy path through the real _raw_query using a mocked urlopen."""
+    import json
+    import urllib.request
+
+    payload = json.dumps(
+        {
+            "results": [
+                {
+                    "path": "memory/ROOT.md",
+                    "content": "root memory content",
+                    "score": 0.88,
+                    "context": "root",
+                }
+            ]
+        }
+    ).encode("utf-8")
+
+    monkeypatch.setattr(
+        urllib.request,
+        "urlopen",
+        lambda *_a, **_kw: _make_mock_response(payload),
+    )
+
+    client = QmdClient(endpoint="http://qmd.local/search")
+    results = client.query("root", collection="clawy-memory")
+
+    assert len(results) == 1
+    assert results[0]["path"] == "memory/ROOT.md"
+    assert results[0]["score"] == pytest.approx(0.88)

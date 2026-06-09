@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import os
+from urllib.parse import urlparse
 
 
 QMD_ENDPOINT_ENV: str = "MAGI_QMD_ENDPOINT"
@@ -121,6 +122,14 @@ class QmdClient:
         """
         if not self.endpoint:
             raise QmdUnavailable("no qmd endpoint configured")
+
+        # Defense-in-depth: restrict to http/https to prevent file:// or ftp://
+        # reads via urllib when MAGI_QMD_ENDPOINT is misconfigured.
+        scheme = urlparse(self.endpoint).scheme
+        if scheme not in ("http", "https"):
+            raise QmdUnavailable(
+                f"qmd endpoint scheme {scheme!r} is not allowed; use http or https"
+            )
 
         # Lazy import: keep module-load import boundary free of network libs.
         from urllib import error as urllib_error
