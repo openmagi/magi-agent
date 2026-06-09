@@ -365,7 +365,6 @@ def _build_system_instruction(
     request: Gate5B4C3ShadowGenerationRequest,
     *,
     model_aware: bool = False,
-    memory_snapshot_block: str = "",
 ) -> str:
     if request.recipe_profile.tools_policy == "selected_full_toolhost":
         base = (
@@ -400,12 +399,10 @@ def _build_system_instruction(
 
             hint = _coding_model_hint_for(request.model_routing.model_label)
             if hint:
-                base = f"{base}\n\n{hint}"
-        if memory_snapshot_block:
-            return f"{base}\n\n{memory_snapshot_block}"
+                return f"{base}\n\n{hint}"
         return base
     if request.recipe_profile.tools_policy == "shadow_readonly":
-        base = (
+        return (
             "You are running an OpenMagi Gate 1A read-only tools canary. "
             "You may request only the approved read-only tools exposed for this turn. "
             "Use tool results only as bounded, redacted evidence. "
@@ -415,19 +412,13 @@ def _build_system_instruction(
             "write transcripts, or write SSE events. "
             f"Routing source: {request.model_routing.routing_source}."
         )
-        if memory_snapshot_block:
-            return f"{base}\n\n{memory_snapshot_block}"
-        return base
-    base = (
+    return (
         "You are running an OpenMagi Gate 5B-4c-3 no-memory, no-tools shadow "
         "generation diagnostic. Use only the sanitized current-turn input. Do not "
         "claim production authority. Do not request tools, memory, workspace, child "
         "agents, evidence block mode, channel delivery, transcript writes, or SSE writes. "
         f"Routing source: {request.model_routing.routing_source}."
     )
-    if memory_snapshot_block:
-        return f"{base}\n\n{memory_snapshot_block}"
-    return base
 
 
 __all__ = [
