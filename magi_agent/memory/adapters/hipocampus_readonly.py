@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 from pathlib import Path
 from typing import Literal, Sequence
@@ -17,8 +18,21 @@ from magi_agent.memory.contracts import (
 )
 from magi_agent.memory.policy import MemoryPolicy, evaluate_memory_policy
 
+# NOTE: QmdClient is imported lazily inside the gated live-recall branch to keep
+# the module import boundary free of network libraries (urllib is stdlib, but the
+# adapter import-boundary test asserts no provider/network modules load at import
+# time, so we resolve the symbol via this module attribute and import lazily).
+from magi_agent.memory.qmd_client import QmdClient  # noqa: F401 (re-exported for monkeypatch seam)
+
 
 PROVIDER_ID = "hipocampus-qmd-readonly"
+
+#: Env gate for the OPTIONAL live qmd recall path (default OFF).  When unset/falsy,
+#: ``_load_qmd_records`` behaves byte-identically to the pre-existing JSON-file path.
+#: This is a SEPARATE surface from the shadow parity contracts that pin
+#: ``hipocampus_qmd_live_called: Literal[False]`` — those guard fixture/projection
+#: evidence, not this recall adapter.
+MAGI_MEMORY_QMD_LIVE_ENABLED_ENV = "MAGI_MEMORY_QMD_LIVE_ENABLED"
 
 _MODEL_CONFIG = ConfigDict(frozen=True, populate_by_name=True, extra="forbid")
 _PRODUCTION_PATH_RE = re.compile(
@@ -75,6 +89,11 @@ class HipocampusReadOnlyConfig(BaseModel):
     qmd_results_path: str = Field(default="memory/qmd_results.json", alias="qmdResultsPath")
     daily_memory_glob: str = Field(default="memory/daily/*.md", alias="dailyMemoryGlob")
     max_records: int = Field(default=5, alias="maxRecords", ge=1, le=20)
+    #: Collection scope used when the OPTIONAL live qmd recall gate is ON.
+    #: Ignored entirely when the gate is OFF (the JSON-file path takes no collection).
+    qmd_collection: str = Field(default="magi-memory", alias="qmdCollection")
+    #: Endpoint override for the live qmd client; falls back to MAGI_QMD_ENDPOINT.
+    qmd_endpoint: str | None = Field(default=None, alias="qmdEndpoint")
 
 
 class HipocampusReadOnlyAdapter:
@@ -234,6 +253,14 @@ class HipocampusReadOnlyAdapter:
         return records
 
     def _load_qmd_records(self, request: RecallRequest) -> list[MemoryRecord]:
+        if _qmd_live_recall_enabled():
+            results = self._live_qmd_results(request)
+        else:
+            results = self._json_qmd_results()
+        return self._map_qmd_results(results, request)
+
+    def _json_qmd_results(self) -> list[dict]:
+        """Read the pre-computed qmd_results.json file (default, gate-OFF path)."""
         path = _resolve_workspace_path(self.workspace_root, self.config.qmd_results_path)
         if path is None or not path.is_file():
             return []
@@ -244,7 +271,29 @@ class HipocampusReadOnlyAdapter:
         results = parsed.get("results") if isinstance(parsed, dict) else None
         if not isinstance(results, list):
             return []
+        return [item for item in results if isinstance(item, dict)]
 
+    def _live_qmd_results(self, request: RecallRequest) -> list[dict]:
+        """Query qmd live (OPTIONAL, GATED path).
+
+        Fail-open: ``QmdClient.query`` never raises into a turn; on any failure
+        it returns ``[]`` and recall simply yields no qmd records.  Returns the
+        same ``{"path","content","score","context"}`` shape as the JSON file so
+        the shared mapper builds identical ``MemoryRecord`` objects.
+        """
+        client = QmdClient(endpoint=self.config.qmd_endpoint)
+        return client.query(
+            request.query,
+            collection=self.config.qmd_collection,
+            limit=min(request.limit, self.config.max_records),
+            min_score=request.min_score,
+        )
+
+    def _map_qmd_results(
+        self,
+        results: list[dict],
+        request: RecallRequest,
+    ) -> list[MemoryRecord]:
         records: list[MemoryRecord] = []
         for item in results:
             if not isinstance(item, dict):
@@ -284,6 +333,19 @@ class HipocampusReadOnlyAdapter:
             )
         records.sort(key=lambda record: record.score or 0, reverse=True)
         return records
+
+
+def _qmd_live_recall_enabled() -> bool:
+    """Return True when the OPTIONAL live qmd recall gate is set to a truthy value.
+
+    Default (unset/falsy): False — the JSON-file path is used byte-identically.
+    """
+    return os.environ.get(MAGI_MEMORY_QMD_LIVE_ENABLED_ENV, "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
 
 
 def _empty_result(

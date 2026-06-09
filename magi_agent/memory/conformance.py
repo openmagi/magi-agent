@@ -449,6 +449,64 @@ def check_writable_provider_conformance(
     )
 
 
+# ---------------------------------------------------------------------------
+# B1 — Gated live qmd recall conformance (additive).
+#
+# The shadow/parity contracts pin ``hipocampus_qmd_live_called: Literal[False]``
+# and ``MemoryConformanceImportBoundary.hipocampus_qmd_calls: Literal[False]`` to
+# guarantee the SHADOW evidence/authority surfaces never invoke live qmd.  Those
+# pins are intentionally LEFT UNTOUCHED.
+#
+# The OPTIONAL, env-gated live qmd RECALL path lives in a DIFFERENT surface (the
+# read-only recall adapter) and is represented by a SEPARATE field below
+# (``hipocampus_qmd_live_recall_gated``).  The two are decoupled by design: the
+# gated recall field may become True while the parity pin stays False.
+# ---------------------------------------------------------------------------
+
+
+class HipocampusQmdLiveRecallConformance(BaseModel):
+    """Conformance record for the gated live qmd RECALL path.
+
+    Records whether the OPTIONAL ``MAGI_MEMORY_QMD_LIVE_ENABLED`` recall gate is
+    active, WITHOUT coupling to the shadow/parity pin.  ``hipocampus_qmd_calls``
+    here mirrors the pinned ``Literal[False]`` from the import boundary: it can
+    NEVER be True, asserting that enabling gated recall does not flip the parity
+    surface.
+    """
+
+    model_config = _MODEL_CONFIG
+
+    #: Whether the gated live qmd RECALL path (recall adapter) is enabled.  This
+    #: is a normal ``bool`` — the gate may be on (True) without weakening parity.
+    hipocampus_qmd_live_recall_gated: bool = Field(
+        default=False,
+        alias="hipocampusQmdLiveRecallGated",
+    )
+    #: Parity pin: the shadow evidence/authority surfaces NEVER call live qmd.
+    #: Pinned ``Literal[False]`` so enabling gated recall cannot flip it.
+    hipocampus_qmd_calls: Literal[False] = Field(
+        default=False,
+        alias="hipocampusQmdCalls",
+    )
+
+
+def check_hipocampus_qmd_live_recall_conformance() -> HipocampusQmdLiveRecallConformance:
+    """Derive the gated live qmd recall conformance from the live adapter gate.
+
+    Reads the recall adapter's gate predicate (lazy import to keep this module's
+    import boundary network-library-free) and reports it as
+    ``hipocampus_qmd_live_recall_gated`` while keeping the parity pin
+    ``hipocampus_qmd_calls`` pinned False.
+    """
+    from magi_agent.memory.adapters.hipocampus_readonly import (  # lazy import: keep boundary thin
+        _qmd_live_recall_enabled,
+    )
+
+    return HipocampusQmdLiveRecallConformance(
+        hipocampusQmdLiveRecallGated=_qmd_live_recall_enabled(),
+    )
+
+
 def check_local_file_memory_provider_conformance() -> WritableProviderConformanceReport:
     """Check D1–D4 invariants for the canonical LocalFileMemoryProvider (D1).
 
