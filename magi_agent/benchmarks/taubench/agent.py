@@ -7,7 +7,8 @@ installed.
 """
 from __future__ import annotations
 
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from magi_agent.benchmarks.taubench.episode import EpisodeState, run_episode
 from magi_agent.benchmarks.taubench.tau_env import build_env_function_tools

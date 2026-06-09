@@ -11,12 +11,15 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+from collections.abc import Iterator
+
+from magi_agent.benchmarks.taubench.config import Config
 
 _GATE_ENV = "MAGI_TAUBENCH_ENABLED"
 
 
 @contextlib.contextmanager
-def _apply_flags(config):  # type: ignore[no-untyped-def]
+def _apply_flags(config: Config) -> Iterator[None]:
     """Set control-plane env flags for *config* and restore them afterward.
 
     This prevents flag leakage across run_eval calls when multiple configs are
@@ -57,7 +60,7 @@ def run_eval(
     domain: str = "airline",
     max_tasks: int | None = None,
     trials: int = 4,
-    config: str = "full",
+    config: Config = "full",
     api_key: str | None = None,
 ) -> None:
     """Run the τ-bench harness end-to-end and print a TauReport as JSON.
