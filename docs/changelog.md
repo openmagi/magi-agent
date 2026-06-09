@@ -15,6 +15,33 @@ Versions follow the tags published on GitHub Releases.
 
 ### Fixed
 
+## 0.1.28
+
+### Added
+- Local dashboard Customize controls now expose runtime catalog data,
+  verification presets, custom tool toggles, and persisted tool overrides
+  through the app API and static dashboard bundle.
+- ADK-backed local turns now stream through owned SSE run configuration, giving
+  the dashboard and CLI cleaner runtime progress delivery.
+- Hipocampus memory now includes gated QMD recall, MemoryWrite registry wiring,
+  local full memory tools, append/background compaction, ROOT synthesis, and
+  channel memory-mode enforcement.
+- Canary model routing can now select configured full-provider canary routes for
+  targeted Gate5B runs.
+- The default-off Agent Vault egress seam adds an egress proxy boundary for
+  future controlled external access.
+
+### Changed
+- Web acquisition support now includes the Jina and Insane Fetch providers, with
+  WAF-oriented fetch support kept optional behind the `waf` extra.
+
+### Fixed
+- Memory collection now confines QMD roots and blocks protected raw memory reads.
+- Introspection egress evidence is redacted and the critic path uses hardened
+  prompt boundaries.
+- Insane Fetch DNS pinning now uses curl options, and the tau-bench harness now
+  matches the current `get_env` API.
+
 ## 0.1.27
 
 ### Fixed
