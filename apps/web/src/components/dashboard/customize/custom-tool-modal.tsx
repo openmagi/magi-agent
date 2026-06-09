@@ -9,6 +9,10 @@ interface CustomToolModalProps {
   tools: ToolItem[];
   overrides: Record<string, boolean>;
   onToggle: (name: string, enabled: boolean) => void;
+  /** Names of tools whose PATCH request is currently in-flight. */
+  pendingNames?: Set<string>;
+  /** Transient error from the most recent failed PATCH, cleared on next toggle. */
+  error?: string | null;
 }
 
 const SOURCE_BADGE: Record<string, string> = {
@@ -21,10 +25,12 @@ function Toggle({
   checked,
   onChange,
   label,
+  disabled,
 }: {
   checked: boolean;
   onChange: (next: boolean) => void;
   label: string;
+  disabled?: boolean;
 }) {
   return (
     <button
@@ -32,8 +38,9 @@ function Toggle({
       role="switch"
       aria-checked={checked}
       aria-label={label}
+      disabled={disabled}
       onClick={() => onChange(!checked)}
-      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45 focus-visible:ring-offset-2 ${
+      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 ${
         checked ? "bg-primary" : "bg-black/15"
       }`}
     >
@@ -52,6 +59,8 @@ export function CustomToolModal({
   tools,
   overrides,
   onToggle,
+  pendingNames,
+  error,
 }: CustomToolModalProps): React.ReactElement | null {
   if (!open) return null;
 
@@ -72,9 +81,17 @@ export function CustomToolModal({
             </svg>
           </button>
         </div>
-        <p className="mb-6 text-xs text-secondary">
-          Enable or disable the tools your agent can call. Changes apply to this local session only.
+        <p className="mb-4 text-xs text-secondary">
+          Enable or disable the tools your agent can call. Changes are saved and take effect
+          immediately.
         </p>
+
+        {/* Transient PATCH error */}
+        {error ? (
+          <div className="mb-4 rounded-xl border border-amber-500/25 bg-amber-500/[0.08] px-4 py-3 text-xs leading-5 text-amber-800">
+            {error}
+          </div>
+        ) : null}
 
         {/* Tool list */}
         {tools.length === 0 ? (
@@ -85,6 +102,7 @@ export function CustomToolModal({
           <div className="space-y-2">
             {tools.map((tool) => {
               const enabled = overrides[tool.name] ?? tool.enabled;
+              const isPending = pendingNames?.has(tool.name) ?? false;
               return (
                 <div
                   key={tool.name}
@@ -114,6 +132,7 @@ export function CustomToolModal({
                     checked={enabled}
                     onChange={(next) => onToggle(tool.name, next)}
                     label={`Toggle ${tool.name}`}
+                    disabled={isPending}
                   />
                 </div>
               );
