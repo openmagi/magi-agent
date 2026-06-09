@@ -136,6 +136,11 @@ class OpenMagiRuntime:
             else Path.cwd()
         )
         self.memory_snapshot_cache = MemorySnapshotCache(workspace_root=_workspace_root)
+        # NOTE: when session reset becomes live (SlashControlBoundary
+        # session_reset_performed is currently Literal[False], performed by a
+        # higher layer / Stream B/E), call
+        # `self.memory_snapshot_cache.invalidate(old_session_key)` at the reset
+        # site so the frozen snapshot rebuilds for the new session.
 
     def list_active_tools(self) -> list[str]:
         return [tool.name for tool in self.tool_registry.list_available(mode="act")]
