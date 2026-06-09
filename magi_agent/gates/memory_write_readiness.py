@@ -44,6 +44,7 @@ Forbidden imports: urllib, socket, subprocess, http, requests — none appear he
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 from typing import Literal
 
@@ -54,6 +55,7 @@ MemoryWriteExecutionMode = Literal["disabled", "shadow", "live"]
 
 _DIGEST_RE = re.compile(r"^sha256:[a-f0-9]{64}$")
 _SAFE_ENVIRONMENTS = frozenset({"local", "development", "staging", "production"})
+_TRUE_STRINGS = frozenset({"1", "true", "yes", "on"})
 
 #: Master readiness env gate (default OFF).  Resolved via
 #: ``magi_agent.memory.config.resolve_memory_config`` (see ``_readiness_env_enabled``).
@@ -62,6 +64,15 @@ _READINESS_ENV_VAR: str = "MAGI_MEMORY_WRITE_READINESS_ENABLED"
 #: Kill-switch env var.  When truthy the gate is immediately blocked.  Resolved
 #: via the single memory config resolver (see ``_kill_switch_env_active``).
 _KILL_SWITCH_ENV_VAR: str = "MAGI_MEMORY_WRITE_KILL_SWITCH_ENABLED"
+
+#: Local single-user developer short-circuit.
+#: When set to a truthy value AND ``MAGI_MEMORY_WRITE_READINESS_ENABLED=1``
+#: AND ``MAGI_MEMORY_WRITE_ENABLED=1``, ``resolve_memory_write_execution_mode``
+#: returns ``"live"`` directly, bypassing the canary-promotion ladder.
+#: This has NO effect in multi-tenant hosted deployments because those
+#: deployments do NOT set this env var; the canary ladder remains the only
+#: path to "live" in production.
+MAGI_MEMORY_LOCAL_DEV_ENV: str = "MAGI_MEMORY_LOCAL_DEV"
 
 #: The three D-track surface gates governed by this readiness gate.
 MAGI_MEMORY_WRITE_ENABLED_ENV: str = "MAGI_MEMORY_WRITE_ENABLED"
@@ -95,6 +106,36 @@ def _kill_switch_env_active() -> bool:
     from magi_agent.memory.config import resolve_memory_config
 
     return resolve_memory_config().write_kill_switch_enabled
+
+
+def _write_enabled_env_active() -> bool:
+    """Return True when ``MAGI_MEMORY_WRITE_ENABLED`` is explicitly truthy."""
+    return os.environ.get(MAGI_MEMORY_WRITE_ENABLED_ENV, "").lower() in _TRUE_STRINGS
+
+
+def _local_dev_env_active() -> bool:
+    """Return True when the local single-user dev short-circuit is explicitly set.
+
+    Requires ALL of:
+      * ``MAGI_MEMORY_LOCAL_DEV=1`` (the short-circuit opt-in),
+      * the master readiness env gate ``MAGI_MEMORY_WRITE_READINESS_ENABLED=1``,
+      * the D1/D2 surface gate ``MAGI_MEMORY_WRITE_ENABLED=1`` (defense-in-depth,
+        matching the documented two-key requirement),
+    AND requires the kill-switch (``MAGI_MEMORY_WRITE_KILL_SWITCH_ENABLED``) to be
+    INACTIVE.  The kill-switch must win immediately regardless of any other flag,
+    so the short-circuit never bypasses it.
+
+    This prevents accidental activation in environments where the master gate or
+    write gate is off.  Multi-tenant hosted deployments never set
+    MAGI_MEMORY_LOCAL_DEV, so they cannot reach "live" through this path — only
+    through canary promotion.
+    """
+    return (
+        os.environ.get(MAGI_MEMORY_LOCAL_DEV_ENV, "").lower() in _TRUE_STRINGS
+        and _readiness_env_enabled()
+        and _write_enabled_env_active()
+        and not _kill_switch_env_active()
+    )
 
 
 class MemoryWriteReadinessConfig(BaseModel):
@@ -255,7 +296,21 @@ def resolve_memory_write_execution_mode(
     bot_id: str,
     user_id: str,
 ) -> MemoryWriteExecutionMode:
-    """Convenience: resolve just the execution mode for the writable-memory gate."""
+    """Convenience: resolve just the execution mode for the writable-memory gate.
+
+    Local-developer short-circuit: when ``MAGI_MEMORY_LOCAL_DEV=1`` is set
+    together with the master readiness gate (``MAGI_MEMORY_WRITE_READINESS_ENABLED``)
+    AND the write surface gate (``MAGI_MEMORY_WRITE_ENABLED``), the mode is
+    promoted to ``"live"`` without requiring canary promotion.  This path is
+    intended ONLY for single-user local development and CLI sessions — hosted
+    multi-tenant deployments never set ``MAGI_MEMORY_LOCAL_DEV``.
+
+    The kill-switch (``MAGI_MEMORY_WRITE_KILL_SWITCH_ENABLED``) wins immediately:
+    when active, the short-circuit is bypassed and the mode falls through to the
+    normal gate evaluation (which resolves to ``"disabled"``/``"blocked"``).
+    """
+    if _local_dev_env_active():
+        return "live"
     meta = memory_write_readiness_health_metadata(
         config, bot_id=bot_id, user_id=user_id
     )
@@ -352,4 +407,5 @@ __all__ = [
     "MAGI_MEMORY_WRITE_ENABLED_ENV",
     "MAGI_MEMORY_PROJECTION_ENABLED_ENV",
     "MAGI_SOUL_WRITE_ENABLED_ENV",
+    "MAGI_MEMORY_LOCAL_DEV_ENV",
 ]

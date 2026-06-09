@@ -93,7 +93,14 @@ class MemoryWriteToolHost:
         self.provider = provider
 
     def bind(self, registry: ToolRegistry) -> None:
-        """Bind the MemoryWrite handler to the registry and enable the tool."""
+        """Bind the MemoryWrite handler to the registry.
+
+        The handler is ALWAYS bound (so an execution-time dispatch returns a
+        structured ``blocked`` result rather than a hard KeyError), but the tool
+        is only ADVERTISED to the model (registry ``enabled=True``) when the host
+        gate is enabled (shadow/live).  When the host is disabled the tool is
+        bound-but-not-advertised: ``is_enabled``/``list_available`` omit it.
+        """
         registration = registry.resolve_registration("MemoryWrite")
         if registration is None:
             return  # manifest not registered — nothing to bind
@@ -108,7 +115,11 @@ class MemoryWriteToolHost:
         ) -> ToolResult:
             return await host._handle(arguments, context)
 
-        registry.bind_handler("MemoryWrite", _handler, enabled_by_registry_policy=True)
+        registry.bind_handler(
+            "MemoryWrite",
+            _handler,
+            enabled_by_registry_policy=self.config.enabled,
+        )
 
     async def _handle(
         self,
