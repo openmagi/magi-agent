@@ -97,6 +97,8 @@ def run_eval(
         profile: optional task-profile hint forwarded to the runner as
             {"taskType": profile}; omitted uses the runner's default profile.
         api_key: Anthropic API key. Falls back to ANTHROPIC_API_KEY env var.
+        reliability: optional ReliabilityConfig enabling the v2 driver-boundary
+            levers (None = all levers off). Set programmatically, not via CLI.
     """
     ensure_enabled()
 
