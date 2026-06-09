@@ -71,6 +71,27 @@ def _seed_active_item(
     run_eval_gate((candidate,), store=store, checkset=checkset)
 
 
+def _apply_local_full_defaults_to_process(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    explicit_env: dict[str, str] | None = None,
+) -> dict[str, str]:
+    """Apply local full defaults to os.environ through monkeypatch."""
+    from magi_agent.runtime.local_defaults import (
+        LOCAL_FULL_RUNTIME_ENV_DEFAULTS,
+        apply_local_full_runtime_defaults,
+    )
+
+    env = dict(explicit_env or {})
+    apply_local_full_runtime_defaults(env)
+
+    for key in set(LOCAL_FULL_RUNTIME_ENV_DEFAULTS) | {_ENV_INJECTION, _ENV_MASTER}:
+        monkeypatch.delenv(key, raising=False)
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    return env
+
+
 # ---------------------------------------------------------------------------
 # 1. Gate off (default) — returns "" even with active items
 # ---------------------------------------------------------------------------
@@ -282,6 +303,46 @@ def test_build_cli_instruction_no_learning_block_when_gate_off(
         workspace_root=str(tmp_path),
     )
     assert _BLOCK_HEADER not in instruction
+
+
+def test_build_cli_instruction_after_local_full_defaults_requires_explicit_injection_opt_in(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Installed/local full defaults must not enable learning prompt injection."""
+    store = _make_store(tmp_path)
+    _seed_active_item(store, rationale="always write tests first")
+
+    _apply_local_full_defaults_to_process(monkeypatch)
+
+    from magi_agent.cli.tool_runtime import build_cli_instruction
+
+    instruction = build_cli_instruction(
+        session_id="cli-test-local-full-defaults",
+        workspace_root=str(tmp_path),
+    )
+    assert _BLOCK_HEADER not in instruction
+
+
+def test_build_cli_instruction_after_local_full_defaults_injects_when_explicitly_enabled(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Explicit injection opt-in still works with installed/local full defaults."""
+    store = _make_store(tmp_path)
+    _seed_active_item(store, rationale="always write tests first")
+
+    _apply_local_full_defaults_to_process(
+        monkeypatch,
+        explicit_env={_ENV_INJECTION: "1"},
+    )
+
+    from magi_agent.cli.tool_runtime import build_cli_instruction
+
+    instruction = build_cli_instruction(
+        session_id="cli-test-local-full-defaults-opt-in",
+        workspace_root=str(tmp_path),
+    )
+    assert _BLOCK_HEADER in instruction
+    assert "always write tests first" in instruction
 
 
 # ---------------------------------------------------------------------------
