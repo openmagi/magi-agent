@@ -76,3 +76,35 @@ async def test_decision_still_denies_destructive_pipeline(tmp_path):
 
     assert outcome.status == "blocked"
     assert outcome.handler_called is False
+
+
+@pytest.mark.asyncio
+async def test_decision_denies_bare_background_operator_network(tmp_path):
+    (tmp_path / "f.py").write_text("x\n", encoding="utf-8")
+    bundle = _build_bundle(tmp_path)
+
+    outcome = await bundle.host.dispatch(
+        "Bash",
+        {"command": "head -1 f.py & curl http://example.invalid"},
+        request_digest=_sha256("request-background-network"),
+        tool_call_id="call-background-network",
+    )
+
+    assert outcome.status == "blocked"
+    assert outcome.handler_called is False
+
+
+@pytest.mark.asyncio
+async def test_decision_denies_bare_background_operator_mutation(tmp_path):
+    (tmp_path / "f.py").write_text("x\n", encoding="utf-8")
+    bundle = _build_bundle(tmp_path)
+
+    outcome = await bundle.host.dispatch(
+        "Bash",
+        {"command": "head -1 f.py & rm f.py"},
+        request_digest=_sha256("request-background-mutation"),
+        tool_call_id="call-background-mutation",
+    )
+
+    assert outcome.status == "blocked"
+    assert outcome.handler_called is False

