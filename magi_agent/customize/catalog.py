@@ -2,6 +2,13 @@ from __future__ import annotations
 
 from typing import Any
 
+# The fixed set of runtime hook-point names exposed by the live runtime shell.
+# OpenMagiRuntime has no hook_registry attribute — it is a thin shell that owns
+# only tool_registry. Hook manifests are not surfaced via any runtime accessor;
+# the /v1/app/skills endpoint (app_api._RUNTIME_HOOK_POINTS) uses this same
+# hardcoded list. We source from there via import so both surfaces stay in sync.
+from magi_agent.transport.app_api import _RUNTIME_HOOK_POINTS as _HOOK_POINTS
+
 # Curated constants mirror REAL recipe modules under magi_agent/recipes/first_party/
 # and the documented harness presets (docs/harness-schema.md). Phase 2 wires their
 # selection to enforcement; Phase 1 surfaces them so the UI reaches parity.
@@ -51,27 +58,21 @@ def _preset_entries() -> list[dict[str, Any]]:
 
 
 def _hook_entries(runtime: Any) -> list[dict[str, Any]]:
-    # list_all() returns HookManifest objects directly (enabled is baked in
-    # via _copy_registration_manifest in the real registry).
+    # OpenMagiRuntime is a thin shell — it exposes only tool_registry; there is
+    # no hook_registry attribute. Hook points are sourced from the same fixed
+    # tuple that /v1/app/skills uses (_HOOK_POINTS, imported above). Each entry
+    # is a builtin runtime-level hook point; none are user-opt-out-able, so all
+    # are alwaysOn=True / category="security".
     entries: list[dict[str, Any]] = []
-    for manifest in runtime.hook_registry.list_all():
-        name = manifest.name
-        point = getattr(manifest, "point", None)
-        # Mirror is_protected_manifest() from magi_agent/hooks/registry.py:
-        #   security_critical or scope.hard_safety or not opt_out
-        security_critical = bool(getattr(manifest, "security_critical", False))
-        scope = getattr(manifest, "scope", None)
-        hard_safety = bool(getattr(scope, "hard_safety", False)) if scope is not None else False
-        opt_out = bool(getattr(manifest, "opt_out", True))
-        always_on = security_critical or hard_safety or not opt_out
+    for point_name in _HOOK_POINTS:
         entries.append(
             {
-                "name": name,
-                "point": str(point) if point is not None else None,
-                "title": name,
-                "category": "security" if always_on else "general",
-                "alwaysOn": always_on,
-                "enabled": bool(getattr(manifest, "enabled", True)),
+                "name": point_name,
+                "point": point_name,  # already a plain camelCase string
+                "title": point_name,
+                "category": "security",
+                "alwaysOn": True,
+                "enabled": True,
             }
         )
     return entries

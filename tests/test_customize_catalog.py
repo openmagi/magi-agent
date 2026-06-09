@@ -1,55 +1,33 @@
 """Tests for magi_agent.customize.catalog.
 
-Fakes MIRROR the real registry shapes:
-- hook_registry.list_all() → list[HookManifest-shaped objects]
-  Fields: name, point, enabled (baked in), security_critical, scope.hard_safety, opt_out
+Hook entries are sourced from the same fixed _RUNTIME_HOOK_POINTS tuple that
+/v1/app/skills uses — OpenMagiRuntime has no hook_registry attribute.
+
+Tool fakes MIRROR the real registry shapes:
 - tool_registry.list_all() → list[ToolManifest-shaped objects]
   Fields: name, description, source (object with .kind), dangerous, enabled_by_default
   live enabled comes from tool_registry.resolve_registration(name).enabled
 """
 from __future__ import annotations
 
+import json
+import os
+import tempfile
+
+import pytest
+
 from magi_agent.customize.catalog import (
     HARNESS_PRESETS,
     RECIPES,
     build_catalog,
 )
+from magi_agent.hooks.manifest import HookPoint
+from magi_agent.transport.app_api import _RUNTIME_HOOK_POINTS
 
 
 # ---------------------------------------------------------------------------
-# Minimal fake scope mirroring HookScope (just the field catalog.py reads)
-# ---------------------------------------------------------------------------
-class _FakeScope:
-    def __init__(self, hard_safety: bool = False) -> None:
-        self.hard_safety = hard_safety
-
-
-# ---------------------------------------------------------------------------
-# HookManifest-shaped fake — matches what hook_registry.list_all() returns.
-# Fields used by _hook_entries: name, point, enabled, security_critical,
-# scope (with .hard_safety), opt_out.
-# ---------------------------------------------------------------------------
-class _FakeHookManifest:
-    def __init__(
-        self,
-        name: str,
-        point: object,
-        enabled: bool = True,
-        security_critical: bool = False,
-        hard_safety: bool = False,
-        opt_out: bool = True,
-    ) -> None:
-        self.name = name
-        self.point = point
-        self.enabled = enabled
-        self.security_critical = security_critical
-        self.scope = _FakeScope(hard_safety=hard_safety)
-        self.opt_out = opt_out
-
-
-# ---------------------------------------------------------------------------
-# ToolManifest-shaped fake — matches what tool_registry.list_all() returns.
-# The manifest itself does NOT carry live enabled; resolve_registration does.
+# Tool fakes — matches what tool_registry.list_all() / resolve_registration()
+# returns on the real ToolRegistry.
 # ---------------------------------------------------------------------------
 class _FakeToolSource:
     def __init__(self, kind: str = "builtin") -> None:
@@ -78,19 +56,6 @@ class _FakeToolRegistration:
         self.enabled = enabled
 
 
-# ---------------------------------------------------------------------------
-# Fake registries — hook_registry.list_all() returns manifests directly;
-# tool_registry.list_all() returns manifests directly AND exposes
-# resolve_registration(name) returning a registration with .enabled.
-# ---------------------------------------------------------------------------
-class _FakeHookRegistry:
-    def __init__(self, manifests: list[_FakeHookManifest]) -> None:
-        self._manifests = manifests
-
-    def list_all(self) -> list[_FakeHookManifest]:
-        return list(self._manifests)
-
-
 class _FakeToolRegistry:
     def __init__(self, items: list[tuple[_FakeToolManifest, bool]]) -> None:
         self._manifests = [m for m, _ in items]
@@ -106,101 +71,84 @@ class _FakeToolRegistry:
 
 
 class _FakeRuntime:
-    def __init__(
-        self,
-        hooks: list[_FakeHookManifest],
-        tools: list[tuple[_FakeToolManifest, bool]],
-    ) -> None:
-        self.hook_registry = _FakeHookRegistry(hooks)
+    """Fake runtime: only tool_registry is needed — hook entries are sourced
+    from the module-level _RUNTIME_HOOK_POINTS constant, not the runtime."""
+
+    def __init__(self, tools: list[tuple[_FakeToolManifest, bool]]) -> None:
         self.tool_registry = _FakeToolRegistry(tools)
 
 
 # ---------------------------------------------------------------------------
-# Tests
+# Hook entry tests — _hook_entries reads _RUNTIME_HOOK_POINTS, not a registry
+# ---------------------------------------------------------------------------
+
+def test_hook_entries_are_sourced_from_runtime_hook_points() -> None:
+    """_hook_entries produces one entry per _RUNTIME_HOOK_POINTS point."""
+    runtime = _FakeRuntime(tools=[])
+    hooks = build_catalog(runtime)["verification"]["hooks"]
+    hook_names = {h["name"] for h in hooks}
+    assert hook_names == set(_RUNTIME_HOOK_POINTS)
+
+
+def test_hook_entry_point_values_are_plain_camel_strings() -> None:
+    """point values must be plain camelCase strings — never 'HookPoint.X'."""
+    runtime = _FakeRuntime(tools=[])
+    hooks = build_catalog(runtime)["verification"]["hooks"]
+    for h in hooks:
+        point = h["point"]
+        assert point is not None, "point should not be None for runtime hook points"
+        assert "HookPoint" not in point, (
+            f"point '{point}' contains 'HookPoint' — use .value, not str(enum)"
+        )
+        # Must be a lowercase-starting camelCase identifier
+        assert point[0].islower(), f"point '{point}' should start with lowercase"
+
+
+def test_runtime_hook_points_are_always_on_security() -> None:
+    """Built-in runtime hook points are alwaysOn=True, category='security'."""
+    runtime = _FakeRuntime(tools=[])
+    hooks = build_catalog(runtime)["verification"]["hooks"]
+    assert len(hooks) == len(_RUNTIME_HOOK_POINTS)
+    for h in hooks:
+        assert h["alwaysOn"] is True
+        assert h["category"] == "security"
+        assert h["enabled"] is True
+
+
+def test_hook_point_enum_value_is_camel_case() -> None:
+    """Confirm HookPoint.value gives camelCase, not 'HookPoint.NAME'.
+
+    BUG 2 root cause: even though HookPoint is a str-subclass enum, str()
+    returns 'HookPoint.BEFORE_TOOL_USE' (the enum repr), not the value.
+    The correct serialization is .value (or direct string comparison via ==).
+    """
+    # Spot-check a few known enum members
+    assert HookPoint.BEFORE_TOOL_USE.value == "beforeToolUse"
+    assert HookPoint.AFTER_TURN_END.value == "afterTurnEnd"
+    assert HookPoint.BEFORE_LLM_CALL.value == "beforeLLMCall"
+    # BUG: str() of HookPoint enum does NOT give the value — it gives "HookPoint.X"
+    # This is the exact bug that was in the old _hook_entries implementation.
+    assert str(HookPoint.BEFORE_TOOL_USE) == "HookPoint.BEFORE_TOOL_USE"
+    # The fix: always use .value to get the plain camelCase string
+    assert HookPoint.BEFORE_TOOL_USE.value == "beforeToolUse"
+    assert "HookPoint" not in HookPoint.BEFORE_TOOL_USE.value
+
+
+# ---------------------------------------------------------------------------
+# Catalog structure tests
 # ---------------------------------------------------------------------------
 
 def test_catalog_has_curated_recipes_and_presets() -> None:
-    runtime = _FakeRuntime(hooks=[], tools=[])
+    runtime = _FakeRuntime(tools=[])
     catalog = build_catalog(runtime)
     assert len(catalog["verification"]["recipes"]) == len(RECIPES)
     assert len(catalog["verification"]["harnessPresets"]) == len(HARNESS_PRESETS)
     assert catalog["verification"]["recipes"][0]["id"]
 
 
-def test_security_critical_hook_is_always_on_security() -> None:
-    """security_critical=True → alwaysOn True, category 'security'."""
-    runtime = _FakeRuntime(
-        hooks=[
-            _FakeHookManifest(
-                "secret-scan",
-                "beforeToolUse",
-                enabled=True,
-                security_critical=True,
-            ),
-            _FakeHookManifest(
-                "nudge",
-                "afterTurnEnd",
-                enabled=False,
-                security_critical=False,
-            ),
-        ],
-        tools=[],
-    )
-    hooks = build_catalog(runtime)["verification"]["hooks"]
-    secret = next(h for h in hooks if h["name"] == "secret-scan")
-    nudge = next(h for h in hooks if h["name"] == "nudge")
-
-    assert secret["alwaysOn"] is True
-    assert secret["category"] == "security"
-    assert secret["enabled"] is True
-
-    assert nudge["alwaysOn"] is False
-    assert nudge["category"] == "general"
-    assert nudge["enabled"] is False
-
-
-def test_hard_safety_scope_hook_is_always_on_security() -> None:
-    """scope.hard_safety=True → alwaysOn True, category 'security'."""
-    runtime = _FakeRuntime(
-        hooks=[
-            _FakeHookManifest("hard-guard", "beforeLLMCall", hard_safety=True),
-        ],
-        tools=[],
-    )
-    hooks = build_catalog(runtime)["verification"]["hooks"]
-    guard = next(h for h in hooks if h["name"] == "hard-guard")
-    assert guard["alwaysOn"] is True
-    assert guard["category"] == "security"
-
-
-def test_non_opt_out_hook_is_always_on() -> None:
-    """opt_out=False → alwaysOn True (mirrors is_protected_manifest logic)."""
-    runtime = _FakeRuntime(
-        hooks=[
-            _FakeHookManifest("mandatory", "beforeCommit", opt_out=False),
-        ],
-        tools=[],
-    )
-    hooks = build_catalog(runtime)["verification"]["hooks"]
-    m = next(h for h in hooks if h["name"] == "mandatory")
-    assert m["alwaysOn"] is True
-    assert m["category"] == "security"
-
-
-def test_plain_hook_is_general_and_reflects_enabled() -> None:
-    """A plain hook (no security flags) → alwaysOn False, enabled reflects manifest."""
-    runtime = _FakeRuntime(
-        hooks=[
-            _FakeHookManifest("plain-disabled", "afterToolUse", enabled=False),
-        ],
-        tools=[],
-    )
-    hooks = build_catalog(runtime)["verification"]["hooks"]
-    h = hooks[0]
-    assert h["alwaysOn"] is False
-    assert h["category"] == "general"
-    assert h["enabled"] is False
-
+# ---------------------------------------------------------------------------
+# Tool tests
+# ---------------------------------------------------------------------------
 
 def test_tools_reflect_registry_enabled_state() -> None:
     """enabled comes from resolve_registration, not from the manifest itself."""
@@ -215,10 +163,9 @@ def test_tools_reflect_registry_enabled_state() -> None:
         source_kind="builtin",
     )
     runtime = _FakeRuntime(
-        hooks=[],
         tools=[
-            (web_manifest, True),   # enabled=True via registration
-            (shell_manifest, False),  # enabled=False via registration
+            (web_manifest, True),    # enabled=True via registration
+            (shell_manifest, False), # enabled=False via registration
         ],
     )
     tools = build_catalog(runtime)["tools"]
@@ -231,8 +178,10 @@ def test_tools_reflect_registry_enabled_state() -> None:
 
 def test_tools_shape_has_required_keys() -> None:
     """Every tool entry must expose name, description, enabled, source, dangerous."""
-    manifest = _FakeToolManifest("my_tool", description="does stuff", source_kind="custom-plugin", dangerous=True)
-    runtime = _FakeRuntime(hooks=[], tools=[(manifest, True)])
+    manifest = _FakeToolManifest(
+        "my_tool", description="does stuff", source_kind="custom-plugin", dangerous=True
+    )
+    runtime = _FakeRuntime(tools=[(manifest, True)])
     tools = build_catalog(runtime)["tools"]
     assert len(tools) == 1
     t = tools[0]
@@ -240,3 +189,59 @@ def test_tools_shape_has_required_keys() -> None:
     assert t["source"] == "custom-plugin"
     assert t["dangerous"] is True
     assert t["name"] == "my_tool"
+
+
+# ---------------------------------------------------------------------------
+# Real-runtime integration test
+# Gate that would have caught both BUG 1 (AttributeError on hook_registry)
+# and BUG 2 (HookPoint serialization producing "HookPoint.X" strings).
+# ---------------------------------------------------------------------------
+
+def test_build_catalog_real_runtime_no_attr_error_and_no_hookpoint_leak(
+    tmp_path, monkeypatch
+) -> None:
+    """build_catalog(real_runtime) must:
+    1. Not raise AttributeError (no hook_registry on OpenMagiRuntime).
+    2. Produce JSON-serializable output (json.dumps must not raise).
+    3. Contain no 'HookPoint.' substring in any hook entry's point field.
+    """
+    from magi_agent.config.models import BuildInfo, RuntimeConfig
+    from magi_agent.runtime.openmagi_runtime import OpenMagiRuntime
+
+    # Isolate config from developer's ~/.magi/config.toml
+    monkeypatch.setenv("MAGI_CONFIG", str(tmp_path / "config.toml"))
+
+    runtime = OpenMagiRuntime(
+        config=RuntimeConfig(
+            bot_id="test-bot",
+            user_id="test-user",
+            gateway_token="test-token",
+            api_proxy_url="http://api-proxy.local",
+            chat_proxy_url="http://chat-proxy.local",
+            redis_url="redis://redis.local:6379/0",
+            model="gpt-5.2",
+            build=BuildInfo(version="0.1.0", build_sha="sha-test"),
+        )
+    )
+
+    # Must not raise AttributeError
+    result = build_catalog(runtime)
+
+    # Must be JSON-serializable
+    serialized = json.dumps(result)
+
+    # No HookPoint enum leakage
+    assert "HookPoint." not in serialized, (
+        "Serialized catalog contains 'HookPoint.' — enum was not converted to .value"
+    )
+
+    # Each hook entry's point must be None or a plain camelCase string
+    for hook in result["verification"]["hooks"]:
+        point = hook.get("point")
+        if point is not None:
+            assert "HookPoint" not in point, (
+                f"Hook entry point '{point}' leaks enum repr"
+            )
+            assert point[0].islower(), (
+                f"Hook entry point '{point}' should start with lowercase camelCase"
+            )
