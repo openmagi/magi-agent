@@ -1418,6 +1418,24 @@ def is_self_introspection_enabled(env: Mapping[str, str] | None = None) -> bool:
     return _is_true(source.get(MAGI_SELF_INTROSPECTION_ENABLED_ENV))
 
 
+MAGI_EGRESS_GATE_ENABLED_ENV = "MAGI_EGRESS_GATE_ENABLED"
+
+
+def is_egress_gate_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Single source of truth for the egress critic gate activation flag.
+
+    Default OFF (strict truthy opt-in: "1"/"true"/"yes"/"on"). When OFF the
+    user-visible chat egress path is byte-identical to today: no evidence-view
+    building and no critic call. When ON, fact-critical turns run a lean,
+    evidence-grounded critic before egress and set ``verifierEvidenceStatus`` on
+    the response. Like ``is_self_introspection_enabled`` this deliberately does
+    NOT follow the runtime-profile default-ON convention — it is an additive,
+    default-disabled seam.
+    """
+    source = os.environ if env is None else env
+    return _is_true(source.get(MAGI_EGRESS_GATE_ENABLED_ENV))
+
+
 def is_format_on_write_enabled(env: Mapping[str, str]) -> bool:
     """Single source for the format-after-edit flag.
 

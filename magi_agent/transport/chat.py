@@ -44,7 +44,8 @@ from magi_agent.gates.gate5b_full_toolhost import (
     Gate5BFullToolHostConfig,
     build_gate5b_full_toolhost_bundle,
 )
-from magi_agent.config.env import is_read_quality_enabled
+from magi_agent.config.env import is_egress_gate_enabled, is_read_quality_enabled
+from magi_agent.introspection.egress_gate import EgressVerifierStatus
 from magi_agent.gates.gate2_readiness import gate2_readiness_health_metadata
 from magi_agent.gates.gate8_readiness import gate8_readiness_health_metadata
 from magi_agent.runtime.openmagi_runtime import OpenMagiRuntime
@@ -2433,6 +2434,133 @@ def _run_mocked_chat_runner(
     )
 
 
+def _build_egress_evidence_view(
+    gate1a_bundle: Gate1AReadOnlyToolBundle | Gate5BFullToolBundle,
+):
+    """Project the LIVE turn evidence into a PR1 ``SessionEvidenceView``.
+
+    Reuses the PR1 view models. The only real per-turn evidence reachable at
+    egress is on the gate5b full toolhost:
+      - ``host.read_ledger`` (a real ``ReadLedger``) -> files_read.
+      - ``host.counter.receipts`` (tool receipts)    -> tool_calls.
+    There is no live ``EvidenceLedger`` at this seam (the toolhost records reads
+    in the ReadLedger and tool outcomes as receipts, not as EvidenceLedger
+    entries), so files_read are projected directly from the ReadLedger exactly
+    as PR2's ``_empty_view_with_optional_reads`` does, and tool_calls from the
+    receipts. Phases/verdicts stay empty (no live producer). Pure / read-only;
+    never raises.
+    """
+    from magi_agent.introspection.projection import (
+        FileReadView,
+        SessionEvidenceView,
+        SessionScopeView,
+        ToolCallView,
+    )
+
+    host = getattr(gate1a_bundle, "host", None)
+    read_ledger = getattr(host, "read_ledger", None)
+    receipts = tuple(getattr(getattr(host, "counter", None), "receipts", ()) or ())
+
+    files_read: list[FileReadView] = []
+    turns: list[str] = []
+    session_id = "live-egress-session"
+    if read_ledger is not None:
+        for entry in read_ledger.iter_entries():
+            session_id = entry.session_id
+            turns.append(entry.turn_id)
+            files_read.append(
+                FileReadView(
+                    path=entry.path,
+                    sha256=entry.digest,
+                    turnId=entry.turn_id,
+                    bytes=entry.size_bytes,
+                )
+            )
+
+    tool_calls = tuple(
+        ToolCallView(
+            name=receipt.tool_name,
+            status=receipt.status,
+            turnId="live-egress-turn",
+        )
+        for receipt in receipts
+    )
+    return SessionEvidenceView(
+        scope=SessionScopeView(
+            sessionId=session_id,
+            turnsCovered=tuple(dict.fromkeys(turns)),
+        ),
+        filesRead=tuple(files_read),
+        toolCalls=tool_calls,
+        phases=(),
+        verdicts=(),
+    )
+
+
+async def _maybe_run_egress_critic_gate(
+    *,
+    payload: object,
+    draft_text: str,
+    gate1a_bundle: Gate1AReadOnlyToolBundle | Gate5BFullToolBundle,
+) -> EgressVerifierStatus | None:
+    """Run the egress critic gate when the flag is ON. Fail-open; never raises.
+
+    Returns the ``verifier_evidence_status`` value (or ``None`` for no signal /
+    not fact-critical / fail-open error). When the flag is OFF this is never
+    called, so the egress path is byte-identical to before.
+    """
+    try:
+        from magi_agent.introspection.egress_gate import run_egress_critic_check
+
+        user_query = (
+            _extract_last_user_text(payload) if isinstance(payload, Mapping) else ""
+        )
+        view = _build_egress_evidence_view(gate1a_bundle)
+        model_factory = _egress_critic_model_factory(payload)
+
+        evidence_records: list[dict[str, object]] = []
+        result = await run_egress_critic_check(
+            draft_text=draft_text or "",
+            user_query=user_query or "",
+            view=view,
+            model_factory=model_factory,
+            evidence_sink=evidence_records.append,
+        )
+        for record in evidence_records:
+            _log_egress_critic_evidence(record)
+        return result.status
+    except Exception:  # noqa: BLE001 — egress gate must NEVER break the response
+        return None
+
+
+def _egress_critic_model_factory(payload: object) -> Callable[[], object] | None:
+    """Resolve the critic model factory.
+
+    Tests inject a fake via ``payload["_egressCriticModelFactory"]`` (a private,
+    test-only key ignored by the rest of the pipeline). In production this
+    returns ``None`` until a provider-backed factory is wired — the gate then
+    fails open (status ``None``), so enabling the flag without a model is safe.
+    """
+    if isinstance(payload, Mapping):
+        factory = payload.get("_egressCriticModelFactory")
+        if callable(factory):
+            return factory  # type: ignore[return-value]
+    return None
+
+
+def _log_egress_critic_evidence(record: Mapping[str, object]) -> None:
+    """Best-effort structured log of one egress-critic evidence record."""
+    try:
+        import logging  # noqa: PLC0415
+
+        logging.getLogger("magi_agent.introspection.egress_gate").info(
+            "egress_critic_evidence %s",
+            json.dumps(dict(record), ensure_ascii=False, default=str),
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
+
 async def _run_live_chat_runner(
     runtime: OpenMagiRuntime,
     route_config: Gate5BUserVisibleChatRouteConfig,
@@ -2710,6 +2838,17 @@ async def _run_live_chat_runner(
             counter_status=counter_status,
             adk_invoked=boundary_result.adk_invoked,
         )
+    # Egress critic gate (default-OFF). When the flag is OFF this block is
+    # skipped entirely so the response is byte-identical to before. When ON, for
+    # fact-critical turns it grounds the draft against the real evidence view and
+    # sets ``verifierEvidenceStatus`` on the payload. Fail-open: never blocks.
+    verifier_evidence_status: EgressVerifierStatus | None = None
+    if is_egress_gate_enabled():
+        verifier_evidence_status = await _maybe_run_egress_critic_gate(
+            payload=payload,
+            draft_text=boundary_result.output_text_internal or "",
+            gate1a_bundle=gate1a_bundle,
+        )
     return _python_ready_response(
         runtime=runtime,
         content=sanitize_gate5b_model_visible_identity_text(
@@ -2732,6 +2871,7 @@ async def _run_live_chat_runner(
             payload=payload,
             gate1a_bundle=gate1a_bundle,
         ),
+        verifier_evidence_status=verifier_evidence_status,
     )
 
 
@@ -4016,6 +4156,7 @@ def _python_ready_response(
     public_events: Sequence[Mapping[str, object]] = (),
     research_first_metadata: Mapping[str, object] | None = None,
     first_party_harness_metadata: Mapping[str, object] | None = None,
+    verifier_evidence_status: EgressVerifierStatus | None = None,
 ) -> JSONResponse:
     active_tools = _route_tool_bundle_names(gate1a_bundle)
     gate8_metadata = _gate8_selected_authority_metadata(runtime)
@@ -4082,6 +4223,11 @@ def _python_ready_response(
         body["researchFirst"] = dict(research_first_metadata)
     if first_party_harness_metadata is not None:
         body["firstPartyHarness"] = dict(first_party_harness_metadata)
+    # Egress critic gate signal (default-OFF). Only added to the body when the
+    # gate ran AND produced a non-None status, so the off-state body is
+    # byte-identical to before.
+    if verifier_evidence_status is not None:
+        body["verifierEvidenceStatus"] = verifier_evidence_status
     return JSONResponse(status_code=200, content=body)
 
 
