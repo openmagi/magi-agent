@@ -4,7 +4,7 @@
 
 **Goal:** A default-OFF τ-bench measurement harness that drives magi's real ADK runner as the τ-bench agent and reports pass^k for magi-full (control-plane flags ON) vs magi-vanilla (bare), plus a published-reference comparison.
 
-**Architecture:** Pure, tau-bench-free core (scorer, episode-loop, env-tool translation, config) tested with a FakeEnv + fake runner; a thin `agent.py` that subclasses tau-bench's `Agent` and delegates to the pure loop; a CLI that gates on `MAGI_TAUBENCH_ENABLED`, binds the agent to Sonnet 4.5 and the user-sim to gpt-4o, and runs the real `build_cli_model_runner`.
+**Architecture:** Pure, tau-bench-free core (scorer, episode-loop, env-tool translation, config) tested with a FakeEnv + fake runner; a thin `agent.py` that subclasses tau-bench's `Agent` and delegates to the pure loop; a CLI that gates on `MAGI_TAUBENCH_ENABLED`, binds the agent to the current Anthropic provider default and the user-sim to gpt-4o, and runs the real `build_cli_model_runner`.
 
 **Tech Stack:** Python 3.11+, `uv` for env/test, pytest, pydantic v2, Google ADK (`google.adk`, `google.genai.types`), tau-bench (cloned, MIT, NOT vendored into git).
 
@@ -57,7 +57,7 @@ and need none of this. For a LIVE run:
     pip install -e /path/to/tau-bench   # into the same env as magi-agent
 
 Set `TAUBENCH_PATH=/path/to/tau-bench` (or install it importable as `tau_bench`).
-Keys: ANTHROPIC_API_KEY (agent = Sonnet 4.5), OPENAI_API_KEY (user-sim = gpt-4o).
+Keys: ANTHROPIC_API_KEY (agent = current Anthropic provider default), OPENAI_API_KEY (user-sim = gpt-4o).
 Enable the harness: MAGI_TAUBENCH_ENABLED=1.
 ```
 
@@ -812,7 +812,7 @@ def test_run_subset_aggregates_pass_hat_k() -> None:
     assert report.trials == 4
 ```
 
-- [ ] **Step 5: Write `cli.py`** — gate + live wiring. The live `solve_one` builds the real runner (Sonnet 4.5 agent) + sets the user-sim to gpt-4o on the tau-bench env, and sets the control-plane flags for `config="full"`. Mirror `benchmarks/legalbench/cli.py` for the gate/provider pattern and `benchmarks/gaia/harness.py` for `build_cli_model_runner`.
+- [ ] **Step 5: Write `cli.py`** — gate + live wiring. The live `solve_one` builds the real runner using the current Anthropic provider default + sets the user-sim to gpt-4o on the tau-bench env, and sets the control-plane flags for `config="full"`. Mirror `benchmarks/legalbench/cli.py` for the gate/provider pattern and `benchmarks/gaia/harness.py` for `build_cli_model_runner`.
 
 ```python
 # magi_agent/benchmarks/taubench/cli.py
@@ -836,7 +836,7 @@ The full `run_eval(...)` live entry (gated; sets `flags_for(config)` into the
 environment before building the runner; constructs the tau-bench env for the domain
 with `user_model="gpt-4o"`, builds `MagiTauAgent` via `build_magi_tau_agent` with a
 `runner_factory` that calls `build_cli_model_runner(ProviderConfig("anthropic",
-"claude-sonnet-4-5", api_key), instruction=..., tools=...)`, runs `run_subset`, prints
+DEFAULT_AGENT_MODEL, api_key), instruction=..., tools=...)`, runs `run_subset`, prints
 the `TauReport` as JSON) is wired here. READ `tau_bench/envs/__init__.py` (or the
 domain env constructor) in the cloned repo to confirm how to instantiate an env with
 a chosen `user_model`/`user_provider`, and the `--task-split test` selection. Behind
@@ -883,7 +883,7 @@ Run: `MAGI_TAUBENCH_ENABLED=1 uv run --extra cli --extra providers magi-taubench
 Expected: completes an episode end-to-end, prints a TauReport JSON. If the turn-boundary loop hangs or never terminates, debug the handshake before scaling up.
 
 - [ ] **Step 4: v1 run (operator-gated, costs money)** — airline 50 × 4 trials, both configs:
-  run `--config vanilla` then `--config full`; record both TauReports; compare pass^1..4 and to the published Sonnet 4.5 airline ≈ 0.70.
+  run `--config vanilla` then `--config full`; record both TauReports; compare pass^1..4 and to the published airline reference ≈ 0.70.
 
 - [ ] **Step 5: Confirm gate default-OFF** — with `MAGI_TAUBENCH_ENABLED` unset, the CLI refuses to run.
 

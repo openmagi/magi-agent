@@ -12,10 +12,13 @@ import contextlib
 import json
 import os
 from collections.abc import Iterator
+from collections.abc import Sequence
 
-from magi_agent.benchmarks.taubench.config import Config
+from magi_agent.benchmarks.taubench.config import Config, FULL_CAPABILITY_FLAGS
+from magi_agent.cli.providers import _DEFAULT_MODEL
 
 _GATE_ENV = "MAGI_TAUBENCH_ENABLED"
+DEFAULT_AGENT_MODEL = _DEFAULT_MODEL["anthropic"]
 
 
 @contextlib.contextmanager
@@ -26,8 +29,13 @@ def _apply_flags(config: Config) -> Iterator[None]:
     evaluated in the same process (e.g. full sweep followed by vanilla sweep).
     """
     from magi_agent.benchmarks.taubench.config import flags_for  # noqa: PLC0415
-    flags = flags_for(config)
-    saved = {k: os.environ.get(k) for k in flags}
+
+    flags = (
+        flags_for(config)
+        if config == "full"
+        else {key: "0" for key in FULL_CAPABILITY_FLAGS}
+    )
+    saved = {k: os.environ.get(k) for k in FULL_CAPABILITY_FLAGS}
     os.environ.update(flags)
     try:
         yield
@@ -61,12 +69,13 @@ def run_eval(
     max_tasks: int | None = None,
     trials: int = 4,
     config: Config = "full",
+    profile: str | None = None,
     api_key: str | None = None,
 ) -> None:
     """Run the τ-bench harness end-to-end and print a TauReport as JSON.
 
     Gate: MAGI_TAUBENCH_ENABLED=1 required.
-    Agent model: claude-sonnet-4-5 (Anthropic).
+    Agent model: current Anthropic provider default.
     User-sim model: gpt-4o (OpenAI, tau-bench default).
 
     Infra-error handling: if run_episode returns infra_error=True for a
@@ -80,7 +89,10 @@ def run_eval(
         max_tasks: evaluate only the first N tasks (None = all tasks in
             the test split).
         trials: number of independent trials per task (tau-bench paper uses 4).
-        config: "full" (all six control-plane flags enabled) or "vanilla" (none).
+        config: "full" (all six control-plane flags enabled) or
+            "vanilla" (all six forced off for the run).
+        profile: optional task-profile hint forwarded to the runner as
+            {"taskType": profile}; omitted uses the runner's default profile.
         api_key: Anthropic API key. Falls back to ANTHROPIC_API_KEY env var.
     """
     ensure_enabled()
@@ -139,7 +151,7 @@ def run_eval(
                 )
                 provider_config = ProviderConfig(
                     provider="anthropic",
-                    model="claude-sonnet-4-5",
+                    model=DEFAULT_AGENT_MODEL,
                     api_key=effective_api_key,
                 )
                 session_id = f"taubench-{domain}-t{task_index}-r{trial}"
@@ -151,6 +163,7 @@ def run_eval(
                         tools=tools,
                         user_id="taubench-agent",
                         session_id=session_id,
+                        task_profile=_task_profile_for(profile),
                     )
 
                 agent = build_magi_tau_agent(runner_factory=runner_factory)
@@ -180,4 +193,53 @@ def run_eval(
     print(json.dumps(output, indent=2))
 
 
-__all__ = ["GateDisabledError", "ensure_enabled", "run_eval"]
+def _task_profile_for(profile: str | None) -> dict[str, object] | None:
+    cleaned = profile.strip() if profile is not None else ""
+    if not cleaned or cleaned == "default":
+        return None
+    return {"taskType": cleaned}
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """Standalone CLI entrypoint (``python -m magi_agent.benchmarks.taubench.cli``)."""
+    import argparse  # noqa: PLC0415
+
+    parser = argparse.ArgumentParser(
+        prog="magi-taubench",
+        description="tau-bench Magi Agent harness (default-OFF).",
+    )
+    parser.add_argument("--domain", default="airline")
+    parser.add_argument("--max-tasks", type=int, default=None)
+    parser.add_argument("--trials", type=int, default=4)
+    parser.add_argument("--config", default="full", choices=("full", "vanilla"))
+    parser.add_argument(
+        "--profile",
+        default=None,
+        help="optional task profile hint (for example: research, automation)",
+    )
+    args = parser.parse_args(argv)
+
+    try:
+        run_eval(
+            domain=args.domain,
+            max_tasks=args.max_tasks,
+            trials=args.trials,
+            config=args.config,
+            profile=args.profile,
+        )
+    except GateDisabledError as exc:
+        parser.exit(1, f"{exc}\n")
+    return 0
+
+
+__all__ = [
+    "DEFAULT_AGENT_MODEL",
+    "GateDisabledError",
+    "ensure_enabled",
+    "main",
+    "run_eval",
+]
+
+
+if __name__ == "__main__":  # pragma: no cover
+    raise SystemExit(main())
