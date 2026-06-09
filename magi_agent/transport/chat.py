@@ -2564,14 +2564,31 @@ def _egress_critic_model_factory(payload: object) -> Callable[[], object] | None
     return _production_egress_critic_model_factory()
 
 
+# Sensible Haiku-class fallback used ONLY if the resolved provider config cannot
+# yield its own default model string. Keeps the egress critic explicitly resolved
+# rather than ever inheriting SmartApprove's pinned env model.
+_EGRESS_CRITIC_DEFAULT_MODEL = "anthropic/claude-haiku-4-6"
+
+
 def _production_egress_critic_model_factory() -> Callable[[], object] | None:
     """Build a provider-backed critic model factory, or ``None`` (fail open).
 
     Reuses the exact resolution path of the SmartApprove read-only classifier:
     ``resolve_provider_config()`` discovers the active provider/key from the same
     ``~/.magi/config.toml`` + env sources the runner uses, and
-    ``_build_litellm_for_config()`` constructs the ADK ``LiteLlm`` model. A
-    Haiku-class model is selected via ``MAGI_EGRESS_CRITIC_MODEL`` when set.
+    ``_build_litellm_for_config()`` constructs the ADK ``LiteLlm`` model.
+
+    Model resolution order (resolved EXPLICITLY here so the egress critic never
+    silently inherits ``MAGI_SMART_APPROVE_MODEL``):
+      1. ``MAGI_EGRESS_CRITIC_MODEL`` env var (Haiku-class fast override), else
+      2. the resolved provider config's OWN default model
+         (``ProviderConfig.litellm_model``), else
+      3. a fixed sensible Haiku-class default (``_EGRESS_CRITIC_DEFAULT_MODEL``).
+
+    A concrete ``model_override`` string is ALWAYS passed into
+    ``_build_litellm_for_config`` so SmartApprove's env override is never
+    consulted for the egress critic (no cross-coupling). SmartApprove's own
+    resolution is unchanged.
     """
     try:
         from magi_agent.cli.providers import resolve_provider_config  # noqa: PLC0415
@@ -2584,13 +2601,19 @@ def _production_egress_critic_model_factory() -> Callable[[], object] | None:
         # No provider / key configured -> gate stays dormant (fail open).
         return None
 
-    model_override = os.environ.get(_ENV_EGRESS_CRITIC_MODEL, "").strip() or None
+    # Explicit resolution: egress env -> provider default -> fixed Haiku default.
+    model_override = os.environ.get(_ENV_EGRESS_CRITIC_MODEL, "").strip()
+    if not model_override:
+        provider_default = getattr(provider_config, "litellm_model", None)
+        model_override = (provider_default or "").strip() or _EGRESS_CRITIC_DEFAULT_MODEL
 
     def _factory() -> object:
         from magi_agent.cli.readonly_classifier import (  # noqa: PLC0415
             _build_litellm_for_config,
         )
 
+        # Pass a concrete model string so the SmartApprove env override
+        # (MAGI_SMART_APPROVE_MODEL) is NEVER consulted for the egress critic.
         return _build_litellm_for_config(provider_config, model_override=model_override)
 
     return _factory

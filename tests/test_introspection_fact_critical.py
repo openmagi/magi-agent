@@ -234,6 +234,54 @@ async def test_classifier_timeout_defaults_not_fact_critical(
     assert "timeout" in decision.reason.lower()
 
 
+# ---------------------------------------------------------------------------
+# Input caps / empty-input slicing (pure-slicing; fake model captures prompt)
+# ---------------------------------------------------------------------------
+
+
+def _make_capturing_llm(captured: dict, json_text: str = '{"fact_critical": false}') -> object:
+    """Fake model that records the prompt text fed into the request."""
+
+    class _CapturingLlm:
+        model = "fake-capturing"
+
+        async def generate_content_async(
+            self, llm_request: Any, stream: bool = False
+        ) -> AsyncGenerator:
+            captured["prompt"] = llm_request.contents[0].parts[0].text
+            yield _FakeLlmResponse(json_text)
+
+    return _CapturingLlm()
+
+
+@pytest.mark.asyncio
+async def test_oversized_query_is_truncated_to_max_chars() -> None:
+    from magi_agent.introspection import fact_critical as fc
+
+    captured: dict = {}
+    classifier = FactCriticalClassifier(
+        model_factory=lambda: _make_capturing_llm(captured),
+    )
+    huge_query = "Q" * (fc._MAX_QUERY_CHARS + 5000)
+    await classifier.classify(user_query=huge_query, view=_view_with_tool())
+
+    # The injected query run is capped at exactly _MAX_QUERY_CHARS: a run of
+    # that length is present, but one char longer is not (template letters
+    # elsewhere never form a contiguous run of this 'Q' marker).
+    assert ("Q" * fc._MAX_QUERY_CHARS) in captured["prompt"]
+    assert ("Q" * (fc._MAX_QUERY_CHARS + 1)) not in captured["prompt"]
+
+
+@pytest.mark.asyncio
+async def test_empty_query_renders_empty_placeholder() -> None:
+    captured: dict = {}
+    classifier = FactCriticalClassifier(
+        model_factory=lambda: _make_capturing_llm(captured),
+    )
+    await classifier.classify(user_query="", view=_view_with_tool())
+    assert "(empty)" in captured["prompt"]
+
+
 @pytest.mark.asyncio
 async def test_transient_error_is_not_cached() -> None:
     """An error verdict must not poison the cache for a later retry."""

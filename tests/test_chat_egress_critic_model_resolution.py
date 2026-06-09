@@ -83,6 +83,10 @@ def test_production_factory_builds_model_from_provider_config(monkeypatch) -> No
     Both the provider resolver and the LiteLlm builder are stubbed so no real
     model is constructed and no network call happens — we only assert the prod
     path threads the resolved config into the same builder SmartApprove uses.
+
+    With no ``MAGI_EGRESS_CRITIC_MODEL`` env set, the egress critic resolves the
+    provider's OWN default model EXPLICITLY (never the SmartApprove env), so a
+    concrete model string is forwarded as ``model_override``.
     """
     import magi_agent.cli.providers as providers
     import magi_agent.cli.readonly_classifier as rc
@@ -95,7 +99,7 @@ def test_production_factory_builds_model_from_provider_config(monkeypatch) -> No
     def _fake_build(provider_config, *, model_override=None):
         captured["provider_config"] = provider_config
         captured["model_override"] = model_override
-        return _FakeModel(model=provider_config.litellm_model)
+        return _FakeModel(model=model_override or provider_config.litellm_model)
 
     monkeypatch.setattr(rc, "_build_litellm_for_config", _fake_build)
     monkeypatch.delenv("MAGI_EGRESS_CRITIC_MODEL", raising=False)
@@ -108,8 +112,9 @@ def test_production_factory_builds_model_from_provider_config(monkeypatch) -> No
     assert model.model == "anthropic/claude-sonnet-4-6"
     # The SAME provider config object is threaded into the SmartApprove builder.
     assert captured["provider_config"] is cfg
-    # No fast-model override env set -> None passed through.
-    assert captured["model_override"] is None
+    # No egress env override -> the provider's OWN default model is passed
+    # EXPLICITLY (NOT None), so MAGI_SMART_APPROVE_MODEL is never consulted.
+    assert captured["model_override"] == "anthropic/claude-sonnet-4-6"
 
 
 def test_production_factory_honours_haiku_override_env(monkeypatch) -> None:
@@ -135,6 +140,70 @@ def test_production_factory_honours_haiku_override_env(monkeypatch) -> None:
     assert isinstance(model, _FakeModel)
     assert captured["model_override"] == "anthropic/claude-haiku-4-6"
     assert model.model == "anthropic/claude-haiku-4-6"
+
+
+def test_production_factory_ignores_smartapprove_env(monkeypatch) -> None:
+    """MAGI_SMART_APPROVE_MODEL must NEVER leak into the egress critic model.
+
+    Even with the SmartApprove env pinned and NO egress env set, the egress
+    critic resolves the provider's own default explicitly and forwards it as a
+    concrete model_override — so the SmartApprove env cannot cross-couple in.
+    """
+    import magi_agent.cli.providers as providers
+    import magi_agent.cli.readonly_classifier as rc
+
+    cfg = _FakeProviderConfig()
+    monkeypatch.setattr(providers, "resolve_provider_config", lambda *a, **k: cfg)
+    monkeypatch.delenv("MAGI_EGRESS_CRITIC_MODEL", raising=False)
+    monkeypatch.setenv("MAGI_SMART_APPROVE_MODEL", "anthropic/smartapprove-pinned")
+
+    captured: dict[str, object] = {}
+
+    def _fake_build(provider_config, *, model_override=None):
+        captured["model_override"] = model_override
+        return _FakeModel(model=model_override or provider_config.litellm_model)
+
+    monkeypatch.setattr(rc, "_build_litellm_for_config", _fake_build)
+
+    factory = chat._egress_critic_model_factory({"messages": []})
+    assert factory is not None
+    model = factory()
+    # A concrete, non-None override is passed and it is NOT the SmartApprove env.
+    assert captured["model_override"] == "anthropic/claude-sonnet-4-6"
+    assert captured["model_override"] != "anthropic/smartapprove-pinned"
+    assert model.model == "anthropic/claude-sonnet-4-6"
+
+
+def test_production_factory_uses_fixed_default_when_no_provider_model(monkeypatch) -> None:
+    """If the provider config exposes no default model, the fixed Haiku default is used."""
+    import magi_agent.cli.providers as providers
+    import magi_agent.cli.readonly_classifier as rc
+
+    @dataclass(frozen=True)
+    class _NoModelProviderConfig:
+        provider: str = "anthropic"
+        api_key: str = "sk-test"
+
+        @property
+        def litellm_model(self):  # noqa: ANN202 — mimics missing/empty default
+            return ""
+
+    cfg = _NoModelProviderConfig()
+    monkeypatch.setattr(providers, "resolve_provider_config", lambda *a, **k: cfg)
+    monkeypatch.delenv("MAGI_EGRESS_CRITIC_MODEL", raising=False)
+
+    captured: dict[str, object] = {}
+
+    def _fake_build(provider_config, *, model_override=None):
+        captured["model_override"] = model_override
+        return _FakeModel(model=model_override)
+
+    monkeypatch.setattr(rc, "_build_litellm_for_config", _fake_build)
+
+    factory = chat._egress_critic_model_factory({"messages": []})
+    assert factory is not None
+    factory()
+    assert captured["model_override"] == chat._EGRESS_CRITIC_DEFAULT_MODEL
 
 
 def test_factory_raise_in_build_is_safe_caller_fails_open(monkeypatch) -> None:

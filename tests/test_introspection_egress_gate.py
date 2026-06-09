@@ -262,6 +262,104 @@ async def test_no_critic_model_fails_open_when_fact_critical() -> None:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Input caps / empty-input slicing (pure-slicing; fake model captures prompt)
+# ---------------------------------------------------------------------------
+
+
+def _capturing_llm(captured: dict, json_text: str = '{"grounded": true, "relevant": true}'):
+    def _factory() -> object:
+        class _CapturingLlm:
+            model = "fake-capturing"
+
+            async def generate_content_async(
+                self, llm_request: Any, stream: bool = False
+            ) -> AsyncGenerator:
+                captured["prompt"] = llm_request.contents[0].parts[0].text
+                yield _FakeLlmResponse(json_text)
+
+        return _CapturingLlm()
+
+    return _factory
+
+
+def _big_view(n_files: int) -> SessionEvidenceView:
+    return SessionEvidenceView(
+        scope=SessionScopeView(sessionId="s-1", turnsCovered=("turn-1",)),
+        filesRead=tuple(
+            FileReadView(
+                path=f"file-{i}.txt",
+                sha256="sha256:" + "a" * 64,
+                turnId="turn-1",
+                bytes=1,
+            )
+            for i in range(n_files)
+        ),
+        toolCalls=(ToolCallView(name="FileRead", status="ok", turnId="turn-1"),),
+    )
+
+
+@pytest.mark.asyncio
+async def test_oversized_draft_and_query_truncated() -> None:
+    from magi_agent.introspection import egress_gate as eg
+
+    captured: dict = {}
+    await run_egress_critic_check(
+        draft_text="D" * (eg._MAX_DRAFT_CHARS + 5000),
+        user_query="Q" * (eg._MAX_QUERY_CHARS + 5000),
+        view=_view_with_evidence(),
+        model_factory=_capturing_llm(captured),
+        fact_critical_model_factory=_llm('{"fact_critical": true}'),
+    )
+    # Each injected run is capped exactly at its limit (a run of the limit
+    # length is present, one char longer is not).
+    assert ("D" * eg._MAX_DRAFT_CHARS) in captured["prompt"]
+    assert ("D" * (eg._MAX_DRAFT_CHARS + 1)) not in captured["prompt"]
+    assert ("Q" * eg._MAX_QUERY_CHARS) in captured["prompt"]
+    assert ("Q" * (eg._MAX_QUERY_CHARS + 1)) not in captured["prompt"]
+
+
+@pytest.mark.asyncio
+async def test_empty_draft_and_query_render_empty_placeholder() -> None:
+    captured: dict = {}
+    await run_egress_critic_check(
+        draft_text="",
+        user_query="",
+        view=_view_with_evidence(),
+        model_factory=_capturing_llm(captured),
+        fact_critical_model_factory=_llm('{"fact_critical": true}'),
+    )
+    # Both empty draft and empty query collapse to the (empty) placeholder.
+    assert captured["prompt"].count("(empty)") == 2
+
+
+@pytest.mark.asyncio
+async def test_view_items_capped_in_rendered_prompt() -> None:
+    from magi_agent.introspection import egress_gate as eg
+
+    captured: dict = {}
+    await run_egress_critic_check(
+        draft_text="answer",
+        user_query="what files did you read?",
+        view=_big_view(eg._MAX_VIEW_ITEMS + 25),
+        model_factory=_capturing_llm(captured),
+        fact_critical_model_factory=_llm('{"fact_critical": true}'),
+    )
+    # Only the first _MAX_VIEW_ITEMS files are rendered into the view JSON.
+    assert captured["prompt"].count("file-") == eg._MAX_VIEW_ITEMS
+    assert "file-0.txt" in captured["prompt"]
+    assert f"file-{eg._MAX_VIEW_ITEMS - 1}.txt" in captured["prompt"]
+    assert f"file-{eg._MAX_VIEW_ITEMS}.txt" not in captured["prompt"]
+
+
+def test_render_view_caps_items_directly() -> None:
+    """Pure-slicing _render_view: no model needed."""
+    from magi_agent.introspection import egress_gate as eg
+
+    payload = eg._render_view(_big_view(eg._MAX_VIEW_ITEMS + 10))
+    assert payload.count('"path"') == eg._MAX_VIEW_ITEMS
+
+
 @pytest.mark.asyncio
 async def test_emits_critic_evidence_record() -> None:
     records: list[dict] = []
