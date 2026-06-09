@@ -26,6 +26,11 @@ from magi_agent.transport import web_dashboard
 
 _TOKEN = "local-dev-token"
 _APP_PATH_RE = re.compile(r"/v1/app/[A-Za-z0-9/_-]+")
+_WORKSPACE_ENV_VARS = (
+    "MAGI_AGENT_WORKSPACE",
+    "CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_WORKSPACE_ROOT",
+    "CORE_AGENT_WORKSPACE_ROOT",
+)
 
 
 def _runtime() -> OpenMagiRuntime:
@@ -48,6 +53,21 @@ def _client(tmp_path, monkeypatch) -> TestClient:
     # read or write the developer's real ~/.magi/config.toml.
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("MAGI_CONFIG", str(tmp_path / "config.toml"))
+    for name in _WORKSPACE_ENV_VARS:
+        monkeypatch.delenv(name, raising=False)
+    client = TestClient(create_app(_runtime()))
+    client.headers.update({"x-gateway-token": _TOKEN})
+    return client
+
+
+def _client_with_workspace_env(tmp_path, monkeypatch, env_name: str, workspace) -> TestClient:
+    app_cwd = tmp_path / "app"
+    app_cwd.mkdir()
+    monkeypatch.chdir(app_cwd)
+    monkeypatch.setenv("MAGI_CONFIG", str(tmp_path / "config.toml"))
+    for name in _WORKSPACE_ENV_VARS:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv(env_name, str(workspace))
     client = TestClient(create_app(_runtime()))
     client.headers.update({"x-gateway-token": _TOKEN})
     return client
@@ -239,6 +259,64 @@ def test_memory_list_read_search(tmp_path, monkeypatch) -> None:
     assert any(r["path"] == "MEMORY.md" for r in search.json()["results"])
 
 
+def test_app_api_uses_hosted_workspace_env_for_skills_and_memory(
+    tmp_path, monkeypatch
+) -> None:
+    workspace = tmp_path / "workspace"
+    skill_dir = workspace / "skills" / "hosted-demo"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text(
+        "---\nname: hosted-demo-skill\ndescription: hosted demo\n---\n",
+        encoding="utf-8",
+    )
+    (workspace / "MEMORY.md").write_text("hosted memory fact", encoding="utf-8")
+
+    client = _client_with_workspace_env(
+        tmp_path,
+        monkeypatch,
+        "CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_WORKSPACE_ROOT",
+        workspace,
+    )
+
+    skills = client.get("/v1/app/skills").json()
+    assert {s["name"] for s in skills["loaded"]} == {"hosted-demo-skill"}
+
+    listing = client.get("/v1/app/memory").json()
+    assert any(f["path"] == "MEMORY.md" for f in listing["files"])
+    read = client.get("/v1/app/memory/file", params={"path": "MEMORY.md"})
+    assert read.json()["content"] == "hosted memory fact"
+
+
+def test_workspace_env_precedence_and_traversal_protection(tmp_path, monkeypatch) -> None:
+    primary = tmp_path / "primary-workspace"
+    fallback = tmp_path / "fallback-workspace"
+    primary.mkdir()
+    fallback.mkdir()
+    (primary / "MEMORY.md").write_text("primary memory", encoding="utf-8")
+    (fallback / "MEMORY.md").write_text("fallback memory", encoding="utf-8")
+
+    client = _client_with_workspace_env(
+        tmp_path,
+        monkeypatch,
+        "CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_WORKSPACE_ROOT",
+        fallback,
+    )
+    monkeypatch.setenv("MAGI_AGENT_WORKSPACE", str(primary))
+
+    config = client.get("/v1/app/config").json()
+    assert config["config"]["workspace"] == str(primary.resolve())
+    read = client.get("/v1/app/memory/file", params={"path": "MEMORY.md"})
+    assert read.json()["content"] == "primary memory"
+
+    traversal_read = client.get("/v1/app/memory/file", params={"path": "../escape.md"})
+    assert traversal_read.status_code == 403
+    traversal_write = client.put(
+        "/v1/app/workspace/file", json={"path": "../escape.md", "content": "x"}
+    )
+    assert traversal_write.status_code == 403
+    assert not (tmp_path / "escape.md").exists()
+
+
 def test_workspace_write_then_read(tmp_path, monkeypatch) -> None:
     client = _client(tmp_path, monkeypatch)
     res = client.put("/v1/app/workspace/file", json={"path": "notes/x.md", "content": "hi"})
@@ -268,5 +346,7 @@ def test_knowledge_index_empty_is_valid(tmp_path, monkeypatch) -> None:
 def test_requires_gateway_token(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("MAGI_CONFIG", str(tmp_path / "config.toml"))
+    for name in _WORKSPACE_ENV_VARS:
+        monkeypatch.delenv(name, raising=False)
     client = TestClient(create_app(_runtime()))  # no token header
     assert client.get("/v1/app/runtime").status_code == 401
