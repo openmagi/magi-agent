@@ -74,6 +74,58 @@ def test_handler_no_provider_returns_blocked(monkeypatch) -> None:
     assert result.error_code == "no_provider"
 
 
+def test_blocked_run_metadata_is_surfaced_sanitized(monkeypatch) -> None:
+    # A blocked engine result carrying violation metadata must reach the
+    # ToolResult, sanitized (raw URLs dropped, policy reasons kept). Network-free:
+    # we stub the provider resolution, chat-model build, and the engine run.
+    if importlib.util.find_spec("browser_use") is None:
+        import pytest  # noqa: PLC0415
+
+        pytest.skip("browser extra not installed")
+
+    from magi_agent.browser.autonomous.engine import BrowserRunResult  # noqa: PLC0415
+
+    monkeypatch.setattr(
+        "magi_agent.cli.providers.resolve_provider_config",
+        lambda *args, **kwargs: object(),
+    )
+    monkeypatch.setattr(
+        "magi_agent.browser.autonomous.provider_bridge.build_chat_model",
+        lambda _cfg: object(),
+    )
+
+    async def _fake_run(self, **kwargs):
+        return BrowserRunResult(
+            status="blocked",
+            error_code="invalid_url",
+            metadata={
+                "violations": [
+                    {"url": "http://127.0.0.1/", "reason": "local_url_blocked"}
+                ]
+            },
+        )
+
+    monkeypatch.setattr(
+        "magi_agent.browser.autonomous.engine.BrowserEngine.run",
+        _fake_run,
+    )
+
+    result = asyncio.run(
+        _browser_task_handler(
+            {"task": "go somewhere blocked"}, ToolContext(botId="test")
+        )
+    )
+
+    assert result.status == "blocked"
+    assert result.error_code == "invalid_url"
+    # Metadata surfaced and non-empty...
+    assert result.metadata
+    # ...but the raw blocked URL is NOT leaked verbatim anywhere in it.
+    assert "127.0.0.1" not in str(result.metadata)
+    # ...and the non-sensitive policy reason IS carried through.
+    assert "local_url_blocked" in str(result.metadata)
+
+
 def test_module_does_not_import_browser_use_at_top() -> None:
     import sys  # noqa: PLC0415
 

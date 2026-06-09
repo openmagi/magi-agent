@@ -164,4 +164,26 @@ NOTES / GOTCHAS
     register_should_stop_callback -> returns stop_state["stop"].
   Result: a blocked URL aborts cleanly in the same step, no blocked action runs,
   no failure-count churn. This is the real 0.11.x mechanism, not a guess.
+
+================================================================================
+5. PER-WORKSPACE PROFILE ISOLATION  (CONFIRMED, final-review cleanup)
+================================================================================
+  Question: how to pass a per-workspace profile directory to the real Agent so
+  ``profile_dir`` is not silently dropped?
+
+  Introspected directly from browser-use==0.11.13:
+    - ``from browser_use import BrowserProfile`` (and ``BrowserSession``) are
+      importable from the package root.
+    - ``BrowserProfile`` is a pydantic model; ``model_fields`` includes
+      ``user_data_dir`` with annotation ``str | pathlib.Path | None`` (default
+      None). Constructing ``BrowserProfile(user_data_dir="/tmp/x")`` succeeds
+      WITHOUT launching Chromium (the dir is normalized to an absolute path).
+    - ``Agent.__init__`` accepts a ``browser_profile=`` kwarg (also
+      ``browser_session=`` / ``browser=``), confirmed in section 2.
+
+  ENGINE DECISION (_default_agent_factory): build
+  ``BrowserProfile(user_data_dir=profile_dir)`` and pass it as
+  ``Agent(browser_profile=...)``. This is construction-only (no browser launch),
+  so it stays unit-testable; the actual Chromium launch happens only in
+  ``Agent.run()``.
 """

@@ -58,6 +58,41 @@ def context_profile_dir(context: ToolContext) -> str:
     return f"{context.workspace_root or '/tmp'}/.magi-browser-profile"
 
 
+def _sanitized_run_metadata(metadata: object) -> dict[str, object]:
+    """Surface engine-recorded run detail on a non-ok result, sanitized.
+
+    The engine records blocked-navigation violations as
+    ``{"violations": [{"url": ..., "reason": ...}, ...]}``. Raw URLs must never
+    leak into the ToolResult, so we flatten the list into non-sensitive scalar
+    fields (a count + the de-duplicated policy reason codes -- URLs dropped) and
+    then run the whole dict through ``safe_metadata`` as the authoritative
+    redaction pass (``safe_metadata`` itself drops any non-scalar value, so the
+    flattening is what makes the surfaced metadata non-empty).
+    """
+    from magi_agent.web_acquisition.policy import safe_metadata  # noqa: PLC0415
+
+    if not isinstance(metadata, Mapping) or not metadata:
+        return {}
+    flat: dict[str, object] = {}
+    violations = metadata.get("violations")
+    if isinstance(violations, list) and violations:
+        reasons = [
+            str(item.get("reason"))
+            for item in violations
+            if isinstance(item, Mapping) and item.get("reason")
+        ]
+        flat["violation_count"] = len(violations)
+        if reasons:
+            # Policy reason codes (e.g. "local_url_blocked") are non-sensitive;
+            # raw URLs are intentionally NOT included.
+            flat["violation_reasons"] = ", ".join(dict.fromkeys(reasons))
+    # Pass-through any other scalar keys the engine may have set.
+    for key, value in metadata.items():
+        if key != "violations" and isinstance(value, str | bool | int | float):
+            flat.setdefault(key, value)
+    return safe_metadata(flat)
+
+
 async def _browser_task_handler(
     arguments: Mapping[str, object], context: ToolContext
 ) -> ToolResult:
@@ -116,6 +151,7 @@ async def _browser_task_handler(
             status=run.status,
             error_code=run.error_code,
             error_message=run.summary or None,
+            metadata=_sanitized_run_metadata(run.metadata),
         )
 
     return ToolResult(

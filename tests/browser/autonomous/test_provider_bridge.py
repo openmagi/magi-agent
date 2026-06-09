@@ -44,3 +44,28 @@ def test_unknown_provider_raises():
 def test_none_config_raises():
     with pytest.raises(BridgeError):
         chat_model_kwargs_for(None)
+
+
+class _PartialCfg:
+    """A known provider but with no model/api_key attributes at all."""
+
+    def __init__(self, provider):
+        self.provider = provider
+
+
+def test_missing_model_and_api_key_raises_bridge_error_not_attribute_error():
+    # A malformed config (right provider, but no model/api_key) must raise the
+    # module's BridgeError -- the taxonomy the handler catches -- not a bare
+    # AttributeError leaking out.
+    with pytest.raises(BridgeError):
+        chat_model_kwargs_for(_PartialCfg("anthropic"))
+
+
+def test_falsy_model_raises_bridge_error():
+    with pytest.raises(BridgeError):
+        chat_model_kwargs_for(_Cfg("anthropic", "", "k"))
+
+
+def test_falsy_api_key_raises_bridge_error():
+    with pytest.raises(BridgeError):
+        chat_model_kwargs_for(_Cfg("anthropic", "claude-opus-4-7", ""))

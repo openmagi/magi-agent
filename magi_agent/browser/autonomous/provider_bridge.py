@@ -40,13 +40,19 @@ def chat_model_kwargs_for(provider_config: object | None) -> ChatModelSpec:
     chat_class = _PROVIDER_TO_CHAT_CLASS.get(str(provider))
     if chat_class is None:
         raise BridgeError(f"provider {provider!r} not supported by the browser tool")
+    # Read with defaults so a malformed/partial config raises BridgeError (the
+    # taxonomy the handler catches) rather than a bare AttributeError.
+    model = getattr(provider_config, "model", None)
+    api_key = getattr(provider_config, "api_key", None)
+    if not model or not api_key:
+        raise BridgeError(
+            f"provider {provider!r} config is missing a model and/or api_key "
+            "for the browser tool"
+        )
     return ChatModelSpec(
         provider=str(provider),
         chat_class_name=chat_class,
-        kwargs={
-            "model": getattr(provider_config, "model"),
-            "api_key": getattr(provider_config, "api_key"),
-        },
+        kwargs={"model": model, "api_key": api_key},
     )
 
 

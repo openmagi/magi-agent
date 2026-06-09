@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import importlib.util
+
 import pytest
 
 from magi_agent.browser.autonomous.engine import (
     BrowserEngine,
     BrowserRunResult,
+    _default_agent_factory,
 )
 
 
@@ -254,3 +257,38 @@ def test_on_step_guard_returns_block_reason_for_unsafe_url() -> None:
     assert callable(guard)
     assert guard("http://127.0.0.1/") is not None
     assert guard("https://example.com/") is None
+
+
+def test_default_factory_passes_profile_dir_to_agent(monkeypatch) -> None:
+    # The real _default_agent_factory must thread profile_dir into the browser-use
+    # Agent via BrowserProfile(user_data_dir=...). We stub both browser_use symbols
+    # so nothing launches Chromium; constructing the profile/agent is the only
+    # behavior under test.
+    if importlib.util.find_spec("browser_use") is None:
+        pytest.skip("browser extra not installed")
+
+    import browser_use  # noqa: PLC0415
+
+    captured: dict[str, object] = {}
+
+    class _FakeProfile:
+        def __init__(self, *, user_data_dir):
+            captured["user_data_dir"] = user_data_dir
+
+    def _fake_agent(*, task, llm, browser_profile, **kwargs):
+        captured["browser_profile"] = browser_profile
+        captured["task"] = task
+        return object()
+
+    monkeypatch.setattr(browser_use, "BrowserProfile", _FakeProfile)
+    monkeypatch.setattr(browser_use, "Agent", _fake_agent)
+
+    _default_agent_factory(
+        task="t",
+        chat_model=object(),
+        on_step=lambda _url: None,
+        profile_dir="/work/.magi-browser-profile",
+    )
+
+    assert captured["user_data_dir"] == "/work/.magi-browser-profile"
+    assert isinstance(captured["browser_profile"], _FakeProfile)

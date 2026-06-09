@@ -81,10 +81,14 @@ def _default_agent_factory(
     it with a ``register_should_stop_callback`` so a blocked URL aborts the run
     cleanly in the same step (see module docstring for the verified mechanism).
     """
-    from browser_use import Agent  # noqa: PLC0415  (lazy: optional extra)
+    from browser_use import Agent, BrowserProfile  # noqa: PLC0415  (lazy: optional extra)
 
-    # Shared state between the two cooperating callbacks.
-    stop_state: dict[str, object] = {"stop": False, "reason": None, "violations": []}
+    # Shared state between the two cooperating callbacks. Only "stop"/"reason"
+    # are read: "stop" by the should-stop callback (clean same-step abort) and
+    # "reason" for parity/debugging. The authoritative violation record lives in
+    # the ``guard`` closure inside ``BrowserEngine.run`` (which IS this on_step),
+    # so we deliberately do NOT keep a second violations list here.
+    stop_state: dict[str, object] = {"stop": False, "reason": None}
 
     def _new_step_callback(state: Any, _output: Any, _step: int) -> None:
         # BrowserStateSummary exposes the current URL as ``state.url`` (confirmed
@@ -94,19 +98,25 @@ def _default_agent_factory(
             return
         reason = on_step(url)
         if reason:
-            # Record so the block is never silent, then arm the cooperative stop.
+            # on_step (the engine's guard) already recorded the violation; here
+            # we only arm the cooperative stop so the blocked action never runs.
             stop_state["stop"] = True
             stop_state["reason"] = reason
-            violations = stop_state["violations"]
-            if isinstance(violations, list):
-                violations.append({"url": url, "reason": reason})
 
     async def _should_stop_callback() -> bool:
         return bool(stop_state["stop"])
 
+    # Per-workspace browser profile isolation: BrowserProfile(user_data_dir=...)
+    # is a pydantic model (browser_use 0.11.13) whose ``user_data_dir`` accepts
+    # ``str | Path | None``; Agent(...) accepts a ``browser_profile=`` kwarg.
+    # Both confirmed by introspection (see _api_notes.py section 5). Constructing
+    # the profile does NOT launch Chromium (only Agent.run() does).
+    browser_profile = BrowserProfile(user_data_dir=profile_dir)
+
     return Agent(
         task=task,
         llm=chat_model,
+        browser_profile=browser_profile,
         register_new_step_callback=_new_step_callback,
         register_should_stop_callback=_should_stop_callback,
     )
