@@ -18,9 +18,8 @@ def test_persona_is_first_section():
 
 
 def test_persona_inoculates_against_project_identity():
-    assert "do NOT define who you are" in MAGI_BASE_PERSONA or (
-        "not" in MAGI_BASE_PERSONA.lower() and "identity" in MAGI_BASE_PERSONA.lower()
-    )
+    assert "describe the PROJECT you are working on" in MAGI_BASE_PERSONA
+    assert "do NOT define who you are" in MAGI_BASE_PERSONA
 
 
 def test_persona_protected_from_hook_stripping():
