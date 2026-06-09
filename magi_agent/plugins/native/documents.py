@@ -22,6 +22,12 @@ from magi_agent.web_acquisition.policy import redact_public_text
 
 
 def document_write(arguments: dict[str, object], context: ToolContext) -> ToolResult:
+    if _wants_docx(arguments):
+        # Lazy delegate so documents.py never imports ``docx`` at module load.
+        from magi_agent.tools.document_write_tools import docx_write  # noqa: PLC0415
+
+        return docx_write(arguments, context)
+
     content = str(arguments.get("content") or arguments.get("text") or "")
     if not content.strip():
         return blocked_result("DocumentWrite", "content_required")
@@ -183,3 +189,11 @@ def _session_key(context: ToolContext) -> str:
     return f"session:{_short_digest(str(base))}"
 
 
+def _wants_docx(arguments: Mapping[str, object]) -> bool:
+    fmt = arguments.get("format")
+    if isinstance(fmt, str) and fmt.strip().lower() == "docx":
+        return True
+    path_value = arguments.get("path") or arguments.get("filename")
+    if isinstance(path_value, str) and path_value.strip().lower().endswith(".docx"):
+        return True
+    return False
