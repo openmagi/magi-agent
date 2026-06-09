@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from importlib import import_module
+from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from magi_agent.adk_bridge.primitives import AdkPrimitiveBoundary
 from magi_agent.config.models import RuntimeConfig
 from magi_agent.harness.profiles import RuntimeProfile, build_default_profile
+from magi_agent.runtime.memory_snapshot_cache import MemorySnapshotCache
 
 _SYNTHETIC_NATIVE_TOOL_HANDLERS: dict[tuple[str, str], str] = {
     (
@@ -126,6 +128,14 @@ class OpenMagiRuntime:
         if tool_registry is None:
             tool_registry = _build_core_tool_registry(self.plugin_state)
         self.tool_registry = tool_registry
+        # Session-scoped frozen snapshot cache for memory recall.
+        # Uses config.memory.workspace_root when set, otherwise cwd.
+        _workspace_root = (
+            Path(config.memory.workspace_root)
+            if config.memory.workspace_root
+            else Path.cwd()
+        )
+        self.memory_snapshot_cache = MemorySnapshotCache(workspace_root=_workspace_root)
 
     def list_active_tools(self) -> list[str]:
         return [tool.name for tool in self.tool_registry.list_available(mode="act")]
