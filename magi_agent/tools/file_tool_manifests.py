@@ -4,7 +4,7 @@ All four tools are ``enabled_by_default=False``.  They are registered only
 when ``MAGI_FILE_TOOLS_ENABLED=true`` and wired into the CLI tool runtime by
 ``magi_agent.cli.tool_runtime.build_cli_tool_runtime``.
 
-Heavy dependencies (openpyxl / pypdf / python-docx / openai) are guarded by
+Heavy dependencies (openpyxl / pypdf / python-docx / python-pptx / openai) are guarded by
 ``try/except ImportError`` inside the handlers, so environments without the
 ``[files]`` or ``[audio]`` extras return a ``status="blocked"`` result rather
 than failing on import.
@@ -101,7 +101,10 @@ _FILE_TOOL_MANIFESTS: tuple[ToolManifest, ...] = (
     ),
     ToolManifest(
         name="DocumentRead",
-        description="Extract text from a PDF or DOCX file in the workspace as markdown.",
+        description=(
+            "Extract text from a document file in the workspace. "
+            "Supports: PDF, DOCX, PPTX, XML, CSV, TXT, MD, RST."
+        ),
         kind="core",
         source=CORE_TOOL_SOURCE,
         permission="read",

@@ -353,10 +353,11 @@ class TestDocumentRead:
         assert "|" in text  # markdown table delimiter
 
     def test_unsupported_extension_blocked(self, tmp_path: Path) -> None:
-        (tmp_path / "file.txt").write_text("hello", encoding="utf-8")
+        # .tiff is not in the supported-extensions list
+        (tmp_path / "file.tiff").write_bytes(b"\x00" * 10)
         from magi_agent.tools.document_tools import document_read
 
-        result = document_read({"path": "file.txt"}, _context(tmp_path))
+        result = document_read({"path": "file.tiff"}, _context(tmp_path))
         assert result.status == "blocked"
         assert result.error_code == "document_extension_not_supported"
 
