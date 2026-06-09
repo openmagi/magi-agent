@@ -17,6 +17,7 @@ from .memory_mode_guard import (
     is_long_term_memory_read_disabled,
     is_long_term_memory_write_disabled,
     is_protected_memory_path,
+    memory_write_target_paths,
     protected_memory_error,
 )
 from .registry import ToolRegistry
@@ -166,7 +167,7 @@ def _memory_mode_block(
     if tool_name in _MEMORY_WRITE_TOOL_NAMES:
         if not is_long_term_memory_write_disabled(mode):
             return None
-        for path in _memory_mode_target_paths(tool_name, arguments):
+        for path in memory_write_target_paths(tool_name, arguments):
             if is_protected_memory_path(path):
                 return _memory_mode_blocked_result(tool_name, path)
         return None
@@ -277,38 +278,6 @@ def _match_path(match: object) -> str | None:
         path = match.get("path")
         return path if isinstance(path, str) else None
     return None
-
-
-def _memory_mode_target_paths(
-    tool_name: str,
-    arguments: dict[str, object],
-) -> tuple[str, ...]:
-    paths: list[str] = []
-    path_arg = arguments.get("path")
-    if isinstance(path_arg, str) and path_arg:
-        paths.append(path_arg)
-    if tool_name == "PatchApply" and not paths:
-        patch_text = arguments.get("patch") or arguments.get("diff")
-        if isinstance(patch_text, str) and patch_text.strip():
-            paths.extend(_patch_envelope_paths(patch_text))
-    return tuple(paths)
-
-
-def _patch_envelope_paths(patch_text: str) -> tuple[str, ...]:
-    try:
-        from magi_agent.coding.patch_apply import parse_patch_envelope
-
-        files = parse_patch_envelope(patch_text)
-    except Exception:
-        return ()
-    paths: list[str] = []
-    for file_op in files:
-        if isinstance(getattr(file_op, "path", None), str):
-            paths.append(file_op.path)
-        move_to = getattr(file_op, "move_to", None)
-        if isinstance(move_to, str) and move_to:
-            paths.append(move_to)
-    return tuple(paths)
 
 
 def _memory_mode_blocked_result(tool_name: str, path_label: str) -> ToolResult:

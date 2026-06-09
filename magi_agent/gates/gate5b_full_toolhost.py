@@ -10,7 +10,7 @@ import re
 import subprocess
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
-from typing import Any, Literal, Self
+from typing import TYPE_CHECKING, Any, Literal, Self
 
 from magi_agent.config.env import MAGI_EDIT_FUZZY_MATCH_ENABLED as _EDIT_FUZZY_MATCH_ENABLED
 
@@ -48,6 +48,15 @@ from magi_agent.evidence.edit_match_receipts import (
 from magi_agent.tools.context import ToolContext
 from magi_agent.tools.dispatcher import ToolDispatcher
 from magi_agent.tools.manifest import RuntimeMode, ToolManifest, ToolSource
+from magi_agent.tools.memory_mode_guard import (
+    command_may_write_protected_memory,
+    command_mentions_protected_memory,
+    is_incognito_memory_mode,
+    is_long_term_memory_write_disabled,
+    is_protected_memory_path,
+    memory_write_target_paths,
+    normalize_memory_mode,
+)
 from magi_agent.tools.permission import ToolPermissionPolicy
 from magi_agent.tools.read_ledger import (
     ReadLedger,
@@ -58,6 +67,9 @@ from magi_agent.tools.read_ledger import (
 )
 from magi_agent.tools.registry import ToolRegistry
 from magi_agent.tools.result import ToolResult
+
+if TYPE_CHECKING:
+    from magi_agent.runtime.session_identity import MemoryMode
 
 
 logger = logging.getLogger(__name__)
@@ -76,6 +88,36 @@ _GATE5B_LEGACY_FULL_TOOLHOST_TOOL_NAMES = (
     "PatchApply",
     "Bash",
 )
+
+# Memory-mode enforcement tool groupings. Writes obey read_only/incognito;
+# reads obey incognito only (read_only permits reads of protected memory).
+_MEMORY_WRITE_TOOL_NAMES = frozenset({"FileWrite", "FileEdit", "PatchApply"})
+_MEMORY_READ_TOOL_NAMES = frozenset({"FileRead", "Grep"})
+
+
+def _memory_read_target_paths(
+    tool_name: str,
+    arguments: Mapping[str, object],
+) -> tuple[str, ...]:
+    """Return candidate paths a read-style tool call would touch.
+
+    FileRead resolves ``path``/``filePath`` (mirroring ``_handle_file_read``).
+    Grep has no per-file ``path`` argument; the files it scans come from its
+    ``glob`` selector, so that glob is the protected-memory target.
+    """
+
+    if tool_name == "FileRead":
+        path_text = arguments.get("path") or arguments.get("filePath")
+        if isinstance(path_text, str) and path_text:
+            return (path_text,)
+        return ()
+    if tool_name == "Grep":
+        glob = arguments.get("glob")
+        if isinstance(glob, str) and glob:
+            return (glob,)
+        return ()
+    return ()
+
 
 _GATE5B_FIRST_PARTY_REGISTRY_TOOL_NAMES = (
     "AgentMemoryRemember",
@@ -518,11 +560,13 @@ class Gate5BFullToolHost:
         tool_registry: ToolRegistry | None = None,
         read_ledger_enabled: bool = False,
         diagnostics_provider: DiagnosticsProvider | None = None,
+        memory_mode: "MemoryMode | str" = "normal",
     ) -> None:
         self.config = config
         self.workspace_root = workspace_root.resolve()
         self.exposed_tool_names = exposed_tool_names
         self.now_ms = now_ms
+        self.memory_mode = normalize_memory_mode(memory_mode)
         self.counter = Gate5BFullToolCounter(config)
         self._tool_registry = tool_registry
         self._tool_dispatcher = ToolDispatcher(tool_registry) if tool_registry is not None else None
@@ -572,6 +616,45 @@ class Gate5BFullToolHost:
         if self._owns_lsp_client and isinstance(self._diagnostics_provider, LspClient):
             self._diagnostics_provider.shutdown_all()
 
+    def _enforce_memory_mode(
+        self,
+        tool_name: str,
+        args: Mapping[str, object],
+    ) -> None:
+        """Block protected-memory access the channel memory mode forbids.
+
+        Raises ``Gate5BFullToolRegistryBlocked("memory_mode_blocked")`` so the
+        dispatch loop turns it into a blocked outcome with that reason.
+        """
+
+        mode = self.memory_mode
+        if tool_name in _MEMORY_WRITE_TOOL_NAMES:
+            if not is_long_term_memory_write_disabled(mode):
+                return
+            for path in memory_write_target_paths(tool_name, args):
+                if is_protected_memory_path(path):
+                    raise Gate5BFullToolRegistryBlocked("memory_mode_blocked")
+            return
+        if tool_name == "Bash":
+            command = args.get("command")
+            command_text = command if isinstance(command, str) else ""
+            if (
+                is_incognito_memory_mode(mode)
+                and command_mentions_protected_memory(command_text)
+            ) or (
+                is_long_term_memory_write_disabled(mode)
+                and command_may_write_protected_memory(command_text)
+            ):
+                raise Gate5BFullToolRegistryBlocked("memory_mode_blocked")
+            return
+        if tool_name in _MEMORY_READ_TOOL_NAMES:
+            if not is_incognito_memory_mode(mode):
+                return
+            for path in _memory_read_target_paths(tool_name, args):
+                if is_protected_memory_path(path):
+                    raise Gate5BFullToolRegistryBlocked("memory_mode_blocked")
+            return
+
     async def dispatch(
         self,
         tool_name: str,
@@ -603,6 +686,13 @@ class Gate5BFullToolHost:
             # Clear any stale edit-match result from a previous call before
             # invoking the handler so dispatch never reads stale state.
             self._last_edit_match_result = None
+            # Channel memory-mode hard enforcement. The gate5b host executes
+            # FileRead/Grep/FileWrite/FileEdit/PatchApply/Bash directly via
+            # _handle, bypassing the core_toolhost guard, so it must enforce
+            # the same protected-memory rules here. Raised inside the try block
+            # so the existing Gate5BFullToolRegistryBlocked handler surfaces it
+            # as a "memory_mode_blocked" blocked outcome.
+            self._enforce_memory_mode(tool_name, args)
             self._preflight_legacy_tool(tool_name, args, tool_call_id=tool_call_id)
             output = await self._handle(tool_name, args, tool_call_id=tool_call_id)
             # The diagnostics collection does blocking stdio reads against the
@@ -910,6 +1000,7 @@ class Gate5BFullToolHost:
                 botId="gate5b-selected-full-toolhost",
                 turnId=f"gate5b-full-toolhost:{tool_call_id}",
                 workspaceRoot=str(self.workspace_root),
+                memoryMode=self.memory_mode,
                 permissionScope={
                     "mode": "selected_full_toolhost",
                     "source": "selected_full_toolhost",
@@ -955,6 +1046,7 @@ class Gate5BFullToolHost:
                 botId="gate5b-selected-full-toolhost",
                 turnId=f"gate5b-full-toolhost:{tool_call_id}",
                 workspaceRoot=str(self.workspace_root),
+                memoryMode=self.memory_mode,
                 permissionScope={
                     "mode": "selected_full_toolhost",
                     "source": "selected_full_toolhost",
@@ -1426,6 +1518,7 @@ def build_gate5b_full_toolhost_bundle(
     tool_registry: ToolRegistry | None = None,
     read_ledger_enabled: bool | None = None,
     diagnostics_provider: DiagnosticsProvider | None = None,
+    memory_mode: "MemoryMode | str" = "normal",
 ) -> Gate5BFullToolBundle:
     safe_config = Gate5BFullToolHostConfig.model_validate(config or {})
     workspace = Path(workspace_root)
@@ -1448,6 +1541,7 @@ def build_gate5b_full_toolhost_bundle(
         tool_registry=tool_registry,
         read_ledger_enabled=read_ledger_enabled,
         diagnostics_provider=diagnostics_provider,
+        memory_mode=memory_mode,
     )
     if selected_scope_error is not None:
         return Gate5BFullToolBundle(

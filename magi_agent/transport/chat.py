@@ -12,7 +12,7 @@ import os
 from pathlib import Path
 import re
 import time
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -49,6 +49,10 @@ from magi_agent.introspection.egress_gate import EgressVerifierStatus
 from magi_agent.gates.gate2_readiness import gate2_readiness_health_metadata
 from magi_agent.gates.gate8_readiness import gate8_readiness_health_metadata
 from magi_agent.runtime.openmagi_runtime import OpenMagiRuntime
+from magi_agent.runtime.session_identity import _memory_mode_from_header
+
+if TYPE_CHECKING:
+    from magi_agent.runtime.session_identity import MemoryMode
 from magi_agent.runtime.public_events import (
     tool_end_event,
     tool_progress_event,
@@ -1420,7 +1424,12 @@ async def run_gate5b_user_visible_chat_response(
             runtime=runtime,
         )
     gate1a_bundle = _gate1a_readonly_tool_bundle(runtime, route_config)
-    gate5b_full_bundle = _gate5b_full_toolhost_bundle(runtime, route_config)
+    memory_mode = _memory_mode_from_header(
+        request.headers.get("x-core-agent-memory-mode")
+    )
+    gate5b_full_bundle = _gate5b_full_toolhost_bundle(
+        runtime, route_config, memory_mode=memory_mode
+    )
     tool_bundle = (
         gate5b_full_bundle
         if gate5b_full_bundle.status == "ready"
@@ -2389,6 +2398,8 @@ def _gate5b_full_toolhost_config(runtime: OpenMagiRuntime) -> Gate5BFullToolHost
 def _gate5b_full_toolhost_bundle(
     runtime: OpenMagiRuntime,
     route_config: Gate5BUserVisibleChatRouteConfig,
+    *,
+    memory_mode: "MemoryMode | str" = "normal",
 ) -> Gate5BFullToolBundle:
     return build_gate5b_full_toolhost_bundle(
         config=_gate5b_full_toolhost_config(runtime),
@@ -2399,6 +2410,7 @@ def _gate5b_full_toolhost_bundle(
         },
         workspace_root=_gate5b_full_toolhost_workspace_root(),
         tool_registry=runtime.tool_registry,
+        memory_mode=memory_mode,
     )
 
 
