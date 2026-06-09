@@ -182,6 +182,53 @@ async def test_run_handles_none_final_result() -> None:
     assert result.steps_used == 2
 
 
+class _MidRunBlockAgent:
+    """Fake agent that, during run(), invokes on_step with a BLOCKED url
+    (mimicking a mid-run navigation that the SSRF guard must abort), then
+    returns a normal AgentHistoryList-like outcome -- exactly the shape that
+    previously masqueraded as status="ok".
+    """
+
+    def __init__(self, on_step, blocked_url: str, history: _FakeHistory) -> None:
+        self._on_step = on_step
+        self._blocked_url = blocked_url
+        self._history = history
+
+    async def run(self, max_steps: int = 500) -> _FakeHistory:
+        # The real browser-use loop would arm the cooperative stop from this
+        # return value and abort the same step; here we just fire the seam.
+        self._on_step(self._blocked_url)
+        return self._history
+
+
+@pytest.mark.asyncio
+async def test_run_mid_run_block_surfaces_as_blocked() -> None:
+    def factory(*, task, chat_model, on_step, profile_dir):
+        # Normal outcome (final_result/number_of_steps work) so the only thing
+        # that can mark this run blocked is the recorded mid-run violation.
+        return _MidRunBlockAgent(
+            on_step,
+            "http://169.254.169.254/",
+            _FakeHistory("looks fine", 3),
+        )
+
+    engine = BrowserEngine(agent_factory=factory)
+    result = await engine.run(
+        task="exfiltrate cloud metadata",
+        chat_model=object(),
+        max_steps=5,
+        profile_dir="/tmp/p",
+    )
+
+    assert result.status == "blocked"
+    assert result.error_code is not None
+    assert result.error_code != "ok"
+    # the recorded reason is the SSRF reason for the blocked url
+    from magi_agent.browser.autonomous.safety_hooks import navigation_block_reason
+
+    assert result.error_code == navigation_block_reason("http://169.254.169.254/")
+
+
 def test_on_step_guard_returns_block_reason_for_unsafe_url() -> None:
     # The guard handed to the factory is a plain url-in / reason-out callable.
     captured: dict[str, object] = {}

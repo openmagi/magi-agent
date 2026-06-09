@@ -144,8 +144,20 @@ class BrowserEngine:
 
         # 3. Per-step navigation guard (url-in / reason-out). The factory adapts
         #    browser-use's 3-arg step callback down to this seam.
+        #
+        #    run() OWNS the violation record. The factory wires our returned
+        #    reason into ``register_should_stop_callback`` (clean same-step
+        #    abort, unchanged), but because the guard ALSO records the violation
+        #    here, a mid-run block can never be silent: after the run we surface
+        #    it as status="blocked" regardless of what the (interrupted) history
+        #    looks like.
+        violations: list[dict[str, str]] = []
+
         def guard(url: str) -> str | None:
-            return navigation_block_reason(url)
+            reason = navigation_block_reason(url)
+            if reason:
+                violations.append({"url": url, "reason": reason})
+            return reason
 
         # 4. + 5. Build + run, wrapping construction and the run in try/except.
         try:
@@ -163,8 +175,19 @@ class BrowserEngine:
                 summary=str(exc),
             )
 
-        # 6. Result extraction, duck-typed so the test fake and the real
-        #    AgentHistoryList both work.
+        # 6a. A mid-run navigation was blocked by the SSRF guard. The run was
+        #     aborted in the same step; surface it as blocked (never silent),
+        #     carrying the first violation reason as the error_code.
+        if violations:
+            first = violations[0]
+            return BrowserRunResult(
+                status="blocked",
+                error_code=first["reason"],
+                metadata={"violations": list(violations)},
+            )
+
+        # 6b. No violation: normal duck-typed result extraction, so the test
+        #     fake and the real AgentHistoryList both work.
         return _normalize_outcome(outcome)
 
 
