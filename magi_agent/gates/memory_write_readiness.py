@@ -92,18 +92,33 @@ def _kill_switch_env_active() -> bool:
     return os.environ.get(_KILL_SWITCH_ENV_VAR, "").lower() in _TRUE_STRINGS
 
 
+def _write_enabled_env_active() -> bool:
+    """Return True when ``MAGI_MEMORY_WRITE_ENABLED`` is explicitly truthy."""
+    return os.environ.get(MAGI_MEMORY_WRITE_ENABLED_ENV, "").lower() in _TRUE_STRINGS
+
+
 def _local_dev_env_active() -> bool:
     """Return True when the local single-user dev short-circuit is explicitly set.
 
-    Requires BOTH ``MAGI_MEMORY_LOCAL_DEV=1`` AND the master readiness env gate
-    (``MAGI_MEMORY_WRITE_READINESS_ENABLED=1``) to be truthy.  This prevents
-    accidental activation in environments where the master gate is off.
-    Multi-tenant hosted deployments never set MAGI_MEMORY_LOCAL_DEV, so they
-    cannot reach "live" through this path — only through canary promotion.
+    Requires ALL of:
+      * ``MAGI_MEMORY_LOCAL_DEV=1`` (the short-circuit opt-in),
+      * the master readiness env gate ``MAGI_MEMORY_WRITE_READINESS_ENABLED=1``,
+      * the D1/D2 surface gate ``MAGI_MEMORY_WRITE_ENABLED=1`` (defense-in-depth,
+        matching the documented two-key requirement),
+    AND requires the kill-switch (``MAGI_MEMORY_WRITE_KILL_SWITCH_ENABLED``) to be
+    INACTIVE.  The kill-switch must win immediately regardless of any other flag,
+    so the short-circuit never bypasses it.
+
+    This prevents accidental activation in environments where the master gate or
+    write gate is off.  Multi-tenant hosted deployments never set
+    MAGI_MEMORY_LOCAL_DEV, so they cannot reach "live" through this path — only
+    through canary promotion.
     """
     return (
         os.environ.get(MAGI_MEMORY_LOCAL_DEV_ENV, "").lower() in _TRUE_STRINGS
         and _readiness_env_enabled()
+        and _write_enabled_env_active()
+        and not _kill_switch_env_active()
     )
 
 
@@ -268,10 +283,15 @@ def resolve_memory_write_execution_mode(
     """Convenience: resolve just the execution mode for the writable-memory gate.
 
     Local-developer short-circuit: when ``MAGI_MEMORY_LOCAL_DEV=1`` is set
-    together with the master readiness gate (``MAGI_MEMORY_WRITE_READINESS_ENABLED``),
-    the mode is unconditionally promoted to ``"live"`` without requiring canary
-    promotion.  This path is intended ONLY for single-user local development and
-    CLI sessions — hosted multi-tenant deployments never set ``MAGI_MEMORY_LOCAL_DEV``.
+    together with the master readiness gate (``MAGI_MEMORY_WRITE_READINESS_ENABLED``)
+    AND the write surface gate (``MAGI_MEMORY_WRITE_ENABLED``), the mode is
+    promoted to ``"live"`` without requiring canary promotion.  This path is
+    intended ONLY for single-user local development and CLI sessions — hosted
+    multi-tenant deployments never set ``MAGI_MEMORY_LOCAL_DEV``.
+
+    The kill-switch (``MAGI_MEMORY_WRITE_KILL_SWITCH_ENABLED``) wins immediately:
+    when active, the short-circuit is bypassed and the mode falls through to the
+    normal gate evaluation (which resolves to ``"disabled"``/``"blocked"``).
     """
     if _local_dev_env_active():
         return "live"
