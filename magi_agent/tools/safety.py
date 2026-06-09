@@ -1602,6 +1602,39 @@ def _decompose_shell_segments(command: str) -> list[str] | None:
     return [s for s in segments if s]
 
 
+def _segment_is_read_safe(segment: str) -> bool:
+    """True iff a single (already-decomposed) command segment is read-only safe:
+    executable in the read-only allowlist, no write/mutating flags, no inline
+    interpreter, non-empty.
+
+    POSIX numeric-only short flags (e.g. ``head -30``, ``tail -5``) are
+    treated as read-safe line/byte counts and skipped before the general
+    flag-denial check.
+    """
+    segment = segment.strip()
+    if not segment or _has_inline_interpreter_code(segment):
+        return False
+    try:
+        parts = shlex.split(segment)
+    except ValueError:
+        return False
+    if not parts:
+        return False
+    exe = parts[0].rsplit("/", 1)[-1]
+    if exe not in _READONLY_SHELL_COMMANDS:
+        return False
+    # Strip POSIX numeric-only short flags (e.g. -30, -5) for line-count
+    # commands before passing to the general flag-denial check.
+    _NUMERIC_FLAG_COMMANDS = {"head", "tail"}
+    filtered_args = tuple(
+        arg for arg in parts[1:]
+        if not (exe in _NUMERIC_FLAG_COMMANDS and arg.startswith("-") and arg[1:].isdigit())
+    )
+    if _readonly_argument_denial(exe, filtered_args, shell=False) is not None:
+        return False
+    return True
+
+
 def _has_complex_shell_operator(command: str) -> bool:
     return (
         "\n" in command
