@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_valid
 from magi_agent.shadow.gate5b4c3_shadow_generation_contract import (
     Gate5B4C3ModelRoutingSource,
     Gate5B4C3ShadowGenerationAuthorityFlags,
+    Gate5B4C3ShadowGenerationImageBlock,
     Gate5B4C3ShadowGenerationRequest,
     Gate5B4C3SourceAuthority,
 )
@@ -108,6 +109,10 @@ class Gate5B4C3RunnerInput(_Gate5B4C3RunnerInputModel):
     sanitized_recent_history: tuple[dict[str, str], ...] = Field(
         default=(),
         alias="sanitizedRecentHistory",
+    )
+    sanitized_image_blocks: tuple[Gate5B4C3ShadowGenerationImageBlock, ...] = Field(
+        default=(),
+        alias="sanitizedImageBlocks",
     )
     source_authority: Gate5B4C3SourceAuthority = Field(alias="sourceAuthority")
     provider_label: str = Field(alias="providerLabel")
@@ -296,6 +301,7 @@ def build_gate5b4c3_runner_input(
         sanitizedUserInput=sanitized_input,
         sanitizedInputTextDigest=request.turn.sanitized_input_text_digest,
         sanitizedRecentHistory=sanitized_history,
+        sanitizedImageBlocks=request.turn.sanitized_image_blocks,
         sourceAuthority=request.recipe_profile.source_authority,
         providerLabel=request.model_routing.provider_label,
         modelLabel=request.model_routing.model_label,
