@@ -42,6 +42,7 @@ wiring (``subagents.py``) keeps an import-clean surface.
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import os
 from collections.abc import Callable, Mapping
@@ -88,6 +89,34 @@ _DEFAULT_CHILD_MODEL = "claude-sonnet-4-6"
 #: re-sanitises and re-trims to 512, so this is just a pre-trim guard against
 #: pushing a megabyte of text through the seam.
 _MAX_SUMMARY_CHARS = 2000
+
+#: Provider-alias normalisation applied BEFORE delegating to
+#: ``cli.providers.resolve_provider_config``. The ``ModelTierRegistry`` records
+#: the gemini model under the ``"google"`` provider (and ``ChildRunnerConfig``
+#: defaults ``child_provider="google"``), but the litellm/provider name in
+#: ``cli.providers.SUPPORTED_PROVIDERS`` is ``"gemini"``. Without this alias a
+#: default-routed child would be silently blocked (``child_provider_key_missing``)
+#: even with a Gemini key present. Tier validation still runs against the
+#: registry's OWN provider name (unaliased) so the vetted route is unchanged.
+_PROVIDER_ALIAS: dict[str, str] = {"google": "gemini"}
+
+#: Minimal child instruction so a TEXT-ONLY (tools=[]) child is NOT handed the
+#: full filesystem-tool system prompt that ``build_cli_model_runner`` would
+#: otherwise synthesise for a tool-enabled agent.
+_CHILD_INSTRUCTION = (
+    "Complete the following delegated subtask. Respond with the answer only."
+)
+
+# Degrade-reason tokens (fixed, non-leaking). Used by the degrade returns below
+# and referenced by tests, so they live as module constants in ONE place.
+_DEGRADE_ROUTE_UNKNOWN = "child_model_route_unknown"
+_DEGRADE_KEY_MISSING = "child_provider_key_missing"
+_DEGRADE_TURN_ERROR = "child_turn_error"
+_DEGRADE_TIMEOUT = "child_turn_timeout"
+
+#: Hard ceiling for a single child turn (seconds), regardless of the request's
+#: ``budget_ms``. Keeps a runaway/huge budget from blocking indefinitely.
+_MAX_TURN_TIMEOUT_S = 600.0
 
 
 class RealLocalChildRunner:
@@ -149,23 +178,41 @@ class RealLocalChildRunner:
             if route is None:
                 return self._blocked(
                     child_execution_id,
-                    reason="child_model_route_unknown",
+                    reason=_DEGRADE_ROUTE_UNKNOWN,
                 )
 
+            # Thread the VALIDATED/normalised route (canonical casefolded
+            # provider/model from the registry) into provider-config resolution
+            # and the litellm re-pin, so the vetted route and the litellm route
+            # string always agree (no mixed-case drift).
+            route_provider = _clean_str(getattr(route, "provider", None)) or provider
+            route_model = _clean_str(getattr(route, "model", None)) or model
+
             # --- Resolve the provider key (degrade if absent) -----------------
-            config = self._resolve_provider_config(provider, model)
+            config = self._resolve_provider_config(route_provider, route_model)
             if config is None:
                 return self._blocked(
                     child_execution_id,
-                    reason="child_provider_key_missing",
+                    reason=_DEGRADE_KEY_MISSING,
                 )
 
             # --- Drive ONE turn and collect the final text --------------------
             final_text = await self._drive_one_turn(config, request)
+        except asyncio.TimeoutError:
+            # Hung/slow model exceeded the turn budget — degrade (never raise).
+            return self._failed(
+                child_execution_id,
+                reason=_DEGRADE_TIMEOUT,
+            )
+        except asyncio.CancelledError:
+            # Cooperative cancellation MUST propagate — never convert it to a
+            # failed mapping (it is BaseException in 3.11 so the broad ``except
+            # Exception`` below won't catch it; this is explicit for robustness).
+            raise
         except Exception:  # noqa: BLE001 — NEVER raise across the seam.
             return self._failed(
                 child_execution_id,
-                reason="child_turn_error",
+                reason=_DEGRADE_TURN_ERROR,
             )
 
         summary = (final_text or "").strip()[:_MAX_SUMMARY_CHARS]
@@ -220,14 +267,28 @@ class RealLocalChildRunner:
     def _resolve_provider_config(self, provider: str, model: str) -> object | None:
         """Return a ``ProviderConfig`` with a usable key, or ``None``.
 
+        ``provider``/``model`` here are the VALIDATED/normalised route from the
+        ``ModelTierRegistry`` (canonical casefolded). The registry records the
+        gemini model under ``"google"`` while ``cli.providers`` knows it as
+        ``"gemini"``; we normalise via ``_PROVIDER_ALIAS`` at THIS seam so a
+        default-routed (``provider="google"``) child resolves a Gemini key
+        instead of being silently blocked. Tier validation upstream still ran
+        against the registry's own (unaliased) provider name.
+
         Prefers an injected ``provider_config`` that already carries a key
         (tests / explicit callers). Otherwise delegates to
         ``resolve_provider_config`` (config file + env). NO key → ``None``
         (the caller degrades to blocked; never crashes).
         """
+        # Map the registry-name provider to the litellm/provider name used by
+        # ``cli.providers`` (e.g. ``"google"`` -> ``"gemini"``).
+        provider_key = _PROVIDER_ALIAS.get(provider, provider)
+
         injected_key = _clean_str(getattr(self._provider_config, "api_key", None))
         injected_provider = _clean_str(getattr(self._provider_config, "provider", None))
-        if injected_key and injected_provider == provider:
+        # An injected config may carry either the registry name or the litellm
+        # name; accept a match against either form.
+        if injected_key and injected_provider in {provider, provider_key}:
             return self._provider_config
 
         from magi_agent.cli.providers import (  # noqa: PLC0415
@@ -241,7 +302,7 @@ class RealLocalChildRunner:
         # child's chosen provider via an env overlay so the resolved key matches
         # the route we validated.
         overlay = dict(self._env)
-        overlay["MAGI_PROVIDER"] = provider
+        overlay["MAGI_PROVIDER"] = provider_key
         try:
             resolved = resolve_provider_config(model_override=model, env=overlay)
         except UnknownProviderError:
@@ -269,7 +330,21 @@ class RealLocalChildRunner:
         Heavy ADK imports are LOCAL so importing this module never triggers
         them. Mirrors the discovery orchestrator's message construction +
         event-text collection.
+
+        The turn is bounded by ``request.budget_ms`` (clamped to a sane max);
+        on expiry ``asyncio.wait_for`` raises ``asyncio.TimeoutError`` which the
+        caller maps to a degraded ``child_turn_timeout`` result.
+        ``asyncio.CancelledError`` is NEVER swallowed — it propagates.
         """
+        timeout_s = self._turn_timeout_s(request)
+        if timeout_s is None:
+            return await self._collect_turn_text(config, request)
+        return await asyncio.wait_for(
+            self._collect_turn_text(config, request),
+            timeout=timeout_s,
+        )
+
+    async def _collect_turn_text(self, config: object, request: object) -> str:
         import tempfile  # noqa: PLC0415
 
         from google.genai import types  # noqa: PLC0415
@@ -278,6 +353,8 @@ class RealLocalChildRunner:
             build_cli_model_runner,
         )
 
+        # m-2: compute the child session id ONCE and reuse it.
+        session_id = self._child_session_id(request)
         runner = self._injected_runner
         if runner is None:
             workspace = self._workspace_root or tempfile.mkdtemp()
@@ -285,9 +362,12 @@ class RealLocalChildRunner:
                 config,  # type: ignore[arg-type]
                 # v1 TEXT-ONLY: empty toolset → no workspace mutation.
                 tools=list(self._tools),
+                # m-3: a tools=[] child should NOT get the full filesystem-tool
+                # system prompt — give it a minimal delegated-subtask instruction.
+                instruction=_CHILD_INSTRUCTION,
                 model_factory=self._model_factory,
                 workspace_root=workspace,
-                session_id=self._child_session_id(request),
+                session_id=session_id,
             )
 
         prompt = _child_prompt(request)
@@ -295,7 +375,7 @@ class RealLocalChildRunner:
         texts: list[str] = []
         async for event in runner.run_async(
             user_id=self._child_user_id(request),
-            session_id=self._child_session_id(request),
+            session_id=session_id,
             new_message=new_message,
         ):
             content = getattr(event, "content", None)
@@ -304,6 +384,29 @@ class RealLocalChildRunner:
                 if isinstance(text, str) and text:
                     texts.append(text)
         return "\n".join(texts)
+
+    def _turn_timeout_s(self, request: object) -> float | None:
+        """Resolve the per-turn timeout (seconds) from ``request.budget_ms``.
+
+        Returns ``None`` (no bound) when no positive budget is present, so the
+        existing no-timeout behaviour is preserved for callers that don't set a
+        budget. A positive ``budget_ms`` is clamped to ``[0, _MAX_TURN_TIMEOUT_S]``;
+        ``MAGI_MODEL_TIMEOUT_S`` (if set) further lowers the ceiling so the turn
+        bound never exceeds the underlying model request timeout.
+        """
+        raw = getattr(request, "budget_ms", None)
+        if isinstance(raw, bool) or not isinstance(raw, int) or raw <= 0:
+            return None
+        ceiling = _MAX_TURN_TIMEOUT_S
+        env_ceiling = _clean_str(self._env.get("MAGI_MODEL_TIMEOUT_S"))
+        if env_ceiling is not None:
+            try:
+                parsed = float(env_ceiling)
+            except ValueError:
+                parsed = 0.0
+            if parsed > 0:
+                ceiling = min(ceiling, parsed)
+        return min(raw / 1000.0, ceiling)
 
     # ------------------------------------------------------------------ #
     # Degraded-output builders + id helpers                               #

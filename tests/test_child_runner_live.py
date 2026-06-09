@@ -16,6 +16,10 @@ from magi_agent.runtime.child_runner_boundary import (
 from magi_agent.runtime.child_runner_live import (
     LIVE_CHILD_RUNNER_ENABLED_ENV,
     LIVE_CHILD_RUNNER_KILL_SWITCH_ENV,
+    _DEGRADE_KEY_MISSING,
+    _DEGRADE_ROUTE_UNKNOWN,
+    _DEGRADE_TIMEOUT,
+    _DEGRADE_TURN_ERROR,
     RealLocalChildRunner,
     is_live_child_runner_enabled,
 )
@@ -102,6 +106,32 @@ def _provider_config(api_key: str = "sk-test") -> object:
     return ProviderConfig(
         provider="anthropic", model="claude-sonnet-4-6", api_key=api_key
     )
+
+
+class _SlowRunner:
+    """Mimics ``run_async`` but sleeps before yielding — to trip a turn budget."""
+
+    def __init__(self, sleep_s: float = 5.0, text: str = "ANSWER: late") -> None:
+        self._sleep_s = sleep_s
+        self._text = text
+        self.calls = 0
+
+    async def run_async(self, **kwargs: object) -> AsyncGenerator[object, None]:
+        self.calls += 1
+        await asyncio.sleep(self._sleep_s)
+        yield _FakeEvent(self._text)
+
+
+class _RecordingRunner:
+    """Captures the kwargs ``build_cli_model_runner`` was called with."""
+
+    def __init__(self, text: str = "ANSWER: captured") -> None:
+        self._text = text
+        self.calls = 0
+
+    async def run_async(self, **kwargs: object) -> AsyncGenerator[object, None]:
+        self.calls += 1
+        yield _FakeEvent(self._text)
 
 
 # --------------------------------------------------------------------------- #
@@ -260,7 +290,7 @@ def test_run_child_blocks_when_no_provider_key(monkeypatch) -> None:
     output = asyncio.run(runner.run_child(_request()))
 
     assert output["status"] == "blocked"
-    assert output["summary"] == "child_provider_key_missing"
+    assert output["summary"] == _DEGRADE_KEY_MISSING
     assert fake.calls == 0
 
 
@@ -274,7 +304,7 @@ def test_run_child_blocks_on_unknown_model_tier() -> None:
     )
 
     assert output["status"] == "blocked"
-    assert output["summary"] == "child_model_route_unknown"
+    assert output["summary"] == _DEGRADE_ROUTE_UNKNOWN
     assert fake.calls == 0
 
 
@@ -286,7 +316,7 @@ def test_run_child_never_raises_when_runner_raises_mid_turn() -> None:
 
     assert raising.calls == 1
     assert output["status"] in {"failed", "blocked"}
-    assert output["summary"] == "child_turn_error"
+    assert output["summary"] == _DEGRADE_TURN_ERROR
     # No raw error text (path / token) leaks into the output.
     encoded = repr(output)
     assert "/Users/kevin/secret" not in encoded
@@ -308,6 +338,132 @@ def test_boundary_sanitises_blocked_output_from_real_runner() -> None:
     assert result.status == "ok"
     assert result.envelope is not None
     assert result.envelope.status == "blocked"
+
+
+# --------------------------------------------------------------------------- #
+# I-2: google→gemini provider alias (default route must not be blocked)        #
+# --------------------------------------------------------------------------- #
+
+
+def test_run_child_resolves_google_provider_via_gemini_alias(monkeypatch) -> None:
+    """A ``provider="google"`` child (the boundary default) with a Gemini key
+    present resolves to a usable config — NOT ``child_provider_key_missing``."""
+    # Gemini key present in env; provider explicitly the registry's "google".
+    monkeypatch.setenv("GEMINI_API_KEY", "sk-gemini-test")
+    fake = _FakeRunner(text="ANSWER: gemini child ran")
+    runner = RealLocalChildRunner(runner=fake)  # no injected provider_config
+
+    output = asyncio.run(
+        runner.run_child(_request(provider="google", model="gemini-3.5-flash"))
+    )
+
+    assert output["status"] == "completed"
+    assert output["summary"] != _DEGRADE_KEY_MISSING
+    assert "gemini child ran" in str(output["summary"])
+    assert fake.calls == 1
+
+
+def test_run_child_default_google_route_resolves_with_gemini_key(monkeypatch) -> None:
+    """The historical default child route is ``google``/gemini; with a Gemini
+    key it resolves rather than silently blocking."""
+    monkeypatch.setenv("GEMINI_API_KEY", "sk-gemini-test")
+    fake = _FakeRunner(text="ANSWER: default route")
+    # Inject the boundary-default route via the per-request override (mirrors
+    # ChildRunnerConfig.child_provider="google", child_model="gemini-3.5-flash").
+    runner = RealLocalChildRunner(runner=fake)
+
+    output = asyncio.run(
+        runner.run_child(_request(provider="google", model="gemini-3.5-flash"))
+    )
+
+    assert output["status"] == "completed"
+    assert output["summary"] != _DEGRADE_KEY_MISSING
+
+
+# --------------------------------------------------------------------------- #
+# I-1: validated/normalised route threaded into litellm re-pin                  #
+# --------------------------------------------------------------------------- #
+
+
+def test_run_child_uses_canonical_lowercase_litellm_route(monkeypatch) -> None:
+    """A mixed-case request ``model`` resolves to the canonical lowercase
+    litellm route (the registry-validated route, not the raw input)."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-anthropic-test")
+
+    captured: dict[str, object] = {}
+
+    def _fake_build(config, **kwargs):  # noqa: ANN001, ANN003
+        captured["litellm_model"] = config.litellm_model
+        captured["provider"] = config.provider
+        captured["model"] = config.model
+        return _RecordingRunner(text="ANSWER: canonical route")
+
+    # Patch build_cli_model_runner so no real model/network is built; capture
+    # the ProviderConfig the runner re-pinned from the validated route.
+    monkeypatch.setattr(
+        "magi_agent.cli.real_runner.build_cli_model_runner", _fake_build
+    )
+
+    runner = RealLocalChildRunner()  # no injected runner → goes through build
+    output = asyncio.run(
+        runner.run_child(_request(provider="Anthropic", model="Claude-Sonnet-4-6"))
+    )
+
+    assert output["status"] == "completed"
+    # Canonical (casefolded) litellm route — never the mixed-case input.
+    assert captured["model"] == "claude-sonnet-4-6"
+    assert captured["litellm_model"] == "anthropic/claude-sonnet-4-6"
+
+
+# --------------------------------------------------------------------------- #
+# I-3: budget_ms turn timeout honoured + never raises                          #
+# --------------------------------------------------------------------------- #
+
+
+def test_run_child_times_out_on_budget_ms_and_never_raises() -> None:
+    slow = _SlowRunner(sleep_s=5.0)
+    runner = RealLocalChildRunner(provider_config=_provider_config(), runner=slow)
+
+    # Tiny budget → the 5s runner must be cut off and degrade (never raise).
+    output = asyncio.run(runner.run_child(_request(budgetMs=20)))
+
+    assert slow.calls == 1
+    assert output["status"] in {"failed", "blocked"}
+    assert output["summary"] == _DEGRADE_TIMEOUT
+
+
+def test_run_child_no_budget_ms_runs_unbounded() -> None:
+    """Without a budget, the turn runs to completion (no timeout regression)."""
+    fake = _FakeRunner(text="ANSWER: unbounded ok")
+    runner = RealLocalChildRunner(provider_config=_provider_config(), runner=fake)
+
+    output = asyncio.run(runner.run_child(_request()))  # budget_ms defaults to 0
+
+    assert output["status"] == "completed"
+    assert "unbounded ok" in str(output["summary"])
+
+
+def test_run_child_propagates_cancellation() -> None:
+    """``asyncio.CancelledError`` from the turn must PROPAGATE, never become a
+    degraded mapping."""
+
+    class _CancellingRunner:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def run_async(self, **kwargs: object) -> AsyncGenerator[object, None]:
+            self.calls += 1
+            raise asyncio.CancelledError()
+            yield  # pragma: no cover - async generator marker
+
+    cancelling = _CancellingRunner()
+    runner = RealLocalChildRunner(
+        provider_config=_provider_config(), runner=cancelling
+    )
+
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(runner.run_child(_request()))
+    assert cancelling.calls == 1
 
 
 # --------------------------------------------------------------------------- #
