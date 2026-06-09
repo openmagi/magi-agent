@@ -828,8 +828,10 @@ class MagiTuiApp(App[None]):
         """Open the model picker; apply the chosen model on dismiss.
 
         Surfaced automatically in the command palette (``AppActionProvider``
-        gates on ``action_open_model_picker`` existing) and reachable as the
-        ``model`` ``open_dialog`` name (a ``/model`` widget command routes here).
+        gates on ``action_open_model_picker`` existing) and reachable via
+        ``open_dialog("model_picker")`` (the ``open_dialog`` name maps to
+        ``action_open_<name>``). The plan defers a ``/model`` widget command
+        wiring; the action + palette path is the PR2.3 surface.
         """
 
         dialog = ModelPickerDialog(

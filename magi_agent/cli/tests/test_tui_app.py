@@ -972,6 +972,20 @@ def test_open_model_picker_cancel_keeps_model() -> None:
     asyncio.run(_run())
 
 
+def test_open_dialog_model_picker_opens_dialog() -> None:
+    async def _run() -> None:
+        from magi_agent.cli.tui.dialogs.model import ModelPickerDialog
+
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            app.open_dialog("model_picker")
+            await pilot.pause()
+            assert isinstance(app.screen, ModelPickerDialog)
+
+    asyncio.run(_run())
+
+
 def test_open_model_picker_surfaces_in_palette_actions() -> None:
     async def _run() -> None:
         from magi_agent.cli.tui.palette import AppActionProvider
