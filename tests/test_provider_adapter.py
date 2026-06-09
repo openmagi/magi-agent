@@ -361,7 +361,6 @@ class TestBuildSystemPromptIntegration:
 
         identity = {
             "soul": "<identity>You are helpful.</identity>\n<rules>Follow instructions carefully.</rules>",
-            "tools": "<tool-list>bash, python</tool-list>",
         }
         claude_prompt = build_system_prompt(
             session_key="s1",
@@ -378,5 +377,11 @@ class TestBuildSystemPromptIntegration:
             model_aware_prompts_enabled=True,
         )
         assert claude_prompt != gpt_prompt
-        assert "<identity>" in claude_prompt
-        assert "<identity>" not in gpt_prompt
+        # Assert on the soul section's <rules> tag, not <identity>: the
+        # hardcoded MAGI_BASE_PERSONA floor is a protected block wrapped in
+        # <identity> that (like the other protected blocks) is intentionally
+        # NOT run through the per-provider XML-stripping adapter, so its tag
+        # survives for every provider. The adapter's identity-section stripping
+        # is still verified here via the non-colliding <rules> tag.
+        assert "<rules>" in claude_prompt
+        assert "<rules>" not in gpt_prompt

@@ -253,10 +253,10 @@ def build_cli_instruction(
 ) -> str:
     """Build the real system prompt for the CLI agent (coding-agent path).
 
-    When ``workspace_root`` is supplied, optional project instruction files
-    (``AGENTS.md`` / ``SOUL.md`` / ``TOOLS.md`` / ``CLAUDE.md``) found in that cwd
-    (and its ``.magi/`` subdir) are loaded and rendered into the system prompt so
-    the CLI agent picks up repo conventions, matching Claude Code / OpenCode.
+    When ``workspace_root`` is supplied, the agent's self identity is loaded
+    from the magi-owned ``.magi`` namespace (``~/.magi`` + ``<cwd>/.magi``),
+    while repo-root ``AGENTS.md`` / ``CLAUDE.md`` are loaded as project context
+    (NOT identity). See :func:`magi_agent.cli.identity.load_identity`.
     """
 
     from magi_agent.runtime.message_builder import build_system_prompt  # noqa: PLC0415

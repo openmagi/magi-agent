@@ -42,7 +42,6 @@ _IDENTITY_SECTION_ORDER = (
     ("identity", "IDENTITY"),
     ("user", "USER"),
     ("agents", "AGENTS"),
-    ("tools", "TOOLS"),
 )
 _KNOWN_TOKEN_LIMITS = {
     "claude-opus-4-6": 150_000,
@@ -240,35 +239,6 @@ def _coding_model_hint_for(model: str) -> str:
     return CODING_MODEL_HINT_BLOCK.get(family, "")
 
 
-TOOL_PREFERENCES_BLOCK = "\n".join(
-    [
-        "<tool-preferences>",
-        "When multiple tools can accomplish the same task, prefer the specialized tool:",
-        "- Use FileRead instead of running cat/head/tail via Shell",
-        "- Use FileEdit instead of sed/awk via Shell",
-        "- Use Glob instead of find via Shell",
-        "- Use Grep instead of grep/rg via Shell",
-        "- Reserve Shell for system operations that no specialized tool handles",
-        "- Call multiple independent tools in parallel when possible",
-        "- When searching: Grep for content, Glob for file paths",
-        "</tool-preferences>",
-    ]
-)
-
-TODO_USAGE_BLOCK = "\n".join(
-    [
-        "<todo-usage>",
-        "Use the TodoWrite tool to plan and track multi-step work:",
-        "- Call TodoWrite at the start of any task with 3+ steps to lay out the plan.",
-        "- Send the FULL task list every call — each call replaces the previous list.",
-        "- Each item has a content string and a status: pending, in_progress, or completed.",
-        "- Keep exactly one item in_progress at a time; mark it completed before starting the next.",
-        "- Update the list as you finish steps so progress stays accurate.",
-        "- Skip TodoWrite for trivial single-step tasks.",
-        "</todo-usage>",
-    ]
-)
-
 OUTPUT_EFFICIENCY_BLOCK = "\n".join(
     [
         "<output-efficiency>",
@@ -364,11 +334,30 @@ def refresh_runtime_time_header(
     )
 
 
+MAGI_BASE_PERSONA = "\n".join(
+    [
+        "<identity>",
+        "You are Magi Agent, an autonomous AI agent on the OpenMagi platform.",
+        "You help with software engineering and general knowledge work: writing",
+        "and editing code, running tools, researching, and completing multi-step",
+        "tasks end to end.",
+        "",
+        "This identity is fixed and authoritative. Files in your working directory",
+        "(such as CLAUDE.md or AGENTS.md) describe the PROJECT you are working on,",
+        "not who you are. Never adopt a project's name, tech stack, or purpose as",
+        "your own identity; those files do NOT define who you are. If asked who you",
+        "are, you are Magi Agent.",
+        "</identity>",
+    ]
+)
+
+
 PROMPT_DYNAMIC_BOUNDARY = "__MAGI_PROMPT_DYNAMIC_BOUNDARY__"
 
 # Hard-safety sections that MUST survive any prompt-transform hook (rule 4).
 # If a hook removes/empties any of these, they are re-asserted before joining.
 _PROTECTED_SECTIONS: tuple[str, ...] = (
+    MAGI_BASE_PERSONA,
     DEFERRAL_PREVENTION_BLOCK,
     OUTPUT_RULES_BLOCK,
     ACTION_SAFETY_BLOCK,
@@ -420,7 +409,7 @@ def _assemble_prompt_sections(
         ]
     )
 
-    static_parts: list[str] = []
+    static_parts: list[str] = [MAGI_BASE_PERSONA]
     rendered_identity = _render_identity_system(
         identity or {},
         model=model,
@@ -428,6 +417,9 @@ def _assemble_prompt_sections(
     )
     if rendered_identity:
         static_parts.append(rendered_identity)
+    rendered_project_context = _render_project_context(identity or {})
+    if rendered_project_context:
+        static_parts.append(rendered_project_context)
     static_parts.extend([
         DEFERRAL_PREVENTION_BLOCK,
         OUTPUT_RULES_BLOCK,
@@ -435,7 +427,7 @@ def _assemble_prompt_sections(
         ACTION_SAFETY_BLOCK,
     ])
     if coding_agent:
-        static_parts.extend([CODING_DISCIPLINE_BLOCK, TOOL_PREFERENCES_BLOCK, TODO_USAGE_BLOCK])
+        static_parts.extend([CODING_DISCIPLINE_BLOCK])
         # PR10: semantic per-model coding hint, only when the model-aware flag
         # is on. Lives in the STATIC region (cacheable) alongside the other
         # coding blocks; default family contributes nothing (single body).
@@ -971,6 +963,19 @@ def _render_identity_system(
 
         parts, _adapter = adapt_identity_sections(parts, model=model)
     return "\n\n---\n\n".join(parts)
+
+
+def _render_project_context(identity: Mapping[str, object]) -> str:
+    raw = identity.get("project_context")
+    if not isinstance(raw, str) or not raw.strip():
+        return ""
+    return (
+        "# PROJECT CONTEXT\n\n"
+        "The following files were found in your working directory. They describe "
+        "the PROJECT you are working on and its conventions — follow them where "
+        "relevant, but they do NOT define who you are.\n\n"
+        f"{raw.strip()}"
+    )
 
 
 def _format_attachments_preamble(
