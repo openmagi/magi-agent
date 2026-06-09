@@ -180,9 +180,11 @@ class LocalAdkLiveChildRunner:
     def __init__(self, *, raw_runner: object) -> None:
         if not callable(getattr(raw_runner, "run_async", None)):
             raise TypeError("live child runner requires a runner with run_async")
+        _validate_live_child_raw_runner(raw_runner)
         self._raw = raw_runner
 
     async def run_async(self, **kwargs: object):
+        _validate_live_child_raw_runner(self._raw)
         async for event in self._raw.run_async(**kwargs):
             yield event
 
@@ -855,6 +857,8 @@ def _validate_config_boundary(
     data = config.__dict__
     if type(data.get("enabled")) is not bool:
         raise ValueError("enabled must be a boolean")
+    if type(data.get("live_child_runner_allowed")) is not bool:
+        raise ValueError("live_child_runner_allowed must be a boolean")
     timeout = data.get("timeout_seconds")
     if (
         type(timeout) not in {int, float}
@@ -982,6 +986,16 @@ def _validate_known_local_model_route(config: AdkTurnRunnerConfig) -> None:
         raise ValueError("modelTier does not match registry")
 
 
+def _validate_live_child_raw_runner(raw_runner: object) -> None:
+    if not callable(getattr(raw_runner, "run_async", None)):
+        raise ValueError("live child runner requires a runner with run_async")
+    if raw_runner.__class__.__module__ == "magi_agent.adk_bridge.local_runner":
+        raise ValueError("runner_local_attestation_missing")
+    for flag, category in _LIVE_RUNNER_FLAGS:
+        if getattr(raw_runner, flag, False) is not False:
+            raise ValueError(category)
+
+
 def _validate_local_runner_candidate(runner: object) -> None:
     if type(runner) not in _LOCAL_RUNNER_TYPES:
         raise ValueError("local ADK turn runner requires a trusted local runner type")
@@ -992,6 +1006,8 @@ def _validate_local_runner_candidate(runner: object) -> None:
         raise ValueError("local ADK turn runner cannot wrap production local_runner")
     if not callable(getattr(runner, "run_async", None)):
         raise ValueError("local ADK turn runner requires run_async")
+    if type(runner) is LocalAdkLiveChildRunner:
+        _validate_live_child_raw_runner(runner._raw)
     for flag, category in _LIVE_RUNNER_FLAGS:
         if getattr(runner, flag, False) is not False:
             raise ValueError(category)
