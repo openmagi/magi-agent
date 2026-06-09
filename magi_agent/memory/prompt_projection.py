@@ -65,8 +65,22 @@ MEMORY_CONTEXT_CLOSE = "</memory-context>"
 # small enough to stay in the cheap volatile section without cache pressure.
 _DEFAULT_MAX_BYTES = 8_192
 
-# Files that contribute to the snapshot (in order).
-_SNAPSHOT_FILES: tuple[str, ...] = ("MEMORY.md", "USER.md")
+# Files that contribute to the snapshot (in order).  ``memory/ROOT.md`` is the
+# synthesized root of the 5-level compaction tree (built by
+# :class:`magi_agent.memory.compaction_tree.CompactionTree`); surfacing it here
+# is what lets the tree's output actually reach the model on the next session.
+# It is listed FIRST so the compacted long-horizon summary leads the snapshot;
+# when ROOT.md is absent (tree never ran / gated off) this degrades to the
+# original MEMORY.md/USER.md-only behaviour byte-for-byte.
+_SNAPSHOT_FILES: tuple[str, ...] = ("memory/ROOT.md", "MEMORY.md", "USER.md")
+
+# Most-recent raw daily files to append after the curated files, newest-first.
+# Bounded by ``_DEFAULT_RECENT_DAILY_COUNT`` and the shared byte budget — these
+# are the freshest, not-yet-rolled-up turn logs, useful when ROOT.md lags the
+# current day.  The glob is fixed (``memory/daily/*.md``) and never escapes the
+# workspace (each candidate is re-validated through ``_resolve_workspace_path``).
+_RECENT_DAILY_GLOB = "memory/daily/*.md"
+_DEFAULT_RECENT_DAILY_COUNT = 2
 
 _MODEL_CONFIG = ConfigDict(frozen=True, populate_by_name=True, extra="forbid")
 
@@ -236,7 +250,8 @@ def _build_snapshot(
     headroom = len(MEMORY_CONTEXT_OPEN.encode()) + len(MEMORY_CONTEXT_CLOSE.encode()) + 4
     content_budget = max(budget - headroom, 0)
 
-    for rel_path in _SNAPSHOT_FILES:
+    snapshot_rel_paths = [*_SNAPSHOT_FILES, *_recent_daily_rel_paths(workspace_root)]
+    for rel_path in snapshot_rel_paths:
         path = _resolve_workspace_path(workspace_root, rel_path)
         if path is None or not path.is_file():
             continue
@@ -281,6 +296,41 @@ def _build_snapshot(
         filesLoaded=tuple(files_loaded),
         reasonCodes=("projection_gate_on",),
     )
+
+
+def _recent_daily_rel_paths(
+    workspace_root: Path,
+    *,
+    count: int = _DEFAULT_RECENT_DAILY_COUNT,
+) -> list[str]:
+    """Return up to ``count`` newest ``memory/daily/*.md`` workspace-relative paths.
+
+    Newest-first by filename (``YYYY-MM-DD.md`` sorts chronologically as text).
+    Every candidate is re-validated through ``_resolve_workspace_path`` by the
+    caller, so a symlinked / escaping path is dropped there; this helper only
+    enumerates and never reads file contents.
+    """
+    if count <= 0:
+        return []
+    daily_dir = workspace_root / "memory" / "daily"
+    if not daily_dir.is_dir():
+        return []
+    try:
+        candidates = sorted(
+            (p for p in daily_dir.glob("*.md") if p.is_file()),
+            key=lambda p: p.name,
+            reverse=True,
+        )
+    except OSError:
+        return []
+    rel_paths: list[str] = []
+    for path in candidates[:count]:
+        try:
+            rel = path.relative_to(workspace_root).as_posix()
+        except ValueError:
+            continue
+        rel_paths.append(rel)
+    return rel_paths
 
 
 def _slice_utf8(value: str, max_bytes: int) -> str:
