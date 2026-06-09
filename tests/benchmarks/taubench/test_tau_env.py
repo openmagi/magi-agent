@@ -86,3 +86,70 @@ def test_tool_callable_returns_error_observation_on_env_exception() -> None:
     callables = build_env_tool_callables(BoomEnv(), state=EpisodeState(), action_factory=FakeAction)
     out = asyncio.run(callables["boom"]({}, None))
     assert "Error" in str(out)
+
+
+from magi_agent.benchmarks.taubench.reliability import ReliabilityConfig, WriteLedger
+
+
+@dataclass
+class _BookEnv:
+    tools_info: tuple = (
+        {"type": "function", "function": {"name": "book_reservation", "description": "d",
+         "parameters": {"type": "object",
+            "properties": {
+                "flight_type": {"type": "string", "enum": ["one_way", "round_trip"]},
+                "user_id": {"type": "string"}},
+            "required": ["user_id"]}}},
+    )
+    steps: list = field(default_factory=list)
+
+    def step(self, action):
+        self.steps.append(action)
+        return FakeResp(observation="Reservation booked id=R1", reward=0.0, done=False)
+
+
+def test_l1_blocks_invalid_enum_without_stepping() -> None:
+    env = _BookEnv()
+    led = WriteLedger()
+    cfg = ReliabilityConfig(arg_validation=True)
+    callables = build_env_tool_callables(
+        env, state=EpisodeState(), action_factory=FakeAction, reliability=cfg, ledger=led
+    )
+    out = asyncio.run(callables["book_reservation"]({"user_id": "u1", "flight_type": "one way"}, None))
+    assert "flight_type" in str(out)
+    assert env.steps == []  # never executed
+    assert led.had_successful_write() is False
+
+
+def test_l3_blocks_duplicate_write() -> None:
+    env = _BookEnv()
+    led = WriteLedger()
+    cfg = ReliabilityConfig(dup_write_guard=True)
+    callables = build_env_tool_callables(
+        env, state=EpisodeState(), action_factory=FakeAction, reliability=cfg, ledger=led
+    )
+    args = {"user_id": "u1", "flight_type": "one_way"}
+    out1 = asyncio.run(callables["book_reservation"](dict(args), None))
+    assert "booked" in str(out1).lower()
+    out2 = asyncio.run(callables["book_reservation"](dict(args), None))
+    assert "uplicate" in str(out2)  # "Duplicate write blocked..."
+    assert len(env.steps) == 1  # second call never executed
+
+
+def test_records_successful_write_in_ledger() -> None:
+    env = _BookEnv()
+    led = WriteLedger()
+    cfg = ReliabilityConfig(dup_write_guard=True)
+    callables = build_env_tool_callables(
+        env, state=EpisodeState(), action_factory=FakeAction, reliability=cfg, ledger=led
+    )
+    asyncio.run(callables["book_reservation"]({"user_id": "u1"}, None))
+    assert led.had_successful_write() is True
+
+
+def test_levers_off_by_default_do_not_interfere() -> None:
+    env = _BookEnv()
+    callables = build_env_tool_callables(env, state=EpisodeState(), action_factory=FakeAction)
+    out = asyncio.run(callables["book_reservation"]({"user_id": "u1", "flight_type": "one way"}, None))
+    assert "booked" in str(out).lower()  # executed despite invalid enum (validation off)
+    assert len(env.steps) == 1
