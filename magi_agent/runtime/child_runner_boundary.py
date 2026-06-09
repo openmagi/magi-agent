@@ -133,6 +133,29 @@ class ChildRunnerConfig(BaseModel):
     child_provider: str = Field(default="google", alias="childProvider")
     child_model: str = Field(default="gemini-3.5-flash", alias="childModel")
 
+    @field_validator(
+        "enabled",
+        "local_fake_child_runner_enabled",
+        "real_child_execution_pack_enabled",
+        mode="before",
+    )
+    @classmethod
+    def _validate_exact_bool(cls, value: object) -> bool:
+        if type(value) is not bool:
+            raise ValueError("child runner config booleans must be exact bools")
+        return value
+
+
+def _validate_child_runner_config_boundary(config: ChildRunnerConfig) -> None:
+    data = config.__dict__
+    for field in (
+        "enabled",
+        "local_fake_child_runner_enabled",
+        "real_child_execution_pack_enabled",
+    ):
+        if type(data.get(field)) is not bool:
+            raise ValueError(f"{field} must be a boolean")
+
 
 class ChildRunnerAuthorityFlags(BaseModel):
     model_config = _MODEL_CONFIG
@@ -415,6 +438,7 @@ class LocalChildRunnerBoundary:
         adk_turn_boundary: object | None = None,
         agents_spawned_so_far: int = 0,
     ) -> None:
+        _validate_child_runner_config_boundary(config)
         self.config = config
         self.child_runner = child_runner
         #: Injected real-execution surface (a ``LocalAdkTurnRunnerBoundary``).
@@ -578,6 +602,9 @@ class LocalChildRunnerBoundary:
                     provider=child_provider,
                     model=child_model,
                     modelTier=child_tier,
+                    # A vetted live child runner only executes under the pack
+                    # flag; a replay runner ignores this.
+                    liveChildRunnerAllowed=self.config.real_child_execution_pack_enabled,
                 ),
             )
         except Exception as exc:

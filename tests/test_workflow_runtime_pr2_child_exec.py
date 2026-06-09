@@ -289,6 +289,59 @@ def test_pack_enabled_routes_child_through_real_adk_surface() -> None:
     assert "/workspace" not in encoded
 
 
+def test_real_child_pack_flag_rejects_coercive_string_before_boundary() -> None:
+    with pytest.raises(Exception):
+        ChildRunnerConfig(
+            enabled=True,
+            localFakeChildRunnerEnabled=True,
+            realChildExecutionPackEnabled="yes",
+        )
+
+
+def test_constructed_real_child_pack_flag_string_never_invokes_live_runner() -> None:
+    fake = _LocalFakeRunner()
+    config = ChildRunnerConfig.model_construct(
+        enabled=True,
+        local_fake_child_runner_enabled=True,
+        real_child_execution_pack_enabled="yes",
+    )
+
+    with pytest.raises(ValueError, match="real_child_execution_pack_enabled"):
+        LocalChildRunnerBoundary(
+            config,
+            child_runner=fake,
+            adk_turn_boundary=_adk_boundary(),
+        )
+
+    assert fake.calls == 0
+
+
+def test_constructed_real_child_pack_flag_evil_bool_never_invokes_live_runner() -> None:
+    side_effects = {"count": 0}
+
+    class EvilBool:
+        def __bool__(self) -> bool:
+            side_effects["count"] += 1
+            return True
+
+    fake = _LocalFakeRunner()
+    config = ChildRunnerConfig.model_construct(
+        enabled=True,
+        local_fake_child_runner_enabled=True,
+        real_child_execution_pack_enabled=EvilBool(),
+    )
+
+    with pytest.raises(ValueError, match="real_child_execution_pack_enabled"):
+        LocalChildRunnerBoundary(
+            config,
+            child_runner=fake,
+            adk_turn_boundary=_adk_boundary(),
+        )
+
+    assert side_effects == {"count": 0}
+    assert fake.calls == 0
+
+
 def test_real_child_surface_requires_token_validated_acceptance(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
