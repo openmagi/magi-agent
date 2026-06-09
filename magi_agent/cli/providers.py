@@ -21,6 +21,7 @@ Resolution rules
 
 from __future__ import annotations
 
+import math
 import os
 import tomllib
 from dataclasses import dataclass
@@ -29,45 +30,98 @@ from typing import Mapping
 
 # ---------------------------------------------------------------------------
 # Minimal TOML serializer (tomli_w is not in the project's dependencies; we
-# keep this small and only handle the value types that appear in config.toml:
-# str, bool, int, float, and nested tables (dicts)).  Lists are NOT supported
-# by this config format, so we skip them gracefully.
+# keep this small and handle the value types that appear in real config.toml:
+# str, bool, int, finite-float, list (of the above), and nested tables (dicts).
+#
+# Anything not faithfully renderable — datetimes, None, sets, inf/nan, nested
+# dicts inside arrays (array-of-tables) — raises ValueError immediately rather
+# than emitting a corrupt/lossy representation.
 # ---------------------------------------------------------------------------
+
+# Control-character escape map for TOML basic strings.
+_TOML_ESCAPES: dict[str, str] = {
+    "\\": "\\\\",
+    '"': '\\"',
+    "\b": "\\b",
+    "\f": "\\f",
+    "\n": "\\n",
+    "\r": "\\r",
+    "\t": "\\t",
+}
+
+
+def _escape_toml_string(s: str) -> str:
+    """Return the content of a TOML basic string (without surrounding quotes)."""
+    parts: list[str] = []
+    for ch in s:
+        if ch in _TOML_ESCAPES:
+            parts.append(_TOML_ESCAPES[ch])
+        elif ord(ch) < 0x20 or ord(ch) == 0x7F:
+            # Other control chars: use \uXXXX escape.
+            parts.append(f"\\u{ord(ch):04X}")
+        else:
+            parts.append(ch)
+    return "".join(parts)
 
 
 def _toml_value(value: object) -> str:
-    """Render a scalar or nested-table value as a TOML literal."""
+    """Render a scalar, list, or nested-table value as a TOML literal.
+
+    Raises ``ValueError`` for any type/value that cannot be faithfully
+    represented in TOML by this serializer (e.g. datetimes, None, sets,
+    inf, nan, arrays-of-tables).
+    """
     if isinstance(value, bool):  # bool BEFORE int (bool is a subclass of int)
         return "true" if value else "false"
     if isinstance(value, int):
         return str(value)
     if isinstance(value, float):
+        if math.isnan(value) or math.isinf(value):
+            raise ValueError(
+                f"Cannot serialize float {value!r} to TOML: "
+                "inf and nan are not valid TOML float literals."
+            )
         return repr(value)
     if isinstance(value, str):
-        # Escape backslashes and double-quotes; use basic string.
-        escaped = value.replace("\\", "\\\\").replace('"', '\\"')
-        return f'"{escaped}"'
-    # Unsupported type (e.g. list) — skip by signalling None to caller.
-    return ""  # pragma: no cover
+        return f'"{_escape_toml_string(value)}"'
+    if isinstance(value, (list, tuple)):
+        # Render as a TOML inline array.  Each element must be a scalar
+        # (dict elements would require array-of-tables syntax which we don't
+        # support here — raise so the round-trip self-check catches it).
+        rendered_elems: list[str] = []
+        for elem in value:
+            if isinstance(elem, dict):
+                raise ValueError(
+                    "Cannot serialize a list containing dicts (array-of-tables) "
+                    "with this minimal TOML writer."
+                )
+            rendered_elems.append(_toml_value(elem))
+        return "[" + ", ".join(rendered_elems) + "]"
+    # Unsupported type (datetime, None, set, …) — raise instead of silently dropping.
+    raise ValueError(
+        f"Cannot serialize value of type {type(value).__name__!r} to TOML: {value!r}. "
+        "Aborting to prevent config data loss."
+    )
 
 
 def _render_toml(data: dict[str, object]) -> str:
     """Serialize ``data`` to a minimal TOML string (sections + key=value).
 
     Handles arbitrarily nested tables by emitting ``[a.b.c]`` section headers
-    for nested dict values.  Scalars at each level are emitted as ``key = val``
-    lines immediately after the section header.
+    for nested dict values.  Scalars and arrays at each level are emitted as
+    ``key = val`` lines immediately after the section header.
+
+    Raises ``ValueError`` for any value type that cannot be faithfully rendered.
     """
     lines: list[str] = []
 
     def _emit_section(d: dict[str, object], prefix: str) -> None:
-        """Emit the scalar keys of ``d`` then recurse into sub-tables."""
-        # Scalars first.
+        """Emit the non-dict keys of ``d`` then recurse into sub-tables."""
+        # Non-table values first (scalars + inline arrays).
         for key, value in d.items():
             if not isinstance(value, dict):
                 rendered = _toml_value(value)
-                if rendered:
-                    lines.append(f"{key} = {rendered}")
+                lines.append(f"{key} = {rendered}")
         # Sub-tables after (each gets its own [prefix.key] header).
         for key, value in d.items():
             if isinstance(value, dict):
@@ -75,12 +129,11 @@ def _render_toml(data: dict[str, object]) -> str:
                 lines.append(f"\n[{section_name}]")
                 _emit_section(value, section_name)
 
-    # Top-level scalars (no section header needed).
+    # Top-level non-table values (no section header needed).
     for key, value in data.items():
         if not isinstance(value, dict):
             rendered = _toml_value(value)
-            if rendered:
-                lines.append(f"{key} = {rendered}")
+            lines.append(f"{key} = {rendered}")
     # Top-level tables.
     for key, value in data.items():
         if isinstance(value, dict):
@@ -300,11 +353,22 @@ def persist_model(model_id: str, *, path: Path | None = None) -> None:
     raw = dict(raw)  # shallow copy top level
     raw["model"] = model_section
 
+    # Round-trip self-check: render → re-parse and assert equality BEFORE writing.
+    # If _render_toml raises (unrenderable value) or the round-trip check fails,
+    # we abort here — BEFORE touching the file — so the original is never lost.
+    rendered = _render_toml(raw)  # may raise ValueError for unrenderable types
+    reparsed = tomllib.loads(rendered)
+    if reparsed != raw:
+        raise ValueError(
+            "TOML round-trip self-check failed: the rendered config does not "
+            "re-parse to the intended dict. Aborting to preserve the original file."
+        )
+
     # Atomic write: temp file in same dir then os.replace.
     config_path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = config_path.with_suffix(".toml.tmp")
     try:
-        tmp_path.write_text(_render_toml(raw), encoding="utf-8")
+        tmp_path.write_text(rendered, encoding="utf-8")
         tmp_path.replace(config_path)
     finally:
         # Clean up temp if replace failed.

@@ -544,3 +544,211 @@ class TestModelCommandTuiReturnsSkip:
         ctx = _ctx(app=_FakeApp())
         asyncio.run(cmd.call(None, ctx))
         assert opened == ["model_picker"]
+
+
+# ---------------------------------------------------------------------------
+# New tests: array preservation, special-char strings, fail-safe on
+# unrenderable types, and round-trip self-check in persist_model.
+# ---------------------------------------------------------------------------
+
+
+class TestPersistModelFailSafe:
+    """Covers the two data-loss bugs + fail-safe round-trip self-check."""
+
+    # ------------------------------------------------------------------
+    # Bug 1: arrays silently dropped → must now be preserved
+    # ------------------------------------------------------------------
+
+    def test_array_preserved_after_persist(self, tmp_path: Path) -> None:
+        """Config with an array value is intact after persist_model."""
+        import tomllib
+
+        cfg = tmp_path / "config.toml"
+        cfg.write_text(
+            '[mcp]\nservers = ["alpha", "beta"]\n',
+            encoding="utf-8",
+        )
+        persist_model("new-model", path=cfg)
+        with open(cfg, "rb") as fh:
+            data = tomllib.load(fh)
+        # Array must survive unchanged.
+        assert data["mcp"]["servers"] == ["alpha", "beta"]
+        # Model must be updated.
+        assert data["model"]["model"] == "new-model"
+
+    def test_array_of_ints_preserved(self, tmp_path: Path) -> None:
+        """Array of integers survives persist_model unchanged."""
+        import tomllib
+
+        cfg = tmp_path / "config.toml"
+        cfg.write_text('[retries]\nmax_attempts = 3\nports = [8080, 8081, 8082]\n', encoding="utf-8")
+        persist_model("some-model", path=cfg)
+        with open(cfg, "rb") as fh:
+            data = tomllib.load(fh)
+        assert data["retries"]["ports"] == [8080, 8081, 8082]
+        assert data["model"]["model"] == "some-model"
+
+    # ------------------------------------------------------------------
+    # Bug 2: special-char strings produce invalid TOML → must round-trip
+    # ------------------------------------------------------------------
+
+    def test_special_char_string_round_trips(self, tmp_path: Path) -> None:
+        """String with quote, backslash, newline and tab round-trips identically."""
+        import tomllib
+
+        # The tricky string contains: double quote, backslash, newline, tab.
+        tricky = 'say "hello"\npath\\to\tthing'
+        cfg = tmp_path / "config.toml"
+        # Write initial config with a tricky TOML-escaped string value.
+        # In TOML basic strings: \" = quote, \\ = backslash, \n = newline, \t = tab.
+        cfg.write_text(
+            '[providers.anthropic]\napi_key = "sk-plain"\n'
+            '[meta]\nnote = "say \\"hello\\"\\npath\\\\to\\tthing"\n',
+            encoding="utf-8",
+        )
+        # Verify the file is parseable before we touch it.
+        with open(cfg, "rb") as fh:
+            before = tomllib.load(fh)
+        assert before["meta"]["note"] == tricky
+
+        persist_model("target-model", path=cfg)
+
+        with open(cfg, "rb") as fh:
+            after = tomllib.load(fh)
+        # Special-char string must be byte-faithful.
+        assert after["meta"]["note"] == tricky
+        # Model updated.
+        assert after["model"]["model"] == "target-model"
+        # API key preserved.
+        assert after["providers"]["anthropic"]["api_key"] == "sk-plain"
+
+    def test_backslash_and_quote_string_round_trips(self, tmp_path: Path) -> None:
+        """Backslash and double-quote in a string survive persist_model."""
+        import tomllib
+
+        value = 'C:\\Users\\test\\path with "spaces"'
+        cfg = tmp_path / "config.toml"
+        # In TOML: \\ → backslash, \" → double-quote.
+        cfg.write_text(
+            '[settings]\nbase_dir = "C:\\\\Users\\\\test\\\\path with \\"spaces\\""\n',
+            encoding="utf-8",
+        )
+        with open(cfg, "rb") as fh:
+            before = tomllib.load(fh)
+        assert before["settings"]["base_dir"] == value  # sanity-check before touch
+
+        persist_model("m1", path=cfg)
+        with open(cfg, "rb") as fh:
+            data = tomllib.load(fh)
+        assert data["settings"]["base_dir"] == value
+
+    # ------------------------------------------------------------------
+    # Fail-safe: datetime values → raises, original file UNCHANGED
+    # ------------------------------------------------------------------
+
+    def test_datetime_in_config_raises_and_file_unchanged(self, tmp_path: Path) -> None:
+        """persist_model raises ValueError on a config containing a datetime; file untouched."""
+        import datetime
+
+        cfg = tmp_path / "config.toml"
+        # Write a TOML file that has a datetime field.
+        cfg.write_text(
+            "[meta]\ncreated = 2026-06-09T10:00:00Z\n[model]\nmodel = \"old-model\"\n",
+            encoding="utf-8",
+        )
+        original_bytes = cfg.read_bytes()
+
+        with pytest.raises((ValueError, TypeError)):
+            persist_model("new-model", path=cfg)
+
+        # File must be UNCHANGED.
+        assert cfg.read_bytes() == original_bytes
+
+    # ------------------------------------------------------------------
+    # Fail-safe: inf/nan float → raises, original file UNCHANGED
+    # ------------------------------------------------------------------
+
+    def test_inf_float_raises_and_file_unchanged(self, tmp_path: Path) -> None:
+        """persist_model raises when a float inf/nan is in the config."""
+        import math
+        import tomllib
+
+        cfg = tmp_path / "config.toml"
+        cfg.write_text('[model]\nmodel = "old"\n', encoding="utf-8")
+        original_bytes = cfg.read_bytes()
+
+        # Inject an inf directly into the raw dict to simulate a config that
+        # somehow has inf (e.g., from a programmatic update rather than TOML parse).
+        # We do this by monkeypatching the read step in the test itself.
+        from magi_agent.cli import providers as prov_mod
+
+        _orig_load = prov_mod.tomllib.load  # type: ignore[attr-defined]
+
+        def _fake_load(fh):
+            return {"model": {"model": "old", "threshold": math.inf}}
+
+        prov_mod.tomllib.load = _fake_load  # type: ignore[attr-defined]
+        try:
+            with pytest.raises((ValueError, OverflowError)):
+                persist_model("new-model", path=cfg)
+        finally:
+            prov_mod.tomllib.load = _orig_load  # type: ignore[attr-defined]
+
+        assert cfg.read_bytes() == original_bytes
+
+    def test_nan_float_raises_and_file_unchanged(self, tmp_path: Path) -> None:
+        """persist_model raises when a float nan is in the config."""
+        import math
+
+        cfg = tmp_path / "config.toml"
+        cfg.write_text('[model]\nmodel = "old"\n', encoding="utf-8")
+        original_bytes = cfg.read_bytes()
+
+        from magi_agent.cli import providers as prov_mod
+
+        _orig_load = prov_mod.tomllib.load  # type: ignore[attr-defined]
+
+        def _fake_load(fh):
+            return {"model": {"model": "old", "score": math.nan}}
+
+        prov_mod.tomllib.load = _fake_load  # type: ignore[attr-defined]
+        try:
+            with pytest.raises((ValueError, OverflowError)):
+                persist_model("new-model", path=cfg)
+        finally:
+            prov_mod.tomllib.load = _orig_load  # type: ignore[attr-defined]
+
+        assert cfg.read_bytes() == original_bytes
+
+    # ------------------------------------------------------------------
+    # Round-trip self-check: realistic nested config
+    # ------------------------------------------------------------------
+
+    def test_realistic_nested_config_round_trips(self, tmp_path: Path) -> None:
+        """A realistic config (nested tables + keys + array) round-trips faithfully."""
+        import tomllib
+
+        cfg = tmp_path / "config.toml"
+        cfg.write_text(
+            "[providers.anthropic]\n"
+            'api_key = "sk-ant-test"\n'
+            "\n[providers.openai]\n"
+            'api_key = "sk-openai-test"\n'
+            "\n[mcp]\n"
+            'servers = ["server-a", "server-b"]\n'
+            "\n[model]\n"
+            'model = "old-model"\n'
+            'provider = "anthropic"\n',
+            encoding="utf-8",
+        )
+
+        persist_model("claude-opus-4", path=cfg)
+
+        with open(cfg, "rb") as fh:
+            data = tomllib.load(fh)
+
+        assert data["providers"]["anthropic"]["api_key"] == "sk-ant-test"
+        assert data["providers"]["openai"]["api_key"] == "sk-openai-test"
+        assert data["mcp"]["servers"] == ["server-a", "server-b"]
+        assert data["model"]["model"] == "claude-opus-4"
+        assert data["model"]["provider"] == "anthropic"
