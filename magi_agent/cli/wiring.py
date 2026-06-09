@@ -48,6 +48,7 @@ from magi_agent.cli.engine import (
     MagiEngineDriver,
     RunnerPolicyAssembly,
     build_engine_recovery_policy,
+    build_output_continuation_config,
 )
 from magi_agent.cli.permissions import HeadlessSink, PermissionMode, RulesPermissionGate
 from magi_agent.cli.session_log import SessionLog
@@ -213,6 +214,7 @@ def build_headless_runtime(
     engine = MagiEngineDriver(
         runner=effective_runner,
         recovery=build_engine_recovery_policy(),
+        output_continuation=build_output_continuation_config(),
         runner_policy_assembly=_build_runner_policy_assembly(
             runner=effective_runner,
             model=model,
