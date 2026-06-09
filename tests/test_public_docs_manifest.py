@@ -10,6 +10,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 DOCS = ROOT / "docs"
 MANIFEST = DOCS / "manifest.json"
+PACKAGED_DASHBOARD_LLMS = ROOT / "magi_agent" / "web_dashboard" / "llms.txt"
 BANNED_PUBLIC_DOC_PREFIXES = (
     "docs/architecture/parity/",
     "docs/internal/",
@@ -187,7 +188,7 @@ def test_docs_landing_pages_link_to_openmagi_site_and_source() -> None:
 
 
 def test_machine_readable_docs_do_not_include_planning_only_markers() -> None:
-    for path in (DOCS / "llms.txt", DOCS / "llms-full.txt"):
+    for path in (DOCS / "llms.txt", DOCS / "llms-full.txt", PACKAGED_DASHBOARD_LLMS):
         text = path.read_text(encoding="utf-8")
         for marker in PLANNING_ONLY_MARKERS:
             assert marker not in text
@@ -195,7 +196,7 @@ def test_machine_readable_docs_do_not_include_planning_only_markers() -> None:
 
 def test_public_docs_do_not_describe_stale_disabled_or_typescript_runtime_state() -> None:
     public_docs = [ROOT / page["path"] for page in _manifest_pages()]
-    public_docs.extend((DOCS / "llms.txt", DOCS / "llms-full.txt"))
+    public_docs.extend((DOCS / "llms.txt", DOCS / "llms-full.txt", PACKAGED_DASHBOARD_LLMS))
 
     for path in public_docs:
         text = path.read_text(encoding="utf-8")
@@ -205,7 +206,9 @@ def test_public_docs_do_not_describe_stale_disabled_or_typescript_runtime_state(
 
 def test_public_docs_do_not_include_internal_worktree_pr_or_track_residue() -> None:
     public_docs = [ROOT / page["path"] for page in _manifest_pages()]
-    public_docs.extend((ROOT / "README.md", DOCS / "llms.txt", DOCS / "llms-full.txt"))
+    public_docs.extend(
+        (ROOT / "README.md", DOCS / "llms.txt", DOCS / "llms-full.txt", PACKAGED_DASHBOARD_LLMS)
+    )
 
     for path in public_docs:
         text = path.read_text(encoding="utf-8")
@@ -215,7 +218,9 @@ def test_public_docs_do_not_include_internal_worktree_pr_or_track_residue() -> N
 
 def test_public_docs_do_not_include_stale_node_or_typescript_contributor_residue() -> None:
     public_docs = [ROOT / page["path"] for page in _manifest_pages()]
-    public_docs.extend((ROOT / "README.md", DOCS / "llms.txt", DOCS / "llms-full.txt"))
+    public_docs.extend(
+        (ROOT / "README.md", DOCS / "llms.txt", DOCS / "llms-full.txt", PACKAGED_DASHBOARD_LLMS)
+    )
 
     for path in public_docs:
         text = path.read_text(encoding="utf-8")
@@ -225,7 +230,9 @@ def test_public_docs_do_not_include_stale_node_or_typescript_contributor_residue
 
 def test_public_docs_do_not_include_internal_hosted_rollout_residue() -> None:
     public_docs = [ROOT / page["path"] for page in _manifest_pages()]
-    public_docs.extend((ROOT / "README.md", DOCS / "llms.txt", DOCS / "llms-full.txt"))
+    public_docs.extend(
+        (ROOT / "README.md", DOCS / "llms.txt", DOCS / "llms-full.txt", PACKAGED_DASHBOARD_LLMS)
+    )
 
     for path in public_docs:
         text = path.read_text(encoding="utf-8").lower()
