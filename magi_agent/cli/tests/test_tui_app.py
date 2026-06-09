@@ -756,14 +756,18 @@ def test_app_legacy_richlog_flag_restores_richlog(monkeypatch) -> None:
     asyncio.run(_run())
 
 
-def test_tool_event_commits_collapsible_card(monkeypatch) -> None:
+def test_tool_event_commits_one_line_block(monkeypatch) -> None:
+    """Tool events render as compact one-line blocks, never collapsible cards.
+
+    The old large ``▶`` ``ToolCard`` boxes flooded the transcript; tools now
+    render Claude-Code style (``● Name(arg)`` + dimmed ``└ preview``) committed
+    inline, so no ``ToolCard`` widget is ever mounted on either backing.
+    """
+
     async def _run() -> None:
         from magi_agent.cli.tui.tool_render import build_tool_renderers
         from magi_agent.cli.tui.widgets.tool_card import ToolCard
 
-        # This asserts the widget-list (default) backing, so pin it even when a
-        # full-suite run sets MAGI_TUI_LEGACY_RICHLOG in the environment
-        # (the legacy path is covered by test_tool_event_legacy_richlog_no_card).
         monkeypatch.delenv("MAGI_TUI_LEGACY_RICHLOG", raising=False)
         engine = FakeEngineDriver(tokens=["ok"], ask_tool="Bash")
         app = MagiTuiApp(
@@ -776,15 +780,59 @@ def test_tool_event_commits_collapsible_card(monkeypatch) -> None:
             app.start_turn("run ls")
             await app.workers.wait_for_complete()
             await pilot.pause()
-            # The Bash tool_end rendered as a collapsed ToolCard in the view.
-            cards = app.query(ToolCard)
-            assert len(cards) >= 1
-            assert all(card.collapsed for card in cards)
+            # No collapsible cards: tool output is committed inline.
+            assert len(app.query(ToolCard)) == 0
             # Search fidelity: the tool text is still in the committed snapshot.
             joined = "\n".join(app.controller.committed_blocks_snapshot())
             assert "Bash" in joined
 
     asyncio.run(_run())
+
+
+def test_internal_status_events_hidden_by_default(monkeypatch) -> None:
+    """Internal lifecycle/plumbing status events are dropped from the transcript
+    unless MAGI_TUI_VERBOSE=1 — they used to flood chat with bare lines like
+    ``runner_policy_assembly`` / ``phase_route_decision`` / ``turn_end``."""
+
+    class _StatusEngine:
+        async def run_turn_stream(self, runtime, turn_input, *, cancel, gate=None):
+            turn_id = getattr(turn_input, "turn_id", "t")
+            yield RuntimeEvent(
+                type="status",
+                payload={"type": "runner_policy_assembly", "turnId": turn_id},
+                turn_id=turn_id,
+            )
+            yield RuntimeEvent(
+                type="token", payload={"delta": "hi"}, turn_id=turn_id
+            )
+            yield EngineResult(terminal=Terminal.completed, turn_id=turn_id)
+
+    async def _run(verbose: bool) -> str:
+        from magi_agent.cli.tui.tool_render import build_tool_renderers
+
+        monkeypatch.delenv("MAGI_TUI_LEGACY_RICHLOG", raising=False)
+        if verbose:
+            monkeypatch.setenv("MAGI_TUI_VERBOSE", "1")
+        else:
+            monkeypatch.delenv("MAGI_TUI_VERBOSE", raising=False)
+        app = MagiTuiApp(
+            engine=_StatusEngine(),
+            gate=AllowGate(),
+            commands=FakeRegistry(["compact"]),
+            renderers=build_tool_renderers(),
+        )
+        async with app.run_test() as pilot:
+            app.start_turn("hi")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            return "\n".join(app.controller.committed_blocks_snapshot())
+
+    quiet = asyncio.run(_run(verbose=False))
+    assert "runner_policy_assembly" not in quiet
+    assert "hi" in quiet  # real assistant text still renders
+
+    loud = asyncio.run(_run(verbose=True))
+    assert "runner_policy_assembly" in loud
 
 
 def test_assistant_text_committed_before_tool_card_in_one_turn(monkeypatch) -> None:
