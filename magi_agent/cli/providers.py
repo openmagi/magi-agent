@@ -27,6 +27,71 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping
 
+# ---------------------------------------------------------------------------
+# Minimal TOML serializer (tomli_w is not in the project's dependencies; we
+# keep this small and only handle the value types that appear in config.toml:
+# str, bool, int, float, and nested tables (dicts)).  Lists are NOT supported
+# by this config format, so we skip them gracefully.
+# ---------------------------------------------------------------------------
+
+
+def _toml_value(value: object) -> str:
+    """Render a scalar or nested-table value as a TOML literal."""
+    if isinstance(value, bool):  # bool BEFORE int (bool is a subclass of int)
+        return "true" if value else "false"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        return repr(value)
+    if isinstance(value, str):
+        # Escape backslashes and double-quotes; use basic string.
+        escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+        return f'"{escaped}"'
+    # Unsupported type (e.g. list) — skip by signalling None to caller.
+    return ""  # pragma: no cover
+
+
+def _render_toml(data: dict[str, object]) -> str:
+    """Serialize ``data`` to a minimal TOML string (sections + key=value).
+
+    Handles arbitrarily nested tables by emitting ``[a.b.c]`` section headers
+    for nested dict values.  Scalars at each level are emitted as ``key = val``
+    lines immediately after the section header.
+    """
+    lines: list[str] = []
+
+    def _emit_section(d: dict[str, object], prefix: str) -> None:
+        """Emit the scalar keys of ``d`` then recurse into sub-tables."""
+        # Scalars first.
+        for key, value in d.items():
+            if not isinstance(value, dict):
+                rendered = _toml_value(value)
+                if rendered:
+                    lines.append(f"{key} = {rendered}")
+        # Sub-tables after (each gets its own [prefix.key] header).
+        for key, value in d.items():
+            if isinstance(value, dict):
+                section_name = f"{prefix}.{key}" if prefix else key
+                lines.append(f"\n[{section_name}]")
+                _emit_section(value, section_name)
+
+    # Top-level scalars (no section header needed).
+    for key, value in data.items():
+        if not isinstance(value, dict):
+            rendered = _toml_value(value)
+            if rendered:
+                lines.append(f"{key} = {rendered}")
+    # Top-level tables.
+    for key, value in data.items():
+        if isinstance(value, dict):
+            lines.append(f"\n[{key}]")
+            _emit_section(value, key)
+
+    result = "\n".join(lines)
+    if result and not result.endswith("\n"):
+        result += "\n"
+    return result
+
 from magi_agent.config.env import LOCAL_DEV_MODEL_SENTINEL
 
 # Auto-detect order. Anthropic first (magi's primary deployment posture), then
@@ -191,10 +256,71 @@ def resolve_provider_config(
     return None
 
 
+def model_choices_from_config(current: str | None = None) -> list[str]:
+    """Return candidate model ids with ``current`` first (if known).
+
+    Delegates to :func:`magi_agent.cli.tui.dialogs.model.model_choices` so the
+    list is always in sync with the picker dialog.  This thin wrapper lives in
+    ``providers.py`` so ``control.py`` can import it without pulling in
+    ``textual`` at the top level (the dialog module is imported lazily inside
+    the wrapper function call).
+    """
+
+    from magi_agent.cli.tui.dialogs.model import model_choices  # noqa: PLC0415
+
+    return model_choices(current)
+
+
+def persist_model(model_id: str, *, path: Path | None = None) -> None:
+    """Write ``model_id`` to ``[model].model`` in the magi config file.
+
+    - Reads the existing config (tolerates missing file — starts from empty).
+    - Sets ``[model].model = <model_id>`` WITHOUT clobbering other sections/keys.
+    - Writes back atomically (temp file + replace) and creates ``~/.magi/`` if
+      needed.
+    - ``path`` overrides the default config path for tests so tests NEVER touch
+      the real ``~/.magi/config.toml``.
+    """
+    config_path = path if path is not None else _config_path()
+    # Load existing config so we don't lose other sections/keys.
+    try:
+        with open(config_path, "rb") as fh:
+            raw: dict[str, object] = tomllib.load(fh)
+    except (FileNotFoundError, NotADirectoryError, IsADirectoryError):
+        raw = {}
+    except (OSError, tomllib.TOMLDecodeError):
+        raw = {}
+
+    # Ensure [model] section exists and set .model within it.
+    model_section = raw.get("model")
+    if not isinstance(model_section, dict):
+        model_section = {}
+    model_section = dict(model_section)  # shallow copy — don't mutate original
+    model_section["model"] = model_id
+    raw = dict(raw)  # shallow copy top level
+    raw["model"] = model_section
+
+    # Atomic write: temp file in same dir then os.replace.
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = config_path.with_suffix(".toml.tmp")
+    try:
+        tmp_path.write_text(_render_toml(raw), encoding="utf-8")
+        tmp_path.replace(config_path)
+    finally:
+        # Clean up temp if replace failed.
+        if tmp_path.exists():
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
+
+
 __all__ = [
     "SUPPORTED_PROVIDERS",
     "ProviderConfig",
     "UnknownProviderError",
     "default_model_for",
     "resolve_provider_config",
+    "persist_model",
+    "model_choices_from_config",
 ]

@@ -196,6 +196,21 @@ def _session_lifecycle(ctx: CommandContext) -> SessionLifecycle | None:
     return lc
 
 
+def _app_has_model_dialog(ctx: CommandContext) -> bool:
+    """Return ``True`` when ``ctx.app`` exposes the model picker dialog.
+
+    Checks for the ``open_dialog`` callable (duck-typed; no textual import),
+    which ``MagiTuiApp`` provides.  This is the TUI-surface gate that allows
+    ``/model`` to be VISIBLE in the TUI without requiring a ``ModelSelector``
+    to be wired on the runtime.
+    """
+
+    app = getattr(ctx, "app", None)
+    if app is None:
+        return False
+    return callable(getattr(app, "open_dialog", None))
+
+
 # ---------------------------------------------------------------------------
 # LocalCommand implementations
 # ---------------------------------------------------------------------------
@@ -203,25 +218,80 @@ def _session_lifecycle(ctx: CommandContext) -> SessionLifecycle | None:
 
 @dataclass
 class ModelCommand(LocalCommand):
-    """``/model [model-id]`` — list or switch the active model.
+    """``/model [model-id]`` — set the active model via the TUI picker or directly.
 
-    No arg → list ``current_model()`` and available ``list_models()``.
-    With an arg → call ``select_model(arg)`` and confirm selection.
-    No ``ModelSelector`` wired → ``Skip()`` (safe no-op; command is hidden
-    from ``list_for`` anyway when no selector is present).
+    Behaviour matrix:
+    - ``/model <id>`` (any surface): persist ``<id>`` to config and confirm.
+    - ``/model`` (no arg) + TUI app present: open the interactive picker via
+      ``ctx.app.open_dialog("model_picker")``; the picker's ``_apply_model``
+      callback handles selection + persistence.  Returns ``Skip()`` so the
+      caller does not try to render anything.
+    - ``/model`` (no arg) + headless / no app: list available model ids and
+      hint the user to pass an id explicitly.
+
+    No ``ModelSelector`` is required — the command works via config persistence
+    and the TUI dialog path.  The old ``ModelSelector`` path (live runtime
+    switching) is preserved when a selector IS wired: with an arg we still call
+    ``select_model`` in addition to persisting.
     """
 
     async def call(self, args: object, ctx: CommandContext) -> LocalResult:  # type: ignore[override]
-        sel = _model_selector(ctx)
-        if sel is None:
-            return Skip()
+        from magi_agent.cli.providers import (  # noqa: PLC0415
+            _config_path,
+            model_choices_from_config,
+            persist_model,
+        )
+
         arg = str(args).strip() if args else ""
+
         if arg:
-            sel.select_model(arg)
-            return Text(text=f"model: selected {arg}")
-        current = sel.current_model() or "(none)"
-        available = ", ".join(sel.list_models()) or "(none)"
-        return Text(text=f"model: current={current} available=[{available}]")
+            # Headless or TUI with an explicit id: persist and confirm.
+            persist_model(arg)
+            # Also drive the ModelSelector when one is wired (live switch too).
+            sel = _model_selector(ctx)
+            if sel is not None:
+                sel.select_model(arg)
+            return Text(
+                text=f"model: set {arg} (saved to config, applies next session)"
+            )
+
+        # No arg: TUI path — open the interactive picker.
+        app = getattr(ctx, "app", None)
+        if app is not None:
+            open_dialog = getattr(app, "open_dialog", None)
+            if callable(open_dialog):
+                open_dialog("model_picker")
+                return Skip()
+
+        # No arg, no app (headless without an id) — list choices + hint.
+        current = None
+        sel = _model_selector(ctx)
+        if sel is not None:
+            current = sel.current_model()
+        if current is None:
+            # Best-effort: read current from config.
+            try:
+                import tomllib as _tomllib  # noqa: PLC0415
+
+                cfg_path = _config_path()
+                with open(cfg_path, "rb") as fh:
+                    cfg = _tomllib.load(fh)
+                model_sec = cfg.get("model")
+                if isinstance(model_sec, dict):
+                    val = model_sec.get("model")
+                    if isinstance(val, str) and val.strip():
+                        current = val.strip()
+            except Exception:
+                pass
+        choices = model_choices_from_config(current)
+        available = ", ".join(choices) or "(none)"
+        current_str = current or "(none)"
+        return Text(
+            text=(
+                f"model: current={current_str} available=[{available}]\n"
+                f"hint: /model <id> to set and save"
+            )
+        )
 
 
 @dataclass
@@ -307,7 +377,10 @@ def _control_specs() -> list[tuple[LocalCommand, Callable[[CommandContext], bool
     return [
         (
             ModelCommand(name="model", surface=_CONTROL_BOTH),
-            lambda ctx: _model_selector(ctx) is not None,
+            lambda ctx: (
+                _model_selector(ctx) is not None
+                or _app_has_model_dialog(ctx)
+            ),
         ),
         (
             AgentCommand(name="agent", surface=_CONTROL_BOTH),
