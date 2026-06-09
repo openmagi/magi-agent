@@ -79,6 +79,7 @@ from magi_agent.cli.tui.autocomplete import (
 )
 from magi_agent.cli.tui.history import DraftStash, InputHistory
 from magi_agent.cli.tui.input import PromptInput, Submission
+from magi_agent.cli.tui.palette import AppActionProvider, CommandPaletteProvider
 from magi_agent.cli.tui.render.markdown import render_markdown
 from magi_agent.cli.tui.transcript import (
     DEFAULT_FLUSH_INTERVAL,
@@ -487,6 +488,14 @@ class MagiTuiApp(App[None]):
         ("ctrl+y", "copy_selection", "Copy"),
     ]
 
+    # Textual's built-in command palette (PR2.1). Ctrl+P is already the 8.2.7
+    # default (verified: ``App.COMMAND_PALETTE_BINDING == "ctrl+p"``); pin it
+    # explicitly (OQ2) so a future Textual default change can't silently move it,
+    # and so it documents intent. No collision with BINDINGS (ctrl+c / ctrl+y)
+    # or the keybindings defaults.
+    COMMANDS = {CommandPaletteProvider, AppActionProvider}
+    COMMAND_PALETTE_BINDING = "ctrl+p"
+
     def __init__(
         self,
         *,
@@ -696,6 +705,25 @@ class MagiTuiApp(App[None]):
             self._dispatch_command(submission)
             return
         self.start_turn(submission.text)
+
+    def submit_command(self, name: str, args: str = "") -> None:
+        """Submit a slash command exactly as if typed at the prompt.
+
+        Builds the SAME ``Submission`` the prompt input's ``classify_line``
+        produces for ``/name args`` (kind/text/command_name/args + the registry
+        ``lookup`` result) and routes it through
+        ``on_prompt_input_prompt_submitted`` → ``_dispatch_command``. This is the
+        single funnel both typed and palette-launched commands use, so PR2.2's
+        executor and the single-turn invariant apply uniformly.
+        """
+
+        from magi_agent.cli.tui.input import classify_line  # noqa: PLC0415
+
+        line = f"/{name} {args}".rstrip()
+        submission = classify_line(line, self._commands)
+        self.on_prompt_input_prompt_submitted(
+            PromptInput.PromptSubmitted(submission)
+        )
 
     def on_text_area_changed(self, event: TextArea.Changed) -> None:
         # Recompute completions for the current pre-cursor slice (debounced via
