@@ -215,6 +215,69 @@ def test_compaction_not_called_when_disabled(
 
 
 # ---------------------------------------------------------------------------
+# 5b. redact BEFORE truncate (I1 regression)
+# ---------------------------------------------------------------------------
+
+
+def test_secret_split_by_truncation_is_still_redacted(tmp_path: Path) -> None:
+    """A secret straddling the assistant ~400-char cap must NOT leak a fragment.
+
+    If the entry were truncated BEFORE redaction, the cap would split the token
+    mid-string and the redactor (which matches whole secrets) could miss the
+    surviving prefix. Redact-before-truncate kills the secret first.
+    """
+    secret = "sk-live-DEADBEEFCAFEBABE0123456789ABCDEF"
+    # Pad so the secret straddles the 400-char assistant cap: a leading run of
+    # filler ending a few chars before 400, then the secret crossing the cap.
+    filler = "x" * 397
+    assistant = f"{filler}{secret} and then more trailing context after it"
+
+    record_turn(
+        workspace_root=tmp_path,
+        session_id="s1",
+        turn_id="t1",
+        user_text="here is the deploy token to use",
+        assistant_text=assistant,
+        used_tool=True,
+        config=_cfg(writeEnabled=True),
+        today=date(2026, 6, 8),
+    )
+
+    files = _daily_files(tmp_path)
+    assert len(files) == 1
+    body = files[0].read_text(encoding="utf-8")
+    # The secret (or any fragment of it) must not survive in the daily entry.
+    # (The redaction marker itself may be truncated away by the char cap; what
+    # matters is that no secret material leaks.)
+    assert secret not in body
+    assert "DEADBEEF" not in body
+    assert "sk-live" not in body
+
+
+def test_secret_in_user_text_is_redacted(tmp_path: Path) -> None:
+    """User-side secrets are redacted before truncation too (~200-char cap)."""
+    secret = "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+    user = ("y" * 190) + secret + " trailing user context"
+
+    record_turn(
+        workspace_root=tmp_path,
+        session_id="s1",
+        turn_id="t1",
+        user_text=user,
+        assistant_text="a long meaningful assistant reply about the work " * 3,
+        used_tool=True,
+        config=_cfg(writeEnabled=True),
+        today=date(2026, 6, 8),
+    )
+
+    files = _daily_files(tmp_path)
+    assert len(files) == 1
+    body = files[0].read_text(encoding="utf-8")
+    assert secret not in body
+    assert "ghp_" not in body
+
+
+# ---------------------------------------------------------------------------
 # 6. fail-soft
 # ---------------------------------------------------------------------------
 

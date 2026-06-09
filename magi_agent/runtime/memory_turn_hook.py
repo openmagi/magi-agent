@@ -86,13 +86,16 @@ def _build_turn_entry(
 ) -> str:
     """Render a compact one-block daily entry for a completed turn.
 
-    Redaction is applied by ``append_daily_entry`` downstream, so this just
-    shapes a concise, human-readable block.  Long user/assistant text is
-    truncated here so the raw daily log stays bounded per turn (the tree's
-    summarizer handles cross-turn growth).
+    Redaction is applied here BEFORE truncation (and again, defense-in-depth,
+    by ``append_daily_entry`` downstream).  Truncating first is order-fragile:
+    a secret split by the ~200/~400-char cap could leave a fragment the
+    redactor no longer matches.  This mirrors ROOT's redact-before-cap order
+    (see ``compaction_tree._synthesize_root``).  Truncation then keeps the raw
+    daily log bounded per turn (the tree's summarizer handles cross-turn
+    growth).
     """
-    user = _one_line(user_text, limit=200)
-    assistant = _one_line(assistant_text, limit=400)
+    user = _one_line(_redact(user_text), limit=200)
+    assistant = _one_line(_redact(assistant_text), limit=400)
     tool_note = " [tools used]" if used_tool else ""
     parts = [f"- [turn {turn_id}]{tool_note}"]
     if user:
@@ -100,6 +103,27 @@ def _build_turn_entry(
     if assistant:
         parts.append(f"  - assistant: {assistant}")
     return "\n".join(parts)
+
+
+def _redact(text: str) -> str:
+    """Scrub secrets using the same redactor the write path uses.
+
+    Lazy-imported (consistent with this hook's fail-soft, late-bound style) and
+    fail-soft: if the redactor is unavailable for any reason we fall back to the
+    raw text rather than break the turn — ``append_daily_entry`` redacts again
+    downstream as defense-in-depth.
+    """
+    if not text:
+        return text
+    try:
+        from magi_agent.memory.adapters.local_file_writable import (  # noqa: PLC0415
+            _redact_for_write,
+        )
+
+        return _redact_for_write(text)
+    except Exception:  # pragma: no cover - defensive; downstream redacts again
+        logger.exception("turn-entry redaction failed; deferring to downstream redact")
+        return text
 
 
 def _one_line(text: str, *, limit: int) -> str:
