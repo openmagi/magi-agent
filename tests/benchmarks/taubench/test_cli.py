@@ -143,7 +143,7 @@ def test_run_eval_uses_tau_bench_task_split_keyword_without_live_calls(
         )
         return FakeEnv()
 
-    def fake_build_magi_tau_agent(*, runner_factory: object) -> object:
+    def fake_build_magi_tau_agent(*, runner_factory: object, reliability: object = None) -> object:
         class FakeAgent:
             def solve(
                 self,
@@ -197,4 +197,53 @@ def test_run_eval_uses_tau_bench_task_split_keyword_without_live_calls(
             "task_index": 0,
         },
     ]
-    assert '"config": "vanilla"' in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert '"config": "vanilla"' in out
+    assert '"reliability": null' in out
+
+
+def test_run_eval_forwards_reliability_config(monkeypatch, capsys) -> None:
+    from magi_agent.benchmarks.taubench import cli
+    from magi_agent.benchmarks.taubench.reliability import ReliabilityConfig
+
+    captured: dict[str, object] = {}
+
+    class FakeEnv:
+        tasks = [object()]
+
+    def fake_get_env(domain, *, user_strategy, user_model, task_split,
+                     user_provider=None, task_index=None):
+        return FakeEnv()
+
+    def fake_build_magi_tau_agent(*, runner_factory, reliability=None):
+        captured["reliability"] = reliability
+
+        class FakeAgent:
+            def solve(self, env, task_index=None, max_num_steps=30):
+                return SimpleNamespace(reward=1.0, info={"turns": 1, "infra_error": False})
+
+        return FakeAgent()
+
+    tau_bench = types.ModuleType("tau_bench")
+    tau_bench_envs = types.ModuleType("tau_bench.envs")
+    tau_bench_envs.get_env = fake_get_env
+    fake_litellm = types.ModuleType("litellm")
+    fake_agent_module = types.ModuleType("magi_agent.benchmarks.taubench.agent")
+    fake_agent_module.build_magi_tau_agent = fake_build_magi_tau_agent
+    fake_runner_module = types.ModuleType("magi_agent.cli.real_runner")
+    fake_runner_module.build_cli_model_runner = lambda *a, **k: object()
+
+    monkeypatch.setitem(sys.modules, "tau_bench", tau_bench)
+    monkeypatch.setitem(sys.modules, "tau_bench.envs", tau_bench_envs)
+    monkeypatch.setitem(sys.modules, "litellm", fake_litellm)
+    monkeypatch.setitem(sys.modules, "magi_agent.benchmarks.taubench.agent", fake_agent_module)
+    monkeypatch.setitem(sys.modules, "magi_agent.cli.real_runner", fake_runner_module)
+    monkeypatch.setenv("MAGI_TAUBENCH_ENABLED", "1")
+
+    cfg = ReliabilityConfig(arg_validation=True)
+    cli.run_eval(domain="airline", max_tasks=1, trials=1, config="vanilla",
+                 api_key="test-key", reliability=cfg)
+
+    assert captured["reliability"] is cfg
+    out = capsys.readouterr().out
+    assert '"arg_validation": true' in out

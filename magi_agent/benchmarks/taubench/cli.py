@@ -15,6 +15,7 @@ from collections.abc import Iterator
 from collections.abc import Sequence
 
 from magi_agent.benchmarks.taubench.config import Config, FULL_CAPABILITY_FLAGS
+from magi_agent.benchmarks.taubench.reliability import ReliabilityConfig
 from magi_agent.cli.providers import _DEFAULT_MODEL
 
 _GATE_ENV = "MAGI_TAUBENCH_ENABLED"
@@ -72,6 +73,7 @@ def run_eval(
     profile: str | None = None,
     model: str = DEFAULT_AGENT_MODEL,
     api_key: str | None = None,
+    reliability: ReliabilityConfig | None = None,
 ) -> None:
     """Run the τ-bench harness end-to-end and print a TauReport as JSON.
 
@@ -171,7 +173,9 @@ def run_eval(
                         task_profile=_task_profile_for(profile),
                     )
 
-                agent = build_magi_tau_agent(runner_factory=runner_factory)
+                agent = build_magi_tau_agent(
+                    runner_factory=runner_factory, reliability=reliability
+                )
                 solve_result = agent.solve(trial_env, task_index=task_index, max_num_steps=30)
                 # Reconstruct an EpisodeResult from the SolveResult info dict.
                 info = getattr(solve_result, "info", {}) or {}
@@ -194,6 +198,7 @@ def run_eval(
         "config": config,
         "domain": domain,
         "infra_error_count": infra_error_count,
+        "reliability": reliability.model_dump() if reliability is not None else None,
     }
     print(json.dumps(output, indent=2))
 
@@ -240,6 +245,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 __all__ = [
     "DEFAULT_AGENT_MODEL",
     "GateDisabledError",
+    "ReliabilityConfig",
     "ensure_enabled",
     "main",
     "run_eval",
