@@ -239,34 +239,33 @@ class InsaneFetchProvider:
         Returns the response object on success, or a ``{"status": ...}`` mapping
         when the underlying client raises a timeout/connection error.
         """
-        try:
-            return session.get(  # type: ignore[attr-defined]
-                url,
-                headers={"Accept": ACCEPT_HEADER},
-                resolve=resolve_pin,
-                allow_redirects=False,
-                impersonate=self.impersonate,
-                timeout=self.timeout_s,
-                stream=True,
-            )
-        except TypeError:
-            # A session/fake that does not accept stream=True — retry without it
-            # (we still enforce the size cap on the buffered body below).
+        with _temporary_curl_resolve(session, resolve_pin):
             try:
                 return session.get(  # type: ignore[attr-defined]
                     url,
                     headers={"Accept": ACCEPT_HEADER},
-                    resolve=resolve_pin,
                     allow_redirects=False,
                     impersonate=self.impersonate,
                     timeout=self.timeout_s,
+                    stream=True,
                 )
+            except TypeError:
+                # A session/fake that does not accept stream=True — retry without it
+                # (we still enforce the size cap on the buffered body below).
+                try:
+                    return session.get(  # type: ignore[attr-defined]
+                        url,
+                        headers={"Accept": ACCEPT_HEADER},
+                        allow_redirects=False,
+                        impersonate=self.impersonate,
+                        timeout=self.timeout_s,
+                    )
+                except Exception:
+                    return _timeout("transport_error")
             except Exception:
+                # curl_cffi timeouts/connection errors (or any client error) →
+                # transient timeout, never escapes fetch().
                 return _timeout("transport_error")
-        except Exception:
-            # curl_cffi timeouts/connection errors (or any client error) →
-            # transient timeout, never escapes fetch().
-            return _timeout("transport_error")
 
     def _read_capped(self, response: object) -> bytes | None:
         """Read the body honoring the size cap; ``None`` when it is exceeded.
@@ -383,6 +382,54 @@ def _response_header(response: object, name: str) -> str | None:
     except Exception:
         return None
     return None
+
+
+class _temporary_curl_resolve:
+    """Temporarily set curl_cffi's CURLOPT_RESOLVE session option.
+
+    ``curl_cffi.requests.Session.get`` does not accept a ``resolve=`` keyword.
+    IP pinning is configured through ``Session.curl_options`` instead, so each
+    guarded hop installs its validated ``host:port:ip`` pin for the duration of
+    exactly one request and then restores the caller's previous options.
+    """
+
+    def __init__(self, session: object, resolve_pin: list[str]) -> None:
+        self._session = session
+        self._resolve_pin = resolve_pin
+        self._had_options = False
+        self._previous_options: object = None
+
+    def __enter__(self) -> None:
+        key = _curl_resolve_option_key()
+        self._had_options = hasattr(self._session, "curl_options")
+        self._previous_options = getattr(self._session, "curl_options", None)
+
+        options: dict[object, object]
+        if isinstance(self._previous_options, Mapping):
+            options = dict(self._previous_options)
+        else:
+            options = {}
+        options[key] = list(self._resolve_pin)
+        setattr(self._session, "curl_options", options)
+
+    def __exit__(self, *_exc: object) -> None:
+        if self._had_options:
+            setattr(self._session, "curl_options", self._previous_options)
+            return
+        try:
+            delattr(self._session, "curl_options")
+        except AttributeError:
+            pass
+
+
+def _curl_resolve_option_key() -> object:
+    """Return curl_cffi's RESOLVE option key without importing at module load."""
+    try:
+        from curl_cffi import CurlOpt  # noqa: PLC0415
+
+        return CurlOpt.RESOLVE
+    except Exception:
+        return "RESOLVE"
 
 
 __all__ = ["InsaneFetchProvider"]
