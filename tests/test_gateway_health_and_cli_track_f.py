@@ -1,6 +1,8 @@
 """Track F — gateway health projection (ops/health.py additive) + CLI parsing."""
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 from typer.testing import CliRunner
 
@@ -116,6 +118,54 @@ def test_gateway_start_gate_off_is_noop(monkeypatch: pytest.MonkeyPatch) -> None
     result = runner.invoke(app, ["gateway", "start"])
     assert result.exit_code == 0
     assert "disabled" in result.stdout.lower() or "not enabled" in result.stdout.lower()
+
+
+def test_gateway_start_with_scheduler_on_invokes_scheduler_executor_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    """Enabled gateway+scheduler config must consume the real scheduler seam."""
+    from magi_agent.cli.app import app
+    from magi_agent.harness.scheduler_executor import ScheduledJobRecord
+    from magi_agent.harness.scheduler_job_store import SqliteScheduledJobSource
+
+    now = datetime(2026, 1, 1, tzinfo=UTC)
+    db_path = tmp_path / "scheduled-jobs.db"
+    lock_dir = tmp_path / "locks"
+    store = SqliteScheduledJobSource(db_path)
+    try:
+        store.create(
+            ScheduledJobRecord(
+                jobId="job:gateway-start",
+                scheduleExpr="every 60s",
+                lastFire=None,
+                nextRun=now,
+            )
+        )
+    finally:
+        store.close()
+
+    monkeypatch.setenv("MAGI_GATEWAY_DAEMON_ENABLED", "1")
+    monkeypatch.setenv("MAGI_SCHEDULER_EXECUTOR_ENABLED", "1")
+    monkeypatch.delenv("MAGI_SCHEDULER_SHADOW", raising=False)
+    monkeypatch.setenv("MAGI_SCHEDULER_DB_PATH", str(db_path))
+    monkeypatch.setenv("MAGI_SCHEDULER_LOCK_DIR", str(lock_dir))
+
+    result = runner.invoke(app, ["gateway", "start"])
+
+    assert result.exit_code == 0
+    assert "scheduler_cron" in result.stdout
+    assert "executions=1" in result.stdout
+    assert "mode=shadow" in result.stdout
+    assert "No operator-wired watchers" not in result.stdout
+
+    advanced = SqliteScheduledJobSource(db_path)
+    try:
+        got = advanced.get("job:gateway-start")
+        assert got is not None
+        assert got.next_run > now
+    finally:
+        advanced.close()
 
 
 # ---------------------------------------------------------------------------

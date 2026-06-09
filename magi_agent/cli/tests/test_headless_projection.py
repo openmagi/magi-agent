@@ -1098,6 +1098,68 @@ def test_prompt_command_feeds_engine_turn(monkeypatch: pytest.MonkeyPatch) -> No
     )
 
 
+def test_superpowers_runtime_flag_injects_bundled_skill_into_engine_turn(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    """When configured ON, /superpowers must feed bundled instructions to the turn."""
+
+    from magi_agent.cli.commands.discovery import build_registry
+
+    monkeypatch.setenv("MAGI_CLI_ENABLED", "1")
+    monkeypatch.setenv("MAGI_SUPERPOWERS_RUNTIME_ENABLED", "1")
+
+    driver = ScriptedDriver([RuntimeEvent(type="token", payload={"delta": "ok"})])
+    buffer = io.StringIO()
+    code = asyncio.run(
+        run_headless(
+            "/superpowers",
+            output="stream-json",
+            driver=driver,
+            commands=build_registry(str(tmp_path)),
+            stream=buffer,
+        )
+    )
+
+    assert code == 0
+    assert driver.seen_input is not None
+    turn = driver.seen_input
+    assert isinstance(turn, dict)
+    prompt = turn.get("prompt")
+    assert isinstance(prompt, str)
+    assert "name: using-superpowers" in prompt
+    assert "Using Skills" in prompt
+    assert "/Users/" not in prompt
+
+
+def test_superpowers_runtime_flag_off_keeps_local_ack_no_engine_turn(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    """Explicit OFF keeps the existing intent-only /superpowers behavior."""
+
+    from magi_agent.cli.commands.discovery import build_registry
+
+    monkeypatch.setenv("MAGI_CLI_ENABLED", "1")
+    monkeypatch.setenv("MAGI_SUPERPOWERS_RUNTIME_ENABLED", "0")
+
+    driver = ScriptedDriver([RuntimeEvent(type="token", payload={"delta": "X"})])
+    buffer = io.StringIO()
+    code = asyncio.run(
+        run_headless(
+            "/superpowers",
+            output="stream-json",
+            driver=driver,
+            commands=build_registry(str(tmp_path)),
+            stream=buffer,
+        )
+    )
+
+    assert code == 0
+    assert driver.seen_input is None
+    assert "superpowers: command_intent" in buffer.getvalue()
+
+
 def test_unknown_slash_command_errors(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MAGI_CLI_ENABLED", "1")
     driver = ScriptedDriver([RuntimeEvent(type="token", payload={"delta": "X"})])

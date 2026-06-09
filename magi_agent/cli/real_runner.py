@@ -21,8 +21,9 @@ needs the optional ``litellm`` dependency; if it is missing we raise
 from __future__ import annotations
 
 import os
-from collections.abc import Mapping
-from typing import AsyncGenerator, Callable
+from collections.abc import Coroutine, Mapping
+from datetime import datetime
+from typing import Any, AsyncGenerator, Callable
 
 from magi_agent.cli.engine import RunnerPolicyAssembly
 from magi_agent.cli.providers import ProviderConfig
@@ -150,6 +151,11 @@ def build_cli_model_runner(
     task_profile: Mapping[str, object] | None = None,
     general_automation_receipts: object | None = None,
     local_tool_evidence_collector: object | None = None,
+    self_review_fork_runner: object | None = None,
+    self_review_candidate_sink: object | None = None,
+    self_review_config: object | None = None,
+    self_review_now: datetime | None = None,
+    self_review_scheduler: Callable[[Coroutine[Any, Any, None]], None] | None = None,
 ) -> CliModelRunner:
     """Build a real, model-backed CLI runner from a resolved provider config.
 
@@ -234,6 +240,11 @@ def build_cli_model_runner(
             runner_policy_assembly
         ),
         agent_role="general",
+        self_review_fork_runner=self_review_fork_runner,
+        self_review_candidate_sink=self_review_candidate_sink,
+        self_review_config=self_review_config,
+        self_review_now=self_review_now,
+        self_review_scheduler=self_review_scheduler,
     )
     app = App(name=_app_identifier(app_name), root_agent=agent, plugins=[plane_plugin])
     runner = Runner(

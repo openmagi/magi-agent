@@ -459,12 +459,15 @@ def gateway_status() -> None:
 def gateway_start() -> None:
     """Run the gateway daemon (gated). Gate OFF → prints status and exits.
 
-    With the gate ON this would assemble the operator-wired watcher fleet and
-    block on the run-loop; without operator wiring there are no watchers, so the
-    command reports that the gate is enabled and returns.  Tests never reach a
-    blocking ``uvicorn.run`` — there is none here.
+    With the gate ON, this consumes the local scheduler boundary once when
+    ``MAGI_SCHEDULER_EXECUTOR_ENABLED`` is also ON. Channel watchers still require
+    explicit provider/client wiring and are not constructed by this local CLI.
     """
     from magi_agent.gateway.daemon import is_gateway_daemon_enabled  # noqa: PLC0415
+    from magi_agent.gateway.watchers import (  # noqa: PLC0415
+        build_local_scheduler_cron_driver,
+        is_scheduler_executor_enabled,
+    )
 
     if not is_gateway_daemon_enabled():
         typer.echo(
@@ -472,10 +475,37 @@ def gateway_start() -> None:
             "MAGI_GATEWAY_DAEMON_ENABLED=1 to start always-on."
         )
         return
+    if not is_scheduler_executor_enabled():
+        typer.echo(
+            "gateway daemon: enabled. scheduler_cron disabled "
+            "(MAGI_SCHEDULER_EXECUTOR_ENABLED is not set). Channel watchers "
+            "require explicit provider wiring."
+        )
+        return
+    driver = build_local_scheduler_cron_driver()
+    result = driver.run_once()
     typer.echo(
-        "gateway daemon: enabled. No operator-wired watchers in this build — "
-        "wire the scheduler driver + channel ports via gateway.watchers, then "
-        "run GatewayDaemon.run(stop_event=...)."
+        "gateway daemon: enabled. "
+        f"scheduler_cron: {_scheduler_once_summary(result)}. "
+        "Channel watchers require explicit provider wiring."
+    )
+
+
+def _scheduler_once_summary(result: object) -> str:
+    tick_result = getattr(result, "tick_result")
+    executions = tuple(getattr(result, "executions", ()))
+    modes = sorted({str(getattr(execution, "mode", "unknown")) for execution in executions})
+    mode = ",".join(modes) if modes else "none"
+    runner_invoked = any(
+        bool(getattr(execution, "runner_invoked", False)) for execution in executions
+    )
+    return (
+        f"{tick_result.status} "
+        f"fired={len(tick_result.fired_job_ids)} "
+        f"skipped={len(tick_result.skipped_job_ids)} "
+        f"executions={len(executions)} "
+        f"mode={mode} "
+        f"runnerInvoked={str(runner_invoked).lower()}"
     )
 
 

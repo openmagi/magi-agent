@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 from collections.abc import Mapping
 from typing import AsyncIterator
 
@@ -232,6 +234,26 @@ class _RepairAwareRunner(_NoopRunner):
         self.invocations = 0
 
 
+def _failing_test_evidence(*, observed_at: float = 1000.0) -> dict[str, object]:
+    return {
+        "type": "TestRun",
+        "status": "failed",
+        "observedAt": observed_at,
+        "source": {"kind": "tool_trace"},
+        "fields": {
+            "command": "pytest tests/test_widget.py -q",
+            "exitCode": 1,
+        },
+        "preview": "1 failed, 7 passed",
+        "evidenceRef": "verifier:dev-coding:test-evidence",
+    }
+
+
+def _evidence_digest(evidence: Mapping[str, object]) -> str:
+    payload = json.dumps(evidence, sort_keys=True, separators=(",", ":"), default=str)
+    return f"sha256:{hashlib.sha256(payload.encode()).hexdigest()[:16]}"
+
+
 def test_cli_model_runner_attaches_first_party_policy_callback_by_default(
     tmp_path,
 ) -> None:
@@ -414,6 +436,59 @@ def test_engine_executes_pre_final_verifier_bus_when_evidence_collector_attached
         "tool-evidence-contract": "missing",
         "dev-coding-verification-audit": "missing",
     }
+
+
+def test_engine_repair_decision_uses_latest_collected_failing_test_evidence(
+    monkeypatch,
+) -> None:
+    _CapturedRunnerInput.captured = []
+    monkeypatch.setenv("MAGI_CODING_REPAIR_LOOP_ENABLED", "1")
+    monkeypatch.setattr(engine_module, "_lazy_engine_deps", _fake_engine_deps)
+    latest_test_evidence = _failing_test_evidence(observed_at=2000.0)
+    stale_test_evidence = _failing_test_evidence(observed_at=1000.0)
+    expected_digest = _evidence_digest(latest_test_evidence)
+
+    def _collect(turn_id: str) -> tuple[object, ...]:
+        if turn_id != "t1":
+            return ()
+        return (stale_test_evidence, latest_test_evidence)
+
+    driver = MagiEngineDriver(
+        runner=_NoopRunner(),
+        runner_policy_assembly=_coding_policy_assembly(),
+        evidence_collector=_collect,
+    )
+
+    async def _drive() -> list[object]:
+        return [
+            item
+            async for item in driver.run_turn_stream(
+                runtime=object(),
+                turn_input={
+                    "prompt": "fix the failing tests",
+                    "session_id": "s1",
+                    "turn_id": "t1",
+                },
+                cancel=asyncio.Event(),
+            )
+        ]
+
+    items = asyncio.run(_drive())
+    events = [item for item in items if isinstance(item, RuntimeEvent)]
+    gate_event = next(
+        event.payload
+        for event in events
+        if event.payload.get("type") == "pre_final_evidence_gate"
+    )
+    repair_decision = gate_event["repairDecision"]
+
+    assert gate_event["decision"] == "block"
+    assert gate_event["missingEvidence"] == ["evidence:git-diff"]
+    assert gate_event["missingValidators"] == []
+    assert repair_decision["action"] == "continue_repair"
+    assert repair_decision["reasonCodes"] == ("test_failure_detected",)
+    assert repair_decision["evidenceDigest"] == expected_digest
+    assert repair_decision["evidenceRefs"] == (expected_digest,)
 
 
 def test_engine_pre_final_verifier_bus_passes_with_collected_evidence(

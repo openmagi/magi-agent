@@ -1044,6 +1044,11 @@ def build_default_plane(
     general_automation_receipts: Any | None = None,
     contract_required: Any | None = None,
     agent_role: str = "general",
+    self_review_fork_runner: Any | None = None,
+    self_review_candidate_sink: Any | None = None,
+    self_review_config: Any | None = None,
+    self_review_now: datetime | None = None,
+    self_review_scheduler: Callable[[Coroutine[Any, Any, None]], None] | None = None,
 ) -> ControlPlane:
     """Build the default ControlPlane from environment flags.
 
@@ -1062,6 +1067,10 @@ def build_default_plane(
             active GA contract's owed deliverables. See above.
         agent_role: Agent role passed to the reminder gate (default ``"general"``;
             the reminder is inert for any non-general role).
+        self_review_*: Optional collaborators for the self-review after-turn
+            control. Omitted values preserve the default safe runtime behavior:
+            lazy ``ForkRunner`` construction, no-op candidate sink, env-derived
+            config/time, and background scheduling on the active event loop.
 
     Returns:
         A configured ``ControlPlane`` with all enabled controls registered.
@@ -1129,7 +1138,15 @@ def build_default_plane(
 
     # 5. Self-review C1 (MAGI_SELF_REVIEW_ENABLED, default OFF).
     if _is_true(env.get(SELF_REVIEW_ENABLED_ENV, "")):
-        plane.register(SelfReviewAfterTurnControl())
+        plane.register(
+            SelfReviewAfterTurnControl(
+                fork_runner=self_review_fork_runner,
+                candidate_sink=self_review_candidate_sink,
+                config=self_review_config,
+                now=self_review_now,
+                scheduler=self_review_scheduler,
+            )
+        )
 
     # 6. GA constraint reminder (MAGI_GA_LIVE_ENABLED + general role).
     # Registered ONLY when BOTH a receipts store and a contract requirement are
@@ -1161,6 +1178,11 @@ def build_default_plugin(
     general_automation_receipts: Any | None = None,
     contract_required: Any | None = None,
     agent_role: str = "general",
+    self_review_fork_runner: Any | None = None,
+    self_review_candidate_sink: Any | None = None,
+    self_review_config: Any | None = None,
+    self_review_now: datetime | None = None,
+    self_review_scheduler: Callable[[Coroutine[Any, Any, None]], None] | None = None,
 ) -> _ExtendedControlPlanePlugin:
     """Build the single ControlPlanePlugin for runner construction.
 
@@ -1178,6 +1200,11 @@ def build_default_plugin(
         general_automation_receipts=general_automation_receipts,
         contract_required=contract_required,
         agent_role=agent_role,
+        self_review_fork_runner=self_review_fork_runner,
+        self_review_candidate_sink=self_review_candidate_sink,
+        self_review_config=self_review_config,
+        self_review_now=self_review_now,
+        self_review_scheduler=self_review_scheduler,
     )
     return _ExtendedControlPlanePlugin(plane)
 
