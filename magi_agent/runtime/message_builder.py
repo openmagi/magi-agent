@@ -26,6 +26,9 @@ MAX_IMAGE_BLOCK_BYTES = 5_000_000
 MAX_IMAGE_BLOCK_COUNT = 12
 MAX_IMAGE_BLOCK_TOTAL_BYTES = 20_000_000
 ATTACHMENT_DISPLAY_MAX_CHARS = 240
+# Mirror: gate5b4c3_shadow_generation_contract.py defines an identical constant.
+# Both definitions are intentional — importing across the runtime/shadow boundary
+# would create a coupling that is deliberately avoided. Keep both in sync.
 SUPPORTED_IMAGE_MEDIA_TYPES = frozenset(
     ("image/jpeg", "image/png", "image/gif", "image/webp")
 )
