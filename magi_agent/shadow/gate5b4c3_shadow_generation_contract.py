@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import binascii
 from collections.abc import Mapping
 import re
 from typing import Any, Literal, Self, TypeAlias
@@ -289,6 +291,31 @@ class Gate5B4C3ShadowGenerationHistoryMessage(_Gate5B4C3Model):
         return self
 
 
+SUPPORTED_IMAGE_MEDIA_TYPES = frozenset(
+    ("image/jpeg", "image/png", "image/gif", "image/webp")
+)
+MAX_USER_VISIBLE_IMAGE_BYTES = 5 * 1024 * 1024  # 5 MiB per image, defense-in-depth
+
+
+class Gate5B4C3ShadowGenerationImageBlock(_Gate5B4C3Model):
+    media_type: str = Field(alias="mediaType")
+    data: str = Field(alias="data")  # base64, no data-URL prefix
+
+    @model_validator(mode="after")
+    def _validate_block(self) -> "Gate5B4C3ShadowGenerationImageBlock":
+        if self.media_type.lower() not in SUPPORTED_IMAGE_MEDIA_TYPES:
+            raise ValueError("unsupported image media type")
+        try:
+            raw = base64.b64decode(self.data, validate=True)
+        except (binascii.Error, ValueError) as exc:
+            raise ValueError("image data must be valid base64") from exc
+        if not raw:
+            raise ValueError("image data must be non-empty")
+        if len(raw) > MAX_USER_VISIBLE_IMAGE_BYTES:
+            raise ValueError("image exceeds per-image byte cap")
+        return self
+
+
 class Gate5B4C3ShadowGenerationTurn(_Gate5B4C3Model):
     turn_id: str = Field(alias="turnId")
     turn_digest: str = Field(alias="turnDigest")
@@ -300,6 +327,10 @@ class Gate5B4C3ShadowGenerationTurn(_Gate5B4C3Model):
     attachment_metadata: tuple[Gate5B4C3ShadowGenerationAttachmentMetadata, ...] = Field(
         default=(),
         alias="attachmentMetadata",
+    )
+    sanitized_image_blocks: tuple[Gate5B4C3ShadowGenerationImageBlock, ...] = Field(
+        default=(),
+        alias="sanitizedImageBlocks",
     )
     sanitized_recent_history: tuple[Gate5B4C3ShadowGenerationHistoryMessage, ...] = Field(
         default=(),
@@ -1117,6 +1148,9 @@ def _reject_unsafe_key(value: object) -> None:
 __all__ = [
     "Gate5B4C3ModelRoutingSource",
     "Gate5B4C3ShadowGenerationAttachmentMetadata",
+    "Gate5B4C3ShadowGenerationImageBlock",
+    "MAX_USER_VISIBLE_IMAGE_BYTES",
+    "SUPPORTED_IMAGE_MEDIA_TYPES",
     "Gate5B4C3ShadowGenerationAuthorityFlags",
     "Gate5B4C3ShadowGenerationBudgets",
     "Gate5B4C3ShadowGenerationComparison",
