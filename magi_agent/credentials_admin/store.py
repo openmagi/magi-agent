@@ -70,6 +70,7 @@ def public_metadata(item: dict[str, Any]) -> dict[str, Any]:
         "auth_scheme": str(item.get("auth_scheme", "")),
         "status": str(item.get("status", STATUS_PENDING)),
         "vault_ref": item.get("vault_ref") if item.get("vault_ref") else None,
+        "requires_approval": bool(item.get("requires_approval", False)),
         "created_at": str(item.get("created_at", "")),
     }
 
@@ -113,6 +114,7 @@ def add_credential(
     auth_scheme: str,
     status: str,
     vault_ref: str | None,
+    requires_approval: bool = False,
     path: Path | None = None,
 ) -> dict[str, Any]:
     """Append one credential's metadata, save atomically, return its projection."""
@@ -125,6 +127,7 @@ def add_credential(
         "auth_scheme": auth_scheme,
         "status": status,
         "vault_ref": vault_ref,
+        "requires_approval": requires_approval,
         "created_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
     }
     projection = public_metadata(record)

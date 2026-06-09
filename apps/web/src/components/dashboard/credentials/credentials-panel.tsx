@@ -15,6 +15,7 @@ import type {
   CredentialMetadata,
   VaultStatus,
 } from "@/lib/credentials-api";
+import { PendingApprovals } from "./pending-approvals";
 
 interface CredentialsPanelProps {
   botId: string;
@@ -68,6 +69,7 @@ export function CredentialsPanel({ botId }: CredentialsPanelProps): React.JSX.El
   const [service, setService] = useState("");
   const [label, setLabel] = useState("");
   const [authScheme, setAuthScheme] = useState<string>(AUTH_SCHEMES[0]);
+  const [requiresApproval, setRequiresApproval] = useState(false);
   // Write-only: this field is never populated from server data.
   const [secret, setSecret] = useState("");
 
@@ -98,12 +100,14 @@ export function CredentialsPanel({ botId }: CredentialsPanelProps): React.JSX.El
         label: label.trim(),
         auth_scheme: authScheme.trim(),
         secret,
+        requires_approval: requiresApproval,
       })
         .then(() => {
           // Clear the write-only secret immediately; never echo it back.
           setSecret("");
           setService("");
           setLabel("");
+          setRequiresApproval(false);
           reload();
         })
         .catch((err: unknown) => {
@@ -115,7 +119,17 @@ export function CredentialsPanel({ botId }: CredentialsPanelProps): React.JSX.El
           setSubmitting(false);
         });
     },
-    [agentFetch, authScheme, canSubmit, label, reload, secret, service, vaultReady],
+    [
+      agentFetch,
+      authScheme,
+      canSubmit,
+      label,
+      reload,
+      requiresApproval,
+      secret,
+      service,
+      vaultReady,
+    ],
   );
 
   const handleRevoke = useCallback(
@@ -156,6 +170,8 @@ export function CredentialsPanel({ botId }: CredentialsPanelProps): React.JSX.El
       </header>
 
       {data ? <VaultBanner status={data.vault_status} /> : null}
+
+      <PendingApprovals />
 
       <form
         onSubmit={handleRegister}
@@ -206,6 +222,21 @@ export function CredentialsPanel({ botId }: CredentialsPanelProps): React.JSX.El
           autoComplete="new-password"
           disabled={!vaultReady || submitting}
         />
+        <label className="flex items-start gap-3 text-sm text-foreground">
+          <input
+            type="checkbox"
+            checked={requiresApproval}
+            onChange={(e) => setRequiresApproval(e.target.checked)}
+            className="mt-0.5 h-4 w-4 shrink-0 rounded border-black/20 text-primary focus:ring-primary"
+          />
+          <span>
+            <span className="font-semibold">Require approval before use</span>
+            <span className="mt-0.5 block text-xs text-secondary">
+              The agent must get your explicit approval each time it uses this
+              credential. Pending requests appear above.
+            </span>
+          </span>
+        </label>
         {formError ? (
           <div className="rounded-lg border border-red-500/20 bg-red-500/[0.06] px-3 py-2 text-sm text-red-700">
             {formError}
@@ -260,6 +291,9 @@ export function CredentialsPanel({ botId }: CredentialsPanelProps): React.JSX.El
                     <Badge variant={statusVariant(credential.status)}>
                       {credential.status}
                     </Badge>
+                    {credential.requires_approval ? (
+                      <Badge variant="warning">approval required</Badge>
+                    ) : null}
                   </div>
                   <div className="mt-1 text-xs text-secondary">
                     {credential.service} · {credential.auth_scheme}
