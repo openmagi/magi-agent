@@ -55,6 +55,10 @@ from magi_agent.channels.workflow_orchestrator import (
 from magi_agent.cli.protocol import ControlResponse
 from magi_agent.ops.health import _truthy_env
 from magi_agent.runtime.events import RuntimeEvent
+from magi_agent.runtime.memory_mode_context import (
+    current_memory_mode,
+    memory_mode_request_scope,
+)
 from magi_agent.transport.active_turn import ACTIVE_TURNS, ActiveTurn
 from magi_agent.transport.chat import (
     gate5b_user_visible_chat_gate_active,
@@ -398,6 +402,7 @@ def register_streaming_chat_routes(
             model=model,
             prompt_sink=sink,
             runner_policy_routing_enabled=runner_policy_routing_enabled,
+            memory_mode=current_memory_mode(),
         )
         return rt.engine, rt.gate
 
@@ -515,7 +520,8 @@ def register_streaming_chat_routes(
         # contract. No SSE bytes have been sent yet, so returning a JSON 500
         # here is safe (the client has not started consuming an event stream).
         try:
-            engine, gate = builder(session_id, sink)
+            with memory_mode_request_scope(request.headers):
+                engine, gate = builder(session_id, sink)
         except Exception:
             return JSONResponse(status_code=500, content={"error": "engine_build_failed"})
         cancel = asyncio.Event()
