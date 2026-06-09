@@ -1,3 +1,5 @@
+import os
+
 from magi_agent.egress_proxy.config import EgressProxyConfig
 from magi_agent.egress_proxy.injection import (
     subprocess_env_overlay,
@@ -46,3 +48,20 @@ def test_httpx_kwargs_sets_proxy_and_verify(tmp_path):
     # httpx.Proxy carries url + Proxy-Authorization header
     assert "127.0.0.1:8888" in str(proxy.url)
     assert any(h.lower() == b"proxy-authorization" for h, _ in proxy.headers.raw)
+    # §4 loggable-URL guarantee: auth stays in the header, never in the httpx URL
+    assert "tok" not in str(proxy.url)
+
+
+def test_https_proxy_origin_accepted(tmp_path):
+    ca = tmp_path / "ca.pem"; ca.write_text("x")
+    cfg = EgressProxyConfig(True, "https://127.0.0.1:8888", None, str(ca))
+    cfg.validate()  # must not raise
+    assert subprocess_env_overlay(cfg)["HTTPS_PROXY"] == "https://127.0.0.1:8888"
+
+
+def test_builders_never_mutate_os_environ(tmp_path):
+    before = dict(os.environ)
+    cfg = _enabled(tmp_path, auth="agent:tok")
+    subprocess_env_overlay(cfg)
+    httpx_client_kwargs(cfg)
+    assert dict(os.environ) == before

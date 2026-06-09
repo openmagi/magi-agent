@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from urllib.parse import urlparse
 
 _TRUTHY = {"1", "true", "yes", "on"}
@@ -30,8 +30,8 @@ def _validate_proxy_origin(value: str) -> str:
 class EgressProxyConfig:
     enabled: bool
     proxy_url: str | None
-    proxy_auth: str | None
-    ca_cert_path: str | None
+    proxy_auth: str | None = field(repr=False)  # secret: kept out of repr/tracebacks
+    ca_cert_path: str | None = None
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "EgressProxyConfig":

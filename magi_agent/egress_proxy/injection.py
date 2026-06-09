@@ -22,6 +22,9 @@ def _url_with_auth(url: str, auth: str | None) -> str:
 def subprocess_env_overlay(cfg: EgressProxyConfig) -> dict[str, str]:
     if not cfg.enabled or not cfg.proxy_url:
         return {}
+    # Auth is embedded in the proxy URL here by necessity: CLI tools (curl, git)
+    # read proxy creds from the *_PROXY URL, not a header. The httpx path below
+    # keeps auth in a Proxy-Authorization header instead. Do not "unify" these.
     proxy = _url_with_auth(cfg.proxy_url, cfg.proxy_auth)
     overlay = {"HTTPS_PROXY": proxy, "HTTP_PROXY": proxy, "ALL_PROXY": proxy}
     if cfg.ca_cert_path:
