@@ -21,7 +21,6 @@ from magi_agent.memory.search import (
     select_search_backend,
 )
 from magi_agent.memory.search import qmd as qmd_module
-import magi_agent.memory.search as search_pkg
 
 
 # ---------------------------------------------------------------------------
@@ -157,7 +156,7 @@ def test_bm25_reindex_reflects_filesystem(tmp_path: Path) -> None:
 
 
 def test_select_prefers_qmd_when_present(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(search_pkg.shutil, "which", lambda name: "/usr/local/bin/qmd")
+    monkeypatch.setattr(qmd_module.shutil, "which", lambda name: "/usr/local/bin/qmd")
     config = resolve_memory_config(env={}, config={"memory": {"prefer_qmd": True}})
     assert config.prefer_qmd is True
     backend = select_search_backend(config)
@@ -165,7 +164,7 @@ def test_select_prefers_qmd_when_present(monkeypatch: pytest.MonkeyPatch) -> Non
 
 
 def test_select_falls_back_to_bm25_when_qmd_absent(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(search_pkg.shutil, "which", lambda name: None)
+    monkeypatch.setattr(qmd_module.shutil, "which", lambda name: None)
     config = resolve_memory_config(env={}, config={"memory": {"prefer_qmd": True}})
     backend = select_search_backend(config)
     assert isinstance(backend, PyBM25Backend)
@@ -174,7 +173,7 @@ def test_select_falls_back_to_bm25_when_qmd_absent(monkeypatch: pytest.MonkeyPat
 def test_select_bm25_when_prefer_qmd_false_even_if_present(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(search_pkg.shutil, "which", lambda name: "/usr/local/bin/qmd")
+    monkeypatch.setattr(qmd_module.shutil, "which", lambda name: "/usr/local/bin/qmd")
     config = resolve_memory_config(env={}, config={"memory": {"prefer_qmd": False}})
     assert config.prefer_qmd is False
     backend = select_search_backend(config)

@@ -17,8 +17,6 @@ and imported explicitly by the PR5 recall wiring only.
 """
 from __future__ import annotations
 
-import shutil
-
 from magi_agent.memory.config import MemoryRuntimeConfig
 
 from .base import SearchBackend, SearchCapabilities, SearchHit
@@ -33,11 +31,16 @@ def select_search_backend(config: MemoryRuntimeConfig) -> SearchBackend:
     resolvable on PATH; otherwise the pure-Python :class:`PyBM25Backend` (which
     always works with no external dependency).
 
+    The ``qmd``-availability probe is delegated to :attr:`QmdBackend.available`
+    so ``subprocess``/``shutil`` stay confined to :mod:`qmd` within this package.
+
     Vector search is out of scope for PR2 — ``config.vector_search`` does not
     change the selection here; both backends report ``supports_vector=False``.
     """
-    if config.prefer_qmd and shutil.which("qmd") is not None:
-        return QmdBackend()
+    if config.prefer_qmd:
+        backend = QmdBackend()
+        if backend.available:
+            return backend
     return PyBM25Backend()
 
 
