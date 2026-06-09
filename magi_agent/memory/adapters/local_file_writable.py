@@ -16,12 +16,15 @@ All content is redacted through the existing secret-scanner before persisting.
 """
 from __future__ import annotations
 
+import hashlib
+import os
 import re
 from pathlib import Path
 from typing import Any, Literal, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from magi_agent.memory.compactor import consolidate
 from magi_agent.memory.contracts import (
     MemoryProviderCapabilities,
     MemoryRecord,
@@ -51,8 +54,17 @@ from magi_agent.memory.adapters.hipocampus_readonly import (
 # ---------------------------------------------------------------------------
 MAGI_MEMORY_WRITE_ENABLED_ENV: str = "MAGI_MEMORY_WRITE_ENABLED"
 
+# Optional, default-OFF gate for the deterministic append-compactor (B2).
+# When unset the provider behaves exactly as before: append-only, bounded by
+# ``max_file_bytes``, no consolidation.
+MAGI_MEMORY_COMPACTION_ENABLED_ENV: str = "MAGI_MEMORY_COMPACTION_ENABLED"
+
 _PROVIDER_ID_READONLY = "local-file-memory-readonly"
 _PROVIDER_ID_WRITABLE = "local-file-memory-writable"
+
+# Subdirectory (relative to workspace root) where pre-compaction snapshots are
+# archived before consolidation. Stays inside the workspace containment check.
+_ARCHIVE_SUBDIR = "memory/archive"
 
 # Allowed target files for gated writes.  No other paths may be written.
 _ALLOWED_WRITE_FILES: frozenset[str] = frozenset({"MEMORY.md", "USER.md"})
@@ -122,7 +134,23 @@ class LocalFileMemoryConfig(BaseModel):
         alias="maxFileBytes",
         ge=1,
     )
+    # Compaction threshold (B2). When the gated compactor is enabled and the
+    # post-append file size would reach/exceed this many bytes, the file is
+    # consolidated. ``None`` (default) derives 0.9 * max_file_bytes so we leave
+    # headroom below the hard cap. The env gate must ALSO be open for any
+    # compaction to occur — this field is inert unless gated on.
+    compaction_threshold_bytes: int | None = Field(
+        default=None,
+        alias="compactionThresholdBytes",
+        ge=1,
+    )
     max_records: int = Field(default=5, alias="maxRecords", ge=1, le=20)
+
+    def resolved_compaction_threshold_bytes(self) -> int:
+        """Effective compaction threshold (defaults to 0.9 * max_file_bytes)."""
+        if self.compaction_threshold_bytes is not None:
+            return self.compaction_threshold_bytes
+        return max(1, int(self.max_file_bytes * 9 // 10))
 
 
 # ---------------------------------------------------------------------------
@@ -150,6 +178,7 @@ class LocalFileMemoryProvider:
         self.config = config
         self.workspace_root = _validate_workspace_root(config.workspace_root)
         self._write_active = self._resolve_write_enabled(config)
+        self._compaction_active = self._resolve_compaction_enabled()
 
     # ------------------------------------------------------------------
     # Public API
@@ -238,6 +267,21 @@ class LocalFileMemoryProvider:
         entry = f"\n- [{kind}] {safe_body}\n"
         entry_bytes = entry.encode("utf-8")
         current_size = target_path.stat().st_size if target_path.exists() else 0
+
+        # Gated compaction (B2): when enabled and the post-append size would
+        # reach/exceed the compaction threshold, archive the current file and
+        # write back a consolidated (deduped + bounded) version. This shrinks
+        # the file so the subsequent max_file_bytes guard passes naturally.
+        # Default-OFF: when the gate is closed this branch is skipped entirely
+        # and behavior is byte-identical to the legacy append-only path.
+        if (
+            self._compaction_active
+            and target_path.exists()
+            and current_size + len(entry_bytes)
+            >= self.config.resolved_compaction_threshold_bytes()
+        ):
+            current_size = self._compact_file(target_path)
+
         if current_size + len(entry_bytes) > self.config.max_file_bytes:
             raise ValueError(
                 f"remember: appending would exceed max_file_bytes "
@@ -296,6 +340,46 @@ class LocalFileMemoryProvider:
         from magi_agent.memory.config import resolve_memory_config
 
         return resolve_memory_config().write_enabled
+
+    @staticmethod
+    def _resolve_compaction_enabled() -> bool:
+        """Determine whether the gated append-compactor is enabled (default OFF)."""
+        env_val = os.environ.get(MAGI_MEMORY_COMPACTION_ENABLED_ENV, "").strip().lower()
+        return env_val in {"1", "true", "yes", "on"}
+
+    def _compact_file(self, target_path: Path) -> int:
+        """Archive then consolidate ``target_path`` in place.
+
+        1. Read the current content and archive it verbatim under
+           ``memory/archive/<NAME>.<content-hash>.md`` (deterministic suffix —
+           no clock; the hash makes identical content map to one archive).
+        2. Consolidate (dedup + bound to max_file_bytes) via the pure compactor.
+        3. Atomically replace the file with the consolidated text.
+
+        Reuses the same workspace-containment guard as every other write path;
+        never touches a path outside the workspace root. Returns the new file
+        size in bytes so the caller can re-run its max_file_bytes guard.
+        """
+        original = target_path.read_text(encoding="utf-8")
+
+        # Archive first (no-delete safety): deterministic content-hash suffix.
+        digest = hashlib.sha256(original.encode("utf-8")).hexdigest()[:16]
+        archive_rel = f"{_ARCHIVE_SUBDIR}/{target_path.name}.{digest}.md"
+        archive_path = _resolve_workspace_path(self.workspace_root, archive_rel)
+        if archive_path is None:
+            # Containment guard rejected the archive path — refuse to compact
+            # rather than risk writing outside the workspace.
+            raise UnsupportedMemoryOperationError(
+                "remember: archive path failed workspace containment",
+                provider_id=_PROVIDER_ID_WRITABLE,
+            )
+        archive_path.parent.mkdir(parents=True, exist_ok=True)
+        archive_path.write_text(original, encoding="utf-8")
+
+        # Consolidate deterministically and write back (bounded by max_file_bytes).
+        result = consolidate(original, max_bytes=self.config.max_file_bytes)
+        target_path.write_text(result.text, encoding="utf-8")
+        return len(result.text.encode("utf-8"))
 
     def _query_memory(
         self,
