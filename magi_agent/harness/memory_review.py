@@ -29,7 +29,6 @@ Forbidden imports: urllib, socket, subprocess, http, requests — none here.
 """
 from __future__ import annotations
 
-import asyncio
 import os
 from collections.abc import Callable
 from typing import Any, Literal, Self
@@ -182,7 +181,7 @@ class MemoryReviewHarness:
     def __init__(self, config: MemoryReviewConfig) -> None:
         self.config = config
 
-    def review(
+    async def review(
         self,
         transcript: list[dict],
         *,
@@ -193,6 +192,12 @@ class MemoryReviewHarness:
 
         Short-circuits (no reviewer call, no writes) unless BOTH
         ``config.enabled`` and the ``MAGI_MEMORY_REVIEW_ENABLED`` env gate are on.
+
+        This is ``async`` on purpose: the documented caller
+        (``transport/chat.py::_local_adk_chat_sse``) runs inside a live event
+        loop and schedules this OFF the hot path (e.g. ``asyncio.create_task``).
+        It therefore ``await``\\s the PR2 host's async ``_handle`` directly — no
+        sync→async bridge, no worker thread that would block the loop.
         """
         if not self.config.enabled:
             return MemoryReviewReceipt(
@@ -203,7 +208,16 @@ class MemoryReviewHarness:
                 status="disabled", reasonCodes=("review_env_gate_disabled",)
             )
 
-        candidate_facts = list(reviewer(transcript))
+        # Reviewer isolation: a raising reviewer must never propagate into the
+        # caller's turn. Return a reviewed receipt with zero candidates instead.
+        try:
+            candidate_facts = list(reviewer(transcript))
+        except Exception:
+            return MemoryReviewReceipt(
+                status="reviewed",
+                candidates=0,
+                reasonCodes=("reviewer_exception",),
+            )
 
         write_receipts: list[MemoryReviewWriteReceipt] = []
         dropped = 0
@@ -217,7 +231,7 @@ class MemoryReviewHarness:
             if not decision.accepted:
                 dropped += 1
                 continue
-            receipt = self._route_fact(text, write_host)
+            receipt = await self._route_fact(text, write_host)
             write_receipts.append(receipt)
             if receipt.status == "ok":
                 written += 1
@@ -238,17 +252,30 @@ class MemoryReviewHarness:
             reasonCodes=("review_completed",),
         )
 
-    def _route_fact(self, fact: str, write_host: Any) -> MemoryReviewWriteReceipt:
+    async def _route_fact(self, fact: str, write_host: Any) -> MemoryReviewWriteReceipt:
         """Route one accepted fact through the PR2 host's ``_handle`` boundary.
 
-        Builds a minimal ``ToolContext`` and calls the async handler. The host
+        Builds a minimal ``ToolContext`` and awaits the async handler. The host
         runs its own declarative filter + redaction + gated append-only write,
         so this harness adds no privilege beyond surfacing the candidate.
+
+        Per-fact isolation: if ``_handle`` (or receipt mapping) raises, this
+        returns a ``blocked`` receipt with a generic reason code rather than
+        crashing the whole review or leaking the exception. The raw exception
+        text is intentionally NOT included (it could contain secrets).
         """
         arguments = {"fact": fact, "target_file": "MEMORY.md"}
         context = ToolContext(botId="memory-review", turnId="memory-review")
-        result = _run_coro(write_host._handle(arguments, context))
-        return _to_write_receipt(fact, result)
+        try:
+            result = await write_host._handle(arguments, context)
+            return _to_write_receipt(fact, result)
+        except Exception:
+            return MemoryReviewWriteReceipt(
+                factPreview=fact[:120],
+                status="blocked",
+                realWrite=False,
+                reasonCodes=("review_write_exception",),
+            )
 
 
 def _to_write_receipt(fact: str, result: Any) -> MemoryReviewWriteReceipt:
@@ -275,35 +302,6 @@ def _to_write_receipt(fact: str, result: Any) -> MemoryReviewWriteReceipt:
         realWrite=False,
         reasonCodes=codes,
     )
-
-
-def _run_coro(coro: Any) -> Any:
-    """Execute an async handler from sync code.
-
-    The background reviewer is intended to run off the hot loop (its own task /
-    thread), so there is normally no running event loop here. If one IS already
-    running we fall back to a private loop in a worker thread to avoid the
-    "cannot call run_until_complete on a running loop" error.
-    """
-    try:
-        running = asyncio.get_running_loop()
-    except RuntimeError:
-        running = None
-
-    if running is None:
-        return asyncio.run(coro)
-
-    import threading
-
-    result_box: dict[str, Any] = {}
-
-    def _worker() -> None:
-        result_box["value"] = asyncio.run(coro)
-
-    thread = threading.Thread(target=_worker, daemon=True)
-    thread.start()
-    thread.join()
-    return result_box["value"]
 
 
 __all__ = [
