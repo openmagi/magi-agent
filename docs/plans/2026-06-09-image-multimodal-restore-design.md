@@ -76,6 +76,11 @@ Input blocks (as the chat payload / TS runtime produce them) are Anthropic-style
   "source": { "type": "base64", "media_type": "image/png", "data": "<base64>" } }
 ```
 
+The L1 extractor (`_extract_last_user_image_blocks`) also accepts the OpenAI
+inline data-URL variant (`{"type":"image_url","image_url":{"url":"data:<mime>;base64,..."}}`),
+normalising it into the same Anthropic-style shape before sanitisation. Only
+inline `data:` URLs are handled; remote `http(s)://` URLs are ignored.
+
 ADK / Gemini wants:
 
 ```python

@@ -311,8 +311,13 @@ class Gate5B4C3ShadowGenerationImageBlock(_Gate5B4C3Model):
 
     @model_validator(mode="after")
     def _validate_block(self) -> Self:
-        if self.media_type.lower() not in SUPPORTED_IMAGE_MEDIA_TYPES:
+        lowered = self.media_type.lower()
+        if lowered not in SUPPORTED_IMAGE_MEDIA_TYPES:
             raise ValueError("unsupported image media type")
+        # Normalize to lowercase so the stored value is always canonical and
+        # Gemini receives a clean mime_type regardless of input casing.
+        if lowered != self.media_type:
+            object.__setattr__(self, "media_type", lowered)
         try:
             raw = base64.b64decode(self.data, validate=True)
         except (binascii.Error, ValueError) as exc:

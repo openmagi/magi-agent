@@ -149,3 +149,24 @@ def test_image_block_rejects_oversized_data():
         Gate5B4C3ShadowGenerationImageBlock.model_validate(
             {"mediaType": "image/png", "data": oversized}
         )
+
+
+# ---------------------------------------------------------------------------
+# M1 — media_type normalization to lowercase
+# ---------------------------------------------------------------------------
+
+
+def test_image_block_normalizes_media_type_to_lowercase():
+    """A block built with mixed-case mediaType must store the lowercase form."""
+    block = Gate5B4C3ShadowGenerationImageBlock.model_validate(
+        {"mediaType": "Image/PNG", "data": _PNG}
+    )
+    assert block.media_type == "image/png"
+
+
+def test_image_block_already_lowercase_media_type_unchanged():
+    """Canonical lowercase mediaType is accepted and stored without change."""
+    block = Gate5B4C3ShadowGenerationImageBlock.model_validate(
+        {"mediaType": "image/jpeg", "data": _PNG}
+    )
+    assert block.media_type == "image/jpeg"
