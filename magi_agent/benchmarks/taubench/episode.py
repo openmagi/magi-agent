@@ -11,6 +11,12 @@ from pydantic import BaseModel, ConfigDict
 
 from google.genai import types
 
+from magi_agent.benchmarks.taubench.reliability import (
+    ReliabilityConfig,
+    WriteLedger,
+    verify_final,
+)
+
 
 class EpisodeState:
     """Tracks the latest (reward, done) seen across env.step calls in one episode."""
@@ -48,6 +54,8 @@ def run_episode(
     instruction: str | None = None,
     tools: list[object] | None = None,
     session_id: str | None = None,
+    reliability: ReliabilityConfig | None = None,
+    ledger: WriteLedger | None = None,
 ) -> EpisodeResult:
     # `state` is SHARED: the env tools (built by tau_env) record (reward, done) into
     # it on every tool env.step, and this loop records the respond steps. Either can
@@ -60,6 +68,9 @@ def run_episode(
     # so trials stay isolated; constant across this episode's turns so multi-turn
     # conversation history is preserved.
     episode_session_id = session_id or f"taubench-{uuid.uuid4().hex}"
+    cfg = reliability or ReliabilityConfig()
+    led = ledger if ledger is not None else WriteLedger()
+    nudged = False
 
     async def _run_turn(message: str) -> str:
         texts: list[str] = []
@@ -88,6 +99,15 @@ def run_episode(
         turns += 1
         if state.done:
             break
+        if cfg.verify_before_final and not nudged:
+            try:
+                nudge = verify_final(led, agent_text)
+            except Exception:
+                nudge = None
+            if nudge:
+                nudged = True
+                obs = nudge
+                continue  # give the agent one grounded turn; skip this respond
         # the agent's tool calls already hit env.step during the turn (via FunctionTools,
         # which call state.observe). Now route the agent's user-facing text as a respond.
         resp = env.step(

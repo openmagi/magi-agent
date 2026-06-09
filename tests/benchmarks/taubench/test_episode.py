@@ -145,3 +145,71 @@ def test_no_respond_when_tool_finishes_episode() -> None:
     assert result.done is True
     assert result.reward == 1.0
     assert [a for a in env.steps if a.name == "respond"] == []  # no extra respond
+
+
+from magi_agent.benchmarks.taubench.reliability import ReliabilityConfig, WriteLedger
+
+
+def _text_of(content) -> str:
+    parts = getattr(content, "parts", None) or []
+    return "".join(getattr(p, "text", "") or "" for p in parts)
+
+
+def test_l2_injects_one_nudge_on_unsupported_success_claim() -> None:
+    env = FakeEnv(script=[
+        FakeResp("user-reply-after-nudge", 0.0, False),  # respond after the 2nd turn
+        FakeResp("###STOP###", 1.0, True),                # respond after the 3rd turn -> done
+    ])
+    state = EpisodeState()
+    led = WriteLedger()
+    seen: list[str] = []
+    calls = {"n": 0}
+    texts = ["Your reservation is booked! Reservation ID HATHAT", "ok, fixing now", "done"]
+
+    def factory(*, instruction, tools):
+        class _R:
+            async def run_async(self, **kw):
+                seen.append(_text_of(kw["new_message"]))
+                idx = calls["n"]
+                calls["n"] += 1
+                yield _Event(texts[idx])
+        return _R()
+
+    result = run_episode(
+        env, task_index=0, state=state, runner_factory=factory,
+        action_factory=FakeAction, respond_action_name="respond", max_steps=6,
+        reliability=ReliabilityConfig(verify_before_final=True), ledger=led,
+    )
+    respond_contents = [a.kwargs["content"] for a in env.steps if a.name == "respond"]
+    # The unsupported success claim was NOT routed as a respond — the nudge replaced it.
+    assert "Your reservation is booked! Reservation ID HATHAT" not in respond_contents
+    assert respond_contents[0] == "ok, fixing now"
+    # The nudge was delivered to the agent as the next observation.
+    assert any("Re-check the tool results" in m for m in seen)
+    assert result.done is True
+
+
+def test_l2_silent_when_write_succeeded() -> None:
+    env = FakeEnv(script=[FakeResp("###STOP###", 1.0, True)])
+    state = EpisodeState()
+    led = WriteLedger()
+    led.record("book_reservation", {"x": 1}, ok=True)
+    calls = {"n": 0}
+    texts = ["Your reservation is booked. Reservation ID R1."]
+
+    def factory(*, instruction, tools):
+        class _R:
+            async def run_async(self, **kw):
+                idx = calls["n"]
+                calls["n"] += 1
+                yield _Event(texts[idx])
+        return _R()
+
+    result = run_episode(
+        env, task_index=0, state=state, runner_factory=factory,
+        action_factory=FakeAction, respond_action_name="respond", max_steps=5,
+        reliability=ReliabilityConfig(verify_before_final=True), ledger=led,
+    )
+    respond_contents = [a.kwargs["content"] for a in env.steps if a.name == "respond"]
+    assert respond_contents == ["Your reservation is booked. Reservation ID R1."]
+    assert result.done is True
