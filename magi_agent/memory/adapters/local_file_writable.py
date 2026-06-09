@@ -356,7 +356,10 @@ class LocalFileMemoryProvider:
         2. Consolidate (dedup + bounded) via the pure compactor, reserving
            ``incoming_entry_size`` bytes of headroom so the subsequent append
            of the triggering entry cannot breach ``max_file_bytes``.
-        3. Atomically replace the file with the consolidated text.
+        3. Atomically replace the file with the consolidated text via a
+           write-to-tmp-then-rename pattern (os.replace is atomic on POSIX).
+           The tmp file lives in the same directory so the rename is guaranteed
+           to be on the same filesystem.
 
         Reuses the same workspace-containment guard as every other write path;
         never touches a path outside the workspace root. Returns the new file
@@ -371,6 +374,9 @@ class LocalFileMemoryProvider:
         original = target_path.read_text(encoding="utf-8")
 
         # Archive first (no-delete safety): deterministic content-hash suffix.
+        # The archive is written BEFORE the live file is touched — if anything
+        # fails after this point, the original content is preserved in both the
+        # live file (unchanged until os.replace succeeds) and the archive.
         digest = hashlib.sha256(original.encode("utf-8")).hexdigest()[:16]
         archive_rel = f"{_ARCHIVE_SUBDIR}/{target_path.name}.{digest}.md"
         archive_path = _resolve_workspace_path(self.workspace_root, archive_rel)
@@ -390,7 +396,12 @@ class LocalFileMemoryProvider:
         # all of max_file_bytes and the new fact would still be rejected.
         headroom_max = max(self.config.max_file_bytes - incoming_entry_size, 0)
         result = consolidate(original, max_bytes=headroom_max)
-        target_path.write_text(result.text, encoding="utf-8")
+
+        # Atomic overwrite: write consolidated text to a sibling tmp file first,
+        # then rename into place. os.replace is atomic on POSIX — the live file
+        # is never left partially-written. The tmp file is in the same directory
+        # as the target to guarantee a same-filesystem rename.
+        _atomic_write_text(target_path, result.text)
         return len(result.text.encode("utf-8"))
 
     def _query_memory(
@@ -458,6 +469,27 @@ class LocalFileMemoryProvider:
 # ---------------------------------------------------------------------------
 # Module-level helpers
 # ---------------------------------------------------------------------------
+
+
+def _atomic_write_text(target: Path, text: str) -> None:
+    """Write *text* to *target* atomically using a write-tmp-then-rename pattern.
+
+    The tmp file (``<target>.compact.tmp``) is created in the same directory as
+    *target* so the final ``os.replace`` call is guaranteed to be a same-
+    filesystem rename — which is atomic on POSIX.  The fixed suffix
+    ``".compact.tmp"`` is deterministic (no clock, no random) and makes the
+    leftover tmp file easy to identify after a crash.
+
+    If this function raises (e.g. ``os.replace`` fails), *target* is guaranteed
+    to still contain its original content — it is never touched until the rename
+    succeeds.
+    """
+    tmp_path = target.with_suffix(target.suffix + ".compact.tmp")
+    # Write consolidated content to the sibling tmp file.
+    tmp_path.write_text(text, encoding="utf-8")
+    # Atomically replace the live file.  If this raises, tmp_path is left
+    # behind for inspection but target is untouched.
+    os.replace(tmp_path, target)
 
 
 def _empty_result(

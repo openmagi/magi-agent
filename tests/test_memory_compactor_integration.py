@@ -11,6 +11,7 @@ the new entry appends.
 from __future__ import annotations
 
 import asyncio
+import os
 from pathlib import Path
 
 import pytest
@@ -305,3 +306,60 @@ def test_gate_on_post_compaction_dedup_prevents_duplicate(
     assert occurrences == 1, (
         f"'u-00' must appear exactly once after compaction+dedup, found {occurrences}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Atomicity — failure during swap must not destroy the live file
+# ---------------------------------------------------------------------------
+
+
+def test_compaction_swap_failure_leaves_original_intact(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Atomicity guarantee: if os.replace raises AFTER the tmp file is written,
+    the original memory file must still be intact (not truncated/empty) and the
+    archive must exist.
+
+    This simulates a process-kill / disk error between tmp-write and rename.
+    """
+    monkeypatch.setenv(MAGI_MEMORY_COMPACTION_ENABLED_ENV, "1")
+    target = tmp_path / "MEMORY.md"
+    prefill = "".join(f"\n- [note] fact-{i:02d}\n" for i in range(10))
+    target.write_text(prefill, encoding="utf-8")
+    original_content = target.read_text(encoding="utf-8")
+
+    provider = _provider(
+        tmp_path, max_file_bytes=4_194_304, compaction_threshold_bytes=50
+    )
+
+    # Monkeypatch os.replace to raise AFTER tmp file is written.
+    import magi_agent.memory.adapters.local_file_writable as _mod
+
+    def _raise_on_replace(src: str | os.PathLike, dst: str | os.PathLike) -> None:
+        raise OSError("simulated rename failure")
+
+    monkeypatch.setattr(_mod.os, "replace", _raise_on_replace)
+
+    # The remember() call must propagate the OSError (not silently swallow it).
+    with pytest.raises(OSError, match="simulated rename failure"):
+        asyncio.run(provider.remember({"body": "new fact after crash", "kind": "note"}))
+
+    # 1. Original file must be intact — not truncated or empty.
+    live_content = target.read_text(encoding="utf-8")
+    assert live_content == original_content, (
+        "live MEMORY.md must be unchanged when the atomic swap fails"
+    )
+
+    # 2. The tmp file (compact.tmp) must be left in place — the consolidated
+    #    text was written but not yet renamed.
+    tmp_files = list(tmp_path.glob("MEMORY.md.compact.tmp"))
+    assert len(tmp_files) == 1, (
+        "compact.tmp must exist after a failed swap (written before os.replace)"
+    )
+
+    # 3. Archive must exist — archive write happens BEFORE the swap, so the
+    #    original is safe regardless of the rename failure.
+    archive_dir = _archive_dir(tmp_path)
+    archives = list(archive_dir.glob("MEMORY.md.*.md"))
+    assert len(archives) == 1, "archive must exist even when the swap fails"
+    assert archives[0].read_text(encoding="utf-8") == original_content
