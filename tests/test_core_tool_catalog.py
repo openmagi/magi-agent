@@ -40,12 +40,16 @@ EXPECTED_CORE_TOOL_NAMES = (
     "CronList",
     # D2: gated declarative memory write — default OFF
     "MemoryWrite",
+    # PR2: gated self-introspection tool — default OFF
+    "InspectSelfEvidence",
 )
 
 # Tools that are default-OFF (gate-disabled) by design
-_DEFAULT_OFF_TOOL_NAMES = frozenset({"MemoryWrite"})
+_DEFAULT_OFF_TOOL_NAMES = frozenset({"MemoryWrite", "InspectSelfEvidence"})
 # Tools with structured input schemas (not the loose additionalProperties default)
-_STRUCTURED_SCHEMA_TOOL_NAMES = frozenset({"TodoWrite", "FileRead", "MemoryWrite"})
+_STRUCTURED_SCHEMA_TOOL_NAMES = frozenset(
+    {"TodoWrite", "FileRead", "MemoryWrite", "InspectSelfEvidence"}
+)
 
 
 def make_context() -> ToolContext:
@@ -82,8 +86,8 @@ def test_core_tool_catalog_seed_set_is_immutable_builtin_core_metadata() -> None
             # TodoWrite carries a structured payload schema
             assert manifest.input_schema["type"] == "object"
             assert "todos" in manifest.input_schema["properties"]  # type: ignore[index]
-        elif manifest.name in {"FileRead", "MemoryWrite"}:
-            # FileRead and MemoryWrite carry structured input schemas
+        elif manifest.name in {"FileRead", "MemoryWrite", "InspectSelfEvidence"}:
+            # FileRead, MemoryWrite, InspectSelfEvidence carry structured schemas
             assert manifest.input_schema["type"] == "object"
             assert "properties" in manifest.input_schema
 

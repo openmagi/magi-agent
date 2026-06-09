@@ -1403,6 +1403,21 @@ def is_read_ledger_enabled(env: Mapping[str, str]) -> bool:
     return _runtime_feature_enabled(env, "MAGI_READ_LEDGER_ENABLED")
 
 
+MAGI_SELF_INTROSPECTION_ENABLED_ENV = "MAGI_SELF_INTROSPECTION_ENABLED"
+
+
+def is_self_introspection_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Single source of truth for the self-introspection tool activation flag.
+
+    Default OFF (strict truthy opt-in: "1"/"true"/"yes"/"on"). When OFF the
+    ``InspectSelfEvidence`` tool is bound-but-not-advertised so the model never
+    sees it. This deliberately does NOT follow the runtime-profile default-ON
+    convention — introspection is an additive, default-disabled seam.
+    """
+    source = os.environ if env is None else env
+    return _is_true(source.get(MAGI_SELF_INTROSPECTION_ENABLED_ENV))
+
+
 def is_format_on_write_enabled(env: Mapping[str, str]) -> bool:
     """Single source for the format-after-edit flag.
 

@@ -203,10 +203,11 @@ def _project_read_ledger(
     files_read: list[FileReadView],
     turns: list[str],
 ) -> None:
-    # Read-only snapshot of the ReadLedger's private entries. Snapshot to a tuple
-    # first so concurrent record_read() cannot mutate the list mid-iteration; we
-    # emit only projected summary fields (path / digest / size / turn).
-    for entry in tuple(read_ledger._entries):  # noqa: SLF001 — read-only projection seam
+    # Read-only, lock-guarded snapshot of the ReadLedger's entries via its public
+    # ``iter_entries()`` accessor (no private ``_entries`` access). Concurrent
+    # record_read() cannot mutate the snapshot mid-iteration; we emit only
+    # projected summary fields (path / digest / size / turn).
+    for entry in read_ledger.iter_entries():
         if entry.session_id != session_id:
             continue
         if turn_filter is not None and entry.turn_id != turn_filter:

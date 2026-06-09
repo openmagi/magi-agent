@@ -363,6 +363,74 @@ _CORE_TOOL_MANIFESTS: tuple[ToolManifest, ...] = (
         enabled_by_default=False,  # gate-off by default
         opt_out=True,
     ),
+    # Self-introspection (pull) — default OFF, gated by
+    # MAGI_SELF_INTROSPECTION_ENABLED. Read-only/introspective: it only projects
+    # the session evidence ledger (never raw transcript) so the model can
+    # truthfully answer questions about its own prior actions. Real availability
+    # is flipped on at bind time (see runtime wiring) only when the env gate is
+    # truthy — mirrors the MemoryWrite bound-but-not-advertised pattern.
+    ToolManifest(
+        name="InspectSelfEvidence",
+        description=(
+            "Inspect your own recorded runtime evidence for this session — which "
+            "files you actually read, which tools you called (and their status), "
+            "which workflow phases you reached, and verifier verdicts. Use this to "
+            "truthfully answer questions about your own prior actions (\"did you "
+            "really read X?\", \"did you follow the workflow?\") instead of "
+            "guessing. Returns a compact projection of the evidence ledger, never "
+            "raw transcript."
+        ),
+        kind="core",
+        source=CORE_TOOL_SOURCE,
+        permission="meta",
+        input_schema={
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["query_type"],
+            "properties": {
+                "query_type": {
+                    "type": "string",
+                    "enum": [
+                        "files_read",
+                        "tools_called",
+                        "phases",
+                        "verifier_verdicts",
+                        "summary",
+                    ],
+                    "description": (
+                        "Which evidence slice to return. 'summary' returns all "
+                        "slices; the others return just that slice (plus "
+                        "scope+note)."
+                    ),
+                },
+                "turn": {
+                    "type": ["string", "null"],
+                    "description": (
+                        "Optional turn_id to scope the projection to a single "
+                        "turn. Omit (or null) for the whole session."
+                    ),
+                },
+                "ref": {
+                    "type": ["string", "null"],
+                    "description": (
+                        "Optional case-insensitive substring filter applied to "
+                        "the relevant slice's identifier (file path / tool name / "
+                        "phase name / verdict stage)."
+                    ),
+                },
+            },
+        },
+        timeout_ms=10_000,
+        budget=Budget(max_calls_per_turn=10, max_parallel=1),
+        dangerous=False,
+        is_concurrency_safe=True,
+        mutates_workspace=False,
+        parallel_safety="readonly",
+        available_in_modes=("plan", "act"),
+        tags=("introspection", "evidence", "meta", "read"),
+        enabled_by_default=False,  # gate-off by default
+        opt_out=True,
+    ),
 )
 
 

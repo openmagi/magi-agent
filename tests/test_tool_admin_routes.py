@@ -32,6 +32,7 @@ EXPECTED_CORE_TOOL_NAMES = {
     "TaskGet",
     "TaskOutput",
     "CronList",
+    "InspectSelfEvidence",
 }
 
 EXPECTED_NATIVE_TOOL_NAMES = {
