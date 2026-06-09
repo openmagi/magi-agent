@@ -270,6 +270,37 @@ def test_no_summarizer_falls_back_to_truncation(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# I2 — redact-before-summarize: the summarizer must never receive raw secrets
+# ---------------------------------------------------------------------------
+
+
+def test_summarizer_input_is_redacted(tmp_path: Path) -> None:
+    """The text handed to the summarizer must be scrubbed of secrets (I2).
+
+    A daily file over threshold containing a secret token is fed to the tree.
+    We assert that EVERY recorded summarizer input has the secret redacted —
+    closing the exfiltration surface of sending raw tier text to an LLM.
+    """
+    memory = tmp_path / "memory"
+    secret = "sk-live-supersecretkey1234567890"
+    lines = "\n".join(
+        [f"- entry {i}" for i in range(8)] + [f"- api key is {secret}"]
+    )
+    _write_daily(memory, "2026-05-01", text=lines)
+    summ = _RecordingSummarizer()
+    tree = CompactionTree(memory, _config(), summarizer=summ)
+
+    tree.run(today=date(2026, 6, 8))
+
+    assert summ.calls, "summarizer must be invoked when over threshold"
+    for recorded in summ.calls:
+        assert secret not in recorded, "raw secret leaked into summarizer input"
+    # And the persisted tier file is redacted too (defense-in-depth on write).
+    daily_after = (memory / "daily" / "2026-05-01.md").read_text(encoding="utf-8")
+    assert secret not in daily_after
+
+
+# ---------------------------------------------------------------------------
 # ROOT.md synthesis: canonical sections + cap
 # ---------------------------------------------------------------------------
 
