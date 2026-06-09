@@ -1,10 +1,11 @@
 """Single source of truth for Hipocampus memory activation (PR1).
 
 This module resolves the one ``MemoryRuntimeConfig`` that every memory surface
-reads — the scattered per-module env reads (gates/memory_write_readiness,
-adapters/local_file_writable, harness/memory_recall, config/env context
-compaction) route through :func:`resolve_memory_config` so activation is decided
-in exactly one place.
+reads — activation is decided in exactly one place via
+:func:`resolve_memory_config`.  PR1 routes four surfaces through the resolver
+(gates/memory_write_readiness, memory/policy, adapters/local_file_writable,
+adapters/operator_soul_writer); the remaining consumers (harness/memory_recall
+and config/env context-compaction) are converged in later PRs.
 
 GOVERNANCE INVARIANT
 --------------------
@@ -163,7 +164,7 @@ def resolve_memory_config(
         table,
         env_var=MASTER_ENV_VAR,
         config_key="enabled",
-        default=False,
+        default=False,  # TODO(PR8): default=True
     )
 
     def sub_flag(env_var: str, config_key: str, *, master_default: bool) -> bool:
@@ -209,32 +210,32 @@ def resolve_memory_config(
         ),
         cooldownHours=_resolve_int(
             env, table, env_var=COOLDOWN_HOURS_ENV_VAR, config_key="cooldown_hours",
-            default=_DEFAULT_COOLDOWN_HOURS,
+            default=_DEFAULT_COOLDOWN_HOURS, minimum=0,
         ),
         dailyThreshold=_resolve_int(
             env, table, env_var=DAILY_THRESHOLD_ENV_VAR, config_key="daily_threshold",
-            default=_DEFAULT_DAILY_THRESHOLD,
+            default=_DEFAULT_DAILY_THRESHOLD, minimum=1,
         ),
         weeklyThreshold=_resolve_int(
             env, table, env_var=WEEKLY_THRESHOLD_ENV_VAR, config_key="weekly_threshold",
-            default=_DEFAULT_WEEKLY_THRESHOLD,
+            default=_DEFAULT_WEEKLY_THRESHOLD, minimum=1,
         ),
         monthlyThreshold=_resolve_int(
             env, table, env_var=MONTHLY_THRESHOLD_ENV_VAR, config_key="monthly_threshold",
-            default=_DEFAULT_MONTHLY_THRESHOLD,
+            default=_DEFAULT_MONTHLY_THRESHOLD, minimum=1,
         ),
         rootMaxTokens=_resolve_int(
             env, table, env_var=ROOT_MAX_TOKENS_ENV_VAR, config_key="root_max_tokens",
-            default=_DEFAULT_ROOT_MAX_TOKENS,
+            default=_DEFAULT_ROOT_MAX_TOKENS, minimum=1,
         ),
         mode=_resolve_mode(env, table),
         recallK=_resolve_int(
             env, table, env_var=RECALL_K_ENV_VAR, config_key="recall_k",
-            default=_DEFAULT_RECALL_K,
+            default=_DEFAULT_RECALL_K, minimum=1,
         ),
         recallMaxBytes=_resolve_int(
             env, table, env_var=RECALL_MAX_BYTES_ENV_VAR, config_key="recall_max_bytes",
-            default=_DEFAULT_RECALL_MAX_BYTES,
+            default=_DEFAULT_RECALL_MAX_BYTES, minimum=1,
         ),
     )
 
@@ -302,11 +303,19 @@ def _resolve_int(
     env_var: str,
     config_key: str,
     default: int,
+    minimum: int,
 ) -> int:
+    # An out-of-range value gets the SAME forgiveness as a malformed string:
+    # clamp-to-default rather than let the pydantic ``ge=`` field constraint
+    # raise a ValidationError out of resolve_memory_config() (which runs inside
+    # gates/adapters — an operator typo must not crash a gate evaluation).
+    def _checked(value: int) -> int:
+        return value if value >= minimum else default
+
     raw = env.get(env_var)
     if raw is not None and str(raw).strip():
         try:
-            return int(str(raw).strip())
+            return _checked(int(str(raw).strip()))
         except ValueError:
             return default
     if config_key in table:
@@ -314,10 +323,10 @@ def _resolve_int(
         if isinstance(candidate, bool):
             return default
         if isinstance(candidate, int):
-            return candidate
+            return _checked(candidate)
         if isinstance(candidate, str) and candidate.strip():
             try:
-                return int(candidate.strip())
+                return _checked(int(candidate.strip()))
             except ValueError:
                 return default
     return default

@@ -22,6 +22,7 @@ from __future__ import annotations
 
 from typing import Literal, get_args
 
+import pydantic
 import pytest
 
 from magi_agent.memory.config import (
@@ -65,7 +66,8 @@ def test_default_tunables_are_stable_regardless_of_master() -> None:
 
 def test_config_is_frozen_immutable() -> None:
     cfg = resolve_memory_config(env={}, config={})
-    with pytest.raises((TypeError, ValueError, Exception)):
+    # Frozen pydantic v2 raises ValidationError on attribute mutation.
+    with pytest.raises(pydantic.ValidationError):
         cfg.write_enabled = True  # type: ignore[misc]
 
 
@@ -212,6 +214,44 @@ def test_db_and_adk_write_fields_coerce_forged_true_to_false() -> None:
     assert compaction_cfg.adk_memory_service_write_enabled is False
 
 
-def test_mode_literal_values() -> None:
-    anno = MemoryRuntimeConfig.model_fields["mode"].annotation
-    assert set(get_args(anno)) >= {"normal"}
+def test_invalid_mode_falls_back_to_normal() -> None:
+    # An invalid mode value (env or config) must clamp to the default rather
+    # than tripping the MemoryMode Literal — the happy path is covered above.
+    cfg_env = resolve_memory_config(env={"MAGI_MEMORY_MODE": "turbo"}, config={})
+    assert cfg_env.mode == "normal"
+    cfg_cfg = resolve_memory_config(env={}, config={"memory": {"mode": "turbo"}})
+    assert cfg_cfg.mode == "normal"
+
+
+# ---------------------------------------------------------------------------
+# Fail-soft int tunables — out-of-range clamps to default, never raises
+# ---------------------------------------------------------------------------
+
+
+def test_out_of_range_int_clamps_to_default_without_raising() -> None:
+    # An in-range-parseable but out-of-bounds value (below the field minimum)
+    # gets the same forgiveness as a malformed string: clamp-to-default instead
+    # of raising a pydantic ValidationError out of resolve_memory_config().
+    cfg = resolve_memory_config(
+        env={"MAGI_MEMORY_DAILY_THRESHOLD": "-5"},
+        config={},
+    )
+    assert cfg.daily_threshold == 200  # hardcoded default, no raise
+    # Zero also trips the ge=1 constraint → default.
+    cfg_zero = resolve_memory_config(
+        env={"MAGI_MEMORY_DAILY_THRESHOLD": "0"},
+        config={},
+    )
+    assert cfg_zero.daily_threshold == 200
+    # cooldown_hours has ge=0, so 0 is valid and must be preserved.
+    cfg_cooldown = resolve_memory_config(
+        env={"MAGI_MEMORY_COOLDOWN_HOURS": "0"},
+        config={},
+    )
+    assert cfg_cooldown.cooldown_hours == 0
+    # Out-of-range via the config table is also clamped.
+    cfg_table = resolve_memory_config(
+        env={},
+        config={"memory": {"recall_k": -1}},
+    )
+    assert cfg_table.recall_k == 8
