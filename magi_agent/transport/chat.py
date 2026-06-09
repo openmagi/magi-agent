@@ -868,8 +868,9 @@ async def _local_adk_chat_sse(
     model_override = (
         None if configured_model == LOCAL_DEV_MODEL_SENTINEL else configured_model
     )
+    workspace_root = os.environ.get("MAGI_AGENT_WORKSPACE") or os.getcwd()
     headless = build_headless_runtime(
-        cwd=os.environ.get("MAGI_AGENT_WORKSPACE") or os.getcwd(),
+        cwd=workspace_root,
         permission_mode="bypassPermissions",
         session_id=session_id,
         model=model_override,
@@ -886,9 +887,16 @@ async def _local_adk_chat_sse(
         cancel=cancel,
         gate=headless.gate,
     )
+    # Accumulate the assistant text + a tool-use signal so the turn-end memory
+    # hook (below) can flush a concise daily entry and skip trivial turns. This
+    # mirrors data we already stream, so it adds no extra engine work.
+    assistant_parts: list[str] = []
+    used_tool = False
+    turn_errored = False
     async for item in stream:
         if isinstance(item, EngineResult):
             if item.error:
+                turn_errored = True
                 yield _sse_event(
                     "agent",
                     {
@@ -899,43 +907,37 @@ async def _local_adk_chat_sse(
                 )
             break
         event_payload = dict(item.payload)
+        if event_payload.get("type") == "tool_start":
+            used_tool = True
         yield _sse_event("agent", event_payload)
         delta = _local_runtime_event_delta(event_payload)
         if delta:
+            assistant_parts.append(delta)
             yield _sse_data({"choices": [{"index": 0, "delta": {"content": delta}}]})
-    # ── BACKGROUND MEMORY-REVIEW WIRING SEAM (A1, PR5) ──────────────────────
+    # ── TURN-END MEMORY HOOK (PR-B) ─────────────────────────────────────────
     # This is the turn-finalization point of the live local chat path: the
-    # engine stream has drained, so the assistant turn is complete. A periodic
-    # background memory review (Hermes-style "save what the model forgot") would
-    # be triggered HERE — but DELIBERATELY NOT IN THIS PR, because it needs a
-    # live model-backed reviewer and MUST run OFF this hot path so it never
-    # blocks the user's turn or the SSE stream. When a live reviewer is added,
-    # wire it like this (off-loop, e.g. via the background-task boundary):
+    # engine stream has drained, so the assistant turn is complete. Flush a
+    # concise turn entry to memory/daily/YYYY-MM-DD.md (the compaction tree's
+    # raw input) and trigger a compaction build once per session. Both are GATED
+    # (default-OFF master) and FAIL-SOFT — record_turn never raises, so a memory
+    # error can never break the user's turn or the SSE stream. Errored turns are
+    # skipped (nothing useful to persist). Real date injected at this call site.
+    if not turn_errored:
+        from magi_agent.runtime.memory_turn_hook import record_turn  # noqa: PLC0415
+
+        record_turn(
+            workspace_root=workspace_root,
+            session_id=session_id,
+            turn_id=turn_id,
+            user_text=prompt,
+            assistant_text="".join(assistant_parts),
+            used_tool=used_tool,
+        )
     #
-    #   from magi_agent.harness.memory_review import (
-    #       MemoryReviewConfig, MemoryReviewHarness, should_run_review,
-    #   )
-    #   from magi_agent.runtime.memory_write_wiring import build_memory_write_host
-    #
-    #   cfg = MemoryReviewConfig(enabled=...)   # default-OFF; also gated by
-    #                                           # MAGI_MEMORY_REVIEW_ENABLED env
-    #   if should_run_review(turn_count, interval_turns=cfg.interval_turns,
-    #                        enabled=cfg.enabled):
-    #       host = build_memory_write_host(
-    #           workspace_root=Path(workspace), bot_id=..., user_id=...,
-    #       )
-    #       # review() is async. We are already inside a live event loop here,
-    #       # so schedule it fire-and-forget OFF the hot path — NEVER await it
-    #       # inline (that would block the SSE stream / the user's turn):
-    #       asyncio.create_task(
-    #           MemoryReviewHarness(cfg).review(
-    #               transcript, reviewer=<live extractor>, write_host=host,
-    #           )
-    #       )
-    #
-    # The harness re-runs the declarative filter + PR2 write gate on every
-    # surfaced fact, so even a buggy reviewer cannot persist task-state or write
-    # without the memory-write gate being live. Do NOT inline it above. ────────
+    # NOTE: the Hermes-style background memory *review* (re-reading the transcript
+    # to "save what the model forgot") is a SEPARATE mechanism that still needs a
+    # live model-backed reviewer and MUST run OFF this hot path. It is intentionally
+    # NOT wired here — see magi_agent/harness/memory_review.py. ──────────────────
     yield _sse_data({"choices": [{"index": 0, "finish_reason": "stop"}]})
     yield "data: [DONE]\n\n"
 
