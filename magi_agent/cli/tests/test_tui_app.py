@@ -1658,3 +1658,105 @@ def test_copy_selection_empty_surfaces_info_toast() -> None:
         assert any(sev == "information" for _msg, sev in captured)
 
     asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
+# PR3.4 — focus-aware attention bell on turn-done / permission-needed.
+# ---------------------------------------------------------------------------
+def test_app_tracks_focus_on_blur_and_focus() -> None:
+    async def _run() -> None:
+        app = _make_app(FakeEngineDriver())
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            # Default: focused after mount.
+            assert app.app_is_focused is True
+            app.on_app_blur(None)
+            assert app.app_is_focused is False
+            app.on_app_focus(None)
+            assert app.app_is_focused is True
+
+    asyncio.run(_run())
+
+
+def test_turn_done_rings_bell_when_unfocused_and_enabled(monkeypatch) -> None:
+    async def _run() -> None:
+        from magi_agent.cli.tui import notify as _notify
+
+        monkeypatch.setenv(_notify.BELL_ENV, "1")
+        app = _make_app(FakeEngineDriver())
+        rings: list[int] = []
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.bell = lambda: rings.append(1)  # type: ignore[method-assign]
+            app.on_app_blur(None)  # go unfocused
+            app.start_turn("hi")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+        assert rings, "expected a bell on turn-done while unfocused + enabled"
+
+    asyncio.run(_run())
+
+
+def test_turn_done_no_bell_when_focused_even_if_enabled(monkeypatch) -> None:
+    async def _run() -> None:
+        from magi_agent.cli.tui import notify as _notify
+
+        monkeypatch.setenv(_notify.BELL_ENV, "1")
+        app = _make_app(FakeEngineDriver())
+        rings: list[int] = []
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.bell = lambda: rings.append(1)  # type: ignore[method-assign]
+            # Focused (default) -> no bell even though the gate is ON.
+            app.start_turn("hi")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+        assert not rings, "no bell should fire while the terminal is focused"
+
+    asyncio.run(_run())
+
+
+def test_turn_done_no_bell_when_env_unset_default_off(monkeypatch) -> None:
+    async def _run() -> None:
+        from magi_agent.cli.tui import notify as _notify
+
+        # Default OFF: with the env unset, NO bell ever — even while unfocused.
+        monkeypatch.delenv(_notify.BELL_ENV, raising=False)
+        app = _make_app(FakeEngineDriver())
+        rings: list[int] = []
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.bell = lambda: rings.append(1)  # type: ignore[method-assign]
+            app.on_app_blur(None)  # unfocused, but gate is OFF
+            app.start_turn("hi")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+        assert not rings, "default-OFF gate must never ring the bell"
+
+    asyncio.run(_run())
+
+
+def test_permission_needed_rings_bell_when_unfocused_and_enabled(monkeypatch) -> None:
+    async def _run() -> None:
+        from magi_agent.cli.tui import notify as _notify
+
+        monkeypatch.setenv(_notify.BELL_ENV, "1")
+        engine = FakeEngineDriver(tokens=["working"], ask_tool="Bash")
+        app = _make_app(engine)
+        rings: list[int] = []
+        async with app.run_test() as pilot:
+            app._gate = SinkGate(app.sink)
+            await pilot.pause()
+            app.bell = lambda: rings.append(1)  # type: ignore[method-assign]
+            app.on_app_blur(None)  # go unfocused
+            app.start_turn("do it")
+            await pilot.pause()
+            await pilot.pause()
+            # The permission modal is up; the bell fired before it was shown.
+            assert isinstance(app.screen, ToolUseConfirm)
+            await pilot.click("#deny")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+        assert rings, "expected a bell when a permission modal opened while unfocused"
+
+    asyncio.run(_run())

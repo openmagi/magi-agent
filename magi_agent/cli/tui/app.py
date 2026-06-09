@@ -544,6 +544,16 @@ class TextualSink(PromptSink):
         self._app = app
 
     async def ask(self, req: ControlRequest) -> PermissionDecision:
+        # Gated focus-aware attention bell (PR3.4): a permission prompt while the
+        # terminal is unfocused (and MAGI_TUI_NOTIFY_BELL on) rings, so an
+        # away-from-keyboard operator notices a turn is blocked on them. No-op
+        # when focused or the gate is off (default). Fired BEFORE the modal so
+        # the cue lands as the prompt appears.
+        _notify.notify_attention(
+            self._app,
+            focused=self._app.app_is_focused,
+            reason=f"Magi: permission needed for {req.tool_name}",
+        )
         # On app teardown the modal can resolve ``None`` (the screen is popped
         # without a decision). The contract is ``-> PermissionDecision``, so fail
         # safe: anything that is not a real decision becomes a deny.
@@ -759,6 +769,10 @@ class MagiTuiApp(App[None]):
         # Left sidebar (PR3.2): mounted hidden, toggled by ctrl+b. Panes are fed
         # from folded tool/terminal events (todo / recent files / context usage).
         self._sidebar: Sidebar | None = None
+        # Focus tracking for the gated attention bell (PR3.4). Assume focused at
+        # mount; on_app_blur/on_app_focus keep it current. The bell only fires
+        # while UNFOCUSED (and only when MAGI_TUI_NOTIFY_BELL is on — default OFF).
+        self.app_is_focused: bool = True
         # monotonic() stamp marking the in-flight turn's start; None when idle.
         # Used by the footer elapsed clock (set in start_turn, cleared in
         # _render_terminal).
@@ -1443,6 +1457,15 @@ class MagiTuiApp(App[None]):
         # Stop the running clock once the turn is terminal (the flush-tick
         # elapsed advance keys off this being None / state != "running").
         self._turn_started_monotonic = None
+        # Gated focus-aware attention bell (PR3.4): ring only when the terminal
+        # is unfocused AND MAGI_TUI_NOTIFY_BELL is on (default OFF). Fired here
+        # so it covers completed AND non-completed turns (before the early
+        # return for the completed case). Fail-open — never crashes the turn.
+        _notify.notify_attention(
+            self,
+            focused=self.app_is_focused,
+            reason=f"Magi: turn {terminal.terminal.value}",
+        )
         if terminal.terminal == Terminal.completed:
             return
         suffix = f": {terminal.error}" if terminal.error else ""
@@ -1474,6 +1497,26 @@ class MagiTuiApp(App[None]):
         if self._sidebar is None:
             return
         self._sidebar.display = not self._sidebar.display
+
+    # -- focus tracking for the attention bell (PR3.4) ---------------------
+    def on_app_blur(self, _event: object) -> None:
+        """Terminal lost focus -> the attention bell may fire on next turn-done.
+
+        Textual posts ``AppBlur`` (handler ``on_app_blur``) when the terminal
+        emulator reports the window/tab lost focus. We only track the flag here;
+        the gated bell keys off it (and ``MAGI_TUI_NOTIFY_BELL``).
+        """
+
+        self.app_is_focused = False
+
+    def on_app_focus(self, _event: object) -> None:
+        """Terminal regained focus -> suppress the attention bell.
+
+        Textual posts ``AppFocus`` (handler ``on_app_focus``) when focus returns;
+        the operator is now looking, so no bell should fire.
+        """
+
+        self.app_is_focused = True
 
     # -- cancellation -------------------------------------------------------
     def action_cancel_turn(self) -> None:
