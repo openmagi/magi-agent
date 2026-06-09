@@ -2533,19 +2533,67 @@ async def _maybe_run_egress_critic_gate(
         return None
 
 
+# Haiku-class fast-model override for the egress critic / fact-critical
+# classifier (analogous to ``MAGI_SMART_APPROVE_MODEL`` for SmartApprove). When
+# unset the critic uses the runtime's configured provider model.
+_ENV_EGRESS_CRITIC_MODEL = "MAGI_EGRESS_CRITIC_MODEL"
+
+
 def _egress_critic_model_factory(payload: object) -> Callable[[], object] | None:
     """Resolve the critic model factory.
 
-    Tests inject a fake via ``payload["_egressCriticModelFactory"]`` (a private,
-    test-only key ignored by the rest of the pipeline). In production this
-    returns ``None`` until a provider-backed factory is wired — the gate then
-    fails open (status ``None``), so enabling the flag without a model is safe.
+    Resolution order:
+      1. Test injection — ``payload["_egressCriticModelFactory"]`` (a private,
+         test-only key ignored by the rest of the pipeline) ALWAYS wins so tests
+         stay hermetic and never touch a real provider.
+      2. Production — build a real Haiku-class model from the runtime's provider
+         configuration, reusing the SAME mechanism SmartApprove's
+         ``ReadOnlyClassifier`` uses (``resolve_provider_config`` ->
+         ``_build_litellm_for_config``). The fast model is overridable via the
+         ``MAGI_EGRESS_CRITIC_MODEL`` env var.
+
+    Fail-open is sacrosanct: if no provider config / key can be resolved, or the
+    litellm dependency is unavailable, this returns ``None`` and the gate stays
+    dormant (status ``None``) — never erroring into the response. Enabling the
+    flag without a configured model is therefore always safe.
     """
     if isinstance(payload, Mapping):
         factory = payload.get("_egressCriticModelFactory")
         if callable(factory):
             return factory  # type: ignore[return-value]
-    return None
+    return _production_egress_critic_model_factory()
+
+
+def _production_egress_critic_model_factory() -> Callable[[], object] | None:
+    """Build a provider-backed critic model factory, or ``None`` (fail open).
+
+    Reuses the exact resolution path of the SmartApprove read-only classifier:
+    ``resolve_provider_config()`` discovers the active provider/key from the same
+    ``~/.magi/config.toml`` + env sources the runner uses, and
+    ``_build_litellm_for_config()`` constructs the ADK ``LiteLlm`` model. A
+    Haiku-class model is selected via ``MAGI_EGRESS_CRITIC_MODEL`` when set.
+    """
+    try:
+        from magi_agent.cli.providers import resolve_provider_config  # noqa: PLC0415
+
+        provider_config = resolve_provider_config()
+    except Exception:  # noqa: BLE001 — fail open (no provider config -> dormant)
+        return None
+
+    if provider_config is None:
+        # No provider / key configured -> gate stays dormant (fail open).
+        return None
+
+    model_override = os.environ.get(_ENV_EGRESS_CRITIC_MODEL, "").strip() or None
+
+    def _factory() -> object:
+        from magi_agent.cli.readonly_classifier import (  # noqa: PLC0415
+            _build_litellm_for_config,
+        )
+
+        return _build_litellm_for_config(provider_config, model_override=model_override)
+
+    return _factory
 
 
 def _log_egress_critic_evidence(record: Mapping[str, object]) -> None:
