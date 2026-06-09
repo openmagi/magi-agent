@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import uuid
 from collections.abc import Callable
 from typing import Any
 
@@ -46,6 +47,7 @@ def run_episode(
     max_steps: int,
     instruction: str | None = None,
     tools: list[object] | None = None,
+    session_id: str | None = None,
 ) -> EpisodeResult:
     # `state` is SHARED: the env tools (built by tau_env) record (reward, done) into
     # it on every tool env.step, and this loop records the respond steps. Either can
@@ -53,12 +55,18 @@ def run_episode(
     reset = env.reset(task_index)
     obs = reset.observation
     runner = runner_factory(instruction=instruction or env.wiki, tools=tools)
+    # One session_id for the whole episode: ADK's Runner.run_async REQUIRES it
+    # (CliModelRunner forwards kwargs raw, so it must be passed). Unique per episode
+    # so trials stay isolated; constant across this episode's turns so multi-turn
+    # conversation history is preserved.
+    episode_session_id = session_id or f"taubench-{uuid.uuid4().hex}"
 
     async def _run_turn(message: str) -> str:
         texts: list[str] = []
-        # session_id omitted: the runner's per-trial default (set by the caller) keeps trials independent
         async for event in runner.run_async(
-            user_id="taubench", new_message=_user_content(message)
+            user_id="taubench",
+            session_id=episode_session_id,
+            new_message=_user_content(message),
         ):
             content = getattr(event, "content", None)
             for part in getattr(content, "parts", None) or []:
@@ -82,7 +90,9 @@ def run_episode(
             break
         # the agent's tool calls already hit env.step during the turn (via FunctionTools,
         # which call state.observe). Now route the agent's user-facing text as a respond.
-        resp = env.step(action_factory(respond_action_name, {"content": agent_text}))
+        resp = env.step(
+            action_factory(name=respond_action_name, kwargs={"content": agent_text})
+        )
         state.observe(resp.reward, resp.done)
         obs = resp.observation
     return EpisodeResult(reward=state.reward, done=state.done, turns=turns)

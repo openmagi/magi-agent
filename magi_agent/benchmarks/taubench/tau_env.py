@@ -33,7 +33,7 @@ def build_env_tool_callables(
         def _make(tool_name: str) -> Callable:
             async def invoke(arguments: dict, tool_context: object = None) -> str:
                 try:
-                    resp = env.step(action_factory(tool_name, dict(arguments or {})))
+                    resp = env.step(action_factory(name=tool_name, kwargs=dict(arguments or {})))
                 except Exception as exc:  # surface to the agent as an observation, not an infra error
                     return f"Error: {exc}"
                 state.observe(resp.reward, resp.done)
