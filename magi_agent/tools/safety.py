@@ -1550,6 +1550,58 @@ def _command_basename(command_token: str) -> str:
     return command_token.rsplit("/", 1)[-1]
 
 
+_SHELL_UNDECOMPOSABLE = ("$(", "${", "`", ">", "<", ">>", "<<")
+
+
+def _decompose_shell_segments(command: str) -> list[str] | None:
+    """Split a command into top-level segments on ``| ; && ||``.
+
+    Returns ``None`` (caller must deny) when the command contains command
+    substitution, backticks, parameter expansion, or redirection. Operators
+    inside single/double quotes are ignored.
+    """
+    if any(token in command for token in _SHELL_UNDECOMPOSABLE):
+        return None
+    segments: list[str] = []
+    buf: list[str] = []
+    quote: str | None = None
+    i = 0
+    n = len(command)
+    while i < n:
+        ch = command[i]
+        if quote is not None:
+            buf.append(ch)
+            if ch == quote:
+                quote = None
+            i += 1
+            continue
+        if ch in ("'", '"'):
+            quote = ch
+            buf.append(ch)
+            i += 1
+            continue
+        matched = ""
+        for op in ("&&", "||"):
+            if command.startswith(op, i):
+                matched = op
+                break
+        if not matched and ch in ("|", ";"):
+            matched = ch
+        if matched:
+            segments.append("".join(buf).strip())
+            buf = []
+            i += len(matched)
+            continue
+        buf.append(ch)
+        i += 1
+    if quote is not None:
+        return None
+    tail = "".join(buf).strip()
+    if tail:
+        segments.append(tail)
+    return [s for s in segments if s]
+
+
 def _has_complex_shell_operator(command: str) -> bool:
     return (
         "\n" in command
