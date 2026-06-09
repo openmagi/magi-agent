@@ -1483,6 +1483,8 @@ def _readonly_shell_denial(
 
 
 def _readonly_argument_denial(exe: str, args: tuple[str, ...], *, shell: bool) -> str | None:
+    if exe == "sed" and _sed_readonly_script_denial(args):
+        return "mutating_shell_flag_denied" if shell else "mutating_command_flag_denied"
     for arg in args:
         if exe == "sed" and (arg == "-i" or arg.startswith("-i") or arg == "--in-place"):
             return "mutating_shell_flag_denied" if shell else "mutating_command_flag_denied"
@@ -1497,6 +1499,98 @@ def _readonly_argument_denial(exe: str, args: tuple[str, ...], *, shell: bool) -
             continue
         return "unsafe_command_flag_denied"
     return None
+
+
+_SED_DIRECT_WRITE_COMMAND_RE = re.compile(
+    r"(?:^|[;\n{}])\s*"
+    r"(?:(?:\d+|\$|[,!~+\s]|/[^/\n]*/|\\[^\n]+\\)+)?"
+    r"[wW](?=\s|$)"
+)
+
+
+def _sed_readonly_script_denial(args: tuple[str, ...]) -> bool:
+    """True when sed arguments include an opaque or mutating script.
+
+    A sed executable can be read-only, but sed's script language includes file
+    writes via ``w``/``W`` commands and ``s///w file`` substitution flags. Those
+    writes are not visible to generic shell flag/path checks, so trusted-local
+    read-safe pipelines must inspect inline scripts and reject opaque ``-f``
+    script files.
+    """
+    scripts: list[str] = []
+    first_positional_script_seen = False
+    index = 0
+    while index < len(args):
+        arg = args[index]
+        if arg in {"-f", "--file"} or arg.startswith("--file="):
+            return True
+        if arg in {"-e", "--expression"}:
+            if index + 1 >= len(args):
+                return True
+            scripts.append(args[index + 1])
+            index += 2
+            continue
+        if arg.startswith("--expression="):
+            scripts.append(arg.split("=", 1)[1])
+            index += 1
+            continue
+        if arg.startswith("-e") and arg != "-e":
+            scripts.append(arg[2:])
+            index += 1
+            continue
+        if arg.startswith("-"):
+            index += 1
+            continue
+        if not first_positional_script_seen:
+            scripts.append(arg)
+            first_positional_script_seen = True
+        index += 1
+    return any(_sed_script_has_write_command(script) for script in scripts)
+
+
+def _sed_script_has_write_command(script: str) -> bool:
+    if _SED_DIRECT_WRITE_COMMAND_RE.search(script) is not None:
+        return True
+    return _sed_substitution_has_write_flag(script)
+
+
+def _sed_substitution_has_write_flag(script: str) -> bool:
+    index = 0
+    while index < len(script):
+        if script[index] != "s" or (index > 0 and script[index - 1] == "\\"):
+            index += 1
+            continue
+        if index + 1 >= len(script):
+            index += 1
+            continue
+        delimiter = script[index + 1]
+        if delimiter.isalnum() or delimiter.isspace() or delimiter == "\\":
+            index += 1
+            continue
+        cursor = index + 2
+        delimiters_seen = 0
+        escaped = False
+        while cursor < len(script):
+            ch = script[cursor]
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == delimiter:
+                delimiters_seen += 1
+                if delimiters_seen == 2:
+                    cursor += 1
+                    break
+            cursor += 1
+        if delimiters_seen != 2:
+            index += 1
+            continue
+        while cursor < len(script) and script[cursor].isalpha():
+            if script[cursor] == "w":
+                return True
+            cursor += 1
+        index += 1
+    return False
 
 
 def _readonly_flag_allowed(exe: str, arg: str) -> bool:

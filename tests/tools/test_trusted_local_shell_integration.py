@@ -108,3 +108,21 @@ async def test_decision_denies_bare_background_operator_mutation(tmp_path):
 
     assert outcome.status == "blocked"
     assert outcome.handler_called is False
+
+
+@pytest.mark.asyncio
+async def test_decision_denies_sed_write_script_pipeline(tmp_path):
+    (tmp_path / "f.py").write_text("x\n", encoding="utf-8")
+    escaped_path = tmp_path.parent / "escaped.txt"
+    bundle = _build_bundle(tmp_path)
+
+    outcome = await bundle.host.dispatch(
+        "Bash",
+        {"command": "sed -n '1w ../escaped.txt' f.py | head -1"},
+        request_digest=_sha256("request-sed-write-pipeline"),
+        tool_call_id="call-sed-write-pipeline",
+    )
+
+    assert outcome.status == "blocked"
+    assert outcome.handler_called is False
+    assert not escaped_path.exists()
