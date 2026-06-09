@@ -191,6 +191,10 @@ _SENSITIVE_RE = re.compile(
     r")",
     re.IGNORECASE,
 )
+_URL_USERINFO_RE = re.compile(
+    r"\b(?P<scheme>https?://)(?P<userinfo>[^/\s@]+@)(?P<authority>[^/\s]+)",
+    re.IGNORECASE,
+)
 
 _MODEL_CONFIG = ConfigDict(
     frozen=True,
@@ -2086,6 +2090,7 @@ def _sanitize_output(value: object) -> object:
 
 
 def _redact(value: str) -> str:
+    value = _URL_USERINFO_RE.sub(r"\g<scheme>[redacted]@\g<authority>", value)
     return _SENSITIVE_RE.sub("[redacted]", value)
 
 

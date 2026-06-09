@@ -57,7 +57,7 @@ class EgressProxyConfig:
 ```python
 def subprocess_env_overlay(cfg: EgressProxyConfig) -> dict[str, str]:
     """Extra env keys to merge into a tool subprocess. Empty dict if disabled."""
-    # HTTPS_PROXY/HTTP_PROXY/ALL_PROXY (+auth in URL form for CLI tools)
+    # HTTPS_PROXY/HTTP_PROXY/ALL_PROXY (auth-free; Bash can print env)
     # SSL_CERT_FILE/CURL_CA_BUNDLE/REQUESTS_CA_BUNDLE/NODE_EXTRA_CA_CERTS/GIT_SSL_CAINFO
 
 def httpx_client_kwargs(cfg: EgressProxyConfig) -> dict[str, object]:
@@ -77,7 +77,7 @@ model emits Bash{command:"curl https://api.slack.com/..."}
         overlay = injection.subprocess_env_overlay(cfg)   # HTTPS_PROXY, CA vars
         env = base | overlay
   → subprocess.run(command, env=env)
-        curl reads HTTPS_PROXY → CONNECT to Agent Vault (auth via Proxy-Authorization)
+        curl reads HTTPS_PROXY → CONNECT to Agent Vault without env-exposed auth
         Agent Vault: terminate TLS (trusted CA) → strip agent creds → inject real cred
                      → verified TLS to api.slack.com
   ← response; agent never saw the Slack token
@@ -104,7 +104,7 @@ LiteLlm / google-genai → their own httpx/aiohttp clients (trust_env=False for 
 
 Two layers, matching what we actually control in OSS:
 
-1. **Startup (FR4):** `cfg.validate()` raises if enabled-but-misconfigured → runtime refuses to start. Wired as a 1-liner at runtime construction.
+1. **Startup/shared builders (FR4):** `cfg.validate()` raises if enabled-but-misconfigured. Startup calls it, and the shared injection builders call it again so CLI/toolhost/direct builder paths cannot silently fall back to an empty overlay.
 2. **Request time:** because injection forces `HTTPS_PROXY`/`proxy=` onto the tool paths, an unreachable proxy makes the call error out. There is no code path that drops the overlay and retries direct. (We never set `NO_PROXY`, never catch-and-bypass.)
 
 Kernel-level guarantee that *nothing else* on the box can egress directly is explicitly out of OSS scope (Spec N5) and handled by hosted deploy (B).
@@ -112,7 +112,7 @@ Kernel-level guarantee that *nothing else* on the box can egress directly is exp
 ## 5. Proxy-auth handling detail
 
 Agent Vault scopes the session via proxy credentials. Two consumers, two mechanisms:
-- **Subprocess/CLI tools** read auth from the proxy URL → overlay emits `HTTPS_PROXY=http://<auth>@host:port` when `proxy_auth` set. The *config* URL stays auth-free (loggable); auth is composed only at env-build time.
+- **Subprocess/CLI tools** receive only the auth-free proxy origin. Auth is deliberately not composed into `HTTPS_PROXY` because Bash can print env values to model-visible stdout/stderr. Authenticated subprocess proxying needs a future non-env credential mechanism.
 - **httpx** → `httpx.Proxy(url, headers={"Proxy-Authorization": basic/bearer})`. URL stays auth-free.
 
 This keeps `MAGI_EGRESS_PROXY_URL` safe to log/emit while still authenticating the session.
@@ -127,9 +127,9 @@ This keeps `MAGI_EGRESS_PROXY_URL` safe to log/emit while still authenticating t
 |---|---|
 | `config.from_env` | tri-state on/off/unset; alias parsing |
 | `config.validate` | enabled+missing-url raises; enabled+bad-ca raises; disabled skips |
-| `subprocess_env_overlay` | enabled → expected keys+values; disabled → `{}`; auth composed into URL |
+| `subprocess_env_overlay` | enabled → expected auth-free keys+values; disabled → `{}`; enabled misconfig raises |
 | `httpx_client_kwargs` | enabled → proxy+verify; disabled → `{}`; Proxy-Authorization header set |
-| gate5b wiring | enabled → Bash env contains overlay; disabled → env == `{"PATH":…}` (byte-identical) |
+| gate5b wiring | enabled → Bash env contains auth-free overlay; `printenv HTTPS_PROXY` does not leak auth; disabled → env == `{"PATH":…}` (byte-identical) |
 | live_fetch wiring | enabled → client built with proxy/verify; disabled → unchanged construction |
 | isolation (FR3) | model/provider client construction never receives overlay |
 
@@ -139,5 +139,5 @@ All via fake env maps and constructed-but-not-sent transports/fakes; zero socket
 
 - **R1 — overlay leaks into model egress.** Mitigation: explicit scoped injection + an FR3 isolation test asserting model client construction is untouched.
 - **R2 — CA env var coverage gaps** (a tool runtime that reads a var we didn't set). Mitigation: enumerate the common set now (FR1), document the limitation, extend on demand (OQ3).
-- **R3 — proxy auth accidentally logged.** Mitigation: auth never stored in the config URL; only composed at env/transport build; evidence is digest-only/redacted.
+- **R3 — proxy auth accidentally logged.** Mitigation: auth never stored in the config URL, never composed into subprocess env, and only applied by clients that can carry `Proxy-Authorization` out of env; evidence is digest-only/redacted.
 - **R4 — disabled path drift** (someone makes the seam do work even when off). Mitigation: byte-identical test on the gate5b Bash env when disabled.

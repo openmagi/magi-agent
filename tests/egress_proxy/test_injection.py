@@ -1,5 +1,7 @@
 import os
 
+import pytest
+
 from magi_agent.egress_proxy.config import EgressProxyConfig
 from magi_agent.egress_proxy.injection import (
     subprocess_env_overlay,
@@ -31,9 +33,28 @@ def test_overlay_sets_proxy_and_ca(tmp_path):
         assert overlay[k].endswith("ca.pem")
 
 
-def test_overlay_composes_auth_into_url(tmp_path):
+def test_overlay_keeps_auth_out_of_subprocess_proxy_urls(tmp_path):
     overlay = subprocess_env_overlay(_enabled(tmp_path, auth="agent:tok"))
-    assert overlay["HTTPS_PROXY"] == "http://agent:tok@127.0.0.1:8888"
+    for key in ("HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY"):
+        assert overlay[key] == "http://127.0.0.1:8888"
+        assert "agent" not in overlay[key]
+        assert "tok" not in overlay[key]
+
+
+@pytest.mark.parametrize("builder", [subprocess_env_overlay, httpx_client_kwargs])
+def test_enabled_builders_fail_closed_when_proxy_url_missing(tmp_path, builder):
+    ca = tmp_path / "ca.pem"; ca.write_text("x")
+    cfg = EgressProxyConfig(True, None, None, str(ca))
+    with pytest.raises(ValueError, match="proxy URL missing"):
+        builder(cfg)
+
+
+@pytest.mark.parametrize("builder", [subprocess_env_overlay, httpx_client_kwargs])
+def test_enabled_builders_fail_closed_when_proxy_url_invalid(tmp_path, builder):
+    ca = tmp_path / "ca.pem"; ca.write_text("x")
+    cfg = EgressProxyConfig(True, "http://127.0.0.1:8888/path", None, str(ca))
+    with pytest.raises(ValueError, match="path/query/fragment"):
+        builder(cfg)
 
 
 def test_httpx_kwargs_empty_when_disabled():
