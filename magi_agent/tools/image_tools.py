@@ -1,12 +1,15 @@
 """ImageUnderstand tool — describe or Q&A an image file from the workspace.
 
-The handler loads image bytes and calls the session's vision model via the ADK
-inline image content API.  When no ``adk_tool_context`` is available (e.g. in
-unit tests) the handler returns a placeholder description so tests can verify
-the path-safety and schema logic without making live model calls.
+The handler loads image bytes and dispatches a vision-model call via litellm
+using the configured provider (``~/.magi/config.toml`` or env vars).  litellm
+is already a core runtime dependency so no extra package is required.
 
-No additional package dependency is required beyond ``google-adk`` (already in
-core dependencies) and optionally ``anthropic`` for Claude vision.
+The previous implementation tried to probe the ADK ``ToolContext`` for a
+``.model`` / ``._model`` attribute that does not exist on
+``google.adk.agents.context.Context``, causing every call to silently return
+the stub string ``"[vision model not available in this context]"``.  This
+module replaces that approach with a direct ``litellm.completion`` call so
+vision actually works.
 """
 
 from __future__ import annotations
@@ -88,17 +91,12 @@ def image_understand(arguments: Mapping[str, object], context: ToolContext) -> T
     content_digest = f"sha256:{hashlib.sha256(image_bytes).hexdigest()}"
     prompt = _str_arg(arguments, "prompt") or _DEFAULT_PROMPT
 
-    # If no ADK tool context is present (unit tests / plan mode without model),
-    # return a stub result so tests can validate path logic hermetically.
-    if context.adk_tool_context is None:
-        description = f"[stub] image bytes={byte_size} mime={mime_type} prompt={prompt!r}"
-    else:
-        description = _call_vision_model(
-            image_bytes=image_bytes,
-            mime_type=mime_type,
-            prompt=prompt,
-            adk_tool_context=context.adk_tool_context,
-        )
+    description = _call_vision_model(
+        image_bytes=image_bytes,
+        mime_type=mime_type,
+        prompt=prompt,
+        adk_tool_context=context.adk_tool_context,
+    )
 
     output: dict[str, object] = {
         "description": description,
@@ -128,34 +126,81 @@ def _call_vision_model(
     image_bytes: bytes,
     mime_type: str,
     prompt: str,
-    adk_tool_context: object,
+    adk_tool_context: object,  # retained for API compatibility, unused after fix
 ) -> str:
-    """Make a synchronous vision-model call using the ADK inline image API.
+    """Make a vision-model call via litellm using the configured provider.
 
-    This is a best-effort call; any failure returns a descriptive error string
-    rather than raising so the agent can still make progress.
+    The ``adk_tool_context`` parameter is kept for call-site compatibility but
+    is no longer used.  The previous implementation probed
+    ``adk_tool_context.model`` which does not exist on
+    ``google.adk.agents.context.Context``, causing every call to silently
+    return ``"[vision model not available in this context]"``.  This
+    implementation uses ``litellm.completion`` directly, reading provider
+    credentials from :func:`~magi_agent.cli.providers.resolve_provider_config`.
+
+    Falls back to a descriptive error string on any failure so the agent can
+    still make progress rather than crashing.
     """
     try:
-        # google-adk: types.Part with inline_data is the canonical multipart API.
-        from google.genai import types as genai_types  # noqa: PLC0415
-
-        image_part = genai_types.Part(
-            inline_data=genai_types.Blob(mime_type=mime_type, data=image_bytes)
+        return _call_vision_model_via_litellm(
+            image_bytes=image_bytes,
+            mime_type=mime_type,
+            prompt=prompt,
         )
-        text_part = genai_types.Part(text=prompt)
-
-        # The ADK tool context exposes the session model; attempt a generate call.
-        # Depending on ADK version the attribute may differ; we probe defensively.
-        model = getattr(adk_tool_context, "model", None) or getattr(
-            adk_tool_context, "_model", None
-        )
-        if model is None:
-            return "[vision model not available in this context]"
-
-        response = model.generate_content([image_part, text_part])
-        return response.text or "[no description returned]"
     except Exception as exc:  # noqa: BLE001
         return f"[vision call failed: {exc}]"
+
+
+def _call_vision_model_via_litellm(
+    *,
+    image_bytes: bytes,
+    mime_type: str,
+    prompt: str,
+) -> str:
+    """Internal litellm-based vision call — called by :func:`_call_vision_model`.
+
+    Resolves the provider config (api_key + model) from the magi config file or
+    environment variables, then issues a ``litellm.completion`` call with the
+    image base64-encoded as an ``image_url`` message part.
+    """
+    import base64  # noqa: PLC0415
+
+    import litellm  # noqa: PLC0415
+
+    from magi_agent.cli.providers import resolve_provider_config  # noqa: PLC0415
+
+    provider_cfg = resolve_provider_config()
+    if provider_cfg is not None:
+        model_id = provider_cfg.litellm_model
+        api_key: str | None = provider_cfg.api_key
+    else:
+        # Fallback: try env-based auto-detect without a config file.
+        # If still nothing, litellm will raise an auth error which the caller
+        # wraps into a graceful "[vision call failed: ...]" string.
+        model_id = "anthropic/claude-sonnet-4-6"
+        api_key = None
+
+    b64 = base64.b64encode(image_bytes).decode()
+    messages = [
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:{mime_type};base64,{b64}"},
+                },
+                {"type": "text", "text": prompt},
+            ],
+        }
+    ]
+    resp = litellm.completion(
+        model=model_id,
+        messages=messages,
+        api_key=api_key,
+        timeout=60,
+        max_tokens=2048,
+    )
+    return (resp.choices[0].message.content or "").strip() or "[no description returned]"
 
 
 # ---------------------------------------------------------------------------

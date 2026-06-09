@@ -490,17 +490,25 @@ class TestImageUnderstand:
 
     def test_custom_prompt_accepted(self, tmp_path: Path) -> None:
         import shutil
+        from unittest.mock import MagicMock
 
         shutil.copy(_FIXTURES / "sample.png", tmp_path / "sample.png")
         from magi_agent.tools.image_tools import image_understand
 
-        result = image_understand(
-            {"path": "sample.png", "prompt": "What color is the pixel?"},
-            _context(tmp_path),
-        )
+        # Patch litellm.completion so the test is hermetic (no real API key needed).
+        fake_resp = MagicMock()
+        fake_resp.choices = [MagicMock()]
+        fake_resp.choices[0].message.content = "A pixel image."
+
+        with patch.dict("sys.modules", {}):
+            with patch("litellm.completion", return_value=fake_resp):
+                result = image_understand(
+                    {"path": "sample.png", "prompt": "What color is the pixel?"},
+                    _context(tmp_path),
+                )
         assert result.status == "ok"
-        # stub includes the prompt in the description
-        assert "What color is the pixel?" in result.output["description"]  # type: ignore[index]
+        # After the fix the tool calls litellm; our fake returns "A pixel image."
+        assert result.output["description"] == "A pixel image."  # type: ignore[index]
 
     def test_content_digest_present(self, tmp_path: Path) -> None:
         import shutil
