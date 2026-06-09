@@ -71,3 +71,9 @@ def test_auth_carried_separately(tmp_path):
     cfg.validate()
     assert cfg.proxy_auth == "agent:tok123"
     assert "tok123" not in (cfg.proxy_url or "")
+
+
+def test_startup_validate_raises_on_enabled_misconfig():
+    cfg = EgressProxyConfig.from_env({"MAGI_EGRESS_PROXY_ENABLED": "1"})
+    with pytest.raises(ValueError):
+        cfg.validate()
