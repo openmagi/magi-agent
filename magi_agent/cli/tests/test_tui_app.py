@@ -143,6 +143,8 @@ def test_tui_mount_renders_welcome_state() -> None:
         assert "Shift+Enter" in joined
         assert "history" in joined
         assert "Ctrl+S" in joined
+        # Phase 3 sidebar toggle advertised in the welcome banner too.
+        assert "Ctrl+B" in joined
         # Phase 2 doors advertised too: command palette + help.
         assert "Ctrl+P" in joined
         assert "F1" in joined
@@ -1316,5 +1318,541 @@ def test_f1_opens_help_dialog() -> None:
             await pilot.press("f1")
             await pilot.pause()
             assert isinstance(app.screen, HelpDialog)
+
+    asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
+# PR3.1 — StatusFooter wiring
+# ---------------------------------------------------------------------------
+def test_footer_reflects_turn_state_and_token_usage() -> None:
+    async def _run() -> None:
+        from magi_agent.cli.tui.footer import StatusFooter
+
+        class _UsageEngine(FakeEngineDriver):
+            async def run_turn_stream(self, runtime, turn_input, *, cancel, gate=None):
+                turn_id = getattr(turn_input, "turn_id", "t")
+                yield RuntimeEvent(type="token", payload={"delta": "hi"}, turn_id=turn_id)
+                yield EngineResult(
+                    terminal=Terminal.completed,
+                    usage={"input_tokens": 100, "output_tokens": 23},
+                    turn_id=turn_id,
+                )
+
+        app = _make_app(_UsageEngine())
+        async with app.run_test() as pilot:
+            footer = app.query_one("#footer", StatusFooter)
+            # Idle before any turn.
+            assert "idle" in footer.status_text()
+            app.start_turn("hi")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            text = footer.status_text()
+        assert "completed" in text
+        # 100 + 23 = 123 tokens summed from the terminal usage dict.
+        assert "123 tok" in text
+
+    asyncio.run(_run())
+
+
+def test_footer_elapsed_ticks_during_turn() -> None:
+    async def _run() -> None:
+        import asyncio as _asyncio
+
+        class _SlowEngine(FakeEngineDriver):
+            async def run_turn_stream(self, runtime, turn_input, *, cancel, gate=None):
+                turn_id = getattr(turn_input, "turn_id", "t")
+                # Stream slowly so the footer tick fires at least once mid-turn.
+                for tok in ("a", "b", "c"):
+                    await _asyncio.sleep(0.02)
+                    yield RuntimeEvent(type="token", payload={"delta": tok}, turn_id=turn_id)
+                yield EngineResult(terminal=Terminal.completed, turn_id=turn_id)
+
+        app = _make_app(_SlowEngine(), flush_interval=0.01)
+        async with app.run_test() as pilot:
+            app.start_turn("go")
+            await pilot.pause(0.015)
+            first = app._footer.elapsed
+            await pilot.pause(0.03)
+            second = app._footer.elapsed
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+        assert second > first
+
+    asyncio.run(_run())
+
+
+def test_footer_resets_when_turn_worker_raises() -> None:
+    """If the engine RAISES (vs yielding an error terminal), the footer must not
+    get stuck on "running" and the elapsed clock must stop.
+
+    Without the ``_run_turn`` error cleanup the exception propagates past
+    ``_render_terminal`` (which never runs), so the footer stays on "running"
+    and ``_turn_started_monotonic`` stays set — this test asserts the opposite.
+    """
+
+    async def _run() -> None:
+        from magi_agent.cli.tui.footer import StatusFooter
+
+        class _RaisingEngine(FakeEngineDriver):
+            async def run_turn_stream(self, runtime, turn_input, *, cancel, gate=None):
+                # Async generator that raises before yielding any item — the
+                # engine never produces a terminal EngineResult.
+                if False:  # pragma: no cover - makes this an async generator
+                    yield None
+                raise RuntimeError("engine boom")
+
+        from textual.worker import WorkerFailed
+
+        captured: dict[str, object] = {}
+        app = _make_app(_RaisingEngine())
+        try:
+            async with app.run_test() as pilot:
+                footer = app.query_one("#footer", StatusFooter)
+                app.start_turn("go")
+                # The turn worker RAISES (propagation is preserved per the fix):
+                # ``wait_for_complete`` re-raises it as ``WorkerFailed``, and the
+                # ``run_test`` context re-raises the app panic on exit. We swallow
+                # only those here — the point is the footer was cleaned up DESPITE
+                # the raise, sampled BEFORE the context tears down.
+                try:
+                    await app.workers.wait_for_complete()
+                except WorkerFailed:
+                    pass
+                await pilot.pause()
+                captured["state"] = footer.state
+                captured["started"] = app._turn_started_monotonic
+        except (WorkerFailed, RuntimeError):
+            pass
+        # Footer must NOT be stuck on "running" and the elapsed clock stopped.
+        assert captured.get("state") != "running"
+        assert captured.get("state") is not None  # the turn actually ran
+        assert captured.get("started") is None
+
+    asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
+# PR3.2 — Sidebar: mount hidden, ctrl+b toggles visibility
+# ---------------------------------------------------------------------------
+def test_ctrl_b_toggles_sidebar_visibility() -> None:
+    async def _run() -> None:
+        app = _make_app(FakeEngineDriver())
+        async with app.run_test() as pilot:
+            sidebar = app.query_one("#sidebar")
+            # Hidden on mount.
+            assert sidebar.display is False
+            await pilot.press("ctrl+b")
+            await pilot.pause()
+            assert sidebar.display is True
+            await pilot.press("ctrl+b")
+            await pilot.pause()
+            assert sidebar.display is False
+
+    asyncio.run(_run())
+
+
+def test_ctrl_b_binding_present_and_no_collision() -> None:
+    """ctrl+b is a real App BINDING and collides with nothing else.
+
+    It must not duplicate ctrl+c / ctrl+y / f1 (the other App BINDINGS) nor any
+    keybindings-default keystroke (defaults.py) — those route through the
+    resolver before BINDINGS, so a collision would silently shadow the toggle.
+    """
+
+    from textual.binding import Binding
+
+    from magi_agent.cli.keybindings.defaults import DEFAULT_SPEC
+
+    def _key(binding: object) -> str:
+        if isinstance(binding, Binding):
+            return binding.key
+        return binding[0]  # bare ("key", action, desc) tuple
+
+    keys = [_key(b) for b in MagiTuiApp.BINDINGS]
+    assert keys.count("ctrl+b") == 1, "ctrl+b must be bound exactly once"
+    # No clash with the keybindings-default keystrokes (which win in on_key).
+    default_keys = {chord for _ctx, chord, _action in DEFAULT_SPEC}
+    assert "ctrl+b" not in default_keys
+
+
+def test_sidebar_panes_fed_from_tool_and_terminal_events() -> None:
+    async def _run() -> None:
+        class _ToolEngine(FakeEngineDriver):
+            async def run_turn_stream(self, runtime, turn_input, *, cancel, gate=None):
+                turn_id = getattr(turn_input, "turn_id", "t")
+                yield RuntimeEvent(
+                    type="tool",
+                    payload={
+                        "type": "tool_start",
+                        "name": "TodoWrite",
+                        "input": {
+                            "todos": [
+                                {"content": "step one"},
+                                {"content": "step two"},
+                            ]
+                        },
+                    },
+                    turn_id=turn_id,
+                )
+                yield RuntimeEvent(
+                    type="tool",
+                    payload={
+                        "type": "tool_start",
+                        "name": "Read",
+                        "input": {"path": "lib/x.py"},
+                    },
+                    turn_id=turn_id,
+                )
+                yield EngineResult(
+                    terminal=Terminal.completed,
+                    usage={"input_tokens": 500, "output_tokens": 40},
+                    turn_id=turn_id,
+                )
+
+        app = _make_app(_ToolEngine())
+        async with app.run_test() as pilot:
+            app.start_turn("do work")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            sidebar = app.query_one("#sidebar")
+            text = sidebar.panes_text()
+        assert "step one" in text
+        assert "step two" in text
+        assert "x.py" in text  # recent-files pane shows the shortened basename
+        assert "540 tokens" in text  # honest bare token count (no false ratio)
+        assert "200,000" not in text  # NOT a ratio against a hardcoded budget
+
+    asyncio.run(_run())
+
+
+def test_sidebar_todowrite_empty_list_clears_todos() -> None:
+    async def _run() -> None:
+        class _ToolEngine(FakeEngineDriver):
+            async def run_turn_stream(self, runtime, turn_input, *, cancel, gate=None):
+                turn_id = getattr(turn_input, "turn_id", "t")
+                yield RuntimeEvent(
+                    type="tool",
+                    payload={
+                        "type": "tool_start",
+                        "name": "TodoWrite",
+                        "input": {"todos": [{"content": "step one"}]},
+                    },
+                    turn_id=turn_id,
+                )
+                yield RuntimeEvent(
+                    type="tool",
+                    payload={
+                        "type": "tool_start",
+                        "name": "TodoWrite",
+                        "input": {"todos": []},
+                    },
+                    turn_id=turn_id,
+                )
+                yield EngineResult(terminal=Terminal.completed, turn_id=turn_id)
+
+        app = _make_app(_ToolEngine())
+        async with app.run_test() as pilot:
+            app.start_turn("clear todos")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            sidebar = app.query_one("#sidebar")
+            text = sidebar.panes_text()
+        assert "step one" not in text
+        assert "Todo\n  (none)" in text
+
+    asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
+# PR3.3 — Permission-modal diff preview for Edit/Write + toasts on copy failure
+# ---------------------------------------------------------------------------
+def test_perm_modal_shows_diff_preview_for_edit() -> None:
+    async def _run() -> None:
+        class _EditAskEngine(FakeEngineDriver):
+            async def run_turn_stream(self, runtime, turn_input, *, cancel, gate=None):
+                turn_id = getattr(turn_input, "turn_id", "t")
+                req = ControlRequest(
+                    requestId="req-1",
+                    turnId=turn_id,
+                    toolName="Edit",
+                    arguments={
+                        "path": "x.py",
+                        "old_string": "a = 1\nb = 2\n",
+                        "new_string": "a = 1\nb = 3\n",
+                    },
+                    reason="edit a file",
+                )
+                self.gate_decision = await gate.check(req)
+                yield EngineResult(terminal=Terminal.completed, turn_id=turn_id)
+
+        app = _make_app(_EditAskEngine())
+        async with app.run_test() as pilot:
+            app._gate = SinkGate(app.sink)
+            app.start_turn("edit it")
+            await pilot.pause()
+            await pilot.pause()
+            assert isinstance(app.screen, ToolUseConfirm)
+            # The diff-preview panel exists and is visible (only for Edit/Write).
+            preview = app.screen.query_one("#tool-diff-preview")
+            assert preview.display is True
+            await pilot.click("#allow")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+        assert app.last_terminal.terminal == Terminal.completed
+
+    asyncio.run(_run())
+
+
+def test_perm_modal_no_diff_preview_for_non_edit() -> None:
+    async def _run() -> None:
+        engine = FakeEngineDriver(tokens=["working"], ask_tool="Bash")
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            app._gate = SinkGate(app.sink)
+            app.start_turn("run something")
+            await pilot.pause()
+            await pilot.pause()
+            assert isinstance(app.screen, ToolUseConfirm)
+            preview = app.screen.query_one("#tool-diff-preview")
+            assert preview.display is False  # Bash has no old/new -> hidden
+            await pilot.click("#deny")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+
+    asyncio.run(_run())
+
+
+def test_perm_modal_shows_diff_preview_for_write_content() -> None:
+    async def _run() -> None:
+        class _WriteAskEngine(FakeEngineDriver):
+            async def run_turn_stream(self, runtime, turn_input, *, cancel, gate=None):
+                turn_id = getattr(turn_input, "turn_id", "t")
+                req = ControlRequest(
+                    requestId="req-w",
+                    turnId=turn_id,
+                    toolName="Write",
+                    arguments={"path": "new.py", "content": "print('hi')\n"},
+                    reason="write a file",
+                )
+                self.gate_decision = await gate.check(req)
+                yield EngineResult(terminal=Terminal.completed, turn_id=turn_id)
+
+        app = _make_app(_WriteAskEngine())
+        async with app.run_test() as pilot:
+            app._gate = SinkGate(app.sink)
+            app.start_turn("write it")
+            await pilot.pause()
+            await pilot.pause()
+            assert isinstance(app.screen, ToolUseConfirm)
+            preview = app.screen.query_one("#tool-diff-preview")
+            assert preview.display is True  # empty -> content renders as added lines
+            await pilot.click("#deny")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+
+    asyncio.run(_run())
+
+
+def test_copy_selection_failure_surfaces_toast() -> None:
+    async def _run() -> None:
+        app = _make_app(FakeEngineDriver())
+        captured: list[tuple[str, str]] = []
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+            def _boom(text):
+                raise RuntimeError("clipboard unavailable")
+
+            def _capture(message, *, severity="information", timeout=None):
+                captured.append((message, severity))
+
+            app.copy_to_clipboard = _boom  # type: ignore[method-assign]
+            app.notify = _capture  # type: ignore[method-assign]
+            # Force a non-empty selection path.
+            app.screen.get_selected_text = lambda: "some text"  # type: ignore[attr-defined]
+            app.action_copy_selection()
+            await pilot.pause()
+        assert any(sev == "warning" for _msg, sev in captured)
+
+    asyncio.run(_run())
+
+
+def test_copy_selection_empty_surfaces_info_toast() -> None:
+    async def _run() -> None:
+        app = _make_app(FakeEngineDriver())
+        captured: list[tuple[str, str]] = []
+
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+            def _capture(message, *, severity="information", timeout=None):
+                captured.append((message, severity))
+
+            app.notify = _capture  # type: ignore[method-assign]
+            # Nothing selected -> info toast, not a silent return.
+            app.screen.get_selected_text = lambda: ""  # type: ignore[attr-defined]
+            app.action_copy_selection()
+            await pilot.pause()
+        assert any(sev == "information" for _msg, sev in captured)
+
+    asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
+# PR3.4 — focus-aware attention bell on turn-done / permission-needed.
+# ---------------------------------------------------------------------------
+def test_app_tracks_focus_on_blur_and_focus() -> None:
+    async def _run() -> None:
+        app = _make_app(FakeEngineDriver())
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            # Default: focused after mount.
+            assert app.app_is_focused is True
+            app.on_app_blur(None)
+            assert app.app_is_focused is False
+            app.on_app_focus(None)
+            assert app.app_is_focused is True
+
+    asyncio.run(_run())
+
+
+def test_turn_done_rings_bell_when_unfocused_and_enabled(monkeypatch) -> None:
+    async def _run() -> None:
+        from magi_agent.cli.tui import notify as _notify
+
+        monkeypatch.setenv(_notify.BELL_ENV, "1")
+        app = _make_app(FakeEngineDriver())
+        rings: list[int] = []
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.bell = lambda: rings.append(1)  # type: ignore[method-assign]
+            app.on_app_blur(None)  # go unfocused
+            app.start_turn("hi")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+        assert rings, "expected a bell on turn-done while unfocused + enabled"
+
+    asyncio.run(_run())
+
+
+def test_turn_done_no_bell_when_focused_even_if_enabled(monkeypatch) -> None:
+    async def _run() -> None:
+        from magi_agent.cli.tui import notify as _notify
+
+        monkeypatch.setenv(_notify.BELL_ENV, "1")
+        app = _make_app(FakeEngineDriver())
+        rings: list[int] = []
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.bell = lambda: rings.append(1)  # type: ignore[method-assign]
+            # Focused (default) -> no bell even though the gate is ON.
+            app.start_turn("hi")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+        assert not rings, "no bell should fire while the terminal is focused"
+
+    asyncio.run(_run())
+
+
+def test_turn_done_no_bell_when_env_unset_default_off(monkeypatch) -> None:
+    async def _run() -> None:
+        from magi_agent.cli.tui import notify as _notify
+
+        # Default OFF: with the env unset, NO bell ever — even while unfocused.
+        monkeypatch.delenv(_notify.BELL_ENV, raising=False)
+        app = _make_app(FakeEngineDriver())
+        rings: list[int] = []
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.bell = lambda: rings.append(1)  # type: ignore[method-assign]
+            app.on_app_blur(None)  # unfocused, but gate is OFF
+            app.start_turn("hi")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+        assert not rings, "default-OFF gate must never ring the bell"
+
+    asyncio.run(_run())
+
+
+def test_permission_needed_rings_bell_when_unfocused_and_enabled(monkeypatch) -> None:
+    async def _run() -> None:
+        from magi_agent.cli.tui import notify as _notify
+
+        monkeypatch.setenv(_notify.BELL_ENV, "1")
+        engine = FakeEngineDriver(tokens=["working"], ask_tool="Bash")
+        app = _make_app(engine)
+        rings: list[int] = []
+        async with app.run_test() as pilot:
+            app._gate = SinkGate(app.sink)
+            await pilot.pause()
+            app.bell = lambda: rings.append(1)  # type: ignore[method-assign]
+            app.on_app_blur(None)  # go unfocused
+            app.start_turn("do it")
+            await pilot.pause()
+            await pilot.pause()
+            # The permission modal is up; the bell fired before it was shown.
+            assert isinstance(app.screen, ToolUseConfirm)
+            await pilot.click("#deny")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+        assert rings, "expected a bell when a permission modal opened while unfocused"
+
+    asyncio.run(_run())
+
+
+def test_footer_below_prompt_no_overlap() -> None:
+    """Geometry guard: the docked footer must sit strictly below the prompt.
+
+    The footer-below-prompt layout relies on the prompt's margin/auto height to
+    reflow. Asserting the real widget regions catches a future CSS change that
+    would silently overlap the footer and the prompt.
+    """
+
+    async def _run() -> None:
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test(size=(100, 30)) as pilot:
+            await pilot.pause()
+            footer = app.query_one("#footer")
+            prompt = app.query_one("#prompt")
+            assert footer.region.height >= 1
+            assert prompt.region.height >= 1
+            # Footer strictly below the prompt — no vertical overlap.
+            assert footer.region.y >= prompt.region.y + prompt.region.height
+
+    asyncio.run(_run())
+
+
+def test_footer_elapsed_resets_across_two_turns() -> None:
+    """The elapsed clock is re-based each turn (it must NOT accumulate).
+
+    ``start_turn`` re-stamps ``_turn_started_monotonic`` and ``_render_terminal``
+    clears it. So each turn's elapsed is measured from that turn's own start; a
+    second turn cannot carry the first turn's time.
+    """
+
+    async def _run() -> None:
+        engine = FakeEngineDriver(tokens=["a", "b"])
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+            # Turn 1: stamped while running, cleared after terminal.
+            app.start_turn("first")
+            assert app._turn_started_monotonic is not None
+            stamp1 = app._turn_started_monotonic
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert app._turn_started_monotonic is None  # clock stopped/reset
+
+            # Turn 2: a FRESH stamp (strictly later monotonic), not turn 1's.
+            app.start_turn("second")
+            assert app._turn_started_monotonic is not None
+            assert app._turn_started_monotonic >= stamp1  # re-based, monotonic
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert app._turn_started_monotonic is None
 
     asyncio.run(_run())

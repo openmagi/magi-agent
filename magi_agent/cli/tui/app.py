@@ -50,6 +50,7 @@ from textual.widgets import Button, Input, OptionList, RichLog, Static, TextArea
 from textual.widgets.option_list import Option
 
 from magi_agent.cli.commands.executor import DefaultCommandExecutor
+from magi_agent.cli.render.diff import render_diff
 from magi_agent.cli.contracts import (
     CommandContext,
     CommandExecutor,
@@ -79,8 +80,10 @@ from magi_agent.cli.tui.autocomplete import (
     Completion,
     CompletionProvider,
 )
+from magi_agent.cli.tui import notify as _notify
 from magi_agent.cli.tui.history import DraftStash, InputHistory
 from magi_agent.cli.tui.input import PromptInput, Submission
+from magi_agent.cli.tui.footer import StatusFooter
 from magi_agent.cli.tui.dialogs.help import HelpDialog
 from magi_agent.cli.tui.dialogs.model import ModelPickerDialog, model_choices
 from magi_agent.cli.tui.dialogs.session import (
@@ -94,6 +97,7 @@ from magi_agent.cli.tui.palette import (
     tui_command_names,
 )
 from magi_agent.cli.tui.render.markdown import render_markdown
+from magi_agent.cli.tui.sidebar import Sidebar
 from magi_agent.cli.tui.transcript import (
     DEFAULT_FLUSH_INTERVAL,
     TranscriptController,
@@ -111,6 +115,31 @@ def _token_text(payload: dict) -> str:
         if isinstance(value, str):
             return value
     return ""
+
+
+def _usage_tokens(usage: object) -> int:
+    """Sum input+output tokens from an EngineResult.usage dict (best-effort).
+
+    ``EngineResult.usage`` is a free-form dict; providers spell token counts
+    differently. We sum the input/output split when present, else fall back to a
+    pre-summed ``tokens`` / ``total_tokens`` field. Missing/non-numeric -> 0 (the
+    footer then shows ``0 tok``, degrading gracefully when usage is unavailable).
+    """
+
+    if not isinstance(usage, dict):
+        return 0
+    split = 0
+    for key in ("input_tokens", "output_tokens"):
+        value = usage.get(key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            split += int(value)
+    if split > 0:
+        return split
+    for key in ("total_tokens", "tokens"):
+        value = usage.get(key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return max(0, int(value))
+    return 0
 
 
 def _stop(event: object) -> None:
@@ -148,6 +177,52 @@ def _tool_input(payload: dict) -> object:
                     return value
             return value
     return {}
+
+
+def _tool_file_path(tool_input: object) -> str | None:
+    """Best-effort file path from a Read/Edit/Write tool input."""
+
+    if isinstance(tool_input, dict):
+        for key in ("path", "file_path", "filePath", "file"):
+            value = tool_input.get(key)
+            if isinstance(value, str) and value:
+                return value
+    return None
+
+
+def _todo_contents(tool_input: object) -> list[str] | None:
+    """Best-effort todo strings from a TodoWrite tool input.
+
+    ``None`` means "not a TodoWrite-style payload"; an empty list is a valid
+    payload and should clear the sidebar's Todo pane.
+    """
+
+    if not isinstance(tool_input, dict):
+        return None
+    todos = tool_input.get("todos")
+    if not isinstance(todos, list):
+        return None
+    out: list[str] = []
+    for item in todos:
+        if isinstance(item, dict):
+            content = item.get("content") or item.get("text")
+            if isinstance(content, str) and content:
+                out.append(content)
+        elif isinstance(item, str) and item:
+            out.append(item)
+    return out
+
+
+# Coarse default context-window budget (tokens) retained as a future sidebar
+# seam. The current sidebar renders an honest bare token count; a future
+# per-model window table can decide when a ratio is accurate enough to surface.
+DEFAULT_CONTEXT_WINDOW = 200_000
+
+
+def _context_limit(_model: str | None) -> int:
+    """Coarse context-window budget for a future per-model context pane ratio."""
+
+    return DEFAULT_CONTEXT_WINDOW
 
 
 def _tool_result(payload: dict) -> object:
@@ -253,6 +328,10 @@ class ToolUseConfirm(ModalScreen[PermissionDecision]):
                 f"Allow tool: {self._req.tool_name}\n{self._req.reason}",
                 id="tool-confirm-msg",
             )
+            # Diff preview (PR3.3): shows what an Edit/Write would change ABOVE
+            # the action buttons so the operator approves an informed diff, not a
+            # bare tool name. Hidden (display:false) for non-edit tools.
+            yield Static("", id="tool-diff-preview", classes="confirm-diff")
             with Vertical(id="confirm-actions"):
                 for index, (choice_id, label) in enumerate(self._CHOICES, start=1):
                     yield Button(f"{index}. {label}", id=choice_id)
@@ -276,8 +355,62 @@ class ToolUseConfirm(ModalScreen[PermissionDecision]):
         # Sub-views start hidden; the action buttons are the default view.
         self.query_one("#edit-view").display = False
         self.query_one("#deny-view").display = False
+        # Render the Edit/Write diff preview (hidden for non-edit tools).
+        self._render_diff_preview()
         # Focus the first action so Enter/Up/Down work without a click.
         self.query_one("#allow", Button).focus()
+
+    def _render_diff_preview(self) -> None:
+        """Render an Edit/Write diff into the preview panel, else hide it."""
+
+        preview = self.query_one("#tool-diff-preview", Static)
+        rendered = self._diff_renderable()
+        if rendered is None:
+            preview.display = False
+            return
+        preview.update(rendered)
+        preview.display = True
+
+    def _diff_renderable(self) -> object | None:
+        """Build a Rich diff for an Edit/Write request, else ``None``.
+
+        Only Edit/Write requests carrying ``old_string``/``new_string``
+        (or an empty old + ``content`` for Write) produce a preview. Reuses
+        ``cli/render/diff.py:render_diff`` (cached, syntax-highlighted). Returns
+        ``None`` for any other tool, partial/missing fields, or a no-op edit, so
+        the modal stays diff-free in those cases. Never raises (a failed render
+        falls back to ``None`` rather than crashing the permission prompt).
+        """
+
+        # MultiEdit carries an ``edits: [{old_string, new_string}, ...]`` array
+        # rather than top-level fields, so it has no single-diff preview here;
+        # rendering that array is a deferred follow-up (intentionally omitted).
+        if self._req.tool_name not in ("Edit", "Write"):
+            return None
+        args = self._req.arguments
+        if not isinstance(args, dict):
+            return None
+        old = args.get("old_string")
+        new = args.get("new_string")
+        if not isinstance(new, str):
+            # Write: empty old -> full content as the "new" (added) side.
+            content = args.get("content")
+            if isinstance(content, str):
+                old, new = "", content
+            else:
+                return None
+        if not isinstance(old, str):
+            old = ""
+        if old == new:
+            return None
+        path = args.get("path") or args.get("file_path") or "file"
+        file = path if isinstance(path, str) else "file"
+        try:
+            # 58 = conservative narrow-terminal-safe floor for the modal's
+            # usable width (modal ``width: 72`` minus padding/borders).
+            return render_diff(old, new, file=file, width=58)
+        except Exception:  # pragma: no cover - never fail the modal on a diff
+            return None
 
     def _arguments_json(self) -> str:
         try:
@@ -410,6 +543,16 @@ class TextualSink(PromptSink):
         self._app = app
 
     async def ask(self, req: ControlRequest) -> PermissionDecision:
+        # Gated focus-aware attention bell (PR3.4): a permission prompt while the
+        # terminal is unfocused (and MAGI_TUI_NOTIFY_BELL on) rings, so an
+        # away-from-keyboard operator notices a turn is blocked on them. No-op
+        # when focused or the gate is off (default). Fired BEFORE the modal so
+        # the cue lands as the prompt appears.
+        _notify.notify_attention(
+            self._app,
+            focused=self._app.app_is_focused,
+            reason=f"Magi: permission needed for {req.tool_name}",
+        )
         # On app teardown the modal can resolve ``None`` (the screen is popped
         # without a decision). The contract is ``-> PermissionDecision``, so fail
         # safe: anything that is not a real decision becomes a deny.
@@ -450,6 +593,13 @@ class MagiTuiApp(App[None]):
         height: auto;
     }
     #prompt:focus { border: round $accent; }
+    #footer {
+        dock: bottom;
+        height: 1;
+        padding: 0 1;
+        background: $primary-darken-2;
+        color: $text;
+    }
     #completions {
         dock: bottom;
         height: auto;
@@ -458,6 +608,15 @@ class MagiTuiApp(App[None]):
         display: none;
     }
     #completions.visible { display: block; }
+    #sidebar {
+        dock: left;
+        width: 32;
+        padding: 0 1;
+        background: $panel;
+        border-right: solid $primary-darken-2;
+        display: none;
+    }
+    .sidebar-pane { height: auto; padding: 0 0 1 0; }
     ToolUseConfirm { align: center middle; }
     #tool-confirm {
         width: 72;
@@ -468,6 +627,14 @@ class MagiTuiApp(App[None]):
         border: round $primary;
     }
     #tool-confirm-msg { margin-bottom: 1; color: $text; }
+    #tool-diff-preview {
+        height: auto;
+        max-height: 12;
+        margin: 0 0 1 0;
+        padding: 0 1;
+        background: $panel-darken-1;
+    }
+    .confirm-diff { width: 1fr; }
     #confirm-actions { height: auto; }
     #confirm-actions Button {
         width: 100%;
@@ -499,6 +666,11 @@ class MagiTuiApp(App[None]):
         # fires from the prompt and Ctrl+C appears dead.
         Binding("ctrl+c", "cancel_turn", "Cancel", priority=True),
         ("ctrl+y", "copy_selection", "Copy"),
+        # ctrl+b toggles the left sidebar (PR3.2). priority=True so it preempts
+        # any built-in ctrl+b on the focused Input/TextArea (some widgets map it
+        # to cursor-left); it is NOT in the keybindings defaults (defaults.py),
+        # so on_key resolves it UNBOUND and lets it bubble to this App BINDING.
+        Binding("ctrl+b", "toggle_sidebar", "Sidebar", priority=True),
         # F1 opens the help dialog. F1 is not in the keybindings defaults
         # (defaults.py) and (unlike "?") never collides with typed prompt text,
         # so it is safe to bind globally while the prompt input is focused.
@@ -592,6 +764,18 @@ class MagiTuiApp(App[None]):
         # ``_view`` (new TranscriptView widget list) is populated, selected by
         # ``_legacy_richlog`` (the MAGI_TUI_LEGACY_RICHLOG escape hatch, PR0.3).
         self._topbar: Static | None = None
+        self._footer: StatusFooter | None = None
+        # Left sidebar (PR3.2): mounted hidden, toggled by ctrl+b. Panes are fed
+        # from folded tool/terminal events (todo / recent files / context usage).
+        self._sidebar: Sidebar | None = None
+        # Focus tracking for the gated attention bell (PR3.4). Assume focused at
+        # mount; on_app_blur/on_app_focus keep it current. The bell only fires
+        # while UNFOCUSED (and only when MAGI_TUI_NOTIFY_BELL is on — default OFF).
+        self.app_is_focused: bool = True
+        # monotonic() stamp marking the in-flight turn's start; None when idle.
+        # Used by the footer elapsed clock (set in start_turn, cleared in
+        # _render_terminal).
+        self._turn_started_monotonic: float | None = None
         self._log: RichLog | None = None
         self._view: TranscriptView | None = None
         self._live: Static | None = None
@@ -628,14 +812,27 @@ class MagiTuiApp(App[None]):
         self._live = Static("", id="live")
         self._completions = OptionList(id="completions")
         self._input = PromptInput(commands=self._commands, id="prompt")
+        self._footer = StatusFooter(
+            model=self._model, cwd=self._topbar_cwd(), id="footer"
+        )
+        # Left sidebar (PR3.2): a left-docked sibling, hidden by default (the CSS
+        # sets ``display: none``; ctrl+b flips ``display``). Yielded BEFORE the
+        # transcript so the left dock column is reserved first and the transcript
+        # reflows to the right of it (no extra rule needed — #transcript is 1fr).
+        self._sidebar = Sidebar(id="sidebar")
         yield self._topbar
+        yield self._sidebar
         yield transcript_widget
         yield self._live
         yield self._completions
         yield self._input
+        # The footer is yielded LAST so its ``dock: bottom`` wins the lower slot
+        # over the prompt's (also bottom-docked) — the footer sits BELOW the
+        # prompt.
+        yield self._footer
 
-    def _topbar_text(self) -> str:
-        """The top status bar: app · model · cwd · mode."""
+    def _topbar_cwd(self) -> str:
+        """Home-relative, length-capped cwd (shared by topbar + footer)."""
 
         import os as _os  # noqa: PLC0415
 
@@ -645,9 +842,14 @@ class MagiTuiApp(App[None]):
             cwd = "~" + cwd[len(home) :]
         if len(cwd) > 48:
             cwd = "…" + cwd[-47:]
+        return cwd
+
+    def _topbar_text(self) -> str:
+        """The top status bar: app · model · cwd · mode (static identity)."""
+
         model = self._model or "no model"
         mode = (self._mode or "act").lower()
-        return f"● Magi   {model}   {cwd}   [{mode}]"
+        return f"● Magi   {model}   {self._topbar_cwd()}   [{mode}]"
 
     def on_mount(self) -> None:
         assert self._live is not None and (
@@ -677,6 +879,20 @@ class MagiTuiApp(App[None]):
     def _on_flush_tick(self) -> None:
         if self._controller is not None:
             self._controller.flush()
+        # While a turn is in flight, advance the footer elapsed so the live
+        # status reads as a running clock (reuses the existing flush timer — no
+        # separate timer needed). Once _render_terminal clears the start stamp
+        # and flips state off "running", this stops contributing.
+        if (
+            self._turn_started_monotonic is not None
+            and self._footer is not None
+            and self._footer.state == "running"
+        ):
+            # The reactive ``elapsed`` advances every tick (cheap assignment),
+            # but ``StatusFooter.watch_elapsed`` only REPAINTS when the
+            # whole-second value changes — so this 25Hz tick no longer triggers
+            # ~24/25 identical repaints for the 1s-granularity render.
+            self._footer.set_elapsed(self._turn_elapsed())
 
     def _render_welcome(self) -> None:
         """Render the initial TUI state so bare ``magi`` never opens blank."""
@@ -707,6 +923,8 @@ class MagiTuiApp(App[None]):
         welcome.append(" history · ", style="dim")
         welcome.append("Ctrl+S", style="#7aa2f7")
         welcome.append(" draft · ", style="dim")
+        welcome.append("Ctrl+B", style="#7aa2f7")
+        welcome.append(" sidebar · ", style="dim")
         welcome.append("Ctrl+P", style="#7aa2f7")
         welcome.append(" palette · ", style="dim")
         welcome.append("F1", style="#7aa2f7")
@@ -723,7 +941,7 @@ class MagiTuiApp(App[None]):
             text=(
                 "Welcome to Magi  "
                 "Keys: Shift+Enter newline · ↑ history · Ctrl+S draft · "
-                "Ctrl+P palette · F1 help  "
+                "Ctrl+B sidebar · Ctrl+P palette · F1 help  "
                 "Copy: drag to select · Ctrl+Y copy (⌥-drag for native terminal copy)  "
                 f"Commands ({len(command_names)}): {command_line}"
             ),
@@ -975,12 +1193,16 @@ class MagiTuiApp(App[None]):
     def start_turn(self, prompt: str) -> None:
         """Kick off a single engine turn for ``prompt`` in an exclusive worker."""
 
+        import time as _time  # noqa: PLC0415
+
         self._turn_seq += 1
         turn_id = f"{self._session_id}-turn-{self._turn_seq}"
         cancel = asyncio.Event()
         self._cancel = cancel
         self._active_turn_id = turn_id
         self._turn_active = True
+        self._turn_started_monotonic = _time.monotonic()
+        self.update_footer(state="running")
         self._echo_user(prompt)
         self._run_turn(prompt, turn_id, cancel)
 
@@ -997,7 +1219,14 @@ class MagiTuiApp(App[None]):
         self._controller.commit_rich(block, text=f"› {prompt}")
 
     def action_copy_selection(self) -> None:
-        """Copy the currently selected transcript text to the clipboard."""
+        """Copy the currently selected transcript text to the clipboard.
+
+        Both the empty-selection and clipboard-failure paths now surface a toast
+        (``_notify.info`` / ``_notify.warning``) instead of returning silently —
+        the operator always gets feedback that Ctrl+Y did something (or why it
+        couldn't). Reading the selection itself stays best-effort (a missing
+        selection API is the expected "nothing selected" case, not an error).
+        """
 
         text = ""
         try:
@@ -1007,12 +1236,14 @@ class MagiTuiApp(App[None]):
                 text = self.selected_text or ""  # type: ignore[attr-defined]
             except Exception:
                 text = ""
-        if text:
-            try:
-                self.copy_to_clipboard(text)
-                self.notify("Copied selection", timeout=2)
-            except Exception:
-                pass
+        if not text:
+            _notify.info(self, "Nothing selected to copy")
+            return
+        try:
+            self.copy_to_clipboard(text)
+            _notify.info(self, "Copied selection")
+        except Exception as exc:
+            _notify.warning(self, f"Copy failed: {exc}")
 
     @work(exclusive=True, group="turn")
     async def _run_turn(
@@ -1040,6 +1271,14 @@ class MagiTuiApp(App[None]):
                     terminal = item
                     break
                 await self._fold_event(item)
+        except BaseException:
+            # The engine RAISED instead of yielding a terminal: the normal
+            # ``_render_terminal`` path below never runs, so the footer would
+            # stay on "running" and the elapsed clock would tick forever. Reset
+            # the footer to a terminal-ish state and stop the clock, then
+            # re-raise to preserve the existing error propagation.
+            self._reset_footer_on_error()
+            raise
         finally:
             await gen.aclose()
             if self._active_turn_id == turn_id:
@@ -1054,6 +1293,18 @@ class MagiTuiApp(App[None]):
             terminal = EngineResult(terminal=Terminal.error, error="no_terminal")
         self.last_terminal = terminal
         self._render_terminal(terminal)
+
+    def _reset_footer_on_error(self) -> None:
+        """Stop the running clock + flip the footer off "running" on a raise.
+
+        Used when the engine generator raises (rather than yielding an error
+        terminal): clears the elapsed start stamp so ``_on_flush_tick`` stops
+        advancing the clock, and folds an ``error`` state into the footer so the
+        user sees the turn ended. No-op before mount.
+        """
+
+        self._turn_started_monotonic = None
+        self.update_footer(state=Terminal.error.value)
 
     async def _fold_event(self, event: RuntimeEvent) -> None:
         """Fold one ``RuntimeEvent`` into the transcript regions."""
@@ -1087,6 +1338,10 @@ class MagiTuiApp(App[None]):
         renderer = self._renderers.get(name)
         inner = _inner_type(payload)
         if inner == "tool_start":
+            # Fold this tool_start into the sidebar panes (todo / recent files)
+            # BEFORE rendering the call, so the side panes track activity even
+            # when the sidebar is currently hidden.
+            self._fold_sidebar_tool(name, _tool_input(payload))
             node = renderer.render_call(_tool_input(payload))
         elif inner == "tool_progress":
             node = renderer.render_progress(_tool_result(payload) or payload)
@@ -1130,7 +1385,88 @@ class MagiTuiApp(App[None]):
             return text
         return f"{tool_name}: {text}" if text else tool_name
 
+    def _fold_sidebar_tool(self, name: str, tool_input: object) -> None:
+        """Route a tool_start into the sidebar panes (todo / recent files).
+
+        TodoWrite replaces the todo pane with the tool's todo list; Read/Edit/
+        Write push the touched file onto the MRU recent-files pane. No-op when
+        the sidebar is not mounted or the input carries nothing usable.
+        """
+
+        if self._sidebar is None:
+            return
+        if name == "TodoWrite":
+            todos = _todo_contents(tool_input)
+            if todos is not None:
+                self._sidebar.set_todos(todos)
+            return
+        if name in ("Read", "Edit", "Write", "MultiEdit"):
+            path = _tool_file_path(tool_input)
+            if path:
+                self._sidebar.add_file(path)
+
+    # -- status footer (PR3.1) ---------------------------------------------
+    def update_footer(
+        self,
+        *,
+        state: str | None = None,
+        tokens: int | None = None,
+        elapsed: float | None = None,
+    ) -> None:
+        """Single seam every fold/turn path uses to refresh the footer.
+
+        No-op before mount (the footer is created in ``compose``); each provided
+        field updates the corresponding reactive on ``StatusFooter`` (which
+        repaints only itself).
+        """
+
+        if self._footer is None:
+            return
+        if state is not None:
+            self._footer.set_state(state)
+        if tokens is not None:
+            self._footer.set_tokens(tokens)
+        if elapsed is not None:
+            self._footer.set_elapsed(elapsed)
+
+    def _turn_elapsed(self) -> float:
+        """Seconds since the in-flight turn started (0.0 when idle)."""
+
+        import time as _time  # noqa: PLC0415
+
+        if self._turn_started_monotonic is None:
+            return 0.0
+        return max(0.0, _time.monotonic() - self._turn_started_monotonic)
+
     def _render_terminal(self, terminal: EngineResult) -> None:
+        # Fold the terminal state + token usage + elapsed into the footer FIRST,
+        # so it updates for completed AND non-completed turns (the early return
+        # below is only for the transcript marker, not the footer).
+        tokens = _usage_tokens(terminal.usage)
+        self.update_footer(
+            state=terminal.terminal.value,
+            tokens=tokens,
+            elapsed=self._turn_elapsed(),
+        )
+        # Mirror the turn's token usage into the sidebar context pane. The limit
+        # is kept as a future per-model seam, but the sidebar currently renders
+        # only a bare token count to avoid a misleading hardcoded ratio.
+        if self._sidebar is not None:
+            self._sidebar.set_context(
+                usage=tokens, limit=_context_limit(self._model)
+            )
+        # Stop the running clock once the turn is terminal (the flush-tick
+        # elapsed advance keys off this being None / state != "running").
+        self._turn_started_monotonic = None
+        # Gated focus-aware attention bell (PR3.4): ring only when the terminal
+        # is unfocused AND MAGI_TUI_NOTIFY_BELL is on (default OFF). Fired here
+        # so it covers completed AND non-completed turns (before the early
+        # return for the completed case). Fail-open — never crashes the turn.
+        _notify.notify_attention(
+            self,
+            focused=self.app_is_focused,
+            reason=f"Magi: turn {terminal.terminal.value}",
+        )
         if terminal.terminal == Terminal.completed:
             return
         suffix = f": {terminal.error}" if terminal.error else ""
@@ -1154,6 +1490,34 @@ class MagiTuiApp(App[None]):
         renderable = render_markdown(text)
         self._last_committed_renderable = renderable
         controller.commit_rich(renderable, text=text)
+
+    # -- sidebar toggle (PR3.2) --------------------------------------------
+    def action_toggle_sidebar(self) -> None:
+        """Show/hide the left sidebar (ctrl+b)."""
+
+        if self._sidebar is None:
+            return
+        self._sidebar.display = not self._sidebar.display
+
+    # -- focus tracking for the attention bell (PR3.4) ---------------------
+    def on_app_blur(self, _event: object) -> None:
+        """Terminal lost focus -> the attention bell may fire on next turn-done.
+
+        Textual posts ``AppBlur`` (handler ``on_app_blur``) when the terminal
+        emulator reports the window/tab lost focus. We only track the flag here;
+        the gated bell keys off it (and ``MAGI_TUI_NOTIFY_BELL``).
+        """
+
+        self.app_is_focused = False
+
+    def on_app_focus(self, _event: object) -> None:
+        """Terminal regained focus -> suppress the attention bell.
+
+        Textual posts ``AppFocus`` (handler ``on_app_focus``) when focus returns;
+        the operator is now looking, so no bell should fire.
+        """
+
+        self.app_is_focused = True
 
     # -- cancellation -------------------------------------------------------
     def action_cancel_turn(self) -> None:
