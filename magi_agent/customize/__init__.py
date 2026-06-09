@@ -1,3 +1,4 @@
+from magi_agent.customize.apply import apply_tool_overrides
 from magi_agent.customize.store import (
     DEFAULT_OVERRIDES,
     customize_path,
@@ -8,6 +9,7 @@ from magi_agent.customize.store import (
 
 __all__ = [
     "DEFAULT_OVERRIDES",
+    "apply_tool_overrides",
     "customize_path",
     "load_overrides",
     "save_overrides",
