@@ -1,0 +1,631 @@
+"""Dashboard ``/v1/app/*`` API surface.
+
+The committed static dashboard bundle (``magi_agent/web_dashboard``) is built
+from ``apps/web`` and talks to a ``/v1/app/*`` API family for its Overview,
+Usage, Skills, Memory, Knowledge and Settings pages. Those routes never existed
+on the runtime, so every one of those pages 404'd with "Failed to load local
+runtime". This module implements the contract the bundle expects.
+
+Design notes
+------------
+* The runtime (:class:`OpenMagiRuntime`) is a thin shell — it owns the tool
+  registry and config but no session/task/cron/artifact managers. Endpoints
+  surface real data where the runtime exposes it (tools, skills, config, and
+  workspace files) and a valid-but-empty projection (``count: 0``/``items: []``)
+  where a subsystem is genuinely not wired. A fresh local runtime legitimately
+  has zero sessions/tasks/crons/artifacts, which is what the dashboard shows.
+* All reads are fail-soft: a missing DB or unreadable file yields empty rather
+  than a 500, mirroring the app's fail-open posture elsewhere.
+* The workspace root is the process cwd, which is where ``magi-agent serve``
+  runs and where the local workspace (``MEMORY.md`` etc.) lives.
+* File reads/writes are confined to the workspace and refuse sealed operator
+  files and secret-looking names.
+"""
+
+from __future__ import annotations
+
+import os
+import re
+from pathlib import Path
+from typing import Any
+
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
+
+from magi_agent.runtime.openmagi_runtime import OpenMagiRuntime
+from magi_agent.transport.tools import _unauthorized_response
+
+# Operator-owned files that must never be overwritten through the dashboard.
+_SEALED_BASENAMES = {
+    "SOUL.md",
+    "TOOLS.md",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "HEARTBEAT.md",
+}
+# Basenames that look like they carry secrets — never read or written here.
+_SECRET_NAME_RE = re.compile(
+    r"(^\.env)|secret|credential|password|api[_-]?key|token", re.IGNORECASE
+)
+
+# The runtime's fixed skill-hook points (see plugins/native/skills.py).
+_RUNTIME_HOOK_POINTS = ("beforeModelCall", "afterToolCall", "beforeCommit", "afterTurnEnd")
+
+_FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
+_MAX_SEARCH_BYTES = 200_000
+_PREVIEW_CHARS = 240
+
+
+class _ConfigValidationError(ValueError):
+    """Validation error for dashboard config writes."""
+
+    def __init__(self, error: str) -> None:
+        super().__init__(error)
+        self.error = error
+
+
+# --------------------------------------------------------------------------- #
+# Workspace + path safety helpers
+# --------------------------------------------------------------------------- #
+def _workspace_root() -> Path:
+    return Path(os.getcwd()).resolve()
+
+
+def _resolve_in_workspace(relative: str) -> Path | None:
+    """Resolve ``relative`` under the workspace, blocking traversal escapes."""
+    root = _workspace_root()
+    candidate = (root / relative.lstrip("/")).resolve()
+    try:
+        candidate.relative_to(root)
+    except ValueError:
+        return None
+    return candidate
+
+
+def _is_protected(path: Path) -> bool:
+    name = path.name
+    return name in _SEALED_BASENAMES or bool(_SECRET_NAME_RE.search(name))
+
+
+def _file_stat(path: Path) -> dict[str, Any]:
+    stat = path.stat()
+    return {"sizeBytes": stat.st_size, "mtimeMs": int(stat.st_mtime * 1000)}
+
+
+def _read_text(path: Path, *, limit: int | None = None) -> str | None:
+    try:
+        data = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+    return data if limit is None else data[:limit]
+
+
+# --------------------------------------------------------------------------- #
+# Runtime status
+# --------------------------------------------------------------------------- #
+def _session_items(runtime: OpenMagiRuntime) -> list[dict[str, Any]]:
+    """Best-effort read of persisted sessions. Never raises, never creates a DB."""
+    try:
+        from magi_agent.storage.session_store import (
+            SessionSqliteStore,
+            SessionStoreConfig,
+        )
+
+        config = SessionStoreConfig(enabled=True)
+        store = SessionSqliteStore(config, workspace_root=str(_workspace_root()))
+        if not store.db_full_path.exists():
+            return []
+        rows = store.list_sync(app_name="magi", user_id=runtime.config.user_id)
+        items: list[dict[str, Any]] = []
+        for row in rows:
+            state = row.get("state") if isinstance(row.get("state"), dict) else {}
+            usage = None
+            try:
+                usage = store.get_usage_sync(row["id"])
+            except Exception:  # noqa: BLE001 - usage is optional
+                usage = None
+            item: dict[str, Any] = {
+                "sessionKey": row["id"],
+                "persona": state.get("persona"),
+                "channel": state.get("channel"),
+                "lastActivityAt": row.get("updated_at"),
+            }
+            if usage is not None:
+                item["budget"] = {
+                    "turns": usage.turn_count,
+                    "inputTokens": usage.tokens_in,
+                    "outputTokens": usage.tokens_out,
+                    "costUsd": usage.cost_usd,
+                }
+            items.append(item)
+        store.close()
+        return items
+    except Exception:  # noqa: BLE001 - fail-soft: dashboard must still load
+        return []
+
+
+def _runtime_snapshot(runtime: OpenMagiRuntime) -> dict[str, Any]:
+    skills = _scan_skills()
+    tool_count = len(runtime.tool_registry.list_all())
+    sessions = _session_items(runtime)
+    return {
+        "sessions": {"count": len(sessions), "items": sessions},
+        # Not wired into the thin runtime shell yet — honestly empty.
+        "tasks": {"count": 0, "items": []},
+        "crons": {"count": 0, "internalCount": 0, "items": []},
+        "artifacts": {"count": 0, "items": []},
+        "tools": {"count": tool_count, "skillCount": len(skills["loaded"])},
+        "skills": {
+            "loadedCount": len(skills["loaded"]),
+            "count": len(skills["loaded"]),
+            "issueCount": len(skills["issues"]),
+            "runtimeHookCount": len(skills["runtimeHooks"]),
+        },
+    }
+
+
+# --------------------------------------------------------------------------- #
+# Skills
+# --------------------------------------------------------------------------- #
+def _parse_frontmatter(text: str) -> dict[str, str]:
+    match = _FRONTMATTER_RE.match(text)
+    if not match:
+        return {}
+    fields: dict[str, str] = {}
+    for line in match.group(1).splitlines():
+        key, sep, value = line.partition(":")
+        if sep:
+            fields[key.strip()] = value.strip().strip("'\"")
+    return fields
+
+
+def _scan_skills() -> dict[str, Any]:
+    root = _workspace_root()
+    loaded: list[dict[str, Any]] = []
+    issues: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    bases = [root / "skills", root / ".magi" / "skills", root / "docs" / "superpowers"]
+    for base in bases:
+        if not base.is_dir():
+            continue
+        for skill_md in sorted(base.rglob("SKILL.md"))[:100]:
+            skill_dir = skill_md.parent
+            try:
+                rel = skill_dir.relative_to(root).as_posix()
+            except ValueError:
+                rel = skill_dir.name
+            if rel in seen:
+                continue
+            seen.add(rel)
+            text = _read_text(skill_md, limit=_MAX_SEARCH_BYTES)
+            if text is None:
+                issues.append(
+                    {"dir": rel, "path": skill_md.as_posix(), "reason": "unreadable"}
+                )
+                continue
+            front = _parse_frontmatter(text)
+            scripts = [
+                p
+                for p in skill_dir.rglob("*")
+                if p.is_file() and p.suffix in {".sh", ".py", ".js", ".ts"}
+            ]
+            tags = [t.strip() for t in front.get("tags", "").split(",") if t.strip()]
+            loaded.append(
+                {
+                    "name": front.get("name") or skill_dir.name,
+                    "dir": rel,
+                    "path": skill_md.as_posix(),
+                    "description": front.get("description", ""),
+                    "tags": tags,
+                    "promptOnly": len(scripts) == 0,
+                    "scriptBacked": len(scripts) > 0,
+                    "runtimeHooks": 0,
+                }
+            )
+
+    runtime_hooks = [
+        {"name": point, "point": point, "kind": "builtin", "source": "runtime"}
+        for point in _RUNTIME_HOOK_POINTS
+    ]
+    return {
+        "loaded": loaded,
+        "issues": issues,
+        "runtimeHooks": runtime_hooks,
+        "issueCount": len(issues),
+        "runtimeHookCount": len(runtime_hooks),
+        "loadedCount": len(loaded),
+    }
+
+
+# --------------------------------------------------------------------------- #
+# Config
+# --------------------------------------------------------------------------- #
+def _config_snapshot(runtime: OpenMagiRuntime) -> dict[str, Any]:
+    from magi_agent.cli import providers
+
+    raw = providers._load_config_file()
+    model_section = providers._section(raw, "model")
+    resolved = None
+    try:
+        resolved = providers.resolve_provider_config(config=raw)
+    except Exception:  # noqa: BLE001 - bad config must not 500 the page
+        resolved = None
+
+    provider = (
+        resolved.provider
+        if resolved
+        else _canonical_provider(model_section.get("provider"), strict=False)
+    )
+    model = resolved.model if resolved else providers._clean(model_section.get("model"))
+    api_key_set = bool(
+        (resolved and resolved.api_key) or providers._clean(model_section.get("api_key"))
+    )
+
+    return {
+        "ok": True,
+        "exists": providers._config_path().exists(),
+        "config": {
+            "llm": {
+                "provider": provider,
+                "model": model,
+                "baseUrl": providers._clean(model_section.get("base_url")),
+                "apiKeySet": api_key_set,
+                "apiKeyEnvVar": providers._clean(model_section.get("api_key_env")),
+            },
+            "server": {
+                "gatewayTokenSet": bool(runtime.config.gateway_token),
+            },
+            "workspace": str(_workspace_root()),
+        },
+    }
+
+
+def _toml_escape(value: str) -> str:
+    return value.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _canonical_provider(value: object, *, strict: bool = True) -> str | None:
+    from magi_agent.cli import providers
+
+    provider = providers._clean(value)
+    if provider is None:
+        return None
+    normalized = provider.lower()
+    if normalized == "google":
+        return "gemini"
+    if normalized in providers.SUPPORTED_PROVIDERS:
+        return normalized
+    if strict:
+        raise _ConfigValidationError("unsupported_provider")
+    return normalized
+
+
+def _write_config(payload: dict[str, Any]) -> None:
+    from magi_agent.cli import providers
+
+    llm = payload.get("llm") if isinstance(payload.get("llm"), dict) else {}
+    existing = providers._load_config_file()
+    existing_model = providers._section(existing, "model")
+    existing_provider = _canonical_provider(existing_model.get("provider"), strict=False)
+    next_provider = _canonical_provider(llm.get("provider"))
+    next_api_key = providers._clean(llm.get("apiKey"))
+    if next_api_key is None and next_provider == existing_provider:
+        next_api_key = providers._clean(existing_model.get("api_key"))
+
+    model_lines: list[str] = []
+    for key, value in (
+        ("provider", next_provider),
+        ("model", llm.get("model")),
+        ("base_url", llm.get("baseUrl")),
+        ("api_key", next_api_key),
+        ("api_key_env", llm.get("apiKeyEnvVar")),
+    ):
+        if isinstance(value, str) and value.strip():
+            model_lines.append(f'{key} = "{_toml_escape(value.strip())}"')
+
+    body = ""
+    if model_lines:
+        body += "[model]\n" + "\n".join(model_lines) + "\n"
+
+    path = providers._config_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(body, encoding="utf-8")
+
+
+# --------------------------------------------------------------------------- #
+# Workspace file domains (memory + knowledge)
+# --------------------------------------------------------------------------- #
+def _list_markdown(rel_dirs: list[str], extra_files: list[str]) -> list[dict[str, Any]]:
+    root = _workspace_root()
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    def add(path: Path) -> None:
+        if not path.is_file() or _is_protected(path):
+            return
+        rel = path.relative_to(root).as_posix()
+        if rel in seen:
+            return
+        seen.add(rel)
+        out.append({"path": rel, **_file_stat(path)})
+
+    for name in extra_files:
+        add(root / name)
+    for rel_dir in rel_dirs:
+        base = root / rel_dir
+        if base.is_dir():
+            for path in sorted(base.rglob("*.md")):
+                add(path)
+    return out
+
+
+def _search_files(files: list[dict[str, Any]], query: str, limit: int) -> list[dict[str, Any]]:
+    root = _workspace_root()
+    needle = query.lower()
+    results: list[dict[str, Any]] = []
+    if not needle:
+        return results
+    for entry in files:
+        path = root / entry["path"]
+        text = _read_text(path, limit=_MAX_SEARCH_BYTES)
+        if text is None:
+            continue
+        idx = text.lower().find(needle)
+        if idx < 0:
+            continue
+        start = max(0, idx - 80)
+        context = text[start : start + _PREVIEW_CHARS]
+        results.append(
+            {
+                "path": entry["path"],
+                "score": 1.0,
+                "context": context,
+                "contentPreview": text[:_PREVIEW_CHARS],
+            }
+        )
+        if len(results) >= limit:
+            break
+    return results
+
+
+# --------------------------------------------------------------------------- #
+# Route registration
+# --------------------------------------------------------------------------- #
+def register_app_api_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
+    """Mount the dashboard ``/v1/app/*`` API surface."""
+
+    def guard(request: Request) -> JSONResponse | None:
+        return _unauthorized_response(request, runtime)
+
+    # ---- runtime -------------------------------------------------------- #
+    @app.get("/v1/app/runtime")
+    def app_runtime(request: Request) -> JSONResponse:
+        denied = guard(request)
+        if denied is not None:
+            return denied
+        return JSONResponse(content=_runtime_snapshot(runtime))
+
+    # ---- config --------------------------------------------------------- #
+    @app.get("/v1/app/config")
+    def app_config_get(request: Request) -> JSONResponse:
+        denied = guard(request)
+        if denied is not None:
+            return denied
+        return JSONResponse(content=_config_snapshot(runtime))
+
+    @app.put("/v1/app/config")
+    async def app_config_put(request: Request) -> JSONResponse:
+        denied = guard(request)
+        if denied is not None:
+            return denied
+        try:
+            payload = await request.json()
+        except Exception:  # noqa: BLE001
+            return JSONResponse(status_code=400, content={"error": "invalid_json"})
+        try:
+            _write_config(payload if isinstance(payload, dict) else {})
+        except _ConfigValidationError as exc:
+            return JSONResponse(status_code=400, content={"error": exc.error})
+        except OSError as exc:
+            return JSONResponse(status_code=500, content={"error": str(exc)})
+        return JSONResponse(content=_config_snapshot(runtime))
+
+    # ---- skills --------------------------------------------------------- #
+    @app.get("/v1/app/skills")
+    def app_skills(request: Request) -> JSONResponse:
+        denied = guard(request)
+        if denied is not None:
+            return denied
+        return JSONResponse(content=_scan_skills())
+
+    @app.post("/v1/app/skills/reload")
+    def app_skills_reload(request: Request) -> JSONResponse:
+        denied = guard(request)
+        if denied is not None:
+            return denied
+        # The scan does fresh disk I/O each call; "reload" is just a re-scan.
+        return JSONResponse(content=_scan_skills())
+
+    # ---- memory --------------------------------------------------------- #
+    @app.get("/v1/app/memory")
+    def app_memory(request: Request) -> JSONResponse:
+        denied = guard(request)
+        if denied is not None:
+            return denied
+        files = _list_markdown(["memory", ".magi/memory"], ["MEMORY.md", "USER.md"])
+        return JSONResponse(content={"files": files})
+
+    @app.get("/v1/app/memory/file")
+    def app_memory_file(request: Request, path: str) -> JSONResponse:
+        denied = guard(request)
+        if denied is not None:
+            return denied
+        target = _resolve_in_workspace(path)
+        if target is None or _is_protected(target):
+            return JSONResponse(status_code=403, content={"error": "forbidden_path"})
+        content = _read_text(target)
+        if content is None:
+            return JSONResponse(status_code=404, content={"error": "not_found"})
+        return JSONResponse(content={"content": content})
+
+    @app.delete("/v1/app/memory/files")
+    async def app_memory_delete(request: Request) -> JSONResponse:
+        denied = guard(request)
+        if denied is not None:
+            return denied
+        try:
+            payload = await request.json()
+        except Exception:  # noqa: BLE001
+            return JSONResponse(status_code=400, content={"error": "invalid_json"})
+        paths = payload.get("paths") if isinstance(payload, dict) else None
+        if not isinstance(paths, list):
+            return JSONResponse(status_code=400, content={"error": "paths_required"})
+        deleted: list[str] = []
+        for rel in paths:
+            if not isinstance(rel, str):
+                continue
+            target = _resolve_in_workspace(rel)
+            if target is None or _is_protected(target) or not target.is_file():
+                continue
+            try:
+                target.unlink()
+                deleted.append(rel)
+            except OSError:
+                continue
+        return JSONResponse(content={"deleted": deleted})
+
+    @app.get("/v1/app/memory/search")
+    def app_memory_search(request: Request, q: str = "", limit: int = 15) -> JSONResponse:
+        denied = guard(request)
+        if denied is not None:
+            return denied
+        files = _list_markdown(["memory", ".magi/memory"], ["MEMORY.md", "USER.md"])
+        return JSONResponse(content={"results": _search_files(files, q, limit)})
+
+    # ---- workspace file write ------------------------------------------ #
+    @app.put("/v1/app/workspace/file")
+    async def app_workspace_write(request: Request) -> JSONResponse:
+        denied = guard(request)
+        if denied is not None:
+            return denied
+        try:
+            payload = await request.json()
+        except Exception:  # noqa: BLE001
+            return JSONResponse(status_code=400, content={"error": "invalid_json"})
+        rel = payload.get("path") if isinstance(payload, dict) else None
+        content = payload.get("content") if isinstance(payload, dict) else None
+        if not isinstance(rel, str) or not isinstance(content, str):
+            return JSONResponse(status_code=400, content={"error": "path_and_content_required"})
+        target = _resolve_in_workspace(rel)
+        if target is None or _is_protected(target):
+            return JSONResponse(status_code=403, content={"error": "forbidden_path"})
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content, encoding="utf-8")
+        except OSError as exc:
+            return JSONResponse(status_code=500, content={"error": str(exc)})
+        return JSONResponse(content={"path": rel})
+
+    # ---- knowledge ------------------------------------------------------ #
+    @app.get("/v1/app/knowledge")
+    def app_knowledge(request: Request, collection: str | None = None) -> JSONResponse:
+        denied = guard(request)
+        if denied is not None:
+            return denied
+        return JSONResponse(content=_knowledge_index(collection))
+
+    @app.get("/v1/app/knowledge/file")
+    def app_knowledge_file(request: Request, path: str) -> JSONResponse:
+        denied = guard(request)
+        if denied is not None:
+            return denied
+        target = _resolve_in_workspace(path)
+        if target is None or _is_protected(target):
+            return JSONResponse(status_code=403, content={"error": "forbidden_path"})
+        content = _read_text(target)
+        if content is None:
+            return JSONResponse(status_code=404, content={"error": "not_found"})
+        return JSONResponse(content={"content": content, "path": path})
+
+    @app.put("/v1/app/knowledge/file")
+    async def app_knowledge_write(request: Request) -> JSONResponse:
+        denied = guard(request)
+        if denied is not None:
+            return denied
+        try:
+            payload = await request.json()
+        except Exception:  # noqa: BLE001
+            return JSONResponse(status_code=400, content={"error": "invalid_json"})
+        rel = payload.get("path") if isinstance(payload, dict) else None
+        content = payload.get("content") if isinstance(payload, dict) else None
+        if not isinstance(rel, str) or not isinstance(content, str):
+            return JSONResponse(status_code=400, content={"error": "path_and_content_required"})
+        target = _resolve_in_workspace(rel)
+        if target is None or _is_protected(target):
+            return JSONResponse(status_code=403, content={"error": "forbidden_path"})
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content, encoding="utf-8")
+        except OSError as exc:
+            return JSONResponse(status_code=500, content={"error": str(exc)})
+        return JSONResponse(content={"path": rel})
+
+    @app.get("/v1/app/knowledge/search")
+    def app_knowledge_search(
+        request: Request, q: str = "", limit: int = 25, collection: str | None = None
+    ) -> JSONResponse:
+        denied = guard(request)
+        if denied is not None:
+            return denied
+        index = _knowledge_index(collection)
+        files = [
+            {"path": doc["path"]}
+            for doc in index["documents"]
+        ]
+        hits = _search_files(files, q, limit)
+        by_path = {doc["path"]: doc for doc in index["documents"]}
+        results = []
+        for hit in hits:
+            doc = dict(by_path.get(hit["path"], {}))
+            doc["score"] = hit["score"]
+            doc["snippet"] = hit["context"]
+            results.append(doc)
+        return JSONResponse(content={"results": results})
+
+
+def _knowledge_index(collection: str | None) -> dict[str, Any]:
+    """Scan workspace knowledge dirs. Empty when no KB store is configured."""
+    root = _workspace_root()
+    collections: list[dict[str, Any]] = []
+    documents: list[dict[str, Any]] = []
+    for base_name in ("knowledge", ".magi/knowledge"):
+        base = root / base_name
+        if not base.is_dir():
+            continue
+        for coll_dir in sorted(p for p in base.iterdir() if p.is_dir()):
+            if collection is not None and coll_dir.name != collection:
+                continue
+            docs = [p for p in sorted(coll_dir.rglob("*")) if p.is_file() and not _is_protected(p)]
+            size = sum(p.stat().st_size for p in docs)
+            collections.append(
+                {
+                    "name": coll_dir.name,
+                    "path": coll_dir.relative_to(root).as_posix(),
+                    "documentCount": len(docs),
+                    "sizeBytes": size,
+                }
+            )
+            for doc in docs:
+                stat = doc.stat()
+                documents.append(
+                    {
+                        "collection": coll_dir.name,
+                        "filename": doc.name,
+                        "title": doc.stem,
+                        "path": doc.relative_to(root).as_posix(),
+                        "sizeBytes": stat.st_size,
+                        "mtimeMs": int(stat.st_mtime * 1000),
+                    }
+                )
+    return {"collections": collections, "documents": documents}

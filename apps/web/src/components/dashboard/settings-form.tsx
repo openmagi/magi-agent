@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { useMessages } from "@/lib/i18n";
 
-type ProviderName = "anthropic" | "openai" | "google" | "openai-compatible";
+type ProviderName = "anthropic" | "openai" | "gemini" | "fireworks";
 
 interface SettingsFormProps {
   bot?: null;
@@ -36,8 +36,8 @@ interface AppConfigPayload {
 const PROVIDER_OPTIONS: Array<{ value: ProviderName; label: string }> = [
   { value: "anthropic", label: "Anthropic" },
   { value: "openai", label: "OpenAI" },
-  { value: "google", label: "Google" },
-  { value: "openai-compatible", label: "OpenAI-Compatible / Local" },
+  { value: "gemini", label: "Gemini" },
+  { value: "fireworks", label: "Fireworks" },
 ];
 
 function isProviderName(value: string): value is ProviderName {
