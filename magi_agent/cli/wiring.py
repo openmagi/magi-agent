@@ -105,6 +105,9 @@ class HeadlessRuntime:
     general_automation_receipts:
         Local-only GA dispatch receipt ledger store retained by the active
         first-party tool dispatcher, when present.
+    local_tool_evidence:
+        Local-only tool evidence collector shared by CLI/dashboard tools and
+        the engine verifier bus, when present.
     mcp_servers:
         Labels for active MCP servers surfaced in protocol metadata.
     """
@@ -115,6 +118,7 @@ class HeadlessRuntime:
     session_log: SessionLog
     composio: ComposioToolsetBundle
     general_automation_receipts: object | None = None
+    local_tool_evidence: object | None = None
     mcp_servers: tuple[str, ...] = ()
 
 
@@ -200,6 +204,12 @@ def build_headless_runtime(
             event_sink = get_active_sink()
         except Exception:
             event_sink = None
+    local_tool_evidence = _local_tool_evidence_collector(effective_runner)
+    evidence_collector = (
+        None
+        if local_tool_evidence is None
+        else getattr(local_tool_evidence, "collect_for_turn", None)
+    )
     engine = MagiEngineDriver(
         runner=effective_runner,
         recovery=build_engine_recovery_policy(),
@@ -210,7 +220,7 @@ def build_headless_runtime(
         ),
         runner_policy_routing_enabled=runner_policy_routing_enabled,
         event_sink=event_sink,
-        evidence_collector=_general_automation_evidence_collector(effective_runner),
+        evidence_collector=evidence_collector if callable(evidence_collector) else None,
     )
 
     # (C) Permission gate — default stays sink-less and therefore fail-safe on
@@ -264,6 +274,7 @@ def build_headless_runtime(
             "general_automation_receipts",
             None,
         ),
+        local_tool_evidence=local_tool_evidence,
         mcp_servers=mcp_servers,
     )
 
@@ -372,10 +383,16 @@ def _build_default_runner(
     from magi_agent.harness.general_automation.live_gate import (  # noqa: PLC0415
         GeneralAutomationReceiptLedgerStore,
     )
+    from magi_agent.evidence.local_tool_collector import (  # noqa: PLC0415
+        LocalToolEvidenceCollector,
+    )
 
     # Identity is loaded from the SAME cwd used to root the tools.
     workspace_root = str(cwd) if cwd is not None else os.getcwd()
     general_automation_receipts = GeneralAutomationReceiptLedgerStore()
+    local_tool_evidence = LocalToolEvidenceCollector(
+        general_automation_receipts=general_automation_receipts,
+    )
     try:
         return build_cli_model_runner(
             config,
@@ -384,9 +401,11 @@ def _build_default_runner(
                 session_id=session_id,
                 mode=mode,
                 general_automation_receipts=general_automation_receipts,
+                local_tool_evidence_collector=local_tool_evidence,
             ),
             workspace_root=workspace_root,
             general_automation_receipts=general_automation_receipts,
+            local_tool_evidence_collector=local_tool_evidence,
         )
     except CliProviderDependencyError as exc:
         # Key configured but the provider dependency is missing: keep the CLI
@@ -400,6 +419,7 @@ def _build_first_party_adk_tools(
     session_id: str,
     mode: "RuntimeMode" = "act",
     general_automation_receipts: object | None = None,
+    local_tool_evidence_collector: object | None = None,
 ) -> list[object]:
     """Build default first-party local ADK tools for the CLI real runner.
 
@@ -423,6 +443,9 @@ def _build_first_party_adk_tools(
     from magi_agent.tools.dispatcher import ToolDispatcher  # noqa: PLC0415
     from magi_agent.harness.general_automation.live_gate import (  # noqa: PLC0415
         GeneralAutomationReceiptLedgerStore,
+    )
+    from magi_agent.cli.tool_runtime import (  # noqa: PLC0415
+        wrap_cli_adk_tools_with_evidence_collector,
     )
 
     workspace_root = str(cwd) if cwd is not None else os.getcwd()
@@ -478,7 +501,7 @@ def _build_first_party_adk_tools(
             plugin_id=tool_name if isinstance(tool_name, str) else None,
         )
 
-    return build_adk_function_tools_for_registry(
+    tools = build_adk_function_tools_for_registry(
         registry,
         dispatcher,
         mode=mode,
@@ -486,12 +509,28 @@ def _build_first_party_adk_tools(
         attach_enabled=True,
         exposed_tool_names=exposed_tool_names,
     )
+    return wrap_cli_adk_tools_with_evidence_collector(
+        tools,
+        collector=local_tool_evidence_collector,
+        session_id=session_id,
+    )
 
 
-def _general_automation_evidence_collector(runner: object) -> object | None:
+def _local_tool_evidence_collector(runner: object) -> object | None:
+    collector = getattr(runner, "local_tool_evidence_collector", None)
+    collect_for_turn = getattr(collector, "collect_for_turn", None)
+    if callable(collect_for_turn):
+        return collector
     store = getattr(runner, "general_automation_receipts", None)
-    collector = getattr(store, "entries_for_turn", None)
-    return collector if callable(collector) else None
+    if store is None:
+        return None
+    try:
+        from magi_agent.evidence.local_tool_collector import (  # noqa: PLC0415
+            LocalToolEvidenceCollector,
+        )
+    except Exception:
+        return None
+    return LocalToolEvidenceCollector(general_automation_receipts=store)
 
 
 def _context_lookup(value: object, key: str) -> object | None:
