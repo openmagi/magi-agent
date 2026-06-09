@@ -33,6 +33,12 @@ from magi_agent.memory.contracts import (
     UnsupportedMemoryOperationError,
 )
 from magi_agent.memory.policy import MemoryPolicy, evaluate_memory_policy
+# Shared, broader token/secret redactor — single source of truth, also used by
+# the read-side projection (``memory/prompt_projection.py``).  ``tool_preview``
+# imports only ``re`` (no transport/network at module load), so importing it at
+# module top does not trip the memory import-boundary tests.  This keeps the
+# write-side redactor at least as strong as the read-side one (C2 / PR-D).
+from magi_agent.transport.tool_preview import MAX_TOOL_PREVIEW, redact_secret_tokens
 from magi_agent.memory.adapters.hipocampus_readonly import (
     UnsafeMemoryPathError,
     _PRODUCTION_PATH_RE,
@@ -96,6 +102,143 @@ _SENSITIVE_URL_RE = re.compile(
     r"https?://api\.telegram\.org/bot[0-9]+:[^/\s\"'<>]+[^\s\"'<>]*",
     re.IGNORECASE,
 )
+
+# ---------------------------------------------------------------------------
+# C2 — gap patterns that BOTH the existing ``_SECRET_RE`` and the shared
+# ``redact_secret_tokens`` miss.  These bring the write-side redactor to parity
+# with (and slightly beyond) the read-side projection redactor.
+# ---------------------------------------------------------------------------
+
+# PEM private-key blocks (RSA/EC/OPENSSH/PGP/etc).  DOTALL so the base64 body
+# between the BEGIN/END markers is consumed.
+#
+# C1 (ReDoS): this regex ALSO runs on the FULL body (not windowed), so it must
+# be super-linear-free.  Two hardening changes vs the earlier form:
+#   1. The type label is bounded ``[A-Z0-9 ]{0,20}`` (real labels — RSA, EC,
+#      OPENSSH, ENCRYPTED, … — are short) instead of unbounded ``[A-Z0-9 ]*``.
+#   2. The body is a TEMPERED, BOUNDED dot ``(?:(?!-----BEGIN)[\s\S]){0,8192}?``.
+#      The bare ``.*?`` form restarts its scan-to-EOF at EVERY ``-----BEGIN``
+#      marker, so ``"-----BEGIN PRIVATE KEY-----" * 8000`` (no END) cost ~45s
+#      (O(n^2)).  The ``(?!-----BEGIN)`` temper forbids the body from crossing
+#      into a second BEGIN marker (killing the quadratic restart) and the
+#      ``{0,8192}`` ceiling caps a single key body (real keys are ~1-4KB), so the
+#      same adversarial 200KB input now redacts in ~0.001s.  A genuine block —
+#      including one buried inside an adversarial run — is still matched.
+_PEM_PRIVATE_KEY_RE = re.compile(
+    r"-----BEGIN [A-Z0-9 ]{0,20}PRIVATE KEY-----"
+    r"(?:(?!-----BEGIN)[\s\S]){0,8192}?"
+    r"-----END [A-Z0-9 ]{0,20}PRIVATE KEY-----",
+    re.DOTALL,
+)
+# JSON Web Tokens: three base64url segments separated by dots.  The first
+# segment starts with ``eyJ`` (``{"`` base64url-encoded), which keeps this from
+# matching ordinary dotted prose.
+#
+# C1 audit (runs on FULL body): ReDoS-safe.  Each segment is a single bounded
+# char class ``[A-Za-z0-9_-]{6,}`` and the dots between them are LITERAL — there
+# is no nested/overlapping quantifier and ``.`` is not in the segment class, so a
+# segment can never absorb a delimiter.  On a 200KB adversarial input (a long
+# ``eyJA....`` run that never completes a valid 3-segment token) the engine fails
+# linearly: measured ~0.007s.
+_JWT_RE = re.compile(
+    r"\beyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\b"
+)
+# Slack/Discord/etc incoming-webhook URLs carrying a secret path component.
+#
+# C1 audit (runs on FULL body): ReDoS-safe.  Each alternative is a fixed literal
+# prefix followed by a SINGLE bounded char class (no nested quantifier, no
+# overlap between the class and any following literal), so a long matching tail
+# is consumed in one linear greedy pass.  On a 200KB adversarial slack tail it
+# measured ~0.006-0.09s.
+_WEBHOOK_URL_RE = re.compile(
+    r"https://hooks\.slack\.com/services/[A-Za-z0-9/_+-]+|"
+    r"https://(?:ptb\.|canary\.)?discord(?:app)?\.com/api/webhooks/[0-9]+/[A-Za-z0-9_-]+",
+    re.IGNORECASE,
+)
+# Connection DSNs with inline credentials: ``scheme://user:pass@host``.  Only
+# the ``user:pass`` credential portion is redacted, preserving the rest of the
+# URL for context.  Restricted to a plausible scheme + non-empty password to
+# avoid mangling ordinary ``http://user@host`` or ``a://b`` prose.
+#
+# C1 (ReDoS): the scheme class is BOUNDED to ``{0,30}``.  An UNbounded
+# ``[a-z0-9+.-]*`` (which contains ``.``) backtracks catastrophically on a long
+# dotted run with no ``@`` — ``"QUJjRGVm." * 8000`` (~64KB) took ~16.7s, and the
+# compaction-tree I2 path feeds UNBOUNDED text through here (NOT windowed —
+# this regex runs on the full body), so the cost is super-linear in body size.
+# Real URI schemes are short (RFC 3986 examples top out well under 30 chars), so
+# the ``{0,30}`` ceiling cannot be reached by a long dotted blob and the engine
+# fails the match in linear time instead of backtracking.  Post-fix the same
+# 64KB vector redacts in ~0.04s.
+_DSN_CREDENTIALS_RE = re.compile(
+    r"\b([a-z][a-z0-9+.-]{0,30}://)[^\s:/@]+:[^\s:/@]+(@)",
+    re.IGNORECASE,
+)
+
+# ReDoS guard for the per-line token redactors (``_SECRET_RE`` and
+# ``redact_secret_tokens``).  Both exhibit superlinear backtracking on long
+# uniform lines, and the compaction-tree path feeds *unbounded* tier text
+# through ``_redact_for_write`` (not just the byte-bounded remember() path).
+# Mirrors the read-side ReDoS guard in ``prompt_projection``
+# (``_TOKEN_REDACT_LINE_LIMIT = MAX_TOOL_PREVIEW + 200``).
+#
+# Unlike the read side (which truncates the tail away) the write side must NOT
+# lose persisted memory.  Earlier versions redacted only ``line[:600]`` and
+# re-attached the rest *verbatim* — that leaked any token-format secret that
+# appeared past column 600 (PR-D review).  We instead redact the ENTIRE line in
+# fixed-size **overlapping windows**: every window of ``_TOKEN_REDACT_WINDOW``
+# original chars is run through the backtracking-prone redactors (bounded input
+# → bounded time), and consecutive windows overlap by ``_TOKEN_REDACT_OVERLAP``
+# so any secret straddling a window boundary is fully contained in at least one
+# window.  Windows are stitched back without duplicating the overlap, so the
+# non-secret remainder is preserved with no truncation.
+_TOKEN_REDACT_LINE_LIMIT = MAX_TOOL_PREVIEW + 200
+# Number of *committed* original chars per window.  Bounded so the redactors
+# never see an unbounded string in one shot.
+_TOKEN_REDACT_WINDOW = _TOKEN_REDACT_LINE_LIMIT
+# Trailing margin (in original chars) redacted together with each committed
+# window.  Must be ≥ the longest realistic single token-format secret so a
+# secret straddling a window boundary is fully contained in the window that
+# commits the chars before the boundary.  Vendor tokens / Bearer tokens / long
+# AIza/JWT-ish blobs are well under 200 chars.
+_TOKEN_REDACT_OVERLAP = 200
+
+# Linear, NON-backtracking vendor/bearer token shapes.  These can appear in a
+# long uniform tail with NO surrounding ``key=value`` context, so they are
+# redacted on the FULL line in one shot (no windowing needed — each alternative
+# is anchored on a literal prefix and uses a single bounded char class, so the
+# regex is linear).  This is the only way a token past column 600 with no
+# delimiter is caught.
+# I-1 (write<read parity): the ``sk-`` alternative is aligned to the read-side
+# ``_OPENAI_TOKEN_RE`` (``\bsk-[A-Za-z0-9._-]+\b`` in transport.tool_preview):
+# it now ALLOWS ``.`` in the body and drops the ``{8,}`` floor.  The earlier
+# form ``sk-(?:proj-|live|test)?[-_A-Za-z0-9]{8,}`` excluded ``.`` and required
+# ≥8 chars, so a delimiter-free dotted key like ``sk-abc.def.ghi.jkl.mnopqr``
+# (which the read side redacts) passed through the write side VERBATIM — a
+# write<read leak.  The ``\b`` prefix (mirroring read-side) keeps the literal
+# ``sk-`` from firing inside ordinary hyphenated prose (``task-list``,
+# ``disk-usage``: no word boundary before ``sk``).  The class is a single
+# bounded char class with a literal prefix, so it stays LINEAR / non-backtracking
+# (measured ~0.004s on a 200KB ``sk-`` dotted run).  github/stripe read-side
+# patterns do not permit ``.`` so their write-side alternatives are already at
+# parity and are left unchanged.
+_VENDOR_TOKEN_RE = re.compile(
+    r"Bearer\s+[A-Za-z0-9._~+/=-]{8,}"
+    r"|gh[opusr]_[A-Za-z0-9_]{8,}"
+    r"|github_pat_[A-Za-z0-9_]{8,}"
+    r"|\bsk-[A-Za-z0-9._-]+"
+    r"|[rs]k_(?:live|test)_[A-Za-z0-9_]{8,}"
+    r"|AKIA[A-Z0-9]{8,}"
+    r"|glpat-[A-Za-z0-9_-]{8,}"
+    r"|xox[baprs]-[A-Za-z0-9-]{8,}"
+    r"|AIza[0-9A-Za-z_-]{20,}",
+    re.IGNORECASE,
+)
+# A ``NAME=value`` / ``key: value`` / ``Bearer x`` style secret can only form
+# around one of these delimiter characters.  The backtracking-prone key=value
+# redactors are therefore run ONLY on windows that contain a delimiter; uniform
+# delimiter-free tails skip them entirely (so a multi-KB uniform run costs O(n),
+# not O(n^2)).
+_TOKEN_DELIMITER_RE = re.compile(r"[:=]")
 
 _MODEL_CONFIG = ConfigDict(frozen=True, populate_by_name=True, extra="forbid")
 
@@ -518,12 +661,147 @@ def _empty_result(
 
 
 def _redact_for_write(body: str) -> str:
-    """Scrub secrets from body before persisting to disk."""
-    safe = _SECRET_RE.sub("[redacted]", body)
+    """Scrub secrets from body before persisting to disk.
+
+    C2 / PR-D: the write-side redactor must be *at least as strong* as the
+    read-side projection redactor (``_redact_snapshot_content``).  We therefore
+    layer the shared, broader ``redact_secret_tokens`` (the single source of
+    truth, also used by projection) on top of the adapter's own structural
+    patterns:
+
+      1. Structural / multi-token shapes the shared redactor misses entirely:
+         PEM private-key blocks, JWTs, Slack/Discord webhook URLs, DSNs with
+         inline ``user:pass@`` credentials.  (ReDoS-safe regexes; run on full
+         text.)
+      2. The existing ``_SECRET_RE`` allowlist (vendor tokens + NAME=value) AND
+         the shared ``redact_secret_tokens`` (Bearer/GitHub/OpenAI/Stripe/
+         key=value/session) — applied per-line under a ReDoS guard so the
+         result is scrubbed at least as well as the projection path.
+      3. Header / sensitive-URL passes (Authorization, Cookie, DSN-by-scheme).
+         (ReDoS-safe regexes; run on full text.)
+    """
+    # 1. Multi-token / structural secrets both per-line passes otherwise miss.
+    safe = _PEM_PRIVATE_KEY_RE.sub("[redacted-private-key]", body)
+    safe = _JWT_RE.sub("[redacted]", safe)
+    safe = _WEBHOOK_URL_RE.sub("[redacted-url]", safe)
+    safe = _DSN_CREDENTIALS_RE.sub(r"\1[redacted]\2", safe)
+    # 2. Backtracking-prone token redactors, applied per-line under a ReDoS
+    #    guard.  ``_SECRET_RE`` and ``redact_secret_tokens`` both blow up on
+    #    long uniform lines, and the compaction-tree path feeds unbounded tier
+    #    text here.  We redact the ENTIRE line in fixed-size overlapping windows
+    #    (see ``_redact_token_line``): bounded input → bounded time, no verbatim
+    #    tail leak past the window, and no truncation → no persisted-memory loss.
+    #
+    # M-1: ``str.splitlines()`` splits on the FULL Unicode line-boundary set
+    # (``\r``, ``\n``, ``\r\n``, plus ``\v \f \x1c \x1d \x1e \x85    ``),
+    # NOT only on ``\r\n``.  Each piece is therefore guaranteed boundary-free, so
+    # every per-line redactor sees one logical line.  These boundary chars are
+    # normalised to ``\n`` by the join — acceptable here because the result is
+    # immediately collapsed to a single delimiter-safe line by
+    # ``_single_line_memory_text`` before persisting; on the unbounded I2 path the
+    # text is consolidated tier content where exact boundary preservation is not
+    # required.  (If byte-exact ``\r?\n`` round-tripping ever matters, switch to an
+    # explicit ``re.split(r"(\r?\n)", ...)`` that retains the separators.)
+    safe = "\n".join(_redact_token_line(line) for line in safe.splitlines())
+    # 3. Header / sensitive-URL passes (ReDoS-safe).
     safe = _AUTHORIZATION_HEADER_RE.sub(r"\1[redacted]", safe)
     safe = _COOKIE_HEADER_RE.sub(r"\1[redacted]", safe)
     safe = _SENSITIVE_URL_RE.sub("[redacted-url]", safe)
     return safe.strip()
+
+
+def _redact_keyvalue_run(text: str) -> str:
+    """Apply the backtracking-prone ``NAME=value`` / token redactors to a slice.
+
+    ``_SECRET_RE`` and ``redact_secret_tokens`` exhibit superlinear backtracking,
+    so callers MUST only ever pass a bounded ``text`` (≤ one window + overlap).
+    This is the only place the unbounded-input-prone regexes run.
+    """
+    redacted = _SECRET_RE.sub("[redacted]", text)
+    return redact_secret_tokens(redacted)
+
+
+def _redact_token_line(line: str) -> str:
+    """Redact token-format secrets across an ENTIRE line, ReDoS-safe & lossless.
+
+    Two-tier strategy so the whole line is covered without ever feeding an
+    unbounded string to a backtracking regex:
+
+      1. **Vendor/bearer tokens** (``ghp_``, ``sk-…``, ``AKIA…``, ``Bearer x``,
+         …) are matched by ``_VENDOR_TOKEN_RE``, a *linear* (non-backtracking)
+         regex, on the FULL line in one shot.  These can hide in a long uniform
+         tail with no delimiter, so they must be caught anywhere — including past
+         column 600 — and the linear regex makes that O(n).
+
+      2. **``NAME=value`` / ``key: value`` secrets** require a ``:`` or ``=``
+         delimiter, and the patterns that catch them backtrack badly.  They are
+         therefore run (via ``_redact_keyvalue_run``) only on fixed-size
+         **overlapping windows** that actually contain a delimiter.  Each window
+         of ``_TOKEN_REDACT_WINDOW`` committed chars is redacted together with a
+         trailing ``_TOKEN_REDACT_OVERLAP`` margin, so a ``key=value`` secret
+         straddling a window boundary is fully contained in (and redacted by) the
+         window that commits the chars before the boundary.  Windows are stitched
+         back without duplicating the overlap.  Delimiter-free windows skip this
+         tier entirely, so a multi-KB uniform run costs O(n), not O(n^2).
+
+    Properties:
+      * **No leak** — every char is covered: vendor tokens by tier 1 over the
+        full line, ``key=value`` secrets by tier 2 over every delimiter-bearing
+        window (boundary-straddling secrets fall inside an overlap).
+      * **ReDoS-safe** — the backtracking redactors only ever see a bounded
+        ``window + overlap`` slice; the full-line pass uses only linear regexes.
+      * **No data loss** — the non-secret remainder is preserved verbatim.
+    """
+    # Tier 1: linear vendor/bearer token shapes over the full line.
+    line = _VENDOR_TOKEN_RE.sub("[redacted]", line)
+
+    # Tier 2: key=value secrets, only where a delimiter exists.
+    if not _TOKEN_DELIMITER_RE.search(line):
+        return line
+
+    # Short lines fit in a single window — redact in one shot.
+    if len(line) <= _TOKEN_REDACT_WINDOW + _TOKEN_REDACT_OVERLAP:
+        return _redact_keyvalue_run(line)
+
+    window = _TOKEN_REDACT_WINDOW
+    overlap = _TOKEN_REDACT_OVERLAP
+    out: list[str] = []
+    i = 0
+    n = len(line)
+    while i < n:
+        commit_end = i + window
+        if commit_end >= n:
+            # Last window: redact the whole remaining slice and commit it all.
+            out.append(_redact_keyvalue_run(line[i:]))
+            break
+
+        margin_end = min(commit_end + overlap, n)
+        slice_ = line[i:margin_end]
+        # Only the backtracking key=value patterns need running, and only when a
+        # delimiter is present.  A delimiter-free window cannot hold a key=value
+        # secret (tier 1 already removed vendor tokens), so commit it verbatim.
+        if not _TOKEN_DELIMITER_RE.search(slice_):
+            out.append(line[i:commit_end])
+            i = commit_end
+            continue
+
+        red_window = _redact_keyvalue_run(slice_)
+        red_overlap = _redact_keyvalue_run(line[commit_end:margin_end])
+
+        if red_overlap and red_window.endswith(red_overlap):
+            # No secret straddles the commit boundary: the trailing overlap was
+            # redacted identically standalone, so drop it (it is committed by the
+            # next window) to avoid duplication.
+            out.append(red_window[: len(red_window) - len(red_overlap)])
+            i = commit_end
+        else:
+            # A secret spans the commit boundary (or the overlap merged into a
+            # neighbouring match): the redacted window differs from the standalone
+            # overlap, so we cannot safely split it.  Commit the full redacted
+            # window and advance past the consumed overlap.
+            out.append(red_window)
+            i = margin_end
+    return "".join(out)
 
 
 def _single_line_memory_text(text: str) -> str:
