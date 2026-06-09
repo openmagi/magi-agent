@@ -315,6 +315,24 @@ _BUILTIN_PRESETS: tuple[BuiltinHarnessPreset, ...] = tuple(
             ),
             _preset("output-delivery", PresetCategory.OUTPUT, hook_points=("afterLLMCall",), verifier_gates=("output-delivery",)),
             _preset("artifact-delivery", PresetCategory.OUTPUT, hook_points=("onArtifactCreated", "afterTurnEnd"), verifier_gates=("artifact-delivery",)),
+            # Task C — OPTIONAL BLOCKING document-authoring coverage gate. Default
+            # OFF and env-gated (``MAGI_DOCUMENT_AUTHORING_COVERAGE``); when off the
+            # ``DocumentCoverage`` evidence from ``docx_write`` (Task B) stays
+            # audit-only. When on, the ``document-authoring-coverage`` verifier-bus
+            # gate BLOCKS turn/commit completion on a failed coverage record
+            # (``fields["status"] != "pass"``). fail_open so a missing/erroring
+            # boundary never wedges a turn; a non-document turn (no DocumentCoverage
+            # evidence) is never blocked by this gate.
+            _preset(
+                "document-authoring-coverage",
+                PresetCategory.OUTPUT,
+                default_on=False,
+                hook_points=("onArtifactCreated", "beforeCommit"),
+                blocking=True,
+                fail_open=True,
+                env_gates=("MAGI_DOCUMENT_AUTHORING_COVERAGE",),
+                verifier_gates=("document-authoring-coverage",),
+            ),
             _preset("response-language", PresetCategory.OUTPUT, hook_points=("afterLLMCall",), config_gates=("response-language-policy",), scope_hints=("configured-policy",)),
             _preset("parallel-research", PresetCategory.RESEARCH, default_on=False, hook_points=("beforeTurnStart",), scope_hints=("research-agent",)),
             _preset("source-authority", PresetCategory.RESEARCH, hook_points=("afterToolUse", "afterLLMCall"), contributed_ledgers=("source-ledger",), verifier_gates=("source-authority",)),

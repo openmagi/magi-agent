@@ -231,6 +231,20 @@ def test_default_bus_includes_dev_coding_verification_audit_metadata_default_off
     assert verifier.runner_attached is False
 
 
+def test_default_bus_includes_document_authoring_coverage_metadata_default_off() -> None:
+    bus = build_default_verifier_bus_metadata()
+    verifier = by_verifier_id(bus, "document-authoring-coverage")
+
+    assert verifier.stage == "file_artifact_delivery"
+    assert verifier.phase == "deterministic"
+    assert verifier.default_enabled is False
+    assert verifier.disabled is True
+    assert verifier.blocking is False
+    assert verifier.fail_open is True
+    assert verifier.fail_closed is False
+    assert verifier.input_declarations[0].evidence_types == ("DocumentCoverage",)
+
+
 def test_llm_critic_is_not_effective_until_deterministic_prerequisites_or_escalation() -> None:
     bus = build_default_verifier_bus_metadata()
 

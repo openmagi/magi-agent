@@ -737,6 +737,7 @@ def _build_pre_final_verifier_bus_payload(
         "results": results,
         "trafficAttached": False,
         "executionAttached": False,
+        "failedDocumentCoverage": 0,
     }
 
 
@@ -1990,6 +1991,13 @@ class MagiEngineDriver:
             return None
         evidence_records: tuple[object, ...] = ()
         verifier_bus: dict[str, object] | None = None
+        # Task C — OPTIONAL BLOCKING document-authoring coverage gate. Default OFF
+        # and strict-truthy env-gated; when off the bus call is behavior-identical
+        # to before and DocumentCoverage evidence stays audit-only.
+        from magi_agent.config.env import is_document_authoring_coverage_enabled
+
+        document_coverage_gate_enabled = is_document_authoring_coverage_enabled()
+        failed_document_coverage = 0
         if self._evidence_collector is not None:
             from magi_agent.harness.verifier_bus import execute_pre_final_verifier_bus
 
@@ -1999,17 +2007,25 @@ class MagiEngineDriver:
                 required_validators=assembly.required_validators,
                 observed_public_refs=tuple(sorted(observed_public_refs)),
                 evidence_records=evidence_records,
+                document_coverage_gate_enabled=document_coverage_gate_enabled,
             )
             matched_refs = verifier_bus.get("matchedRefs")
             if isinstance(matched_refs, list):
                 observed_public_refs = {ref for ref in matched_refs if isinstance(ref, str)}
+            raw_failed_coverage = verifier_bus.get("failedDocumentCoverage")
+            if isinstance(raw_failed_coverage, int):
+                failed_document_coverage = raw_failed_coverage
         missing_evidence = [
             ref for ref in assembly.evidence_requirements if ref not in observed_public_refs
         ]
         missing_validators = [
             ref for ref in assembly.required_validators if ref not in observed_public_refs
         ]
-        decision = "block" if missing_evidence or missing_validators else "pass"
+        decision = (
+            "block"
+            if (missing_evidence or missing_validators or failed_document_coverage)
+            else "pass"
+        )
 
         # D1: consume the phase route's verifier-escalation decision. When the
         # materialized route requires a bounded stronger verifier for a review
@@ -2063,6 +2079,7 @@ class MagiEngineDriver:
             verifier_bus["decision"] = decision
             verifier_bus["missingEvidence"] = missing_evidence
             verifier_bus["missingValidators"] = missing_validators
+            verifier_bus["failedDocumentCoverage"] = failed_document_coverage
             verifier_bus.setdefault("evidenceRecordCount", len(evidence_records))
         payload["verifierBus"] = verifier_bus
         if decision == "block" and effective_action == "repair_required":
