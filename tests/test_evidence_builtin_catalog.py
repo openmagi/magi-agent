@@ -29,6 +29,7 @@ EXPECTED_BUILTIN_TYPES = (
     "Clock",
     "TelegramDeliveryAck",
     "PromptTransform",
+    "EditMatch",
 )
 
 ALLOWED_PRODUCER_SURFACES = {

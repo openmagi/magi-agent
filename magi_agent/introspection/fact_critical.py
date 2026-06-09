@@ -33,6 +33,8 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict
 
+from magi_agent.introspection.reason_safety import safe_model_reason
+
 if TYPE_CHECKING:
     from magi_agent.introspection.projection import SessionEvidenceView
 
@@ -116,6 +118,8 @@ class FactCriticalDecision(BaseModel):
 
     fact_critical: bool
     reason: str
+    reason_digest: str | None = None
+    reason_preview: str | None = None
     # "no_evidence" | "cache" | "llm" | "classifier_error"
     source: str
     model: str | None = None
@@ -162,7 +166,7 @@ class FactCriticalClassifier:
         if not _has_evidence_activity(view):
             decision = FactCriticalDecision(
                 fact_critical=False,
-                reason="no evidence-bearing activity this turn; nothing to ground",
+                reason="no_evidence_activity",
                 source="no_evidence",
                 model=None,
             )
@@ -203,17 +207,22 @@ class FactCriticalClassifier:
             if parsed is None:
                 raise ValueError(f"LLM returned non-parseable response: {raw_text!r}")
             verdict = bool(parsed["fact_critical"])
-            reason = str(parsed.get("reason", ""))[:_MAX_REASON_CHARS]
+            reason = safe_model_reason(
+                str(parsed.get("reason", ""))[:_MAX_REASON_CHARS],
+                label=f"llm_fact_critical_{str(verdict).lower()}",
+            )
             return FactCriticalDecision(
                 fact_critical=verdict,
-                reason=reason or "llm classification",
+                reason=reason.label,
+                reason_digest=reason.digest,
+                reason_preview=reason.preview,
                 source="llm",
                 model=model_name,
             )
         except asyncio.TimeoutError:
             return FactCriticalDecision(
                 fact_critical=False,
-                reason="classifier timeout",
+                reason="classifier_timeout",
                 source="classifier_error",
                 model=model_name,
             )
@@ -239,15 +248,18 @@ class FactCriticalClassifier:
         if self._evidence_sink is None:
             return
         try:
-            self._evidence_sink(
-                {
-                    "type": FACT_CRITICAL_EVIDENCE_TYPE,
-                    "fact_critical": decision.fact_critical,
-                    "reason": decision.reason,
-                    "source": decision.source,
-                    "model": decision.model,
-                }
-            )
+            record = {
+                "type": FACT_CRITICAL_EVIDENCE_TYPE,
+                "fact_critical": decision.fact_critical,
+                "reason": decision.reason,
+                "source": decision.source,
+                "model": decision.model,
+            }
+            if decision.reason_digest is not None:
+                record["reason_digest"] = decision.reason_digest
+            if decision.reason_preview is not None:
+                record["reason_preview"] = decision.reason_preview
+            self._evidence_sink(record)
         except Exception:  # noqa: BLE001 — evidence sink errors never break the gate
             pass
 

@@ -36,6 +36,7 @@ from pydantic import BaseModel, ConfigDict
 
 from magi_agent.introspection.fact_critical import FactCriticalClassifier
 from magi_agent.introspection.projection import SessionEvidenceView
+from magi_agent.introspection.reason_safety import safe_model_reason
 
 __all__ = [
     "EGRESS_CRITIC_EVIDENCE_TYPE",
@@ -142,6 +143,8 @@ class EgressCheckResult(BaseModel):
     grounded: bool | None = None
     relevant: bool | None = None
     reason: str = ""
+    reason_digest: str | None = None
+    reason_preview: str | None = None
     # "not_fact_critical" | "grounded" | "ungrounded" | "fact_critical_error"
     #  | "critic_error"
     source: str = "not_fact_critical"
@@ -195,6 +198,8 @@ async def run_egress_critic_check(
             fact_critical=False,
             critic_invoked=False,
             reason=decision.reason,
+            reason_digest=decision.reason_digest,
+            reason_preview=decision.reason_preview,
             source=source,
             model=decision.model,
         )
@@ -239,21 +244,28 @@ async def _run_critic(
             raise ValueError(f"critic returned non-parseable response: {raw_text!r}")
         grounded = bool(parsed["grounded"])
         relevant = bool(parsed["relevant"])
-        reason = str(parsed.get("reason", ""))[:_MAX_REASON_CHARS]
         if grounded and relevant:
             status: EgressVerifierStatus | None = "passed"
             source = "grounded"
+            reason_label = "critic_grounded"
         else:
             # Not grounded / not relevant -> SOFT missing_evidence signal.
             status = "missing_evidence"
             source = "ungrounded"
+            reason_label = "critic_ungrounded" if not grounded else "critic_irrelevant"
+        reason = safe_model_reason(
+            str(parsed.get("reason", ""))[:_MAX_REASON_CHARS],
+            label=reason_label,
+        )
         return EgressCheckResult(
             status=status,
             fact_critical=True,
             critic_invoked=True,
             grounded=grounded,
             relevant=relevant,
-            reason=reason or "critic verdict",
+            reason=reason.label,
+            reason_digest=reason.digest,
+            reason_preview=reason.preview,
             source=source,
             model=model_name,
         )
@@ -262,7 +274,7 @@ async def _run_critic(
             status=None,
             fact_critical=True,
             critic_invoked=True,
-            reason="critic timeout",
+            reason="critic_timeout",
             source="critic_error",
             model=model_name,
         )
@@ -366,18 +378,21 @@ def _emit(
     if evidence_sink is None:
         return
     try:
-        evidence_sink(
-            {
-                "type": EGRESS_CRITIC_EVIDENCE_TYPE,
-                "status": result.status,
-                "fact_critical": result.fact_critical,
-                "critic_invoked": result.critic_invoked,
-                "grounded": result.grounded,
-                "relevant": result.relevant,
-                "reason": result.reason,
-                "source": result.source,
-                "model": result.model,
-            }
-        )
+        record = {
+            "type": EGRESS_CRITIC_EVIDENCE_TYPE,
+            "status": result.status,
+            "fact_critical": result.fact_critical,
+            "critic_invoked": result.critic_invoked,
+            "grounded": result.grounded,
+            "relevant": result.relevant,
+            "reason": result.reason,
+            "source": result.source,
+            "model": result.model,
+        }
+        if result.reason_digest is not None:
+            record["reason_digest"] = result.reason_digest
+        if result.reason_preview is not None:
+            record["reason_preview"] = result.reason_preview
+        evidence_sink(record)
     except Exception:  # noqa: BLE001 — evidence sink errors never break the gate
         pass

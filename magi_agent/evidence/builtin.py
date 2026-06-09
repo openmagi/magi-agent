@@ -176,6 +176,15 @@ _BUILTIN_EVIDENCE_CATALOG: tuple[BuiltInEvidenceType, ...] = (
         producerSurfaces=("plugin",),
         sourceKinds=("transcript",),
     ),
+    BuiltInEvidenceType(
+        type="EditMatch",
+        description=(
+            "Fuzzy file-edit match evidence produced by the core FileEdit tool "
+            "boundary using digest-only matched-span metadata."
+        ),
+        producerSurfaces=("tool_host", "transcript"),
+        sourceKinds=("tool_trace", "transcript"),
+    ),
 )
 
 _BUILTIN_EVIDENCE_BY_TYPE: dict[str, BuiltInEvidenceType] = {

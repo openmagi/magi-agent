@@ -2643,10 +2643,37 @@ def _log_egress_critic_evidence(record: Mapping[str, object]) -> None:
 
         logging.getLogger("magi_agent.introspection.egress_gate").info(
             "egress_critic_evidence %s",
-            json.dumps(dict(record), ensure_ascii=False, default=str),
+            json.dumps(
+                _safe_egress_critic_evidence_log_record(record),
+                ensure_ascii=False,
+                default=str,
+            ),
         )
     except Exception:  # noqa: BLE001
         pass
+
+
+def _safe_egress_critic_evidence_log_record(
+    record: Mapping[str, object],
+) -> dict[str, object]:
+    safe_record = dict(record)
+    reason = safe_record.get("reason")
+    if isinstance(reason, str) and reason and not _SAFE_LABEL_RE.match(reason):
+        try:
+            from magi_agent.introspection.reason_safety import (  # noqa: PLC0415
+                safe_model_reason,
+            )
+
+            safe_reason = safe_model_reason(reason, label="egress_reason")
+        except Exception:  # noqa: BLE001
+            safe_record["reason"] = "egress_reason"
+            return safe_record
+        safe_record["reason"] = safe_reason.label
+        if safe_reason.digest is not None:
+            safe_record.setdefault("reason_digest", safe_reason.digest)
+        if safe_reason.preview is not None:
+            safe_record.setdefault("reason_preview", safe_reason.preview)
+    return safe_record
 
 
 async def _run_live_chat_runner(
