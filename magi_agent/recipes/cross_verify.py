@@ -30,9 +30,12 @@ Design constraints (mirrors the rest of the recipe layer):
   envelope (``ChildRunnerResult.public_projection``); the recipe never reads or
   re-introduces raw transcript text.
 * Injected child-runner seam — ``child_runner_factory(route)`` returns the
-  child-runner object the boundary runs (a real runner at runtime; a fake in
-  tests).  The recipe does NOT import the real model runner, so it is
-  network-free testable.
+  child-runner object the boundary runs.  At runtime this is a REAL
+  model-backed runner (``openmagi_live_provider=True``); in tests it is a fake
+  stub (``openmagi_local_fake_provider=True``).  The recipe does NOT import any
+  real runner, so it is network-free testable.  The boundary's OWN marker
+  (live or fake) selects the execution path; a runner with neither marker is
+  blocked by the boundary.
 * Safety caps — spawn-depth (1) + max models (≤8) + concurrency clamp mirror
   the research child runner; each child is text-only via the injected runner
   (the recipe grants no tools).
@@ -338,8 +341,13 @@ async def _run_child(
 ) -> ChildRunnerResult:
     """Run a single route's child through the local boundary.
 
-    The boundary executes whatever runner the factory injected — a real model
-    runner at runtime, a fake stub in tests.
+    The boundary executes whatever runner the factory injected — a real
+    model-backed runner (``openmagi_live_provider=True``) at runtime, or a
+    fake stub (``openmagi_local_fake_provider=True``) in tests.  Both gates
+    (``liveChildRunnerEnabled`` and ``localFakeChildRunnerEnabled``) are enabled
+    so the boundary's own marker on the injected runner selects the correct
+    execution path.  A runner that carries neither marker is blocked by the
+    boundary (expected for untrusted objects).
     """
     provider, model = route
     request = ChildTaskRequest(
@@ -364,6 +372,7 @@ async def _run_child(
         ChildRunnerConfig(
             enabled=True,
             localFakeChildRunnerEnabled=True,
+            liveChildRunnerEnabled=True,
             childProvider=provider,
             childModel=model,
         ),

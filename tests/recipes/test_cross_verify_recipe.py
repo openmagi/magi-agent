@@ -465,6 +465,94 @@ class TestGatherFaultTolerance:
 
 
 # ---------------------------------------------------------------------------
+# Live-path admission — live-marked runner is admitted via the LIVE branch
+# ---------------------------------------------------------------------------
+
+
+class TestLivePathAdmission:
+    """Prove the recipe admits a live-marked (``openmagi_live_provider=True``)
+    runner through the boundary's LIVE branch.
+
+    A real model is NOT needed: the "live-marked stand-in" carries the
+    ``openmagi_live_provider=True`` marker so the boundary routes it via
+    ``_run_live_child``, but its ``run_child`` still returns a canned envelope
+    mapping — no network, no keys.  This verifies that ``_run_child`` now
+    enables ``liveChildRunnerEnabled=True`` in the ``ChildRunnerConfig`` it
+    constructs, so the boundary's live-admission path is reachable from the
+    recipe.
+    """
+
+    def test_live_marked_runner_admitted_and_counted(self) -> None:
+        """A live-marked stand-in runner is admitted and its answer counted."""
+
+        class LiveMarkedStandIn:
+            """Fake with the live-provider marker — no real model calls."""
+
+            openmagi_live_provider = True
+
+            def __init__(self, answer: str) -> None:
+                self.answer = answer
+                self.calls = 0
+
+            async def run_child(self, request: object) -> dict[str, object]:
+                self.calls += 1
+                task_id = getattr(request, "task_id", "task")
+                return {
+                    "childExecutionId": f"child-{task_id}",
+                    "status": "completed",
+                    "summary": self.answer,
+                }
+
+        routes = [
+            ("anthropic", "claude"),
+            ("openai", "gpt"),
+        ]
+        live_runner_a = LiveMarkedStandIn("live-answer")
+        live_runner_b = LiveMarkedStandIn("live-answer")
+        factory = _factory(
+            {
+                routes[0]: live_runner_a,  # type: ignore[dict-item]
+                routes[1]: live_runner_b,  # type: ignore[dict-item]
+            }
+        )
+        cfg = CrossVerifyConfig(enabled=True, models=tuple(routes))
+        result = asyncio.run(
+            run_cross_verify(prompt="q", child_runner_factory=factory, config=cfg)
+        )
+        # Both live-marked runners must have been called.
+        assert live_runner_a.calls == 1
+        assert live_runner_b.calls == 1
+        # Their answers must be counted in the consensus.
+        assert result.models_counted == 2
+        assert result.consensus == "live-answer"
+        assert result.agreement_count == 2
+        # All candidates must be marked counted=True.
+        assert all(c.counted is True for c in result.candidates)
+
+    def test_fake_path_still_works_alongside_live_gate_enabled(self) -> None:
+        """Enabling liveChildRunnerEnabled must NOT break the existing fake path."""
+        routes = [
+            ("anthropic", "claude"),
+            ("openai", "gpt"),
+            ("google", "gemini"),
+        ]
+        factory = _factory(
+            {
+                routes[0]: FakeChildRunner("X"),
+                routes[1]: FakeChildRunner("X"),
+                routes[2]: FakeChildRunner("Y"),
+            }
+        )
+        cfg = CrossVerifyConfig(enabled=True, models=tuple(routes))
+        result = asyncio.run(
+            run_cross_verify(prompt="q", child_runner_factory=factory, config=cfg)
+        )
+        assert result.consensus == "X"
+        assert result.models_counted == 3
+        assert result.agreement_count == 2
+
+
+# ---------------------------------------------------------------------------
 # Minor #5/#6 — confidence accuracy + tie-break determinism
 # ---------------------------------------------------------------------------
 
