@@ -87,6 +87,22 @@ class FileChannelDeliveryPort(Protocol):
     def deliver(self, request: FileDeliveryRequest) -> ChannelDeliveryReceipt: ...
 
 
+class LiveFileArtifactProviderPort(Protocol):
+    # Type-clarity twin of FileDeliveryProviderPort for live providers. Runtime
+    # trust stays getattr/duck-typed (_is_trusted_live_provider); this Protocol
+    # exists so upcoming live provider implementations have something to declare.
+    openmagi_live_provider: bool
+
+    def write_artifact(self, request: FileDeliveryRequest) -> Mapping[str, object]: ...
+
+
+class LiveFileChannelDeliveryPort(Protocol):
+    # Type-clarity twin of FileChannelDeliveryPort for live providers.
+    openmagi_live_provider: bool
+
+    def deliver(self, request: FileDeliveryRequest) -> ChannelDeliveryReceipt: ...
+
+
 class FileDeliveryConfig(BaseModel):
     model_config = _MODEL_CONFIG
 
@@ -345,7 +361,10 @@ class FileDeliveryBoundary:
         artifact_ref = _digest_artifact_ref(request.artifact_refs[0]) if request.artifact_refs else None
         content_digest = request.content_digest
         artifact_receipt: ProviderReceipt | None = None
-        live_path = False
+        # Track which providers ran live so the decision site can require BOTH
+        # sides to be live before emitting delivered_live (no mixed-mode).
+        artifact_used_live = False
+        channel_used_live = False
         artifact_live = (
             self.config.live_artifact_storage_enabled and artifact_provider is not None
         )
@@ -361,7 +380,7 @@ class FileDeliveryBoundary:
                         reason_codes=("live_artifact_provider_untrusted",),
                         diagnostics=diagnostics,
                     )
-                live_path = True
+                artifact_used_live = True
             else:
                 if not _is_local_fake_provider(artifact_provider):
                     return _decision(
@@ -378,7 +397,11 @@ class FileDeliveryBoundary:
                 return _decision(
                     request,
                     "blocked",
-                    reason_codes=("local_fake_artifact_provider_error",),
+                    reason_codes=(
+                        "live_artifact_provider_error"
+                        if artifact_live
+                        else "local_fake_artifact_provider_error",
+                    ),
                     diagnostics={**diagnostics, "providerError": _safe_provider_error(exc)},
                 )
             artifact_ref = _artifact_ref_from_raw(raw_artifact) or artifact_ref
@@ -448,7 +471,7 @@ class FileDeliveryBoundary:
                     reason_codes=("live_channel_provider_untrusted",),
                     diagnostics=diagnostics,
                 )
-            live_path = True
+            channel_used_live = True
         elif not _is_local_fake_provider(channel_provider):
             return _decision(
                 request,
@@ -459,6 +482,22 @@ class FileDeliveryBoundary:
                 reason_codes=("local_fake_channel_provider_untrusted",),
                 diagnostics=diagnostics,
             )
+        # Mixed-mode is unsupported: delivered_live requires BOTH the artifact
+        # provider AND the channel provider to be live. A live+fake mix is
+        # ambiguous (partial real-world side effect), so block with NO delivery
+        # before invoking the channel provider. Pure fake+fake stays
+        # delivered_local_fake; pure live+live stays delivered_live.
+        if artifact_used_live != channel_used_live:
+            return _decision(
+                request,
+                "blocked",
+                artifact_ref=artifact_ref,
+                content_digest=content_digest,
+                artifact_receipt=artifact_receipt,
+                reason_codes=("mixed_provider_mode_unsupported",),
+                diagnostics=diagnostics,
+            )
+        live_path = artifact_used_live and channel_used_live
         delivery_request = request.model_copy(
             update={"artifact_refs": (artifact_ref,) if artifact_ref is not None else request.artifact_refs}
         )
@@ -770,4 +809,6 @@ __all__ = [
     "FileDeliveryDecision",
     "FileDeliveryProviderPort",
     "FileDeliveryRequest",
+    "LiveFileArtifactProviderPort",
+    "LiveFileChannelDeliveryPort",
 ]

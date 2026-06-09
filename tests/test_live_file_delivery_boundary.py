@@ -91,6 +91,17 @@ class LiveChannelDeliveryProvider:
         )
 
 
+class RaisingLiveFileArtifactProvider:
+    openmagi_live_provider = True
+
+    def __init__(self) -> None:
+        self.calls: list[object] = []
+
+    def write_artifact(self, request: object) -> Mapping[str, object]:
+        self.calls.append(request)
+        raise RuntimeError("Bearer provider-token /Users/kevin/private/report.md")
+
+
 class MismatchedChannelDeliveryProvider(FakeChannelDeliveryProvider):
     def deliver(self, request: object) -> ChannelDeliveryReceipt:
         self.calls.append(request)
@@ -356,6 +367,88 @@ def test_fake_channel_provider_used_in_live_slot_is_blocked_untrusted() -> None:
     assert fake_channel.calls == []
 
 
+def test_live_artifact_provider_error_uses_live_reason_code() -> None:
+    from magi_agent.artifacts.file_delivery import (
+        FileDeliveryBoundary,
+        FileDeliveryConfig,
+    )
+
+    raising = RaisingLiveFileArtifactProvider()
+    decision = FileDeliveryBoundary(
+        FileDeliveryConfig(enabled=True, liveArtifactStorageEnabled=True)
+    ).execute(
+        _request(channel=ChannelRef(type="web", channelId="web-session-1")),
+        artifact_provider=raising,
+    )
+
+    rendered = json.dumps(decision.public_projection(), sort_keys=True)
+    assert decision.status == "blocked"
+    assert decision.reason_codes == ("live_artifact_provider_error",)
+    assert len(raising.calls) == 1
+    # Provider error text is never surfaced.
+    assert "Bearer" not in rendered
+    assert "provider-token" not in rendered
+    assert "/Users/kevin" not in rendered
+
+
+def test_mixed_mode_live_artifact_fake_channel_is_blocked_with_no_delivery() -> None:
+    from magi_agent.artifacts.file_delivery import (
+        FileDeliveryBoundary,
+        FileDeliveryConfig,
+    )
+
+    live_artifact = LiveFileArtifactProvider()
+    fake_channel = FakeChannelDeliveryProvider()
+    decision = FileDeliveryBoundary(
+        FileDeliveryConfig(
+            enabled=True,
+            liveArtifactStorageEnabled=True,
+            localFakeChannelDeliveryEnabled=True,
+        )
+    ).execute(
+        _request(channel=ChannelRef(type="web", channelId="web-session-1")),
+        artifact_provider=live_artifact,
+        channel_provider=fake_channel,
+    )
+
+    assert decision.status == "blocked"
+    assert decision.reason_codes == ("mixed_provider_mode_unsupported",)
+    assert decision.delivery_claim_allowed is False
+    assert decision.boundary_verified is False
+    # Artifact provider ran (it must, to know it was live) but the channel
+    # provider is NEVER invoked on a mixed-mode block.
+    assert len(live_artifact.calls) == 1
+    assert fake_channel.calls == []
+
+
+def test_mixed_mode_fake_artifact_live_channel_is_blocked_with_no_delivery() -> None:
+    from magi_agent.artifacts.file_delivery import (
+        FileDeliveryBoundary,
+        FileDeliveryConfig,
+    )
+
+    fake_artifact = FakeFileArtifactProvider()
+    live_channel = LiveChannelDeliveryProvider()
+    decision = FileDeliveryBoundary(
+        FileDeliveryConfig(
+            enabled=True,
+            localFakeArtifactServiceEnabled=True,
+            liveChannelDeliveryEnabled=True,
+        )
+    ).execute(
+        _request(channel=ChannelRef(type="web", channelId="web-session-1")),
+        artifact_provider=fake_artifact,
+        channel_provider=live_channel,
+    )
+
+    assert decision.status == "blocked"
+    assert decision.reason_codes == ("mixed_provider_mode_unsupported",)
+    assert decision.delivery_claim_allowed is False
+    assert decision.boundary_verified is False
+    assert len(fake_artifact.calls) == 1
+    assert live_channel.calls == []
+
+
 @pytest.mark.parametrize(
     ("kwargs", "reason"),
     (
@@ -551,6 +644,11 @@ def test_artifact_channel_boundary_consumes_delivered_live_decision() -> None:
     )
     assert delivered.status == "delivered_live"
     assert delivered.artifact_ref is not None
+    # The live provider returns contentDigest "1"*64, which execute() adopts onto
+    # the decision; matching the request digest exercises the real success path
+    # (delivery_receipts._trusted_channel_receipt_from_decision digest check)
+    # instead of passing incidentally.
+    assert delivered.content_digest == "sha256:" + "1" * 64
     artifact_request = ArtifactChannelDeliveryRequest(
         operation="file.send",
         requestId="file-delivery-1",
@@ -559,7 +657,7 @@ def test_artifact_channel_boundary_consumes_delivered_live_decision() -> None:
         artifactRefs=(delivered.artifact_ref,),
         filename="market-brief.md",
         mimeType="text/markdown",
-        contentDigest="sha256:" + "0" * 64,
+        contentDigest="sha256:" + "1" * 64,
     )
     boundary = ArtifactChannelDeliveryBoundary(ArtifactChannelDeliveryConfig(enabled=True))
 
