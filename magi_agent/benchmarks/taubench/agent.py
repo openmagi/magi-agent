@@ -46,7 +46,7 @@ def build_magi_tau_agent(*, runner_factory: Callable[..., Any]) -> Any:
             tools = build_env_function_tools(env, state=state, action_factory=Action)
             result = run_episode(
                 env,
-                task_index or 0,
+                task_index if task_index is not None else 0,
                 state=state,
                 runner_factory=runner_factory,  # (*, instruction, tools) -> runner
                 action_factory=Action,

@@ -56,8 +56,9 @@ def run_episode(
 
     async def _run_turn(message: str) -> str:
         texts: list[str] = []
+        # session_id omitted: the runner's per-trial default (set by the caller) keeps trials independent
         async for event in runner.run_async(
-            user_id="taubench", session_id=f"task-{task_index}", new_message=_user_content(message)
+            user_id="taubench", new_message=_user_content(message)
         ):
             content = getattr(event, "content", None)
             for part in getattr(content, "parts", None) or []:

@@ -8,10 +8,32 @@ missing, mirroring the legalbench guard pattern.
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 
 _GATE_ENV = "MAGI_TAUBENCH_ENABLED"
+
+
+@contextlib.contextmanager
+def _apply_flags(config):  # type: ignore[no-untyped-def]
+    """Set control-plane env flags for *config* and restore them afterward.
+
+    This prevents flag leakage across run_eval calls when multiple configs are
+    evaluated in the same process (e.g. full sweep followed by vanilla sweep).
+    """
+    from magi_agent.benchmarks.taubench.config import flags_for  # noqa: PLC0415
+    flags = flags_for(config)
+    saved = {k: os.environ.get(k) for k in flags}
+    os.environ.update(flags)
+    try:
+        yield
+    finally:
+        for k, prev in saved.items():
+            if prev is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = prev
 
 
 class GateDisabledError(RuntimeError):
@@ -83,73 +105,68 @@ def run_eval(
         ) from exc
 
     from magi_agent.benchmarks.taubench.agent import build_magi_tau_agent  # noqa: PLC0415
-    from magi_agent.benchmarks.taubench.config import flags_for  # noqa: PLC0415
     from magi_agent.benchmarks.taubench.episode import EpisodeResult  # noqa: PLC0415
-    from magi_agent.benchmarks.taubench.harness import run_subset  # noqa: PLC0415
+    from magi_agent.benchmarks.taubench.harness import run_subset, run_with_retry  # noqa: PLC0415
     from magi_agent.cli.providers import ProviderConfig  # noqa: PLC0415
     from magi_agent.cli.real_runner import build_cli_model_runner  # noqa: PLC0415
 
-    # Set the control-plane flags for the requested config BEFORE building
-    # the runner (build_default_plugin reads them at construction time).
-    for key, val in flags_for(config).items():  # type: ignore[arg-type]
-        os.environ[key] = val
-
     effective_api_key = api_key or os.environ.get("ANTHROPIC_API_KEY", "")
+    if not effective_api_key:
+        raise ValueError("No Anthropic API key: pass api_key= or set ANTHROPIC_API_KEY")
 
-    # Build the tau-bench env for the domain (user-sim uses gpt-4o).
-    env = get_env(domain, user_strategy="llm", user_model="gpt-4o", split="test")
-    task_indices = list(range(len(env.tasks)))
-    if max_tasks is not None:
-        task_indices = task_indices[:max_tasks]
+    # Wrap the entire run in _apply_flags so control-plane flags are live while
+    # runners are built/run, then restored — prevents leakage across run_eval calls.
+    with _apply_flags(config):
+        # Build the tau-bench env for the domain (user-sim uses gpt-4o).
+        env = get_env(domain, user_strategy="llm", user_model="gpt-4o", split="test")
+        task_indices = list(range(len(env.tasks)))
+        if max_tasks is not None:
+            task_indices = task_indices[:max_tasks]
 
-    infra_error_count = 0
+        infra_error_count = 0
 
-    def solve_one(task_index: int, trial: int) -> bool:
-        """Run one (task_index, trial); retry once on infra-error."""
-        nonlocal infra_error_count
+        def solve_one(task_index: int, trial: int) -> bool:
+            """Run one (task_index, trial); retry once on infra-error."""
+            nonlocal infra_error_count
 
-        def _attempt() -> EpisodeResult:
-            # Fresh env + state per (task, trial) — tau-bench envs are stateful.
-            trial_env = get_env(
-                domain, user_strategy="llm", user_model="gpt-4o", split="test"
-            )
-            provider_config = ProviderConfig(
-                provider="anthropic",
-                model="claude-sonnet-4-5",
-                api_key=effective_api_key,
-            )
-            session_id = f"taubench-{domain}-t{task_index}-r{trial}"
+            def _attempt() -> EpisodeResult:
+                # Fresh env + state per (task, trial) — tau-bench envs are stateful.
+                trial_env = get_env(
+                    domain, user_strategy="llm", user_model="gpt-4o", split="test"
+                )
+                provider_config = ProviderConfig(
+                    provider="anthropic",
+                    model="claude-sonnet-4-5",
+                    api_key=effective_api_key,
+                )
+                session_id = f"taubench-{domain}-t{task_index}-r{trial}"
 
-            def runner_factory(*, instruction: str, tools: list) -> object:
-                return build_cli_model_runner(
-                    provider_config,
-                    instruction=instruction,
-                    tools=tools,
-                    user_id="taubench-agent",
-                    session_id=session_id,
+                def runner_factory(*, instruction: str, tools: list) -> object:
+                    return build_cli_model_runner(
+                        provider_config,
+                        instruction=instruction,
+                        tools=tools,
+                        user_id="taubench-agent",
+                        session_id=session_id,
+                    )
+
+                agent = build_magi_tau_agent(runner_factory=runner_factory)
+                solve_result = agent.solve(trial_env, task_index=task_index, max_num_steps=30)
+                # Reconstruct an EpisodeResult from the SolveResult info dict.
+                info = getattr(solve_result, "info", {}) or {}
+                return EpisodeResult(
+                    reward=getattr(solve_result, "reward", 0.0),
+                    done=getattr(solve_result, "reward", 0.0) >= 1.0,
+                    turns=info.get("turns", 0),
+                    infra_error=bool(info.get("infra_error", False)),
                 )
 
-            agent = build_magi_tau_agent(runner_factory=runner_factory)
-            solve_result = agent.solve(trial_env, task_index=task_index, max_num_steps=30)
-            # Reconstruct an EpisodeResult from the SolveResult info dict.
-            info = getattr(solve_result, "info", {}) or {}
-            return EpisodeResult(
-                reward=getattr(solve_result, "reward", 0.0),
-                done=getattr(solve_result, "reward", 0.0) >= 1.0,
-                turns=info.get("turns", 0),
-                infra_error=bool(info.get("infra_error", False)),
-            )
-
-        result = _attempt()
-        if result.infra_error:
-            # Retry once on infra-error.
-            result = _attempt()
-            if result.infra_error:
+            success, infra_failed = run_with_retry(_attempt)
+            if infra_failed:
                 infra_error_count += 1
-                return False  # count as non-success; keeps trials uniform
-        return result.reward >= 1.0
+            return success
 
-    report = run_subset(task_indices, trials=trials, solve_one=solve_one)
+        report = run_subset(task_indices, trials=trials, solve_one=solve_one)
 
     output = {
         **report.model_dump(),

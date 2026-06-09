@@ -45,7 +45,7 @@ def make_fake_runner_factory(turns_text: list[str], state: EpisodeState, env: Fa
 
     def factory(*, instruction, tools):
         class _Runner:
-            async def run_async(self, *, user_id, session_id, new_message):
+            async def run_async(self, **kw):
                 # simulate: agent calls one tool this turn, then emits text
                 resp = env.step(FakeAction(name="lookup", kwargs={}))
                 state.observe(resp.reward, resp.done)
