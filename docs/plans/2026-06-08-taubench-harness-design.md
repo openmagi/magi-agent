@@ -211,3 +211,36 @@ scorer: pass^k = mean_over_tasks( C(successes,k) / C(trials,k) ); + avg reward;
 3. All pure components (scorer, tool translation, handshake, flag application)
    covered by fake-env/fake-model tests; suite green; no network required.
 4. Default-OFF; no behavior change when the gate is unset.
+
+## Live results — first full run (2026-06-09)
+
+airline, 50 tasks × 4 trials, agent = `claude-sonnet-4-5`, user-sim = `gpt-4o`,
+0 infra errors per config. ~3.8h per config.
+
+| metric | vanilla | full (control-plane ON) |
+| --- | --- | --- |
+| pass^1 | 0.520 | 0.525 |
+| pass^2 | 0.447 | 0.440 |
+| pass^3 | 0.410 | 0.400 |
+| pass^4 | 0.380 | 0.380 |
+| avg_reward | 0.520 | 0.525 |
+
+**Conclusion: full ≈ vanilla — the wired control-plane did NOT move pass^k**
+(pass^1 +0.005 is noise; pass^2/3 marginally lower; pass^4 identical). This
+matches the design's honest caveat: the controls the native plane currently
+wires are resilience/observation (edit-retry reflection, loop-guard,
+error-recovery, context-compaction, max-steps-brake, self-review-after-turn) —
+not the determinism levers that would change task outcomes (policy-block,
+verify→re-iterate), which are NOT expressible in the native plane and are
+deferred to v2 at the driver tool boundary. On airline customer-service tasks
+the resilience controls rarely change the final DB state, hence ~0 lift.
+
+**vs published:** vanilla pass^1 0.52 is standard reference-agent territory.
+Anthropic's published Sonnet 4.5 airline ~0.70 used extended thinking + a
+policy prompt-addendum (not the vanilla reference setup), so it is an optimistic
+ceiling, not apples-to-apples with this bare run.
+
+**What this validates:** the harness measures cleanly (0 infra errors across 400
+episodes) and gives an honest, reproducible answer — magi's *currently-wired*
+composable determinism does not raise τ-bench pass^k. The v2 levers
+(policy-block + verify-reiterate) are the next thing to build and measure.
