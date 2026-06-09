@@ -22,7 +22,7 @@ def test_query_returns_parsed_results_when_raw_query_succeeds(monkeypatch: pytes
 
     monkeypatch.setattr(client, "_raw_query", _fake_raw_query)
 
-    results = client.query("launch plan", collection="clawy-memory")
+    results = client.query("launch plan", collection="magi-memory")
 
     assert results == [
         {
@@ -44,7 +44,7 @@ def test_query_returns_empty_list_and_does_not_raise_on_failure(
 
     monkeypatch.setattr(client, "_raw_query", _raising_raw_query)
 
-    results = client.query("launch plan", collection="clawy-memory")
+    results = client.query("launch plan", collection="magi-memory")
 
     assert results == []
 
@@ -59,7 +59,7 @@ def test_query_returns_empty_list_on_arbitrary_exception(
 
     monkeypatch.setattr(client, "_raw_query", _boom)
 
-    assert client.query("anything", collection="clawy-memory") == []
+    assert client.query("anything", collection="magi-memory") == []
 
 
 def test_query_filters_results_below_min_score(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -76,7 +76,7 @@ def test_query_filters_results_below_min_score(monkeypatch: pytest.MonkeyPatch) 
 
     monkeypatch.setattr(client, "_raw_query", _fake_raw_query)
 
-    results = client.query("q", collection="clawy-memory", min_score=0.5)
+    results = client.query("q", collection="magi-memory", min_score=0.5)
 
     paths = [item["path"] for item in results]
     assert paths == ["a.md", "c.md"]
@@ -97,7 +97,7 @@ def test_query_drops_malformed_entries(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(client, "_raw_query", _fake_raw_query)
 
-    results = client.query("q", collection="clawy-memory")
+    results = client.query("q", collection="magi-memory")
 
     assert [item["path"] for item in results] == ["ok.md"]
     assert results[0]["context"] == ""
@@ -110,7 +110,7 @@ def test_raw_query_raises_when_no_endpoint_configured(
     client = QmdClient()
 
     with pytest.raises(QmdUnavailable):
-        client._raw_query("q", collection="clawy-memory", limit=10)
+        client._raw_query("q", collection="magi-memory", limit=10)
 
 
 def test_query_returns_empty_when_no_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -118,7 +118,7 @@ def test_query_returns_empty_when_no_endpoint(monkeypatch: pytest.MonkeyPatch) -
     client = QmdClient()
 
     # fail-open: no endpoint -> _raw_query raises QmdUnavailable -> query returns []
-    assert client.query("q", collection="clawy-memory") == []
+    assert client.query("q", collection="magi-memory") == []
 
 
 def test_endpoint_falls_back_to_env(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -137,19 +137,19 @@ def test_raw_query_raises_on_file_scheme() -> None:
     """_raw_query must raise QmdUnavailable for file:// endpoints."""
     client = QmdClient(endpoint="file:///etc/passwd")
     with pytest.raises(QmdUnavailable, match="scheme"):
-        client._raw_query("q", collection="clawy-memory", limit=10)
+        client._raw_query("q", collection="magi-memory", limit=10)
 
 
 def test_query_returns_empty_on_file_scheme() -> None:
     """query() must fail-open (return []) when the endpoint uses a non-http scheme."""
     client = QmdClient(endpoint="file:///etc/passwd")
-    assert client.query("q", collection="clawy-memory") == []
+    assert client.query("q", collection="magi-memory") == []
 
 
 def test_query_returns_empty_on_ftp_scheme() -> None:
     """ftp:// endpoints should also be rejected."""
     client = QmdClient(endpoint="ftp://internal.host/search")
-    assert client.query("q", collection="clawy-memory") == []
+    assert client.query("q", collection="magi-memory") == []
 
 
 # ---------------------------------------------------------------------------
@@ -195,7 +195,7 @@ def test_query_returns_empty_on_http_error(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setattr(urllib.request, "urlopen", _raise_http)
 
     client = QmdClient(endpoint="http://qmd.local/search")
-    assert client.query("q", collection="clawy-memory") == []
+    assert client.query("q", collection="magi-memory") == []
 
 
 def test_query_returns_empty_on_junk_json_body(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -209,7 +209,7 @@ def test_query_returns_empty_on_junk_json_body(monkeypatch: pytest.MonkeyPatch) 
     )
 
     client = QmdClient(endpoint="http://qmd.local/search")
-    assert client.query("q", collection="clawy-memory") == []
+    assert client.query("q", collection="magi-memory") == []
 
 
 def test_query_returns_empty_on_url_error(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -223,7 +223,7 @@ def test_query_returns_empty_on_url_error(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(urllib.request, "urlopen", _raise_url)
 
     client = QmdClient(endpoint="http://qmd.local/search")
-    assert client.query("q", collection="clawy-memory") == []
+    assert client.query("q", collection="magi-memory") == []
 
 
 def test_query_returns_results_via_urlopen_path(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -251,7 +251,7 @@ def test_query_returns_results_via_urlopen_path(monkeypatch: pytest.MonkeyPatch)
     )
 
     client = QmdClient(endpoint="http://qmd.local/search")
-    results = client.query("root", collection="clawy-memory")
+    results = client.query("root", collection="magi-memory")
 
     assert len(results) == 1
     assert results[0]["path"] == "memory/ROOT.md"

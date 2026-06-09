@@ -91,7 +91,7 @@ class HipocampusReadOnlyConfig(BaseModel):
     max_records: int = Field(default=5, alias="maxRecords", ge=1, le=20)
     #: Collection scope used when the OPTIONAL live qmd recall gate is ON.
     #: Ignored entirely when the gate is OFF (the JSON-file path takes no collection).
-    qmd_collection: str = Field(default="clawy-memory", alias="qmdCollection")
+    qmd_collection: str = Field(default="magi-memory", alias="qmdCollection")
     #: Endpoint override for the live qmd client; falls back to MAGI_QMD_ENDPOINT.
     qmd_endpoint: str | None = Field(default=None, alias="qmdEndpoint")
 
