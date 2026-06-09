@@ -441,6 +441,120 @@ def test_file_deliver_tool_with_artifact_id_produces_correct_artifact_ref(tmp_pa
 
 
 # ---------------------------------------------------------------------------
+# Item 1: live downgrade warning — workspace resolution failure emits a warning
+# ---------------------------------------------------------------------------
+
+
+def test_factory_live_enabled_but_workspace_fails_returns_fake_and_warns(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """When live delivery is requested but context workspace resolution fails,
+    the factory must:
+    - Return the FAKE config/providers (fail-open, never raise).
+    - Emit a logging.WARNING via the module-level logger.
+    """
+    import logging
+
+    from magi_agent.artifacts.file_delivery import FileDeliveryConfig
+    from magi_agent.artifacts.file_delivery_live import (
+        LIVE_FILE_DELIVERY_ENABLED_ENV,
+        build_file_delivery_providers,
+    )
+
+    # A context with no workspaceRoot causes workspace_root() / safe_child_path()
+    # to resolve to the process cwd — but we simulate a resolution error by
+    # passing a non-ToolContext object that lacks the expected attributes so
+    # safe_child_path raises AttributeError when it tries to read workspace_root.
+    class _BrokenContext:
+        """Intentionally broken context — workspace_root attribute raises on access."""
+
+        @property
+        def workspace_root(self) -> str:  # type: ignore[override]
+            raise RuntimeError("workspace_resolution_failure_simulated")
+
+    content = b"test content for warning test"
+    broken_ctx = _BrokenContext()
+
+    with caplog.at_level(logging.WARNING, logger="magi_agent.artifacts.file_delivery_live"):
+        config, artifact_provider, channel_provider = build_file_delivery_providers(
+            env={LIVE_FILE_DELIVERY_ENABLED_ENV: "1"},
+            content_bytes=content,
+            filename="warn-test.md",
+            context=broken_ctx,  # type: ignore[arg-type]
+        )
+
+    # Must return fake providers (fail-open).
+    assert isinstance(config, FileDeliveryConfig)
+    assert config.local_fake_artifact_service_enabled is True
+    assert config.local_fake_channel_delivery_enabled is True
+    assert config.live_artifact_storage_enabled is False
+    assert getattr(artifact_provider, "openmagi_local_fake_provider", False) is True
+    assert getattr(channel_provider, "openmagi_local_fake_provider", False) is True
+
+    # Must emit a warning mentioning the live delivery fallback.
+    warning_messages = [r.message for r in caplog.records if r.levelno == logging.WARNING]
+    assert any(
+        "live" in str(msg).lower() and ("fallback" in str(msg).lower() or "fake" in str(msg).lower())
+        for msg in warning_messages
+    ), f"Expected a live-delivery-fallback warning, got: {warning_messages}"
+
+
+# ---------------------------------------------------------------------------
+# Item 4: traversal via MAGI_FILE_DELIVERY_ARTIFACT_DIR="../outside" → fake + warn
+# ---------------------------------------------------------------------------
+
+
+def test_factory_traversal_artifact_dir_falls_back_to_fake_and_warns(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """MAGI_FILE_DELIVERY_ARTIFACT_DIR="../outside" with live enabled must:
+    - Cause safe_child_path to raise (path traversal blocked).
+    - Factory catches it, falls back to fake, emits the warning.
+    - No file escapes the workspace.
+    """
+    import logging
+
+    from magi_agent.artifacts.file_delivery import FileDeliveryConfig
+    from magi_agent.artifacts.file_delivery_live import (
+        LIVE_FILE_DELIVERY_ENABLED_ENV,
+        MAGI_FILE_DELIVERY_ARTIFACT_DIR_ENV,
+        build_file_delivery_providers,
+    )
+
+    content = b"traversal via env var test"
+    ctx = _make_tool_context(tmp_path)
+
+    with caplog.at_level(logging.WARNING, logger="magi_agent.artifacts.file_delivery_live"):
+        config, artifact_provider, channel_provider = build_file_delivery_providers(
+            env={
+                LIVE_FILE_DELIVERY_ENABLED_ENV: "1",
+                MAGI_FILE_DELIVERY_ARTIFACT_DIR_ENV: "../outside",
+            },
+            content_bytes=content,
+            filename="traversal-test.md",
+            context=ctx,
+        )
+
+    # Factory must fall back to fake (safe_child_path blocked the traversal).
+    assert isinstance(config, FileDeliveryConfig)
+    assert config.local_fake_artifact_service_enabled is True
+    assert config.live_artifact_storage_enabled is False
+    assert getattr(artifact_provider, "openmagi_local_fake_provider", False) is True
+    assert getattr(channel_provider, "openmagi_local_fake_provider", False) is True
+
+    # Warning must have been emitted.
+    warning_messages = [r.message for r in caplog.records if r.levelno == logging.WARNING]
+    assert any(
+        "live" in str(msg).lower() and ("fallback" in str(msg).lower() or "fake" in str(msg).lower())
+        for msg in warning_messages
+    ), f"Expected a live-delivery-fallback warning, got: {warning_messages}"
+
+    # No file should have escaped the workspace.
+    outside_dir = tmp_path.parent / "outside"
+    assert not outside_dir.exists(), f"Path traversal escaped workspace: {outside_dir}"
+
+
+# ---------------------------------------------------------------------------
 # Import boundary: documents must NOT import file_delivery_live at module level
 # ---------------------------------------------------------------------------
 

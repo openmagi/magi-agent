@@ -31,13 +31,20 @@ pure filesystem logic; no network I/O is performed here.
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import pathlib
 import re
 from collections.abc import Mapping
 from typing import Any
 
+from magi_agent.artifacts._file_delivery_fakes import (
+    LocalFakeChannelDeliveryProvider as _FactoryLocalFakeChannelProvider,
+    LocalFakeFileArtifactProvider as _FactoryLocalFakeArtifactProvider,
+)
 from magi_agent.channels.contract import ChannelDeliveryReceipt, ChannelRef
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -284,54 +291,6 @@ class LiveFilesystemChannelProvider:
 
 
 # ---------------------------------------------------------------------------
-# Inline fake providers (used by build_file_delivery_providers gate-off path)
-# ---------------------------------------------------------------------------
-# These are equivalents of _LocalFakeFileArtifactProvider /
-# _LocalFakeChannelDeliveryProvider in documents.py.  They are duplicated here
-# (rather than imported from documents.py) to avoid a circular import:
-# file_delivery_live ← lazy-import ← documents ← lazy-import ← file_delivery_live.
-
-
-class _FactoryLocalFakeArtifactProvider:
-    openmagi_local_fake_provider = True
-
-    def __init__(self, *, artifact_ref: str, content_digest: str) -> None:
-        self._artifact_ref = artifact_ref
-        self._content_digest = content_digest
-
-    def write_artifact(self, request: Any) -> Mapping[str, object]:
-        request_id: str = getattr(request, "request_id", "unknown")
-        return {
-            "status": "ok",
-            "artifactRef": self._artifact_ref,
-            "contentDigest": self._content_digest,
-            "receiptId": f"artifact-receipt:{hashlib.sha1(request_id.encode('utf-8')).hexdigest()[:16]}",
-        }
-
-
-class _FactoryLocalFakeChannelProvider:
-    openmagi_local_fake_provider = True
-
-    def deliver(self, request: Any) -> "ChannelDeliveryReceipt":
-        channel = request.channel
-        if channel is None:
-            raise ValueError("channel_required")
-        request_id: str = request.request_id
-        artifact_refs: tuple[str, ...] = getattr(request, "artifact_refs", ())
-        file_refs: tuple[str, ...] = getattr(request, "file_refs", ())
-        short = hashlib.sha1(request_id.encode("utf-8")).hexdigest()[:16]
-        return ChannelDeliveryReceipt(
-            receiptId=f"receipt:{short}",
-            requestId=request_id,
-            channel=channel,
-            status="sent",
-            providerMessageId=f"message:{hashlib.sha1((request_id + ':message').encode('utf-8')).hexdigest()[:16]}",
-            artifactRefs=artifact_refs,
-            fileRefs=file_refs,
-        )
-
-
-# ---------------------------------------------------------------------------
 # Env var names for workspace delivery directories
 # ---------------------------------------------------------------------------
 
@@ -407,17 +366,13 @@ def build_file_delivery_providers(
     if not is_live_file_delivery_enabled(resolved_env):
         # ------------------------------------------------------------------ #
         # DEFAULT (gate off): return fake providers — identical to today.     #
-        # Fake providers are constructed inline here to avoid a circular      #
-        # import between file_delivery_live and documents.                    #
         # ------------------------------------------------------------------ #
-        import hashlib as _hashlib  # noqa: PLC0415
-
-        content_digest = "sha256:" + _hashlib.sha256(content_bytes).hexdigest()
+        content_digest = "sha256:" + hashlib.sha256(content_bytes).hexdigest()
         # Use the caller-derived artifact_ref when provided (preserves byte-
         # identity when arguments["artifactId"]/artifactRef is supplied).
         # Fall back to content-digest derivation for the common no-artifactId case.
         resolved_artifact_ref = artifact_ref if artifact_ref is not None else (
-            f"artifact:{_hashlib.sha1(content_digest.encode('utf-8')).hexdigest()[:16]}"
+            f"artifact:{hashlib.sha1(content_digest.encode('utf-8')).hexdigest()[:16]}"
         )
         fake_config = FileDeliveryConfig(
             enabled=True,
@@ -437,8 +392,6 @@ def build_file_delivery_providers(
     # LIVE path: resolve workspace dirs, construct filesystem providers.      #
     # ---------------------------------------------------------------------- #
     try:
-        ws_root = workspace_root(context)  # type: ignore[arg-type]
-
         artifact_subdir = resolved_env.get(MAGI_FILE_DELIVERY_ARTIFACT_DIR_ENV, "").strip()
         if not artifact_subdir:
             artifact_subdir = _DEFAULT_ARTIFACT_SUBDIR
@@ -461,14 +414,19 @@ def build_file_delivery_providers(
             mutating=True,
             allow_internal=True,
         )
-        _ = ws_root  # workspace_root validated implicitly via safe_child_path
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
         # Path resolution failed — fall back to fake path (fail-open).
-        import hashlib as _hashlib  # noqa: PLC0415
-
-        content_digest = "sha256:" + _hashlib.sha256(content_bytes).hexdigest()
+        # Log a warning so operators who set MAGI_FILE_DELIVERY_LIVE_ENABLED=1
+        # are not silently surprised by a fake delivery instead of a live one.
+        logger.warning(
+            "live file delivery was requested (MAGI_FILE_DELIVERY_LIVE_ENABLED=1) "
+            "but workspace/path resolution failed — falling back to fake delivery. "
+            "Exception: %s",
+            exc,
+        )
+        content_digest = "sha256:" + hashlib.sha256(content_bytes).hexdigest()
         resolved_artifact_ref = artifact_ref if artifact_ref is not None else (
-            f"artifact:{_hashlib.sha1(content_digest.encode('utf-8')).hexdigest()[:16]}"
+            f"artifact:{hashlib.sha1(content_digest.encode('utf-8')).hexdigest()[:16]}"
         )
         fake_config = FileDeliveryConfig(
             enabled=True,

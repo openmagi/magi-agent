@@ -4,11 +4,16 @@ import hashlib
 import mimetypes
 from collections.abc import Mapping
 
+from magi_agent.artifacts._file_delivery_fakes import (
+    LocalFakeChannelDeliveryProvider as _LocalFakeChannelDeliveryProvider,
+    LocalFakeFileArtifactProvider as _LocalFakeFileArtifactProvider,
+    _short_digest,
+)
 from magi_agent.artifacts.file_delivery import (
     FileDeliveryBoundary,
     FileDeliveryRequest,
 )
-from magi_agent.channels.contract import ChannelDeliveryReceipt, ChannelRef
+from magi_agent.channels.contract import ChannelRef
 from magi_agent.plugins.native._common import blocked_result, digest, ok_result, safe_child_path
 from magi_agent.tools.context import ToolContext
 from magi_agent.tools.result import ToolResult
@@ -47,39 +52,6 @@ def spreadsheet_write(arguments: dict[str, object], context: ToolContext) -> Too
     if "rows" not in args:
         args["rows"] = [["value"], [str(args.get("content") or "")]]
     return csv_write(args, context)
-
-
-class _LocalFakeFileArtifactProvider:
-    openmagi_local_fake_provider = True
-
-    def __init__(self, *, artifact_ref: str, content_digest: str) -> None:
-        self._artifact_ref = artifact_ref
-        self._content_digest = content_digest
-
-    def write_artifact(self, request: FileDeliveryRequest) -> Mapping[str, object]:
-        return {
-            "status": "ok",
-            "artifactRef": self._artifact_ref,
-            "contentDigest": self._content_digest,
-            "receiptId": f"artifact-receipt:{_short_digest(request.request_id)}",
-        }
-
-
-class _LocalFakeChannelDeliveryProvider:
-    openmagi_local_fake_provider = True
-
-    def deliver(self, request: FileDeliveryRequest) -> ChannelDeliveryReceipt:
-        if request.channel is None:
-            raise ValueError("channel_required")
-        return ChannelDeliveryReceipt(
-            receiptId=f"receipt:{_short_digest(request.request_id)}",
-            requestId=request.request_id,
-            channel=request.channel,
-            status="sent",
-            providerMessageId=f"message:{_short_digest(request.request_id + ':message')}",
-            artifactRefs=request.artifact_refs,
-            fileRefs=request.file_refs,
-        )
 
 
 def file_deliver(arguments: dict[str, object], context: ToolContext) -> ToolResult:
@@ -211,5 +183,3 @@ def _session_key(context: ToolContext) -> str:
     return f"session:{_short_digest(str(base))}"
 
 
-def _short_digest(value: str) -> str:
-    return hashlib.sha1(value.encode("utf-8")).hexdigest()[:16]
