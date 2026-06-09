@@ -489,6 +489,16 @@ def test_child_runner_config_live_gate_keeps_production_flags_sealed() -> None:
         ChildRunnerConfig(productionWritesEnabled=True)
 
 
+@pytest.mark.parametrize("value", ["1", "true", "TRUE"])
+def test_child_runner_config_live_gate_rejects_coercive_strings(value: str) -> None:
+    from pydantic import ValidationError
+
+    from magi_agent.runtime.child_runner_boundary import ChildRunnerConfig
+
+    with pytest.raises(ValidationError):
+        ChildRunnerConfig(enabled=True, liveChildRunnerEnabled=value)
+
+
 def test_child_runner_projection_bypasses_cannot_inject_raw_context_or_authority() -> None:
     from magi_agent.runtime.child_runner_boundary import (
         ChildRunnerAuthorityFlags,

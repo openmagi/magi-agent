@@ -6,7 +6,7 @@ import inspect
 import re
 from typing import Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_serializer, field_validator
 
 from magi_agent.evidence.child_runtime_envelope import (
     ChildRuntimeEnvelope,
@@ -115,7 +115,7 @@ class ChildRunnerConfig(BaseModel):
     #: ``production_*`` ``Literal[False]`` flag below, nor any authority flag; the
     #: live runner is a *local* surface and never flips hosted authority.  Default
     #: False keeps the fake/shadow/fallback behaviour byte-identical to before.
-    live_child_runner_enabled: bool = Field(
+    live_child_runner_enabled: StrictBool = Field(
         default=False,
         alias="liveChildRunnerEnabled",
     )
