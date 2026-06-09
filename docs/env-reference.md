@@ -46,6 +46,22 @@ Useful local toggles:
 - `MAGI_EDIT_FUZZY_MATCH_ENABLED` — enables fuzzy matching for the edit tool.
 - `MAGI_EDIT_MATCH_EVIDENCE_ENFORCEMENT` — enables edit-match evidence enforcement.
 
+## Egress proxy (Agent Vault)
+
+Optional, **default-OFF** seam that routes Bash-tool and `web_fetch`-tool egress
+through an external forward proxy (trusting its CA). It never touches
+model/provider egress. Disabled = byte-identical runtime; enabled-but-misconfigured
+refuses to start (fail-closed).
+
+- `MAGI_EGRESS_PROXY_ENABLED` (default off) — set to `1`/`true`/`yes`/`on` to route
+  tool egress through the proxy. When off, all four vars below are ignored.
+- `MAGI_EGRESS_PROXY_URL` — HTTP(S) proxy origin (e.g. `http://127.0.0.1:8888`).
+  Required when enabled; must not embed credentials, path, query, or fragment.
+- `MAGI_EGRESS_PROXY_AUTH` — proxy credentials (`user:token`), carried separately
+  from the URL. Optional.
+- `MAGI_EGRESS_PROXY_CA_CERT_PATH` — path to the proxy CA cert to trust. Required
+  and must be a readable file when enabled.
+
 ## Local server
 
 - `CORE_AGENT_PORT` (default `8080`) — HTTP port used by `magi-agent serve`.
