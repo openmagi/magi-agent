@@ -150,6 +150,7 @@ def build_cli_model_runner(
     session_id: str = "cli-session",
     workspace_root: str | None = None,
     memory_mode: "MemoryMode | str" = "normal",
+    recall_query: str | None = None,
     task_profile: Mapping[str, object] | None = None,
     general_automation_receipts: object | None = None,
     local_tool_evidence_collector: object | None = None,
@@ -216,6 +217,7 @@ def build_cli_model_runner(
             model=config.litellm_model,
             workspace_root=effective_workspace_root,
             memory_mode=memory_mode,
+            recall_query=recall_query,
         )
     )
 

@@ -347,6 +347,7 @@ def build_cli_instruction(
     model: str = "",
     workspace_root: str | None = None,
     memory_mode: "MemoryMode | str" = "normal",
+    recall_query: str | None = None,
 ) -> str:
     """Build the real system prompt for the CLI agent (coding-agent path).
 
@@ -402,6 +403,28 @@ def build_cli_instruction(
         memory_snapshot_block = "\n\n".join(
             part for part in (memory_snapshot_block, _learning_block) if part
         )
+
+    # Per-turn query-based recall (PR-E item 3): when recall_enabled AND
+    # prefer_local_search are on, search the workspace memory tree for the
+    # current user message and prepend the top hits as a <memory-recall> block,
+    # ALONGSIDE the static <memory-context> snapshot above.  Returns "" when any
+    # gate is off, memory_mode is incognito, no workspace, no query, no hits, or
+    # any error — so the combined block is byte-identical to pre-wiring when off.
+    if recall_query is not None and workspace_root is not None:
+        from magi_agent.cli.memory_recall_block import (  # noqa: PLC0415
+            build_cli_memory_recall_block,
+        )
+
+        _recall_block = build_cli_memory_recall_block(
+            workspace_root=workspace_root,
+            query=recall_query,
+            memory_mode=memory_mode_value,
+        )
+        if _recall_block:
+            # Lead with the query-relevant recall, then the frozen snapshot.
+            memory_snapshot_block = "\n\n".join(
+                part for part in (_recall_block, memory_snapshot_block) if part
+            )
 
     prompt = build_system_prompt(
         session_key=session_id,
