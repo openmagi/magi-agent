@@ -918,8 +918,16 @@ async def _local_adk_chat_sse(
     # error can never break the user's turn or the SSE stream. Errored turns are
     # skipped (nothing useful to persist). Real date injected at this call site.
     if not turn_errored:
+        from magi_agent.runtime.memory_mode_context import (  # noqa: PLC0415
+            current_memory_mode,
+        )
         from magi_agent.runtime.memory_turn_hook import record_turn  # noqa: PLC0415
 
+        # Thread the per-request memory mode so incognito / read_only actually
+        # suppress the live daily flush. ``current_memory_mode()`` is NORMAL
+        # unless the (default-OFF) memory-mode routing gate bound it from the
+        # ``x-core-agent-memory-mode`` header; ``.value`` yields the string form
+        # ``record_turn`` compares against ``_NON_WRITING_MODES``.
         record_turn(
             workspace_root=workspace_root,
             session_id=session_id,
@@ -927,6 +935,7 @@ async def _local_adk_chat_sse(
             user_text=prompt,
             assistant_text="".join(assistant_parts),
             used_tool=used_tool,
+            memory_mode=current_memory_mode().value,
         )
     #
     # NOTE: the Hermes-style background memory *review* (re-reading the transcript

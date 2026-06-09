@@ -107,6 +107,103 @@ async def test_local_chat_seam_flushes_daily_when_flags_on(
 
 
 @pytest.mark.asyncio
+async def test_seam_inert_under_real_default_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Production default (master MAGI_MEMORY_ENABLED unset) => the seam is inert.
+
+    Unlike the flags-on test above, this drives the SSE generator with the REAL
+    ``resolve_memory_config()`` (no pinned config, no forced flags). With the
+    master switch off, the wiring layer must write NO daily file and run NO
+    compaction — proving the live seam is a no-op on the shipped default path.
+    """
+    from magi_agent.transport import chat as chat_mod
+
+    monkeypatch.setenv("MAGI_AGENT_WORKSPACE", str(tmp_path))
+    # Belt-and-suspenders: ensure no stray env flips the master default on.
+    for env in (
+        "MAGI_MEMORY_ENABLED",
+        "MAGI_MEMORY_WRITE_ENABLED",
+        "MAGI_MEMORY_COMPACTION_ENABLED",
+    ):
+        monkeypatch.delenv(env, raising=False)
+
+    compaction_calls: list[object] = []
+
+    class _SpyTree:
+        def __init__(self, *_a: object, **_k: object) -> None: ...
+
+        def run(self, *_a: object, **_k: object):  # noqa: ANN202
+            compaction_calls.append(object())
+            return None
+
+    monkeypatch.setattr(memory_turn_hook, "CompactionTree", _SpyTree)
+
+    items = [
+        _ev("tool_start", name="Bash"),
+        _ev("text_delta", delta="A substantial reply that would otherwise persist."),
+        EngineResult(terminal=Terminal.completed, session_id="s", turn_id="t"),
+    ]
+    _install_fake_headless(monkeypatch, items)
+
+    out = await _drain(
+        chat_mod._local_adk_chat_sse(
+            _runtime(), {"sessionId": "sess-y", "turnId": "turn-y"}, "build the project"
+        )
+    )
+    assert out.rstrip().endswith("data: [DONE]")
+    assert not (tmp_path / "memory").exists()
+    assert compaction_calls == []
+
+
+@pytest.mark.asyncio
+async def test_incognito_mode_blocks_live_flush(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """C1 regression: write flags ON but incognito mode => NO daily file written.
+
+    Drives the live SSE seam with write_enabled ON, then binds the per-request
+    memory mode to INCOGNITO exactly as the runtime does (gate on +
+    ``x-core-agent-memory-mode`` header via ``memory_mode_request_scope``).
+    The seam must thread that mode into ``record_turn`` so the flush is
+    suppressed. WITHOUT the C1 fix (call site omits ``memory_mode``) this test
+    FAILS because the daily file is written.
+    """
+    from magi_agent.runtime.memory_mode_context import (
+        MAGI_MEMORY_MODE_ROUTING_ENABLED_ENV,
+        memory_mode_request_scope,
+    )
+    from magi_agent.transport import chat as chat_mod
+
+    monkeypatch.setenv("MAGI_AGENT_WORKSPACE", str(tmp_path))
+    monkeypatch.setattr(
+        memory_turn_hook,
+        "resolve_memory_config",
+        lambda: MemoryRuntimeConfig(masterEnabled=True, writeEnabled=True),
+    )
+    # Turn the memory-mode routing gate on so the header is honored.
+    monkeypatch.setenv(MAGI_MEMORY_MODE_ROUTING_ENABLED_ENV, "1")
+
+    items = [
+        _ev("tool_start", name="Bash"),
+        _ev("text_delta", delta="A substantial reply that must NOT persist."),
+        EngineResult(terminal=Terminal.completed, session_id="s", turn_id="t"),
+    ]
+    _install_fake_headless(monkeypatch, items)
+
+    # Bind the per-request mode the same way the serve path does.
+    with memory_mode_request_scope({"x-core-agent-memory-mode": "incognito"}):
+        out = await _drain(
+            chat_mod._local_adk_chat_sse(
+                _runtime(), {"sessionId": "sess-z", "turnId": "turn-z"}, "build it"
+            )
+        )
+
+    assert out.rstrip().endswith("data: [DONE]")
+    assert not (tmp_path / "memory" / "daily").exists()
+
+
+@pytest.mark.asyncio
 async def test_errored_turn_flushes_nothing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
