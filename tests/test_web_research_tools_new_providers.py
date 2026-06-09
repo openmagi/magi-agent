@@ -15,37 +15,6 @@ import asyncio
 # ---------------------------------------------------------------------------
 
 
-class _FetchOkProvider:
-    """Fake provider that succeeds on fetch and reader operations."""
-
-    openmagi_live_provider = True
-
-    def search(self, request: object) -> dict[str, object]:
-        return {
-            "results": [
-                {
-                    "url": "https://docs.example.com/search",
-                    "title": "Search Result",
-                    "snippet": "ok snippet",
-                }
-            ]
-        }
-
-    def fetch(self, request: object) -> dict[str, object]:
-        return {
-            "url": "https://docs.example.com/fetch",
-            "title": "Fetched Page",
-            "content": "ok fetched content",
-        }
-
-    def reader(self, request: object) -> dict[str, object]:
-        return {
-            "url": "https://docs.example.com/reader",
-            "title": "Reader Page",
-            "content": "ok reader content",
-        }
-
-
 class _FetchTimeoutProvider:
     """Fake provider that always times out."""
 
@@ -179,8 +148,8 @@ def test_build_live_research_boundary_jina_absent_when_flag_off() -> None:
     }
 
     boundary = build_live_research_boundary(env=env)
-    if boundary._provider_router is not None:
-        assert JINA_READER_PROVIDER_NAME not in boundary._provider_router.config.providers
+    assert boundary._provider_router is not None
+    assert JINA_READER_PROVIDER_NAME not in boundary._provider_router.config.providers
     if boundary._live_pack is not None:
         assert JINA_READER_PROVIDER_NAME not in boundary._live_pack.config.provider_allowlist  # type: ignore[attr-defined]
 
@@ -201,8 +170,8 @@ def test_build_live_research_boundary_insane_absent_when_flag_off() -> None:
     }
 
     boundary = build_live_research_boundary(env=env)
-    if boundary._provider_router is not None:
-        assert INSANE_FETCH_PROVIDER_NAME not in boundary._provider_router.config.providers
+    assert boundary._provider_router is not None
+    assert INSANE_FETCH_PROVIDER_NAME not in boundary._provider_router.config.providers
     if boundary._live_pack is not None:
         assert INSANE_FETCH_PROVIDER_NAME not in boundary._live_pack.config.provider_allowlist  # type: ignore[attr-defined]
 
@@ -223,10 +192,10 @@ def test_build_live_research_boundary_both_absent_when_no_flags() -> None:
     }
 
     boundary = build_live_research_boundary(env=env)
-    if boundary._provider_router is not None:
-        router_providers = boundary._provider_router.config.providers
-        assert JINA_READER_PROVIDER_NAME not in router_providers
-        assert INSANE_FETCH_PROVIDER_NAME not in router_providers
+    assert boundary._provider_router is not None
+    router_providers = boundary._provider_router.config.providers
+    assert JINA_READER_PROVIDER_NAME not in router_providers
+    assert INSANE_FETCH_PROVIDER_NAME not in router_providers
     if boundary._live_pack is not None:
         allowlist = boundary._live_pack.config.provider_allowlist  # type: ignore[attr-defined]
         assert JINA_READER_PROVIDER_NAME not in allowlist

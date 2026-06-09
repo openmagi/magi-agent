@@ -799,7 +799,7 @@ def build_live_research_boundary(
         pack_config = LiveWebAcquisitionPackConfig(
             enabled=bool(provider_names),
             liveNetworkEnabled=bool(provider_names),
-            providerAllowlist=tuple(set(provider_names)),
+            providerAllowlist=tuple(provider_names),
         )
 
     if router_config is None:
