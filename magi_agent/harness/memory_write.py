@@ -86,20 +86,26 @@ class MemoryWriteHarnessConfig(BaseModel):
 
     enabled: bool = False
     local_fake_adapter_enabled: bool = Field(default=False, alias="localFakeAdapterEnabled")
-    production_write_enabled: Literal[False] = Field(
+    # PR1: relaxed from Literal[False] -> bool so the engine can be enabled in
+    # later PRs.  Defaults to False (resolver master is OFF in PR1); flipping it
+    # ON is what activates the real write/compaction surfaces in PR4+.
+    production_write_enabled: bool = Field(
         default=False,
         alias="productionWriteEnabled",
     )
-    provider_call_allowed: Literal[False] = Field(default=False, alias="providerCallAllowed")
-    filesystem_mutation_allowed: Literal[False] = Field(
+    provider_call_allowed: bool = Field(default=False, alias="providerCallAllowed")
+    filesystem_mutation_allowed: bool = Field(
         default=False,
         alias="filesystemMutationAllowed",
     )
+    # PERMANENTLY FROZEN: Hipocampus is file-based and never writes a DB or the
+    # ADK MemoryService — these stay Literal[False] for safety, regardless of the
+    # master switch.
     database_mutation_allowed: Literal[False] = Field(
         default=False,
         alias="databaseMutationAllowed",
     )
-    network_call_allowed: Literal[False] = Field(default=False, alias="networkCallAllowed")
+    network_call_allowed: bool = Field(default=False, alias="networkCallAllowed")
     adk_memory_service_write_enabled: Literal[False] = Field(
         default=False,
         alias="adkMemoryServiceWriteEnabled",
@@ -109,19 +115,14 @@ class MemoryWriteHarnessConfig(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def _force_default_off_authority(cls, value: object) -> dict[str, object]:
+        # Only the permanently-frozen fields are coerced here; the relaxed
+        # bool fields (production_write/provider_call/filesystem/network) now
+        # accept their incoming value so the engine can be enabled in PR4+.
         payload = dict(value) if isinstance(value, Mapping) else {}
-        payload["productionWriteEnabled"] = False
-        payload["providerCallAllowed"] = False
-        payload["filesystemMutationAllowed"] = False
         payload["databaseMutationAllowed"] = False
-        payload["networkCallAllowed"] = False
         payload["adkMemoryServiceWriteEnabled"] = False
         payload["trafficAttached"] = False
-        payload.pop("production_write_enabled", None)
-        payload.pop("provider_call_allowed", None)
-        payload.pop("filesystem_mutation_allowed", None)
         payload.pop("database_mutation_allowed", None)
-        payload.pop("network_call_allowed", None)
         payload.pop("adk_memory_service_write_enabled", None)
         payload.pop("traffic_attached", None)
         return payload
@@ -148,11 +149,7 @@ class MemoryWriteHarnessConfig(BaseModel):
         return type(self).model_validate(payload)
 
     @field_serializer(
-        "production_write_enabled",
-        "provider_call_allowed",
-        "filesystem_mutation_allowed",
         "database_mutation_allowed",
-        "network_call_allowed",
         "adk_memory_service_write_enabled",
         "traffic_attached",
     )

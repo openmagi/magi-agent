@@ -25,7 +25,6 @@ Default: OFF.
 """
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Any
 
@@ -162,11 +161,20 @@ class OperatorSoulWriter:
     # ------------------------------------------------------------------
 
     def _operator_gate_open(self) -> bool:
-        """Return True if the operator gate is open."""
+        """Return True if the operator gate is open.
+
+        An explicit ``config.operator_enabled`` flag wins (used by tests).
+        Otherwise the gate is resolved through the single ``resolve_memory_config``
+        source of truth, which reads the same ``MAGI_SOUL_WRITE_ENABLED`` env
+        override.  SOUL write is opt-in: it stays OFF even when the
+        ``MAGI_MEMORY_ENABLED`` master is on, so this is byte-identical to the
+        prior direct env read.
+        """
         if self.config.operator_enabled is not None:
             return self.config.operator_enabled
-        env_val = os.environ.get(MAGI_SOUL_WRITE_ENABLED_ENV, "").strip().lower()
-        return env_val in {"1", "true", "yes", "on"}
+        from magi_agent.memory.config import resolve_memory_config
+
+        return resolve_memory_config().soul_write_enabled
 
 
 __all__ = [

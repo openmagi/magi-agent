@@ -44,7 +44,6 @@ Forbidden imports: urllib, socket, subprocess, http, requests — none appear he
 from __future__ import annotations
 
 import hashlib
-import os
 import re
 from typing import Literal
 
@@ -56,10 +55,12 @@ MemoryWriteExecutionMode = Literal["disabled", "shadow", "live"]
 _DIGEST_RE = re.compile(r"^sha256:[a-f0-9]{64}$")
 _SAFE_ENVIRONMENTS = frozenset({"local", "development", "staging", "production"})
 
-#: Master readiness env gate (default OFF).
+#: Master readiness env gate (default OFF).  Resolved via
+#: ``magi_agent.memory.config.resolve_memory_config`` (see ``_readiness_env_enabled``).
 _READINESS_ENV_VAR: str = "MAGI_MEMORY_WRITE_READINESS_ENABLED"
 
-#: Kill-switch env var.  When truthy the gate is immediately blocked.
+#: Kill-switch env var.  When truthy the gate is immediately blocked.  Resolved
+#: via the single memory config resolver (see ``_kill_switch_env_active``).
 _KILL_SWITCH_ENV_VAR: str = "MAGI_MEMORY_WRITE_KILL_SWITCH_ENABLED"
 
 #: The three D-track surface gates governed by this readiness gate.
@@ -67,20 +68,33 @@ MAGI_MEMORY_WRITE_ENABLED_ENV: str = "MAGI_MEMORY_WRITE_ENABLED"
 MAGI_MEMORY_PROJECTION_ENABLED_ENV: str = "MAGI_MEMORY_PROJECTION_ENABLED"
 MAGI_SOUL_WRITE_ENABLED_ENV: str = "MAGI_SOUL_WRITE_ENABLED"
 
-_TRUE_STRINGS = frozenset({"1", "true", "yes", "on"})
-
 #: Gate at which live promotion first becomes eligible.  Mirrors the precedents.
 _CANARY_LIVE_GATE: int = 5
 
 
 def _readiness_env_enabled() -> bool:
-    """Return True only when the master readiness env gate is explicitly truthy."""
-    return os.environ.get(_READINESS_ENV_VAR, "").lower() in _TRUE_STRINGS
+    """Return True when the writable-memory readiness gate is enabled.
+
+    Routed through the single ``resolve_memory_config`` source of truth, which
+    reads the same ``MAGI_MEMORY_WRITE_READINESS_ENABLED`` env override and also
+    honours the new ``MAGI_MEMORY_ENABLED`` master switch (default OFF in PR1, so
+    the effective default is unchanged from the pre-resolver env read).
+    """
+    from magi_agent.memory.config import resolve_memory_config
+
+    return resolve_memory_config().write_readiness_enabled
 
 
 def _kill_switch_env_active() -> bool:
-    """Return True when the kill-switch env var is explicitly truthy."""
-    return os.environ.get(_KILL_SWITCH_ENV_VAR, "").lower() in _TRUE_STRINGS
+    """Return True when the writable-memory kill-switch is engaged.
+
+    Routed through ``resolve_memory_config``; the kill-switch is explicit-only
+    (it never follows the master), so this is byte-identical to the prior direct
+    ``MAGI_MEMORY_WRITE_KILL_SWITCH_ENABLED`` read.
+    """
+    from magi_agent.memory.config import resolve_memory_config
+
+    return resolve_memory_config().write_kill_switch_enabled
 
 
 class MemoryWriteReadinessConfig(BaseModel):
