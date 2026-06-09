@@ -282,6 +282,13 @@ class HipocampusReadOnlyAdapter:
         #   2. QmdClient HTTP (external-server fallback) — when the live gate is ON.
         #   3. ``qmd_results.json`` static file — the default.
         if self._prefer_local_search_enabled():
+            # NOTE for a future vector/semantic backend author: the local backend
+            # ranks with ``request.query`` (BM25 lexical), and ``_map_qmd_results``
+            # below ALSO re-applies a lexical ``_matches_query`` OR-filter.  That
+            # is harmless for BM25 (every hit shares query terms) but would
+            # silently DROP a relevant zero-lexical-overlap (purely semantic) hit
+            # once a non-lexical backend is wired here — revisit / skip the
+            # lexical re-filter for non-lexical backends then.
             results = self._local_search_results(request)
         elif _qmd_live_recall_enabled():
             results = self._live_qmd_results(request)

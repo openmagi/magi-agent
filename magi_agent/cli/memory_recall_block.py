@@ -99,6 +99,24 @@ def build_cli_memory_recall_block(
         return ""
 
 
+def _has_indexable_memory(root: "Path") -> bool:
+    """True when ``root`` holds anything the BM25 backend would index.
+
+    Mirrors ``PyBM25Backend`` (``memory/search/bm25.py``): any ``*.md`` under
+    ``memory/`` (recursive) OR a top-level ``MEMORY.md`` / ``ROOT.md``.  Used as
+    a hot-path guard so an empty/fresh workspace never triggers a reindex scan.
+    Fail-soft: any filesystem error reports "indexable" so the normal
+    (try/except-wrapped) search path still runs rather than silently skipping.
+    """
+    try:
+        memory_dir = root / "memory"
+        if memory_dir.is_dir() and next(memory_dir.rglob("*.md"), None) is not None:
+            return True
+        return any((root / name).is_file() for name in ("MEMORY.md", "ROOT.md"))
+    except OSError:
+        return True
+
+
 def _build_block(
     *,
     workspace_root: str,
@@ -116,6 +134,13 @@ def _build_block(
     )
 
     root = Path(workspace_root)
+    # Cheap empty-tree guard: skip the per-turn reindex+search entirely when the
+    # workspace has no indexable memory.  The PyBM25 backend indexes
+    # ``memory/**/*.md`` plus top-level ``MEMORY.md`` / ``ROOT.md`` (see
+    # ``memory/search/bm25.py``); if none of those exist there is nothing to
+    # rank, so a fresh/empty workspace pays no scan cost on the hot path.
+    if not _has_indexable_memory(root):
+        return ""
     backend = select_search_backend(config)
     backend.reindex(root)
     hits = backend.search(query, k=max(int(recall_k), 1))

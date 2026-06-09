@@ -166,6 +166,42 @@ def test_recall_block_off_path_does_no_work_and_emits_no_block(
     assert "<memory-recall" not in with_query
 
 
+def test_recall_leads_snapshot_follows_when_both_present(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When BOTH a query-relevant recall block AND the static snapshot block are
+    non-empty, the documented order holds: the recall leads, the snapshot
+    follows, and both are present."""
+    from magi_agent.cli.tool_runtime import build_cli_instruction
+
+    _on(monkeypatch)
+    # Also turn the static <memory-context> snapshot on (default-OFF gate).
+    monkeypatch.setenv("MAGI_MEMORY_PROJECTION_ENABLED", "1")
+    # Snapshot source (curated MEMORY.md) carries a marker disjoint from the
+    # recall query so each block's distinctive token is unambiguous.
+    _write(tmp_path, "MEMORY.md", "curated snapshot marker snapshotonlymarker")
+    # Recall source: a daily log matching the query term.
+    _write(
+        tmp_path,
+        "memory/daily/2026-06-01.md",
+        "decision: adopt zebraquux for the billing rollout",
+    )
+
+    instruction = build_cli_instruction(
+        session_id="s1",
+        model="claude-sonnet-4-6",
+        workspace_root=str(tmp_path),
+        recall_query="what did we decide about zebraquux",
+    )
+
+    # Both blocks present.
+    assert "<memory-recall" in instruction
+    assert "<memory-context" in instruction
+    assert "snapshotonlymarker" in instruction
+    # Recall leads, snapshot follows.
+    assert instruction.index("<memory-recall") < instruction.index("<memory-context")
+
+
 def test_build_cli_instruction_recall_blocked_in_incognito(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
