@@ -34,6 +34,7 @@ def test_read_safe_segments():
     assert _segment_is_read_safe("head -30") is True
     assert _segment_is_read_safe("cat django/db/models/sql/query.py") is True
     assert _segment_is_read_safe("find django -name '*.py'") is True
+    assert _segment_is_read_safe("sed -n p f.py") is False
 
 
 def test_unsafe_segments():
@@ -42,6 +43,7 @@ def test_unsafe_segments():
     assert _segment_is_read_safe("sed -n '1w ../escaped.txt' f.py") is False
     assert _segment_is_read_safe("sed -n '1W owned.txt' f.py") is False
     assert _segment_is_read_safe("sed 's/x/y/w owned.txt' f.py") is False
+    assert _segment_is_read_safe("sed -n '1e touch ../escaped.txt' f.py") is False
     assert _segment_is_read_safe("curl http://x") is False
     assert _segment_is_read_safe("python -c 'import os'") is False
     assert _segment_is_read_safe("") is False
@@ -72,3 +74,4 @@ def test_complex_with_dangerous_or_opaque_segment_denied():
     assert _complex_command_is_read_safe("sed -n '1w ../escaped.txt' f.py | head -1") is False
     assert _complex_command_is_read_safe("sed -n '1W owned.txt' f.py | head -1") is False
     assert _complex_command_is_read_safe("sed 's/x/y/w owned.txt' f.py | head -1") is False
+    assert _complex_command_is_read_safe("sed -n '1e touch ../escaped.txt' f.py | head -1") is False

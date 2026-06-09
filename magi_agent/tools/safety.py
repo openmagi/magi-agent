@@ -83,7 +83,6 @@ _READONLY_SHELL_COMMANDS = {
     "nl",
     "pwd",
     "rg",
-    "sed",
     "tail",
     "wc",
 }
@@ -1460,6 +1459,8 @@ def _readonly_shell_denial(
     if not parts:
         return None
     exe = parts[0].rsplit("/", 1)[-1]
+    if exe == "sed":
+        return _readonly_argument_denial(exe, tuple(parts[1:]), shell=True)
     if exe not in _READONLY_SHELL_COMMANDS and exe != "git":
         return None
     args = tuple(parts[1:])
@@ -1501,10 +1502,10 @@ def _readonly_argument_denial(exe: str, args: tuple[str, ...], *, shell: bool) -
     return None
 
 
-_SED_DIRECT_WRITE_COMMAND_RE = re.compile(
+_SED_DIRECT_UNSAFE_COMMAND_RE = re.compile(
     r"(?:^|[;\n{}])\s*"
     r"(?:(?:\d+|\$|[,!~+\s]|/[^/\n]*/|\\[^\n]+\\)+)?"
-    r"[wW](?=\s|$)"
+    r"[eErRwW](?=\s|$)"
 )
 
 
@@ -1512,10 +1513,10 @@ def _sed_readonly_script_denial(args: tuple[str, ...]) -> bool:
     """True when sed arguments include an opaque or mutating script.
 
     A sed executable can be read-only, but sed's script language includes file
-    writes via ``w``/``W`` commands and ``s///w file`` substitution flags. Those
-    writes are not visible to generic shell flag/path checks, so trusted-local
-    read-safe pipelines must inspect inline scripts and reject opaque ``-f``
-    script files.
+    reads, writes, and shell execution via commands such as ``r``, ``w``, and
+    ``e``. Those effects are not visible to generic shell flag/path checks, so
+    trusted-local read-safe paths inspect inline scripts and reject opaque
+    ``-f`` script files.
     """
     scripts: list[str] = []
     first_positional_script_seen = False
@@ -1549,12 +1550,12 @@ def _sed_readonly_script_denial(args: tuple[str, ...]) -> bool:
 
 
 def _sed_script_has_write_command(script: str) -> bool:
-    if _SED_DIRECT_WRITE_COMMAND_RE.search(script) is not None:
+    if _SED_DIRECT_UNSAFE_COMMAND_RE.search(script) is not None:
         return True
-    return _sed_substitution_has_write_flag(script)
+    return _sed_substitution_has_unsafe_flag(script)
 
 
-def _sed_substitution_has_write_flag(script: str) -> bool:
+def _sed_substitution_has_unsafe_flag(script: str) -> bool:
     index = 0
     while index < len(script):
         if script[index] != "s" or (index > 0 and script[index - 1] == "\\"):
@@ -1586,7 +1587,7 @@ def _sed_substitution_has_write_flag(script: str) -> bool:
             index += 1
             continue
         while cursor < len(script) and script[cursor].isalpha():
-            if script[cursor] == "w":
+            if script[cursor] in {"e", "w"}:
                 return True
             cursor += 1
         index += 1
