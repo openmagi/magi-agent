@@ -578,6 +578,9 @@ class LocalChildRunnerBoundary:
                     provider=child_provider,
                     model=child_model,
                     modelTier=child_tier,
+                    # A vetted live child runner only executes under the pack
+                    # flag; a replay runner ignores this.
+                    liveChildRunnerAllowed=self.config.real_child_execution_pack_enabled,
                 ),
             )
         except Exception as exc:
