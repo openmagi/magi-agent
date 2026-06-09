@@ -56,3 +56,52 @@ def test_validate_args_accepts_unknown_optional_key() -> None:
 
 def test_validate_args_no_properties_passes() -> None:
     assert validate_args({"type": "object"}, {"x": 1}) is None
+
+
+from magi_agent.benchmarks.taubench.reliability import WriteLedger, looks_like_error
+
+
+def test_is_write_by_prefix() -> None:
+    led = WriteLedger()
+    assert led.is_write("book_reservation") is True
+    assert led.is_write("cancel_reservation") is True
+    assert led.is_write("update_reservation_flights") is True
+    assert led.is_write("send_certificate") is True
+    assert led.is_write("get_reservation_details") is False
+
+
+def test_repeat_write_same_name_and_args_order_independent() -> None:
+    led = WriteLedger()
+    led.record("book_reservation", {"user_id": "u1", "flight": "F1"}, ok=True)
+    assert led.is_repeat_write("book_reservation", {"flight": "F1", "user_id": "u1"}) is True
+
+
+def test_not_repeat_when_args_differ() -> None:
+    led = WriteLedger()
+    led.record("book_reservation", {"flight": "F1"}, ok=True)
+    assert led.is_repeat_write("book_reservation", {"flight": "F2"}) is False
+
+
+def test_not_repeat_when_prior_write_failed() -> None:
+    led = WriteLedger()
+    led.record("book_reservation", {"flight": "F1"}, ok=False)
+    assert led.is_repeat_write("book_reservation", {"flight": "F1"}) is False
+
+
+def test_had_successful_write_and_last_errored_transitions() -> None:
+    led = WriteLedger()
+    assert led.had_successful_write() is False
+    assert led.last_write_errored() is False  # empty ledger -> not errored
+    led.record("book_reservation", {"x": 1}, ok=False)
+    assert led.had_successful_write() is False
+    assert led.last_write_errored() is True
+    led.record("book_reservation", {"x": 1}, ok=True)
+    assert led.had_successful_write() is True
+    assert led.last_write_errored() is False
+
+
+def test_looks_like_error() -> None:
+    assert looks_like_error("Error: bad action") is True
+    assert looks_like_error("  error - nope") is True
+    assert looks_like_error("Reservation booked id=R1") is False
+    assert looks_like_error(123) is False

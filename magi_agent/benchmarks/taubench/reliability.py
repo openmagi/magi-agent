@@ -87,4 +87,58 @@ def validate_args(parameters: dict, arguments: dict) -> str | None:
     return None
 
 
-__all__ = ["ReliabilityConfig", "validate_args"]
+DEFAULT_WRITE_PREFIXES = ("book_", "cancel_", "update_", "send_")
+
+
+class WriteLedger:
+    """Per-episode record of write-tool calls and their outcomes.
+
+    A "write" is any tool whose name starts with a configured prefix. A "repeat"
+    write is an identical (name, normalized-args) write that already succeeded.
+    """
+
+    def __init__(self, write_prefixes: tuple[str, ...] = DEFAULT_WRITE_PREFIXES) -> None:
+        self._prefixes = tuple(write_prefixes)
+        self._records: list[tuple[str, str, bool]] = []  # (name, args_key, ok)
+
+    def is_write(self, tool_name: str) -> bool:
+        return any(tool_name.startswith(p) for p in self._prefixes)
+
+    @staticmethod
+    def _key(arguments: dict) -> str:
+        try:
+            return json.dumps(arguments or {}, sort_keys=True, default=str)
+        except (TypeError, ValueError):
+            return repr(arguments)
+
+    def record(self, tool_name: str, arguments: dict, *, ok: bool) -> None:
+        self._records.append((tool_name, self._key(arguments), ok))
+
+    def is_repeat_write(self, tool_name: str, arguments: dict) -> bool:
+        key = self._key(arguments)
+        return any(
+            name == tool_name and arg_key == key and ok
+            for (name, arg_key, ok) in self._records
+        )
+
+    def had_successful_write(self) -> bool:
+        return any(ok for (_name, _key, ok) in self._records)
+
+    def last_write_errored(self) -> bool:
+        if not self._records:
+            return False
+        return not self._records[-1][2]
+
+
+def looks_like_error(observation: object) -> bool:
+    """True if an env observation string indicates a tool error."""
+    return isinstance(observation, str) and observation.strip().lower().startswith("error")
+
+
+__all__ = [
+    "DEFAULT_WRITE_PREFIXES",
+    "ReliabilityConfig",
+    "WriteLedger",
+    "looks_like_error",
+    "validate_args",
+]
