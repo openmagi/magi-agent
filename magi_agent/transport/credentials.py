@@ -4,13 +4,14 @@ Parity with the hosted Clawy agent-vault C surface:
 
 * ``GET  /v1/admin/credentials``                 — list redacted metadata + vault status
 * ``POST /v1/admin/credentials``                 — register: forward secret to the vault
-  seam, persist metadata only (status ``active`` if a vault_ref was returned, else
-  ``pending``), respond WITHOUT the secret
+  seam only when the vault is available, persist metadata only, respond WITHOUT
+  the secret
 * ``POST /v1/admin/credentials/{id}/revoke``     — revoke via the seam, mark metadata revoked
 
 All routes require a valid ``x-gateway-token`` (reusing ``transport.tools``'s helper).
 Registering the routes is unconditional and inert by default: with the vault seam
-OFF the secret is dropped and the credential is recorded as ``pending``.
+OFF registration returns ``503`` and persists nothing because no secret is
+retained for later forwarding.
 """
 
 from __future__ import annotations
@@ -51,6 +52,9 @@ def register_credentials_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
         unauthorized = _unauthorized_response(request, runtime)
         if unauthorized is not None:
             return unauthorized
+        current_vault_status = vault_local.vault_status()
+        if not _vault_ready(current_vault_status):
+            return _vault_unavailable_response(current_vault_status)
         try:
             body = await request.json()
         except Exception:
@@ -72,22 +76,26 @@ def register_credentials_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
             )
         except vault_local.VaultSeamError:
             # Secret-free error: the credential could not be stored in the vault.
-            # We still record pending metadata so the operator sees the attempt.
             logger.warning("vault seam rejected credential for service=%s", service)
             seam_result = {"disabled": True}
         finally:
             # Scrub the local plaintext reference immediately.
             secret = ""  # noqa: F841
 
+        if isinstance(seam_result, dict) and seam_result.get("disabled"):
+            return _vault_unavailable_response(current_vault_status)
+
         vault_ref = seam_result.get("vault_ref") if isinstance(seam_result, dict) else None
-        status = store.STATUS_ACTIVE if vault_ref else store.STATUS_PENDING
+        if not isinstance(vault_ref, str) or not vault_ref:
+            return _vault_unavailable_response(current_vault_status)
+        status = store.STATUS_ACTIVE
 
         projection = store.add_credential(
             service=service,
             label=label,
             auth_scheme=auth_scheme,
             status=status,
-            vault_ref=vault_ref if isinstance(vault_ref, str) else None,
+            vault_ref=vault_ref,
         )
 
         # Exercise (do not bypass) the durable store guard with a digest-only
@@ -166,4 +174,19 @@ def _validate_body(
         str(label).strip(),
         str(auth_scheme).strip(),
         str(secret),
+    )
+
+
+def _vault_ready(status: dict[str, bool]) -> bool:
+    return bool(status.get("present") and status.get("healthy"))
+
+
+def _vault_unavailable_response(status: dict[str, bool]) -> JSONResponse:
+    return JSONResponse(
+        status_code=503,
+        content={
+            "error": "vault_unavailable",
+            "message": "credential registration requires an available vault",
+            "vault_status": status,
+        },
     )

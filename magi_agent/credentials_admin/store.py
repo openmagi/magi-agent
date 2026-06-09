@@ -6,10 +6,10 @@ auth_scheme, status, vault_ref, created_at — for the dashboard list. The
 plaintext secret NEVER reaches this file; it is forwarded to the vault seam and
 dropped before persistence.
 
-In addition to this listable projection, the route layer writes a
-digest-anchored record into the durable store's ``credential_lease_metadata``
-collection (see ``vault_local.build_durable_metadata_record``) so the durable
-store's secret-shaped-value guards are exercised, not bypassed.
+In addition to this listable projection, the route layer sends a digest-anchored
+record through ``DurableRecord`` validation (see
+``vault_local.build_durable_metadata_record``) so the durable store's
+secret-shaped-value guards are exercised, not bypassed.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any
 
 # Status values for a registered credential.
-#   pending  — metadata recorded, vault seam OFF or not yet wired (no vault_ref)
+#   pending  — metadata recorded for a future vault workflow (no vault_ref)
 #   active   — vault accepted the secret and returned a vault_ref
 #   revoked  — operator revoked the credential
 STATUS_PENDING = "pending"

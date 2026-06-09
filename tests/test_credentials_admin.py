@@ -73,11 +73,11 @@ def test_list_returns_credentials_and_vault_status(monkeypatch, tmp_path) -> Non
     assert payload["vault_status"] == {"present": False, "healthy": False}
 
 
-def test_register_with_vault_disabled_persists_pending_metadata_without_secret(
+def test_register_with_vault_disabled_rejects_without_persisting_metadata(
     monkeypatch, tmp_path
 ) -> None:
     _isolate_store(monkeypatch, tmp_path)
-    # Default-OFF: MAGI_VAULT_ADMIN_ENABLED unset → vault seam is a no-op.
+    # Default-OFF: no vault exists to retain the secret, so registration is blocked.
     monkeypatch.delenv("MAGI_VAULT_ADMIN_ENABLED", raising=False)
     client = _client()
 
@@ -91,27 +91,20 @@ def test_register_with_vault_disabled_persists_pending_metadata_without_secret(
             "secret": SECRET_VALUE,
         },
     )
-    assert response.status_code == 200
-    created = response.json()["credential"]
-    assert created["service"] == "openai"
-    assert created["label"] == "Prod key"
-    assert created["auth_scheme"] == "bearer"
-    assert created["status"] == "pending"
-    assert created["vault_ref"] is None
+    assert response.status_code == 503
+    assert response.json()["error"] == "vault_unavailable"
 
     # The response carries NO secret anywhere.
     body_text = json.dumps(response.json())
     assert SECRET_VALUE not in body_text
 
-    # The persisted metadata file carries NO secret anywhere.
-    persisted = credentials_path().read_text(encoding="utf-8")
-    assert SECRET_VALUE not in persisted
-
-    # The list endpoint reflects the new metadata, still without secret.
+    # No metadata row is persisted because there is no retained secret to
+    # forward later.
+    assert not credentials_path().exists()
     listing = client.get(
         "/v1/admin/credentials", headers={"x-gateway-token": "local-token"}
     ).json()
-    assert len(listing["credentials"]) == 1
+    assert listing["credentials"] == []
     assert SECRET_VALUE not in json.dumps(listing)
 
 
@@ -202,6 +195,16 @@ def test_revoke_marks_metadata_revoked(monkeypatch, tmp_path) -> None:
     _isolate_store(monkeypatch, tmp_path)
     monkeypatch.delenv("MAGI_VAULT_ADMIN_ENABLED", raising=False)
     client = _client()
+    monkeypatch.setattr(
+        vault_local,
+        "vault_status",
+        lambda: {"present": True, "healthy": True},
+    )
+    monkeypatch.setattr(
+        vault_local,
+        "register_credential",
+        lambda **_: {"vault_ref": "vault://local/cred-1"},
+    )
     created = client.post(
         "/v1/admin/credentials",
         headers={"x-gateway-token": "local-token"},

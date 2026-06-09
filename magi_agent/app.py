@@ -107,9 +107,9 @@ def create_app(runtime: OpenMagiRuntime) -> FastAPI:
     register_shadow_generation_routes(app, runtime)
     register_tool_admin_routes(app, runtime)
     register_customize_routes(app, runtime)
-    # Default-OFF vault seam: routes serve unconditionally, but the secret is
-    # forwarded to a no-op seam and credentials are recorded as "pending" until
-    # MAGI_VAULT_ADMIN_ENABLED + a real vault admin API are wired.
+    # Default-OFF vault seam: routes serve unconditionally, but registration
+    # returns 503 and persists nothing until MAGI_VAULT_ADMIN_ENABLED + a real
+    # vault admin API are wired.
     register_credentials_routes(app, runtime)
     register_app_api_routes(app, runtime)
     register_plugin_admin_routes(app, runtime)

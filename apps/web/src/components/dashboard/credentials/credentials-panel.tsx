@@ -52,9 +52,8 @@ function VaultBanner({ status }: { status: VaultStatus }) {
       <div>
         <div className="font-semibold">Vault not provisioned</div>
         <div className="mt-0.5 text-amber-700/90">
-          A secure vault is not connected yet. You can still register credentials —
-          they are recorded as <span className="font-semibold">pending</span> and the
-          secret is dropped (never stored or logged) until a vault is wired in.
+          A secure vault is not connected yet. Credential registration is disabled
+          until this local vault is available.
         </div>
       </div>
     </div>
@@ -64,6 +63,7 @@ function VaultBanner({ status }: { status: VaultStatus }) {
 export function CredentialsPanel({ botId }: CredentialsPanelProps): React.JSX.Element {
   const { data, loading, error, reload } = useCredentials();
   const agentFetch = useAgentFetch();
+  const vaultReady = Boolean(data?.vault_status.present && data.vault_status.healthy);
 
   const [service, setService] = useState("");
   const [label, setLabel] = useState("");
@@ -80,11 +80,16 @@ export function CredentialsPanel({ botId }: CredentialsPanelProps): React.JSX.El
     label.trim() !== "" &&
     authScheme.trim() !== "" &&
     secret !== "" &&
+    vaultReady &&
     !submitting;
 
   const handleRegister = useCallback(
     (event: React.FormEvent) => {
       event.preventDefault();
+      if (!vaultReady) {
+        setFormError("Credential registration requires an available vault.");
+        return;
+      }
       if (!canSubmit) return;
       setSubmitting(true);
       setFormError(null);
@@ -110,7 +115,7 @@ export function CredentialsPanel({ botId }: CredentialsPanelProps): React.JSX.El
           setSubmitting(false);
         });
     },
-    [agentFetch, authScheme, canSubmit, label, reload, secret, service],
+    [agentFetch, authScheme, canSubmit, label, reload, secret, service, vaultReady],
   );
 
   const handleRevoke = useCallback(
@@ -169,6 +174,7 @@ export function CredentialsPanel({ botId }: CredentialsPanelProps): React.JSX.El
             value={service}
             onChange={(e) => setService(e.target.value)}
             autoComplete="off"
+            disabled={!vaultReady || submitting}
           />
           <Input
             label="Label"
@@ -176,11 +182,13 @@ export function CredentialsPanel({ botId }: CredentialsPanelProps): React.JSX.El
             value={label}
             onChange={(e) => setLabel(e.target.value)}
             autoComplete="off"
+            disabled={!vaultReady || submitting}
           />
           <Select
             label="Auth scheme"
             value={authScheme}
             onChange={(e) => setAuthScheme(e.target.value)}
+            disabled={!vaultReady || submitting}
           >
             {AUTH_SCHEMES.map((scheme) => (
               <option key={scheme} value={scheme}>
@@ -196,6 +204,7 @@ export function CredentialsPanel({ botId }: CredentialsPanelProps): React.JSX.El
           value={secret}
           onChange={(e) => setSecret(e.target.value)}
           autoComplete="new-password"
+          disabled={!vaultReady || submitting}
         />
         {formError ? (
           <div className="rounded-lg border border-red-500/20 bg-red-500/[0.06] px-3 py-2 text-sm text-red-700">
