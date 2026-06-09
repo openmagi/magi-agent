@@ -22,6 +22,7 @@ from .transport.learning_dashboard import register_learning_dashboard_routes
 from .transport.tools import register_tool_admin_routes
 from .transport.app_api import register_app_api_routes
 from .transport.customize import register_customize_routes
+from .transport.credentials import register_credentials_routes
 from magi_agent.observability import register_observability
 from magi_agent.egress_proxy.config import EgressProxyConfig
 
@@ -106,6 +107,10 @@ def create_app(runtime: OpenMagiRuntime) -> FastAPI:
     register_shadow_generation_routes(app, runtime)
     register_tool_admin_routes(app, runtime)
     register_customize_routes(app, runtime)
+    # Default-OFF vault seam: routes serve unconditionally, but registration
+    # returns 503 and persists nothing until MAGI_VAULT_ADMIN_ENABLED + a real
+    # vault admin API are wired.
+    register_credentials_routes(app, runtime)
     register_app_api_routes(app, runtime)
     register_plugin_admin_routes(app, runtime)
     register_dashboard_routes(app, runtime)
