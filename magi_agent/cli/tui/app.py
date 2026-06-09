@@ -924,6 +924,8 @@ class MagiTuiApp(App[None]):
         welcome.append(" history · ", style="dim")
         welcome.append("Ctrl+S", style="#7aa2f7")
         welcome.append(" draft · ", style="dim")
+        welcome.append("Ctrl+B", style="#7aa2f7")
+        welcome.append(" sidebar · ", style="dim")
         welcome.append("Ctrl+P", style="#7aa2f7")
         welcome.append(" palette · ", style="dim")
         welcome.append("F1", style="#7aa2f7")
@@ -940,7 +942,7 @@ class MagiTuiApp(App[None]):
             text=(
                 "Welcome to Magi  "
                 "Keys: Shift+Enter newline · ↑ history · Ctrl+S draft · "
-                "Ctrl+P palette · F1 help  "
+                "Ctrl+B sidebar · Ctrl+P palette · F1 help  "
                 "Copy: drag to select · Ctrl+Y copy (⌥-drag for native terminal copy)  "
                 f"Commands ({len(command_names)}): {command_line}"
             ),

@@ -18,6 +18,7 @@ from textual.binding import Binding
 from textual.widgets import Static
 
 from magi_agent.cli.tui.dialogs.help import (
+    ENV_HELP,
     PROMPT_KEYS,
     HelpDialog,
     _binding_key_desc,
@@ -50,6 +51,27 @@ def test_build_help_sections_includes_prompt_keys_section() -> None:
     # History recall (↑/↓) is listed.
     assert "History recall" in flat
     assert "↑" in flat
+
+
+def test_build_help_sections_includes_env_section() -> None:
+    # Opt-in env toggles (not keys/commands) surface as an "Environment" section
+    # so a user can discover the gated bell.
+    sections = build_help_sections(
+        bindings=[], commands=[], prompt_keys=[], env=list(ENV_HELP)
+    )
+    titles = [title for title, _lines in sections]
+    assert "Environment" in titles
+    flat = "\n".join(line for _title, lines in sections for line in lines)
+    assert "MAGI_TUI_NOTIFY_BELL" in flat
+
+
+def test_help_dialog_default_includes_env_bell() -> None:
+    # The live HelpDialog (default ENV_HELP) renders the bell env toggle.
+    dialog = HelpDialog(bindings=[("ctrl+c", "Cancel")], commands=["compact"])
+    flat = "\n".join(
+        line for _title, lines in dialog._sections for line in lines
+    )
+    assert "MAGI_TUI_NOTIFY_BELL" in flat
 
 
 def test_build_help_sections_drops_empty_sections() -> None:

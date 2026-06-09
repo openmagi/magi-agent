@@ -143,6 +143,8 @@ def test_tui_mount_renders_welcome_state() -> None:
         assert "Shift+Enter" in joined
         assert "history" in joined
         assert "Ctrl+S" in joined
+        # Phase 3 sidebar toggle advertised in the welcome banner too.
+        assert "Ctrl+B" in joined
         # Phase 2 doors advertised too: command palette + help.
         assert "Ctrl+P" in joined
         assert "F1" in joined
@@ -1518,8 +1520,8 @@ def test_sidebar_panes_fed_from_tool_and_terminal_events() -> None:
         assert "step one" in text
         assert "step two" in text
         assert "x.py" in text  # recent-files pane shows the shortened basename
-        assert "540" in text  # 500 + 40 token usage folded into context pane
-        assert "200,000" in text  # coarse context-window budget (v1)
+        assert "540 tokens" in text  # honest bare token count (no false ratio)
+        assert "200,000" not in text  # NOT a ratio against a hardcoded budget
 
     asyncio.run(_run())
 
@@ -1758,5 +1760,61 @@ def test_permission_needed_rings_bell_when_unfocused_and_enabled(monkeypatch) ->
             await app.workers.wait_for_complete()
             await pilot.pause()
         assert rings, "expected a bell when a permission modal opened while unfocused"
+
+    asyncio.run(_run())
+
+
+def test_footer_below_prompt_no_overlap() -> None:
+    """Geometry guard: the docked footer must sit strictly below the prompt.
+
+    The footer-below-prompt layout relies on the prompt's margin/auto height to
+    reflow. Asserting the real widget regions catches a future CSS change that
+    would silently overlap the footer and the prompt.
+    """
+
+    async def _run() -> None:
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test(size=(100, 30)) as pilot:
+            await pilot.pause()
+            footer = app.query_one("#footer")
+            prompt = app.query_one("#prompt")
+            assert footer.region.height >= 1
+            assert prompt.region.height >= 1
+            # Footer strictly below the prompt — no vertical overlap.
+            assert footer.region.y >= prompt.region.y + prompt.region.height
+
+    asyncio.run(_run())
+
+
+def test_footer_elapsed_resets_across_two_turns() -> None:
+    """The elapsed clock is re-based each turn (it must NOT accumulate).
+
+    ``start_turn`` re-stamps ``_turn_started_monotonic`` and ``_render_terminal``
+    clears it. So each turn's elapsed is measured from that turn's own start; a
+    second turn cannot carry the first turn's time.
+    """
+
+    async def _run() -> None:
+        engine = FakeEngineDriver(tokens=["a", "b"])
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+
+            # Turn 1: stamped while running, cleared after terminal.
+            app.start_turn("first")
+            assert app._turn_started_monotonic is not None
+            stamp1 = app._turn_started_monotonic
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert app._turn_started_monotonic is None  # clock stopped/reset
+
+            # Turn 2: a FRESH stamp (strictly later monotonic), not turn 1's.
+            app.start_turn("second")
+            assert app._turn_started_monotonic is not None
+            assert app._turn_started_monotonic >= stamp1  # re-based, monotonic
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert app._turn_started_monotonic is None
 
     asyncio.run(_run())

@@ -99,9 +99,13 @@ class Sidebar(VerticalScroll):
         return f"Todo\n{lines}"
 
     def _context_text(self) -> str:
-        if self._context_limit <= 0:
-            return f"Context\n  {self._context_usage:,} tokens"
-        return f"Context\n  {self._context_usage:,} / {self._context_limit:,}"
+        # Render a HONEST bare token count, NOT ``usage / limit``. A hardcoded
+        # default limit (200k) is actively misleading on a 128k/1M-window model
+        # — the ratio would be wrong for every non-Claude model. ``set_context``
+        # still accepts a ``limit`` (other code passes one, and it is kept for a
+        # future per-model context-window table) but it is no longer rendered as
+        # a hard ratio against the hardcoded default.
+        return f"Context\n  {self._context_usage:,} tokens"
 
     def _files_text(self) -> str:
         if not self._recent_files:

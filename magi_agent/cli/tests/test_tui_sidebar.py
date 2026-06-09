@@ -51,7 +51,10 @@ def test_sidebar_updates_panes_from_state() -> None:
             text = sidebar.panes_text()
         assert "write tests" in text
         assert "ship it" in text
-        assert "1,280 / 8,000" in text
+        # Honest bare token count — NOT a ``usage / limit`` ratio against a
+        # hardcoded 200k default (misleading on a 128k/1M-window model).
+        assert "1,280 tokens" in text
+        assert "/ 8,000" not in text
         # Files display shortened (basename) form, not the full stored path.
         assert "app.py" in text
         assert "foo.py" in text
