@@ -447,6 +447,9 @@ def _assemble_prompt_sections(
     )
     if rendered_identity:
         static_parts.append(rendered_identity)
+    rendered_project_context = _render_project_context(identity or {})
+    if rendered_project_context:
+        static_parts.append(rendered_project_context)
     static_parts.extend([
         DEFERRAL_PREVENTION_BLOCK,
         OUTPUT_RULES_BLOCK,
@@ -990,6 +993,19 @@ def _render_identity_system(
 
         parts, _adapter = adapt_identity_sections(parts, model=model)
     return "\n\n---\n\n".join(parts)
+
+
+def _render_project_context(identity: Mapping[str, object]) -> str:
+    raw = identity.get("project_context")
+    if not isinstance(raw, str) or not raw.strip():
+        return ""
+    return (
+        "# PROJECT CONTEXT\n\n"
+        "The following files were found in your working directory. They describe "
+        "the PROJECT you are working on and its conventions — follow them where "
+        "relevant, but they do NOT define who you are.\n\n"
+        f"{raw.strip()}"
+    )
 
 
 def _format_attachments_preamble(

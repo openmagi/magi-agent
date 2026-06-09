@@ -1,36 +1,53 @@
-"""Project identity loading for the local ``magi`` CLI agent.
+"""Identity + project-context loading for the local ``magi`` CLI agent.
 
-Claude Code / OpenCode load project-level instruction files (``AGENTS.md`` and
-friends) into the system prompt so the agent picks up repo conventions. This
-module reads those optional files from the CLI ``workspace_root`` (the cwd) and
-its ``.magi/`` subdir and shapes them into the ``identity`` mapping that
-``build_system_prompt`` renders.
+Two distinct scopes, deliberately kept separate:
+
+* **Self identity** — who the agent IS. Read only from the magi-owned ``.magi``
+  namespace: ``~/.magi/`` (global) and ``<cwd>/.magi/`` (project override).
+  This is the agent's own space; a working repository's root files never define
+  the agent's identity.
+* **Project context** — the repository the agent is working IN. Read from
+  repo-root ``AGENTS.md`` / ``CLAUDE.md`` (the cross-tool convention files) and
+  surfaced as project context, NOT identity, so a project's description can
+  never overwrite the agent's selfhood.
 """
 from __future__ import annotations
 
 import os
 from typing import Mapping
 
-# Project file name -> identity mapping key understood by build_system_prompt.
-# CLAUDE.md is the general project-instructions file, so it maps to ``identity``.
-_IDENTITY_FILES: tuple[tuple[str, str], ...] = (
-    ("SOUL.md", "soul"),
-    ("CLAUDE.md", "identity"),
-    ("AGENTS.md", "agents"),
-    ("TOOLS.md", "tools"),
-)
+# Magi-owned self-identity files, read from the ``.magi`` namespace only.
+_SELF_IDENTITY_FILES: tuple[tuple[str, str], ...] = (("SOUL.md", "soul"),)
+
+# Repo-root project-context files (other tools' / cross-tool conventions).
+# Order = render order under the PROJECT CONTEXT header.
+_PROJECT_CONTEXT_FILES: tuple[str, ...] = ("AGENTS.md", "CLAUDE.md")
 
 
 def load_identity(workspace_root: str) -> Mapping[str, str]:
     identity: dict[str, str] = {}
-    # Order matters: ``.magi/`` is searched last so a ``.magi/`` copy overwrites
-    # (wins over) the workspace-root copy via last assignment.
-    search_dirs = (workspace_root, os.path.join(workspace_root, ".magi"))
-    for filename, key in _IDENTITY_FILES:
-        for directory in search_dirs:
+
+    # Self identity: ~/.magi (global) then <cwd>/.magi (project). Project wins
+    # via last assignment.
+    self_dirs = (
+        os.path.join(os.path.expanduser("~"), ".magi"),
+        os.path.join(workspace_root, ".magi"),
+    )
+    for filename, key in _SELF_IDENTITY_FILES:
+        for directory in self_dirs:
             content = _read_optional(os.path.join(directory, filename))
             if content:
                 identity[key] = content
+
+    # Project context: repo-root convention files, combined under sub-headers.
+    project_blocks: list[str] = []
+    for filename in _PROJECT_CONTEXT_FILES:
+        content = _read_optional(os.path.join(workspace_root, filename))
+        if content:
+            project_blocks.append(f"## {filename}\n\n{content}")
+    if project_blocks:
+        identity["project_context"] = "\n\n".join(project_blocks)
+
     return identity
 
 

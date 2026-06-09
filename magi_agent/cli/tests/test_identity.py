@@ -1,4 +1,10 @@
-"""Tests for cli/identity.py — project identity loading + prompt threading."""
+"""Tests for cli/identity.py — self identity + project context loading.
+
+Self identity (``soul``) is read only from the magi-owned ``.magi`` namespace
+(``~/.magi`` global + ``<cwd>/.magi`` project). Repo-root ``AGENTS.md`` /
+``CLAUDE.md`` are read as ``project_context`` — they describe the working repo,
+not who the agent is.
+"""
 
 from __future__ import annotations
 
@@ -8,64 +14,81 @@ from magi_agent.cli.identity import load_identity
 from magi_agent.cli.tool_runtime import build_cli_instruction
 
 
-def test_load_identity_reads_agents_md(tmp_path) -> None:
+def test_load_identity_reads_agents_md_as_project_context(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
     (tmp_path / "AGENTS.md").write_text("repo conventions here\n", encoding="utf-8")
     identity = load_identity(str(tmp_path))
-    assert identity["agents"] == "repo conventions here"
+    assert "agents" not in identity
+    assert "repo conventions here" in identity["project_context"]
 
 
-def test_load_identity_maps_all_known_files(tmp_path) -> None:
-    (tmp_path / "SOUL.md").write_text("soul body", encoding="utf-8")
-    (tmp_path / "CLAUDE.md").write_text("claude body", encoding="utf-8")
+def test_load_identity_combines_repo_root_convention_files(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
     (tmp_path / "AGENTS.md").write_text("agents body", encoding="utf-8")
-    (tmp_path / "TOOLS.md").write_text("tools body", encoding="utf-8")
+    (tmp_path / "CLAUDE.md").write_text("claude body", encoding="utf-8")
     identity = load_identity(str(tmp_path))
-    assert identity == {
-        "soul": "soul body",
-        "identity": "claude body",
-        "agents": "agents body",
-        "tools": "tools body",
-    }
+    # Repo-root files are project context, not self identity.
+    assert "identity" not in identity
+    assert "agents" not in identity
+    context = identity["project_context"]
+    assert "## AGENTS.md" in context
+    assert "agents body" in context
+    assert "## CLAUDE.md" in context
+    assert "claude body" in context
 
 
-def test_load_identity_magi_subdir_precedence(tmp_path) -> None:
-    # A file in workspace_root is overridden by the same file under .magi/
-    # (the .magi directory is searched second, so it wins on the last assignment).
-    (tmp_path / "AGENTS.md").write_text("root agents", encoding="utf-8")
+def test_load_identity_soul_from_project_magi_namespace(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
     magi_dir = tmp_path / ".magi"
     magi_dir.mkdir()
-    (magi_dir / "AGENTS.md").write_text("magi agents", encoding="utf-8")
+    (magi_dir / "SOUL.md").write_text("magi soul", encoding="utf-8")
     identity = load_identity(str(tmp_path))
-    assert identity["agents"] == "magi agents"
+    assert identity["soul"] == "magi soul"
 
 
-def test_load_identity_reads_from_magi_subdir_only(tmp_path) -> None:
+def test_load_identity_project_magi_soul_overrides_global(tmp_path, monkeypatch) -> None:
+    home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home))
+    global_magi = home / ".magi"
+    global_magi.mkdir(parents=True)
+    (global_magi / "SOUL.md").write_text("global soul", encoding="utf-8")
     magi_dir = tmp_path / ".magi"
     magi_dir.mkdir()
-    (magi_dir / "TOOLS.md").write_text("magi tools", encoding="utf-8")
+    (magi_dir / "SOUL.md").write_text("project soul", encoding="utf-8")
     identity = load_identity(str(tmp_path))
-    assert identity["tools"] == "magi tools"
+    assert identity["soul"] == "project soul"
 
 
-def test_load_identity_missing_files_omitted(tmp_path) -> None:
+def test_load_identity_repo_root_soul_is_not_self_identity(tmp_path, monkeypatch) -> None:
+    # A SOUL.md at the repo root (outside .magi) must NOT become self identity.
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    (tmp_path / "SOUL.md").write_text("repo soul", encoding="utf-8")
+    identity = load_identity(str(tmp_path))
+    assert "soul" not in identity
+
+
+def test_load_identity_missing_files_omitted(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
     (tmp_path / "AGENTS.md").write_text("only agents", encoding="utf-8")
     identity = load_identity(str(tmp_path))
     assert "soul" not in identity
     assert "identity" not in identity
-    assert "tools" not in identity
-    assert identity["agents"] == "only agents"
+    assert "only agents" in identity["project_context"]
 
 
-def test_load_identity_empty_when_nothing_present(tmp_path) -> None:
+def test_load_identity_empty_when_nothing_present(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
     assert load_identity(str(tmp_path)) == {}
 
 
-def test_load_identity_empty_file_omitted(tmp_path) -> None:
+def test_load_identity_empty_file_omitted(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
     (tmp_path / "AGENTS.md").write_text("   \n\n  ", encoding="utf-8")
     assert load_identity(str(tmp_path)) == {}
 
 
-def test_cli_instruction_includes_identity(tmp_path) -> None:
+def test_cli_instruction_includes_project_context(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
     marker = "UNIQUE-REPO-CONVENTION-XYZ"
     (tmp_path / "AGENTS.md").write_text(marker, encoding="utf-8")
     instruction = build_cli_instruction(
@@ -78,7 +101,7 @@ def test_cli_instruction_includes_identity(tmp_path) -> None:
 
 def test_cli_instruction_without_workspace_root_omits_identity(tmp_path) -> None:
     # When no workspace_root is supplied, the instruction builds without loading
-    # any project identity files (back-compat: existing callers pass no root).
+    # any project context files (back-compat: existing callers pass no root).
     marker = "SHOULD-NOT-APPEAR-1234"
     (tmp_path / "AGENTS.md").write_text(marker, encoding="utf-8")
     # Run from elsewhere; default-arg path must not read tmp_path.
