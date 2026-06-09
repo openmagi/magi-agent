@@ -82,6 +82,41 @@ def test_search_fidelity_read() -> None:
     assert renderer.extract_search_text(rnode) == rnode.text
 
 
+def test_result_extracts_human_output_not_receipt_scaffold() -> None:
+    """A full ToolResult dict shows its human ``output`` content, never the
+    receipt scaffolding (artifactRefs / codingMutationReceipt / durationMs)."""
+
+    result = {
+        "status": "ok",
+        "output": {"content": "real file body"},
+        "artifactRefs": [],
+        "codingMutationReceipt": None,
+        "deliveryReceipts": [],
+        "durationMs": 12,
+    }
+    node = tool_render.ReadRenderer().render_result(result)
+    assert "real file body" in node.text
+    assert "artifactRefs" not in node.text
+    assert "codingMutationReceipt" not in node.text
+
+
+def test_result_truncated_json_string_renders_done_not_raw_json() -> None:
+    """A truncated/invalid ToolResult JSON STRING (the bridge clips large
+    previews) must NOT dump verbatim — it collapses to ``(done)``."""
+
+    truncated = '{"artifactRefs": [], "codingMutationReceipt": null, "durat...'
+    node = tool_render.ReadRenderer().render_result(truncated)
+    assert "artifactRefs" not in node.text
+    assert node.text == "(done)"
+
+
+def test_result_plain_string_passes_through() -> None:
+    """A non-JSON string result (e.g. a short message) renders as-is."""
+
+    node = tool_render.ReadRenderer().render_result("all good")
+    assert "all good" in node.text
+
+
 # ---------------------------------------------------------------------------
 # Edit renders a diff
 # ---------------------------------------------------------------------------

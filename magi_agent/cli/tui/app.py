@@ -98,7 +98,6 @@ from magi_agent.cli.tui.transcript import (
     DEFAULT_FLUSH_INTERVAL,
     TranscriptController,
 )
-from magi_agent.cli.tui.widgets.tool_card import ToolCard
 from magi_agent.cli.tui.widgets.transcript_view import TranscriptView
 
 __all__ = ["MagiTuiApp", "TextualSink", "ToolUseConfirm"]
@@ -432,21 +431,22 @@ class MagiTuiApp(App[None]):
     ALLOW_SELECT = True
 
     CSS = """
+    Screen { background: transparent; }
     #topbar {
         dock: top;
         height: 1;
         padding: 0 1;
-        background: $primary-darken-2;
-        color: $text;
+        background: transparent;
+        color: $text-muted;
     }
-    #transcript { height: 1fr; padding: 0 1; background: $background; }
-    #live { height: auto; padding: 0 1; background: $background; }
+    #transcript { height: 1fr; padding: 0 1; background: transparent; }
+    #live { height: auto; padding: 0 1; background: transparent; }
     #prompt {
         dock: bottom;
         margin: 1 1;
         padding: 0 1;
         border: round $primary;
-        background: $surface;
+        background: transparent;
         height: auto;
     }
     #prompt:focus { border: round $accent; }
@@ -552,6 +552,12 @@ class MagiTuiApp(App[None]):
         self._drafts = DraftStash(session_id=session_id)
         self._model = model
         self._mode = mode
+        # Quiet by default: internal lifecycle/plumbing status events
+        # (runner_policy_*, phase_route_decision, turn_end, …) are dropped from
+        # the transcript. Set MAGI_TUI_VERBOSE=1 to surface them for debugging.
+        import os as _os_verbose  # noqa: PLC0415
+
+        self._verbose = _os_verbose.environ.get("MAGI_TUI_VERBOSE", "") == "1"
         # Session list (PR2.4) seams. ``_session_source`` is an optional test/
         # injection hook ``() -> list[SessionEntry]``; when None the dialog reads
         # the runtime's ``session_lister`` seam via ``session_entries``.
@@ -705,6 +711,11 @@ class MagiTuiApp(App[None]):
         welcome.append(" palette · ", style="dim")
         welcome.append("F1", style="#7aa2f7")
         welcome.append(" help\n", style="dim")
+        welcome.append("Copy: drag to select · ", style="dim")
+        welcome.append("Ctrl+Y", style="#7aa2f7")
+        welcome.append(" copy (", style="dim")
+        welcome.append("⌥", style="#7aa2f7")
+        welcome.append("-drag for native terminal copy)\n", style="dim")
         welcome.append(f"Commands ({len(command_names)}): ", style="dim")
         welcome.append(command_line, style="#9ece6a")
         self._controller.commit_rich(
@@ -713,6 +724,7 @@ class MagiTuiApp(App[None]):
                 "Welcome to Magi  "
                 "Keys: Shift+Enter newline · ↑ history · Ctrl+S draft · "
                 "Ctrl+P palette · F1 help  "
+                "Copy: drag to select · Ctrl+Y copy (⌥-drag for native terminal copy)  "
                 f"Commands ({len(command_names)}): {command_line}"
             ),
         )
@@ -1040,9 +1052,15 @@ class MagiTuiApp(App[None]):
         if event.type == "tool":
             self._render_tool_event(event)
             return
-        # status / artifact / control / error -> the minimal one-line summary
-        # (only TOOL events get the rich per-tool renderer treatment in F2c).
-        controller.commit_block(_status_summary(event))
+        if event.type == "error":
+            controller.commit_block(_status_summary(event))
+            return
+        # status / artifact / control -> internal diagnostics (routing/policy/
+        # turn-lifecycle plumbing). These flooded the chat with lines like
+        # ``runner_policy_assembly`` / ``phase_route_decision`` / ``turn_end``, so
+        # they are hidden by default and only shown under MAGI_TUI_VERBOSE=1.
+        if self._verbose:
+            controller.commit_block(_status_summary(event))
 
     def _render_tool_event(self, event: RuntimeEvent) -> None:
         """Route a TOOL event through the injected per-tool renderer registry."""
@@ -1066,28 +1084,22 @@ class MagiTuiApp(App[None]):
         self._commit_render_node(node, tool_name=name)
 
     def _commit_render_node(self, node: object, *, tool_name: str = "") -> None:
-        """Commit a ``RenderNode`` as a collapsible ``ToolCard`` (widget backing)
-        or a plain finalized block (legacy ``RichLog`` backing).
+        """Commit a ``RenderNode`` as a compact one-line block.
 
-        The displayed/committed text is annotated with the tool name when the
-        renderer's output does not already carry it (the fallback renderer emits
-        only the raw input/result). The real Edit/Bash/Read renderers already
-        embed their name in the header, so they are left untouched.
+        Tools render Claude-Code style: a ``● Name(arg)`` header and a dimmed
+        ``└ preview`` — committed as plain finalized blocks (not collapsible
+        cards), so a turn's tool activity stays scannable instead of stacking
+        large boxes. The displayed/committed text is annotated with the tool name
+        when the renderer's output does not already carry it (the fallback
+        renderer emits only the raw input/result); the real Edit/Bash/Read
+        renderers already embed their name in the header, so they are untouched.
+        ``commit_rich`` keeps the displayed text in the snapshot for
+        search-fidelity (what is indexed == what is shown).
         """
-
-        from magi_agent.cli.contracts import RenderNode  # noqa: PLC0415
 
         rich = getattr(node, "rich", None)
         text = getattr(node, "text", "") or ""
         annotated = self._annotate_tool_text(text, tool_name)
-        # Widget-list backing -> collapsible ToolCard (header = annotated text).
-        if self._view is not None:
-            card = ToolCard.from_render_node(RenderNode(rich=rich, text=annotated))
-            self.controller.commit_tool(card, text=annotated)
-            return
-        # Legacy RichLog backing -> the historical commit_rich/commit_block path.
-        # commit_rich keeps the displayed text in the snapshot for
-        # search-fidelity (what is indexed == what is shown).
         if rich is not None:
             self.controller.commit_rich(rich, text=annotated)
         else:

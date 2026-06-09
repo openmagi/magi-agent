@@ -197,8 +197,17 @@ def test_tool_end_rejected_renders_rejected_node() -> None:
     asyncio.run(_run())
 
 
-def test_non_tool_event_keeps_one_line_summary() -> None:
-    async def _run() -> None:
+def test_non_tool_status_event_hidden_by_default_shown_when_verbose(
+    monkeypatch,
+) -> None:
+    """Non-tool status events are internal diagnostics: dropped by default,
+    surfaced only under MAGI_TUI_VERBOSE=1."""
+
+    async def _run(verbose: bool) -> tuple[str, ...]:
+        if verbose:
+            monkeypatch.setenv("MAGI_TUI_VERBOSE", "1")
+        else:
+            monkeypatch.delenv("MAGI_TUI_VERBOSE", raising=False)
         events = [
             RuntimeEvent(
                 type="status",
@@ -211,10 +220,13 @@ def test_non_tool_event_keeps_one_line_summary() -> None:
             app.start_turn("status")
             await app.workers.wait_for_complete()
             await pilot.pause()
-        blocks = app.controller.committed_blocks_snapshot()
-        assert any(b.startswith("[status]") for b in blocks)
+        return app.controller.committed_blocks_snapshot()
 
-    asyncio.run(_run())
+    quiet = asyncio.run(_run(verbose=False))
+    assert not any(b.startswith("[status]") for b in quiet)
+
+    loud = asyncio.run(_run(verbose=True))
+    assert any(b.startswith("[status]") for b in loud)
 
 
 # ---------------------------------------------------------------------------
