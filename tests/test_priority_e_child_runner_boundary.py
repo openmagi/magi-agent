@@ -6,6 +6,8 @@ import json
 import re
 from pathlib import Path
 
+import pytest
+
 
 def _is_runtime_ref(value: object, namespace: str) -> bool:
     return isinstance(value, str) and re.fullmatch(rf"{namespace}:[a-f0-9]{{16}}", value) is not None
@@ -103,6 +105,24 @@ class LiveChildRunner:
             "toolLogs": "raw tool logs",
             "hiddenReasoning": "private reasoning",
         }
+
+
+class ThrowingLiveChildRunner:
+    """A REAL (model-backed) live child runner that always raises.
+
+    Used to verify the LIVE error path: the boundary must catch the exception,
+    sanitise the error message (no paths, no tokens), set status="error" with
+    error_code="live_child_runner_error", and NEVER raise.
+    """
+
+    openmagi_live_provider = True
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def run_child(self, request: object) -> dict[str, object]:
+        self.calls += 1
+        raise RuntimeError("boom /Users/kevin/secret sk-live-AAA")
 
 
 def test_child_runner_boundary_defaults_off_and_never_calls_fake_runner() -> None:
@@ -238,6 +258,46 @@ def test_child_runner_boundary_catches_fake_runner_errors_without_raw_leakage() 
     assert projection["authorityFlags"]["realChildRunnerExecuted"] is False
 
 
+def test_child_runner_boundary_catches_live_runner_errors_without_raw_leakage() -> None:
+    """LIVE error path: boundary never raises, sanitises the raw exception text.
+
+    Mirrors ``test_child_runner_boundary_catches_fake_runner_errors_without_raw_leakage``
+    exactly — status=="error", error_code=="live_child_runner_error", the raw
+    exception text (path + token) must NOT appear in the public projection OR
+    the full model_dump, and the runner is called exactly once.
+    """
+    from magi_agent.runtime.child_runner_boundary import (
+        ChildRunnerConfig,
+        LocalChildRunnerBoundary,
+    )
+
+    live = ThrowingLiveChildRunner()
+    boundary = LocalChildRunnerBoundary(
+        ChildRunnerConfig(enabled=True, liveChildRunnerEnabled=True),
+        child_runner=live,
+    )
+
+    result = asyncio.run(boundary.run(_request()))
+    projection = result.public_projection()
+    encoded = json.dumps(projection, sort_keys=True)
+    raw_encoded = json.dumps(result.model_dump(by_alias=True), sort_keys=True)
+
+    assert result.status == "error"
+    assert result.error_code == "live_child_runner_error"
+    assert live.calls == 1
+    # Raw exception text (path + token) must not leak in either surface.
+    assert "/Users/kevin/secret" not in encoded
+    assert "sk-live-AAA" not in encoded
+    assert "/Users/kevin/secret" not in raw_encoded
+    assert "sk-live-AAA" not in raw_encoded
+    # Diagnostic should record that the runner was called (attempt semantics).
+    assert projection["diagnosticMetadata"]["liveChildRunnerCalled"] is True
+    # Sealed authority flags must stay False on the error path.
+    assert projection["authorityFlags"]["realChildRunnerExecuted"] is False
+    for flag_value in projection["authorityFlags"].values():
+        assert flag_value is False
+
+
 def test_child_runner_boundary_runs_live_runner_when_live_gate_enabled() -> None:
     from magi_agent.runtime.child_runner_boundary import (
         ChildRunnerConfig,
@@ -284,7 +344,7 @@ def test_child_runner_boundary_runs_live_runner_when_live_gate_enabled() -> None
         assert leak not in encoded
         assert leak not in raw_encoded
     # Diagnostic (non-authority) signal that a live run happened.
-    assert projection["diagnosticMetadata"]["liveChildRunnerExecuted"] is True
+    assert projection["diagnosticMetadata"]["liveChildRunnerCalled"] is True
     # Sealed authority flags stay False on the live path.
     for flag_value in projection["authorityFlags"].values():
         assert flag_value is False
@@ -314,7 +374,7 @@ def test_child_runner_boundary_blocks_live_runner_when_live_gate_disabled() -> N
     assert live.calls == 0
     assert result.status == "blocked"
     assert result.error_code == "live_child_runner_not_enabled"
-    assert projection["diagnosticMetadata"]["liveChildRunnerExecuted"] is False
+    assert projection["diagnosticMetadata"]["liveChildRunnerCalled"] is False
     assert projection["authorityFlags"]["realChildRunnerExecuted"] is False
 
 
@@ -338,7 +398,7 @@ def test_child_runner_boundary_fake_path_unchanged_with_live_gate_off() -> None:
     assert result.envelope.summary == "Reviewer found no blockers."
     # The fake never runs through the live diagnostic signal.
     projection = result.public_projection()
-    assert projection["diagnosticMetadata"]["liveChildRunnerExecuted"] is False
+    assert projection["diagnosticMetadata"]["liveChildRunnerCalled"] is False
     assert projection["diagnosticMetadata"]["localFakeChildRunnerCalled"] is True
 
 
@@ -423,8 +483,6 @@ def test_child_runner_config_live_gate_keeps_production_flags_sealed() -> None:
     assert config.production_child_execution_enabled is False
     assert config.production_writes_enabled is False
     # Sealed Literal[False] fields reject any attempt to set them True.
-    import pytest
-
     with pytest.raises(Exception):
         ChildRunnerConfig(productionChildExecutionEnabled=True)
     with pytest.raises(Exception):

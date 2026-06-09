@@ -368,7 +368,22 @@ class ChildRunnerResult(BaseModel):
 
 
 class LocalChildRunnerBoundary:
-    """Disabled-by-default child Runner boundary with local fake execution only."""
+    """Child Runner boundary with default-OFF live-child-runner admission.
+
+    Three execution surfaces are available, each behind its own off-switch:
+    - **local-fake** (``localFakeChildRunnerEnabled``): deterministic stub for
+      tests and development.
+    - **sealed ADK shadow** (``realChildExecutionPackEnabled`` opt-in pack): routes
+      a child turn through the real local ADK turn-runner surface.
+    - **live-child-runner** (``liveChildRunnerEnabled``): drives a REAL
+      model-backed runner injected via ``child_runner`` (``openmagi_live_provider``
+      marker required) — PARALLEL to the fake path, NOT through the sealed ADK
+      shadow surface.  All production-authority ``Literal[False]`` flags and seals
+      remain untouched; this is a *local* surface only.
+
+    All three gates default to ``False`` (byte-identical to the original PR1
+    behaviour when none are enabled).
+    """
 
     def __init__(
         self,
@@ -670,7 +685,7 @@ class LocalChildRunnerBoundary:
         spawn-depth, total-agents and ``max_output_refs`` caps are enforced
         exactly as the ADK shadow path does.  The sealed ``ChildRunnerAuthorityFlags``
         are NEVER flipped (this is a *local* surface); a non-authority
-        ``liveChildRunnerExecuted`` diagnostic signals a live run instead.
+        ``liveChildRunnerCalled`` diagnostic signals a live run attempt instead.
         """
         # Bound 1 — spawn-depth cap (no runaway recursion).
         spawn_depth = _requested_spawn_depth(request)
@@ -683,6 +698,11 @@ class LocalChildRunnerBoundary:
                 diagnostics=diagnostics,
             )
         # Bound 2 — total-agents-per-run cap (≤1000).
+        # NOTE(contract): ``agents_spawned_so_far`` is a preflight *snapshot*
+        # supplied by the caller.  The boundary checks it but does NOT
+        # self-increment it — a multi-spawn caller (e.g. Task C ``spawn_agent``)
+        # MUST own and increment the running count across successive ``run()``
+        # calls to prevent races where the cap appears satisfied mid-fan-out.
         if self.agents_spawned_so_far >= MAX_TOTAL_AGENTS_PER_RUN:
             return _result(
                 request,
@@ -694,7 +714,7 @@ class LocalChildRunnerBoundary:
         try:
             output = await self._call_child_runner(request)
         except Exception as exc:
-            diagnostics["liveChildRunnerExecuted"] = True
+            diagnostics["liveChildRunnerCalled"] = True
             diagnostics["providerError"] = (
                 _sanitize_public_text(str(exc), max_chars=240)
                 or "[redacted-provider-error]"
@@ -706,7 +726,7 @@ class LocalChildRunnerBoundary:
                 error_code="live_child_runner_error",
                 diagnostics=diagnostics,
             )
-        diagnostics["liveChildRunnerExecuted"] = True
+        diagnostics["liveChildRunnerCalled"] = True
         return ChildRunnerResult(
             status="ok",
             taskId=request.task_id,
@@ -920,7 +940,7 @@ def _diagnostics(config: ChildRunnerConfig) -> dict[str, object]:
         "adkRunnerSurface": config.adk_runner_surface,
         "localFakeChildRunnerCalled": False,
         "realChildRunnerExecuted": False,
-        "liveChildRunnerExecuted": False,
+        "liveChildRunnerCalled": False,
     }
 
 
