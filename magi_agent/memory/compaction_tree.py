@@ -52,15 +52,21 @@ Determinism / safety
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
-from magi_agent.memory.adapters.local_file_writable import _redact_for_write
+from magi_agent.memory.adapters.local_file_writable import (
+    _atomic_write_text,
+    _redact_for_write,
+)
 from magi_agent.memory.compactor import consolidate
 from magi_agent.memory.config import MemoryRuntimeConfig
+
+logger = logging.getLogger(__name__)
 
 #: ROOT token estimate heuristic.  We approximate tokens as ``chars / 4`` (a
 #: common rule of thumb for English/markdown), so the char budget for ROOT.md
@@ -149,7 +155,9 @@ def append_daily_entry(memory_dir: Path, entry: str, *, today: date) -> Path | N
     existing = target.read_text(encoding="utf-8") if target.is_file() else ""
     if existing and not existing.endswith("\n"):
         existing += "\n"
-    target.write_text(existing + safe + "\n", encoding="utf-8")
+    # Atomic write (tmp + os.replace) so a mid-write crash can never corrupt the
+    # raw daily log — reuses the sibling adapter's proven helper.
+    _atomic_write_text(target, existing + safe + "\n")
     return target
 
 
@@ -229,6 +237,9 @@ class CompactionTree:
         except Exception:
             # Fail-soft: never propagate into the caller.  Persist the cooldown
             # stamp anyway so a hard-looping caller still respects the window.
+            # Log the traceback so a real programming bug is visible instead of
+            # being silently swallowed by the fail-soft behavior.
+            logger.exception("CompactionTree.run failed; returning partial result")
             self._stamp_run()
             return CompactionTreeResult(
                 ran=True,
@@ -411,13 +422,19 @@ class CompactionTree:
         return _truncate_lines(text, threshold), True, False
 
     def _combine(self, paths: list[Path], *, header: str | None) -> str:
-        parts: list[str] = []
-        if header:
-            parts.append(header)
+        bodies: list[str] = []
         for path in paths:
             text = _read(path).strip()
             if text:
-                parts.append(text)
+                bodies.append(text)
+        if not bodies:
+            # All sources empty → no body.  Emit nothing rather than a bare
+            # header (e.g. a lone ``# Month 2026-03`` with no content).
+            return ""
+        parts: list[str] = []
+        if header:
+            parts.append(header)
+        parts.extend(bodies)
         return "\n\n".join(parts)
 
     def _tier_files(self, tier: str) -> list[Path]:
@@ -436,13 +453,20 @@ class CompactionTree:
         if not _is_within(target, self.memory_dir):
             return False
         safe = _redact_for_write(text)
-        # Reuse the deterministic dedup/oldest-drop consolidator as a final
-        # within-file size guard (generous cap — summarization already bounds
-        # tier size; this just dedups repeated rollups).
-        capped = consolidate(safe, max_bytes=_DEFAULT_FILE_CAP_BYTES).text
-        body = capped if capped.strip() else safe
+        # The consolidator is built for the flat ``- [kind] body`` append-log;
+        # on structured tier/ROOT markdown (``# Week …`` headers, blank-line
+        # separators) its dedup re-render flattens structure when lines repeat.
+        # So only invoke it as a LAST-RESORT byte-cap guard, when the encoded
+        # text actually exceeds the cap.  Under the cap we write the structured
+        # text verbatim so dedup never fires.
+        body = safe
+        if len(safe.encode("utf-8")) > _DEFAULT_FILE_CAP_BYTES:
+            capped = consolidate(safe, max_bytes=_DEFAULT_FILE_CAP_BYTES).text
+            body = capped if capped.strip() else safe
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(body if body.endswith("\n") else body + "\n", encoding="utf-8")
+        # Atomic write (tmp + os.replace) so a mid-write crash can never corrupt
+        # a tier/ROOT file — reuses the sibling adapter's proven helper.
+        _atomic_write_text(target, body if body.endswith("\n") else body + "\n")
         return True
 
     def _rel(self, path: Path) -> str:
@@ -522,7 +546,12 @@ def _build_root_document(
         rendered.append(heading)
         rendered.append(body.strip() if body.strip() else "_(none)_")
     document = "\n\n".join(rendered) + "\n"
-    return _cap_chars(document, char_cap)
+    # Redact BEFORE the char-cap: truncating mid-secret before the scanner runs
+    # is order-fragile (a partial token could slip past redaction).  Scan the
+    # full document first, then cap.  ``_write`` redacts again (idempotent), so
+    # the final ROOT on disk is both redacted and within the char budget.
+    redacted = _redact_for_write(document)
+    return _cap_chars(redacted, char_cap)
 
 
 def _cap_chars(text: str, char_cap: int) -> str:

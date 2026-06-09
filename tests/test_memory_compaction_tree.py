@@ -435,3 +435,171 @@ def test_run_never_raises_on_garbage_files(tmp_path: Path) -> None:
     tree = CompactionTree(memory, _config(), summarizer=_RecordingSummarizer())
     result = tree.run(today=date(2026, 6, 8))
     assert result.ran is True
+
+
+# ---------------------------------------------------------------------------
+# Multi-period rollup: distinct weeks + correct monthly folding
+# ---------------------------------------------------------------------------
+
+
+def test_two_completed_weeks_produce_two_weekly_files(tmp_path: Path) -> None:
+    memory = tmp_path / "memory"
+    # Two distinct completed ISO weeks, both well before today.
+    # 2026-W18: Mon 2026-04-27 .. Sun 2026-05-03.
+    _write_daily(memory, "2026-04-27", lines=2)
+    _write_daily(memory, "2026-04-28", lines=2)
+    # 2026-W19: Mon 2026-05-04 .. Sun 2026-05-10.
+    _write_daily(memory, "2026-05-04", lines=2)
+    _write_daily(memory, "2026-05-05", lines=2)
+    tree = CompactionTree(memory, _config(), summarizer=_RecordingSummarizer())
+    tree.run(today=date(2026, 6, 8))
+    weekly_dir = memory / "weekly"
+    week_files = sorted(p.name for p in weekly_dir.glob("*.md"))
+    assert week_files == ["2026-W18.md", "2026-W19.md"]
+    w18 = (weekly_dir / "2026-W18.md").read_text(encoding="utf-8")
+    w19 = (weekly_dir / "2026-W19.md").read_text(encoding="utf-8")
+    assert "2026-04-27" in w18 and "2026-04-28" in w18
+    assert "2026-05-04" in w19 and "2026-05-05" in w19
+
+
+def test_multiple_weeks_fold_into_single_monthly_bucket(tmp_path: Path) -> None:
+    memory = tmp_path / "memory"
+    weekly = memory / "weekly"
+    weekly.mkdir(parents=True)
+    # Three weeks whose Mondays all fall in 2026-03:
+    #   2026-W10 Mon 2026-03-02, 2026-W11 Mon 2026-03-09, 2026-W12 Mon 2026-03-16.
+    (weekly / "2026-W10.md").write_text("- w10 summary\n", encoding="utf-8")
+    (weekly / "2026-W11.md").write_text("- w11 summary\n", encoding="utf-8")
+    (weekly / "2026-W12.md").write_text("- w12 summary\n", encoding="utf-8")
+    tree = CompactionTree(memory, _config(), summarizer=_RecordingSummarizer())
+    tree.run(today=date(2026, 6, 8))
+    monthly_dir = memory / "monthly"
+    month_files = sorted(p.name for p in monthly_dir.glob("*.md"))
+    assert month_files == ["2026-03.md"]  # all folded into one bucket
+    march = (monthly_dir / "2026-03.md").read_text(encoding="utf-8")
+    assert "w10 summary" in march
+    assert "w11 summary" in march
+    assert "w12 summary" in march
+
+
+# ---------------------------------------------------------------------------
+# ISO year-rollover correctness (week bucketing across the year boundary)
+# ---------------------------------------------------------------------------
+
+
+def test_iso_week_year_rollover_late_december(tmp_path: Path) -> None:
+    memory = tmp_path / "memory"
+    # 2025-12-29 is a Monday belonging to ISO week 2026-W01.
+    _write_daily(memory, "2025-12-29", lines=2)
+    tree = CompactionTree(memory, _config(), summarizer=_RecordingSummarizer())
+    tree.run(today=date(2026, 6, 8))
+    assert (memory / "weekly" / "2026-W01.md").is_file()
+    # And NOT a (wrong) 2025-W## bucket for that date.
+    assert not (memory / "weekly" / "2025-W52.md").exists()
+    assert not (memory / "weekly" / "2025-W53.md").exists()
+
+
+def test_iso_week_year_rollover_early_january(tmp_path: Path) -> None:
+    memory = tmp_path / "memory"
+    # 2027-01-03 is a Sunday belonging to ISO week 2026-W53.
+    _write_daily(memory, "2027-01-03", lines=2)
+    tree = CompactionTree(memory, _config(), summarizer=_RecordingSummarizer())
+    # today is in 2027 so the late-2026 ISO week is completed.
+    tree.run(today=date(2027, 3, 1))
+    assert (memory / "weekly" / "2026-W53.md").is_file()
+    assert not (memory / "weekly" / "2027-W01.md").exists()
+
+
+# ---------------------------------------------------------------------------
+# consolidate byte-cap path vs structure preservation under the cap
+# ---------------------------------------------------------------------------
+
+
+def test_oversized_tier_triggers_byte_cap_guard(tmp_path: Path) -> None:
+    from magi_agent.memory.compaction_tree import _DEFAULT_FILE_CAP_BYTES
+
+    memory = tmp_path / "memory"
+    # A completed prior day whose body EXCEEDS the 256KB cap, made of UNIQUE flat
+    # bullets so dedup alone cannot shrink it — the oldest-drop byte guard must
+    # fire when this rolls up through ``_write`` into the weekly tier.  The
+    # weekly threshold is set absurdly high so summarization never runs and the
+    # full oversized text reaches ``_write``.
+    big = "\n".join(f"- [note] unique fact number {i} padding xyz" for i in range(20000))
+    assert len(big.encode("utf-8")) > _DEFAULT_FILE_CAP_BYTES
+    # 2026-04-27 is in completed week 2026-W18 (before today).
+    _write_daily(memory, "2026-04-27", text=big)
+    tree = CompactionTree(
+        memory, _config(weeklyThreshold=10_000_000), summarizer=None
+    )
+    tree.run(today=date(2026, 6, 8))
+    written = (memory / "weekly" / "2026-W18.md").read_text(encoding="utf-8")
+    # Size guard fired → final weekly file is within the cap.
+    assert len(written.encode("utf-8")) <= _DEFAULT_FILE_CAP_BYTES
+
+
+def test_structured_content_under_cap_preserved(tmp_path: Path) -> None:
+    """Under the cap, structured markdown is written verbatim (no dedup flatten).
+
+    A recurring ``- standup done`` bullet across two days must NOT collapse the
+    structure (headers / blank-line separators) now that consolidate no longer
+    runs under-cap.
+    """
+    memory = tmp_path / "memory"
+    # Two completed days in the same ISO week (2026-W18), each with a duplicate
+    # bullet that would be deduped if consolidate ran on the structured rollup.
+    _write_daily(
+        memory,
+        "2026-04-27",
+        text="- standup done\n- shipped feature A",
+    )
+    _write_daily(
+        memory,
+        "2026-04-28",
+        text="- standup done\n- shipped feature B",
+    )
+    # High thresholds so no summarization fires; we want the raw combined text.
+    tree = CompactionTree(
+        memory, _config(weeklyThreshold=10_000), summarizer=None
+    )
+    tree.run(today=date(2026, 6, 8))
+    weekly = (memory / "weekly" / "2026-W18.md").read_text(encoding="utf-8")
+    # Structure intact: the header is present and both days' content survive.
+    assert "# Week 2026-W18" in weekly
+    assert "shipped feature A" in weekly and "shipped feature B" in weekly
+    # The duplicate bullet is NOT deduped — it appears for BOTH days.
+    assert weekly.count("- standup done") == 2
+    # Blank-line separators between blocks are preserved.
+    assert "\n\n" in weekly
+
+
+# ---------------------------------------------------------------------------
+# Atomic write: no leftover temp file remains
+# ---------------------------------------------------------------------------
+
+
+def _temp_files(root: Path) -> list[Path]:
+    return [p for p in root.rglob("*.compact.tmp")]
+
+
+def test_write_leaves_no_temp_file(tmp_path: Path) -> None:
+    memory = tmp_path / "memory"
+    _write_daily(memory, "2026-06-08", lines=2)
+    tree = CompactionTree(memory, _config(), summarizer=_RecordingSummarizer())
+    tree.run(today=date(2026, 6, 8))
+    root = memory / "ROOT.md"
+    assert root.is_file()
+    # The atomic tmp file is renamed into place — nothing left behind.
+    assert _temp_files(memory) == []
+    # Content is the real (correct) ROOT document.
+    assert "# Memory Root (synthesized)" in root.read_text(encoding="utf-8")
+
+
+def test_append_daily_entry_leaves_no_temp_file(tmp_path: Path) -> None:
+    memory = tmp_path / "memory"
+    append_daily_entry(memory, "first fact", today=date(2026, 6, 8))
+    append_daily_entry(memory, "second fact", today=date(2026, 6, 8))
+    daily = memory / "daily" / "2026-06-08.md"
+    assert daily.is_file()
+    assert _temp_files(memory) == []
+    content = daily.read_text(encoding="utf-8")
+    assert "first fact" in content and "second fact" in content
