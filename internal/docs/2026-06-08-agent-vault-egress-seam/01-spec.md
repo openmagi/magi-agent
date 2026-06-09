@@ -74,6 +74,8 @@ When false, validation is skipped entirely.
 ### FR5 — Evidence
 Each proxied egress class (bash-subprocess, web_fetch) emits one `observed_egress`-style decision record (source tag reusing `gate5b_egress_proxy`), digest-only / redacted per existing sensitivity rules. Best-effort; evidence emission failure must not break the tool call.
 
+> **Status (sub-project A):** the record builder `egress_proxy.evidence.egress_proxy_record` is **defined and tested**, but **not yet wired** into the two injection sites — no records are emitted today. Wiring emission from a real runtime evidence sink is a deliberate follow-up (the pure injection helpers have no sink in scope). FR5 is therefore *seam-defined, emission-deferred* for this phase.
+
 ## 6. Failure & edge behavior
 
 - **Enabled + misconfigured** → refuse to start (FR4).

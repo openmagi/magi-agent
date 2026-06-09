@@ -44,5 +44,8 @@ def httpx_client_kwargs(cfg: EgressProxyConfig) -> dict[str, object]:
         headers["Proxy-Authorization"] = f"Basic {token}"
     return {
         "proxy": httpx.Proxy(cfg.proxy_url, headers=headers or None),
+        # ca_cert_path is guaranteed non-None when enabled because app startup
+        # calls EgressProxyConfig.validate() (fail-closed). Do not call this
+        # builder on an enabled-but-unvalidated config.
         "verify": cfg.ca_cert_path,
     }

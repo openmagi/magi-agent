@@ -19,6 +19,10 @@ def egress_proxy_record(
     """Build (and optionally emit) a digest-only egress-proxy decision record.
 
     Best-effort: emission failures are swallowed so a tool call is never broken.
+
+    NOTE: sub-project A defines this seam but does not yet wire it into the two
+    injection sites (gate5b Bash env, live_fetch httpx). Emission from a real
+    runtime evidence sink lands in a follow-up; today no records are emitted.
     """
     record = {
         "evidence_source": GATE1A_EGRESS_TELEMETRY_SOURCE,
