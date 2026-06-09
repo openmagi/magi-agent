@@ -198,3 +198,110 @@ def test_gate_on_under_threshold_plain_append(tmp_path: Path, monkeypatch) -> No
     assert after.startswith(before)
     assert "another" in after
     assert not _archive_dir(tmp_path).exists()
+
+
+# ---------------------------------------------------------------------------
+# Fix 1 — reserve headroom for the triggering entry (all-unique near-cap)
+# ---------------------------------------------------------------------------
+
+
+def test_gate_on_all_unique_near_cap_new_fact_succeeds(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Gate ON, all-unique entries near cap: remember() a brand-new fact must
+    SUCCEED (not raise ValueError). The new fact must appear, the original must
+    be archived, and the final file must be <= max_file_bytes.
+
+    Before the fix, consolidate() was called with max_bytes=max_file_bytes, which
+    filled the entire cap with existing entries, leaving no room for the incoming
+    entry — the subsequent max_file_bytes guard then raised ValueError and the
+    new fact was LOST.
+    """
+    monkeypatch.setenv(MAGI_MEMORY_COMPACTION_ENABLED_ENV, "1")
+    target = tmp_path / "MEMORY.md"
+
+    # 11 unique entries render (via _render) to exactly 264 bytes.
+    # Setting max_file_bytes=264 means consolidate(original, max_bytes=264)
+    # keeps all 264 bytes of unique entries, leaving ZERO headroom for the
+    # incoming entry (36 bytes). Without the fix: 264 + 36 > 264 → ValueError.
+    # With the fix: consolidate(original, max_bytes=264-36=228) drops the
+    # oldest entries to make room, then the append succeeds at ≤264 bytes.
+    max_file_bytes = 264
+
+    # Build all-unique entries: 11 × "- [note] unique-factXX\n" → 264 bytes rendered.
+    lines = "".join(f"\n- [note] unique-fact{i:02d}\n" for i in range(11))
+    target.write_text(lines, encoding="utf-8")
+    pre_size = len(target.read_bytes())
+    assert pre_size == max_file_bytes, "pre-fill must exactly fill the cap"
+
+    # Set threshold so the compaction branch triggers.
+    threshold = pre_size - 10
+
+    provider = _provider(
+        tmp_path,
+        max_file_bytes=max_file_bytes,
+        compaction_threshold_bytes=threshold,
+    )
+
+    new_body = "brand-new-unique-fact-xyz"
+    # Before the fix this raised ValueError; after the fix it must succeed.
+    asyncio.run(provider.remember({"body": new_body, "kind": "note"}))
+
+    after = target.read_text(encoding="utf-8")
+    after_bytes = len(after.encode("utf-8"))
+
+    # The new fact must be present.
+    assert new_body in after, "new fact must be appended"
+    # The file must respect the hard cap.
+    assert after_bytes <= max_file_bytes, (
+        f"file size {after_bytes} exceeds max_file_bytes {max_file_bytes}"
+    )
+    # The original was archived.
+    archives = list(_archive_dir(tmp_path).glob("MEMORY.md.*.md"))
+    assert len(archives) == 1, "original must be archived before compaction"
+
+
+# ---------------------------------------------------------------------------
+# Fix 2 — post-compaction dedup: same fact must NOT be appended twice
+# ---------------------------------------------------------------------------
+
+
+def test_gate_on_post_compaction_dedup_prevents_duplicate(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Gate ON, USER.md compacted, then remember() a fact already in the
+    compacted file → it must NOT be duplicated.
+
+    Before the fix, _render joined entries with single '\\n', breaking the
+    provider's dedup check (which tests 'if entry in existing' where entry
+    has a LEADING '\\n'). After compaction the first entry in the file had no
+    leading '\\n', so the substring match failed and the duplicate slipped through.
+    """
+    monkeypatch.setenv(MAGI_MEMORY_COMPACTION_ENABLED_ENV, "1")
+    target = tmp_path / "USER.md"
+
+    # Pre-fill with entries + a dup to trigger compaction.
+    prefill = "".join(f"\n- [note] u-{i:02d}\n" for i in range(10))
+    # Add duplicate so compaction actually fires (changes file).
+    prefill += "\n- [note] u-00\n"
+    target.write_text(prefill, encoding="utf-8")
+
+    max_file_bytes = 4_194_304
+    # Low threshold so compaction triggers immediately.
+    provider = _provider(
+        tmp_path,
+        max_file_bytes=max_file_bytes,
+        compaction_threshold_bytes=50,
+    )
+
+    # First remember() triggers compaction and appends the new fact.
+    asyncio.run(
+        provider.remember({"body": "u-00", "kind": "note", "target_file": "USER.md"})
+    )
+
+    after = target.read_text(encoding="utf-8")
+    # "u-00" already existed; must appear exactly once (dedup should catch it).
+    occurrences = after.count("- [note] u-00\n")
+    assert occurrences == 1, (
+        f"'u-00' must appear exactly once after compaction+dedup, found {occurrences}"
+    )
