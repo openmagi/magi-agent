@@ -1,13 +1,13 @@
 """Manifest declarations for the optional file & multimodal tool suite.
 
-All four tools are ``enabled_by_default=False``.  They are registered only
-when ``MAGI_FILE_TOOLS_ENABLED=true`` and wired into the CLI tool runtime by
+All tools are ``enabled_by_default=False``.  They are registered only when
+``MAGI_FILE_TOOLS_ENABLED=true`` and wired into the CLI tool runtime by
 ``magi_agent.cli.tool_runtime.build_cli_tool_runtime``.
 
-Heavy dependencies (openpyxl / pypdf / python-docx / python-pptx / openai) are guarded by
-``try/except ImportError`` inside the handlers, so environments without the
-``[files]`` or ``[audio]`` extras return a ``status="blocked"`` result rather
-than failing on import.
+Heavy dependencies (openpyxl / pypdf / python-docx / python-pptx / openai /
+yt-dlp / ffmpeg) are guarded by ``try/except ImportError`` inside the
+handlers, so environments without the ``[files]``, ``[audio]``, or ``[video]``
+extras return a ``status="blocked"`` result rather than failing on import.
 """
 
 from __future__ import annotations
@@ -66,12 +66,87 @@ _IMAGE_UNDERSTAND_SCHEMA: dict[str, object] = {
 _AUDIO_TRANSCRIBE_SCHEMA: dict[str, object] = {
     "type": "object",
     "additionalProperties": False,
-    "required": ["path"],
     "properties": {
-        "path": {"type": "string"},
+        "path": {
+            "type": "string",
+            "description": "Workspace-relative path to an audio file. Mutually exclusive with url.",
+        },
+        "url": {
+            "type": "string",
+            "description": (
+                "YouTube or direct audio URL to fetch and transcribe. "
+                "Mutually exclusive with path. "
+                "Requires MAGI_VIDEO_DOWNLOAD_ENABLED=true."
+            ),
+        },
         "language": {
             "type": "string",
             "description": "ISO 639-1 language code hint (e.g. 'en'). Optional.",
+        },
+    },
+}
+
+_VIDEO_FRAMES_SCHEMA: dict[str, object] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["source"],
+    "properties": {
+        "source": {
+            "type": "string",
+            "description": (
+                "YouTube URL (https://youtube.com/...) or workspace-relative path "
+                "to a video file (.mp4, .webm, .avi, .mov, .mkv)."
+            ),
+        },
+        "timestamps": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": (
+                "List of timestamps in HH:MM:SS or MM:SS format "
+                "(e.g. ['00:02:00', '00:05:30']). "
+                "If omitted, samples 5 evenly-spaced frames."
+            ),
+            "maxItems": 10,
+        },
+        "prompt": {
+            "type": "string",
+            "description": (
+                "Question or instruction for the vision model applied to each frame. "
+                "Default: 'Describe what is happening in this video frame.'"
+            ),
+        },
+        "includeCaptions": {
+            "type": "boolean",
+            "description": (
+                "When true and source is a YouTube URL, also fetch auto-generated "
+                "or manual captions. Default: true."
+            ),
+        },
+    },
+}
+
+_MUSIC_NOTATION_SCHEMA: dict[str, object] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["path"],
+    "properties": {
+        "path": {
+            "type": "string",
+            "description": "Workspace-relative path to an image file containing musical notation.",
+        },
+        "clef": {
+            "type": "string",
+            "enum": ["treble", "bass", "alto", "tenor", "auto"],
+            "description": (
+                "Expected clef type. Use 'auto' to let the model detect. Default: 'auto'."
+            ),
+        },
+        "question": {
+            "type": "string",
+            "description": (
+                "Specific question about the notation "
+                "(e.g. 'What are the note names from left to right?'). Optional."
+            ),
         },
     },
 }
@@ -140,7 +215,11 @@ _FILE_TOOL_MANIFESTS: tuple[ToolManifest, ...] = (
     ),
     ToolManifest(
         name="AudioTranscribe",
-        description="Transcribe an audio file in the workspace to text via ASR.",
+        description=(
+            "Transcribe an audio file in the workspace to text via ASR. "
+            "Also accepts a YouTube or direct audio URL when "
+            "MAGI_VIDEO_DOWNLOAD_ENABLED=true."
+        ),
         kind="core",
         source=CORE_TOOL_SOURCE,
         permission="read",
@@ -156,6 +235,55 @@ _FILE_TOOL_MANIFESTS: tuple[ToolManifest, ...] = (
         adkToolType="LongRunningFunctionTool",
         shouldDefer=True,
         budget=Budget(max_calls_per_turn=2, max_parallel=1),
+        enabled_by_default=False,
+        opt_out=True,
+    ),
+    ToolManifest(
+        name="VideoFrames",
+        description=(
+            "Extract frames from a video at specific timestamps and describe their content. "
+            "Accepts a YouTube URL or a workspace-local video file path. "
+            "Also fetches available subtitles/captions when present. "
+            "URL sources require MAGI_VIDEO_DOWNLOAD_ENABLED=true."
+        ),
+        kind="core",
+        source=CORE_TOOL_SOURCE,
+        permission="read",
+        inputSchema=_VIDEO_FRAMES_SCHEMA,
+        availableInModes=("act",),
+        tags=("video", "multimodal", "read", "url", "multimodal-file"),
+        parallelSafety="readonly",
+        mutatesWorkspace=False,
+        dangerous=False,
+        timeoutMs=300_000,
+        costClass="metered",
+        latencyClass="background",
+        adkToolType="LongRunningFunctionTool",
+        shouldDefer=True,
+        budget=Budget(max_calls_per_turn=2, max_parallel=1),
+        enabled_by_default=False,
+        opt_out=True,
+    ),
+    ToolManifest(
+        name="MusicNotation",
+        description=(
+            "Read musical notation from an image file (staff, clef, notes, rests). "
+            "Returns a structured description of the notes and their values. "
+            "Supports treble clef, bass clef, and common time signatures."
+        ),
+        kind="core",
+        source=CORE_TOOL_SOURCE,
+        permission="read",
+        inputSchema=_MUSIC_NOTATION_SCHEMA,
+        availableInModes=("act",),
+        tags=("image", "music", "notation", "read", "multimodal-file"),
+        parallelSafety="readonly",
+        mutatesWorkspace=False,
+        dangerous=False,
+        timeoutMs=60_000,
+        costClass="medium",
+        latencyClass="interactive",
+        budget=Budget(max_calls_per_turn=3, max_parallel=1),
         enabled_by_default=False,
         opt_out=True,
     ),
