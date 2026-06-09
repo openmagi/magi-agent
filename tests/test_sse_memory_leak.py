@@ -127,3 +127,31 @@ def test_clean_thinking_delta_not_redacted(monkeypatch):
     assert out.get("delta") == clean, (
         f"clean thinking delta was unexpectedly altered: {out.get('delta')!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Task 3.1e — benign "memory context" prose is NOT falsely redacted
+# ---------------------------------------------------------------------------
+
+
+def test_text_delta_prose_memory_context_not_redacted():
+    """The phrase 'memory context' appearing in normal assistant prose must NOT
+    be redacted.  Before the regex tightening this would have been a
+    false-positive; after tightening it must pass through unchanged."""
+    prose = "increase the memory context window of the model"
+    out = sse._sanitize_agent_event({"type": "text_delta", "delta": prose})
+    assert out is not None, "event should not be dropped entirely"
+    assert out.get("delta") == prose, (
+        f"benign 'memory context' prose was incorrectly redacted: {out.get('delta')!r}"
+    )
+
+
+def test_thinking_delta_prose_memory_context_not_redacted(monkeypatch):
+    """Same false-positive guard for thinking_delta path."""
+    monkeypatch.setenv("MAGI_STREAM_THINKING", "1")
+    prose = "shared memory context between threads is a common concurrency topic"
+    out = sse._sanitize_agent_event({"type": "thinking_delta", "delta": prose})
+    assert out is not None, "event should not be dropped entirely"
+    assert out.get("delta") == prose, (
+        f"benign 'memory context' prose was incorrectly redacted in thinking_delta: {out.get('delta')!r}"
+    )

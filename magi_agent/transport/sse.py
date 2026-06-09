@@ -94,7 +94,7 @@ _PRIVATE_TEXT_RE = re.compile(
     r"(?:raw\s+)?source\s+snapshot|"
     r"(?:raw\s+)?(?:system\s+|developer\s+|user\s+)?prompt|"
     r"private\s+(?:active\s+snapshot|prompt|payload|context|memory|transcript|source)|"
-    r"memory\s+context"
+    r"memory\s+context\s+hidden"
     r")\b",
     re.IGNORECASE,
 )
