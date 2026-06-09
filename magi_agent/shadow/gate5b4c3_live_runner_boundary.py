@@ -28,6 +28,7 @@ from magi_agent.shadow.gate5b4c3_shadow_generation_contract import (
 from magi_agent.shadow.gate5b4c3_runner_input_adapter import (
     build_gate5b4c3_runner_input,
 )
+from magi_agent.shadow.gate5b4c3_image_parts import image_blocks_to_parts
 
 
 Gate5B4C3LiveRunnerStatus: TypeAlias = Literal["skipped", "dropped", "completed", "error"]
@@ -613,11 +614,7 @@ class Gate5B4C3LiveRunnerBoundary:
             )
         try:
             message = primitives.Content(
-                parts=[
-                    primitives.Part.from_text(
-                        text=_runner_message_text(runner_input),
-                    )
-                ],
+                parts=_build_user_message_parts(runner_input, primitives=primitives),
                 role="user",
             )
         except Exception as exc:
@@ -925,6 +922,28 @@ def load_gate5b4c3_live_adk_primitives() -> Gate5B4C3LiveAdkPrimitives:
         Part=adk_runners.types.Part,
         GenerateContentConfig=adk_runners.types.GenerateContentConfig,
     )
+
+
+def _build_user_message_parts(runner_input: object, *, primitives: object) -> list:
+    parts = [primitives.Part.from_text(text=_runner_message_text(runner_input))]
+    raw_blocks = getattr(runner_input, "sanitized_image_blocks", ()) or ()
+    if not raw_blocks:
+        return parts
+    converter_blocks = [
+        {
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": b.media_type,  # validated str at ingestion
+                "data": b.data,  # validated base64 str at ingestion
+            },
+        }
+        for b in raw_blocks
+    ]
+    parts.extend(
+        image_blocks_to_parts(converter_blocks, part_factory=primitives.Part.from_bytes)
+    )
+    return parts
 
 
 def _runner_message_text(runner_input: object) -> str:

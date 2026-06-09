@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import binascii
 from collections.abc import Mapping
 import re
 from typing import Any, Literal, Self, TypeAlias
@@ -111,6 +113,17 @@ _UNSAFE_TEXT_RE = re.compile(
     r"s3://\S+"
     r")",
     re.IGNORECASE,
+)
+
+# Supported image media types for Gate5B4C3 image blocks. base64 image bytes
+# are opaque binary; this set is also used by _reject_unsafe_value to detect
+# image-block mappings and exempt only their encoded data payload from the
+# unsafe-text scan (the media type value itself is still scanned).
+# Mirror: magi_agent/runtime/message_builder.py defines an identical constant;
+# both definitions are intentional — importing across the runtime/shadow
+# boundary would create a coupling that is deliberately avoided here.
+SUPPORTED_IMAGE_MEDIA_TYPES = frozenset(
+    ("image/jpeg", "image/png", "image/gif", "image/webp")
 )
 
 
@@ -289,6 +302,33 @@ class Gate5B4C3ShadowGenerationHistoryMessage(_Gate5B4C3Model):
         return self
 
 
+MAX_USER_VISIBLE_IMAGE_BYTES = 5 * 1024 * 1024  # 5 MiB per image, defense-in-depth
+
+
+class Gate5B4C3ShadowGenerationImageBlock(_Gate5B4C3Model):
+    media_type: str = Field(alias="mediaType")
+    data: str  # base64, no data-URL prefix
+
+    @model_validator(mode="after")
+    def _validate_block(self) -> Self:
+        lowered = self.media_type.lower()
+        if lowered not in SUPPORTED_IMAGE_MEDIA_TYPES:
+            raise ValueError("unsupported image media type")
+        # Normalize to lowercase so the stored value is always canonical and
+        # Gemini receives a clean mime_type regardless of input casing.
+        if lowered != self.media_type:
+            object.__setattr__(self, "media_type", lowered)
+        try:
+            raw = base64.b64decode(self.data, validate=True)
+        except (binascii.Error, ValueError) as exc:
+            raise ValueError("image data must be valid base64") from exc
+        if not raw:
+            raise ValueError("image data must be non-empty")
+        if len(raw) > MAX_USER_VISIBLE_IMAGE_BYTES:
+            raise ValueError("image exceeds per-image byte cap")
+        return self
+
+
 class Gate5B4C3ShadowGenerationTurn(_Gate5B4C3Model):
     turn_id: str = Field(alias="turnId")
     turn_digest: str = Field(alias="turnDigest")
@@ -300,6 +340,10 @@ class Gate5B4C3ShadowGenerationTurn(_Gate5B4C3Model):
     attachment_metadata: tuple[Gate5B4C3ShadowGenerationAttachmentMetadata, ...] = Field(
         default=(),
         alias="attachmentMetadata",
+    )
+    sanitized_image_blocks: tuple[Gate5B4C3ShadowGenerationImageBlock, ...] = Field(
+        default=(),
+        alias="sanitizedImageBlocks",
     )
     sanitized_recent_history: tuple[Gate5B4C3ShadowGenerationHistoryMessage, ...] = Field(
         default=(),
@@ -1090,14 +1134,36 @@ def _is_safe_label(value: object) -> bool:
     return isinstance(value, str) and bool(_SAFE_LABEL_RE.match(value))
 
 
+def _is_image_block_mapping(value: Mapping) -> bool:  # type: ignore[type-arg]
+    """Return True if *value* looks like a serialized image block.
+
+    Detection keys on a str 'data' field plus a 'mediaType' whose value is a
+    recognised image media type. This is intentionally narrow: if the shape
+    ever changes the scan resumes (fail-safe), and it does NOT exempt arbitrary
+    mappings that merely happen to have a field called 'data'.
+    """
+    media = value.get("mediaType")
+    return (
+        isinstance(value.get("data"), str)
+        and isinstance(media, str)
+        and media.lower() in SUPPORTED_IMAGE_MEDIA_TYPES
+    )
+
+
 def _reject_unsafe_value(value: object) -> None:
     if isinstance(value, str):
         if _UNSAFE_TEXT_RE.search(value):
             raise ValueError("shadow generation payload contains forbidden private material")
         return
     if isinstance(value, Mapping):
+        image_block = _is_image_block_mapping(value)
         for key, child in value.items():
             _reject_unsafe_key(key)
+            # base64 image bytes are opaque binary, not sanitized text; the
+            # unsafe-text regex false-matches long base64 runs. Exempt only the
+            # encoded image payload from the scan (media type is still checked).
+            if image_block and key == "data":
+                continue
             _reject_unsafe_value(child)
         return
     if isinstance(value, (list, tuple)):
@@ -1122,6 +1188,7 @@ __all__ = [
     "Gate5B4C3ShadowGenerationComparison",
     "Gate5B4C3ShadowGenerationConfig",
     "Gate5B4C3ShadowGenerationDiagnostic",
+    "Gate5B4C3ShadowGenerationImageBlock",
     "Gate5B4C3ShadowGenerationModelRouting",
     "Gate5B4C3ShadowGenerationOutputMetadata",
     "Gate5B4C3ShadowGenerationPolicy",
@@ -1133,5 +1200,7 @@ __all__ = [
     "Gate5B4C3ShadowGenerationSelection",
     "Gate5B4C3ShadowGenerationStatus",
     "Gate5B4C3ShadowGenerationTurn",
+    "MAX_USER_VISIBLE_IMAGE_BYTES",
+    "SUPPORTED_IMAGE_MEDIA_TYPES",
     "build_gate5b4c3_shadow_generation_diagnostic",
 ]
