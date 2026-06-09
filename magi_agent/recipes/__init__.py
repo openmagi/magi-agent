@@ -67,6 +67,14 @@ _BEST_OF_N_EXPORTS = {
     "ConsensusMode",
     "run_best_of_n",
 }
+_CROSS_VERIFY_EXPORTS = {
+    "CrossVerifyCandidate",
+    "CrossVerifyConfig",
+    "CrossVerifyResult",
+    "ModelRoute",
+    "is_cross_verify_enabled",
+    "run_cross_verify",
+}
 
 __all__ = (
     "AgentRecipeCompiler",
@@ -74,6 +82,12 @@ __all__ = (
     "BestOfNResult",
     "ConsensusMode",
     "run_best_of_n",
+    "CrossVerifyCandidate",
+    "CrossVerifyConfig",
+    "CrossVerifyResult",
+    "ModelRoute",
+    "is_cross_verify_enabled",
+    "run_cross_verify",
     "CodingEvidenceGate",
     "CodingEvidenceGateAuthorityFlags",
     "CodingEvidenceGateConfig",
@@ -145,4 +159,8 @@ def __getattr__(name: str) -> object:
         from magi_agent.recipes import best_of_n
 
         return getattr(best_of_n, name)
+    if name in _CROSS_VERIFY_EXPORTS:
+        from magi_agent.recipes import cross_verify
+
+        return getattr(cross_verify, name)
     raise AttributeError(name)
