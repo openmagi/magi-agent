@@ -7,11 +7,12 @@ transcript replay. Session entries are supplied by the caller, sourced from the
 ``session_history.py`` substrate (``cli/session_log.py`` DAG) when a controller
 is wired on ``ctx.runtime``; absent a controller the list is empty.
 
-The dialog mirrors :class:`~magi_agent.cli.tui.dialogs.model.ModelPickerDialog`:
-``ModalScreen`` + ``OptionList`` + an ``escape`` binding that cancels + a
-``push_screen`` callback the app uses to resume. The empty case shows a
-``Static`` placeholder ("No prior sessions.") and an empty ``OptionList`` so the
-caller can always ``query_one(OptionList)`` without a crash.
+The dialog shares the ``OptionListModal`` base with
+:class:`~magi_agent.cli.tui.dialogs.model.ModelPickerDialog`: ``ModalScreen`` +
+``OptionList`` + an ``escape`` binding that cancels + select -> dismiss(ref) +
+focus-on-mount. The empty case shows a ``Static`` placeholder ("No prior
+sessions.") and an empty ``OptionList`` so the caller can always
+``query_one(OptionList)`` without a crash.
 """
 
 from __future__ import annotations
@@ -19,11 +20,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from textual.app import ComposeResult
-from textual.binding import Binding
 from textual.containers import Vertical
-from textual.screen import ModalScreen
 from textual.widgets import OptionList, Static
 from textual.widgets.option_list import Option
+
+from magi_agent.cli.tui.dialogs._option_modal import OptionListModal
 
 __all__ = ["SessionEntry", "SessionListDialog", "session_entries"]
 
@@ -73,10 +74,13 @@ def session_entries(runtime: object | None) -> list[SessionEntry]:
     return out
 
 
-class SessionListDialog(ModalScreen[str]):
-    """List prior sessions; dismiss with the chosen ref (or None on escape)."""
+class SessionListDialog(OptionListModal):
+    """List prior sessions; dismiss with the chosen ref (or None on escape).
 
-    BINDINGS = [Binding("escape", "cancel", "Cancel")]
+    Inherits the shared ``OptionList`` modal skeleton (escape -> cancel, select
+    -> dismiss(ref), focus-on-mount) from :class:`OptionListModal`; only the
+    per-dialog ``compose`` + empty-state placeholder live here.
+    """
 
     CSS = """
     SessionListDialog { align: center middle; }
@@ -117,16 +121,3 @@ class SessionListDialog(ModalScreen[str]):
         stamp = f"  ({entry.updated})" if entry.updated else ""
         return f"{entry.label}{stamp}"
 
-    def on_mount(self) -> None:
-        # Focus the list so Up/Down + Enter work without a click. (Empty list is
-        # still focusable; Enter on it is a no-op.)
-        self.query_one(OptionList).focus()
-
-    def on_option_list_option_selected(
-        self, event: OptionList.OptionSelected
-    ) -> None:
-        event.stop()
-        self.dismiss(event.option.id)
-
-    def action_cancel(self) -> None:
-        self.dismiss(None)

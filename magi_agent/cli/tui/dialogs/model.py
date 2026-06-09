@@ -9,11 +9,11 @@ list is supplied by the caller, sourced from ``cli/providers.py`` defaults via
 from __future__ import annotations
 
 from textual.app import ComposeResult
-from textual.binding import Binding
 from textual.containers import Vertical
-from textual.screen import ModalScreen
 from textual.widgets import OptionList, Static
 from textual.widgets.option_list import Option
+
+from magi_agent.cli.tui.dialogs._option_modal import OptionListModal
 
 __all__ = ["ModelPickerDialog", "model_choices"]
 
@@ -40,10 +40,13 @@ def model_choices(current: str | None = None) -> list[str]:
     return ids
 
 
-class ModelPickerDialog(ModalScreen[str]):
-    """Pick a model; dismiss with its id (or None on escape)."""
+class ModelPickerDialog(OptionListModal):
+    """Pick a model; dismiss with its id (or None on escape).
 
-    BINDINGS = [Binding("escape", "cancel", "Cancel")]
+    Inherits the shared ``OptionList`` modal skeleton (escape -> cancel, select
+    -> dismiss(id), focus-on-mount) from :class:`OptionListModal`; only the
+    per-dialog ``compose`` + current-row pre-highlight live here.
+    """
 
     CSS = """
     ModelPickerDialog { align: center middle; }
@@ -69,17 +72,8 @@ class ModelPickerDialog(ModalScreen[str]):
             options = [Option(m, id=m) for m in self._models]
             yield OptionList(*options, id="model-options")
 
-    def on_mount(self) -> None:
-        option_list = self.query_one(OptionList)
+    def _after_mount(self) -> None:
         if self._current in self._models:
-            option_list.highlighted = self._models.index(self._current)
-        option_list.focus()
-
-    def on_option_list_option_selected(
-        self, event: OptionList.OptionSelected
-    ) -> None:
-        event.stop()
-        self.dismiss(event.option.id)
-
-    def action_cancel(self) -> None:
-        self.dismiss(None)
+            self.query_one(OptionList).highlighted = self._models.index(
+                self._current
+            )
