@@ -28,8 +28,8 @@ Design notes
 ------------
 - We reuse ``_parse_frontmatter`` from ``discovery.py`` rather than duplicating
   the parser. Both live in the same package so the internal import is stable.
-- At most 50 skills are loaded per on-disk location (mirrors the existing limit
-  in ``plugins.native.skills``). Bundled skills use the same 50-cap.
+- Skills are loaded in deterministic path order for each location. There is no
+  per-location cap, so large installed skill sets stay visible.
 - ``build_prompt`` performs no I/O (body captured at discovery time).
 - ``agent``, ``model``, ``subtask`` from SKILL.md frontmatter are currently
   stored but not wired to execution (same data-model-only convention as P1.2).
@@ -55,8 +55,6 @@ __all__ = [
 ]
 
 SKILL_SURFACE = CommandSurface(tui=True, headless=True)
-
-_MAX_SKILLS_PER_LOCATION = 50
 
 
 @dataclass
@@ -119,14 +117,14 @@ def _parse_skill_md(path: Path, fallback_name: str) -> SkillPromptCommand | None
 
 
 def _scan_dir(base: Path) -> list[SkillPromptCommand]:
-    """Scan ``base`` recursively for ``SKILL.md`` files (up to the cap).
+    """Scan ``base`` recursively for ``SKILL.md`` files.
 
     Returns skills sorted by the SKILL.md path for deterministic ordering.
     """
     if not base.exists() or not base.is_dir():
         return []
     skills: list[SkillPromptCommand] = []
-    for skill_md in sorted(base.rglob("SKILL.md"))[:_MAX_SKILLS_PER_LOCATION]:
+    for skill_md in sorted(base.rglob("SKILL.md")):
         fallback = skill_md.parent.name
         cmd = _parse_skill_md(skill_md, fallback)
         if cmd is not None:
