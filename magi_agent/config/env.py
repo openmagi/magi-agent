@@ -276,6 +276,33 @@ def parse_error_recovery_env(env: Mapping[str, str]) -> ErrorRecoveryEnv:
     return ErrorRecoveryEnv(enabled=enabled, max_recovery_attempts=max_attempts)
 
 
+# Output-continuation wiring. A single model response is capped at the model's
+# per-response output-token limit; when a long deliverable hits that cap the
+# answer is truncated mid-sentence (finish_reason length/max_tokens). When
+# enabled, the live run seam re-invokes the model with a "continue where you
+# left off" message and appends, up to MAGI_MAX_OUTPUT_CONTINUATIONS times.
+# Enabled by default outside the safe runtime profile (like error recovery);
+# set MAGI_OUTPUT_CONTINUATION_ENABLED=0 or MAGI_RUNTIME_PROFILE=safe to disable.
+OUTPUT_CONTINUATION_ENABLED_ENV = "MAGI_OUTPUT_CONTINUATION_ENABLED"
+MAX_OUTPUT_CONTINUATIONS_ENV = "MAGI_MAX_OUTPUT_CONTINUATIONS"
+
+
+@dataclass(frozen=True)
+class OutputContinuationEnv:
+    enabled: bool = False
+    max_continuations: int = 4
+
+
+def parse_output_continuation_env(env: Mapping[str, str]) -> OutputContinuationEnv:
+    enabled = _runtime_feature_enabled(env, OUTPUT_CONTINUATION_ENABLED_ENV)
+    max_continuations = _int_env(env, MAX_OUTPUT_CONTINUATIONS_ENV, 4)
+    if max_continuations < 1:
+        raise RuntimeEnvError(f"{MAX_OUTPUT_CONTINUATIONS_ENV} must be >= 1")
+    return OutputContinuationEnv(
+        enabled=enabled, max_continuations=max_continuations
+    )
+
+
 # Single source of truth for the live context-compaction activation flags.
 # PR13: when enabled, an ADK ``before_model_callback`` plugin reduces the
 # outgoing ``llm_request.contents`` to the recent tail (reusing

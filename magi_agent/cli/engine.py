@@ -90,6 +90,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only, never imported at runtime
         RecoveryEngine,
     )
     from magi_agent.runtime.goal_nudge import GoalNudge
+    from magi_agent.runtime.output_continuation import OutputContinuationConfig
 
 
 @dataclass(frozen=True)
@@ -355,6 +356,45 @@ def build_engine_recovery_policy(env: object = None) -> "EngineRecoveryPolicy | 
         engine=RecoveryEngine(config),
         max_attempts=parsed.max_recovery_attempts,
     )
+
+
+def _adk_finish_reason(event: object) -> str | None:
+    """Extract the model finish reason from a raw ADK event as a plain string.
+
+    ADK exposes ``finish_reason`` as a ``FinishReason`` enum (``.name``/``.value``)
+    or occasionally a bare string. Returns ``None`` when absent.
+    """
+    finish_reason = getattr(event, "finish_reason", None)
+    if finish_reason is None:
+        return None
+    value = getattr(finish_reason, "name", None) or getattr(finish_reason, "value", None)
+    return value if isinstance(value, str) else str(finish_reason)
+
+
+def build_output_continuation_config(
+    env: object = None,
+) -> "OutputContinuationConfig | None":
+    """Build the output-continuation config from env, or ``None`` when OFF.
+
+    Reuses ``MAGI_OUTPUT_CONTINUATION_ENABLED`` / ``MAGI_MAX_OUTPUT_CONTINUATIONS``
+    (single source of truth in ``config.env``). ``None`` leaves streaming
+    byte-for-byte identical to the pre-continuation path.
+    """
+
+    import os
+
+    from magi_agent.config.env import parse_output_continuation_env
+    from magi_agent.runtime.output_continuation import OutputContinuationConfig
+
+    mapping = env if isinstance(env, dict) else os.environ
+    parsed = parse_output_continuation_env(mapping)
+    if not parsed.enabled:
+        return None
+    return OutputContinuationConfig(
+        enabled=True,
+        max_continuations=parsed.max_continuations,
+    )
+
 
 # A sane default cap so a runaway stream can't yield forever. Mirrors the spirit
 # of RunnerSessionBoundaryConfig.max_event_count but headless can tolerate more.
@@ -773,6 +813,7 @@ class MagiEngineDriver:
         runner_policy_routing_enabled: bool | None = None,
         event_sink: object | None = None,
         goal_nudge: "GoalNudge | None" = None,
+        output_continuation: "OutputContinuationConfig | None" = None,
         evidence_collector: Callable[[str], Sequence[object]] | None = None,
     ) -> None:
         self._runner = runner
@@ -791,6 +832,12 @@ class MagiEngineDriver:
         # PR4 goal-nudge continuation. ``None`` (default) -> no nudge logic;
         # ``_drive`` behaves byte-identically to pre-PR4.
         self._goal_nudge: "GoalNudge | None" = goal_nudge
+        # Output-continuation: resume a response truncated at the model's
+        # per-response output-token cap by re-invoking and appending. ``None``
+        # (default) -> no continuation logic; streaming is byte-identical.
+        self._output_continuation: "OutputContinuationConfig | None" = (
+            output_continuation
+        )
         # Optional evidence-collector DI seam (PR4 follow-up). When set,
         # _collect_evidence delegates to this callable instead of returning ().
         # The engine driver does NOT own a ledger; the harness layer above wires
@@ -931,6 +978,7 @@ class MagiEngineDriver:
             cancel=cancel,
             gate=gate,
             goal_nudge=self._goal_nudge,
+            output_continuation=self._output_continuation,
         )
         try:
             async for item in driver_gen:
@@ -956,6 +1004,7 @@ class MagiEngineDriver:
         cancel: asyncio.Event,
         gate: "PermissionGate | None" = None,
         goal_nudge: "GoalNudge | None" = None,
+        output_continuation: "OutputContinuationConfig | None" = None,
     ) -> AsyncGenerator[RuntimeEvent, EngineResult]:
         # PR3/Stream B: feed initial_messages via SessionContinuityBoundary.
         # Read here (so the seam is plumbed end-to-end) but NOT yet fed into the
@@ -1059,6 +1108,14 @@ class MagiEngineDriver:
             )
             return
 
+        # Output-continuation helpers (pure, dependency-light). Imported here so
+        # ``import cli.engine`` stays cold-clean.
+        from magi_agent.runtime.output_continuation import (  # noqa: PLC0415
+            build_continuation_message,
+            should_continue,
+            stop_reason_is_truncated,
+        )
+
         types = deps["types"]
         adapter = deps["OpenMagiRunnerAdapter"](runner=runner)  # type: ignore[operator]
         bridge = deps["OpenMagiEventBridge"](live_compatible=True)  # type: ignore[operator]
@@ -1124,6 +1181,9 @@ class MagiEngineDriver:
         # consecutive clean stop; reset to False when a tool fires (re-arm).
         nudges_used = 0
         goal_check_pending = False
+        # Output-continuation budget: how many times we've resumed a response
+        # truncated at the model's per-response output-token cap this turn.
+        continuations_used = 0
 
         try:
             while True:
@@ -1136,6 +1196,9 @@ class MagiEngineDriver:
                 )
                 attempt_error: Exception | None = None
                 attempt_yielded = 0
+                # Set when this attempt's final response stopped at the output
+                # token cap (finish_reason length/max_tokens) — resumable.
+                attempt_truncated = False
                 try:
                     while True:
                         if cancel.is_set():
@@ -1151,6 +1214,15 @@ class MagiEngineDriver:
 
                         adk_event = step
                         event_count += 1
+                        # Detect output-cap truncation from the RAW model finish
+                        # reason — the source of truth. The bridge's turn_end
+                        # projection can rewrite the reason (e.g. to
+                        # ``missing_runtime_receipt``), so we must read it here.
+                        if output_continuation is not None and not attempt_truncated:
+                            if stop_reason_is_truncated(
+                                _adk_finish_reason(adk_event)
+                            ):
+                                attempt_truncated = True
                         projection = bridge.project_adk_event(adk_event, turn_id=turn_id)  # type: ignore[union-attr]
                         for raw_event in projection.agent_events:  # type: ignore[union-attr]
                             safe = sanitize(dict(raw_event))  # type: ignore[operator]
@@ -1182,6 +1254,42 @@ class MagiEngineDriver:
                 if cancelled:
                     break
                 if attempt_error is None:
+                    # Output-continuation: if the model stopped because it hit
+                    # its per-response output-token cap (truncated mid-answer),
+                    # resume by re-invoking with a "continue where you left off"
+                    # message and appending — the only way past the single-
+                    # response ceiling. Reuses the goal-nudge re-invocation
+                    # machinery (post-output re-invoke is already safe here).
+                    if should_continue(
+                        output_continuation,
+                        truncated=attempt_truncated,
+                        output_seen=attempt_yielded > 0,
+                        continuations_used=continuations_used,
+                    ):
+                        continuations_used += 1
+                        runner_input = runner_turn_input_cls(
+                            userId=self._user_id,
+                            sessionId=session_id,
+                            turnId=turn_id,
+                            invocationId=turn_id,
+                            newMessage=types.Content(  # type: ignore[attr-defined]
+                                role="user",
+                                parts=[
+                                    types.Part(text=build_continuation_message())  # type: ignore[attr-defined]
+                                ],
+                            ),
+                            harnessState=effective_harness_state,
+                        )
+                        yield RuntimeEvent(
+                            type="status",
+                            payload={
+                                "type": "output_continuation",
+                                "continuation": continuations_used,
+                                "max": output_continuation.max_continuations,  # type: ignore[union-attr]
+                            },
+                            turn_id=turn_id,
+                        )
+                        continue  # re-invoke run_async to resume truncated output
                     # PR4 goal-nudge: at the clean-break path, check whether a
                     # nudge re-invocation is warranted before breaking.
                     if goal_nudge is not None and nudges_used < goal_nudge.max_nudges:
