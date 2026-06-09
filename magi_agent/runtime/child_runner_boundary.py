@@ -107,6 +107,18 @@ class ChildRunnerConfig(BaseModel):
         default=False,
         alias="realChildExecutionPackEnabled",
     )
+    #: Parallel real-bool live gate (FileDelivery / web_acquisition precedent:
+    #: "default-False IS the seal").  When True AND a trusted live child runner
+    #: (``openmagi_live_provider=True``) is injected, ``run()`` drives that REAL
+    #: model-backed runner directly via ``run_child`` — PARALLEL to the local-fake
+    #: path, not through the sealed ADK shadow surface.  This does NOT unseal any
+    #: ``production_*`` ``Literal[False]`` flag below, nor any authority flag; the
+    #: live runner is a *local* surface and never flips hosted authority.  Default
+    #: False keeps the fake/shadow/fallback behaviour byte-identical to before.
+    live_child_runner_enabled: bool = Field(
+        default=False,
+        alias="liveChildRunnerEnabled",
+    )
     runtime_id: str = Field(default="openmagi.child-runner-boundary", alias="runtimeId")
     max_output_refs: int = Field(default=8, alias="maxOutputRefs", ge=1, le=32)
     #: Bounded spawn-depth ceiling for real child execution (no runaway
@@ -386,6 +398,33 @@ class LocalChildRunnerBoundary:
                 error_code="child_runner_disabled",
                 diagnostics=diagnostics,
             )
+
+        # --- LIVE (real, model-backed) child runner — PARALLEL to local-fake ---
+        # A live-marked runner (``openmagi_live_provider=True``) is driven via the
+        # SAME injected ``run_child`` invocation path as the fake, then routed
+        # through the SAME ``_envelope_from_output`` sanitisation.  Two off-switches
+        # gate it: (a) the ``live_child_runner_enabled`` real-bool, and (b) a
+        # live-trusted runner.  A live-marked runner provided while the gate is OFF
+        # is BLOCKED (never silently executed); when neither the gate nor a
+        # live-marked runner is present we fall straight through to the fake/shadow
+        # paths below, byte-identical to before.
+        if self.config.live_child_runner_enabled and _is_trusted_live_child_runner(
+            self.child_runner
+        ):
+            return await self._run_live_child(request, prompt_ref, diagnostics)
+        if (
+            not self.config.live_child_runner_enabled
+            and self.child_runner is not None
+            and _is_trusted_live_child_runner(self.child_runner)
+        ):
+            return _result(
+                request,
+                prompt_ref,
+                "blocked",
+                error_code="live_child_runner_not_enabled",
+                diagnostics=diagnostics,
+            )
+
         if not self.config.local_fake_child_runner_enabled or self.child_runner is None:
             return _result(
                 request,
@@ -431,7 +470,7 @@ class LocalChildRunnerBoundary:
             return await self._run_real_child(request, prompt_ref, diagnostics)
 
         try:
-            output = await self._call_fake_runner(request)
+            output = await self._call_child_runner(request)
         except Exception as exc:
             diagnostics["localFakeChildRunnerCalled"] = True
             diagnostics["providerError"] = (
@@ -616,14 +655,94 @@ class LocalChildRunnerBoundary:
             authorityFlags=ChildRunnerAuthorityFlags(),
         )
 
-    async def _call_fake_runner(self, request: ChildTaskRequest) -> object:
+    async def _run_live_child(
+        self,
+        request: ChildTaskRequest,
+        prompt_ref: str,
+        diagnostics: dict[str, object],
+    ) -> ChildRunnerResult:
+        """Drive a REAL (model-backed) live child runner.
+
+        PARALLEL to the local-fake path: the injected live runner is invoked via
+        the SAME ``run_child`` seam (``_call_child_runner``), and its output is
+        routed through the SAME ``_envelope_from_output`` sanitisation — so no
+        secrets/paths/raw transcript can leak into the parent context.  The
+        spawn-depth, total-agents and ``max_output_refs`` caps are enforced
+        exactly as the ADK shadow path does.  The sealed ``ChildRunnerAuthorityFlags``
+        are NEVER flipped (this is a *local* surface); a non-authority
+        ``liveChildRunnerExecuted`` diagnostic signals a live run instead.
+        """
+        # Bound 1 — spawn-depth cap (no runaway recursion).
+        spawn_depth = _requested_spawn_depth(request)
+        if spawn_depth > self.config.max_spawn_depth:
+            return _result(
+                request,
+                prompt_ref,
+                "blocked",
+                error_code="child_spawn_depth_exceeded",
+                diagnostics=diagnostics,
+            )
+        # Bound 2 — total-agents-per-run cap (≤1000).
+        if self.agents_spawned_so_far >= MAX_TOTAL_AGENTS_PER_RUN:
+            return _result(
+                request,
+                prompt_ref,
+                "blocked",
+                error_code="total_agents_per_run_exceeded",
+                diagnostics=diagnostics,
+            )
+        try:
+            output = await self._call_child_runner(request)
+        except Exception as exc:
+            diagnostics["liveChildRunnerExecuted"] = True
+            diagnostics["providerError"] = (
+                _sanitize_public_text(str(exc), max_chars=240)
+                or "[redacted-provider-error]"
+            )
+            return _result(
+                request,
+                prompt_ref,
+                "error",
+                error_code="live_child_runner_error",
+                diagnostics=diagnostics,
+            )
+        diagnostics["liveChildRunnerExecuted"] = True
+        return ChildRunnerResult(
+            status="ok",
+            taskId=request.task_id,
+            promptRef=prompt_ref,
+            envelope=_envelope_from_output(
+                request, output, max_refs=self.config.max_output_refs
+            ),
+            diagnosticMetadata=diagnostics,
+            authorityFlags=ChildRunnerAuthorityFlags(),
+        )
+
+    async def _call_child_runner(self, request: ChildTaskRequest) -> object:
+        """Invoke ANY injected child runner via the ``run_child`` seam.
+
+        Shared by the local-fake and the live paths: it only calls
+        ``run_child(request)`` and awaits the result if it is awaitable.  It does
+        NOT import or construct any live-runner/runtime surface, so the module's
+        import-isolation contract is preserved on both paths.
+        """
         method = getattr(self.child_runner, "run_child", None)
         if method is None:
-            raise ValueError("fake child runner must expose run_child")
+            raise ValueError("child runner must expose run_child")
         value = method(request)
         if inspect.isawaitable(value):
             return await value
         return value
+
+
+def _is_trusted_live_child_runner(runner: object | None) -> bool:
+    """A live (real, model-backed) child runner declares ``openmagi_live_provider``.
+
+    Parallel to the inline ``openmagi_local_fake_provider`` fake-trust check: the
+    two markers are mutually exclusive in practice, so a fake-marked runner is
+    NEVER admitted via the live branch and vice-versa.
+    """
+    return getattr(runner, "openmagi_live_provider", False) is True
 
 
 def _runtime_child_acceptance_envelope(
@@ -795,11 +914,13 @@ def _diagnostics(config: ChildRunnerConfig) -> dict[str, object]:
     return {
         "enabled": config.enabled,
         "localFakeChildRunnerEnabled": config.local_fake_child_runner_enabled,
+        "liveChildRunnerEnabled": config.live_child_runner_enabled,
         "productionChildExecutionEnabled": False,
         "productionWritesEnabled": False,
         "adkRunnerSurface": config.adk_runner_surface,
         "localFakeChildRunnerCalled": False,
         "realChildRunnerExecuted": False,
+        "liveChildRunnerExecuted": False,
     }
 
 

@@ -68,6 +68,43 @@ class ThrowingChildRunner(FakeChildRunner):
         )
 
 
+class LiveChildRunner:
+    """A REAL (model-backed) child runner — declares ``openmagi_live_provider``."""
+
+    openmagi_live_provider = True
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def run_child(self, request: object) -> dict[str, object]:
+        self.calls += 1
+        return {
+            "childExecutionId": "child-exec-live-1",
+            "status": "completed",
+            "summary": (
+                "Live child completed the task.\n"
+                "raw_child_transcript: /workspace/bot/private.txt\n"
+                "/home/kevin/.ssh/id_rsa\n"
+                "/var/lib/kubelet/pods/x\n"
+                "chain_of_thought: hidden reasoning\n"
+                "Authorization: Bearer unsafe-token"
+            ),
+            "evidenceRefs": (
+                "evidence:child-live-1",
+                "/Users/kevin/private/raw-evidence.json",
+                "raw child transcript",
+            ),
+            "artifactRefs": (
+                "artifact:child-live-1",
+                "s3://private-bucket/raw-child-log",
+            ),
+            "auditEventRefs": ("audit:child-live-1",),
+            "rawTranscript": "raw child transcript with sk-child-secret",
+            "toolLogs": "raw tool logs",
+            "hiddenReasoning": "private reasoning",
+        }
+
+
 def test_child_runner_boundary_defaults_off_and_never_calls_fake_runner() -> None:
     from magi_agent.runtime.child_runner_boundary import (
         ChildRunnerConfig,
@@ -199,6 +236,199 @@ def test_child_runner_boundary_catches_fake_runner_errors_without_raw_leakage() 
     assert "sk-child-secret" not in raw_encoded
     assert "hidden_reasoning" not in raw_encoded
     assert projection["authorityFlags"]["realChildRunnerExecuted"] is False
+
+
+def test_child_runner_boundary_runs_live_runner_when_live_gate_enabled() -> None:
+    from magi_agent.runtime.child_runner_boundary import (
+        ChildRunnerConfig,
+        LocalChildRunnerBoundary,
+    )
+
+    live = LiveChildRunner()
+    boundary = LocalChildRunnerBoundary(
+        ChildRunnerConfig(enabled=True, liveChildRunnerEnabled=True),
+        child_runner=live,
+    )
+
+    result = asyncio.run(boundary.run(_request()))
+    projection = result.public_projection()
+    encoded = json.dumps(projection, sort_keys=True)
+    raw_encoded = json.dumps(result.model_dump(by_alias=True), sort_keys=True)
+
+    assert live.calls == 1
+    assert result.status == "ok"
+    assert result.envelope is not None
+    assert result.envelope.status == "completed"
+    assert result.envelope.child_ref.startswith("child:")
+    assert result.envelope.summary == "Live child completed the task."
+    # Output sanitisation reuses the same envelope path as the fake runner.
+    assert _is_runtime_ref(projection["parentOutputRefs"][0], "child")
+    assert _is_runtime_ref(projection["parentOutputRefs"][1], "evidence")
+    assert _is_runtime_ref(projection["parentOutputRefs"][2], "artifact")
+    assert _is_runtime_ref(projection["parentOutputRefs"][3], "audit")
+    for leak in (
+        "raw_child_transcript",
+        "chain_of_thought",
+        "Authorization",
+        "unsafe-token",
+        "/workspace/bot",
+        "/Users/kevin",
+        "/home/kevin",
+        "/var/lib/kubelet",
+        "s3://private-bucket",
+        '"rawTranscript":',
+        "toolLogs",
+        '"hiddenReasoning":',
+        "sk-child-secret",
+    ):
+        assert leak not in encoded
+        assert leak not in raw_encoded
+    # Diagnostic (non-authority) signal that a live run happened.
+    assert projection["diagnosticMetadata"]["liveChildRunnerExecuted"] is True
+    # Sealed authority flags stay False on the live path.
+    for flag_value in projection["authorityFlags"].values():
+        assert flag_value is False
+    assert projection["authorityFlags"]["realChildRunnerExecuted"] is False
+    assert projection["authorityFlags"]["productionAuthority"] is False
+    assert projection["diagnosticMetadata"]["productionChildExecutionEnabled"] is False
+    assert projection["diagnosticMetadata"]["productionWritesEnabled"] is False
+
+
+def test_child_runner_boundary_blocks_live_runner_when_live_gate_disabled() -> None:
+    from magi_agent.runtime.child_runner_boundary import (
+        ChildRunnerConfig,
+        LocalChildRunnerBoundary,
+    )
+
+    live = LiveChildRunner()
+    # Default config: live gate OFF (even though local-fake gate is enabled, a
+    # live-marked runner must NEVER be admitted via the fake path).
+    boundary = LocalChildRunnerBoundary(
+        ChildRunnerConfig(enabled=True, localFakeChildRunnerEnabled=True),
+        child_runner=live,
+    )
+
+    result = asyncio.run(boundary.run(_request()))
+    projection = result.public_projection()
+
+    assert live.calls == 0
+    assert result.status == "blocked"
+    assert result.error_code == "live_child_runner_not_enabled"
+    assert projection["diagnosticMetadata"]["liveChildRunnerExecuted"] is False
+    assert projection["authorityFlags"]["realChildRunnerExecuted"] is False
+
+
+def test_child_runner_boundary_fake_path_unchanged_with_live_gate_off() -> None:
+    from magi_agent.runtime.child_runner_boundary import (
+        ChildRunnerConfig,
+        LocalChildRunnerBoundary,
+    )
+
+    fake = FakeChildRunner()
+    boundary = LocalChildRunnerBoundary(
+        ChildRunnerConfig(enabled=True, localFakeChildRunnerEnabled=True),
+        child_runner=fake,
+    )
+
+    result = asyncio.run(boundary.run(_request()))
+
+    assert fake.calls == 1
+    assert result.status == "ok"
+    assert result.envelope is not None
+    assert result.envelope.summary == "Reviewer found no blockers."
+    # The fake never runs through the live diagnostic signal.
+    projection = result.public_projection()
+    assert projection["diagnosticMetadata"]["liveChildRunnerExecuted"] is False
+    assert projection["diagnosticMetadata"]["localFakeChildRunnerCalled"] is True
+
+
+def test_child_runner_boundary_does_not_admit_fake_via_live_branch() -> None:
+    from magi_agent.runtime.child_runner_boundary import (
+        ChildRunnerConfig,
+        LocalChildRunnerBoundary,
+    )
+
+    # A fake-marked runner while ONLY the live gate is on must not be run by the
+    # live branch (it lacks openmagi_live_provider) and falls through to the fake
+    # gate, which is off here → disabled, fake never called.
+    fake = FakeChildRunner()
+    boundary = LocalChildRunnerBoundary(
+        ChildRunnerConfig(enabled=True, liveChildRunnerEnabled=True),
+        child_runner=fake,
+    )
+
+    result = asyncio.run(boundary.run(_request()))
+
+    assert fake.calls == 0
+    assert result.status == "disabled"
+    assert result.error_code == "local_fake_child_runner_disabled"
+
+
+def test_child_runner_boundary_live_path_enforces_spawn_depth_cap() -> None:
+    from magi_agent.runtime.child_runner_boundary import (
+        ChildRunnerConfig,
+        ChildTaskRequest,
+        LocalChildRunnerBoundary,
+    )
+
+    live = LiveChildRunner()
+    boundary = LocalChildRunnerBoundary(
+        ChildRunnerConfig(enabled=True, liveChildRunnerEnabled=True, maxSpawnDepth=2),
+        child_runner=live,
+    )
+    deep_request = ChildTaskRequest(
+        parentExecutionId="parent-exec-1",
+        turnId="turn-1",
+        taskId="task-1",
+        objective="Run a deeply nested child turn.",
+        role="reviewer",
+        delivery="return",
+        metadata={"spawnDepth": 3},
+    )
+
+    result = asyncio.run(boundary.run(deep_request))
+
+    assert live.calls == 0
+    assert result.status == "blocked"
+    assert result.error_code == "child_spawn_depth_exceeded"
+
+
+def test_child_runner_boundary_live_path_enforces_total_agents_cap() -> None:
+    from magi_agent.runtime.child_runner_boundary import (
+        MAX_TOTAL_AGENTS_PER_RUN,
+        ChildRunnerConfig,
+        LocalChildRunnerBoundary,
+    )
+
+    live = LiveChildRunner()
+    boundary = LocalChildRunnerBoundary(
+        ChildRunnerConfig(enabled=True, liveChildRunnerEnabled=True),
+        child_runner=live,
+        agents_spawned_so_far=MAX_TOTAL_AGENTS_PER_RUN,
+    )
+
+    result = asyncio.run(boundary.run(_request()))
+
+    assert live.calls == 0
+    assert result.status == "blocked"
+    assert result.error_code == "total_agents_per_run_exceeded"
+
+
+def test_child_runner_config_live_gate_keeps_production_flags_sealed() -> None:
+    from magi_agent.runtime.child_runner_boundary import ChildRunnerConfig
+
+    config = ChildRunnerConfig(enabled=True, liveChildRunnerEnabled=True)
+
+    assert config.live_child_runner_enabled is True
+    assert config.production_child_execution_enabled is False
+    assert config.production_writes_enabled is False
+    # Sealed Literal[False] fields reject any attempt to set them True.
+    import pytest
+
+    with pytest.raises(Exception):
+        ChildRunnerConfig(productionChildExecutionEnabled=True)
+    with pytest.raises(Exception):
+        ChildRunnerConfig(productionWritesEnabled=True)
 
 
 def test_child_runner_projection_bypasses_cannot_inject_raw_context_or_authority() -> None:
