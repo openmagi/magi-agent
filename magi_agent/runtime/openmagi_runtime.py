@@ -31,9 +31,14 @@ def _build_core_tool_registry(plugin_state: ResolvedPluginState | None = None) -
     from magi_agent.tools.registry import ToolRegistry
     from magi_agent.tools.todo_toolhost import bind_todo_write_handler
 
+    from magi_agent.introspection.tool import bind_inspect_self_evidence_handler
+
     tool_registry = ToolRegistry()
     register_core_tool_manifests(tool_registry)
     bind_core_toolhost_handlers(tool_registry)
+    # Self-introspection (pull) tool — bound always, advertised only when the
+    # MAGI_SELF_INTROSPECTION_ENABLED env gate is truthy (default OFF).
+    bind_inspect_self_evidence_handler(tool_registry)
     # TodoWrite is not part of the core toolhost's direct tool set, so bind its
     # per-session handler explicitly. The handler set lives for the life of this
     # registry (one per CLI session), keeping each session's todo list in memory.

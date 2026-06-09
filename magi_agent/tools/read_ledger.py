@@ -307,6 +307,18 @@ class ReadLedger:
             self._entries.append(entry)
         return entry
 
+    def iter_entries(self) -> tuple[ReadLedgerEntry, ...]:
+        """Return a lock-guarded immutable snapshot of recorded read entries.
+
+        Public read-only accessor for projection consumers (e.g.
+        ``introspection.projection``). Snapshotting under the entries lock means
+        a concurrent ``record_read`` append cannot mutate the list mid-iteration;
+        the returned tuple is a stable copy. Entries are immutable frozen models,
+        so this never exposes a mutable handle to internal state.
+        """
+        with self._entries_lock:
+            return tuple(self._entries)
+
     def get_latest_read(
         self,
         *,
