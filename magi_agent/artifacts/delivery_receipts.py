@@ -461,7 +461,7 @@ def _trusted_channel_receipt_from_decision(
         return receipt, mismatch_reason
     if (
         not delivery_decision.boundary_verified
-        or delivery_decision.status != "delivered_local_fake"
+        or delivery_decision.status not in ("delivered_local_fake", "delivered_live")
         or delivery_decision.delivery_claim_allowed is not True
         or delivery_decision.artifact_ref != request.artifact_ref
         or delivery_decision.content_digest != request.content_digest

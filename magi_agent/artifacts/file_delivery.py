@@ -18,7 +18,13 @@ from magi_agent.runtime.provider_receipts import (
 
 
 FileDeliveryOperation = Literal["file.deliver", "file.send"]
-FileDeliveryStatus = Literal["disabled", "delivery_intent", "delivered_local_fake", "blocked"]
+FileDeliveryStatus = Literal[
+    "disabled",
+    "delivery_intent",
+    "delivered_local_fake",
+    "delivered_live",
+    "blocked",
+]
 _BOUNDARY_VERIFICATION_TOKEN = object()
 
 _MODEL_CONFIG = ConfigDict(
@@ -92,6 +98,17 @@ class FileDeliveryConfig(BaseModel):
     local_fake_channel_delivery_enabled: bool = Field(
         default=False,
         alias="localFakeChannelDeliveryEnabled",
+    )
+    # Parallel real-bool live gate (web_acquisition precedent: "default-False IS
+    # the seal"). These do NOT unseal the Literal[False] flags below; they admit a
+    # trusted live provider only when explicitly enabled by an operator.
+    live_artifact_storage_enabled: bool = Field(
+        default=False,
+        alias="liveArtifactStorageEnabled",
+    )
+    live_channel_delivery_enabled: bool = Field(
+        default=False,
+        alias="liveChannelDeliveryEnabled",
     )
     production_storage_writes_enabled: Literal[False] = Field(
         default=False,
@@ -328,14 +345,31 @@ class FileDeliveryBoundary:
         artifact_ref = _digest_artifact_ref(request.artifact_refs[0]) if request.artifact_refs else None
         content_digest = request.content_digest
         artifact_receipt: ProviderReceipt | None = None
-        if self.config.local_fake_artifact_service_enabled and artifact_provider is not None:
-            if not _is_local_fake_provider(artifact_provider):
-                return _decision(
-                    request,
-                    "blocked",
-                    reason_codes=("local_fake_artifact_provider_untrusted",),
-                    diagnostics=diagnostics,
-                )
+        live_path = False
+        artifact_live = (
+            self.config.live_artifact_storage_enabled and artifact_provider is not None
+        )
+        artifact_fake = (
+            self.config.local_fake_artifact_service_enabled and artifact_provider is not None
+        )
+        if (artifact_live or artifact_fake) and artifact_provider is not None:
+            if artifact_live:
+                if not _is_trusted_live_provider(artifact_provider):
+                    return _decision(
+                        request,
+                        "blocked",
+                        reason_codes=("live_artifact_provider_untrusted",),
+                        diagnostics=diagnostics,
+                    )
+                live_path = True
+            else:
+                if not _is_local_fake_provider(artifact_provider):
+                    return _decision(
+                        request,
+                        "blocked",
+                        reason_codes=("local_fake_artifact_provider_untrusted",),
+                        diagnostics=diagnostics,
+                    )
             try:
                 raw_artifact = artifact_provider.write_artifact(request)
                 if inspect.isawaitable(raw_artifact):
@@ -389,7 +423,11 @@ class FileDeliveryBoundary:
                 reason_codes=("channel_delivery_receipt_required",),
                 diagnostics=diagnostics,
             )
-        if not self.config.local_fake_channel_delivery_enabled or channel_provider is None:
+        channel_live = self.config.live_channel_delivery_enabled and channel_provider is not None
+        channel_fake = (
+            self.config.local_fake_channel_delivery_enabled and channel_provider is not None
+        )
+        if (not channel_live and not channel_fake) or channel_provider is None:
             return _decision(
                 request,
                 "delivery_intent",
@@ -399,7 +437,19 @@ class FileDeliveryBoundary:
                 reason_codes=("channel_delivery_receipt_required",),
                 diagnostics=diagnostics,
             )
-        if not _is_local_fake_provider(channel_provider):
+        if channel_live:
+            if not _is_trusted_live_provider(channel_provider):
+                return _decision(
+                    request,
+                    "blocked",
+                    artifact_ref=artifact_ref,
+                    content_digest=content_digest,
+                    artifact_receipt=artifact_receipt,
+                    reason_codes=("live_channel_provider_untrusted",),
+                    diagnostics=diagnostics,
+                )
+            live_path = True
+        elif not _is_local_fake_provider(channel_provider):
             return _decision(
                 request,
                 "blocked",
@@ -421,7 +471,11 @@ class FileDeliveryBoundary:
                 artifact_ref=artifact_ref,
                 content_digest=content_digest,
                 artifact_receipt=artifact_receipt,
-                reason_codes=("local_fake_channel_provider_error",),
+                reason_codes=(
+                    "live_channel_provider_error"
+                    if channel_live
+                    else "local_fake_channel_provider_error",
+                ),
                 diagnostics={**diagnostics, "providerError": _safe_provider_error(exc)},
             )
         if receipt.status != "sent":
@@ -459,13 +513,17 @@ class FileDeliveryBoundary:
             )
         return _decision(
             request,
-            "delivered_local_fake",
+            "delivered_live" if live_path else "delivered_local_fake",
             artifact_ref=artifact_ref,
             content_digest=content_digest,
             artifact_receipt=artifact_receipt,
             delivery_receipt=receipt,
             delivery_claim_allowed=True,
-            reason_codes=("local_fake_delivery_receipt_recorded",),
+            reason_codes=(
+                ("live_delivery_receipt_recorded",)
+                if live_path
+                else ("local_fake_delivery_receipt_recorded",)
+            ),
             diagnostics=diagnostics,
         )
 
@@ -502,7 +560,7 @@ def _decision(
             _BOUNDARY_VERIFICATION_TOKEN
             if (
                 delivery_claim_allowed
-                and status == "delivered_local_fake"
+                and status in ("delivered_local_fake", "delivered_live")
                 and artifact_receipt is not None
                 and delivery_receipt is not None
             )
@@ -517,6 +575,8 @@ def _diagnostics(config: FileDeliveryConfig) -> dict[str, object]:
         "enabled": config.enabled,
         "localFakeArtifactServiceEnabled": config.local_fake_artifact_service_enabled,
         "localFakeChannelDeliveryEnabled": config.local_fake_channel_delivery_enabled,
+        "liveArtifactStorageEnabled": config.live_artifact_storage_enabled,
+        "liveChannelDeliveryEnabled": config.live_channel_delivery_enabled,
         "productionStorageWritesEnabled": False,
         "productionChannelDeliveryEnabled": False,
         "routeAttached": False,
@@ -649,6 +709,10 @@ def _safe_provider_error(exc: BaseException) -> str:
 
 def _is_local_fake_provider(provider: object) -> bool:
     return getattr(provider, "openmagi_local_fake_provider", False) is True
+
+
+def _is_trusted_live_provider(provider: object) -> bool:
+    return getattr(provider, "openmagi_live_provider", False) is True
 
 
 def _is_raw_path_ref(value: str) -> bool:

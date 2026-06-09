@@ -145,7 +145,7 @@ def _file_delivery_result(
         channel_provider=_LocalFakeChannelDeliveryProvider(),
     )
     projection = decision.public_projection()
-    if decision.status != "delivered_local_fake" or decision.delivery_receipt is None:
+    if decision.status not in ("delivered_local_fake", "delivered_live") or decision.delivery_receipt is None:
         reason = decision.reason_codes[0] if decision.reason_codes else "file_delivery_blocked"
         return blocked_result(tool_name, reason)
 
