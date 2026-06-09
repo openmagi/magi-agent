@@ -69,12 +69,26 @@ from magi_agent.tools.read_ledger import (
 )
 from magi_agent.tools.registry import ToolRegistry
 from magi_agent.tools.result import ToolResult
+from magi_agent.egress_proxy.config import EgressProxyConfig
+from magi_agent.egress_proxy.injection import subprocess_env_overlay
 
 if TYPE_CHECKING:
     from magi_agent.runtime.session_identity import MemoryMode
 
 
 logger = logging.getLogger(__name__)
+
+
+def _build_bash_env(cfg: EgressProxyConfig | None = None) -> dict[str, str]:
+    """Build the env for the Bash tool subprocess.
+
+    Default-OFF: when the egress proxy is unset, the overlay is empty and the
+    returned env is byte-identical to the legacy ``{"PATH": ...}`` mapping.
+    """
+    cfg = EgressProxyConfig.from_env() if cfg is None else cfg
+    env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin")}
+    env.update(subprocess_env_overlay(cfg))
+    return env
 
 Gate5BFullToolHostStatus = Literal["disabled", "blocked", "ready"]
 Gate5BFullToolOutcomeStatus = Literal["ok", "blocked", "error", "duplicate"]
@@ -293,6 +307,10 @@ _SENSITIVE_RE = re.compile(
     r"raw[_ -]?(?:user|tool|session|auth|cookie|text)|"
     r"hidden[_ -]?reasoning|chain[_ -]?of[_ -]?thought"
     r")",
+    re.IGNORECASE,
+)
+_URL_USERINFO_RE = re.compile(
+    r"\b(?P<scheme>https?://)(?P<userinfo>[^/\s@]+@)(?P<authority>[^/\s]+)",
     re.IGNORECASE,
 )
 
@@ -1050,7 +1068,7 @@ class Gate5BFullToolHost:
                 capture_output=True,
                 text=True,
                 timeout=self.config.command_timeout_ms / 1000,
-                env={"PATH": os.environ.get("PATH", "/usr/bin:/bin")},
+                env=_build_bash_env(),
                 check=False,
             )
             stdout = _redact(completed.stdout)[0 : self.config.max_per_tool_output_bytes]
@@ -2252,6 +2270,7 @@ def _sanitize_output(value: object) -> object:
 
 
 def _redact(value: str) -> str:
+    value = _URL_USERINFO_RE.sub(r"\g<scheme>[redacted]@\g<authority>", value)
     return _SENSITIVE_RE.sub("[redacted]", value)
 
 
