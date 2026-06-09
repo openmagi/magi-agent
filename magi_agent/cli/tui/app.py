@@ -114,7 +114,7 @@ def _token_text(payload: dict) -> str:
     return ""
 
 
-def _usage_tokens(usage: dict) -> int:
+def _usage_tokens(usage: object) -> int:
     """Sum input+output tokens from an EngineResult.usage dict (best-effort).
 
     ``EngineResult.usage`` is a free-form dict; providers spell token counts
@@ -736,6 +736,10 @@ class MagiTuiApp(App[None]):
             and self._footer is not None
             and self._footer.state == "running"
         ):
+            # The reactive ``elapsed`` advances every tick (cheap assignment),
+            # but ``StatusFooter.watch_elapsed`` only REPAINTS when the
+            # whole-second value changes — so this 25Hz tick no longer triggers
+            # ~24/25 identical repaints for the 1s-granularity render.
             self._footer.set_elapsed(self._turn_elapsed())
 
     def _render_welcome(self) -> None:
@@ -1104,6 +1108,14 @@ class MagiTuiApp(App[None]):
                     terminal = item
                     break
                 await self._fold_event(item)
+        except BaseException:
+            # The engine RAISED instead of yielding a terminal: the normal
+            # ``_render_terminal`` path below never runs, so the footer would
+            # stay on "running" and the elapsed clock would tick forever. Reset
+            # the footer to a terminal-ish state and stop the clock, then
+            # re-raise to preserve the existing error propagation.
+            self._reset_footer_on_error()
+            raise
         finally:
             await gen.aclose()
             if self._active_turn_id == turn_id:
@@ -1118,6 +1130,18 @@ class MagiTuiApp(App[None]):
             terminal = EngineResult(terminal=Terminal.error, error="no_terminal")
         self.last_terminal = terminal
         self._render_terminal(terminal)
+
+    def _reset_footer_on_error(self) -> None:
+        """Stop the running clock + flip the footer off "running" on a raise.
+
+        Used when the engine generator raises (rather than yielding an error
+        terminal): clears the elapsed start stamp so ``_on_flush_tick`` stops
+        advancing the clock, and folds an ``error`` state into the footer so the
+        user sees the turn ended. No-op before mount.
+        """
+
+        self._turn_started_monotonic = None
+        self.update_footer(state=Terminal.error.value)
 
     async def _fold_event(self, event: RuntimeEvent) -> None:
         """Fold one ``RuntimeEvent`` into the transcript regions."""

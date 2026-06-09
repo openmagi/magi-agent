@@ -1378,3 +1378,53 @@ def test_footer_elapsed_ticks_during_turn() -> None:
         assert second > first
 
     asyncio.run(_run())
+
+
+def test_footer_resets_when_turn_worker_raises() -> None:
+    """If the engine RAISES (vs yielding an error terminal), the footer must not
+    get stuck on "running" and the elapsed clock must stop.
+
+    Without the ``_run_turn`` error cleanup the exception propagates past
+    ``_render_terminal`` (which never runs), so the footer stays on "running"
+    and ``_turn_started_monotonic`` stays set — this test asserts the opposite.
+    """
+
+    async def _run() -> None:
+        from magi_agent.cli.tui.footer import StatusFooter
+
+        class _RaisingEngine(FakeEngineDriver):
+            async def run_turn_stream(self, runtime, turn_input, *, cancel, gate=None):
+                # Async generator that raises before yielding any item — the
+                # engine never produces a terminal EngineResult.
+                if False:  # pragma: no cover - makes this an async generator
+                    yield None
+                raise RuntimeError("engine boom")
+
+        from textual.worker import WorkerFailed
+
+        captured: dict[str, object] = {}
+        app = _make_app(_RaisingEngine())
+        try:
+            async with app.run_test() as pilot:
+                footer = app.query_one("#footer", StatusFooter)
+                app.start_turn("go")
+                # The turn worker RAISES (propagation is preserved per the fix):
+                # ``wait_for_complete`` re-raises it as ``WorkerFailed``, and the
+                # ``run_test`` context re-raises the app panic on exit. We swallow
+                # only those here — the point is the footer was cleaned up DESPITE
+                # the raise, sampled BEFORE the context tears down.
+                try:
+                    await app.workers.wait_for_complete()
+                except WorkerFailed:
+                    pass
+                await pilot.pause()
+                captured["state"] = footer.state
+                captured["started"] = app._turn_started_monotonic
+        except (WorkerFailed, RuntimeError):
+            pass
+        # Footer must NOT be stuck on "running" and the elapsed clock stopped.
+        assert captured.get("state") != "running"
+        assert captured.get("state") is not None  # the turn actually ran
+        assert captured.get("started") is None
+
+    asyncio.run(_run())
