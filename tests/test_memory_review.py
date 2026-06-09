@@ -418,6 +418,33 @@ def test_review_config_authority_pins_locked() -> None:
     assert copied.live_reviewer_attached is False
     assert copied.production_writes_enabled is False
 
+    constructed = MemoryReviewConfig.model_construct(
+        enabled=True,
+        background_review_runner_attached=True,
+        live_reviewer_attached=True,
+        production_writes_enabled=True,
+    )
+    assert constructed.background_review_runner_attached is False
+    assert constructed.live_reviewer_attached is False
+    assert constructed.production_writes_enabled is False
+
+
+def test_review_receipt_fact_preview_is_digest_only() -> None:
+    """Write receipts must not echo raw reviewer facts or secrets."""
+    from magi_agent.harness.memory_review import _to_write_receipt
+
+    class _Result:
+        status = "ok"
+        metadata = {"reasonCodes": ("memory_write_live",)}
+        output = {"realWrite": True}
+
+    fact = "user api token is sk-test-secret-value"
+    receipt = _to_write_receipt(fact, _Result())
+
+    assert receipt.fact_preview.startswith("sha256:")
+    assert "sk-test-secret-value" not in receipt.fact_preview
+    assert "user api token" not in receipt.fact_preview
+
 
 # ---------------------------------------------------------------------------
 # Task 5.2 — should_run_review N-turn trigger

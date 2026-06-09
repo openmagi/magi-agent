@@ -29,6 +29,7 @@ Forbidden imports: urllib, socket, subprocess, http, requests — none here.
 """
 from __future__ import annotations
 
+import hashlib
 import os
 from collections.abc import Callable
 from typing import Any, Literal, Self
@@ -116,6 +117,14 @@ class MemoryReviewConfig(BaseModel):
         data["production_writes_enabled"] = False
         _ = deep
         return type(self).model_validate(data)
+
+    @classmethod
+    def model_construct(cls, _fields_set: set[str] | None = None, **values: Any) -> Self:
+        model = super().model_construct(_fields_set=_fields_set, **values)
+        object.__setattr__(model, "background_review_runner_attached", False)
+        object.__setattr__(model, "live_reviewer_attached", False)
+        object.__setattr__(model, "production_writes_enabled", False)
+        return model
 
 
 class MemoryReviewWriteReceipt(BaseModel):
@@ -271,7 +280,7 @@ class MemoryReviewHarness:
             return _to_write_receipt(fact, result)
         except Exception:
             return MemoryReviewWriteReceipt(
-                factPreview=fact[:120],
+                factPreview=_fact_preview(fact),
                 status="blocked",
                 realWrite=False,
                 reasonCodes=("review_write_exception",),
@@ -288,7 +297,7 @@ def _to_write_receipt(fact: str, result: Any) -> MemoryReviewWriteReceipt:
         real = bool(output.get("realWrite", False)) if isinstance(output, dict) else False
         outcome: WriteOutcome = "ok" if real else "simulated"
         return MemoryReviewWriteReceipt(
-            factPreview=fact[:120],
+            factPreview=_fact_preview(fact),
             status=outcome,
             realWrite=real,
             reasonCodes=reason_codes,
@@ -297,11 +306,15 @@ def _to_write_receipt(fact: str, result: Any) -> MemoryReviewWriteReceipt:
     error_code = getattr(result, "error_code", None)
     codes = reason_codes or ((str(error_code),) if error_code else ())
     return MemoryReviewWriteReceipt(
-        factPreview=fact[:120],
+        factPreview=_fact_preview(fact),
         status="blocked",
         realWrite=False,
         reasonCodes=codes,
     )
+
+
+def _fact_preview(fact: str) -> str:
+    return "sha256:" + hashlib.sha256(fact.encode("utf-8")).hexdigest()
 
 
 __all__ = [
