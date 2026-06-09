@@ -11,13 +11,14 @@ from collections.abc import Callable
 from typing import Any
 
 from magi_agent.benchmarks.taubench.episode import EpisodeState, run_episode
+from magi_agent.benchmarks.taubench.reliability import ReliabilityConfig
 from magi_agent.benchmarks.taubench.tau_env import build_env_function_tools
 
 
 def build_magi_tau_agent(
     *,
     runner_factory: Callable[..., Any],
-    reliability: Any = None,
+    reliability: ReliabilityConfig | None = None,
 ) -> Any:
     """Construct a tau_bench Agent subclass bound to a magi runner_factory.
 
