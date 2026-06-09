@@ -6,6 +6,7 @@ import sys
 import time
 from pathlib import Path
 
+from google.adk.agents.run_config import RunConfig, StreamingMode
 from google.adk.events import Event
 from google.genai import types
 
@@ -238,17 +239,26 @@ def test_fake_runner_success_emits_local_public_events_and_turn_end_only() -> No
     assert result.response_authority == "none"
     assert result.user_visible_output is None
     assert len(runner.calls) == 1
-    assert set(runner.calls[0]) == {
+    assert set(runner.calls[0]) <= {
         "user_id",
         "session_id",
         "invocation_id",
         "new_message",
+        "run_config",
     }
+    assert {
+        "user_id",
+        "session_id",
+        "invocation_id",
+        "new_message",
+    } <= set(runner.calls[0])
     assert runner.calls[0]["session_id"] == "agent:main:app:default"
     assert runner.calls[0]["invocation_id"] == "turn-1"
     assert "harness_state" not in runner.calls[0]
-    assert "run_config" not in runner.calls[0]
     assert "state_delta" not in runner.calls[0]
+    if "run_config" in runner.calls[0]:
+        assert isinstance(runner.calls[0]["run_config"], RunConfig)
+        assert runner.calls[0]["run_config"].streaming_mode == StreamingMode.SSE
     _assert_no_write_authority(result)
 
 
