@@ -25,12 +25,29 @@ from collections.abc import Iterable
 
 from textual.command import DiscoveryHit, Hit, Hits, Provider
 
-from magi_agent.cli.contracts import CommandSurface
+from magi_agent.cli.contracts import CommandRegistry, CommandSurface
 
-__all__ = ["CommandPaletteProvider", "AppActionProvider"]
+__all__ = ["CommandPaletteProvider", "AppActionProvider", "tui_command_names"]
 
 # The TUI surface mask — palette commands are the interactive set.
 _TUI_SURFACE = CommandSurface(tui=True, headless=False)
+
+
+def tui_command_names(registry: CommandRegistry) -> list[str]:
+    """Non-empty TUI-surfaced slash-command names (bare, no ``/`` prefix).
+
+    Shared by every TUI surface that lists slash commands (palette discovery,
+    the welcome banner, and the help dialog) so the
+    ``list_for(CommandSurface(tui=True, headless=False))`` + non-empty-name
+    filter lives in one place. The ``/`` prefix is applied at each display site.
+    """
+
+    out: list[str] = []
+    for command in registry.list_for(_TUI_SURFACE):
+        name = getattr(command, "name", "")
+        if isinstance(name, str) and name:
+            out.append(name)
+    return out
 
 
 def _command_names(app: object) -> list[str]:
@@ -39,12 +56,7 @@ def _command_names(app: object) -> list[str]:
     commands = getattr(app, "_commands", None)
     if commands is None:
         return []
-    out: list[str] = []
-    for command in commands.list_for(_TUI_SURFACE):
-        name = getattr(command, "name", "")
-        if isinstance(name, str) and name:
-            out.append(name)
-    return out
+    return tui_command_names(commands)
 
 
 class CommandPaletteProvider(Provider):

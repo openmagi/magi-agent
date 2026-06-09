@@ -51,7 +51,6 @@ from textual.widgets.option_list import Option
 
 from magi_agent.cli.contracts import (
     CommandRegistry,
-    CommandSurface,
     ControlRequest,
     EngineDriver,
     EngineResult,
@@ -79,7 +78,11 @@ from magi_agent.cli.tui.autocomplete import (
 )
 from magi_agent.cli.tui.history import DraftStash, InputHistory
 from magi_agent.cli.tui.input import PromptInput, Submission
-from magi_agent.cli.tui.palette import AppActionProvider, CommandPaletteProvider
+from magi_agent.cli.tui.palette import (
+    AppActionProvider,
+    CommandPaletteProvider,
+    tui_command_names,
+)
 from magi_agent.cli.tui.render.markdown import render_markdown
 from magi_agent.cli.tui.transcript import (
     DEFAULT_FLUSH_INTERVAL,
@@ -645,13 +648,7 @@ class MagiTuiApp(App[None]):
 
         if self._controller is None:
             return
-        command_names = [
-            name
-            for command in self._commands.list_for(
-                CommandSurface(tui=True, headless=False)
-            )
-            if (name := getattr(command, "name", ""))
-        ]
+        command_names = tui_command_names(self._commands)
         preview = ", ".join(f"/{name}" for name in command_names[:8])
         extra = len(command_names) - 8
         if preview and extra > 0:
