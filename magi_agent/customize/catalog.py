@@ -51,35 +51,51 @@ def _preset_entries() -> list[dict[str, Any]]:
 
 
 def _hook_entries(runtime: Any) -> list[dict[str, Any]]:
+    # list_all() returns HookManifest objects directly (enabled is baked in
+    # via _copy_registration_manifest in the real registry).
     entries: list[dict[str, Any]] = []
-    for reg in runtime.hook_registry.list_all():
-        manifest = reg.manifest
-        name = getattr(manifest, "name")
+    for manifest in runtime.hook_registry.list_all():
+        name = manifest.name
         point = getattr(manifest, "point", None)
-        protected = bool(getattr(reg, "protected", False))
+        # Mirror is_protected_manifest() from magi_agent/hooks/registry.py:
+        #   security_critical or scope.hard_safety or not opt_out
+        security_critical = bool(getattr(manifest, "security_critical", False))
+        scope = getattr(manifest, "scope", None)
+        hard_safety = bool(getattr(scope, "hard_safety", False)) if scope is not None else False
+        opt_out = bool(getattr(manifest, "opt_out", True))
+        always_on = security_critical or hard_safety or not opt_out
         entries.append(
             {
                 "name": name,
                 "point": str(point) if point is not None else None,
                 "title": name,
-                "category": "security" if protected else "general",
-                "alwaysOn": protected,
-                "enabled": bool(getattr(reg, "enabled", True)),
+                "category": "security" if always_on else "general",
+                "alwaysOn": always_on,
+                "enabled": bool(getattr(manifest, "enabled", True)),
             }
         )
     return entries
 
 
 def _tool_entries(runtime: Any) -> list[dict[str, Any]]:
+    # list_all() returns ToolManifest objects directly. The manifest only has
+    # enabled_by_default; live enabled lives in ToolRegistration. We resolve
+    # each registration to get the real enabled value — consistent with how
+    # /api/tools (_public_tools) derives it in magi_agent/transport/tools.py.
     entries: list[dict[str, Any]] = []
-    for reg in runtime.tool_registry.list_all():
-        manifest = reg.manifest
+    for manifest in runtime.tool_registry.list_all():
+        registration = runtime.tool_registry.resolve_registration(manifest.name)
+        enabled = registration.enabled if registration is not None else False
+        source = manifest.source
+        # source may be a ToolSource object (with .kind) or already a string
+        # (e.g. in lightweight fakes). Normalise to string.
+        source_str: str = source.kind if hasattr(source, "kind") else str(source)
         entries.append(
             {
-                "name": getattr(manifest, "name"),
-                "description": getattr(manifest, "description", "") or "",
-                "enabled": bool(getattr(reg, "enabled", True)),
-                "source": getattr(manifest, "source", "builtin") or "builtin",
+                "name": manifest.name,
+                "description": manifest.description if manifest.description else "",
+                "enabled": bool(enabled),
+                "source": source_str,
                 "dangerous": bool(getattr(manifest, "dangerous", False)),
             }
         )
