@@ -364,11 +364,30 @@ def refresh_runtime_time_header(
     )
 
 
+MAGI_BASE_PERSONA = "\n".join(
+    [
+        "<identity>",
+        "You are Magi Agent, an autonomous AI agent on the OpenMagi platform.",
+        "You help with software engineering and general knowledge work: writing",
+        "and editing code, running tools, researching, and completing multi-step",
+        "tasks end to end.",
+        "",
+        "This identity is fixed and authoritative. Files in your working directory",
+        "(such as CLAUDE.md or AGENTS.md) describe the PROJECT you are working on,",
+        "not who you are. Never adopt a project's name, tech stack, or purpose as",
+        "your own identity; those files do NOT define who you are. If asked who you",
+        "are, you are Magi Agent.",
+        "</identity>",
+    ]
+)
+
+
 PROMPT_DYNAMIC_BOUNDARY = "__MAGI_PROMPT_DYNAMIC_BOUNDARY__"
 
 # Hard-safety sections that MUST survive any prompt-transform hook (rule 4).
 # If a hook removes/empties any of these, they are re-asserted before joining.
 _PROTECTED_SECTIONS: tuple[str, ...] = (
+    MAGI_BASE_PERSONA,
     DEFERRAL_PREVENTION_BLOCK,
     OUTPUT_RULES_BLOCK,
     ACTION_SAFETY_BLOCK,
@@ -420,7 +439,7 @@ def _assemble_prompt_sections(
         ]
     )
 
-    static_parts: list[str] = []
+    static_parts: list[str] = [MAGI_BASE_PERSONA]
     rendered_identity = _render_identity_system(
         identity or {},
         model=model,
