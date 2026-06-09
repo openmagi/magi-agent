@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import base64
 
 from magi_agent.shadow.gate5b4c3_image_parts import image_blocks_to_parts
@@ -37,6 +39,7 @@ def test_skips_malformed_blocks():
     parts = image_blocks_to_parts(
         [
             {"type": "text", "text": "nope"},
+            {"type": "image"},
             {"type": "image", "source": {"type": "base64"}},
             {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": "!!notb64!!"}},
         ],
@@ -47,4 +50,4 @@ def test_skips_malformed_blocks():
 
 
 def test_empty_returns_empty():
-    assert image_blocks_to_parts([], part_factory=lambda **_: None) == []
+    assert image_blocks_to_parts([], part_factory=lambda *, data, mime_type: None) == []

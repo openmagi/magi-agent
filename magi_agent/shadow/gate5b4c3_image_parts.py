@@ -13,6 +13,8 @@ import binascii
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
+__all__ = ["image_blocks_to_parts"]
+
 PartFactory = Callable[..., Any]
 
 
