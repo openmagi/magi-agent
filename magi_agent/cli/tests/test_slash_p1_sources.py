@@ -460,6 +460,25 @@ class TestSkillCommands:
         assert isinstance(cmd, SkillPromptCommand)
         assert cmd.description == "does stuff"
 
+    def test_skill_commands_discovers_installed_skills_beyond_previous_cap(
+        self, tmp_path: Path
+    ) -> None:
+        from magi_agent.cli.commands.skill_commands import skill_commands
+
+        for index in range(75):
+            name = f"bulk-skill-{index:03d}"
+            skill_dir = tmp_path / "skills" / name
+            skill_dir.mkdir(parents=True)
+            (skill_dir / "SKILL.md").write_text(
+                f"---\nname: {name}\n---\n{name} body",
+                encoding="utf-8",
+            )
+
+        result = skill_commands(str(tmp_path))
+
+        discovered = [cmd.name for cmd in result if cmd.name.startswith("bulk-skill-")]
+        assert discovered == [f"bulk-skill-{index:03d}" for index in range(75)]
+
     def test_skill_commands_discovers_magi_skills_dir(self, tmp_path: Path) -> None:
         from magi_agent.cli.commands.skill_commands import skill_commands
 

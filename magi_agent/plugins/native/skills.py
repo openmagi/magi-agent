@@ -3,18 +3,23 @@ from __future__ import annotations
 from importlib import resources
 from pathlib import Path
 
-from magi_agent.plugins.native._common import digest, ok_result, workspace_root
+from magi_agent.plugins.native._common import (
+    digest,
+    ok_result,
+    protected_workspace_path_reason,
+    workspace_root,
+)
 from magi_agent.tools.context import ToolContext
 from magi_agent.tools.result import ToolResult
 
-_MAX_LOADED_BUNDLED_SKILLS = 20
 _MAX_SKILL_BODY_CHARS = 64_000
+_WORKSPACE_SKILL_BASES = ("skills", ".magi/skills", "docs/superpowers")
 
 
 def skill_loader(arguments: dict[str, object], context: ToolContext) -> ToolResult:
     root = workspace_root(context)
     candidates = _skill_candidates(root)
-    loaded_skills = _load_bundled_skill_bodies(candidates)
+    loaded_skills = _load_skill_bodies(candidates, root)
     return ok_result(
         "SkillLoader",
         {
@@ -45,14 +50,16 @@ def external_tool_loader(arguments: dict[str, object], context: ToolContext) -> 
 def _skill_candidates(root: Path) -> list[str]:
     skills: list[str] = []
     skills.extend(_bundled_skill_candidates())
-    for base in (root / "skills", root / ".magi" / "skills", root / "docs" / "superpowers"):
-        if not base.exists():
+    for relative_base in _WORKSPACE_SKILL_BASES:
+        base = root / relative_base
+        if not base.is_dir():
             continue
-        for skill in sorted(base.rglob("SKILL.md"))[:50]:
-            try:
-                skills.append(skill.relative_to(root).as_posix())
-            except ValueError:
-                skills.append(skill.name)
+        if _workspace_read_path_reason(root, relative_base) != "":
+            continue
+        for skill in sorted(base.rglob("SKILL.md")):
+            relative = _workspace_skill_relative(root, skill)
+            if relative is not None:
+                skills.append(relative)
     return skills
 
 
@@ -67,20 +74,19 @@ def _bundled_skill_candidates() -> list[str]:
     return sorted(
         skill.relative_to(skills_root).as_posix()
         for skill in bundled_root.rglob("SKILL.md")
-    )[:50]
+    )
 
 
-def _load_bundled_skill_bodies(candidates: list[str]) -> list[dict[str, object]]:
+def _load_skill_bodies(candidates: list[str], root: Path) -> list[dict[str, object]]:
     loaded: list[dict[str, object]] = []
     for relative in candidates:
-        if not relative.startswith("bundled/") or not relative.endswith("/SKILL.md"):
-            continue
-        body = _read_bundled_skill_body(relative)
+        if relative.startswith("bundled/"):
+            body = _read_bundled_skill_body(relative)
+        else:
+            body = _read_workspace_skill_body(root, relative)
         if body is None:
             continue
         loaded.append(body)
-        if len(loaded) >= _MAX_LOADED_BUNDLED_SKILLS:
-            break
     return loaded
 
 
@@ -144,3 +150,53 @@ def _read_bundled_skill_body(relative: str) -> dict[str, object] | None:
         "body": body,
         "bodyDigest": digest(body),
     }
+
+
+def _workspace_skill_relative(root: Path, skill: Path) -> str | None:
+    try:
+        relative = skill.relative_to(root).as_posix()
+    except ValueError:
+        return None
+    if not relative.endswith("/SKILL.md"):
+        return None
+    if _workspace_read_path_reason(root, relative) != "":
+        return None
+    return relative
+
+
+def _read_workspace_skill_body(root: Path, relative: str) -> dict[str, object] | None:
+    if not relative.endswith("/SKILL.md"):
+        return None
+    if _workspace_read_path_reason(root, relative) != "":
+        return None
+    path = (root / relative).resolve()
+    try:
+        body = path.read_text(encoding="utf-8")
+    except (FileNotFoundError, UnicodeDecodeError, OSError):
+        return None
+    if len(body) > _MAX_SKILL_BODY_CHARS:
+        body = body[:_MAX_SKILL_BODY_CHARS]
+    return {
+        "path": relative,
+        "source": "workspace",
+        "body": body,
+        "bodyDigest": digest(body),
+    }
+
+
+def _workspace_read_path_reason(root: Path, relative: str) -> str:
+    normalized = str(Path(relative.replace("\\", "/")).as_posix())
+    normalized = "" if normalized == "." else normalized
+    if not normalized or normalized.startswith("/") or normalized == "..":
+        return "path_traversal_blocked"
+    if normalized.startswith("../") or "/../" in f"/{normalized}/":
+        return "path_traversal_blocked"
+    reason = protected_workspace_path_reason(normalized, mutating=False)
+    if reason:
+        return reason
+    try:
+        candidate = (root / normalized).resolve()
+        resolved_relative = candidate.relative_to(root).as_posix()
+    except (OSError, ValueError):
+        return "path_traversal_blocked"
+    return protected_workspace_path_reason(resolved_relative, mutating=False)
