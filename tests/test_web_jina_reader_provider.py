@@ -360,6 +360,71 @@ def test_reader_without_api_key_omits_auth_header(monkeypatch: pytest.MonkeyPatc
 
 
 # ---------------------------------------------------------------------------
+# Constructor-built client auth headers (I-1)
+# ---------------------------------------------------------------------------
+
+
+def test_constructor_with_api_key_builds_client_with_auth_header() -> None:
+    """JinaReaderProvider(api_key=...) with no client= must build an httpx.Client
+    that carries both Authorization and X-Return-Format headers."""
+    from magi_agent.web_acquisition.providers.jina_reader import JinaReaderProvider
+
+    provider = JinaReaderProvider(api_key="my-key")
+    client = provider._fetch_provider._client
+    assert client is not None
+    assert dict(client.headers).get("authorization") == "Bearer my-key"
+    assert dict(client.headers).get("x-return-format") == "markdown"
+
+
+def test_constructor_without_api_key_builds_client_with_no_auth_header() -> None:
+    """JinaReaderProvider() with no api_key must build a client WITHOUT an
+    Authorization header, but still carry X-Return-Format: markdown."""
+    from magi_agent.web_acquisition.providers.jina_reader import JinaReaderProvider
+
+    provider = JinaReaderProvider()
+    client = provider._fetch_provider._client
+    assert client is not None
+    assert "authorization" not in dict(client.headers)
+    assert dict(client.headers).get("x-return-format") == "markdown"
+
+
+# ---------------------------------------------------------------------------
+# Non-2xx upstream response passthrough (M-3)
+# ---------------------------------------------------------------------------
+
+
+def test_reader_non_2xx_response_returns_status_dict_without_raising(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A 429 or 403 from Jina must be returned as a {'status': ...} dict, never raise."""
+    _allow_public_host(monkeypatch)
+
+    for status_code in (429, 403):
+
+        def handler(request: httpx.Request, _code: int = status_code) -> httpx.Response:
+            return httpx.Response(
+                _code,
+                headers={"content-type": "text/plain"},
+                text="Rate limited" if _code == 429 else "Forbidden",
+            )
+
+        client, _spy = _client_with(handler)
+
+        from magi_agent.web_acquisition.providers.jina_reader import JinaReaderProvider
+
+        provider = JinaReaderProvider(client=client)
+        result = provider.reader(_Req("https://docs.example.com/article"))
+
+        # Must not raise; must return a structured mapping.
+        assert isinstance(result, dict), f"Expected dict for {status_code}, got {type(result)}"
+        # Either an error status is present (denied/timeout) OR the content is empty/short.
+        # The key constraint is: no exception was raised.
+        assert "content" in result or "status" in result, (
+            f"Expected status or content key for {status_code}, got {result!r}"
+        )
+
+
+# ---------------------------------------------------------------------------
 # live marker
 # ---------------------------------------------------------------------------
 

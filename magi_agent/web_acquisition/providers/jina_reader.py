@@ -61,35 +61,25 @@ class JinaReaderProvider:
 
     def __init__(
         self,
-        api_key: str | None = None,
         *,
+        api_key: str | None = None,
         client: httpx.Client | None = None,
         timeout_s: float = 30.0,
     ) -> None:
-        self._api_key = api_key
         self._timeout_s = float(timeout_s)
 
-        if client is not None:
-            # Use the injected client directly (test seam).
-            self._fetch_provider = LiveFetchProvider(
-                client=client,
-                timeout_s=self._timeout_s,
-            )
-        else:
-            # Build a default client with Jina-specific headers.
-            default_headers: dict[str, str] = {
-                "X-Return-Format": "markdown",
-            }
-            if api_key:
-                default_headers["Authorization"] = f"Bearer {api_key}"
-            default_client = httpx.Client(
-                headers=default_headers,
-                follow_redirects=False,
-            )
-            self._fetch_provider = LiveFetchProvider(
-                client=default_client,
-                timeout_s=self._timeout_s,
-            )
+        # Build a default client when none is injected (test seam).
+        default_headers: dict[str, str] = {"X-Return-Format": "markdown"}
+        if api_key:
+            default_headers["Authorization"] = f"Bearer {api_key}"
+        resolved_client = client if client is not None else httpx.Client(
+            headers=default_headers,
+            follow_redirects=False,
+        )
+        self._fetch_provider = LiveFetchProvider(
+            client=resolved_client,
+            timeout_s=self._timeout_s,
+        )
 
     def reader(self, request: object) -> Mapping[str, object]:
         """Fetch ``request.url`` via Jina Reader → ``{"url", "title", "content", "metadata"}``.
