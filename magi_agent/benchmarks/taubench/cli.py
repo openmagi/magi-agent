@@ -121,7 +121,10 @@ def run_eval(
     # runners are built/run, then restored — prevents leakage across run_eval calls.
     with _apply_flags(config):
         # Build the tau-bench env for the domain (user-sim uses gpt-4o).
-        env = get_env(domain, user_strategy="llm", user_model="gpt-4o", task_split="test", user_provider="openai")
+        # Pass an explicit task_index: tau_bench's env __init__ otherwise selects a
+        # task via random.randint(0, len(tasks)) — which is INCLUSIVE of len and
+        # occasionally IndexErrors. We only need len(tasks) here.
+        env = get_env(domain, user_strategy="llm", user_model="gpt-4o", task_split="test", user_provider="openai", task_index=0)
         task_indices = list(range(len(env.tasks)))
         if max_tasks is not None:
             task_indices = task_indices[:max_tasks]
@@ -135,7 +138,8 @@ def run_eval(
             def _attempt() -> EpisodeResult:
                 # Fresh env + state per (task, trial) — tau-bench envs are stateful.
                 trial_env = get_env(
-                    domain, user_strategy="llm", user_model="gpt-4o", task_split="test", user_provider="openai"
+                    domain, user_strategy="llm", user_model="gpt-4o",
+                    task_split="test", user_provider="openai", task_index=task_index,
                 )
                 provider_config = ProviderConfig(
                     provider="anthropic",
