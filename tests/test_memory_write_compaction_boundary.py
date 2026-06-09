@@ -440,7 +440,17 @@ def test_compaction_denies_missing_policy_evidence_approval_and_unsafe_sources()
         assert result.receipt.provider_call_attempted is False
 
 
-def test_forged_config_and_authority_flags_cannot_enable_production_or_provider_calls() -> None:
+def test_harness_config_defaults_are_inert_when_master_off() -> None:
+    """PR1 governance: with the resolver master OFF (the default), a
+    default-constructed harness config is fully inert — every write/provider/
+    filesystem/network activation field is False — so the OFF path stays
+    byte-identical to the pre-PR1 scaffold even though the relaxed fields are now
+    plain ``bool`` (they can be turned ON by later PRs, see
+    ``test_relaxed_authority_fields_reflect_explicit_activation`` below).
+
+    The DB-mutation and ADK-memory-service-write fields plus ``traffic_attached``
+    remain permanently-frozen ``Literal[False]``.
+    """
     from magi_agent.harness.memory_compaction import (
         MemoryCompactionHarnessConfig,
         MemoryCompactionPolicy,
@@ -450,6 +460,60 @@ def test_forged_config_and_authority_flags_cannot_enable_production_or_provider_
         MemoryWritePolicy,
     )
 
+    write_config = MemoryWriteHarnessConfig.model_validate({})
+    compaction_config = MemoryCompactionHarnessConfig.model_validate({})
+    write_policy = MemoryWritePolicy.model_validate(
+        {
+            "policyRef": "policy:memory-write",
+            "policySnapshotRef": "policy-snapshot:pr6",
+        }
+    )
+    compaction_policy = MemoryCompactionPolicy.model_validate(
+        {
+            "policyRef": "policy:memory-compaction",
+            "policySnapshotRef": "policy-snapshot:pr6",
+        }
+    )
+
+    # Relaxed activation fields default OFF (inert when master is off).
+    assert write_config.production_write_enabled is False
+    assert write_config.provider_call_allowed is False
+    assert write_config.filesystem_mutation_allowed is False
+    assert write_config.network_call_allowed is False
+    assert compaction_config.production_write_enabled is False
+    assert compaction_config.provider_call_allowed is False
+    assert compaction_config.filesystem_mutation_allowed is False
+    assert compaction_config.network_call_allowed is False
+
+    # Permanently-frozen authority fields stay False.
+    assert write_config.database_mutation_allowed is False
+    assert write_config.adk_memory_service_write_enabled is False
+    assert write_config.traffic_attached is False
+    assert compaction_config.database_mutation_allowed is False
+    assert compaction_config.adk_memory_service_write_enabled is False
+    assert compaction_config.traffic_attached is False
+
+    # Policy snapshots are unchanged in PR1 — still locked False.
+    assert write_policy.production_write_enabled is False
+    assert write_policy.provider_call_allowed is False
+    assert compaction_policy.production_write_enabled is False
+    assert compaction_policy.provider_call_allowed is False
+
+
+def test_relaxed_authority_fields_reflect_explicit_activation() -> None:
+    """PR1 governance: a flag gates *activation*, never *capability*.  The
+    relaxed authority fields are now plain ``bool`` — when explicitly turned ON
+    (the seam later PRs drive from ``resolve_memory_config``) they actually flip
+    ON.  A dead flag-on path would be a governance violation, so we assert the
+    fields are honoured here even though no later-PR wiring consumes them yet.
+
+    The DB-mutation / ADK-memory-service-write / traffic fields stay
+    permanently-frozen ``Literal[False]`` and coerce any forged ``True`` to
+    ``False``.
+    """
+    from magi_agent.harness.memory_compaction import MemoryCompactionHarnessConfig
+    from magi_agent.harness.memory_write import MemoryWriteHarnessConfig
+
     write_config = MemoryWriteHarnessConfig.model_validate(
         {
             "enabled": True,
@@ -457,19 +521,11 @@ def test_forged_config_and_authority_flags_cannot_enable_production_or_provider_
             "productionWriteEnabled": True,
             "providerCallAllowed": True,
             "filesystemMutationAllowed": True,
-            "databaseMutationAllowed": True,
             "networkCallAllowed": True,
+            # Forged frozen fields must still coerce to False.
+            "databaseMutationAllowed": True,
             "adkMemoryServiceWriteEnabled": True,
             "trafficAttached": True,
-        }
-    )
-    write_policy = MemoryWritePolicy.model_validate(
-        {
-            "policyRef": "policy:memory-write",
-            "policySnapshotRef": "policy-snapshot:pr6",
-            "localFakeSuccessAllowed": True,
-            "productionWriteEnabled": True,
-            "providerCallAllowed": True,
         }
     )
     compaction_config = MemoryCompactionHarnessConfig.model_validate(
@@ -479,56 +535,46 @@ def test_forged_config_and_authority_flags_cannot_enable_production_or_provider_
             "productionWriteEnabled": True,
             "providerCallAllowed": True,
             "filesystemMutationAllowed": True,
-            "databaseMutationAllowed": True,
             "networkCallAllowed": True,
+            "databaseMutationAllowed": True,
             "adkMemoryServiceWriteEnabled": True,
             "trafficAttached": True,
         }
     )
-    compaction_policy = MemoryCompactionPolicy.model_validate(
-        {
-            "policyRef": "policy:memory-compaction",
-            "policySnapshotRef": "policy-snapshot:pr6",
-            "localFakeCompactionAllowed": True,
-            "productionWriteEnabled": True,
-            "providerCallAllowed": True,
-        }
-    )
-    constructed_write_config = MemoryWriteHarnessConfig.model_construct(
-        enabled=True,
-        localFakeAdapterEnabled=True,
-        productionWriteEnabled=True,
-        providerCallAllowed=True,
-    )
-    constructed_compaction_config = MemoryCompactionHarnessConfig.model_construct(
-        enabled=True,
-        localFakeAdapterEnabled=True,
-        productionWriteEnabled=True,
-        providerCallAllowed=True,
-    )
 
-    assert write_config.production_write_enabled is False
-    assert write_config.provider_call_allowed is False
-    assert write_config.filesystem_mutation_allowed is False
+    # Relaxed fields are now honoured (capability follows the flag).
+    assert write_config.production_write_enabled is True
+    assert write_config.provider_call_allowed is True
+    assert write_config.filesystem_mutation_allowed is True
+    assert write_config.network_call_allowed is True
+    assert compaction_config.production_write_enabled is True
+    assert compaction_config.provider_call_allowed is True
+    assert compaction_config.filesystem_mutation_allowed is True
+    assert compaction_config.network_call_allowed is True
+
+    # Permanently-frozen authority fields reject the forged True.
     assert write_config.database_mutation_allowed is False
-    assert write_config.network_call_allowed is False
     assert write_config.adk_memory_service_write_enabled is False
     assert write_config.traffic_attached is False
-    assert write_policy.production_write_enabled is False
-    assert write_policy.provider_call_allowed is False
-    assert compaction_config.production_write_enabled is False
-    assert compaction_config.provider_call_allowed is False
-    assert compaction_config.filesystem_mutation_allowed is False
     assert compaction_config.database_mutation_allowed is False
-    assert compaction_config.network_call_allowed is False
     assert compaction_config.adk_memory_service_write_enabled is False
     assert compaction_config.traffic_attached is False
-    assert compaction_policy.production_write_enabled is False
-    assert compaction_policy.provider_call_allowed is False
-    assert constructed_write_config.production_write_enabled is False
-    assert constructed_write_config.provider_call_allowed is False
-    assert constructed_compaction_config.production_write_enabled is False
-    assert constructed_compaction_config.provider_call_allowed is False
+
+    # model_construct goes through the same validation path.
+    constructed_write = MemoryWriteHarnessConfig.model_construct(
+        enabled=True,
+        productionWriteEnabled=True,
+        databaseMutationAllowed=True,
+    )
+    constructed_compaction = MemoryCompactionHarnessConfig.model_construct(
+        enabled=True,
+        productionWriteEnabled=True,
+        databaseMutationAllowed=True,
+    )
+    assert constructed_write.production_write_enabled is True
+    assert constructed_write.database_mutation_allowed is False
+    assert constructed_compaction.production_write_enabled is True
+    assert constructed_compaction.database_mutation_allowed is False
 
 
 def test_public_projections_redact_sensitive_write_and_compaction_strings() -> None:

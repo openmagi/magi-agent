@@ -16,7 +16,6 @@ All content is redacted through the existing secret-scanner before persisting.
 """
 from __future__ import annotations
 
-import os
 import re
 from pathlib import Path
 from typing import Any, Literal, Sequence
@@ -280,13 +279,23 @@ class LocalFileMemoryProvider:
 
     @staticmethod
     def _resolve_write_enabled(config: LocalFileMemoryConfig) -> bool:
-        """Determine whether the write gate is open."""
+        """Determine whether the write gate is open.
+
+        An explicit ``config.write_enabled`` flag always takes precedence (used
+        by tests for deterministic behaviour).  Otherwise the gate is resolved
+        through the single ``resolve_memory_config`` source of truth — which
+        reads the same ``MAGI_MEMORY_WRITE_ENABLED`` env override and also honours
+        the new ``MAGI_MEMORY_ENABLED`` master switch (default OFF in PR1, so the
+        effective default is unchanged from the pre-resolver env read).
+        """
         if config.write_enabled is not None:
             # Explicit config flag takes precedence
             return config.write_enabled
-        # Fall back to environment variable
-        env_val = os.environ.get(MAGI_MEMORY_WRITE_ENABLED_ENV, "").strip().lower()
-        return env_val in {"1", "true", "yes", "on"}
+        # Single source of truth: resolver reads MAGI_MEMORY_WRITE_ENABLED (same
+        # env contract) plus the MAGI_MEMORY_ENABLED master (default OFF in PR1).
+        from magi_agent.memory.config import resolve_memory_config
+
+        return resolve_memory_config().write_enabled
 
     def _query_memory(
         self,

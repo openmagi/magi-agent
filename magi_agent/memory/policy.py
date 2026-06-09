@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from collections.abc import Mapping
 from typing import Any, Literal, Self
 
@@ -266,13 +265,16 @@ class MemoryProjectionGateDecision(BaseModel):
 
 
 def _projection_gate_open() -> bool:
-    """Return True when ``MAGI_MEMORY_PROJECTION_ENABLED`` is set to a truthy value."""
-    return os.environ.get(MAGI_MEMORY_PROJECTION_ENABLED_ENV, "").strip().lower() in (
-        "1",
-        "true",
-        "yes",
-        "on",
-    )
+    """Return True when memory prompt projection is enabled.
+
+    Routed through the single ``resolve_memory_config`` source of truth, which
+    reads the same ``MAGI_MEMORY_PROJECTION_ENABLED`` env override and also
+    honours the ``MAGI_MEMORY_ENABLED`` master switch (default OFF in PR1, so the
+    effective default is unchanged from the pre-resolver env read).
+    """
+    from magi_agent.memory.config import resolve_memory_config
+
+    return resolve_memory_config().projection_enabled
 
 
 def evaluate_memory_policy_with_gate(
