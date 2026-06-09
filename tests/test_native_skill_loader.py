@@ -76,6 +76,59 @@ def test_skill_loader_loads_installed_workspace_skill_bodies(tmp_path: Path) -> 
     assert user["bodyDigest"].startswith("sha256:")
 
 
+def test_skill_loader_discovers_legacy_workspace_sibling_skills(
+    tmp_path: Path,
+) -> None:
+    hosted_root_parent = tmp_path / "workspace"
+    active_root = hosted_root_parent / "workspace"
+    active_root.mkdir(parents=True)
+    _write_skill(
+        hosted_root_parent,
+        "skills/insane-fetch",
+        "insane-fetch",
+        "Legacy sibling skill instructions are discoverable.",
+    )
+    _write_skill(
+        active_root,
+        "skills/qmd-search",
+        "qmd-search",
+        "Active workspace skill instructions are discoverable.",
+    )
+
+    result = skill_loader({}, _context(active_root))
+
+    assert result.status == "ok"
+    assert result.output is not None
+    paths = set(result.output["skills"])
+    assert "skills/qmd-search/SKILL.md" in paths
+    assert "legacy-workspace/skills/insane-fetch/SKILL.md" in paths
+    loaded = {skill["path"]: skill for skill in result.output["loadedSkills"]}
+    legacy = loaded["legacy-workspace/skills/insane-fetch/SKILL.md"]
+    assert legacy["source"] == "legacy_workspace"
+    assert "Legacy sibling skill instructions" in legacy["body"]
+
+
+def test_skill_loader_does_not_scan_arbitrary_sibling_skills(
+    tmp_path: Path,
+) -> None:
+    active_root = tmp_path / "workspace"
+    active_root.mkdir()
+    _write_skill(
+        tmp_path,
+        "skills/not-allowed",
+        "not-allowed",
+        "Arbitrary sibling skill instructions must stay hidden.",
+    )
+
+    result = skill_loader({}, _context(active_root))
+
+    assert result.status == "ok"
+    assert result.output is not None
+    serialized = repr(result.output)
+    assert "not-allowed" not in serialized
+    assert "Arbitrary sibling skill instructions" not in serialized
+
+
 @pytest.mark.skipif(not hasattr(os, "symlink"), reason="symlink unavailable")
 def test_skill_loader_skips_symlinked_escape_and_protected_skill_bodies(
     tmp_path: Path,
