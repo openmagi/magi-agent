@@ -871,12 +871,18 @@ async def _local_adk_chat_sse(
         None if configured_model == LOCAL_DEV_MODEL_SENTINEL else configured_model
     )
     workspace_root = os.environ.get("MAGI_AGENT_WORKSPACE") or os.getcwd()
+    # Per-turn query-based memory recall (PR-E item 3): pass the incoming user
+    # message as the recall query so build_cli_instruction can search the
+    # workspace memory tree and inject a <memory-recall> block. Gated + fail-soft
+    # downstream (recall_enabled AND prefer_local_search, incognito-aware): when
+    # off this is byte-identical (recall_query is just an unused string).
     headless = build_headless_runtime(
         cwd=workspace_root,
         permission_mode="bypassPermissions",
         session_id=session_id,
         model=model_override,
         runner_policy_routing_enabled=local_runner_policy_routing_enabled_from_env(),
+        recall_query=prompt,
     )
     cancel = asyncio.Event()
     stream = headless.engine.run_turn_stream(

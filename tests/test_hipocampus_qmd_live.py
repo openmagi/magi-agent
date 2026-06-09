@@ -55,6 +55,128 @@ def _policy() -> MemoryPolicy:
     return MemoryPolicy(memory_mode="normal", source_authority="long_term_allowed")
 
 
+def test_prefer_local_search_uses_search_backend_and_maps_records(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When ``prefer_local_search`` is ON the adapter sources qmd records from
+    the LOCAL ``memory/search`` backend (BM25/qmd), mapping each ``SearchHit``
+    to the same record shape — NOT from the QmdClient or the JSON file."""
+    from magi_agent.memory.search.base import SearchHit
+
+    monkeypatch.setenv("MAGI_MEMORY_PREFER_LOCAL_SEARCH", "1")
+    # Provide a JSON file + would-be client to prove neither is used.
+    _write_qmd_json_fixture(tmp_path)
+
+    def _boom_client(*args: object, **kwargs: object) -> object:
+        raise AssertionError("QmdClient must not be used when prefer_local_search is ON")
+
+    monkeypatch.setattr(hipocampus_readonly, "QmdClient", _boom_client)
+
+    captured: dict[str, object] = {}
+
+    class _FakeBackend:
+        def reindex(self, root: object, **kwargs: object) -> None:
+            captured["reindexed"] = str(root)
+
+        def search(self, query: str, *, k: int) -> list[SearchHit]:
+            captured["query"] = query
+            captured["k"] = k
+            return [
+                SearchHit(
+                    path="memory/daily/2026-05-24.md",
+                    content=(
+                        "LOCAL launch plan from search backend.\n"
+                        "Authorization: Bearer local-secret-token\n"
+                        "/Users/kevin/private must not leak"
+                    ),
+                    score=0.93,
+                ),
+            ]
+
+    monkeypatch.setattr(
+        hipocampus_readonly,
+        "select_search_backend",
+        lambda config: _FakeBackend(),
+    )
+
+    adapter = HipocampusReadOnlyAdapter(
+        HipocampusReadOnlyConfig(workspace_root=tmp_path, enabled=True)
+    )
+    result = asyncio.run(adapter.search(_request(), policy=_policy()))
+
+    assert captured.get("query") == "launch plan"
+    qmd_records = [
+        record
+        for record in result.records
+        if record.custom_metadata.get("sourceKind") == "qmd_search"
+    ]
+    assert qmd_records, "prefer_local_search should surface search-backend records"
+    assert any("LOCAL launch plan from search backend." in r.body for r in qmd_records)
+    assert all("from JSON file" not in r.body for r in qmd_records)
+    rendered = result.model_dump_json(by_alias=True)
+    for leaked in ("Bearer local-secret-token", "/Users/kevin", "Authorization:"):
+        assert leaked not in rendered
+
+
+def test_prefer_local_search_off_falls_back_to_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Default (prefer_local_search OFF): the search backend is never consulted;
+    the JSON-file path supplies records (byte-identical to before)."""
+    monkeypatch.delenv("MAGI_MEMORY_PREFER_LOCAL_SEARCH", raising=False)
+    monkeypatch.delenv(MAGI_MEMORY_QMD_LIVE_ENABLED_ENV, raising=False)
+    _write_qmd_json_fixture(tmp_path)
+
+    def _boom_select(*args: object, **kwargs: object) -> object:
+        raise AssertionError("select_search_backend must not run when flag is OFF")
+
+    monkeypatch.setattr(hipocampus_readonly, "select_search_backend", _boom_select)
+
+    adapter = HipocampusReadOnlyAdapter(
+        HipocampusReadOnlyConfig(workspace_root=tmp_path, enabled=True)
+    )
+    result = asyncio.run(adapter.search(_request(), policy=_policy()))
+    qmd_records = [
+        record
+        for record in result.records
+        if record.custom_metadata.get("sourceKind") == "qmd_search"
+    ]
+    assert any("QMD launch plan from JSON file." in r.body for r in qmd_records)
+
+
+def test_prefer_local_search_fail_soft_when_backend_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A search-backend error must never break recall — it yields no qmd
+    records (and does NOT silently fall through to the JSON file)."""
+    monkeypatch.setenv("MAGI_MEMORY_PREFER_LOCAL_SEARCH", "1")
+    _write_qmd_json_fixture(tmp_path)
+
+    class _ExplodingBackend:
+        def reindex(self, root: object, **kwargs: object) -> None:
+            pass
+
+        def search(self, query: str, *, k: int) -> object:
+            raise RuntimeError("backend boom")
+
+    monkeypatch.setattr(
+        hipocampus_readonly,
+        "select_search_backend",
+        lambda config: _ExplodingBackend(),
+    )
+
+    adapter = HipocampusReadOnlyAdapter(
+        HipocampusReadOnlyConfig(workspace_root=tmp_path, enabled=True)
+    )
+    result = asyncio.run(adapter.search(_request(), policy=_policy()))
+    qmd_records = [
+        record
+        for record in result.records
+        if record.custom_metadata.get("sourceKind") == "qmd_search"
+    ]
+    assert qmd_records == []
+
+
 def test_gate_off_reads_json_file_and_does_not_call_client(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

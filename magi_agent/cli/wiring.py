@@ -141,6 +141,7 @@ def build_headless_runtime(
     prompt_sink: "PromptSink | None" = None,
     runner_policy_routing_enabled: bool | None = None,
     memory_mode: "MemoryMode | str" = "normal",
+    recall_query: str | None = None,
 ) -> HeadlessRuntime:
     """Construct the complete headless dependency set.
 
@@ -185,6 +186,7 @@ def build_headless_runtime(
             model=model,
             mode=mode,
             memory_mode=memory_mode,
+            recall_query=recall_query,
         )
     )
     composio_bundle, composio_attached = _build_composio_bundle_for_mode(
@@ -362,6 +364,7 @@ def _build_default_runner(
     model: str | None = None,
     mode: "RuntimeMode" = "act",
     memory_mode: "MemoryMode | str" = "normal",
+    recall_query: str | None = None,
 ) -> object:
     """Build the CLI's default runner.
 
@@ -412,6 +415,7 @@ def _build_default_runner(
             ),
             workspace_root=workspace_root,
             memory_mode=memory_mode,
+            recall_query=recall_query,
             general_automation_receipts=general_automation_receipts,
             local_tool_evidence_collector=local_tool_evidence,
         )

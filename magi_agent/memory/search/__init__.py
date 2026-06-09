@@ -36,9 +36,14 @@ def select_search_backend(config: MemoryRuntimeConfig) -> SearchBackend:
 
     Vector search is out of scope for PR2 — ``config.vector_search`` does not
     change the selection here; both backends report ``supports_vector=False``.
+
+    The qmd backend is constructed with the resolved
+    ``config.prefer_qmd_auto_register`` opt-in (default False) so that a uniform
+    ``backend.reindex(root)`` call never registers a NEW global qmd collection
+    unless the operator explicitly opted in (multi-tenant safety).
     """
     if config.prefer_qmd:
-        backend = QmdBackend()
+        backend = QmdBackend(auto_register=config.prefer_qmd_auto_register)
         if backend.available:
             return backend
     return PyBM25Backend()

@@ -284,7 +284,8 @@ def test_qmd_reindex_registers_named_collection(monkeypatch: pytest.MonkeyPatch,
 
     root = _mk_memory(tmp_path)
     expected = qmd_module.collection_name_for(root / "memory")
-    QmdBackend().reindex(root)
+    # Registration only happens with the explicit auto-register opt-in.
+    QmdBackend().reindex(root, allow_auto_register=True)
 
     add_calls = [c for c in fake.calls if c[1:3] == ["collection", "add"]]
     assert len(add_calls) == 1
@@ -294,6 +295,82 @@ def test_qmd_reindex_registers_named_collection(monkeypatch: pytest.MonkeyPatch,
     # add already builds the BM25 index -> no slow update/embed on first register.
     assert not any(c[1:2] == ["update"] for c in fake.calls)
     assert not any("embed" in c for c in fake.calls)
+
+
+def test_qmd_reindex_does_not_register_when_auto_register_off(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Multi-tenant safety: with auto-register OFF (default) a brand-new
+    collection is NOT registered (no global ``collection add``); search then
+    just returns [] — fail-soft."""
+    monkeypatch.setattr(qmd_module.shutil, "which", lambda name: "/fake/qmd")
+    fake = _FakeQmd()
+    monkeypatch.setattr(qmd_module.subprocess, "run", fake)
+
+    root = _mk_memory(tmp_path)
+    # Default call (allow_auto_register defaults to False).
+    QmdBackend().reindex(root)
+
+    assert not any(c[1:3] == ["collection", "add"] for c in fake.calls)
+    # collection still does not exist -> search returns [] without registering.
+
+
+def test_qmd_reindex_registers_when_auto_register_on(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Explicit opt-in: with auto-register ON a new collection IS registered."""
+    monkeypatch.setattr(qmd_module.shutil, "which", lambda name: "/fake/qmd")
+    fake = _FakeQmd()
+    monkeypatch.setattr(qmd_module.subprocess, "run", fake)
+
+    root = _mk_memory(tmp_path)
+    expected = qmd_module.collection_name_for(root / "memory")
+    QmdBackend().reindex(root, allow_auto_register=True)
+
+    add_calls = [c for c in fake.calls if c[1:3] == ["collection", "add"]]
+    assert len(add_calls) == 1
+    assert add_calls[0][-2:] == ["--name", expected]
+
+
+def test_qmd_reindex_refreshes_existing_regardless_of_auto_register(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """An ALREADY-registered collection is refreshed via ``update`` even when
+    auto-register is OFF (refreshing our own collection is always allowed)."""
+    monkeypatch.setattr(qmd_module.shutil, "which", lambda name: "/fake/qmd")
+    root = _mk_memory(tmp_path)
+    name = qmd_module.collection_name_for(root / "memory")
+    fake = _FakeQmd(existing={name})
+    monkeypatch.setattr(qmd_module.subprocess, "run", fake)
+
+    QmdBackend().reindex(root)  # auto-register OFF, but collection exists
+
+    assert any(c[1:] == ["update", name] for c in fake.calls)
+    assert not any(c[1:3] == ["collection", "add"] for c in fake.calls)
+
+
+def test_select_threads_auto_register_flag_into_qmd_reindex(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """``select_search_backend`` wires the config's auto-register opt-in so the
+    returned QmdBackend.reindex honors it without the caller re-passing it."""
+    monkeypatch.setattr(qmd_module.shutil, "which", lambda name: "/fake/qmd")
+    fake = _FakeQmd()
+    monkeypatch.setattr(qmd_module.subprocess, "run", fake)
+    root = _mk_memory(tmp_path)
+
+    off = resolve_memory_config(env={}, config={"memory": {"prefer_qmd": True}})
+    assert off.prefer_qmd_auto_register is False
+    select_search_backend(off).reindex(root)
+    assert not any(c[1:3] == ["collection", "add"] for c in fake.calls)
+
+    on = resolve_memory_config(
+        env={},
+        config={"memory": {"prefer_qmd": True, "prefer_qmd_auto_register": True}},
+    )
+    assert on.prefer_qmd_auto_register is True
+    select_search_backend(on).reindex(root)
+    assert any(c[1:3] == ["collection", "add"] for c in fake.calls)
 
 
 def test_qmd_reindex_idempotent_refreshes_when_present(
@@ -501,7 +578,7 @@ def test_qmd_real_binary_end_to_end(tmp_path: Path) -> None:
     name = qmd_module.collection_name_for(root / "memory")
     backend = QmdBackend()
     try:
-        backend.reindex(root)
+        backend.reindex(root, allow_auto_register=True)
         hits = backend.search("zebraquux", k=5)
         assert [h.path for h in hits] == ["memory/daily/note.md"]
     finally:

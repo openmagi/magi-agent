@@ -25,6 +25,24 @@ from magi_agent.memory.policy import MemoryPolicy, evaluate_memory_policy
 from magi_agent.memory.qmd_client import QmdClient  # noqa: F401 (re-exported for monkeypatch seam)
 
 
+def select_search_backend(config: object) -> object:
+    """Lazy seam for the LOCAL ``memory/search`` backend selector.
+
+    Defined as a thin wrapper (NOT a top-level ``from ... import``) so importing
+    this adapter never pulls in :mod:`magi_agent.memory.search.qmd` — which
+    imports ``subprocess`` — at module load time (the adapter import-boundary
+    test asserts the contract/policy/adapter modules stay process-free).  The
+    real selector is imported only when ``prefer_local_search`` is ON and this is
+    actually called.  Tests monkeypatch ``hipocampus_readonly.select_search_backend``
+    to inject a fake backend.
+    """
+    from magi_agent.memory.search import (  # noqa: PLC0415
+        select_search_backend as _select,
+    )
+
+    return _select(config)
+
+
 PROVIDER_ID = "hipocampus-qmd-readonly"
 
 #: Env gate for the OPTIONAL live qmd recall path (default OFF).  When unset/falsy,
@@ -94,6 +112,11 @@ class HipocampusReadOnlyConfig(BaseModel):
     qmd_collection: str = Field(default="magi-memory", alias="qmdCollection")
     #: Endpoint override for the live qmd client; falls back to MAGI_QMD_ENDPOINT.
     qmd_endpoint: str | None = Field(default=None, alias="qmdEndpoint")
+    #: When set, forces the LOCAL ``memory/search`` recall branch on/off for THIS
+    #: adapter regardless of the resolved env config.  ``None`` (default) defers
+    #: to ``resolve_memory_config().prefer_local_search`` (env
+    #: ``MAGI_MEMORY_PREFER_LOCAL_SEARCH``, default OFF).
+    prefer_local_search: bool | None = Field(default=None, alias="preferLocalSearch")
 
 
 class HipocampusReadOnlyAdapter:
@@ -253,11 +276,66 @@ class HipocampusReadOnlyAdapter:
         return records
 
     def _load_qmd_records(self, request: RecallRequest) -> list[MemoryRecord]:
-        if _qmd_live_recall_enabled():
+        # Three distinct qmd surfaces, in priority order:
+        #   1. LOCAL ``memory/search`` backend (canonical local recall) — when
+        #      ``prefer_local_search`` is ON.
+        #   2. QmdClient HTTP (external-server fallback) — when the live gate is ON.
+        #   3. ``qmd_results.json`` static file — the default.
+        if self._prefer_local_search_enabled():
+            results = self._local_search_results(request)
+        elif _qmd_live_recall_enabled():
             results = self._live_qmd_results(request)
         else:
             results = self._json_qmd_results()
         return self._map_qmd_results(results, request)
+
+    def _prefer_local_search_enabled(self) -> bool:
+        """True when the LOCAL ``memory/search`` recall branch is selected.
+
+        Adapter-config override (``prefer_local_search``) wins; otherwise defers
+        to the resolved ``MemoryRuntimeConfig.prefer_local_search`` (env
+        ``MAGI_MEMORY_PREFER_LOCAL_SEARCH``, default OFF).
+        """
+        if self.config.prefer_local_search is not None:
+            return bool(self.config.prefer_local_search)
+        from magi_agent.memory.config import resolve_memory_config  # noqa: PLC0415
+
+        return resolve_memory_config().prefer_local_search
+
+    def _local_search_results(self, request: RecallRequest) -> list[dict]:
+        """Source qmd records from the LOCAL ``memory/search`` backend.
+
+        Fail-soft: any backend error (missing binary, subprocess failure, etc.)
+        yields ``[]`` so a search problem never breaks recall.  Maps each
+        ``SearchHit(path, content, score)`` to the same ``{"path","content",
+        "score","context"}`` dict the JSON/HTTP paths emit, so the shared
+        ``_map_qmd_results`` mapper (redaction, path-safety, min-score, query
+        match) is reused verbatim.
+        """
+        try:
+            from magi_agent.memory.config import resolve_memory_config  # noqa: PLC0415
+
+            backend = select_search_backend(resolve_memory_config())
+            backend.reindex(self.workspace_root)
+            hits = backend.search(
+                request.query,
+                k=min(request.limit, self.config.max_records),
+            )
+        except Exception:
+            return []
+        results: list[dict] = []
+        for hit in hits:
+            path = getattr(hit, "path", None)
+            content = getattr(hit, "content", None)
+            score = getattr(hit, "score", None)
+            if not isinstance(path, str) or not isinstance(content, str):
+                continue
+            if isinstance(score, bool) or not isinstance(score, (int, float)):
+                continue
+            results.append(
+                {"path": path, "content": content, "score": float(score), "context": ""}
+            )
+        return results
 
     def _json_qmd_results(self) -> list[dict]:
         """Read the pre-computed qmd_results.json file (default, gate-OFF path)."""
