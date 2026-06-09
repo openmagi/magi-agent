@@ -9,8 +9,8 @@ Different providers respond differently to system prompts:
 - Other providers: full prompt, no adaptation (safe default).
 
 This module provides a transform layer on top of identity sections — the
-identity content stays in SOUL.md/TOOLS.md; adapters adjust formatting and
-length per provider.
+identity content stays in its source files (e.g. SOUL.md); adapters adjust
+formatting and length per provider.
 """
 
 from __future__ import annotations
@@ -57,7 +57,7 @@ class PromptAdapter(Protocol):
         """Transform identity sections for a specific provider.
 
         Args:
-            sections: Ordered identity section strings (SOUL, TOOLS, etc.).
+            sections: Ordered identity section strings (e.g. SOUL, AGENTS).
 
         Returns:
             Adapted sections list. May be shorter (merged) or have modified

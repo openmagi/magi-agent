@@ -37,6 +37,19 @@ def test_load_identity_combines_repo_root_convention_files(tmp_path, monkeypatch
     assert "claude body" in context
 
 
+def test_load_identity_project_context_orders_agents_before_claude(
+    tmp_path, monkeypatch
+) -> None:
+    # Render order under PROJECT CONTEXT follows _PROJECT_CONTEXT_FILES:
+    # AGENTS.md before CLAUDE.md, regardless of which content is longer.
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    (tmp_path / "AGENTS.md").write_text("agents body", encoding="utf-8")
+    (tmp_path / "CLAUDE.md").write_text("claude body", encoding="utf-8")
+    identity = load_identity(str(tmp_path))
+    ctx = identity["project_context"]
+    assert ctx.index("## AGENTS.md") < ctx.index("## CLAUDE.md")
+
+
 def test_load_identity_soul_from_project_magi_namespace(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
     magi_dir = tmp_path / ".magi"
