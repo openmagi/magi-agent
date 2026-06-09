@@ -700,14 +700,19 @@ class MagiTuiApp(App[None]):
         welcome.append("↑", style="#7aa2f7")
         welcome.append(" history · ", style="dim")
         welcome.append("Ctrl+S", style="#7aa2f7")
-        welcome.append(" draft\n", style="dim")
+        welcome.append(" draft · ", style="dim")
+        welcome.append("Ctrl+P", style="#7aa2f7")
+        welcome.append(" palette · ", style="dim")
+        welcome.append("F1", style="#7aa2f7")
+        welcome.append(" help\n", style="dim")
         welcome.append(f"Commands ({len(command_names)}): ", style="dim")
         welcome.append(command_line, style="#9ece6a")
         self._controller.commit_rich(
             welcome,
             text=(
                 "Welcome to Magi  "
-                "Keys: Shift+Enter newline · ↑ history · Ctrl+S draft  "
+                "Keys: Shift+Enter newline · ↑ history · Ctrl+S draft · "
+                "Ctrl+P palette · F1 help  "
                 f"Commands ({len(command_names)}): {command_line}"
             ),
         )
@@ -871,7 +876,10 @@ class MagiTuiApp(App[None]):
         self._model = model
         if self._topbar is not None:
             self._topbar.update(self._topbar_text())
-        self.notify(f"Model: {model}", timeout=2)
+        # Honest toast: the switch is cosmetic. ``TurnInput`` carries no model
+        # field, so the next turn still runs the old model until the runtime
+        # seam is wired (deferred). Don't imply an immediate runtime effect.
+        self.notify(f"Model set to {model} (applies next session)", timeout=2)
 
     # -- session list (PR2.4) ----------------------------------------------
     def action_open_session_list(self) -> None:
@@ -907,6 +915,17 @@ class MagiTuiApp(App[None]):
             return
         self.resumed_session = ref
         self._session_id = ref
+        # Re-bind the per-session history + draft stores to the resumed session.
+        # Both were constructed ONCE in __init__ bound to the ORIGINAL session's
+        # files (history-<id>.jsonl / drafts-<id>.jsonl); without rebuilding them
+        # ↑/↓ recall and ctrl+s drafts would keep reading/writing the OLD
+        # session's files — a silent desync. Match __init__'s construction.
+        self._history = InputHistory(session_id=ref)
+        self._drafts = DraftStash(session_id=ref)
+        # Re-point the prompt's ↑/↓ recall at the new history ring (on_mount
+        # wired the original; the input must follow the resumed session too).
+        if self._input is not None:
+            self._input.attach_history(self._history)
         self.controller.commit_block(f"[resumed session {ref}]")
 
     # -- help (PR2.5) ------------------------------------------------------

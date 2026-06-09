@@ -18,6 +18,7 @@ from textual.binding import Binding
 from textual.widgets import Static
 
 from magi_agent.cli.tui.dialogs.help import (
+    PROMPT_KEYS,
     HelpDialog,
     _binding_key_desc,
     build_help_sections,
@@ -33,6 +34,22 @@ def test_build_help_sections_includes_keys_and_commands() -> None:
     assert "ctrl+c" in flat and "Cancel" in flat
     assert "ctrl+p" in flat
     assert "/compact" in flat and "/status" in flat
+
+
+def test_build_help_sections_includes_prompt_keys_section() -> None:
+    # The Phase-1 PromptInput keys (NOT in App.BINDINGS) surface as a dedicated
+    # "Prompt" section so they are discoverable from the help reference.
+    sections = build_help_sections(
+        bindings=[], commands=[], prompt_keys=list(PROMPT_KEYS)
+    )
+    titles = [title for title, _lines in sections]
+    assert "Prompt" in titles
+    flat = "\n".join(line for _title, lines in sections for line in lines)
+    assert "Shift+Enter" in flat
+    assert "Ctrl+S" in flat
+    # History recall (↑/↓) is listed.
+    assert "History recall" in flat
+    assert "↑" in flat
 
 
 def test_build_help_sections_drops_empty_sections() -> None:

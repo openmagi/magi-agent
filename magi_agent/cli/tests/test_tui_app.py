@@ -143,6 +143,9 @@ def test_tui_mount_renders_welcome_state() -> None:
         assert "Shift+Enter" in joined
         assert "history" in joined
         assert "Ctrl+S" in joined
+        # Phase 2 doors advertised too: command palette + help.
+        assert "Ctrl+P" in joined
+        assert "F1" in joined
         assert app.last_terminal is None
 
     asyncio.run(_run())
@@ -1003,6 +1006,34 @@ def test_open_model_picker_surfaces_in_palette_actions() -> None:
     asyncio.run(_run())
 
 
+def test_apply_model_without_topbar_does_not_crash() -> None:
+    # _apply_model is reachable before the topbar is wired (e.g. programmatic
+    # apply pre-mount). It must not crash and must still update self._model.
+    engine = FakeEngineDriver()
+    app = _make_app(engine)
+    assert app._topbar is None  # not yet composed/mounted
+    app._apply_model("gpt-5.5")
+    assert app._model == "gpt-5.5"
+
+
+def test_ctrl_p_opens_command_palette() -> None:
+    async def _run() -> None:
+        from textual.command import CommandPalette
+
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("ctrl+p")
+            await pilot.pause()
+            # The command palette screen is actually pushed onto the stack.
+            assert any(
+                isinstance(s, CommandPalette) for s in app.screen_stack
+            )
+
+    asyncio.run(_run())
+
+
 # ---------------------------------------------------------------------------
 # Session list dialog (PR2.4) — resume = marker-only, NO synthetic turn (OQ3)
 # ---------------------------------------------------------------------------
@@ -1037,6 +1068,53 @@ def test_open_session_list_resume_is_marker_only_no_turn() -> None:
         # The redundant/confusing synthetic "Resume session s-9." prompt is
         # NOT echoed — the user's NEXT prompt runs under the resumed id.
         assert not any("Resume session s-9" in b for b in blocks)
+
+    asyncio.run(_run())
+
+
+def test_resume_rebinds_history_and_drafts_to_new_session() -> None:
+    async def _run() -> None:
+        from magi_agent.cli.tui.dialogs.session import (
+            SessionEntry,
+            SessionListDialog,
+        )
+
+        engine = FakeEngineDriver()
+        app = _make_app(engine, commands=FakeRegistry([]))
+        app._session_source = lambda: [
+            SessionEntry(ref="s-99", label="earlier work")
+        ]
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            old_history = app._history
+            old_drafts = app._drafts
+            # Seed the OLD session's history so we can prove the recall reads the
+            # RESUMED session's ring (which is empty) after the re-bind.
+            old_history.add("old-session-prompt")
+
+            app.action_open_session_list()
+            await pilot.pause()
+            assert isinstance(app.screen, SessionListDialog)
+            app.screen.dismiss("s-99")
+            await pilot.pause()
+            await pilot.pause()
+
+            # New history/drafts objects, bound to the resumed session id.
+            assert app._history is not old_history
+            assert app._drafts is not old_drafts
+            assert app._history._session_id == "s-99"
+            assert app._drafts._session_id == "s-99"
+            assert "s-99" in str(app._history._path)
+            assert "s-99" in str(app._drafts._path)
+
+            # ↑-recall after resume reads the RESUMED session's history (empty),
+            # NOT the old session's "old-session-prompt".
+            recalled = app._history.prev("")
+            assert recalled != "old-session-prompt"
+            assert recalled is None
+            # The prompt input's recall ring follows the resumed session too.
+            assert app._input is not None
+            assert app._input._history is app._history
 
     asyncio.run(_run())
 
@@ -1134,6 +1212,10 @@ def test_open_help_shows_help_dialog() -> None:
             assert "/compact" in rendered
             assert "/status" in rendered
             assert "ctrl+p" in rendered  # COMMAND_PALETTE_BINDING surfaced
+            # Phase-1 prompt keys surface via the default PROMPT_KEYS section.
+            assert "Shift+Enter" in rendered
+            assert "Ctrl+S" in rendered
+            assert "History recall" in rendered
             await pilot.press("escape")
             await pilot.pause()
             # Escape dismissed the modal: no HelpDialog left on the stack.

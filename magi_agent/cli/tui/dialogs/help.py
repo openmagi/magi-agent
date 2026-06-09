@@ -26,23 +26,43 @@ from textual.containers import VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Static
 
-__all__ = ["HelpDialog", "build_help_sections"]
+__all__ = ["HelpDialog", "build_help_sections", "PROMPT_KEYS"]
+
+
+# Phase-1 prompt-input keys. These live on ``PromptInput`` (its ``_on_key``),
+# NOT on ``App.BINDINGS``, so the BINDINGS-driven help reference would otherwise
+# omit them. Surfaced here as a static (key, description) reference so ↑/↓
+# recall, Shift+Enter newline, Ctrl+S drafts, and Enter submit are discoverable.
+PROMPT_KEYS: tuple[tuple[str, str], ...] = (
+    ("Enter", "Submit prompt"),
+    ("Shift+Enter", "Insert newline"),
+    ("↑ / ↓", "History recall"),
+    ("Ctrl+S", "Stash / restore draft"),
+)
 
 
 def build_help_sections(
     *,
     bindings: list[tuple[str, str]],
     commands: list[str],
+    prompt_keys: list[tuple[str, str]] | None = None,
 ) -> list[tuple[str, list[str]]]:
     """Return ``[(section_title, lines)]`` for the help reference.
 
     Pure formatting — no App, no Textual widgets — so it is unit-testable.
-    Empty sections (no keys / no commands) are dropped.
+    Empty sections (no keys / no commands / no prompt keys) are dropped.
+    ``prompt_keys`` are the Phase-1 ``PromptInput`` keys (not in ``BINDINGS``);
+    they render as a dedicated "Prompt" section.
     """
 
     key_lines = [f"  {key:<12} {desc}" for key, desc in bindings if key]
+    prompt_lines = [
+        f"  {key:<12} {desc}" for key, desc in (prompt_keys or []) if key
+    ]
     command_lines = [f"  /{name}" for name in commands if name]
     sections: list[tuple[str, list[str]]] = []
+    if prompt_lines:
+        sections.append(("Prompt", prompt_lines))
     if key_lines:
         sections.append(("Keybindings", key_lines))
     if command_lines:
@@ -85,9 +105,15 @@ class HelpDialog(ModalScreen[None]):
         *,
         bindings: list[tuple[str, str]],
         commands: list[str],
+        prompt_keys: list[tuple[str, str]] | None = None,
     ) -> None:
         super().__init__()
-        self._sections = build_help_sections(bindings=bindings, commands=commands)
+        self._sections = build_help_sections(
+            bindings=bindings,
+            commands=commands,
+            prompt_keys=list(prompt_keys) if prompt_keys is not None
+            else list(PROMPT_KEYS),
+        )
 
     @classmethod
     def from_app(cls, app: object) -> "HelpDialog":
