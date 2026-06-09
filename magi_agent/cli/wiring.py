@@ -471,6 +471,20 @@ def _build_first_party_adk_tools(
         bot_id="local-cli",
         user_id="cli",
     )
+
+    from magi_agent.config.env import file_tools_enabled  # noqa: PLC0415
+
+    if file_tools_enabled():
+        from magi_agent.tools.file_tool_manifests import (  # noqa: PLC0415
+            register_file_tool_manifests,
+        )
+        from magi_agent.tools.file_toolhost import (  # noqa: PLC0415
+            bind_file_toolhost_handlers,
+        )
+
+        register_file_tool_manifests(registry)
+        bind_file_toolhost_handlers(registry)
+
     receipt_store = (
         general_automation_receipts
         if isinstance(general_automation_receipts, GeneralAutomationReceiptLedgerStore)

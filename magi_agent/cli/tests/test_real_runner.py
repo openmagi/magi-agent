@@ -280,6 +280,36 @@ def test_first_party_adk_tools_attach_memory_and_introspection_when_gated(
     )
 
 
+def test_first_party_adk_tools_attach_file_tools_when_gated(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setenv("MAGI_FILE_TOOLS_ENABLED", "1")
+
+    tools = _build_first_party_adk_tools(
+        cwd=tmp_path,
+        session_id="sid-file-tools",
+        mode="act",
+    )
+
+    names = {getattr(tool, "name", None) for tool in tools}
+    assert {
+        "XLSXRead",
+        "DocumentRead",
+        "ImageUnderstand",
+        "AudioTranscribe",
+    }.issubset(names)
+
+    image_result = _run_adk_tool(
+        _tool_by_name(tools, "ImageUnderstand"),
+        {"path": "missing.png"},
+        invocation_id="turn-file-tools",
+        call_id="call-file-tools",
+    )
+    assert image_result["status"] == "blocked"
+    assert image_result["errorCode"] == "path_not_found"
+
+
 @pytest.mark.parametrize(
     "env",
     (
