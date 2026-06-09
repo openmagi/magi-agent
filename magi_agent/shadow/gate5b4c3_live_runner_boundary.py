@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from functools import cached_property
 import hashlib
 import json
+import os
 import re
 import time
 from typing import Any, ClassVar, Literal, Self, TypeAlias
@@ -176,6 +177,14 @@ _PRE_PROVIDER_EXCEPTION_CATEGORIES = frozenset(
         "provider_request_serialization_failure",
     }
 )
+_GATE5B_LITELLM_PROVIDER_PREFIX: Mapping[str, str] = {
+    "openai": "openai",
+    "fireworks": "fireworks_ai",
+}
+_GATE5B_LITELLM_PROVIDER_ENV_KEYS: Mapping[str, tuple[str, ...]] = {
+    "openai": ("OPENAI_API_KEY",),
+    "fireworks": ("FIREWORKS_API_KEY",),
+}
 
 
 @dataclass(frozen=True)
@@ -1020,6 +1029,9 @@ def _gate1a_correlated_model_or_label(
                 raise
             return model_label
 
+    if provider_label in _GATE5B_LITELLM_PROVIDER_PREFIX:
+        return _gate5b_litellm_model(provider_label, model_label)
+
     if (
         context is None
         or not proxy_url
@@ -1052,6 +1064,44 @@ def _gate1a_correlated_model_or_label(
             return Client(**kwargs)
 
     return Gate1AEgressCorrelatedGemini(model=model_label)
+
+
+def _gate5b_litellm_model(provider_label: str, model_label: str) -> object:
+    """Build ADK LiteLlm for non-native selected canary routes.
+
+    Gate5B passes provider and model as separate safe labels. ADK's LiteLlm
+    needs the provider-prefixed model string, otherwise routes such as Fireworks
+    and OpenAI are treated as bare model ids and cannot be exercised by the
+    selected canary.
+    """
+    prefix = _GATE5B_LITELLM_PROVIDER_PREFIX[provider_label]
+    try:
+        from google.adk.models.lite_llm import LiteLlm  # noqa: PLC0415
+    except Exception as exc:  # ImportError or downstream litellm import errors.
+        raise RuntimeError(
+            f"{provider_label}_litellm_dependency_missing",
+        ) from exc
+    try:
+        import litellm  # noqa: PLC0415
+
+        litellm.suppress_debug_info = True
+    except Exception:
+        pass
+    kwargs: dict[str, Any] = {"model": f"{prefix}/{model_label}"}
+    api_key = _first_present_env_value(
+        _GATE5B_LITELLM_PROVIDER_ENV_KEYS.get(provider_label, ()),
+    )
+    if api_key:
+        kwargs["api_key"] = api_key
+    return LiteLlm(**kwargs)
+
+
+def _first_present_env_value(names: Sequence[str]) -> str | None:
+    for name in names:
+        value = os.environ.get(name)
+        if isinstance(value, str) and value.strip():
+            return value
+    return None
 
 
 def _setup_error_result(

@@ -416,6 +416,132 @@ def parse_gate5b4c3_shadow_generation_route_env(
         )
     approved_budgets = _parse_gate5b4c3_shadow_generation_budgets(env)
 
+    configured_routes = _csv_values(
+        _trimmed(
+            env.get("CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_ALLOWED_MODEL_ROUTES")
+        )
+        or ""
+    )
+    if configured_routes:
+        (
+            allowed_provider_labels,
+            allowed_model_labels,
+            allowed_model_routes,
+        ) = _parse_gate5b4c3_shadow_generation_allowed_model_routes(configured_routes)
+        (
+            allowed_shadow_credential_refs,
+            bindings,
+        ) = _parse_gate5b4c3_shadow_generation_provider_credential_bindings(
+            env,
+            allowed_provider_labels=allowed_provider_labels,
+        )
+        if not allowed_shadow_credential_refs:
+            raise RuntimeEnvError(
+                "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_PROVIDER_CREDENTIAL_BINDINGS "
+                "is required when CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_ALLOWED_MODEL_ROUTES "
+                "is configured"
+            )
+        _validate_gate5b4c3_shadow_generation_google_env(env, allowed_provider_labels)
+        return Gate5B4C3ShadowGenerationRouteConfig(
+            mockedRunnerBoundaryEnabled=False,
+            liveRunnerBoundaryEnabled=True,
+            counterStore=(
+                Gate5B4C3ShadowCounterStore(
+                    _trimmed(
+                        env.get(
+                            "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_COUNTER_STATE_PATH"
+                        )
+                    ),
+                    stale_after_ms=_int_env(
+                        env,
+                        "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_COUNTER_STALE_AFTER_MS",
+                        120_000,
+                    ),
+                )
+                if _trimmed(
+                    env.get("CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_COUNTER_STATE_PATH")
+                )
+                is not None
+                else None
+            ),
+            generationConfig=Gate5B4C3ShadowGenerationConfig(
+                enabled=True,
+                killSwitchActive=_env_bool_default_true(
+                    env.get("CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_KILL_SWITCH")
+                ),
+                capStateInitialized=_is_true(
+                    env.get("CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_CAP_STATE_INITIALIZED")
+                ),
+                generationBudgetExhausted=_is_true(
+                    env.get("CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_BUDGET_EXHAUSTED")
+                ),
+                providerProjectSpendControlsVerified=_is_true(
+                    env.get(
+                        "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_PROVIDER_PROJECT_SPEND_CONTROLS_VERIFIED"
+                    )
+                ),
+                costOwnerWaiver=_is_true(
+                    env.get("CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_COST_OWNER_WAIVER")
+                ),
+                inFlightGenerationRuns=_int_env(
+                    env,
+                    "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_IN_FLIGHT_RUNS",
+                    0,
+                ),
+                pendingGenerationRuns=_int_env(
+                    env,
+                    "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_PENDING_RUNS",
+                    0,
+                ),
+                dailyGenerationRunsUsed=_int_env(
+                    env,
+                    "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_DAILY_RUNS_USED",
+                    0,
+                ),
+                dailyGenerationCostUsdUsed=_float_env(
+                    env,
+                    "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_DAILY_COST_USD_USED",
+                    0,
+                ),
+                selectedBotDigest=_trimmed(
+                    _first_non_empty(
+                        env,
+                        "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_SELECTED_BOT_DIGEST",
+                        "CORE_AGENT_PYTHON_GATE5B_USER_VISIBLE_CANARY_SELECTED_BOT_DIGEST",
+                    )
+                ),
+                trustedOwnerUserIdDigest=_trimmed(
+                    _first_non_empty(
+                        env,
+                        "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_TRUSTED_OWNER_USER_ID_DIGEST",
+                        "CORE_AGENT_PYTHON_GATE5B_USER_VISIBLE_CANARY_TRUSTED_OWNER_USER_ID_DIGEST",
+                    )
+                ),
+                environment=_trimmed(
+                    _first_non_empty(
+                        env,
+                        "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_ENVIRONMENT",
+                        "CORE_AGENT_PYTHON_GATE5B_USER_VISIBLE_CANARY_ENVIRONMENT",
+                    )
+                ),
+                allowedProviderLabels=allowed_provider_labels,
+                allowedModelLabels=allowed_model_labels,
+                allowedModelRoutes=allowed_model_routes,
+                allowedShadowCredentialRefs=allowed_shadow_credential_refs,
+                providerCredentialBindings=bindings,
+                providerCredentialBindingRequired=True,
+                botConfigFallbackAllowed=_is_true(
+                    env.get("CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_BOT_CONFIG_FALLBACK_ALLOWED")
+                ),
+                botConfigFallbackApprovalDigest=_trimmed(
+                    env.get(
+                        "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_BOT_CONFIG_FALLBACK_APPROVAL_DIGEST"
+                    )
+                ),
+                approvedBudgets=approved_budgets,
+            ),
+        )
+
     provider_label = _trimmed(
         env.get("CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_PROVIDER_LABEL")
     )
@@ -657,6 +783,127 @@ def _parse_gate5b4c3_shadow_generation_budgets(
             "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_RETRY_POLICY",
         ) or "budget env"
         raise RuntimeEnvError(f"{failing_name} exceeds approved Gate 5B-4c-3e caps") from exc
+
+
+def _parse_gate5b4c3_shadow_generation_allowed_model_routes(
+    routes: tuple[str, ...],
+) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
+    provider_labels: list[str] = []
+    model_labels: list[str] = []
+    normalized_routes: list[str] = []
+    seen_routes: set[str] = set()
+    for route in routes:
+        if route.count(":") != 1:
+            raise RuntimeEnvError(
+                "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_ALLOWED_MODEL_ROUTES "
+                "entries must be provider:model"
+            )
+        provider_label, model_label = (part.strip() for part in route.split(":", 1))
+        if not provider_label or not model_label:
+            raise RuntimeEnvError(
+                "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_ALLOWED_MODEL_ROUTES "
+                "entries must include provider and model"
+            )
+        normalized = f"{provider_label}:{model_label}"
+        if normalized in seen_routes:
+            raise RuntimeEnvError(
+                "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_ALLOWED_MODEL_ROUTES "
+                "must not contain duplicates"
+            )
+        seen_routes.add(normalized)
+        normalized_routes.append(normalized)
+        if provider_label not in provider_labels:
+            provider_labels.append(provider_label)
+        if model_label not in model_labels:
+            model_labels.append(model_label)
+    return tuple(provider_labels), tuple(model_labels), tuple(normalized_routes)
+
+
+def _parse_gate5b4c3_shadow_generation_provider_credential_bindings(
+    env: Mapping[str, str],
+    *,
+    allowed_provider_labels: tuple[str, ...],
+) -> tuple[
+    tuple[str, ...],
+    tuple["Gate5B4C3ShadowGenerationProviderCredentialBinding", ...],
+]:
+    from magi_agent.shadow.gate5b4c3_shadow_generation_contract import (
+        Gate5B4C3ShadowGenerationProviderCredentialBinding,
+    )
+
+    raw_bindings = _csv_values(
+        _trimmed(
+            env.get(
+                "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_PROVIDER_CREDENTIAL_BINDINGS"
+            )
+        )
+        or ""
+    )
+    refs: list[str] = []
+    bindings: list[Gate5B4C3ShadowGenerationProviderCredentialBinding] = []
+    seen: set[tuple[str, str]] = set()
+    for raw in raw_bindings:
+        parts = tuple(part.strip() for part in raw.split(":"))
+        if len(parts) not in {3, 4}:
+            raise RuntimeEnvError(
+                "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_PROVIDER_CREDENTIAL_BINDINGS "
+                "entries must be provider:credential-ref:ENV[:adk|litellm]"
+            )
+        provider_label, credential_ref, env_name = parts[:3]
+        mode = parts[3].lower() if len(parts) == 4 else "adk"
+        if mode not in {"adk", "litellm"}:
+            raise RuntimeEnvError(
+                "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_PROVIDER_CREDENTIAL_BINDINGS "
+                "mode must be adk or litellm"
+            )
+        if provider_label not in allowed_provider_labels:
+            raise RuntimeEnvError(
+                "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_PROVIDER_CREDENTIAL_BINDINGS "
+                "provider must be present in the model route allowlist"
+            )
+        key = (provider_label, credential_ref)
+        if key in seen:
+            raise RuntimeEnvError(
+                "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_PROVIDER_CREDENTIAL_BINDINGS "
+                "must not contain duplicate provider/ref pairs"
+            )
+        seen.add(key)
+        if credential_ref not in refs:
+            refs.append(credential_ref)
+        if not _trimmed(env.get(env_name)):
+            continue
+        bindings.append(
+            Gate5B4C3ShadowGenerationProviderCredentialBinding(
+                providerLabel=provider_label,
+                credentialRef=credential_ref,
+                credentialSource="env_presence",
+                requiredEnvVars=(env_name,),
+                presentEnvVars=(env_name,),
+                adkNative=(mode == "adk"),
+            )
+        )
+    return tuple(refs), tuple(bindings)
+
+
+def _validate_gate5b4c3_shadow_generation_google_env(
+    env: Mapping[str, str],
+    allowed_provider_labels: tuple[str, ...],
+) -> None:
+    if _GATE5B4C3_FIRST_SMOKE_PROVIDER not in allowed_provider_labels:
+        return
+    google_genai_use_vertexai = _trimmed(env.get("GOOGLE_GENAI_USE_VERTEXAI"))
+    if google_genai_use_vertexai is None or google_genai_use_vertexai.lower() not in _FALSE_VALUES:
+        raise RuntimeEnvError(
+            "GOOGLE_GENAI_USE_VERTEXAI must be false when Google/Gemini is allowlisted"
+        )
+    google_genai_use_enterprise = _trimmed(env.get("GOOGLE_GENAI_USE_ENTERPRISE"))
+    if (
+        google_genai_use_enterprise is not None
+        and google_genai_use_enterprise.lower() not in _FALSE_VALUES
+    ):
+        raise RuntimeEnvError(
+            "GOOGLE_GENAI_USE_ENTERPRISE must be false when Google/Gemini is allowlisted"
+        )
 
 
 def parse_python_memory_adapter_env(env: Mapping[str, str]) -> PythonMemoryAdapterConfig:

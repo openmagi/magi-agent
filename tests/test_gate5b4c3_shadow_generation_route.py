@@ -46,6 +46,8 @@ GOOGLE_MODEL = "gemini-3.5-flash"
 GOOGLE_CREDENTIAL_REF = "gate5b-google-api-key-smoke-v1"
 GOOGLE_CREDENTIAL_ENV = "GOOGLE" + "_API_KEY"
 ANTHROPIC_CREDENTIAL_ENV = "ANTHROPIC" + "_API_KEY"
+OPENAI_CREDENTIAL_ENV = "OPENAI" + "_API_KEY"
+FIREWORKS_CREDENTIAL_ENV = "FIREWORKS" + "_API_KEY"
 
 
 def _runtime() -> OpenMagiRuntime:
@@ -445,6 +447,67 @@ def test_shadow_generation_live_smoke_env_accepts_selected_production_caps() -> 
     assert budgets.max_daily_generation_runs == 1000
     assert budgets.max_cost_usd == pytest.approx(1000)
     assert budgets.max_daily_generation_cost_usd == pytest.approx(100000)
+
+
+def test_shadow_generation_live_canary_env_accepts_multi_provider_allowlist_and_bindings() -> None:
+    env = _live_smoke_env(
+        CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_ALLOWED_MODEL_ROUTES=(
+            "google:gemini-3.5-flash,"
+            "anthropic:claude-sonnet-4-6,"
+            "openai:gpt-5.5,"
+            "fireworks:kimi-k2p6"
+        ),
+        CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_PROVIDER_CREDENTIAL_BINDINGS=(
+            "google:gate5b-google-api-key-smoke-v1:GOOGLE_API_KEY:adk,"
+            "anthropic:bot-secrets-canary:ANTHROPIC_API_KEY:litellm,"
+            "openai:platform-proxy-openai:OPENAI_API_KEY:litellm,"
+            "fireworks:platform-proxy-fireworks:FIREWORKS_API_KEY:litellm"
+        ),
+        CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_PROVIDER_LABEL="",
+        CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_MODEL_LABEL="",
+        CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_CREDENTIAL_REF="",
+        CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_CREDENTIAL_ENV="",
+    )
+    env[ANTHROPIC_CREDENTIAL_ENV] = "sample-fixture-value-must-not-leak"
+    env[OPENAI_CREDENTIAL_ENV] = "sample-fixture-value-must-not-leak"
+    env[FIREWORKS_CREDENTIAL_ENV] = "sample-fixture-value-must-not-leak"
+
+    route_config = parse_gate5b4c3_shadow_generation_route_env(env)
+
+    config = route_config.generation_config
+    assert config.allowed_provider_labels == (
+        "google",
+        "anthropic",
+        "openai",
+        "fireworks",
+    )
+    assert config.allowed_model_labels == (
+        "gemini-3.5-flash",
+        "claude-sonnet-4-6",
+        "gpt-5.5",
+        "kimi-k2p6",
+    )
+    assert config.allowed_model_routes == (
+        "google:gemini-3.5-flash",
+        "anthropic:claude-sonnet-4-6",
+        "openai:gpt-5.5",
+        "fireworks:kimi-k2p6",
+    )
+    assert config.allowed_shadow_credential_refs == (
+        "gate5b-google-api-key-smoke-v1",
+        "bot-secrets-canary",
+        "platform-proxy-openai",
+        "platform-proxy-fireworks",
+    )
+    assert {
+        (binding.provider_label, binding.credential_ref, binding.required_env_vars)
+        for binding in config.provider_credential_bindings
+    } == {
+        ("google", "gate5b-google-api-key-smoke-v1", ("GOOGLE_API_KEY",)),
+        ("anthropic", "bot-secrets-canary", ("ANTHROPIC_API_KEY",)),
+        ("openai", "platform-proxy-openai", ("OPENAI_API_KEY",)),
+        ("fireworks", "platform-proxy-fireworks", ("FIREWORKS_API_KEY",)),
+    }
 
 
 def test_shadow_generation_live_smoke_env_rejects_unsupported_provider() -> None:
