@@ -64,3 +64,69 @@ def test_notify_helpers_never_raise_when_notify_unavailable() -> None:
             notify.error(app, "still fine")
 
     asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
+# PR3.4 — focus-aware bell / desktop notify (gated by MAGI_TUI_NOTIFY_BELL)
+# ---------------------------------------------------------------------------
+def test_bell_enabled_respects_env(monkeypatch) -> None:
+    monkeypatch.delenv(notify.BELL_ENV, raising=False)
+    assert notify.bell_enabled() is False
+    monkeypatch.setenv(notify.BELL_ENV, "1")
+    assert notify.bell_enabled() is True
+    monkeypatch.setenv(notify.BELL_ENV, "0")
+    assert notify.bell_enabled() is False
+
+
+def test_notify_attention_rings_only_when_enabled_and_unfocused(monkeypatch) -> None:
+    async def _run() -> None:
+        class _BellApp(App[None]):
+            def __init__(self) -> None:
+                super().__init__()
+                self.bells = 0
+
+            def compose(self) -> ComposeResult:
+                yield Static("x")
+
+            def bell(self) -> None:  # noqa: A003 - shadow App.bell for the test
+                self.bells += 1
+
+        # Enabled + unfocused -> rings.
+        monkeypatch.setenv(notify.BELL_ENV, "1")
+        app = _BellApp()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            notify.notify_attention(app, focused=False, reason="turn done")
+            assert app.bells == 1
+            # Focused -> no ring even when enabled.
+            notify.notify_attention(app, focused=True, reason="turn done")
+            assert app.bells == 1
+
+        # Disabled (env unset) -> never rings even when unfocused.
+        monkeypatch.delenv(notify.BELL_ENV, raising=False)
+        app2 = _BellApp()
+        async with app2.run_test() as pilot:
+            await pilot.pause()
+            notify.notify_attention(app2, focused=False, reason="turn done")
+            assert app2.bells == 0
+
+    asyncio.run(_run())
+
+
+def test_notify_attention_never_raises_when_bell_unavailable(monkeypatch) -> None:
+    async def _run() -> None:
+        class _BrokenBell(App[None]):
+            def compose(self) -> ComposeResult:
+                yield Static("x")
+
+            def bell(self) -> None:  # noqa: A003
+                raise RuntimeError("no bell here")
+
+        monkeypatch.setenv(notify.BELL_ENV, "1")
+        app = _BrokenBell()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            # A bell that raises must never crash a turn (fail-open).
+            notify.notify_attention(app, focused=False, reason="turn done")
+
+    asyncio.run(_run())

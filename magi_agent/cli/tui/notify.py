@@ -1,21 +1,32 @@
-"""Toast helpers for the Magi TUI (PR3.3).
+"""Toast + bell helpers for the Magi TUI (PR3.3 + PR3.4).
 
-Thin, fail-safe wrappers over ``App.notify`` so call sites that previously
-swallowed errors silently (``except: pass``) surface a visible, severity-tagged
-toast instead. Every helper is fail-safe: a notification that itself raises is
-swallowed (a failed toast must never crash a turn).
+Two concerns:
 
-The three severities mirror Textual's ``App.notify`` severity strings:
-``information`` / ``warning`` / ``error``.
-
-> The focus-aware bell / desktop-notify surface (``BELL_ENV`` / ``bell_enabled``
-> / ``notify_attention``) is gated and lands with PR3.4; ``__all__`` is extended
-> there so this module's public surface grows additively without churning PR3.3.
+* **Toasts** (PR3.3) — thin, fail-safe wrappers over ``App.notify`` so call
+  sites that previously swallowed errors silently (``except: pass``) surface a
+  visible, severity-tagged toast instead. Every helper is fail-safe: a
+  notification that itself raises is swallowed (a failed toast must never crash
+  a turn). The three severities mirror Textual's ``App.notify`` severity
+  strings: ``information`` / ``warning`` / ``error``.
+* **Focus-aware bell** (PR3.4) — ring the terminal bell (``App.bell()``) and
+  optionally emit an OSC 9 desktop notification when the terminal is UNFOCUSED,
+  gated by the ``MAGI_TUI_NOTIFY_BELL`` env flag (default OFF). The bell never
+  fires while focused (the operator is already looking) and is fail-open like
+  the toast helpers.
 """
 
 from __future__ import annotations
 
-__all__ = ["info", "warning", "error"]
+import os
+
+__all__ = [
+    "info",
+    "warning",
+    "error",
+    "BELL_ENV",
+    "bell_enabled",
+    "notify_attention",
+]
 
 
 def info(app: object, message: str, *, timeout: float = 4.0) -> None:
@@ -46,4 +57,65 @@ def _notify(app: object, message: str, *, severity: str, timeout: float) -> None
         # A toast that fails must never crash a turn (fail-open). This is a
         # genuinely benign swallow: the message was already best-effort and the
         # alternative (propagating) would take down the engine turn.
+        pass
+
+
+# ---------------------------------------------------------------------------
+# Focus-aware bell / desktop notify (PR3.4) — gated by MAGI_TUI_NOTIFY_BELL.
+# ---------------------------------------------------------------------------
+
+#: Env flag gating the focus-aware terminal bell / desktop notify (default OFF).
+BELL_ENV = "MAGI_TUI_NOTIFY_BELL"
+
+# Accepted truthy spellings for the gate; anything else (incl. unset) -> OFF.
+_TRUTHY = {"1", "true", "yes", "on"}
+
+
+def bell_enabled() -> bool:
+    """True iff ``MAGI_TUI_NOTIFY_BELL`` is set to a truthy value (default OFF).
+
+    Unset, empty, or any non-truthy value (e.g. ``"0"``/``"false"``) -> ``False``
+    so the bell is strictly opt-in.
+    """
+
+    return os.environ.get(BELL_ENV, "").strip().lower() in _TRUTHY
+
+
+def notify_attention(app: object, *, focused: bool, reason: str = "") -> None:
+    """Ring the terminal bell when enabled AND the terminal is unfocused.
+
+    No-op when the gate is off (default) OR the terminal is focused (the operator
+    is already looking — don't annoy). A best-effort OSC 9 desktop notification
+    is attempted after the bell; any failure (a missing/raising ``bell``, an OSC
+    write error) is swallowed — an attention cue must never crash a turn.
+    """
+
+    if focused or not bell_enabled():
+        return
+    bell = getattr(app, "bell", None)
+    if callable(bell):
+        try:
+            bell()
+        except Exception:
+            # A bell that fails must never crash a turn (fail-open).
+            pass
+    _osc_desktop_notify(reason)
+
+
+def _osc_desktop_notify(reason: str) -> None:
+    """Emit an OSC 9 desktop notification (best-effort, terminal-dependent).
+
+    ``OSC 9 ; <text> BEL`` is honored by iTerm2 and several modern terminals and
+    is harmlessly ignored elsewhere. No-op for an empty reason. Any write/flush
+    failure is swallowed (the bell already fired; the desktop toast is a bonus).
+    """
+
+    if not reason:
+        return
+    try:
+        import sys  # noqa: PLC0415
+
+        sys.stdout.write(f"\033]9;{reason}\007")
+        sys.stdout.flush()
+    except Exception:
         pass
