@@ -919,9 +919,13 @@ async def _local_adk_chat_sse(
     #       host = build_memory_write_host(
     #           workspace_root=Path(workspace), bot_id=..., user_id=...,
     #       )
-    #       # Schedule OFF the hot path (own task/thread) — never await here:
-    #       MemoryReviewHarness(cfg).review(
-    #           transcript, reviewer=<live extractor>, write_host=host,
+    #       # review() is async. We are already inside a live event loop here,
+    #       # so schedule it fire-and-forget OFF the hot path — NEVER await it
+    #       # inline (that would block the SSE stream / the user's turn):
+    #       asyncio.create_task(
+    #           MemoryReviewHarness(cfg).review(
+    #               transcript, reviewer=<live extractor>, write_host=host,
+    #           )
     #       )
     #
     # The harness re-runs the declarative filter + PR2 write gate on every
