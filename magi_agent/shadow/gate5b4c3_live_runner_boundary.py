@@ -925,8 +925,8 @@ def _build_user_message_parts(runner_input: object, *, primitives: object) -> li
             "type": "image",
             "source": {
                 "type": "base64",
-                "media_type": getattr(b, "media_type", None),
-                "data": getattr(b, "data", None),
+                "media_type": b.media_type,  # validated str at ingestion
+                "data": b.data,  # validated base64 str at ingestion
             },
         }
         for b in raw_blocks
