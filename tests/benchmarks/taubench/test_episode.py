@@ -125,3 +125,23 @@ def test_run_episode_stops_at_max_steps() -> None:
     )
     assert result.turns == 3
     assert result.done is False
+
+
+def test_no_respond_when_tool_finishes_episode() -> None:
+    """If a tool call sets done=True mid-turn, no 'respond' action should be sent."""
+    env = FakeEnv(script=[FakeResp("done-by-tool", 1.0, True)])  # the tool step finishes it
+    state = EpisodeState()
+
+    def factory(*, instruction, tools):
+        class _R:
+            async def run_async(self, **kw):
+                resp = env.step(FakeAction(name="finish", kwargs={}))
+                state.observe(resp.reward, resp.done)
+                yield _Event("done")
+        return _R()
+
+    result = run_episode(env, task_index=0, state=state, runner_factory=factory,
+                         action_factory=FakeAction, respond_action_name="respond", max_steps=5)
+    assert result.done is True
+    assert result.reward == 1.0
+    assert [a for a in env.steps if a.name == "respond"] == []  # no extra respond

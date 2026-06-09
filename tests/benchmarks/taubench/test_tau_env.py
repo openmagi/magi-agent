@@ -46,8 +46,8 @@ def test_tool_callable_routes_to_env_step_and_records_state() -> None:
 
 
 def test_function_tool_declaration_exposes_real_params() -> None:
-    """The ADK declaration must expose the real parameter name ``id``, not just
-    an opaque ``arguments: OBJECT`` with no inner properties."""
+    """The ADK declaration must expose the real parameter name ``id`` nested
+    under the ``arguments`` property (the enrichment path), not just at top-level."""
     env = FakeEnv()
     state = EpisodeState()
     tools = build_env_function_tools(env, state=state, action_factory=FakeAction)
@@ -60,12 +60,29 @@ def test_function_tool_declaration_exposes_real_params() -> None:
     props = getattr(params, "properties", None)
     assert isinstance(props, dict), "declaration.parameters.properties must be a dict"
 
-    # The real param "id" must be reachable: either directly top-level or
-    # nested under the "arguments" property (the enrichment path).
+    # The real param "id" must be reachable nested under the "arguments" property
+    # (the enrichment path that _make_enriched patches in).
     arg_schema = props.get("arguments", None)
-    nested = getattr(arg_schema, "properties", None) if arg_schema is not None else None
-    assert (nested and "id" in nested) or "id" in props, (
-        f"Parameter 'id' not found in declaration. "
+    assert arg_schema is not None, (
+        f"Expected 'arguments' key in declaration properties, got: {list(props.keys())}"
+    )
+    nested = getattr(arg_schema, "properties", None)
+    assert nested is not None and "id" in nested, (
+        f"Parameter 'id' not found under arguments.properties. "
         f"Top-level props: {list(props.keys())}, "
         f"nested props: {list(nested.keys()) if nested else None}"
     )
+
+
+def test_tool_callable_returns_error_observation_on_env_exception() -> None:
+    """A tool whose env.step raises must return an error string, not propagate."""
+    class BoomEnv:
+        tools_info = ({"type": "function", "function": {"name": "boom", "description": "d",
+            "parameters": {"type": "object", "properties": {}}}},)
+
+        def step(self, action):
+            raise RuntimeError("bad action")
+
+    callables = build_env_tool_callables(BoomEnv(), state=EpisodeState(), action_factory=FakeAction)
+    out = asyncio.run(callables["boom"]({}, None))
+    assert "Error" in str(out)

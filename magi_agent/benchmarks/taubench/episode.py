@@ -70,9 +70,15 @@ def run_episode(
     while not state.done and turns < max_steps:
         try:
             agent_text = asyncio.run(_run_turn(obs))
+        except (KeyboardInterrupt, SystemExit):
+            raise
+        except AssertionError:
+            raise
         except Exception:
             return EpisodeResult(reward=0.0, done=False, turns=turns, infra_error=True)
         turns += 1
+        if state.done:
+            break
         # the agent's tool calls already hit env.step during the turn (via FunctionTools,
         # which call state.observe). Now route the agent's user-facing text as a respond.
         resp = env.step(action_factory(respond_action_name, {"content": agent_text}))
