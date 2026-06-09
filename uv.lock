@@ -2431,7 +2431,7 @@ waf = [
 [package.metadata]
 requires-dist = [
     { name = "anthropic", marker = "extra == 'anthropic'", specifier = "==0.105.2" },
-    { name = "browser-use", marker = "extra == 'browser'", specifier = ">=0.2.0" },
+    { name = "browser-use", marker = "extra == 'browser'", specifier = ">=0.11.13,<0.12" },
     { name = "composio", marker = "extra == 'composio'", specifier = "==0.13.1" },
     { name = "curl-cffi", marker = "extra == 'waf'", specifier = ">=0.7" },
     { name = "datasets", marker = "extra == 'bench'", specifier = ">=2.19.0" },
