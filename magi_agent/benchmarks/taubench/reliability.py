@@ -135,10 +135,47 @@ def looks_like_error(observation: object) -> bool:
     return isinstance(observation, str) and observation.strip().lower().startswith("error")
 
 
+# Assertion-style success phrases only. Deliberately excludes bare "confirm"/
+# "completed" so a clarifying question ("Can you confirm your dates?") is not
+# mistaken for a success claim.
+_SUCCESS_MARKERS = (
+    "is booked",
+    "has been booked",
+    "reservation id",
+    "confirmation number",
+    "is confirmed",
+    "booking is confirmed",
+    "successfully",
+    "has been cancelled",
+    "has been canceled",
+    "has been completed",
+)
+
+
+def verify_final(ledger: WriteLedger, agent_text: str) -> str | None:
+    """If the agent asserts success but the ledger does not support it (last
+    write errored, or no successful write at all), return a one-time corrective
+    message; else None. The caller enforces the one-shot-per-episode bound.
+    """
+    text = (agent_text or "").lower()
+    if not any(marker in text for marker in _SUCCESS_MARKERS):
+        return None
+    if ledger.last_write_errored() or not ledger.had_successful_write():
+        return (
+            "Before confirming success to the user: your records show no "
+            "successful write operation (the last write either failed or never "
+            "happened). Re-check the tool results, then either perform the "
+            "required action correctly or tell the user it did not complete. "
+            "Do not claim success the tool results do not support."
+        )
+    return None
+
+
 __all__ = [
     "DEFAULT_WRITE_PREFIXES",
     "ReliabilityConfig",
     "WriteLedger",
     "looks_like_error",
     "validate_args",
+    "verify_final",
 ]

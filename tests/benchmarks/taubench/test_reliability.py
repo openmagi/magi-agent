@@ -105,3 +105,29 @@ def test_looks_like_error() -> None:
     assert looks_like_error("  error - nope") is True
     assert looks_like_error("Reservation booked id=R1") is False
     assert looks_like_error(123) is False
+
+
+from magi_agent.benchmarks.taubench.reliability import verify_final
+
+
+def test_verify_final_nudges_on_success_claim_without_write() -> None:
+    led = WriteLedger()
+    msg = verify_final(led, "Your reservation is booked! Reservation ID HATHAT")
+    assert msg is not None
+
+
+def test_verify_final_nudges_when_last_write_errored() -> None:
+    led = WriteLedger()
+    led.record("book_reservation", {"x": 1}, ok=False)
+    assert verify_final(led, "All set — your booking is confirmed.") is not None
+
+
+def test_verify_final_silent_when_success_backed_by_write() -> None:
+    led = WriteLedger()
+    led.record("book_reservation", {"x": 1}, ok=True)
+    assert verify_final(led, "Your reservation is booked. Reservation ID R1.") is None
+
+
+def test_verify_final_silent_without_success_language() -> None:
+    led = WriteLedger()
+    assert verify_final(led, "Can you confirm your travel dates first?") is None
