@@ -433,7 +433,7 @@ class ArtifactChannelDeliveryBoundary:
                 reason_codes=("file_delivery_decision_invalid",),
                 diagnostics=diagnostics,
             )
-        if file_decision.status != "delivered_local_fake":
+        if file_decision.status not in ("delivered_local_fake", "delivered_live"):
             return _decision(
                 request,
                 "delivery_intent",
