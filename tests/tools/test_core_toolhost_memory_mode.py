@@ -86,6 +86,71 @@ def test_filewrite_top_level_protected_blocked(tmp_path) -> None:
         assert not (tmp_path / protected).exists()
 
 
+def test_fileread_top_level_protected_blocked_under_incognito(tmp_path) -> None:
+    (tmp_path / "MEMORY.md").write_text("secret recall\n", encoding="utf-8")
+    registry = _registry()
+    result = _dispatch(
+        registry,
+        "FileRead",
+        {"path": "MEMORY.md"},
+        _context(tmp_path, memory_mode=MemoryMode.INCOGNITO),
+    )
+    assert result.status == "blocked"
+    assert result.error_code == "memory_mode_blocked"
+    assert "memory mode blocks access to MEMORY.md" in result.error_message
+
+
+def test_fileread_top_level_protected_blocked_under_read_only(tmp_path) -> None:
+    (tmp_path / "MEMORY.md").write_text("secret recall\n", encoding="utf-8")
+    registry = _registry()
+    result = _dispatch(
+        registry,
+        "FileRead",
+        {"path": "MEMORY.md"},
+        _context(tmp_path, memory_mode=MemoryMode.READ_ONLY),
+    )
+    assert result.status == "blocked"
+    assert result.error_code == "memory_mode_blocked"
+    assert "memory mode blocks access to MEMORY.md" in result.error_message
+
+
+def test_broad_grep_blocked_under_non_normal_memory_mode(tmp_path) -> None:
+    (tmp_path / "MEMORY.md").write_text("needle protected\n", encoding="utf-8")
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "note.txt").write_text("needle public\n", encoding="utf-8")
+    for mode in (MemoryMode.INCOGNITO, MemoryMode.READ_ONLY):
+        registry = _registry()
+        result = _dispatch(
+            registry,
+            "Grep",
+            {"pattern": "needle"},
+            _context(tmp_path, memory_mode=mode),
+        )
+        assert result.status == "blocked", mode
+        assert result.error_code == "memory_mode_blocked", mode
+
+
+def test_broad_glob_does_not_return_protected_memory_under_non_normal_mode(
+    tmp_path,
+) -> None:
+    (tmp_path / "MEMORY.md").write_text("secret\n", encoding="utf-8")
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "note.txt").write_text("public\n", encoding="utf-8")
+    for mode in (MemoryMode.INCOGNITO, MemoryMode.READ_ONLY):
+        registry = _registry()
+        result = _dispatch(
+            registry,
+            "Glob",
+            {"pattern": "**/*"},
+            _context(tmp_path, memory_mode=mode),
+        )
+        assert result.status == "ok", mode
+        assert result.output is not None
+        paths = set(result.output["matches"])
+        assert "src/note.txt" in paths
+        assert "MEMORY.md" not in paths
+
+
 def test_fileedit_protected_blocked_under_read_only(tmp_path) -> None:
     registry = _registry()
     result = _dispatch(

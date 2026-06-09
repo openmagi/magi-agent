@@ -5,7 +5,8 @@ channel may carry a memory mode that restricts whether tools may read/write the
 agent's long-term ("protected") memory state:
 
 - ``incognito`` — tools may NOT read OR write protected memory paths.
-- ``read_only`` — tools may read but NOT write protected memory paths.
+- ``read_only`` — FileRead/Grep/Glob may NOT read protected memory paths;
+  write tools may NOT write protected memory paths.
 - ``normal``    — no restriction.
 
 "Protected" memory = the top-level files ``MEMORY.md`` / ``SCRATCHPAD.md`` /
@@ -56,6 +57,11 @@ def is_long_term_memory_write_disabled(value: MemoryMode | str | None) -> bool:
     return normalized in (MemoryMode.READ_ONLY.value, MemoryMode.INCOGNITO.value)
 
 
+def is_long_term_memory_read_disabled(value: MemoryMode | str | None) -> bool:
+    normalized = normalize_memory_mode(value)
+    return normalized in (MemoryMode.READ_ONLY.value, MemoryMode.INCOGNITO.value)
+
+
 def is_protected_memory_path(raw_path: str | None) -> bool:
     if not isinstance(raw_path, str):
         return False
@@ -102,6 +108,7 @@ __all__ = [
     "command_may_write_protected_memory",
     "command_mentions_protected_memory",
     "is_incognito_memory_mode",
+    "is_long_term_memory_read_disabled",
     "is_long_term_memory_write_disabled",
     "is_protected_memory_path",
     "normalize_memory_mode",

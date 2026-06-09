@@ -25,6 +25,7 @@ from magi_agent.evidence.source_ledger import (
 from .context import ToolContext
 from .memory_mode_guard import (
     is_incognito_memory_mode,
+    is_long_term_memory_read_disabled,
     is_protected_memory_path,
     protected_memory_error,
 )
@@ -381,6 +382,7 @@ class LocalReadOnlyToolHost:
             files = rg_files
         else:
             files = list(_safe_glob_files(root, pattern, max_files=max_matches + 1))
+        files = _memory_mode_filter_readable_files(files, context)
         selected = files[:max_matches]
         source_bundle = self._source_bundle(
             context,
@@ -441,6 +443,7 @@ class LocalReadOnlyToolHost:
             files: tuple[_ResolvedPath, ...] = rg_resolved
         else:
             files = _safe_glob_files(root, glob_pattern, max_files=max_files + 1)
+        files = _memory_mode_filter_readable_files(files, context)
         selected_files = files[:max_files]
         matches: list[dict[str, object]] = []
         source_inputs: list[tuple[_ResolvedPath, str]] = []
@@ -1056,21 +1059,35 @@ def _memory_mode_read_block(
     path_text: str,
     context: ToolContext,
 ) -> ToolResult | None:
-    """Block incognito reads of an explicitly-targeted protected memory path.
+    """Block protected memory reads when the channel disables raw memory reads."""
 
-    Only ``incognito`` blocks reads; ``read_only`` permits reads (it only
-    disables writes), so this returns ``None`` for every non-incognito mode.
-    """
-
-    if not is_incognito_memory_mode(context.memory_mode):
+    if not is_long_term_memory_read_disabled(context.memory_mode):
         return None
     if not is_protected_memory_path(path_text):
         return None
+    reason = (
+        "memory_mode_incognito"
+        if is_incognito_memory_mode(context.memory_mode)
+        else "memory_mode_blocked"
+    )
     return ToolResult(
         status="blocked",
-        errorCode="memory_mode_incognito",
+        errorCode=reason,
         errorMessage=protected_memory_error(path_text),
-        metadata=_base_metadata(tool_name, reason="memory_mode_incognito"),
+        metadata=_base_metadata(tool_name, reason=reason),
+    )
+
+
+def _memory_mode_filter_readable_files(
+    files: Sequence[_ResolvedPath],
+    context: ToolContext,
+) -> tuple[_ResolvedPath, ...]:
+    if not is_long_term_memory_read_disabled(context.memory_mode):
+        return tuple(files)
+    return tuple(
+        resolved
+        for resolved in files
+        if not is_protected_memory_path(resolved.relative)
     )
 
 

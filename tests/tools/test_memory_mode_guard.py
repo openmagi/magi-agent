@@ -5,6 +5,7 @@ from magi_agent.tools.memory_mode_guard import (
     command_may_write_protected_memory,
     command_mentions_protected_memory,
     is_incognito_memory_mode,
+    is_long_term_memory_read_disabled,
     is_long_term_memory_write_disabled,
     is_protected_memory_path,
     normalize_memory_mode,
@@ -32,6 +33,11 @@ def test_memory_mode_truth_tables() -> None:
     assert is_long_term_memory_write_disabled("read_only") is True
     assert is_long_term_memory_write_disabled(MemoryMode.READ_ONLY) is True
     assert is_long_term_memory_write_disabled("normal") is False
+
+    assert is_long_term_memory_read_disabled("incognito") is True
+    assert is_long_term_memory_read_disabled("read_only") is True
+    assert is_long_term_memory_read_disabled(MemoryMode.READ_ONLY) is True
+    assert is_long_term_memory_read_disabled("normal") is False
     assert is_long_term_memory_write_disabled(None) is False
 
 
