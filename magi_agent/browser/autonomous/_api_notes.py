@@ -129,4 +129,39 @@ NOTES / GOTCHAS
     Agent instance. Pick whichever fits the per-step reporting need.
   - Nothing in this spike was UNVERIFIED: all of the above was read directly
     from the installed browser-use==0.11.13 via inspect.signature.
+
+================================================================================
+4. STEP-CALLBACK ABORT SEMANTICS  (CONFIRMED, Task 5 — read from source)
+================================================================================
+  Question: can returning from register_new_step_callback stop the run, or must
+  we use register_should_stop_callback / raise to abort?
+
+  Read directly from browser_use.agent.service.Agent source (0.11.13):
+    - register_new_step_callback fires inside _handle_post_llm_processing
+      (service.py ~L1554), invoked from _get_next_action (~L1051) AFTER the LLM
+      decided the next action but BEFORE that action executes. Its return value
+      is IGNORED -> returning a "block" reason does nothing by itself.
+    - Raising from the callback is NOT a clean abort: step() wraps it in
+      `except Exception -> _handle_step_error` (~L925/L1103). For a generic
+      exception that just increments consecutive_failures and CONTINUES, up to
+      max_failures (default 5). So a bare raise leaks ~5 more steps. (Only
+      InterruptedError is special-cased there, and even that does not set
+      state.stopped on its own.)
+    - The CLEAN cooperative stop is register_should_stop_callback (async
+      () -> bool). _check_stop_or_pause (~L865) calls it; True -> sets
+      state.stopped + raises InterruptedError, and the run loop breaks on
+      `if self.state.stopped: break` (~L2437).
+    - KEY: _get_next_action runs _check_stop_or_pause on the line IMMEDIATELY
+      after firing the step callback (service.py L1051 then L1054). So a stop
+      flag set inside the step callback is honored in the SAME step, before the
+      just-decided (blocked) action is ever executed.
+
+  ENGINE DECISION (engine.py / _default_agent_factory): wire a cooperating PAIR
+  of callbacks sharing a stop_state dict:
+    register_new_step_callback   -> reads state.url, runs the SSRF guard, and on
+                                    a block RECORDS the violation (never silent)
+                                    and arms stop_state["stop"]=True.
+    register_should_stop_callback -> returns stop_state["stop"].
+  Result: a blocked URL aborts cleanly in the same step, no blocked action runs,
+  no failure-count churn. This is the real 0.11.x mechanism, not a guess.
 """
