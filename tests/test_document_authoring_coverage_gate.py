@@ -193,6 +193,93 @@ def test_env_flag_defaults_off_and_is_strict_truthy() -> None:
         )
 
 
+# -- Gate ON edge cases (items 1, 2, 7) ------------------------------------
+
+
+def test_gate_on_model_dump_raises_runtime_error_does_not_crash() -> None:
+    """Item 1: model_dump raising RuntimeError is swallowed; gate stays open."""
+
+    class _BadDumpRecord:
+        """Pretends to be a DocumentCoverage record but model_dump raises."""
+
+        type = "DocumentCoverage"
+        fields = {"status": "failed"}
+
+        def model_dump(self, **kwargs: object) -> object:
+            raise RuntimeError("intentional model_dump failure for test")
+
+    bus = execute_pre_final_verifier_bus(
+        required_evidence=(),
+        required_validators=(),
+        observed_public_refs=(),
+        evidence_records=(_BadDumpRecord(),),
+        document_coverage_gate_enabled=True,
+    )
+
+    # The broken record is safely ignored (no-readable-record ⇒ pass).
+    assert bus["decision"] == "pass"
+    assert bus["failedDocumentCoverage"] == 0
+
+
+def test_gate_on_absent_status_key_does_not_block() -> None:
+    """Item 2: a DocumentCoverage record with no 'status' in fields ⇒ pass."""
+    record = {
+        "type": "DocumentCoverage",
+        "status": "ok",
+        "fields": {
+            "totalUnits": 4,
+            "coveredUnits": 1,
+            # NOTE: no "status" key in fields
+        },
+    }
+    bus = execute_pre_final_verifier_bus(
+        required_evidence=(),
+        required_validators=(),
+        observed_public_refs=(),
+        evidence_records=(record,),
+        document_coverage_gate_enabled=True,
+    )
+
+    assert bus["decision"] == "pass"
+    assert bus["failedDocumentCoverage"] == 0
+
+
+def test_gate_on_two_records_one_pass_one_failed_counts_one() -> None:
+    """Item 7: two records (one pass, one failed) → failedDocumentCoverage==1, blocked."""
+    bus = execute_pre_final_verifier_bus(
+        required_evidence=(),
+        required_validators=(),
+        observed_public_refs=(),
+        evidence_records=(
+            _coverage_record("pass"),
+            _coverage_record("failed"),
+        ),
+        document_coverage_gate_enabled=True,
+    )
+
+    assert bus["decision"] == "block"
+    assert bus["failedDocumentCoverage"] == 1
+
+
+def test_gate_on_mapping_record_with_no_fields_key_does_not_block() -> None:
+    """Item 7: mapping-shaped record with type='DocumentCoverage' and NO 'fields' key ⇒ pass."""
+    record = {
+        "type": "DocumentCoverage",
+        "status": "ok",
+        # NOTE: no "fields" key at all
+    }
+    bus = execute_pre_final_verifier_bus(
+        required_evidence=(),
+        required_validators=(),
+        observed_public_refs=(),
+        evidence_records=(record,),
+        document_coverage_gate_enabled=True,
+    )
+
+    assert bus["decision"] == "pass"
+    assert bus["failedDocumentCoverage"] == 0
+
+
 # -- preset registry -------------------------------------------------------
 
 

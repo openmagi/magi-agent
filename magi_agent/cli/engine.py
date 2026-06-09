@@ -737,6 +737,7 @@ def _build_pre_final_verifier_bus_payload(
         "results": results,
         "trafficAttached": False,
         "executionAttached": False,
+        "failedDocumentCoverage": 0,
     }
 
 
@@ -1991,8 +1992,8 @@ class MagiEngineDriver:
         evidence_records: tuple[object, ...] = ()
         verifier_bus: dict[str, object] | None = None
         # Task C — OPTIONAL BLOCKING document-authoring coverage gate. Default OFF
-        # and strict-truthy env-gated; when off the bus call is byte-identical to
-        # before and DocumentCoverage evidence stays audit-only.
+        # and strict-truthy env-gated; when off the bus call is behavior-identical
+        # to before and DocumentCoverage evidence stays audit-only.
         from magi_agent.config.env import is_document_authoring_coverage_enabled
 
         document_coverage_gate_enabled = is_document_authoring_coverage_enabled()

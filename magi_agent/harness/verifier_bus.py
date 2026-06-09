@@ -842,7 +842,7 @@ def execute_pre_final_verifier_bus(
     agents, or production services.
 
     ``document_coverage_gate_enabled`` (Task C, default OFF) activates the
-    ``document-authoring-coverage`` gate. When OFF this function is byte-identical
+    ``document-authoring-coverage`` gate. When OFF this function is behavior-identical
     to before: ``DocumentCoverage`` evidence (Task B) stays audit-only and never
     affects the decision. When ON, a ``DocumentCoverage`` record whose
     ``fields["status"] != "pass"`` (failed coverage) flips the decision to
@@ -974,9 +974,13 @@ def _failed_document_coverage_records(
         evidence_type, fields = _document_coverage_view(record)
         if evidence_type != _DOCUMENT_COVERAGE_EVIDENCE_TYPE:
             continue
-        # fields["status"] != "pass" (failed coverage). _match_document_field
-        # returns a mismatch dict when the field does not satisfy the matcher.
-        if _match_document_field(fields, "status", _DOCUMENT_COVERAGE_PASS_MATCHER):
+        # Absent status key ⇒ pass (fail_open contract: only a present
+        # fields["status"] != "pass" blocks).
+        if "status" not in fields:
+            continue
+        # fields["status"] != "pass" (failed coverage). _document_field_fails_matcher
+        # returns True when the field does not satisfy the matcher.
+        if _document_field_fails_matcher(fields, "status", _DOCUMENT_COVERAGE_PASS_MATCHER):
             failed.append(record)
     return tuple(failed)
 
@@ -987,6 +991,14 @@ def _document_coverage_view(record: object) -> tuple[object, Mapping[str, object
     Accepts ``EvidenceRecord``-like objects (with ``type``/``fields`` attrs), any
     model exposing ``model_dump``, or plain mappings (camel or snake keys).
     Returns ``(None, {})`` for anything that is not a readable evidence record.
+
+    Total/never-raising: any exception from ``model_dump`` (including
+    ``ValueError``, ``AttributeError``, ``RuntimeError``, etc.) causes
+    ``dumped`` to be set to ``None``, which then falls through to the
+    attribute-read path so the gate is never wedged by a malformed record.
+    When model_dump raises, we do NOT fall through to attribute reads (which
+    could accidentally surface class-level attributes as coverage data) —
+    instead we treat it as no-readable-record and return ``(None, {})``.
     """
     data: Mapping[str, object] | None = None
     if isinstance(record, Mapping):
@@ -994,15 +1006,26 @@ def _document_coverage_view(record: object) -> tuple[object, Mapping[str, object
     else:
         model_dump = getattr(record, "model_dump", None)
         if callable(model_dump):
+            dumped: object = None
             try:
                 dumped = model_dump(by_alias=True, mode="python", warnings=False)
-            except TypeError:
+            except Exception:
+                # Any exception (TypeError, ValueError, AttributeError,
+                # RuntimeError, …) from model_dump is caught here.
+                # We try the no-kwargs form as a last resort, but if that
+                # also fails (or yields a non-Mapping), we return no-record
+                # rather than falling through to attribute reads — that path
+                # could pick up class-level attributes that were never meant
+                # as serialized field data.
                 try:
                     dumped = model_dump()
                 except Exception:
-                    dumped = None
+                    return None, {}
             if isinstance(dumped, Mapping):
                 data = dumped
+            elif dumped is None:
+                # model_dump() returned None (or both forms failed gracefully)
+                return None, {}
         if data is None:
             evidence_type = getattr(record, "type", None)
             raw_fields = getattr(record, "fields", None)
@@ -1015,17 +1038,23 @@ def _document_coverage_view(record: object) -> tuple[object, Mapping[str, object
     return evidence_type, fields
 
 
-def _match_document_field(
+def _document_field_fails_matcher(
     fields: Mapping[str, object],
     field_name: str,
     matcher: EvidenceFieldMatcher,
 ) -> bool:
     """Return True iff ``fields[field_name]`` does NOT satisfy ``matcher``.
 
-    Reuses the canonical evidence-contract field matcher so the gate's
-    field-level semantics are identical to ``EvidenceContractEngine``. Imported
-    lazily to keep this module ADK/runtime/route-import-free at module load.
+    Named to make the "fails" sense explicit at call sites: a True return means
+    the field did not pass the matcher (i.e. the record should be counted as
+    failed coverage). Reuses the canonical evidence-contract field matcher so
+    the gate's field-level semantics are identical to ``EvidenceContractEngine``.
+    Imported lazily to keep this module ADK/runtime/route-import-free at module
+    load.
     """
+    # Intentional cross-module reuse of the canonical field matcher from
+    # evidence/contracts.py — keeps field-matching semantics in one place.
+    # If _match_field is ever renamed, grep for this import site.
     from magi_agent.evidence.contracts import _match_field
 
     return _match_field(fields, field_name, matcher) is not None
@@ -1059,8 +1088,11 @@ def _collect_public_refs(value: object, refs: set[str], depth: int = 0) -> None:
     if callable(model_dump):
         try:
             dumped = model_dump(by_alias=True, mode="python", warnings=False)
-        except TypeError:
-            dumped = model_dump()
+        except Exception:
+            try:
+                dumped = model_dump()
+            except Exception:
+                return
         _collect_public_refs(dumped, refs, depth + 1)
         return
 
