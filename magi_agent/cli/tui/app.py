@@ -81,6 +81,7 @@ from magi_agent.cli.tui.autocomplete import (
 )
 from magi_agent.cli.tui.history import DraftStash, InputHistory
 from magi_agent.cli.tui.input import PromptInput, Submission
+from magi_agent.cli.tui.footer import StatusFooter
 from magi_agent.cli.tui.dialogs.help import HelpDialog
 from magi_agent.cli.tui.dialogs.model import ModelPickerDialog, model_choices
 from magi_agent.cli.tui.dialogs.session import (
@@ -111,6 +112,31 @@ def _token_text(payload: dict) -> str:
         if isinstance(value, str):
             return value
     return ""
+
+
+def _usage_tokens(usage: dict) -> int:
+    """Sum input+output tokens from an EngineResult.usage dict (best-effort).
+
+    ``EngineResult.usage`` is a free-form dict; providers spell token counts
+    differently. We sum the input/output split when present, else fall back to a
+    pre-summed ``tokens`` / ``total_tokens`` field. Missing/non-numeric -> 0 (the
+    footer then shows ``0 tok``, degrading gracefully when usage is unavailable).
+    """
+
+    if not isinstance(usage, dict):
+        return 0
+    split = 0
+    for key in ("input_tokens", "output_tokens"):
+        value = usage.get(key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            split += int(value)
+    if split > 0:
+        return split
+    for key in ("total_tokens", "tokens"):
+        value = usage.get(key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return max(0, int(value))
+    return 0
 
 
 def _stop(event: object) -> None:
@@ -450,6 +476,13 @@ class MagiTuiApp(App[None]):
         height: auto;
     }
     #prompt:focus { border: round $accent; }
+    #footer {
+        dock: bottom;
+        height: 1;
+        padding: 0 1;
+        background: $primary-darken-2;
+        color: $text;
+    }
     #completions {
         dock: bottom;
         height: auto;
@@ -592,6 +625,11 @@ class MagiTuiApp(App[None]):
         # ``_view`` (new TranscriptView widget list) is populated, selected by
         # ``_legacy_richlog`` (the MAGI_TUI_LEGACY_RICHLOG escape hatch, PR0.3).
         self._topbar: Static | None = None
+        self._footer: StatusFooter | None = None
+        # monotonic() stamp marking the in-flight turn's start; None when idle.
+        # Used by the footer elapsed clock (set in start_turn, cleared in
+        # _render_terminal).
+        self._turn_started_monotonic: float | None = None
         self._log: RichLog | None = None
         self._view: TranscriptView | None = None
         self._live: Static | None = None
@@ -628,14 +666,21 @@ class MagiTuiApp(App[None]):
         self._live = Static("", id="live")
         self._completions = OptionList(id="completions")
         self._input = PromptInput(commands=self._commands, id="prompt")
+        self._footer = StatusFooter(
+            model=self._model, cwd=self._topbar_cwd(), id="footer"
+        )
         yield self._topbar
         yield transcript_widget
         yield self._live
         yield self._completions
         yield self._input
+        # The footer is yielded LAST so its ``dock: bottom`` wins the lower slot
+        # over the prompt's (also bottom-docked) — the footer sits BELOW the
+        # prompt.
+        yield self._footer
 
-    def _topbar_text(self) -> str:
-        """The top status bar: app · model · cwd · mode."""
+    def _topbar_cwd(self) -> str:
+        """Home-relative, length-capped cwd (shared by topbar + footer)."""
 
         import os as _os  # noqa: PLC0415
 
@@ -645,9 +690,14 @@ class MagiTuiApp(App[None]):
             cwd = "~" + cwd[len(home) :]
         if len(cwd) > 48:
             cwd = "…" + cwd[-47:]
+        return cwd
+
+    def _topbar_text(self) -> str:
+        """The top status bar: app · model · cwd · mode (static identity)."""
+
         model = self._model or "no model"
         mode = (self._mode or "act").lower()
-        return f"● Magi   {model}   {cwd}   [{mode}]"
+        return f"● Magi   {model}   {self._topbar_cwd()}   [{mode}]"
 
     def on_mount(self) -> None:
         assert self._live is not None and (
@@ -975,12 +1025,16 @@ class MagiTuiApp(App[None]):
     def start_turn(self, prompt: str) -> None:
         """Kick off a single engine turn for ``prompt`` in an exclusive worker."""
 
+        import time as _time  # noqa: PLC0415
+
         self._turn_seq += 1
         turn_id = f"{self._session_id}-turn-{self._turn_seq}"
         cancel = asyncio.Event()
         self._cancel = cancel
         self._active_turn_id = turn_id
         self._turn_active = True
+        self._turn_started_monotonic = _time.monotonic()
+        self.update_footer(state="running")
         self._echo_user(prompt)
         self._run_turn(prompt, turn_id, cancel)
 
@@ -1130,7 +1184,51 @@ class MagiTuiApp(App[None]):
             return text
         return f"{tool_name}: {text}" if text else tool_name
 
+    # -- status footer (PR3.1) ---------------------------------------------
+    def update_footer(
+        self,
+        *,
+        state: str | None = None,
+        tokens: int | None = None,
+        elapsed: float | None = None,
+    ) -> None:
+        """Single seam every fold/turn path uses to refresh the footer.
+
+        No-op before mount (the footer is created in ``compose``); each provided
+        field updates the corresponding reactive on ``StatusFooter`` (which
+        repaints only itself).
+        """
+
+        if self._footer is None:
+            return
+        if state is not None:
+            self._footer.set_state(state)
+        if tokens is not None:
+            self._footer.set_tokens(tokens)
+        if elapsed is not None:
+            self._footer.set_elapsed(elapsed)
+
+    def _turn_elapsed(self) -> float:
+        """Seconds since the in-flight turn started (0.0 when idle)."""
+
+        import time as _time  # noqa: PLC0415
+
+        if self._turn_started_monotonic is None:
+            return 0.0
+        return max(0.0, _time.monotonic() - self._turn_started_monotonic)
+
     def _render_terminal(self, terminal: EngineResult) -> None:
+        # Fold the terminal state + token usage + elapsed into the footer FIRST,
+        # so it updates for completed AND non-completed turns (the early return
+        # below is only for the transcript marker, not the footer).
+        self.update_footer(
+            state=terminal.terminal.value,
+            tokens=_usage_tokens(terminal.usage),
+            elapsed=self._turn_elapsed(),
+        )
+        # Stop the running clock once the turn is terminal (the flush-tick
+        # elapsed advance keys off this being None / state != "running").
+        self._turn_started_monotonic = None
         if terminal.terminal == Terminal.completed:
             return
         suffix = f": {terminal.error}" if terminal.error else ""

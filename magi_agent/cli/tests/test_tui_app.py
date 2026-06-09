@@ -1318,3 +1318,36 @@ def test_f1_opens_help_dialog() -> None:
             assert isinstance(app.screen, HelpDialog)
 
     asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
+# PR3.1 — StatusFooter wiring
+# ---------------------------------------------------------------------------
+def test_footer_reflects_turn_state_and_token_usage() -> None:
+    async def _run() -> None:
+        from magi_agent.cli.tui.footer import StatusFooter
+
+        class _UsageEngine(FakeEngineDriver):
+            async def run_turn_stream(self, runtime, turn_input, *, cancel, gate=None):
+                turn_id = getattr(turn_input, "turn_id", "t")
+                yield RuntimeEvent(type="token", payload={"delta": "hi"}, turn_id=turn_id)
+                yield EngineResult(
+                    terminal=Terminal.completed,
+                    usage={"input_tokens": 100, "output_tokens": 23},
+                    turn_id=turn_id,
+                )
+
+        app = _make_app(_UsageEngine())
+        async with app.run_test() as pilot:
+            footer = app.query_one("#footer", StatusFooter)
+            # Idle before any turn.
+            assert "idle" in footer.status_text()
+            app.start_turn("hi")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            text = footer.status_text()
+        assert "completed" in text
+        # 100 + 23 = 123 tokens summed from the terminal usage dict.
+        assert "123 tok" in text
+
+    asyncio.run(_run())
