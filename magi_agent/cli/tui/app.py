@@ -177,6 +177,46 @@ def _tool_input(payload: dict) -> object:
     return {}
 
 
+def _tool_file_path(tool_input: object) -> str | None:
+    """Best-effort file path from a Read/Edit/Write tool input."""
+
+    if isinstance(tool_input, dict):
+        for key in ("path", "file_path", "filePath", "file"):
+            value = tool_input.get(key)
+            if isinstance(value, str) and value:
+                return value
+    return None
+
+
+def _todo_contents(tool_input: object) -> list[str]:
+    """Best-effort todo strings from a TodoWrite tool input."""
+
+    if not isinstance(tool_input, dict):
+        return []
+    todos = tool_input.get("todos")
+    if not isinstance(todos, list):
+        return []
+    out: list[str] = []
+    for item in todos:
+        if isinstance(item, dict):
+            content = item.get("content") or item.get("text")
+            if isinstance(content, str) and content:
+                out.append(content)
+        elif isinstance(item, str) and item:
+            out.append(item)
+    return out
+
+
+def _context_limit(_model: str | None) -> int:
+    """Coarse context-window budget for the sidebar context pane (v1).
+
+    A model-specific table is Phase 4 polish; v1 returns a coarse default so the
+    context pane shows a ``usage / limit`` ratio rather than a bare token count.
+    """
+
+    return 200_000
+
+
 def _tool_result(payload: dict) -> object:
     """Best-effort tool result for a tool_end block (output preview)."""
 
@@ -1199,6 +1239,10 @@ class MagiTuiApp(App[None]):
         renderer = self._renderers.get(name)
         inner = _inner_type(payload)
         if inner == "tool_start":
+            # Fold this tool_start into the sidebar panes (todo / recent files)
+            # BEFORE rendering the call, so the side panes track activity even
+            # when the sidebar is currently hidden.
+            self._fold_sidebar_tool(name, _tool_input(payload))
             node = renderer.render_call(_tool_input(payload))
         elif inner == "tool_progress":
             node = renderer.render_progress(_tool_result(payload) or payload)
@@ -1242,6 +1286,26 @@ class MagiTuiApp(App[None]):
             return text
         return f"{tool_name}: {text}" if text else tool_name
 
+    def _fold_sidebar_tool(self, name: str, tool_input: object) -> None:
+        """Route a tool_start into the sidebar panes (todo / recent files).
+
+        TodoWrite replaces the todo pane with the tool's todo list; Read/Edit/
+        Write push the touched file onto the MRU recent-files pane. No-op when
+        the sidebar is not mounted or the input carries nothing usable.
+        """
+
+        if self._sidebar is None:
+            return
+        if name == "TodoWrite":
+            todos = _todo_contents(tool_input)
+            if todos:
+                self._sidebar.set_todos(todos)
+            return
+        if name in ("Read", "Edit", "Write", "MultiEdit"):
+            path = _tool_file_path(tool_input)
+            if path:
+                self._sidebar.add_file(path)
+
     # -- status footer (PR3.1) ---------------------------------------------
     def update_footer(
         self,
@@ -1279,11 +1343,19 @@ class MagiTuiApp(App[None]):
         # Fold the terminal state + token usage + elapsed into the footer FIRST,
         # so it updates for completed AND non-completed turns (the early return
         # below is only for the transcript marker, not the footer).
+        tokens = _usage_tokens(terminal.usage)
         self.update_footer(
             state=terminal.terminal.value,
-            tokens=_usage_tokens(terminal.usage),
+            tokens=tokens,
             elapsed=self._turn_elapsed(),
         )
+        # Mirror the turn's token usage into the sidebar context pane (usage vs a
+        # coarse v1 context-window budget). Folded here next to the footer so the
+        # two stay in lockstep.
+        if self._sidebar is not None:
+            self._sidebar.set_context(
+                usage=tokens, limit=_context_limit(self._model)
+            )
         # Stop the running clock once the turn is terminal (the flush-tick
         # elapsed advance keys off this being None / state != "running").
         self._turn_started_monotonic = None
