@@ -443,4 +443,10 @@ def _build_litellm_for_config(
     api_key = getattr(provider_config, "api_key", None)
     if not litellm_model:
         raise RuntimeError("cannot determine litellm model for SmartApprove")
-    return LiteLlm(model=litellm_model, api_key=api_key)
+    # Share the runtime's gateway routing so the classifier egresses through the
+    # same api-proxy as the main turn (see real_runner._model_api_base_kwargs).
+    from magi_agent.cli.real_runner import _model_api_base_kwargs  # noqa: PLC0415
+
+    api_base_kwargs = _model_api_base_kwargs()
+    api_key = api_base_kwargs.pop("api_key", api_key)
+    return LiteLlm(model=litellm_model, api_key=api_key, **api_base_kwargs)
