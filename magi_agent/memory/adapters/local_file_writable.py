@@ -250,8 +250,9 @@ class LocalFileMemoryProvider:
                 f"({body_bytes} > {self.config.max_write_bytes})"
             )
 
-        # Redact secrets and sanitize
-        safe_body = _redact_for_write(body)
+        # Redact secrets and sanitize. Memory entries are line-delimited, so
+        # body text must be a single logical line before it is persisted.
+        safe_body = _single_line_memory_text(_redact_for_write(body))
 
         # Resolve target path (must stay within workspace)
         target_path = _resolve_workspace_path(self.workspace_root, target_file)
@@ -267,6 +268,12 @@ class LocalFileMemoryProvider:
         entry = f"\n- [{kind}] {safe_body}\n"
         entry_bytes = entry.encode("utf-8")
         current_size = target_path.stat().st_size if target_path.exists() else 0
+
+        if len(entry_bytes) > self.config.max_file_bytes:
+            raise ValueError(
+                f"remember: entry exceeds max_file_bytes "
+                f"({len(entry_bytes)} > {self.config.max_file_bytes})"
+            )
 
         # Gated compaction (B2): when enabled and the post-append size would
         # reach/exceed the compaction threshold, archive the current file and
@@ -517,6 +524,11 @@ def _redact_for_write(body: str) -> str:
     safe = _COOKIE_HEADER_RE.sub(r"\1[redacted]", safe)
     safe = _SENSITIVE_URL_RE.sub("[redacted-url]", safe)
     return safe.strip()
+
+
+def _single_line_memory_text(text: str) -> str:
+    """Collapse persisted memory text to one delimiter-safe logical line."""
+    return " ".join(text.split())
 
 
 def _extract_body(payload: Any) -> str:  # noqa: ANN401

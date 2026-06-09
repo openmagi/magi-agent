@@ -363,3 +363,46 @@ def test_compaction_swap_failure_leaves_original_intact(
     archives = list(archive_dir.glob("MEMORY.md.*.md"))
     assert len(archives) == 1, "archive must exist even when the swap fails"
     assert archives[0].read_text(encoding="utf-8") == original_content
+
+
+def test_gate_on_oversized_entry_rejected_before_compaction(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """A rejected append must not archive, compact, truncate, or mutate live memory."""
+    monkeypatch.setenv(MAGI_MEMORY_COMPACTION_ENABLED_ENV, "1")
+    target = tmp_path / "MEMORY.md"
+    original_content = "\n- [note] original memory\n"
+    target.write_text(original_content, encoding="utf-8")
+
+    provider = _provider(
+        tmp_path,
+        max_file_bytes=50,
+        compaction_threshold_bytes=10,
+    )
+
+    with pytest.raises(ValueError, match="max_file_bytes"):
+        asyncio.run(provider.remember({"body": "x" * 80, "kind": "note"}))
+
+    assert target.read_text(encoding="utf-8") == original_content
+    assert not _archive_dir(tmp_path).exists()
+
+
+def test_gate_on_multiline_body_is_single_memory_entry(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Newlines in remembered bodies must not become bare continuation entries."""
+    monkeypatch.setenv(MAGI_MEMORY_COMPACTION_ENABLED_ENV, "1")
+    target = tmp_path / "MEMORY.md"
+    target.write_text("\n- [note] old\n\n- [note] old\n", encoding="utf-8")
+    provider = _provider(
+        tmp_path,
+        max_file_bytes=4_194_304,
+        compaction_threshold_bytes=10,
+    )
+
+    asyncio.run(provider.remember({"body": "first line\nsecond continuation", "kind": "note"}))
+
+    after = target.read_text(encoding="utf-8")
+    assert "first line second continuation" in after
+    assert "\nsecond continuation" not in after
+    assert all(line.startswith("- [") for line in after.splitlines() if line.strip())

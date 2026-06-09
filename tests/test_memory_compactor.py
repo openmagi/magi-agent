@@ -74,6 +74,20 @@ def test_duplicate_removal_keeps_first_occurrence_order() -> None:
     assert result.dropped_count == 2
 
 
+def test_continuation_lines_stay_with_bullet_entry() -> None:
+    text = (
+        "- [note] first line\n"
+        "second continuation\n"
+        "- [note] first line\n"
+        "second continuation\n"
+    )
+    result = consolidate(text, max_bytes=10_000)
+    assert result.was_compacted is True
+    assert result.dropped_count == 1
+    assert _entries(result.text) == ["- [note] first line second continuation"]
+    assert "\nsecond continuation" not in result.text
+
+
 # ---------------------------------------------------------------------------
 # (c) over-cap after dedup → oldest dropped, result <= cap, newest retained
 # ---------------------------------------------------------------------------

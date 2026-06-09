@@ -7,11 +7,12 @@ default-off flag in :mod:`magi_agent.memory.adapters.local_file_writable`.
 
 Algorithm
 ---------
-1. Split the text into whole entries using the SAME line-based delimiter the
-   :class:`LocalFileMemoryProvider` uses when appending: each entry is a
-   single non-blank line (the provider writes ``\\n- [{kind}] {body}\\n``).
-   Blank lines are structural padding and are dropped from the working set but
-   never counted as facts.
+1. Split the text into whole entries using the provider's bullet delimiter.
+   New writes are single-line entries, but older files can contain continuation
+   lines. Those continuations are kept with the preceding bullet so compaction
+   never turns one memory fact into independent orphan entries. Blank lines are
+   structural padding and are dropped from the working set but never counted as
+   facts.
 2. **Dedup pass** — remove exact-duplicate entries, preserving the first
    occurrence and original order. Duplicates carry no new information, so this
    is always loss-free.
@@ -120,12 +121,31 @@ def consolidate(text: str, *, max_bytes: int) -> CompactionResult:
 
 
 def _split_entries(text: str) -> list[str]:
-    """Split into whole entries by the provider's line-based delimiter.
+    """Split into whole entries by the provider's bullet delimiter.
 
-    The provider appends ``\\n- [{kind}] {body}\\n``; every meaningful entry is
-    therefore a single non-blank line. Blank lines are structural and excluded.
+    The current provider appends ``\\n- [{kind}] {body}\\n`` single-line
+    entries.  Older files may contain body continuation lines.  Preserve those
+    continuations with the preceding bullet entry, normalizing internal
+    whitespace so rendered compaction output remains delimiter-safe.
     """
-    return [line for line in text.splitlines() if line.strip()]
+    entries: list[str] = []
+    current: list[str] = []
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if line.startswith("- ["):
+            if current:
+                entries.append(" ".join(current))
+            current = [line]
+            continue
+        if current:
+            current.append(line)
+        else:
+            entries.append(line)
+    if current:
+        entries.append(" ".join(current))
+    return entries
 
 
 def _dedup_preserve_order(entries: list[str]) -> tuple[list[str], list[str]]:
