@@ -375,7 +375,7 @@ class ToolUseConfirm(ModalScreen[PermissionDecision]):
     def _diff_renderable(self) -> object | None:
         """Build a Rich diff for an Edit/Write request, else ``None``.
 
-        Only Edit/Write/MultiEdit requests carrying ``old_string``/``new_string``
+        Only Edit/Write requests carrying ``old_string``/``new_string``
         (or an empty old + ``content`` for Write) produce a preview. Reuses
         ``cli/render/diff.py:render_diff`` (cached, syntax-highlighted). Returns
         ``None`` for any other tool, partial/missing fields, or a no-op edit, so
@@ -383,7 +383,10 @@ class ToolUseConfirm(ModalScreen[PermissionDecision]):
         falls back to ``None`` rather than crashing the permission prompt).
         """
 
-        if self._req.tool_name not in ("Edit", "Write", "MultiEdit"):
+        # MultiEdit carries an ``edits: [{old_string, new_string}, ...]`` array
+        # rather than top-level fields, so it has no single-diff preview here;
+        # rendering that array is a deferred follow-up (intentionally omitted).
+        if self._req.tool_name not in ("Edit", "Write"):
             return None
         args = self._req.arguments
         if not isinstance(args, dict):
@@ -404,6 +407,8 @@ class ToolUseConfirm(ModalScreen[PermissionDecision]):
         path = args.get("path") or args.get("file_path") or "file"
         file = path if isinstance(path, str) else "file"
         try:
+            # 58 = conservative narrow-terminal-safe floor for the modal's
+            # usable width (modal ``width: 72`` minus padding/borders).
             return render_diff(old, new, file=file, width=58)
         except Exception:  # pragma: no cover - never fail the modal on a diff
             return None
