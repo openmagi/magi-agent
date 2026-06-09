@@ -177,16 +177,75 @@ async def test_fileread_protected_memory_blocked_incognito(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("mode", ["read_only", "normal"])
-async def test_fileread_protected_memory_not_blocked(tmp_path, mode) -> None:
-    (tmp_path / "MEMORY.md").write_text("memory\n", encoding="utf-8")
-    bundle = _ready_bundle(tmp_path, memory_mode=mode)
+async def test_fileread_protected_memory_blocked_read_only(tmp_path) -> None:
+    (tmp_path / "MEMORY.md").write_text("secret memory\n", encoding="utf-8")
+    bundle = _ready_bundle(tmp_path, memory_mode="read_only")
 
     outcome = await bundle.host.dispatch(
         "FileRead",
         {"path": "MEMORY.md"},
-        request_digest=_sha256(f"req-read-{mode}"),
-        tool_call_id=f"call-read-{mode}",
+        request_digest=_sha256("req-read-read-only"),
+        tool_call_id="call-read-read-only",
+    )
+
+    assert outcome.status == "blocked"
+    assert outcome.reason == "memory_mode_blocked"
+
+
+@pytest.mark.asyncio
+async def test_fileread_protected_memory_not_blocked_normal(tmp_path) -> None:
+    (tmp_path / "MEMORY.md").write_text("memory\n", encoding="utf-8")
+    bundle = _ready_bundle(tmp_path, memory_mode="normal")
+
+    outcome = await bundle.host.dispatch(
+        "FileRead",
+        {"path": "MEMORY.md"},
+        request_digest=_sha256("req-read-normal"),
+        tool_call_id="call-read-normal",
     )
 
     assert outcome.reason != "memory_mode_blocked"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["read_only", "incognito"])
+async def test_broad_grep_protected_memory_blocked(tmp_path, mode) -> None:
+    (tmp_path / "MEMORY.md").write_text("needle protected\n", encoding="utf-8")
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "note.txt").write_text("needle public\n", encoding="utf-8")
+    bundle = _ready_bundle(tmp_path, memory_mode=mode)
+
+    outcome = await bundle.host.dispatch(
+        "Grep",
+        {"pattern": "needle"},
+        request_digest=_sha256(f"req-grep-{mode}"),
+        tool_call_id=f"call-grep-{mode}",
+    )
+
+    assert outcome.status == "blocked"
+    assert outcome.reason == "memory_mode_blocked"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["read_only", "incognito"])
+async def test_glob_protected_memory_filtered(tmp_path, mode) -> None:
+    (tmp_path / "MEMORY.md").write_text("protected top\n", encoding="utf-8")
+    (tmp_path / "memory").mkdir()
+    (tmp_path / "memory" / "daily.md").write_text("protected dir\n", encoding="utf-8")
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "note.txt").write_text("public\n", encoding="utf-8")
+    bundle = _ready_bundle(tmp_path, memory_mode=mode)
+
+    outcome = await bundle.host.dispatch(
+        "Glob",
+        {"pattern": "**/*"},
+        request_digest=_sha256(f"req-glob-{mode}"),
+        tool_call_id=f"call-glob-{mode}",
+    )
+
+    assert outcome.status == "ok"
+    assert outcome.reason != "memory_mode_blocked"
+    matches = set(outcome.output_preview["matches"])
+    assert "src/note.txt" in matches
+    assert "MEMORY.md" not in matches
+    assert "memory/daily.md" not in matches

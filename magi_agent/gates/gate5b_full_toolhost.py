@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 import os
+import posixpath
 import re
 import subprocess
 from collections.abc import Callable, Mapping, Sequence
@@ -52,6 +53,7 @@ from magi_agent.tools.memory_mode_guard import (
     command_may_write_protected_memory,
     command_mentions_protected_memory,
     is_incognito_memory_mode,
+    is_long_term_memory_read_disabled,
     is_long_term_memory_write_disabled,
     is_protected_memory_path,
     memory_write_target_paths,
@@ -89,10 +91,18 @@ _GATE5B_LEGACY_FULL_TOOLHOST_TOOL_NAMES = (
     "Bash",
 )
 
-# Memory-mode enforcement tool groupings. Writes obey read_only/incognito;
-# reads obey incognito only (read_only permits reads of protected memory).
+# Memory-mode enforcement tool groupings. Writes and raw reads obey
+# read_only/incognito. Bash mirrors core_toolhost: incognito blocks protected
+# mentions, while read_only blocks protected writes.
 _MEMORY_WRITE_TOOL_NAMES = frozenset({"FileWrite", "FileEdit", "PatchApply"})
-_MEMORY_READ_TOOL_NAMES = frozenset({"FileRead", "Grep"})
+_MEMORY_READ_TOOL_NAMES = frozenset({"FileRead", "Glob", "Grep"})
+_PROTECTED_GLOB_SENTINELS = (
+    "MEMORY.md",
+    "SCRATCHPAD.md",
+    "WORKING.md",
+    "TASK-QUEUE.md",
+    "memory/example.md",
+)
 
 
 def _memory_read_target_paths(
@@ -101,22 +111,88 @@ def _memory_read_target_paths(
 ) -> tuple[str, ...]:
     """Return candidate paths a read-style tool call would touch.
 
-    FileRead resolves ``path``/``filePath`` (mirroring ``_handle_file_read``).
-    Grep has no per-file ``path`` argument; the files it scans come from its
-    ``glob`` selector, so that glob is the protected-memory target.
+    Mirrors the core toolhost read preflight: FileRead resolves path aliases,
+    Glob resolves the selector, and Grep resolves the glob/path selector.
     """
 
     if tool_name == "FileRead":
-        path_text = arguments.get("path") or arguments.get("filePath")
-        if isinstance(path_text, str) and path_text:
-            return (path_text,)
-        return ()
-    if tool_name == "Grep":
-        glob = arguments.get("glob")
-        if isinstance(glob, str) and glob:
-            return (glob,)
-        return ()
-    return ()
+        names = ("path", "file", "filePath")
+    elif tool_name == "Glob":
+        names = ("pattern", "glob")
+    elif tool_name == "Grep":
+        names = ("glob", "path", "patternGlob")
+    else:
+        names = ()
+    paths: list[str] = []
+    for name in names:
+        value = arguments.get(name)
+        if isinstance(value, str) and value:
+            paths.append(value)
+    return tuple(paths)
+
+
+def _grep_glob_may_include_protected_memory(arguments: Mapping[str, object]) -> bool:
+    raw_glob = (
+        arguments.get("glob")
+        or arguments.get("path")
+        or arguments.get("patternGlob")
+        or "**/*"
+    )
+    if not isinstance(raw_glob, str):
+        return True
+    pattern = _normalize_memory_glob(raw_glob)
+    if pattern is None:
+        return False
+    return any(_glob_pattern_matches(path, pattern) for path in _PROTECTED_GLOB_SENTINELS)
+
+
+def _normalize_memory_glob(pattern: str) -> str | None:
+    text = str(pattern or "*").strip().replace("\\", "/")
+    if not text:
+        return "*"
+    if text.startswith(("/", "~")):
+        return None
+    parts = [part for part in text.split("/") if part not in {"", "."}]
+    if any(part == ".." for part in parts):
+        return None
+    normalized = posixpath.normpath("/".join(parts) or "*")
+    return "*" if normalized == "." else normalized
+
+
+def _glob_pattern_matches(relative: str, pattern: str) -> bool:
+    if pattern in {"**", "**/*"}:
+        return True
+    if pattern.startswith("**/"):
+        suffix = pattern[3:]
+        return fnmatch.fnmatchcase(relative, suffix) or fnmatch.fnmatchcase(relative, pattern)
+    if "/" not in pattern and "/" in relative:
+        return False
+    return fnmatch.fnmatchcase(relative, pattern)
+
+
+def _filter_protected_memory_matches(output: object) -> object:
+    if not isinstance(output, Mapping):
+        return output
+    matches = output.get("matches")
+    if not isinstance(matches, list):
+        return output
+    filtered = [
+        match for match in matches if not is_protected_memory_path(_match_path(match))
+    ]
+    if len(filtered) == len(matches):
+        return output
+    updated = dict(output)
+    updated["matches"] = filtered
+    return updated
+
+
+def _match_path(match: object) -> str | None:
+    if isinstance(match, str):
+        return match
+    if isinstance(match, Mapping):
+        path = match.get("path")
+        return path if isinstance(path, str) else None
+    return None
 
 
 _GATE5B_FIRST_PARTY_REGISTRY_TOOL_NAMES = (
@@ -648,12 +724,21 @@ class Gate5BFullToolHost:
                 raise Gate5BFullToolRegistryBlocked("memory_mode_blocked")
             return
         if tool_name in _MEMORY_READ_TOOL_NAMES:
-            if not is_incognito_memory_mode(mode):
+            if not is_long_term_memory_read_disabled(mode):
                 return
             for path in _memory_read_target_paths(tool_name, args):
                 if is_protected_memory_path(path):
                     raise Gate5BFullToolRegistryBlocked("memory_mode_blocked")
+            if tool_name == "Grep" and _grep_glob_may_include_protected_memory(args):
+                raise Gate5BFullToolRegistryBlocked("memory_mode_blocked")
             return
+
+    def _filter_memory_mode_output(self, tool_name: str, output: object) -> object:
+        if tool_name not in {"Glob", "Grep"}:
+            return output
+        if not is_long_term_memory_read_disabled(self.memory_mode):
+            return output
+        return _filter_protected_memory_matches(output)
 
     async def dispatch(
         self,
@@ -695,6 +780,7 @@ class Gate5BFullToolHost:
             self._enforce_memory_mode(tool_name, args)
             self._preflight_legacy_tool(tool_name, args, tool_call_id=tool_call_id)
             output = await self._handle(tool_name, args, tool_call_id=tool_call_id)
+            output = self._filter_memory_mode_output(tool_name, output)
             # The diagnostics collection does blocking stdio reads against the
             # language server. Run it off the event loop so a slow/hung server
             # can't stall concurrent requests (mirrors the to_thread pattern in
