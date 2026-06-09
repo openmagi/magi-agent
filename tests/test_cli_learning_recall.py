@@ -229,6 +229,39 @@ def test_store_error_is_non_fatal(
 
 
 # ---------------------------------------------------------------------------
+# New: read_only memory_mode still injects (only incognito suppresses)
+# ---------------------------------------------------------------------------
+
+
+def test_gate_on_read_only_still_injects(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """read_only memory_mode does NOT suppress learning injection.
+
+    Only incognito suppresses learning recall.  read_only means the agent
+    cannot write new memories, but should still receive existing active
+    learnings in the prompt.
+
+    This test locks the behavior against a future regression where someone
+    over-broadens the incognito guard to include read_only.
+    """
+    monkeypatch.setenv(_ENV_INJECTION, "true")
+    monkeypatch.setenv(_ENV_MASTER, "true")
+
+    store = _make_store(tmp_path)
+    _seed_active_item(store, rationale="prefer short variable names")
+
+    from magi_agent.cli.learning_recall import build_cli_learning_recall_block
+
+    result = build_cli_learning_recall_block(
+        workspace_root=str(tmp_path), memory_mode="read_only"
+    )
+    assert result != "", "read_only should still inject learnings (only incognito suppresses)"
+    assert _BLOCK_HEADER in result
+    assert "prefer short variable names" in result
+
+
+# ---------------------------------------------------------------------------
 # 7. build_cli_instruction byte-identical when gate off
 # ---------------------------------------------------------------------------
 

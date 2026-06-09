@@ -21,6 +21,10 @@ logger = logging.getLogger(__name__)
 #: Scope task_kind used by the deterministic labeler for all CLI-originated
 #: learnings.  Matches ``magi_agent.learning.labeler`` which writes items
 #: with ``taskKind="general"`` (see labeler.py line 222).
+#: Scope limitation: only "general" learnings surface today because the
+#: labeler writes all items under that kind.  To surface per-task-kind
+#: learnings, thread the current task kind into build_cli_learning_recall_block
+#: and down to _build_block's LearningScope here.
 _CLI_LEARNING_SCOPE_TASK_KIND = "general"
 
 _BLOCK_HEADER = "## Learned from past sessions"
@@ -53,26 +57,26 @@ def build_cli_learning_recall_block(
     if workspace_root is None:
         return ""
 
-    # --- guard: incognito memory mode ---
-    from magi_agent.tools.memory_mode_guard import is_incognito_memory_mode  # noqa: PLC0415
-
-    if is_incognito_memory_mode(memory_mode):
-        return ""
-
-    # --- guard: injection gate (default-OFF) ---
-    from magi_agent.learning.config import resolve_learning_config  # noqa: PLC0415
-
+    # Everything below is wrapped so that ANY exception (including import
+    # failures of memory_mode_guard or learning.config) returns "" and never
+    # propagates to the caller.
     try:
+        # --- guard: incognito memory mode ---
+        from magi_agent.tools.memory_mode_guard import (  # noqa: PLC0415
+            is_incognito_memory_mode,
+        )
+
+        if is_incognito_memory_mode(memory_mode):
+            return ""
+
+        # --- guard: injection gate (default-OFF) ---
+        from magi_agent.learning.config import resolve_learning_config  # noqa: PLC0415
+
         cfg = resolve_learning_config()
-    except Exception:
-        logger.debug("resolve_learning_config() failed; skipping learning recall", exc_info=True)
-        return ""
+        if not cfg.injection_effective:
+            return ""
 
-    if not cfg.injection_effective:
-        return ""
-
-    # --- build result (any error here must be non-fatal) ---
-    try:
+        # --- build result ---
         return _build_block(workspace_root=workspace_root)
     except Exception:
         logger.debug("Learning recall failed; skipping", exc_info=True)
@@ -97,21 +101,24 @@ def _build_block(*, workspace_root: str) -> str:
         db_path=DEFAULT_LEARNING_DB_PATH,
         workspace_root=workspace_root,
     )
-    scope = LearningScope(taskKind=_CLI_LEARNING_SCOPE_TASK_KIND)
-    entries = build_learning_recall_payload(
-        store,
-        tenant_id="local",
-        scope=scope,
-        k=8,
-    )
+    try:
+        scope = LearningScope(taskKind=_CLI_LEARNING_SCOPE_TASK_KIND)
+        entries = build_learning_recall_payload(
+            store,
+            tenant_id="local",
+            scope=scope,
+            k=8,
+        )
 
-    if not entries:
-        return ""
+        if not entries:
+            return ""
 
-    lines = [_BLOCK_HEADER]
-    for entry in entries:
-        lines.append(f"- {entry.text}")
-    return "\n".join(lines)
+        lines = [_BLOCK_HEADER]
+        for entry in entries:
+            lines.append(f"- {entry.text}")
+        return "\n".join(lines)
+    finally:
+        store.close()
 
 
 __all__ = ["build_cli_learning_recall_block"]
