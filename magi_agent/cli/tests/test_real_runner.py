@@ -203,7 +203,7 @@ def test_build_cli_model_runner_attaches_real_tools(tmp_path) -> None:
     # The instruction is the real system prompt, not the removed hand-written stub.
     instruction = getattr(runner.agent, "instruction", "")
     assert "<output-rules>" in instruction
-    assert "<tool-preferences>" in instruction
+    assert "<coding-discipline>" in instruction
 
 
 def test_run_async_drives_real_adk_runner_and_autocreates_session() -> None:

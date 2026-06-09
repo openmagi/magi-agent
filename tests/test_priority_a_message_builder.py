@@ -96,7 +96,6 @@ def test_build_system_prompt_renders_headers_identity_order_and_addendum_without
         session_key="sess-1",
         turn_id="turn-A",
         identity={
-            "tools": "tools body",
             "userRules": "- Always answer in Korean.",
             "identity": "identity body",
             "soul": "soul body",
@@ -133,7 +132,6 @@ def test_build_system_prompt_renders_headers_identity_order_and_addendum_without
         "# IDENTITY",
         "# USER",
         "# AGENTS",
-        "# TOOLS",
     ]
     indexes = [out.index(section) for section in sections]
     assert indexes == sorted(indexes)
@@ -846,59 +844,6 @@ def test_coding_discipline_block_absent_when_coding_agent_false() -> None:
     assert "<coding-discipline>" not in out
 
 
-def test_tool_preferences_block_present_for_coding_agent() -> None:
-    builder = _builder()
-    out = builder.build_system_prompt(
-        session_key="s1",
-        turn_id="t1",
-        identity={},
-        now=_utc("2026-05-28T00:00:00Z"),
-        coding_agent=True,
-    )
-    assert "<tool-preferences>" in out
-    assert "Use FileRead instead of running cat/head/tail via Shell" in out
-    assert "Call multiple independent tools in parallel" in out
-    assert "</tool-preferences>" in out
-
-
-def test_tool_preferences_block_absent_for_non_coding_agent() -> None:
-    builder = _builder()
-    out = builder.build_system_prompt(
-        session_key="s1",
-        turn_id="t1",
-        identity={},
-        now=_utc("2026-05-28T00:00:00Z"),
-    )
-    assert "<tool-preferences>" not in out
-
-
-def test_todo_usage_block_present_for_coding_agent() -> None:
-    builder = _builder()
-    out = builder.build_system_prompt(
-        session_key="s1",
-        turn_id="t1",
-        identity={},
-        now=_utc("2026-05-28T00:00:00Z"),
-        coding_agent=True,
-    )
-    assert "<todo-usage>" in out
-    assert "Use the TodoWrite tool to plan and track multi-step work" in out
-    assert "exactly one item in_progress" in out
-    assert "</todo-usage>" in out
-
-
-def test_todo_usage_block_absent_for_non_coding_agent() -> None:
-    builder = _builder()
-    out = builder.build_system_prompt(
-        session_key="s1",
-        turn_id="t1",
-        identity={},
-        now=_utc("2026-05-28T00:00:00Z"),
-        coding_agent=False,
-    )
-    assert "<todo-usage>" not in out
-
-
 def test_output_efficiency_block_always_present() -> None:
     builder = _builder()
     out = builder.build_system_prompt(
@@ -962,19 +907,15 @@ def test_coding_blocks_appear_after_universal_blocks() -> None:
     )
     safety_pos = out.index("<action-safety>")
     discipline_pos = out.index("<coding-discipline>")
-    tool_pref_pos = out.index("<tool-preferences>")
     assert safety_pos < discipline_pos
-    assert discipline_pos < tool_pref_pos
 
 
 def test_new_blocks_exported_as_module_constants() -> None:
     builder = _builder()
     assert hasattr(builder, "CODING_DISCIPLINE_BLOCK")
-    assert hasattr(builder, "TOOL_PREFERENCES_BLOCK")
     assert hasattr(builder, "OUTPUT_EFFICIENCY_BLOCK")
     assert hasattr(builder, "ACTION_SAFETY_BLOCK")
     assert "<coding-discipline>" in builder.CODING_DISCIPLINE_BLOCK
-    assert "<tool-preferences>" in builder.TOOL_PREFERENCES_BLOCK
     assert "<output-efficiency>" in builder.OUTPUT_EFFICIENCY_BLOCK
     assert "<action-safety>" in builder.ACTION_SAFETY_BLOCK
 

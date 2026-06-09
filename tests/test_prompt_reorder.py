@@ -32,7 +32,6 @@ _IDENTITY = {
     "identity": "identity body",
     "user": "user body",
     "agents": "agents body",
-    "tools": "tools body",
 }
 
 
@@ -78,7 +77,7 @@ class TestSectionOrder:
             now=_utc("2026-05-28T10:00:00.000Z"),
         )
         boundary_pos = out.index(builder.PROMPT_DYNAMIC_BOUNDARY)
-        for section in ("# BOOTSTRAP", "# SOUL", "# LEARNING", "# IDENTITY", "# USER", "# AGENTS", "# TOOLS"):
+        for section in ("# BOOTSTRAP", "# SOUL", "# LEARNING", "# IDENTITY", "# USER", "# AGENTS"):
             assert out.index(section) < boundary_pos
 
     def test_static_blocks_before_boundary(self) -> None:
@@ -150,7 +149,7 @@ class TestSectionOrder:
             identity=_IDENTITY,
             now=_utc("2026-05-28T10:00:00.000Z"),
         )
-        sections = ["# BOOTSTRAP", "# SOUL", "# LEARNING", "# IDENTITY", "# USER", "# AGENTS", "# TOOLS"]
+        sections = ["# BOOTSTRAP", "# SOUL", "# LEARNING", "# IDENTITY", "# USER", "# AGENTS"]
         indexes = [out.index(s) for s in sections]
         assert indexes == sorted(indexes)
 
@@ -244,7 +243,7 @@ class TestContentCompleteness:
         assert "[Channel: telegram]" in out
         assert '<runtime_temporal_context hidden="true">' in out
         assert "# BOOTSTRAP" in out
-        assert "# TOOLS" in out
+        assert "# AGENTS" in out
         assert "<deferral-prevention>" in out
         assert "<output-rules>" in out
         assert "memory_mode: read_only" in out
