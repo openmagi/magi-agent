@@ -114,23 +114,6 @@ def _section(config: Mapping[str, object], name: str) -> dict[str, object]:
     return section if isinstance(section, dict) else {}
 
 
-def default_model_for(provider: str) -> str:
-    """Return the best-effort default model id for ``provider``.
-
-    Mirrors :func:`resolve_provider_config`'s handling of unsupported providers:
-    an unknown provider raises :class:`UnknownProviderError` rather than guessing
-    a fallback. Used by TUI dialogs to list candidate models without a key.
-    """
-
-    try:
-        return _DEFAULT_MODEL[provider]
-    except KeyError:
-        raise UnknownProviderError(
-            f"Unsupported provider {provider!r}. "
-            f"Supported: {', '.join(SUPPORTED_PROVIDERS)}."
-        ) from None
-
-
 def resolve_provider_config(
     *,
     model_override: str | None = None,
@@ -195,6 +178,5 @@ __all__ = [
     "SUPPORTED_PROVIDERS",
     "ProviderConfig",
     "UnknownProviderError",
-    "default_model_for",
     "resolve_provider_config",
 ]

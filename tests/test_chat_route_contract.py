@@ -89,45 +89,6 @@ def make_runtime(
     )
 
 
-def test_user_visible_generation_request_selects_allowlisted_model_from_body() -> None:
-    route_config = parse_gate5b4c3_shadow_generation_route_env(
-        {
-            "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_ENABLED": "1",
-            "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_KILL_SWITCH": "0",
-            "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_CAP_STATE_INITIALIZED": "1",
-            "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_PROVIDER_PROJECT_SPEND_CONTROLS_VERIFIED": "1",
-            "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_SELECTED_BOT_DIGEST": _sha256("bot-test"),
-            "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_TRUSTED_OWNER_USER_ID_DIGEST": _sha256("user-test"),
-            "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_ENVIRONMENT": "production",
-            "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_ALLOWED_MODEL_ROUTES": (
-                "google:gemini-3.5-flash,fireworks:kimi-k2p6"
-            ),
-            "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_PROVIDER_CREDENTIAL_BINDINGS": (
-                "google:gate5b-google-api-key-smoke-v1:GOOGLE_API_KEY:adk,"
-                "fireworks:platform-proxy-fireworks:FIREWORKS_API_KEY:litellm"
-            ),
-            "GOOGLE_GENAI_USE_VERTEXAI": "FALSE",
-            "GOOGLE_API_KEY": "sample-fixture-value-must-not-leak",
-            "FIREWORKS_API_KEY": "sample-fixture-value-must-not-leak",
-        }
-    )
-
-    generation = chat_module._build_user_visible_generation_request(
-        runtime=make_runtime(),
-        route_config=Gate5BUserVisibleChatRouteConfig(environment="production"),
-        generation_config=route_config.generation_config,
-        payload={
-            "model": "fireworks/kimi-k2p6",
-            "messages": [{"role": "user", "content": "run a Kimi canary"}],
-        },
-        trace_id="trace-1",
-    )
-
-    assert generation.model_routing.provider_label == "fireworks"
-    assert generation.model_routing.model_label == "kimi-k2p6"
-    assert generation.model_routing.shadow_credential_ref == "platform-proxy-fireworks"
-
-
 def test_chat_completions_route_is_disabled_by_default(monkeypatch) -> None:
     monkeypatch.delenv("CORE_AGENT_PYTHON_CHAT_ROUTE", raising=False)
     client = TestClient(create_app(make_runtime()))

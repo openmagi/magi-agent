@@ -410,7 +410,12 @@ class CompactionTree:
 
         if self.summarizer is not None:
             try:
-                summary = self.summarizer.summarize(text)
+                # I2 / PR-D: the tier text is RAW and may contain secrets.
+                # Sending it to an (LLM-backed) summarizer is an exfiltration
+                # surface, so redact BEFORE the summarizer ever sees it.  The
+                # post-summary redaction on write (``_redact_for_write`` in the
+                # tier writers) remains as defense-in-depth.
+                summary = self.summarizer.summarize(_redact_for_write(text))
                 if isinstance(summary, str) and summary.strip():
                     return summary, True, False
                 # Empty/garbage summary → treat as a soft failure (truncate).

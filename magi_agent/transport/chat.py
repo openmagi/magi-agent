@@ -868,9 +868,8 @@ async def _local_adk_chat_sse(
     model_override = (
         None if configured_model == LOCAL_DEV_MODEL_SENTINEL else configured_model
     )
-    workspace_root = os.environ.get("MAGI_AGENT_WORKSPACE") or os.getcwd()
     headless = build_headless_runtime(
-        cwd=workspace_root,
+        cwd=os.environ.get("MAGI_AGENT_WORKSPACE") or os.getcwd(),
         permission_mode="bypassPermissions",
         session_id=session_id,
         model=model_override,
@@ -887,16 +886,9 @@ async def _local_adk_chat_sse(
         cancel=cancel,
         gate=headless.gate,
     )
-    # Accumulate the assistant text + a tool-use signal so the turn-end memory
-    # hook (below) can flush a concise daily entry and skip trivial turns. This
-    # mirrors data we already stream, so it adds no extra engine work.
-    assistant_parts: list[str] = []
-    used_tool = False
-    turn_errored = False
     async for item in stream:
         if isinstance(item, EngineResult):
             if item.error:
-                turn_errored = True
                 yield _sse_event(
                     "agent",
                     {
@@ -907,46 +899,43 @@ async def _local_adk_chat_sse(
                 )
             break
         event_payload = dict(item.payload)
-        if event_payload.get("type") == "tool_start":
-            used_tool = True
         yield _sse_event("agent", event_payload)
         delta = _local_runtime_event_delta(event_payload)
         if delta:
-            assistant_parts.append(delta)
             yield _sse_data({"choices": [{"index": 0, "delta": {"content": delta}}]})
-    # ── TURN-END MEMORY HOOK (PR-B) ─────────────────────────────────────────
+    # ── BACKGROUND MEMORY-REVIEW WIRING SEAM (A1, PR5) ──────────────────────
     # This is the turn-finalization point of the live local chat path: the
-    # engine stream has drained, so the assistant turn is complete. Flush a
-    # concise turn entry to memory/daily/YYYY-MM-DD.md (the compaction tree's
-    # raw input) and trigger a compaction build once per session. Both are GATED
-    # (default-OFF master) and FAIL-SOFT — record_turn never raises, so a memory
-    # error can never break the user's turn or the SSE stream. Errored turns are
-    # skipped (nothing useful to persist). Real date injected at this call site.
-    if not turn_errored:
-        from magi_agent.runtime.memory_mode_context import (  # noqa: PLC0415
-            current_memory_mode,
-        )
-        from magi_agent.runtime.memory_turn_hook import record_turn  # noqa: PLC0415
-
-        # Thread the per-request memory mode so incognito / read_only actually
-        # suppress the live daily flush. ``current_memory_mode()`` is NORMAL
-        # unless the (default-OFF) memory-mode routing gate bound it from the
-        # ``x-core-agent-memory-mode`` header; ``.value`` yields the string form
-        # ``record_turn`` compares against ``_NON_WRITING_MODES``.
-        record_turn(
-            workspace_root=workspace_root,
-            session_id=session_id,
-            turn_id=turn_id,
-            user_text=prompt,
-            assistant_text="".join(assistant_parts),
-            used_tool=used_tool,
-            memory_mode=current_memory_mode().value,
-        )
+    # engine stream has drained, so the assistant turn is complete. A periodic
+    # background memory review (Hermes-style "save what the model forgot") would
+    # be triggered HERE — but DELIBERATELY NOT IN THIS PR, because it needs a
+    # live model-backed reviewer and MUST run OFF this hot path so it never
+    # blocks the user's turn or the SSE stream. When a live reviewer is added,
+    # wire it like this (off-loop, e.g. via the background-task boundary):
     #
-    # NOTE: the Hermes-style background memory *review* (re-reading the transcript
-    # to "save what the model forgot") is a SEPARATE mechanism that still needs a
-    # live model-backed reviewer and MUST run OFF this hot path. It is intentionally
-    # NOT wired here — see magi_agent/harness/memory_review.py. ──────────────────
+    #   from magi_agent.harness.memory_review import (
+    #       MemoryReviewConfig, MemoryReviewHarness, should_run_review,
+    #   )
+    #   from magi_agent.runtime.memory_write_wiring import build_memory_write_host
+    #
+    #   cfg = MemoryReviewConfig(enabled=...)   # default-OFF; also gated by
+    #                                           # MAGI_MEMORY_REVIEW_ENABLED env
+    #   if should_run_review(turn_count, interval_turns=cfg.interval_turns,
+    #                        enabled=cfg.enabled):
+    #       host = build_memory_write_host(
+    #           workspace_root=Path(workspace), bot_id=..., user_id=...,
+    #       )
+    #       # review() is async. We are already inside a live event loop here,
+    #       # so schedule it fire-and-forget OFF the hot path — NEVER await it
+    #       # inline (that would block the SSE stream / the user's turn):
+    #       asyncio.create_task(
+    #           MemoryReviewHarness(cfg).review(
+    #               transcript, reviewer=<live extractor>, write_host=host,
+    #           )
+    #       )
+    #
+    # The harness re-runs the declarative filter + PR2 write gate on every
+    # surfaced fact, so even a buggy reviewer cannot persist task-state or write
+    # without the memory-write gate being live. Do NOT inline it above. ────────
     yield _sse_data({"choices": [{"index": 0, "finish_reason": "stop"}]})
     yield "data: [DONE]\n\n"
 
@@ -2765,7 +2754,6 @@ async def _run_live_chat_runner(
             trace_id=request.headers.get("x-magi-trace-id"),
             canary_request_digest=request.headers.get("x-gate5b-canary-request-digest"),
             gate1a_bundle=gate1a_bundle,
-            request_headers=request.headers,
         )
     except (ValidationError, ValueError, TypeError):
         return _fallback_response(
@@ -3649,7 +3637,6 @@ def _build_user_visible_generation_request(
     trace_id: str | None,
     canary_request_digest: str | None = None,
     gate1a_bundle: Gate1AReadOnlyToolBundle | Gate5BFullToolBundle | None = None,
-    request_headers: Mapping[str, str] | None = None,
 ) -> Gate5B4C3ShadowGenerationRequest:
     if not isinstance(payload, Mapping):
         raise ValueError("chat payload must be an object")
@@ -3685,11 +3672,9 @@ def _build_user_visible_generation_request(
         if _is_sha256_digest(canary_request_digest)
         else _sha256_digest(request_seed)
     )
-    provider_label, model_label, credential_ref = _select_user_visible_model_route(
-        generation_config,
-        payload=payload,
-        request_headers=request_headers,
-    )
+    provider_label = _single_config_value(generation_config.allowed_provider_labels)
+    model_label = _single_config_value(generation_config.allowed_model_labels)
+    credential_ref = _single_config_value(generation_config.allowed_shadow_credential_refs)
     router_digest = _sha256_digest(f"{provider_label}:{model_label}:{request_digest}")
     profile_digest = _sha256_digest("gate5b-user-visible-canary-profile-v1")
     tools_policy = (
@@ -3812,111 +3797,6 @@ def _single_config_value(values: tuple[str, ...]) -> str:
     if len(values) != 1:
         raise ValueError("Gate 5B user-visible canary requires one configured value")
     return values[0]
-
-
-def _select_user_visible_model_route(
-    generation_config: Gate5B4C3ShadowGenerationConfig,
-    *,
-    payload: Mapping[str, object],
-    request_headers: Mapping[str, str] | None,
-) -> tuple[str, str, str]:
-    if not generation_config.allowed_model_routes:
-        return (
-            _single_config_value(generation_config.allowed_provider_labels),
-            _single_config_value(generation_config.allowed_model_labels),
-            _single_config_value(generation_config.allowed_shadow_credential_refs),
-        )
-    allowed_routes = tuple(
-        tuple(route.split(":", 1))
-        for route in generation_config.allowed_model_routes
-        if route.count(":") == 1
-    )
-    requested_provider, requested_model = _requested_user_visible_model_route(
-        payload=payload,
-        request_headers=request_headers,
-    )
-    if requested_model is not None:
-        candidates = tuple(
-            (provider, model)
-            for provider, model in allowed_routes
-            if model == requested_model
-            and (requested_provider is None or provider == requested_provider)
-        )
-        if len(candidates) != 1:
-            raise ValueError("requested model route is not allowlisted")
-        provider_label, model_label = candidates[0]
-    else:
-        if not allowed_routes:
-            raise ValueError("Gate 5B user-visible canary requires model routes")
-        provider_label, model_label = allowed_routes[0]
-    credential_ref = _credential_ref_for_user_visible_provider(
-        generation_config,
-        provider_label=provider_label,
-    )
-    return provider_label, model_label, credential_ref
-
-
-def _requested_user_visible_model_route(
-    *,
-    payload: Mapping[str, object],
-    request_headers: Mapping[str, str] | None,
-) -> tuple[str | None, str | None]:
-    headers = request_headers or {}
-    header_provider = _safe_label_or_none(
-        headers.get("x-magi-runtime-provider")
-        or headers.get("x-magi-router-provider")
-    )
-    header_model = _safe_label_or_none(
-        headers.get("x-magi-runtime-model")
-        or headers.get("x-magi-router-model")
-    )
-    if header_model is not None:
-        return header_provider, header_model
-    model_routing = payload.get("modelRouting")
-    if isinstance(model_routing, Mapping):
-        routed_provider = _safe_label_or_none(
-            model_routing.get("providerLabel")
-            or model_routing.get("provider")
-            or model_routing.get("perTurnProvider")
-        )
-        routed_model = _safe_label_or_none(
-            model_routing.get("modelLabel")
-            or model_routing.get("model")
-            or model_routing.get("perTurnModel")
-        )
-        if routed_model is not None:
-            return routed_provider, routed_model
-    return _provider_model_from_user_visible_model(payload.get("model"))
-
-
-def _provider_model_from_user_visible_model(value: object) -> tuple[str | None, str | None]:
-    text = str(value or "").strip()
-    if not text:
-        return None, None
-    lowered = text.lower()
-    if lowered in {"auto", "openclaw"} or lowered.endswith("/auto"):
-        return None, None
-    separator = "/" if "/" in text else ":" if ":" in text else ""
-    if separator:
-        provider, model = (part.strip() for part in text.split(separator, 1))
-    else:
-        provider, model = "", text
-    safe_provider = _safe_label_or_none(provider) if provider else None
-    safe_model = _safe_label_or_none(model)
-    return safe_provider, safe_model
-
-
-def _credential_ref_for_user_visible_provider(
-    generation_config: Gate5B4C3ShadowGenerationConfig,
-    *,
-    provider_label: str,
-) -> str:
-    for binding in generation_config.provider_credential_bindings:
-        if binding.provider_label == provider_label:
-            return binding.credential_ref
-    if len(generation_config.allowed_shadow_credential_refs) == 1:
-        return generation_config.allowed_shadow_credential_refs[0]
-    raise ValueError("Gate 5B user-visible canary requires a provider credential binding")
 
 
 def _build_gate5b_sanitized_recent_history(

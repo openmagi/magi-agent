@@ -4,11 +4,9 @@ import json
 import subprocess
 import sys
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
-from magi_agent.shadow import gate5b4c3_live_runner_boundary as live_boundary_module
 from magi_agent.shadow.gate5b4c3_live_runner_boundary import (
     Gate5B4C3LiveAdkPrimitives,
     Gate5B4C3LiveRunnerBoundary,
@@ -18,7 +16,6 @@ from magi_agent.shadow.gate5b4c3_live_runner_boundary import (
 from magi_agent.shadow.gate5b4c3_shadow_generation_contract import (
     Gate5B4C3ShadowGenerationBudgets,
     Gate5B4C3ShadowGenerationConfig,
-    Gate5B4C3ShadowGenerationProviderCredentialBinding,
     Gate5B4C3ShadowGenerationRequest,
 )
 
@@ -241,55 +238,6 @@ def _gate1a_google_config() -> Gate5B4C3ShadowGenerationConfig:
         allowedModelLabels=("gemini-3.5-flash",),
         allowedModelRoutes=("google:gemini-3.5-flash",),
         allowedShadowCredentialRefs=("gate5b-google-api-key-smoke-v1",),
-    )
-
-
-def _fireworks_full_toolhost_request() -> Gate5B4C3ShadowGenerationRequest:
-    return Gate5B4C3ShadowGenerationRequest.model_validate(
-        _payload(
-            modelRouting={
-                **_payload()["modelRouting"],  # type: ignore[arg-type]
-                "providerLabel": "fireworks",
-                "modelLabel": "kimi-k2p6",
-                "shadowCredentialRef": "platform-proxy-fireworks",
-            },
-            recipeProfile={
-                **_payload()["recipeProfile"],  # type: ignore[arg-type]
-                "toolsPolicy": "selected_full_toolhost",
-            },
-            policy={
-                **_payload()["policy"],  # type: ignore[arg-type]
-                "toolsDisabled": False,
-                "toolHostDispatchAllowed": True,
-            },
-        )
-    )
-
-
-def _fireworks_config() -> Gate5B4C3ShadowGenerationConfig:
-    return Gate5B4C3ShadowGenerationConfig(
-        enabled=True,
-        killSwitchActive=False,
-        capStateInitialized=True,
-        providerProjectSpendControlsVerified=True,
-        selectedBotDigest=BOT_DIGEST,
-        trustedOwnerUserIdDigest=OWNER_DIGEST,
-        environment="production",
-        allowedProviderLabels=("fireworks",),
-        allowedModelLabels=("kimi-k2p6",),
-        allowedModelRoutes=("fireworks:kimi-k2p6",),
-        allowedShadowCredentialRefs=("platform-proxy-fireworks",),
-        providerCredentialBindings=(
-            Gate5B4C3ShadowGenerationProviderCredentialBinding(
-                providerLabel="fireworks",
-                credentialRef="platform-proxy-fireworks",
-                credentialSource="env_presence",
-                requiredEnvVars=("FIREWORKS_API_KEY",),
-                presentEnvVars=("FIREWORKS_API_KEY",),
-                adkNative=False,
-            ),
-        ),
-        providerCredentialBindingRequired=True,
     )
 
 
@@ -1279,37 +1227,6 @@ def test_live_boundary_does_not_attach_gate1a_proxy_connect_headers_without_cont
     assert result.status == "completed"
     assert _FakeAgent.created_kwargs["model"] == "gemini-3.5-flash"
     assert set(_FakeRunner.run_kwargs) == {"new_message", "session_id", "user_id"}
-
-
-def test_live_boundary_builds_litellm_model_for_fireworks_route(monkeypatch: pytest.MonkeyPatch) -> None:
-    built: list[tuple[str, str]] = []
-
-    def fake_litellm_model(provider_label: str, model_label: str) -> object:
-        built.append((provider_label, model_label))
-        return SimpleNamespace(
-            model=f"fireworks_ai/{model_label}",
-            openmagi_gate5b_litellm_model=True,
-        )
-
-    monkeypatch.setattr(
-        live_boundary_module,
-        "_gate5b_litellm_model",
-        fake_litellm_model,
-    )
-
-    result = Gate5B4C3LiveRunnerBoundary(
-        _fake_primitives,
-        adk_tools=(_ManualCalculationTool,),
-    ).invoke(
-        _fireworks_full_toolhost_request(),
-        config=_fireworks_config(),
-    )
-
-    assert result.status == "completed"
-    assert built == [("fireworks", "kimi-k2p6")]
-    model = _FakeAgent.created_kwargs["model"]
-    assert getattr(model, "openmagi_gate5b_litellm_model") is True
-    assert getattr(model, "model") == "fireworks_ai/kimi-k2p6"
 
 
 def test_live_boundary_uses_adapter_resolved_per_turn_output_cap() -> None:
