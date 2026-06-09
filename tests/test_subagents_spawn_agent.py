@@ -376,3 +376,148 @@ if loaded:
     )
 
     assert completed.returncode == 0, completed.stderr
+
+
+# ---------------------------------------------------------------------------
+# T6: Kill-switch — ENABLED=1 + KILL_SWITCH=1 → gate-OFF byte-identical payload
+# ---------------------------------------------------------------------------
+
+
+def test_spawn_agent_kill_switch_overrides_enabled_returns_gate_off_payload(
+    monkeypatch,
+) -> None:
+    """MAGI_CHILD_RUNNER_LIVE_ENABLED=1 AND MAGI_CHILD_RUNNER_LIVE_KILL_SWITCH=1
+    → spawn_agent must return the EXACT gate-OFF payload (liveChildRunnerAttached=False).
+    """
+    monkeypatch.setenv("MAGI_CHILD_RUNNER_LIVE_ENABLED", "1")
+    monkeypatch.setenv("MAGI_CHILD_RUNNER_LIVE_KILL_SWITCH", "1")
+
+    from magi_agent.plugins.native._common import digest
+    from magi_agent.plugins.native.subagents import spawn_agent
+
+    arguments: dict[str, object] = {"prompt": "Hello kill switch", "persona": "tester"}
+    ctx = _context(spawnDepth=1)
+
+    result = spawn_agent(arguments, ctx)
+
+    assert result.status == "ok"
+    output = result.output
+
+    # Must be byte-identical to the gate-OFF payload — no live fields.
+    assert output["status"] == "queued_locally"
+    assert output["persona"] == "tester"
+    assert output["promptDigest"] == digest("Hello kill switch")
+    assert output["spawnDepth"] == 1
+    assert output["liveChildRunnerAttached"] is False
+    assert set(output.keys()) == {
+        "status",
+        "persona",
+        "promptDigest",
+        "spawnDepth",
+        "liveChildRunnerAttached",
+    }
+
+
+# ---------------------------------------------------------------------------
+# T7: Depth-cap boundary — spawn_depth=2 → child depth=3 > max_spawn_depth=2
+# ---------------------------------------------------------------------------
+
+
+def test_spawn_agent_live_depth_cap_blocks_without_running_child(monkeypatch) -> None:
+    """A ToolContext with spawn_depth=2 passes child depth=3 to the boundary,
+    which exceeds the default max_spawn_depth=2.  The fake runner must NOT be
+    called and the result must be a non-crashing blocked/degraded payload.
+    """
+    monkeypatch.setenv("MAGI_CHILD_RUNNER_LIVE_ENABLED", "1")
+    monkeypatch.delenv("MAGI_CHILD_RUNNER_LIVE_KILL_SWITCH", raising=False)
+
+    import magi_agent.runtime.child_runner_live as _live_mod
+
+    runner_called = {"called": False}
+
+    class _DepthCapFakeRunner:
+        openmagi_live_provider = True
+
+        def __init__(self, *, tools: list[object] | None = None, **kwargs: object) -> None:
+            pass
+
+        async def run_child(self, request: object) -> dict[str, object]:
+            runner_called["called"] = True
+            return {
+                "childExecutionId": "child-exec-depth",
+                "status": "completed",
+                "summary": "should not reach here",
+                "evidenceRefs": (),
+                "artifactRefs": (),
+                "auditEventRefs": (),
+            }
+
+    monkeypatch.setattr(_live_mod, "RealLocalChildRunner", _DepthCapFakeRunner)
+
+    from magi_agent.plugins.native.subagents import spawn_agent
+
+    # spawn_depth=2 → child metadata spawnDepth=3 > max_spawn_depth=2 (default)
+    ctx = _context(spawnDepth=2)
+    result = spawn_agent({"prompt": "deep nested task"}, ctx)
+
+    # The result must not raise and must be a valid ok-level ToolResult.
+    assert result.status == "ok"
+    assert result.output is not None
+    # The runner must NOT have been called (boundary blocked it at the depth cap).
+    assert runner_called["called"] is False
+    # The output status reflects a blocked/degraded condition.
+    assert result.output.get("status") in {"blocked", "error", "disabled"}
+
+
+# ---------------------------------------------------------------------------
+# T8: String budget_ms — "5000" must produce budget_ms=5000 in the request
+# ---------------------------------------------------------------------------
+
+
+def test_spawn_agent_live_string_budget_ms_parsed_correctly(monkeypatch) -> None:
+    """arguments={"budget_ms":"5000", ...} with the live gate on must not crash
+    and must build a ChildTaskRequest with budgetMs=5000 (not 0).
+    """
+    monkeypatch.setenv("MAGI_CHILD_RUNNER_LIVE_ENABLED", "1")
+    monkeypatch.delenv("MAGI_CHILD_RUNNER_LIVE_KILL_SWITCH", raising=False)
+
+    import magi_agent.runtime.child_runner_live as _live_mod
+
+    captured_request: dict[str, object] = {}
+
+    class _CaptureBudgetRunner:
+        openmagi_live_provider = True
+
+        def __init__(self, *, tools: list[object] | None = None, **kwargs: object) -> None:
+            pass
+
+        async def run_child(self, request: object) -> dict[str, object]:
+            # Capture budget_ms from the request for assertion.
+            # ChildTaskRequest.budget_ms is the Python attribute; budgetMs is the
+            # alias used by the LLM-facing JSON schema.
+            captured_request["budget_ms"] = getattr(request, "budget_ms", None)
+            return {
+                "childExecutionId": "child-exec-budget",
+                "status": "completed",
+                "summary": "budget parsed ok",
+                "evidenceRefs": (),
+                "artifactRefs": (),
+                "auditEventRefs": (),
+            }
+
+    monkeypatch.setattr(_live_mod, "RealLocalChildRunner", _CaptureBudgetRunner)
+
+    from magi_agent.plugins.native.subagents import spawn_agent
+
+    # Pass budget_ms as a string (as an LLM tool call would).
+    arguments: dict[str, object] = {
+        "prompt": "budget string test",
+        "budget_ms": "5000",
+    }
+    result = spawn_agent(arguments, _context())
+
+    # Must not crash.
+    assert result.status == "ok"
+    assert result.output is not None
+    # The request must have received budget_ms=5000, not 0.
+    assert captured_request.get("budget_ms") == 5000

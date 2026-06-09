@@ -84,12 +84,21 @@ def spawn_agent(arguments: dict[str, object], context: ToolContext) -> ToolResul
         )
 
         # budget_ms from arguments (optional).
+        # LLM tool calls often encode numbers as strings; accept int/float OR a
+        # string that int()-parses to a non-negative value.  Bools and
+        # unparseable strings produce 0 (never-crash convention).
         budget_ms_raw = arguments.get("budget_ms") or arguments.get("budgetMs")
-        budget_ms = (
-            int(budget_ms_raw)
-            if isinstance(budget_ms_raw, int | float) and not isinstance(budget_ms_raw, bool)
-            else 0
-        )
+        if isinstance(budget_ms_raw, bool):
+            budget_ms = 0
+        elif isinstance(budget_ms_raw, int | float):
+            budget_ms = int(budget_ms_raw)
+        elif isinstance(budget_ms_raw, str):
+            try:
+                budget_ms = max(0, int(budget_ms_raw))
+            except (ValueError, OverflowError):
+                budget_ms = 0
+        else:
+            budget_ms = 0
 
         request = ChildTaskRequest(
             parentExecutionId=parent_exec_id,
@@ -115,9 +124,11 @@ def spawn_agent(arguments: dict[str, object], context: ToolContext) -> ToolResul
 
         # Drive the async boundary from this sync tool.  asyncio.run() creates a
         # new event loop for the coroutine; it raises RuntimeError if called from
-        # inside an already-running loop.  In that case (e.g. an async test
-        # framework) we close the orphaned coroutine to suppress "never awaited"
-        # warnings and fall back to the safe blocked result below.
+        # inside an already-running loop (e.g. an async test framework or an
+        # awaiting executor).  In that case we close the orphaned coroutine to
+        # suppress "never awaited" warnings and return the safe blocked fallback
+        # INLINE — no re-raise, so the outer except-Exception block is not
+        # triggered by this specific condition.
         boundary = LocalChildRunnerBoundary(
             config,
             child_runner=runner,
@@ -128,9 +139,19 @@ def spawn_agent(arguments: dict[str, object], context: ToolContext) -> ToolResul
             result = asyncio.run(coro)
         except RuntimeError:
             # Called from inside a running event loop — close the orphaned coro
-            # to suppress warnings, then fall through to the safe fallback.
+            # to suppress "never awaited" warnings, then return the safe
+            # blocked payload immediately (degrade, never crash).
             coro.close()
-            raise
+            return ok_result(
+                "SpawnAgent",
+                {
+                    "status": "blocked",
+                    "persona": persona,
+                    "promptDigest": digest(prompt),
+                    "spawnDepth": context.spawn_depth,
+                    "liveChildRunnerAttached": False,
+                },
+            )
 
         # Project the sanitised envelope into the output payload.
         envelope = result.envelope
