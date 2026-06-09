@@ -108,3 +108,53 @@ def test_memory_write_enabled_in_registry_when_local_dev_gate_on(
     registration = runtime.tool_registry.resolve_registration("MemoryWrite")
     assert registration is not None
     assert registration.handler is not None
+
+
+# ---------------------------------------------------------------------------
+# Issue 3: MemoryWrite is ADVERTISED (is_enabled) only when the host is enabled
+# ---------------------------------------------------------------------------
+
+
+def test_memory_write_not_advertised_when_gate_disabled() -> None:
+    """Disabled host → bound (handler non-None) but NOT advertised (is_enabled False)."""
+    from magi_agent.harness.memory_write_tool import (
+        MemoryWriteToolHost,
+        MemoryWriteToolHostConfig,
+    )
+    from magi_agent.tools.catalog import register_core_tool_manifests
+    from magi_agent.tools.registry import ToolRegistry
+
+    registry = ToolRegistry()
+    register_core_tool_manifests(registry)
+
+    host = MemoryWriteToolHost(MemoryWriteToolHostConfig(enabled=False))
+    host.bind(registry)
+
+    # Bound so it can return a structured 'blocked' at execution time...
+    registration = registry.resolve_registration("MemoryWrite")
+    assert registration is not None
+    assert registration.handler is not None
+    # ...but NOT advertised to the model.
+    assert registry.is_enabled("MemoryWrite") is False
+    available = registry.list_available(mode="act")
+    assert all(m.name != "MemoryWrite" for m in available)
+
+
+def test_memory_write_advertised_when_host_enabled_shadow_or_live() -> None:
+    """Enabled host (shadow/live) → advertised (is_enabled True, present in list)."""
+    from magi_agent.harness.memory_write_tool import (
+        MemoryWriteToolHost,
+        MemoryWriteToolHostConfig,
+    )
+    from magi_agent.tools.catalog import register_core_tool_manifests
+    from magi_agent.tools.registry import ToolRegistry
+
+    registry = ToolRegistry()
+    register_core_tool_manifests(registry)
+
+    host = MemoryWriteToolHost(MemoryWriteToolHostConfig(enabled=True))
+    host.bind(registry)
+
+    assert registry.is_enabled("MemoryWrite") is True
+    available = registry.list_available(mode="act")
+    assert any(m.name == "MemoryWrite" for m in available)
