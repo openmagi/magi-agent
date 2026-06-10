@@ -247,6 +247,40 @@ def _selected_runtime(
 
 
 # ---------------------------------------------------------------------------
+# MAGI_HOSTED_STREAMING_SERVE flag parsing (08-PR3) — default-OFF, strict truthy
+# ---------------------------------------------------------------------------
+def test_hosted_streaming_serve_flag_default_off(monkeypatch) -> None:
+    from magi_agent.config.env import is_hosted_streaming_serve_enabled
+
+    monkeypatch.delenv("MAGI_HOSTED_STREAMING_SERVE", raising=False)
+    assert is_hosted_streaming_serve_enabled() is False
+
+
+@pytest.mark.parametrize("value", ["1", "true", "yes", "on", "ON", "True"])
+def test_hosted_streaming_serve_flag_truthy(value: str, monkeypatch) -> None:
+    from magi_agent.config.env import is_hosted_streaming_serve_enabled
+
+    monkeypatch.setenv("MAGI_HOSTED_STREAMING_SERVE", value)
+    assert is_hosted_streaming_serve_enabled() is True
+
+
+@pytest.mark.parametrize("value", ["0", "false", "off", "", "  ", "banana"])
+def test_hosted_streaming_serve_flag_falsy(value: str, monkeypatch) -> None:
+    from magi_agent.config.env import is_hosted_streaming_serve_enabled
+
+    monkeypatch.setenv("MAGI_HOSTED_STREAMING_SERVE", value)
+    assert is_hosted_streaming_serve_enabled() is False
+
+
+def test_hosted_streaming_serve_flag_registered_default_off() -> None:
+    from magi_agent.config.flags import get_flag
+
+    spec = get_flag("MAGI_HOSTED_STREAMING_SERVE")
+    assert spec.default is False
+    assert spec.kind == "bool"
+
+
+# ---------------------------------------------------------------------------
 # Test 1 — feature flag off → 503
 # ---------------------------------------------------------------------------
 def test_stream_disabled_returns_503(monkeypatch) -> None:
