@@ -20,7 +20,7 @@ imported lazily inside ``_lazy_engine_deps`` which is only called the first time
 Single-flight
 -------------
 A second concurrent turn for the same session id is rejected. We reuse the real
-``ActiveTurnRegistry`` from ``runner_session_boundary`` (a thread-safe
+``ActiveTurnRegistry`` from ``active_turn_registry`` (a thread-safe
 session-key -> turn-id map). A per-driver default registry is shared across all
 turns of a driver instance; on a concurrent turn we yield a terminal
 ``EngineResult(terminal=Terminal.aborted, error="active_session_turn")`` without
@@ -790,12 +790,12 @@ def _lazy_engine_deps() -> dict[str, object]:
 def _active_turn_registry():
     """Lazily build the real ActiveTurnRegistry (no ADK import needed).
 
-    runner_session_boundary imports ADK at *function* scope only, so importing
-    the module itself is import-clean — but we still defer it to keep engine.py's
-    module-load dependency graph minimal.
+    ``active_turn_registry`` is a standalone, ADK-free module, so importing it is
+    import-clean — but we still defer the import to keep engine.py's module-load
+    dependency graph minimal.
     """
 
-    from magi_agent.runtime.runner_session_boundary import (
+    from magi_agent.runtime.active_turn_registry import (
         ActiveTurnRegistry,
     )
 
