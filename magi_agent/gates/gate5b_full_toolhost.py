@@ -8,7 +8,9 @@ import logging
 import os
 import posixpath
 import re
+import signal
 import subprocess
+import threading
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Self
@@ -90,13 +92,8 @@ def _build_bash_env(cfg: EgressProxyConfig | None = None) -> dict[str, str]:
     env.update(subprocess_env_overlay(cfg))
     return env
 
-def _decode_subprocess_capture(value: object) -> str:
-    """``TimeoutExpired.stdout/.stderr`` may be bytes even under ``text=True``."""
-    if value is None:
-        return ""
-    if isinstance(value, bytes):
-        return value.decode("utf-8", errors="replace")
-    return str(value)
+def _decode_capture_bytes(value: bytes) -> str:
+    return value.decode("utf-8", errors="replace")
 
 
 def _bounded_head_tail(text: str, max_bytes: int) -> str:
@@ -118,6 +115,128 @@ def _bounded_head_tail(text: str, max_bytes: int) -> str:
         "head/tail/grep filters to see the elided region ...]\n"
     )
     return head + marker + tail
+
+
+class _BoundedPipeCapture:
+    """Bound subprocess pipe capture without buffering unbounded output."""
+
+    def __init__(self, max_bytes: int) -> None:
+        self.max_bytes = max(1, max_bytes)
+        self._raw_digest = hashlib.sha256()
+        self._buffer = bytearray()
+        self._tail = bytearray()
+        self.total_bytes = 0
+
+    @property
+    def _head_budget(self) -> int:
+        return max(1, (self.max_bytes * 3) // 5)
+
+    @property
+    def _tail_budget(self) -> int:
+        return max(0, self.max_bytes - self._head_budget)
+
+    def feed(self, chunk: bytes) -> None:
+        if not chunk:
+            return
+        self.total_bytes += len(chunk)
+        self._raw_digest.update(chunk)
+        remaining = self.max_bytes - len(self._buffer)
+        if remaining > 0:
+            self._buffer.extend(chunk[:remaining])
+        tail_budget = self._tail_budget
+        if tail_budget > 0:
+            self._tail.extend(chunk)
+            overflow = len(self._tail) - tail_budget
+            if overflow > 0:
+                del self._tail[:overflow]
+
+    def text(self) -> str:
+        if self.total_bytes <= self.max_bytes:
+            return _decode_capture_bytes(bytes(self._buffer))
+        head_bytes = bytes(self._buffer[: self._head_budget])
+        tail_budget = self._tail_budget
+        tail_bytes = bytes(self._tail[-tail_budget:]) if tail_budget else b""
+        elided = max(0, self.total_bytes - len(head_bytes) - len(tail_bytes))
+        marker = (
+            f"\n[... {elided} bytes elided - output truncated; re-run with "
+            "head/tail/grep filters to see the elided region ...]\n"
+        )
+        return _decode_capture_bytes(head_bytes) + marker + _decode_capture_bytes(tail_bytes)
+
+    def digest(self) -> str:
+        if self.total_bytes <= self.max_bytes:
+            return _digest(_decode_capture_bytes(bytes(self._buffer)))
+        return "sha256:" + self._raw_digest.hexdigest()
+
+
+def _drain_pipe(pipe: Any, capture: _BoundedPipeCapture) -> None:
+    try:
+        while True:
+            chunk = pipe.read(65536)
+            if not chunk:
+                break
+            capture.feed(chunk)
+    except (OSError, ValueError):
+        return
+    finally:
+        try:
+            pipe.close()
+        except (OSError, ValueError):
+            return
+
+
+def _start_pipe_drain(pipe: Any, capture: _BoundedPipeCapture) -> threading.Thread:
+    thread = threading.Thread(target=_drain_pipe, args=(pipe, capture), daemon=True)
+    thread.start()
+    return thread
+
+
+def _kill_process_group(process: subprocess.Popen[bytes]) -> None:
+    if os.name == "posix":
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+            return
+        except ProcessLookupError:
+            return
+        except OSError:
+            pass
+    process.kill()
+
+
+def _force_stop_process(process: subprocess.Popen[bytes]) -> None:
+    if process.poll() is not None:
+        return
+    _kill_process_group(process)
+    try:
+        process.wait(timeout=1.0)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        try:
+            process.wait(timeout=1.0)
+        except subprocess.TimeoutExpired:
+            return
+
+
+def _close_process_pipes(process: subprocess.Popen[bytes]) -> None:
+    for pipe in (process.stdout, process.stderr):
+        if pipe is None:
+            continue
+        try:
+            pipe.close()
+        except (OSError, ValueError):
+            continue
+
+
+def _join_pipe_drains(
+    process: subprocess.Popen[bytes],
+    threads: Sequence[threading.Thread],
+) -> None:
+    for thread in threads:
+        thread.join(timeout=1.0)
+    if any(thread.is_alive() for thread in threads):
+        _close_process_pipes(process)
+        for thread in threads:
+            thread.join(timeout=1.0)
 
 
 Gate5BFullToolHostStatus = Literal["disabled", "blocked", "ready"]
@@ -1116,24 +1235,45 @@ class Gate5BFullToolHost:
         command = raw_command.strip()
         if not command:
             raise ValueError("empty_command")
+        cap = self.config.max_per_tool_output_bytes
+        stdout_capture = _BoundedPipeCapture(cap)
+        stderr_capture = _BoundedPipeCapture(cap)
+        timed_out = False
+        returncode: int | None
+        process: subprocess.Popen[bytes] | None = None
+        threads: list[threading.Thread] = []
         try:
-            completed = subprocess.run(
+            process = subprocess.Popen(
                 command,
                 cwd=self.workspace_root,
                 shell=True,
-                capture_output=True,
-                text=True,
-                timeout=timeout_s,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 env=_build_bash_env(),
-                check=False,
+                start_new_session=(os.name == "posix"),
             )
-        except subprocess.TimeoutExpired as exc:
-            # Surface what the command printed before the deadline — a bare
-            # "command_timeout" hides test progress/failure output the model
-            # needs to act on.
-            partial_stdout = _decode_subprocess_capture(exc.stdout)
-            partial_stderr = _decode_subprocess_capture(exc.stderr)
-            cap = self.config.max_per_tool_output_bytes
+            if process.stdout is not None:
+                threads.append(_start_pipe_drain(process.stdout, stdout_capture))
+            if process.stderr is not None:
+                threads.append(_start_pipe_drain(process.stderr, stderr_capture))
+            try:
+                returncode = process.wait(timeout=timeout_s)
+            except subprocess.TimeoutExpired:
+                timed_out = True
+                returncode = None
+                _force_stop_process(process)
+            finally:
+                _join_pipe_drains(process, threads)
+        except BaseException:
+            if process is not None:
+                _force_stop_process(process)
+                _close_process_pipes(process)
+                _join_pipe_drains(process, threads)
+            raise
+
+        stdout = _redact(stdout_capture.text())
+        stderr = _redact(stderr_capture.text())
+        if timed_out:
             return {
                 "exitCode": None,
                 "timedOut": True,
@@ -1142,20 +1282,17 @@ class Gate5BFullToolHost:
                     f"command timed out after {timeout_s:g}s; "
                     "partial output captured below"
                 ),
-                "stdout": _bounded_head_tail(_redact(partial_stdout), cap),
-                "stderr": _bounded_head_tail(_redact(partial_stderr), cap),
-                "stdoutDigest": _digest(partial_stdout),
-                "stderrDigest": _digest(partial_stderr),
+                "stdout": stdout,
+                "stderr": stderr,
+                "stdoutDigest": stdout_capture.digest(),
+                "stderrDigest": stderr_capture.digest(),
             }
-        cap = self.config.max_per_tool_output_bytes
-        stdout = _bounded_head_tail(_redact(completed.stdout), cap)
-        stderr = _bounded_head_tail(_redact(completed.stderr), cap)
         return {
-            "exitCode": completed.returncode,
+            "exitCode": returncode,
             "stdout": stdout,
             "stderr": stderr,
-            "stdoutDigest": _digest(completed.stdout),
-            "stderrDigest": _digest(completed.stderr),
+            "stdoutDigest": stdout_capture.digest(),
+            "stderrDigest": stderr_capture.digest(),
         }
 
     def _handle_git_diff(self) -> dict[str, object]:

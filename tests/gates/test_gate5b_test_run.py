@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 import pytest
@@ -22,6 +23,24 @@ def _host(workspace: Path) -> Gate5BFullToolHost:
         config=config,
         workspace_root=workspace,
         exposed_tool_names=("TestRun",),
+        now_ms=lambda: 0,
+    )
+
+
+def _bash_host(workspace: Path) -> Gate5BFullToolHost:
+    config = Gate5BFullToolHostConfig.model_validate(
+        {
+            "enabled": True,
+            "killSwitchEnabled": False,
+            "maxToolCallsPerTurn": 8,
+            "commandTimeoutMs": 250,
+            "maxPerToolOutputBytes": 512,
+        }
+    )
+    return Gate5BFullToolHost(
+        config=config,
+        workspace_root=workspace,
+        exposed_tool_names=("Bash",),
         now_ms=lambda: 0,
     )
 
@@ -54,24 +73,69 @@ async def test_test_run_empty_command_rejected(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_test_run_uses_300s_verification_timeout(tmp_path):
-    # The TestRun handler must apply the manifest 300s timeout, not the 5s Bash
-    # command_timeout_ms. We assert the timeout passed to subprocess.run is 300.
+async def test_bash_timeout_bounds_infinite_output_before_redaction(tmp_path, monkeypatch):
     import magi_agent.gates.gate5b_full_toolhost as mod
 
+    redaction_input_lengths: list[int] = []
+    real_redact = mod._redact
+
+    def guarded_redact(value: str) -> str:
+        redaction_input_lengths.append(len(value))
+        assert len(value.encode("utf-8")) <= 2048
+        return real_redact(value)
+
+    monkeypatch.setattr(mod, "_redact", guarded_redact)
+    host = _bash_host(tmp_path)
+    started = time.monotonic()
+
+    out = await host._handle(
+        "Bash",
+        {
+            "command": (
+                "i=0; while :; do "
+                "printf 'HEAD-%07d\\n' \"$i\"; "
+                "i=$((i + 1)); "
+                "done"
+            )
+        },
+        tool_call_id="bash-timeout",
+    )
+
+    assert time.monotonic() - started < 3.0
+    assert out["timedOut"] is True
+    assert out["exitCode"] is None
+    stdout = out["stdout"]
+    assert "HEAD-0000000" in stdout
+    assert "output truncated" in stdout
+    assert "HEAD-" in stdout.split("output truncated", 1)[1]
+    assert redaction_input_lengths
+    assert max(redaction_input_lengths) <= 2048
+
+
+@pytest.mark.asyncio
+async def test_test_run_uses_300s_verification_timeout(tmp_path, monkeypatch):
+    # The TestRun handler must apply the manifest 300s timeout, not the 5s Bash
+    # command_timeout_ms.
     captured: dict[str, float] = {}
-    real_run = mod.subprocess.run
 
-    def fake_run(*args, **kwargs):  # noqa: ANN002, ANN003
-        captured["timeout"] = kwargs.get("timeout")
-        return real_run(["true"], capture_output=True, text=True)
+    def fake_run_shell_command(
+        self: Gate5BFullToolHost,
+        raw_command: str,
+        *,
+        timeout_s: float,
+    ) -> dict[str, object]:
+        captured["timeout"] = timeout_s
+        return {
+            "exitCode": 0,
+            "stdout": raw_command,
+            "stderr": "",
+            "stdoutDigest": "sha256:test",
+            "stderrDigest": "sha256:test",
+        }
 
-    mod.subprocess.run = fake_run  # type: ignore[assignment]
-    try:
-        host = _host(tmp_path)
-        await _run(host, "echo hi")
-    finally:
-        mod.subprocess.run = real_run  # type: ignore[assignment]
+    monkeypatch.setattr(Gate5BFullToolHost, "_run_shell_command", fake_run_shell_command)
+    host = _host(tmp_path)
+    await _run(host, "echo hi")
 
     assert captured["timeout"] == 300.0
 
