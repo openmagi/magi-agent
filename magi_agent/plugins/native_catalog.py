@@ -66,6 +66,56 @@ _NATIVE_PLUGIN_DATA: tuple[Mapping[str, object], ...] = (
         ),
     },
     {
+        "id": "openmagi.apify",
+        "name": "OpenMagi Apify",
+        "kind": "native",
+        "version": "0.1.0",
+        "description": (
+            "Apify Actor marketplace access: discover Actors (free) and run them "
+            "for platform-specific structured scraping (paid, bring-your-own "
+            "APIFY_TOKEN). Complements the general web fetch stack."
+        ),
+        "publisher": "openmagi",
+        "defaultInstalled": True,
+        "defaultEnabled": True,
+        "optOutAllowed": True,
+        "securityCritical": False,
+        "audit_required": True,
+        "runtime": {
+            "minCoreVersion": "0.1.0",
+            "adkCompatibility": (
+                "REST tool surface; ADK FunctionTool attachment routes through "
+                "ToolHost policy"
+            ),
+        },
+        "permissions": ("read", "net"),
+        "services": (),
+        "tools": (
+            {
+                "name": "apify_search_actors",
+                "entrypoint": "magi_agent.plugins.native.apify:apify_search_actors",
+            },
+            {
+                "name": "apify_run_actor",
+                "entrypoint": "magi_agent.plugins.native.apify:apify_run_actor",
+            },
+        ),
+        "secrets": (
+            {"name": "APIFY_TOKEN", "source": "user"},
+        ),
+        "configSchema": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "maxUsdPerRun": {"type": "number", "default": 1.0},
+            },
+        },
+        "capabilities": (
+            {"type": "tool", "name": "apify_search_actors"},
+            {"type": "tool", "name": "apify_run_actor"},
+        ),
+    },
+    {
         "id": "openmagi.artifacts",
         "name": "OpenMagi Artifacts",
         "kind": "native",
