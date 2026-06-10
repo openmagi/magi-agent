@@ -46,10 +46,19 @@ def test_systemd_unit_content() -> None:
     assert "[Service]" in unit
     assert "[Install]" in unit
     assert "ExecStart=/usr/bin/magi gateway start" in unit
-    assert "Restart=on-failure" in unit
+    assert "Restart=always" in unit
     assert "WantedBy=multi-user.target" in unit
     # default-off discipline: the env gate is documented, not forced ON
     assert "MAGI_GATEWAY_DAEMON_ENABLED" in unit
+
+
+def test_unit_restarts_always_for_long_running_daemon() -> None:
+    """`gateway start` is now a long-running supervise loop: ANY exit should be
+    restarted to honour the always-on intent (systemctl stop is not restarted
+    by systemd), so the unit must use Restart=always, not on-failure."""
+    unit = render_systemd_unit(exec_start="/usr/bin/magi gateway start")
+    assert "Restart=always" in unit
+    assert "Restart=on-failure" not in unit
 
 
 def test_systemd_unit_does_not_force_gate_on() -> None:

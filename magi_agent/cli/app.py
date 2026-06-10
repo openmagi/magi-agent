@@ -490,17 +490,28 @@ def gateway_status() -> None:
 
 
 @gateway_app.command("start")
-def gateway_start() -> None:
-    """Run the gateway daemon (gated). Gate OFF → prints status and exits.
+def gateway_start(
+    once: bool = typer.Option(
+        False,
+        "--once",
+        help="Run a single scheduler tick and exit (legacy behavior).",
+    ),
+) -> None:
+    """Run the gateway daemon (gated). Default: supervise until SIGINT/SIGTERM.
 
-    With the gate ON, this consumes the local scheduler boundary once when
-    ``MAGI_SCHEDULER_EXECUTOR_ENABLED`` is also ON. Channel watchers still require
-    explicit provider/client wiring and are not constructed by this local CLI.
+    Gate OFF → prints status and exits. With the gate ON, the default mode
+    supervises the first-party watcher set via ``GatewayDaemon.run`` (each
+    watcher still respects its own gate, e.g. the cron watcher's
+    ``MAGI_SCHEDULER_EXECUTOR_ENABLED``). ``--once`` keeps the legacy
+    single-tick behavior. Channel watchers still require explicit
+    provider/client wiring and are not constructed by this local CLI.
     """
-    from magi_agent.gateway.daemon import is_gateway_daemon_enabled  # noqa: PLC0415
-    from magi_agent.gateway.watchers import (  # noqa: PLC0415
-        build_local_scheduler_cron_driver,
-        is_scheduler_executor_enabled,
+    import asyncio  # noqa: PLC0415
+    import contextlib  # noqa: PLC0415
+    import signal  # noqa: PLC0415
+
+    from magi_agent.gateway.daemon import (  # noqa: PLC0415
+        is_gateway_daemon_enabled,
     )
 
     if not is_gateway_daemon_enabled():
@@ -509,6 +520,38 @@ def gateway_start() -> None:
             "MAGI_GATEWAY_DAEMON_ENABLED=1 to start always-on."
         )
         return
+
+    if once:
+        _gateway_run_once()
+        return
+
+    from magi_agent.gateway.daemon import build_default_gateway_daemon  # noqa: PLC0415
+
+    daemon = build_default_gateway_daemon()
+
+    async def _main() -> None:
+        stop_event = asyncio.Event()
+        loop = asyncio.get_running_loop()
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            with contextlib.suppress(NotImplementedError):
+                loop.add_signal_handler(sig, stop_event.set)
+        typer.echo(
+            "gateway daemon: supervising watchers (Ctrl-C or SIGTERM to stop). "
+            "Each watcher still respects its own gate."
+        )
+        await daemon.run(stop_event=stop_event)
+        typer.echo("gateway daemon: stopped.")
+
+    asyncio.run(_main())
+
+
+def _gateway_run_once() -> None:
+    """Legacy single scheduler tick (the pre-daemon `gateway start` body)."""
+    from magi_agent.gateway.watchers import (  # noqa: PLC0415
+        build_local_scheduler_cron_driver,
+        is_scheduler_executor_enabled,
+    )
+
     if not is_scheduler_executor_enabled():
         typer.echo(
             "gateway daemon: enabled. scheduler_cron disabled "
