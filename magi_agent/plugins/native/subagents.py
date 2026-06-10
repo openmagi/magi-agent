@@ -49,9 +49,12 @@ async def spawn_agent(arguments: dict[str, object], context: ToolContext) -> Too
     #
     # Design:
     # 1. Build a ChildTaskRequest from the tool arguments.
-    # 2. Construct RealLocalChildRunner(tools=[]) — HARD-WIRED empty toolset to
-    #    enforce v1 text-only; caller-supplied tools are intentionally NOT
-    #    forwarded (prevents accidental tool escalation).
+    # 2. Construct RealLocalChildRunner with a toolset PROFILE resolved from the
+    #    MAGI_CHILD_RUNNER_TOOLSET gate (PR1, doc 07). Default (unset / "none")
+    #    keeps the historical text-only empty toolset; "readonly" forwards the
+    #    non-mutating inspection tools (FileRead/Glob/Grep/GitDiff); "full" is
+    #    gated upstream by the permission-unification follow-up. The child runs
+    #    in an ISOLATED workspace tempdir so it can never mutate the parent cwd.
     # 3. Build ChildRunnerConfig with live gate ON.
     # 4. await boundary.run(request) on the dispatch event loop.
     # 5. Project the sanitised result envelope into the ToolResult output.
@@ -71,6 +74,9 @@ async def spawn_agent(arguments: dict[str, object], context: ToolContext) -> Too
         )
         from magi_agent.runtime.child_runner_live import (  # noqa: PLC0415
             RealLocalChildRunner,
+        )
+        from magi_agent.runtime.child_toolset import (  # noqa: PLC0415
+            resolve_child_toolset_profile,
         )
 
         # Build the request — use the context's IDs as parent identifiers, or
@@ -122,9 +128,21 @@ async def spawn_agent(arguments: dict[str, object], context: ToolContext) -> Too
             budgetMs=budget_ms,
         )
 
-        # HARD-WIRE tools=[] (v1 text-only enforcement — no caller-supplied tools
-        # are forwarded; this prevents accidental tool escalation in child turns).
-        runner = RealLocalChildRunner(tools=[])
+        # Resolve the toolset profile from the dedicated env gate. The gate is
+        # the final authority (a caller-supplied "toolsetProfile" argument never
+        # ESCALATES past it); default unset/"none" => empty toolset (text-only).
+        # The child gets an ISOLATED workspace tempdir so a tool-enabled child
+        # can never mutate the parent's working directory.
+        import tempfile  # noqa: PLC0415
+
+        toolset_profile = resolve_child_toolset_profile()
+        child_workspace = (
+            tempfile.mkdtemp(prefix="magi-child-") if toolset_profile != "none" else None
+        )
+        runner = RealLocalChildRunner(
+            toolset_profile=toolset_profile,
+            workspace_root=child_workspace,
+        )
 
         config = ChildRunnerConfig(
             enabled=True,

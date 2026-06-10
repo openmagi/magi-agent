@@ -57,6 +57,10 @@ LOCAL_FULL_RUNTIME_ENV_DEFAULTS: Mapping[str, str] = {
     # ("0") so the disk-write + sanitization behavior can be validated before a
     # later release flips it on.
     "MAGI_CLI_SESSION_LOG_ENABLED": "0",
+    # PR-04-PR2: --resume/--continue rehydration. Stage-1 OFF ("0") safety net;
+    # depends on the session-log write path above, so a later release stages both
+    # on together.
+    "MAGI_CLI_RESUME_ENABLED": "0",
     "MAGI_LEARNING_ENABLED": "true",
     "MAGI_LEARNING_REFLECTION_ENABLED": "1",
     "MAGI_LEARNING_DASHBOARD_ENABLED": "1",
@@ -100,6 +104,7 @@ EVAL_RUNTIME_ENV_DEFAULTS: Mapping[str, str] = {
     "MAGI_AUTOPILOT": "0",
     "MAGI_SESSION_PERSISTENCE_ENABLED": "0",
     "MAGI_CLI_SESSION_LOG_ENABLED": "0",
+    "MAGI_CLI_RESUME_ENABLED": "0",
     "MAGI_CONTEXT_COMPACTION_ENABLED": "0",
     "MAGI_LEARNING_ENABLED": "false",
     "MAGI_SKILL_CURATOR_ENABLED": "0",

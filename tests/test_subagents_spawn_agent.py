@@ -298,44 +298,86 @@ def test_spawn_agent_live_gate_on_runner_raises_falls_back(monkeypatch) -> None:
 
 
 # ---------------------------------------------------------------------------
-# T4: tools=[] enforcement — runner is always constructed with empty toolset
+# T4: toolset gate — runner gets the gate-resolved profile, no caller escalation
 # ---------------------------------------------------------------------------
 
 
-def test_spawn_agent_live_runner_constructed_with_empty_tools(monkeypatch) -> None:
-    """RealLocalChildRunner is ALWAYS constructed with tools=[] (v1 text-only)."""
+class _CapturingProfileRunner:
+    """Captures the construction kwargs the live path passes (PR1, doc 07)."""
+
+    captured: dict[str, object] = {}
+    openmagi_live_provider = True
+
+    def __init__(
+        self,
+        *,
+        tools: list[object] | None = None,
+        toolset_profile: str = "none",
+        workspace_root: str | None = None,
+        **kwargs: object,
+    ) -> None:
+        type(self).captured = {
+            "tools": list(tools) if tools is not None else None,
+            "toolset_profile": toolset_profile,
+            "workspace_root": workspace_root,
+        }
+
+    async def run_child(self, request: object) -> Mapping[str, object]:
+        return {
+            "childExecutionId": "child-exec-cap",
+            "status": "completed",
+            "summary": "done",
+            "evidenceRefs": (),
+            "artifactRefs": (),
+            "auditEventRefs": (),
+        }
+
+
+def test_spawn_agent_default_toolset_gate_unset_is_none_profile(monkeypatch) -> None:
+    """With MAGI_CHILD_RUNNER_TOOLSET unset the live runner is constructed with
+    the text-only ``none`` profile (no caller ``tools`` escalation)."""
     monkeypatch.setenv("MAGI_CHILD_RUNNER_LIVE_ENABLED", "1")
     monkeypatch.delenv("MAGI_CHILD_RUNNER_LIVE_KILL_SWITCH", raising=False)
+    monkeypatch.delenv("MAGI_CHILD_RUNNER_TOOLSET", raising=False)
 
     import magi_agent.runtime.child_runner_live as _live_mod
 
-    captured: dict[str, object] = {}
-
-    class _CapturingRunner:
-        openmagi_live_provider = True
-
-        def __init__(self, *, tools: list[object] | None = None, **kwargs: object) -> None:
-            captured["tools"] = list(tools) if tools is not None else []
-
-        async def run_child(self, request: object) -> Mapping[str, object]:
-            return {
-                "childExecutionId": "child-exec-cap",
-                "status": "completed",
-                "summary": "done",
-                "evidenceRefs": (),
-                "artifactRefs": (),
-                "auditEventRefs": (),
-            }
-
-    monkeypatch.setattr(_live_mod, "RealLocalChildRunner", _CapturingRunner)
+    monkeypatch.setattr(_live_mod, "RealLocalChildRunner", _CapturingProfileRunner)
 
     from magi_agent.plugins.native.subagents import spawn_agent
 
     asyncio.run(spawn_agent({"prompt": "test", "tools": ["some_tool"]}, _context()))
 
-    # The runner must have been constructed with an EMPTY toolset regardless of
-    # what arguments were passed to spawn_agent.
-    assert captured.get("tools") == []
+    captured = _CapturingProfileRunner.captured
+    # No caller-supplied tools escalation; default text-only profile.
+    assert captured["toolset_profile"] == "none"
+    assert captured["tools"] is None
+    # ``none`` profile shares the parent cwd (no isolated workspace needed).
+    assert captured["workspace_root"] is None
+
+
+def test_spawn_agent_readonly_toolset_gate_forwards_profile_and_isolates(
+    monkeypatch,
+) -> None:
+    """MAGI_CHILD_RUNNER_TOOLSET=readonly forwards the ``readonly`` profile and
+    constructs the child with an ISOLATED workspace (parent cwd protected)."""
+    monkeypatch.setenv("MAGI_CHILD_RUNNER_LIVE_ENABLED", "1")
+    monkeypatch.delenv("MAGI_CHILD_RUNNER_LIVE_KILL_SWITCH", raising=False)
+    monkeypatch.setenv("MAGI_CHILD_RUNNER_TOOLSET", "readonly")
+
+    import magi_agent.runtime.child_runner_live as _live_mod
+
+    monkeypatch.setattr(_live_mod, "RealLocalChildRunner", _CapturingProfileRunner)
+
+    from magi_agent.plugins.native.subagents import spawn_agent
+
+    asyncio.run(spawn_agent({"prompt": "review this"}, _context()))
+
+    captured = _CapturingProfileRunner.captured
+    assert captured["toolset_profile"] == "readonly"
+    # Isolated workspace tempdir so the child can never mutate the parent cwd.
+    assert isinstance(captured["workspace_root"], str)
+    assert captured["workspace_root"]
 
 
 # ---------------------------------------------------------------------------

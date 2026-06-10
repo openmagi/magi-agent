@@ -670,6 +670,17 @@ def _coding_repair_loop_enabled() -> bool:
     return coding_repair_loop_enabled()
 
 
+def _document_coverage_blocks(mode: str, failed_count: int) -> bool:
+    """Whether failed document coverage should flip the pre-final decision.
+
+    14-PR3 (C11): the gate is 3-state (``off`` | ``advisory`` | ``block``). Only
+    ``block`` mode lets a failed-coverage count contribute to a ``"block"``
+    decision; ``advisory`` records the count for telemetry but never blocks, and
+    ``off`` is inert.
+    """
+    return mode == "block" and failed_count > 0
+
+
 def _coding_repair_max_attempts(repair_policy: Mapping[str, object]) -> int:
     from magi_agent.coding.repair_loop import repair_max_attempts
 
@@ -799,6 +810,57 @@ def _active_turn_registry():
     )
 
     return ActiveTurnRegistry()
+
+
+# Role label used when rendering a resumed transcript line whose role is missing
+# or unrecognized. ``user``/``assistant`` are passed through verbatim.
+_RESUME_ROLE_LABELS = {"user": "User", "assistant": "Assistant"}
+
+
+def _render_resume_prefix(initial_messages: object) -> str:
+    """Render reconstructed prior messages as a transcript prefix for the prompt.
+
+    ``initial_messages`` is the ``ResumeContext.initial_messages`` payload — a
+    ``list[{"role","content"}]`` produced by
+    :func:`session_log.reconstruct_messages`. We synthesize a compact, labeled
+    transcript that is PREPENDED to the current user prompt so a resumed turn
+    replays the prior conversation to the model. This is the lightweight
+    JSONL-transcript rehydration path (no runner/ADK dependency).
+
+    Pure + defensive:
+    - Non-list / empty input -> ``""`` (byte-identical no-op for fresh turns).
+    - Each entry must be a mapping with a string ``content``; malformed entries
+      are skipped rather than raising (resume is best-effort).
+    - Returns ``""`` when nothing usable remains, so the caller leaves the prompt
+      untouched.
+    """
+
+    if not isinstance(initial_messages, list) or not initial_messages:
+        return ""
+
+    lines: list[str] = []
+    for entry in initial_messages:
+        if not isinstance(entry, dict):
+            continue
+        content = entry.get("content")
+        if not isinstance(content, str) or not content:
+            continue
+        role = entry.get("role")
+        label = _RESUME_ROLE_LABELS.get(
+            role if isinstance(role, str) else "",
+            str(role) if role else "Message",
+        )
+        lines.append(f"{label}: {content}")
+
+    if not lines:
+        return ""
+
+    transcript = "\n".join(lines)
+    return (
+        "[Resumed conversation — prior turns for context]\n"
+        f"{transcript}\n"
+        "[End of prior conversation]\n\n"
+    )
 
 
 class MagiEngineDriver:
@@ -1075,10 +1137,22 @@ class MagiEngineDriver:
         goal_nudge: "GoalNudge | None" = None,
         output_continuation: "OutputContinuationConfig | None" = None,
     ) -> AsyncGenerator[RuntimeEvent, EngineResult]:
-        # PR3/Stream B: feed initial_messages via SessionContinuityBoundary.
-        # Read here (so the seam is plumbed end-to-end) but NOT yet fed into the
-        # runner — full rehydration lands with Stream B.
-        _ = initial_messages
+        # PR-04-PR2 (resume rehydration): consume ``initial_messages`` by
+        # synthesizing the prior transcript into a prefix on the opening user
+        # prompt, so a ``--resume``/``--continue`` turn replays the prior
+        # conversation to the model. ``ResumeContext.initial_messages`` is the
+        # source (already reconstructed by session_log.reconstruct_messages).
+        #
+        # This is the lightweight JSONL-transcript path. The richer ADK-native
+        # rehydration (importing a committed transcript into a live
+        # SessionContinuityBoundary) is carried on ``ResumeContext`` but wired by
+        # the SQLite-persistence PR; here we keep the no-runner-dependency path.
+        #
+        # No-op / byte-identical invariant: an empty (or non-list) value leaves
+        # ``prompt`` untouched, so a fresh session is unchanged from pre-PR2.
+        resume_prefix = _render_resume_prefix(initial_messages)
+        if resume_prefix:
+            prompt = f"{resume_prefix}{prompt}"
 
         runner = self._resolve_runner(runtime)
         if runner is None:
@@ -2151,11 +2225,15 @@ class MagiEngineDriver:
         evidence_records: tuple[object, ...] = ()
         verifier_bus: dict[str, object] | None = None
         # Task C — OPTIONAL BLOCKING document-authoring coverage gate. Default OFF
-        # and strict-truthy env-gated; when off the bus call is behavior-identical
-        # to before and DocumentCoverage evidence stays audit-only.
-        from magi_agent.config.env import is_document_authoring_coverage_enabled
+        # and env-gated; when off the bus call is behavior-identical to before and
+        # DocumentCoverage evidence stays audit-only. 14-PR3 (C11) makes the gate
+        # 3-state: ``advisory`` still computes the failed-coverage count (for
+        # false-block-rate telemetry) but the engine does not block on it; only
+        # ``block`` flips the pre-final decision.
+        from magi_agent.config.env import resolve_document_authoring_coverage_mode
 
-        document_coverage_gate_enabled = is_document_authoring_coverage_enabled()
+        document_coverage_mode = resolve_document_authoring_coverage_mode()
+        document_coverage_gate_enabled = document_coverage_mode != "off"
         failed_document_coverage = 0
         if self._evidence_collector is not None:
             from magi_agent.harness.verifier_bus import execute_pre_final_verifier_bus
@@ -2185,9 +2263,12 @@ class MagiEngineDriver:
         missing_validators = [
             ref for ref in assembly.required_validators if ref not in observed_public_refs
         ]
+        document_coverage_blocks = _document_coverage_blocks(
+            document_coverage_mode, failed_document_coverage
+        )
         decision = (
             "block"
-            if (missing_evidence or missing_validators or failed_document_coverage)
+            if (missing_evidence or missing_validators or document_coverage_blocks)
             else "pass"
         )
 
