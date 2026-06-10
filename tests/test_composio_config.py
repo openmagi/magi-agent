@@ -52,15 +52,15 @@ def test_composio_config_import_is_sdk_and_adk_clean() -> None:
     }
 
 
-def test_default_without_key_is_inactive_disabled_by_config() -> None:
+def test_default_without_key_is_inactive_auto_not_configured() -> None:
     from magi_agent.composio.config import resolve_composio_config
 
-    cfg = resolve_composio_config({})
+    cfg = resolve_composio_config({}, package_available=True)
 
-    assert cfg.enabled_mode == "off"
+    assert cfg.enabled_mode == "auto"
     assert cfg.active is False
     assert cfg.configured is False
-    assert cfg.disabled_reason == "disabled_by_config"
+    assert cfg.disabled_reason == "not_configured"
     assert cfg.credential_source == "missing"
 
 
@@ -77,18 +77,37 @@ def test_explicit_on_without_key_is_inactive_missing_api_key() -> None:
     assert cfg.credential_source == "missing"
 
 
-def test_default_with_key_stays_inactive_until_explicitly_enabled() -> None:
+def test_default_with_key_and_package_available_is_active_auto() -> None:
     from magi_agent.composio.config import resolve_composio_config
 
-    cfg = resolve_composio_config({"COMPOSIO_API_KEY": "cp_test_secret"})
+    cfg = resolve_composio_config(
+        {"COMPOSIO_API_KEY": "cp_test_secret"},
+        package_available=True,
+    )
 
-    assert cfg.enabled_mode == "off"
-    assert cfg.active is False
+    assert cfg.enabled_mode == "auto"
+    assert cfg.active is True
     assert cfg.configured is True
     assert cfg.api_key == "cp_test_secret"
     assert cfg.credential_source == "env"
     assert cfg.toolkits == ()
-    assert cfg.disabled_reason == "disabled_by_config"
+    assert cfg.disabled_reason is None
+
+
+def test_default_with_key_but_missing_package_is_inactive_auto() -> None:
+    from magi_agent.composio.config import resolve_composio_config
+
+    cfg = resolve_composio_config(
+        {"COMPOSIO_API_KEY": "cp_test_secret"},
+        package_available=False,
+    )
+
+    assert cfg.enabled_mode == "auto"
+    assert cfg.active is False
+    assert cfg.configured is True
+    assert cfg.api_key == "cp_test_secret"
+    assert cfg.credential_source == "env"
+    assert cfg.disabled_reason == "missing_python_package"
 
 
 def test_explicit_on_with_key_uses_default_oss_entity() -> None:
@@ -117,7 +136,8 @@ def test_explicit_auto_with_key_is_active() -> None:
         {
             "COMPOSIO_API_KEY": "cp_test_secret",
             "MAGI_COMPOSIO_ENABLED": "auto",
-        }
+        },
+        package_available=True,
     )
 
     assert cfg.enabled_mode == "auto"

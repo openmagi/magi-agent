@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from importlib.util import find_spec
 import re
 from collections.abc import Mapping
 from typing import Literal
@@ -66,7 +67,7 @@ class ComposioConfig(BaseModel):
         hide_input_in_errors=True,
     )
 
-    enabled_mode: ComposioEnabledMode = Field(default="off", alias="enabledMode")
+    enabled_mode: ComposioEnabledMode = Field(default="auto", alias="enabledMode")
     active: bool = False
     configured: bool = False
     required: bool = False
@@ -99,9 +100,18 @@ class ComposioConfig(BaseModel):
         return None
 
 
-def resolve_composio_config(env: Mapping[str, str]) -> ComposioConfig:
+def resolve_composio_config(
+    env: Mapping[str, str],
+    *,
+    package_available: bool | None = None,
+) -> ComposioConfig:
     enabled_mode, enabled_valid = _parse_enabled_mode(env.get("MAGI_COMPOSIO_ENABLED"))
     api_key = _trim(env.get("COMPOSIO_API_KEY"))
+    package_ready = (
+        _composio_package_available()
+        if package_available is None
+        else package_available
+    )
     source, source_valid = _parse_credential_source(
         env.get("MAGI_COMPOSIO_CREDENTIAL_SOURCE"),
         api_key,
@@ -133,7 +143,11 @@ def resolve_composio_config(env: Mapping[str, str]) -> ComposioConfig:
     elif enabled_mode == "off":
         disabled_reason = "disabled_by_config"
     elif api_key is None:
-        disabled_reason = "missing_api_key"
+        disabled_reason = (
+            "missing_api_key" if enabled_mode == "on" else "not_configured"
+        )
+    elif enabled_mode == "auto" and not package_ready:
+        disabled_reason = "missing_python_package"
     elif source == "hosted" and (
         entity_id == "default" or not runtime_entity and not explicit_entity
     ):
@@ -160,7 +174,7 @@ def resolve_composio_config(env: Mapping[str, str]) -> ComposioConfig:
 
 def _parse_enabled_mode(raw: str | None) -> tuple[ComposioEnabledMode, bool]:
     if raw is None or not raw.strip():
-        return "off", True
+        return "auto", True
     value = raw.strip().lower()
     if value in _TRUE_VALUES:
         return "on", True
@@ -169,6 +183,10 @@ def _parse_enabled_mode(raw: str | None) -> tuple[ComposioEnabledMode, bool]:
     if value == "auto":
         return "auto", True
     return "auto", False
+
+
+def _composio_package_available() -> bool:
+    return find_spec("composio") is not None
 
 
 def _parse_credential_source(

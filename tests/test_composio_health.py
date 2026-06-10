@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 
 
-def test_composio_health_for_default_disabled_is_safe_and_actionable() -> None:
+def test_composio_health_for_default_auto_unconfigured_is_safe_and_actionable() -> None:
     from magi_agent.composio.config import resolve_composio_config
     from magi_agent.composio.health import composio_health_metadata
 
@@ -11,10 +11,10 @@ def test_composio_health_for_default_disabled_is_safe_and_actionable() -> None:
 
     assert metadata["configured"] is False
     assert metadata["active"] is False
-    assert metadata["enabledMode"] == "off"
+    assert metadata["enabledMode"] == "auto"
     assert metadata["credentialSource"] == "missing"
-    assert metadata["disabledReason"] == "disabled_by_config"
-    assert metadata["nextAction"] == "set MAGI_COMPOSIO_ENABLED=auto or on"
+    assert metadata["disabledReason"] == "not_configured"
+    assert metadata["nextAction"] == "set COMPOSIO_API_KEY to enable integrations"
 
 
 def test_composio_health_redacts_secret_and_url() -> None:
