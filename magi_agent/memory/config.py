@@ -284,7 +284,7 @@ def _memory_table(config: Mapping[str, object] | None) -> Mapping[str, object]:
     return section if isinstance(section, Mapping) else {}
 
 
-def _coerce_bool(value: object) -> bool | None:
+def coerce_bool(value: object) -> bool | None:
     if isinstance(value, bool):
         return value
     if value is None:
@@ -306,11 +306,11 @@ def _override_bool(
 ) -> bool | None:
     """Return the explicit override (env beats config), or None if neither set."""
     if env_var in env:
-        coerced = _coerce_bool(env.get(env_var))
+        coerced = coerce_bool(env.get(env_var))
         if coerced is not None:
             return coerced
     if config_key in table:
-        coerced = _coerce_bool(table.get(config_key))
+        coerced = coerce_bool(table.get(config_key))
         if coerced is not None:
             return coerced
     return None
@@ -381,10 +381,12 @@ def _resolve_mode(
 
 
 __all__ = [
+    "CONFIG_TABLE",
     "MASTER_ENV_VAR",
     "PREFER_LOCAL_SEARCH_ENV_VAR",
     "PREFER_QMD_AUTO_REGISTER_ENV_VAR",
     "MemoryMode",
     "MemoryRuntimeConfig",
+    "coerce_bool",
     "resolve_memory_config",
 ]
