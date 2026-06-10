@@ -359,6 +359,84 @@ def _render_thinking_node(text: str) -> RenderNode:
     return RenderNode(rich=rich, text=search)
 
 
+# Subagent / child-run inline display (PR4.3). The runtime surfaces nested
+# subagent (child-run) activity to the TUI as a ``status`` event whose inner
+# payload ``type`` is one of ``child_started`` / ``child_progress`` /
+# ``child_completed`` / ``child_cancelled`` / ``child_failed`` (engine
+# ``_map_event_kind`` has no ``child_*`` member → falls through to ``status``;
+# the SSE sanitizer lets them through UNCONDITIONALLY — not behind a flag like
+# thinking's ``MAGI_STREAM_THINKING`` — as long as ``taskId`` survives). We render
+# them as a DIM INDENTED one-line ``  ⤷ subagent <label>  <status>`` block —
+# visually nested under the parent turn, distinct from the flush-left teal/blue
+# tool dots and assistant markdown. Lifecycle events for the SAME task coalesce
+# into one updating line (started → completed/failed).
+_CHILD_INNER_STATUS = {
+    "child_started": "running",
+    "child_progress": "running",
+    "child_completed": "completed",
+    "child_cancelled": "cancelled",
+    "child_failed": "failed",
+}
+_SUBAGENT_LABEL_MAX_CHARS = 60
+# Dim throughout so the subagent line reads as quiet nested annotation.
+_SUBAGENT_INDENT = "  "
+_SUBAGENT_MARKER_STYLE = "dim #9ece6a"
+_SUBAGENT_LABEL_STYLE = "dim bold"
+_SUBAGENT_STATUS_STYLE = "dim italic"
+
+
+def _is_child_event(event: RuntimeEvent) -> bool:
+    """True for a ``status`` event carrying a child/subagent marker.
+
+    Distinguishes user-relevant subagent activity from plumbing ``status``
+    events (runner_policy_*, phase_route_*, turn_end) that stay hidden by
+    default. Keys off the inner payload ``type`` (a ``child_*`` string),
+    mirroring how ``tool`` events carry an inner ``tool_start``/``tool_end``.
+    """
+
+    if event.type != "status":
+        return False
+    payload = event.payload
+    if not isinstance(payload, dict):
+        return False
+    inner = payload.get("type")
+    return isinstance(inner, str) and inner in _CHILD_INNER_STATUS
+
+
+def _child_task_label(payload: dict) -> str:
+    """The subagent label: the public ``taskId`` (or a sane fallback)."""
+
+    for key in ("taskId", "label"):
+        value = payload.get(key)
+        if isinstance(value, str) and value:
+            label = value
+            break
+    else:
+        label = "subagent"
+    if len(label) > _SUBAGENT_LABEL_MAX_CHARS:
+        label = label[: _SUBAGENT_LABEL_MAX_CHARS - 1].rstrip() + "…"
+    return label
+
+
+def _render_subagent_node(label: str, status: str) -> RenderNode:
+    """Build the DIM INDENTED one-line ``  ⤷ subagent <label>  <status>`` block.
+
+    The committed/search text mirrors the displayed line for search fidelity
+    (what is indexed == what is shown). The whole line is styled dim and the
+    text is leading-indented so it reads as quiet activity nested under the
+    parent turn, distinct from flush-left tool/assistant lines.
+    """
+
+    from rich.text import Text  # noqa: PLC0415
+
+    rich = Text()
+    rich.append(f"{_SUBAGENT_INDENT}⤷ ", style=_SUBAGENT_MARKER_STYLE)
+    rich.append(f"subagent {label}", style=_SUBAGENT_LABEL_STYLE)
+    rich.append(f"  {status}", style=_SUBAGENT_STATUS_STYLE)
+    search = f"{_SUBAGENT_INDENT}⤷ subagent {label}  {status}"
+    return RenderNode(rich=rich, text=search)
+
+
 # ---------------------------------------------------------------------------
 # Modal confirm screen
 # ---------------------------------------------------------------------------
@@ -852,6 +930,10 @@ class MagiTuiApp(App[None]):
         # streaming deltas coalesce into ONE updating line, not a new line each.
         self._thinking_handle: object | None = None
         self._thinking_accum: str = ""
+        # Subagent/child-run inline display (PR4.3): per-task in-flight handle to
+        # the dim indented line so lifecycle events (started → completed/failed)
+        # for the SAME taskId coalesce into ONE updating line. Reset per turn.
+        self._subagent_handles: dict[str, object] = {}
         # Keybindings: defaults-only (no user keybindings.json wired in v1).
         # load_keybindings(None) never raises and returns the built-in keymap.
         # VIM mode + hot-reload are explicitly DEFERRED to v1.1.
@@ -1353,6 +1435,8 @@ class MagiTuiApp(App[None]):
         # Fresh thinking line for this turn (coalesce only within one turn).
         self._thinking_handle = None
         self._thinking_accum = ""
+        # Fresh subagent registry for this turn (coalesce only within one turn).
+        self._subagent_handles = {}
         self._turn_started_monotonic = _time.monotonic()
         self.update_footer(state="running")
         self._echo_user(prompt)
@@ -1482,6 +1566,13 @@ class MagiTuiApp(App[None]):
         if _is_reasoning_event(event):
             self._render_thinking(event)
             return
+        # Subagent/child-run activity is user-relevant (unlike plumbing noise),
+        # so it too is INTERCEPTED here — BEFORE the quiet-by-default ``status``
+        # drop below — and rendered as a dim INDENTED one-line block, shown by
+        # default. Lifecycle events coalesce per taskId into one updating line.
+        if _is_child_event(event):
+            self._render_subagent(event)
+            return
         # status / artifact / control -> internal diagnostics (routing/policy/
         # turn-lifecycle plumbing). These flooded the chat with lines like
         # ``runner_policy_assembly`` / ``phase_route_decision`` / ``turn_end``, so
@@ -1579,6 +1670,31 @@ class MagiTuiApp(App[None]):
             self.controller.update_thinking(
                 self._thinking_handle, node.rich, text=node.text
             )
+
+    def _render_subagent(self, event: RuntimeEvent) -> None:
+        """Render a child/subagent event as a dim indented one-line block.
+
+        The first event for a ``taskId`` commits a fresh dim indented
+        ``  ⤷ subagent <label>  <status>`` line; subsequent lifecycle events for
+        the SAME task UPDATE that one line in place (status started → completed/
+        failed) rather than spamming one line per event. Distinct tasks get
+        distinct lines. The per-task handle registry is reset at turn start.
+        Reuses the generic in-place one-line ``commit_thinking``/
+        ``update_thinking`` seam (the transcript's coalescing primitive).
+        """
+
+        payload = event.payload if isinstance(event.payload, dict) else {}
+        inner = payload.get("type")
+        status = _CHILD_INNER_STATUS.get(inner, "running") if isinstance(inner, str) else "running"
+        label = _child_task_label(payload)
+        node = _render_subagent_node(label, status)
+        handle = self._subagent_handles.get(label)
+        if handle is None:
+            self._subagent_handles[label] = self.controller.commit_thinking(
+                node.rich, text=node.text
+            )
+        else:
+            self.controller.update_thinking(handle, node.rich, text=node.text)
 
     def _fold_sidebar_tool(self, name: str, tool_input: object) -> None:
         """Route a tool_start into the sidebar panes (todo / recent files).
