@@ -1835,6 +1835,25 @@ def parse_evidence_completion_gate_enabled(env: Mapping[str, str]) -> bool:
     return _runtime_feature_enabled(env, "MAGI_EVIDENCE_COMPLETION_GATE_ENABLED")
 
 
+def parse_recipe_default_packs_expanded(env: Mapping[str, str]) -> bool:
+    """MAGI_RECIPE_DEFAULT_PACKS_EXPANDED — stage gate for recipe default-pack
+    expansion (doc 05 PR-2 / A1-G1). Default OFF.
+
+    When ON, a *safe* subset of first-party recipe packs
+    (``SAFE_DEFAULT_PACK_EXPANSION_IDS`` in ``magi_agent.recipes.compiler``) is
+    auto-selected during profile resolution even without an explicit
+    task-profile selector. The safe subset is restricted to packs that are
+    read-only / idempotent, carry zero production-authority approval gates, and
+    declare no live dependency — so turning the gate ON cannot auto-enable any
+    side-effecting/authority pack (coding, channel, scheduler, office, etc.).
+
+    OFF (default) keeps the compiled snapshot byte-identical to origin/main:
+    only the two ``hardSafety`` packs (``openmagi.context-safety`` /
+    ``openmagi.evidence``) are default-selected.
+    """
+    return _is_true(env.get("MAGI_RECIPE_DEFAULT_PACKS_EXPANDED"))
+
+
 def tool_concurrency_enabled(env: Mapping[str, str]) -> bool:
     """Single source of truth for the ``MAGI_TOOL_CONCURRENCY_ENABLED`` flag.
 
