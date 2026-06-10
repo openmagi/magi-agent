@@ -52,20 +52,6 @@
       "boundary": "scheduler"
     },
     {
-      "caseId": "long_running_goal_subtask_notification",
-      "taskProfile": {
-        "taskTypes": ["mission", "scheduled-work"],
-        "taskIntents": ["notify-user"]
-      },
-      "runtimeContext": {
-        "channel": "web"
-      },
-      "expectedPacks": ["openmagi.missions", "openmagi.scheduled-work", "openmagi.channel-delivery"],
-      "expectedSchedulerIntents": ["scheduler:cron.create", "scheduler:notify-user"],
-      "expectedApprovals": ["approval:missions:cancel-retry-resume-control", "approval:scheduled-work:resume-or-notify"],
-      "boundary": "background_task"
-    },
-    {
       "caseId": "coding_test_run_file_delivery",
       "taskProfile": {
         "taskTypes": ["coding", "artifact-delivery"]

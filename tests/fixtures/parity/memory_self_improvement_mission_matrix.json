@@ -373,19 +373,11 @@
       ],
       "latestMainCoveredRefs": [
         {
-          "path": "magi_agent/harness/mission_runtime_boundary.py",
-          "state": "existing"
-        },
-        {
           "path": "magi_agent/shadow/mission_lifecycle_contract.py",
           "state": "existing"
         },
         {
           "path": "tests/test_mission_lifecycle_contract_golden_fixtures.py",
-          "state": "existing"
-        },
-        {
-          "path": "tests/test_priority_e_mission_runtime_boundary.py",
           "state": "existing"
         },
         {
@@ -500,14 +492,6 @@
         "mission_control_parity"
       ],
       "latestMainCoveredRefs": [
-        {
-          "path": "magi_agent/harness/background_tasks.py",
-          "state": "existing"
-        },
-        {
-          "path": "tests/test_live_background_task_boundary.py",
-          "state": "existing"
-        },
         {
           "path": "magi_agent/runtime/long_running_activity.py",
           "state": "existing"
