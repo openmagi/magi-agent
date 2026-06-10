@@ -212,6 +212,115 @@ def test_dispatcher_attach_allows_safe_composio_call_through() -> None:
     assert result.get("status") == "ok"
 
 
+# ---------------------------------------------------------------------------
+# receipt 적재 — guarded composio calls must record a dispatcher-style receipt
+# (completion definition, plan 09 PR2: prove receipt recording by test)
+# ---------------------------------------------------------------------------
+
+
+def test_guarded_composio_call_records_allow_receipt() -> None:
+    from magi_agent.composio.mcp import (
+        ComposioReceiptLedger,
+        ComposioToolsetBundle,
+        attach_composio_toolsets_through_dispatcher,
+    )
+    from magi_agent.tools.safety import RuntimePermissionArbiter
+
+    inner_tool = FakeMcpTool("composio-GMAIL_SEND")
+    toolset = FakeMcpToolset([inner_tool])
+    bundle = ComposioToolsetBundle(active=True, status="ready", toolsets=(toolset,))
+    runner = FakeRunner()
+    ledger = ComposioReceiptLedger()
+
+    attach_composio_toolsets_through_dispatcher(
+        runner,
+        bundle,
+        arbiter=RuntimePermissionArbiter(),
+        mode="act",
+        context_factory=lambda **_kw: _ctx(),
+        receipt_ledger=ledger,
+    )
+    guarded = asyncio.run(runner.agent.tools[0].get_tools())[0]
+
+    asyncio.run(guarded.run_async(args={"to": "a@b.com"}, tool_context=None))
+
+    receipts = ledger.receipts()
+    assert len(receipts) == 1
+    receipt = receipts[0]
+    assert receipt.tool == "composio-GMAIL_SEND"
+    assert receipt.action == "allow"
+    # payload digest must be present and must NOT leak the raw argument value.
+    assert receipt.payload_digest
+    assert "a@b.com" not in receipt.payload_digest
+
+
+def test_guarded_composio_call_records_deny_receipt() -> None:
+    from magi_agent.composio.mcp import (
+        ComposioReceiptLedger,
+        ComposioToolsetBundle,
+        attach_composio_toolsets_through_dispatcher,
+    )
+    from magi_agent.tools.safety import RuntimePermissionArbiter
+
+    inner_tool = FakeMcpTool("composio-FILE_WRITE")
+    toolset = FakeMcpToolset([inner_tool])
+    bundle = ComposioToolsetBundle(active=True, status="ready", toolsets=(toolset,))
+    runner = FakeRunner()
+    ledger = ComposioReceiptLedger()
+
+    attach_composio_toolsets_through_dispatcher(
+        runner,
+        bundle,
+        arbiter=RuntimePermissionArbiter(),
+        mode="act",
+        context_factory=lambda **_kw: _ctx(),
+        receipt_ledger=ledger,
+    )
+    guarded = asyncio.run(runner.agent.tools[0].get_tools())[0]
+
+    result = asyncio.run(guarded.run_async(args={"path": ".env"}, tool_context=None))
+
+    # body blocked AND a deny receipt was recorded.
+    assert inner_tool.calls == []
+    assert result.get("status") == "blocked"
+    receipts = ledger.receipts()
+    assert len(receipts) == 1
+    assert receipts[0].action == "deny"
+    assert receipts[0].tool == "composio-FILE_WRITE"
+    # secret path must not appear anywhere in the recorded receipt.
+    assert ".env" not in str(receipts[0])
+
+
+def test_guarded_composio_ledger_default_created_when_none() -> None:
+    """A ledger is always available even when the caller passes none."""
+    from magi_agent.composio.mcp import (
+        ComposioToolsetBundle,
+        attach_composio_toolsets_through_dispatcher,
+        guarded_toolset_receipt_ledger,
+    )
+    from magi_agent.tools.safety import RuntimePermissionArbiter
+
+    inner_tool = FakeMcpTool("composio-GMAIL_SEND")
+    toolset = FakeMcpToolset([inner_tool])
+    bundle = ComposioToolsetBundle(active=True, status="ready", toolsets=(toolset,))
+    runner = FakeRunner()
+
+    attach_composio_toolsets_through_dispatcher(
+        runner,
+        bundle,
+        arbiter=RuntimePermissionArbiter(),
+        mode="act",
+        context_factory=lambda **_kw: _ctx(),
+    )
+    guarded_toolset = runner.agent.tools[0]
+    guarded = asyncio.run(guarded_toolset.get_tools())[0]
+    asyncio.run(guarded.run_async(args={"to": "a@b.com"}, tool_context=None))
+
+    ledger = guarded_toolset_receipt_ledger(guarded_toolset)
+    assert ledger is not None
+    assert len(ledger.receipts()) == 1
+
+
 def test_dispatcher_attach_noop_for_inactive_bundle() -> None:
     from magi_agent.composio.mcp import (
         ComposioToolsetBundle,
