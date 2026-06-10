@@ -91,6 +91,15 @@ EVAL_RUNTIME_ENV_DEFAULTS: Mapping[str, str] = {
     "MAGI_MODEL_AWARE_PROMPTS_ENABLED": "1",
     "MAGI_LOOP_GUARD_ENABLED": "1",
     "MAGI_ERROR_RECOVERY_ENABLED": "1",
+    # Relaxed loop-guard thresholds for eval: a coding agent legitimately
+    # re-runs tests/greps dozens of times. The conservative production defaults
+    # (soft=3/hard=5/freq-soft=15/freq-hard=30) block that iteration.
+    # In an ephemeral eval sandbox a true infinite loop only wastes the per-
+    # instance timeout, so generous thresholds are safe here.
+    "MAGI_LOOP_GUARD_SOFT_THRESHOLD": "25",
+    "MAGI_LOOP_GUARD_HARD_THRESHOLD": "50",
+    "MAGI_LOOP_GUARD_FREQUENCY_SOFT_THRESHOLD": "80",
+    "MAGI_LOOP_GUARD_FREQUENCY_HARD_THRESHOLD": "200",
     "MAGI_TOOL_CONCURRENCY_ENABLED": "1",
     "MAGI_PROVIDER_REPAIR_ENABLED": "1",
     "MAGI_MESSAGE_CACHE_ENABLED": "1",
