@@ -517,6 +517,75 @@ def test_typing_slash_shows_completions_via_textarea_event() -> None:
     asyncio.run(_run())
 
 
+def test_tab_accepts_highlighted_completion() -> None:
+    """Tab substitutes the highlighted completion (+ trailing space) and dismisses
+    the overlay — so a long skill name is completed instead of hand-typed."""
+
+    async def _run() -> None:
+        engine = FakeEngineDriver()
+        registry = FakeRegistry(["compact", "reset", "status"])
+        app = _make_app(engine, commands=registry)
+        async with app.run_test() as pilot:
+            app._input.focus()
+            await pilot.pause()
+            await pilot.press("slash")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert app.completions_active()
+            await pilot.press("tab")
+            await pilot.pause()
+        # Top candidate (lexicographic on empty fragment) is "/compact".
+        assert app._input.text == "/compact "
+        assert not app._completions.has_class("visible")
+
+    asyncio.run(_run())
+
+
+def test_arrow_navigates_then_tab_accepts() -> None:
+    """↓ moves the highlight while the overlay is open; Tab then accepts it."""
+
+    async def _run() -> None:
+        engine = FakeEngineDriver()
+        registry = FakeRegistry(["compact", "reset", "status"])
+        app = _make_app(engine, commands=registry)
+        async with app.run_test() as pilot:
+            app._input.focus()
+            await pilot.pause()
+            await pilot.press("slash")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert app._completion_index == 0
+            await pilot.press("down")
+            await pilot.pause()
+            assert app._completion_index == 1
+            await pilot.press("tab")
+            await pilot.pause()
+        assert app._input.text == "/reset "
+
+    asyncio.run(_run())
+
+
+def test_escape_dismisses_completions_without_substituting() -> None:
+    async def _run() -> None:
+        engine = FakeEngineDriver()
+        registry = FakeRegistry(["compact", "reset", "status"])
+        app = _make_app(engine, commands=registry)
+        async with app.run_test() as pilot:
+            app._input.focus()
+            await pilot.pause()
+            await pilot.press("slash")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert app.completions_active()
+            await pilot.press("escape")
+            await pilot.pause()
+            assert not app._completions.has_class("visible")
+            # Text is untouched (no substitution on Esc).
+            assert app._input.text == "/"
+
+    asyncio.run(_run())
+
+
 # ---------------------------------------------------------------------------
 # 6. Slash command submission routes through the registry lookup
 # ---------------------------------------------------------------------------
