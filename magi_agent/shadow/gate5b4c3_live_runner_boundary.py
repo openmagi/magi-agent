@@ -1013,12 +1013,20 @@ class Gate5B4C3LiveRunnerBoundary:
         ``session_lease_releases`` and runs in :meth:`invoke_async`'s
         ``finally`` once the turn fully ends. The second element reports
         whether an existing live session was reused (registry hit).
+
+        Requests without a stable ``session_key_digest`` bypass the registry
+        entirely (fresh service, never registered): their session id falls
+        back to the per-request-unique request digest, so a registry entry
+        could never be reused — each one would only churn the LRU and evict
+        this bot's live sessions.
         """
         # Lazy import: shadow -> config is a function-level dependency by
         # convention in this package (avoids import cycles).
         from magi_agent.config.env import is_hosted_session_reuse_enabled
 
         if not is_hosted_session_reuse_enabled():
+            return primitives.InMemorySessionService(), False
+        if not request.selection.session_key_digest:
             return primitives.InMemorySessionService(), False
         registry = self._session_service_registry
         if registry is None:

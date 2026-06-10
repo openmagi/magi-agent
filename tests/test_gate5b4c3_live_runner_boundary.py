@@ -2012,7 +2012,7 @@ class _SessionReuseManualClock:
 def _session_reuse_request(
     *,
     bot_digest: str = BOT_DIGEST,
-    session_digest: str = SESSION_DIGEST,
+    session_digest: str | None = SESSION_DIGEST,
 ) -> Gate5B4C3ShadowGenerationRequest:
     return Gate5B4C3ShadowGenerationRequest.model_validate(
         _payload(
@@ -2076,7 +2076,7 @@ def _invoke_session_reuse_turn(
     boundary: Gate5B4C3LiveRunnerBoundary,
     *,
     bot_digest: str = BOT_DIGEST,
-    session_digest: str = SESSION_DIGEST,
+    session_digest: str | None = SESSION_DIGEST,
 ) -> tuple[Gate5B4C3LiveRunnerBoundaryResult, object, str]:
     result = boundary.invoke(
         _session_reuse_request(bot_digest=bot_digest, session_digest=session_digest),
@@ -2293,3 +2293,51 @@ def test_session_reuse_overlapping_same_key_turns_never_share_a_service(
     assert followup_result.status == "completed"
     assert followup_service is first_service
     assert _HISTORY_MARKER not in followup_text
+
+
+def test_session_reuse_flag_on_without_session_key_bypasses_registry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Security finding 2: a None session key must not churn the LRU.
+
+    Without a stable session key the session id falls back to the
+    per-request-unique request digest, so with the flag ON every such request
+    would insert a never-reusable registry entry — evicting the bot's own live
+    sessions. The boundary must bypass the registry entirely: fresh service,
+    not reused, no insert.
+    """
+    monkeypatch.setenv("MAGI_HOSTED_SESSION_REUSE", "1")
+    registry = SessionServiceRegistry(max_entries=4, ttl_seconds=60.0)
+    boundary = _session_reuse_boundary(registry)
+
+    first_result, first_service, first_text = _invoke_session_reuse_turn(
+        boundary,
+        session_digest=None,
+    )
+    second_result, second_service, second_text = _invoke_session_reuse_turn(
+        boundary,
+        session_digest=None,
+    )
+
+    assert first_result.status == "completed"
+    assert second_result.status == "completed"
+    # Fresh service per turn, history re-seeded each turn — exactly like a miss.
+    assert second_service is not first_service
+    for text in (first_text, second_text):
+        assert _HISTORY_MARKER in text
+        assert _CURRENT_TURN_TEXT in text
+    # No never-reusable per-request keys were inserted: zero LRU churn.
+    assert len(registry) == 0
+
+
+def test_session_reuse_flag_on_without_session_key_never_touches_registry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MAGI_HOSTED_SESSION_REUSE", "1")
+    boundary = _session_reuse_boundary(_MustNotTouchRegistry())
+
+    result, service, text = _invoke_session_reuse_turn(boundary, session_digest=None)
+
+    assert result.status == "completed"
+    assert isinstance(service, _FakeSessionService)
+    assert _HISTORY_MARKER in text
