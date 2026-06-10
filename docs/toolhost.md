@@ -66,4 +66,10 @@ The runtime includes 5 builtin preset identifiers that can be activated via Harn
 
 ## ToolHostRequest and ToolHostReceipt (conceptual)
 
-The conceptual ToolHostRequest and ToolHostReceipt types do not exist in the codebase. Tool execution uses the ADK tool execution path with hook-based policy enforcement and ToolEvidenceRecord as the output. A dedicated ToolHost abstraction that wraps tool execution with its own request/receipt types is a potential future design but is not implemented.
+The conceptual ToolHostRequest and ToolHostReceipt types do not exist in the codebase. Tool execution uses the ADK tool execution path with hook-based policy enforcement (beforeToolUse / afterToolUse) and ToolEvidenceRecord as the output. A dedicated ToolHost abstraction that wraps tool execution with its own request/receipt types is a potential future design but is not implemented.
+
+Where real tool execution lives: the concrete `*ToolHost` classes each carry their own request/receipt shape that converges on ToolEvidenceRecord rather than a unified Request/Receipt type. For the actual contract, see:
+
+- [ToolHost API](/docs/toolhost-api) — concrete dispatch, policy enforcement, and the ToolEvidenceRecord receipt equivalent (HookContext acts as the request context).
+- [Evidence](/docs/evidence) — how ToolEvidenceRecord is produced and promoted into the evidence pipeline.
+- [Hook points](/docs/hook-points) — the beforeToolUse / afterToolUse points where tool policy is enforced.
