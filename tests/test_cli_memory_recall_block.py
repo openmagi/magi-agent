@@ -78,6 +78,29 @@ def test_on_returns_fenced_block_with_matching_hit(
     assert "grocery" not in block
 
 
+def test_master_only_produces_recall_block_after_dual_gate_fix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """PR1 dual-gate fix: master-on alone (no explicit prefer_local_search)
+    yields a real per-turn recall block, proving recall is no longer silently
+    double-gated off when the master is on."""
+    monkeypatch.delenv("MAGI_MEMORY_RECALL_ENABLED", raising=False)
+    monkeypatch.delenv("MAGI_MEMORY_PREFER_LOCAL_SEARCH", raising=False)
+    monkeypatch.setenv("MAGI_MEMORY_ENABLED", "1")
+    # Force the pure-python backend so the test never depends on a qmd binary.
+    monkeypatch.setenv("MAGI_MEMORY_PREFER_QMD", "0")
+    _write(
+        tmp_path,
+        "memory/daily/2026-06-01.md",
+        "decision: we will adopt zebraquux for the billing rollout",
+    )
+    block = build_cli_memory_recall_block(
+        workspace_root=str(tmp_path), query="zebraquux", memory_mode="normal"
+    )
+    assert block
+    assert "<memory-recall" in block and "zebraquux" in block
+
+
 def test_incognito_blocks_recall(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     _on_env(monkeypatch)
     _write(tmp_path, "memory/daily/2026-06-01.md", "zebraquux term present")
