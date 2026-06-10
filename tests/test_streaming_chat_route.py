@@ -1179,6 +1179,85 @@ def test_hosted_stream_counter_receipt_critic_equivalence_with_completions(
     assert stream_critic == completions_critic
 
 
+class _MultiChunkFakeRunner(_FakeRunner):
+    """Fake ADK runner that streams N distinct text chunks across N events."""
+
+    chunks = ("first progressive chunk. ", "second progressive chunk. ", "third progressive chunk.")
+
+    async def run_async(self, **kwargs: object) -> object:
+        type(self).run_kwargs = kwargs
+        for index, chunk in enumerate(self.chunks):
+            event = SimpleNamespace(
+                content=SimpleNamespace(parts=[SimpleNamespace(text=chunk)])
+            )
+            if index == len(self.chunks) - 1:
+                event.usage_metadata = SimpleNamespace(
+                    prompt_token_count=11,
+                    candidates_token_count=7,
+                    total_token_count=18,
+                )
+            yield event
+
+
+def _multi_chunk_fake_primitives() -> Gate5B4C3LiveAdkPrimitives:
+    primitives = _fake_primitives()
+    return Gate5B4C3LiveAdkPrimitives(
+        Agent=primitives.Agent,
+        Runner=_MultiChunkFakeRunner,
+        InMemorySessionService=primitives.InMemorySessionService,
+        Content=primitives.Content,
+        Part=primitives.Part,
+        GenerateContentConfig=primitives.GenerateContentConfig,
+    )
+
+
+def test_hosted_stream_emits_one_text_delta_frame_per_chunk(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """Progressive-emit regression guard (08-PR3 / #377).
+
+    N live runner chunks must surface as N separate text_delta SSE frames in
+    chunk order — NOT buffered into one aggregated frame at the end.
+    """
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
+    monkeypatch.setenv("MAGI_HOSTED_STREAMING_SERVE", "1")
+    monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
+    monkeypatch.setenv("CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_WORKSPACE_ROOT", str(tmp_path))
+    client = TestClient(
+        _make_app(
+            runtime=_selected_runtime(
+                tmp_path,
+                full_toolhost=True,
+                primitives_loader=_multi_chunk_fake_primitives,
+            ),
+            engine_builder=_bypass_canary_builder,
+        )
+    )
+
+    response = client.post(
+        "/v1/chat/stream",
+        headers=_auth_headers(),
+        json={
+            "sessionId": "s-progressive",
+            "turnId": "t-progressive",
+            "messages": [{"role": "user", "content": "Stream three chunks."}],
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    payloads = _data_lines(response.text)
+    text_deltas = [
+        payload["delta"] for payload in payloads if payload.get("type") == "text_delta"
+    ]
+    assert text_deltas == list(_MultiChunkFakeRunner.chunks)
+    # The aggregated final answer must NOT be re-emitted as one extra frame.
+    aggregated = "".join(_MultiChunkFakeRunner.chunks)
+    assert aggregated not in text_deltas
+    assert payloads[-1]["type"] == "turn_result"
+    assert payloads[-1]["terminal"] == "completed"
+
+
 def test_hosted_serve_flag_off_gate_inactive_keeps_headless_fallthrough(
     monkeypatch,
 ) -> None:
