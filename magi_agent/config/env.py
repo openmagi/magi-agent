@@ -1911,6 +1911,30 @@ def parse_recipe_default_packs_expanded(env: Mapping[str, str]) -> bool:
     return _is_true(env.get("MAGI_RECIPE_DEFAULT_PACKS_EXPANDED"))
 
 
+def parse_recipe_intent_binding_enabled(env: Mapping[str, str]) -> bool:
+    """MAGI_RECIPE_INTENT_BINDING_ENABLED — stage gate for binding the
+    emit-only recipe intents to runner effects (doc 05 PR-3 / A1-G2). Default
+    OFF.
+
+    The four intent families (``provider_intents`` / ``channel_intents`` /
+    ``artifact_intents`` / ``scheduler_intents``) are materialized and emitted
+    as public-payload metadata but, unlike ``tool_intents``, have no consumer
+    driving an actual runner effect. When ON, the local runner-policy route
+    selection surfaces hint-level bindings:
+
+    * provider intents  -> model preference hints
+    * channel intents   -> channel delivery hints
+    * artifact intents  -> artifact delivery requirements (joins pre-final gate)
+    * scheduler intents -> scheduler readiness hints (handed to 03-always-on)
+
+    Bindings are intentionally *hint* level — they never assert production-write
+    authority and never hard-force a model/channel/provider. Hard enforcement is
+    deferred to 14-controlplane. OFF (default) keeps the emitted route selection
+    byte-identical to origin/main.
+    """
+    return _is_true(env.get("MAGI_RECIPE_INTENT_BINDING_ENABLED"))
+
+
 # Single source of truth for the CLI session-log write path (PR-04-PR1).
 CLI_SESSION_LOG_ENABLED_ENV = "MAGI_CLI_SESSION_LOG_ENABLED"
 
