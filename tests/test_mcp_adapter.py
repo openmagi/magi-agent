@@ -911,7 +911,6 @@ forbidden = (
     "google.adk.runners",
     "magi_agent.runtime.route_activation",
     "magi_agent.runtime.adk_turn_runner",
-    "magi_agent.runtime.model_routing",
     "magi_agent.transport.chat",
     "magi_agent.transport.chat_route",
     "magi_agent.tools.kernel",

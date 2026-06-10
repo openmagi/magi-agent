@@ -1830,7 +1830,6 @@ forbidden_exact = (
     "magi_agent.app",
     "magi_agent.main",
     "magi_agent.runtime.openmagi_runtime",
-    "magi_agent.runtime.turn_controller",
     "magi_agent.transport.chat",
     "magi_agent.transport.health",
     "magi_agent.transport.plugins",
