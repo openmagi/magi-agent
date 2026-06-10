@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import pytest
 
+from pathlib import Path
+
 from magi_agent.cli.tool_runtime import build_cli_instruction
 
 
@@ -28,16 +30,29 @@ from magi_agent.cli.tool_runtime import build_cli_instruction
 # ---------------------------------------------------------------------------
 
 
-def _instruction(monkeypatch: pytest.MonkeyPatch, *, file_tools: bool = False) -> str:
+def _instruction(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    file_tools: bool = False,
+    browser_tool: bool = False,
+    self_introspection: bool = False,
+    workspace_root: Path | None = None,
+) -> str:
     if file_tools:
         monkeypatch.setenv("MAGI_FILE_TOOLS_ENABLED", "true")
     else:
         # Explicitly set to "false" so file_tools_enabled() returns False
         # regardless of the runtime profile default.
         monkeypatch.setenv("MAGI_FILE_TOOLS_ENABLED", "false")
-    # Disable browser tool so it does not affect tool listing in tests.
-    monkeypatch.setenv("MAGI_BROWSER_TOOL_ENABLED", "false")
-    return build_cli_instruction(session_id="test-session")
+    monkeypatch.setenv("MAGI_BROWSER_TOOL_ENABLED", "true" if browser_tool else "false")
+    monkeypatch.setenv(
+        "MAGI_SELF_INTROSPECTION_ENABLED",
+        "true" if self_introspection else "false",
+    )
+    return build_cli_instruction(
+        session_id="test-session",
+        workspace_root=str(workspace_root) if workspace_root is not None else None,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -121,13 +136,36 @@ def test_file_tool_description_present_with_file_tools(monkeypatch: pytest.Monke
 
 
 def test_non_attached_tool_not_advertised(monkeypatch: pytest.MonkeyPatch) -> None:
-    """BrowserTool is never registered unless MAGI_BROWSER_TOOL_ENABLED; absent."""
-    monkeypatch.delenv("MAGI_BROWSER_TOOL_ENABLED", raising=False)
+    """BrowserTask is never registered unless MAGI_BROWSER_TOOL_ENABLED; absent."""
     instruction = _instruction(monkeypatch, file_tools=False)
-    assert "BrowserTool" not in instruction
+    assert "BrowserTask" not in instruction
 
 
 def test_xlsx_info_absent_without_file_tools(monkeypatch: pytest.MonkeyPatch) -> None:
     """XLSXInfo is a file tool — must not leak into the prompt when gate is off."""
     instruction = _instruction(monkeypatch, file_tools=False)
     assert "XLSXInfo" not in instruction
+
+
+def test_browser_task_present_when_runtime_binds_it(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    instruction = _instruction(
+        monkeypatch,
+        browser_tool=True,
+        workspace_root=tmp_path,
+    )
+    assert "BrowserTask" in instruction
+
+
+def test_inspect_self_evidence_present_when_runtime_binds_it(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    instruction = _instruction(
+        monkeypatch,
+        self_introspection=True,
+        workspace_root=tmp_path,
+    )
+    assert "InspectSelfEvidence" in instruction

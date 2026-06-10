@@ -417,12 +417,14 @@ def _source_ledger_for_session(
         return ()
 
 
-def build_tool_advertisement_block() -> str:
+def build_tool_advertisement_block(*, workspace_root: str | None = None) -> str:
     """Build an ``<available_tools>`` XML block from the currently-enabled tool set.
 
-    Assembles a throw-away registry using the same env-gated manifest
-    registration logic as :func:`build_cli_tool_runtime` (no handlers, no
-    dispatcher — manifest-only, so it is cheap and side-effect free).
+    Assembles a throw-away local runtime using the same env-gated registration
+    and bind-time policy path as :func:`build_cli_tool_runtime`. This keeps the
+    advertised catalog aligned with tools that become enabled only when their
+    host binds a handler (for example ``BrowserTask`` and
+    ``InspectSelfEvidence``).
     Each enabled tool is emitted as one line::
 
         ToolName [permission] — one-line description
@@ -435,40 +437,10 @@ def build_tool_advertisement_block() -> str:
     Fail-open: any error returns an empty string so prompt assembly never breaks.
     """
     try:
-        from magi_agent.tools.registry import ToolRegistry  # noqa: PLC0415
-        from magi_agent.tools import register_core_tool_manifests  # noqa: PLC0415
-
-        registry = ToolRegistry()
-        register_core_tool_manifests(registry)
-
-        from magi_agent.config.env import file_tools_enabled  # noqa: PLC0415
-
-        if file_tools_enabled():
-            from magi_agent.tools.file_tool_manifests import (  # noqa: PLC0415
-                register_file_tool_manifests,
-            )
-
-            register_file_tool_manifests(registry)
-            # Enable file tools so they appear in the listing.
-            from magi_agent.tools.file_tool_manifests import file_tool_manifests  # noqa: PLC0415
-
-            for manifest in file_tool_manifests():
-                try:
-                    registry.enable(manifest.name)
-                except Exception:
-                    pass
-
-        from magi_agent.config.env import browser_tool_enabled  # noqa: PLC0415
-
-        if browser_tool_enabled():
-            try:
-                from magi_agent.browser.autonomous.tool import (  # noqa: PLC0415
-                    register_browser_tool_manifest,
-                )
-
-                register_browser_tool_manifest(registry)
-            except Exception:
-                pass
+        registry = build_cli_tool_runtime(
+            workspace_root=str(Path(workspace_root or ".").resolve()),
+            session_id="tool-advertisement",
+        ).registry
 
         lines: list[str] = []
         for tool_name in sorted(registry._tools):  # noqa: SLF001
@@ -648,7 +620,7 @@ def build_cli_instruction(
     # Registry-driven tool advertisement (Principle P2: "built ≠ used").
     # Dynamically reflects which tools are attached — file/browser tools only
     # appear when their env gate is on.  Fail-open: empty string when unavailable.
-    _tool_ad_block = build_tool_advertisement_block()
+    _tool_ad_block = build_tool_advertisement_block(workspace_root=workspace_root)
 
     # File-tool usage guidance — only injected when file tools are actually
     # enabled so the model is not directed to use unavailable tools.
