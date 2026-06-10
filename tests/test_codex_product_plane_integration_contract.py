@@ -13,7 +13,7 @@ from magi_agent.config.models import BuildInfo, RuntimeConfig
 from magi_agent.connectors.credential_lease import CredentialLeaseAuthorityFlags
 from magi_agent.connectors.marketplace import MarketplaceAuthorityFlags
 from magi_agent.connectors.registry import ConnectorAuthorityFlags
-from magi_agent.evals.release_gates import ReleaseGateAuthorityFlags
+from evals.release_gates import ReleaseGateAuthorityFlags
 from magi_agent.ops.metrics import RuntimeOpsAttachmentFlags
 from magi_agent.ops.job_queue import JobQueueAuthorityFlags
 from magi_agent.permissions.auto_control import AutoPermissionAuthorityFlags

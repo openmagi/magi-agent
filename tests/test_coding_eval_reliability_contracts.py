@@ -201,5 +201,5 @@ def test_pr8_matrix_row_points_to_gap_fixture_and_stays_default_off() -> None:
         in row["coveredByFiles"]
     )
     assert "tests/test_coding_eval_reliability_contracts.py" in row["coveredByTests"]
-    assert "magi_agent/evals/regression_gates.py" in row["coveredByFiles"]
+    assert "evals/regression_gates.py" in row["coveredByFiles"]
     assert "tests/test_self_improvement_eval_capture.py" in row["coveredByTests"]
