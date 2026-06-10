@@ -21,10 +21,16 @@ class ReliabilityConfig(BaseModel):
     arg_validation: bool = False
     dup_write_guard: bool = False
     verify_before_final: bool = False
+    completion_review: bool = False
 
     @property
     def any_enabled(self) -> bool:
-        return self.arg_validation or self.dup_write_guard or self.verify_before_final
+        return (
+            self.arg_validation
+            or self.dup_write_guard
+            or self.verify_before_final
+            or self.completion_review
+        )
 
 
 _JSON_TYPE_CHECKS: dict[str, type | tuple[type, ...]] = {
@@ -171,10 +177,51 @@ def verify_final(ledger: WriteLedger, agent_text: str) -> str | None:
     return None
 
 
+# Conclusion = the agent is wrapping up: either a success claim (reuse the L2
+# success markers) OR a refusal/closure. Catches both under-action (refusal that
+# leaves work undone) and premature success claims. Lowercased substring match.
+_CONCLUSION_MARKERS = _SUCCESS_MARKERS + (
+    "unable to",
+    "not able to",
+    "cannot",
+    "can't",
+    "won't be able",
+    "i'm sorry",
+    "i am sorry",
+    "unfortunately",
+    "is there anything else",
+    "anything else i can",
+)
+
+
+def is_conclusion(agent_text: str) -> bool:
+    """True if the agent text reads like it is concluding the interaction (a
+    success claim or a refusal/closure), as opposed to asking for more info."""
+    text = (agent_text or "").lower()
+    return any(marker in text for marker in _CONCLUSION_MARKERS)
+
+
+def completion_review_nudge() -> str:
+    """A domain-agnostic completion+scope self-review prompt. No ground-truth, no
+    domain rules — a general 'did I do all and only what was asked?' check."""
+    return (
+        "Before you confirm completion or close this out: re-read the user's "
+        "messages and list every concrete action they asked you to perform. For "
+        "each, state whether you actually executed it (and with which tool call) "
+        "or not. Then check whether you performed any action the user did NOT "
+        "request. If a requested action is missing, perform it now. If you "
+        "performed an unrequested action, correct it. Only confirm completion "
+        "once every requested action — and only those — has been done. Do not "
+        "claim completion you cannot support."
+    )
+
+
 __all__ = [
     "DEFAULT_WRITE_PREFIXES",
     "ReliabilityConfig",
     "WriteLedger",
+    "completion_review_nudge",
+    "is_conclusion",
     "looks_like_error",
     "validate_args",
     "verify_final",

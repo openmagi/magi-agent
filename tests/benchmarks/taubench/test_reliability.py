@@ -131,3 +131,37 @@ def test_verify_final_silent_when_success_backed_by_write() -> None:
 def test_verify_final_silent_without_success_language() -> None:
     led = WriteLedger()
     assert verify_final(led, "Can you confirm your travel dates first?") is None
+
+
+from magi_agent.benchmarks.taubench.reliability import completion_review_nudge, is_conclusion
+
+
+def test_config_completion_review_default_and_any_enabled() -> None:
+    assert ReliabilityConfig().completion_review is False
+    assert ReliabilityConfig(completion_review=True).any_enabled is True
+
+
+def test_is_conclusion_detects_success_claim() -> None:
+    assert is_conclusion("Your reservation is booked. Reservation ID R1.") is True
+
+
+def test_is_conclusion_detects_refusal_and_closure() -> None:
+    assert is_conclusion("I'm sorry, I'm unable to do that.") is True
+    assert is_conclusion("Unfortunately I cannot cancel this.") is True
+    assert is_conclusion("Is there anything else I can help with?") is True
+
+
+def test_is_conclusion_silent_on_info_question() -> None:
+    assert is_conclusion("Can you confirm your travel dates first?") is False
+
+
+def test_is_conclusion_handles_empty() -> None:
+    assert is_conclusion("") is False
+
+
+def test_completion_review_nudge_is_general_no_domain_tokens() -> None:
+    msg = completion_review_nudge()
+    assert isinstance(msg, str) and len(msg) > 0
+    low = msg.lower()
+    for tok in ("flight", "reservation", "cabin", "airline", "baggage", "certificate"):
+        assert tok not in low
