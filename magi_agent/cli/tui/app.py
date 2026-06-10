@@ -62,6 +62,7 @@ from magi_agent.cli.contracts import (
     PermissionGate,
     PermissionUpdate,
     PromptSink,
+    RenderNode,
     RuntimeEvent,
     Terminal,
     ToolRendererRegistry,
@@ -271,6 +272,91 @@ def _status_summary(event: RuntimeEvent) -> str:
     if isinstance(label, str) and label:
         parts.append(str(label))
     return " ".join(parts)
+
+
+# Reasoning/thinking inline display (PR4.2). The runtime surfaces model reasoning
+# to the TUI as a ``status`` event whose inner payload ``type`` is
+# ``thinking_delta`` (engine ``_map_event_kind`` has no ``thinking_delta`` →
+# falls through to ``status``; the engine sanitizer only lets it through under
+# ``MAGI_STREAM_THINKING``). We render it as a DIM one-line ``● thinking <preview>``
+# block — distinct from the teal/blue tool dots and from assistant markdown.
+_THINKING_INNER_TYPES = frozenset({"thinking_delta", "thinking"})
+_THINKING_PREVIEW_MAX_CHARS = 100
+# Dim throughout so the reasoning line reads as quiet annotation, not output.
+_THINKING_DOT_STYLE = "dim #7aa2f7"
+_THINKING_LABEL_STYLE = "dim bold"
+_THINKING_PREVIEW_STYLE = "dim italic"
+
+
+def _is_reasoning_event(event: RuntimeEvent) -> bool:
+    """True for a ``status`` event carrying a reasoning/thinking marker.
+
+    Distinguishes user-relevant reasoning from plumbing ``status`` events
+    (runner_policy_*, phase_route_*, turn_end) that stay hidden by default.
+    """
+
+    if event.type != "status":
+        return False
+    payload = event.payload
+    if not isinstance(payload, dict):
+        return False
+    inner = payload.get("type")
+    if isinstance(inner, str) and inner in _THINKING_INNER_TYPES:
+        return True
+    # Belt-and-suspenders: an explicit label/reasoning marker (forward-compatible
+    # with a future status-marker shape) also counts.
+    if payload.get("reasoning"):
+        return True
+    return payload.get("label") in {"thinking", "reasoning"}
+
+
+def _reasoning_text(payload: dict) -> str:
+    """Extract reasoning text from a ``thinking_delta``-style payload."""
+
+    for key in ("delta", "text", "detail", "thinking", "reasoning"):
+        value = payload.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return ""
+
+
+def _thinking_preview(text: str) -> str:
+    """Collapse multi-line reasoning into a single terse preview line."""
+
+    first = ""
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped:
+            first = stripped
+            break
+    if not first:
+        first = text.strip()
+    if len(first) > _THINKING_PREVIEW_MAX_CHARS:
+        first = first[: _THINKING_PREVIEW_MAX_CHARS - 1].rstrip() + "…"
+    return first
+
+
+def _render_thinking_node(text: str) -> RenderNode:
+    """Build the DIM one-line ``● thinking  <preview>`` reasoning block.
+
+    The committed/search text mirrors the displayed line for search fidelity
+    (what is indexed == what is shown). The whole line is styled dim so it reads
+    as quiet annotation, distinct from the teal/blue tool dots and from the
+    assistant markdown.
+    """
+
+    from rich.text import Text  # noqa: PLC0415
+
+    preview = _thinking_preview(text)
+    rich = Text()
+    rich.append("● ", style=_THINKING_DOT_STYLE)
+    rich.append("thinking", style=_THINKING_LABEL_STYLE)
+    search = "● thinking"
+    if preview:
+        rich.append("  ", style=_THINKING_PREVIEW_STYLE)
+        rich.append(preview, style=_THINKING_PREVIEW_STYLE)
+        search = f"● thinking  {preview}"
+    return RenderNode(rich=rich, text=search)
 
 
 # ---------------------------------------------------------------------------
@@ -761,6 +847,11 @@ class MagiTuiApp(App[None]):
         # True while an engine turn is in flight; gates Ctrl+C (cancel vs quit).
         self._turn_active = False
         self._active_turn_id: str | None = None
+        # Reasoning/thinking inline display (PR4.2): the in-flight dim thinking
+        # line's update handle + accumulated reasoning text. Reset per turn so
+        # streaming deltas coalesce into ONE updating line, not a new line each.
+        self._thinking_handle: object | None = None
+        self._thinking_accum: str = ""
         # Keybindings: defaults-only (no user keybindings.json wired in v1).
         # load_keybindings(None) never raises and returns the built-in keymap.
         # VIM mode + hot-reload are explicitly DEFERRED to v1.1.
@@ -1259,6 +1350,9 @@ class MagiTuiApp(App[None]):
         self._cancel = cancel
         self._active_turn_id = turn_id
         self._turn_active = True
+        # Fresh thinking line for this turn (coalesce only within one turn).
+        self._thinking_handle = None
+        self._thinking_accum = ""
         self._turn_started_monotonic = _time.monotonic()
         self.update_footer(state="running")
         self._echo_user(prompt)
@@ -1381,6 +1475,13 @@ class MagiTuiApp(App[None]):
         if event.type == "error":
             controller.commit_block(_status_summary(event))
             return
+        # Reasoning/thinking is user-relevant (unlike plumbing noise), so it is
+        # INTERCEPTED here — BEFORE the quiet-by-default ``status`` drop below —
+        # and rendered as a dim one-line block, shown by default. Streaming
+        # deltas coalesce into the single in-flight thinking line.
+        if _is_reasoning_event(event):
+            self._render_thinking(event)
+            return
         # status / artifact / control -> internal diagnostics (routing/policy/
         # turn-lifecycle plumbing). These flooded the chat with lines like
         # ``runner_policy_assembly`` / ``phase_route_decision`` / ``turn_end``, so
@@ -1442,6 +1543,31 @@ class MagiTuiApp(App[None]):
         if tool_name in text:
             return text
         return f"{tool_name}: {text}" if text else tool_name
+
+    def _render_thinking(self, event: RuntimeEvent) -> None:
+        """Render a reasoning event as a dim one-line block (coalesced).
+
+        The first reasoning event in a turn commits a fresh dim ``● thinking``
+        line; subsequent deltas UPDATE that same line in place (the accumulated
+        reasoning's terse preview) rather than spamming one line per delta. The
+        in-flight handle is reset at turn start (``start_turn``).
+        """
+
+        payload = event.payload if isinstance(event.payload, dict) else {}
+        delta = _reasoning_text(payload)
+        # Accumulate so the coalesced preview reflects the latest reasoning.
+        self._thinking_accum = (self._thinking_accum + " " + delta).strip() if (
+            self._thinking_handle is not None
+        ) else delta
+        node = _render_thinking_node(self._thinking_accum)
+        if self._thinking_handle is None:
+            self._thinking_handle = self.controller.commit_thinking(
+                node.rich, text=node.text
+            )
+        else:
+            self.controller.update_thinking(
+                self._thinking_handle, node.rich, text=node.text
+            )
 
     def _fold_sidebar_tool(self, name: str, tool_input: object) -> None:
         """Route a tool_start into the sidebar panes (todo / recent files).

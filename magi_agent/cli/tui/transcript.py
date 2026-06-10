@@ -22,10 +22,26 @@ PR-E2 will fold real ``RuntimeEvent``s into this surface: ``token`` events ->
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from textual.app import App, ComposeResult
 from textual.widgets import RichLog, Static
 
 __all__ = ["TranscriptController", "TranscriptApp", "DEFAULT_FLUSH_INTERVAL"]
+
+
+@dataclass
+class _ThinkingHandle:
+    """Update handle for a coalesced reasoning block (PR4.2).
+
+    Returned by :meth:`TranscriptController.commit_thinking`; carries the backing
+    widget (``None`` on the legacy ``RichLog`` backing) and the snapshot index so
+    streaming reasoning deltas update the same line in place.
+    """
+
+    controller: "TranscriptController"
+    index: int
+    widget: object | None
 
 # Coalescing cadence: render batched deltas at most this often. 40ms sits in the
 # 30-60ms band the design calls for (≈25 fps) — fast enough to feel live, slow
@@ -231,6 +247,53 @@ class TranscriptController:
         self._committed.append(text)
         self.committed_block_count += 1
         self._emit(renderable, as_status=False)
+
+    def commit_thinking(self, renderable: object, *, text: str = "") -> object:
+        """Commit a DIM one-line reasoning block and return an update handle.
+
+        Mirrors :meth:`commit_rich` (finalized Rich renderable + recorded search
+        text) but returns the backing widget AND the snapshot index so streaming
+        reasoning deltas can be COALESCED via :meth:`update_thinking` rather than
+        flooding the transcript with one block per delta. On the legacy
+        ``RichLog`` backing (no in-place widget update) the handle widget is
+        ``None`` and a later :meth:`update_thinking` no-ops on the widget while
+        still patching the recorded snapshot text for search fidelity.
+        """
+
+        index = len(self._committed)
+        self._committed.append(text)
+        self.committed_block_count += 1
+        widget: object | None = None
+        if self._view is not None:
+            from textual.widgets import Static  # noqa: PLC0415
+
+            widget = Static(renderable)
+            self._view.add_block(widget)
+        else:
+            assert self._log is not None
+            self._log.write(renderable)
+        return _ThinkingHandle(controller=self, index=index, widget=widget)
+
+    def update_thinking(
+        self, handle: object, renderable: object, *, text: str = ""
+    ) -> None:
+        """Update a previously :meth:`commit_thinking` block in place.
+
+        Patches both the live widget (so the single line repaints with the
+        latest reasoning preview) and the recorded snapshot entry (so search
+        fidelity reflects what is shown). Unknown/legacy handles update only the
+        snapshot text.
+        """
+
+        if not isinstance(handle, _ThinkingHandle):
+            return
+        if 0 <= handle.index < len(self._committed):
+            self._committed[handle.index] = text
+        widget = handle.widget
+        if widget is not None:
+            update = getattr(widget, "update", None)
+            if callable(update):
+                update(renderable)
 
     def commit_tool(self, card: object, *, text: str = "") -> None:
         """Append a ``ToolCard`` (Collapsible) as a finalized block (PR0.4).
