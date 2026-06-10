@@ -279,12 +279,52 @@ def test_app_api_uses_hosted_workspace_env_for_skills_and_memory(
     )
 
     skills = client.get("/v1/app/skills").json()
-    assert {s["name"] for s in skills["loaded"]} == {"hosted-demo-skill"}
+    assert "hosted-demo-skill" in {s["name"] for s in skills["loaded"]}
 
     listing = client.get("/v1/app/memory").json()
     assert any(f["path"] == "MEMORY.md" for f in listing["files"])
     read = client.get("/v1/app/memory/file", params={"path": "MEMORY.md"})
     assert read.json()["content"] == "hosted memory fact"
+
+
+def test_app_api_skills_scan_is_uncapped_and_includes_hosted_legacy_sibling(
+    tmp_path, monkeypatch
+) -> None:
+    hosted_parent = tmp_path / "workspace"
+    workspace = hosted_parent / "workspace"
+    workspace.mkdir(parents=True)
+    for index in range(120):
+        skill_dir = workspace / "skills" / f"bulk-skill-{index:03d}"
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            f"---\nname: bulk-skill-{index:03d}\ndescription: bulk\n---\n",
+            encoding="utf-8",
+        )
+    qmd = workspace / "skills" / "qmd-search"
+    qmd.mkdir(parents=True)
+    (qmd / "SKILL.md").write_text(
+        "---\nname: qmd-search\ndescription: qmd\n---\n",
+        encoding="utf-8",
+    )
+    legacy = hosted_parent / "skills" / "moltbook"
+    legacy.mkdir(parents=True)
+    (legacy / "SKILL.md").write_text(
+        "---\nname: moltbook\ndescription: legacy\n---\n",
+        encoding="utf-8",
+    )
+
+    client = _client_with_workspace_env(
+        tmp_path,
+        monkeypatch,
+        "MAGI_AGENT_WORKSPACE",
+        workspace,
+    )
+
+    body = client.get("/v1/app/skills").json()
+    dirs = {skill["dir"] for skill in body["loaded"]}
+    assert "skills/qmd-search" in dirs
+    assert "legacy-workspace/skills/moltbook" in dirs
+    assert body["loadedCount"] == len(body["loaded"])
 
 
 def test_workspace_env_precedence_and_traversal_protection(tmp_path, monkeypatch) -> None:
