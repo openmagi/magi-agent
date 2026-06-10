@@ -154,7 +154,6 @@ class OpenMagiRuntime:
         self.config = config
         self.profile = profile or build_default_profile()
         self.adk_boundary = adk_boundary or AdkPrimitiveBoundary.declared()
-        self.adk_invocation_enabled = False
         self.plugin_state = (
             plugin_state if plugin_state is not None else _build_default_plugin_state()
         )
