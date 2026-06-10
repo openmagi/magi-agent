@@ -26,6 +26,7 @@ from magi_agent.cli.commands.builtins import (
     GoalCommand,
     OnboardingCommand,
     PlanCommand,
+    StatusCommand,
     SuperpowersCommand,
 )
 from magi_agent.cli.commands.discovery import (
@@ -449,6 +450,39 @@ def test_status_and_reset_delegate_to_boundary(monkeypatch) -> None:
     assert "command_intent" in status_out.text
     assert isinstance(reset_out, Text)
     assert "command_intent" in reset_out.text
+
+
+def test_status_uses_app_snapshot_when_available(monkeypatch) -> None:
+    """In the TUI (ctx.app present) /status renders the live session snapshot,
+    not the slash-control boundary projection."""
+
+    # The boundary must NOT be consulted when an app snapshot is available.
+    def _spy(self, request):  # type: ignore[no-untyped-def]
+        raise AssertionError("status must not call the boundary when app present")
+
+    monkeypatch.setattr(builtins_mod.SlashControlBoundary, "project", _spy)
+
+    class _FakeApp:
+        def status_snapshot(self) -> dict[str, object]:
+            return {
+                "version": "9.9.9",
+                "model": "claude-sonnet-4-6",
+                "cwd": "/work/space",
+                "mode": "act",
+                "session": "cli",
+                "turns": 3,
+                "tokens": 1234,
+            }
+
+    ctx = CommandContext(cwd="/tmp", app=_FakeApp())
+    out = asyncio.run(StatusCommand(name="status", surface=HEADLESS).call(None, ctx))
+    assert isinstance(out, Text)
+    assert "Magi v9.9.9" in out.text
+    assert "claude-sonnet-4-6" in out.text
+    assert "/work/space" in out.text
+    assert "turns: 3" in out.text
+    assert "1234 tok" in out.text
+    assert "command_intent" not in out.text
 
 
 def test_help_does_not_call_boundary(monkeypatch) -> None:
