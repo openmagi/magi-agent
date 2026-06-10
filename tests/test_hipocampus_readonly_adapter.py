@@ -186,6 +186,17 @@ def test_readonly_adapter_rejects_workspace_root_symlink_to_production_path(
         )
 
 
+def test_readonly_adapter_allows_local_checkout_names_with_canary(tmp_path: Path) -> None:
+    checkout_root = tmp_path / "magi-agent-canary-final"
+    checkout_root.mkdir()
+
+    adapter = HipocampusReadOnlyAdapter(
+        HipocampusReadOnlyConfig(workspace_root=checkout_root, enabled=True)
+    )
+
+    assert adapter.workspace_root == checkout_root.resolve()
+
+
 def test_readonly_adapter_ignores_qmd_results_outside_workspace(tmp_path: Path) -> None:
     write_memory_fixture(tmp_path)
     adapter = HipocampusReadOnlyAdapter(
