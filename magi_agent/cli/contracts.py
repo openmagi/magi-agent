@@ -130,6 +130,7 @@ class TurnInput:
     turn_id: str = "cli-turn"
     initial_messages: list = field(default_factory=list)
     harness_state: object | None = None
+    image_blocks: tuple[dict[str, object], ...] = ()
 
 
 @runtime_checkable
