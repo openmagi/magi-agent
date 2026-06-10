@@ -381,6 +381,21 @@ def test_app_api_discovers_hosted_nested_legacy_workspace_roots(
     assert {"direct-legacy", "openclaw-legacy", "agent-legacy"} <= names
 
 
+def test_local_cwd_does_not_discover_nested_workspace_without_env(
+    tmp_path, monkeypatch
+) -> None:
+    nested = tmp_path / "workspace" / "memory"
+    nested.mkdir(parents=True)
+    (nested / "ROOT.md").write_text("nested local memory", encoding="utf-8")
+
+    client = _client(tmp_path, monkeypatch)
+
+    listing = client.get("/v1/app/memory").json()
+    assert "memory/ROOT.md" not in {file["path"] for file in listing["files"]}
+    read = client.get("/v1/app/memory/file", params={"path": "memory/ROOT.md"})
+    assert read.status_code == 404
+
+
 def test_workspace_write_uses_discovered_hosted_legacy_workspace_root(
     tmp_path, monkeypatch
 ) -> None:

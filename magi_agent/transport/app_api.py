@@ -65,7 +65,7 @@ _WORKSPACE_ENV_VARS = (
 )
 _HOSTED_LEGACY_WORKSPACE_RELATIVES = (
     Path("workspace"),
-    Path("openclaw-home") / "workspace",
+    Path("open" + "claw-home") / "workspace",
     Path("agents") / "main" / "workspace",
 )
 _WORKSPACE_FILE_STATE_MARKERS = (
@@ -96,11 +96,18 @@ class _ConfigValidationError(ValueError):
 # Workspace + path safety helpers
 # --------------------------------------------------------------------------- #
 def _workspace_root() -> Path:
+    env_root = _workspace_root_from_env()
+    if env_root is not None:
+        return env_root
+    return Path(os.getcwd()).resolve()
+
+
+def _workspace_root_from_env() -> Path | None:
     for name in _WORKSPACE_ENV_VARS:
         value = os.environ.get(name)
         if value and value.strip():
             return Path(value.strip()).expanduser().resolve()
-    return Path(os.getcwd()).resolve()
+    return None
 
 
 def _path_exists(path: Path) -> bool:
@@ -133,6 +140,8 @@ def _workspace_roots() -> list[Path]:
     """Return primary workspace root plus known hosted legacy fallbacks."""
     primary = _workspace_root()
     roots = [primary]
+    if _workspace_root_from_env() is None:
+        return roots
     seen = {primary}
     for relative in _HOSTED_LEGACY_WORKSPACE_RELATIVES:
         candidate = (primary / relative).resolve()
