@@ -44,6 +44,8 @@ jobs:
         run: uv sync --extra dev
       - name: Ruff (stage-1 fatal subset, blocking)
         run: uv run --no-sync ruff check .
+      - name: Module map drift gate
+        run: bash scripts/check_module_map.sh
       - name: Mypy (advisory, non-blocking)
         run: uv run --no-sync mypy magi_agent
         continue-on-error: true
