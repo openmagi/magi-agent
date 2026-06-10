@@ -5,7 +5,6 @@
 ```mermaid
 graph LR
     authoring
-    evals
     rules
     sandbox
     adk_bridge --> config
@@ -700,14 +699,6 @@ graph LR
 | evidence.py | — | gate1a_egress_correlation | — |
 | injection.py | — | config | gates/gate5b_full_toolhost.py, web_acquisition/live_fetch_provider.py |
 
-### evals/
-
-| Module | Purpose | Depends On | Depended By |
-|---|---|---|---|
-| __init__.py | — | regression_gates, release_gates | — |
-| regression_gates.py | — | — | evals/__init__.py |
-| release_gates.py | — | — | evals/__init__.py |
-
 ### evidence/
 
 | Module | Purpose | Depends On | Depended By |
@@ -1090,7 +1081,7 @@ graph LR
 | source_ledger.py | — | _common, context, result | — |
 | subagents.py | — | _common, child_runner_boundary, child_runner_live, context, result | — |
 | taskboard.py | — | _common, context, result | — |
-| web.py | — | context, result | — |
+| web.py | — | context, research_tools, result | — |
 
 ### prompt/
 
@@ -1544,7 +1535,7 @@ graph LR
 | query_planner.py | Rule-based query planner for deep web research. | deep_research_config | web_acquisition/deep_research.py, web_acquisition/tests/test_query_planner.py |
 | reference_research_tools.py | — | catalog, context, kernel, local_readonly, read_ledger, registry | — |
 | repo_research_tools.py | — | policy, result, source_ledger, source_proof | — |
-| research_tools.py | — | insane_fetch, jina_reader, live_provider_pack, platform_endpoint, policy, provider_boundary, provider_router, result, source_ledger | benchmarks/gaia/web_tools.py, web_acquisition/deep_research.py, web_acquisition/opencode_provider_router.py, web_acquisition/tests/test_deep_research_orchestrator.py, web_acquisition/tests/test_gaia_web_tools_deep_research.py |
+| research_tools.py | — | insane_fetch, jina_reader, live_provider_pack, platform_endpoint, policy, provider_boundary, provider_router, result, source_ledger | benchmarks/gaia/web_tools.py, plugins/native/web.py, web_acquisition/deep_research.py, web_acquisition/opencode_provider_router.py, web_acquisition/tests/test_deep_research_orchestrator.py, web_acquisition/tests/test_gaia_web_tools_deep_research.py |
 
 ### web_acquisition/providers/
 
