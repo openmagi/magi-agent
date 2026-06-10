@@ -29,7 +29,10 @@ def test_adk_dependency_boundary_is_available_without_invoking_runner() -> None:
 
     runtime = OpenMagiRuntime(config=make_config())
 
-    assert runtime.adk_invocation_enabled is False
+    # The dead `adk_invocation_enabled` documentation-only toggle has been removed;
+    # ADK invocation state is derived from the live `adk_boundary`, not a hardcoded
+    # attribute. Guard against the dead flag being reintroduced.
+    assert not hasattr(runtime, "adk_invocation_enabled")
     assert runtime.status()["adk"] == {"available": True, "invoked": False}
 
 

@@ -11,7 +11,7 @@ from magi_agent.web_acquisition.research_tools import (
     MAGI_PLATFORM_API_KEY_ENV,
     MAGI_PLATFORM_BASE_URL_ENV,
     PROVIDER_ROUTER_ENABLED_ENV,
-    build_live_research_boundary,
+    build_native_web_boundary,
     live_web_acquisition_active,
 )
 
@@ -79,16 +79,14 @@ def _live_provider_configured(env: Mapping[str, str] | None = None) -> bool:
 
 
 async def web_search(arguments: dict[str, object], context: ToolContext) -> ToolResult:
-    if not _live_provider_configured():
+    boundary = build_native_web_boundary(os.environ)
+    if boundary is None:
         return _not_configured_result("WebSearch")
-    return await build_live_research_boundary().execute_tool(
-        "WebSearch", arguments, context
-    )
+    return await boundary.execute_tool("WebSearch", arguments, context)
 
 
 async def web_fetch(arguments: dict[str, object], context: ToolContext) -> ToolResult:
-    if not _live_provider_configured():
+    boundary = build_native_web_boundary(os.environ)
+    if boundary is None:
         return _not_configured_result("WebFetch")
-    return await build_live_research_boundary().execute_tool(
-        "WebFetch", arguments, context
-    )
+    return await boundary.execute_tool("WebFetch", arguments, context)

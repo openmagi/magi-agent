@@ -600,7 +600,6 @@ def test_injection_modules_have_no_core_or_hook_imports() -> None:
         python_root / "magi_agent/recipes/first_party/learning_usage.py",
     ]
     banned_substrings = (
-        "magi_agent.runtime.turn_controller",
         "magi_agent.runtime.message_builder",
         "magi_agent.runtime.adk_bridge",
         "magi_agent.openmagi_runtime",

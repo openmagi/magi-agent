@@ -1696,8 +1696,34 @@ def is_egress_gate_enabled(env: Mapping[str, str] | None = None) -> bool:
     NOT follow the runtime-profile default-ON convention — it is an additive,
     default-disabled seam.
     """
+    # Delegate to the canonical config.flags registry (PR2). Behaviour is
+    # byte-identical to the previous ``_is_true(source.get(...))`` form because
+    # MAGI_EGRESS_GATE_ENABLED is registered with a False default and the same
+    # strict-truthy parser. Imported lazily to avoid a config<->flags import cycle.
+    from .flags import flag_bool
+
     source = os.environ if env is None else env
-    return _is_true(source.get(MAGI_EGRESS_GATE_ENABLED_ENV))
+    return flag_bool(MAGI_EGRESS_GATE_ENABLED_ENV, env=source)
+
+
+MAGI_GOAL_NUDGE_ENABLED_ENV = "MAGI_GOAL_NUDGE_ENABLED"
+
+
+def is_goal_nudge_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Single source of truth for the production goal-nudge activation flag.
+
+    Default OFF (strict truthy opt-in: "1"/"true"/"yes"/"on"). When OFF, the
+    production CLI/serve engine wiring injects ``goal_nudge=None`` so
+    ``MagiEngineDriver._drive`` behaves byte-identically to pre-PR4. When ON,
+    ``cli.goal_nudge_wiring.build_goal_nudge_from_env`` constructs a
+    :class:`~magi_agent.runtime.goal_nudge.GoalNudge` (default ``mode="goal"``)
+    and threads it onto the engine so a clean stop short of the goal triggers a
+    bounded continuation. Like ``is_egress_gate_enabled`` this deliberately does
+    NOT follow the runtime-profile default-ON convention — it is an additive,
+    default-disabled seam.
+    """
+    source = os.environ if env is None else env
+    return _is_true(source.get(MAGI_GOAL_NUDGE_ENABLED_ENV))
 
 
 MAGI_DOCUMENT_AUTHORING_COVERAGE_ENV = "MAGI_DOCUMENT_AUTHORING_COVERAGE"
@@ -1719,6 +1745,37 @@ def is_document_authoring_coverage_enabled(env: Mapping[str, str] | None = None)
     """
     source = os.environ if env is None else env
     return _is_true(source.get(MAGI_DOCUMENT_AUTHORING_COVERAGE_ENV))
+
+
+MAGI_CONTROL_STAGE_ENV = "MAGI_CONTROL_STAGE"
+MAGI_DEPLOYMENT_ENV = "MAGI_DEPLOYMENT"
+
+
+def resolve_control_stage(env: Mapping[str, str] | None = None) -> str:
+    """Single source of truth for the hosted control-stage selector.
+
+    Resolves ``MAGI_CONTROL_STAGE`` (``off|resilience|full|hardgate``), failing
+    safe to ``off`` for unknown/empty values so a typo never silently flips a
+    more aggressive stage. The actual env overlay lives in
+    :mod:`magi_agent.runtime.hosted_defaults`; this helper exists so callers read
+    the flag through ``config/env`` (15-flag-governance P1-6).
+    """
+    source = os.environ if env is None else env
+    from ..runtime.hosted_defaults import resolve_control_stage as _resolve  # noqa: PLC0415
+
+    return _resolve(source)
+
+
+def is_hosted_deployment(env: Mapping[str, str] | None = None) -> bool:
+    """Single source of truth for explicit hosted-deployment detection.
+
+    True only when ``MAGI_DEPLOYMENT=hosted`` is explicitly set. Reverse-detection
+    from the local-dev identity is intentionally avoided (doc 14 open-decision #2).
+    """
+    source = os.environ if env is None else env
+    from ..runtime.hosted_defaults import is_hosted_deployment as _is_hosted  # noqa: PLC0415
+
+    return _is_hosted(source)
 
 
 def is_format_on_write_enabled(env: Mapping[str, str]) -> bool:
@@ -1835,6 +1892,49 @@ def parse_evidence_completion_gate_enabled(env: Mapping[str, str]) -> bool:
     return _runtime_feature_enabled(env, "MAGI_EVIDENCE_COMPLETION_GATE_ENABLED")
 
 
+def parse_recipe_default_packs_expanded(env: Mapping[str, str]) -> bool:
+    """MAGI_RECIPE_DEFAULT_PACKS_EXPANDED — stage gate for recipe default-pack
+    expansion (doc 05 PR-2 / A1-G1). Default OFF.
+
+    When ON, a *safe* subset of first-party recipe packs
+    (``SAFE_DEFAULT_PACK_EXPANSION_IDS`` in ``magi_agent.recipes.compiler``) is
+    auto-selected during profile resolution even without an explicit
+    task-profile selector. The safe subset is restricted to packs that are
+    read-only / idempotent, carry zero production-authority approval gates, and
+    declare no live dependency — so turning the gate ON cannot auto-enable any
+    side-effecting/authority pack (coding, channel, scheduler, office, etc.).
+
+    OFF (default) keeps the compiled snapshot byte-identical to origin/main:
+    only the two ``hardSafety`` packs (``openmagi.context-safety`` /
+    ``openmagi.evidence``) are default-selected.
+    """
+    return _is_true(env.get("MAGI_RECIPE_DEFAULT_PACKS_EXPANDED"))
+
+
+# Single source of truth for the CLI session-log write path (PR-04-PR1).
+CLI_SESSION_LOG_ENABLED_ENV = "MAGI_CLI_SESSION_LOG_ENABLED"
+
+
+def cli_session_log_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Whether the headless CLI persists a per-turn JSONL transcript.
+
+    Single source of truth for the ``MAGI_CLI_SESSION_LOG_ENABLED`` flag. This
+    gates the live drain tap that calls ``SessionLog.append`` for every turn,
+    which is the on-disk substrate ``--resume``/``--continue`` rehydration reads.
+
+    Stage-1 default-OFF: unlike most runtime feature flags this is **strict**
+    default-OFF (only an explicit truthy value enables it) — it is NOT tied to
+    the runtime profile, so a local-full install does not silently start writing
+    raw transcripts to disk until the value is flipped on. The local-full / eval
+    profiles register the flag at ``"0"`` so a later release can stage it ON.
+    """
+
+    import os as _os
+
+    source = env if env is not None else _os.environ
+    return _is_true(source.get(CLI_SESSION_LOG_ENABLED_ENV))
+
+
 def tool_concurrency_enabled(env: Mapping[str, str]) -> bool:
     """Single source of truth for the ``MAGI_TOOL_CONCURRENCY_ENABLED`` flag.
 
@@ -1884,6 +1984,24 @@ def general_automation_live_enabled(env: Mapping[str, str] | None = None) -> boo
 
         env = os.environ
     return _runtime_feature_enabled(env, "MAGI_GA_LIVE_ENABLED")
+
+
+def plan_act_gate_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Return True when the plan_act runner-wiring gate is explicitly enabled.
+
+    Single source of truth for ``MAGI_PLAN_ACT_GATE_ENABLED`` (cluster 06 PR4 /
+    inventory B9). This is a **strict default-OFF** gate: unlike the
+    profile-aware ``MAGI_*_ENABLED`` flags, it never defaults ON in the full
+    runtime profile. It only flips to ``True`` for an explicit truthy value
+    (``"1"``/``"true"``/``"yes"``/``"on"``), so the GA
+    ``plan_gate -> plan_act_switch -> delegation`` chain stays inert (and
+    byte-identical to ``main``) unless an operator opts in.
+    """
+    if env is None:
+        import os as _os
+
+        env = _os.environ
+    return _is_true(env.get("MAGI_PLAN_ACT_GATE_ENABLED"))
 
 
 def is_message_cache_enabled(env: Mapping[str, str] | None = None) -> bool:
@@ -1938,6 +2056,27 @@ def browser_tool_enabled(env: Mapping[str, str] | None = None) -> bool:
     return _runtime_feature_enabled(env, "MAGI_BROWSER_TOOL_ENABLED") and not _is_true(
         env.get("MAGI_BROWSER_TOOL_KILL_SWITCH")
     )
+
+
+MAGI_PERMISSION_SCOPE_FROM_MODE_ENV = "MAGI_PERMISSION_SCOPE_FROM_MODE"
+
+
+def permission_scope_from_mode_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Single source of truth for the mode-derived permission-scope gate.
+
+    Default OFF (strict truthy opt-in: "1"/"true"/"yes"/"on"). When OFF the CLI
+    tool runtime keeps stamping the legacy hardcoded
+    ``permission_scope={"mode": "selected_full_toolhost", ...}`` onto every
+    ``ToolContext`` — byte-identical to before. When ON, the scope is derived
+    from the active permission mode via
+    :class:`magi_agent.tools.permission_scope.PermissionScopeResolver`, so the
+    ``default`` mode no longer preapproves mutating tools and the arbiter "ask"
+    branch can actually be reached. Like ``is_egress_gate_enabled`` this is an
+    additive, default-disabled seam and deliberately does NOT follow the
+    runtime-profile default-ON convention.
+    """
+    source = os.environ if env is None else env
+    return _is_true(source.get(MAGI_PERMISSION_SCOPE_FROM_MODE_ENV))
 
 
 def _is_true(value: str | None) -> bool:

@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from magi_agent.transport import chat
+from magi_agent.transport import chat_routes
 
 
 def _runtime() -> Any:
@@ -27,7 +28,7 @@ def test_scheduler_noop_when_disabled(monkeypatch: Any) -> None:
         called.append(kwargs)
         return "emitted"
 
-    monkeypatch.setattr(chat, "emit_runtime_direct_usage_receipt", _fake_emit)
+    monkeypatch.setattr(chat_routes, "emit_runtime_direct_usage_receipt", _fake_emit)
 
     async def _run() -> None:
         chat._schedule_runtime_direct_usage_receipt(
@@ -50,7 +51,7 @@ def test_scheduler_noop_without_usage(monkeypatch: Any) -> None:
         called.append(kwargs)
         return "emitted"
 
-    monkeypatch.setattr(chat, "emit_runtime_direct_usage_receipt", _fake_emit)
+    monkeypatch.setattr(chat_routes, "emit_runtime_direct_usage_receipt", _fake_emit)
 
     async def _run() -> None:
         chat._schedule_runtime_direct_usage_receipt(
@@ -73,7 +74,7 @@ def test_scheduler_emits_when_enabled(monkeypatch: Any) -> None:
         captured.update(kwargs)
         return "emitted"
 
-    monkeypatch.setattr(chat, "emit_runtime_direct_usage_receipt", _fake_emit)
+    monkeypatch.setattr(chat_routes, "emit_runtime_direct_usage_receipt", _fake_emit)
 
     async def _run() -> None:
         chat._schedule_runtime_direct_usage_receipt(

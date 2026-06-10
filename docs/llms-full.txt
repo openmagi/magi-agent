@@ -94,7 +94,8 @@ The source checkout is for contributors developing the runtime. Normal users ins
 - What Works Today: https://openmagi.ai/docs/what-works-today - with a provider key, the local `magi` CLI runs a real model and first-party tools today.
 - Common Tasks: https://openmagi.ai/docs/common-tasks - the local `magi` CLI runs a real model and first-party tools once a provider key is set (`magi_agent/cli/app.py`, `magi_agent/tools/catalog.py`).
 - Channels (Telegram, Discord): https://openmagi.ai/docs/channels - (default-off) channel code (Telegram, Discord) ships in shadow / local-fake mode; live send/receive is gated and produces intent + receipt records, not real delivery (`magi_agent/channels/telegram_adapter.py`, `contract.py`).
-- CLI Reference: https://openmagi.ai/docs/cli-reference - Type: Reference — the full flag, output-mode, exit-code, keybinding, and
+- CLI Reference: https://openmagi.ai/docs/cli-reference - Type: Reference — the full flag, output-mode, exit-code, and keybinding reference for `magi`/`magi <subcommand>` (source: `docs/cli/magi.md`).
+- Gateway Daemon CLI: https://openmagi.ai/docs/cli-gateway - the `magi gateway status|start|install|uninstall` always-on daemon commands; default-off via `MAGI_GATEWAY_DAEMON_ENABLED`.
 - Changelog: https://openmagi.ai/docs/changelog - this page tracks user-facing changes; tagged builds are on GitHub Releases.
 - Upgrading: https://openmagi.ai/docs/upgrading - covers upgrading the Homebrew install and source checkouts.
 - Glossary: https://openmagi.ai/docs/glossary - definitions of the core Magi Agent terms.
@@ -439,7 +440,7 @@ EvidenceRecord(
 
 The model drafts a claim: "Competitor A charges $99/seat." Before the answer can be committed, the evidence contract evaluates. It checks: is there a SourceInspection record with `inspected=True`? Yes - the record from Step 2 matches. Verdict: pass. The claim is supported and can proceed.
 
-If the model had claimed something without reading the source, the contract verdict would be `missing`. The enforcement boundary logs an audit event and sends the `retry_message` back to the model: "Inspect the source document before making claims." The model then reads the source and tries again — this is the repair flow.
+If the model had claimed something without reading the source, the contract verdict would be `missing`. The engine pre-final gate logs an audit event and sends the `retry_message` back to the model: "Inspect the source document before making claims." The model then reads the source and tries again — this is the repair flow.
 
 ## Step 4 - Output projection
 
@@ -456,7 +457,7 @@ Each layer of the runtime handled a different concern in this scenario:
 - Hook bus — dispatched `beforeToolUse` (permission), `afterToolUse` (evidence), and `beforeCommit` (contract evaluation) hooks
 - Evidence ledger — recorded ToolEvidenceRecord and SourceInspection records with source refs
 - Evidence contracts — required SourceInspection evidence before claims could proceed
-- Enforcement boundary — evaluated contract verdicts and determined audit/block/pass actions
+- Engine pre-final gate — evaluated contract verdicts and determined audit/block/pass actions
 - Output projection — allowed only supported claims with citation references to reach the user
 
 # CLI
@@ -510,14 +511,29 @@ configured, `magi` still launches but uses a model-free stub.
 
 ## Permission modes
 
-The CLI gates tool calls with three permission modes (set via `--permission-mode`):
+The CLI gates tool calls with four permission modes (set via `--permission-mode`):
 
 - `default` — prompts for each tool call that requires approval.
 - `acceptEdits` — auto-allows edit-class tools (file writes, patches); everything else still prompts.
 - `bypassPermissions` — allows all tool calls without prompting.
+- `smartApprove` — opt-in mode that auto-approves low-risk tool calls and only
+  prompts for higher-risk ones. It is never selected automatically; you must
+  pass `--permission-mode smartApprove` to enable it.
 
 First-party local tools are on by default; disable them with
 `MAGI_FIRST_PARTY_TOOLS_ENABLED=0`.
+
+## Agent mode (`--mode`)
+
+The `--mode` flag selects the agent's working mode:
+
+- `act` (default) — full tool access; the agent reads, writes, and runs commands.
+- `plan` — plan-first mode that restricts the agent to read-only tools so it
+  drafts a plan before acting.
+
+```sh
+magi --mode plan "refactor the auth module"
+```
 
 ## Full reference
 
@@ -696,13 +712,13 @@ Source: https://github.com/openmagi/magi-agent/blob/main/docs/runtime.md
 
 How Magi Agent turns model proposals into governed state transitions via the Python ADK runtime.
 
-The runtime is the engine that governs every agent action. The runtime loop separates model-visible context from runtime-only evidence and claim state. A local run with a configured provider key builds a model-backed ADK runner, then flows through session boundaries, model routing, message building, event streaming, projection validation, and error classification. External delivery and high-authority mutations remain governed by explicit gates.
+The runtime is the engine that governs every agent action. The runtime loop separates model-visible context from runtime-only evidence and claim state. A local run with a configured provider key builds a model-backed ADK runner and drives each turn through the engine driver: provider and model resolution, single-flight session admission, the ADK event stream, and error classification with bounded recovery. External delivery and high-authority mutations remain governed by explicit gates.
 
 ## Runtime loop
 
 The Python ADK runtime entry point is __main__.py, which calls main.py (parse_runtime_env() reads required env vars) and then app.py (create_app() registers FastAPI routes such as /health, /healthz, and /v1/chat/completions).
 
-The runtime container creates RuntimeConfig, RuntimeProfile, AdkPrimitiveBoundary, ToolRegistry, and ResolvedPluginState. The real turn loop is: user message enters RunnerSessionBoundary.run_turn(), which takes a policy snapshot plus harness resolution, then routes through model_routing.py for model selection, message_builder.py for context packet assembly, the ADK runner, event streaming, projection_write_boundary.py for output validation, and error_taxonomy.py for error classification.
+The runtime container creates RuntimeConfig, RuntimeProfile, AdkPrimitiveBoundary, ToolRegistry, and ResolvedPluginState. The real turn loop is driven by the engine: a user message becomes a TurnInput (cli/contracts.py), and MagiEngineDriver (cli/engine.py) drives the turn over a model-backed ADK runner built by cli/real_runner.py, with the provider and model resolved by cli/providers.py. The engine takes a per-session single-flight slot from ActiveTurnRegistry (runtime/active_turn_registry.py), streams ADK events through the adk_bridge adapter, and classifies failures through runtime/error_recovery. The same engine path drives the CLI, the TUI, and the `magi-agent serve` chat surface.
 
 ### Two-plane architecture
 
@@ -733,9 +749,9 @@ Final answer/artifact     <-------- Validators + repair/fallback policy
 User-visible projection   <-------- Output projector + audit checkpoint
 ```
 
-## TurnInput and session boundary
+## TurnInput and session concurrency
 
-Each turn is modeled as a TurnInput (from runtime/turn_controller.py) with fields: user_id, session_id, turn_id, message_text, and harness_state. The RunnerSessionBoundary (runtime/runner_session_boundary.py) manages session concurrency and error classification for each turn.
+Each turn is modeled as a TurnInput (cli/contracts.py) with fields: prompt, session_id, turn_id, initial_messages, harness_state, and image_blocks. Session concurrency is single-flight: the engine registers each turn in ActiveTurnRegistry (runtime/active_turn_registry.py) and rejects a second concurrent turn for the same session id.
 
 The runtime uses two layers: runtime/openmagi_runtime.py is the core container, and the adk_bridge/ directory provides the adapter, callback, plugin, context-compaction, and tool-attachment surfaces used when a live ADK runner is built. Local CLI/dashboard runs can use those surfaces directly; external authority is controlled by deployment policy.
 
@@ -1631,9 +1647,9 @@ Recipes are composable task profiles that declare what evidence, hooks, and harn
 
 The runtime exposes typed hook points (hooks/manifest.py, 15 HookPoint values), HookRegistry + HookBus dispatch (hooks/registry.py, hooks/bus.py), boundary interfaces, and a ToolHost surface (tools/catalog.py, tools/registry.py, tools/manifest.py) for extending agent behavior without forking the core.
 
-- Runtime architecture: See [Runtime](/docs/runtime) for the FastAPI entry point, RunnerSessionBoundary turn loop, and the two-plane model-visible loop vs runtime-only control plane.
+- Runtime architecture: See [Runtime](/docs/runtime) for the FastAPI entry point, the MagiEngineDriver turn loop, and the two-plane model-visible loop vs runtime-only control plane.
 - System architecture: See [Architecture](/docs/architecture) for the MODEL-VISIBLE LOOP and RUNTIME-ONLY CONTROL PLANE separation.
-- Boundary modules: See [Boundaries](/docs/boundaries) for the seven implemented boundary modules and the Intent-to-Receipt pattern.
+- Boundary modules: See [Boundaries](/docs/boundaries) for the six implemented boundary modules and the Intent-to-Receipt pattern.
 - Hook points: See [Hook Points](/docs/hook-points) for the 15 HookPoint enum values, HookRegistry registration, and HookBus dispatch.
 - Runtime interfaces: See [Runtime Interfaces](/docs/runtime-interfaces) for TurnInput, HookBusRunResult, EvidenceLedgerEntry, ToolRegistration, RecipeSnapshot, and all typed Python interfaces.
 - ToolHost: See [ToolHost](/docs/toolhost) for ToolManifest schema, ToolRegistry, first-party tool catalog, and governed dispatch.
@@ -1662,7 +1678,7 @@ Sessions track turn history, context windows, compaction, and durable state acro
 
 A session is a conversation with the agent. It remembers what you discussed, what files were changed, and what evidence was collected across turns. Sessions persist across compaction — when the context window fills up, older turns are summarized but key evidence and decisions are preserved.
 
-Implementation: session identity is managed by the runtime session identity module, session continuity across turns by the session continuity module, and the ADK bridge session service handles session state persistence (read-only or disabled by default). Each turn enters through RunnerSessionBoundary, which manages session concurrency and error classification.
+Implementation: session identity is managed by the runtime session identity module, session continuity across turns by the session continuity module, and the ADK bridge session service handles session state persistence (read-only or disabled by default). Each turn enters through the engine driver (MagiEngineDriver in cli/engine.py), which enforces single-flight session concurrency via ActiveTurnRegistry and classifies turn errors.
 
 ## Context window and turn management
 
@@ -1748,7 +1764,7 @@ Builtin evidence types include GitDiff, TestRun, CodeDiagnostics, CommitCheckpoi
 
 ## Boundary decisions as status updates
 
-Each boundary module produces typed decisions that the console can display. For example, the evidence enforcement boundary produces EvidenceEnforcementDecision with allowed/blocked status. The commit boundary produces CommitBoundaryPlan describing what will be committed. The artifact delivery boundary produces ArtifactChannelDeliveryDecision for file delivery operations.
+Each boundary module produces typed decisions that the console can display. For example, the engine pre-final gate produces an EvidenceContractVerdict with a pass/block_ready state. The commit boundary produces CommitBoundaryPlan describing what will be committed. The artifact delivery boundary produces ArtifactChannelDeliveryDecision for file delivery operations.
 
 These decisions are part of the runtime-only control plane and are not visible to the model. The work console is the primary surface where operators see boundary decisions and their outcomes.
 
@@ -1773,7 +1789,7 @@ Source: https://github.com/openmagi/magi-agent/blob/main/docs/boundaries.md
 
 Runtime boundaries that govern when model proposals become state, output, or side effects.
 
-Boundaries are control points that prevent the agent from taking action without verification. Seven boundary modules follow the Intent-to-Receipt pattern where every side effect is validated before execution.
+Boundaries are control points that prevent the agent from taking action without verification. Six boundary modules follow the Intent-to-Receipt pattern where every side effect is validated before execution.
 
 > **Boundary enforcement is default-off (shadow) — the agent still executes work.** These boundaries are the governance layer; today they observe and record without blocking or gating. That is independent of the agent's ability to run: with a provider key, the local `magi` CLI executes a real model and first-party tools today (see [What works today](/docs/what-works-today)). "Default-off" / `Literal[False]` here scopes whether enforcement is attached to live decisions, not whether tasks can execute.
 
@@ -1820,16 +1836,9 @@ class ToolEvidenceRecord(BaseModel):
     duration_ms: int | None
 ```
 
-## Evidence enforcement boundary
+## Evidence enforcement
 
-The evidence enforcement boundary (evidence/enforcement_boundary.py) evaluates an EvidenceContract against collected evidence records and produces an EvidenceEnforcementDecision. It determines whether evidence is sufficient to proceed, requires repair, or should block. Status: implemented, evaluation is default-off (config.enabled=False).
-
-- EvidenceEnforcementStatus: disabled, evaluation_intent, pass, audit_missing, repair_required, escalate_required, block_ready_local_fake.
-- EvidenceEnforcementAction: audit, pass, repair, escalate, block_intent.
-- EvidenceEnforcementDomain: research, coding, completion, general.
-- EvidenceEnforcementConfig gates evaluation: enabled, local_fake_evaluation_enabled, evidence_block_enabled (Literal[False]), final_answer_blocking_enabled (Literal[False]).
-- EvidenceEnforcementAuthorityFlags: all fields Literal[False] including evidence_block_enabled, final_answer_blocked, live_tool_dispatched, shell_git_or_test_executed, production_writes_enabled, route_attached.
-- When the verdict fails with block_ready state: if repair_allowed, status is repair_required; if escalation_allowed, status is escalate_required; otherwise status is block_ready_local_fake with action block_intent.
+Evidence enforcement happens on the live output path in the engine pre-final gate. A turn collects EvidenceRecords from tool calls, matches them against an EvidenceContract, and produces an EvidenceContractVerdict. For coding-domain turns the engine pre-final gate (cli/engine.py) consumes that verdict via the verifier bus (harness/verifier_bus.py) and, when it reaches a block_ready state, blocks the final answer or triggers a repair loop by default. There is a single live enforcement path; there is no separate standalone enforcement-boundary module.
 
 ## Memory write boundary
 
@@ -1841,16 +1850,6 @@ The memory write boundary (memory/write_boundary.py) governs all memory mutation
 - MemoryMutationReceipt includes receipt_id, status, executed, memory_write_allowed, production_write_enabled, provider_call_attempted, filesystem_mutation_attempted, production_receipt, local_test_only, target (MemoryMutationTarget), authority_flags.
 - MemoryWriteAuthorityFlags: all Literal[False] including memory_write_allowed, memory_redact_allowed, memory_delete_allowed, provider_call_allowed, filesystem_write_allowed, database_write_allowed, network_call_allowed, production_write_enabled.
 - Local test-only receipts use HMAC signature verification (local_test_receipt_marker + local_test_receipt_signature) to distinguish test receipts from production claims.
-
-## Projection write boundary
-
-The projection write boundary (runtime/projection_write_boundary.py) governs writes to output channels: transcript, SSE, control events, and control requests. All projection writes are disabled by default and produce a ProjectionWriteBoundaryResult with allowed=False. Status: implemented, default-off.
-
-- ProjectionWriteTarget: transcript, sse, control_event, control_request.
-- ProjectionWriteIntent includes target, operation, session_key, idempotency_key, payload.
-- ProjectionWriteBoundaryResult: allowed is Literal[False], includes denial (ProjectionWriteDenial with reason_code projection_writes_disabled) and authority_flags.
-- ProjectionWriteAuthorityFlags: all Literal[False] including transcript_write_allowed, sse_write_allowed, control_event_write_allowed, control_request_write_allowed, durable_write_allowed, production_receipt_allowed, storage_backend_attached, filesystem_write_allowed, database_write_allowed, transport_write_allowed.
-- evaluate_projection_write_intent() always returns allowed=False with a denial explaining that storage backend and receipt policy are not attached.
 
 ## Child runner boundary
 
@@ -1976,15 +1975,15 @@ An EvidenceContract declares what evidence must be present and what to do when i
 
 ## Evidence flow
 
-Evidence flows through the system in a pipeline: tool call produces a ToolEvidenceRecord, which is promoted to an EvidenceRecord with source kind tool_trace. Collected EvidenceRecords are matched against EvidenceContract requirements. The contract engine produces an EvidenceContractVerdict. The enforcement boundary consumes the verdict and produces an EvidenceEnforcementDecision with a status and action.
+Evidence flows through the system in a pipeline: tool call produces a ToolEvidenceRecord, which is promoted to an EvidenceRecord with source kind tool_trace. Collected EvidenceRecords are matched against EvidenceContract requirements. The contract engine produces an EvidenceContractVerdict. On the live output path the engine pre-final gate (cli/engine.py) consumes that verdict via the verifier bus (harness/verifier_bus.py) and decides whether to pass, block, or repair the turn.
 
-The flow is: tool call -> ToolEvidenceRecord -> EvidenceRecord -> contract matching -> EvidenceContractVerdict -> EvidenceEnforcementDecision.
+The flow is: tool call -> ToolEvidenceRecord -> EvidenceRecord -> contract matching -> EvidenceContractVerdict -> engine pre-final gate (pass / block / repair).
 
 - Step 1: Tool boundary creates ToolEvidenceRecord with kind, status, hashes, and sanitized summaries.
 - Step 2: Record is wrapped as EvidenceRecord with type matching the evidence category (e.g. TestRun, GitDiff).
 - Step 3: Contract engine iterates requirements, matches records by type, checks after-boundary freshness, validates field matchers.
 - Step 4: Verdict summarizes pass/fail with matched evidence and missing requirements.
-- Step 5: Enforcement boundary maps verdict to action: pass, audit, repair, escalate, or block_intent.
+- Step 5: The engine pre-final gate maps the verdict to an action: pass, audit, repair, or block (for coding-domain turns the gate blocks by default; research-domain verdicts are recorded for diagnostics only).
 
 # Projection
 
@@ -1994,39 +1993,15 @@ Source: https://github.com/openmagi/magi-agent/blob/main/docs/projection.md
 
 How runtime state is projected into model-visible context and user-visible output.
 
-Projection controls what the model sees as context and what users receive as output. The projection write boundary governs all durable writes to output channels, and is disabled by default.
+Projection controls what the model sees as context and what users receive as output. Durable writes to output channels (transcript, SSE, control events) are performed directly by the surfaces that own them; receipts that reach the model first pass through the sanitizing projections described below.
 
-## Projection write targets
+## Removed: projection write boundary
 
-The projection system defines four write targets that represent the channels through which runtime state can become visible output. All writes to these targets go through the projection write boundary, which is disabled by default.
-
-- transcript: durable conversation transcript entries (assistant text, tool results, turn markers).
-- sse: server-sent event stream to the client (turn_end, runtime_trace, legacy_finish).
-- control_event: internal runtime control events (stop_reason, structured_output).
-- control_request: internal runtime control requests (reject_pending_asks).
-
-## ProjectionWriteIntent and result
-
-A ProjectionWriteIntent describes a proposed write to an output channel. The boundary evaluates it and returns a ProjectionWriteBoundaryResult. Currently, all projection writes return allowed=False because no storage backend or receipt policy is attached.
-
-- ProjectionWriteIntent fields: target (ProjectionWriteTarget), operation (string describing the write), session_key, idempotency_key, payload.
-- ProjectionWriteBoundaryResult fields: allowed (Literal[False]), target, operation, durable_write_attempted (Literal[False]), production_receipt_produced (Literal[False]), authority_flags, denial, receipt.
-- ProjectionWriteDenial: reason_code is always projection_writes_disabled.
-- ProjectionWriteReceipt: defined but never populated (receipt is always None) because no storage backend is attached.
-
-## Projection authority flags
-
-ProjectionWriteAuthorityFlags follows the same default-off pattern as all boundary modules. All 10 flags are typed as Literal[False] and enforced to False through model validators and serializers.
-
-- transcript_write_allowed, sse_write_allowed, control_event_write_allowed, control_request_write_allowed: per-target write gates.
-- durable_write_allowed: whether writes can be persisted.
-- production_receipt_allowed: whether production receipts can be issued.
-- storage_backend_attached: whether a storage backend is connected.
-- filesystem_write_allowed, database_write_allowed, transport_write_allowed: infrastructure-level write gates.
+Earlier revisions shipped an experimental `runtime/projection_write_boundary.py` that modeled output writes as gated intents (always `allowed=False`, with no storage backend attached). It was removed together with the unwired runner-session stack because no production path consumed it. Output writes now happen at the points that own them: durable session logs in `cli/session_log.py`, SSE frames in the transport stream routes, and control events inside the engine.
 
 ## Relationship to the commit boundary
 
-The commit boundary (commit_boundary.py) plans projection intents as CommitIntent records with targets matching the projection write targets (transcript, sse, control, hook). Each CommitIntent is descriptive only and is not executed. The projection write boundary would govern the actual execution of these intents if enabled.
+The commit boundary (commit_boundary.py) plans projection intents as CommitIntent records with targets matching the historical projection write targets (transcript, sse, control, hook). Each CommitIntent is descriptive only and is not executed.
 
 The commit boundary also plans hook intents (beforeCommit, afterCommit, afterTurnEnd, onTaskCheckpoint, onAbort) that observe the turn lifecycle but do not write to output channels directly.
 
@@ -2034,7 +2009,7 @@ The commit boundary also plans hook intents (beforeCommit, afterCommit, afterTur
 
 Memory writes follow a separate projection path through the memory write boundary (write_boundary.py). Memory mutation receipts include a public_projection() method that produces a sanitized view safe for model-visible context. The projection strips production execution claims, forces authority flags to False, and sanitizes receipt IDs, provider IDs, turn IDs, and error codes.
 
-Similarly, ChildRunnerResult, ArtifactChannelDeliveryDecision, and EvidenceEnforcementDecision all provide public_projection() methods that strip private metadata before the result is returned to the model.
+Similarly, ChildRunnerResult and ArtifactChannelDeliveryDecision both provide public_projection() methods that strip private metadata before the result is returned to the model.
 
 # Repair and Fallback
 
@@ -2044,17 +2019,16 @@ Source: https://github.com/openmagi/magi-agent/blob/main/docs/repair-fallback.md
 
 How the runtime handles missing evidence: retry, downgrade, approve, fallback, abstain, or block.
 
-When evidence is missing or validation fails, the enforcement decision flow determines the next action. Repair is currently implicit in the enforcement boundary and commit boundary block plans, not a separate framework.
+When evidence is missing or validation fails, the enforcement decision flow determines the next action. Repair is currently implicit in the engine pre-final gate and commit boundary block plans, not a separate framework.
 
 ## Evidence enforcement repair flow
 
-When the evidence enforcement boundary evaluates a contract and the verdict fails (state is block_ready), the enforcement decision depends on the request flags. This is the current repair mechanism, implemented in EvidenceEnforcementBoundary.evaluate().
+When an evidence contract verdict fails (state is block_ready), the next action is decided on the live output path by the engine pre-final gate (cli/engine.py) via the verifier bus (harness/verifier_bus.py).
 
-- If verdict.ok is True: status=pass, action=pass. No repair needed.
-- If verdict is block_ready and repair_allowed is True: status=repair_required, action=repair. The caller should gather more evidence and retry.
-- If verdict is block_ready and escalation_allowed is True: status=escalate_required, action=escalate. The caller should escalate to a higher authority (e.g. human review).
-- If verdict is block_ready and neither flag is set: status=block_ready_local_fake, action=block_intent. The intent to block is recorded but not enforced (because evidence_block_enabled is Literal[False]).
-- If verdict is not block_ready (state is missing or failed): status=audit_missing, action=audit. Missing evidence is logged but does not block.
+- If verdict.ok is True: the gate passes the turn. No repair needed.
+- If verdict is block_ready for a coding-domain turn: the gate blocks the final answer (Terminal.error, error="pre_final_evidence_gate_blocked"); with MAGI_CODING_REPAIR_LOOP_ENABLED it drives a repair loop that gathers more evidence and retries. This is live and on by default for the coding domain.
+- For research-domain turns, the final-projection gate records the same verdict for diagnostics only: a block_ready verdict becomes "block_ready_local_fake" (its final_answer_blocking_enabled flag is Literal[False]) and does not block output.
+- If verdict is not block_ready (state is missing or failed): missing evidence is logged to the audit ledger but does not block.
 
 ## Commit boundary block plans
 
@@ -2088,9 +2062,9 @@ block plan with a retryable flag.
 
 ## Current behavior vs future repair framework
 
-The current repair mechanism is implicit in the enforcement decision flow and commit boundary block plans. There is no dedicated RepairDecision type that orchestrates a multi-step repair loop across boundaries. The RepairPlan/RepairDecision types in harness/repair_policy.py provide the building blocks, but integration with the enforcement boundary to automatically drive repair sequences is not yet implemented.
+The current repair mechanism is implicit in the engine pre-final gate decision flow and commit boundary block plans. There is no dedicated RepairDecision type that orchestrates a multi-step repair loop across boundaries. The RepairPlan/RepairDecision types in harness/repair_policy.py provide the building blocks, but integration with the engine pre-final gate to automatically drive repair sequences across multiple contracts is not yet implemented.
 
-A future explicit repair framework would unify the enforcement boundary repair_required action, commit boundary retryable block plans, and harness repair policy into a single orchestrated repair loop with configurable strategies per evidence contract.
+A future explicit repair framework would unify the engine pre-final gate repair action, commit boundary retryable block plans, and harness repair policy into a single orchestrated repair loop with configurable strategies per evidence contract.
 
 # Recipes
 
@@ -2569,7 +2543,7 @@ test_evidence = EvidenceRecord(
 
 ## How this compares to built-in recipes
 
-This recipe is under 100 lines. It defines one pack manifest, two evidence contracts, two scopes, and a local test. When activated, the harness engine resolves these contracts, the hook bus evaluates them at after_tool_use and before_commit, and the enforcement boundary logs audit events for missing evidence.
+This recipe is under 100 lines. It defines one pack manifest, two evidence contracts, two scopes, and a local test. When activated, the harness engine resolves these contracts, the hook bus evaluates them at after_tool_use and before_commit, and the engine pre-final gate logs audit events for missing evidence.
 
 Compare this with the built-in research domain (~16,000 lines) which adds source ledger tracking with 9 source kinds and trust tiers, citation auditing with pass/failure/missing per citation, claim graph dependency tracking, multi-layer scope enforcement with child agent delegation, and repair policies with retry backoff. The built-in coding domain (~3,800 lines) adds git diff verification, test run validation with exit code checks, diagnostics integration, and planner command alignment. Most custom recipes need far less; the under-100-line pattern above covers the typical case.
 
@@ -2877,7 +2851,7 @@ Source: https://github.com/openmagi/magi-agent/blob/main/docs/general-automation
 
 Worked example covering approval gates, delivery boundaries, artifact verification, and commit boundaries using openmagi.office-automation and openmagi.spreadsheet-automation packs.
 
-A general automation workflow uses boundary modules (artifacts/delivery_boundary.py, runtime/commit_boundary.py, runtime/projection_write_boundary.py) and evidence types (FileDeliver, ArtifactVerify, CommitCheckpoint) to govern background and scheduled tasks. Relevant first-party packs: openmagi.office-automation, openmagi.spreadsheet-automation.
+A general automation workflow uses boundary modules (artifacts/delivery_boundary.py, runtime/commit_boundary.py) and evidence types (FileDeliver, ArtifactVerify, CommitCheckpoint) to govern background and scheduled tasks. Relevant first-party packs: openmagi.office-automation, openmagi.spreadsheet-automation.
 
 ## Automation scenario
 
@@ -2891,12 +2865,12 @@ The runtime includes dedicated boundary modules that enforce policy at specific 
 
 - artifacts/delivery_boundary.py -- governs artifact delivery to channels and external targets
 - runtime/commit_boundary.py -- validates state before committing results
-- runtime/projection_write_boundary.py -- controls what enters projected output
 - memory/write_boundary.py -- validates memory writes for safety and policy
 - runtime/child_runner_boundary.py -- governs child agent result imports
 - evidence/tool_boundary.py -- validates tool execution and produces evidence records
-- evidence/enforcement_boundary.py -- enforces evidence contract verdicts
 - runtime/activity_boundary.py -- general activity boundary for tool execution
+
+Evidence contract verdicts are enforced on the live output path by the engine pre-final gate (cli/engine.py) via the verifier bus (harness/verifier_bus.py), not by a separate enforcement-boundary module.
 
 ## Delivery and artifact evidence
 
@@ -3177,7 +3151,7 @@ The runtime exposes typed interfaces for turn control, evidence, boundaries, hoo
 
 The runtime core defines types for turn input, session management, and hook dispatch. These are the entry points for the governed turn loop.
 
-- TurnInput (runtime/turn_controller.py): user_id, session_id, turn_id, message_text, harness_state. The input model for each agent turn.
+- TurnInput (cli/contracts.py): prompt, session_id, turn_id, initial_messages, harness_state, image_blocks. The input model for each agent turn.
 - HookBusRunResult (hooks/bus.py): final_action (continue/block/pending_control_request), observation (effective_hooks, skipped_by_scope, failed_open, failed_closed, blocked_by), permission_boundary. The result of running hooks at a lifecycle point.
 - EvidenceLedgerEntry (evidence/ledger.py): kind, sequence, evidence_ref, session_id, turn_id, run_on, agent_role, spawn_depth, source_kind, producer_surface, payload (sanitized), metadata, traffic_attached/execution_attached/route_attached (all False). The primary ledger record.
 - ToolRegistration (tools/registry.py): manifest (ToolManifest), enabled, handler. The registry entry for a tool.
@@ -3208,11 +3182,11 @@ The tool evidence boundary produces ToolEvidenceRecord instances that capture ev
 Each boundary module exposes Intent, Receipt/Decision, and AuthorityFlags types. All are implemented with default-off behavior.
 
 - MemoryMutationIntent / MemoryMutationReceipt: memory write boundary. Implemented, default-off.
-- ProjectionWriteIntent / ProjectionWriteBoundaryResult: projection write boundary. Implemented, default-off.
 - ChildTaskRequest / ChildRunnerResult: child runner boundary. Implemented, default-off.
 - ArtifactRecord / ArtifactChannelDeliveryRequest / ArtifactChannelDeliveryDecision: artifact delivery boundary. Implemented, default-off.
 - CommitIntent / CommitBoundaryPlan: commit boundary. Implemented, descriptive only.
-- EvidenceEnforcementRequest / EvidenceEnforcementDecision: enforcement boundary. Implemented, default-off.
+
+Evidence enforcement does not have a standalone boundary type. Evidence contract verdicts (EvidenceContractVerdict) are enforced on the live output path by the engine pre-final gate (cli/engine.py) via the verifier bus (harness/verifier_bus.py).
 
 ## Hook manifest interface (Python)
 
@@ -3251,8 +3225,8 @@ The following interface names appear in design documents or are referenced conce
 
 - ToolHostRequest / ToolHostReceipt: conceptual types for a dedicated ToolHost boundary. Tool execution currently goes through the hook system (beforeToolUse/afterToolUse) and produces ToolEvidenceRecord, not a separate ToolHostReceipt.
 - RepairDecision (as a cross-boundary orchestrator): the existing RepairDecision in harness/repair_policy.py handles single-plan repair steps, but there is no cross-boundary repair orchestration type.
-- ProjectionResult: projection writes always return ProjectionWriteBoundaryResult with allowed=False. No separate ProjectionResult type exists.
-- ValidationResult: validation is expressed through EvidenceContractVerdict and EvidenceEnforcementDecision, not a separate ValidationResult type.
+- ProjectionResult: no projection write result type exists. The earlier default-off projection write boundary module (and its ProjectionWriteBoundaryResult type) was removed from the codebase.
+- ValidationResult: validation is expressed through EvidenceContractVerdict and the engine pre-final gate decision, not a separate ValidationResult type.
 
 # Hook Points
 
@@ -3488,7 +3462,7 @@ Contract triggers determine when the contract is evaluated during the turn lifec
 The on_missing field determines the severity of missing evidence.
 
 - audit: missing evidence produces a verdict with state audit or missing. The turn is not blocked. Missing evidence is logged for review. This is the default for contracts that inform rather than enforce.
-- block_final_answer: missing evidence produces a verdict with state block_ready. When consumed by the enforcement boundary, this triggers repair_required, escalate_required, or block_intent depending on the enforcement configuration. This is used for contracts that must be satisfied before output.
+- block_final_answer: missing evidence produces a verdict with state block_ready. When consumed by the engine pre-final gate on the live output path, this blocks the final answer or triggers a repair loop for coding-domain turns (research-domain verdicts are recorded for diagnostics only). This is used for contracts that must be satisfied before output.
 
 ## Contract scoping
 
@@ -3625,11 +3599,11 @@ Evidence contracts are deterministic: given the same contract definition and the
 
 The contract engine (evidence/contracts.py) validates requirements against records using field matchers (equals, one_of, matches, exists). Each requirement specifies a type (matching a BUILTIN_EVIDENCE_TYPES value or custom: prefix) and optional field constraints. The engine produces a verdict with state pass, missing, failed, audit, or block_ready.
 
-## Using local_fake_evaluation_enabled for boundary testing
+## Testing enforcement decisions with the contract engine
 
-The EvidenceRolloutMetadata model (evidence/rollout.py) includes a mode field that can be set to audit or block_final_answer. When testing boundary behavior locally, the evidence enforcement boundary can be configured with local_fake_evaluation_enabled to simulate enforcement decisions without connecting to a live authority provider.
+The EvidenceRolloutMetadata model (evidence/rollout.py) includes a mode field that can be set to audit or block_final_answer. To test enforcement behavior locally, build fixture EvidenceRecords for a contract's requirements and call evaluate_evidence_contract (evidence/contracts.py) to produce an EvidenceContractVerdict without connecting to a live authority provider or executing live tools.
 
-This lets developers test the full boundary decision path: intent creation, boundary evaluation, and receipt production. The boundary will produce real EvidenceEnforcementDecision instances but will not attach live traffic or execution authority (both are typed as Literal[False]).
+This lets developers test the full decision path deterministically: a block_ready verdict is what the engine pre-final gate (cli/engine.py) consumes on the live output path to block or repair a coding-domain turn, so asserting on the verdict exercises the same enforcement signal without attaching live traffic or execution authority.
 
 ## Creating test EvidenceRecord instances
 
@@ -3737,15 +3711,9 @@ Top-level runtime authority flags. Eight fields are structurally locked to Liter
 
 - [Security](/docs/security)
 
-## EvidenceEnforcementConfig
+## Evidence enforcement (no standalone config surface)
 
-Controls the evidence enforcement boundary. Two fields are structurally locked to Literal[False] to prevent live evidence blocking.
-
-- enabled (bool, default False) — Whether evidence enforcement is active.
-- local_fake_evaluation_enabled (bool, alias localFakeEvaluationEnabled, default False) — Whether local fake evaluation is enabled for testing.
-- evidence_block_enabled (Literal[False], alias evidenceBlockEnabled) — Structurally false. Cannot enable evidence blocking.
-- final_answer_blocking_enabled (Literal[False], alias finalAnswerBlockingEnabled) — Structurally false. Cannot enable final answer blocking.
-- route_attached (Literal[False], alias routeAttached) — Structurally false. Cannot attach routing.
+There is no standalone evidence-enforcement config type. Evidence contract verdicts (EvidenceContractVerdict) are enforced on the live output path by the engine pre-final gate (cli/engine.py) via the verifier bus (harness/verifier_bus.py). Coding-domain turns block on a block_ready verdict by default; the coding repair loop is gated by MAGI_CODING_REPAIR_LOOP_ENABLED.
 
 - [Evidence concepts](/docs/evidence)
 - [Evidence contracts](/docs/evidence-contracts)
@@ -4159,7 +4127,7 @@ When a tool call is denied by policy, the ToolEvidenceRecord records the denial 
 
 ## Policy Enforcement
 
-ToolHost policy enforcement is driven by BuiltinHarnessPreset verifier gates and HookManifest registrations at the beforeToolUse and afterToolUse hook points. The enforcement boundary evaluates evidence contracts and produces EvidenceEnforcementDecision outcomes.
+ToolHost policy enforcement is driven by BuiltinHarnessPreset verifier gates and HookManifest registrations at the beforeToolUse and afterToolUse hook points. The engine pre-final gate (cli/engine.py) evaluates evidence contracts via the verifier bus (harness/verifier_bus.py) and produces EvidenceContractVerdict outcomes that pass, block, or repair the turn.
 
 The ToolHostRequest and ToolHostReceipt types referenced in the architecture docs are not yet implemented as formal Pydantic models. The current implementation uses ToolEvidenceRecord as the receipt equivalent and HookContext as the request context.
 
@@ -4391,15 +4359,15 @@ This means the Python runtime structurally cannot perform write operations, deli
 
 ## How do I test a recipe locally?
 
-Use fixture evidence and local_fake_evaluation_enabled. Set EvidenceEnforcementConfig.enabled to True and EvidenceEnforcementConfig.local_fake_evaluation_enabled to True. This enables the EvidenceEnforcementBoundary to evaluate evidence contracts against local fixture evidence records without requiring live tool execution.
+Use fixture evidence with the evidence contract engine directly. Build EvidenceRecords for the contract's requirements and call evaluate_evidence_contract (evidence/contracts.py) to produce an EvidenceContractVerdict without requiring live tool execution. This lets you exercise a recipe's evidence contract against local fixture evidence records.
 
-The boundary produces EvidenceEnforcementDecision with status values like "pass", "audit_missing", "repair_required", or "block_ready_local_fake". The "block_ready_local_fake" status indicates that evidence blocking would fire in production, but since evidence_block_enabled is Literal[False], the decision is recorded as a block intent without actually blocking.
+The verdict reports states like "satisfied", "audit", or "block_ready". A "block_ready" verdict means evidence blocking would fire in production. On the live path the engine pre-final gate consumes that verdict (coding-domain turns block by default); the research final-projection gate records the same verdict for diagnostics only ("block_ready_local_fake") because its final_answer_blocking_enabled flag is Literal[False].
 
 - [Evidence contracts](/docs/evidence-contracts)
 
 ## Why is there no RepairDecision type?
 
-Repair is implicit in enforcement decisions. When an evidence contract evaluation fails and repair_allowed is True in the EvidenceEnforcementRequest, the EvidenceEnforcementBoundary returns an EvidenceEnforcementDecision with status "repair_required" and action "repair". RepairDecision and RepairPlan exist in harness/repair_policy.py for single-contract repair steps (max 5 attempts per plan). Cross-boundary repair orchestration across multiple contracts is not yet integrated.
+Repair is implicit in the enforcement path. When a coding-domain evidence contract is unsatisfied at the engine pre-final gate and MAGI_CODING_REPAIR_LOOP_ENABLED is set, the gate drives a repair loop rather than exposing a standalone RepairDecision return type. RepairDecision and RepairPlan exist in harness/repair_policy.py for single-contract repair steps (max 5 attempts per plan). Cross-boundary repair orchestration across multiple contracts is not yet integrated.
 
 The repair flow is: evidence missing or failed -> boundary checks repair_allowed -> if True, returns repair action -> caller retries the operation -> boundary re-evaluates with new evidence.
 
@@ -4433,7 +4401,7 @@ Custom evidence types work with the same EvidenceRequirement and EvidenceFieldMa
 
 The behavior depends on the on_missing field of the EvidenceContract. When set to "audit", missing evidence is logged to the audit ledger but does not block the run. When set to "block_final_answer", missing evidence prevents the final answer from being projected to the user.
 
-However, because final_answer_blocking_enabled is Literal[False] in EvidenceEnforcementConfig, the block_final_answer enforcement is currently recorded as a "block_ready_local_fake" intent without actually blocking output. This structural safety ensures that evidence contracts can be developed and tested without risk of silently blocking production output.
+On the live path, coding-domain turns enforce this for real: the engine pre-final gate blocks the final answer (Terminal.error, error="pre_final_evidence_gate_blocked") when a block_final_answer contract is unsatisfied, and it is on by default for the coding domain. The research final-projection gate, by contrast, has final_answer_blocking_enabled set to Literal[False], so for research-domain turns block_final_answer is recorded as a "block_ready_local_fake" intent without actually blocking output.
 
 - [Evidence contracts](/docs/evidence-contracts)
 - [Boundaries](/docs/boundaries)
@@ -4479,7 +4447,7 @@ A scannable map of what the local `magi` CLI can actually do right now, what shi
 
 [^1]: `magi_agent/cli/wiring.py::_build_default_runner` selects a real model-backed ADK runner when a provider key or `~/.magi/config.toml` is configured (`magi_agent/cli/real_runner.py`), otherwise falls back to the model-free stub (`magi_agent/cli/local_runner.py`).
 [^2]: `magi_agent/cli/wiring.py::_build_first_party_adk_tools` / `_first_party_tools_enabled` (True unless `MAGI_FIRST_PARTY_TOOLS_ENABLED` is off); permission modes in `magi_agent/cli/permissions.py`.
-[^3]: `magi_agent/evidence/rollout.py::EvidenceRolloutMetadata` — `traffic_attached` / `execution_attached` are `Literal[False]`, meaning the enforcement boundary is not attached to live traffic/decisions. These flags govern whether the governance layer blocks/gates the agent, not whether the agent can execute tasks.
+[^3]: `magi_agent/evidence/rollout.py::EvidenceRolloutMetadata` — `traffic_attached` / `execution_attached` are `Literal[False]`, meaning the evidence governance layer is not attached to live traffic/decisions. These flags govern whether the governance layer blocks/gates the agent, not whether the agent can execute tasks.
 
 # Common Tasks
 
@@ -4915,9 +4883,24 @@ violation; it never raises — it degrades to the built-in defaults on error.
 | `default` | Prompts for each tool call that requires approval. |
 | `acceptEdits` | Automatically allows edit-class tools (file writes, patches). |
 | `bypassPermissions` | Allows all tool calls without prompting. |
+| `smartApprove` | Opt-in: auto-approves low-risk tool calls and only prompts for higher-risk ones. Never selected automatically — pass `--permission-mode smartApprove`. |
 
 ```sh
 magi -p "apply the patch" --permission-mode acceptEdits
+magi -p "apply the patch" --permission-mode smartApprove
+```
+
+## Agent mode (`--mode`)
+
+`--mode` selects the agent's working mode:
+
+| Mode | Behavior |
+|------|----------|
+| `act` (default) | Full tool access — the agent reads, writes, and runs commands. |
+| `plan` | Plan-first mode restricted to read-only tools; the agent drafts a plan before acting. |
+
+```sh
+magi --mode plan "refactor the auth module"
 ```
 
 ## `MAGI_CLI_ENABLED`
@@ -4943,11 +4926,13 @@ Options:
   --output [text|json|stream-json]
                                  Output format for headless mode. [default: text]
   --include-partial-messages     Include partial streaming events in stream-json.
-  --permission-mode [default|acceptEdits|bypassPermissions]
+  --permission-mode [default|acceptEdits|bypassPermissions|smartApprove]
                                  Permission mode.  [default: default]
   --resume TEXT                  Resume a session by id.
   --continue / --no-continue     Continue the most-recent session.
   --model TEXT                   Model to use.
+  --mode [plan|act]              Agent mode: plan (read-only tools) | act (full
+                                 tools).  [default: act]
   -V, --version                  Print the magi version and exit.
   --help                         Show this message and exit.
 ```

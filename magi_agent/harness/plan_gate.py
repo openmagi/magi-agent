@@ -162,6 +162,81 @@ class PlanGateDecisionSnapshot(BaseModel):
         return self
 
 
+class AttachedPlanGateDecisionSnapshot(BaseModel):
+    """A plan_gate decision snapshot with execution write-attachment flipped ON.
+
+    The base :class:`PlanGateDecisionSnapshot` pins its write/execution flags to
+    ``Literal[False]`` so the inert (default) chain can never *claim* to have
+    attached a live write. Cluster 06 PR4 (B9) wires the chain into the runner
+    behind the strict default-OFF ``MAGI_PLAN_ACT_GATE_ENABLED`` gate. When that
+    gate is ON *and* the GA plan_act resolver fires, the runner attaches
+    execution by projecting the source snapshot onto THIS type — a separate,
+    explicitly-attached snapshot. The original snapshot is never mutated; this
+    keeps the inert contract's ``Literal[False]`` honesty while still letting an
+    opted-in runner record that execution was attached.
+    """
+
+    model_config = ConfigDict(frozen=True, populate_by_name=True, extra="forbid")
+
+    decision_id: str = Field(alias="decisionId")
+    session_key: str = Field(alias="sessionKey")
+    turn_id: str = Field(alias="turnId")
+    lane: str
+    decision: str
+    reason: str
+    #: the request id of the approved plan-exit control that triggered attach.
+    approved_control_request_id: str = Field(alias="approvedControlRequestId")
+    session_write_attached: Literal[True] = Field(
+        default=True, alias="sessionWriteAttached"
+    )
+    transcript_write_attached: Literal[True] = Field(
+        default=True, alias="transcriptWriteAttached"
+    )
+    artifact_write_attached: Literal[True] = Field(
+        default=True, alias="artifactWriteAttached"
+    )
+    execution_attached: Literal[True] = Field(default=True, alias="executionAttached")
+
+    @field_validator(
+        "decision_id",
+        "session_key",
+        "turn_id",
+        "lane",
+        "decision",
+        "reason",
+        "approved_control_request_id",
+    )
+    @classmethod
+    def _reject_empty_attached_fields(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("attached plan gate snapshot fields must be non-empty")
+        return value
+
+
+def attach_plan_gate_execution(
+    snapshot: PlanGateDecisionSnapshot,
+    *,
+    approved_control_request_id: str,
+) -> AttachedPlanGateDecisionSnapshot:
+    """Project *snapshot* onto an execution-attached snapshot (range-limited).
+
+    Used by the runner-wiring seam (cluster 06 PR4) when the
+    ``MAGI_PLAN_ACT_GATE_ENABLED`` gate is ON and the GA plan_act resolver fires.
+    Carries the source snapshot's identity/lane/decision and stamps the approved
+    plan-exit control request id; the write/execution-attached flags are ``True``
+    on the returned type only. The source snapshot is left untouched.
+    """
+    return AttachedPlanGateDecisionSnapshot(
+        decision_id=snapshot.decision_id,
+        session_key=snapshot.session_key,
+        turn_id=snapshot.turn_id,
+        lane=snapshot.lane,
+        decision=snapshot.decision,
+        reason=snapshot.reason,
+        approved_control_request_id=approved_control_request_id,
+    )
+
+
 def build_plan_gate_decision_snapshot(
     *,
     decision_id: str,

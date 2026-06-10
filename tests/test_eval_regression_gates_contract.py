@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from magi_agent.evals.regression_gates import (
+from evals.regression_gates import (
     EvalGateThresholds,
     EvalGateVerdict,
     HardInvariantPolicyEvaluation,

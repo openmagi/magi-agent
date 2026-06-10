@@ -31,9 +31,9 @@ Recipes are composable task profiles that declare what evidence, hooks, and harn
 
 The runtime exposes typed hook points (hooks/manifest.py, 15 HookPoint values), HookRegistry + HookBus dispatch (hooks/registry.py, hooks/bus.py), boundary interfaces, and a ToolHost surface (tools/catalog.py, tools/registry.py, tools/manifest.py) for extending agent behavior without forking the core.
 
-- Runtime architecture: See [Runtime](/docs/runtime) for the FastAPI entry point, RunnerSessionBoundary turn loop, and the two-plane model-visible loop vs runtime-only control plane.
+- Runtime architecture: See [Runtime](/docs/runtime) for the FastAPI entry point, the MagiEngineDriver turn loop, and the two-plane model-visible loop vs runtime-only control plane.
 - System architecture: See [Architecture](/docs/architecture) for the MODEL-VISIBLE LOOP and RUNTIME-ONLY CONTROL PLANE separation.
-- Boundary modules: See [Boundaries](/docs/boundaries) for the seven implemented boundary modules and the Intent-to-Receipt pattern.
+- Boundary modules: See [Boundaries](/docs/boundaries) for the six implemented boundary modules and the Intent-to-Receipt pattern.
 - Hook points: See [Hook Points](/docs/hook-points) for the 15 HookPoint enum values, HookRegistry registration, and HookBus dispatch.
 - Runtime interfaces: See [Runtime Interfaces](/docs/runtime-interfaces) for TurnInput, HookBusRunResult, EvidenceLedgerEntry, ToolRegistration, RecipeSnapshot, and all typed Python interfaces.
 - ToolHost: See [ToolHost](/docs/toolhost) for ToolManifest schema, ToolRegistry, first-party tool catalog, and governed dispatch.

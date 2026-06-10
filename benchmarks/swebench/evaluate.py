@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -24,7 +25,7 @@ def run_evaluation(
     predictions_path = predictions_path.resolve()
     report_dir = predictions_path.parent
     cmd = [
-        "python", "-m", "swebench.harness.run_evaluation",
+        sys.executable, "-m", "swebench.harness.run_evaluation",
         "--dataset_name", DATASET_NAME,
         "--predictions_path", str(predictions_path),
         "--max_workers", str(max_workers),

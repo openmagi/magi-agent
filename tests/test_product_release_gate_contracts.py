@@ -13,7 +13,7 @@ from pydantic import ConfigDict
 from pydantic import ValidationError
 from pydantic_core import PydanticSerializationError
 
-from magi_agent.evals.release_gates import (
+from evals.release_gates import (
     ADK_EVALUATION_BOUNDARY,
     CanaryProofRef,
     DigestOnlyProjection,
@@ -33,7 +33,7 @@ from magi_agent.evals.release_gates import (
 
 
 PYTHON_ROOT = Path(__file__).parents[1]
-MODULE_PATH = PYTHON_ROOT / "magi_agent" / "evals" / "release_gates.py"
+MODULE_PATH = PYTHON_ROOT / "evals" / "release_gates.py"
 
 
 def _thresholds() -> EvalThresholds:
@@ -1044,7 +1044,7 @@ def test_release_gate_contract_documents_local_adk_evaluation_boundary_without_i
             """
 import importlib
 import sys
-module = importlib.import_module("magi_agent.evals.release_gates")
+module = importlib.import_module("evals.release_gates")
 assert module.ADK_EVALUATION_BOUNDARY["adkEvaluationImported"] is False
 forbidden = (
     "google.adk.evaluation",
@@ -1099,8 +1099,8 @@ def test_release_gate_source_has_no_model_network_tool_or_live_runtime_imports()
     for fragment in forbidden_fragments:
         assert fragment not in source
 
-    module = importlib.import_module("magi_agent.evals.release_gates")
-    assert module.__name__ == "magi_agent.evals.release_gates"
+    module = importlib.import_module("evals.release_gates")
+    assert module.__name__ == "evals.release_gates"
 
 
 def test_release_gate_validation_errors_do_not_echo_private_or_secret_refs() -> None:

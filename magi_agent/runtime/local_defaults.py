@@ -53,6 +53,10 @@ LOCAL_FULL_RUNTIME_ENV_DEFAULTS: Mapping[str, str] = {
     "MAGI_OBSERVABILITY_ENABLED": "1",
     "MAGI_OBS_HOME": ".openmagi",
     "MAGI_SESSION_PERSISTENCE_ENABLED": "1",
+    # PR-04-PR1: CLI transcript write path. Registered here but stage-1 OFF
+    # ("0") so the disk-write + sanitization behavior can be validated before a
+    # later release flips it on.
+    "MAGI_CLI_SESSION_LOG_ENABLED": "0",
     "MAGI_LEARNING_ENABLED": "true",
     "MAGI_LEARNING_REFLECTION_ENABLED": "1",
     "MAGI_LEARNING_DASHBOARD_ENABLED": "1",
@@ -95,6 +99,7 @@ EVAL_RUNTIME_ENV_DEFAULTS: Mapping[str, str] = {
     "MAGI_SELF_REVIEW_ENABLED": "0",
     "MAGI_AUTOPILOT": "0",
     "MAGI_SESSION_PERSISTENCE_ENABLED": "0",
+    "MAGI_CLI_SESSION_LOG_ENABLED": "0",
     "MAGI_CONTEXT_COMPACTION_ENABLED": "0",
     "MAGI_LEARNING_ENABLED": "false",
     "MAGI_SKILL_CURATOR_ENABLED": "0",

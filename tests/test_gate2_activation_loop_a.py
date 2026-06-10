@@ -450,7 +450,7 @@ def test_gate2_selected_python_exception_exposes_digest_safe_failure_chain(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
-    from magi_agent.transport import chat as chat_transport
+    from magi_agent.transport import gate2_sandbox_canary as gate2_canary_mod
 
     monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
     env = _base_env(
@@ -466,7 +466,7 @@ def test_gate2_selected_python_exception_exposes_digest_safe_failure_chain(
         raise RuntimeError("raw /Users/private token=secret must not leak")
 
     monkeypatch.setattr(
-        chat_transport,
+        gate2_canary_mod,
         "run_gate2_sandbox_workspace_canary",
         _raise_private_exception,
     )
@@ -521,7 +521,7 @@ def test_gate2_selected_exception_chain_build_failure_returns_minimal_chain(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
-    from magi_agent.transport import chat as chat_transport
+    from magi_agent.transport import gate2_sandbox_canary as gate2_canary_mod
 
     monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
     env = _base_env(
@@ -537,12 +537,12 @@ def test_gate2_selected_exception_chain_build_failure_returns_minimal_chain(
         raise RuntimeError("raw /Users/private token=secret must not leak")
 
     monkeypatch.setattr(
-        chat_transport,
+        gate2_canary_mod,
         "_gate2_request_digest_status",
         _raise_before_chain,
     )
     monkeypatch.setattr(
-        chat_transport,
+        gate2_canary_mod,
         "_gate2_scope_match",
         _raise_before_chain,
     )

@@ -46,11 +46,18 @@ class CliToolRuntime:
     general_automation_receipts: "GeneralAutomationReceiptLedgerStore"
 
 
+_LEGACY_FULL_TOOLHOST_SCOPE: dict[str, object] = {
+    "mode": "selected_full_toolhost",
+    "source": "selected_full_toolhost",
+}
+
+
 def build_cli_tool_runtime(
     *,
     workspace_root: str,
     session_id: str = "cli-session",
     memory_mode: "MemoryMode | str" = "normal",
+    permission_mode: str = "default",
     general_automation_receipts: "GeneralAutomationReceiptLedgerStore | None" = None,
     local_tool_evidence_collector: "LocalToolEvidenceCollector | None" = None,
 ) -> CliToolRuntime:
@@ -130,10 +137,11 @@ def build_cli_tool_runtime(
             workspace_ref="local-cli-workspace",
             memory_mode=memory_mode_value,
             channel="cli",
-            permission_scope={
-                "mode": "selected_full_toolhost",
-                "source": "selected_full_toolhost",
-            },
+            permission_scope=_resolve_cli_permission_scope(
+                adk_tool_context,
+                registry=registry,
+                permission_mode=permission_mode,
+            ),
             execution_contract={"agentRole": "general"},
             source_ledger=_source_ledger_for_session(
                 local_tool_evidence_collector,
@@ -157,6 +165,7 @@ def build_cli_adk_tools(
     session_id: str = "cli-session",
     mode: "RuntimeMode" = "act",
     memory_mode: "MemoryMode | str" = "normal",
+    permission_mode: str = "default",
     general_automation_receipts: "GeneralAutomationReceiptLedgerStore | None" = None,
     local_tool_evidence_collector: "LocalToolEvidenceCollector | None" = None,
 ) -> list[object]:
@@ -170,6 +179,7 @@ def build_cli_adk_tools(
         workspace_root=workspace_root,
         session_id=session_id,
         memory_mode=memory_mode,
+        permission_mode=permission_mode,
         general_automation_receipts=general_automation_receipts,
         local_tool_evidence_collector=local_tool_evidence_collector,
     )
@@ -185,6 +195,72 @@ def build_cli_adk_tools(
         collector=local_tool_evidence_collector,
         session_id=session_id,
     )
+
+
+def _resolve_cli_permission_scope(
+    adk_tool_context: object,
+    *,
+    registry: "ToolRegistry",
+    permission_mode: str,
+) -> dict[str, object]:
+    """Return the ``permission_scope`` for a CLI tool call.
+
+    When ``MAGI_PERMISSION_SCOPE_FROM_MODE`` is OFF (default) this returns the
+    legacy hardcoded ``selected_full_toolhost`` scope — byte-identical to the
+    pre-PR1 behavior, so the regression surface is zero. When ON, the scope is
+    derived from ``permission_mode`` + the called tool's manifest via
+    :class:`~magi_agent.tools.permission_scope.PermissionScopeResolver`:
+    ``default``/``smartApprove`` get no preapproval (arbiter ``ask`` reaches),
+    ``acceptEdits`` preapproves only edit-class tools, ``bypassPermissions`` gets
+    a ``bypass`` scope (hard-safety still enforced).
+
+    Fail-open: any error (gate lookup, manifest resolution) collapses back to the
+    legacy scope so a malformed runtime never breaks tool dispatch.
+    """
+    try:
+        from magi_agent.config.env import (  # noqa: PLC0415
+            permission_scope_from_mode_enabled,
+        )
+
+        if not permission_scope_from_mode_enabled():
+            return dict(_LEGACY_FULL_TOOLHOST_SCOPE)
+
+        manifest = _manifest_for_adk_context(adk_tool_context, registry=registry)
+        if manifest is None:
+            # No manifest in hand -> mode-only resolution: bypass stays bypass,
+            # everything else stays strict (no preapproval) so the arbiter ask
+            # branch can reach.
+            if str(permission_mode).strip() == "bypassPermissions":
+                return {"mode": "bypass", "source": "bypass"}
+            return {"mode": "default", "source": "builtin"}
+
+        from magi_agent.tools.permission_scope import (  # noqa: PLC0415
+            PermissionScopeResolver,
+        )
+
+        return PermissionScopeResolver().resolve(
+            permission_mode=permission_mode,
+            manifest=manifest,
+            channel="cli",
+        )
+    except Exception:
+        return dict(_LEGACY_FULL_TOOLHOST_SCOPE)
+
+
+def _manifest_for_adk_context(
+    adk_tool_context: object,
+    *,
+    registry: "ToolRegistry",
+) -> object | None:
+    """Best-effort resolution of the called tool's manifest from the ADK ctx."""
+    function_call = _context_lookup(adk_tool_context, "function_call")
+    tool_name = _context_lookup(function_call, "name")
+    if not isinstance(tool_name, str) or not tool_name.strip():
+        return None
+    registration = registry.resolve_registration(tool_name.strip())
+    if registration is None:
+        return None
+    return getattr(registration, "manifest", None)
 
 
 def bind_cli_local_full_tool_handlers(
@@ -348,6 +424,9 @@ def build_cli_instruction(
     workspace_root: str | None = None,
     memory_mode: "MemoryMode | str" = "normal",
     recall_query: str | None = None,
+    bot_id: str = "local",
+    user_id: str = "local",
+    learning_live_readiness: object | None = None,
 ) -> str:
     """Build the real system prompt for the CLI agent (coding-agent path).
 
@@ -424,6 +503,57 @@ def build_cli_instruction(
             # Lead with the query-relevant recall, then the frozen snapshot.
             memory_snapshot_block = "\n\n".join(
                 part for part in (_recall_block, memory_snapshot_block) if part
+            )
+
+    # 01-PR4 (C2): consult the gated-live learning-recall + write harnesses on
+    # the SERVE path. This resolves the unified-rag B1 gap where BOTH
+    # build_gated_live_learning_recall_harness AND
+    # build_gated_live_learning_write_harness had ZERO serve consumers. Gated by
+    # the existing learning-live readiness ladder (MAGI_LEARNING_LIVE_ENABLED +
+    # the caller-PROVIDED selected-scope canary readiness config — no net-new
+    # flags) and incognito-aware. The real bot_id/user_id are threaded from the
+    # serve caller so the canary digest match resolves against the genuine
+    # identity, not the literal "local" default. Returns ""/None when the ladder
+    # is off (default: learning_live_readiness is None), in shadow mode, with no
+    # live binding, or on any error — so the combined block is byte-identical to
+    # pre-wiring when off. Appended AFTER the snapshot/recall blocks so it never
+    # reorders them.
+    if (
+        recall_query is not None
+        and workspace_root is not None
+        and learning_live_readiness is not None
+    ):
+        from magi_agent.cli.learning_recall import (  # noqa: PLC0415
+            build_serve_live_learning_recall_block,
+            build_serve_live_learning_write_audit,
+        )
+
+        _live_learning_block = build_serve_live_learning_recall_block(
+            workspace_root=workspace_root,
+            recall_query=recall_query,
+            memory_mode=memory_mode_value,
+            bot_id=bot_id,
+            user_id=user_id,
+            readiness=learning_live_readiness,
+        )
+        # Write symmetry (spec PR4 file-map "write 대칭"): on the live path also
+        # run the gated WRITE harness for a symmetric audit record. The audit is
+        # observe-only here — every Literal[False] authority flag stays frozen —
+        # so it never mutates the prompt; it only proves the write seam is wired
+        # (the builder logs the audit dict at debug). Returns None off the live
+        # path, keeping prompt assembly byte-identical.
+        build_serve_live_learning_write_audit(
+            workspace_root=workspace_root,
+            memory_mode=memory_mode_value,
+            bot_id=bot_id,
+            user_id=user_id,
+            readiness=learning_live_readiness,
+        )
+        if _live_learning_block:
+            memory_snapshot_block = "\n\n".join(
+                part
+                for part in (memory_snapshot_block, _live_learning_block)
+                if part
             )
 
     prompt = build_system_prompt(
