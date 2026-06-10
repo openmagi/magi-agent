@@ -31,12 +31,13 @@ __all__ = ["TranscriptController", "TranscriptApp", "DEFAULT_FLUSH_INTERVAL"]
 
 
 @dataclass
-class _ThinkingHandle:
-    """Update handle for a coalesced reasoning block (PR4.2).
+class _CoalesceHandle:
+    """Update handle for a coalesced one-line block.
 
-    Returned by :meth:`TranscriptController.commit_thinking`; carries the backing
-    widget (``None`` on the legacy ``RichLog`` backing) and the snapshot index so
-    streaming reasoning deltas update the same line in place.
+    Returned by :meth:`TranscriptController.commit_coalesced`; carries the
+    backing widget (``None`` on the legacy ``RichLog`` backing) and the snapshot
+    index so streaming deltas update the same line in place. Generic across
+    consumers — thinking (PR4.2) and subagent (PR4.3) rendering both use it.
     """
 
     controller: "TranscriptController"
@@ -248,15 +249,17 @@ class TranscriptController:
         self.committed_block_count += 1
         self._emit(renderable, as_status=False)
 
-    def commit_thinking(self, renderable: object, *, text: str = "") -> object:
-        """Commit a DIM one-line reasoning block and return an update handle.
+    def commit_coalesced(self, renderable: object, *, text: str = "") -> object:
+        """Commit a DIM one-line block and return an update handle.
 
-        Mirrors :meth:`commit_rich` (finalized Rich renderable + recorded search
-        text) but returns the backing widget AND the snapshot index so streaming
-        reasoning deltas can be COALESCED via :meth:`update_thinking` rather than
+        Generic in-place one-line coalescing seam (nothing thinking-specific):
+        thinking (PR4.2) and subagent (PR4.3) rendering both drive it. Mirrors
+        :meth:`commit_rich` (finalized Rich renderable + recorded search text)
+        but returns the backing widget AND the snapshot index so streaming
+        deltas can be COALESCED via :meth:`update_coalesced` rather than
         flooding the transcript with one block per delta. On the legacy
         ``RichLog`` backing (no in-place widget update) the handle widget is
-        ``None`` and a later :meth:`update_thinking` no-ops on the widget while
+        ``None`` and a later :meth:`update_coalesced` no-ops on the widget while
         still patching the recorded snapshot text for search fidelity.
         """
 
@@ -272,20 +275,20 @@ class TranscriptController:
         else:
             assert self._log is not None
             self._log.write(renderable)
-        return _ThinkingHandle(controller=self, index=index, widget=widget)
+        return _CoalesceHandle(controller=self, index=index, widget=widget)
 
-    def update_thinking(
+    def update_coalesced(
         self, handle: object, renderable: object, *, text: str = ""
     ) -> None:
-        """Update a previously :meth:`commit_thinking` block in place.
+        """Update a previously :meth:`commit_coalesced` block in place.
 
         Patches both the live widget (so the single line repaints with the
-        latest reasoning preview) and the recorded snapshot entry (so search
-        fidelity reflects what is shown). Unknown/legacy handles update only the
-        snapshot text.
+        latest preview) and the recorded snapshot entry (so search fidelity
+        reflects what is shown). Unknown/legacy handles update only the snapshot
+        text.
         """
 
-        if not isinstance(handle, _ThinkingHandle):
+        if not isinstance(handle, _CoalesceHandle):
             return
         if 0 <= handle.index < len(self._committed):
             self._committed[handle.index] = text

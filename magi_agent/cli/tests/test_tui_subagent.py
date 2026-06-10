@@ -227,7 +227,7 @@ def test_distinct_tasks_get_distinct_subagent_lines() -> None:
     asyncio.run(_run())
 
 
-def test_child_failed_shows_failed_status() -> None:
+def test_child_failed_shows_failed_status_and_error_reason() -> None:
     async def _run() -> None:
         app = _make_app(
             [
@@ -243,6 +243,51 @@ def test_child_failed_shows_failed_status() -> None:
             sub = [b for b in blocks if "subagent" in b]
             assert len(sub) == 1, sub
             assert "failed" in sub[0], sub
+            # The failure CAUSE is surfaced on the line (not just "failed").
+            assert "boom" in sub[0], sub
+
+    asyncio.run(_run())
+
+
+def test_child_progress_shows_detail() -> None:
+    async def _run() -> None:
+        app = _make_app(
+            [
+                _child_event("child_started", "sub-p"),
+                _child_event("child_progress", "sub-p", detail="halfway there"),
+            ]
+        )
+        async with app.run_test() as pilot:
+            app.start_turn("go")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            blocks = app.controller.committed_blocks_snapshot()
+            sub = [b for b in blocks if "subagent" in b]
+            assert len(sub) == 1, sub
+            # The progress detail is surfaced so distinct progress isn't
+            # indistinguishable from a bare "running".
+            assert "halfway there" in sub[0], sub
+
+    asyncio.run(_run())
+
+
+def test_child_cancelled_shows_reason() -> None:
+    async def _run() -> None:
+        app = _make_app(
+            [
+                _child_event("child_started", "sub-c"),
+                _child_event("child_cancelled", "sub-c", reason="user abort"),
+            ]
+        )
+        async with app.run_test() as pilot:
+            app.start_turn("go")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            blocks = app.controller.committed_blocks_snapshot()
+            sub = [b for b in blocks if "subagent" in b]
+            assert len(sub) == 1, sub
+            assert "cancelled" in sub[0], sub
+            assert "user abort" in sub[0], sub
 
     asyncio.run(_run())
 

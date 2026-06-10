@@ -418,13 +418,31 @@ def _child_task_label(payload: dict) -> str:
     return label
 
 
-def _render_subagent_node(label: str, status: str) -> RenderNode:
+def _child_detail(payload: dict) -> str:
+    """Short dim suffix surfacing WHY a child line shows its status.
+
+    ``child_progress`` carries ``detail`` (what the child is doing),
+    ``child_failed`` carries ``errorMessage`` (the failure cause), and
+    ``child_cancelled`` carries ``reason``. Without this they all render
+    identically ("running"/"failed") with no cause. Truncated to the same terse
+    preview cap as thinking so it stays one-line and dim.
+    """
+
+    for key in ("detail", "errorMessage", "reason"):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return _thinking_preview(value)
+    return ""
+
+
+def _render_subagent_node(label: str, status: str, detail: str = "") -> RenderNode:
     """Build the DIM INDENTED one-line ``  ⤷ subagent <label>  <status>`` block.
 
     The committed/search text mirrors the displayed line for search fidelity
     (what is indexed == what is shown). The whole line is styled dim and the
     text is leading-indented so it reads as quiet activity nested under the
-    parent turn, distinct from flush-left tool/assistant lines.
+    parent turn, distinct from flush-left tool/assistant lines. An optional
+    ``detail`` (progress detail / failure reason) is appended as a dim suffix.
     """
 
     from rich.text import Text  # noqa: PLC0415
@@ -434,6 +452,9 @@ def _render_subagent_node(label: str, status: str) -> RenderNode:
     rich.append(f"subagent {label}", style=_SUBAGENT_LABEL_STYLE)
     rich.append(f"  {status}", style=_SUBAGENT_STATUS_STYLE)
     search = f"{_SUBAGENT_INDENT}⤷ subagent {label}  {status}"
+    if detail:
+        rich.append(f"  {detail}", style=_SUBAGENT_STATUS_STYLE)
+        search = f"{search}  {detail}"
     return RenderNode(rich=rich, text=search)
 
 
@@ -1658,16 +1679,16 @@ class MagiTuiApp(App[None]):
         )
         node = _render_thinking_node(self._thinking_accum)
         if self._thinking_handle is None:
-            self._thinking_handle = self.controller.commit_thinking(
+            self._thinking_handle = self.controller.commit_coalesced(
                 node.rich, text=node.text
             )
         else:
             # Position-freeze: if a tool/assistant block commits BETWEEN two
-            # thinking deltas, ``update_thinking`` keeps patching the ORIGINAL
+            # thinking deltas, ``update_coalesced`` keeps patching the ORIGINAL
             # thinking line in place — its text updates while its on-screen
             # position stays ABOVE the later block. This is intended coalescing
             # (one thinking line per turn), NOT the index-drift bug.
-            self.controller.update_thinking(
+            self.controller.update_coalesced(
                 self._thinking_handle, node.rich, text=node.text
             )
 
@@ -1679,22 +1700,24 @@ class MagiTuiApp(App[None]):
         the SAME task UPDATE that one line in place (status started → completed/
         failed) rather than spamming one line per event. Distinct tasks get
         distinct lines. The per-task handle registry is reset at turn start.
-        Reuses the generic in-place one-line ``commit_thinking``/
-        ``update_thinking`` seam (the transcript's coalescing primitive).
+        Reuses the generic in-place one-line ``commit_coalesced``/
+        ``update_coalesced`` seam (the transcript's coalescing primitive).
         """
 
         payload = event.payload if isinstance(event.payload, dict) else {}
         inner = payload.get("type")
-        status = _CHILD_INNER_STATUS.get(inner, "running") if isinstance(inner, str) else "running"
+        # ``_is_child_event`` already proved ``inner`` is a str key in
+        # ``_CHILD_INNER_STATUS`` before routing here, so a direct lookup is safe.
+        status = _CHILD_INNER_STATUS[inner]
         label = _child_task_label(payload)
-        node = _render_subagent_node(label, status)
+        node = _render_subagent_node(label, status, _child_detail(payload))
         handle = self._subagent_handles.get(label)
         if handle is None:
-            self._subagent_handles[label] = self.controller.commit_thinking(
+            self._subagent_handles[label] = self.controller.commit_coalesced(
                 node.rich, text=node.text
             )
         else:
-            self.controller.update_thinking(handle, node.rich, text=node.text)
+            self.controller.update_coalesced(handle, node.rich, text=node.text)
 
     def _fold_sidebar_tool(self, name: str, tool_input: object) -> None:
         """Route a tool_start into the sidebar panes (todo / recent files).

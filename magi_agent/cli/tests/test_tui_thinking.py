@@ -215,7 +215,7 @@ def test_interleaved_thinking_tool_thinking_keeps_one_thinking_block() -> None:
     intervening tool block.
 
     This locks the append-only ``_committed`` index-stability invariant. If
-    ``update_thinking`` keyed off a stale/absolute index instead of the stored
+    ``update_coalesced`` keyed off a stale/absolute index instead of the stored
     handle, the second delta ("b") would land on the TOOL block's slot — this
     test would then see the tool entry mutated into thinking text (failing the
     "$ echo hi"/stdout assertions) and/or a second thinking line.
