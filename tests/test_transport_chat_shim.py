@@ -126,7 +126,17 @@ UNDERSCORE_IMPORTER_SYMBOLS = [
 
 # Extracted modules and the representative symbols the shim must re-export
 # as the SAME object. Entries are appended as each module extraction lands.
-EXTRACTED_MODULE_SYMBOLS: dict[str, list[str]] = {}
+EXTRACTED_MODULE_SYMBOLS: dict[str, list[str]] = {
+    "magi_agent.runtime.user_visible_model_routing": [
+        "_SAFE_LABEL_RE",
+        "_credential_ref_for_user_visible_provider",
+        "_provider_model_from_user_visible_model",
+        "_requested_user_visible_model_route",
+        "_safe_label_or_none",
+        "_select_user_visible_model_route",
+        "_single_config_value",
+    ],
+}
 
 
 def test_chat_shim_exports_frozen_public_surface() -> None:
