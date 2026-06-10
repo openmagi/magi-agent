@@ -1,13 +1,12 @@
 """Real ADK-backed engine driver for the Magi headless CLI (PR-A2).
 
 ``MagiEngineDriver`` implements the :class:`EngineDriver` Protocol from
-``cli.contracts``. It drives a single turn through the ADK runner using the same
-adapter + bridge wiring as
-``runtime.runner_session_boundary._collect_runner_events`` (the reference
-implementation), but YIELDS each projected public event incrementally as a
-``RuntimeEvent`` instead of accumulating-then-returning. The terminal
-``EngineResult`` is delivered as the FINAL yielded item, per the consumption
-convention documented in ``cli.contracts``.
+``cli.contracts``. It is the production runner-driving path: it drives a
+single turn through the ADK runner via the adapter + bridge wiring and YIELDS
+each projected public event incrementally as a ``RuntimeEvent`` instead of
+accumulating-then-returning. The terminal ``EngineResult`` is delivered as the
+FINAL yielded item, per the consumption convention documented in
+``cli.contracts``.
 
 Import-cleanliness
 ------------------
@@ -19,8 +18,8 @@ imported lazily inside ``_lazy_engine_deps`` which is only called the first time
 
 Single-flight
 -------------
-A second concurrent turn for the same session id is rejected. We reuse the real
-``ActiveTurnRegistry`` from ``runner_session_boundary`` (a thread-safe
+A second concurrent turn for the same session id is rejected. We use
+``ActiveTurnRegistry`` from ``runtime.active_turn_registry`` (a thread-safe
 session-key -> turn-id map). A per-driver default registry is shared across all
 turns of a driver instance; on a concurrent turn we yield a terminal
 ``EngineResult(terminal=Terminal.aborted, error="active_session_turn")`` without
@@ -790,12 +789,11 @@ def _lazy_engine_deps() -> dict[str, object]:
 def _active_turn_registry():
     """Lazily build the real ActiveTurnRegistry (no ADK import needed).
 
-    runner_session_boundary imports ADK at *function* scope only, so importing
-    the module itself is import-clean — but we still defer it to keep engine.py's
-    module-load dependency graph minimal.
+    active_turn_registry is ADK-free; we still defer the import to keep
+    engine.py's module-load dependency graph minimal.
     """
 
-    from magi_agent.runtime.runner_session_boundary import (
+    from magi_agent.runtime.active_turn_registry import (
         ActiveTurnRegistry,
     )
 
