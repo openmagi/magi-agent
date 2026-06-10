@@ -14,6 +14,7 @@ from magi_agent.shadow.gate5b4c3_live_runner_boundary import (
     Gate5B4C3LiveRunnerBoundary,
     Gate5B4C3LiveRunnerBoundaryResult,
     _looks_like_incomplete_full_toolhost_output,
+    _selected_full_toolhost_run_config,
 )
 from magi_agent.shadow.gate5b4c3_shadow_generation_contract import (
     Gate5B4C3ShadowGenerationBudgets,
@@ -962,6 +963,17 @@ def test_live_boundary_selected_full_toolhost_uses_request_adk_llm_call_budget()
     assert result.status == "completed"
     run_config = _FakeRunner.run_kwargs["run_config"]
     assert getattr(run_config, "max_llm_calls") == 32
+
+
+def test_live_boundary_selected_full_toolhost_run_config_requests_sse_streaming() -> None:
+    pytest.importorskip("google.adk.agents.run_config")
+    from google.adk.agents.run_config import StreamingMode
+
+    run_config = _selected_full_toolhost_run_config(True, max_llm_calls=32)
+
+    assert run_config is not None
+    assert getattr(run_config, "max_llm_calls") == 32
+    assert getattr(run_config, "streaming_mode") == StreamingMode.SSE
 
 
 def test_live_boundary_rejects_completed_runner_without_text_output() -> None:

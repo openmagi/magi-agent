@@ -1417,6 +1417,7 @@ async def run_gate5b_user_visible_chat_response(
     payload: object,
     *,
     request: Request,
+    public_event_sink: Callable[[Mapping[str, object]], None] | None = None,
 ) -> JSONResponse:
     """Run the selected Gate5B user-visible chat path for HTTP adapters.
 
@@ -1524,6 +1525,7 @@ async def run_gate5b_user_visible_chat_response(
             payload,
             request=request,
             gate1a_bundle=tool_bundle,
+            public_event_sink=public_event_sink,
         )
     finally:
         try:
@@ -2748,6 +2750,7 @@ async def _run_live_chat_runner(
     *,
     request: Request,
     gate1a_bundle: Gate1AReadOnlyToolBundle | Gate5BFullToolBundle,
+    public_event_sink: Callable[[Mapping[str, object]], None] | None = None,
 ) -> JSONResponse:
     shadow_config = _shadow_generation_route_config(runtime)
     generation_config = shadow_config.generation_config
@@ -2842,6 +2845,7 @@ async def _run_live_chat_runner(
             adk_tools=gate1a_bundle.tools if gate1a_bundle.status == "ready" else (),
             gate1a_egress_correlation_context=gate1a_egress_context,
             gate1a_egress_proxy_url=gate1a_egress_proxy_url,
+            public_event_sink=public_event_sink,
         )
         model_call_window_end = _utc_now_iso()
         report_digest = _sha256_digest(

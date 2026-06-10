@@ -20,7 +20,9 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 
+from magi_agent.transport import streaming_chat_route as streaming_chat_route_module
 from magi_agent.shadow.gate5b4c3_live_runner_boundary import (
     Gate5B4C3LiveAdkPrimitives,
 )
@@ -49,6 +51,7 @@ from magi_agent.transport.streaming_chat_route import (
     _streaming_chat_enabled,
     _extract_prompt_text,
     _local_full_access,
+    _drive_selected_gate5b_stream,
 )
 from magi_agent.transport.streaming_sink import build_streaming_prompt_sink
 
@@ -389,6 +392,116 @@ def test_selected_full_toolhost_stream_uses_selected_canary_path(
     assert "Selected first-party toolhost active" in serialized
     assert [payload["type"] for payload in payloads][-1] == "turn_result"
     assert payloads[-1]["terminal"] == "completed"
+
+
+def test_selected_gate5b_stream_emits_live_sink_events_before_completion(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
+    release_response = asyncio.Event()
+
+    async def fake_selected_chat_response(
+        runtime: object,
+        body: object,
+        *,
+        request: object,
+        public_event_sink=None,
+    ) -> JSONResponse:
+        assert public_event_sink is not None
+        public_event_sink({"type": "text_delta", "delta": "early live chunk"})
+        await release_response.wait()
+        return JSONResponse(
+            status_code=200,
+            content={
+                "status": "python_ready",
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "early live chunk final answer",
+                        }
+                    }
+                ],
+            },
+        )
+
+    monkeypatch.setattr(
+        streaming_chat_route_module,
+        "run_gate5b_user_visible_chat_response",
+        fake_selected_chat_response,
+    )
+
+    async def _collect() -> list[dict]:
+        frames = _drive_selected_gate5b_stream(
+            SimpleNamespace(),
+            {"messages": [{"role": "user", "content": "stream selected"}]},
+            SimpleNamespace(),
+            session_id="s-selected-live",
+            turn_id="t-selected-live",
+        )
+        first_task = asyncio.create_task(anext(frames))
+        first_frame = await asyncio.wait_for(first_task, timeout=1)
+        first_payloads = _data_lines(first_frame.decode("utf-8"))
+        release_response.set()
+        remaining_frames = [frame async for frame in frames]
+        remaining_payloads = [
+            payload
+            for frame in remaining_frames
+            for payload in _data_lines(frame.decode("utf-8"))
+        ]
+        return first_payloads + remaining_payloads
+
+    payloads = asyncio.run(_collect())
+
+    assert payloads[0]["type"] == "text_delta"
+    assert payloads[0]["delta"] == "early live chunk"
+    assert payloads[-1]["type"] == "turn_result"
+    assert payloads[-1]["terminal"] == "completed"
+
+
+def test_selected_gate5b_stream_cancels_response_task_when_client_closes(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
+    cancelled = asyncio.Event()
+
+    async def fake_selected_chat_response(
+        runtime: object,
+        body: object,
+        *,
+        request: object,
+        public_event_sink=None,
+    ) -> JSONResponse:
+        assert public_event_sink is not None
+        public_event_sink({"type": "text_delta", "delta": "first chunk"})
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+
+    monkeypatch.setattr(
+        streaming_chat_route_module,
+        "run_gate5b_user_visible_chat_response",
+        fake_selected_chat_response,
+    )
+
+    async def _run() -> bool:
+        frames = _drive_selected_gate5b_stream(
+            SimpleNamespace(),
+            {"messages": [{"role": "user", "content": "stream selected"}]},
+            SimpleNamespace(),
+            session_id="s-selected-close",
+            turn_id="t-selected-close",
+        )
+        first_frame = await asyncio.wait_for(anext(frames), timeout=1)
+        first_payloads = _data_lines(first_frame.decode("utf-8"))
+        assert first_payloads[0]["delta"] == "first chunk"
+        await frames.aclose()
+        await asyncio.wait_for(cancelled.wait(), timeout=1)
+        return cancelled.is_set()
+
+    assert asyncio.run(_run()) is True
 
 
 def test_selected_stream_failure_does_not_fall_back_to_headless_success(

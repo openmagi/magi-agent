@@ -381,6 +381,7 @@ class Gate5B4C3LiveRunnerBoundaryResult(BaseModel):
 
 
 AdkPrimitivesLoader: TypeAlias = Callable[[], Gate5B4C3LiveAdkPrimitives]
+Gate5B4C3PublicEventSink: TypeAlias = Callable[[Mapping[str, object]], None]
 
 
 class Gate5B4C3LiveRunnerBoundary:
@@ -391,6 +392,7 @@ class Gate5B4C3LiveRunnerBoundary:
         adk_tools: Sequence[object] = (),
         gate1a_egress_correlation_context: Gate1AEgressCorrelationContext | None = None,
         gate1a_egress_proxy_url: str | None = None,
+        public_event_sink: Gate5B4C3PublicEventSink | None = None,
     ) -> None:
         self._adk_primitives_loader = (
             adk_primitives_loader or load_gate5b4c3_live_adk_primitives
@@ -398,6 +400,7 @@ class Gate5B4C3LiveRunnerBoundary:
         self._adk_tools = tuple(adk_tools)
         self._gate1a_egress_correlation_context = gate1a_egress_correlation_context
         self._gate1a_egress_proxy_url = str(gate1a_egress_proxy_url or "").strip()
+        self._public_event_sink = public_event_sink
 
     def invoke(
         self,
@@ -669,6 +672,12 @@ class Gate5B4C3LiveRunnerBoundary:
                         chunk = _event_text(event)
                         if chunk:
                             output_chunks.append(chunk)
+                            self._emit_public_event(
+                                {
+                                    "type": "text_delta",
+                                    "delta": chunk,
+                                }
+                            )
                         event_function_calls = _event_function_calls(event)
                         for function_call in event_function_calls:
                             function_call_key = _json_dumps(function_call)
@@ -908,6 +917,15 @@ class Gate5B4C3LiveRunnerBoundary:
             output_text=output_text,
         )
 
+    def _emit_public_event(self, payload: Mapping[str, object]) -> None:
+        if self._public_event_sink is None:
+            return
+        try:
+            self._public_event_sink(dict(payload))
+        except Exception:
+            # Streaming hints must never change the selected boundary result.
+            return
+
 
 def load_gate5b4c3_live_adk_primitives() -> Gate5B4C3LiveAdkPrimitives:
     from google.adk import agents as adk_agents
@@ -977,12 +995,14 @@ def run_gate5b4c3_live_runner_boundary(
     adk_tools: Sequence[object] = (),
     gate1a_egress_correlation_context: Gate1AEgressCorrelationContext | None = None,
     gate1a_egress_proxy_url: str | None = None,
+    public_event_sink: Gate5B4C3PublicEventSink | None = None,
 ) -> Gate5B4C3LiveRunnerBoundaryResult:
     boundary = Gate5B4C3LiveRunnerBoundary(
         adk_primitives_loader or load_gate5b4c3_live_adk_primitives,
         adk_tools=adk_tools,
         gate1a_egress_correlation_context=gate1a_egress_correlation_context,
         gate1a_egress_proxy_url=gate1a_egress_proxy_url,
+        public_event_sink=public_event_sink,
     )
     return boundary.invoke(request, config=config)
 
@@ -995,12 +1015,14 @@ async def run_gate5b4c3_live_runner_boundary_async(
     adk_tools: Sequence[object] = (),
     gate1a_egress_correlation_context: Gate1AEgressCorrelationContext | None = None,
     gate1a_egress_proxy_url: str | None = None,
+    public_event_sink: Gate5B4C3PublicEventSink | None = None,
 ) -> Gate5B4C3LiveRunnerBoundaryResult:
     boundary = Gate5B4C3LiveRunnerBoundary(
         adk_primitives_loader or load_gate5b4c3_live_adk_primitives,
         adk_tools=adk_tools,
         gate1a_egress_correlation_context=gate1a_egress_correlation_context,
         gate1a_egress_proxy_url=gate1a_egress_proxy_url,
+        public_event_sink=public_event_sink,
     )
     return await boundary.invoke_async(request, config=config)
 
@@ -1814,7 +1836,14 @@ def _run_config(*, max_llm_calls: int) -> object | None:
         except Exception:
             return None
     try:
-        return RunConfig(max_llm_calls=max_llm_calls)
+        from google.adk.agents.run_config import StreamingMode
+    except Exception:
+        StreamingMode = None  # type: ignore[assignment]
+    try:
+        kwargs: dict[str, object] = {"max_llm_calls": max_llm_calls}
+        if StreamingMode is not None:
+            kwargs["streaming_mode"] = StreamingMode.SSE
+        return RunConfig(**kwargs)
     except Exception:
         return None
 
