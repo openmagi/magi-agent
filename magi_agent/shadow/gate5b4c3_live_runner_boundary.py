@@ -325,6 +325,11 @@ class Gate5B4C3LiveRunnerBoundaryResult(BaseModel):
         alias="outputTextInternal",
         exclude=True,
     )
+    usage_internal: dict[str, int] | None = Field(
+        default=None,
+        alias="usageInternal",
+        exclude=True,
+    )
     user_visible_output: str | None = Field(default=None, alias="userVisibleOutput")
     authority: Gate5B4C3ShadowGenerationAuthorityFlags = Field(
         default_factory=Gate5B4C3ShadowGenerationAuthorityFlags,
@@ -654,6 +659,7 @@ class Gate5B4C3LiveRunnerBoundary:
         output_chunks: list[str] = []
         manual_continuations = 0
         tool_only_events_seen = False
+        usage_totals = [0, 0, 0]
         try:
             async with asyncio.timeout(request.budgets.python_runner_timeout_ms / 1000):
                 next_message: object = message
@@ -662,6 +668,7 @@ class Gate5B4C3LiveRunnerBoundary:
                     function_call_keys: set[str] = set()
                     function_responses_seen = False
                     current_run_output_chunks: list[str] = []
+                    stream_usage: tuple[int, int, int] | None = None
                     current_run_kwargs = {**run_kwargs, "new_message": next_message}
                     async for event in runner.run_async(
                         **_allowlist_kwargs(
@@ -686,6 +693,9 @@ class Gate5B4C3LiveRunnerBoundary:
                                         "delta": visible_delta,
                                     }
                                 )
+                        event_usage = _event_usage_metadata(event)
+                        if event_usage is not None:
+                            stream_usage = event_usage
                         event_function_calls = _event_function_calls(event)
                         for function_call in event_function_calls:
                             function_call_key = _json_dumps(function_call)
@@ -700,6 +710,10 @@ class Gate5B4C3LiveRunnerBoundary:
                             function_responses_seen = True
                         if event_count >= 64:
                             break
+                    if stream_usage is not None:
+                        usage_totals[0] += stream_usage[0]
+                        usage_totals[1] += stream_usage[1]
+                        usage_totals[2] += stream_usage[2]
                     # Drive pending tool calls to execution even when the model
                     # also emitted preamble text in the same turn. Short-circuiting
                     # on `output_chunks` here discarded the model's unexecuted tool
@@ -765,6 +779,7 @@ class Gate5B4C3LiveRunnerBoundary:
                     gate1a_egress_proxy_url=self._gate1a_egress_proxy_url,
                 ),
                 output_text=_joined_output(output_chunks),
+                usage=_usage_dict(tuple(usage_totals)),
             )
         except Exception as exc:
             if selected_full_toolhost and tool_only_events_seen:
@@ -794,6 +809,7 @@ class Gate5B4C3LiveRunnerBoundary:
                         runner_kwargs_keys=tuple(sorted(runner_kwargs)),
                         run_async_kwargs_keys=tuple(sorted(run_kwargs)),
                         output_text=_joined_output(output_chunks),
+                        usage=_usage_dict(tuple(usage_totals)),
                     )
             stage, reason_code, exception_category = _classify_runner_exception(exc)
             model_attempted = not (
@@ -831,6 +847,7 @@ class Gate5B4C3LiveRunnerBoundary:
                     gate1a_egress_proxy_url=self._gate1a_egress_proxy_url,
                 ),
                 output_text=_joined_output(output_chunks),
+                usage=_usage_dict(tuple(usage_totals)),
             )
 
         output_text = _joined_output(output_chunks)
@@ -923,6 +940,7 @@ class Gate5B4C3LiveRunnerBoundary:
             runner_kwargs_keys=tuple(sorted(runner_kwargs)),
             run_async_kwargs_keys=tuple(sorted(run_kwargs)),
             output_text=output_text,
+            usage=_usage_dict(tuple(usage_totals)),
         )
 
     def _emit_public_event(self, payload: Mapping[str, object]) -> None:
@@ -1388,6 +1406,7 @@ def _result(
     error_preview: str | None = None,
     runner_error_diagnostic: Gate5B4C3LiveRunnerErrorDiagnostic | None = None,
     output_text: str | None = None,
+    usage: dict[str, int] | None = None,
 ) -> Gate5B4C3LiveRunnerBoundaryResult:
     return Gate5B4C3LiveRunnerBoundaryResult(
         diagnostic=diagnostic.model_dump(by_alias=True, mode="python", warnings=False),
@@ -1417,6 +1436,7 @@ def _result(
             else None
         ),
         outputTextInternal=output_text,
+        usageInternal=usage,
     )
 
 
@@ -1548,6 +1568,52 @@ def _event_function_responses(event: object) -> tuple[object, ...]:
             if response is not None:
                 responses.append(response)
     return tuple(responses)
+
+
+def _usage_int(meta: object, *names: str) -> int | None:
+    for name in names:
+        value = _mapping_or_attr(meta, name)
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, int) and value >= 0:
+            return value
+    return None
+
+
+def _event_usage_metadata(event: object, *, depth: int = 0) -> tuple[int, int, int] | None:
+    if depth > 3:
+        return None
+    meta = _mapping_or_attr(event, "usage_metadata") or _mapping_or_attr(
+        event,
+        "usageMetadata",
+    )
+    if meta is not None:
+        prompt = _usage_int(meta, "prompt_token_count", "promptTokenCount")
+        candidates = _usage_int(meta, "candidates_token_count", "candidatesTokenCount")
+        cached = _usage_int(
+            meta,
+            "cached_content_token_count",
+            "cachedContentTokenCount",
+        )
+        if prompt is not None or candidates is not None or cached is not None:
+            return (prompt or 0, candidates or 0, cached or 0)
+    for nested_name in ("llm_response", "response"):
+        nested = _mapping_or_attr(event, nested_name)
+        if nested is not None:
+            found = _event_usage_metadata(nested, depth=depth + 1)
+            if found is not None:
+                return found
+    return None
+
+
+def _usage_dict(totals: tuple[int, int, int]) -> dict[str, int] | None:
+    if not any(totals):
+        return None
+    return {
+        "inputTokens": totals[0],
+        "outputTokens": totals[1],
+        "cacheReadTokens": totals[2],
+    }
 
 
 def _event_parts(
