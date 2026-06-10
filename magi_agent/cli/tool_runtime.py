@@ -350,6 +350,7 @@ def build_cli_instruction(
     recall_query: str | None = None,
     bot_id: str = "local",
     user_id: str = "local",
+    learning_live_readiness: object | None = None,
 ) -> str:
     """Build the real system prompt for the CLI agent (coding-agent path).
 
@@ -428,17 +429,27 @@ def build_cli_instruction(
                 part for part in (_recall_block, memory_snapshot_block) if part
             )
 
-    # 01-PR4 (C2): consult the gated-live learning-recall harness on the SERVE
-    # path. This resolves the unified-rag B1 gap where
-    # build_gated_live_learning_recall_harness had ZERO serve consumers. Gated
-    # by the existing learning-live readiness ladder (MAGI_LEARNING_LIVE_ENABLED
-    # + selected-scope canary) and incognito-aware. Returns "" when the gate is
-    # off (default), in shadow mode, with no live binding, or on any error — so
-    # the combined block is byte-identical to pre-wiring when the live ladder is
-    # off. Appended AFTER the snapshot/recall blocks so it never reorders them.
-    if recall_query is not None and workspace_root is not None:
+    # 01-PR4 (C2): consult the gated-live learning-recall + write harnesses on
+    # the SERVE path. This resolves the unified-rag B1 gap where BOTH
+    # build_gated_live_learning_recall_harness AND
+    # build_gated_live_learning_write_harness had ZERO serve consumers. Gated by
+    # the existing learning-live readiness ladder (MAGI_LEARNING_LIVE_ENABLED +
+    # the caller-PROVIDED selected-scope canary readiness config — no net-new
+    # flags) and incognito-aware. The real bot_id/user_id are threaded from the
+    # serve caller so the canary digest match resolves against the genuine
+    # identity, not the literal "local" default. Returns ""/None when the ladder
+    # is off (default: learning_live_readiness is None), in shadow mode, with no
+    # live binding, or on any error — so the combined block is byte-identical to
+    # pre-wiring when off. Appended AFTER the snapshot/recall blocks so it never
+    # reorders them.
+    if (
+        recall_query is not None
+        and workspace_root is not None
+        and learning_live_readiness is not None
+    ):
         from magi_agent.cli.learning_recall import (  # noqa: PLC0415
             build_serve_live_learning_recall_block,
+            build_serve_live_learning_write_audit,
         )
 
         _live_learning_block = build_serve_live_learning_recall_block(
@@ -447,6 +458,20 @@ def build_cli_instruction(
             memory_mode=memory_mode_value,
             bot_id=bot_id,
             user_id=user_id,
+            readiness=learning_live_readiness,
+        )
+        # Write symmetry (spec PR4 file-map "write 대칭"): on the live path also
+        # run the gated WRITE harness for a symmetric audit record. The audit is
+        # observe-only here — every Literal[False] authority flag stays frozen —
+        # so it never mutates the prompt; it only proves the write seam is wired
+        # (the builder logs the audit dict at debug). Returns None off the live
+        # path, keeping prompt assembly byte-identical.
+        build_serve_live_learning_write_audit(
+            workspace_root=workspace_root,
+            memory_mode=memory_mode_value,
+            bot_id=bot_id,
+            user_id=user_id,
+            readiness=learning_live_readiness,
         )
         if _live_learning_block:
             memory_snapshot_block = "\n\n".join(

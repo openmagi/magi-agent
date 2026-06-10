@@ -151,6 +151,9 @@ def build_cli_model_runner(
     workspace_root: str | None = None,
     memory_mode: "MemoryMode | str" = "normal",
     recall_query: str | None = None,
+    bot_id: str = "local",
+    owner_user_id: str = "local",
+    learning_live_readiness: object | None = None,
     task_profile: Mapping[str, object] | None = None,
     general_automation_receipts: object | None = None,
     local_tool_evidence_collector: object | None = None,
@@ -218,6 +221,16 @@ def build_cli_model_runner(
             workspace_root=effective_workspace_root,
             memory_mode=memory_mode,
             recall_query=recall_query,
+            # Thread REAL identity (issue 3): the learning-live readiness ladder
+            # matches the selected-canary digest against these — the previous
+            # literal "local" default could only ever target the literal "local"
+            # scope, so the live recall/write seam never resolved on the real
+            # serve path. ``owner_user_id`` is the bot-OWNER identity used for the
+            # canary digest (distinct from the ADK session ``user_id`` above); the
+            # serve caller passes runtime.config.bot_id / runtime.config.user_id.
+            bot_id=bot_id,
+            user_id=owner_user_id,
+            learning_live_readiness=learning_live_readiness,
         )
     )
 

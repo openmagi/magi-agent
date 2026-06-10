@@ -143,70 +143,6 @@ class LearningLiveReadinessConfig(BaseModel):
         return False
 
 
-#: Env vars consumed by :func:`build_learning_live_readiness_config_from_env`.
-#: All default to the disabled/empty value, so a fresh env resolves to the
-#: ``disabled`` execution mode (byte-identical to no live binding).
-_GATE_ENABLED_ENV_VAR = "MAGI_LEARNING_LIVE_GATE_ENABLED"
-_KILL_SWITCH_ENV_VAR = "MAGI_LEARNING_LIVE_KILL_SWITCH"
-_SHADOW_MODE_ENV_VAR = "MAGI_LEARNING_LIVE_SHADOW_MODE"
-_SELECTED_BOT_DIGEST_ENV_VAR = "MAGI_LEARNING_LIVE_SELECTED_BOT_DIGEST"
-_SELECTED_OWNER_DIGEST_ENV_VAR = "MAGI_LEARNING_LIVE_SELECTED_OWNER_DIGEST"
-_ENVIRONMENT_ENV_VAR = "MAGI_LEARNING_LIVE_ENVIRONMENT"
-_ENVIRONMENT_ALLOWLIST_ENV_VAR = "MAGI_LEARNING_LIVE_ENVIRONMENT_ALLOWLIST"
-_PROMOTED_GATE_ENV_VAR = "MAGI_LEARNING_LIVE_PROMOTED_GATE"
-_CANARY_CONFIRMED_ENV_VAR = "MAGI_LEARNING_LIVE_CANARY_CONFIRMED"
-
-
-def _env_bool(name: str, *, default: bool = False) -> bool:
-    raw = os.environ.get(name)
-    if raw is None:
-        return default
-    return raw.strip().lower() in _TRUE_STRINGS
-
-
-def _env_int(name: str, *, default: int = 0) -> int:
-    raw = os.environ.get(name)
-    if raw is None:
-        return default
-    try:
-        return int(raw.strip())
-    except (TypeError, ValueError):
-        return default
-
-
-def build_learning_live_readiness_config_from_env() -> LearningLiveReadinessConfig:
-    """Build the learning-live readiness config from environment variables.
-
-    Mirrors the ``*_from_env`` builders elsewhere (e.g.
-    ``check_oc_cron_transition_guard_from_env``).  A fresh environment (no vars
-    set) yields ``enabled=False`` + ``promoted_gate=0`` so
-    :func:`resolve_learning_live_execution_mode` resolves to ``disabled`` — the
-    serve path then keeps the local-fake / no-binding behaviour, byte-identical
-    to before this seam existed.  The env gate ``MAGI_LEARNING_LIVE_ENABLED``
-    remains an additional hard short-circuit consulted inside the resolver, so
-    even a fully-configured readiness config stays ``disabled`` until that gate
-    is on.
-
-    The locked ``live_authority_allowed`` flag is never read from env — it stays
-    ``Literal[False]`` and authority is gate-derived.
-    """
-    promoted_raw = _env_int(_PROMOTED_GATE_ENV_VAR, default=0)
-    promoted_gate = max(0, min(9, promoted_raw))
-    return LearningLiveReadinessConfig(
-        enabled=_env_bool(_GATE_ENABLED_ENV_VAR),
-        killSwitchEnabled=_env_bool(_KILL_SWITCH_ENV_VAR, default=True),
-        shadowModeEnabled=_env_bool(_SHADOW_MODE_ENV_VAR),
-        selectedBotDigest=os.environ.get(_SELECTED_BOT_DIGEST_ENV_VAR, "").strip(),
-        selectedOwnerUserIdDigest=os.environ.get(
-            _SELECTED_OWNER_DIGEST_ENV_VAR, ""
-        ).strip(),
-        environment=os.environ.get(_ENVIRONMENT_ENV_VAR, "local").strip() or "local",
-        environmentAllowlist=os.environ.get(_ENVIRONMENT_ALLOWLIST_ENV_VAR, ""),
-        promotedGate=promoted_gate,
-        canaryPromotionConfirmed=_env_bool(_CANARY_CONFIRMED_ENV_VAR),
-    )
-
-
 def learning_live_readiness_health_metadata(
     config: LearningLiveReadinessConfig,
     *,
@@ -355,7 +291,6 @@ def _digest_present(value: object) -> bool:
 __all__ = [
     "LearningLiveExecutionMode",
     "LearningLiveReadinessConfig",
-    "build_learning_live_readiness_config_from_env",
     "learning_live_readiness_health_metadata",
     "resolve_learning_live_execution_mode",
 ]

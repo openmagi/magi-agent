@@ -132,6 +132,7 @@ def build_serve_live_learning_recall_block(
     memory_mode: str,
     bot_id: str,
     user_id: str,
+    readiness: object | None,
 ) -> str:
     """Return a ``<learning-live-recall>`` block, or ``""`` when suppressed.
 
@@ -144,21 +145,33 @@ def build_serve_live_learning_recall_block(
     ``build_headless_runtime`` → ``build_cli_instruction``) actually consults
     the live recall harness when the learning-live readiness ladder is on.
 
-    Default-OFF is PRESERVED: the readiness config is built from env
-    (``build_learning_live_readiness_config_from_env``), and the env gate
-    ``MAGI_LEARNING_LIVE_ENABLED`` short-circuits the resolver to ``disabled``.
-    The gated factory then returns ``None`` (also for ``shadow`` — observe-only
-    is not a serve injection), so this returns ``""`` and the prompt is
-    byte-identical to before this seam existed.
+    Spec PR4 default-state: *no new flags — consume the existing
+    ``MAGI_LEARNING_LIVE_ENABLED`` + readiness config*.  Accordingly the
+    ``readiness`` config is PROVIDED by the caller (the runtime/control-plane
+    that already owns the selected-scope canary digests + environment); this
+    seam never reads any net-new ``MAGI_LEARNING_LIVE_*`` env var.  Default-OFF
+    is PRESERVED two ways:
 
-    All early-exit conditions (no workspace, incognito mode, gate disabled,
-    shadow mode, no live binding, empty/blocked recall, any error) return ``""``
-    — the caller always receives a plain string and the function never raises.
+    * ``readiness is None`` (the default CLI/local case) → no live binding;
+    * the env gate ``MAGI_LEARNING_LIVE_ENABLED`` (default OFF) hard
+      short-circuits ``resolve_learning_live_execution_mode`` to ``disabled``
+      inside the gated factory regardless of the readiness config.
+
+    The gated factory returns ``None`` for ``disabled``/``shadow`` (observe-only
+    is not a serve injection), so this returns ``""`` and the prompt is
+    byte-identical to before this seam existed.  Real ``bot_id``/``user_id`` are
+    threaded from the serve caller so the canary digest match resolves against
+    the genuine identity (not the literal ``"local"`` default).
+
+    All early-exit conditions (no workspace, no readiness, incognito mode, gate
+    disabled, shadow mode, no live binding, empty/blocked recall, any error)
+    return ``""`` — the caller always receives a plain string and the function
+    never raises.
 
     No ``Literal[False]`` authority flag is flipped — live behaviour is purely
     gate-derived through the existing readiness ladder + audit path.
     """
-    if workspace_root is None:
+    if workspace_root is None or readiness is None:
         return ""
 
     try:
@@ -169,9 +182,6 @@ def build_serve_live_learning_recall_block(
         if is_incognito_memory_mode(memory_mode):
             return ""
 
-        from magi_agent.gates.learning_live_readiness import (  # noqa: PLC0415
-            build_learning_live_readiness_config_from_env,
-        )
         from magi_agent.harness.memory_recall import (  # noqa: PLC0415
             build_gated_live_learning_recall_harness,
         )
@@ -189,7 +199,6 @@ def build_serve_live_learning_recall_block(
         if not db_path.exists():
             return ""
 
-        readiness = build_learning_live_readiness_config_from_env()
         store = SqliteLearningStore(
             db_path=DEFAULT_LEARNING_DB_PATH,
             workspace_root=workspace_root,
@@ -222,6 +231,96 @@ def build_serve_live_learning_recall_block(
     except Exception:
         logger.debug("Live learning recall failed; skipping", exc_info=True)
         return ""
+
+
+def build_serve_live_learning_write_audit(
+    *,
+    workspace_root: str | None,
+    memory_mode: str,
+    bot_id: str,
+    user_id: str,
+    readiness: object | None,
+) -> dict[str, object] | None:
+    """Return a PUBLIC-SAFE write-audit projection, or ``None`` when suppressed.
+
+    Spec PR4 file-map requires *write 대칭* (write symmetry) and test (c)
+    requires a *write audit* on the live path: ``build_gated_live_learning_
+    write_harness`` (``harness/memory_write.py``) ALSO had ZERO serve callers.
+    This is its serve consumer — it mirrors the recall seam exactly:
+
+    * ``readiness is None`` / ``disabled`` / ``shadow`` → ``None`` (no write,
+      no audit — observe-only is not a serve write);
+    * ``live`` (env gate ON + caller readiness resolves live for the real
+      identity) → run the gated write harness and return its PUBLIC-SAFE
+      ``public_projection()`` audit dict.
+
+    Every ``Literal[False]`` authority flag on the write harness stays
+    frozen-False even on the live path — the audit proves the seam reached the
+    write harness, never that an authority flag flipped.  Fail-soft: any error
+    returns ``None`` and the function never raises.
+    """
+    if workspace_root is None or readiness is None:
+        return None
+
+    try:
+        from magi_agent.tools.memory_mode_guard import (  # noqa: PLC0415
+            is_incognito_memory_mode,
+        )
+
+        if is_incognito_memory_mode(memory_mode):
+            return None
+
+        from magi_agent.harness.memory_write import (  # noqa: PLC0415
+            build_gated_live_learning_write_harness,
+        )
+
+        harness = build_gated_live_learning_write_harness(
+            readiness=readiness,
+            bot_id=bot_id,
+            user_id=user_id,
+        )
+        # ``None`` == disabled/shadow → no live binding → no serve write/audit.
+        if harness is None:
+            return None
+        audit = _run_serve_live_write(harness=harness)
+        if audit is not None:
+            logger.debug("learning-live serve write audit: %s", audit)
+        return audit
+    except Exception:
+        logger.debug("Live learning write audit failed; skipping", exc_info=True)
+        return None
+
+
+def _run_serve_live_write(*, harness: object) -> dict[str, object] | None:
+    """Run the gated-live write harness and return its public-safe audit dict.
+
+    Isolated so tests can monkeypatch the write execution.  The request is a
+    declarative no-op anchor (a ``remember`` of the learning-live serve seam
+    activation) — it exists only to exercise the write boundary + emit an audit
+    record; the receipt/authority projection is what the serve caller logs.
+    """
+    import asyncio  # noqa: PLC0415
+
+    from magi_agent.harness.memory_write import (  # noqa: PLC0415
+        MemoryWritePolicy,
+        MemoryWriteRequest,
+    )
+
+    request = MemoryWriteRequest(
+        providerId="learning-live-serve",
+        turnId="learning-live-serve",
+        operation="remember",
+        content="learning-live serve seam active",
+    )
+    policy = MemoryWritePolicy(
+        policyRef="policy:learning-live-serve",
+        policySnapshotRef="policy-snapshot:learning-live-serve",
+        approvalRequired=False,
+        evidenceRequired=False,
+        localFakeSuccessAllowed=True,
+    )
+    result = asyncio.run(harness.write(request=request, policy=policy))
+    return result.public_projection()
 
 
 def _run_serve_live_recall(
@@ -277,4 +376,5 @@ def _run_serve_live_recall(
 __all__ = [
     "build_cli_learning_recall_block",
     "build_serve_live_learning_recall_block",
+    "build_serve_live_learning_write_audit",
 ]

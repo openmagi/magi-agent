@@ -142,6 +142,9 @@ def build_headless_runtime(
     runner_policy_routing_enabled: bool | None = None,
     memory_mode: "MemoryMode | str" = "normal",
     recall_query: str | None = None,
+    bot_id: str = "local",
+    owner_user_id: str = "local",
+    learning_live_readiness: object | None = None,
 ) -> HeadlessRuntime:
     """Construct the complete headless dependency set.
 
@@ -187,6 +190,9 @@ def build_headless_runtime(
             mode=mode,
             memory_mode=memory_mode,
             recall_query=recall_query,
+            bot_id=bot_id,
+            owner_user_id=owner_user_id,
+            learning_live_readiness=learning_live_readiness,
         )
     )
     composio_bundle, composio_attached = _build_composio_bundle_for_mode(
@@ -365,6 +371,9 @@ def _build_default_runner(
     mode: "RuntimeMode" = "act",
     memory_mode: "MemoryMode | str" = "normal",
     recall_query: str | None = None,
+    bot_id: str = "local",
+    owner_user_id: str = "local",
+    learning_live_readiness: object | None = None,
 ) -> object:
     """Build the CLI's default runner.
 
@@ -416,6 +425,13 @@ def _build_default_runner(
             workspace_root=workspace_root,
             memory_mode=memory_mode,
             recall_query=recall_query,
+            # Thread REAL identity + the caller-provided learning-live readiness
+            # config down to prompt assembly (issue 3 end-to-end). owner_user_id
+            # is the bot-owner identity used for the canary digest match (distinct
+            # from the ADK session user).
+            bot_id=bot_id,
+            owner_user_id=owner_user_id,
+            learning_live_readiness=learning_live_readiness,
             general_automation_receipts=general_automation_receipts,
             local_tool_evidence_collector=local_tool_evidence,
         )
