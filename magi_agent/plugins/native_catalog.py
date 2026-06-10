@@ -69,7 +69,7 @@ _NATIVE_PLUGIN_DATA: tuple[Mapping[str, object], ...] = (
         "id": "openmagi.apify",
         "name": "OpenMagi Apify",
         "kind": "native",
-        "version": "0.1.0",
+        "version": "0.1.0-adk-scaffold",
         "description": (
             "Apify Actor marketplace access: discover Actors (free) and run them "
             "for platform-specific structured scraping (paid, bring-your-own "
@@ -82,7 +82,7 @@ _NATIVE_PLUGIN_DATA: tuple[Mapping[str, object], ...] = (
         "securityCritical": False,
         "audit_required": True,
         "runtime": {
-            "minCoreVersion": "0.1.0",
+            "minCoreVersion": "0.1.0-adk-scaffold",
             "adkCompatibility": (
                 "REST tool surface; ADK FunctionTool attachment routes through "
                 "ToolHost policy"
@@ -106,9 +106,7 @@ _NATIVE_PLUGIN_DATA: tuple[Mapping[str, object], ...] = (
         "configSchema": {
             "type": "object",
             "additionalProperties": False,
-            "properties": {
-                "maxUsdPerRun": {"type": "number", "default": 1.0},
-            },
+            "properties": {},
         },
         "capabilities": (
             {"type": "tool", "name": "apify_search_actors"},
