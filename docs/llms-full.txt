@@ -94,7 +94,8 @@ The source checkout is for contributors developing the runtime. Normal users ins
 - What Works Today: https://openmagi.ai/docs/what-works-today - with a provider key, the local `magi` CLI runs a real model and first-party tools today.
 - Common Tasks: https://openmagi.ai/docs/common-tasks - the local `magi` CLI runs a real model and first-party tools once a provider key is set (`magi_agent/cli/app.py`, `magi_agent/tools/catalog.py`).
 - Channels (Telegram, Discord): https://openmagi.ai/docs/channels - (default-off) channel code (Telegram, Discord) ships in shadow / local-fake mode; live send/receive is gated and produces intent + receipt records, not real delivery (`magi_agent/channels/telegram_adapter.py`, `contract.py`).
-- CLI Reference: https://openmagi.ai/docs/cli-reference - Type: Reference — the full flag, output-mode, exit-code, keybinding, and
+- CLI Reference: https://openmagi.ai/docs/cli-reference - Type: Reference — the full flag, output-mode, exit-code, and keybinding reference for `magi`/`magi <subcommand>` (source: `docs/cli/magi.md`).
+- Gateway Daemon CLI: https://openmagi.ai/docs/cli-gateway - the `magi gateway status|start|install|uninstall` always-on daemon commands; default-off via `MAGI_GATEWAY_DAEMON_ENABLED`.
 - Changelog: https://openmagi.ai/docs/changelog - this page tracks user-facing changes; tagged builds are on GitHub Releases.
 - Upgrading: https://openmagi.ai/docs/upgrading - covers upgrading the Homebrew install and source checkouts.
 - Glossary: https://openmagi.ai/docs/glossary - definitions of the core Magi Agent terms.
@@ -510,14 +511,29 @@ configured, `magi` still launches but uses a model-free stub.
 
 ## Permission modes
 
-The CLI gates tool calls with three permission modes (set via `--permission-mode`):
+The CLI gates tool calls with four permission modes (set via `--permission-mode`):
 
 - `default` — prompts for each tool call that requires approval.
 - `acceptEdits` — auto-allows edit-class tools (file writes, patches); everything else still prompts.
 - `bypassPermissions` — allows all tool calls without prompting.
+- `smartApprove` — opt-in mode that auto-approves low-risk tool calls and only
+  prompts for higher-risk ones. It is never selected automatically; you must
+  pass `--permission-mode smartApprove` to enable it.
 
 First-party local tools are on by default; disable them with
 `MAGI_FIRST_PARTY_TOOLS_ENABLED=0`.
+
+## Agent mode (`--mode`)
+
+The `--mode` flag selects the agent's working mode:
+
+- `act` (default) — full tool access; the agent reads, writes, and runs commands.
+- `plan` — plan-first mode that restricts the agent to read-only tools so it
+  drafts a plan before acting.
+
+```sh
+magi --mode plan "refactor the auth module"
+```
 
 ## Full reference
 
@@ -4879,9 +4895,24 @@ violation; it never raises — it degrades to the built-in defaults on error.
 | `default` | Prompts for each tool call that requires approval. |
 | `acceptEdits` | Automatically allows edit-class tools (file writes, patches). |
 | `bypassPermissions` | Allows all tool calls without prompting. |
+| `smartApprove` | Opt-in: auto-approves low-risk tool calls and only prompts for higher-risk ones. Never selected automatically — pass `--permission-mode smartApprove`. |
 
 ```sh
 magi -p "apply the patch" --permission-mode acceptEdits
+magi -p "apply the patch" --permission-mode smartApprove
+```
+
+## Agent mode (`--mode`)
+
+`--mode` selects the agent's working mode:
+
+| Mode | Behavior |
+|------|----------|
+| `act` (default) | Full tool access — the agent reads, writes, and runs commands. |
+| `plan` | Plan-first mode restricted to read-only tools; the agent drafts a plan before acting. |
+
+```sh
+magi --mode plan "refactor the auth module"
 ```
 
 ## `MAGI_CLI_ENABLED`
@@ -4907,11 +4938,13 @@ Options:
   --output [text|json|stream-json]
                                  Output format for headless mode. [default: text]
   --include-partial-messages     Include partial streaming events in stream-json.
-  --permission-mode [default|acceptEdits|bypassPermissions]
+  --permission-mode [default|acceptEdits|bypassPermissions|smartApprove]
                                  Permission mode.  [default: default]
   --resume TEXT                  Resume a session by id.
   --continue / --no-continue     Continue the most-recent session.
   --model TEXT                   Model to use.
+  --mode [plan|act]              Agent mode: plan (read-only tools) | act (full
+                                 tools).  [default: act]
   -V, --version                  Print the magi version and exit.
   --help                         Show this message and exit.
 ```

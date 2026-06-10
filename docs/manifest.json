@@ -353,6 +353,12 @@
       "group": "Reference"
     },
     {
+      "slug": "cli-gateway",
+      "title": "Gateway Daemon CLI",
+      "path": "docs/cli/gateway.md",
+      "group": "Reference"
+    },
+    {
       "slug": "changelog",
       "title": "Changelog",
       "path": "docs/changelog.md",

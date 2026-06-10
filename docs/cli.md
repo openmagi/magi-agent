@@ -45,14 +45,29 @@ configured, `magi` still launches but uses a model-free stub.
 
 ## Permission modes
 
-The CLI gates tool calls with three permission modes (set via `--permission-mode`):
+The CLI gates tool calls with four permission modes (set via `--permission-mode`):
 
 - `default` — prompts for each tool call that requires approval.
 - `acceptEdits` — auto-allows edit-class tools (file writes, patches); everything else still prompts.
 - `bypassPermissions` — allows all tool calls without prompting.
+- `smartApprove` — opt-in mode that auto-approves low-risk tool calls and only
+  prompts for higher-risk ones. It is never selected automatically; you must
+  pass `--permission-mode smartApprove` to enable it.
 
 First-party local tools are on by default; disable them with
 `MAGI_FIRST_PARTY_TOOLS_ENABLED=0`.
+
+## Agent mode (`--mode`)
+
+The `--mode` flag selects the agent's working mode:
+
+- `act` (default) — full tool access; the agent reads, writes, and runs commands.
+- `plan` — plan-first mode that restricts the agent to read-only tools so it
+  drafts a plan before acting.
+
+```sh
+magi --mode plan "refactor the auth module"
+```
 
 ## Full reference
 
