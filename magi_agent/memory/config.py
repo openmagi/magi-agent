@@ -133,8 +133,11 @@ class MemoryRuntimeConfig(BaseModel):
     prefer_qmd_auto_register: bool = Field(
         default=False, alias="preferQmdAutoRegister"
     )
-    #: Opt-in even under master-on — stays False unless explicitly enabled.
-    #: When True the read adapter uses ``memory/search`` for qmd records.
+    #: Follows the master (master-on => True) so per-turn dynamic recall is not
+    #: silently double-gated off; an explicit env/config override still wins.
+    #: The cost/multi-tenancy opt-ins (``vector_search``,
+    #: ``prefer_qmd_auto_register``) remain explicit-only. When True the read
+    #: adapter uses ``memory/search`` for qmd records.
     prefer_local_search: bool = Field(default=False, alias="preferLocalSearch")
 
     # Tunables.
@@ -226,8 +229,12 @@ def resolve_memory_config(
             "prefer_qmd_auto_register",
             master_default=False,
         ),
+        # Follows the master: per-turn dynamic recall (recall_enabled AND
+        # prefer_local_search) must not be silently double-gated off once the
+        # master is on. An explicit override (env/config) still wins, so an
+        # operator can opt out under master-on.
         preferLocalSearch=sub_flag(
-            PREFER_LOCAL_SEARCH_ENV_VAR, "prefer_local_search", master_default=False
+            PREFER_LOCAL_SEARCH_ENV_VAR, "prefer_local_search", master_default=master
         ),
         preferQmd=_resolve_bool(
             env, table, env_var=PREFER_QMD_ENV_VAR, config_key="prefer_qmd",

@@ -49,6 +49,9 @@ def test_master_defaults_off_when_nothing_set() -> None:
     assert cfg.compaction_enabled is False
     assert cfg.soul_write_enabled is False
     assert cfg.vector_search is False
+    # The dual-gate recall companion is inert when the master is off.
+    assert cfg.prefer_local_search is False
+    assert cfg.prefer_qmd_auto_register is False
 
 
 def test_default_tunables_are_stable_regardless_of_master() -> None:
@@ -88,9 +91,14 @@ def test_master_on_enables_engine_subflags_except_optins() -> None:
     # The kill-switch is explicit-only: master-on must NOT engage it (writes
     # alive), so it stays OFF unless set.
     assert cfg.write_kill_switch_enabled is False
+    # prefer_local_search follows the master so per-turn dynamic recall is not
+    # silently double-gated off once the master is on (PR1 dual-gate fix).
+    assert cfg.prefer_local_search is True
     # Documented opt-ins stay OFF even under master-on.
     assert cfg.soul_write_enabled is False
     assert cfg.vector_search is False
+    # Cost/multi-tenancy opt-in stays OFF even under master-on.
+    assert cfg.prefer_qmd_auto_register is False
 
 
 def test_kill_switch_engages_only_on_explicit_override() -> None:
@@ -151,6 +159,61 @@ def test_vector_search_opt_in_can_be_explicitly_enabled() -> None:
         config={},
     )
     assert cfg.vector_search is True
+
+
+# ---------------------------------------------------------------------------
+# PR1 dual-gate resolution — prefer_local_search follows the master
+# ---------------------------------------------------------------------------
+
+
+def test_prefer_local_search_follows_master_on() -> None:
+    # The core dual-gate fix: master-on (without an explicit prefer-local
+    # override) resolves prefer_local_search ON so the per-turn dynamic recall
+    # path (recall_enabled AND prefer_local_search) is not silently gated off.
+    cfg = resolve_memory_config(env={MASTER_ENV_VAR: "1"}, config={})
+    assert cfg.recall_enabled is True
+    assert cfg.prefer_local_search is True
+
+
+def test_prefer_local_search_off_when_master_off() -> None:
+    # Master off => prefer_local_search inert (default behaviour unchanged).
+    cfg = resolve_memory_config(env={}, config={})
+    assert cfg.prefer_local_search is False
+
+
+def test_prefer_local_search_explicit_override_beats_master_on() -> None:
+    # An operator can still explicitly opt OUT even when the master is on.
+    cfg = resolve_memory_config(
+        env={MASTER_ENV_VAR: "1", "MAGI_MEMORY_PREFER_LOCAL_SEARCH": "0"},
+        config={},
+    )
+    assert cfg.master_enabled is True
+    assert cfg.prefer_local_search is False
+    # Other engine sub-flags still follow the master.
+    assert cfg.recall_enabled is True
+
+
+def test_prefer_local_search_explicit_override_beats_master_off() -> None:
+    # And opt IN even when the master is off (precedence: env > master default).
+    cfg = resolve_memory_config(
+        env={"MAGI_MEMORY_PREFER_LOCAL_SEARCH": "1"},
+        config={},
+    )
+    assert cfg.master_enabled is False
+    assert cfg.prefer_local_search is True
+
+
+def test_prefer_qmd_auto_register_stays_opt_in_under_master_on() -> None:
+    # The cost/multi-tenancy opt-in does NOT follow the master (explicit-only),
+    # so turning the master on must not pollute a shared host with a global qmd
+    # collection.
+    cfg = resolve_memory_config(env={MASTER_ENV_VAR: "1"}, config={})
+    assert cfg.prefer_qmd_auto_register is False
+    cfg_on = resolve_memory_config(
+        env={MASTER_ENV_VAR: "1", "MAGI_MEMORY_PREFER_QMD_AUTO_REGISTER": "1"},
+        config={},
+    )
+    assert cfg_on.prefer_qmd_auto_register is True
 
 
 def test_config_override_beats_master_but_env_beats_config() -> None:
