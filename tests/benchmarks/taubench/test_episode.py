@@ -308,3 +308,33 @@ def test_l2_and_l4_independent_latches() -> None:
     assert any("Re-check the tool results" in m for m in seen)   # L2 nudge delivered
     assert any("every concrete action" in m for m in seen)       # L4 nudge delivered
     assert result.done is True
+
+
+def test_l2_takes_precedence_within_a_turn() -> None:
+    # A single text that is BOTH an unsupported success claim (L2) and a
+    # conclusion (L4-eligible): L2 must win that turn; L4 must NOT also fire.
+    env = FakeEnv(script=[FakeResp("###STOP###", 1.0, True)])
+    state = EpisodeState()
+    led = WriteLedger()  # empty -> L2 fires
+    seen: list[str] = []
+    calls = {"n": 0}
+    texts = ["Your reservation is booked! Reservation ID X", "ok"]
+
+    def factory(*, instruction, tools):
+        class _R:
+            async def run_async(self, **kw):
+                seen.append(_text_of(kw["new_message"]))
+                idx = calls["n"]
+                calls["n"] += 1
+                yield _Event(texts[idx])
+        return _R()
+
+    result = run_episode(
+        env, task_index=0, state=state, runner_factory=factory,
+        action_factory=FakeAction, respond_action_name="respond", max_steps=6,
+        reliability=ReliabilityConfig(verify_before_final=True, completion_review=True),
+        ledger=led,
+    )
+    assert any("Re-check the tool results" in m for m in seen)        # L2 won the turn
+    assert not any("every concrete action" in m for m in seen)       # L4 did NOT fire
+    assert result.done is True
