@@ -15,12 +15,16 @@ applies when the deployment is explicitly marked hosted
 Scope by PR:
 
 * PR1 (C8): ``observability`` — DB on the hosted PVC subPath.
-* PR2 (C3, this change): the six ControlPlane controls. ``resilience`` wires
+* PR2 (C3): the six ControlPlane controls. ``resilience`` wires
   edit-retry, loop-guard, error-recovery and max-steps-brake; ``full`` adds
   context-compaction and shadow self-review; ``hardgate`` promotes self-review
   from shadow to live. control_plane.py already reads each flag from env, so
   no builder change is needed — the overlay just ``setdefault``s the canonical
   flag values per stage.
+* PR6 (C9, this change): ``full`` also enables read-only InspectSelfEvidence
+  introspection (``MAGI_SELF_INTROSPECTION_ENABLED``). C9 MemoryWrite is
+  deliberately kept default-OFF at every stage — its real persistence depends
+  on the held memory master (01-PR5) plus an injected writable provider.
 
 The tau-bench live result for the C3 controls was *null* (resilience controls
 do not move pass^k accuracy metrics — doc 14 §0/§3-2). This overlay is about
@@ -29,9 +33,9 @@ by operational/resilience metrics, not accuracy benches.
 
 The default stage is ``off``, which is byte-identical to today's hosted
 runtime. Stages are additive: ``full`` includes everything in ``resilience``
-and ``hardgate`` everything in ``full``. Per doc 14, C9 introspection /
-memory-write and C11 coding-repair / doc-coverage are explicitly NOT wired
-here — sibling PRs own those.
+and ``hardgate`` everything in ``full``. Per doc 14, C9 MemoryWrite real-write
+and C11 coding-repair / doc-coverage are explicitly NOT wired here — sibling PRs
+own those.
 """
 
 from __future__ import annotations
@@ -76,6 +80,22 @@ _C3_FULL_OVERLAY: Mapping[str, str] = {
     "MAGI_SELF_REVIEW_SHADOW": "1",
 }
 
+# C9 introspection (PR6): InspectSelfEvidence is a read-only projection of the
+# session evidence ledger (never raw transcript, ``tools/catalog.py`` ~373) — it
+# only lets the model truthfully answer "did I really read X?". Low-risk, so it
+# joins the ``full`` stage. The handler decides availability from the env gate
+# at bind time, so the overlay just ``setdefault``s the flag.
+#
+# Note: C9 MemoryWrite (``MAGI_MEMORY_WRITE_ENABLED``, catalog.py ~325) is
+# DELIBERATELY NOT wired into any stage. Its real persistence requires an
+# injected writable provider tied to the memory master (01-PR5, currently HELD);
+# flipping the flag alone yields only "local fake success". MemoryWrite stays
+# default-OFF here until the memory master lands and a writable provider is
+# wired hosted-side.
+_C9_FULL_OVERLAY: Mapping[str, str] = {
+    "MAGI_SELF_INTROSPECTION_ENABLED": "1",
+}
+
 # C3 ``hardgate`` promotion (PR2): flip self-review from shadow to live.
 _C3_HARDGATE_OVERLAY: Mapping[str, str] = {
     "MAGI_SELF_REVIEW_SHADOW": "0",
@@ -96,7 +116,7 @@ def _compose(*fragments: Mapping[str, str]) -> Mapping[str, str]:
 # keeping the hosted runtime byte-identical to today.
 _RESILIENCE_OVERLAY = _compose(_C3_RESILIENCE_OVERLAY)
 _FULL_OVERLAY = _compose(
-    _RESILIENCE_OVERLAY, _OBSERVABILITY_OVERLAY, _C3_FULL_OVERLAY
+    _RESILIENCE_OVERLAY, _OBSERVABILITY_OVERLAY, _C3_FULL_OVERLAY, _C9_FULL_OVERLAY
 )
 _HARDGATE_OVERLAY = _compose(_FULL_OVERLAY, _C3_HARDGATE_OVERLAY)
 
