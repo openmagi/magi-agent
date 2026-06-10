@@ -467,6 +467,158 @@ def test_run_child_propagates_cancellation() -> None:
 
 
 # --------------------------------------------------------------------------- #
+# PR1 (doc 07): toolset injection + tool-call evidence into live child runner   #
+# --------------------------------------------------------------------------- #
+
+
+def test_run_child_readonly_profile_forwards_readonly_tools_to_builder(
+    monkeypatch,
+) -> None:
+    """A ``readonly`` profile builds the read-only toolset and forwards a
+    NON-EMPTY ``tools`` list to ``build_cli_model_runner`` (no more tools=[])."""
+    from magi_agent.runtime.child_toolset import READONLY_TOOL_NAMES
+
+    captured: dict[str, object] = {}
+
+    class _NamedTool:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+    def _fake_build_tools(**kwargs):  # noqa: ANN003
+        # Return a full-ish core toolset (read-only names + a mutating tool) so
+        # the runner's read-only FILTER is exercised.
+        names = [*READONLY_TOOL_NAMES, "FileWrite", "Bash"]
+        return [_NamedTool(n) for n in names]
+
+    def _fake_build_runner(config, **kwargs):  # noqa: ANN001, ANN003
+        captured["tools"] = kwargs.get("tools")
+        return _RecordingRunner(text="ANSWER: readonly child ran")
+
+    monkeypatch.setattr(
+        "magi_agent.cli.tool_runtime.build_cli_adk_tools", _fake_build_tools
+    )
+    monkeypatch.setattr(
+        "magi_agent.cli.real_runner.build_cli_model_runner", _fake_build_runner
+    )
+
+    runner = RealLocalChildRunner(
+        provider_config=_provider_config(), toolset_profile="readonly"
+    )
+    output = asyncio.run(runner.run_child(_request()))
+
+    assert output["status"] == "completed"
+    tool_names = [getattr(t, "name", None) for t in captured["tools"]]
+    # Read-only inspection tools are forwarded ...
+    assert "FileRead" in tool_names
+    assert "Glob" in tool_names
+    assert "Grep" in tool_names
+    # ... and mutating tools are filtered OUT (no tool escalation).
+    assert "FileWrite" not in tool_names
+    assert "Bash" not in tool_names
+
+
+def test_run_child_readonly_profile_promotes_tool_receipts_to_evidence_refs() -> None:
+    """When a toolset runs, the collected tool-call receipts surface as the
+    child's ``evidenceRefs`` (promoted to the envelope by the boundary)."""
+
+    class _FakeCollector:
+        """Stands in for ``LocalToolEvidenceCollector`` — yields public refs."""
+
+        def evidence_refs_for_session(self, session_id: str) -> tuple[str, ...]:
+            return ("evidence:tool-call-1", "evidence:tool-call-2")
+
+    fake = _FakeRunner(text="ANSWER: read the file")
+    runner = RealLocalChildRunner(
+        provider_config=_provider_config(),
+        runner=fake,
+        toolset_profile="readonly",
+        evidence_collector=_FakeCollector(),
+    )
+
+    output = asyncio.run(runner.run_child(_request()))
+
+    assert output["status"] == "completed"
+    assert tuple(output["evidenceRefs"]) == (
+        "evidence:tool-call-1",
+        "evidence:tool-call-2",
+    )
+
+
+def test_readonly_evidence_refs_promoted_through_boundary_envelope() -> None:
+    """e2e: a read-only child's tool receipts become non-empty envelope
+    ``evidence_refs`` after passing through the boundary sanitiser."""
+
+    class _FakeCollector:
+        def evidence_refs_for_session(self, session_id: str) -> tuple[str, ...]:
+            return ("evidence:child-read-1",)
+
+    fake = _FakeRunner(text="ANSWER: boundary readonly")
+    real = RealLocalChildRunner(
+        provider_config=_provider_config(),
+        runner=fake,
+        toolset_profile="readonly",
+        evidence_collector=_FakeCollector(),
+    )
+    boundary = LocalChildRunnerBoundary(
+        ChildRunnerConfig(enabled=True, liveChildRunnerEnabled=True),
+        child_runner=real,
+    )
+
+    result = asyncio.run(boundary.run(_request()))
+
+    assert result.status == "ok"
+    assert result.envelope is not None
+    assert result.envelope.status == "completed"
+    # The boundary re-issues refs but only when the child emitted ≥1 evidence
+    # ref — so a non-empty tuple proves the tool-receipt promotion worked.
+    assert len(result.envelope.evidence_refs) >= 1
+
+
+def test_run_child_default_profile_is_byte_identical_empty_toolset() -> None:
+    """REGRESSION: with no toolset_profile (default ``none``) the output keys/
+    values are unchanged — empty toolset, empty refs (v1 byte-identical)."""
+    fake = _FakeRunner(text="ANSWER: text only child")
+    runner = RealLocalChildRunner(provider_config=_provider_config(), runner=fake)
+
+    output = asyncio.run(runner.run_child(_request()))
+
+    assert set(output.keys()) == {
+        "childExecutionId",
+        "status",
+        "summary",
+        "evidenceRefs",
+        "artifactRefs",
+        "auditEventRefs",
+    }
+    assert output["status"] == "completed"
+    assert output["evidenceRefs"] == ()
+    assert output["artifactRefs"] == ()
+    assert output["auditEventRefs"] == ()
+
+
+def test_run_child_none_profile_forwards_empty_toolset_to_builder(
+    monkeypatch,
+) -> None:
+    """REGRESSION: default ``none`` profile keeps the historical ``tools=[]``
+    forwarded to ``build_cli_model_runner`` (no read-only tools leak in)."""
+    captured: dict[str, object] = {}
+
+    def _fake_build_runner(config, **kwargs):  # noqa: ANN001, ANN003
+        captured["tools"] = kwargs.get("tools")
+        return _RecordingRunner(text="ANSWER: none profile")
+
+    monkeypatch.setattr(
+        "magi_agent.cli.real_runner.build_cli_model_runner", _fake_build_runner
+    )
+
+    runner = RealLocalChildRunner(provider_config=_provider_config())  # default none
+    output = asyncio.run(runner.run_child(_request()))
+
+    assert output["status"] == "completed"
+    assert captured["tools"] == []
+
+
+# --------------------------------------------------------------------------- #
 # Marker contract                                                             #
 # --------------------------------------------------------------------------- #
 
