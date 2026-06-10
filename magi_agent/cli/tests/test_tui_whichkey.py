@@ -159,3 +159,29 @@ def test_chord_cancel_hides_whichkey() -> None:
             assert app._pending is None
 
     asyncio.run(_run())
+
+
+def test_start_turn_clears_dangling_chord_and_hides_whichkey() -> None:
+    """A turn starting mid-chord must not leave the which-key overlay stuck.
+
+    If the user presses a chord prefix (overlay shown) and a turn then begins
+    (e.g. a submit), ``start_turn`` clears ``_pending`` and hides the overlay.
+    """
+
+    async def _run() -> None:
+        app = _make_chord_app()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            overlay = app.query_one(WhichKeyOverlay)
+            await pilot.press("ctrl+x")  # chord prefix -> overlay visible
+            await pilot.pause()
+            assert "visible" in overlay.classes
+            assert app._pending is not None
+
+            app.start_turn("do it")  # a turn begins mid-chord
+            await pilot.pause()
+            assert app._pending is None
+            assert "visible" not in overlay.classes
+            await app.workers.wait_for_complete()
+
+    asyncio.run(_run())

@@ -1487,6 +1487,10 @@ class MagiTuiApp(App[None]):
         # Fresh subagent registry for this turn (coalesce only within one turn).
         self._subagent_handles = {}
         self._turn_started_monotonic = _time.monotonic()
+        # Clear any dangling chord prefix + which-key overlay: a turn starting
+        # mid-chord (e.g. submit fired) must not leave the hint stuck visible.
+        self._pending = None
+        self._hide_whichkey()
         self.update_footer(state="running")
         self._echo_user(prompt)
         self._run_turn(prompt, turn_id, cancel)
