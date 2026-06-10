@@ -8,7 +8,7 @@ The runtime exposes typed interfaces for turn control, evidence, boundaries, hoo
 
 The runtime core defines types for turn input, session management, and hook dispatch. These are the entry points for the governed turn loop.
 
-- TurnInput (runtime/turn_controller.py): user_id, session_id, turn_id, message_text, harness_state. The input model for each agent turn.
+- TurnInput (cli/contracts.py): prompt, session_id, turn_id, initial_messages, harness_state, image_blocks. The input model for each agent turn.
 - HookBusRunResult (hooks/bus.py): final_action (continue/block/pending_control_request), observation (effective_hooks, skipped_by_scope, failed_open, failed_closed, blocked_by), permission_boundary. The result of running hooks at a lifecycle point.
 - EvidenceLedgerEntry (evidence/ledger.py): kind, sequence, evidence_ref, session_id, turn_id, run_on, agent_role, spawn_depth, source_kind, producer_surface, payload (sanitized), metadata, traffic_attached/execution_attached/route_attached (all False). The primary ledger record.
 - ToolRegistration (tools/registry.py): manifest (ToolManifest), enabled, handler. The registry entry for a tool.
@@ -39,7 +39,6 @@ The tool evidence boundary produces ToolEvidenceRecord instances that capture ev
 Each boundary module exposes Intent, Receipt/Decision, and AuthorityFlags types. All are implemented with default-off behavior.
 
 - MemoryMutationIntent / MemoryMutationReceipt: memory write boundary. Implemented, default-off.
-- ProjectionWriteIntent / ProjectionWriteBoundaryResult: projection write boundary. Implemented, default-off.
 - ChildTaskRequest / ChildRunnerResult: child runner boundary. Implemented, default-off.
 - ArtifactRecord / ArtifactChannelDeliveryRequest / ArtifactChannelDeliveryDecision: artifact delivery boundary. Implemented, default-off.
 - CommitIntent / CommitBoundaryPlan: commit boundary. Implemented, descriptive only.
@@ -82,5 +81,5 @@ The following interface names appear in design documents or are referenced conce
 
 - ToolHostRequest / ToolHostReceipt: conceptual types for a dedicated ToolHost boundary. Tool execution currently goes through the hook system (beforeToolUse/afterToolUse) and produces ToolEvidenceRecord, not a separate ToolHostReceipt.
 - RepairDecision (as a cross-boundary orchestrator): the existing RepairDecision in harness/repair_policy.py handles single-plan repair steps, but there is no cross-boundary repair orchestration type.
-- ProjectionResult: projection writes always return ProjectionWriteBoundaryResult with allowed=False. No separate ProjectionResult type exists.
+- ProjectionResult: no projection write result type exists. The earlier default-off projection write boundary module (and its ProjectionWriteBoundaryResult type) was removed from the codebase.
 - ValidationResult: validation is expressed through EvidenceContractVerdict and EvidenceEnforcementDecision, not a separate ValidationResult type.
