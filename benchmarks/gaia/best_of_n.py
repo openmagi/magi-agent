@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from magi_agent.benchmarks.gaia.scorer import normalize_str
+from benchmarks.gaia.scorer import normalize_str
 
 
 def majority_vote(answers: Sequence[str]) -> str:

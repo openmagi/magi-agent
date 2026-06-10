@@ -17,7 +17,7 @@ def test_build_web_tools_returns_adapter_when_platform_keys_set(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """When MAGI_PLATFORM_BASE_URL + MAGI_PLATFORM_API_KEY are set, return adapter."""
-    import magi_agent.benchmarks.gaia.web_tools as _mod
+    import benchmarks.gaia.web_tools as _mod
 
     # Stub build_live_research_boundary so no real network is involved.
     class _FakeBoundary:
@@ -42,7 +42,7 @@ def test_build_web_tools_returns_adapter_when_platform_keys_set(
 
 def test_build_web_tools_returns_empty_without_platform_keys() -> None:
     """When no platform keys are set and Composio is disabled, return []."""
-    from magi_agent.benchmarks.gaia.web_tools import build_web_tools
+    from benchmarks.gaia.web_tools import build_web_tools
 
     result = build_web_tools(env={})
     assert result == []
@@ -52,7 +52,7 @@ def test_build_web_tools_platform_boundary_exception_falls_back_to_composio(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """If the platform path raises, fall through to the Composio path gracefully."""
-    import magi_agent.benchmarks.gaia.web_tools as _mod
+    import benchmarks.gaia.web_tools as _mod
 
     def _raises(env: object) -> None:
         raise RuntimeError("simulated platform boundary failure")
@@ -76,20 +76,20 @@ def test_build_web_tools_platform_boundary_exception_falls_back_to_composio(
 
 
 def test_disabled_returns_empty() -> None:
-    from magi_agent.benchmarks.gaia.web_tools import build_web_tools
+    from benchmarks.gaia.web_tools import build_web_tools
 
     assert build_web_tools(env={}) == []
 
 
 def test_enabled_without_key_returns_empty() -> None:
-    from magi_agent.benchmarks.gaia.web_tools import build_web_tools
+    from benchmarks.gaia.web_tools import build_web_tools
 
     assert build_web_tools(env={"MAGI_COMPOSIO_ENABLED": "1"}) == []
 
 
 def test_factory_raises_returns_empty(monkeypatch: pytest.MonkeyPatch) -> None:
     """If resolve_composio_config raises, build_web_tools returns []."""
-    import magi_agent.benchmarks.gaia.web_tools as _mod
+    import benchmarks.gaia.web_tools as _mod
 
     def _boom(env: object) -> None:
         raise RuntimeError("simulated config failure")
@@ -107,7 +107,7 @@ def test_factory_raises_returns_empty(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_web_research_boundary_adapter_has_boundary_attr(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import magi_agent.benchmarks.gaia.web_tools as _mod
+    import benchmarks.gaia.web_tools as _mod
 
     class _FakeBoundary:
         pass

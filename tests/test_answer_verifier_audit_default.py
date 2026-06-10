@@ -195,7 +195,7 @@ class TestPluginUsesAuditDefault:
         """When MAGI_ANSWER_VERIFIER_MODE=1, plugin should use audit (no mutation)."""
         monkeypatch.setenv("MAGI_ANSWER_VERIFIER_MODE", "1")
 
-        from magi_agent.benchmarks.gaia.answer_verifier_plugin import (
+        from benchmarks.gaia.answer_verifier_plugin import (
             apply_answer_verifier,
             build_evidence_payload,
         )

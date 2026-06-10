@@ -9,8 +9,8 @@ from typing import Callable
 
 from google.genai import types
 
-from magi_agent.benchmarks.gaia.answer import GAIA_SYSTEM_PROMPT, extract_final_answer
-from magi_agent.benchmarks.gaia.dataset import GaiaQuestion
+from benchmarks.gaia.answer import GAIA_SYSTEM_PROMPT, extract_final_answer
+from benchmarks.gaia.dataset import GaiaQuestion
 from magi_agent.cli.providers import ProviderConfig
 from magi_agent.cli.real_runner import CliModelRunner, build_cli_model_runner
 
@@ -29,7 +29,7 @@ def run_gaia_question(
     Parameters
     ----------
     question:
-        The :class:`~magi_agent.benchmarks.gaia.dataset.GaiaQuestion` to solve.
+        The :class:`~benchmarks.gaia.dataset.GaiaQuestion` to solve.
     workspace_root:
         Directory the agent operates in. Any attachment is copied here first.
     model_factory:

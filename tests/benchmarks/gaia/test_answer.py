@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from magi_agent.benchmarks.gaia.answer import GAIA_SYSTEM_PROMPT, extract_final_answer
+from benchmarks.gaia.answer import GAIA_SYSTEM_PROMPT, extract_final_answer
 
 
 def test_extracts_last_final_answer() -> None:
