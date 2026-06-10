@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import os
 
+import pytest
+
 
 # ---------------------------------------------------------------------------
 # MAGI_LEDGER_ORCHESTRATOR_ENABLED — default OFF
@@ -21,8 +23,6 @@ def test_ledger_orchestrator_disabled_by_default(
     monkeypatch: "pytest.MonkeyPatch",
 ) -> None:
     """``run_with_ledger_orchestrator`` returns None when env var is absent (default-OFF)."""
-    import pytest  # local import so monkeypatch type hint resolves
-
     monkeypatch.delenv("MAGI_LEDGER_ORCHESTRATOR_ENABLED", raising=False)
 
     from magi_agent.recipes.ledger_orchestrator import _ledger_orchestrator_enabled
@@ -37,8 +37,6 @@ def test_ledger_orchestrator_run_returns_none_when_disabled(
     monkeypatch: "pytest.MonkeyPatch",
 ) -> None:
     """``run_with_ledger_orchestrator`` short-circuits to None when flag is not set."""
-    import pytest
-
     monkeypatch.delenv("MAGI_LEDGER_ORCHESTRATOR_ENABLED", raising=False)
 
     from magi_agent.recipes.ledger_orchestrator import run_with_ledger_orchestrator
