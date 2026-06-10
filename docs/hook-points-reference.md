@@ -1,15 +1,23 @@
 # Hook Points Reference
 
-Complete reference for all 15 HookPoint enum values, their camelCase keys, firing conditions, payloads, and blocking behavior.
+Complete reference for all 17 HookPoint enum values, their camelCase keys, firing conditions, payloads, and blocking behavior.
 
 Every HookPoint enum value with its key, when it fires, blocking behavior, and the ADK callback mapping table.
 
 ## HookPoint Enum Values
 
-HookPoint is a Python str Enum with 15 members. Each member has a camelCase value used as the wire key. Hooks registered at a given point fire when the runtime reaches that lifecycle moment.
+HookPoint is a Python str Enum with 17 members. Each member has a camelCase value used as the wire key. Hooks registered at a given point fire when the runtime reaches that lifecycle moment.
+
+> **Wiring state (default-OFF).** User hooks load and bind only when
+> `MAGI_USER_HOOKS_ENABLED` is set (default-OFF); the `http` and `llm` executors
+> are declared but not yet wired. The blocking behavior listed per point is the
+> dispatch contract for an enabled hook, not the production turn loop's
+> enforcement path on a default install. See [hooks](/docs/hooks).
 
 - BEFORE_TURN_START ("beforeTurnStart") — Fires before a new turn begins. Use for context injection, task contract setup.
 - AFTER_TURN_END ("afterTurnEnd") — Fires after a turn completes. Use for task board completion, artifact delivery.
+- BEFORE_SYSTEM_PROMPT ("beforeSystemPrompt") — Fires while the system prompt is assembled. Use for prompt-transform presets, persona/context injection (maps from ADK UserPromptSubmit).
+- BEFORE_MESSAGE_SEND ("beforeMessageSend") — Fires before the outbound message payload is sent. Use for last-mile message shaping.
 - BEFORE_LLM_CALL ("beforeLLMCall") — Fires before each LLM API call. Use for context injection, coding context, pre-refusal.
 - AFTER_LLM_CALL ("afterLLMCall") — Fires after each LLM API call. Use for answer quality, fact grounding, claim citation, output delivery, response language.
 - BEFORE_TOOL_USE ("beforeToolUse") — Fires before tool execution. Use for dangerous pattern detection, path safety, permission checks, resource existence.
