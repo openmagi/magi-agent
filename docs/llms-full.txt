@@ -696,13 +696,13 @@ Source: https://github.com/openmagi/magi-agent/blob/main/docs/runtime.md
 
 How Magi Agent turns model proposals into governed state transitions via the Python ADK runtime.
 
-The runtime is the engine that governs every agent action. The runtime loop separates model-visible context from runtime-only evidence and claim state. A local run with a configured provider key builds a model-backed ADK runner, then flows through session boundaries, model routing, message building, event streaming, projection validation, and error classification. External delivery and high-authority mutations remain governed by explicit gates.
+The runtime is the engine that governs every agent action. The runtime loop separates model-visible context from runtime-only evidence and claim state. A local run with a configured provider key builds a model-backed ADK runner and drives each turn through the engine driver: provider and model resolution, single-flight session admission, the ADK event stream, and error classification with bounded recovery. External delivery and high-authority mutations remain governed by explicit gates.
 
 ## Runtime loop
 
 The Python ADK runtime entry point is __main__.py, which calls main.py (parse_runtime_env() reads required env vars) and then app.py (create_app() registers FastAPI routes such as /health, /healthz, and /v1/chat/completions).
 
-The runtime container creates RuntimeConfig, RuntimeProfile, AdkPrimitiveBoundary, ToolRegistry, and ResolvedPluginState. The real turn loop is: user message enters RunnerSessionBoundary.run_turn(), which takes a policy snapshot plus harness resolution, then routes through model_routing.py for model selection, message_builder.py for context packet assembly, the ADK runner, event streaming, projection_write_boundary.py for output validation, and error_taxonomy.py for error classification.
+The runtime container creates RuntimeConfig, RuntimeProfile, AdkPrimitiveBoundary, ToolRegistry, and ResolvedPluginState. The real turn loop is driven by the engine: a user message becomes a TurnInput (cli/contracts.py), and MagiEngineDriver (cli/engine.py) drives the turn over a model-backed ADK runner built by cli/real_runner.py, with the provider and model resolved by cli/providers.py. The engine takes a per-session single-flight slot from ActiveTurnRegistry (runtime/active_turn_registry.py), streams ADK events through the adk_bridge adapter, and classifies failures through runtime/error_recovery. The same engine path drives the CLI, the TUI, and the `magi-agent serve` chat surface.
 
 ### Two-plane architecture
 
@@ -733,9 +733,9 @@ Final answer/artifact     <-------- Validators + repair/fallback policy
 User-visible projection   <-------- Output projector + audit checkpoint
 ```
 
-## TurnInput and session boundary
+## TurnInput and session concurrency
 
-Each turn is modeled as a TurnInput (from runtime/turn_controller.py) with fields: user_id, session_id, turn_id, message_text, and harness_state. The RunnerSessionBoundary (runtime/runner_session_boundary.py) manages session concurrency and error classification for each turn.
+Each turn is modeled as a TurnInput (cli/contracts.py) with fields: prompt, session_id, turn_id, initial_messages, harness_state, and image_blocks. Session concurrency is single-flight: the engine registers each turn in ActiveTurnRegistry (runtime/active_turn_registry.py) and rejects a second concurrent turn for the same session id.
 
 The runtime uses two layers: runtime/openmagi_runtime.py is the core container, and the adk_bridge/ directory provides the adapter, callback, plugin, context-compaction, and tool-attachment surfaces used when a live ADK runner is built. Local CLI/dashboard runs can use those surfaces directly; external authority is controlled by deployment policy.
 
@@ -1631,9 +1631,9 @@ Recipes are composable task profiles that declare what evidence, hooks, and harn
 
 The runtime exposes typed hook points (hooks/manifest.py, 15 HookPoint values), HookRegistry + HookBus dispatch (hooks/registry.py, hooks/bus.py), boundary interfaces, and a ToolHost surface (tools/catalog.py, tools/registry.py, tools/manifest.py) for extending agent behavior without forking the core.
 
-- Runtime architecture: See [Runtime](/docs/runtime) for the FastAPI entry point, RunnerSessionBoundary turn loop, and the two-plane model-visible loop vs runtime-only control plane.
+- Runtime architecture: See [Runtime](/docs/runtime) for the FastAPI entry point, the MagiEngineDriver turn loop, and the two-plane model-visible loop vs runtime-only control plane.
 - System architecture: See [Architecture](/docs/architecture) for the MODEL-VISIBLE LOOP and RUNTIME-ONLY CONTROL PLANE separation.
-- Boundary modules: See [Boundaries](/docs/boundaries) for the seven implemented boundary modules and the Intent-to-Receipt pattern.
+- Boundary modules: See [Boundaries](/docs/boundaries) for the six implemented boundary modules and the Intent-to-Receipt pattern.
 - Hook points: See [Hook Points](/docs/hook-points) for the 15 HookPoint enum values, HookRegistry registration, and HookBus dispatch.
 - Runtime interfaces: See [Runtime Interfaces](/docs/runtime-interfaces) for TurnInput, HookBusRunResult, EvidenceLedgerEntry, ToolRegistration, RecipeSnapshot, and all typed Python interfaces.
 - ToolHost: See [ToolHost](/docs/toolhost) for ToolManifest schema, ToolRegistry, first-party tool catalog, and governed dispatch.
@@ -1662,7 +1662,7 @@ Sessions track turn history, context windows, compaction, and durable state acro
 
 A session is a conversation with the agent. It remembers what you discussed, what files were changed, and what evidence was collected across turns. Sessions persist across compaction — when the context window fills up, older turns are summarized but key evidence and decisions are preserved.
 
-Implementation: session identity is managed by the runtime session identity module, session continuity across turns by the session continuity module, and the ADK bridge session service handles session state persistence (read-only or disabled by default). Each turn enters through RunnerSessionBoundary, which manages session concurrency and error classification.
+Implementation: session identity is managed by the runtime session identity module, session continuity across turns by the session continuity module, and the ADK bridge session service handles session state persistence (read-only or disabled by default). Each turn enters through the engine driver (MagiEngineDriver in cli/engine.py), which enforces single-flight session concurrency via ActiveTurnRegistry and classifies turn errors.
 
 ## Context window and turn management
 
@@ -1773,7 +1773,7 @@ Source: https://github.com/openmagi/magi-agent/blob/main/docs/boundaries.md
 
 Runtime boundaries that govern when model proposals become state, output, or side effects.
 
-Boundaries are control points that prevent the agent from taking action without verification. Seven boundary modules follow the Intent-to-Receipt pattern where every side effect is validated before execution.
+Boundaries are control points that prevent the agent from taking action without verification. Six boundary modules follow the Intent-to-Receipt pattern where every side effect is validated before execution.
 
 > **Boundary enforcement is default-off (shadow) — the agent still executes work.** These boundaries are the governance layer; today they observe and record without blocking or gating. That is independent of the agent's ability to run: with a provider key, the local `magi` CLI executes a real model and first-party tools today (see [What works today](/docs/what-works-today)). "Default-off" / `Literal[False]` here scopes whether enforcement is attached to live decisions, not whether tasks can execute.
 
@@ -1841,16 +1841,6 @@ The memory write boundary (memory/write_boundary.py) governs all memory mutation
 - MemoryMutationReceipt includes receipt_id, status, executed, memory_write_allowed, production_write_enabled, provider_call_attempted, filesystem_mutation_attempted, production_receipt, local_test_only, target (MemoryMutationTarget), authority_flags.
 - MemoryWriteAuthorityFlags: all Literal[False] including memory_write_allowed, memory_redact_allowed, memory_delete_allowed, provider_call_allowed, filesystem_write_allowed, database_write_allowed, network_call_allowed, production_write_enabled.
 - Local test-only receipts use HMAC signature verification (local_test_receipt_marker + local_test_receipt_signature) to distinguish test receipts from production claims.
-
-## Projection write boundary
-
-The projection write boundary (runtime/projection_write_boundary.py) governs writes to output channels: transcript, SSE, control events, and control requests. All projection writes are disabled by default and produce a ProjectionWriteBoundaryResult with allowed=False. Status: implemented, default-off.
-
-- ProjectionWriteTarget: transcript, sse, control_event, control_request.
-- ProjectionWriteIntent includes target, operation, session_key, idempotency_key, payload.
-- ProjectionWriteBoundaryResult: allowed is Literal[False], includes denial (ProjectionWriteDenial with reason_code projection_writes_disabled) and authority_flags.
-- ProjectionWriteAuthorityFlags: all Literal[False] including transcript_write_allowed, sse_write_allowed, control_event_write_allowed, control_request_write_allowed, durable_write_allowed, production_receipt_allowed, storage_backend_attached, filesystem_write_allowed, database_write_allowed, transport_write_allowed.
-- evaluate_projection_write_intent() always returns allowed=False with a denial explaining that storage backend and receipt policy are not attached.
 
 ## Child runner boundary
 
@@ -1994,39 +1984,15 @@ Source: https://github.com/openmagi/magi-agent/blob/main/docs/projection.md
 
 How runtime state is projected into model-visible context and user-visible output.
 
-Projection controls what the model sees as context and what users receive as output. The projection write boundary governs all durable writes to output channels, and is disabled by default.
+Projection controls what the model sees as context and what users receive as output. Durable writes to output channels (transcript, SSE, control events) are performed directly by the surfaces that own them; receipts that reach the model first pass through the sanitizing projections described below.
 
-## Projection write targets
+## Removed: projection write boundary
 
-The projection system defines four write targets that represent the channels through which runtime state can become visible output. All writes to these targets go through the projection write boundary, which is disabled by default.
-
-- transcript: durable conversation transcript entries (assistant text, tool results, turn markers).
-- sse: server-sent event stream to the client (turn_end, runtime_trace, legacy_finish).
-- control_event: internal runtime control events (stop_reason, structured_output).
-- control_request: internal runtime control requests (reject_pending_asks).
-
-## ProjectionWriteIntent and result
-
-A ProjectionWriteIntent describes a proposed write to an output channel. The boundary evaluates it and returns a ProjectionWriteBoundaryResult. Currently, all projection writes return allowed=False because no storage backend or receipt policy is attached.
-
-- ProjectionWriteIntent fields: target (ProjectionWriteTarget), operation (string describing the write), session_key, idempotency_key, payload.
-- ProjectionWriteBoundaryResult fields: allowed (Literal[False]), target, operation, durable_write_attempted (Literal[False]), production_receipt_produced (Literal[False]), authority_flags, denial, receipt.
-- ProjectionWriteDenial: reason_code is always projection_writes_disabled.
-- ProjectionWriteReceipt: defined but never populated (receipt is always None) because no storage backend is attached.
-
-## Projection authority flags
-
-ProjectionWriteAuthorityFlags follows the same default-off pattern as all boundary modules. All 10 flags are typed as Literal[False] and enforced to False through model validators and serializers.
-
-- transcript_write_allowed, sse_write_allowed, control_event_write_allowed, control_request_write_allowed: per-target write gates.
-- durable_write_allowed: whether writes can be persisted.
-- production_receipt_allowed: whether production receipts can be issued.
-- storage_backend_attached: whether a storage backend is connected.
-- filesystem_write_allowed, database_write_allowed, transport_write_allowed: infrastructure-level write gates.
+Earlier revisions shipped an experimental `runtime/projection_write_boundary.py` that modeled output writes as gated intents (always `allowed=False`, with no storage backend attached). It was removed together with the unwired runner-session stack because no production path consumed it. Output writes now happen at the points that own them: durable session logs in `cli/session_log.py`, SSE frames in the transport stream routes, and control events inside the engine.
 
 ## Relationship to the commit boundary
 
-The commit boundary (commit_boundary.py) plans projection intents as CommitIntent records with targets matching the projection write targets (transcript, sse, control, hook). Each CommitIntent is descriptive only and is not executed. The projection write boundary would govern the actual execution of these intents if enabled.
+The commit boundary (commit_boundary.py) plans projection intents as CommitIntent records with targets matching the historical projection write targets (transcript, sse, control, hook). Each CommitIntent is descriptive only and is not executed.
 
 The commit boundary also plans hook intents (beforeCommit, afterCommit, afterTurnEnd, onTaskCheckpoint, onAbort) that observe the turn lifecycle but do not write to output channels directly.
 
@@ -2877,7 +2843,7 @@ Source: https://github.com/openmagi/magi-agent/blob/main/docs/general-automation
 
 Worked example covering approval gates, delivery boundaries, artifact verification, and commit boundaries using openmagi.office-automation and openmagi.spreadsheet-automation packs.
 
-A general automation workflow uses boundary modules (artifacts/delivery_boundary.py, runtime/commit_boundary.py, runtime/projection_write_boundary.py) and evidence types (FileDeliver, ArtifactVerify, CommitCheckpoint) to govern background and scheduled tasks. Relevant first-party packs: openmagi.office-automation, openmagi.spreadsheet-automation.
+A general automation workflow uses boundary modules (artifacts/delivery_boundary.py, runtime/commit_boundary.py) and evidence types (FileDeliver, ArtifactVerify, CommitCheckpoint) to govern background and scheduled tasks. Relevant first-party packs: openmagi.office-automation, openmagi.spreadsheet-automation.
 
 ## Automation scenario
 
@@ -2891,7 +2857,6 @@ The runtime includes dedicated boundary modules that enforce policy at specific 
 
 - artifacts/delivery_boundary.py -- governs artifact delivery to channels and external targets
 - runtime/commit_boundary.py -- validates state before committing results
-- runtime/projection_write_boundary.py -- controls what enters projected output
 - memory/write_boundary.py -- validates memory writes for safety and policy
 - runtime/child_runner_boundary.py -- governs child agent result imports
 - evidence/tool_boundary.py -- validates tool execution and produces evidence records
@@ -3177,7 +3142,7 @@ The runtime exposes typed interfaces for turn control, evidence, boundaries, hoo
 
 The runtime core defines types for turn input, session management, and hook dispatch. These are the entry points for the governed turn loop.
 
-- TurnInput (runtime/turn_controller.py): user_id, session_id, turn_id, message_text, harness_state. The input model for each agent turn.
+- TurnInput (cli/contracts.py): prompt, session_id, turn_id, initial_messages, harness_state, image_blocks. The input model for each agent turn.
 - HookBusRunResult (hooks/bus.py): final_action (continue/block/pending_control_request), observation (effective_hooks, skipped_by_scope, failed_open, failed_closed, blocked_by), permission_boundary. The result of running hooks at a lifecycle point.
 - EvidenceLedgerEntry (evidence/ledger.py): kind, sequence, evidence_ref, session_id, turn_id, run_on, agent_role, spawn_depth, source_kind, producer_surface, payload (sanitized), metadata, traffic_attached/execution_attached/route_attached (all False). The primary ledger record.
 - ToolRegistration (tools/registry.py): manifest (ToolManifest), enabled, handler. The registry entry for a tool.
@@ -3208,7 +3173,6 @@ The tool evidence boundary produces ToolEvidenceRecord instances that capture ev
 Each boundary module exposes Intent, Receipt/Decision, and AuthorityFlags types. All are implemented with default-off behavior.
 
 - MemoryMutationIntent / MemoryMutationReceipt: memory write boundary. Implemented, default-off.
-- ProjectionWriteIntent / ProjectionWriteBoundaryResult: projection write boundary. Implemented, default-off.
 - ChildTaskRequest / ChildRunnerResult: child runner boundary. Implemented, default-off.
 - ArtifactRecord / ArtifactChannelDeliveryRequest / ArtifactChannelDeliveryDecision: artifact delivery boundary. Implemented, default-off.
 - CommitIntent / CommitBoundaryPlan: commit boundary. Implemented, descriptive only.
@@ -3251,7 +3215,7 @@ The following interface names appear in design documents or are referenced conce
 
 - ToolHostRequest / ToolHostReceipt: conceptual types for a dedicated ToolHost boundary. Tool execution currently goes through the hook system (beforeToolUse/afterToolUse) and produces ToolEvidenceRecord, not a separate ToolHostReceipt.
 - RepairDecision (as a cross-boundary orchestrator): the existing RepairDecision in harness/repair_policy.py handles single-plan repair steps, but there is no cross-boundary repair orchestration type.
-- ProjectionResult: projection writes always return ProjectionWriteBoundaryResult with allowed=False. No separate ProjectionResult type exists.
+- ProjectionResult: no projection write result type exists. The earlier default-off projection write boundary module (and its ProjectionWriteBoundaryResult type) was removed from the codebase.
 - ValidationResult: validation is expressed through EvidenceContractVerdict and EvidenceEnforcementDecision, not a separate ValidationResult type.
 
 # Hook Points

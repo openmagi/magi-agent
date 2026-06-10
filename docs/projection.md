@@ -2,39 +2,15 @@
 
 How runtime state is projected into model-visible context and user-visible output.
 
-Projection controls what the model sees as context and what users receive as output. The projection write boundary governs all durable writes to output channels, and is disabled by default.
+Projection controls what the model sees as context and what users receive as output. Durable writes to output channels (transcript, SSE, control events) are performed directly by the surfaces that own them; receipts that reach the model first pass through the sanitizing projections described below.
 
-## Projection write targets
+## Removed: projection write boundary
 
-The projection system defines four write targets that represent the channels through which runtime state can become visible output. All writes to these targets go through the projection write boundary, which is disabled by default.
-
-- transcript: durable conversation transcript entries (assistant text, tool results, turn markers).
-- sse: server-sent event stream to the client (turn_end, runtime_trace, legacy_finish).
-- control_event: internal runtime control events (stop_reason, structured_output).
-- control_request: internal runtime control requests (reject_pending_asks).
-
-## ProjectionWriteIntent and result
-
-A ProjectionWriteIntent describes a proposed write to an output channel. The boundary evaluates it and returns a ProjectionWriteBoundaryResult. Currently, all projection writes return allowed=False because no storage backend or receipt policy is attached.
-
-- ProjectionWriteIntent fields: target (ProjectionWriteTarget), operation (string describing the write), session_key, idempotency_key, payload.
-- ProjectionWriteBoundaryResult fields: allowed (Literal[False]), target, operation, durable_write_attempted (Literal[False]), production_receipt_produced (Literal[False]), authority_flags, denial, receipt.
-- ProjectionWriteDenial: reason_code is always projection_writes_disabled.
-- ProjectionWriteReceipt: defined but never populated (receipt is always None) because no storage backend is attached.
-
-## Projection authority flags
-
-ProjectionWriteAuthorityFlags follows the same default-off pattern as all boundary modules. All 10 flags are typed as Literal[False] and enforced to False through model validators and serializers.
-
-- transcript_write_allowed, sse_write_allowed, control_event_write_allowed, control_request_write_allowed: per-target write gates.
-- durable_write_allowed: whether writes can be persisted.
-- production_receipt_allowed: whether production receipts can be issued.
-- storage_backend_attached: whether a storage backend is connected.
-- filesystem_write_allowed, database_write_allowed, transport_write_allowed: infrastructure-level write gates.
+Earlier revisions shipped an experimental `runtime/projection_write_boundary.py` that modeled output writes as gated intents (always `allowed=False`, with no storage backend attached). It was removed together with the unwired runner-session stack because no production path consumed it. Output writes now happen at the points that own them: durable session logs in `cli/session_log.py`, SSE frames in the transport stream routes, and control events inside the engine.
 
 ## Relationship to the commit boundary
 
-The commit boundary (commit_boundary.py) plans projection intents as CommitIntent records with targets matching the projection write targets (transcript, sse, control, hook). Each CommitIntent is descriptive only and is not executed. The projection write boundary would govern the actual execution of these intents if enabled.
+The commit boundary (commit_boundary.py) plans projection intents as CommitIntent records with targets matching the historical projection write targets (transcript, sse, control, hook). Each CommitIntent is descriptive only and is not executed.
 
 The commit boundary also plans hook intents (beforeCommit, afterCommit, afterTurnEnd, onTaskCheckpoint, onAbort) that observe the turn lifecycle but do not write to output channels directly.
 

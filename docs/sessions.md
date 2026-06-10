@@ -8,7 +8,7 @@ Sessions track turn history, context windows, compaction, and durable state acro
 
 A session is a conversation with the agent. It remembers what you discussed, what files were changed, and what evidence was collected across turns. Sessions persist across compaction — when the context window fills up, older turns are summarized but key evidence and decisions are preserved.
 
-Implementation: session identity is managed by the runtime session identity module, session continuity across turns by the session continuity module, and the ADK bridge session service handles session state persistence (read-only or disabled by default). Each turn enters through RunnerSessionBoundary, which manages session concurrency and error classification.
+Implementation: session identity is managed by the runtime session identity module, session continuity across turns by the session continuity module, and the ADK bridge session service handles session state persistence (read-only or disabled by default). Each turn enters through the engine driver (MagiEngineDriver in cli/engine.py), which enforces single-flight session concurrency via ActiveTurnRegistry and classifies turn errors.
 
 ## Context window and turn management
 
