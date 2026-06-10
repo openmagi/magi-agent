@@ -1,7 +1,8 @@
 """Stage 0+1 — per-turn EvidenceLedger lifecycle -> real ``tool_calls``.
 
 Covers:
-  - env flag ``MAGI_EVIDENCE_LEDGER_LIFECYCLE_ENABLED`` (default OFF, "1"->ON);
+  - env flag ``MAGI_EVIDENCE_LEDGER_LIFECYCLE_ENABLED`` (default ON for the
+    full/local profile; explicit false/off or safe profiles keep it OFF);
   - ``LocalToolEvidenceCollector`` builds one single-turn EvidenceLedger per
     ``(session, turn)`` with the synthesized tool-trace records (flag ON), and
     builds NOTHING (returns ``()``) when the flag is OFF;
@@ -30,13 +31,18 @@ _ENV = "MAGI_EVIDENCE_LEDGER_LIFECYCLE_ENABLED"
 # ---------------------------------------------------------------------------
 
 
-def test_lifecycle_flag_defaults_off(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_lifecycle_flag_defaults_on_for_full_profile(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.delenv(_ENV, raising=False)
-    assert is_evidence_ledger_lifecycle_enabled() is False
-    # Explicit empty/false-y env mapping is also off.
-    assert is_evidence_ledger_lifecycle_enabled({}) is False
+    assert is_evidence_ledger_lifecycle_enabled() is True
+    assert is_evidence_ledger_lifecycle_enabled({}) is True
+
+
+def test_lifecycle_flag_false_and_safe_profile_disable() -> None:
     assert is_evidence_ledger_lifecycle_enabled({_ENV: "off"}) is False
     assert is_evidence_ledger_lifecycle_enabled({_ENV: "0"}) is False
+    assert is_evidence_ledger_lifecycle_enabled({"MAGI_RUNTIME_PROFILE": "safe"}) is False
 
 
 def test_lifecycle_flag_truthy_opt_in() -> None:
@@ -97,7 +103,7 @@ def test_collector_builds_one_single_turn_ledger_per_turn(
 def test_collector_builds_no_ledger_when_flag_off(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.delenv(_ENV, raising=False)
+    monkeypatch.setenv(_ENV, "off")
     collector = LocalToolEvidenceCollector()
 
     _record(collector, turn_id="turn-1", tool_name="Grep")
@@ -143,7 +149,7 @@ def test_flag_off_byte_identical_empty_source_ledger(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
 ) -> None:
-    monkeypatch.delenv(_ENV, raising=False)
+    monkeypatch.setenv(_ENV, "off")
     from magi_agent.cli.tool_runtime import build_cli_tool_runtime
 
     collector = LocalToolEvidenceCollector()
@@ -216,7 +222,7 @@ def test_record_phase_reached_shares_turn_ledger_with_tool_traces(
 def test_record_phase_reached_no_record_when_flag_off(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.delenv(_ENV, raising=False)
+    monkeypatch.setenv(_ENV, "off")
     collector = LocalToolEvidenceCollector()
 
     collector.record_phase_reached("session-1", "turn-1", "analysis")
@@ -297,7 +303,7 @@ def test_record_verifier_verdict_appends_verdict_record(
 def test_record_verifier_verdict_no_record_when_flag_off(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.delenv(_ENV, raising=False)
+    monkeypatch.setenv(_ENV, "off")
     collector = LocalToolEvidenceCollector()
 
     collector.record_verifier_verdict(

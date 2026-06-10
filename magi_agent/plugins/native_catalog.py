@@ -447,8 +447,11 @@ _NATIVE_PLUGIN_DATA: tuple[Mapping[str, object], ...] = (
         "kind": "native",
         "version": "0.1.0-adk-scaffold",
         "description": (
-            "Metadata-only scheduled work policy surface for Cron tool names, "
-            "scheduler metadata, script cron runner metadata, and TaskWait parity."
+            "Scheduled work policy surface for Cron and background-task tool "
+            "names. Honest-by-default (MAGI_NATIVE_RECEIPTS_HONEST): mutating "
+            "Cron/Task handlers return not_configured until a scheduler / "
+            "background-task runtime is attached; list handlers report "
+            "schedulerAttached/backgroundTasksAttached state instead of fake-ok."
         ),
         "publisher": "openmagi",
         "defaultInstalled": True,

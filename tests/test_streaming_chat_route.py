@@ -394,6 +394,38 @@ def test_selected_full_toolhost_stream_uses_selected_canary_path(
     assert payloads[-1]["terminal"] == "completed"
 
 
+def test_selected_full_toolhost_duplicate_replay_surfaces_status_not_none(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
+    monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
+    monkeypatch.setenv("CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_WORKSPACE_ROOT", str(tmp_path))
+    runtime = _selected_runtime(tmp_path, full_toolhost=True)
+    client = TestClient(_make_app(runtime=runtime))
+    body = {
+        "sessionId": "s-selected-duplicate",
+        "turnId": "t-selected-duplicate",
+        "messages": [{"role": "user", "content": "Repeat the selected toolhost prompt."}],
+    }
+
+    first = client.post("/v1/chat/stream", headers=_auth_headers(), json=body)
+    second = client.post("/v1/chat/stream", headers=_auth_headers(), json=body)
+
+    assert first.status_code == 200, first.text
+    assert _data_lines(first.text)[-1]["terminal"] == "completed"
+    assert second.status_code == 200, second.text
+    second_payloads = _data_lines(second.text)
+    assert any(
+        payload.get("type") == "error"
+        and payload.get("code") == "counter_duplicate_replay"
+        for payload in second_payloads
+    )
+    assert second_payloads[-1]["terminal"] == "error"
+    assert second_payloads[-1]["error"] == "counter_duplicate_replay"
+    assert "counter_none" not in second.text
+
+
 def test_selected_gate5b_stream_emits_live_sink_events_before_completion(
     monkeypatch,
 ) -> None:
@@ -455,6 +487,73 @@ def test_selected_gate5b_stream_emits_live_sink_events_before_completion(
 
     assert payloads[0]["type"] == "text_delta"
     assert payloads[0]["delta"] == "early live chunk"
+    assert payloads[-1]["type"] == "turn_result"
+    assert payloads[-1]["terminal"] == "completed"
+
+
+def test_selected_gate5b_stream_skips_posthoc_text_after_live_text(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
+
+    async def fake_selected_chat_response(
+        runtime: object,
+        body: object,
+        *,
+        request: object,
+        public_event_sink=None,
+    ) -> JSONResponse:
+        assert public_event_sink is not None
+        public_event_sink({"type": "text_delta", "delta": "live chunk"})
+        return JSONResponse(
+            status_code=200,
+            content={
+                "status": "python_ready",
+                "publicEvents": [
+                    {"type": "turn_phase", "phase": "planning"},
+                    {"type": "text_delta", "delta": "live chunk final aggregate"},
+                ],
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "live chunk final aggregate",
+                        }
+                    }
+                ],
+            },
+        )
+
+    monkeypatch.setattr(
+        streaming_chat_route_module,
+        "run_gate5b_user_visible_chat_response",
+        fake_selected_chat_response,
+    )
+
+    async def _collect() -> list[dict]:
+        frames = _drive_selected_gate5b_stream(
+            SimpleNamespace(),
+            {"messages": [{"role": "user", "content": "stream selected"}]},
+            SimpleNamespace(),
+            session_id="s-selected-posthoc-text",
+            turn_id="t-selected-posthoc-text",
+        )
+        return [
+            payload
+            async for frame in frames
+            for payload in _data_lines(frame.decode("utf-8"))
+        ]
+
+    payloads = asyncio.run(_collect())
+
+    text_payloads = [
+        payload for payload in payloads if payload.get("type") == "text_delta"
+    ]
+    assert [payload["delta"] for payload in text_payloads] == ["live chunk"]
+    assert any(
+        payload.get("type") == "turn_phase" and payload.get("phase") == "planning"
+        for payload in payloads
+    )
     assert payloads[-1]["type"] == "turn_result"
     assert payloads[-1]["terminal"] == "completed"
 

@@ -323,3 +323,55 @@ def test_down_on_last_row_walks_history_forward() -> None:
             assert app.input.text == "newer"
 
     asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
+# Ctrl+V posts AttachImageRequested (Task 3)
+# ---------------------------------------------------------------------------
+
+
+class _AttachHostApp(App[None]):
+    """Minimal host that captures AttachImageRequested messages."""
+
+    def __init__(self, registry: FakeRegistry) -> None:
+        super().__init__()
+        self._command_registry = registry
+        self.attach_requests: list[PromptInput.AttachImageRequested] = []
+        self.input: PromptInput | None = None
+
+    def compose(self) -> ComposeResult:
+        self.input = PromptInput(commands=self._command_registry, id="prompt")
+        yield self.input
+
+    def on_prompt_input_attach_image_requested(
+        self, event: "PromptInput.AttachImageRequested"
+    ) -> None:
+        self.attach_requests.append(event)
+
+
+def test_ctrl_v_posts_attach_image_requested() -> None:
+    """AttachImageRequested is a Message subclass on PromptInput."""
+    from textual.message import Message
+
+    from magi_agent.cli.tui.input import PromptInput
+
+    assert hasattr(PromptInput, "AttachImageRequested")
+    assert issubclass(PromptInput.AttachImageRequested, Message)
+
+
+def test_ctrl_v_behavioral_posts_attach_image_requested() -> None:
+    """Pressing ctrl+v posts exactly one AttachImageRequested and stops the event."""
+
+    async def _run() -> None:
+        app = _AttachHostApp(FakeRegistry([]))
+        async with app.run_test() as pilot:
+            app.input.focus()
+            await pilot.pause()
+            app.input.text = ""
+            await pilot.press("ctrl+v")
+            await pilot.pause()
+        assert len(app.attach_requests) == 1
+        # Buffer must remain empty (default paste must not fire)
+        assert app.input.text == ""
+
+    asyncio.run(_run())

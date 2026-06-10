@@ -82,7 +82,9 @@ def render_systemd_unit(
 ) -> str:
     """Render a systemd unit string for the gateway daemon.
 
-    The unit restarts on failure (resilience) but does NOT set
+    The unit restarts on any exit (``Restart=always`` — the daemon is a
+    long-running supervise loop, so every exit short of ``systemctl stop``
+    should be restarted) but does NOT set
     ``Environment=MAGI_GATEWAY_DAEMON_ENABLED=1`` — the env gate is left to the
     operator, so installing the unit alone keeps the daemon a no-op.
     """
@@ -95,7 +97,10 @@ def render_systemd_unit(
         "[Service]",
         "Type=simple",
         f"ExecStart={exec_start}",
-        "Restart=on-failure",
+        # `gateway start` is a long-running supervise loop, so ANY exit should
+        # be restarted to honour the always-on intent (`systemctl stop` is not
+        # restarted by systemd).
+        "Restart=always",
         "RestartSec=5",
     ]
     if working_directory:

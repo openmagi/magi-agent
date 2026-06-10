@@ -392,6 +392,50 @@ def test_sanitizer_drops_thinking_events(monkeypatch: pytest.MonkeyPatch) -> Non
     assert all("secret" not in json.dumps(ev.payload) for ev in events)
 
 
+def test_sanitizer_passes_thinking_when_flag_on(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The OTHER side of the MAGI_STREAM_THINKING gate: with the flag SET, the
+    # sanitizer lets a thinking_delta through (redacted), so a thinking event
+    # DOES reach the TUI. Mirrors test_sanitizer_drops_thinking_events (flag off)
+    # but proves the gate is genuinely a gate, not an unconditional drop.
+    import magi_agent.cli.engine as engine_mod
+
+    monkeypatch.setenv("MAGI_STREAM_THINKING", "1")
+
+    runner = MockRunner([_text_event("visible")])
+    driver = MagiEngineDriver(runner=runner)
+
+    real_deps = engine_mod._lazy_engine_deps()
+    real_bridge = real_deps["OpenMagiEventBridge"](live_compatible=True)  # type: ignore[operator]
+
+    class _BridgeWithThinking:
+        def __init__(self, **_kw: object) -> None:
+            self._real = real_bridge
+
+        def project_adk_event(self, event: object, *, turn_id: str):
+            proj = self._real.project_adk_event(event, turn_id=turn_id)
+            proj.agent_events.insert(0, {"type": "thinking_delta", "delta": "just planning"})
+            return proj
+
+    def _fake_deps() -> dict:
+        deps = dict(real_deps)
+        deps["OpenMagiEventBridge"] = _BridgeWithThinking
+        return deps
+
+    monkeypatch.setattr(engine_mod, "_lazy_engine_deps", _fake_deps)
+
+    events, terminal = asyncio.run(
+        drain(driver.run_turn_stream(None, _turn_input("s-think-on"), cancel=asyncio.Event()))
+    )
+    assert terminal.terminal is Terminal.completed
+    # With the flag ON, the thinking event survives the sanitizer (engine maps
+    # thinking_delta -> a "status" RuntimeEvent whose inner payload type stays
+    # "thinking_delta") — it is NOT dropped.
+    assert any(
+        isinstance(ev.payload, dict) and ev.payload.get("type") == "thinking_delta"
+        for ev in events
+    ), [ev.payload for ev in events]
+
+
 # ---------------------------------------------------------------------------
 # 5. engine.py import-clean (no google.adk / textual at module load)
 # ---------------------------------------------------------------------------

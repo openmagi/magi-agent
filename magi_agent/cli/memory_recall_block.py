@@ -84,6 +84,8 @@ def build_cli_memory_recall_block(
 
         config = resolve_memory_config()
         # BOTH gates required: recall path active AND local search selected.
+        # Both now follow the master switch (PR1 dual-gate fix), so master-on
+        # alone enables this block; an explicit prefer-local override still wins.
         if not (config.recall_enabled and config.prefer_local_search):
             return ""
 

@@ -97,6 +97,9 @@ class PromptInput(TextArea):
             self.submission = submission
             super().__init__()
 
+    class AttachImageRequested(Message):
+        """Posted when the user presses Ctrl+V to attach a clipboard image."""
+
     def __init__(self, *, commands: CommandRegistry, **kwargs: object) -> None:
         super().__init__(**kwargs)  # type: ignore[arg-type]
         self._commands = commands
@@ -170,6 +173,11 @@ class PromptInput(TextArea):
         normal. With no history attached, ↑/↓ are never hijacked.
         """
 
+        if event.key == "ctrl+v":
+            event.stop()
+            event.prevent_default()
+            self.post_message(self.AttachImageRequested())
+            return
         if event.key == "enter":
             event.stop()
             event.prevent_default()

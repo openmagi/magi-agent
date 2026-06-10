@@ -1,8 +1,13 @@
-"""Thread-safe single-flight registry for active turns.
+"""Single-flight registry for active turns, keyed by session.
 
-Extracted from the retired ``runner_session_boundary`` module. Maps a session
-key to the id of its currently-running turn so a second concurrent turn for
-the same session can be rejected. ADK-free by construction.
+This module hosts :class:`ActiveTurnRegistry`, extracted verbatim out of
+``runtime/runner_session_boundary.py`` so the lone live part of that
+otherwise-dead reference stack no longer blocks its deletion. The registry is
+ADK-free (pure ``threading.Lock`` + ``asyncio`` task plumbing), so it is safe to
+import at module top from any consumer.
+
+Behaviour is preserved exactly: ``cli/engine.py`` reuses it to reject a second
+concurrent turn for the same session id.
 """
 
 from __future__ import annotations
@@ -11,8 +16,6 @@ import asyncio
 from contextlib import suppress
 from threading import Lock
 from typing import Any
-
-__all__ = ["ActiveTurnRegistry"]
 
 
 class ActiveTurnRegistry:
@@ -61,3 +64,6 @@ class ActiveTurnRegistry:
 def _consume_task_result(task: asyncio.Task[Any]) -> None:
     with suppress(asyncio.CancelledError, Exception):
         task.result()
+
+
+__all__ = ["ActiveTurnRegistry"]

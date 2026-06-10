@@ -92,6 +92,10 @@ from magi_agent.shadow.gate5b4c3_shadow_generation_contract import (
 from magi_agent.transport.shadow_generations import (
     Gate5B4C3ShadowGenerationRouteConfig,
 )
+from magi_agent.transport.usage_receipt_emit import (
+    emit_runtime_direct_usage_receipt,
+    usage_receipt_enabled,
+)
 
 
 MockedChatRunner = Callable[[Mapping[str, Any]], Mapping[str, Any]]
@@ -876,6 +880,17 @@ async def _local_adk_chat_sse(
     # workspace memory tree and inject a <memory-recall> block. Gated + fail-soft
     # downstream (recall_enabled AND prefer_local_search, incognito-aware): when
     # off this is byte-identical (recall_query is just an unused string).
+    #
+    # TODO(PR-C offload): the recall search runs SYNCHRONOUSLY inside
+    # build_headless_runtime → build_cli_instruction (prompt assembly), so it is
+    # on this event loop. It already has an empty-tree guard
+    # (memory_recall_block._has_indexable_memory) + a tiny corpus + a qmd
+    # subprocess timeout, so it is cheap today. It is NOT offloaded here because
+    # build_headless_runtime is a single sync call that assembles the whole
+    # runtime (engine/gate/commands), not just recall — wrapping the lot in
+    # to_thread would move unrelated wiring off-loop. If the memory tree ever
+    # grows enough to matter, split the recall-block build out of prompt assembly
+    # and to_thread JUST that, mirroring the record_turn offload below.
     headless = build_headless_runtime(
         cwd=workspace_root,
         permission_mode="bypassPermissions",
@@ -941,7 +956,22 @@ async def _local_adk_chat_sse(
         # unless the (default-OFF) memory-mode routing gate bound it from the
         # ``x-core-agent-memory-mode`` header; ``.value`` yields the string form
         # ``record_turn`` compares against ``_NON_WRITING_MODES``.
-        record_turn(
+        #
+        # HOT-PATH OFFLOAD (PR-C): ``record_turn`` is synchronous and its
+        # first-turn ``_maybe_run_compaction`` can do ~300ms of file IO (a final
+        # review measured it). Run it on a worker thread via ``asyncio.to_thread``
+        # so the daily flush + compaction build never block this SSE event loop.
+        # Still fail-soft (record_turn swallows its own errors) and gated (no-op
+        # when memory is off); the await just keeps the loop responsive.
+        #
+        # CONCURRENCY: offloading makes genuine concurrent execution possible, and
+        # compaction_tree.append_daily_entry is read-modify-write (atomic write,
+        # but last-writer-wins if two same-workspace turns finalize concurrently →
+        # a daily entry could be lost). Acceptable for the single-user local CLI;
+        # a lock here would only be needed if concurrent same-workspace turns
+        # become common.
+        await asyncio.to_thread(
+            record_turn,
             workspace_root=workspace_root,
             session_id=session_id,
             turn_id=turn_id,
@@ -2500,6 +2530,44 @@ def _run_mocked_chat_runner(
     )
 
 
+def _swallow_task_result(task: "asyncio.Task[object]") -> None:
+    try:
+        task.exception()
+    except asyncio.CancelledError:
+        pass
+
+
+def _schedule_runtime_direct_usage_receipt(
+    *,
+    runtime: OpenMagiRuntime,
+    model: str,
+    usage: Mapping[str, int] | None,
+    turn_id: str,
+) -> None:
+    if not usage or not model:
+        return
+    if not usage_receipt_enabled(os.environ):
+        return
+    try:
+        coro = emit_runtime_direct_usage_receipt(
+            api_proxy_url=str(runtime.config.api_proxy_url),
+            gateway_token=runtime.config.gateway_token,
+            bot_id=runtime.config.bot_id,
+            user_id=runtime.config.user_id,
+            model=model,
+            usage=usage,
+            turn_id=turn_id,
+        )
+    except Exception:  # noqa: BLE001 - metering setup must not break the turn
+        return
+    try:
+        task = asyncio.create_task(coro)
+    except RuntimeError:
+        coro.close()
+        return
+    task.add_done_callback(_swallow_task_result)
+
+
 def _build_egress_evidence_view(
     gate1a_bundle: Gate1AReadOnlyToolBundle | Gate5BFullToolBundle,
 ):
@@ -2812,10 +2880,15 @@ async def _run_live_chat_runner(
         cost_owner_waiver=generation_config.cost_owner_waiver,
     )
     if reservation.status != "reserved":
+        failure_reason = (
+            "counter_duplicate_replay"
+            if reservation.status == "duplicate_replay"
+            else f"counter_{reservation.reason}"
+        )
         return _fallback_response(
             status_code=503,
             status="python_disabled",
-            reason=f"counter_{reservation.reason}",
+            reason=failure_reason,
             runtime=runtime,
             counter_state=reservation.counter_state,
             counter_status=reservation.status,
@@ -3034,6 +3107,12 @@ async def _run_live_chat_runner(
             draft_text=boundary_result.output_text_internal or "",
             gate1a_bundle=gate1a_bundle,
         )
+    _schedule_runtime_direct_usage_receipt(
+        runtime=runtime,
+        model=boundary_result.selected_model,
+        usage=getattr(boundary_result, "usage_internal", None),
+        turn_id=generation.request_id_digest,
+    )
     return _python_ready_response(
         runtime=runtime,
         content=sanitize_gate5b_model_visible_identity_text(

@@ -129,6 +129,26 @@ def build_scheduler_cron_watcher(
     )
 
 
+# Tick interval for the default cron watcher built by ``build_default_watchers``.
+DEFAULT_CRON_TICK_INTERVAL_SECONDS = 60.0
+
+
+def build_default_watchers() -> tuple[GatewayWatcher, ...]:
+    """First-party watcher set for ``magi gateway start`` (each self-gates).
+
+    Currently the scheduler-cron ticker only: channel watchers require
+    operator-injected provider ports and are NOT constructed here.  The cron
+    watcher carries its own ``MAGI_SCHEDULER_EXECUTOR_ENABLED`` gate, so with
+    that gate OFF the daemon records it as disabled and starts nothing.
+    """
+    return (
+        build_scheduler_cron_watcher(
+            driver=build_local_scheduler_cron_driver(),
+            interval_seconds=DEFAULT_CRON_TICK_INTERVAL_SECONDS,
+        ),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Channel poll watcher — wraps an injected per-platform poll/read function
 # ---------------------------------------------------------------------------
@@ -175,7 +195,9 @@ def build_channel_poll_watcher(
 
 
 __all__ = [
+    "DEFAULT_CRON_TICK_INTERVAL_SECONDS",
     "build_channel_poll_watcher",
+    "build_default_watchers",
     "build_local_scheduler_cron_driver",
     "build_scheduler_cron_watcher",
     "is_scheduler_executor_enabled",

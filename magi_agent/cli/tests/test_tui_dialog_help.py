@@ -65,6 +65,19 @@ def test_build_help_sections_includes_env_section() -> None:
     assert "MAGI_TUI_NOTIFY_BELL" in flat
 
 
+def test_help_env_surfaces_stream_thinking() -> None:
+    # The thinking trace is gated behind MAGI_STREAM_THINKING (the SSE sanitizer
+    # drops thinking_delta otherwise). That env var is otherwise invisible in-app,
+    # so it MUST be discoverable from the help reference's Environment section.
+    flat = "\n".join(line for _name, desc in ENV_HELP for line in (_name, desc))
+    assert "MAGI_STREAM_THINKING" in flat
+    sections = build_help_sections(
+        bindings=[], commands=[], prompt_keys=[], env=list(ENV_HELP)
+    )
+    rendered = "\n".join(line for _title, lines in sections for line in lines)
+    assert "MAGI_STREAM_THINKING" in rendered
+
+
 def test_help_dialog_default_includes_env_bell() -> None:
     # The live HelpDialog (default ENV_HELP) renders the bell env toggle.
     dialog = HelpDialog(bindings=[("ctrl+c", "Cancel")], commands=["compact"])
