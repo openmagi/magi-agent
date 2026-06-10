@@ -88,6 +88,17 @@ def local_runner_policy_routing_enabled_from_env() -> bool:
     return raw.strip().lower() not in {"0", "false", "no", "off"}
 
 
+def _build_user_hook_bus_for_headless(*, workspace_root: str) -> object | None:
+    from magi_agent.config.env import is_user_hooks_enabled
+
+    if not is_user_hooks_enabled():
+        return None
+
+    from magi_agent.cli.hook_wiring import build_user_hook_bus
+
+    return build_user_hook_bus(workspace_root=workspace_root)
+
+
 @dataclass
 class HeadlessRuntime:
     """Dependency set for the headless path.
@@ -242,6 +253,13 @@ def build_headless_runtime(
         # engine streaming is byte-identical to pre-PR4. When ON, a clean stop
         # short of the goal triggers a bounded continuation (default mode "goal").
         goal_nudge=build_goal_nudge_from_env(),
+        # PR2 (cluster 11): production user-hook wiring. Default OFF
+        # (MAGI_USER_HOOKS_ENABLED) → build_user_hook_bus returns None → engine
+        # never attaches the HookBus tool-callback bridge and streaming is
+        # byte-identical. When ON (self-host / local CLI only), CC-style
+        # ~/.magi/settings.json + <cwd>/.magi/settings.json command hooks are
+        # bridged onto the before/after-tool callbacks.
+        user_hook_bus=_build_user_hook_bus_for_headless(workspace_root=effective_cwd),
     )
 
     # (C) Permission gate — default stays sink-less and therefore fail-safe on

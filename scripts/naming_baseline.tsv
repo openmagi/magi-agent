@@ -102,11 +102,9 @@ openmagi	magi_agent/gates/gate1a_readonly_tools.py	1
 openmagi	magi_agent/gates/gate5b_full_toolhost.py	1
 openmagi	magi_agent/gates/self_review_readiness.py	1
 openmagi	magi_agent/gateway/service_install.py	1
-openmagi	magi_agent/harness/background_tasks.py	2
 openmagi	magi_agent/harness/cron_turn_runner_adapter.py	8
 openmagi	magi_agent/harness/goal_state.py	2
 openmagi	magi_agent/harness/long_context_eval.py	1
-openmagi	magi_agent/harness/mission_runtime_boundary.py	3
 openmagi	magi_agent/harness/plan_gate.py	9
 openmagi	magi_agent/harness/presets.py	1
 openmagi	magi_agent/harness/profiles.py	2
@@ -219,8 +217,8 @@ openmagi	magi_agent/tools/local_readonly.py	1
 openmagi	magi_agent/tools/schema_projection.py	1
 openmagi	magi_agent/transport/app_api.py	6
 openmagi	magi_agent/transport/chat.py	1
-openmagi	magi_agent/transport/chat_routes.py	53
-openmagi	magi_agent/transport/chat_shared.py	5
+openmagi	magi_agent/transport/chat_routes.py	54
+openmagi	magi_agent/transport/chat_shared.py	4
 openmagi	magi_agent/transport/control_requests.py	3
 openmagi	magi_agent/transport/credentials.py	2
 openmagi	magi_agent/transport/customize.py	2

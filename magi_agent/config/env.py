@@ -1726,6 +1726,28 @@ def is_goal_nudge_enabled(env: Mapping[str, str] | None = None) -> bool:
     return _is_true(source.get(MAGI_GOAL_NUDGE_ENABLED_ENV))
 
 
+MAGI_USER_HOOKS_ENABLED_ENV = "MAGI_USER_HOOKS_ENABLED"
+
+
+def is_user_hooks_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Master gate for CC-style user ``settings.json`` hooks (cluster doc 11 PR2).
+
+    Default OFF (strict truthy opt-in: "1"/"true"/"yes"/"on"). When OFF, the CLI
+    engine never loads ``~/.magi/settings.json`` / ``<workspace>/.magi/settings.json``
+    hooks and never constructs a user :class:`~magi_agent.hooks.bus.HookBus`, so a
+    turn is byte-identical to today. When ON (self-host / local CLI only — never
+    hosted multi-tenant, since command hooks run operator-supplied ``bash -c``),
+    the engine loads the user hooks, builds one HookBus wired to the **command**
+    executor (http/llm deferred to a later PR), and bridges the
+    ``PreToolUse``/``PostToolUse`` lifecycle points onto the ADK
+    before/after-tool callbacks. Like ``is_egress_gate_enabled`` / ``is_goal_nudge_enabled``
+    this is an additive, default-disabled seam and does NOT follow the
+    runtime-profile default-ON convention.
+    """
+    source = os.environ if env is None else env
+    return _is_true(source.get(MAGI_USER_HOOKS_ENABLED_ENV))
+
+
 MAGI_DOCUMENT_AUTHORING_COVERAGE_ENV = "MAGI_DOCUMENT_AUTHORING_COVERAGE"
 
 
