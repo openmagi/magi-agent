@@ -51,8 +51,17 @@ Read / meta-read tools are concurrency-safe and available in both `plan` and
 
 ### WebSearch / WebFetch (plugin web tools)
 
-`WebSearch` and `WebFetch` ship in the `openmagi.web` plugin, not the core
-registry above. They have **no fabricated fallback**: on a default install with
+`WebSearch` and `WebFetch` ship in the `openmagi.web` plugin
+(`magi_agent/plugins/native/web.py`), not the core registry above. Following the
+catalog's permission convention, they carry the `net` permission (outbound
+network egress), distinct from the local read/write/execute/meta tools:
+
+| Tool | Purpose | Permission |
+|---|---|---|
+| `WebSearch` | Search the web via a live provider router. | net (egress; default: not configured → error) |
+| `WebFetch` | Fetch a URL via a live provider router. | net (egress; default: not configured → error) |
+
+They have **no fabricated fallback**: on a default install with
 no live web provider configured they return an honest
 `web_research_not_configured` error instead of simulated results. To activate
 live search/fetch, set `CORE_AGENT_PYTHON_LIVE_WEB_ACQUISITION_ENABLED=1` and
@@ -60,7 +69,12 @@ live search/fetch, set `CORE_AGENT_PYTHON_LIVE_WEB_ACQUISITION_ENABLED=1` and
 provider: `CORE_AGENT_PYTHON_JINA_READER_ENABLED=1` (optionally with
 `MAGI_JINA_API_KEY`), `CORE_AGENT_PYTHON_INSANE_FETCH_ENABLED=1`, or
 `MAGI_PLATFORM_BASE_URL` + `MAGI_PLATFORM_API_KEY`. With those set, the
-handlers delegate to the live provider router.
+handlers delegate to the live provider router
+(`magi_agent/web_acquisition/research_tools.py`).
+
+`WebReader` is **not exposed** by the native plugin — the catalog registers only
+`WebSearch` and `WebFetch`. The live provider router has a jina-reader path, but
+there is no `WebReader` tool handler today, so it is out of scope for this row.
 
 ### Example: invocation and approval
 
