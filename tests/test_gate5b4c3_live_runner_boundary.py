@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import subprocess
 import sys
@@ -14,6 +15,7 @@ from magi_agent.shadow.gate5b4c3_live_runner_boundary import (
     Gate5B4C3LiveRunnerBoundary,
     Gate5B4C3LiveRunnerBoundaryResult,
     _event_usage_metadata,
+    _invoke_manual_tool,
     _looks_like_incomplete_full_toolhost_output,
     _selected_full_toolhost_run_config,
     _usage_dict,
@@ -1005,6 +1007,80 @@ def test_live_boundary_selected_full_toolhost_run_config_requests_sse_streaming(
     assert run_config is not None
     assert getattr(run_config, "max_llm_calls") == 32
     assert getattr(run_config, "streaming_mode") == StreamingMode.SSE
+
+
+def _file_write_adk_tool(tmp_path: Path) -> object:
+    pytest.importorskip("google.adk.tools")
+    from magi_agent.gates.gate5b_full_toolhost import (
+        Gate5BFullToolHostConfig,
+        build_gate5b_full_toolhost_bundle,
+    )
+
+    bundle = build_gate5b_full_toolhost_bundle(
+        config=Gate5BFullToolHostConfig.model_validate(
+            {
+                "enabled": True,
+                "killSwitchEnabled": False,
+                "routeAttachmentEnabled": True,
+                "selectedBotDigest": BOT_DIGEST,
+                "selectedOwnerDigest": OWNER_DIGEST,
+                "environment": "production",
+                "environmentAllowlist": ("production",),
+                "allowedToolNames": ("FileWrite",),
+                "maxToolCallsPerTurn": 1,
+            }
+        ),
+        scope={
+            "selectedBotDigest": BOT_DIGEST,
+            "selectedOwnerDigest": OWNER_DIGEST,
+            "environment": "production",
+        },
+        workspace_root=tmp_path,
+    )
+    return bundle.tools[0]
+
+
+def test_manual_fallback_invokes_real_adk_function_tool_with_direct_args(
+    tmp_path: Path,
+) -> None:
+    tool = _file_write_adk_tool(tmp_path)
+
+    result = asyncio.run(
+        _invoke_manual_tool(
+            tool,
+            {"path": "manual-fallback.txt", "content": "manual fallback wrote"},
+        )
+    )
+
+    assert (tmp_path / "manual-fallback.txt").read_text(encoding="utf-8") == (
+        "manual fallback wrote"
+    )
+    assert isinstance(result, dict)
+    assert result.get("status") == "ok"
+
+
+def test_manual_fallback_unwraps_provider_arguments_object_for_real_adk_tool(
+    tmp_path: Path,
+) -> None:
+    tool = _file_write_adk_tool(tmp_path)
+
+    result = asyncio.run(
+        _invoke_manual_tool(
+            tool,
+            {
+                "arguments": {
+                    "path": "provider-wrapper.txt",
+                    "content": "provider wrapper wrote",
+                }
+            },
+        )
+    )
+
+    assert (tmp_path / "provider-wrapper.txt").read_text(encoding="utf-8") == (
+        "provider wrapper wrote"
+    )
+    assert isinstance(result, dict)
+    assert result.get("status") == "ok"
 
 
 def test_live_boundary_rejects_completed_runner_without_text_output() -> None:

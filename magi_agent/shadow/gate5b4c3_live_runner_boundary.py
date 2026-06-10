@@ -1808,16 +1808,24 @@ async def _run_manual_tool_calls(
 
 
 async def _invoke_manual_tool(tool: object, args: Mapping[str, object]) -> object:
+    safe_args = _manual_tool_invocation_args(args)
     run_async = getattr(tool, "run_async", None)
     if callable(run_async):
-        return await run_async(args=dict(args), tool_context=object())
+        return await run_async(args=safe_args, tool_context=object())
     func = getattr(tool, "func", None)
     if callable(func):
-        result = func(**dict(args))
+        result = func(**safe_args)
         if hasattr(result, "__await__"):
             return await result
         return result
     raise TypeError("manual tool is not invocable")
+
+
+def _manual_tool_invocation_args(args: Mapping[str, object]) -> dict[str, object]:
+    safe_args = dict(args)
+    if set(safe_args) == {"arguments"} and isinstance(safe_args["arguments"], Mapping):
+        return dict(safe_args["arguments"])
+    return safe_args
 
 
 async def _run_no_tool_finalizer(
