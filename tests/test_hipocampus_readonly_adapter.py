@@ -174,6 +174,14 @@ def test_readonly_adapter_rejects_production_workspace_roots(workspace_root: Pat
         )
 
 
+def test_readonly_adapter_allows_tmp_name_that_merely_contains_pvc() -> None:
+    adapter = HipocampusReadOnlyAdapter(
+        HipocampusReadOnlyConfig(workspace_root=Path("/tmp/tmpvcaosub1"), enabled=True)
+    )
+
+    assert adapter.config.workspace_root == Path("/tmp/tmpvcaosub1")
+
+
 def test_readonly_adapter_rejects_workspace_root_symlink_to_production_path(
     tmp_path: Path,
 ) -> None:
