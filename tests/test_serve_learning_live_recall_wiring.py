@@ -32,6 +32,7 @@ No ``Literal[False]`` authority flag is flipped — live behaviour is gate-deriv
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 
 import pytest
@@ -495,6 +496,110 @@ def test_cli_instruction_live_block_fail_soft_on_recall_error(
         learning_live_readiness=_live_readiness(bot_id="bot-1", user_id="user-1"),
     )
     assert "<learning-live-recall" not in instruction
+
+
+# ---------------------------------------------------------------------------
+# 3b. REAL serve async call context (issue 1/2) — the builders run inside a
+#     RUNNING event loop on the hosted/serve path
+#     (``transport.chat._local_adk_chat_sse`` is ``async`` and calls
+#     ``build_headless_runtime`` → ``build_cli_instruction`` → these builders
+#     DIRECTLY on-loop, NOT via ``to_thread``).  The prior tests called the
+#     builders synchronously (no loop) so ``asyncio.run`` succeeded there and
+#     hid the production break.  These tests reproduce the running-loop site:
+#     an ``asyncio.run()`` inside an already-running loop raises
+#     ``RuntimeError`` which the broad ``except`` swallowed → empty block / no
+#     audit → the feature was silently inert exactly on the path this PR exists
+#     to serve.
+# ---------------------------------------------------------------------------
+
+
+def test_serve_block_injects_snippet_when_live_inside_running_loop(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Driven from inside ``asyncio.run`` — mirrors the real serve call site.
+
+    Before the fix this returned ``""`` (asyncio.run-in-running-loop
+    RuntimeError, swallowed); after the fix the block is injected just like
+    the synchronous case.
+    """
+    from magi_agent.cli.learning_recall import (
+        build_serve_live_learning_recall_block,
+    )
+
+    _live_env(monkeypatch)
+    _seed_learning(tmp_path)
+
+    async def _drive() -> str:
+        # Synchronous builder invoked from within a running loop, exactly as
+        # build_cli_instruction is invoked on-loop by _local_adk_chat_sse.
+        return build_serve_live_learning_recall_block(
+            workspace_root=str(tmp_path),
+            recall_query="zebraquux",
+            memory_mode="normal",
+            bot_id="bot-1",
+            user_id="user-1",
+            readiness=_live_readiness(bot_id="bot-1", user_id="user-1"),
+        )
+
+    block = asyncio.run(_drive())
+    assert "<learning-live-recall" in block
+    assert "</learning-live-recall>" in block
+    assert "zebraquux" in block
+
+
+def test_serve_write_audit_emitted_when_live_inside_running_loop(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Write-audit symmetry under a running loop — the real serve context."""
+    from magi_agent.cli.learning_recall import (
+        build_serve_live_learning_write_audit,
+    )
+
+    _live_env(monkeypatch)
+
+    async def _drive() -> object:
+        return build_serve_live_learning_write_audit(
+            workspace_root=str(tmp_path),
+            memory_mode="normal",
+            bot_id="bot-1",
+            user_id="user-1",
+            readiness=_live_readiness(bot_id="bot-1", user_id="user-1"),
+        )
+
+    audit = asyncio.run(_drive())
+    assert audit is not None
+    assert "status" in audit
+    assert "authorityFlags" in audit
+    assert all(value is False for value in audit["authorityFlags"].values())
+
+
+def test_cli_instruction_injects_live_block_inside_running_loop(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """End-to-end: ``build_cli_instruction`` (the on-loop serve seam) must inject
+    the live block when invoked from within a running loop, not just when called
+    synchronously from a test with no loop."""
+    from magi_agent.cli.tool_runtime import build_cli_instruction
+
+    _live_env(monkeypatch)
+    _seed_learning(tmp_path)
+
+    async def _drive() -> str:
+        return build_cli_instruction(
+            session_id="s1",
+            model="claude-sonnet-4-6",
+            workspace_root=str(tmp_path),
+            recall_query="zebraquux",
+            bot_id="bot-1",
+            user_id="user-1",
+            learning_live_readiness=_live_readiness(
+                bot_id="bot-1", user_id="user-1"
+            ),
+        )
+
+    instruction = asyncio.run(_drive())
+    assert "<learning-live-recall" in instruction
+    assert "zebraquux" in instruction
 
 
 # ---------------------------------------------------------------------------

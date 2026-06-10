@@ -14,9 +14,70 @@ identical behaviour relative to the pre-wiring baseline.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
+from typing import Any, Awaitable, Callable, TypeVar
 
 logger = logging.getLogger(__name__)
+
+_T = TypeVar("_T")
+
+
+def _run_coro_blocking(make_coro: Callable[[], Awaitable[_T]]) -> _T:
+    """Run an async coroutine to completion from a SYNC caller, loop-safe.
+
+    The serve prompt-assembly seam (``build_cli_instruction``) is a synchronous
+    function that the hosted/serve path invokes DIRECTLY on a running event loop
+    (``transport.chat._local_adk_chat_sse`` is ``async`` and calls
+    ``build_headless_runtime`` → ``build_cli_instruction`` on-loop, NOT via
+    ``to_thread``).  A bare ``asyncio.run`` raises ``RuntimeError:
+    asyncio.run() cannot be called from a running event loop`` there, which —
+    swallowed by the broad ``except`` in the builders — left the live learning
+    recall/write seam silently inert on exactly the path this PR exists to
+    serve.
+
+    To bridge correctly regardless of caller context:
+
+    * **No running loop** (the CLI/test sync case) → ``asyncio.run`` directly.
+    * **Already inside a running loop** (the real serve case) → offload the
+      coroutine to a fresh thread that owns its own private loop, and block the
+      caller until it completes.  This keeps the synchronous builder contract
+      intact while still awaiting the harness coroutine.
+
+    ``make_coro`` is a zero-arg factory (not a bare coroutine) so the coroutine
+    is constructed inside whichever loop will actually await it — never created
+    in one loop and run in another.
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        # No loop running on this thread → safe to own one.
+        return asyncio.run(make_coro())
+
+    # A loop is already running on this thread (the serve path).  We cannot
+    # nest ``asyncio.run`` / ``loop.run_until_complete`` on it, so run the
+    # coroutine on a dedicated worker thread with its own private loop and
+    # block until it finishes.
+    result: dict[str, Any] = {}
+
+    def _worker() -> None:
+        try:
+            result["value"] = asyncio.run(make_coro())
+        except BaseException as exc:  # noqa: BLE001 - re-raised on caller thread
+            result["error"] = exc
+
+    import threading  # noqa: PLC0415
+
+    thread = threading.Thread(
+        target=_worker, name="learning-live-serve-bridge", daemon=True
+    )
+    thread.start()
+    thread.join()
+    if "error" in result:
+        # Propagate so the builder's fail-soft ``except`` handles it (the
+        # feature stays non-fatal) instead of silently returning a stale value.
+        raise result["error"]
+    return result["value"]  # type: ignore[return-value]
 
 #: Scope task_kind used by the deterministic labeler for all CLI-originated
 #: learnings.  Matches ``magi_agent.learning.labeler`` which writes items
@@ -298,9 +359,10 @@ def _run_serve_live_write(*, harness: object) -> dict[str, object] | None:
     declarative no-op anchor (a ``remember`` of the learning-live serve seam
     activation) — it exists only to exercise the write boundary + emit an audit
     record; the receipt/authority projection is what the serve caller logs.
-    """
-    import asyncio  # noqa: PLC0415
 
+    Loop-safe: bridges via ``_run_coro_blocking`` so it works both from a sync
+    CLI caller and from inside the running serve event loop.
+    """
     from magi_agent.harness.memory_write import (  # noqa: PLC0415
         MemoryWritePolicy,
         MemoryWriteRequest,
@@ -319,7 +381,9 @@ def _run_serve_live_write(*, harness: object) -> dict[str, object] | None:
         evidenceRequired=False,
         localFakeSuccessAllowed=True,
     )
-    result = asyncio.run(harness.write(request=request, policy=policy))
+    result = _run_coro_blocking(
+        lambda: harness.write(request=request, policy=policy)
+    )
     return result.public_projection()
 
 
@@ -336,9 +400,10 @@ def _run_serve_live_recall(
     the public-safe surface is the per-reference sanitized ``snippet``.  We
     project those snippets only, never raw bodies.  Isolated so tests can
     monkeypatch the live recall execution.
-    """
-    import asyncio  # noqa: PLC0415
 
+    Loop-safe: bridges via ``_run_coro_blocking`` so it works both from a sync
+    CLI caller and from inside the running serve event loop.
+    """
     from magi_agent.memory.contracts import RecallRequest  # noqa: PLC0415
     from magi_agent.memory.namespaces import MemoryNamespacePolicy  # noqa: PLC0415
     from magi_agent.recipes.first_party.memory_recall import (  # noqa: PLC0415
@@ -354,8 +419,8 @@ def _run_serve_live_recall(
         query=recall_query,
         purpose="answer_user",
     )
-    result = asyncio.run(
-        harness.recall(
+    result = _run_coro_blocking(
+        lambda: harness.recall(
             request=request,
             namespace_policy=MemoryNamespacePolicy(namespaceRef=namespace_ref),
             projection_policy=MemoryRecallProjectionPolicy(
