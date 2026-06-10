@@ -70,12 +70,34 @@ EXPECTED_LOCAL_FULL_RUNTIME_DEFAULTS = {
 }
 
 
+HOSTED_OVERLAY_TEST_ENV_FLAGS = (
+    "MAGI_EDIT_RETRY_REFLECTION_ENABLED",
+    "MAGI_LOOP_GUARD_ENABLED",
+    "MAGI_ERROR_RECOVERY_ENABLED",
+    "MAGI_MAX_STEPS_BRAKE_ENABLED",
+    "MAGI_CONTEXT_COMPACTION_ENABLED",
+    "MAGI_SELF_REVIEW_ENABLED",
+    "MAGI_SELF_REVIEW_SHADOW",
+    "MAGI_SELF_INTROSPECTION_ENABLED",
+    "MAGI_CODING_REPAIR_LOOP_ENABLED",
+    "MAGI_DOCUMENT_AUTHORING_COVERAGE",
+    "MAGI_MEMORY_WRITE_READINESS_ENABLED",
+    "MAGI_MEMORY_WRITE_ENABLED",
+    "MAGI_MEMORY_LOCAL_DEV",
+)
+
+
 @pytest.fixture(autouse=True)
 def _restore_process_env_after_test():
     original = dict(os.environ)
     yield
     os.environ.clear()
     os.environ.update(original)
+
+
+def _clear_hosted_overlay_test_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    for key in HOSTED_OVERLAY_TEST_ENV_FLAGS:
+        monkeypatch.delenv(key, raising=False)
 
 
 def test_release_version_and_local_health_version_are_aligned() -> None:
@@ -259,6 +281,7 @@ def test_main_hosted_overlay_off_by_default_is_byte_identical(
     monkeypatch.delenv("MAGI_CONTROL_STAGE", raising=False)
     monkeypatch.delenv("MAGI_OBSERVABILITY_ENABLED", raising=False)
     monkeypatch.delenv("MAGI_OBS_HOME", raising=False)
+    _clear_hosted_overlay_test_env(monkeypatch)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(main_module.uvicorn, "run", lambda app, **kwargs: captured.update(kwargs))
     main_module.main(["serve", "--port", "9101"])
@@ -284,6 +307,7 @@ def test_main_hosted_overlay_full_enables_observability_on_pvc(
     # here we point MAGI_OBS_HOME at a writable tmp dir so create_app can mount
     # the observability sink without needing the real read-only /workspace PVC.
     monkeypatch.setenv("MAGI_OBS_HOME", str(tmp_path / ".openmagi"))
+    _clear_hosted_overlay_test_env(monkeypatch)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(main_module.uvicorn, "run", lambda app, **kwargs: captured.update(kwargs))
     main_module.main(["serve", "--port", "9102"])

@@ -703,6 +703,7 @@ async def run_headless(
     input_stream: IO[str] | None = None,
     mcp_servers: list[str] | tuple[str, ...] | None = None,
     session_log: "SessionLog | None" = None,
+    initial_messages: list[dict[str, str]] | None = None,
 ) -> int:
     """Run a single headless turn. Returns a process exit code.
 
@@ -736,6 +737,12 @@ async def run_headless(
     # Slash-command dispatch (before the engine turn).                     #
     # ------------------------------------------------------------------ #
     turn_input: dict[str, object] = {"prompt": prompt}
+    # PR-04-PR2 (resume rehydration): when ``--resume``/``--continue`` produced a
+    # ResumeContext, thread its reconstructed prior messages through the engine's
+    # ``initial_messages`` seam so the turn replays the earlier conversation.
+    # Absent/empty -> the key is omitted, leaving turn behavior byte-identical.
+    if initial_messages:
+        turn_input["initial_messages"] = initial_messages
     local_message: str | None = None
     local_is_error = False
     if prompt.startswith("/") and commands is not None:
@@ -755,6 +762,8 @@ async def run_headless(
                 "prompt": expanded or prompt,
                 "content": blocks,
             }
+            if initial_messages:
+                turn_input["initial_messages"] = initial_messages
         elif kind == "local":
             local_message = message
         else:  # error

@@ -138,6 +138,29 @@ def _normalize_runtime_profile(runtime_profile: str | None) -> str:
     return (runtime_profile or "").strip().lower()
 
 
+class _ResumeArgs:
+    """Duck-typed args object for ``session_log.prepare_resume`` (PR-04-PR2).
+
+    ``prepare_resume`` reads ``resume`` / ``continue_`` / ``cwd`` attributes; this
+    tiny carrier adapts the typer options without importing argparse.
+    """
+
+    def __init__(
+        self, *, resume: str | None, continue_: bool, cwd: str
+    ) -> None:
+        self.resume = resume
+        self.continue_ = continue_
+        self.cwd = cwd
+
+
+def _resume_enabled() -> bool:
+    """Whether ``--resume``/``--continue`` rehydration is armed (stage-1 OFF)."""
+
+    from magi_agent.config.env import cli_resume_enabled  # noqa: PLC0415
+
+    return cli_resume_enabled(os.environ)
+
+
 def resolve_headless_permission_mode(
     *, permission_mode: str, flag_is_default: bool, runtime_profile: str | None
 ) -> str:
@@ -248,11 +271,21 @@ def agent(
     # Normalize output format string.
     output_str = output.value  # e.g. "text", "json", "stream-json"
 
-    # NOTE: --resume / --continue only thread a session id today; true session
-    # rehydration (replaying initial_messages into the engine) is a v1.1 follow-up
-    # — the engine still stubs initial_messages (engine._drive: ``_ = initial_messages``),
-    # so wiring resume here would be hollow.
-    _ = continue_  # accepted; resume rehydration deferred to v1.1
+    # PR-04-PR2: --resume / --continue now rehydrate prior conversation context.
+    # When MAGI_CLI_RESUME_ENABLED is on, resolve a ResumeContext from the
+    # on-disk JSONL transcript (session_log) and thread its reconstructed
+    # ``initial_messages`` into the engine so the model replays the earlier
+    # conversation. Gate OFF (stage-1 default) OR no transcript -> empty context,
+    # so --resume/--continue degrade to the legacy "id only" behavior with no
+    # error (byte-identical for a fresh session).
+    resume_messages: list[dict[str, str]] = []
+    if (resume or continue_) and _resume_enabled():
+        from magi_agent.cli.session_log import prepare_resume  # noqa: PLC0415
+
+        resume_ctx = prepare_resume(
+            _ResumeArgs(resume=resume, continue_=continue_, cwd=os.getcwd())
+        )
+        resume_messages = list(resume_ctx.initial_messages or [])
 
     if is_non_interactive:
         # -------------------------------------------------------------- #
@@ -304,6 +337,7 @@ def agent(
                 input_stream=inbound,  # type: ignore[arg-type]
                 mcp_servers=rt.mcp_servers,
                 session_log=rt.session_log,
+                initial_messages=resume_messages,
             )
         )
         raise typer.Exit(code=exit_code)

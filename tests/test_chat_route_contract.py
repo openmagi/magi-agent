@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
+from magi_agent.cli.contracts import EngineResult, Terminal
 from magi_agent.adk_bridge.primitives import AdkPrimitiveBoundary
 from magi_agent.app import create_app
 from magi_agent.config.models import (
@@ -88,6 +89,24 @@ def make_runtime(
             authority=authority or PythonRuntimeAuthorityConfig(),
         )
     )
+
+
+def install_fake_local_headless(monkeypatch, captured: dict[str, object]) -> None:
+    class FakeEngine:
+        async def run_turn_stream(self, runtime, turn_input, *, cancel, gate):
+            yield EngineResult(
+                terminal=Terminal.completed,
+                session_id=turn_input["session_id"],
+                turn_id=turn_input["turn_id"],
+            )
+
+    def fake_build_headless_runtime(**kwargs: object) -> SimpleNamespace:
+        captured.update(kwargs)
+        return SimpleNamespace(engine=FakeEngine(), gate=None)
+
+    import magi_agent.cli.wiring as wiring
+
+    monkeypatch.setattr(wiring, "build_headless_runtime", fake_build_headless_runtime)
 
 
 def test_user_visible_generation_request_selects_allowlisted_model_from_body() -> None:
@@ -210,8 +229,9 @@ def test_generation_request_envelope_drops_dead_ts_era_metadata(monkeypatch) -> 
     assert body["safety"]["productionDbWritesAllowed"] is False
 
 
-def test_chat_completions_route_is_disabled_by_default(monkeypatch) -> None:
+def test_chat_completions_route_is_disabled_when_chat_routes_are_off(monkeypatch) -> None:
     monkeypatch.delenv("CORE_AGENT_PYTHON_CHAT_ROUTE", raising=False)
+    monkeypatch.setenv("MAGI_AGENT_LOCAL_CHAT_ROUTE", "off")
     client = TestClient(create_app(make_runtime()))
 
     response = client.post(
@@ -226,6 +246,32 @@ def test_chat_completions_route_is_disabled_by_default(monkeypatch) -> None:
         "runtime": "magi-agent",
         "runtimeEngine": "adk-python",
     }
+
+
+def test_chat_completions_route_uses_local_adk_when_local_route_is_enabled(
+    monkeypatch,
+) -> None:
+    captured: dict[str, object] = {}
+    install_fake_local_headless(monkeypatch, captured)
+    monkeypatch.delenv("CORE_AGENT_PYTHON_CHAT_ROUTE", raising=False)
+    monkeypatch.setenv("MAGI_AGENT_LOCAL_CHAT_ROUTE", "on")
+    client = TestClient(create_app(make_runtime()))
+
+    response = client.post(
+        "/v1/chat/completions",
+        headers={"authorization": "Bearer gateway-token"},
+        json={
+            "sessionId": "local-session",
+            "turnId": "local-turn",
+            "messages": [{"role": "user", "content": "hello"}],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert "data: [DONE]" in response.text
+    assert captured["session_id"] == "local-session"
+    assert captured["recall_query"] == "hello"
 
 
 def test_chat_route_checks_bearer_before_disabled_response(monkeypatch) -> None:

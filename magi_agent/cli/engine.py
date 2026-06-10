@@ -812,6 +812,57 @@ def _active_turn_registry():
     return ActiveTurnRegistry()
 
 
+# Role label used when rendering a resumed transcript line whose role is missing
+# or unrecognized. ``user``/``assistant`` are passed through verbatim.
+_RESUME_ROLE_LABELS = {"user": "User", "assistant": "Assistant"}
+
+
+def _render_resume_prefix(initial_messages: object) -> str:
+    """Render reconstructed prior messages as a transcript prefix for the prompt.
+
+    ``initial_messages`` is the ``ResumeContext.initial_messages`` payload — a
+    ``list[{"role","content"}]`` produced by
+    :func:`session_log.reconstruct_messages`. We synthesize a compact, labeled
+    transcript that is PREPENDED to the current user prompt so a resumed turn
+    replays the prior conversation to the model. This is the lightweight
+    JSONL-transcript rehydration path (no runner/ADK dependency).
+
+    Pure + defensive:
+    - Non-list / empty input -> ``""`` (byte-identical no-op for fresh turns).
+    - Each entry must be a mapping with a string ``content``; malformed entries
+      are skipped rather than raising (resume is best-effort).
+    - Returns ``""`` when nothing usable remains, so the caller leaves the prompt
+      untouched.
+    """
+
+    if not isinstance(initial_messages, list) or not initial_messages:
+        return ""
+
+    lines: list[str] = []
+    for entry in initial_messages:
+        if not isinstance(entry, dict):
+            continue
+        content = entry.get("content")
+        if not isinstance(content, str) or not content:
+            continue
+        role = entry.get("role")
+        label = _RESUME_ROLE_LABELS.get(
+            role if isinstance(role, str) else "",
+            str(role) if role else "Message",
+        )
+        lines.append(f"{label}: {content}")
+
+    if not lines:
+        return ""
+
+    transcript = "\n".join(lines)
+    return (
+        "[Resumed conversation — prior turns for context]\n"
+        f"{transcript}\n"
+        "[End of prior conversation]\n\n"
+    )
+
+
 class MagiEngineDriver:
     """ADK-backed :class:`EngineDriver` for the headless CLI.
 
@@ -1086,10 +1137,22 @@ class MagiEngineDriver:
         goal_nudge: "GoalNudge | None" = None,
         output_continuation: "OutputContinuationConfig | None" = None,
     ) -> AsyncGenerator[RuntimeEvent, EngineResult]:
-        # PR3/Stream B: feed initial_messages via SessionContinuityBoundary.
-        # Read here (so the seam is plumbed end-to-end) but NOT yet fed into the
-        # runner — full rehydration lands with Stream B.
-        _ = initial_messages
+        # PR-04-PR2 (resume rehydration): consume ``initial_messages`` by
+        # synthesizing the prior transcript into a prefix on the opening user
+        # prompt, so a ``--resume``/``--continue`` turn replays the prior
+        # conversation to the model. ``ResumeContext.initial_messages`` is the
+        # source (already reconstructed by session_log.reconstruct_messages).
+        #
+        # This is the lightweight JSONL-transcript path. The richer ADK-native
+        # rehydration (importing a committed transcript into a live
+        # SessionContinuityBoundary) is carried on ``ResumeContext`` but wired by
+        # the SQLite-persistence PR; here we keep the no-runner-dependency path.
+        #
+        # No-op / byte-identical invariant: an empty (or non-list) value leaves
+        # ``prompt`` untouched, so a fresh session is unchanged from pre-PR2.
+        resume_prefix = _render_resume_prefix(initial_messages)
+        if resume_prefix:
+            prompt = f"{resume_prefix}{prompt}"
 
         runner = self._resolve_runner(runtime)
         if runner is None:
