@@ -62,8 +62,17 @@ from magi_agent.runtime.memory_mode_context import (
     current_memory_mode,
     memory_mode_request_scope,
 )
+from magi_agent.config.env import is_hosted_streaming_serve_enabled
 from magi_agent.transport.active_turn import ACTIVE_TURNS, ActiveTurn
+# NOTE: the underscore-named helpers below are owned by the decomposed chat
+# modules (chat_shared / chat_routes); they are imported via the
+# ``transport.chat`` re-export shim on purpose so this module does not couple
+# to the in-flight chat_routes decomposition (08-PR2).
 from magi_agent.transport.chat import (
+    _canary_gate_error,
+    _fallback_response,
+    _reason_for_gate_error,
+    _route_config,
     gate5b_user_visible_chat_gate_active,
     run_gate5b_user_visible_chat_response,
 )
@@ -161,6 +170,54 @@ def _selected_gate5b_stream_active(runtime: object) -> bool:
         return gate5b_user_visible_chat_gate_active(runtime)
     except Exception:
         return False
+
+
+def _hosted_streaming_serve_active() -> bool:
+    """Return True when the 08-PR3 hosted streaming-serve mode is ON.
+
+    Evaluated per-call (mirrors ``_streaming_chat_enabled``). Default OFF.
+    """
+    return is_hosted_streaming_serve_enabled()
+
+
+def _hosted_serve_gate_refusal(runtime: object) -> JSONResponse | None:
+    """Completions-equivalent refusal for hosted serving over the stream route.
+
+    Mirrors the ``/v1/chat/completions`` wrapper + ``run_gate5b_user_visible_
+    chat_response`` entry gates so a hosted caller gets the exact same JSON
+    failure surface (status / fallbackStatus / responseAuthority) BEFORE any
+    SSE bytes are sent — chat-proxy uses that shape for typescript-authority
+    fallback. Returns ``None`` only when the selected gate5b canary gate is
+    fully active. Never falls through to the local headless engine.
+    """
+    if os.environ.get("CORE_AGENT_PYTHON_CHAT_ROUTE", "off").lower() != "on":
+        config = getattr(runtime, "config", None)
+        return JSONResponse(
+            status_code=503,
+            content={
+                "error": "chat_route_disabled",
+                "runtime": getattr(config, "runtime", None),
+                "runtimeEngine": getattr(config, "runtime_engine", None),
+            },
+        )
+    route_config = _route_config(runtime)
+    if not route_config.enabled:
+        return _fallback_response(
+            status_code=503,
+            status="python_disabled",
+            reason="canary_gate_disabled",
+            runtime=runtime,
+        )
+    gate_error = _canary_gate_error(runtime, route_config)
+    if gate_error is not None:
+        status_code = 409 if gate_error == "invalid_authority" else 503
+        return _fallback_response(
+            status_code=status_code,
+            status=gate_error,
+            reason=_reason_for_gate_error(gate_error),
+            runtime=runtime,
+        )
+    return None
 
 
 def _json_response_mapping(response: JSONResponse) -> dict[str, object]:
@@ -557,6 +614,25 @@ def register_streaming_chat_routes(
             session_id = uuid.uuid4().hex
         turn_id = _body_string(body, "turnId", f"{session_id}:turn")
         prompt = _extract_prompt_text(body)
+
+        if _hosted_streaming_serve_active():
+            # Hosted serving mode (08-PR3, default-OFF): the selected gate5b
+            # path is the ONLY serving path. Gate-inactive requests get the
+            # completions-equivalent fallback JSON; they NEVER fall through to
+            # the local headless engine (gate/counter/receipt bypass surface).
+            refusal = _hosted_serve_gate_refusal(runtime)
+            if refusal is not None:
+                return refusal
+            return StreamingResponse(
+                _drive_selected_gate5b_stream(
+                    runtime,
+                    body,
+                    request,
+                    session_id=session_id,
+                    turn_id=turn_id,
+                ),
+                media_type="text/event-stream",
+            )
 
         if _selected_gate5b_stream_active(runtime):
             return StreamingResponse(
