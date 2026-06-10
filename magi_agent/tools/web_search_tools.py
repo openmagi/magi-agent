@@ -254,7 +254,7 @@ def research_fact(
 
 
 def build_web_search_tools() -> list[object]:
-    """Return ADK FunctionTools for web_search and web_fetch.
+    """Return ADK FunctionTools for web_search, web_fetch, and research_fact.
 
     Default-OFF: returns an empty list when ``BRAVE_API_KEY`` or
     ``FIRECRAWL_API_KEY`` is absent from the environment, so agents that do
@@ -265,4 +265,4 @@ def build_web_search_tools() -> list[object]:
         return []
     from google.adk.tools import FunctionTool  # noqa: PLC0415
 
-    return [FunctionTool(web_search), FunctionTool(web_fetch)]
+    return [FunctionTool(web_search), FunctionTool(web_fetch), FunctionTool(research_fact)]

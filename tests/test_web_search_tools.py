@@ -366,10 +366,10 @@ def test_build_web_search_tools_returns_empty_when_only_firecrawl_key_present(
     assert tools == []
 
 
-def test_build_web_search_tools_returns_two_tools_when_both_keys_present(
+def test_build_web_search_tools_returns_three_tools_when_both_keys_present(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Both keys present → returns a list of two FunctionTool objects."""
+    """Both keys present → returns a list of three FunctionTool objects (web_search, web_fetch, research_fact)."""
     from magi_agent.tools.web_search_tools import build_web_search_tools
 
     monkeypatch.setenv("BRAVE_API_KEY", "brave-key")
@@ -377,7 +377,7 @@ def test_build_web_search_tools_returns_two_tools_when_both_keys_present(
 
     tools = build_web_search_tools()
 
-    assert len(tools) == 2
+    assert len(tools) == 3
     from google.adk.tools import FunctionTool
 
     assert all(isinstance(t, FunctionTool) for t in tools)
@@ -565,3 +565,37 @@ def test_research_fact_parallel_fetch_called_once_per_url() -> None:
 
     for u in urls:
         assert call_counts.get(u, 0) == 1, f"{u} fetched {call_counts.get(u, 0)} times, expected 1"
+
+
+# ---------------------------------------------------------------------------
+# PR2: build_web_search_tools — research_fact registration
+# ---------------------------------------------------------------------------
+
+
+def test_build_web_search_tools_includes_research_fact_when_keys_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Both keys present → research_fact tool must be in the returned list."""
+    from magi_agent.tools.web_search_tools import build_web_search_tools
+
+    monkeypatch.setenv("BRAVE_API_KEY", "brave-key")
+    monkeypatch.setenv("FIRECRAWL_API_KEY", "fc-key")
+
+    tools = build_web_search_tools()
+    names = {getattr(t, "name", None) or getattr(t, "func", lambda: None).__name__ for t in tools}
+
+    assert "research_fact" in names, f"research_fact not found in tool names: {names}"
+
+
+def test_build_web_search_tools_excludes_research_fact_when_keys_absent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No keys → research_fact must not appear (returns empty list)."""
+    from magi_agent.tools.web_search_tools import build_web_search_tools
+
+    monkeypatch.delenv("BRAVE_API_KEY", raising=False)
+    monkeypatch.delenv("FIRECRAWL_API_KEY", raising=False)
+
+    tools = build_web_search_tools()
+
+    assert tools == []
