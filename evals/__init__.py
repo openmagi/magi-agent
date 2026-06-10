@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from magi_agent.evals.regression_gates import (
+from evals.regression_gates import (
     EvalGateThresholds,
     EvalGateVerdict,
     HardInvariantPolicyEvaluation,
@@ -8,7 +8,7 @@ from magi_agent.evals.regression_gates import (
     SelectorFixtureEvaluation,
     evaluate_recipe_promotion_gate,
 )
-from magi_agent.evals.release_gates import (
+from evals.release_gates import (
     ADK_EVALUATION_BOUNDARY,
     CanaryProofRef,
     DigestOnlyProjection,
