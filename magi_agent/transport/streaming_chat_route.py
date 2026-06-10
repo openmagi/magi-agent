@@ -680,11 +680,32 @@ def register_streaming_chat_routes(
             refusal = _hosted_serve_gate_refusal(runtime, body, request)
             if refusal is not None:
                 return refusal
+            wf = await _maybe_handle_workflow(prompt, session_id)
+            if wf is not None:
+                return StreamingResponse(
+                    _drive_workflow_result_stream(
+                        wf,
+                        session_id=session_id,
+                        turn_id=turn_id,
+                    ),
+                    media_type="text/event-stream",
+                )
             return StreamingResponse(
                 _drive_selected_gate5b_stream(
                     runtime,
                     body,
                     request,
+                    session_id=session_id,
+                    turn_id=turn_id,
+                ),
+                media_type="text/event-stream",
+            )
+
+        wf = await _maybe_handle_workflow(prompt, session_id)
+        if wf is not None:
+            return StreamingResponse(
+                _drive_workflow_result_stream(
+                    wf,
                     session_id=session_id,
                     turn_id=turn_id,
                 ),
@@ -697,16 +718,6 @@ def register_streaming_chat_routes(
                     runtime,
                     body,
                     request,
-                    session_id=session_id,
-                    turn_id=turn_id,
-                ),
-                media_type="text/event-stream",
-            )
-        wf = await _maybe_handle_workflow(prompt, session_id)
-        if wf is not None:
-            return StreamingResponse(
-                _drive_workflow_result_stream(
-                    wf,
                     session_id=session_id,
                     turn_id=turn_id,
                 ),

@@ -17,6 +17,9 @@ from magi_agent.config.env import (
     ripgrep_enabled,
     tool_concurrency_enabled,
 )
+from magi_agent.runtime.child_runner_live import is_live_child_runner_enabled
+from magi_agent.runtime.child_toolset import resolve_child_toolset_profile
+from magi_agent.runtime.local_defaults import apply_local_full_runtime_defaults
 
 
 FULL_PROFILE_FLAGS = {
@@ -54,6 +57,24 @@ def test_explicit_flag_off_overrides_full_runtime_profile() -> None:
     for name, parser in FULL_PROFILE_FLAGS.items():
         assert parser({name: "0"}) is False, name
     assert parse_lsp_diagnostics_env({"MAGI_LSP_DIAGNOSTICS_ENABLED": "0"}).enabled is False
+
+
+def test_full_runtime_profile_enables_child_runner_defaults() -> None:
+    env: dict[str, str] = {}
+    apply_local_full_runtime_defaults(env)
+
+    assert env["MAGI_CHILD_RUNNER_LIVE_ENABLED"] == "1"
+    assert env["MAGI_CHILD_RUNNER_TOOLSET"] == "readonly"
+    assert is_live_child_runner_enabled(env) is True
+    assert resolve_child_toolset_profile(env) == "readonly"
+
+
+def test_safe_runtime_profile_does_not_enable_child_runner_defaults() -> None:
+    env = {"MAGI_RUNTIME_PROFILE": "safe"}
+    apply_local_full_runtime_defaults(env)
+
+    assert "MAGI_CHILD_RUNNER_LIVE_ENABLED" not in env
+    assert is_live_child_runner_enabled(env) is False
 
 
 def test_browser_tool_kill_switch_overrides_full_runtime_default() -> None:
