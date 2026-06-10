@@ -891,6 +891,18 @@ async def _local_adk_chat_sse(
     # to_thread would move unrelated wiring off-loop. If the memory tree ever
     # grows enough to matter, split the recall-block build out of prompt assembly
     # and to_thread JUST that, mirroring the record_turn offload below.
+    # 01-PR4 (C2, issue 3): thread the REAL bot/owner identity into prompt
+    # assembly so the gated-live learning recall/write ladder matches the
+    # selected-canary digest against the genuine identity (the previous literal
+    # "local" default could only ever target the literal "local" scope). The
+    # readiness config itself is operator/control-plane-owned: locally there is
+    # none, so it resolves to ``disabled`` and the serve prompt stays
+    # byte-identical (default-OFF). The hosted prompt-assembly seam (08-hosted-
+    # path) is where a real readiness config gets threaded in.
+    learning_live_readiness = _resolve_local_learning_live_readiness(runtime)
+    runtime_config = getattr(runtime, "config", None)
+    serve_bot_id = str(getattr(runtime_config, "bot_id", None) or "local")
+    serve_owner_user_id = str(getattr(runtime_config, "user_id", None) or "local")
     headless = build_headless_runtime(
         cwd=workspace_root,
         permission_mode="bypassPermissions",
@@ -898,6 +910,9 @@ async def _local_adk_chat_sse(
         model=model_override,
         runner_policy_routing_enabled=local_runner_policy_routing_enabled_from_env(),
         recall_query=prompt,
+        bot_id=serve_bot_id,
+        owner_user_id=serve_owner_user_id,
+        learning_live_readiness=learning_live_readiness,
     )
     cancel = asyncio.Event()
     stream = headless.engine.run_turn_stream(
@@ -1569,6 +1584,28 @@ def _route_config(runtime: OpenMagiRuntime) -> Gate5BUserVisibleChatRouteConfig:
     if isinstance(config, Gate5BUserVisibleChatRouteConfig):
         return config
     return Gate5BUserVisibleChatRouteConfig()
+
+
+def _resolve_local_learning_live_readiness(runtime: OpenMagiRuntime) -> object | None:
+    """Return the operator/control-plane learning-live readiness config, or None.
+
+    01-PR4 (C2): the gated-live learning recall/write serve seam consumes a
+    readiness config the runtime/control-plane resolves (it owns the selected-
+    canary digests + environment) — NOT any net-new env var (spec "no new
+    flags").  Mirrors the optional ``getattr(runtime, "<canary>_config", None)``
+    pattern used for the other gate route configs.  When no config is bound (the
+    default local case), this returns ``None`` so the serve prompt stays
+    byte-identical (the live ladder resolves ``disabled``).  Hosted prompt
+    assembly (08-hosted-path) is where a real readiness config gets bound.
+    """
+    from magi_agent.gates.learning_live_readiness import (  # noqa: PLC0415
+        LearningLiveReadinessConfig,
+    )
+
+    config = getattr(runtime, "learning_live_readiness_config", None)
+    if isinstance(config, LearningLiveReadinessConfig):
+        return config
+    return None
 
 
 def _gate2_sandbox_canary_config(runtime: OpenMagiRuntime) -> Gate2SandboxWorkspaceCanaryConfig:
