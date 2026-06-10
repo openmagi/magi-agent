@@ -81,19 +81,92 @@ def test_explicit_env_always_wins_setdefault_semantics():
     assert env["MAGI_OBS_HOME"] == "/custom/path"
 
 
-def test_pr1_overlay_scope_is_observability_only():
-    # PR1 must not pull in sibling control flags (those are PR2/PR3/PR4).
-    env = {HOSTED_DEPLOYMENT_ENV: "hosted", "MAGI_CONTROL_STAGE": "full"}
+def test_c3_overlay_scope_excludes_other_clusters():
+    # PR2 (C3) wires the six ControlPlane controls only. It must NOT pull in
+    # C9 introspection/memory-write or C11 coding-repair/doc-coverage flags —
+    # those belong to sibling PRs (14-PR3/PR6).
+    env = {HOSTED_DEPLOYMENT_ENV: "hosted", "MAGI_CONTROL_STAGE": "hardgate"}
     apply_hosted_runtime_defaults(env)
     for sibling in (
-        "MAGI_LOOP_GUARD_ENABLED",
-        "MAGI_ERROR_RECOVERY_ENABLED",
-        "MAGI_MAX_STEPS_BRAKE_ENABLED",
-        "MAGI_EDIT_RETRY_REFLECTION_ENABLED",
-        "MAGI_CONTEXT_COMPACTION_ENABLED",
-        "MAGI_SELF_REVIEW_ENABLED",
         "MAGI_SELF_INTROSPECTION_ENABLED",
         "MAGI_CODING_REPAIR_LOOP_ENABLED",
         "MAGI_DOCUMENT_AUTHORING_COVERAGE",
+        "MAGI_MEMORY_WRITE_ENABLED",
     ):
         assert sibling not in env, sibling
+
+
+# --- PR2 (C3): six ControlPlane controls wired into the stage overlay ---
+
+RESILIENCE_C3_FLAGS = (
+    "MAGI_EDIT_RETRY_REFLECTION_ENABLED",
+    "MAGI_LOOP_GUARD_ENABLED",
+    "MAGI_ERROR_RECOVERY_ENABLED",
+    "MAGI_MAX_STEPS_BRAKE_ENABLED",
+)
+FULL_C3_FLAGS = ("MAGI_CONTEXT_COMPACTION_ENABLED", "MAGI_SELF_REVIEW_ENABLED")
+
+
+def test_stage_off_sets_no_c3_controls():
+    env = {HOSTED_DEPLOYMENT_ENV: "hosted", "MAGI_CONTROL_STAGE": "off"}
+    apply_hosted_runtime_defaults(env)
+    for flag in (*RESILIENCE_C3_FLAGS, *FULL_C3_FLAGS):
+        assert flag not in env, flag
+
+
+def test_stage_resilience_enables_four_resilience_controls():
+    env = {HOSTED_DEPLOYMENT_ENV: "hosted", "MAGI_CONTROL_STAGE": "resilience"}
+    apply_hosted_runtime_defaults(env)
+    for flag in RESILIENCE_C3_FLAGS:
+        assert env[flag] == "1", flag
+    # resilience must NOT pull in the non-resilience C3 controls.
+    for flag in FULL_C3_FLAGS:
+        assert flag not in env, flag
+    assert "MAGI_SELF_REVIEW_SHADOW" not in env
+
+
+def test_stage_full_adds_compaction_and_shadow_self_review():
+    env = {HOSTED_DEPLOYMENT_ENV: "hosted", "MAGI_CONTROL_STAGE": "full"}
+    apply_hosted_runtime_defaults(env)
+    # full is additive over resilience.
+    for flag in RESILIENCE_C3_FLAGS:
+        assert env[flag] == "1", flag
+    assert env["MAGI_CONTEXT_COMPACTION_ENABLED"] == "1"
+    # self-review is shadow-first on hosted: enabled, but SHADOW stays on so it
+    # only observes (no live candidate generation) until hardgate.
+    assert env["MAGI_SELF_REVIEW_ENABLED"] == "1"
+    assert env["MAGI_SELF_REVIEW_SHADOW"] == "1"
+
+
+def test_stage_hardgate_flips_self_review_to_live():
+    env = {HOSTED_DEPLOYMENT_ENV: "hosted", "MAGI_CONTROL_STAGE": "hardgate"}
+    apply_hosted_runtime_defaults(env)
+    for flag in (*RESILIENCE_C3_FLAGS, *FULL_C3_FLAGS):
+        assert env[flag] == "1", flag
+    # hardgate promotes self-review from shadow to live.
+    assert env["MAGI_SELF_REVIEW_SHADOW"] == "0"
+
+
+def test_explicit_c3_flag_wins_over_stage():
+    env = {
+        HOSTED_DEPLOYMENT_ENV: "hosted",
+        "MAGI_CONTROL_STAGE": "resilience",
+        "MAGI_LOOP_GUARD_ENABLED": "0",
+    }
+    apply_hosted_runtime_defaults(env)
+    assert env["MAGI_LOOP_GUARD_ENABLED"] == "0"
+
+
+def test_c3_controls_register_in_build_default_plane():
+    # End-to-end contract: the overlay env actually drives ControlPlane
+    # registration (control_plane.py reads these flags).
+    from magi_agent.adk_bridge.control_plane import build_default_plane
+
+    env: dict[str, str] = {
+        HOSTED_DEPLOYMENT_ENV: "hosted",
+        "MAGI_CONTROL_STAGE": "resilience",
+    }
+    apply_hosted_runtime_defaults(env)
+    plane = build_default_plane(env)
+    # At least the resilience-family controls must register from the overlay.
+    assert len(plane._controls) >= 1

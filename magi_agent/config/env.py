@@ -1726,6 +1726,28 @@ def is_goal_nudge_enabled(env: Mapping[str, str] | None = None) -> bool:
     return _is_true(source.get(MAGI_GOAL_NUDGE_ENABLED_ENV))
 
 
+MAGI_USER_HOOKS_ENABLED_ENV = "MAGI_USER_HOOKS_ENABLED"
+
+
+def is_user_hooks_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Master gate for CC-style user ``settings.json`` hooks (cluster doc 11 PR2).
+
+    Default OFF (strict truthy opt-in: "1"/"true"/"yes"/"on"). When OFF, the CLI
+    engine never loads ``~/.magi/settings.json`` / ``<workspace>/.magi/settings.json``
+    hooks and never constructs a user :class:`~magi_agent.hooks.bus.HookBus`, so a
+    turn is byte-identical to today. When ON (self-host / local CLI only — never
+    hosted multi-tenant, since command hooks run operator-supplied ``bash -c``),
+    the engine loads the user hooks, builds one HookBus wired to the **command**
+    executor (http/llm deferred to a later PR), and bridges the
+    ``PreToolUse``/``PostToolUse`` lifecycle points onto the ADK
+    before/after-tool callbacks. Like ``is_egress_gate_enabled`` / ``is_goal_nudge_enabled``
+    this is an additive, default-disabled seam and does NOT follow the
+    runtime-profile default-ON convention.
+    """
+    source = os.environ if env is None else env
+    return _is_true(source.get(MAGI_USER_HOOKS_ENABLED_ENV))
+
+
 MAGI_DOCUMENT_AUTHORING_COVERAGE_ENV = "MAGI_DOCUMENT_AUTHORING_COVERAGE"
 
 
@@ -1776,6 +1798,33 @@ def is_hosted_deployment(env: Mapping[str, str] | None = None) -> bool:
     from ..runtime.hosted_defaults import is_hosted_deployment as _is_hosted  # noqa: PLC0415
 
     return _is_hosted(source)
+
+
+MAGI_HOSTED_STREAMING_SERVE_ENV = "MAGI_HOSTED_STREAMING_SERVE"
+
+
+def is_hosted_streaming_serve_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Single source of truth for hosted serving over the SSE stream route (08-PR3).
+
+    Default OFF (strict truthy opt-in: "1"/"true"/"yes"/"on"). When OFF the
+    ``/v1/chat/stream`` route is byte-identical to today: a request that does not
+    match the selected gate5b canary gate falls through to the local headless
+    engine path. When ON, the stream route serves with completions-equivalent
+    gating — gate2 sandbox-canary dispatch, honest ``python_disabled`` /
+    ``invalid_authority`` fallback JSON when the canary gate is not active, and
+    no local-engine fallthrough — so hosted chat-proxy can converge onto the
+    streaming route without minting a gate/counter/receipt bypass surface. Like
+    ``is_egress_gate_enabled`` this deliberately does NOT follow the
+    runtime-profile default-ON convention — it is an additive, default-disabled
+    serving mode.
+    """
+    # Delegate to the canonical config.flags registry; registered with a False
+    # default and the strict-truthy parser. Imported lazily to avoid a
+    # config<->flags import cycle.
+    from .flags import flag_bool
+
+    source = os.environ if env is None else env
+    return flag_bool(MAGI_HOSTED_STREAMING_SERVE_ENV, env=source)
 
 
 def is_format_on_write_enabled(env: Mapping[str, str]) -> bool:
@@ -2128,6 +2177,28 @@ def permission_scope_from_mode_enabled(env: Mapping[str, str] | None = None) -> 
     """
     source = os.environ if env is None else env
     return _is_true(source.get(MAGI_PERMISSION_SCOPE_FROM_MODE_ENV))
+
+
+MAGI_COMPOSIO_DISPATCH_ENFORCED_ENV = "MAGI_COMPOSIO_DISPATCH_ENFORCED"
+
+
+def composio_dispatch_enforced(env: Mapping[str, str] | None = None) -> bool:
+    """Single source of truth for routing composio MCP tools through the
+    dispatcher hard-safety arbiter.
+
+    Default OFF (strict truthy opt-in: "1"/"true"/"yes"/"on"). When OFF the
+    composio toolsets are attached directly to ``agent.tools`` (legacy ADK MCP
+    path) — byte-identical to before — so they only see the agent-level
+    ``RulesPermissionGate`` callback and bypass the
+    :class:`magi_agent.tools.safety.RuntimePermissionArbiter` (secret / sealed /
+    workspace-escape invariants). When ON, each composio tool call is wrapped so
+    it first passes through the arbiter's hard-safety check (a deny blocks the
+    call before the MCP body runs). Like ``permission_scope_from_mode_enabled``
+    this is an additive, default-disabled security seam and deliberately does
+    NOT follow the runtime-profile default-ON convention.
+    """
+    source = os.environ if env is None else env
+    return _is_true(source.get(MAGI_COMPOSIO_DISPATCH_ENFORCED_ENV))
 
 
 def _is_true(value: str | None) -> bool:

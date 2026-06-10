@@ -5,7 +5,8 @@ tool. Hermes additionally runs a periodic BACKGROUND REVIEW: after every N turns
 it re-reads the transcript and saves what the model forgot. This module ports
 that mechanism into magi's gated model.
 
-Safety posture (mirrors ``harness/background_tasks.py``)
+Safety posture (mirrors the default-off harness boundaries, e.g.
+``harness/cron_runtime.py``)
 -------------------------------------------------------
 * DEFAULT OFF. ``MemoryReviewConfig.enabled`` defaults to ``False`` and the
   ``review()`` entrypoint additionally requires the ``MAGI_MEMORY_REVIEW_ENABLED``

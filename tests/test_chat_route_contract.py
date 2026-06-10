@@ -129,6 +129,87 @@ def test_user_visible_generation_request_selects_allowlisted_model_from_body() -
     assert generation.model_routing.shadow_credential_ref == "platform-proxy-fireworks"
 
 
+def test_generation_request_envelope_drops_dead_ts_era_metadata(monkeypatch) -> None:
+    """08-PR2 (D5): the generation-request envelope must not carry the dead
+    TS-era ``mode``/``responseAuthority`` metadata (never consumed by the
+    serving path), while the serving wire body keeps ``responseAuthority:
+    "python"`` plus the authority/safety flag blocks chat-proxy validates."""
+    route_config = parse_gate5b4c3_shadow_generation_route_env(
+        {
+            "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_ENABLED": "1",
+            "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_KILL_SWITCH": "0",
+            "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_CAP_STATE_INITIALIZED": "1",
+            "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_PROVIDER_PROJECT_SPEND_CONTROLS_VERIFIED": "1",
+            "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_SELECTED_BOT_DIGEST": _sha256("bot-test"),
+            "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_TRUSTED_OWNER_USER_ID_DIGEST": _sha256("user-test"),
+            "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_ENVIRONMENT": "production",
+            "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_ALLOWED_MODEL_ROUTES": (
+                "google:gemini-3.5-flash"
+            ),
+            "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_PROVIDER_CREDENTIAL_BINDINGS": (
+                "google:gate5b-google-api-key-smoke-v1:GOOGLE_API_KEY:adk"
+            ),
+            "GOOGLE_GENAI_USE_VERTEXAI": "FALSE",
+            "GOOGLE_API_KEY": "sample-fixture-value-must-not-leak",
+        }
+    )
+
+    generation = chat_module._build_user_visible_generation_request(
+        runtime=make_runtime(),
+        route_config=Gate5BUserVisibleChatRouteConfig(environment="production"),
+        generation_config=route_config.generation_config,
+        payload={
+            "model": "google/gemini-3.5-flash",
+            "messages": [{"role": "user", "content": "envelope honesty probe"}],
+        },
+        trace_id="trace-envelope-1",
+    )
+
+    dumped = generation.model_dump(by_alias=True, mode="json")
+    assert "mode" not in dumped
+    assert "responseAuthority" not in dumped
+    assert dumped["schemaVersion"] == "gate5b4c3.chatProxyShadowGeneration.v1"
+
+    # Serving wire contract is unchanged by the envelope cleanup: the body
+    # still declares python authority plus the authority/safety blocks.
+    monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
+    runtime = make_runtime(
+        authority=PythonRuntimeAuthorityConfig(
+            userVisibleOutputAllowed=True,
+            canaryRoutingAllowed=True,
+        )
+    )
+    runtime.gate5b_user_visible_chat_route_config = Gate5BUserVisibleChatRouteConfig(
+        enabled=True,
+        killSwitchEnabled=False,
+        selectedBotDigest=_sha256("bot-test"),
+        selectedOwnerUserIdDigest=_sha256("user-test"),
+        environment="production",
+        environmentAllowlist=("production",),
+        mockedRunner=lambda request: {
+            "content": "mocked user-visible Python canary response",
+            "eventCount": 1,
+        },
+    )
+
+    response = TestClient(create_app(runtime)).post(
+        "/v1/chat/completions",
+        headers={"authorization": "Bearer gateway-token"},
+        json={
+            "messages": [{"role": "user", "content": "synthetic canary prompt"}],
+            "authority": {"userVisibleOutputAllowed": True},
+        },
+    )
+
+    assert response.status_code == 200, response.json()
+    body = response.json()
+    assert body["responseAuthority"] == "python"
+    assert body["authority"]["userVisibleOutputAllowed"] is True
+    assert body["authority"]["canaryRoutingAllowed"] is True
+    assert body["safety"]["toolsActive"] is False
+    assert body["safety"]["productionDbWritesAllowed"] is False
+
+
 def test_chat_completions_route_is_disabled_by_default(monkeypatch) -> None:
     monkeypatch.delenv("CORE_AGENT_PYTHON_CHAT_ROUTE", raising=False)
     client = TestClient(create_app(make_runtime()))

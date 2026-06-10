@@ -187,13 +187,17 @@ def _selected_runtime(
     *,
     mocked_runner=None,
     full_toolhost: bool = False,
+    authority: PythonRuntimeAuthorityConfig | None = None,
+    primitives_loader=None,
 ) -> OpenMagiRuntime:
     runtime = _make_runtime(
-        authority=PythonRuntimeAuthorityConfig(
+        authority=authority
+        or PythonRuntimeAuthorityConfig(
             userVisibleOutputAllowed=True,
             canaryRoutingAllowed=True,
         )
     )
+    default_loader = None if mocked_runner is not None else _fake_primitives
     runtime.gate5b_user_visible_chat_route_config = Gate5BUserVisibleChatRouteConfig(
         enabled=True,
         killSwitchEnabled=False,
@@ -202,7 +206,9 @@ def _selected_runtime(
         environment="production",
         environmentAllowlist=("production",),
         mockedRunner=mocked_runner,
-        adkPrimitivesLoader=None if mocked_runner is not None else _fake_primitives,
+        adkPrimitivesLoader=(
+            primitives_loader if primitives_loader is not None else default_loader
+        ),
     )
     if full_toolhost:
         runtime.gate5b_full_toolhost_config = Gate5BFullToolHostConfig.model_validate(
@@ -244,6 +250,40 @@ def _selected_runtime(
         )
     )
     return runtime
+
+
+# ---------------------------------------------------------------------------
+# MAGI_HOSTED_STREAMING_SERVE flag parsing (08-PR3) — default-OFF, strict truthy
+# ---------------------------------------------------------------------------
+def test_hosted_streaming_serve_flag_default_off(monkeypatch) -> None:
+    from magi_agent.config.env import is_hosted_streaming_serve_enabled
+
+    monkeypatch.delenv("MAGI_HOSTED_STREAMING_SERVE", raising=False)
+    assert is_hosted_streaming_serve_enabled() is False
+
+
+@pytest.mark.parametrize("value", ["1", "true", "yes", "on", "ON", "True"])
+def test_hosted_streaming_serve_flag_truthy(value: str, monkeypatch) -> None:
+    from magi_agent.config.env import is_hosted_streaming_serve_enabled
+
+    monkeypatch.setenv("MAGI_HOSTED_STREAMING_SERVE", value)
+    assert is_hosted_streaming_serve_enabled() is True
+
+
+@pytest.mark.parametrize("value", ["0", "false", "off", "", "  ", "banana"])
+def test_hosted_streaming_serve_flag_falsy(value: str, monkeypatch) -> None:
+    from magi_agent.config.env import is_hosted_streaming_serve_enabled
+
+    monkeypatch.setenv("MAGI_HOSTED_STREAMING_SERVE", value)
+    assert is_hosted_streaming_serve_enabled() is False
+
+
+def test_hosted_streaming_serve_flag_registered_default_off() -> None:
+    from magi_agent.config.flags import get_flag
+
+    spec = get_flag("MAGI_HOSTED_STREAMING_SERVE")
+    assert spec.default is False
+    assert spec.kind == "bool"
 
 
 # ---------------------------------------------------------------------------
@@ -681,6 +721,574 @@ def test_stream_selected_gate_off_uses_headless_engine(monkeypatch) -> None:
 
     assert response.status_code == 200
     assert "headless default stream" in response.text
+    assert _data_lines(response.text)[-1]["terminal"] == "completed"
+
+
+# ---------------------------------------------------------------------------
+# 08-PR3 — hosted streaming serve (MAGI_HOSTED_STREAMING_SERVE)
+#
+# With the flag ON the stream route must refuse with completions-equivalent
+# fallback JSON whenever the selected gate5b gate is not active — it must NEVER
+# fall through to the local headless engine (gate/counter/receipt bypass).
+# With the flag OFF behavior is byte-identical to before (local fallthrough).
+# ---------------------------------------------------------------------------
+
+class _BypassCanaryEngine:
+    """Headless engine that must never serve under hosted streaming serve."""
+
+    async def run_turn_stream(self, runtime, turn_input, *, cancel, gate):
+        yield _ev("text_delta", delta="hosted bypass must not appear")
+        yield EngineResult(
+            terminal=Terminal.completed,
+            session_id="s-hosted",
+            turn_id="t-hosted",
+        )
+
+
+def _bypass_canary_builder(session_id: str, sink: object) -> tuple[object, object]:
+    return _BypassCanaryEngine(), None
+
+
+def test_hosted_serve_chat_route_off_returns_chat_route_disabled(monkeypatch) -> None:
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
+    monkeypatch.setenv("MAGI_HOSTED_STREAMING_SERVE", "1")
+    monkeypatch.delenv("CORE_AGENT_PYTHON_CHAT_ROUTE", raising=False)
+    client = TestClient(_make_app(engine_builder=_bypass_canary_builder))
+
+    response = client.post(
+        "/v1/chat/stream",
+        headers=_auth_headers(),
+        json={"messages": [{"role": "user", "content": "hosted serve"}]},
+    )
+
+    assert response.status_code == 503
+    payload = response.json()
+    assert payload["error"] == "chat_route_disabled"
+    assert "runtime" in payload
+    assert "runtimeEngine" in payload
+    assert "hosted bypass must not appear" not in response.text
+
+
+def test_hosted_serve_canary_gate_disabled_returns_python_disabled(monkeypatch) -> None:
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
+    monkeypatch.setenv("MAGI_HOSTED_STREAMING_SERVE", "1")
+    monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
+    # Plain runtime: no gate5b route config → canary gate disabled.
+    client = TestClient(_make_app(engine_builder=_bypass_canary_builder))
+
+    response = client.post(
+        "/v1/chat/stream",
+        headers=_auth_headers(),
+        json={"messages": [{"role": "user", "content": "hosted serve"}]},
+    )
+
+    assert response.status_code == 503
+    payload = response.json()
+    assert payload["status"] == "python_disabled"
+    assert payload["reason"] == "canary_gate_disabled"
+    assert payload["fallbackStatus"] == "fallback_to_typescript"
+    assert payload["responseAuthority"] == "typescript"
+    assert "hosted bypass must not appear" not in response.text
+
+
+def test_hosted_serve_invalid_authority_returns_409(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
+    monkeypatch.setenv("MAGI_HOSTED_STREAMING_SERVE", "1")
+    monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
+    # Selected digests match but the runtime authority does not allow
+    # user-visible output → completions answers 409 invalid_authority.
+    runtime = _selected_runtime(
+        tmp_path,
+        authority=PythonRuntimeAuthorityConfig(),
+    )
+    client = TestClient(
+        _make_app(runtime=runtime, engine_builder=_bypass_canary_builder)
+    )
+
+    response = client.post(
+        "/v1/chat/stream",
+        headers=_auth_headers(),
+        json={"messages": [{"role": "user", "content": "hosted serve"}]},
+    )
+
+    assert response.status_code == 409
+    payload = response.json()
+    assert payload["status"] == "invalid_authority"
+    assert payload["reason"] == "authority_gate_not_satisfied"
+    assert payload["responseAuthority"] == "typescript"
+    assert "hosted bypass must not appear" not in response.text
+
+
+def test_hosted_serve_selected_active_still_streams(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
+    monkeypatch.setenv("MAGI_HOSTED_STREAMING_SERVE", "1")
+    monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
+    monkeypatch.setenv("CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_WORKSPACE_ROOT", str(tmp_path))
+    client = TestClient(
+        _make_app(
+            runtime=_selected_runtime(tmp_path, full_toolhost=True),
+            engine_builder=_bypass_canary_builder,
+        )
+    )
+
+    response = client.post(
+        "/v1/chat/stream",
+        headers=_auth_headers(),
+        json={
+            "sessionId": "s-hosted-selected",
+            "turnId": "t-hosted-selected",
+            "messages": [{"role": "user", "content": "Use the selected toolhost."}],
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert "hosted bypass must not appear" not in response.text
+    assert "selected full-toolhost ADK stream answer" in response.text
+    payloads = _data_lines(response.text)
+    assert payloads[-1]["type"] == "turn_result"
+    assert payloads[-1]["terminal"] == "completed"
+
+
+def test_hosted_serve_gate2_canary_payload_dispatches_to_gate2_chat(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    # Completions parity: a gate2 sandbox-workspace canary payload must reach
+    # the same _run_gate2_sandbox_workspace_canary_chat boundary (JSON, not SSE).
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
+    monkeypatch.setenv("MAGI_HOSTED_STREAMING_SERVE", "1")
+    monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
+    from magi_agent.transport.gate2_sandbox_canary import (
+        Gate2SandboxWorkspaceCanaryConfig,
+    )
+
+    runtime = _selected_runtime(tmp_path)
+    runtime.gate2_sandbox_workspace_canary_config = Gate2SandboxWorkspaceCanaryConfig(
+        enabled=True
+    )
+    seen: dict[str, object] = {}
+
+    def fake_gate2_chat(rt, config, payload, *, request):
+        seen["gate"] = payload.get("gate")
+        seen["enabled"] = config.enabled
+        return JSONResponse(status_code=200, content={"status": "gate2_dispatched"})
+
+    monkeypatch.setattr(
+        streaming_chat_route_module,
+        "_run_gate2_sandbox_workspace_canary_chat",
+        fake_gate2_chat,
+    )
+    client = TestClient(
+        _make_app(runtime=runtime, engine_builder=_bypass_canary_builder)
+    )
+
+    response = client.post(
+        "/v1/chat/stream",
+        headers=_auth_headers(),
+        json={
+            "gate": "gate2_sandbox_workspace_canary",
+            "messages": [{"role": "user", "content": "gate2 canary"}],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "gate2_dispatched"}
+    assert seen == {"gate": "gate2_sandbox_workspace_canary", "enabled": True}
+
+
+def test_hosted_serve_gate2_absent_payload_takes_selected_stream(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    # No gate2 config → even a gate2-shaped payload flows down the normal
+    # selected gate5b stream path (mirrors completions).
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
+    monkeypatch.setenv("MAGI_HOSTED_STREAMING_SERVE", "1")
+    monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
+    monkeypatch.setenv("CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_WORKSPACE_ROOT", str(tmp_path))
+
+    def fail_gate2_chat(rt, config, payload, *, request):  # pragma: no cover
+        raise AssertionError("gate2 dispatch must not run without gate2 config")
+
+    monkeypatch.setattr(
+        streaming_chat_route_module,
+        "_run_gate2_sandbox_workspace_canary_chat",
+        fail_gate2_chat,
+    )
+    client = TestClient(
+        _make_app(
+            runtime=_selected_runtime(tmp_path, full_toolhost=True),
+            engine_builder=_bypass_canary_builder,
+        )
+    )
+
+    response = client.post(
+        "/v1/chat/stream",
+        headers=_auth_headers(),
+        json={
+            "gate": "gate2_sandbox_workspace_canary",
+            "sessionId": "s-hosted-gate2-absent",
+            "turnId": "t-hosted-gate2-absent",
+            "messages": [{"role": "user", "content": "Use the selected toolhost."}],
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert "selected full-toolhost ADK stream answer" in response.text
+
+
+def test_hosted_serve_malformed_json_returns_completions_shape(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
+    monkeypatch.setenv("MAGI_HOSTED_STREAMING_SERVE", "1")
+    monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
+    client = TestClient(
+        _make_app(
+            runtime=_selected_runtime(tmp_path),
+            engine_builder=_bypass_canary_builder,
+        )
+    )
+
+    response = client.post(
+        "/v1/chat/stream",
+        headers={**_auth_headers(), "content-type": "application/json"},
+        content="{not json",
+    )
+
+    assert response.status_code == 400
+    payload = response.json()
+    assert payload["status"] == "python_error"
+    assert payload["reason"] == "malformed_json"
+    assert payload["fallbackStatus"] == "fallback_to_typescript"
+    assert payload["responseAuthority"] == "typescript"
+
+
+def test_hosted_serve_malformed_json_route_disabled_returns_python_disabled(
+    monkeypatch,
+) -> None:
+    # Completions checks the canary route gate BEFORE parsing the body, so a
+    # malformed body on a gate-disabled pod answers 503 python_disabled.
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
+    monkeypatch.setenv("MAGI_HOSTED_STREAMING_SERVE", "1")
+    monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
+    client = TestClient(_make_app(engine_builder=_bypass_canary_builder))
+
+    response = client.post(
+        "/v1/chat/stream",
+        headers={**_auth_headers(), "content-type": "application/json"},
+        content="{not json",
+    )
+
+    assert response.status_code == 503
+    payload = response.json()
+    assert payload["status"] == "python_disabled"
+    assert payload["reason"] == "canary_gate_disabled"
+
+
+def test_hosted_serve_malformed_json_chat_route_off_returns_chat_route_disabled(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
+    monkeypatch.setenv("MAGI_HOSTED_STREAMING_SERVE", "1")
+    monkeypatch.delenv("CORE_AGENT_PYTHON_CHAT_ROUTE", raising=False)
+    client = TestClient(_make_app(engine_builder=_bypass_canary_builder))
+
+    response = client.post(
+        "/v1/chat/stream",
+        headers={**_auth_headers(), "content-type": "application/json"},
+        content="{not json",
+    )
+
+    assert response.status_code == 503
+    assert response.json()["error"] == "chat_route_disabled"
+
+
+def test_malformed_json_flag_off_keeps_legacy_shape(monkeypatch) -> None:
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
+    monkeypatch.delenv("MAGI_HOSTED_STREAMING_SERVE", raising=False)
+    monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
+    client = TestClient(_make_app())
+
+    response = client.post(
+        "/v1/chat/stream",
+        headers={**_auth_headers(), "content-type": "application/json"},
+        content="{not json",
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {"error": "malformed_json"}
+
+
+# ---------------------------------------------------------------------------
+# 08-PR3 — gate/counter/receipt/critic EQUIVALENCE with /v1/chat/completions
+#
+# The hosted stream route serves through the same
+# run_gate5b_user_visible_chat_response boundary as completions; these tests
+# pin that equivalence end-to-end: identical counter reservation + finish
+# receipt records, identical usage-receipt scheduling, and identical egress
+# critic invocation for the same request body.
+# ---------------------------------------------------------------------------
+
+class _UsageFakeRunner(_FakeRunner):
+    """Fake ADK runner whose final event carries usage metadata."""
+
+    event_text = "selected equivalence ADK stream answer"
+
+    async def run_async(self, **kwargs: object) -> object:
+        type(self).run_kwargs = kwargs
+        yield SimpleNamespace(
+            content=SimpleNamespace(parts=[SimpleNamespace(text=self.event_text)]),
+            usage_metadata=SimpleNamespace(
+                prompt_token_count=17,
+                candidates_token_count=5,
+                total_token_count=22,
+            ),
+        )
+
+
+def _usage_fake_primitives() -> Gate5B4C3LiveAdkPrimitives:
+    primitives = _fake_primitives()
+    return Gate5B4C3LiveAdkPrimitives(
+        Agent=primitives.Agent,
+        Runner=_UsageFakeRunner,
+        InMemorySessionService=primitives.InMemorySessionService,
+        Content=primitives.Content,
+        Part=primitives.Part,
+        GenerateContentConfig=primitives.GenerateContentConfig,
+    )
+
+
+_COUNTER_TIMESTAMP_KEYS = {"reservedAtMs", "finishedAtMs"}
+
+
+def _normalized_counters(path: Path) -> object:
+    """Counter-store JSON with wall-clock timestamps masked."""
+
+    def _mask(node: object) -> object:
+        if isinstance(node, dict):
+            return {
+                key: (0 if key in _COUNTER_TIMESTAMP_KEYS else _mask(value))
+                for key, value in node.items()
+            }
+        if isinstance(node, list):
+            return [_mask(item) for item in node]
+        return node
+
+    return _mask(json.loads(path.read_text()))
+
+
+def test_hosted_stream_counter_receipt_critic_equivalence_with_completions(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
+    monkeypatch.setenv("MAGI_HOSTED_STREAMING_SERVE", "1")
+    monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
+
+    from magi_agent.app import create_app
+    from magi_agent.transport import chat_routes as chat_routes_module
+
+    # Capture the usage-receipt scheduling seam (sync, deterministic) and force
+    # the egress critic gate ON with a capturing fake — both seams live in the
+    # shared serving boundary, so both routes must hit them identically.
+    receipt_calls: list[dict[str, object]] = []
+
+    def fake_schedule_receipt(*, runtime, model, usage, turn_id) -> None:
+        receipt_calls.append(
+            {
+                "bot_id": runtime.config.bot_id,
+                "model": model,
+                "usage": dict(usage) if usage else None,
+                "turn_id": turn_id,
+            }
+        )
+
+    critic_calls: list[dict[str, object]] = []
+
+    async def fake_critic_gate(*, payload, draft_text, gate1a_bundle):
+        critic_calls.append({"draft_text": draft_text})
+        return None
+
+    monkeypatch.setattr(
+        chat_routes_module,
+        "_schedule_runtime_direct_usage_receipt",
+        fake_schedule_receipt,
+    )
+    monkeypatch.setattr(chat_routes_module, "is_egress_gate_enabled", lambda: True)
+    monkeypatch.setattr(
+        chat_routes_module, "_maybe_run_egress_critic_gate", fake_critic_gate
+    )
+
+    body = {
+        "sessionId": "s-equivalence",
+        "turnId": "t-equivalence",
+        "messages": [{"role": "user", "content": "equivalence probe"}],
+    }
+
+    def _serve(path: str, store_dir: Path):
+        store_dir.mkdir(parents=True, exist_ok=True)
+        monkeypatch.setenv(
+            "CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_WORKSPACE_ROOT", str(store_dir)
+        )
+        runtime = _selected_runtime(
+            store_dir,
+            full_toolhost=True,
+            primitives_loader=_usage_fake_primitives,
+        )
+        client = TestClient(create_app(runtime))
+        return client.post(path, headers=_auth_headers(), json=body)
+
+    completions_dir = tmp_path / "completions"
+    stream_dir = tmp_path / "stream"
+
+    completions_response = _serve("/v1/chat/completions", completions_dir)
+    completions_receipts = list(receipt_calls)
+    completions_critic = list(critic_calls)
+    receipt_calls.clear()
+    critic_calls.clear()
+
+    stream_response = _serve("/v1/chat/stream", stream_dir)
+    stream_receipts = list(receipt_calls)
+    stream_critic = list(critic_calls)
+
+    # Both served successfully through the selected path.
+    assert completions_response.status_code == 200, completions_response.text
+    assert completions_response.json()["status"] == "python_ready"
+    assert stream_response.status_code == 200, stream_response.text
+    assert stream_response.headers["content-type"].startswith("text/event-stream")
+    stream_payloads = _data_lines(stream_response.text)
+    assert stream_payloads[-1]["terminal"] == "completed"
+
+    # Counter store equivalence: same scope, same request digest, same
+    # reservation cost, same shadowGenerationId, same finish status/receipt —
+    # only wall-clock timestamps may differ.
+    completions_counters = _normalized_counters(completions_dir / "counters.json")
+    stream_counters = _normalized_counters(stream_dir / "counters.json")
+    assert stream_counters == completions_counters
+
+    # Usage-receipt scheduling equivalence (same model/usage/turn digest).
+    assert completions_receipts, "completions path must schedule a usage receipt"
+    assert stream_receipts == completions_receipts
+
+    # Egress critic equivalence (same draft text reaches the critic).
+    assert completions_critic, "completions path must invoke the egress critic"
+    assert stream_critic == completions_critic
+
+
+class _MultiChunkFakeRunner(_FakeRunner):
+    """Fake ADK runner that streams N distinct text chunks across N events."""
+
+    chunks = ("first progressive chunk. ", "second progressive chunk. ", "third progressive chunk.")
+
+    async def run_async(self, **kwargs: object) -> object:
+        type(self).run_kwargs = kwargs
+        for index, chunk in enumerate(self.chunks):
+            event = SimpleNamespace(
+                content=SimpleNamespace(parts=[SimpleNamespace(text=chunk)])
+            )
+            if index == len(self.chunks) - 1:
+                event.usage_metadata = SimpleNamespace(
+                    prompt_token_count=11,
+                    candidates_token_count=7,
+                    total_token_count=18,
+                )
+            yield event
+
+
+def _multi_chunk_fake_primitives() -> Gate5B4C3LiveAdkPrimitives:
+    primitives = _fake_primitives()
+    return Gate5B4C3LiveAdkPrimitives(
+        Agent=primitives.Agent,
+        Runner=_MultiChunkFakeRunner,
+        InMemorySessionService=primitives.InMemorySessionService,
+        Content=primitives.Content,
+        Part=primitives.Part,
+        GenerateContentConfig=primitives.GenerateContentConfig,
+    )
+
+
+def test_hosted_stream_emits_one_text_delta_frame_per_chunk(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """Progressive-emit regression guard (08-PR3 / #377).
+
+    N live runner chunks must surface as N separate text_delta SSE frames in
+    chunk order — NOT buffered into one aggregated frame at the end.
+    """
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
+    monkeypatch.setenv("MAGI_HOSTED_STREAMING_SERVE", "1")
+    monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
+    monkeypatch.setenv("CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_WORKSPACE_ROOT", str(tmp_path))
+    client = TestClient(
+        _make_app(
+            runtime=_selected_runtime(
+                tmp_path,
+                full_toolhost=True,
+                primitives_loader=_multi_chunk_fake_primitives,
+            ),
+            engine_builder=_bypass_canary_builder,
+        )
+    )
+
+    response = client.post(
+        "/v1/chat/stream",
+        headers=_auth_headers(),
+        json={
+            "sessionId": "s-progressive",
+            "turnId": "t-progressive",
+            "messages": [{"role": "user", "content": "Stream three chunks."}],
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    payloads = _data_lines(response.text)
+    text_deltas = [
+        payload["delta"] for payload in payloads if payload.get("type") == "text_delta"
+    ]
+    assert text_deltas == list(_MultiChunkFakeRunner.chunks)
+    # The aggregated final answer must NOT be re-emitted as one extra frame.
+    aggregated = "".join(_MultiChunkFakeRunner.chunks)
+    assert aggregated not in text_deltas
+    assert payloads[-1]["type"] == "turn_result"
+    assert payloads[-1]["terminal"] == "completed"
+
+
+def test_hosted_serve_flag_off_gate_inactive_keeps_headless_fallthrough(
+    monkeypatch,
+) -> None:
+    # Flag OFF (unset) → byte-identical legacy behavior: chat route on but the
+    # canary gate inactive falls through to the local headless engine.
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
+    monkeypatch.delenv("MAGI_HOSTED_STREAMING_SERVE", raising=False)
+    monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
+
+    class HeadlessEngine:
+        async def run_turn_stream(self, runtime, turn_input, *, cancel, gate):
+            yield _ev("text_delta", delta="legacy headless fallthrough")
+            yield EngineResult(
+                terminal=Terminal.completed,
+                session_id="s-legacy",
+                turn_id="t-legacy",
+            )
+
+    def headless_builder(session_id: str, sink: object) -> tuple[object, object]:
+        return HeadlessEngine(), None
+
+    client = TestClient(_make_app(engine_builder=headless_builder))
+
+    response = client.post(
+        "/v1/chat/stream",
+        headers=_auth_headers(),
+        json={"messages": [{"role": "user", "content": "Default path."}]},
+    )
+
+    assert response.status_code == 200
+    assert "legacy headless fallthrough" in response.text
     assert _data_lines(response.text)[-1]["terminal"] == "completed"
 
 
