@@ -45,6 +45,14 @@ Useful local toggles:
 - `MAGI_MEMORY_WRITE_ENABLED` (default off) — gates the `MemoryWrite` tool; memory is read-only unless enabled.
 - `MAGI_EDIT_FUZZY_MATCH_ENABLED` — enables fuzzy matching for the edit tool.
 - `MAGI_EDIT_MATCH_EVIDENCE_ENFORCEMENT` — enables edit-match evidence enforcement.
+- `MAGI_CHILD_RUNNER_LIVE_ENABLED` — enables real model-backed `SpawnAgent` /
+  workflow child execution. The base gate is safety-default-off, but the
+  installed full runtime profile sets it to `1` unless explicitly overridden or
+  a safe/eval profile is selected.
+- `MAGI_CHILD_RUNNER_TOOLSET` — child tool profile. The installed full runtime
+  profile defaults to `readonly`, forwarding non-mutating inspection tools.
+  `none` keeps child turns text-only; `full` is reserved for explicitly trusted
+  sandbox/permission deployments.
 
 <!-- BEGIN GENERATED FLAGS (scripts/generate_env_reference.py) -->
 ## Feature flags (auto-generated)

@@ -6,7 +6,7 @@ The tool system is built on ToolManifest (tools/manifest.py) with comprehensive 
 
 ## Tool catalog and ToolManifest
 
-The tool catalog (tools/catalog.py) defines core tools such as FileRead, FileWrite, FileEdit, PatchApply, Glob, Grep, Bash (dangerous, requires approval), TestRun (dangerous, timeout 300s), GitDiff, TodoWrite, AskUserQuestion, EnterPlanMode, ExitPlanMode, ArtifactCreate, and ArtifactRead. Each tool is declared via a ToolManifest (tools/manifest.py) with comprehensive metadata.
+The tool catalog (tools/catalog.py) defines core tools such as FileRead, FileWrite, FileEdit, PatchApply, Glob, Grep, Bash (dangerous, requires approval), TestRun (dangerous, timeout 300s), GitDiff, TodoWrite, AskUserQuestion, EnterPlanMode, and ExitPlanMode. Each tool is declared via a ToolManifest (tools/manifest.py) with comprehensive metadata.
 
 ToolRegistry (tools/registry.py) manages ToolRegistration records with register/enable/disable/list_available operations. The dispatcher (tools/dispatcher.py) performs permission and budget checking, then either executes the registered handler or returns a governed denial. Tool policy enforcement happens through the hook system: beforeToolUse fires before each call and can deny it, afterToolUse fires after execution and records evidence.
 

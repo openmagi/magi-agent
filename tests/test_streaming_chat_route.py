@@ -434,6 +434,45 @@ def test_selected_full_toolhost_stream_uses_selected_canary_path(
     assert payloads[-1]["terminal"] == "completed"
 
 
+def test_selected_full_toolhost_stream_prioritizes_workflow_confirmation(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
+    monkeypatch.setenv("MAGI_CHANNEL_WORKFLOWS_ENABLED", "1")
+    monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
+    monkeypatch.setenv("CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_WORKSPACE_ROOT", str(tmp_path))
+
+    client = TestClient(
+        _make_app(
+            runtime=_selected_runtime(tmp_path, full_toolhost=True),
+            engine_builder=_bypass_canary_builder,
+        )
+    )
+
+    response = client.post(
+        "/v1/chat/stream",
+        headers=_auth_headers(),
+        json={
+            "sessionId": "s-selected-workflow-priority",
+            "turnId": "t-selected-workflow-priority",
+            "messages": [{"role": "user", "content": "/research compare A vs B"}],
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert "selected full-toolhost ADK stream answer" not in response.text
+    payloads = _data_lines(response.text)
+    assert any(
+        payload.get("type") == "turn_phase"
+        and payload.get("status") == "awaiting_confirmation"
+        for payload in payloads
+    )
+    assert payloads[-1]["type"] == "turn_result"
+    assert payloads[-1]["terminal"] == "completed"
+
+
 def test_selected_full_toolhost_duplicate_replay_surfaces_status_not_none(
     monkeypatch,
     tmp_path: Path,
@@ -846,6 +885,45 @@ def test_hosted_serve_selected_active_still_streams(monkeypatch, tmp_path: Path)
     assert "hosted bypass must not appear" not in response.text
     assert "selected full-toolhost ADK stream answer" in response.text
     payloads = _data_lines(response.text)
+    assert payloads[-1]["type"] == "turn_result"
+    assert payloads[-1]["terminal"] == "completed"
+
+
+def test_hosted_serve_selected_active_prioritizes_workflow_confirmation(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
+    monkeypatch.setenv("MAGI_HOSTED_STREAMING_SERVE", "1")
+    monkeypatch.setenv("MAGI_CHANNEL_WORKFLOWS_ENABLED", "1")
+    monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
+    monkeypatch.setenv("CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_WORKSPACE_ROOT", str(tmp_path))
+    client = TestClient(
+        _make_app(
+            runtime=_selected_runtime(tmp_path, full_toolhost=True),
+            engine_builder=_bypass_canary_builder,
+        )
+    )
+
+    response = client.post(
+        "/v1/chat/stream",
+        headers=_auth_headers(),
+        json={
+            "sessionId": "s-hosted-workflow-priority",
+            "turnId": "t-hosted-workflow-priority",
+            "messages": [{"role": "user", "content": "/research compare A vs B"}],
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert "selected full-toolhost ADK stream answer" not in response.text
+    payloads = _data_lines(response.text)
+    assert any(
+        payload.get("type") == "turn_phase"
+        and payload.get("status") == "awaiting_confirmation"
+        for payload in payloads
+    )
     assert payloads[-1]["type"] == "turn_result"
     assert payloads[-1]["terminal"] == "completed"
 

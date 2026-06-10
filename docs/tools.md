@@ -12,11 +12,12 @@ Successful activity produces receipts. Source/file/test/calculation/delivery ope
 
 ## First-party tool catalog
 
-The core registry (`magi_agent/tools/catalog.py`) declares 25 first-party tools.
-24 are `enabled_by_default=True`; `MemoryWrite` is off unless
-`MAGI_MEMORY_WRITE_ENABLED` is set. Two (`Bash`, `TestRun`) are marked
-`dangerous` and require approval. The handlers for the file / search / execute
-tools are bound by the core toolhost (`core_toolhost.py`).
+The core registry (`magi_agent/tools/catalog.py`) declares 21 first-party tools.
+19 are `enabled_by_default=True`; `MemoryWrite` (gated by
+`MAGI_MEMORY_WRITE_ENABLED`) and `InspectSelfEvidence` (gated by
+`MAGI_SELF_INTROSPECTION_ENABLED`) are off by default. Two (`Bash`, `TestRun`)
+are marked `dangerous` and require approval. The handlers for the file / search
+/ execute tools are bound by the core toolhost (`core_toolhost.py`).
 
 | Tool | Purpose | Permission |
 |---|---|---|
@@ -24,23 +25,18 @@ tools are bound by the core toolhost (`core_toolhost.py`).
 | `Glob` | List workspace paths matching a glob. | read (read-only) |
 | `Grep` | Search workspace text by pattern. | read (read-only) |
 | `GitDiff` | Inspect workspace git diff metadata. | read (read-only) |
-| `ArtifactRead` | Read artifact metadata / content. | read (read-only) |
-| `ArtifactList` | List artifact records for the turn. | read (read-only) |
 | `FileWrite` | Write workspace file contents. | write (edit/act) |
 | `FileEdit` | Edit existing workspace file contents. | write (edit/act) |
 | `PatchApply` | Apply a Codex-style multi-file envelope patch. | write (edit/act) |
-| `ArtifactCreate` | Create an artifact record for delivery. | write (edit/act) |
 | `MemoryWrite` | Write to local memory. Off by default (gated by `MAGI_MEMORY_WRITE_ENABLED`). | write (gated) |
 | `Bash` | Run a shell command (dangerous, requires approval). | execute (act) |
 | `TestRun` | Run a project verification command (dangerous, 5-min timeout). | execute (act) |
-| `ToolSearch` | Search deferred tool metadata. | meta |
 | `TodoWrite` | Record / update the agent's task list. | meta |
 | `AskUserQuestion` | Request user input through the control surface. | meta |
 | `EnterPlanMode` | Enter read-only planning mode. | meta |
 | `ExitPlanMode` | Exit planning and continue in act mode. | meta |
 | `Clock` | Read current time metadata. | meta (read-only) |
 | `Calculation` | Evaluate deterministic calculation metadata. | meta (read-only) |
-| `HealthStatus` | Read local runtime health metadata. | meta (read-only) |
 | `TaskList` | List local background task metadata. | meta (read-only) |
 | `TaskGet` | Read local background task metadata. | meta (read-only) |
 | `TaskOutput` | Read local background task output metadata. | meta (read-only) |

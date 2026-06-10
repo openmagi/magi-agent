@@ -56,6 +56,10 @@ class DurableControlRequestStore(ControlRequestStore):
 
     def __init__(self, *, path: str | os.PathLike[str]) -> None:
         self._path = Path(path)
+        # Byte offset of the log consumed so far. Lets :meth:`refresh_from_log`
+        # pick up only lines appended out-of-band (PR-5) since the last read,
+        # instead of re-applying the whole log on every consume.
+        self._log_offset = 0
         super().__init__()
         self._replay()
 
@@ -121,20 +125,40 @@ class DurableControlRequestStore(ControlRequestStore):
         self._path.parent.mkdir(parents=True, exist_ok=True)
         with self._path.open("a", encoding="utf-8") as handle:
             handle.write(line + "\n")
+        # Our own append is already reflected in memory; advance the offset so a
+        # subsequent ``refresh_from_log`` does not re-apply it.
+        self._log_offset = self._path.stat().st_size
 
     def _replay(self) -> None:
+        self._consume_from_offset()
+
+    def refresh_from_log(self) -> None:
+        """Apply lifecycle lines appended to the log since the last read.
+
+        This is the consume side of the out-of-band resolve seam (PR-5): an
+        approval written by *this* process can be approved / denied by a separate
+        process (which appends a terminal snapshot to the same JSONL log).
+        Calling ``refresh_from_log`` replays only the newly-appended lines so the
+        in-memory pending / terminal maps reflect those external resolutions
+        before the next gate check consumes the queue. It never replays the
+        whole log and never touches the ledger, so it is cheap to call often.
+        """
+        self._consume_from_offset()
+
+    def _consume_from_offset(self) -> None:
         if not self._path.exists():
             return
-        max_seq = 0
+        max_seq = self._seq
         with self._path.open("r", encoding="utf-8") as handle:
+            handle.seek(self._log_offset)
             for raw in handle:
                 snapshot = _parse_line(raw)
-                if snapshot is None:
-                    continue
-                record, seq = snapshot
-                self._apply_replayed(record)
-                if seq > max_seq:
-                    max_seq = seq
+                if snapshot is not None:
+                    record, seq = snapshot
+                    self._apply_replayed(record)
+                    if seq > max_seq:
+                        max_seq = seq
+            self._log_offset = handle.tell()
         # Continue the event sequence past the highest persisted watermark so a
         # new mutation never collides with a replayed ledger seq.
         self._seq = max_seq

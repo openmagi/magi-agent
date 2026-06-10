@@ -1,8 +1,4 @@
-"""Tests for tool safety annotations (parallel_safety and is_concurrency_safe).
-
-Verifies that all 16 core tools have the correct explicit parallel_safety values
-and that manifest validation constraints are enforced.
-"""
+"""Tests for tool safety annotations (parallel_safety and is_concurrency_safe)."""
 from __future__ import annotations
 
 import pytest
@@ -27,7 +23,7 @@ def manifests_by_name() -> dict[str, ToolManifest]:
 
 def test_readonly_tools_have_parallel_safety_readonly() -> None:
     m = manifests_by_name()
-    readonly_tools = ["FileRead", "Glob", "Grep", "GitDiff", "ArtifactRead", "ArtifactList"]
+    readonly_tools = ["FileRead", "Glob", "Grep", "GitDiff", "InspectSelfEvidence"]
     for name in readonly_tools:
         assert m[name].parallel_safety == "readonly", (
             f"{name} should have parallel_safety='readonly'"
@@ -50,16 +46,10 @@ def test_control_flow_meta_tools_have_parallel_safety_unsafe() -> None:
 
 def test_workspace_mutating_tools_have_parallel_safety_unsafe() -> None:
     m = manifests_by_name()
-    for name in ["FileWrite", "FileEdit", "PatchApply", "Bash", "TestRun"]:
+    for name in ["FileWrite", "FileEdit", "PatchApply", "Bash", "TestRun", "MemoryWrite"]:
         assert m[name].parallel_safety == "unsafe", (
             f"{name} should have parallel_safety='unsafe'"
         )
-
-
-def test_artifact_create_has_parallel_safety_unsafe() -> None:
-    """ArtifactCreate is a write operation even without mutates_workspace."""
-    m = manifests_by_name()
-    assert m["ArtifactCreate"].parallel_safety == "unsafe"
 
 
 # ---------------------------------------------------------------------------
@@ -69,8 +59,15 @@ def test_artifact_create_has_parallel_safety_unsafe() -> None:
 
 def test_readonly_tools_are_concurrency_safe() -> None:
     m = manifests_by_name()
-    readonly_tools = ["FileRead", "Glob", "Grep", "GitDiff", "ArtifactRead", "ArtifactList",
-                      "Clock", "Calculation"]
+    readonly_tools = [
+        "FileRead",
+        "Glob",
+        "Grep",
+        "GitDiff",
+        "Clock",
+        "Calculation",
+        "InspectSelfEvidence",
+    ]
     for name in readonly_tools:
         assert m[name].is_concurrency_safe is True, (
             f"{name} should have is_concurrency_safe=True"
@@ -91,7 +88,7 @@ def test_meta_control_flow_tools_are_concurrency_safe_by_auto_derivation() -> No
 
 def test_dangerous_and_write_tools_are_not_concurrency_safe() -> None:
     m = manifests_by_name()
-    for name in ["FileWrite", "FileEdit", "PatchApply", "Bash", "TestRun", "ArtifactCreate"]:
+    for name in ["FileWrite", "FileEdit", "PatchApply", "Bash", "TestRun", "MemoryWrite"]:
         assert m[name].is_concurrency_safe is False, (
             f"{name} should have is_concurrency_safe=False"
         )
@@ -199,9 +196,8 @@ def test_all_core_tools_are_present_with_explicit_parallel_safety() -> None:
     expected = {
         "FileRead", "FileWrite", "FileEdit", "PatchApply", "Glob", "Grep", "Bash",
         "TestRun", "GitDiff", "AskUserQuestion", "EnterPlanMode", "ExitPlanMode",
-        "ArtifactCreate", "ArtifactRead", "ArtifactList", "Clock", "Calculation",
-        "ToolSearch", "TodoWrite", "HealthStatus", "TaskList", "TaskGet", "TaskOutput",
-        "CronList",
+        "Clock", "Calculation", "TodoWrite", "TaskList", "TaskGet", "TaskOutput",
+        "CronList", "MemoryWrite", "InspectSelfEvidence",
     }
     assert set(m.keys()) == expected
     # Every tool must have a valid parallel_safety value

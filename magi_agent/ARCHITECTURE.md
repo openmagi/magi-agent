@@ -793,7 +793,7 @@ graph LR
 | self_review_pipeline.py | C2 — LearningPipelineSink: routes self-review candidates through the learning eval-gate. | candidates, eval_gate, models, self_review, store, types | — |
 | skill_curator.py | C3 — SkillCurator: inactivity-triggered janitor for agent-authored learned items. | store, types | — |
 | verifier_bus.py | — | contracts, ledger, types | cli/engine.py, cli/tests/test_local_tool_evidence_wiring.py, evidence/coding_verification.py, evidence/event_projection.py, harness/cross_review.py, meta_orchestration/commit_adapter.py |
-| workflow_executor.py | Bounded workflow-executor — PR1 (skeleton) + PR3 (resumability). | child_runner_boundary, compiler, cross_review, dry_run, parallel_execution, public_events, research_child_runner, workflow_executor_readiness, workflow_result_cache | channels/workflow_orchestrator.py, recipes/workflow_recipe.py |
+| workflow_executor.py | Bounded workflow-executor — PR1 (skeleton) + PR3 (resumability). | child_runner_boundary, child_runner_live, child_toolset, compiler, cross_review, dry_run, parallel_execution, public_events, research_child_runner, runtime, workflow_executor_readiness, workflow_result_cache | channels/workflow_orchestrator.py, recipes/workflow_recipe.py |
 | workflow_result_cache.py | Within-run result cache for the workflow executor — PR3. | — | harness/workflow_executor.py |
 
 ### harness/coding/
@@ -1173,7 +1173,7 @@ graph LR
 
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
-| __init__.py | — | — | recipes/coding_subagents.py, recipes/cross_verify.py, recipes/research_child_runner.py |
+| __init__.py | — | — | harness/workflow_executor.py, recipes/coding_subagents.py, recipes/cross_verify.py, recipes/research_child_runner.py |
 | active_turn_registry.py | Single-flight registry for active turns, keyed by session. | — | cli/engine.py |
 | activity_boundary.py | — | — | — |
 | adk_turn_runner.py | — | model_tiers, request_shape, runner_adapter | runtime/child_runner_boundary.py |
@@ -1183,8 +1183,8 @@ graph LR
 | checkpointing.py | — | — | — |
 | child_event_projection.py | — | child_runner_boundary, child_runtime_envelope, tool_preview | — |
 | child_runner_boundary.py | — | adk_turn_runner, child_acceptance, child_runtime_envelope, model_tiers, runtime_issuance, subagent | harness/workflow_executor.py, plugins/native/subagents.py, runtime/child_event_projection.py |
-| child_runner_live.py | A REAL, model-backed local child runner for the Child Runner boundary. | child_toolset, local_tool_collector, model_tiers, providers, real_runner, tool_runtime | plugins/native/subagents.py |
-| child_toolset.py | Child-runner toolset profile resolution (PR1, doc 07). | local_readonly | plugins/native/subagents.py, runtime/child_runner_live.py |
+| child_runner_live.py | A REAL, model-backed local child runner for the Child Runner boundary. | child_toolset, local_tool_collector, model_tiers, providers, real_runner, tool_runtime | harness/workflow_executor.py, plugins/native/subagents.py |
+| child_toolset.py | Child-runner toolset profile resolution (PR1, doc 07). | local_readonly | harness/workflow_executor.py, plugins/native/subagents.py, runtime/child_runner_live.py |
 | commit_boundary.py | — | turn_utilities | — |
 | content_replacement.py | — | query_state | — |
 | context_attachments.py | — | context_packet, message_builder | — |
@@ -1192,9 +1192,10 @@ graph LR
 | context_lifecycle.py | — | query_state | adk_bridge/context_compaction.py |
 | context_packet.py | — | session_continuity_projection, session_continuity_proof | gates/pregate8_continuity_canary.py, runtime/context_attachments.py |
 | context_projection.py | — | — | — |
-| control.py | — | tool_preview | adk_bridge/policy_boundary.py, cli/contracts.py, cli/permissions.py, cli/tests/test_streaming_driver.py, cli/tests/test_streaming_sink.py, harness/general_automation/plan_act_switch.py, harness/general_automation/question_tool.py, recipes/opencode_permission_patterns.py, runtime/durable_control_store.py, shadow/memory_source_authority_contract.py, shadow/office_automation_contract.py, shadow/patch_file_policy_contract.py, shadow/path_shell_policy_contract.py, shadow/toolhost_contract.py, shadow/ts_parity_replay.py, tools/permission.py |
+| control.py | — | tool_preview | adk_bridge/policy_boundary.py, cli/contracts.py, cli/permissions.py, cli/tests/test_streaming_driver.py, cli/tests/test_streaming_sink.py, harness/general_automation/plan_act_switch.py, harness/general_automation/question_tool.py, recipes/opencode_permission_patterns.py, runtime/control_oob.py, runtime/durable_control_store.py, shadow/memory_source_authority_contract.py, shadow/office_automation_contract.py, shadow/patch_file_policy_contract.py, shadow/path_shell_policy_contract.py, shadow/toolhost_contract.py, shadow/ts_parity_replay.py, tools/permission.py |
+| control_oob.py | Out-of-band (OOB) approval resolve for the durable control queue (doc 09 PR-5 / A7). | control, durable_control_store | — |
 | deterministic_policy.py | — | — | — |
-| durable_control_store.py | Durable JSONL-backed :class:`ControlRequestStore` (doc 09 PR-4 / A7). | control | cli/permissions.py |
+| durable_control_store.py | Durable JSONL-backed :class:`ControlRequestStore` (doc 09 PR-4 / A7). | control | cli/permissions.py, runtime/control_oob.py |
 | error_taxonomy.py | — | — | runtime/stream_fallback.py, runtime/stream_withholding.py |
 | events.py | — | heartbeat_contract, no_agent_watchdog, public_events, tool_preview, transcript | adk_bridge/event_adapter.py, cli/contracts.py, cli/engine.py, cli/tests/test_phase_route_consumption.py, cli/tests/test_runtime_policy_wiring.py, cli/tests/test_streaming_chat.py, cli/tests/test_streaming_driver.py, cli/tests/test_streaming_sink.py, memory/projection.py, transport/streaming_chat.py, transport/streaming_chat_route.py, transport/streaming_driver.py, transport/streaming_sink.py |
 | evidence_first_projection.py | — | — | evidence/final_output_gate.py |
@@ -1428,7 +1429,7 @@ graph LR
 | ask_user_question_toolhost.py | Route the catalog ``AskUserQuestion`` tool to the GA blocking-question flow. | context, env, question_tool, registry, result | cli/tool_runtime.py, tools/tests/test_ask_user_question_toolhost.py |
 | audio_tools.py | AudioTranscribe tool — transcribe audio files in the workspace via ASR. | context, result, spreadsheet_tools, video_tools | tools/file_toolhost.py |
 | base.py | — | context, manifest, result | runtime/openmagi_runtime.py, tools/__init__.py, tools/health.py, tools/registry.py |
-| catalog.py | — | manifest, registry | browser/autonomous/tool.py, gates/gate1a_readonly_tools.py, runtime/openmagi_runtime.py, tools/__init__.py, tools/file_tool_manifests.py, web_acquisition/reference_research_tools.py |
+| catalog.py | — | manifest, registry | browser/autonomous/tool.py, gates/gate1a_readonly_tools.py, runtime/openmagi_runtime.py, tools/__init__.py, tools/file_tool_manifests.py, tools/tests/test_catalog_honest_manifests.py, web_acquisition/reference_research_tools.py |
 | concurrency.py | Tool batch partitioning for concurrent execution. | registry | adk_bridge/tool_adapter.py, tools/concurrent_dispatcher.py |
 | concurrent_dispatcher.py | Concurrent tool dispatcher wrapping the base ToolDispatcher. | concurrency, context, manifest, result, trace_context | adk_bridge/tool_adapter.py |
 | context.py | — | session_identity | (root)/facades.py, adk_bridge/tool_adapter.py, browser/autonomous/tool.py, cli/tool_runtime.py, cli/wiring.py, gates/gate1a_readonly_tools.py, gates/gate5b_full_toolhost.py, harness/general_automation/delegation.py, harness/general_automation/live_gate.py, harness/general_automation/plan_act_switch.py, harness/general_automation/question_tool.py, harness/general_automation/recipe_disclosure.py, harness/memory_review.py, harness/memory_write_tool.py, introspection/tool.py, plugins/agentmemory/tools.py, plugins/native/_common.py, plugins/native/apify.py, plugins/native/artifacts.py, plugins/native/browser.py, plugins/native/coding.py, plugins/native/documents.py, plugins/native/knowledge.py, plugins/native/missions.py, plugins/native/scheduled_work.py, plugins/native/skills.py, plugins/native/source_ledger.py, plugins/native/subagents.py, plugins/native/taskboard.py, plugins/native/web.py, shadow/tool_policy.py, tools/archive_tools.py, tools/ask_user_question_toolhost.py, tools/audio_tools.py, tools/base.py, tools/concurrent_dispatcher.py, tools/core_toolhost.py, tools/dispatcher.py, tools/document_tools.py, tools/document_write/canonical.py, tools/document_write/html.py, tools/document_write/hwpx.py, tools/document_write/model.py, tools/document_write/orchestrator.py, tools/document_write/pdf.py, tools/document_write/text.py, tools/document_write_tools.py, tools/health.py, tools/image_tools.py, tools/kernel.py, tools/local_readonly.py, tools/music_tools.py, tools/permission.py, tools/plan_mode_toolhost.py, tools/safety.py, tools/spreadsheet_tools.py, tools/tests/test_ask_user_question_toolhost.py, tools/tests/test_plan_mode_toolhost.py, tools/todo_toolhost.py, tools/video_tools.py, web_acquisition/reference_research_tools.py |
@@ -1504,6 +1505,7 @@ graph LR
 |---|---|---|---|
 | __init__.py | — | — | — |
 | test_ask_user_question_toolhost.py | Tests for the manifest-routed ``AskUserQuestion`` toolhost (doc 12 PR2). | ask_user_question_toolhost, context, registry, tools | — |
+| test_catalog_honest_manifests.py | Honesty guard for the core tool catalog (doc 12 PR5 / B14). | catalog | — |
 | test_plan_mode_toolhost.py | Tests for the manifest-routed Enter/ExitPlanMode toolhost (doc 12 PR2). | context, plan_mode_toolhost, registry, tools | — |
 
 ### transport/

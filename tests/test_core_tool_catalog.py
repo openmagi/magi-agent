@@ -14,7 +14,6 @@ from magi_agent.tools.manifest import ToolManifest
 
 
 EXPECTED_CORE_TOOL_NAMES = (
-    "ToolSearch",
     "TodoWrite",
     "FileRead",
     "FileWrite",
@@ -28,12 +27,8 @@ EXPECTED_CORE_TOOL_NAMES = (
     "AskUserQuestion",
     "EnterPlanMode",
     "ExitPlanMode",
-    "ArtifactCreate",
-    "ArtifactRead",
-    "ArtifactList",
     "Clock",
     "Calculation",
-    "HealthStatus",
     "TaskList",
     "TaskGet",
     "TaskOutput",
@@ -106,55 +101,55 @@ def test_core_tool_catalog_seed_set_is_immutable_builtin_core_metadata() -> None
 
 def test_core_tool_manifests_returns_defensive_manifest_and_schema_copies() -> None:
     manifests = core_tool_manifests()
-    tool_search = manifests[0]
+    glob = next(manifest for manifest in manifests if manifest.name == "Glob")
 
-    tool_search.input_schema["additionalProperties"] = False
-    tool_search.input_schema["callerMutation"] = {"nested": True}
-    tool_search.input_schema["callerMutation"]["nested"] = False  # type: ignore[index]
+    glob.input_schema["additionalProperties"] = False
+    glob.input_schema["callerMutation"] = {"nested": True}
+    glob.input_schema["callerMutation"]["nested"] = False  # type: ignore[index]
 
-    fresh_tool_search = core_tool_manifests()[0]
+    fresh_glob = next(manifest for manifest in core_tool_manifests() if manifest.name == "Glob")
 
-    assert fresh_tool_search is not tool_search
-    assert fresh_tool_search.input_schema == {"type": "object", "additionalProperties": True}
-    assert fresh_tool_search.input_schema is not tool_search.input_schema
+    assert fresh_glob is not glob
+    assert fresh_glob.input_schema == {"type": "object", "additionalProperties": True}
+    assert fresh_glob.input_schema is not glob.input_schema
 
 
 def test_register_core_tool_manifests_uses_defensive_schema_copies() -> None:
-    mutated_tool_search = core_tool_manifests()[0]
-    mutated_tool_search.input_schema["additionalProperties"] = False
-    mutated_tool_search.input_schema["callerMutation"] = True
+    mutated_glob = next(manifest for manifest in core_tool_manifests() if manifest.name == "Glob")
+    mutated_glob.input_schema["additionalProperties"] = False
+    mutated_glob.input_schema["callerMutation"] = True
 
     registry = ToolRegistry()
     register_core_tool_manifests(registry)
 
-    registered_tool_search = registry.resolve("ToolSearch")
-    assert registered_tool_search is not None
-    assert registered_tool_search is not mutated_tool_search
-    assert registered_tool_search.input_schema == {
+    registered_glob = registry.resolve("Glob")
+    assert registered_glob is not None
+    assert registered_glob is not mutated_glob
+    assert registered_glob.input_schema == {
         "type": "object",
         "additionalProperties": True,
     }
-    assert registered_tool_search.input_schema is not mutated_tool_search.input_schema
+    assert registered_glob.input_schema is not mutated_glob.input_schema
 
 
 def test_register_core_tool_manifests_returned_manifests_do_not_mutate_registry_schema() -> None:
     registry = ToolRegistry()
     manifests = register_core_tool_manifests(registry)
-    returned_tool_search = manifests[0]
+    returned_glob = next(manifest for manifest in manifests if manifest.name == "Glob")
 
-    returned_tool_search.input_schema["additionalProperties"] = False
-    returned_tool_search.input_schema["callerMutation"] = {"nested": True}
-    returned_tool_search.input_schema["callerMutation"]["nested"] = False  # type: ignore[index]
+    returned_glob.input_schema["additionalProperties"] = False
+    returned_glob.input_schema["callerMutation"] = {"nested": True}
+    returned_glob.input_schema["callerMutation"]["nested"] = False  # type: ignore[index]
 
-    registered_tool_search = registry.resolve("ToolSearch")
+    registered_glob = registry.resolve("Glob")
 
-    assert registered_tool_search is not None
-    assert registered_tool_search is not returned_tool_search
-    assert registered_tool_search.input_schema == {
+    assert registered_glob is not None
+    assert registered_glob is not returned_glob
+    assert registered_glob.input_schema == {
         "type": "object",
         "additionalProperties": True,
     }
-    assert registered_tool_search.input_schema is not returned_tool_search.input_schema
+    assert registered_glob.input_schema is not returned_glob.input_schema
 
 
 def test_core_tool_catalog_uses_conservative_permission_and_mode_metadata() -> None:
@@ -195,16 +190,13 @@ def test_core_tool_catalog_uses_conservative_permission_and_mode_metadata() -> N
     assert manifests["ExitPlanMode"].mutates_workspace is False
     assert manifests["ExitPlanMode"].dangerous is False
 
-    assert manifests["ArtifactCreate"].permission == "write"
-    assert manifests["ArtifactCreate"].available_in_modes == ("act",)
-
     assert manifests["Clock"].permission == "meta"
     assert manifests["Clock"].available_in_modes == ("plan", "act")
 
     assert manifests["Calculation"].permission == "meta"
     assert manifests["Calculation"].available_in_modes == ("plan", "act")
 
-    for name in ("HealthStatus", "TaskList", "TaskGet", "TaskOutput", "CronList"):
+    for name in ("TaskList", "TaskGet", "TaskOutput", "CronList"):
         assert manifests[name].permission == "meta"
         assert manifests[name].available_in_modes == ("plan", "act")
         assert manifests[name].mutates_workspace is False
@@ -219,7 +211,7 @@ def test_register_core_tool_manifests_keeps_catalog_enabled_and_protected() -> N
     assert tuple(manifest.name for manifest in manifests) == EXPECTED_CORE_TOOL_NAMES
     assert [tool.name for tool in registry.list_all()] == sorted(EXPECTED_CORE_TOOL_NAMES)
     # list_available only includes enabled tools — MemoryWrite is default-OFF
-    _act_only_tools = {"FileWrite", "FileEdit", "PatchApply", "Bash", "TestRun", "ExitPlanMode", "ArtifactCreate", "MemoryWrite"}
+    _act_only_tools = {"FileWrite", "FileEdit", "PatchApply", "Bash", "TestRun", "ExitPlanMode", "MemoryWrite"}
     assert {tool.name for tool in registry.list_available(mode="plan")} == {
         name
         for name in EXPECTED_CORE_TOOL_NAMES

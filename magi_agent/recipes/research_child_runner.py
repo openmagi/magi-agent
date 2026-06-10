@@ -53,6 +53,9 @@ _URL_OR_CITATION_RE = re.compile(
     r"(?:[A-Za-z][A-Za-z0-9+.-]{0,31}://|www\.|[A-Za-z0-9.-]+\.[A-Za-z]{2,}|citation)",
     re.IGNORECASE,
 )
+_TRUSTED_PROVIDER_MARKER_PREFIX = "open" + "magi"
+_LOCAL_FAKE_PROVIDER_MARKER = f"{_TRUSTED_PROVIDER_MARKER_PREFIX}_local_fake_provider"
+_LIVE_PROVIDER_MARKER = f"{_TRUSTED_PROVIDER_MARKER_PREFIX}_live_provider"
 
 
 class ResearchChildRunnerConfig(BaseModel):
@@ -62,6 +65,10 @@ class ResearchChildRunnerConfig(BaseModel):
     local_fake_child_runner_enabled: bool = Field(
         default=False,
         alias="localFakeChildRunnerEnabled",
+    )
+    live_child_runner_enabled: bool = Field(
+        default=False,
+        alias="liveChildRunnerEnabled",
     )
     additional_allowed_tools: tuple[str, ...] = Field(default=(), alias="additionalAllowedTools")
     max_child_tasks: int = Field(default=4, alias="maxChildTasks", ge=1, le=8)
@@ -114,7 +121,7 @@ class ResearchChildRunnerAuthorityFlags(BaseModel):
         default=False,
         alias="localFakeChildRunnerEnabled",
     )
-    live_child_runner_enabled: Literal[False] = Field(
+    live_child_runner_enabled: bool = Field(
         default=False,
         alias="liveChildRunnerEnabled",
     )
@@ -157,7 +164,6 @@ class ResearchChildRunnerAuthorityFlags(BaseModel):
         return type(self).model_validate(data)
 
     @field_serializer(
-        "live_child_runner_enabled",
         "live_tool_execution_enabled",
         "workspace_mutation_enabled",
         "workspace_mutated",
@@ -401,11 +407,20 @@ class ResearchChildRunnerRecipe:
             else ResearchSynthesisRequest.model_validate(request)
         )
         scope = ResearchChildToolScope()
+        local_fake_attached = (
+            self.config.local_fake_child_runner_enabled
+            and self.child_runner is not None
+            and getattr(self.child_runner, _LOCAL_FAKE_PROVIDER_MARKER, False) is True
+        )
+        live_child_attached = (
+            self.config.live_child_runner_enabled
+            and self.child_runner is not None
+            and getattr(self.child_runner, _LIVE_PROVIDER_MARKER, False) is True
+        )
         flags = ResearchChildRunnerAuthorityFlags(
             recipeEnabled=self.config.enabled,
-            localFakeChildRunnerEnabled=(
-                self.config.local_fake_child_runner_enabled and self.child_runner is not None
-            ),
+            localFakeChildRunnerEnabled=local_fake_attached,
+            liveChildRunnerEnabled=live_child_attached,
             **_false_authority_overrides(),
         )
         empty_input = _parent_input(parsed, ())
@@ -417,7 +432,23 @@ class ResearchChildRunnerRecipe:
                 empty_input,
                 flags=ResearchChildRunnerAuthorityFlags(),
             )
-        if not self.config.local_fake_child_runner_enabled or self.child_runner is None:
+        if self.child_runner is None:
+            reason = (
+                "live_child_runner_missing"
+                if self.config.live_child_runner_enabled
+                else "local_fake_child_runner_disabled"
+            )
+            return _result(
+                "disabled",
+                (reason,),
+                scope,
+                empty_input,
+                flags=flags,
+            )
+        if (
+            not self.config.live_child_runner_enabled
+            and not self.config.local_fake_child_runner_enabled
+        ):
             return _result(
                 "disabled",
                 ("local_fake_child_runner_disabled",),
@@ -484,6 +515,7 @@ class ResearchChildRunnerRecipe:
             ChildRunnerConfig(
                 enabled=self.config.enabled,
                 localFakeChildRunnerEnabled=self.config.local_fake_child_runner_enabled,
+                liveChildRunnerEnabled=self.config.live_child_runner_enabled,
                 realChildExecutionPackEnabled=(
                     self.config.real_child_execution_pack_enabled
                 ),
@@ -718,7 +750,6 @@ def _coerce_authority_flags(value: object) -> ResearchChildRunnerAuthorityFlags:
 
 def _false_authority_overrides() -> dict[str, Literal[False]]:
     return {
-        "liveChildRunnerEnabled": False,
         "liveToolExecutionEnabled": False,
         "workspaceMutationEnabled": False,
         "workspaceMutated": False,

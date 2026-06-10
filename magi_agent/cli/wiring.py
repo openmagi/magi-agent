@@ -554,6 +554,11 @@ def _build_first_party_adk_tools(
         registry,
         general_automation_receipts=receipt_store,
     )
+    # Only advertise tools that actually have an execution handler bound. A
+    # manifest with no handler can never be dispatched, so exposing it would
+    # advertise a capability the runtime cannot deliver. (Handler-less catalog
+    # manifests were removed in doc 12 PR5 — see tools/catalog.py — so this
+    # filter is now a guard rather than a routine drop-list.)
     exposed_tool_names = tuple(
         registration.manifest.name
         for registration in (

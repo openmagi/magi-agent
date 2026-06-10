@@ -128,6 +128,11 @@ retained as a kill switch / honesty selector rather than an opt-in:
   full runtime profile and OFF under a safe/eval `MAGI_RUNTIME_PROFILE`. They are
   modelled as `profile_bool` in the registry so their default is reported as
   profile-resolved, not a flat constant.
+- `MAGI_CHILD_RUNNER_LIVE_ENABLED` remains an explicit safety gate at the env
+  seam, but the installed full runtime profile now sets it to `1` with
+  `MAGI_CHILD_RUNNER_TOOLSET=readonly`. That gives full-profile installs real
+  read-only child delegation by default while keeping mutating child turns a
+  separate `full` operator choice.
 
 ## Promotion and the "don't strand a seam" policy
 
