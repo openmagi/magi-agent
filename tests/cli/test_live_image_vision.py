@@ -39,7 +39,9 @@ import zlib
 
 import pytest
 
-_KEY_ENVS = ("GOOGLE_API_KEY", "GEMINI_API_KEY", "GOOGLE_GENAI_API_KEY")
+# Match the CLI provider key lookup exactly (magi_agent/cli/providers.py); a key
+# the provider does not read would un-skip the test but fall back to the stub engine.
+_KEY_ENVS = ("GEMINI_API_KEY", "GOOGLE_API_KEY")
 
 
 def _red_png() -> bytes:
