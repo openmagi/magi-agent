@@ -5,9 +5,6 @@ from magi_agent.runtime.error_recovery.engine import (
     DEFAULT_STRATEGIES,
     RecoveryEngine,
 )
-from magi_agent.runtime.error_recovery.resilient_boundary import (
-    ResilientRunnerSessionBoundary,
-)
 from magi_agent.runtime.error_recovery.strategies.reactive_compact import (
     LLMCompactCaller,
     ReactiveCompactStrategy,
@@ -37,7 +34,6 @@ __all__ = [
     "RecoveryEngine",
     "RecoveryResult",
     "RecoveryStrategy",
-    "ResilientRunnerSessionBoundary",
     "StubLLMCompactCaller",
     "TerminalError",
 ]

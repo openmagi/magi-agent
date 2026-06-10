@@ -94,10 +94,6 @@
           "state": "existing"
         },
         {
-          "path": "magi_agent/runtime/turn_controller.py",
-          "state": "existing"
-        },
-        {
           "path": "tests/test_e2e_harness_pr2_adk_turn_runner.py",
           "state": "existing"
         }

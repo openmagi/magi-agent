@@ -1055,7 +1055,6 @@ def test_runtime_code_diff_stays_within_final_review_fix_slice() -> None:
         "magi-agent/tests/test_adk_runner_lifecycle_events.py",
         "magi-agent/tests/test_event_bridge.py",
         "magi-agent/tests/test_memory_self_improvement_mission_parity_matrix.py",
-        "magi-agent/tests/test_priority_a_runner_session_boundary.py",
         "magi-agent/tests/test_sse_writer.py",
     }
     if changed <= live_work_console_pr2_paths:

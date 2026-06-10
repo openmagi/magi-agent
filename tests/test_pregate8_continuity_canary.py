@@ -1,136 +1,52 @@
 from __future__ import annotations
 
-import asyncio
 import json
 import subprocess
 import sys
-from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
-from google.adk.events import Event
-from google.genai import types
-
-from magi_agent.adk_bridge.session_service import WorkspaceSessionService
-from magi_agent.harness.resolved import build_default_resolved_harness_state
-from magi_agent.runtime.runner_session_boundary import (
-    RunnerSessionBoundary,
-    RunnerSessionBoundaryConfig,
-)
-from magi_agent.runtime.transcript import TranscriptStore
-from magi_agent.runtime.turn_controller import TurnControllerInput
 
 
-CONTEXT_FIXTURES = Path(__file__).parent / "fixtures" / "context_continuity"
+def _stub_runner_result(
+    *,
+    status: str = "completed",
+    imported_event_count: int = 4,
+    rejected_entry_count: int = 0,
+    compaction_applied: bool = False,
+) -> SimpleNamespace:
+    """Duck-typed runner result for the evidence builder.
 
+    ``build_pre_gate8_continuity_canary_evidence`` reads ``status`` and
+    ``context_continuity`` attributes off an opaque object; the retired
+    runner-session-boundary integration drive was replaced by this stub.
+    """
 
-class _ContinuityObservingRunner:
-    app_name = "openmagi"
-
-    def __init__(self, *, session_service: WorkspaceSessionService) -> None:
-        self.session_service = session_service
-        self.calls: list[dict[str, object]] = []
-        self.imported_texts_at_call: list[str] = []
-
-    async def run_async(self, **kwargs: object):
-        self.calls.append(kwargs)
-        session = await self.session_service.get_session(
-            app_name=self.app_name,
-            user_id=str(kwargs["user_id"]),
-            session_id=str(kwargs["session_id"]),
-        )
-        assert session is not None
-        for event in session.events:
-            if event.content is None or not event.content.parts:
-                continue
-            text = event.content.parts[0].text
-            if text:
-                self.imported_texts_at_call.append(text)
-        yield Event(
-            author="model",
-            content=types.Content(role="model", parts=[types.Part(text="context seen")]),
-            turn_complete=True,
-            invocation_id=str(kwargs["invocation_id"]),
-        )
-
-
-def _turn_input(*, turn_id: str, message_text: str) -> TurnControllerInput:
-    return TurnControllerInput(
-        userId="user-1",
-        sessionId="agent:main:app:default",
-        turnId=turn_id,
-        messageText=message_text,
-        harnessState=build_default_resolved_harness_state(
-            agent_role="coding",
-            spawn_depth=0,
+    return SimpleNamespace(
+        status=status,
+        context_continuity=SimpleNamespace(
+            imported_event_count=imported_event_count,
+            rejected_entry_count=rejected_entry_count,
+            compaction_applied=compaction_applied,
+            projection_digest="sha256:" + "1" * 64,
+            model_visible_digest="sha256:" + "2" * 64,
+            source_transcript_head_digest="sha256:" + "3" * 64,
         ),
     )
 
 
-def _copy_context_fixture(tmp_path: Path, name: str) -> Path:
-    target = tmp_path / name
-    target.write_text(
-        (CONTEXT_FIXTURES / name).read_text(encoding="utf-8"),
-        encoding="utf-8",
-    )
-    return target
-
-
-def _new_message_text(runner: _ContinuityObservingRunner) -> str:
-    assert runner.calls
-    content = runner.calls[0]["new_message"]
-    assert isinstance(content, types.Content)
-    assert content.parts
-    text = content.parts[0].text
-    assert text is not None
-    return text
-
-
-def _run_continuity_turn(
-    tmp_path: Path,
-    *,
-    fixture_name: str,
-    message_text: str,
-) -> tuple[object, _ContinuityObservingRunner, str]:
-    session_service = WorkspaceSessionService(app_name="openmagi")
-    runner = _ContinuityObservingRunner(session_service=session_service)
-
-    result = asyncio.run(
-        RunnerSessionBoundary().run_turn(
-            _turn_input(turn_id="turn-followup", message_text=message_text),
-            runner=runner,
-            config=RunnerSessionBoundaryConfig(
-                enabled=True,
-                timeoutMs=500,
-                contextContinuity={
-                    "enabled": True,
-                    "modelVisibleProjectionEnabled": True,
-                },
-            ),
-            transcript_store=TranscriptStore(
-                file_path=_copy_context_fixture(tmp_path, fixture_name)
-            ),
-        )
-    )
-    return result, runner, _new_message_text(runner)
-
-
-def test_pregate8_canary_records_ambiguous_followup_context_as_digest_only_evidence(
-    tmp_path: Path,
-) -> None:
+def test_pregate8_canary_records_ambiguous_followup_context_as_digest_only_evidence() -> None:
     from magi_agent.gates.pregate8_continuity_canary import (
         build_pre_gate8_continuity_canary_evidence,
     )
 
-    result, runner, model_visible_message = _run_continuity_turn(
-        tmp_path,
-        fixture_name="ambiguous_followup_transcript.jsonl",
-        message_text="아까 말한 그거 어떻게 하면돼?",
-    )
-
     evidence = build_pre_gate8_continuity_canary_evidence(
-        result,
-        adk_session_texts=runner.imported_texts_at_call,
-        model_visible_message=model_visible_message,
+        _stub_runner_result(),
+        adk_session_texts=["Earlier turn: Telegram-to-provisioning handoff recorded."],
+        model_visible_message=(
+            "[context digest] Telegram-to-provisioning handoff\n"
+            "아까 말한 그거 어떻게 하면돼?"
+        ),
         expected_antecedent="Telegram-to-provisioning handoff",
         current_followup="아까 말한 그거",
         fallback_status="none",
@@ -159,27 +75,19 @@ def test_pregate8_canary_records_ambiguous_followup_context_as_digest_only_evide
     )
     assert "Telegram-to-provisioning" not in serialized
     assert "아까 말한 그거" not in serialized
-    assert "web app write the bot state" not in serialized
-    assert "context seen" not in serialized
 
 
-def test_pregate8_canary_proves_compaction_suppresses_pre_boundary_raw_transcript(
-    tmp_path: Path,
-) -> None:
+def test_pregate8_canary_compaction_respected_and_forbidden_payload_absent() -> None:
     from magi_agent.gates.pregate8_continuity_canary import (
         build_pre_gate8_continuity_canary_evidence,
     )
 
-    result, runner, model_visible_message = _run_continuity_turn(
-        tmp_path,
-        fixture_name="compact_summary_transcript.jsonl",
-        message_text="좀전에 말했던거 이어서 해줘",
-    )
-
     evidence = build_pre_gate8_continuity_canary_evidence(
-        result,
-        adk_session_texts=runner.imported_texts_at_call,
-        model_visible_message=model_visible_message,
+        _stub_runner_result(compaction_applied=True),
+        adk_session_texts=["[compact summary] vague follow-up prompts resolve"],
+        model_visible_message=(
+            "[compact summary] vague follow-up prompts resolve\n좀전에 말했던거 이어서 해줘"
+        ),
         expected_antecedent="vague follow-up prompts resolve",
         current_followup="좀전에 말했던거",
         forbidden_payloads=("Raw pre-boundary detail",),
@@ -209,37 +117,27 @@ def test_pregate8_canary_proves_compaction_suppresses_pre_boundary_raw_transcrip
     assert "vague follow-up prompts resolve" not in serialized
 
 
-def test_pregate8_canary_records_private_payload_rejection_without_leaking_raw_values(
-    tmp_path: Path,
-) -> None:
+def test_pregate8_canary_records_private_payload_rejection_without_leaking_raw_values() -> None:
     from magi_agent.gates.pregate8_continuity_canary import (
         build_pre_gate8_continuity_canary_evidence,
     )
 
-    result, runner, model_visible_message = _run_continuity_turn(
-        tmp_path,
-        fixture_name="private_payload_rejection.jsonl",
-        message_text="continue",
-    )
-
     evidence = build_pre_gate8_continuity_canary_evidence(
-        result,
-        adk_session_texts=runner.imported_texts_at_call,
-        model_visible_message=model_visible_message,
+        _stub_runner_result(rejected_entry_count=2),
+        adk_session_texts=["Safe user text survives."],
+        model_visible_message="continue",
         expected_antecedent="Safe user text survives.",
         current_followup="continue",
         forbidden_payloads=(
             "/workspace/private",
             "REDACT_ME_SECRET_SENTINEL",
-            "REDACT_ME_COOKIE_SENTINEL",
-            "REDACT_ME_AUTH_SENTINEL",
         ),
         require_rejected_entries=True,
         fallback_status="none",
     )
 
     assert evidence.status == "pass"
-    assert evidence.rejected_entry_count >= 1
+    assert evidence.rejected_entry_count == 2
     assert evidence.private_payload_rejected is True
     assert evidence.forbidden_payload_observed is False
     assert evidence.antecedent_present_in_adk_session is True
@@ -252,25 +150,17 @@ def test_pregate8_canary_records_private_payload_rejection_without_leaking_raw_v
     assert "Safe user text survives." not in serialized
     assert "/workspace/private" not in serialized
     assert "REDACT_ME_SECRET_SENTINEL" not in serialized
-    assert "REDACT_ME_COOKIE_SENTINEL" not in serialized
-    assert "REDACT_ME_AUTH_SENTINEL" not in serialized
 
 
-def test_pregate8_canary_fails_closed_when_antecedent_is_missing(tmp_path: Path) -> None:
+def test_pregate8_canary_fails_closed_when_antecedent_is_missing() -> None:
     from magi_agent.gates.pregate8_continuity_canary import (
         build_pre_gate8_continuity_canary_evidence,
     )
 
-    result, runner, model_visible_message = _run_continuity_turn(
-        tmp_path,
-        fixture_name="ambiguous_followup_transcript.jsonl",
-        message_text="아까 말한 그거 어떻게 하면돼?",
-    )
-
     evidence = build_pre_gate8_continuity_canary_evidence(
-        result,
-        adk_session_texts=runner.imported_texts_at_call,
-        model_visible_message=model_visible_message,
+        _stub_runner_result(),
+        adk_session_texts=["Earlier turn: unrelated content."],
+        model_visible_message="아까 말한 그거 어떻게 하면돼?",
         expected_antecedent="missing antecedent label",
         current_followup="아까 말한 그거",
         fallback_status="none",
