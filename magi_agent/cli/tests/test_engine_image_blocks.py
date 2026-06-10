@@ -113,3 +113,16 @@ def test_build_opening_parts_skips_invalid_block():
     parts = MagiEngineDriver._build_opening_parts(fake_types, "hello", blocks)
     # Only the text part — both image blocks are malformed/unsupported
     assert parts == [("text", "hello")]
+
+
+def test_turn_images_reads_from_dict():
+    from magi_agent.cli.engine import MagiEngineDriver
+
+    block = {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": _PNG}}
+    assert MagiEngineDriver._turn_images({"image_blocks": (block,)}) == (block,)
+
+
+def test_turn_images_dict_absent_returns_empty():
+    from magi_agent.cli.engine import MagiEngineDriver
+
+    assert MagiEngineDriver._turn_images({"prompt": "hi"}) == ()
