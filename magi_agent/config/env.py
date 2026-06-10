@@ -29,6 +29,7 @@ from .models import (
 if TYPE_CHECKING:
     from magi_agent.shadow.gate5b4c3_shadow_generation_contract import (
         Gate5B4C3ShadowGenerationBudgets,
+        Gate5B4C3ShadowGenerationProviderCredentialBinding,
     )
     from magi_agent.transport.shadow_generations import (
         Gate5B4C3ShadowGenerationRouteConfig,
