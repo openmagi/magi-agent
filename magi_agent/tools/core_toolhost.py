@@ -34,6 +34,8 @@ CORE_TOOLHOST_DIRECT_TOOL_NAMES = (
     "FileEdit",
     "PatchApply",
     "Bash",
+    "TestRun",
+    "GitDiff",
 )
 
 

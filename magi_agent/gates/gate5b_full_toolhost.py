@@ -93,6 +93,10 @@ def _build_bash_env(cfg: EgressProxyConfig | None = None) -> dict[str, str]:
 Gate5BFullToolHostStatus = Literal["disabled", "blocked", "ready"]
 Gate5BFullToolOutcomeStatus = Literal["ok", "blocked", "error", "duplicate"]
 
+# TestRun applies the catalog manifest's 300s verification timeout instead of
+# the short Bash command timeout (catalog.py TestRun timeout_ms=300_000).
+_TEST_RUN_TIMEOUT_S = 300.0
+
 _GATE5B_LEGACY_FULL_TOOLHOST_TOOL_NAMES = (
     "Clock",
     "Calculation",
@@ -1058,29 +1062,70 @@ class Gate5BFullToolHost:
                 return self._apply_envelope_patch(patch_text)
             raise ValueError("unsupported_patch_shape")
         if tool_name == "Bash":
-            command = str(args.get("command", "")).strip()
-            if not command:
-                raise ValueError("empty_command")
-            completed = subprocess.run(
-                command,
-                cwd=self.workspace_root,
-                shell=True,
-                capture_output=True,
-                text=True,
-                timeout=self.config.command_timeout_ms / 1000,
-                env=_build_bash_env(),
-                check=False,
+            return self._run_shell_command(
+                str(args.get("command", "")),
+                timeout_s=self.config.command_timeout_ms / 1000,
             )
-            stdout = _redact(completed.stdout)[0 : self.config.max_per_tool_output_bytes]
-            stderr = _redact(completed.stderr)[0 : self.config.max_per_tool_output_bytes]
-            return {
-                "exitCode": completed.returncode,
-                "stdout": stdout,
-                "stderr": stderr,
-                "stdoutDigest": _digest(completed.stdout),
-                "stderrDigest": _digest(completed.stderr),
-            }
+        if tool_name == "TestRun":
+            # TestRun shares Bash's execution path and approval surface
+            # (safety.py treats {Bash, TestRun} via _shell_decision) but applies
+            # the manifest's 300s verification timeout instead of the short Bash
+            # command timeout.
+            return self._run_shell_command(
+                str(args.get("command", "")),
+                timeout_s=_TEST_RUN_TIMEOUT_S,
+            )
+        if tool_name == "GitDiff":
+            return self._handle_git_diff()
         return await self._dispatch_registry_tool(tool_name, args, tool_call_id=tool_call_id)
+
+    def _run_shell_command(self, raw_command: str, *, timeout_s: float) -> dict[str, object]:
+        command = raw_command.strip()
+        if not command:
+            raise ValueError("empty_command")
+        completed = subprocess.run(
+            command,
+            cwd=self.workspace_root,
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=timeout_s,
+            env=_build_bash_env(),
+            check=False,
+        )
+        stdout = _redact(completed.stdout)[0 : self.config.max_per_tool_output_bytes]
+        stderr = _redact(completed.stderr)[0 : self.config.max_per_tool_output_bytes]
+        return {
+            "exitCode": completed.returncode,
+            "stdout": stdout,
+            "stderr": stderr,
+            "stdoutDigest": _digest(completed.stdout),
+            "stderrDigest": _digest(completed.stderr),
+        }
+
+    def _handle_git_diff(self) -> dict[str, object]:
+        """Return read-only workspace git diff metadata.
+
+        Runs ``git`` with ``shell=False`` in the workspace root. Output is
+        redacted and byte-bounded. When the directory is not a git repository
+        the result is explicit (``isGitRepo: False``) rather than fabricated.
+        """
+
+        if not _is_git_repository(self.workspace_root):
+            return {"isGitRepo": False, "status": [], "numstat": []}
+        status_lines = _git_status_porcelain(
+            self.workspace_root,
+            byte_limit=self.config.max_per_tool_output_bytes,
+        )
+        numstat = _git_diff_numstat(
+            self.workspace_root,
+            byte_limit=self.config.max_per_tool_output_bytes,
+        )
+        return {
+            "isGitRepo": True,
+            "status": status_lines,
+            "numstat": numstat,
+        }
 
     async def _dispatch_registry_tool(
         self,
@@ -2272,6 +2317,61 @@ def _sanitize_output(value: object) -> object:
 def _redact(value: str) -> str:
     value = _URL_USERINFO_RE.sub(r"\g<scheme>[redacted]@\g<authority>", value)
     return _SENSITIVE_RE.sub("[redacted]", value)
+
+
+_GIT_DIFF_TIMEOUT_S = 10.0
+
+
+def _run_git(workspace_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", *args],
+        cwd=workspace_root,
+        shell=False,
+        capture_output=True,
+        text=True,
+        timeout=_GIT_DIFF_TIMEOUT_S,
+        check=False,
+    )
+
+
+def _is_git_repository(workspace_root: Path) -> bool:
+    try:
+        completed = _run_git(
+            workspace_root, "rev-parse", "--is-inside-work-tree"
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return completed.returncode == 0 and completed.stdout.strip() == "true"
+
+
+def _git_status_porcelain(workspace_root: Path, *, byte_limit: int) -> list[str]:
+    completed = _run_git(workspace_root, "status", "--porcelain")
+    if completed.returncode != 0:
+        return []
+    rendered = _redact(completed.stdout)[0:byte_limit]
+    return [line for line in rendered.splitlines() if line.strip()]
+
+
+def _git_diff_numstat(workspace_root: Path, *, byte_limit: int) -> list[dict[str, object]]:
+    completed = _run_git(workspace_root, "diff", "--numstat")
+    if completed.returncode != 0:
+        return []
+    rendered = _redact(completed.stdout)[0:byte_limit]
+    entries: list[dict[str, object]] = []
+    for line in rendered.splitlines():
+        parts = line.split("\t")
+        if len(parts) < 3:
+            continue
+        added_raw, deleted_raw, path = parts[0], parts[1], parts[2]
+        entries.append(
+            {
+                "path": path,
+                # Binary files report "-" for added/deleted; surface as None.
+                "added": int(added_raw) if added_raw.isdigit() else None,
+                "deleted": int(deleted_raw) if deleted_raw.isdigit() else None,
+            }
+        )
+    return entries
 
 
 def _encoded_len(value: object) -> int:
