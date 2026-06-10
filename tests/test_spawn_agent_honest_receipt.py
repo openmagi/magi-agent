@@ -22,6 +22,8 @@ paths.
 """
 from __future__ import annotations
 
+import asyncio
+
 from magi_agent.tools.context import ToolContext
 
 
@@ -47,7 +49,7 @@ def test_spawn_agent_gate_off_status_is_honest_not_attached(monkeypatch) -> None
 
     from magi_agent.plugins.native.subagents import spawn_agent
 
-    result = spawn_agent({"prompt": "do it", "persona": "researcher"}, _context())
+    result = asyncio.run(spawn_agent({"prompt": "do it", "persona": "researcher"}, _context()))
 
     assert result.status == "ok"
     output = result.output
@@ -71,7 +73,7 @@ def test_spawn_agent_gate_off_preserves_legacy_keys(monkeypatch) -> None:
     from magi_agent.plugins.native._common import digest
     from magi_agent.plugins.native.subagents import spawn_agent
 
-    result = spawn_agent({"prompt": "Hello world", "persona": "tester"}, _context(spawnDepth=2))
+    result = asyncio.run(spawn_agent({"prompt": "Hello world", "persona": "tester"}, _context(spawnDepth=2)))
     output = result.output
 
     # Every pre-existing key/value is preserved (only the status *literal* changed
@@ -89,7 +91,7 @@ def test_spawn_agent_kill_switch_also_honest(monkeypatch) -> None:
 
     from magi_agent.plugins.native.subagents import spawn_agent
 
-    result = spawn_agent({"prompt": "x", "persona": "tester"}, _context())
+    result = asyncio.run(spawn_agent({"prompt": "x", "persona": "tester"}, _context()))
     output = result.output
 
     assert output["status"] == "not_attached"
