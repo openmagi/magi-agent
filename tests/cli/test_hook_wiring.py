@@ -252,6 +252,38 @@ async def test_before_tool_bridge_allows_on_continue():
 
 
 @pytest.mark.asyncio
+async def test_before_tool_bridge_fail_open_on_hook_throw(tmp_path):
+    """Spec doc 11 PR2 test #4: a BEFORE_TOOL_USE hook that *raises* with
+    ``failOpen=True`` must NOT block the tool — the turn continues.
+
+    A raising handler is caught by the bus's fail-open path (the manifest's
+    ``fail_open`` flag turns the failure into a ``continue`` result), so the
+    bridge returns ``None`` (the tool runs) rather than a deny dict.
+    """
+    from magi_agent.hooks.bus import RegisteredHook
+    from magi_agent.hooks.manifest import HookManifest, HookPoint
+
+    def _raising_handler(ctx):
+        raise RuntimeError("boom")
+
+    manifest = HookManifest(
+        name="thrower",
+        point=HookPoint.BEFORE_TOOL_USE,
+        description="test",
+        source=_SOURCE,
+        fail_open=True,
+    )
+    bus = HookBus(hooks=(RegisteredHook(manifest=manifest, handler=_raising_handler),))
+    runner = _StubRunner()
+    hook_wiring.attach_hook_bus_tool_callbacks(
+        runner=runner, bus=bus, hook_context=_context()
+    )
+    bridge = runner.agent.before_tool_callback[-1]
+    result = await bridge(tool=_StubTool("Edit"), args={}, tool_context=None)
+    assert result is None  # fail-open: tool still runs, turn continues
+
+
+@pytest.mark.asyncio
 async def test_after_tool_bridge_runs_without_blocking():
     observed: list[str] = []
 
