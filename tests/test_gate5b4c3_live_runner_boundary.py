@@ -583,6 +583,20 @@ class _ModelDumpCandidateContentRunner(_FakeRunner):
         yield self._Event()
 
 
+class _PartialAggregateEvent:
+    def __init__(self, text: str, *, partial: bool) -> None:
+        self.partial = partial
+        self.content = _FakeContent(parts=[_FakePart(text)], role="model")
+
+
+class _PartialAggregateRunner(_FakeRunner):
+    async def run_async(self, **kwargs: object) -> object:
+        type(self).run_kwargs = kwargs
+        yield _PartialAggregateEvent("EX", partial=True)
+        yield _PartialAggregateEvent("ACTLY_ONCE_SENTINEL_9Q4Z", partial=True)
+        yield _PartialAggregateEvent("EXACTLY_ONCE_SENTINEL_9Q4Z", partial=False)
+
+
 class _ModelDumpFunctionCallOnlyEvent:
     @property
     def text(self) -> str:
@@ -821,6 +835,21 @@ def _model_dump_candidate_content_primitives() -> Gate5B4C3LiveAdkPrimitives:
     return Gate5B4C3LiveAdkPrimitives(
         Agent=_FakeAgent,
         Runner=_ModelDumpCandidateContentRunner,
+        InMemorySessionService=_FakeSessionService,
+        Content=_FakeContent,
+        Part=_FakePart,
+        GenerateContentConfig=_FakeGenerateContentConfig,
+    )
+
+
+def _partial_aggregate_primitives() -> Gate5B4C3LiveAdkPrimitives:
+    _FakeAgent.created_kwargs = {}
+    _PartialAggregateRunner.created_kwargs = {}
+    _PartialAggregateRunner.run_kwargs = {}
+    _FakeGenerateContentConfig.created_kwargs = {}
+    return Gate5B4C3LiveAdkPrimitives(
+        Agent=_FakeAgent,
+        Runner=_PartialAggregateRunner,
         InMemorySessionService=_FakeSessionService,
         Content=_FakeContent,
         Part=_FakePart,
@@ -1206,6 +1235,27 @@ def test_live_boundary_extracts_model_dump_candidate_text_output() -> None:
     assert result.event_count == 1
     assert result.output_text_internal == "live ADK text from model dump"
     assert result.runner_error_diagnostic is None
+
+
+def test_live_boundary_does_not_reemit_final_aggregate_after_partial_deltas() -> None:
+    public_events: list[dict[str, object]] = []
+    readonly_tool = object()
+
+    result = Gate5B4C3LiveRunnerBoundary(
+        _partial_aggregate_primitives,
+        adk_tools=(readonly_tool,),
+        public_event_sink=lambda event: public_events.append(dict(event)),
+    ).invoke(
+        _gate1a_google_request(),
+        config=_gate1a_google_config(),
+    )
+
+    assert result.status == "completed"
+    assert result.output_text_internal == "EXACTLY_ONCE_SENTINEL_9Q4Z"
+    text_deltas = [
+        event["delta"] for event in public_events if event.get("type") == "text_delta"
+    ]
+    assert text_deltas == ["EX", "ACTLY_ONCE_SENTINEL_9Q4Z"]
 
 
 def test_live_boundary_fails_closed_on_tool_policy_mismatch_before_adk_load() -> None:
