@@ -44,6 +44,23 @@ def _error(tool: str, code: str, message: str, **meta: object) -> ToolResult:
     )
 
 
+def _resolve_max_usd() -> str:
+    """Return a validated positive per-run USD cap, falling back to the default.
+
+    A misconfigured APIFY_MAX_USD_PER_RUN (empty, zero, negative, non-numeric)
+    must never weaken the cost cap, so anything that does not parse as a positive
+    float falls back to _DEFAULT_MAX_USD.
+    """
+    raw = os.environ.get("APIFY_MAX_USD_PER_RUN")
+    if raw:
+        try:
+            if float(raw) > 0:
+                return raw
+        except ValueError:
+            pass
+    return _DEFAULT_MAX_USD
+
+
 async def apify_search_actors(arguments: dict[str, object], context: ToolContext) -> ToolResult:
     """Discover Apify Actors by keyword. Free; no APIFY_TOKEN required.
 
@@ -138,7 +155,7 @@ async def apify_run_actor(arguments: dict[str, object], context: ToolContext) ->
     query = urllib.parse.urlencode({
         "token": token,
         "timeout": _RUN_TIMEOUT_S,
-        "maxTotalChargeUsd": os.environ.get("APIFY_MAX_USD_PER_RUN") or _DEFAULT_MAX_USD,
+        "maxTotalChargeUsd": _resolve_max_usd(),
         "format": "json",
         "limit": _ITEMS_LIMIT,
     })

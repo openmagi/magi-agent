@@ -227,3 +227,26 @@ def test_run_actor_non_408_http_error_is_apify_error(monkeypatch: pytest.MonkeyP
     assert result.status == "error"
     assert result.error_code == "apify_error"
     assert result.metadata.get("http_status") == 403
+
+
+@pytest.mark.parametrize(
+    ("env_value", "expected"),
+    [("0", "1.0"), ("-5", "1.0"), ("banana", "1.0"), ("0.50", "0.50")],
+)
+def test_run_actor_max_usd_env_validation(
+    monkeypatch: pytest.MonkeyPatch, env_value: str, expected: str
+) -> None:
+    monkeypatch.setenv("APIFY_TOKEN", "tok_secret")
+    monkeypatch.setenv("APIFY_MAX_USD_PER_RUN", env_value)
+    captured: list[urllib.request.Request] = []
+
+    def _open(request: urllib.request.Request, **_: object) -> _FakeResponse:
+        captured.append(request)
+        return _FakeResponse([{"post": 1}])
+
+    monkeypatch.setattr(urllib.request, "urlopen", _open)
+    result = asyncio.run(
+        apify.apify_run_actor({"actor_id": "apify~x", "run_input": "{}"}, _ctx())
+    )
+    assert result.status == "ok"
+    assert f"maxTotalChargeUsd={expected}" in captured[0].full_url
