@@ -193,6 +193,7 @@ def build_headless_runtime(
             bot_id=bot_id,
             owner_user_id=owner_user_id,
             learning_live_readiness=learning_live_readiness,
+            permission_mode=permission_mode,
         )
     )
     composio_bundle, composio_attached = _build_composio_bundle_for_mode(
@@ -374,6 +375,7 @@ def _build_default_runner(
     bot_id: str = "local",
     owner_user_id: str = "local",
     learning_live_readiness: object | None = None,
+    permission_mode: "PermissionMode" = "default",
 ) -> object:
     """Build the CLI's default runner.
 
@@ -419,6 +421,7 @@ def _build_default_runner(
                 session_id=session_id,
                 mode=mode,
                 memory_mode=memory_mode,
+                permission_mode=permission_mode,
                 general_automation_receipts=general_automation_receipts,
                 local_tool_evidence_collector=local_tool_evidence,
             ),
@@ -447,6 +450,7 @@ def _build_first_party_adk_tools(
     session_id: str,
     mode: "RuntimeMode" = "act",
     memory_mode: "MemoryMode | str" = "normal",
+    permission_mode: PermissionMode = "default",
     general_automation_receipts: object | None = None,
     local_tool_evidence_collector: object | None = None,
 ) -> list[object]:
@@ -557,10 +561,11 @@ def _build_first_party_adk_tools(
             workspace_ref="local-cli-workspace",
             memory_mode=memory_mode_value,
             channel="cli",
-            permission_scope={
-                "mode": "selected_full_toolhost",
-                "source": "selected_full_toolhost",
-            },
+            permission_scope=_resolve_first_party_permission_scope(
+                tool_name if isinstance(tool_name, str) else None,
+                registry=registry,
+                permission_mode=permission_mode,
+            ),
             execution_contract={"agentRole": "general"},
             source_ledger=_source_ledger_for_session(
                 local_tool_evidence_collector,
@@ -585,6 +590,61 @@ def _build_first_party_adk_tools(
         collector=local_tool_evidence_collector,
         session_id=session_id,
     )
+
+
+_LEGACY_FULL_TOOLHOST_SCOPE: dict[str, object] = {
+    "mode": "selected_full_toolhost",
+    "source": "selected_full_toolhost",
+}
+
+
+def _resolve_first_party_permission_scope(
+    tool_name: str | None,
+    *,
+    registry: object,
+    permission_mode: "PermissionMode",
+) -> dict[str, object]:
+    """Return the ``permission_scope`` for a first-party CLI tool call.
+
+    When ``MAGI_PERMISSION_SCOPE_FROM_MODE`` is OFF (default) this returns the
+    legacy hardcoded ``selected_full_toolhost`` scope — byte-identical to the
+    pre-PR1 behavior. When ON, the scope is derived from ``permission_mode`` +
+    the called tool's manifest via
+    :class:`~magi_agent.tools.permission_scope.PermissionScopeResolver`. Fail-open:
+    any error collapses back to the legacy scope.
+    """
+    try:
+        from magi_agent.config.env import (  # noqa: PLC0415
+            permission_scope_from_mode_enabled,
+        )
+
+        if not permission_scope_from_mode_enabled():
+            return dict(_LEGACY_FULL_TOOLHOST_SCOPE)
+
+        manifest = None
+        if tool_name:
+            resolve_registration = getattr(registry, "resolve_registration", None)
+            registration = (
+                resolve_registration(tool_name) if callable(resolve_registration) else None
+            )
+            manifest = getattr(registration, "manifest", None) if registration else None
+
+        if manifest is None:
+            if str(permission_mode).strip() == "bypassPermissions":
+                return {"mode": "bypass", "source": "bypass"}
+            return {"mode": "default", "source": "builtin"}
+
+        from magi_agent.tools.permission_scope import (  # noqa: PLC0415
+            PermissionScopeResolver,
+        )
+
+        return PermissionScopeResolver().resolve(
+            permission_mode=permission_mode,
+            manifest=manifest,
+            channel="cli",
+        )
+    except Exception:
+        return dict(_LEGACY_FULL_TOOLHOST_SCOPE)
 
 
 def _source_ledger_for_session(
