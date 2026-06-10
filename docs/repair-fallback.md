@@ -45,6 +45,6 @@ block plan with a retryable flag.
 
 ## Current behavior vs future repair framework
 
-The current repair mechanism is implicit in the enforcement decision flow and commit boundary block plans. There is no dedicated RepairDecision type that orchestrates a multi-step repair loop across boundaries. The RepairPlan/RepairDecision types in harness/repair_policy.py provide the building blocks, but integration with the enforcement boundary to automatically drive repair sequences is not yet implemented.
+The current repair mechanism is implicit in the engine pre-final gate decision flow and commit boundary block plans. There is no dedicated RepairDecision type that orchestrates a multi-step repair loop across boundaries. The RepairPlan/RepairDecision types in harness/repair_policy.py provide the building blocks, but integration with the engine pre-final gate to automatically drive repair sequences across multiple contracts is not yet implemented.
 
-A future explicit repair framework would unify the enforcement boundary repair_required action, commit boundary retryable block plans, and harness repair policy into a single orchestrated repair loop with configurable strategies per evidence contract.
+A future explicit repair framework would unify the engine pre-final gate repair action, commit boundary retryable block plans, and harness repair policy into a single orchestrated repair loop with configurable strategies per evidence contract.

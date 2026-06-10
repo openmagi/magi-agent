@@ -440,7 +440,7 @@ EvidenceRecord(
 
 The model drafts a claim: "Competitor A charges $99/seat." Before the answer can be committed, the evidence contract evaluates. It checks: is there a SourceInspection record with `inspected=True`? Yes - the record from Step 2 matches. Verdict: pass. The claim is supported and can proceed.
 
-If the model had claimed something without reading the source, the contract verdict would be `missing`. The enforcement boundary logs an audit event and sends the `retry_message` back to the model: "Inspect the source document before making claims." The model then reads the source and tries again — this is the repair flow.
+If the model had claimed something without reading the source, the contract verdict would be `missing`. The engine pre-final gate logs an audit event and sends the `retry_message` back to the model: "Inspect the source document before making claims." The model then reads the source and tries again — this is the repair flow.
 
 ## Step 4 - Output projection
 
@@ -457,7 +457,7 @@ Each layer of the runtime handled a different concern in this scenario:
 - Hook bus — dispatched `beforeToolUse` (permission), `afterToolUse` (evidence), and `beforeCommit` (contract evaluation) hooks
 - Evidence ledger — recorded ToolEvidenceRecord and SourceInspection records with source refs
 - Evidence contracts — required SourceInspection evidence before claims could proceed
-- Enforcement boundary — evaluated contract verdicts and determined audit/block/pass actions
+- Engine pre-final gate — evaluated contract verdicts and determined audit/block/pass actions
 - Output projection — allowed only supported claims with citation references to reach the user
 
 # CLI
@@ -1764,7 +1764,7 @@ Builtin evidence types include GitDiff, TestRun, CodeDiagnostics, CommitCheckpoi
 
 ## Boundary decisions as status updates
 
-Each boundary module produces typed decisions that the console can display. For example, the evidence enforcement boundary produces EvidenceEnforcementDecision with allowed/blocked status. The commit boundary produces CommitBoundaryPlan describing what will be committed. The artifact delivery boundary produces ArtifactChannelDeliveryDecision for file delivery operations.
+Each boundary module produces typed decisions that the console can display. For example, the engine pre-final gate produces an EvidenceContractVerdict with a pass/block_ready state. The commit boundary produces CommitBoundaryPlan describing what will be committed. The artifact delivery boundary produces ArtifactChannelDeliveryDecision for file delivery operations.
 
 These decisions are part of the runtime-only control plane and are not visible to the model. The work console is the primary surface where operators see boundary decisions and their outcomes.
 
@@ -1975,15 +1975,15 @@ An EvidenceContract declares what evidence must be present and what to do when i
 
 ## Evidence flow
 
-Evidence flows through the system in a pipeline: tool call produces a ToolEvidenceRecord, which is promoted to an EvidenceRecord with source kind tool_trace. Collected EvidenceRecords are matched against EvidenceContract requirements. The contract engine produces an EvidenceContractVerdict. The enforcement boundary consumes the verdict and produces an EvidenceEnforcementDecision with a status and action.
+Evidence flows through the system in a pipeline: tool call produces a ToolEvidenceRecord, which is promoted to an EvidenceRecord with source kind tool_trace. Collected EvidenceRecords are matched against EvidenceContract requirements. The contract engine produces an EvidenceContractVerdict. On the live output path the engine pre-final gate (cli/engine.py) consumes that verdict via the verifier bus (harness/verifier_bus.py) and decides whether to pass, block, or repair the turn.
 
-The flow is: tool call -> ToolEvidenceRecord -> EvidenceRecord -> contract matching -> EvidenceContractVerdict -> EvidenceEnforcementDecision.
+The flow is: tool call -> ToolEvidenceRecord -> EvidenceRecord -> contract matching -> EvidenceContractVerdict -> engine pre-final gate (pass / block / repair).
 
 - Step 1: Tool boundary creates ToolEvidenceRecord with kind, status, hashes, and sanitized summaries.
 - Step 2: Record is wrapped as EvidenceRecord with type matching the evidence category (e.g. TestRun, GitDiff).
 - Step 3: Contract engine iterates requirements, matches records by type, checks after-boundary freshness, validates field matchers.
 - Step 4: Verdict summarizes pass/fail with matched evidence and missing requirements.
-- Step 5: Enforcement boundary maps verdict to action: pass, audit, repair, escalate, or block_intent.
+- Step 5: The engine pre-final gate maps the verdict to an action: pass, audit, repair, or block (for coding-domain turns the gate blocks by default; research-domain verdicts are recorded for diagnostics only).
 
 # Projection
 
@@ -2009,7 +2009,7 @@ The commit boundary also plans hook intents (beforeCommit, afterCommit, afterTur
 
 Memory writes follow a separate projection path through the memory write boundary (write_boundary.py). Memory mutation receipts include a public_projection() method that produces a sanitized view safe for model-visible context. The projection strips production execution claims, forces authority flags to False, and sanitizes receipt IDs, provider IDs, turn IDs, and error codes.
 
-Similarly, ChildRunnerResult, ArtifactChannelDeliveryDecision, and EvidenceEnforcementDecision all provide public_projection() methods that strip private metadata before the result is returned to the model.
+Similarly, ChildRunnerResult and ArtifactChannelDeliveryDecision both provide public_projection() methods that strip private metadata before the result is returned to the model.
 
 # Repair and Fallback
 
@@ -2062,9 +2062,9 @@ block plan with a retryable flag.
 
 ## Current behavior vs future repair framework
 
-The current repair mechanism is implicit in the enforcement decision flow and commit boundary block plans. There is no dedicated RepairDecision type that orchestrates a multi-step repair loop across boundaries. The RepairPlan/RepairDecision types in harness/repair_policy.py provide the building blocks, but integration with the enforcement boundary to automatically drive repair sequences is not yet implemented.
+The current repair mechanism is implicit in the engine pre-final gate decision flow and commit boundary block plans. There is no dedicated RepairDecision type that orchestrates a multi-step repair loop across boundaries. The RepairPlan/RepairDecision types in harness/repair_policy.py provide the building blocks, but integration with the engine pre-final gate to automatically drive repair sequences across multiple contracts is not yet implemented.
 
-A future explicit repair framework would unify the enforcement boundary repair_required action, commit boundary retryable block plans, and harness repair policy into a single orchestrated repair loop with configurable strategies per evidence contract.
+A future explicit repair framework would unify the engine pre-final gate repair action, commit boundary retryable block plans, and harness repair policy into a single orchestrated repair loop with configurable strategies per evidence contract.
 
 # Recipes
 
@@ -2543,7 +2543,7 @@ test_evidence = EvidenceRecord(
 
 ## How this compares to built-in recipes
 
-This recipe is under 100 lines. It defines one pack manifest, two evidence contracts, two scopes, and a local test. When activated, the harness engine resolves these contracts, the hook bus evaluates them at after_tool_use and before_commit, and the enforcement boundary logs audit events for missing evidence.
+This recipe is under 100 lines. It defines one pack manifest, two evidence contracts, two scopes, and a local test. When activated, the harness engine resolves these contracts, the hook bus evaluates them at after_tool_use and before_commit, and the engine pre-final gate logs audit events for missing evidence.
 
 Compare this with the built-in research domain (~16,000 lines) which adds source ledger tracking with 9 source kinds and trust tiers, citation auditing with pass/failure/missing per citation, claim graph dependency tracking, multi-layer scope enforcement with child agent delegation, and repair policies with retry backoff. The built-in coding domain (~3,800 lines) adds git diff verification, test run validation with exit code checks, diagnostics integration, and planner command alignment. Most custom recipes need far less; the under-100-line pattern above covers the typical case.
 
@@ -3185,7 +3185,8 @@ Each boundary module exposes Intent, Receipt/Decision, and AuthorityFlags types.
 - ChildTaskRequest / ChildRunnerResult: child runner boundary. Implemented, default-off.
 - ArtifactRecord / ArtifactChannelDeliveryRequest / ArtifactChannelDeliveryDecision: artifact delivery boundary. Implemented, default-off.
 - CommitIntent / CommitBoundaryPlan: commit boundary. Implemented, descriptive only.
-- EvidenceEnforcementRequest / EvidenceEnforcementDecision: enforcement boundary. Implemented, default-off.
+
+Evidence enforcement does not have a standalone boundary type. Evidence contract verdicts (EvidenceContractVerdict) are enforced on the live output path by the engine pre-final gate (cli/engine.py) via the verifier bus (harness/verifier_bus.py).
 
 ## Hook manifest interface (Python)
 
@@ -3225,7 +3226,7 @@ The following interface names appear in design documents or are referenced conce
 - ToolHostRequest / ToolHostReceipt: conceptual types for a dedicated ToolHost boundary. Tool execution currently goes through the hook system (beforeToolUse/afterToolUse) and produces ToolEvidenceRecord, not a separate ToolHostReceipt.
 - RepairDecision (as a cross-boundary orchestrator): the existing RepairDecision in harness/repair_policy.py handles single-plan repair steps, but there is no cross-boundary repair orchestration type.
 - ProjectionResult: no projection write result type exists. The earlier default-off projection write boundary module (and its ProjectionWriteBoundaryResult type) was removed from the codebase.
-- ValidationResult: validation is expressed through EvidenceContractVerdict and EvidenceEnforcementDecision, not a separate ValidationResult type.
+- ValidationResult: validation is expressed through EvidenceContractVerdict and the engine pre-final gate decision, not a separate ValidationResult type.
 
 # Hook Points
 
@@ -3461,7 +3462,7 @@ Contract triggers determine when the contract is evaluated during the turn lifec
 The on_missing field determines the severity of missing evidence.
 
 - audit: missing evidence produces a verdict with state audit or missing. The turn is not blocked. Missing evidence is logged for review. This is the default for contracts that inform rather than enforce.
-- block_final_answer: missing evidence produces a verdict with state block_ready. When consumed by the enforcement boundary, this triggers repair_required, escalate_required, or block_intent depending on the enforcement configuration. This is used for contracts that must be satisfied before output.
+- block_final_answer: missing evidence produces a verdict with state block_ready. When consumed by the engine pre-final gate on the live output path, this blocks the final answer or triggers a repair loop for coding-domain turns (research-domain verdicts are recorded for diagnostics only). This is used for contracts that must be satisfied before output.
 
 ## Contract scoping
 
@@ -3598,11 +3599,11 @@ Evidence contracts are deterministic: given the same contract definition and the
 
 The contract engine (evidence/contracts.py) validates requirements against records using field matchers (equals, one_of, matches, exists). Each requirement specifies a type (matching a BUILTIN_EVIDENCE_TYPES value or custom: prefix) and optional field constraints. The engine produces a verdict with state pass, missing, failed, audit, or block_ready.
 
-## Using local_fake_evaluation_enabled for boundary testing
+## Testing enforcement decisions with the contract engine
 
-The EvidenceRolloutMetadata model (evidence/rollout.py) includes a mode field that can be set to audit or block_final_answer. When testing boundary behavior locally, the evidence enforcement boundary can be configured with local_fake_evaluation_enabled to simulate enforcement decisions without connecting to a live authority provider.
+The EvidenceRolloutMetadata model (evidence/rollout.py) includes a mode field that can be set to audit or block_final_answer. To test enforcement behavior locally, build fixture EvidenceRecords for a contract's requirements and call evaluate_evidence_contract (evidence/contracts.py) to produce an EvidenceContractVerdict without connecting to a live authority provider or executing live tools.
 
-This lets developers test the full boundary decision path: intent creation, boundary evaluation, and receipt production. The boundary will produce real EvidenceEnforcementDecision instances but will not attach live traffic or execution authority (both are typed as Literal[False]).
+This lets developers test the full decision path deterministically: a block_ready verdict is what the engine pre-final gate (cli/engine.py) consumes on the live output path to block or repair a coding-domain turn, so asserting on the verdict exercises the same enforcement signal without attaching live traffic or execution authority.
 
 ## Creating test EvidenceRecord instances
 
@@ -3710,15 +3711,9 @@ Top-level runtime authority flags. Eight fields are structurally locked to Liter
 
 - [Security](/docs/security)
 
-## EvidenceEnforcementConfig
+## Evidence enforcement (no standalone config surface)
 
-Controls the evidence enforcement boundary. Two fields are structurally locked to Literal[False] to prevent live evidence blocking.
-
-- enabled (bool, default False) — Whether evidence enforcement is active.
-- local_fake_evaluation_enabled (bool, alias localFakeEvaluationEnabled, default False) — Whether local fake evaluation is enabled for testing.
-- evidence_block_enabled (Literal[False], alias evidenceBlockEnabled) — Structurally false. Cannot enable evidence blocking.
-- final_answer_blocking_enabled (Literal[False], alias finalAnswerBlockingEnabled) — Structurally false. Cannot enable final answer blocking.
-- route_attached (Literal[False], alias routeAttached) — Structurally false. Cannot attach routing.
+There is no standalone evidence-enforcement config type. Evidence contract verdicts (EvidenceContractVerdict) are enforced on the live output path by the engine pre-final gate (cli/engine.py) via the verifier bus (harness/verifier_bus.py). Coding-domain turns block on a block_ready verdict by default; the coding repair loop is gated by MAGI_CODING_REPAIR_LOOP_ENABLED.
 
 - [Evidence concepts](/docs/evidence)
 - [Evidence contracts](/docs/evidence-contracts)
@@ -4132,7 +4127,7 @@ When a tool call is denied by policy, the ToolEvidenceRecord records the denial 
 
 ## Policy Enforcement
 
-ToolHost policy enforcement is driven by BuiltinHarnessPreset verifier gates and HookManifest registrations at the beforeToolUse and afterToolUse hook points. The enforcement boundary evaluates evidence contracts and produces EvidenceEnforcementDecision outcomes.
+ToolHost policy enforcement is driven by BuiltinHarnessPreset verifier gates and HookManifest registrations at the beforeToolUse and afterToolUse hook points. The engine pre-final gate (cli/engine.py) evaluates evidence contracts via the verifier bus (harness/verifier_bus.py) and produces EvidenceContractVerdict outcomes that pass, block, or repair the turn.
 
 The ToolHostRequest and ToolHostReceipt types referenced in the architecture docs are not yet implemented as formal Pydantic models. The current implementation uses ToolEvidenceRecord as the receipt equivalent and HookContext as the request context.
 
@@ -4406,7 +4401,7 @@ Custom evidence types work with the same EvidenceRequirement and EvidenceFieldMa
 
 The behavior depends on the on_missing field of the EvidenceContract. When set to "audit", missing evidence is logged to the audit ledger but does not block the run. When set to "block_final_answer", missing evidence prevents the final answer from being projected to the user.
 
-However, because final_answer_blocking_enabled is Literal[False] in EvidenceEnforcementConfig, the block_final_answer enforcement is currently recorded as a "block_ready_local_fake" intent without actually blocking output. This structural safety ensures that evidence contracts can be developed and tested without risk of silently blocking production output.
+On the live path, coding-domain turns enforce this for real: the engine pre-final gate blocks the final answer (Terminal.error, error="pre_final_evidence_gate_blocked") when a block_final_answer contract is unsatisfied, and it is on by default for the coding domain. The research final-projection gate, by contrast, has final_answer_blocking_enabled set to Literal[False], so for research-domain turns block_final_answer is recorded as a "block_ready_local_fake" intent without actually blocking output.
 
 - [Evidence contracts](/docs/evidence-contracts)
 - [Boundaries](/docs/boundaries)
@@ -4452,7 +4447,7 @@ A scannable map of what the local `magi` CLI can actually do right now, what shi
 
 [^1]: `magi_agent/cli/wiring.py::_build_default_runner` selects a real model-backed ADK runner when a provider key or `~/.magi/config.toml` is configured (`magi_agent/cli/real_runner.py`), otherwise falls back to the model-free stub (`magi_agent/cli/local_runner.py`).
 [^2]: `magi_agent/cli/wiring.py::_build_first_party_adk_tools` / `_first_party_tools_enabled` (True unless `MAGI_FIRST_PARTY_TOOLS_ENABLED` is off); permission modes in `magi_agent/cli/permissions.py`.
-[^3]: `magi_agent/evidence/rollout.py::EvidenceRolloutMetadata` — `traffic_attached` / `execution_attached` are `Literal[False]`, meaning the enforcement boundary is not attached to live traffic/decisions. These flags govern whether the governance layer blocks/gates the agent, not whether the agent can execute tasks.
+[^3]: `magi_agent/evidence/rollout.py::EvidenceRolloutMetadata` — `traffic_attached` / `execution_attached` are `Literal[False]`, meaning the evidence governance layer is not attached to live traffic/decisions. These flags govern whether the governance layer blocks/gates the agent, not whether the agent can execute tasks.
 
 # Common Tasks
 
