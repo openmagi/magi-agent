@@ -278,8 +278,21 @@ def bind_cli_local_full_tool_handlers(
     from magi_agent.runtime.memory_write_wiring import (  # noqa: PLC0415
         build_memory_write_host,
     )
+    from magi_agent.tools.ask_user_question_toolhost import (  # noqa: PLC0415
+        bind_ask_user_question_handler,
+    )
+    from magi_agent.tools.plan_mode_toolhost import (  # noqa: PLC0415
+        bind_plan_mode_handlers,
+    )
 
     bind_inspect_self_evidence_handler(registry)
+    # Route the catalog AskUserQuestion / Enter/ExitPlanMode manifests to their
+    # existing General-Automation implementations (doc 12 PR2 / B14). Both
+    # binders read the strict default-OFF MAGI_PLAN_MODE_TOOLS_ENABLED gate: when
+    # OFF the tools are bound-but-disabled (hidden, byte-identical to main); when
+    # ON they are advertised and dispatch to the GA question / plan-act flow.
+    bind_ask_user_question_handler(registry)
+    bind_plan_mode_handlers(registry)
     memory_write_host = build_memory_write_host(
         workspace_root=Path(workspace_root),
         bot_id=bot_id,

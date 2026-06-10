@@ -2112,6 +2112,29 @@ def plan_act_gate_enabled(env: Mapping[str, str] | None = None) -> bool:
     return _is_true(env.get("MAGI_PLAN_ACT_GATE_ENABLED"))
 
 
+def plan_mode_tools_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Return True when the manifest-routed plan-mode tools are explicitly enabled.
+
+    Single source of truth for ``MAGI_PLAN_MODE_TOOLS_ENABLED`` (inventory B14 /
+    doc 12 PR2). This gate advertises the catalog ``AskUserQuestion`` /
+    ``EnterPlanMode`` / ``ExitPlanMode`` tools to the model by routing them to
+    their EXISTING General-Automation implementations
+    (:mod:`magi_agent.harness.general_automation.question_tool` /
+    :mod:`~magi_agent.harness.general_automation.plan_act_switch`).
+
+    Like :func:`plan_act_gate_enabled` this is a **strict default-OFF** gate: it
+    never defaults ON in the full runtime profile and flips to ``True`` only for
+    an explicit truthy value (``"1"``/``"true"``/``"yes"``/``"on"``). When OFF
+    the three tools stay manifest-only (no handler bound, not advertised), so
+    exposure is byte-identical to ``main``.
+    """
+    if env is None:
+        import os as _os
+
+        env = _os.environ
+    return _is_true(env.get("MAGI_PLAN_MODE_TOOLS_ENABLED"))
+
+
 def is_message_cache_enabled(env: Mapping[str, str] | None = None) -> bool:
     """Single source of truth for the message-tail prompt-cache flag.
 
