@@ -1611,7 +1611,7 @@ def _chat_runner_error_diagnostic(
         "reasonCode": _safe_label_or_default(reason_code, "runner_error"),
         "requestDigest": generation.request_id_digest,
         "traceIdDigest": generation.trace_id_digest,
-        "routeMode": _safe_label_or_default(generation.mode, "unknown"),
+        "routeMode": "user_visible_generation",
         "gateMode": _route_tool_bundle_mode(gate1a_bundle),
         "toolsPolicy": _safe_label_or_default(
             generation.recipe_profile.tools_policy,

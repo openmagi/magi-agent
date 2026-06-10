@@ -157,8 +157,6 @@ def _build_user_visible_generation_request(
     return Gate5B4C3ShadowGenerationRequest.model_validate(
         {
             "schemaVersion": "gate5b4c3.chatProxyShadowGeneration.v1",
-            "mode": "shadow_generation_diagnostic",
-            "responseAuthority": "typescript",
             "shadowGenerationId": f"uv_canary_{request_digest.removeprefix('sha256:')[:24]}",
             "requestIdDigest": request_digest,
             "traceIdDigest": _sha256_digest(trace_id or request_digest),

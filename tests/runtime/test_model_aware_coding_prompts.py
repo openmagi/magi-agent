@@ -243,8 +243,6 @@ def _runner_payload(model_label: str, tools_policy: str) -> dict[str, object]:
     tools_enabled_route = tools_policy in {"selected_full_toolhost", "shadow_readonly"}
     return {
         "schemaVersion": "gate5b4c3.chatProxyShadowGeneration.v1",
-        "mode": "shadow_generation_diagnostic",
-        "responseAuthority": "typescript",
         "shadowGenerationId": "shadow_gen_live",
         "requestIdDigest": _DIGEST,
         "traceIdDigest": _DIGEST,

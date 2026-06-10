@@ -174,8 +174,6 @@ def _mock_loader() -> Gate5B4C3MockedAdkPrimitivesLoader:
 def _payload(**overrides: object) -> dict[str, object]:
     base: dict[str, object] = {
         "schemaVersion": "gate5b4c3.chatProxyShadowGeneration.v1",
-        "mode": "shadow_generation_diagnostic",
-        "responseAuthority": "typescript",
         "shadowGenerationId": "shadow_gen_001",
         "requestIdDigest": REQUEST_DIGEST,
         "traceIdDigest": TRACE_DIGEST,

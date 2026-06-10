@@ -677,8 +677,6 @@ class Gate5B4C3ShadowGenerationRequest(_Gate5B4C3Model):
         default="gate5b4c3.chatProxyShadowGeneration.v1",
         alias="schemaVersion",
     )
-    mode: Literal["shadow_generation_diagnostic"]
-    response_authority: Literal["typescript"] = Field(alias="responseAuthority")
     shadow_generation_id: str = Field(alias="shadowGenerationId")
     request_id_digest: str = Field(alias="requestIdDigest")
     trace_id_digest: str = Field(alias="traceIdDigest")

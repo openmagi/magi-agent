@@ -29,8 +29,6 @@ def _request() -> Gate5B4C3ShadowGenerationRequest:
     return Gate5B4C3ShadowGenerationRequest.model_validate(
         {
             "schemaVersion": "gate5b4c3.chatProxyShadowGeneration.v1",
-            "mode": "shadow_generation_diagnostic",
-            "responseAuthority": "typescript",
             "shadowGenerationId": "shadow_gen_001",
             "requestIdDigest": REQUEST_DIGEST,
             "traceIdDigest": TRACE_DIGEST,
