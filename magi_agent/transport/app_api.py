@@ -63,6 +63,25 @@ _WORKSPACE_ENV_VARS = (
     "CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_WORKSPACE_ROOT",
     "CORE_AGENT_WORKSPACE_ROOT",
 )
+_HOSTED_LEGACY_WORKSPACE_RELATIVES = (
+    Path("workspace"),
+    Path("openclaw-home") / "workspace",
+    Path("agents") / "main" / "workspace",
+)
+_WORKSPACE_FILE_STATE_MARKERS = (
+    "MEMORY.md",
+    "USER.md",
+    "memory",
+    ".magi/memory",
+    "knowledge",
+    ".magi/knowledge",
+)
+_WORKSPACE_STATE_MARKERS = (
+    *_WORKSPACE_FILE_STATE_MARKERS,
+    "skills",
+    ".magi/skills",
+    "docs/superpowers",
+)
 
 
 class _ConfigValidationError(ValueError):
@@ -84,15 +103,88 @@ def _workspace_root() -> Path:
     return Path(os.getcwd()).resolve()
 
 
-def _resolve_in_workspace(relative: str) -> Path | None:
-    """Resolve ``relative`` under the workspace, blocking traversal escapes."""
-    root = _workspace_root()
+def _path_exists(path: Path) -> bool:
+    try:
+        return path.exists()
+    except OSError:
+        return False
+
+
+def _workspace_root_has_state(root: Path, markers: tuple[str, ...]) -> bool:
+    return any(_path_exists(root / marker) for marker in markers)
+
+
+def _path_has_content(path: Path) -> bool:
+    try:
+        if path.is_file():
+            return True
+        if path.is_dir():
+            return any(path.iterdir())
+    except OSError:
+        return False
+    return False
+
+
+def _workspace_root_has_content(root: Path, markers: tuple[str, ...]) -> bool:
+    return any(_path_has_content(root / marker) for marker in markers)
+
+
+def _workspace_roots() -> list[Path]:
+    """Return primary workspace root plus known hosted legacy fallbacks."""
+    primary = _workspace_root()
+    roots = [primary]
+    seen = {primary}
+    for relative in _HOSTED_LEGACY_WORKSPACE_RELATIVES:
+        candidate = (primary / relative).resolve()
+        if candidate in seen:
+            continue
+        try:
+            candidate.relative_to(primary)
+        except ValueError:
+            continue
+        if not _workspace_root_has_state(candidate, _WORKSPACE_STATE_MARKERS):
+            continue
+        roots.append(candidate)
+        seen.add(candidate)
+    return roots
+
+
+def _workspace_write_root() -> Path:
+    roots = _workspace_roots()
+    for root in roots:
+        if _workspace_root_has_content(root, _WORKSPACE_FILE_STATE_MARKERS):
+            return root
+    for root in roots:
+        if _workspace_root_has_state(root, _WORKSPACE_FILE_STATE_MARKERS):
+            return root
+    return roots[0]
+
+
+def _resolve_in_root(root: Path, relative: str) -> Path | None:
     candidate = (root / relative.lstrip("/")).resolve()
     try:
         candidate.relative_to(root)
     except ValueError:
         return None
     return candidate
+
+
+def _resolve_in_workspace(relative: str) -> Path | None:
+    """Resolve ``relative`` under the workspace, blocking traversal escapes."""
+    fallback: Path | None = None
+    for root in _workspace_roots():
+        candidate = _resolve_in_root(root, relative)
+        if candidate is None:
+            return None
+        if fallback is None:
+            fallback = candidate
+        if _path_exists(candidate):
+            return candidate
+    return fallback
+
+
+def _resolve_in_workspace_for_write(relative: str) -> Path | None:
+    return _resolve_in_root(_workspace_write_root(), relative)
 
 
 def _is_protected(path: Path) -> bool:
@@ -193,38 +285,38 @@ def _parse_frontmatter(text: str) -> dict[str, str]:
 
 
 def _scan_skills() -> dict[str, Any]:
-    root = _workspace_root()
     loaded: list[dict[str, Any]] = []
     issues: list[dict[str, Any]] = []
     seen: set[str] = set()
 
-    for relative in _skill_candidates(root):
-        ref = _skill_reference(root, relative)
-        if ref is None or ref["dir"] in seen:
-            continue
-        seen.add(ref["dir"])
-        text = _read_skill_text(ref)
-        if text is None:
-            issues.append(
-                {"dir": ref["dir"], "path": ref["path"], "reason": "unreadable"}
+    for root in _workspace_roots():
+        for relative in _skill_candidates(root):
+            ref = _skill_reference(root, relative)
+            if ref is None or ref["dir"] in seen:
+                continue
+            seen.add(ref["dir"])
+            text = _read_skill_text(ref)
+            if text is None:
+                issues.append(
+                    {"dir": ref["dir"], "path": ref["path"], "reason": "unreadable"}
+                )
+                continue
+            front = _parse_frontmatter(text)
+            tags = [t.strip() for t in front.get("tags", "").split(",") if t.strip()]
+            script_backed = _skill_has_script(ref)
+            loaded.append(
+                {
+                    "name": front.get("name") or Path(ref["dir"]).name,
+                    "dir": ref["dir"],
+                    "path": ref["path"],
+                    "source": ref["source"],
+                    "description": front.get("description", ""),
+                    "tags": tags,
+                    "promptOnly": not script_backed,
+                    "scriptBacked": script_backed,
+                    "runtimeHooks": 0,
+                }
             )
-            continue
-        front = _parse_frontmatter(text)
-        tags = [t.strip() for t in front.get("tags", "").split(",") if t.strip()]
-        script_backed = _skill_has_script(ref)
-        loaded.append(
-            {
-                "name": front.get("name") or Path(ref["dir"]).name,
-                "dir": ref["dir"],
-                "path": ref["path"],
-                "source": ref["source"],
-                "description": front.get("description", ""),
-                "tags": tags,
-                "promptOnly": not script_backed,
-                "scriptBacked": script_backed,
-                "runtimeHooks": 0,
-            }
-        )
 
     runtime_hooks = [
         {"name": point, "point": point, "kind": "builtin", "source": "runtime"}
@@ -422,37 +514,42 @@ def _write_config(payload: dict[str, Any]) -> None:
 # Workspace file domains (memory + knowledge)
 # --------------------------------------------------------------------------- #
 def _list_markdown(rel_dirs: list[str], extra_files: list[str]) -> list[dict[str, Any]]:
-    root = _workspace_root()
     out: list[dict[str, Any]] = []
     seen: set[str] = set()
 
-    def add(path: Path) -> None:
+    def add(root: Path, path: Path) -> None:
         if not path.is_file() or _is_protected(path):
             return
-        rel = path.relative_to(root).as_posix()
+        try:
+            path.resolve().relative_to(root)
+            rel = path.relative_to(root).as_posix()
+        except (OSError, ValueError):
+            return
         if rel in seen:
             return
         seen.add(rel)
         out.append({"path": rel, **_file_stat(path)})
 
-    for name in extra_files:
-        add(root / name)
-    for rel_dir in rel_dirs:
-        base = root / rel_dir
-        if base.is_dir():
-            for path in sorted(base.rglob("*.md")):
-                add(path)
+    for root in _workspace_roots():
+        for name in extra_files:
+            add(root, root / name)
+        for rel_dir in rel_dirs:
+            base = root / rel_dir
+            if base.is_dir():
+                for path in sorted(base.rglob("*.md")):
+                    add(root, path)
     return out
 
 
 def _search_files(files: list[dict[str, Any]], query: str, limit: int) -> list[dict[str, Any]]:
-    root = _workspace_root()
     needle = query.lower()
     results: list[dict[str, Any]] = []
     if not needle:
         return results
     for entry in files:
-        path = root / entry["path"]
+        path = _resolve_in_workspace(str(entry["path"]))
+        if path is None:
+            continue
         text = _read_text(path, limit=_MAX_SEARCH_BYTES)
         if text is None:
             continue
@@ -602,7 +699,7 @@ def register_app_api_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
         content = payload.get("content") if isinstance(payload, dict) else None
         if not isinstance(rel, str) or not isinstance(content, str):
             return JSONResponse(status_code=400, content={"error": "path_and_content_required"})
-        target = _resolve_in_workspace(rel)
+        target = _resolve_in_workspace_for_write(rel)
         if target is None or _is_protected(target):
             return JSONResponse(status_code=403, content={"error": "forbidden_path"})
         try:
@@ -646,7 +743,7 @@ def register_app_api_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
         content = payload.get("content") if isinstance(payload, dict) else None
         if not isinstance(rel, str) or not isinstance(content, str):
             return JSONResponse(status_code=400, content={"error": "path_and_content_required"})
-        target = _resolve_in_workspace(rel)
+        target = _resolve_in_workspace_for_write(rel)
         if target is None or _is_protected(target):
             return JSONResponse(status_code=403, content={"error": "forbidden_path"})
         try:
@@ -681,36 +778,45 @@ def register_app_api_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
 
 def _knowledge_index(collection: str | None) -> dict[str, Any]:
     """Scan workspace knowledge dirs. Empty when no KB store is configured."""
-    root = _workspace_root()
     collections: list[dict[str, Any]] = []
     documents: list[dict[str, Any]] = []
-    for base_name in ("knowledge", ".magi/knowledge"):
-        base = root / base_name
-        if not base.is_dir():
-            continue
-        for coll_dir in sorted(p for p in base.iterdir() if p.is_dir()):
-            if collection is not None and coll_dir.name != collection:
+    seen_documents: set[str] = set()
+    for root in _workspace_roots():
+        for base_name in ("knowledge", ".magi/knowledge"):
+            base = root / base_name
+            if not base.is_dir():
                 continue
-            docs = [p for p in sorted(coll_dir.rglob("*")) if p.is_file() and not _is_protected(p)]
-            size = sum(p.stat().st_size for p in docs)
-            collections.append(
-                {
-                    "name": coll_dir.name,
-                    "path": coll_dir.relative_to(root).as_posix(),
-                    "documentCount": len(docs),
-                    "sizeBytes": size,
-                }
-            )
-            for doc in docs:
-                stat = doc.stat()
-                documents.append(
+            for coll_dir in sorted(p for p in base.iterdir() if p.is_dir()):
+                if collection is not None and coll_dir.name != collection:
+                    continue
+                docs = [
+                    p
+                    for p in sorted(coll_dir.rglob("*"))
+                    if p.is_file() and not _is_protected(p)
+                ]
+                size = sum(p.stat().st_size for p in docs)
+                collections.append(
                     {
-                        "collection": coll_dir.name,
-                        "filename": doc.name,
-                        "title": doc.stem,
-                        "path": doc.relative_to(root).as_posix(),
-                        "sizeBytes": stat.st_size,
-                        "mtimeMs": int(stat.st_mtime * 1000),
+                        "name": coll_dir.name,
+                        "path": coll_dir.relative_to(root).as_posix(),
+                        "documentCount": len(docs),
+                        "sizeBytes": size,
                     }
                 )
+                for doc in docs:
+                    rel = doc.relative_to(root).as_posix()
+                    if rel in seen_documents:
+                        continue
+                    seen_documents.add(rel)
+                    stat = doc.stat()
+                    documents.append(
+                        {
+                            "collection": coll_dir.name,
+                            "filename": doc.name,
+                            "title": doc.stem,
+                            "path": rel,
+                            "sizeBytes": stat.st_size,
+                            "mtimeMs": int(stat.st_mtime * 1000),
+                        }
+                    )
     return {"collections": collections, "documents": documents}

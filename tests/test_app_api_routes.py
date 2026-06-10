@@ -327,6 +327,89 @@ def test_app_api_skills_scan_is_uncapped_and_includes_hosted_legacy_sibling(
     assert body["loadedCount"] == len(body["loaded"])
 
 
+def test_app_api_discovers_hosted_nested_legacy_workspace_roots(
+    tmp_path, monkeypatch
+) -> None:
+    pvc_root = tmp_path / "workspace"
+    direct_workspace = pvc_root / "workspace"
+    openclaw_workspace = pvc_root / "openclaw-home" / "workspace"
+    agent_workspace = pvc_root / "agents" / "main" / "workspace"
+    for workspace, name in (
+        (direct_workspace, "direct-legacy"),
+        (openclaw_workspace, "openclaw-legacy"),
+        (agent_workspace, "agent-legacy"),
+    ):
+        (workspace / "memory" / "daily").mkdir(parents=True)
+        (workspace / "memory" / "daily" / f"{name}.md").write_text(
+            f"{name} memory fact",
+            encoding="utf-8",
+        )
+        skill_dir = workspace / "skills" / name
+        skill_dir.mkdir(parents=True)
+        (skill_dir / "SKILL.md").write_text(
+            f"---\nname: {name}\ndescription: hosted legacy\n---\n",
+            encoding="utf-8",
+        )
+
+    client = _client_with_workspace_env(
+        tmp_path,
+        monkeypatch,
+        "MAGI_AGENT_WORKSPACE",
+        pvc_root,
+    )
+
+    listing = client.get("/v1/app/memory").json()
+    paths = {file["path"] for file in listing["files"]}
+    assert "memory/daily/direct-legacy.md" in paths
+    assert "memory/daily/openclaw-legacy.md" in paths
+    assert "memory/daily/agent-legacy.md" in paths
+
+    read = client.get(
+        "/v1/app/memory/file",
+        params={"path": "memory/daily/openclaw-legacy.md"},
+    )
+    assert read.status_code == 200
+    assert read.json()["content"] == "openclaw-legacy memory fact"
+
+    search = client.get("/v1/app/memory/search", params={"q": "agent-legacy"})
+    assert any(
+        r["path"] == "memory/daily/agent-legacy.md" for r in search.json()["results"]
+    )
+
+    skills = client.get("/v1/app/skills").json()
+    names = {skill["name"] for skill in skills["loaded"]}
+    assert {"direct-legacy", "openclaw-legacy", "agent-legacy"} <= names
+
+
+def test_workspace_write_uses_discovered_hosted_legacy_workspace_root(
+    tmp_path, monkeypatch
+) -> None:
+    pvc_root = tmp_path / "workspace"
+    (pvc_root / "memory").mkdir(parents=True)
+    hosted_workspace = pvc_root / "agents" / "main" / "workspace"
+    (hosted_workspace / "memory").mkdir(parents=True)
+    (hosted_workspace / "memory" / "ROOT.md").write_text(
+        "hosted state", encoding="utf-8"
+    )
+    client = _client_with_workspace_env(
+        tmp_path,
+        monkeypatch,
+        "MAGI_AGENT_WORKSPACE",
+        pvc_root,
+    )
+
+    res = client.put(
+        "/v1/app/workspace/file",
+        json={"path": "notes/from-dashboard.md", "content": "hosted note"},
+    )
+
+    assert res.status_code == 200
+    assert (hosted_workspace / "notes" / "from-dashboard.md").read_text(
+        encoding="utf-8"
+    ) == "hosted note"
+    assert not (pvc_root / "notes" / "from-dashboard.md").exists()
+
+
 def test_workspace_env_precedence_and_traversal_protection(tmp_path, monkeypatch) -> None:
     primary = tmp_path / "primary-workspace"
     fallback = tmp_path / "fallback-workspace"
