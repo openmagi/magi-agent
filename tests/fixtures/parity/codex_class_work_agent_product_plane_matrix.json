@@ -725,7 +725,7 @@
       ],
       "latestMainCoveredRefs": [
         {
-          "path": "magi_agent/evals/regression_gates.py",
+          "path": "evals/regression_gates.py",
           "state": "existing"
         },
         {
@@ -741,7 +741,7 @@
           "state": "existing"
         },
         {
-          "path": "magi_agent/evals/release_gates.py",
+          "path": "evals/release_gates.py",
           "state": "existing"
         },
         {

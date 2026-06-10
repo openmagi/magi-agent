@@ -294,8 +294,8 @@
       ],
       "alreadyCovered": true,
       "coveredByFiles": [
-        "magi_agent/evals/regression_gates.py",
-        "magi_agent/evals/release_gates.py",
+        "evals/regression_gates.py",
+        "evals/release_gates.py",
         "magi_agent/self_improvement/eval_capture.py",
         "docs/notes/coding-parity/benchmark-v1.json",
         "tests/fixtures/coding_eval/reliability_matrix.json"
