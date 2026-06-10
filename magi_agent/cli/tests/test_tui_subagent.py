@@ -69,6 +69,16 @@ def _child_event(inner: str, task_id: str, **extra) -> RuntimeEvent:
     return RuntimeEvent(type="status", payload=payload, turn_id="t")
 
 
+def _reasoning_event(text: str) -> RuntimeEvent:
+    # A thinking_delta status event (what reaches the TUI when MAGI_STREAM_THINKING
+    # let it through upstream). Renders as the dim ``● thinking <preview>`` line.
+    return RuntimeEvent(
+        type="status",
+        payload={"type": "thinking_delta", "delta": text},
+        turn_id="t",
+    )
+
+
 def _plumbing_event() -> RuntimeEvent:
     # A representative plumbing status event that MUST stay hidden by default.
     return RuntimeEvent(
@@ -223,6 +233,96 @@ def test_distinct_tasks_get_distinct_subagent_lines() -> None:
             assert len(sub) == 2, sub
             assert any("sub-a" in b and "completed" in b for b in sub), sub
             assert any("sub-b" in b and "running" in b for b in sub), sub
+
+    asyncio.run(_run())
+
+
+def test_two_child_started_produce_two_running_lines_before_completion() -> None:
+    """Two ``child_started`` events (no completion) -> TWO distinct running
+    subagent lines. Hardens the keying invariant: a regression that keyed the
+    coalescing dict off the truncated DISPLAY label (instead of the raw taskId)
+    would let two ids sharing a long prefix collide into ONE line — caught here."""
+
+    async def _run() -> None:
+        app = _make_app(
+            [
+                _child_event("child_started", "sub-a"),
+                _child_event("child_started", "sub-b"),
+            ]
+        )
+        async with app.run_test() as pilot:
+            app.start_turn("go")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            blocks = app.controller.committed_blocks_snapshot()
+            sub = [b for b in blocks if "subagent" in b]
+            # Two distinct lines, both still RUNNING (neither has completed).
+            assert len(sub) == 2, sub
+            assert any("sub-a" in b and "running" in b for b in sub), sub
+            assert any("sub-b" in b and "running" in b for b in sub), sub
+
+    asyncio.run(_run())
+
+
+def test_two_taskids_sharing_long_prefix_do_not_collide() -> None:
+    """Two taskIds sharing a 59-char prefix (so their truncated DISPLAY labels
+    are identical) must STILL get two distinct lines — the coalescing key is the
+    RAW taskId, not the truncated label. A label-keyed regression collides these
+    into one line (this is the direct FIX D guard)."""
+
+    prefix = "x" * 59
+    id_one = prefix + "AAA"
+    id_two = prefix + "BBB"
+
+    async def _run() -> None:
+        app = _make_app(
+            [
+                _child_event("child_started", id_one),
+                _child_event("child_started", id_two),
+            ]
+        )
+        async with app.run_test() as pilot:
+            app.start_turn("go")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            blocks = app.controller.committed_blocks_snapshot()
+            sub = [b for b in blocks if "subagent" in b]
+            # Distinct raw ids -> two lines even though the displayed labels match.
+            assert len(sub) == 2, sub
+
+    asyncio.run(_run())
+
+
+def test_same_turn_thinking_and_child_do_not_clobber() -> None:
+    """A ``thinking_delta`` AND a ``child_started`` in the SAME turn each get
+    their OWN committed line — the shared coalescing primitive
+    (``commit_coalesced``) is keyed by SEPARATE state (the thinking accumulator
+    vs the per-taskId subagent registry), so they never overwrite each other."""
+
+    async def _run() -> None:
+        app = _make_app(
+            [
+                _reasoning_event("planning the subtask"),
+                _child_event("child_started", "research-subtask"),
+            ]
+        )
+        async with app.run_test() as pilot:
+            app.start_turn("go")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            blocks = app.controller.committed_blocks_snapshot()
+            thinking = [b for b in blocks if "thinking" in b]
+            sub = [b for b in blocks if "subagent" in b]
+            # Exactly ONE thinking line AND exactly ONE subagent line.
+            assert len(thinking) == 1, thinking
+            assert len(sub) == 1, sub
+            # They are SEPARATE snapshot entries (no shared block).
+            assert thinking[0] != sub[0], (thinking, sub)
+            # Each carries its own correct text — neither clobbered the other.
+            assert "planning the subtask" in thinking[0], thinking
+            assert "research-subtask" in sub[0], sub
+            assert "subagent" not in thinking[0], thinking
+            assert "thinking" not in sub[0], sub
 
     asyncio.run(_run())
 

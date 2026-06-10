@@ -404,16 +404,27 @@ def _is_child_event(event: RuntimeEvent) -> bool:
     return isinstance(inner, str) and inner in _CHILD_INNER_STATUS
 
 
-def _child_task_label(payload: dict) -> str:
-    """The subagent label: the public ``taskId`` (or a sane fallback)."""
+def _child_task_key(payload: dict) -> str:
+    """The RAW coalescing key for a subagent line: the untruncated ``taskId``.
+
+    Used as the ``_subagent_handles`` dict key (NOT the display label) so two
+    distinct taskIds that share a 59-char prefix don't collide after the label
+    truncates at ``_SUBAGENT_LABEL_MAX_CHARS``. Falls back to the raw ``label``,
+    then to the literal ``"subagent"`` only when no identifying field is present.
+    """
 
     for key in ("taskId", "label"):
         value = payload.get(key)
         if isinstance(value, str) and value:
-            label = value
-            break
-    else:
-        label = "subagent"
+            return value
+    return "subagent"
+
+
+def _child_task_label(payload: dict) -> str:
+    """The subagent DISPLAY label: the public ``taskId`` (or a sane fallback),
+    truncated to one line. Use ``_child_task_key`` for the coalescing key."""
+
+    label = _child_task_key(payload)
     if len(label) > _SUBAGENT_LABEL_MAX_CHARS:
         label = label[: _SUBAGENT_LABEL_MAX_CHARS - 1].rstrip() + "…"
     return label
@@ -1741,11 +1752,14 @@ class MagiTuiApp(App[None]):
         # ``_is_child_event`` already proved ``inner`` is a str key in
         # ``_CHILD_INNER_STATUS`` before routing here, so a direct lookup is safe.
         status = _CHILD_INNER_STATUS[inner]
+        # Coalesce by the RAW taskId (key) so two distinct taskIds sharing a
+        # 59-char prefix don't collide once the DISPLAY label truncates.
+        key = _child_task_key(payload)
         label = _child_task_label(payload)
         node = _render_subagent_node(label, status, _child_detail(payload))
-        handle = self._subagent_handles.get(label)
+        handle = self._subagent_handles.get(key)
         if handle is None:
-            self._subagent_handles[label] = self.controller.commit_coalesced(
+            self._subagent_handles[key] = self.controller.commit_coalesced(
                 node.rich, text=node.text
             )
         else:
