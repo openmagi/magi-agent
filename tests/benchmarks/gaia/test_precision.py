@@ -3,7 +3,7 @@
 Hermetic: all fakes injected — no network, no exec, no real model.
 
 TDD: these tests are written BEFORE the implementation in
-magi_agent/benchmarks/gaia/precision.py.
+benchmarks/gaia/precision.py.
 """
 from __future__ import annotations
 
@@ -66,7 +66,7 @@ class TestCrossVerifyFact:
     """C1: one extra search; if conflict, one fetch; adopt best-supported value."""
 
     def _import(self) -> Callable[..., str]:
-        from magi_agent.benchmarks.gaia.precision import cross_verify_fact
+        from benchmarks.gaia.precision import cross_verify_fact
 
         return cross_verify_fact
 
@@ -281,7 +281,7 @@ class TestRecomputeNumeric:
     """C2: re-derive numeric answer via exec; adopt if disagrees with draft."""
 
     def _import(self) -> Callable[..., str]:
-        from magi_agent.benchmarks.gaia.precision import recompute_numeric
+        from benchmarks.gaia.precision import recompute_numeric
 
         return recompute_numeric
 
@@ -377,7 +377,7 @@ class TestApplyPrecisionPass:
     """Dispatch + gate: mode=off|audit|enforce, default-OFF."""
 
     def _import(self) -> Callable[..., str]:
-        from magi_agent.benchmarks.gaia.precision import apply_precision_pass
+        from benchmarks.gaia.precision import apply_precision_pass
 
         return apply_precision_pass
 
