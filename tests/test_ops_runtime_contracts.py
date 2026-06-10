@@ -12,8 +12,8 @@ from magi_agent.ops import (
     RuntimeMetricsSnapshot,
     RuntimeOperationEvent,
     RuntimeOpsAttachmentFlags,
+    build_runtime_metrics_snapshot,
     default_runtime_ops_health_metadata,
-    project_runtime_operation_event,
     safe_metadata,
 )
 
@@ -41,24 +41,6 @@ def _event(**overrides: object) -> RuntimeOperationEvent:
     }
     payload.update(overrides)
     return RuntimeOperationEvent(**payload)
-
-
-def test_runtime_operation_event_projects_safe_digest_only_public_shape() -> None:
-    projected = project_runtime_operation_event(_event())
-    encoded = json.dumps(projected, sort_keys=True)
-
-    assert projected["schemaVersion"] == "openmagi.ops.event.public.v1"
-    assert projected["eventId"] == "event-001"
-    assert projected["eventDigest"].startswith("sha256:")
-    assert projected["activationEnabled"] is False
-    assert projected["attachmentFlags"]["liveToolExecutionAttached"] is False
-    assert projected["attachmentFlags"]["promptPayloadAttached"] is False
-    assert projected["attachmentFlags"]["toolOutputPayloadAttached"] is False
-    assert projected["attachmentFlags"]["hiddenReasoningAttached"] is False
-    assert projected["attachmentFlags"]["credentialAttached"] is False
-    assert "rawPrompt" not in encoded
-    assert "rawToolOutput" not in encoded
-    assert "privatePath" not in encoded
 
 
 @pytest.mark.parametrize(
@@ -273,6 +255,46 @@ def test_runtime_ops_health_metadata_is_default_off() -> None:
     assert metadata["productionQueueAttached"] is False
 
 
+# Removed dead trace-stack modules; telemetry/ is the single trace seam.
+# Names are assembled so repo-wide greps for the dead modules stay clean.
+@pytest.mark.parametrize(
+    "removed_submodule",
+    ("recorder", "traces", "contracts", "scheduler_metrics", "runtime_events"),
+)
+def test_dead_ops_trace_modules_are_removed(removed_submodule: str) -> None:
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module(f"magi_agent.ops.{removed_submodule}")
+
+
+def test_runtime_operation_event_lives_in_metrics_module() -> None:
+    metrics = importlib.import_module("magi_agent.ops.metrics")
+
+    assert metrics.RuntimeOperationEvent is RuntimeOperationEvent
+    assert RuntimeOperationEvent.__module__ == "magi_agent.ops.metrics"
+
+
+def test_build_runtime_metrics_snapshot_aggregates_runtime_operation_events() -> None:
+    events = (
+        _event(eventId="event-001", sequence=0, eventType="tool_observed", status="accepted"),
+        _event(eventId="event-002", sequence=1, eventType="guardrail_observed", status="rejected"),
+    )
+
+    snapshot = build_runtime_metrics_snapshot(events)
+    public = snapshot.public_projection()
+
+    assert isinstance(snapshot, RuntimeMetricsSnapshot)
+    assert snapshot.runtime_operations_enabled is False
+    assert snapshot.counts == {"accepted": 1, "rejected": 1}
+    assert snapshot.event_type_counts == {"guardrail_observed": 1, "tool_observed": 1}
+    metric_names = {record.metric_name for record in snapshot.metric_records}
+    assert metric_names == {"ops.event.accepted", "ops.event.rejected"}
+    assert all(record.unit == "count" for record in snapshot.metric_records)
+    assert all(event.event_digest.startswith("sha256:") for event in events)
+    assert public["attachmentFlags"]["liveToolExecutionAttached"] is False
+    assert public["attachmentFlags"]["productionStorageAttached"] is False
+    assert "rawPromptAttached" not in json.dumps(public, sort_keys=True)
+
+
 def test_ops_import_boundary_does_not_load_live_runtime_paths() -> None:
     for module_name in list(sys.modules):
         if module_name.startswith("magi_agent.ops"):
@@ -280,7 +302,6 @@ def test_ops_import_boundary_does_not_load_live_runtime_paths() -> None:
 
     before = set(sys.modules)
     importlib.import_module("magi_agent.ops.metrics")
-    importlib.import_module("magi_agent.ops.runtime_events")
     newly_loaded = set(sys.modules) - before
     forbidden_prefixes = (
         "google.adk.runners",
