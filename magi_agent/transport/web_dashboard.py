@@ -1,16 +1,18 @@
-"""Serve the restored historical web dashboard (static Next.js export).
+"""Serve the web dashboard (static Next.js export) — the single dashboard path.
 
-The rich OSS dashboard UI lives under ``apps/web`` and is built to a static
-export (``output: "export"``) that is committed into the package at
-``magi_agent/web_dashboard``. ``magi-agent serve`` mounts that bundle at
-``/dashboard`` so the dashboard is usable from the local runtime with no
-separate hosted backend and no Node runtime.
+The OSS dashboard UI lives under ``apps/web`` and is built to a static export
+(``output: "export"``) that is committed into the package at
+``magi_agent/web_dashboard`` (wheels always ship it via package-data).
+``magi-agent serve`` mounts that bundle at ``/dashboard`` so the dashboard is
+usable from the local runtime with no separate hosted backend and no Node
+runtime.
 
 The bundle is entirely client-rendered and local-first: it talks to the same
 origin via the runtime's own ``/v1/chat/*`` endpoints (see ``chat.py``) and
 discovers its configuration from ``/app/bootstrap.json`` below. When the bundle
-is absent (e.g. a source checkout that has not run the web build) the caller
-falls back to the inline workbench shell in ``dashboard.py``.
+is absent (only possible in a source checkout that has not run the web build),
+``/dashboard`` serves a static build-instruction placeholder instead — there is
+no second inline web frontend.
 """
 
 from __future__ import annotations
@@ -18,17 +20,55 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi import FastAPI
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import (
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+    Response,
+)
 from fastapi.staticfiles import StaticFiles
 
 from magi_agent.runtime.openmagi_runtime import OpenMagiRuntime
 
-# Token sentinel mirrored from the inline shell + main.py. The gateway token is
-# only surfaced to the page when it is the well-known local-dev default, so a
-# real ``GATEWAY_TOKEN`` secret is never embedded in a digest-safe surface.
+# Token sentinel mirrored from main.py. The gateway token is only surfaced to
+# the page when it is the well-known local-dev default, so a real
+# ``GATEWAY_TOKEN`` secret is never embedded in a digest-safe surface.
 _LOCAL_DEV_TOKEN = "local-dev-token"
 
 BUNDLE_ROOT = Path(__file__).resolve().parent.parent / "web_dashboard"
+
+# Static placeholder served when the bundle is absent (source checkout without
+# a web build). Honest build instructions only — no app logic, no runtime data.
+_BUNDLE_MISSING_HTML = """<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Magi Agent — dashboard bundle not built</title>
+  <style>
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center;
+           background: #f7f8fb; color: #222736;
+           font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; }
+    main { max-width: 34rem; padding: 2rem; background: #fff;
+           border: 1px solid #dde2eb; border-radius: 8px; }
+    code { background: #eef1f7; padding: 0.15em 0.4em; border-radius: 4px; }
+    a { color: #7047d8; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>dashboard bundle not built</h1>
+    <p>This is a source checkout without the built web dashboard. Run
+    <code>scripts/build-web-dashboard.sh</code> (requires Node) to build it,
+    or install a packaged release via Homebrew or the wheel — packaged
+    installs always include the dashboard.</p>
+    <p>The API on this port is fully functional without the dashboard.</p>
+    <p>Docs: <a href="https://github.com/openmagi/magi-agent#local-web-dashboard">
+    https://github.com/openmagi/magi-agent#local-web-dashboard</a></p>
+  </main>
+</body>
+</html>"""
 
 
 def bundle_available() -> bool:
@@ -116,7 +156,7 @@ def register_web_dashboard_routes(app: FastAPI, runtime: OpenMagiRuntime) -> Non
             continue
         name = entry.name
         if name == "index.html":
-            continue  # "/" redirects to /dashboard (registered in dashboard.py)
+            continue  # "/" redirects to /dashboard (register_root_redirect)
 
         def _make_handler(target: Path):
             def _handler() -> Response:
@@ -136,3 +176,24 @@ def register_root_redirect(app: FastAPI) -> None:
     @app.get("/", response_class=RedirectResponse)
     def root() -> RedirectResponse:
         return RedirectResponse("/dashboard", status_code=307)
+
+
+def _register_bundle_missing_placeholder(app: FastAPI) -> None:
+    """Mount the static build-instruction placeholder at ``/dashboard``."""
+
+    @app.get("/dashboard", response_class=HTMLResponse)
+    def dashboard_placeholder() -> HTMLResponse:
+        return HTMLResponse(_BUNDLE_MISSING_HTML)
+
+    @app.get("/dashboard/{path:path}", response_class=HTMLResponse)
+    def dashboard_placeholder_deep_link(path: str) -> HTMLResponse:
+        return HTMLResponse(_BUNDLE_MISSING_HTML)
+
+
+def register_dashboard_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
+    """Single dashboard entry point: static bundle, else build instructions."""
+    register_root_redirect(app)
+    if bundle_available():
+        register_web_dashboard_routes(app, runtime)
+        return
+    _register_bundle_missing_placeholder(app)

@@ -12,7 +12,7 @@ from .runtime.openmagi_runtime import OpenMagiRuntime
 from .transport.chat import register_chat_routes
 from .transport.control_requests import register_control_request_routes
 from .transport.streaming_chat_route import register_streaming_chat_routes
-from .transport.dashboard import register_dashboard_routes
+from .transport.web_dashboard import register_dashboard_routes
 from .transport.health import health_payload, healthz_payload
 from .transport.plugins import register_plugin_admin_routes
 from .transport.shadow_invocations import register_shadow_invocation_routes
