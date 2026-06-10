@@ -13,9 +13,10 @@ import subprocess
 import sys
 from collections.abc import Callable, Sequence
 
+# reuse the established image sanitizer; message_builder exposes no public image API
 from magi_agent.runtime.message_builder import _collect_image_blocks
 
-CommandRunner = Callable[[Sequence[str]], "bytes | None"]
+CommandRunner = Callable[[Sequence[str]], bytes | None]
 
 # (magic, media_type) pairs for supported image formats.
 _IMAGE_MAGIC: list[tuple[bytes, str]] = [

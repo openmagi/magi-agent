@@ -34,9 +34,20 @@ def test_returns_none_on_non_image_bytes():
     assert read_clipboard_image(runner=runner, platform="darwin") is None
 
 
+def test_returns_none_on_oversized_image():
+    # >5 MB PNG payload: _collect_image_blocks drops it, so we get None.
+    big = b"\x89PNG\r\n\x1a\n" + b"\x00" * (6 * 1024 * 1024)
+
+    def runner(cmd):
+        return big
+
+    assert read_clipboard_image(runner=runner, platform="darwin") is None
+
+
 def test_platform_command_selection():
     assert any("pngpaste" in c[0] for c in clipboard_commands("darwin"))
-    linux_cmds = clipboard_commands("linux")
-    assert any("wl-paste" in c[0] for c in linux_cmds)
-    assert any("xclip" in c[0] for c in linux_cmds)
+    for linux_platform in ("linux", "linux2"):  # sys.platform is "linux2" on many systems
+        linux_cmds = clipboard_commands(linux_platform)
+        assert any("wl-paste" in c[0] for c in linux_cmds)
+        assert any("xclip" in c[0] for c in linux_cmds)
     assert clipboard_commands("win32") == []
