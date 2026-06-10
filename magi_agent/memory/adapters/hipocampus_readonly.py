@@ -55,7 +55,7 @@ MAGI_MEMORY_QMD_LIVE_ENABLED_ENV = "MAGI_MEMORY_QMD_LIVE_ENABLED"
 _MODEL_CONFIG = ConfigDict(frozen=True, populate_by_name=True, extra="forbid")
 _PRODUCTION_PATH_RE = re.compile(
     r"(?:^|[\\/])(?:data[\\/]bots|workspace|var[\\/]lib[\\/]kubelet)(?:[\\/]|$)|"
-    r"pvc|supabase://|s3://|gs://|postgres(?:ql)?://|"
+    r"(?:^|[\\/])pvc(?:[\\/]|$)|supabase://|s3://|gs://|postgres(?:ql)?://|"
     r"(?:^|[\\/])(?:telegram|canary)(?:[\\/]|$)",
     re.IGNORECASE,
 )
