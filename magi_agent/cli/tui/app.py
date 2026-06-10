@@ -112,6 +112,7 @@ from magi_agent.cli.tui.transcript import (
     TranscriptController,
 )
 from magi_agent.cli.tui.widgets.transcript_view import TranscriptView
+from magi_agent.cli.tui.widgets.whichkey import WhichKeyOverlay, chord_continuations
 
 __all__ = ["MagiTuiApp", "TextualSink", "ToolUseConfirm"]
 
@@ -964,6 +965,9 @@ class MagiTuiApp(App[None]):
             self._keybindings_path()
         )[0]
         self._pending: tuple[Keystroke, ...] | None = None
+        # which-key chord-hint overlay (PR4.4); mounted in compose, driven by
+        # on_key — shown while a chord is pending, hidden on resolve/cancel.
+        self._whichkey: WhichKeyOverlay | None = None
         # The permission sink the engine's gate can race (Stream C/F wire it in).
         self.sink: TextualSink = TextualSink(self)
         self._router = AutocompleteRouter(
@@ -1048,11 +1052,14 @@ class MagiTuiApp(App[None]):
         # transcript so the left dock column is reserved first and the transcript
         # reflows to the right of it (no extra rule needed — #transcript is 1fr).
         self._sidebar = Sidebar(id="sidebar")
+        # which-key overlay (PR4.4): bottom-docked, hidden until a chord pends.
+        self._whichkey = WhichKeyOverlay(id="whichkey")
         yield self._topbar
         yield self._sidebar
         yield transcript_widget
         yield self._live
         yield self._completions
+        yield self._whichkey
         yield self._input
         # The footer is yielded LAST so its ``dock: bottom`` wins the lower slot
         # over the prompt's (also bottom-docked) — the footer sits BELOW the
@@ -1915,15 +1922,34 @@ class MagiTuiApp(App[None]):
         )
         if result.kind is ResultKind.MATCH:
             self._pending = None
+            self._hide_whichkey()
             _stop(event)
             self._run_key_action(result.action)
         elif result.kind is ResultKind.CHORD_STARTED:
             self._pending = result.pending
+            self._show_whichkey()
             _stop(event)
         else:
-            # UNBOUND / NONE / CHORD_CANCELLED: clear any pending and let the
-            # event bubble (typing reaches the Input widget).
+            # UNBOUND / NONE / CHORD_CANCELLED: clear any pending, hide the hints
+            # and let the event bubble (typing reaches the Input widget).
             self._pending = None
+            self._hide_whichkey()
+
+    def _show_whichkey(self) -> None:
+        """Render the pending chord's continuations into the overlay."""
+
+        if self._whichkey is None:
+            return
+        hints = chord_continuations(
+            self._pending, self._active_contexts(), self._key_bindings
+        )
+        self._whichkey.show_hints(hints)
+
+    def _hide_whichkey(self) -> None:
+        """Hide the which-key overlay (chord resolved or cancelled)."""
+
+        if self._whichkey is not None:
+            self._whichkey.hide_hints()
 
     def _run_key_action(self, action: str | None) -> None:
         """Map a resolved closed-``Action`` value to a concrete v1 REPL behavior.

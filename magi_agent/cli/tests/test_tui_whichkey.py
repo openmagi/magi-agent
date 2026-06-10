@@ -73,3 +73,89 @@ def test_overlay_show_empty_hints_stays_hidden() -> None:
             assert "visible" not in overlay.classes
 
     asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
+# App wiring: overlay shows on a pending chord, hides on resolve/cancel
+# ---------------------------------------------------------------------------
+from magi_agent.cli.contracts import (  # noqa: E402
+    CommandSurface,
+    ControlRequest,
+    EngineResult,
+    LocalCommand,
+    PermissionDecision,
+    PermissionGate,
+    Terminal,
+    ToolRendererRegistry,
+)
+from magi_agent.cli.tui.app import MagiTuiApp  # noqa: E402
+
+_TUI = CommandSurface(tui=True, headless=False)
+
+
+class _Reg:
+    def __init__(self):
+        self._c = [LocalCommand(name="compact", surface=_TUI)]
+
+    def lookup(self, name):
+        return next((c for c in self._c if c.name == name), None)
+
+    def list_for(self, surface):
+        return list(self._c)
+
+
+class _Engine:
+    async def run_turn_stream(self, runtime, turn_input, *, cancel, gate=None):
+        yield EngineResult(terminal=Terminal.completed, turn_id="t")
+
+
+class _Allow(PermissionGate):
+    async def check(self, req: ControlRequest) -> PermissionDecision:
+        _ = req
+        return PermissionDecision(kind="allow")
+
+
+def _make_chord_app() -> MagiTuiApp:
+    return MagiTuiApp(
+        engine=_Engine(),
+        gate=_Allow(),
+        commands=_Reg(),
+        renderers=ToolRendererRegistry(),
+    )
+
+
+def test_chord_start_shows_whichkey_then_hides_on_complete() -> None:
+    async def _run() -> None:
+        app = _make_chord_app()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            overlay = app.query_one(WhichKeyOverlay)
+            # First key of the ctrl+x ctrl+k chord -> overlay visible with a hint.
+            await pilot.press("ctrl+x")
+            await pilot.pause()
+            assert "visible" in overlay.classes
+            assert "chat:killAgents" in str(overlay.render())
+            # Completing the chord hides the overlay.
+            await pilot.press("ctrl+k")
+            await pilot.pause()
+            assert "visible" not in overlay.classes
+
+    asyncio.run(_run())
+
+
+def test_chord_cancel_hides_whichkey() -> None:
+    async def _run() -> None:
+        app = _make_chord_app()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            overlay = app.query_one(WhichKeyOverlay)
+            await pilot.press("ctrl+x")
+            await pilot.pause()
+            assert "visible" in overlay.classes
+            # Escape cancels the pending chord -> overlay hides.
+            await pilot.press("escape")
+            await pilot.pause()
+            assert "visible" not in overlay.classes
+            assert app._pending is None
+
+    asyncio.run(_run())
