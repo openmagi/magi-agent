@@ -672,7 +672,7 @@ _NATIVE_PLUGIN_DATA: tuple[Mapping[str, object], ...] = (
         "name": "OpenMagi Taskboard",
         "kind": "native",
         "version": "0.1.0-adk-scaffold",
-        "description": "First-party task board, mode switch, notification, and memory redaction surfaces.",
+        "description": "First-party task board (local JSONL persistence). Mode-switch, notification, and memory-redaction surfaces return honest *_not_configured errors until their backing channel/permission/memory clusters are attached.",
         "publisher": "openmagi",
         "defaultInstalled": True,
         "defaultEnabled": True,
