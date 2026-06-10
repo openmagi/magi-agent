@@ -213,12 +213,51 @@ async def _drive_selected_gate5b_stream(
     turn_id: str,
 ) -> AsyncIterator[bytes]:
     """Adapt the selected Gate5B chat response to the streaming SSE contract."""
-    try:
-        response = await run_gate5b_user_visible_chat_response(
+    live_events: asyncio.Queue[Mapping[str, object]] = asyncio.Queue()
+    emitted_event_keys: set[str] = set()
+    live_text_emitted = False
+
+    def _event_key(payload: Mapping[str, object]) -> str:
+        return json.dumps(dict(payload), sort_keys=True, default=str)
+
+    def _enqueue_public_event(payload: Mapping[str, object]) -> None:
+        nonlocal live_text_emitted
+        event = dict(payload)
+        if event.get("type") == "text_delta":
+            live_text_emitted = True
+        live_events.put_nowait(event)
+
+    async def _run_selected_response() -> object:
+        return await run_gate5b_user_visible_chat_response(
             runtime,
             body,
             request=request,
+            public_event_sink=_enqueue_public_event,
         )
+
+    response_task = asyncio.create_task(_run_selected_response())
+    try:
+        while True:
+            if response_task.done() and live_events.empty():
+                break
+            next_event_task = asyncio.create_task(live_events.get())
+            done, _pending = await asyncio.wait(
+                {response_task, next_event_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if next_event_task in done:
+                public_event = next_event_task.result()
+                emitted_event_keys.add(_event_key(public_event))
+                frame = _runtime_event_frame(public_event, turn_id=turn_id)
+                if frame is not None:
+                    yield frame
+                continue
+            next_event_task.cancel()
+            try:
+                await next_event_task
+            except asyncio.CancelledError:
+                pass
+        response = response_task.result()
         payload = _json_response_mapping(response)
     except Exception:
         reason = "selected_stream_bridge_error"
@@ -235,9 +274,16 @@ async def _drive_selected_gate5b_stream(
                 session_id=session_id,
                 turn_id=turn_id,
             )
-        ):
-            yield chunk
+            ):
+                yield chunk
         return
+    finally:
+        if not response_task.done():
+            response_task.cancel()
+            try:
+                await response_task
+            except (asyncio.CancelledError, Exception):
+                pass
 
     if response.status_code == 200 and payload.get("status") == "python_ready":
         public_events = payload.get("publicEvents")
@@ -245,11 +291,15 @@ async def _drive_selected_gate5b_stream(
             for public_event in public_events:
                 if not isinstance(public_event, Mapping):
                     continue
+                event_key = _event_key(public_event)
+                if event_key in emitted_event_keys:
+                    continue
+                emitted_event_keys.add(event_key)
                 frame = _runtime_event_frame(public_event, turn_id=turn_id)
                 if frame is not None:
                     yield frame
         content = _assistant_content_from_chat_response(payload)
-        if content:
+        if content and not live_text_emitted:
             frame = _runtime_event_frame(
                 {"type": "text_delta", "delta": content},
                 turn_id=turn_id,
