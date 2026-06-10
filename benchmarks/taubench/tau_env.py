@@ -1,4 +1,4 @@
-# magi_agent/benchmarks/taubench/tau_env.py
+# benchmarks/taubench/tau_env.py
 """Translate a τ-bench env's tools into ADK FunctionTools that route to env.step.
 
 No tau_bench import here — the Action constructor is injected (action_factory)."""
@@ -7,7 +7,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from magi_agent.benchmarks.taubench.episode import EpisodeState
+from benchmarks.taubench.episode import EpisodeState
 
 
 def _tool_specs(env: Any) -> list[dict]:

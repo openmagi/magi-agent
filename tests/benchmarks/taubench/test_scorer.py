@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from magi_agent.benchmarks.taubench.scorer import pass_hat_k, score
+from benchmarks.taubench.scorer import pass_hat_k, score
 
 
 def test_pass_hat_1_is_average_success_rate() -> None:

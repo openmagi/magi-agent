@@ -1,4 +1,4 @@
-# magi_agent/benchmarks/taubench/cli.py
+# benchmarks/taubench/cli.py
 """τ-bench CLI entry-point: gate + provider binding + live run_eval.
 
 The gate (ensure_enabled) and GateDisabledError are pure and unit-tested.
@@ -14,7 +14,7 @@ import os
 from collections.abc import Iterator
 from collections.abc import Sequence
 
-from magi_agent.benchmarks.taubench.config import Config, FULL_CAPABILITY_FLAGS
+from benchmarks.taubench.config import Config, FULL_CAPABILITY_FLAGS
 from magi_agent.cli.providers import _DEFAULT_MODEL
 
 _GATE_ENV = "MAGI_TAUBENCH_ENABLED"
@@ -28,7 +28,7 @@ def _apply_flags(config: Config) -> Iterator[None]:
     This prevents flag leakage across run_eval calls when multiple configs are
     evaluated in the same process (e.g. full sweep followed by vanilla sweep).
     """
-    from magi_agent.benchmarks.taubench.config import flags_for  # noqa: PLC0415
+    from benchmarks.taubench.config import flags_for  # noqa: PLC0415
 
     flags = (
         flags_for(config)
@@ -119,9 +119,9 @@ def run_eval(
             "into the magi-agent env and retry."
         ) from exc
 
-    from magi_agent.benchmarks.taubench.agent import build_magi_tau_agent  # noqa: PLC0415
-    from magi_agent.benchmarks.taubench.episode import EpisodeResult  # noqa: PLC0415
-    from magi_agent.benchmarks.taubench.harness import run_subset, run_with_retry  # noqa: PLC0415
+    from benchmarks.taubench.agent import build_magi_tau_agent  # noqa: PLC0415
+    from benchmarks.taubench.episode import EpisodeResult  # noqa: PLC0415
+    from benchmarks.taubench.harness import run_subset, run_with_retry  # noqa: PLC0415
     from magi_agent.cli.providers import ProviderConfig  # noqa: PLC0415
     from magi_agent.cli.real_runner import build_cli_model_runner  # noqa: PLC0415
 
@@ -201,7 +201,7 @@ def _task_profile_for(profile: str | None) -> dict[str, object] | None:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Standalone CLI entrypoint (``python -m magi_agent.benchmarks.taubench.cli``)."""
+    """Standalone CLI entrypoint (``python -m benchmarks.taubench.cli``)."""
     import argparse  # noqa: PLC0415
 
     parser = argparse.ArgumentParser(

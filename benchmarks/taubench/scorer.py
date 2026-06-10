@@ -1,4 +1,4 @@
-# magi_agent/benchmarks/taubench/scorer.py
+# benchmarks/taubench/scorer.py
 """Pure τ-bench scorer. No tau_bench import, no model/provider calls."""
 from __future__ import annotations
 

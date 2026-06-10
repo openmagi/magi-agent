@@ -8,13 +8,13 @@ from types import SimpleNamespace
 
 import pytest
 
-from magi_agent.benchmarks.taubench.cli import (
+from benchmarks.taubench.cli import (
     DEFAULT_AGENT_MODEL,
     GateDisabledError,
     _apply_flags,
     ensure_enabled,
 )
-from magi_agent.benchmarks.taubench.config import FULL_CAPABILITY_FLAGS
+from benchmarks.taubench.config import FULL_CAPABILITY_FLAGS
 from magi_agent.cli.providers import _DEFAULT_MODEL
 
 
@@ -64,7 +64,7 @@ def test_default_agent_model_tracks_anthropic_provider_default() -> None:
 
 
 def test_main_gate_blocks_before_live_imports(monkeypatch, capsys) -> None:
-    from magi_agent.benchmarks.taubench import cli
+    from benchmarks.taubench import cli
 
     monkeypatch.delenv("MAGI_TAUBENCH_ENABLED", raising=False)
 
@@ -76,7 +76,7 @@ def test_main_gate_blocks_before_live_imports(monkeypatch, capsys) -> None:
 
 
 def test_main_parses_args_and_forwards_profile(monkeypatch) -> None:
-    from magi_agent.benchmarks.taubench import cli
+    from benchmarks.taubench import cli
 
     captured: dict[str, object] = {}
 
@@ -115,7 +115,7 @@ def test_run_eval_uses_tau_bench_task_split_keyword_without_live_calls(
     monkeypatch,
     capsys,
 ) -> None:
-    from magi_agent.benchmarks.taubench import cli
+    from benchmarks.taubench import cli
 
     calls: list[dict[str, object]] = []
 
@@ -155,7 +155,7 @@ def test_run_eval_uses_tau_bench_task_split_keyword_without_live_calls(
     tau_bench_envs = types.ModuleType("tau_bench.envs")
     tau_bench_envs.get_env = fake_get_env
     fake_litellm = types.ModuleType("litellm")
-    fake_agent_module = types.ModuleType("magi_agent.benchmarks.taubench.agent")
+    fake_agent_module = types.ModuleType("benchmarks.taubench.agent")
     fake_agent_module.build_magi_tau_agent = fake_build_magi_tau_agent
     fake_runner_module = types.ModuleType("magi_agent.cli.real_runner")
     fake_runner_module.build_cli_model_runner = lambda *args, **kwargs: object()
@@ -163,7 +163,7 @@ def test_run_eval_uses_tau_bench_task_split_keyword_without_live_calls(
     monkeypatch.setitem(sys.modules, "tau_bench", tau_bench)
     monkeypatch.setitem(sys.modules, "tau_bench.envs", tau_bench_envs)
     monkeypatch.setitem(sys.modules, "litellm", fake_litellm)
-    monkeypatch.setitem(sys.modules, "magi_agent.benchmarks.taubench.agent", fake_agent_module)
+    monkeypatch.setitem(sys.modules, "benchmarks.taubench.agent", fake_agent_module)
     monkeypatch.setitem(sys.modules, "magi_agent.cli.real_runner", fake_runner_module)
     monkeypatch.setenv("MAGI_TAUBENCH_ENABLED", "1")
 

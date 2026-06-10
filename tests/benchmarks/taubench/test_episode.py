@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from magi_agent.benchmarks.taubench.episode import EpisodeState, run_episode
+from benchmarks.taubench.episode import EpisodeState, run_episode
 
 
 # --- fakes (no tau_bench, no ADK) ---

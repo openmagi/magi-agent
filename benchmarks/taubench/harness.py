@@ -1,4 +1,4 @@
-# magi_agent/benchmarks/taubench/harness.py
+# benchmarks/taubench/harness.py
 """Harness aggregation: pure orchestration over an injected solve_one callable.
 
 No tau_bench import here — the real agent + env are injected by cli.py;
@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from magi_agent.benchmarks.taubench.episode import EpisodeResult
-from magi_agent.benchmarks.taubench.scorer import TauReport, score
+from benchmarks.taubench.episode import EpisodeResult
+from benchmarks.taubench.scorer import TauReport, score
 
 
 def run_with_retry(attempt: Callable[[], EpisodeResult]) -> tuple[bool, bool]:
