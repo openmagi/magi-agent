@@ -99,10 +99,6 @@
           "state": "existing"
         },
         {
-          "path": "magi_agent/ops/runtime_events.py",
-          "state": "existing"
-        },
-        {
           "path": "magi_agent/ops/safety.py",
           "state": "existing"
         },

@@ -826,7 +826,6 @@ def test_runtime_code_diff_stays_within_final_review_fix_slice() -> None:
         "magi-agent/magi_agent/ops/__init__.py",
         "magi-agent/magi_agent/ops/health.py",
         "magi-agent/magi_agent/ops/metrics.py",
-        "magi-agent/magi_agent/ops/runtime_events.py",
         "magi-agent/magi_agent/ops/safety.py",
         "magi-agent/magi_agent/transport/health.py",
         "magi-agent/tests/fixtures/parity/codex_class_work_agent_product_plane_matrix.json",

@@ -12,6 +12,7 @@ from magi_agent.ops import (
     RuntimeMetricsSnapshot,
     RuntimeOperationEvent,
     RuntimeOpsAttachmentFlags,
+    build_runtime_metrics_snapshot,
     default_runtime_ops_health_metadata,
     safe_metadata,
 )
@@ -252,6 +253,50 @@ def test_runtime_ops_health_metadata_is_default_off() -> None:
     assert metadata["liveToolExecutionAttached"] is False
     assert metadata["productionStorageAttached"] is False
     assert metadata["productionQueueAttached"] is False
+
+
+@pytest.mark.parametrize(
+    "module_name",
+    (
+        "magi_agent.ops.recorder",
+        "magi_agent.ops.traces",
+        "magi_agent.ops.contracts",
+        "magi_agent.ops.scheduler_metrics",
+        "magi_agent.ops.runtime_events",
+    ),
+)
+def test_dead_ops_trace_modules_are_removed(module_name: str) -> None:
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module(module_name)
+
+
+def test_runtime_operation_event_lives_in_metrics_module() -> None:
+    metrics = importlib.import_module("magi_agent.ops.metrics")
+
+    assert metrics.RuntimeOperationEvent is RuntimeOperationEvent
+    assert RuntimeOperationEvent.__module__ == "magi_agent.ops.metrics"
+
+
+def test_build_runtime_metrics_snapshot_aggregates_runtime_operation_events() -> None:
+    events = (
+        _event(eventId="event-001", sequence=0, eventType="tool_observed", status="accepted"),
+        _event(eventId="event-002", sequence=1, eventType="guardrail_observed", status="rejected"),
+    )
+
+    snapshot = build_runtime_metrics_snapshot(events)
+    public = snapshot.public_projection()
+
+    assert isinstance(snapshot, RuntimeMetricsSnapshot)
+    assert snapshot.runtime_operations_enabled is False
+    assert snapshot.counts == {"accepted": 1, "rejected": 1}
+    assert snapshot.event_type_counts == {"guardrail_observed": 1, "tool_observed": 1}
+    metric_names = {record.metric_name for record in snapshot.metric_records}
+    assert metric_names == {"ops.event.accepted", "ops.event.rejected"}
+    assert all(record.unit == "count" for record in snapshot.metric_records)
+    assert all(event.event_digest.startswith("sha256:") for event in events)
+    assert public["attachmentFlags"]["liveToolExecutionAttached"] is False
+    assert public["attachmentFlags"]["productionStorageAttached"] is False
+    assert "rawPromptAttached" not in json.dumps(public, sort_keys=True)
 
 
 def test_ops_import_boundary_does_not_load_live_runtime_paths() -> None:

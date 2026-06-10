@@ -16,7 +16,7 @@ __all__ = [
 _LAZY_EXPORTS = {
     "RuntimeMetricRecord": (".metrics", "RuntimeMetricRecord"),
     "RuntimeMetricsSnapshot": (".metrics", "RuntimeMetricsSnapshot"),
-    "RuntimeOperationEvent": (".runtime_events", "RuntimeOperationEvent"),
+    "RuntimeOperationEvent": (".metrics", "RuntimeOperationEvent"),
     "RuntimeOpsAttachmentFlags": (".metrics", "RuntimeOpsAttachmentFlags"),
     "build_runtime_metrics_snapshot": (".metrics", "build_runtime_metrics_snapshot"),
     "default_runtime_ops_health_metadata": (".health", "default_runtime_ops_health_metadata"),
