@@ -348,7 +348,7 @@ _NATIVE_PLUGIN_DATA: tuple[Mapping[str, object], ...] = (
                 "allowedFormats": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "default": ("docx", "pdf", "html", "xlsx", "csv"),
+                    "default": ("md", "txt", "html", "docx", "pdf", "hwpx", "xlsx", "csv"),
                 },
                 "deliveryChannels": {
                     "type": "array",

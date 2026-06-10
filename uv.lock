@@ -2496,8 +2496,10 @@ dependencies = [
     { name = "google-adk" },
     { name = "httpx" },
     { name = "litellm" },
+    { name = "lxml" },
     { name = "markdownify" },
     { name = "pydantic" },
+    { name = "python-docx" },
     { name = "uvicorn" },
 ]
 
@@ -2535,7 +2537,6 @@ dev = [
 files = [
     { name = "openpyxl" },
     { name = "pypdf" },
-    { name = "python-docx" },
     { name = "python-pptx" },
 ]
 video = [
@@ -2560,6 +2561,7 @@ requires-dist = [
     { name = "httpx", specifier = "==0.28.1" },
     { name = "httpx", marker = "extra == 'dev'", specifier = "==0.28.1" },
     { name = "litellm", specifier = ">=1.74.0" },
+    { name = "lxml", specifier = ">=6.0" },
     { name = "markdownify", specifier = "==1.2.2" },
     { name = "mypy", marker = "extra == 'dev'", specifier = "==2.1.0" },
     { name = "openai", marker = "extra == 'audio'", specifier = ">=1.0" },
@@ -2568,7 +2570,7 @@ requires-dist = [
     { name = "pydantic", specifier = "==2.13.4" },
     { name = "pypdf", marker = "extra == 'files'", specifier = ">=4.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = "==9.0.3" },
-    { name = "python-docx", marker = "extra == 'files'", specifier = ">=1.1" },
+    { name = "python-docx", specifier = ">=1.1" },
     { name = "python-pptx", marker = "extra == 'files'", specifier = ">=1.0" },
     { name = "rapidfuzz", marker = "extra == 'cli'", specifier = "==3.14.5" },
     { name = "rich", marker = "extra == 'cli'", specifier = "==15.0.0" },

@@ -89,6 +89,7 @@ _SPECIAL_TOOL_METADATA: dict[tuple[str, str], dict[str, object]] = {
     },
     ("openmagi.documents", "DocumentWrite"): {
         "permission": "write",
+        "input_schema": "document_write",
     },
     ("openmagi.documents", "SpreadsheetWrite"): {
         "permission": "write",
@@ -206,6 +207,13 @@ def _build_tool_manifest(
     from magi_agent.tools.manifest import ToolManifest, ToolSource
 
     metadata = _SPECIAL_TOOL_METADATA.get((plugin_id, name), {})
+    input_schema = metadata.get("input_schema", _GENERIC_INPUT_SCHEMA)
+    if input_schema == "document_write":
+        from magi_agent.tools.document_write.model import (  # noqa: PLC0415
+            DOCUMENT_WRITE_INPUT_SCHEMA,
+        )
+
+        input_schema = DOCUMENT_WRITE_INPUT_SCHEMA
     return ToolManifest(
         name=name,
         description=str(
@@ -220,7 +228,7 @@ def _build_tool_manifest(
         kind="native",
         source=ToolSource(kind="native-plugin", package=plugin_id),
         permission=cast(PermissionClass, metadata.get("permission", permission)),
-        input_schema=copy.deepcopy(metadata.get("input_schema", _GENERIC_INPUT_SCHEMA)),
+        input_schema=copy.deepcopy(input_schema),
         timeout_ms=0,
         tags=cast(tuple[str, ...], metadata.get("tags", ("native-plugin", plugin_id, "metadata-only"))),
         should_defer=bool(metadata.get("should_defer", False)),
