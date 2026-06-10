@@ -42,8 +42,6 @@ def make_shadow_generation_request(
 
     payload: dict[str, Any] = {
         "schemaVersion": "gate5b4c3.chatProxyShadowGeneration.v1",
-        "mode": "shadow_generation_diagnostic",
-        "responseAuthority": "typescript",
         "shadowGenerationId": "shadow_gen_001",
         "requestIdDigest": REQUEST_DIGEST,
         "traceIdDigest": TRACE_DIGEST,

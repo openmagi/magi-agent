@@ -256,7 +256,7 @@ graph LR
 |---|---|---|---|
 | __init__.py | — | — | (root)/main.py |
 | __main__.py | — | main | — |
-| app.py | — | app_api, bootstrap, chat, config, control_requests, credentials, customize, dashboard, debug_trace, health, learning_dashboard, observability, openmagi_runtime, plugins, shadow_generations, shadow_invocations, streaming_chat_route, tools | (root)/main.py |
+| app.py | — | app_api, bootstrap, chat, config, control_requests, credentials, customize, dashboard, debug_trace, health, learning_dashboard, observability, openmagi_runtime, plugins, shadow_invocations, streaming_chat_route, tools | (root)/main.py |
 | facades.py | High-level entry-point facades that compose existing modules. | bus, context, dispatcher, manifest, resolved, result | — |
 | main.py | — | app, chat, env, hosted_defaults, local_defaults, memory_bootstrap, models, observed_egress, openmagi_runtime, otel_noise, providers | (root)/__main__.py, cli/tests/test_app.py |
 
@@ -1392,13 +1392,12 @@ graph LR
 | gate5b4_internal_endpoint_contract.py | — | — | — |
 | gate5b4c2_shadow_invocation_contract.py | — | — | transport/shadow_invocations.py |
 | gate5b4c3_image_parts.py | Convert sanitized Anthropic-style image blocks into ADK content parts. | — | cli/engine.py, shadow/gate5b4c3_live_runner_boundary.py |
-| gate5b4c3_live_runner_boundary.py | — | anthropic_cache_model, gate1a_egress_correlation, gate5b4c3_image_parts, gate5b4c3_runner_input_adapter, gate5b4c3_shadow_generation_contract | shadow/gate5b4c3_shadow_parity.py, transport/chat.py, transport/chat_routes.py, transport/chat_shared.py, transport/shadow_generations.py |
-| gate5b4c3_mock_runner_boundary.py | — | gate5b4c3_shadow_generation_contract | — |
-| gate5b4c3_runner_input_adapter.py | — | env, gate5b4c3_shadow_generation_contract, message_builder | shadow/gate5b4c3_live_runner_boundary.py, transport/shadow_generations.py |
-| gate5b4c3_shadow_comparison.py | — | gate5b4c3_shadow_generation_contract, gate5b4c3_shadow_generation_report | transport/shadow_generations.py |
+| gate5b4c3_live_runner_boundary.py | — | anthropic_cache_model, gate1a_egress_correlation, gate5b4c3_image_parts, gate5b4c3_runner_input_adapter, gate5b4c3_shadow_generation_contract | shadow/gate5b4c3_shadow_parity.py, transport/chat.py, transport/chat_routes.py, transport/chat_shared.py |
+| gate5b4c3_runner_input_adapter.py | — | env, gate5b4c3_shadow_generation_contract, message_builder | shadow/gate5b4c3_live_runner_boundary.py |
+| gate5b4c3_shadow_comparison.py | — | gate5b4c3_shadow_generation_contract, gate5b4c3_shadow_generation_report | — |
 | gate5b4c3_shadow_counter_store.py | — | — | config/env.py, shadow/gate5b4c3_shadow_generation_report.py, transport/chat.py, transport/chat_routes.py, transport/shadow_generations.py |
-| gate5b4c3_shadow_generation_contract.py | — | — | config/env.py, runtime/user_visible_model_routing.py, shadow/gate5b4c3_live_runner_boundary.py, shadow/gate5b4c3_mock_runner_boundary.py, shadow/gate5b4c3_runner_input_adapter.py, shadow/gate5b4c3_shadow_comparison.py, shadow/gate5b4c3_shadow_generation_report.py, shadow/gate5b4c3_shadow_parity.py, transport/chat.py, transport/chat_routes.py, transport/generation_request.py, transport/shadow_generations.py |
-| gate5b4c3_shadow_generation_report.py | — | gate5b4c3_shadow_counter_store, gate5b4c3_shadow_generation_contract | shadow/gate5b4c3_shadow_comparison.py, transport/shadow_generations.py |
+| gate5b4c3_shadow_generation_contract.py | — | — | config/env.py, runtime/user_visible_model_routing.py, shadow/gate5b4c3_live_runner_boundary.py, shadow/gate5b4c3_runner_input_adapter.py, shadow/gate5b4c3_shadow_comparison.py, shadow/gate5b4c3_shadow_generation_report.py, shadow/gate5b4c3_shadow_parity.py, transport/chat.py, transport/chat_routes.py, transport/generation_request.py, transport/shadow_generations.py |
+| gate5b4c3_shadow_generation_report.py | — | gate5b4c3_shadow_counter_store, gate5b4c3_shadow_generation_contract | shadow/gate5b4c3_shadow_comparison.py |
 | gate5b4c3_shadow_parity.py | Gate 5B-4c-3 Shadow Parity — observe-only measurement primitive. | gate5b4c3_live_runner_boundary, gate5b4c3_shadow_generation_contract | — |
 | gate5b4d_stream_fixture_audit.py | — | sse | — |
 | gate5b_user_visible_routing_canary.py | — | gate4c0_shadow_config | — |
@@ -1565,7 +1564,7 @@ graph LR
 | plugins.py | — | audit, manager, openmagi_runtime | (root)/app.py |
 | product_admin.py | — | openmagi_runtime, ops, safety | — |
 | public_event_parity.py | — | sse | — |
-| shadow_generations.py | — | gate5b4c3_live_runner_boundary, gate5b4c3_runner_input_adapter, gate5b4c3_shadow_comparison, gate5b4c3_shadow_counter_store, gate5b4c3_shadow_generation_contract, gate5b4c3_shadow_generation_report | (root)/app.py, config/env.py, transport/chat.py, transport/chat_routes.py, transport/chat_shared.py |
+| shadow_generations.py | Gate5B4C3 generation route configuration. | gate5b4c3_shadow_counter_store, gate5b4c3_shadow_generation_contract | config/env.py, transport/chat.py, transport/chat_routes.py, transport/chat_shared.py |
 | shadow_invocations.py | — | gate5b4c2_shadow_invocation_contract, openmagi_runtime | (root)/app.py |
 | sse.py | — | events, health, public_events, redaction, transport | cli/engine.py, runtime/stream_fallback.py, shadow/fixture_runner.py, shadow/gate5b4d_stream_fixture_audit.py, shadow/ts_parity_replay.py, transport/public_event_parity.py, transport/sse_buffer.py, transport/streaming_chat.py |
 | sse_buffer.py | — | event_adapter, sse | runtime/stream_fallback.py, runtime/stream_withholding.py |

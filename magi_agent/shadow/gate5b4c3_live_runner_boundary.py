@@ -1348,7 +1348,7 @@ def _runner_error_diagnostic(
             if gate1a_egress_correlation_context is not None
             else None
         ),
-        routeMode=_safe_label(request.mode, "unknown"),
+        routeMode="user_visible_generation",
         gateMode=(
             "gate1a_readonly_tools"
             if tools_policy == "shadow_readonly"
