@@ -64,8 +64,8 @@ _BUNDLE_MISSING_HTML = """<!doctype html>
     or install a packaged release via Homebrew or the wheel — packaged
     installs always include the dashboard.</p>
     <p>The API on this port is fully functional without the dashboard.</p>
-    <p>Docs: <a href="https://github.com/openmagi/magi-agent#local-web-dashboard">
-    https://github.com/openmagi/magi-agent#local-web-dashboard</a></p>
+    <p><a href="https://github.com/openmagi/magi-agent#local-web-dashboard">
+    Local web dashboard docs (README)</a></p>
   </main>
 </body>
 </html>"""
