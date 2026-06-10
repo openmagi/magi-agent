@@ -394,6 +394,38 @@ def test_selected_full_toolhost_stream_uses_selected_canary_path(
     assert payloads[-1]["terminal"] == "completed"
 
 
+def test_selected_full_toolhost_duplicate_replay_surfaces_status_not_none(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
+    monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
+    monkeypatch.setenv("CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_WORKSPACE_ROOT", str(tmp_path))
+    runtime = _selected_runtime(tmp_path, full_toolhost=True)
+    client = TestClient(_make_app(runtime=runtime))
+    body = {
+        "sessionId": "s-selected-duplicate",
+        "turnId": "t-selected-duplicate",
+        "messages": [{"role": "user", "content": "Repeat the selected toolhost prompt."}],
+    }
+
+    first = client.post("/v1/chat/stream", headers=_auth_headers(), json=body)
+    second = client.post("/v1/chat/stream", headers=_auth_headers(), json=body)
+
+    assert first.status_code == 200, first.text
+    assert _data_lines(first.text)[-1]["terminal"] == "completed"
+    assert second.status_code == 200, second.text
+    second_payloads = _data_lines(second.text)
+    assert any(
+        payload.get("type") == "error"
+        and payload.get("code") == "counter_duplicate_replay"
+        for payload in second_payloads
+    )
+    assert second_payloads[-1]["terminal"] == "error"
+    assert second_payloads[-1]["error"] == "counter_duplicate_replay"
+    assert "counter_none" not in second.text
+
+
 def test_selected_gate5b_stream_emits_live_sink_events_before_completion(
     monkeypatch,
 ) -> None:
