@@ -181,6 +181,7 @@ graph LR
     runtime --> ops
     runtime --> plugins
     runtime --> prompt
+    runtime --> shadow
     runtime --> shared
     runtime --> tools
     runtime --> transport
@@ -430,23 +431,23 @@ graph LR
 | __main__.py | Thin stdlib-only shim for ``python -m magi_agent.cli`` (PR-F1). | app | cli/tests/test_app.py |
 | app.py | Typer CLI entrypoint for Magi (PR-F1, Stream F). | cli, config, daemon, headless, health, legal_eval, local_defaults, memory_bootstrap, otel_noise, providers, service_install, watchers, wiring | cli/__main__.py, cli/tests/test_app.py, cli/tests/test_composio_cli.py, cli/tests/test_doctor.py, cli/tests/test_gateway_start_daemon.py, cli/tests/test_plan_mode.py |
 | clipboard_image.py | Read an image from the OS clipboard for CLI/TUI image attach. | message_builder | cli/tests/test_clipboard_image.py, cli/tui/app.py |
-| contracts.py | Stable interface surface for the Magi headless CLI. | control, events | cli/commands/builtins.py, cli/commands/bundled.py, cli/commands/control.py, cli/commands/discovery.py, cli/commands/executor.py, cli/commands/mcp_commands.py, cli/commands/registry.py, cli/commands/session_history.py, cli/commands/skill_commands.py, cli/engine.py, cli/headless.py, cli/permissions.py, cli/readonly_classifier.py, cli/session_log.py, cli/tests/test_app.py, cli/tests/test_coldstart.py, cli/tests/test_command_executor.py, cli/tests/test_commands.py, cli/tests/test_contracts_a3.py, cli/tests/test_e2e_parity.py, cli/tests/test_engine.py, cli/tests/test_engine_gate.py, cli/tests/test_engine_image_blocks.py, cli/tests/test_engine_output_continuation.py, cli/tests/test_engine_recovery.py, cli/tests/test_headless.py, cli/tests/test_headless_projection.py, cli/tests/test_model_picker_wire.py, cli/tests/test_permissions.py, cli/tests/test_phase_route_consumption.py, cli/tests/test_runtime_policy_wiring.py, cli/tests/test_session_log.py, cli/tests/test_slash_p1_sources.py, cli/tests/test_slash_p2_control.py, cli/tests/test_slash_p2_mcp.py, cli/tests/test_slash_p3_seams.py, cli/tests/test_streaming_chat.py, cli/tests/test_streaming_driver.py, cli/tests/test_tui_app.py, cli/tests/test_tui_autocomplete.py, cli/tests/test_tui_followups.py, cli/tests/test_tui_input.py, cli/tests/test_tui_palette.py, cli/tests/test_tui_subagent.py, cli/tests/test_tui_theme.py, cli/tests/test_tui_thinking.py, cli/tests/test_tui_tool_render.py, cli/tests/test_tui_transcript.py, cli/tests/test_tui_visual.py, cli/tests/test_tui_whichkey.py, cli/tests/test_tui_widgets.py, cli/tui/app.py, cli/tui/autocomplete.py, cli/tui/input.py, cli/tui/palette.py, cli/tui/tool_render.py, cli/tui/widgets/tool_card.py, cli/wiring.py, transport/chat.py, transport/streaming_chat.py, transport/streaming_chat_route.py, transport/streaming_driver.py |
+| contracts.py | Stable interface surface for the Magi headless CLI. | control, events | cli/commands/builtins.py, cli/commands/bundled.py, cli/commands/control.py, cli/commands/discovery.py, cli/commands/executor.py, cli/commands/mcp_commands.py, cli/commands/registry.py, cli/commands/session_history.py, cli/commands/skill_commands.py, cli/engine.py, cli/headless.py, cli/permissions.py, cli/readonly_classifier.py, cli/session_log.py, cli/tests/test_app.py, cli/tests/test_coldstart.py, cli/tests/test_command_executor.py, cli/tests/test_commands.py, cli/tests/test_contracts_a3.py, cli/tests/test_e2e_parity.py, cli/tests/test_engine.py, cli/tests/test_engine_gate.py, cli/tests/test_engine_image_blocks.py, cli/tests/test_engine_output_continuation.py, cli/tests/test_engine_recovery.py, cli/tests/test_headless.py, cli/tests/test_headless_projection.py, cli/tests/test_model_picker_wire.py, cli/tests/test_permissions.py, cli/tests/test_phase_route_consumption.py, cli/tests/test_runtime_policy_wiring.py, cli/tests/test_session_log.py, cli/tests/test_slash_p1_sources.py, cli/tests/test_slash_p2_control.py, cli/tests/test_slash_p2_mcp.py, cli/tests/test_slash_p3_seams.py, cli/tests/test_streaming_chat.py, cli/tests/test_streaming_driver.py, cli/tests/test_tui_app.py, cli/tests/test_tui_autocomplete.py, cli/tests/test_tui_followups.py, cli/tests/test_tui_input.py, cli/tests/test_tui_palette.py, cli/tests/test_tui_subagent.py, cli/tests/test_tui_theme.py, cli/tests/test_tui_thinking.py, cli/tests/test_tui_tool_render.py, cli/tests/test_tui_transcript.py, cli/tests/test_tui_visual.py, cli/tests/test_tui_whichkey.py, cli/tests/test_tui_widgets.py, cli/tui/app.py, cli/tui/autocomplete.py, cli/tui/input.py, cli/tui/palette.py, cli/tui/tool_render.py, cli/tui/widgets/tool_card.py, cli/wiring.py, transport/chat_routes.py, transport/streaming_chat.py, transport/streaming_chat_route.py, transport/streaming_driver.py |
 | engine.py | Real ADK-backed engine driver for the Magi headless CLI (PR-A2). | active_turn_registry, contracts, env, error_recovery, event_adapter, events, gate5b4c3_image_parts, goal_nudge, output_continuation, permissions, readonly_classifier, repair_loop, runner_adapter, sse, verifier_bus | cli/headless.py, cli/real_runner.py, cli/tests/test_app.py, cli/tests/test_coldstart.py, cli/tests/test_contracts_a3.py, cli/tests/test_engine.py, cli/tests/test_engine_gate.py, cli/tests/test_engine_image_blocks.py, cli/tests/test_engine_output_continuation.py, cli/tests/test_engine_recovery.py, cli/tests/test_headless_approval.py, cli/tests/test_phase_route_consumption.py, cli/tests/test_runtime_policy_wiring.py, cli/wiring.py |
 | headless.py | Headless entrypoint for the Magi CLI (PR-A1). | commands, contracts, engine, ndjson, permissions, protocol, redaction | cli/app.py, cli/tests/test_app.py, cli/tests/test_contracts_a3.py, cli/tests/test_e2e_parity.py, cli/tests/test_engine.py, cli/tests/test_engine_gate.py, cli/tests/test_engine_output_continuation.py, cli/tests/test_engine_recovery.py, cli/tests/test_headless.py, cli/tests/test_headless_approval.py, cli/tests/test_headless_projection.py, cli/tests/test_permissions.py |
 | identity.py | Identity + project-context loading for the local ``magi`` CLI agent. | — | cli/tests/test_identity.py, cli/tool_runtime.py |
-| learning_recall.py | CLI learning-recall block builder. | config, injection, memory_mode_guard, models, store | cli/tool_runtime.py |
+| learning_recall.py | CLI learning-recall block builder. | config, contracts, injection, memory_mode_guard, memory_recall, memory_write, models, namespaces, store | cli/tool_runtime.py |
 | local_runner.py | — | — | cli/tests/test_real_runner.py, cli/wiring.py |
 | memory_bootstrap.py | CLI memory bootstrap: ``config.toml[memory]`` → process env (PR-C). | config, providers | (root)/main.py, cli/app.py |
 | memory_recall_block.py | Per-turn query-based memory recall block builder (PR-E item 3). | config, memory_mode_guard, prompt_projection, search | cli/tool_runtime.py |
 | ndjson.py | Single-writer NDJSON output for the headless CLI. | protocol | cli/headless.py, cli/tests/test_ndjson.py |
 | permissions.py | Permission rules engine + gate skeleton for the Magi headless CLI. | contracts, control, protocol, readonly_classifier | cli/engine.py, cli/headless.py, cli/tests/test_app.py, cli/tests/test_coldstart.py, cli/tests/test_engine_gate.py, cli/tests/test_headless_approval.py, cli/tests/test_headless_projection.py, cli/tests/test_permissions.py, cli/tests/test_streaming_driver.py, cli/wiring.py, transport/active_turn.py, transport/streaming_driver.py, transport/streaming_sink.py |
 | protocol.py | Pydantic models for the Magi headless CLI wire protocol. | — | cli/headless.py, cli/ndjson.py, cli/permissions.py, cli/tests/test_ndjson.py, cli/tests/test_permissions.py, cli/tests/test_protocol.py, cli/tests/test_streaming_driver.py, cli/tests/test_streaming_sink.py, transport/streaming_chat_route.py |
-| providers.py | Provider/key resolution for the local ``magi`` CLI. | env, model | (root)/main.py, benchmarks/gaia/harness.py, benchmarks/taubench/cli.py, cli/app.py, cli/commands/control.py, cli/memory_bootstrap.py, cli/real_runner.py, cli/tests/test_model_picker_wire.py, cli/tests/test_providers.py, cli/tests/test_real_runner.py, cli/tests/test_runtime_policy_wiring.py, cli/tests/test_tui_dialog_model.py, cli/tui/app.py, cli/tui/dialogs/model.py, cli/wiring.py, discovery/orchestrator.py, runtime/child_runner_live.py, tools/image_tools.py, transport/chat.py |
-| readonly_classifier.py | SmartApprove read-only classifier for the Magi permission gate (PR3). | contracts, real_runner, registry | cli/engine.py, cli/permissions.py, cli/wiring.py, transport/chat.py |
+| providers.py | Provider/key resolution for the local ``magi`` CLI. | env, model | (root)/main.py, benchmarks/gaia/harness.py, benchmarks/taubench/cli.py, cli/app.py, cli/commands/control.py, cli/memory_bootstrap.py, cli/real_runner.py, cli/tests/test_model_picker_wire.py, cli/tests/test_providers.py, cli/tests/test_real_runner.py, cli/tests/test_runtime_policy_wiring.py, cli/tests/test_tui_dialog_model.py, cli/tui/app.py, cli/tui/dialogs/model.py, cli/wiring.py, discovery/orchestrator.py, runtime/child_runner_live.py, tools/image_tools.py, transport/egress_critic.py |
+| readonly_classifier.py | SmartApprove read-only classifier for the Magi permission gate (PR3). | contracts, real_runner, registry | cli/engine.py, cli/permissions.py, cli/wiring.py, transport/egress_critic.py |
 | real_runner.py | A real, model-backed runner for the local ``magi`` CLI. | compiler, control_plane, engine, env, live_gate, local_tool_collector, materializer, providers, session_identity, session_service, task_completion, tool_runtime | benchmarks/gaia/harness.py, benchmarks/taubench/cli.py, cli/readonly_classifier.py, cli/tests/test_app.py, cli/tests/test_real_runner.py, cli/tests/test_runtime_policy_wiring.py, cli/wiring.py, discovery/orchestrator.py, runtime/child_runner_live.py |
 | session_log.py | Append-only JSONL session log for the Magi CLI (Stream B, PR-B1). | contracts, session_continuity, session_service, transcript | cli/tests/test_app.py, cli/tests/test_coldstart.py, cli/tests/test_session_log.py, cli/tui/app.py, cli/tui/history.py, cli/tui/theme.py, cli/wiring.py |
 | tool_runtime.py | Real tool runtime for the local ``magi`` CLI agent. | context, core_toolhost, dispatcher, env, file_tool_manifests, file_toolhost, identity, learning_recall, live_gate, local_tool_collector, manifest, memory_recall_block, memory_snapshot_cache, memory_write_wiring, message_builder, registry, session_identity, tool, tool_adapter, tools | cli/real_runner.py, cli/tests/test_identity.py, cli/tests/test_local_tool_evidence_wiring.py, cli/tests/test_plan_mode.py, cli/tests/test_tool_runtime.py, cli/wiring.py |
-| wiring.py | Composition root for the Magi CLI (PR-F1, Stream F). | app, commands, config, context, contracts, dispatcher, engine, env, file_tool_manifests, file_toolhost, live_gate, local_runner, local_tool_collector, manifest, mcp, memory_mode_guard, openmagi_runtime, permissions, providers, readonly_classifier, real_runner, registry, runtime_sink, session_identity, session_log, tool, tool_adapter, tool_render, tool_runtime | cli/app.py, cli/tests/test_app.py, cli/tests/test_coldstart.py, cli/tests/test_plan_mode.py, cli/tests/test_real_runner.py, cli/tests/test_runtime_policy_wiring.py, cli/tests/test_streaming_sink.py, transport/chat.py, transport/streaming_chat_route.py |
+| wiring.py | Composition root for the Magi CLI (PR-F1, Stream F). | app, commands, config, context, contracts, dispatcher, engine, env, file_tool_manifests, file_toolhost, live_gate, local_runner, local_tool_collector, manifest, mcp, memory_mode_guard, openmagi_runtime, permissions, providers, readonly_classifier, real_runner, registry, runtime_sink, session_identity, session_log, tool, tool_adapter, tool_render, tool_runtime | cli/app.py, cli/tests/test_app.py, cli/tests/test_coldstart.py, cli/tests/test_plan_mode.py, cli/tests/test_real_runner.py, cli/tests/test_runtime_policy_wiring.py, cli/tests/test_streaming_sink.py, transport/chat_routes.py, transport/streaming_chat_route.py |
 
 ### cli/commands/
 
@@ -630,7 +631,7 @@ graph LR
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
 | __init__.py | — | env, models | — |
-| env.py | — | gate3a_replay, gate5b4c3_shadow_counter_store, gate5b4c3_shadow_generation_contract, models, pregate8_continuity_canary, shadow_generations | (root)/main.py, adk_bridge/anthropic_cache_model.py, adk_bridge/control_plane.py, adk_bridge/tool_adapter.py, browser/autonomous/config.py, cli/engine.py, cli/providers.py, cli/real_runner.py, cli/tests/test_app.py, cli/tool_runtime.py, cli/wiring.py, config/__init__.py, evidence/local_tool_collector.py, gates/gate5b_full_toolhost.py, harness/general_automation/constraint_reinjection.py, harness/general_automation/delegation.py, harness/general_automation/live_gate.py, harness/general_automation/plan_act_switch.py, harness/general_automation/question_tool.py, harness/general_automation/recipe_disclosure.py, harness/general_automation/task_completion.py, introspection/tool.py, plugins/native/scheduled_work.py, recipes/coding_mutation.py, shadow/gate5b4c3_runner_input_adapter.py, tools/dispatcher.py, tools/local_readonly.py, tools/safety.py, transport/chat.py |
+| env.py | — | gate3a_replay, gate5b4c3_shadow_counter_store, gate5b4c3_shadow_generation_contract, models, pregate8_continuity_canary, shadow_generations | (root)/main.py, adk_bridge/anthropic_cache_model.py, adk_bridge/control_plane.py, adk_bridge/tool_adapter.py, browser/autonomous/config.py, cli/engine.py, cli/providers.py, cli/real_runner.py, cli/tests/test_app.py, cli/tool_runtime.py, cli/wiring.py, config/__init__.py, evidence/local_tool_collector.py, gates/gate5b_full_toolhost.py, harness/general_automation/constraint_reinjection.py, harness/general_automation/delegation.py, harness/general_automation/live_gate.py, harness/general_automation/plan_act_switch.py, harness/general_automation/question_tool.py, harness/general_automation/recipe_disclosure.py, harness/general_automation/task_completion.py, introspection/tool.py, plugins/native/missions.py, plugins/native/scheduled_work.py, plugins/native/taskboard.py, recipes/coding_mutation.py, shadow/gate5b4c3_runner_input_adapter.py, tools/dispatcher.py, tools/local_readonly.py, tools/safety.py, transport/chat.py, transport/chat_routes.py, transport/chat_shared.py |
 | models.py | — | pregate8_continuity_canary | (root)/main.py, config/__init__.py, config/env.py, gates/gate2_readiness.py, gates/gate3_readiness.py, gates/gate4_readiness.py, gates/gate5_readiness.py, gates/gate7_readiness.py, gates/gate8_readiness.py, runtime/openmagi_runtime.py |
 
 ### connectors/
@@ -720,12 +721,12 @@ graph LR
 | extraction.py | — | result, transcript, types | evidence/local_tool_collector.py |
 | extractors.py | — | types | evidence/__init__.py |
 | final_output_gate.py | — | calculation_policy, evidence_first_projection, model_tiers, uncertainty_policy | harness/long_context_eval.py, runtime/goal_nudge.py |
-| gate1a_egress_correlation.py | — | — | egress_proxy/evidence.py, evidence/observed_egress.py, gates/gate8_readiness.py, shadow/gate5b4c3_live_runner_boundary.py, transport/chat.py |
-| gate2_durable_evidence.py | Durable evidence store for Gate 2 selected sandbox canary. | — | transport/chat.py |
+| gate1a_egress_correlation.py | — | — | egress_proxy/evidence.py, evidence/observed_egress.py, gates/gate8_readiness.py, shadow/gate5b4c3_live_runner_boundary.py, transport/chat.py, transport/chat_routes.py |
+| gate2_durable_evidence.py | Durable evidence store for Gate 2 selected sandbox canary. | — | transport/chat.py, transport/gate2_sandbox_canary.py |
 | ledger.py | — | builtin, types | evidence/__init__.py, evidence/local_tool_collector.py, harness/general_automation/constraint_reinjection.py, harness/general_automation/live_gate.py, harness/general_automation/task_completion.py, harness/verifier_bus.py, introspection/projection.py, introspection/tool.py, shadow/audit_reporter.py |
 | ledger_semantics.py | — | — | — |
 | local_tool_collector.py | — | env, extraction, ledger, result, types | cli/real_runner.py, cli/tests/test_local_tool_evidence_wiring.py, cli/tests/test_tool_runtime.py, cli/tool_runtime.py, cli/wiring.py |
-| observed_egress.py | — | gate1a_egress_correlation | (root)/main.py, transport/chat.py, transport/health.py |
+| observed_egress.py | — | gate1a_egress_correlation | (root)/main.py, transport/chat.py, transport/chat_routes.py, transport/health.py |
 | reports.py | — | tool_preview, types | evidence/citation_audit.py, evidence/coding_verification.py, evidence/enforcement_boundary.py, evidence/event_projection.py, evidence/source_ledger.py, evidence/subagent.py, shadow/audit_reporter.py, shadow/coding_verification_evidence_contract.py, shadow/research_source_evidence_contract.py |
 | research_final_gate.py | — | citation_audit, source_ledger, types | research/research_first_canary.py |
 | rollout.py | — | types | harness/resolved.py |
@@ -745,16 +746,16 @@ graph LR
 | api_canary_ladder.py | — | — | — |
 | channel_live_readiness.py | E5 — Channel-live readiness ladder + platform-routing dispatch. | discord_live, email_live, slack_live, telegram_live | — |
 | ga_live_readiness.py | General-Automation live-execution rollout readiness gate — Track 19 PR4. | logging | — |
-| gate1a_readonly_tools.py | — | catalog, context, manifest, registry | transport/chat.py |
-| gate2_readiness.py | — | gate2_activation_loop_a, gate2_recipe_profile_resolver, gate2_shadow_tool_policy, models, safety | transport/chat.py, transport/health.py |
+| gate1a_readonly_tools.py | — | catalog, context, manifest, registry | transport/chat.py, transport/chat_routes.py, transport/chat_shared.py, transport/egress_critic.py, transport/generation_request.py |
+| gate2_readiness.py | — | gate2_activation_loop_a, gate2_recipe_profile_resolver, gate2_shadow_tool_policy, models, safety | transport/chat.py, transport/gate2_sandbox_canary.py, transport/health.py |
 | gate3_readiness.py | — | models | transport/health.py |
 | gate4_readiness.py | — | models | transport/health.py |
 | gate5_readiness.py | — | models | transport/health.py |
-| gate5b_full_toolhost.py | — | code_diagnostics_receipts, coding_tool_receipts, config, context, dispatcher, edit_match_receipts, edit_matching, env, formatter_runner, injection, lsp_client, manifest, memory_mode_guard, patch_apply, permission, read_format, read_ledger, registry, result, ripgrep, session_identity | tools/core_toolhost.py, transport/chat.py, transport/health.py |
+| gate5b_full_toolhost.py | — | code_diagnostics_receipts, coding_tool_receipts, config, context, dispatcher, edit_match_receipts, edit_matching, env, formatter_runner, injection, lsp_client, manifest, memory_mode_guard, patch_apply, permission, read_format, read_ledger, registry, result, ripgrep, session_identity | tools/core_toolhost.py, transport/chat.py, transport/chat_routes.py, transport/chat_shared.py, transport/egress_critic.py, transport/generation_request.py, transport/health.py |
 | gate7_readiness.py | — | models | transport/health.py |
-| gate8_readiness.py | — | gate1a_egress_correlation, models | transport/chat.py, transport/health.py |
+| gate8_readiness.py | — | gate1a_egress_correlation, models | transport/chat.py, transport/chat_routes.py, transport/health.py |
 | goal_loop_readiness.py | Goal-loop rollout readiness gate — Track B, PR B5. | goal_loop | — |
-| learning_live_readiness.py | Learning-layer LIVE adapter readiness gate — PR7. | config | harness/memory_recall.py, harness/memory_write.py, learning/live.py |
+| learning_live_readiness.py | Learning-layer LIVE adapter readiness gate — PR7. | config | harness/memory_recall.py, harness/memory_write.py, learning/live.py, transport/chat_routes.py |
 | learning_readiness.py | Learning reflection readiness gate — PR2. | config | learning/bootstrap.py |
 | memory_write_readiness.py | Writable-memory rollout readiness gate — Track D, PR D5. | config | runtime/memory_write_wiring.py |
 | pregate8_continuity_canary.py | — | context_packet | config/env.py, config/models.py |
@@ -796,9 +797,9 @@ graph LR
 | learning_executor.py | Learning reflection executor — PR3 (real signal extraction + labeling). | candidates, config, eval_gate, labeler, store | harness/cron_runtime.py, learning/bootstrap.py |
 | long_context_eval.py | — | context_budget, final_output_gate, model_tiers, request_shape | — |
 | memory_compaction.py | — | memory_write, write_boundary | — |
-| memory_recall.py | — | contracts, injection, learning_live_readiness, memory_recall, namespaces | learning/live.py |
+| memory_recall.py | — | contracts, injection, learning_live_readiness, memory_recall, namespaces | cli/learning_recall.py, learning/live.py |
 | memory_review.py | Gated background memory-review harness (A1, PR5). | context, declarative_filter | — |
-| memory_write.py | — | contracts, declarative_filter, learning_live_readiness, local_file_writable, write_boundary | harness/memory_compaction.py, harness/memory_write_tool.py, learning/live.py |
+| memory_write.py | — | contracts, declarative_filter, learning_live_readiness, local_file_writable, write_boundary | cli/learning_recall.py, harness/memory_compaction.py, harness/memory_write_tool.py, learning/live.py |
 | memory_write_tool.py | MemoryWriteToolHost — agent-callable tool surface for declarative memory writes (D2). | context, memory_write, registry, result | runtime/memory_write_wiring.py |
 | mission_runtime_boundary.py | — | — | — |
 | parallel_execution.py | — | — | harness/workflow_executor.py |
@@ -896,11 +897,11 @@ graph LR
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
 | __init__.py | — | projection, tool | — |
-| egress_gate.py | Evidence-grounded egress critic gate (PR3). | fact_critical, projection, reason_safety | transport/chat.py |
+| egress_gate.py | Evidence-grounded egress critic gate (PR3). | fact_critical, projection, reason_safety | transport/chat.py, transport/chat_routes.py, transport/egress_critic.py |
 | fact_critical.py | Fact-critical turn classifier for the egress critic gate (PR3). | projection, reason_safety | introspection/egress_gate.py |
-| mapping.py | Shared, pure normalization of tool-call evidence into ``ToolCallView``. | projection | introspection/projection.py, transport/chat.py |
-| projection.py | Shared, pure projection of the session evidence ledger into a lean view. | ledger, mapping, read_ledger | introspection/__init__.py, introspection/egress_gate.py, introspection/fact_critical.py, introspection/mapping.py, introspection/tool.py, transport/chat.py |
-| reason_safety.py | Helpers for storing model-generated explanation text safely. | — | introspection/egress_gate.py, introspection/fact_critical.py, transport/chat.py |
+| mapping.py | Shared, pure normalization of tool-call evidence into ``ToolCallView``. | projection | introspection/projection.py, transport/egress_critic.py |
+| projection.py | Shared, pure projection of the session evidence ledger into a lean view. | ledger, mapping, read_ledger | introspection/__init__.py, introspection/egress_gate.py, introspection/fact_critical.py, introspection/mapping.py, introspection/tool.py, transport/egress_critic.py |
+| reason_safety.py | Helpers for storing model-generated explanation text safely. | — | introspection/egress_gate.py, introspection/fact_critical.py, transport/egress_critic.py |
 | tool.py | Self-introspection tool (pull) — ``InspectSelfEvidence``. | context, env, ledger, projection, read_ledger, registry, result | cli/tool_runtime.py, introspection/__init__.py, runtime/openmagi_runtime.py |
 
 ### knowledge/
@@ -941,9 +942,9 @@ graph LR
 | compactor.py | Deterministic, IO-free memory compactor (gap-closer B2). | — | memory/adapters/local_file_writable.py, memory/compaction_tree.py |
 | config.py | Single source of truth for Hipocampus memory activation (PR1). | — | cli/memory_bootstrap.py, cli/memory_recall_block.py, gates/memory_write_readiness.py, memory/adapters/hipocampus_readonly.py, memory/adapters/local_file_writable.py, memory/adapters/operator_soul_writer.py, memory/compaction_tree.py, memory/policy.py, memory/search/__init__.py, runtime/memory_turn_hook.py |
 | conformance.py | — | declarative_filter, hipocampus_readonly, local_file_writable, policy | — |
-| contracts.py | — | — | harness/memory_recall.py, harness/memory_write.py, learning/injection.py, memory/__init__.py, memory/adapters/hipocampus_readonly.py, memory/adapters/local_file_writable.py, memory/adk_bridge.py, memory/namespaces.py, memory/policy.py, memory/projection.py, recipes/first_party/memory_recall.py |
+| contracts.py | — | — | cli/learning_recall.py, harness/memory_recall.py, harness/memory_write.py, learning/injection.py, memory/__init__.py, memory/adapters/hipocampus_readonly.py, memory/adapters/local_file_writable.py, memory/adk_bridge.py, memory/namespaces.py, memory/policy.py, memory/projection.py, recipes/first_party/memory_recall.py |
 | declarative_filter.py | Declarative-only filter for agent memory writes (D2). | — | harness/memory_review.py, harness/memory_write.py, memory/conformance.py |
-| namespaces.py | — | contracts, policy | harness/memory_recall.py, memory/__init__.py, memory/projection.py, recipes/first_party/memory_recall.py |
+| namespaces.py | — | contracts, policy | cli/learning_recall.py, harness/memory_recall.py, memory/__init__.py, memory/projection.py, recipes/first_party/memory_recall.py |
 | policy.py | — | config, contracts | memory/__init__.py, memory/adapters/hipocampus_readonly.py, memory/adapters/local_file_writable.py, memory/adk_bridge.py, memory/conformance.py, memory/namespaces.py, memory/projection.py, memory/prompt_projection.py, recipes/first_party/memory_recall.py |
 | projection.py | — | contracts, events, namespaces, policy, tool_preview | memory/prompt_projection.py, recipes/first_party/memory_recall.py |
 | prompt_projection.py | D3 — gated memory prompt projection. | hipocampus_readonly, policy, projection, tool_preview | cli/memory_recall_block.py, runtime/memory_snapshot_cache.py |
@@ -1071,12 +1072,12 @@ graph LR
 | coding.py | — | _common, context, result | — |
 | documents.py | — | _common, _file_delivery_fakes, context, contract, document_write_tools, file_delivery, file_delivery_live, policy, result, spreadsheet_tools | — |
 | knowledge.py | — | _common, context, policy, provider_boundary, result, source_tools | — |
-| missions.py | — | _common, context, policy, result | — |
+| missions.py | — | _common, context, env, policy, result | — |
 | scheduled_work.py | — | _common, context, env, policy, result | — |
 | skills.py | — | _common, context, result | cli/commands/builtins.py, transport/app_api.py |
 | source_ledger.py | — | _common, context, result | — |
 | subagents.py | — | _common, child_runner_boundary, child_runner_live, context, result | — |
-| taskboard.py | — | _common, context, result | — |
+| taskboard.py | — | _common, context, env, result | — |
 | web.py | — | context, research_tools, result | — |
 
 ### prompt/
@@ -1101,7 +1102,7 @@ graph LR
 | coding_evidence_gate.py | — | coding_verification, types | — |
 | coding_mutation.py | — | edit_matching, env, read_ledger | recipes/coding_subagents.py |
 | coding_subagents.py | — | coding_mutation, read_ledger, runtime | — |
-| compiler.py | — | discovery, learning_usage | cli/real_runner.py, recipes/__init__.py, recipes/first_party/discovery.py, recipes/first_party/learning_usage.py, recipes/materializer.py, recipes/workflow_recipe.py, shadow/gate2_recipe_profile_resolver.py, shadow/mission_lifecycle_contract.py, transport/chat.py |
+| compiler.py | — | discovery, learning_usage | cli/real_runner.py, recipes/__init__.py, recipes/first_party/discovery.py, recipes/first_party/learning_usage.py, recipes/materializer.py, recipes/workflow_recipe.py, shadow/gate2_recipe_profile_resolver.py, shadow/mission_lifecycle_contract.py, transport/chat.py, transport/chat_routes.py |
 | composition.py | — | — | recipes/effective_contract.py, recipes/merge_algebra.py |
 | cross_verify.py | Unified cross-verification recipe — fan out one prompt across N models, vote. | best_of_n, manifest, runtime | — |
 | effective_contract.py | — | composition, hook_composition, merge_algebra | recipes/projection.py |
@@ -1111,7 +1112,7 @@ graph LR
 | ledger_progress.py | Progress ledger contracts — stall detection & per-step self-assessment. | — | recipes/ledger_orchestrator.py |
 | ledger_task.py | Task ledger contract — facts, guesses, and plan for ledger-based orchestration. | child_roles | recipes/ledger_orchestrator.py, recipes/ledger_workforce.py |
 | ledger_workforce.py | Multi-agent workforce mode for ledger-based orchestration (Phase 4). | child_roles, ledger_task | — |
-| materializer.py | — | compiler, context_budget, model_tiers, phase_routing, phase_routing_defaults, reliability_budget, reliability_policy | cli/real_runner.py, recipes/workflow_recipe.py, transport/chat.py |
+| materializer.py | — | compiler, context_budget, model_tiers, phase_routing, phase_routing_defaults, reliability_budget, reliability_policy | cli/real_runner.py, recipes/workflow_recipe.py, transport/chat.py, transport/chat_routes.py |
 | merge_algebra.py | — | composition | recipes/effective_contract.py |
 | opencode_child_lifecycle.py | — | child_roles, child_runtime_envelope, subagent | — |
 | opencode_permission_patterns.py | — | control | — |
@@ -1131,7 +1132,7 @@ graph LR
 | __init__.py | — | — | — |
 | discovery.py | Discovery first-party recipe pack — metadata-only, default-OFF. | compiler | recipes/compiler.py |
 | learning_usage.py | Learning-usage first-party recipe pack — PR5 static injection. | compiler | recipes/compiler.py |
-| memory_recall.py | — | contracts, namespaces, policy, projection | harness/memory_recall.py |
+| memory_recall.py | — | contracts, namespaces, policy, projection | cli/learning_recall.py, harness/memory_recall.py |
 | self_improvement.py | — | — | — |
 
 ### recipes/first_party/coding/
@@ -1183,7 +1184,7 @@ graph LR
 | output_contract_gate.py | Output-Contract Adherence Gate — general format-discipline gate for final answers. | — | — |
 | policy_pack.py | — | acceptance_criteria, action_claims, repair | — |
 | repair.py | — | acceptance_criteria, claim_graph, evidence_graph, source_proof | research/policy_pack.py |
-| research_first_canary.py | — | event_projection, public_events, research_final_gate, source_ledger | transport/chat.py |
+| research_first_canary.py | — | event_projection, public_events, research_final_gate, source_ledger | transport/chat.py, transport/chat_routes.py |
 | source_proof.py | — | runtime_issuance | research/child_roles.py, research/event_projection.py, research/evidence_graph.py, research/repair.py, web_acquisition/cross_verifier.py, web_acquisition/deep_research.py, web_acquisition/repo_research_tools.py |
 
 ### rules/
@@ -1231,21 +1232,21 @@ graph LR
 | local_defaults.py | — | — | (root)/main.py, cli/app.py |
 | long_running_activity.py | — | receipt_utils | missions/background_tasks.py |
 | loop_detectors.py | — | — | adk_bridge/resilience_plugin.py |
-| memory_mode_context.py | Async-safe per-request memory-mode context for the live serve path. | session_identity | transport/chat.py, transport/streaming_chat_route.py |
+| memory_mode_context.py | Async-safe per-request memory-mode context for the live serve path. | session_identity | transport/chat_routes.py, transport/streaming_chat_route.py |
 | memory_snapshot_cache.py | Session-scoped frozen snapshot cache for memory prompt projection. | prompt_projection | cli/tool_runtime.py |
-| memory_turn_hook.py | Turn-end memory hook: transcript→daily flush + compaction trigger (PR-B). | compaction_tree, config, local_file_writable | transport/chat.py |
+| memory_turn_hook.py | Turn-end memory hook: transcript→daily flush + compaction trigger (PR-B). | compaction_tree, config, local_file_writable | transport/chat_routes.py |
 | memory_write_wiring.py | Gate-aware factory for the MemoryWrite tool host (Task D, PR2). | local_file_writable, memory_write_readiness, memory_write_tool | cli/tool_runtime.py, runtime/openmagi_runtime.py |
-| message_builder.py | — | bus, context, injection, manifest, provider_adapter, resolved, splitter | cli/clipboard_image.py, cli/tool_runtime.py, runtime/context_attachments.py, shadow/gate5b4c3_runner_input_adapter.py, transport/chat.py |
+| message_builder.py | — | bus, context, injection, manifest, provider_adapter, resolved, splitter | cli/clipboard_image.py, cli/tool_runtime.py, runtime/context_attachments.py, shadow/gate5b4c3_runner_input_adapter.py, transport/chat.py, transport/generation_request.py |
 | model_tiers.py | — | — | evidence/final_output_gate.py, harness/long_context_eval.py, recipes/materializer.py, recipes/phase_routing_defaults.py, recipes/reliability_policy.py, runtime/adk_turn_runner.py, runtime/child_runner_boundary.py, runtime/child_runner_live.py, runtime/context_budget.py, runtime/phase_routing.py, runtime/reliability_budget.py, runtime/request_shape.py |
 | no_agent_watchdog.py | — | safety | runtime/events.py |
-| openmagi_runtime.py | — | apply, base, catalog, core_toolhost, manager, memory_write_wiring, models, native_catalog, primitives, profiles, registry, store, todo_toolhost, tool, tool_projection | (root)/app.py, (root)/main.py, cli/wiring.py, transport/app_api.py, transport/chat.py, transport/control_requests.py, transport/credentials.py, transport/customize.py, transport/dashboard.py, transport/health.py, transport/learning_dashboard.py, transport/plugins.py, transport/product_admin.py, transport/shadow_invocations.py, transport/tools.py, transport/web_dashboard.py |
+| openmagi_runtime.py | — | apply, base, catalog, core_toolhost, manager, memory_write_wiring, models, native_catalog, primitives, profiles, registry, store, todo_toolhost, tool, tool_projection | (root)/app.py, (root)/main.py, cli/wiring.py, transport/app_api.py, transport/chat.py, transport/chat_routes.py, transport/chat_shared.py, transport/control_requests.py, transport/credentials.py, transport/customize.py, transport/dashboard.py, transport/gate2_sandbox_canary.py, transport/generation_request.py, transport/health.py, transport/learning_dashboard.py, transport/plugins.py, transport/product_admin.py, transport/shadow_invocations.py, transport/tools.py, transport/web_dashboard.py |
 | output_continuation.py | Output continuation — resume a deliverable that hit the model's per-response | — | cli/engine.py, cli/tests/test_engine_output_continuation.py |
 | phase_routing.py | — | model_tiers, reliability_budget | recipes/materializer.py, recipes/phase_routing_defaults.py |
 | policy_snapshot.py | — | — | — |
 | prompt_snapshot.py | — | — | harness/self_review.py, runtime/fork_runner.py |
 | provider_execution.py | — | provider_receipts | browser/live_provider_pack.py, browser/provider_boundary.py, channels/discord_adapter.py, channels/dispatcher.py, channels/push_delivery.py, channels/telegram_adapter.py, web_acquisition/live_provider_pack.py |
 | provider_receipts.py | — | — | artifacts/file_delivery.py, browser/live_provider_pack.py, browser/provider_boundary.py, channels/discord_adapter.py, channels/dispatcher.py, channels/push_delivery.py, channels/telegram_adapter.py, harness/background_tasks.py, harness/cron_runtime.py, harness/scheduler_runtime.py, plugins/mcp_adapter.py, runtime/provider_execution.py, web_acquisition/live_provider_pack.py, web_acquisition/provider_router.py |
-| public_events.py | — | — | evidence/event_projection.py, harness/cross_review.py, harness/workflow_executor.py, meta_orchestration/event_projection.py, research/event_projection.py, research/research_first_canary.py, runtime/events.py, runtime/work_console_snapshot.py, tools/event_projection.py, transport/chat.py, transport/sse.py |
+| public_events.py | — | — | evidence/event_projection.py, harness/cross_review.py, harness/workflow_executor.py, meta_orchestration/event_projection.py, research/event_projection.py, research/research_first_canary.py, runtime/events.py, runtime/work_console_snapshot.py, tools/event_projection.py, transport/chat.py, transport/chat_routes.py, transport/sse.py |
 | query_state.py | — | — | adk_bridge/context_compaction.py, runtime/cache_safe_params.py, runtime/content_replacement.py, runtime/context_lifecycle.py |
 | readiness.py | — | — | transport/health.py |
 | receipt_utils.py | — | — | missions/background_tasks.py, runtime/long_running_activity.py, self_improvement/drift_watch.py, self_improvement/eval_capture.py, self_improvement/failure_cluster.py, self_improvement/promotion_gate.py, self_improvement/proposals.py, self_improvement/review_gate.py, self_improvement/rollback.py |
@@ -1256,7 +1257,7 @@ graph LR
 | session_continuity.py | — | session_continuity_projection, session_continuity_proof | cli/session_log.py |
 | session_continuity_projection.py | — | transcript | runtime/context_packet.py, runtime/session_continuity.py |
 | session_continuity_proof.py | — | — | runtime/context_packet.py, runtime/session_continuity.py |
-| session_identity.py | — | — | cli/real_runner.py, cli/tool_runtime.py, cli/wiring.py, gates/gate5b_full_toolhost.py, runtime/memory_mode_context.py, tools/context.py, tools/memory_mode_guard.py, transport/chat.py |
+| session_identity.py | — | — | cli/real_runner.py, cli/tool_runtime.py, cli/wiring.py, gates/gate5b_full_toolhost.py, runtime/memory_mode_context.py, tools/context.py, tools/memory_mode_guard.py, transport/chat.py, transport/chat_routes.py |
 | slash_control_boundary.py | — | — | cli/commands/builtins.py |
 | stale_run_detector.py | — | heartbeat_contract, heartbeat_store | — |
 | stream_fallback.py | — | error_taxonomy, sse, sse_buffer, stream_withholding | — |
@@ -1268,6 +1269,7 @@ graph LR
 | turn_policy.py | — | — | adk_bridge/control_plane.py, harness/general_automation/task_completion.py |
 | turn_utilities.py | — | — | adk_bridge/edit_retry_reflection.py, recipes/retry_repair_policies.py, runtime/commit_boundary.py |
 | uncertainty_policy.py | — | — | evidence/final_output_gate.py |
+| user_visible_model_routing.py | User-visible model-route selection policy for the Gate5B serving path. | gate5b4c3_shadow_generation_contract | transport/chat.py, transport/chat_routes.py, transport/chat_shared.py, transport/egress_critic.py, transport/gate2_sandbox_canary.py, transport/generation_request.py |
 | work_console_snapshot.py | — | public_events, tool_preview | — |
 
 ### runtime/error_recovery/
@@ -1345,7 +1347,7 @@ graph LR
 | delegated_workflow_evidence_contract.py | — | subagent, tool_preview, types | — |
 | fact_grounding_verifier_contract.py | — | — | — |
 | fixture_runner.py | — | event_adapter, local_runner, runner_adapter, sse, transcript | shadow/gate3a_bundle.py, shadow/gate3a_report.py, shadow/redacted_ts_bundle.py |
-| gate2_activation_loop_a.py | — | gate2_shadow_tool_policy | gates/gate2_readiness.py, transport/chat.py, transport/health.py |
+| gate2_activation_loop_a.py | — | gate2_shadow_tool_policy | gates/gate2_readiness.py, transport/chat.py, transport/gate2_sandbox_canary.py, transport/health.py |
 | gate2_recipe_profile_resolver.py | — | compiler, safety | gates/gate2_readiness.py |
 | gate2_shadow_tool_policy.py | — | — | gates/gate2_readiness.py, shadow/gate2_activation_loop_a.py |
 | gate3a_bundle.py | — | fixture_runner | shadow/gate3a_replay.py |
@@ -1367,12 +1369,12 @@ graph LR
 | gate5b4_internal_endpoint_contract.py | — | — | — |
 | gate5b4c2_shadow_invocation_contract.py | — | — | transport/shadow_invocations.py |
 | gate5b4c3_image_parts.py | Convert sanitized Anthropic-style image blocks into ADK content parts. | — | cli/engine.py, shadow/gate5b4c3_live_runner_boundary.py |
-| gate5b4c3_live_runner_boundary.py | — | anthropic_cache_model, gate1a_egress_correlation, gate5b4c3_image_parts, gate5b4c3_runner_input_adapter, gate5b4c3_shadow_generation_contract | shadow/gate5b4c3_shadow_parity.py, transport/chat.py, transport/shadow_generations.py |
+| gate5b4c3_live_runner_boundary.py | — | anthropic_cache_model, gate1a_egress_correlation, gate5b4c3_image_parts, gate5b4c3_runner_input_adapter, gate5b4c3_shadow_generation_contract | shadow/gate5b4c3_shadow_parity.py, transport/chat.py, transport/chat_routes.py, transport/chat_shared.py, transport/shadow_generations.py |
 | gate5b4c3_mock_runner_boundary.py | — | gate5b4c3_shadow_generation_contract | — |
 | gate5b4c3_runner_input_adapter.py | — | env, gate5b4c3_shadow_generation_contract, message_builder | shadow/gate5b4c3_live_runner_boundary.py, transport/shadow_generations.py |
 | gate5b4c3_shadow_comparison.py | — | gate5b4c3_shadow_generation_contract, gate5b4c3_shadow_generation_report | transport/shadow_generations.py |
-| gate5b4c3_shadow_counter_store.py | — | — | config/env.py, shadow/gate5b4c3_shadow_generation_report.py, transport/chat.py, transport/shadow_generations.py |
-| gate5b4c3_shadow_generation_contract.py | — | — | config/env.py, shadow/gate5b4c3_live_runner_boundary.py, shadow/gate5b4c3_mock_runner_boundary.py, shadow/gate5b4c3_runner_input_adapter.py, shadow/gate5b4c3_shadow_comparison.py, shadow/gate5b4c3_shadow_generation_report.py, shadow/gate5b4c3_shadow_parity.py, transport/chat.py, transport/shadow_generations.py |
+| gate5b4c3_shadow_counter_store.py | — | — | config/env.py, shadow/gate5b4c3_shadow_generation_report.py, transport/chat.py, transport/chat_routes.py, transport/shadow_generations.py |
+| gate5b4c3_shadow_generation_contract.py | — | — | config/env.py, runtime/user_visible_model_routing.py, shadow/gate5b4c3_live_runner_boundary.py, shadow/gate5b4c3_mock_runner_boundary.py, shadow/gate5b4c3_runner_input_adapter.py, shadow/gate5b4c3_shadow_comparison.py, shadow/gate5b4c3_shadow_generation_report.py, shadow/gate5b4c3_shadow_parity.py, transport/chat.py, transport/chat_routes.py, transport/generation_request.py, transport/shadow_generations.py |
 | gate5b4c3_shadow_generation_report.py | — | gate5b4c3_shadow_counter_store, gate5b4c3_shadow_generation_contract | shadow/gate5b4c3_shadow_comparison.py, transport/shadow_generations.py |
 | gate5b4c3_shadow_parity.py | Gate 5B-4c-3 Shadow Parity — observe-only measurement primitive. | gate5b4c3_live_runner_boundary, gate5b4c3_shadow_generation_contract | — |
 | gate5b4d_stream_fixture_audit.py | — | sse | — |
@@ -1488,18 +1490,23 @@ graph LR
 | __init__.py | — | health | adk_bridge/event_adapter.py, cli/tests/test_sse_sanitize_control_request.py, transport/dashboard.py, transport/sse.py |
 | active_turn.py | Process-local registry of in-flight streaming-chat turns. | permissions | cli/tests/test_streaming_driver.py, transport/streaming_chat_route.py, transport/streaming_driver.py |
 | app_api.py | Dashboard ``/v1/app/*`` API surface. | cli, openmagi_runtime, session_store, skills, tools | (root)/app.py, customize/catalog.py |
-| chat.py | — | compiler, contracts, egress_gate, env, gate1a_egress_correlation, gate1a_readonly_tools, gate2_activation_loop_a, gate2_durable_evidence, gate2_readiness, gate5b4c3_live_runner_boundary, gate5b4c3_shadow_counter_store, gate5b4c3_shadow_generation_contract, gate5b_full_toolhost, gate8_readiness, mapping, materializer, memory_mode_context, memory_turn_hook, message_builder, observed_egress, openmagi_runtime, projection, providers, public_events, readonly_classifier, reason_safety, research_first_canary, session_identity, shadow_generations, usage_receipt_emit, wiring | (root)/app.py, (root)/main.py, transport/health.py, transport/streaming_chat_route.py |
+| chat.py | Re-export shim for the decomposed Gate5B chat serving stack (08-PR1). | chat_routes, chat_shared, compiler, egress_critic, egress_gate, env, gate1a_egress_correlation, gate1a_readonly_tools, gate2_activation_loop_a, gate2_durable_evidence, gate2_readiness, gate2_sandbox_canary, gate5b4c3_live_runner_boundary, gate5b4c3_shadow_counter_store, gate5b4c3_shadow_generation_contract, gate5b_full_toolhost, gate8_readiness, generation_request, materializer, message_builder, observed_egress, openmagi_runtime, public_events, research_first_canary, session_identity, shadow_generations, usage_receipt_emit, user_visible_model_routing | (root)/app.py, (root)/main.py, transport/health.py, transport/streaming_chat_route.py |
+| chat_routes.py | Chat route registration and the Gate5B user-visible serving engine. | chat_shared, compiler, contracts, egress_critic, egress_gate, env, gate1a_egress_correlation, gate1a_readonly_tools, gate2_sandbox_canary, gate5b4c3_live_runner_boundary, gate5b4c3_shadow_counter_store, gate5b4c3_shadow_generation_contract, gate5b_full_toolhost, gate8_readiness, generation_request, learning_live_readiness, materializer, memory_mode_context, memory_turn_hook, observed_egress, openmagi_runtime, public_events, research_first_canary, session_identity, shadow_generations, usage_receipt_emit, user_visible_model_routing, wiring | transport/chat.py |
+| chat_shared.py | Shared primitives for the decomposed Gate5B chat serving stack. | env, gate1a_readonly_tools, gate5b4c3_live_runner_boundary, gate5b_full_toolhost, openmagi_runtime, shadow_generations, user_visible_model_routing | transport/chat.py, transport/chat_routes.py, transport/gate2_sandbox_canary.py, transport/generation_request.py |
 | control_requests.py | Control-request REST surface consumed by the restored web dashboard. | openmagi_runtime | (root)/app.py |
 | credentials.py | Dashboard "Credentials" admin routes. | credentials_admin, durable_store, openmagi_runtime, tools | (root)/app.py |
 | customize.py | — | apply, catalog, openmagi_runtime, store, tools | (root)/app.py |
 | dashboard.py | — | openmagi_runtime, transport | (root)/app.py |
 | debug_trace.py | Debug endpoint exposing the current turn's execution trace. | trace_context | (root)/app.py |
+| egress_critic.py | Egress critic gate and live evidence projection for the chat serving path. | egress_gate, gate1a_readonly_tools, gate5b_full_toolhost, generation_request, mapping, projection, providers, readonly_classifier, reason_safety, user_visible_model_routing | transport/chat.py, transport/chat_routes.py |
+| gate2_sandbox_canary.py | Gate2 sandbox workspace canary chat + delivery-receipt logic. | chat_shared, gate2_activation_loop_a, gate2_durable_evidence, gate2_readiness, openmagi_runtime, user_visible_model_routing | transport/chat.py, transport/chat_routes.py |
+| generation_request.py | User-visible generation request, identity, and history contract builders. | chat_shared, gate1a_readonly_tools, gate5b4c3_shadow_generation_contract, gate5b_full_toolhost, message_builder, openmagi_runtime, user_visible_model_routing | transport/chat.py, transport/chat_routes.py, transport/egress_critic.py |
 | health.py | — | chat, config, gate2_activation_loop_a, gate2_readiness, gate3_readiness, gate4_readiness, gate5_readiness, gate5b_full_toolhost, gate7_readiness, gate8_readiness, health, observed_egress, openmagi_runtime, ops, readiness | (root)/app.py, observability/api.py, transport/__init__.py |
 | learning_dashboard.py | Learning governance dashboard API — FastAPI router. | api, config, models, openmagi_runtime, store | (root)/app.py |
 | plugins.py | — | audit, manager, openmagi_runtime | (root)/app.py |
 | product_admin.py | — | openmagi_runtime, ops, safety | — |
 | public_event_parity.py | — | sse | — |
-| shadow_generations.py | — | gate5b4c3_live_runner_boundary, gate5b4c3_runner_input_adapter, gate5b4c3_shadow_comparison, gate5b4c3_shadow_counter_store, gate5b4c3_shadow_generation_contract, gate5b4c3_shadow_generation_report | (root)/app.py, config/env.py, transport/chat.py |
+| shadow_generations.py | — | gate5b4c3_live_runner_boundary, gate5b4c3_runner_input_adapter, gate5b4c3_shadow_comparison, gate5b4c3_shadow_counter_store, gate5b4c3_shadow_generation_contract, gate5b4c3_shadow_generation_report | (root)/app.py, config/env.py, transport/chat.py, transport/chat_routes.py, transport/chat_shared.py |
 | shadow_invocations.py | — | gate5b4c2_shadow_invocation_contract, openmagi_runtime | (root)/app.py |
 | sse.py | — | events, health, public_events, redaction, transport | cli/engine.py, runtime/stream_fallback.py, shadow/fixture_runner.py, shadow/gate5b4d_stream_fixture_audit.py, shadow/ts_parity_replay.py, transport/public_event_parity.py, transport/sse_buffer.py, transport/streaming_chat.py |
 | sse_buffer.py | — | event_adapter, sse | runtime/stream_fallback.py, runtime/stream_withholding.py |
@@ -1509,7 +1516,7 @@ graph LR
 | streaming_sink.py | SSE streaming-chat seam for tool-permission approval requests. | events, permissions | cli/tests/test_streaming_driver.py, cli/tests/test_streaming_sink.py, transport/streaming_chat_route.py |
 | tool_preview.py | — | — | evidence/child_runtime_envelope.py, evidence/reports.py, evidence/tool_boundary.py, harness/general_automation/plan_act_switch.py, harness/general_automation/question_tool.py, harness/plan_gate.py, memory/adapters/local_file_writable.py, memory/projection.py, memory/prompt_projection.py, runtime/child_event_projection.py, runtime/control.py, runtime/events.py, runtime/work_console_snapshot.py, shadow/artifact_channel_delivery_contract.py, shadow/coding_child_conflict_resolution_contract.py, shadow/coding_verification_evidence_contract.py, shadow/delegated_workflow_evidence_contract.py, shadow/gate4c1_runner_shadow_invoker.py, shadow/memory_source_authority_contract.py, shadow/mission_lifecycle_contract.py, shadow/office_automation_contract.py, shadow/patch_file_policy_contract.py, shadow/path_shell_policy_contract.py, shadow/research_source_evidence_contract.py, shadow/toolhost_contract.py, shadow/web_acquisition_browser_provider_contract.py, shadow/workspace_adoption_preflight_contract.py, tools/event_projection.py |
 | tools.py | — | manifest, openmagi_runtime | (root)/app.py, transport/app_api.py, transport/credentials.py, transport/customize.py |
-| usage_receipt_emit.py | Runtime-direct usage receipt emitter. | — | transport/chat.py |
+| usage_receipt_emit.py | Runtime-direct usage receipt emitter. | — | transport/chat.py, transport/chat_routes.py |
 | web_dashboard.py | Serve the restored historical web dashboard (static Next.js export). | openmagi_runtime | — |
 
 ### web_acquisition/
