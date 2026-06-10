@@ -140,7 +140,7 @@ On startup the watcher calls `deleteWebhook` once to clear any stale webhook
 honored: an outbound message that is exactly `[SILENT]` is suppressed without
 calling the provider.
 
-> **Self-host only — do not dual-run.** A hosted deployment already runs a
+> **Self-host only — do not dual-run.** A managed service deployment already runs a
 > separate Telegram long-poller; running this daemon channel watcher alongside
 > it causes Telegram 409 conflicts on `getUpdates`. Enable this watcher only on
 > self-host deployments, not on the hosted path.
