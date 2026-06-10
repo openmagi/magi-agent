@@ -74,14 +74,6 @@ def _manifest(
 
 _CORE_TOOL_MANIFESTS: tuple[ToolManifest, ...] = (
     _manifest(
-        "ToolSearch",
-        "Search deferred tool metadata.",
-        permission="meta",
-        modes=("plan", "act"),
-        tags=("tool", "search", "meta"),
-        parallel_safety="readonly",
-    ),
-    _manifest(
         "TodoWrite",
         "Record and update the agent's task list for multi-step work.",
         permission="meta",
@@ -238,30 +230,6 @@ _CORE_TOOL_MANIFESTS: tuple[ToolManifest, ...] = (
         parallel_safety="unsafe",
     ),
     _manifest(
-        "ArtifactCreate",
-        "Create an artifact record for delivery.",
-        permission="write",
-        modes=("act",),
-        tags=("artifact", "delivery", "write"),
-        parallel_safety="unsafe",
-    ),
-    _manifest(
-        "ArtifactRead",
-        "Read artifact metadata or content.",
-        permission="read",
-        modes=("plan", "act"),
-        tags=("artifact", "delivery", "read"),
-        parallel_safety="readonly",
-    ),
-    _manifest(
-        "ArtifactList",
-        "List artifact records available to the turn.",
-        permission="read",
-        modes=("plan", "act"),
-        tags=("artifact", "delivery", "read"),
-        parallel_safety="readonly",
-    ),
-    _manifest(
         "Clock",
         "Read current time metadata.",
         permission="meta",
@@ -275,14 +243,6 @@ _CORE_TOOL_MANIFESTS: tuple[ToolManifest, ...] = (
         permission="meta",
         modes=("plan", "act"),
         tags=("utility", "calculation", "meta"),
-        parallel_safety="readonly",
-    ),
-    _manifest(
-        "HealthStatus",
-        "Read local runtime health metadata.",
-        permission="meta",
-        modes=("plan", "act"),
-        tags=("runtime", "health", "meta"),
         parallel_safety="readonly",
     ),
     _manifest(

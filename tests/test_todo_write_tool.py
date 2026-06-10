@@ -96,17 +96,17 @@ def test_todowrite_runs_exclusively_and_is_not_readonly_offloaded() -> None:
 
     batches = partition_tool_calls(
         (
-            ToolCall(name="ToolSearch", arguments={}, tool_use_id="read-1"),
+            ToolCall(name="Glob", arguments={}, tool_use_id="read-1"),
             ToolCall(name=TODO_WRITE_TOOL_NAME, arguments={"todos": []}, tool_use_id="todo-1"),
-            ToolCall(name="ToolSearch", arguments={}, tool_use_id="read-2"),
+            ToolCall(name="Glob", arguments={}, tool_use_id="read-2"),
         ),
         registry,
     )
 
     assert [(batch.is_concurrent, [call.name for call in batch.calls]) for batch in batches] == [
-        (True, ["ToolSearch"]),
+        (True, ["Glob"]),
         (False, [TODO_WRITE_TOOL_NAME]),
-        (True, ["ToolSearch"]),
+        (True, ["Glob"]),
     ]
 
     registration = registry.resolve_registration(TODO_WRITE_TOOL_NAME)
