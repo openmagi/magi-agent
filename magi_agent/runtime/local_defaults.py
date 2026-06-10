@@ -84,6 +84,9 @@ EVAL_RUNTIME_ENV_DEFAULTS: Mapping[str, str] = {
     "MAGI_TOOL_MAX_OUTPUT_BYTES": "131072",
     "MAGI_TOOL_COMMAND_TIMEOUT_MS": "120000",
     "MAGI_TOOL_MAX_CALLS_PER_TURN": "512",
+    # Model reasoning: published benchmark numbers are measured with adaptive
+    # thinking at high effort; benchmark the same model mode.
+    "MAGI_MODEL_REASONING_EFFORT": "high",
     # Coding capability ON
     "MAGI_FIRST_PARTY_TOOLS_ENABLED": "1",
     "MAGI_EDIT_FUZZY_MATCH_ENABLED": "1",

@@ -313,6 +313,39 @@ def _model_retry_kwargs(env: Mapping[str, str] | None = None) -> dict[str, int]:
     }
 
 
+def _model_reasoning_kwargs(env: Mapping[str, str] | None = None) -> dict[str, object]:
+    """Optional extended-thinking / reasoning kwargs for the LiteLlm build.
+
+    Published frontier coding-benchmark numbers are measured with adaptive
+    thinking at high effort and thinking blocks preserved across tool turns
+    (the bundled ADK LiteLlm round-trips Anthropic ``thinking_blocks`` with
+    signatures). Without these kwargs the runtime benchmarks the model in a
+    strictly weaker mode.
+
+    * ``MAGI_MODEL_THINKING_BUDGET_TOKENS`` (int > 0) — explicit Anthropic-style
+      ``thinking`` budget; takes precedence.
+    * ``MAGI_MODEL_REASONING_EFFORT`` — litellm's cross-provider
+      ``reasoning_effort`` (``low``/``medium``/``high``); ``off``/``none``
+      disable.
+
+    Unset ⇒ ``{}`` ⇒ build byte-identical to before (default OFF).
+    """
+
+    source = os.environ if env is None else env
+    budget_raw = (source.get("MAGI_MODEL_THINKING_BUDGET_TOKENS") or "").strip()
+    if budget_raw:
+        try:
+            budget = int(budget_raw)
+        except ValueError:
+            budget = 0
+        if budget > 0:
+            return {"thinking": {"type": "enabled", "budget_tokens": budget}}
+    effort = (source.get("MAGI_MODEL_REASONING_EFFORT") or "").strip().lower()
+    if effort and effort not in {"off", "none", "0", "false", "disable", "disabled"}:
+        return {"reasoning_effort": effort}
+    return {}
+
+
 def _model_api_base_kwargs(env: Mapping[str, str] | None = None) -> dict[str, object]:
     """Optional LiteLlm kwargs that route generation through a gateway base URL.
 
@@ -365,6 +398,7 @@ def _build_litellm_model(
         model=config.litellm_model,
         api_key=api_key,
         **_model_retry_kwargs(env),
+        **_model_reasoning_kwargs(env),
         **api_base_kwargs,
     )
 
