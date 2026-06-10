@@ -2,6 +2,7 @@
 
 __all__ = [
     "agentmemory",
+    "apify",
     "browser",
     "documents",
     "knowledge",
