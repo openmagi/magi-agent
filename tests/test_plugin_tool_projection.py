@@ -57,6 +57,8 @@ def test_native_state_projection_returns_expected_native_tool_names_in_resolved_
     assert tuple(manifest.name for manifest in projected) == (
         "AgentMemorySearch",
         "AgentMemoryRemember",
+        "apify_search_actors",
+        "apify_run_actor",
         "ArtifactUpdate",
         "ArtifactDelete",
         "Browser",
