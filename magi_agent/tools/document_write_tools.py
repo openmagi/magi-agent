@@ -55,6 +55,7 @@ from magi_agent.plugins.native._common import (
     safe_child_path,
 )
 from magi_agent.tools.context import ToolContext
+from magi_agent.tools.document_write.model import MIME_TYPES, PREVIEW_KINDS
 from magi_agent.tools.result import ToolResult
 from magi_agent.web_acquisition.policy import redact_public_text
 
@@ -132,6 +133,8 @@ def docx_write(arguments: dict[str, object], context: ToolContext) -> ToolResult
         "contentDigest": content_digest,
         "byteCount": len(data),
         "format": "docx",
+        "mimeType": MIME_TYPES["docx"],
+        "previewKind": PREVIEW_KINDS["docx"],
         "localOnly": True,
         "artifactRef": artifact_ref,
         "artifactRefs": (artifact_ref,),

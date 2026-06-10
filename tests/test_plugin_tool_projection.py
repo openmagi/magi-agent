@@ -203,6 +203,29 @@ def test_projected_tool_manifests_are_metadata_only_and_execution_free() -> None
     assert by_name["KnowledgeWrite"].permission == "write"
     assert by_name["knowledge-write"].permission == "write"
     assert by_name["DocumentWrite"].permission == "write"
+    document_schema = by_name["DocumentWrite"].input_schema
+    assert document_schema["type"] == "object"
+    assert document_schema["additionalProperties"] is False
+    document_properties = document_schema["properties"]
+    assert document_properties["format"]["enum"] == ("html", "docx", "hwpx", "md", "txt", "pdf")
+    assert document_properties["renderer"]["enum"] == ("auto", "default", "canonical_markdown")
+    assert document_properties["outputs"]["items"]["enum"] == ("html", "pdf", "docx")
+    assert document_properties["docxMode"]["enum"] == ("editable", "fixed_layout")
+    assert document_properties["preset"]["enum"] == ("memo", "report", "investment_committee", "plain")
+    assert document_properties["locale"]["enum"] == ("en-US", "ko-KR", "ja-JP", "zh-CN", "es-ES")
+    template_schema = document_properties["template"]
+    assert template_schema["anyOf"][0]["enum"] == ("base", "gonmun", "report", "minutes")
+    assert template_schema["anyOf"][1]["properties"]["path"]["type"] == "string"
+    assert "page" in document_properties
+    assert "title" in document_properties
+    assert "filename" in document_properties
+    source_schema = document_properties["source"]
+    assert "anyOf" in source_schema
+    assert any(
+        "blocks" in option.get("properties", {})
+        and "blocksFile" in option.get("properties", {})
+        for option in source_schema["anyOf"]
+    )
     assert by_name["SpreadsheetWrite"].permission == "write"
     assert by_name["ExternalSourceCache"].permission == "write"
     assert by_name["TaskBoard"].permission == "write"

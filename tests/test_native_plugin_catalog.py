@@ -183,6 +183,16 @@ def test_web_browser_documents_and_missions_expose_expected_native_metadata() ->
     assert documents.services == ("document-worker", "document-converter-worker", "chat-proxy")
     assert _secret_sources(documents)["GATEWAY_TOKEN"] == "platform"
     assert "document_format_compatibility" in documents.harness_rules
+    assert documents.config_schema["properties"]["allowedFormats"]["default"] == (  # type: ignore[index]
+        "md",
+        "txt",
+        "html",
+        "docx",
+        "pdf",
+        "hwpx",
+        "xlsx",
+        "csv",
+    )
 
     missions = manifests["openmagi.missions"]
     expected_mission_tools = ("MissionLedger",)
