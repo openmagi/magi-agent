@@ -46,8 +46,11 @@ boundary therefore acquires through :meth:`SessionServiceRegistry.try_acquire`,
 which marks the entry busy for the duration of the turn; an overlapping
 same-key acquire gets a FRESH, never-registered fallback service
 (``reused=False`` — it seeds history exactly like a miss, behavior-identical
-to the flag-OFF path). :meth:`SessionServiceRegistry.release` is
-identity-checked and idempotent, so a stale lease (entry evicted or expired
+to the flag-OFF path). Miss entries are provisional until the caller releases
+them with ``seeded=True`` after the runner has definitely seeded the ADK
+service; pre-seed failure releases discard the exact provisional entry so the
+next same-key turn reseeds sanitized history. :meth:`SessionServiceRegistry.release`
+is identity-checked and idempotent, so a stale lease (entry evicted or expired
 mid-turn, or a busy-fallback service) can never unmark another in-flight
 turn — which also keeps LRU/TTL eviction of a busy entry safe.
 
@@ -83,6 +86,7 @@ class _RegistryEntry:
     service: object
     last_used_at: float
     in_use: bool = False
+    seeded: bool = True
 
 
 class SessionServiceRegistry:
@@ -157,7 +161,8 @@ class SessionServiceRegistry:
 
         Exactly one in-flight turn holds a key at a time:
 
-        * miss — build via ``factory``, register, mark busy, ``reused=False``;
+        * miss — build via ``factory``, register provisionally, mark busy,
+          ``reused=False``;
         * hit (idle) — mark busy, ``reused=True``;
         * hit (busy) — **busy-fallback**: return a FRESH service built via
           ``factory`` that is never registered (``reused=False``). The
@@ -165,14 +170,20 @@ class SessionServiceRegistry:
           :meth:`release` is an identity-checked no-op.
 
         Callers must pair every ``try_acquire`` with a
-        ``release(key, service)`` in a ``finally`` once the turn stops using
-        the service.
+        ``release(key, service, seeded=...)`` in a ``finally`` once the turn
+        stops using the service. Misses stay provisional until released with
+        ``seeded=True``; pre-seed failure paths release with ``seeded=False``
+        and discard the exact provisional service so the next turn reseeds.
         """
         validated_key = _validated_key(key)
         now = self._clock()
         with self._lock:
             self._purge_expired_locked(now)
             entry = self._entries.get(validated_key)
+            if entry is not None:
+                if not entry.seeded and not entry.in_use:
+                    self._entries.pop(validated_key, None)
+                    entry = None
             if entry is not None:
                 entry.last_used_at = now
                 self._entries.move_to_end(validated_key)
@@ -187,17 +198,29 @@ class SessionServiceRegistry:
                 service=service,
                 last_used_at=now,
                 in_use=True,
+                seeded=False,
             )
             return service, False
 
-    def release(self, key: SessionServiceKey, service: object) -> bool:
+    def release(
+        self,
+        key: SessionServiceKey,
+        service: object,
+        *,
+        seeded: bool = True,
+    ) -> bool:
         """Clear the busy mark set by :meth:`try_acquire` for ``key``.
 
         Identity-checked and idempotent: only the exact ``service`` instance
         currently registered for ``key`` clears the mark, so a stale lease
         (entry evicted/expired mid-turn) or a busy-fallback service can never
         unmark a different in-flight turn. Safe to call from ``finally`` on
-        every path; returns True only when a busy mark was actually cleared.
+        every path; returns True only when a registered busy lease matched.
+
+        Miss-created entries are provisional. ``seeded=True`` promotes the
+        entry to reusable; ``seeded=False`` discards an unseeded provisional
+        entry so the next same-key turn behaves like a miss and reseeds
+        sanitized history.
         """
         validated_key = _validated_key(key)
         now = self._clock()
@@ -205,6 +228,10 @@ class SessionServiceRegistry:
             entry = self._entries.get(validated_key)
             if entry is None or entry.service is not service or not entry.in_use:
                 return False
+            if not seeded and not entry.seeded:
+                self._entries.pop(validated_key, None)
+                return True
+            entry.seeded = True
             entry.in_use = False
             entry.last_used_at = now
             self._entries.move_to_end(validated_key)

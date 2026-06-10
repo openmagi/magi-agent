@@ -2137,6 +2137,51 @@ def test_session_reuse_two_turns_share_session_service_and_seed_history_only_on_
     assert second_text == _CURRENT_TURN_TEXT
 
 
+def test_session_reuse_pre_seed_failure_reseeds_history_on_next_same_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MAGI_HOSTED_SESSION_REUSE", "1")
+    registry = SessionServiceRegistry(max_entries=4, ttl_seconds=60.0)
+
+    def failing_primitives() -> Gate5B4C3LiveAdkPrimitives:
+        primitives = _fake_primitives()
+        return Gate5B4C3LiveAdkPrimitives(
+            Agent=primitives.Agent,
+            Runner=_ProviderSetupFailRunner,
+            InMemorySessionService=primitives.InMemorySessionService,
+            Content=primitives.Content,
+            Part=primitives.Part,
+            GenerateContentConfig=primitives.GenerateContentConfig,
+        )
+
+    failing_boundary = Gate5B4C3LiveRunnerBoundary(
+        failing_primitives,
+        adk_tools=(_ManualCalculationTool,),
+        session_service_registry=registry,
+    )
+    first_result = failing_boundary.invoke(
+        _session_reuse_request(),
+        config=_session_reuse_config(),
+    )
+    failed_message = _ProviderSetupFailRunner.run_kwargs["new_message"]
+    assert isinstance(failed_message, _FakeContent)
+
+    assert first_result.status == "error"
+    assert first_result.reason == "runner_error"
+    assert first_result.event_count == 0
+    assert _HISTORY_MARKER in failed_message.parts[0].text
+
+    normal_boundary = _session_reuse_boundary(registry)
+    second_result, _second_service, second_text = _invoke_session_reuse_turn(
+        normal_boundary
+    )
+
+    assert second_result.status == "completed"
+    assert _HISTORY_MARKER in second_text
+    assert "user: What did you find last turn?" in second_text
+    assert _CURRENT_TURN_TEXT in second_text
+
+
 def test_session_reuse_isolation_distinct_bot_digests_never_share_session_state(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

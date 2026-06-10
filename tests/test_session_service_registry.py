@@ -333,6 +333,21 @@ def test_registry_release_in_finally_after_exception_restores_reuse() -> None:
     assert reacquired_reused is True
 
 
+def test_registry_release_unseeded_miss_discards_entry_for_next_miss() -> None:
+    registry, _clock = _registry()
+    key = (BOT_A, SESSION_1)
+
+    first, first_reused = registry.try_acquire(key, _FakeSessionService)
+    assert first_reused is False
+
+    assert registry.release(key, first, seeded=False) is True
+    assert len(registry) == 0
+
+    second, second_reused = registry.try_acquire(key, _FakeSessionService)
+    assert second_reused is False
+    assert second is not first
+
+
 def test_registry_release_after_eviction_is_noop_and_never_unmarks_new_holder() -> None:
     registry, _clock = _registry(max_entries=1)
     key = (BOT_A, SESSION_1)
