@@ -703,6 +703,7 @@ class MagiTuiApp(App[None]):
         ) = None,
         executor: CommandExecutor | None = None,
         flush_interval: float = DEFAULT_FLUSH_INTERVAL,
+        clipboard_reader: Callable[[], dict | None] | None = None,
     ) -> None:
         super().__init__()
         self._engine = engine
@@ -712,6 +713,12 @@ class MagiTuiApp(App[None]):
         # DefaultCommandExecutor which maps prompt/local/widget kinds onto the
         # app openers without ever starting a second engine loop.
         self._executor: CommandExecutor = executor or DefaultCommandExecutor()
+        # Clipboard image reader (injectable for tests; real default avoids importing
+        # clipboard libs at module level).  ``_pending_attachments`` accumulates
+        # blocks between Ctrl+V presses and is flushed into the TurnInput on submit.
+        from magi_agent.cli.clipboard_image import read_clipboard_image  # noqa: PLC0415
+        self._clipboard_reader: Callable[[], dict | None] = clipboard_reader or read_clipboard_image
+        self._pending_attachments: list[dict] = []
         # Count of /compact (Compact()) acknowledgements; asserted by tests. Real
         # compaction is gated runtime authority (Stream B/E).
         self.compact_requests = 0
@@ -952,6 +959,36 @@ class MagiTuiApp(App[None]):
         if self._controller is None:  # pragma: no cover - guarded by on_mount
             raise RuntimeError("controller not ready; app not mounted")
         return self._controller
+
+    # -- clipboard image attach ---------------------------------------------
+    @property
+    def pending_attachments(self) -> list[dict]:
+        """Read-only view of queued image blocks (not yet submitted)."""
+        return list(self._pending_attachments)
+
+    def attach_clipboard_image(self) -> None:
+        """Read a clipboard image and add it to the pending buffer.
+
+        Calls the injected ``_clipboard_reader`` (real default:
+        ``read_clipboard_image``; test default: any callable → dict | None).
+        On success appends the block and shows a toast. On None shows a warning
+        toast and leaves the buffer untouched.
+        """
+        block = self._clipboard_reader()
+        if block:
+            self._pending_attachments.append(block)
+            self.notify(
+                f"📎 image attached ({len(self._pending_attachments)})",
+                timeout=2,
+            )
+        else:
+            self.notify("No image in clipboard", severity="warning", timeout=2)
+
+    def on_prompt_input_attach_image_requested(
+        self, event: "PromptInput.AttachImageRequested"
+    ) -> None:
+        """Handle the Ctrl+V message posted by PromptInput."""
+        self.attach_clipboard_image()
 
     # -- input / submission -------------------------------------------------
     def on_prompt_input_prompt_submitted(
@@ -1258,8 +1295,15 @@ class MagiTuiApp(App[None]):
 
         controller = self.controller
         controller.begin_live()
+        # Snapshot and clear the pending image buffer atomically before the turn
+        # starts so any Ctrl+V press that races the submit lands in the NEXT turn.
+        image_blocks = tuple(self._pending_attachments)
+        self._pending_attachments.clear()
         turn_input = TurnInput(
-            prompt=prompt, session_id=self._session_id, turn_id=turn_id
+            prompt=prompt,
+            session_id=self._session_id,
+            turn_id=turn_id,
+            image_blocks=image_blocks,
         )
         gen = self._engine.run_turn_stream(
             self._runtime, turn_input, cancel=cancel, gate=self._gate
