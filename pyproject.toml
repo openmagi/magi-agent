@@ -13,8 +13,10 @@ dependencies = [
   "google-adk==1.33.0",
   "httpx==0.28.1",
   "litellm>=1.74.0",
+  "lxml>=6.0",
   "markdownify==1.2.2",
   "pydantic==2.13.4",
+  "python-docx>=1.1",
   "uvicorn==0.47.0",
 ]
 
@@ -50,11 +52,12 @@ anthropic = [
 # the runtime uses ADK LiteLlm as the common model path.
 providers = []
 # Optional file & multimodal attachment tools (MAGI_FILE_TOOLS_ENABLED=true).
+# DOCX/HWPX authoring dependencies are base runtime dependencies because
+# DocumentWrite is a first-party local authoring surface.
 # Install with: uv sync --extra files
 files = [
   "openpyxl>=3.1",
   "pypdf>=4.0",
-  "python-docx>=1.1",
   "python-pptx>=1.0",
 ]
 # Optional audio transcription provider (MAGI_ASR_PROVIDER=openai_whisper).
@@ -96,12 +99,24 @@ include = ["magi_agent*"]
 [tool.setuptools.package-data]
 magi_agent = [
   "discovery/templates/*.json",
+  "skills/bundled/*/SKILL.md",
   "skills/bundled/superpowers/*/SKILL.md",
   "skills/bundled/superpowers/*/*.md",
   "skills/bundled/superpowers/*/references/*.md",
   "skills/bundled/superpowers/*/scripts/*",
   "skills/bundled/superpowers/*/examples/*",
   "skills/bundled/superpowers/*/*.dot",
+  "tools/document_write/hwpx_runtime/references/*.md",
+  "tools/document_write/hwpx_runtime/scripts/*",
+  "tools/document_write/hwpx_runtime/scripts/office/*",
+  "tools/document_write/hwpx_runtime/templates/base/*",
+  "tools/document_write/hwpx_runtime/templates/base/Contents/*",
+  "tools/document_write/hwpx_runtime/templates/base/META-INF/*",
+  "tools/document_write/hwpx_runtime/templates/base/Preview/*",
+  "tools/document_write/hwpx_runtime/templates/gonmun/*",
+  "tools/document_write/hwpx_runtime/templates/minutes/*",
+  "tools/document_write/hwpx_runtime/templates/proposal/*",
+  "tools/document_write/hwpx_runtime/templates/report/*",
   # Bundled slash-command prompt templates loaded via importlib.resources at
   # import time (cli/commands/bundled.py). Without this they are missing from
   # the wheel/bottle and the TUI crashes on launch with FileNotFoundError.

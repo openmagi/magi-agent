@@ -12,10 +12,11 @@ When a skill needs hard guarantees, define the corresponding harness state, boun
 
 ## Bundled skills
 
-The runtime ships a "superpowers" skill pack under
-`magi_agent/skills/bundled/superpowers/`. Each skill is a directory containing a
+The runtime ships first-party skills under
+`magi_agent/skills/bundled/`. Each skill is a directory containing a
 `SKILL.md` with YAML front matter (`name`, `description`) followed by the
-procedure. The 14 bundled skills are:
+procedure. The bundled skills include the superpowers pack plus document
+authoring skills:
 
 | Skill | What it teaches |
 |---|---|
@@ -33,6 +34,8 @@ procedure. The 14 bundled skills are:
 | `using-git-worktrees` | Create an isolated worktree for feature work. |
 | `writing-skills` | Author / edit / verify a new skill. |
 | `using-superpowers` | Find and use the right skill at the start of a task. |
+| `document-writer` | Create Markdown, text, HTML, PDF, DOCX, and HWPX documents with `DocumentWrite`. |
+| `hwpx` | Create Korean HWPX documents with bundled templates and validation. |
 
 ## How a skill is used
 
