@@ -14,9 +14,14 @@ uv run --extra cli magi --help
 ## Running Tests
 
 ```bash
-uv run --extra dev pytest -q
+uv run --extra dev --extra cli pytest -q
+```
+
+Run lint and (advisory) type checks the same way CI does:
+
+```bash
 uv run --extra dev ruff check .
-uv run --extra dev mypy magi_agent
+uv run --extra dev mypy magi_agent   # advisory: CI does not block on this yet
 ```
 
 ## Code Style

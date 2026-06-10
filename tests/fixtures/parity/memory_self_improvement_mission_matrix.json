@@ -675,14 +675,6 @@
       ],
       "latestMainCoveredRefs": [
         {
-          "path": "magi_agent/harness/self_debug.py",
-          "state": "existing"
-        },
-        {
-          "path": "tests/test_self_debug_state_machine_contract.py",
-          "state": "existing"
-        },
-        {
           "path": "magi_agent/recipes/first_party/self_improvement.py",
           "state": "existing"
         },

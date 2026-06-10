@@ -168,7 +168,6 @@ graph LR
     research --> evidence
     research --> meta_orchestration
     research --> runtime
-    routing --> evidence
     runtime --> adk_bridge
     runtime --> cli
     runtime --> config
@@ -744,7 +743,7 @@ graph LR
 | source_ledger.py | — | reports, types | browser/source_tools.py, evidence/citation_audit.py, evidence/event_projection.py, evidence/research_final_gate.py, knowledge/source_tools.py, research/research_first_canary.py, tools/local_readonly.py, web_acquisition/repo_research_tools.py, web_acquisition/research_tools.py |
 | subagent.py | — | contracts, reports, runtime_issuance, types | evidence/child_runtime_envelope.py, recipes/opencode_child_lifecycle.py, runtime/child_runner_boundary.py, shadow/delegated_workflow_evidence_contract.py |
 | tool_boundary.py | — | tool_preview | tools/event_projection.py, tools/kernel.py |
-| types.py | — | — | evidence/__init__.py, evidence/builtin.py, evidence/child_runtime_envelope.py, evidence/citation_audit.py, evidence/coding_verification.py, evidence/contracts.py, evidence/document_coverage.py, evidence/enforcement_boundary.py, evidence/event_projection.py, evidence/extraction.py, evidence/extractors.py, evidence/ledger.py, evidence/local_tool_collector.py, evidence/reports.py, evidence/research_final_gate.py, evidence/rollout.py, evidence/source_ledger.py, evidence/subagent.py, harness/goal_judge.py, harness/goal_loop_control.py, harness/resolved.py, harness/scheduler_delivery.py, harness/scheduler_job_execution.py, harness/self_review.py, harness/self_review_pipeline.py, harness/skill_curator.py, harness/verifier_bus.py, recipes/coding_evidence_gate.py, routing/deterministic.py, shadow/audit_reporter.py, shadow/coding_verification_evidence_contract.py, shadow/delegated_workflow_evidence_contract.py, shadow/research_source_evidence_contract.py, tools/manifest.py |
+| types.py | — | — | evidence/__init__.py, evidence/builtin.py, evidence/child_runtime_envelope.py, evidence/citation_audit.py, evidence/coding_verification.py, evidence/contracts.py, evidence/document_coverage.py, evidence/enforcement_boundary.py, evidence/event_projection.py, evidence/extraction.py, evidence/extractors.py, evidence/ledger.py, evidence/local_tool_collector.py, evidence/reports.py, evidence/research_final_gate.py, evidence/rollout.py, evidence/source_ledger.py, evidence/subagent.py, harness/goal_judge.py, harness/goal_loop_control.py, harness/resolved.py, harness/scheduler_delivery.py, harness/scheduler_job_execution.py, harness/self_review.py, harness/self_review_pipeline.py, harness/skill_curator.py, harness/verifier_bus.py, recipes/coding_evidence_gate.py, shadow/audit_reporter.py, shadow/coding_verification_evidence_contract.py, shadow/delegated_workflow_evidence_contract.py, shadow/research_source_evidence_contract.py, tools/manifest.py |
 | validator_taxonomy.py | — | — | — |
 
 ### gates/
@@ -815,7 +814,6 @@ graph LR
 | plan_gate.py | — | tool_preview | harness/general_automation/plan_act_switch.py |
 | policy_state.py | — | presets, profiles | — |
 | presets.py | — | — | harness/audit.py, harness/policy_state.py, harness/profiles.py |
-| process_reward.py | — | tool_preview | — |
 | profiles.py | — | presets | harness/__init__.py, harness/policy_state.py, runtime/openmagi_runtime.py |
 | repair_policy.py | — | — | harness/__init__.py |
 | research_routing.py | — | research_agents | — |
@@ -826,11 +824,9 @@ graph LR
 | scheduler_job_store.py | A-driver — persistent SQLite-backed ScheduledJobSource. | migrations, scheduler_executor | gateway/watchers.py |
 | scheduler_loop_driver.py | A-driver — SchedulerLoopDriver: the periodic loop that fires due jobs. | scheduler_executor, scheduler_job_execution, scheduler_runtime | gateway/watchers.py |
 | scheduler_runtime.py | — | contract, dispatcher, provider_receipts, runtime_boundary | harness/scheduler_executor.py, harness/scheduler_job_execution.py, harness/scheduler_loop_driver.py |
-| self_debug.py | — | tool_preview | — |
 | self_review.py | C1 — Post-turn self-review fork (default OFF, shadow-first, no writes). | prompt_snapshot, types | adk_bridge/control_plane.py, cli/tests/test_real_runner.py, harness/self_review_pipeline.py |
 | self_review_pipeline.py | C2 — LearningPipelineSink: routes self-review candidates through the learning eval-gate. | candidates, eval_gate, models, self_review, store, types | — |
 | skill_curator.py | C3 — SkillCurator: inactivity-triggered janitor for agent-authored learned items. | store, types | — |
-| slop_cleaner.py | — | tool_preview | — |
 | verifier_bus.py | — | contracts, ledger, types | cli/engine.py, cli/tests/test_local_tool_evidence_wiring.py, evidence/coding_verification.py, evidence/event_projection.py, harness/cross_review.py, meta_orchestration/commit_adapter.py |
 | workflow_executor.py | Bounded workflow-executor — PR1 (skeleton) + PR3 (resumability). | child_runner_boundary, compiler, cross_review, dry_run, parallel_execution, public_events, research_child_runner, workflow_executor_readiness, workflow_result_cache | channels/workflow_orchestrator.py, recipes/workflow_recipe.py |
 | workflow_result_cache.py | Within-run result cache for the workflow executor — PR3. | — | harness/workflow_executor.py |
@@ -1203,13 +1199,6 @@ graph LR
 | research_first_canary.py | — | event_projection, public_events, research_final_gate, source_ledger | transport/chat.py |
 | source_proof.py | — | runtime_issuance | research/child_roles.py, research/event_projection.py, research/evidence_graph.py, research/repair.py, web_acquisition/cross_verifier.py, web_acquisition/deep_research.py, web_acquisition/repo_research_tools.py |
 
-### routing/
-
-| Module | Purpose | Depends On | Depended By |
-|---|---|---|---|
-| __init__.py | — | — | — |
-| deterministic.py | — | types | — |
-
 ### rules/
 
 | Module | Purpose | Depends On | Depended By |
@@ -1260,7 +1249,6 @@ graph LR
 | memory_turn_hook.py | Turn-end memory hook: transcript→daily flush + compaction trigger (PR-B). | compaction_tree, config, local_file_writable | transport/chat.py |
 | memory_write_wiring.py | Gate-aware factory for the MemoryWrite tool host (Task D, PR2). | local_file_writable, memory_write_readiness, memory_write_tool | cli/tool_runtime.py, runtime/openmagi_runtime.py |
 | message_builder.py | — | bus, context, injection, manifest, provider_adapter, resolved, splitter | cli/clipboard_image.py, cli/tool_runtime.py, runtime/context_attachments.py, shadow/gate5b4c3_runner_input_adapter.py, transport/chat.py |
-| model_routing.py | — | — | — |
 | model_tiers.py | — | — | evidence/final_output_gate.py, harness/long_context_eval.py, recipes/materializer.py, recipes/phase_routing_defaults.py, recipes/reliability_policy.py, runtime/adk_turn_runner.py, runtime/child_runner_boundary.py, runtime/child_runner_live.py, runtime/context_budget.py, runtime/phase_routing.py, runtime/reliability_budget.py, runtime/request_shape.py |
 | no_agent_watchdog.py | — | safety | runtime/events.py |
 | openmagi_runtime.py | — | apply, base, catalog, core_toolhost, manager, memory_write_wiring, models, native_catalog, primitives, profiles, registry, store, todo_toolhost, tool, tool_projection | (root)/app.py, (root)/main.py, cli/wiring.py, transport/app_api.py, transport/chat.py, transport/control_requests.py, transport/credentials.py, transport/customize.py, transport/dashboard.py, transport/health.py, transport/learning_dashboard.py, transport/plugins.py, transport/product_admin.py, transport/shadow_invocations.py, transport/tools.py, transport/web_dashboard.py |
@@ -1532,7 +1520,7 @@ graph LR
 | streaming_chat_route.py | Hosted-grade SSE streaming-chat HTTP surface. | active_turn, chat, contracts, events, health, memory_mode_context, protocol, streaming_chat, streaming_driver, streaming_sink, taskkind_classifier, wiring, workflow_confirm_store, workflow_gate, workflow_orchestrator | (root)/app.py |
 | streaming_driver.py | Async driver that turns one agent turn into a live SSE byte stream. | active_turn, contracts, events, permissions, streaming_chat | cli/tests/test_streaming_driver.py, transport/streaming_chat_route.py |
 | streaming_sink.py | SSE streaming-chat seam for tool-permission approval requests. | events, permissions | cli/tests/test_streaming_driver.py, cli/tests/test_streaming_sink.py, transport/streaming_chat_route.py |
-| tool_preview.py | — | — | evidence/child_runtime_envelope.py, evidence/reports.py, evidence/tool_boundary.py, harness/general_automation/plan_act_switch.py, harness/general_automation/question_tool.py, harness/plan_gate.py, harness/process_reward.py, harness/self_debug.py, harness/slop_cleaner.py, memory/adapters/local_file_writable.py, memory/projection.py, memory/prompt_projection.py, runtime/child_event_projection.py, runtime/control.py, runtime/events.py, runtime/work_console_snapshot.py, shadow/artifact_channel_delivery_contract.py, shadow/coding_child_conflict_resolution_contract.py, shadow/coding_verification_evidence_contract.py, shadow/delegated_workflow_evidence_contract.py, shadow/gate4c1_runner_shadow_invoker.py, shadow/memory_source_authority_contract.py, shadow/mission_lifecycle_contract.py, shadow/office_automation_contract.py, shadow/patch_file_policy_contract.py, shadow/path_shell_policy_contract.py, shadow/research_source_evidence_contract.py, shadow/toolhost_contract.py, shadow/web_acquisition_browser_provider_contract.py, shadow/workspace_adoption_preflight_contract.py, tools/event_projection.py |
+| tool_preview.py | — | — | evidence/child_runtime_envelope.py, evidence/reports.py, evidence/tool_boundary.py, harness/general_automation/plan_act_switch.py, harness/general_automation/question_tool.py, harness/plan_gate.py, memory/adapters/local_file_writable.py, memory/projection.py, memory/prompt_projection.py, runtime/child_event_projection.py, runtime/control.py, runtime/events.py, runtime/work_console_snapshot.py, shadow/artifact_channel_delivery_contract.py, shadow/coding_child_conflict_resolution_contract.py, shadow/coding_verification_evidence_contract.py, shadow/delegated_workflow_evidence_contract.py, shadow/gate4c1_runner_shadow_invoker.py, shadow/memory_source_authority_contract.py, shadow/mission_lifecycle_contract.py, shadow/office_automation_contract.py, shadow/patch_file_policy_contract.py, shadow/path_shell_policy_contract.py, shadow/research_source_evidence_contract.py, shadow/toolhost_contract.py, shadow/web_acquisition_browser_provider_contract.py, shadow/workspace_adoption_preflight_contract.py, tools/event_projection.py |
 | tools.py | — | manifest, openmagi_runtime | (root)/app.py, transport/app_api.py, transport/credentials.py, transport/customize.py |
 | usage_receipt_emit.py | Runtime-direct usage receipt emitter. | — | transport/chat.py |
 | web_dashboard.py | Serve the restored historical web dashboard (static Next.js export). | openmagi_runtime | — |
