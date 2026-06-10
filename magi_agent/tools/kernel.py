@@ -32,6 +32,7 @@ from magi_agent.runtime.request_ledger import (
 )
 
 from .context import ToolContext
+from .dispatch_shared import _available_tool_names
 from .manifest import RuntimeMode
 from .output_budget import budget_tool_result
 from .permission import ToolPermissionPolicy
@@ -751,17 +752,6 @@ class ToolExecutionKernel:
             blocking=True,
             authorityFlags=RequestLedgerAuthorityFlags(),
         )
-
-
-def _available_tool_names(
-    registry: ToolRegistry,
-    exposed_tool_names: tuple[str, ...] | None,
-    *,
-    mode: RuntimeMode,
-) -> tuple[str, ...]:
-    if exposed_tool_names is not None:
-        return tuple(sorted(dict.fromkeys(exposed_tool_names)))
-    return tuple(tool.name for tool in registry.list_available(mode=mode))
 
 
 def _dedupe_refs(refs: Sequence[str]) -> tuple[str, ...]:

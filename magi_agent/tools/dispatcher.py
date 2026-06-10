@@ -15,6 +15,7 @@ from magi_agent.harness.general_automation.live_gate import (
 from magi_agent.telemetry.trace_context import get_trace
 
 from .context import ToolContext
+from .dispatch_shared import _available_tool_names
 from .manifest import RuntimeMode, ToolManifest
 from .permission import ToolPermissionPolicy
 from .registry import ToolRegistry
@@ -406,17 +407,6 @@ def _general_automation_gate_result(
     if outcome.decision == "deny":
         return ToolResult(status="blocked", metadata=metadata)
     return ToolResult(status="needs_approval", metadata=metadata)
-
-
-def _available_tool_names(
-    registry: ToolRegistry,
-    exposed_tool_names: tuple[str, ...] | None,
-    *,
-    mode: RuntimeMode,
-) -> tuple[str, ...]:
-    if exposed_tool_names is not None:
-        return tuple(sorted(dict.fromkeys(exposed_tool_names)))
-    return tuple(tool.name for tool in registry.list_available(mode=mode))
 
 
 def _general_automation_arguments(
