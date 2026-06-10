@@ -290,14 +290,14 @@ def test_main_hosted_overlay_full_enables_observability_on_pvc(
 
     assert captured["port"] == 9102
     assert main_module.os.environ["MAGI_OBSERVABILITY_ENABLED"] == "1"
-    # PR2 (C3): the full stage also flips the six ControlPlane controls. C9/C11
-    # siblings (introspection, coding-repair, doc-coverage) stay untouched.
+    # PR2 (C3): the full stage flips the six ControlPlane controls. C9 adds
+    # self-inspection to the same hosted full profile.
     assert main_module.os.environ["MAGI_LOOP_GUARD_ENABLED"] == "1"
     assert main_module.os.environ["MAGI_CONTEXT_COMPACTION_ENABLED"] == "1"
     assert main_module.os.environ["MAGI_SELF_REVIEW_ENABLED"] == "1"
     # self-review stays shadow-first at the full stage (live only at hardgate).
     assert main_module.os.environ["MAGI_SELF_REVIEW_SHADOW"] == "1"
-    assert "MAGI_SELF_INTROSPECTION_ENABLED" not in main_module.os.environ
+    assert main_module.os.environ["MAGI_SELF_INTROSPECTION_ENABLED"] == "1"
     assert "MAGI_CODING_REPAIR_LOOP_ENABLED" not in main_module.os.environ
 
 
