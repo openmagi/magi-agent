@@ -154,7 +154,7 @@ confirmation but declines to execute.
   inbound message then incurs one small classification call; classification is
   fail-open (a classifier error never blocks normal chat).
 
-A hosted deployment may inject its own model-backed classifier; that injected
+A managed service deployment may inject its own model-backed classifier; that injected
 classifier takes precedence over the local auto-wiring.
 
 ## See also
