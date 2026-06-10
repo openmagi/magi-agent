@@ -2175,6 +2175,44 @@ def permission_scope_from_mode_enabled(env: Mapping[str, str] | None = None) -> 
     return _is_true(source.get(MAGI_PERMISSION_SCOPE_FROM_MODE_ENV))
 
 
+MAGI_CONTROL_STORE_DURABLE_ENV = "MAGI_CONTROL_STORE_DURABLE"
+MAGI_CONTROL_STORE_PATH_ENV = "MAGI_CONTROL_STORE_PATH"
+
+
+def control_store_durable_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Single source of truth for the durable ControlRequestStore gate (A7).
+
+    Default OFF (strict truthy opt-in: "1"/"true"/"yes"/"on"). When OFF the CLI
+    permission gate keeps using the volatile in-memory
+    :class:`magi_agent.runtime.control.ControlRequestStore` — byte-identical to
+    before, and pending approvals are lost on process exit. When ON, the gate
+    swaps in
+    :class:`magi_agent.runtime.durable_control_store.DurableControlRequestStore`,
+    which appends every lifecycle mutation to an append-only JSONL log and
+    replays it on startup so out-of-band / always-on approvals survive a
+    restart. Like ``permission_scope_from_mode_enabled`` this is an additive,
+    default-disabled seam and deliberately does NOT follow the runtime-profile
+    default-ON convention.
+    """
+    source = os.environ if env is None else env
+    return _is_true(source.get(MAGI_CONTROL_STORE_DURABLE_ENV))
+
+
+def control_store_durable_path(env: Mapping[str, str] | None = None) -> Path | None:
+    """Resolve the JSONL log path for the durable ControlRequestStore.
+
+    Returns ``None`` when ``MAGI_CONTROL_STORE_PATH`` is unset/blank so the
+    caller can fall back to its own default location. The path is returned
+    as-is (not created) — the durable store creates parent directories lazily
+    on first write.
+    """
+    source = os.environ if env is None else env
+    raw = (source.get(MAGI_CONTROL_STORE_PATH_ENV) or "").strip()
+    if not raw:
+        return None
+    return Path(raw)
+
+
 MAGI_COMPOSIO_DISPATCH_ENFORCED_ENV = "MAGI_COMPOSIO_DISPATCH_ENFORCED"
 
 
