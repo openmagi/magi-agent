@@ -142,7 +142,7 @@ def test_answer_verifier_mode_default_off(
     monkeypatch.delenv("MAGI_ANSWER_VERIFIER_MODE", raising=False)
 
     # The mode reader lives in the GAIA plugin (the only env-reading site).
-    from magi_agent.benchmarks.gaia.answer_verifier_plugin import _get_mode
+    from benchmarks.gaia.answer_verifier_plugin import _get_mode
 
     mode = _get_mode()
     assert mode == "off", (
@@ -200,7 +200,7 @@ def test_all_advanced_orchestration_defaults_are_off(
         DeepResearchConfig,
         deep_research_config_from_env,
     )
-    from magi_agent.benchmarks.gaia.answer_verifier_plugin import _get_mode
+    from benchmarks.gaia.answer_verifier_plugin import _get_mode
 
     assert _ledger_orchestrator_enabled() is False, "ledger orchestrator must default OFF"
     assert deep_research_config_from_env().enabled is False, "deep-web research must default OFF"

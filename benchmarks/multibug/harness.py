@@ -25,7 +25,7 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from typing import Literal
 
-from magi_agent.benchmarks.multibug.dataset import MultiProblemInstance
+from benchmarks.multibug.dataset import MultiProblemInstance
 from magi_agent.discovery.gate import DISCOVERY_ENABLED_ENV
 from magi_agent.discovery.grounding import GroundingMode, make_grounding_verifier
 from magi_agent.discovery.models import DiscoveryConfig, DiscoveryPrediction

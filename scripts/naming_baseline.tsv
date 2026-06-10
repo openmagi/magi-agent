@@ -5,7 +5,6 @@
 # cleanup PRs should re-run --update so the baseline ratchets down.
 CORE_AGENT_	magi_agent/adk_bridge/local_runner.py	1
 CORE_AGENT_	magi_agent/adk_bridge/tool_adapter.py	4
-CORE_AGENT_	magi_agent/benchmarks/gaia/web_tools.py	2
 CORE_AGENT_	magi_agent/cli/tests/test_app.py	5
 CORE_AGENT_	magi_agent/config/env.py	242
 CORE_AGENT_	magi_agent/config/flags.py	2

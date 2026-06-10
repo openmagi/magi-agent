@@ -1,4 +1,4 @@
-# magi_agent/benchmarks/taubench/episode.py
+# benchmarks/taubench/episode.py
 """tau-bench-free multi-turn episode loop. No tau_bench import, no network."""
 from __future__ import annotations
 

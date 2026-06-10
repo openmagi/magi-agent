@@ -1,4 +1,4 @@
-# magi_agent/benchmarks/taubench/config.py
+# benchmarks/taubench/config.py
 from __future__ import annotations
 
 from typing import Literal

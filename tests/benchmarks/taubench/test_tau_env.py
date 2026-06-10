@@ -4,8 +4,8 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, field
 
-from magi_agent.benchmarks.taubench.episode import EpisodeState
-from magi_agent.benchmarks.taubench.tau_env import build_env_function_tools, build_env_tool_callables
+from benchmarks.taubench.episode import EpisodeState
+from benchmarks.taubench.tau_env import build_env_function_tools, build_env_tool_callables
 
 
 @dataclass

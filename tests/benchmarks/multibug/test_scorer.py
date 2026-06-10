@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from magi_agent.benchmarks.multibug.dataset import GoldProblem
-from magi_agent.benchmarks.multibug.scorer import (
+from benchmarks.multibug.dataset import GoldProblem
+from benchmarks.multibug.scorer import (
     InstanceResult,
     JudgeScore,
     MultiBugReport,

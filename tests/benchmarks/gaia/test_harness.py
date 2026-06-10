@@ -5,8 +5,8 @@ from typing import AsyncGenerator
 from google.adk.models import BaseLlm, LlmResponse
 from google.genai import types
 
-from magi_agent.benchmarks.gaia.dataset import GaiaQuestion
-from magi_agent.benchmarks.gaia.harness import run_gaia_question
+from benchmarks.gaia.dataset import GaiaQuestion
+from benchmarks.gaia.harness import run_gaia_question
 
 
 class _ScriptedLlm(BaseLlm):

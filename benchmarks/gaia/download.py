@@ -45,7 +45,7 @@ def download_gaia_validation(
     tuple[str, str]
         ``(metadata_path, attachments_dir)`` — absolute paths suitable for
         passing directly to
-        :func:`~magi_agent.benchmarks.gaia.dataset.load_gaia_questions`.
+        :func:`~benchmarks.gaia.dataset.load_gaia_questions`.
     """
     token = hf_token or os.environ.get("HF_TOKEN", "")
     if not token:

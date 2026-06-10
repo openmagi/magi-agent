@@ -14,8 +14,8 @@ import os
 from collections.abc import Callable, Sequence
 from typing import Any
 
-from magi_agent.benchmarks.multibug.dataset import GoldProblem, MultiProblemInstance
-from magi_agent.benchmarks.multibug.scorer import InstanceResult, score
+from benchmarks.multibug.dataset import GoldProblem, MultiProblemInstance
+from benchmarks.multibug.scorer import InstanceResult, score
 from magi_agent.discovery.grounding import GroundingMode
 from magi_agent.discovery.models import DiscoveryPrediction
 
@@ -34,7 +34,7 @@ def _default_runner(
 ) -> tuple[DiscoveryPrediction, ...]:
     """Thin wrapper around the real harness; imported lazily so tests that inject
     a stub never trigger the heavy ADK import path."""
-    from magi_agent.benchmarks.multibug.harness import run_multiproblem  # noqa: PLC0415
+    from benchmarks.multibug.harness import run_multiproblem  # noqa: PLC0415
 
     return run_multiproblem(
         instance, mode=mode, grounding=grounding, model=model
@@ -53,7 +53,7 @@ def run_benchmark(
     """Run (or resume) a multi-problem discovery evaluation.
 
     Returns a dict with the macro-averaged ``report`` (see
-    :func:`magi_agent.benchmarks.multibug.scorer.score`) plus run metadata.
+    :func:`benchmarks.multibug.scorer.score`) plus run metadata.
     """
     if runner_fn is None:
         runner_fn = _default_runner

@@ -23,13 +23,7 @@ graph LR
     artifacts --> runtime
     artifacts --> storage
     artifacts --> tools
-    benchmarks --> adk_bridge
-    benchmarks --> cli
-    benchmarks --> composio
-    benchmarks --> discovery
     benchmarks --> recipes
-    benchmarks --> research
-    benchmarks --> web_acquisition
     billing --> ops
     billing --> tenancy
     browser --> cli
@@ -240,7 +234,6 @@ graph LR
     transport --> storage
     transport --> telemetry
     transport --> tools
-    web_acquisition --> benchmarks
     web_acquisition --> egress_proxy
     web_acquisition --> evidence
     web_acquisition --> research
@@ -281,7 +274,7 @@ graph LR
 | resilience_plugin.py | Live ADK resilience plugin — loop guard + multi-strategy error recovery. | engine, error_recovery, loop_detectors, strategies | adk_bridge/control_plane.py |
 | runner_adapter.py | — | — | cli/engine.py, harness/cron_turn_runner_adapter.py, runtime/adk_turn_runner.py, shadow/fixture_runner.py |
 | session_service.py | — | session_store | adk_bridge/context_compaction.py, adk_bridge/local_runner.py, cli/real_runner.py, cli/session_log.py |
-| tool_adapter.py | — | concurrency, concurrent_dispatcher, context, deferred, dispatcher, env, manifest, provider_adapter, registry | benchmarks/taubench/tau_env.py, cli/tests/test_tool_runtime.py, cli/tool_runtime.py, cli/wiring.py |
+| tool_adapter.py | — | concurrency, concurrent_dispatcher, context, deferred, dispatcher, env, manifest, provider_adapter, registry | cli/tests/test_tool_runtime.py, cli/tool_runtime.py, cli/wiring.py |
 
 ### artifacts/
 
@@ -318,25 +311,8 @@ graph LR
 
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
-| __init__.py | Coding benchmark evaluation for Claude Code comparable task classes. | — | — |
-| coding_eval.py | Coding benchmark evaluator for Magi runs against Claude Code task classes. | — | — |
+| __init__.py | Benchmark pieces consumed by the runtime (legal eval + legalbench). | — | — |
 | legal_eval.py | LegalBench post-hoc evaluator. No provider/model calls are made here; it | models | benchmarks/legalbench/cli.py, benchmarks/legalbench/runner.py, cli/app.py |
-
-### benchmarks/gaia/
-
-| Module | Purpose | Depends On | Depended By |
-|---|---|---|---|
-| __init__.py | — | — | — |
-| answer.py | GAIA system prompt and FINAL ANSWER extraction. | — | benchmarks/gaia/harness.py |
-| answer_verifier_plugin.py | GAIA Answer Verifier Plugin — evidence payload construction + fail-open wrapper. | answer_verifier, answer_verifier_checks | — |
-| best_of_n.py | Deterministic Best-of-N answer selection by normalized majority vote. | scorer | benchmarks/gaia/run.py |
-| dataset.py | Load GAIA questions from a local parquet metadata file. | — | benchmarks/gaia/harness.py, benchmarks/gaia/run.py |
-| download.py | Download the GAIA validation split from Hugging Face. | — | — |
-| forced_answer.py | Forced-answer / no-abstention helpers for the GAIA benchmark harness. | — | — |
-| harness.py | GAIA agent harness — drives a single GaiaQuestion through the real ADK runner. | answer, dataset, providers, real_runner | benchmarks/gaia/run.py |
-| run.py | Resumable GAIA benchmark runner. | best_of_n, dataset, harness, scorer | — |
-| scorer.py | Official GAIA answer scorer (normalized exact match). | — | benchmarks/gaia/best_of_n.py, benchmarks/gaia/run.py |
-| web_tools.py | Default-off web-tool builder for the GAIA harness. | config, deep_research, deep_research_config, mcp, research_tools | web_acquisition/tests/test_gaia_web_tools_deep_research.py |
 
 ### benchmarks/legalbench/
 
@@ -348,30 +324,6 @@ graph LR
 | manifest.py | Loads a curated subset of LegalBench tasks from a JSON manifest file. | loader, models | benchmarks/legalbench/cli.py |
 | models.py | Pydantic models for the LegalBench lean harness data layer. | — | benchmarks/legal_eval.py, benchmarks/legalbench/loader.py, benchmarks/legalbench/manifest.py, benchmarks/legalbench/runner.py, recipes/first_party/legal/fewshot.py, recipes/first_party/legal/recipe.py |
 | runner.py | — | legal_eval, models, recipe | benchmarks/legalbench/cli.py |
-
-### benchmarks/multibug/
-
-| Module | Purpose | Depends On | Depended By |
-|---|---|---|---|
-| __init__.py | Multi-problem discovery benchmark harness (TIDE multi-bug, driver-only). | — | — |
-| cli.py | Default-OFF gate + entrypoint for the multi-problem discovery harness. | dataset, grounding, run | — |
-| dataset.py | Multi-problem (multi-bug) benchmark instances for the discovery harness. | models | benchmarks/multibug/cli.py, benchmarks/multibug/harness.py, benchmarks/multibug/run.py, benchmarks/multibug/scorer.py |
-| harness.py | Multi-problem discovery harness — drives one instance through ``run_discovery``. | dataset, gate, grounding, models, orchestrator, templates | benchmarks/multibug/run.py |
-| run.py | Resumable multi-problem benchmark runner (mirrors ``gaia/run.py``). | dataset, grounding, harness, models, scorer | benchmarks/multibug/cli.py |
-| scorer.py | Pure scorer for the multi-problem discovery harness (TIDE §3.3). | dataset, models | benchmarks/multibug/run.py |
-
-### benchmarks/taubench/
-
-| Module | Purpose | Depends On | Depended By |
-|---|---|---|---|
-| __init__.py | — | — | — |
-| agent.py | MagiTauAgent: drives magi's real runner as a tau-bench agent. | episode, tau_env | benchmarks/taubench/cli.py |
-| cli.py | τ-bench CLI entry-point: gate + provider binding + live run_eval. | agent, config, episode, harness, providers, real_runner | — |
-| config.py | — | — | benchmarks/taubench/cli.py |
-| episode.py | tau-bench-free multi-turn episode loop. No tau_bench import, no network. | — | benchmarks/taubench/agent.py, benchmarks/taubench/cli.py, benchmarks/taubench/harness.py, benchmarks/taubench/tau_env.py |
-| harness.py | Harness aggregation: pure orchestration over an injected solve_one callable. | episode, scorer | benchmarks/taubench/cli.py |
-| scorer.py | Pure τ-bench scorer. No tau_bench import, no model/provider calls. | — | benchmarks/taubench/harness.py |
-| tau_env.py | Translate a τ-bench env's tools into ADK FunctionTools that route to env.step. | episode, tool_adapter | benchmarks/taubench/agent.py |
 
 ### billing/
 
@@ -456,9 +408,9 @@ graph LR
 | ndjson.py | Single-writer NDJSON output for the headless CLI. | protocol | cli/headless.py, cli/tests/test_ndjson.py |
 | permissions.py | Permission rules engine + gate skeleton for the Magi headless CLI. | contracts, control, durable_control_store, env, protocol, readonly_classifier | cli/engine.py, cli/headless.py, cli/tests/test_app.py, cli/tests/test_coldstart.py, cli/tests/test_engine_gate.py, cli/tests/test_headless_approval.py, cli/tests/test_headless_projection.py, cli/tests/test_permissions.py, cli/tests/test_streaming_driver.py, cli/wiring.py, transport/active_turn.py, transport/streaming_driver.py, transport/streaming_sink.py |
 | protocol.py | Pydantic models for the Magi headless CLI wire protocol. | — | cli/headless.py, cli/ndjson.py, cli/permissions.py, cli/tests/test_ndjson.py, cli/tests/test_permissions.py, cli/tests/test_protocol.py, cli/tests/test_streaming_driver.py, cli/tests/test_streaming_sink.py, transport/streaming_chat_route.py |
-| providers.py | Provider/key resolution for the local ``magi`` CLI. | env, model | (root)/main.py, benchmarks/gaia/harness.py, benchmarks/taubench/cli.py, channels/workflow_classifier_live.py, cli/app.py, cli/commands/control.py, cli/memory_bootstrap.py, cli/real_runner.py, cli/tests/test_model_picker_wire.py, cli/tests/test_providers.py, cli/tests/test_real_runner.py, cli/tests/test_runtime_policy_wiring.py, cli/tests/test_tui_dialog_model.py, cli/tui/app.py, cli/tui/dialogs/model.py, cli/wiring.py, discovery/orchestrator.py, runtime/child_runner_live.py, tools/image_tools.py, transport/egress_critic.py |
+| providers.py | Provider/key resolution for the local ``magi`` CLI. | env, model | (root)/main.py, channels/workflow_classifier_live.py, cli/app.py, cli/commands/control.py, cli/memory_bootstrap.py, cli/real_runner.py, cli/tests/test_model_picker_wire.py, cli/tests/test_providers.py, cli/tests/test_real_runner.py, cli/tests/test_runtime_policy_wiring.py, cli/tests/test_tui_dialog_model.py, cli/tui/app.py, cli/tui/dialogs/model.py, cli/wiring.py, discovery/orchestrator.py, runtime/child_runner_live.py, tools/image_tools.py, transport/egress_critic.py |
 | readonly_classifier.py | SmartApprove read-only classifier for the Magi permission gate (PR3). | contracts, real_runner, registry | channels/workflow_classifier_live.py, cli/engine.py, cli/permissions.py, cli/wiring.py, transport/egress_critic.py |
-| real_runner.py | A real, model-backed runner for the local ``magi`` CLI. | compiler, control_plane, engine, env, live_gate, local_tool_collector, materializer, providers, session_identity, session_service, task_completion, tool_runtime | benchmarks/gaia/harness.py, benchmarks/taubench/cli.py, cli/readonly_classifier.py, cli/tests/test_app.py, cli/tests/test_real_runner.py, cli/tests/test_runtime_policy_wiring.py, cli/wiring.py, discovery/orchestrator.py, runtime/child_runner_live.py |
+| real_runner.py | A real, model-backed runner for the local ``magi`` CLI. | compiler, control_plane, engine, env, live_gate, local_tool_collector, materializer, providers, session_identity, session_service, task_completion, tool_runtime | cli/readonly_classifier.py, cli/tests/test_app.py, cli/tests/test_real_runner.py, cli/tests/test_runtime_policy_wiring.py, cli/wiring.py, discovery/orchestrator.py, runtime/child_runner_live.py |
 | session_log.py | Append-only JSONL session log for the Magi CLI (Stream B, PR-B1). | contracts, session_continuity, session_service, transcript | cli/app.py, cli/headless.py, cli/tests/test_app.py, cli/tests/test_coldstart.py, cli/tests/test_session_log.py, cli/tui/app.py, cli/tui/history.py, cli/tui/theme.py, cli/wiring.py |
 | tool_runtime.py | Real tool runtime for the local ``magi`` CLI agent. | ask_user_question_toolhost, context, core_toolhost, dispatcher, env, file_tool_manifests, file_toolhost, identity, learning_recall, live_gate, local_tool_collector, manifest, memory_recall_block, memory_snapshot_cache, memory_write_wiring, message_builder, permission_scope, plan_mode_toolhost, registry, session_identity, tool, tool_adapter, tools | cli/real_runner.py, cli/tests/test_identity.py, cli/tests/test_local_tool_evidence_wiring.py, cli/tests/test_plan_mode.py, cli/tests/test_plan_mode_tools_exposed.py, cli/tests/test_tool_runtime.py, cli/wiring.py, runtime/child_runner_live.py |
 | wiring.py | Composition root for the Magi CLI (PR-F1, Stream F). | app, commands, config, context, contracts, dispatcher, engine, env, file_tool_manifests, file_toolhost, goal_nudge_wiring, hook_wiring, live_gate, local_runner, local_tool_collector, manifest, mcp, memory_mode_guard, openmagi_runtime, permission_scope, permissions, providers, readonly_classifier, real_runner, registry, runtime_sink, safety, session_identity, session_log, tool, tool_adapter, tool_render, tool_runtime | cli/app.py, cli/tests/test_app.py, cli/tests/test_coldstart.py, cli/tests/test_plan_mode.py, cli/tests/test_real_runner.py, cli/tests/test_runtime_policy_wiring.py, cli/tests/test_streaming_sink.py, transport/chat_routes.py, transport/streaming_chat_route.py |
@@ -636,9 +588,9 @@ graph LR
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
 | __init__.py | — | config, mcp | — |
-| config.py | — | — | benchmarks/gaia/web_tools.py, cli/app.py, cli/wiring.py, composio/__init__.py, composio/health.py, composio/mcp.py, transport/health.py |
+| config.py | — | — | cli/app.py, cli/wiring.py, composio/__init__.py, composio/health.py, composio/mcp.py, transport/health.py |
 | health.py | — | config, mcp, redaction | cli/app.py, transport/health.py |
-| mcp.py | — | config, redaction | benchmarks/gaia/web_tools.py, cli/wiring.py, composio/__init__.py, composio/health.py |
+| mcp.py | — | config, redaction | cli/wiring.py, composio/__init__.py, composio/health.py |
 | redaction.py | — | — | cli/headless.py, composio/health.py, composio/mcp.py, transport/sse.py |
 
 ### config/
@@ -702,17 +654,17 @@ graph LR
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
 | __init__.py | Stateful iterative-discovery orchestrator + static template library. | — | — |
-| gate.py | Default-OFF gate for the discovery orchestrator. | — | benchmarks/multibug/harness.py, discovery/orchestrator.py |
-| grounding.py | Triple grounding verifier for the discovery orchestrator (TIDE ``D̂ ⊆ D``). | models | benchmarks/multibug/cli.py, benchmarks/multibug/harness.py, benchmarks/multibug/run.py |
-| models.py | Pydantic models for the TIDE-style iterative-discovery orchestrator. | — | benchmarks/multibug/dataset.py, benchmarks/multibug/harness.py, benchmarks/multibug/run.py, benchmarks/multibug/scorer.py, discovery/grounding.py, discovery/orchestrator.py, discovery/prompt.py, discovery/templates/__init__.py |
-| orchestrator.py | Stateful iterative-discovery orchestrator (TIDE mechanism). | gate, models, prompt, providers, real_runner | benchmarks/multibug/harness.py |
+| gate.py | Default-OFF gate for the discovery orchestrator. | — | discovery/orchestrator.py |
+| grounding.py | Triple grounding verifier for the discovery orchestrator (TIDE ``D̂ ⊆ D``). | models | — |
+| models.py | Pydantic models for the TIDE-style iterative-discovery orchestrator. | — | discovery/grounding.py, discovery/orchestrator.py, discovery/prompt.py, discovery/templates/__init__.py |
+| orchestrator.py | Stateful iterative-discovery orchestrator (TIDE mechanism). | gate, models, prompt, providers, real_runner | — |
 | prompt.py | Prompt construction + tolerant parsing for the discovery orchestrator. | models | discovery/orchestrator.py |
 
 ### discovery/templates/
 
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
-| __init__.py | Static discovery-template library (feature B1). | models | benchmarks/multibug/harness.py |
+| __init__.py | Static discovery-template library (feature B1). | models | — |
 
 ### egress_proxy/
 
@@ -1195,8 +1147,8 @@ graph LR
 | acceptance_criteria.py | — | — | research/child_roles.py, research/evidence_graph.py, research/policy_pack.py, research/repair.py |
 | action_claims.py | — | runtime_issuance | research/boundary_enforcement.py, research/child_roles.py, research/evidence_graph.py, research/final_projection_gate.py, research/policy_pack.py |
 | answer_policy.py | Answer Policy — configurable commit-vs-abstain seam (first-party, P6). | — | — |
-| answer_verifier.py | Answer Verifier — value-level verification against already-gathered evidence. | answer_verifier_checks | benchmarks/gaia/answer_verifier_plugin.py, research/answer_verifier_checks.py |
-| answer_verifier_checks.py | Answer Verifier Checks — detect type, build prompt, parse response, safety guards. | answer_verifier | benchmarks/gaia/answer_verifier_plugin.py, research/answer_verifier.py |
+| answer_verifier.py | Answer Verifier — value-level verification against already-gathered evidence. | answer_verifier_checks | research/answer_verifier_checks.py |
+| answer_verifier_checks.py | Answer Verifier Checks — detect type, build prompt, parse response, safety guards. | answer_verifier | research/answer_verifier.py |
 | boundary_enforcement.py | — | action_claims, evidence_graph, runtime_issuance | research/final_projection_gate.py |
 | child_roles.py | — | acceptance_criteria, action_claims, child_runtime_envelope, claim_graph, source_proof | recipes/ledger_task.py, recipes/ledger_workforce.py, recipes/opencode_child_lifecycle.py |
 | claim_graph.py | — | runtime_issuance | research/child_roles.py, research/evidence_graph.py, research/repair.py, web_acquisition/cross_verifier.py, web_acquisition/deep_research.py |
@@ -1597,8 +1549,8 @@ graph LR
 | __init__.py | Default-off web acquisition provider boundaries for the ADK migration. | provider_boundary, provider_router | — |
 | acquisition_plan.py | — | policy | — |
 | cross_verifier.py | Cross-verifier for deep web research: verifies ≥2 independent sources agree. | claim_graph, deep_research_config, page_navigator, policy, runtime_issuance, source_proof | web_acquisition/deep_research.py, web_acquisition/tests/test_cross_verifier.py |
-| deep_research.py | Deep web research orchestrator. | claim_graph, cross_verifier, deep_research_config, page_navigator, query_planner, research_tools, runtime_issuance, source_proof | benchmarks/gaia/web_tools.py, web_acquisition/tests/test_deep_research_orchestrator.py, web_acquisition/tests/test_gaia_web_tools_deep_research.py |
-| deep_research_config.py | Default-OFF configuration for the deep web research orchestrator. | — | benchmarks/gaia/web_tools.py, web_acquisition/cross_verifier.py, web_acquisition/deep_research.py, web_acquisition/query_planner.py, web_acquisition/tests/test_cross_verifier.py, web_acquisition/tests/test_deep_research_config.py, web_acquisition/tests/test_deep_research_orchestrator.py, web_acquisition/tests/test_gaia_web_tools_deep_research.py, web_acquisition/tests/test_query_planner.py |
+| deep_research.py | Deep web research orchestrator. | claim_graph, cross_verifier, deep_research_config, page_navigator, query_planner, research_tools, runtime_issuance, source_proof | web_acquisition/tests/test_deep_research_orchestrator.py, web_acquisition/tests/test_gaia_web_tools_deep_research.py |
+| deep_research_config.py | Default-OFF configuration for the deep web research orchestrator. | — | web_acquisition/cross_verifier.py, web_acquisition/deep_research.py, web_acquisition/query_planner.py, web_acquisition/tests/test_cross_verifier.py, web_acquisition/tests/test_deep_research_config.py, web_acquisition/tests/test_deep_research_orchestrator.py, web_acquisition/tests/test_gaia_web_tools_deep_research.py, web_acquisition/tests/test_query_planner.py |
 | live_fetch_provider.py | Live (network-capable) web FETCH provider for the research harness. | config, injection, policy | web_acquisition/providers/insane_fetch.py, web_acquisition/providers/jina_reader.py |
 | live_provider_pack.py | — | policy, provider_execution, provider_receipts | web_acquisition/provider_router.py, web_acquisition/research_tools.py, web_acquisition/tests/test_deep_research_orchestrator.py |
 | opencode_provider_router.py | — | policy, provider_boundary, research_tools, result | — |
@@ -1609,7 +1561,7 @@ graph LR
 | query_planner.py | Rule-based query planner for deep web research. | deep_research_config | web_acquisition/deep_research.py, web_acquisition/tests/test_query_planner.py |
 | reference_research_tools.py | — | catalog, context, kernel, local_readonly, read_ledger, registry | — |
 | repo_research_tools.py | — | policy, result, source_ledger, source_proof | — |
-| research_tools.py | — | insane_fetch, jina_reader, live_provider_pack, platform_endpoint, policy, provider_boundary, provider_router, result, source_ledger | benchmarks/gaia/web_tools.py, plugins/native/web.py, web_acquisition/deep_research.py, web_acquisition/opencode_provider_router.py, web_acquisition/tests/test_deep_research_orchestrator.py, web_acquisition/tests/test_gaia_web_tools_deep_research.py |
+| research_tools.py | — | insane_fetch, jina_reader, live_provider_pack, platform_endpoint, policy, provider_boundary, provider_router, result, source_ledger | plugins/native/web.py, web_acquisition/deep_research.py, web_acquisition/opencode_provider_router.py, web_acquisition/tests/test_deep_research_orchestrator.py, web_acquisition/tests/test_gaia_web_tools_deep_research.py |
 
 ### web_acquisition/providers/
 
@@ -1630,7 +1582,7 @@ graph LR
 | test_cross_verifier.py | Tests for CrossVerifier — PR3 (TDD: written first). | cross_verifier, deep_research_config, page_navigator, runtime_issuance | — |
 | test_deep_research_config.py | Tests for DeepResearchConfig — PR1 (TDD: these were written first). | deep_research_config | — |
 | test_deep_research_orchestrator.py | Tests for DeepWebResearchOrchestrator — PR4 (TDD: written first). | deep_research, deep_research_config, live_provider_pack, research_tools, result, runtime_issuance | — |
-| test_gaia_web_tools_deep_research.py | Tests for GAIA web_tools deep-research wiring — PR4. | deep_research, deep_research_config, research_tools, web_tools | — |
+| test_gaia_web_tools_deep_research.py | Tests for GAIA web_tools deep-research wiring — PR4. | deep_research, deep_research_config, research_tools | — |
 | test_page_navigator.py | Tests for PageNavigator + FactExtractor — PR2 (TDD: written first). | page_navigator | — |
 | test_query_planner.py | Tests for QueryPlanner — PR1 (TDD: these were written first). | deep_research_config, query_planner | — |
 

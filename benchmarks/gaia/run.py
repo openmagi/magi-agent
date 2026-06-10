@@ -1,6 +1,6 @@
 """Resumable GAIA benchmark runner.
 
-Drives a list of :class:`~magi_agent.benchmarks.gaia.dataset.GaiaQuestion`
+Drives a list of :class:`~benchmarks.gaia.dataset.GaiaQuestion`
 objects through a runner function, scores each answer, and persists results to
 ``<output_dir>/results.jsonl``.  A run can be resumed safely: questions whose
 ``task_id`` already appears in ``results.jsonl`` are skipped.
@@ -16,9 +16,9 @@ import tempfile
 from collections.abc import Callable, Sequence
 from typing import Any
 
-from magi_agent.benchmarks.gaia.best_of_n import majority_vote
-from magi_agent.benchmarks.gaia.dataset import GaiaQuestion
-from magi_agent.benchmarks.gaia.scorer import question_scorer
+from benchmarks.gaia.best_of_n import majority_vote
+from benchmarks.gaia.dataset import GaiaQuestion
+from benchmarks.gaia.scorer import question_scorer
 
 
 def _default_runner(
@@ -29,7 +29,7 @@ def _default_runner(
 ) -> str:
     """Thin wrapper around the real harness; only imported when needed so tests
     that inject a stub never trigger heavy ADK imports."""
-    from magi_agent.benchmarks.gaia.harness import run_gaia_question  # noqa: PLC0415
+    from benchmarks.gaia.harness import run_gaia_question  # noqa: PLC0415
 
     return run_gaia_question(question, workspace_root=workspace_root, model=model)
 
@@ -53,7 +53,7 @@ def run_benchmark(
         missing.
     runner_fn:
         ``(question, *, workspace_root, model) -> str``.  Defaults to the real
-        :func:`~magi_agent.benchmarks.gaia.harness.run_gaia_question` wrapper.
+        :func:`~benchmarks.gaia.harness.run_gaia_question` wrapper.
         Tests always inject a stub.
     n:
         Number of independent runs per question; the majority vote is scored.

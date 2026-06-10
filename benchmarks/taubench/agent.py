@@ -1,8 +1,8 @@
-# magi_agent/benchmarks/taubench/agent.py
+# benchmarks/taubench/agent.py
 """MagiTauAgent: drives magi's real runner as a tau-bench agent.
 
 tau_bench is imported ONLY lazily inside build_magi_tau_agent so that
-``import magi_agent.benchmarks.taubench.agent`` succeeds without tau_bench
+``import benchmarks.taubench.agent`` succeeds without tau_bench
 installed.
 """
 from __future__ import annotations
@@ -10,8 +10,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from magi_agent.benchmarks.taubench.episode import EpisodeState, run_episode
-from magi_agent.benchmarks.taubench.tau_env import build_env_function_tools
+from benchmarks.taubench.episode import EpisodeState, run_episode
+from benchmarks.taubench.tau_env import build_env_function_tools
 
 
 def build_magi_tau_agent(*, runner_factory: Callable[..., Any]) -> Any:

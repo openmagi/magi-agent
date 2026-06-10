@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import pytest
 
-from magi_agent.benchmarks.gaia.answer import GAIA_SYSTEM_PROMPT
-from magi_agent.benchmarks.gaia.forced_answer import force_answer, is_abstention
+from benchmarks.gaia.answer import GAIA_SYSTEM_PROMPT
+from benchmarks.gaia.forced_answer import force_answer, is_abstention
 
 
 # ---------------------------------------------------------------------------

@@ -173,7 +173,7 @@ def _normalize_for_consensus(value: str) -> str:
     are treated as equivalent for vote counting.
 
     This function is intentionally lighter than
-    ``magi_agent.benchmarks.gaia.scorer.normalize_str`` — it is a general
+    ``benchmarks.gaia.scorer.normalize_str`` — it is a general
     production primitive, not a benchmark-specific scorer.
     """
     v = value.strip().lower()

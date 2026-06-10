@@ -1,7 +1,7 @@
 """Tests for OutputContractGate (PR 1 — Stage A deterministic + PR 2 — Stage B LLM repair).
 
 Anti-overfitting firewall: this file MUST NOT import anything from
-magi_agent.benchmarks.gaia.  A dedicated test enforces this at the module level.
+benchmarks.gaia.  A dedicated test enforces this at the module level.
 """
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ from magi_agent.research.output_contract_gate import (
 
 
 def test_gate_module_does_not_import_gaia_scorer() -> None:
-    """The gate must not import magi_agent.benchmarks.gaia.scorer — structural firewall."""
+    """The gate must not import benchmarks.gaia.scorer — structural firewall."""
     gate_mod = importlib.import_module("magi_agent.research.output_contract_gate")
     # Collect all module names reachable from the gate's own imports (direct only).
     imported_names: set[str] = set()
@@ -39,12 +39,12 @@ def test_gate_module_does_not_import_gaia_scorer() -> None:
     # Also check sys.modules for anything the gate may have pulled in transitively
     # by inspecting only those that share the gaia prefix.
     gate_source = gate_mod.__file__ or ""
-    gaia_scorer_name = "magi_agent.benchmarks.gaia.scorer"
+    gaia_scorer_name = "benchmarks.gaia.scorer"
     gaia_scorer_mod = sys.modules.get(gaia_scorer_name)
     # Even if the scorer is already loaded (e.g. by another test), the gate must not
     # hold a reference to it.
     assert gaia_scorer_name not in imported_names, (
-        "output_contract_gate must not import magi_agent.benchmarks.gaia.scorer"
+        "output_contract_gate must not import benchmarks.gaia.scorer"
     )
     # Verify via the module's __dict__ that no attribute points to the scorer module.
     gate_dict_values = gate_mod.__dict__.values()
@@ -57,7 +57,7 @@ def test_gate_module_does_not_import_gaia_scorer() -> None:
         with open(gate_source) as fh:
             source_text = fh.read()
         assert "benchmarks.gaia" not in source_text, (
-            "output_contract_gate source must not reference magi_agent.benchmarks.gaia"
+            "output_contract_gate source must not reference benchmarks.gaia"
         )
 
 
