@@ -35,6 +35,7 @@ from magi_agent.transport.shadow_generations import (
     Gate5B4C3ShadowGenerationRouteConfig,
 )
 from magi_agent.transport import chat as chat_module
+from magi_agent.transport import chat_routes as chat_routes_module
 from magi_agent.transport.chat import (
     Gate5BUserVisibleChatRouteConfig,
     build_gate5b_full_toolhost_config_from_env,
@@ -1566,7 +1567,7 @@ def test_chat_route_gate1a_success_uses_live_egress_proxy_telemetry(
             "2026-05-24T10:00:05.000Z",
         )
     )
-    monkeypatch.setattr(chat_module, "_utc_now_iso", lambda: next(timestamps))
+    monkeypatch.setattr(chat_routes_module, "_utc_now_iso", lambda: next(timestamps))
     runtime = make_runtime(
         authority=PythonRuntimeAuthorityConfig(
             userVisibleOutputAllowed=True,
@@ -1950,7 +1951,7 @@ def test_chat_route_failed_canary_records_explicit_counter_error(
         raise RuntimeError("synthetic runner failure")
 
     monkeypatch.setattr(
-        chat_module,
+        chat_routes_module,
         "run_gate5b4c3_live_runner_boundary_async",
         fail_boundary,
     )

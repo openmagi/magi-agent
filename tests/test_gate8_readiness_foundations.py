@@ -35,6 +35,7 @@ from magi_agent.shadow.gate5b4c3_shadow_counter_store import (
     Gate5B4C3ShadowCounterStore,
 )
 from magi_agent.transport import chat as chat_module
+from magi_agent.transport import chat_routes as chat_routes_module
 from magi_agent.transport.chat import Gate5BUserVisibleChatRouteConfig
 from magi_agent.transport.shadow_generations import (
     Gate5B4C3ShadowGenerationRouteConfig,
@@ -499,7 +500,7 @@ def test_gate8_live_selected_path_fails_closed_without_correlated_egress(
             "2026-05-24T10:00:05.000Z",
         )
     )
-    monkeypatch.setattr(chat_module, "_utc_now_iso", lambda: next(timestamps))
+    monkeypatch.setattr(chat_routes_module, "_utc_now_iso", lambda: next(timestamps))
     config = parse_runtime_env(
         _base_env(
             **_gate8_selected_env(
@@ -588,7 +589,7 @@ def test_gate8_live_selected_path_reuses_egress_proxy_correlation_without_gate1a
             "2026-05-24T10:00:05.000Z",
         )
     )
-    monkeypatch.setattr(chat_module, "_utc_now_iso", lambda: next(timestamps))
+    monkeypatch.setattr(chat_routes_module, "_utc_now_iso", lambda: next(timestamps))
     config = parse_runtime_env(
         _base_env(
             **_gate8_selected_env(
