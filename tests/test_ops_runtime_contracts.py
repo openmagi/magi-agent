@@ -13,7 +13,6 @@ from magi_agent.ops import (
     RuntimeOperationEvent,
     RuntimeOpsAttachmentFlags,
     default_runtime_ops_health_metadata,
-    project_runtime_operation_event,
     safe_metadata,
 )
 
@@ -41,24 +40,6 @@ def _event(**overrides: object) -> RuntimeOperationEvent:
     }
     payload.update(overrides)
     return RuntimeOperationEvent(**payload)
-
-
-def test_runtime_operation_event_projects_safe_digest_only_public_shape() -> None:
-    projected = project_runtime_operation_event(_event())
-    encoded = json.dumps(projected, sort_keys=True)
-
-    assert projected["schemaVersion"] == "openmagi.ops.event.public.v1"
-    assert projected["eventId"] == "event-001"
-    assert projected["eventDigest"].startswith("sha256:")
-    assert projected["activationEnabled"] is False
-    assert projected["attachmentFlags"]["liveToolExecutionAttached"] is False
-    assert projected["attachmentFlags"]["promptPayloadAttached"] is False
-    assert projected["attachmentFlags"]["toolOutputPayloadAttached"] is False
-    assert projected["attachmentFlags"]["hiddenReasoningAttached"] is False
-    assert projected["attachmentFlags"]["credentialAttached"] is False
-    assert "rawPrompt" not in encoded
-    assert "rawToolOutput" not in encoded
-    assert "privatePath" not in encoded
 
 
 @pytest.mark.parametrize(
@@ -280,7 +261,6 @@ def test_ops_import_boundary_does_not_load_live_runtime_paths() -> None:
 
     before = set(sys.modules)
     importlib.import_module("magi_agent.ops.metrics")
-    importlib.import_module("magi_agent.ops.runtime_events")
     newly_loaded = set(sys.modules) - before
     forbidden_prefixes = (
         "google.adk.runners",

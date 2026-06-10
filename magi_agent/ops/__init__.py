@@ -9,7 +9,6 @@ __all__ = [
     "RuntimeOpsAttachmentFlags",
     "build_runtime_metrics_snapshot",
     "default_runtime_ops_health_metadata",
-    "project_runtime_operation_event",
     "scheduler_executor_health_projection",
     "safe_metadata",
 ]
@@ -21,7 +20,6 @@ _LAZY_EXPORTS = {
     "RuntimeOpsAttachmentFlags": (".metrics", "RuntimeOpsAttachmentFlags"),
     "build_runtime_metrics_snapshot": (".metrics", "build_runtime_metrics_snapshot"),
     "default_runtime_ops_health_metadata": (".health", "default_runtime_ops_health_metadata"),
-    "project_runtime_operation_event": (".runtime_events", "project_runtime_operation_event"),
     "scheduler_executor_health_projection": (".health", "scheduler_executor_health_projection"),
     "safe_metadata": (".safety", "safe_metadata"),
 }
