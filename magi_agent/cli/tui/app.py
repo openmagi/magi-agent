@@ -94,7 +94,15 @@ from magi_agent.cli.tui.dialogs.session import (
 from magi_agent.cli.tui.palette import (
     AppActionProvider,
     CommandPaletteProvider,
+    ThemeProvider,
     tui_command_names,
+)
+from magi_agent.cli.tui.theme import (
+    DEFAULT_THEME,
+    MAGI_THEMES,
+    load_saved_theme,
+    register_magi_themes,
+    save_theme,
 )
 from magi_agent.cli.tui.render.markdown import render_markdown
 from magi_agent.cli.tui.sidebar import Sidebar
@@ -666,6 +674,11 @@ class MagiTuiApp(App[None]):
         # fires from the prompt and Ctrl+C appears dead.
         Binding("ctrl+c", "cancel_turn", "Cancel", priority=True),
         ("ctrl+y", "copy_selection", "Copy"),
+        # ctrl+t cycles the curated theme set (PR4.1). priority=True so it
+        # preempts any built-in ctrl+t on the focused Input/TextArea; it is NOT
+        # in the keybindings defaults, so on_key resolves it UNBOUND and lets it
+        # bubble to this App BINDING.
+        Binding("ctrl+t", "cycle_theme", "Theme", priority=True),
         # ctrl+b toggles the left sidebar (PR3.2). priority=True so it preempts
         # any built-in ctrl+b on the focused Input/TextArea (some widgets map it
         # to cursor-left); it is NOT in the keybindings defaults (defaults.py),
@@ -682,7 +695,7 @@ class MagiTuiApp(App[None]):
     # explicitly (OQ2) so a future Textual default change can't silently move it,
     # and so it documents intent. No collision with BINDINGS (ctrl+c / ctrl+y)
     # or the keybindings defaults.
-    COMMANDS = {CommandPaletteProvider, AppActionProvider}
+    COMMANDS = {CommandPaletteProvider, AppActionProvider, ThemeProvider}
     COMMAND_PALETTE_BINDING = "ctrl+p"
 
     def __init__(
@@ -855,8 +868,14 @@ class MagiTuiApp(App[None]):
         assert self._live is not None and (
             self._log is not None or self._view is not None
         )
+        # Register the curated theme set (custom magi-dark + Textual built-ins)
+        # and restore the last-chosen theme from disk, falling back to the
+        # historical default. The flat-look CSS pins region backgrounds to
+        # transparent, so a theme only retints accent/text/primary — switching
+        # never repaints the Screen/transcript with a solid colour (PR4.1).
+        register_magi_themes(self)
         try:
-            self.theme = "tokyo-night"
+            self.theme = load_saved_theme() or DEFAULT_THEME
         except Exception:  # pragma: no cover - theme always present in textual 8.x
             pass
         if self._view is not None:
@@ -1188,6 +1207,45 @@ class MagiTuiApp(App[None]):
         """
 
         self.push_screen(HelpDialog.from_app(self))
+
+    # -- theme cycle + picker (PR4.1) --------------------------------------
+    def action_cycle_theme(self) -> None:
+        """Advance ``App.theme`` to the next curated theme and persist it.
+
+        Bound to ``ctrl+t``. Wraps around ``MAGI_THEMES``; if the current theme
+        is outside the curated set (e.g. a built-in set elsewhere) the cycle
+        restarts at the first curated name. The flat-look regions stay
+        transparent across the switch — only accent/text/primary retint.
+        """
+
+        current = self.theme
+        try:
+            idx = MAGI_THEMES.index(current)
+        except ValueError:
+            idx = -1
+        nxt = MAGI_THEMES[(idx + 1) % len(MAGI_THEMES)]
+        self._set_theme(nxt)
+
+    def select_theme(self, name: str) -> None:
+        """Set + persist a theme by name (the palette ThemeProvider entrypoint).
+
+        Unknown names are ignored so a stale/forged palette entry can never set
+        ``App.theme`` to an unregistered value (which would raise on assignment).
+        """
+
+        if name not in MAGI_THEMES:
+            return
+        self._set_theme(name)
+
+    def _set_theme(self, name: str) -> None:
+        """Apply + persist a curated theme and toast the choice (best-effort)."""
+
+        self.theme = name
+        save_theme(name)
+        try:
+            self.notify(f"Theme: {name}", timeout=2)
+        except Exception:  # pragma: no cover - notify always available when mounted
+            pass
 
     # -- the ONE engine-driven turn loop -----------------------------------
     def start_turn(self, prompt: str) -> None:
