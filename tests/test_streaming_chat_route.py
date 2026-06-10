@@ -846,6 +846,179 @@ def test_hosted_serve_selected_active_still_streams(monkeypatch, tmp_path: Path)
     assert payloads[-1]["terminal"] == "completed"
 
 
+def test_hosted_serve_gate2_canary_payload_dispatches_to_gate2_chat(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    # Completions parity: a gate2 sandbox-workspace canary payload must reach
+    # the same _run_gate2_sandbox_workspace_canary_chat boundary (JSON, not SSE).
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
+    monkeypatch.setenv("MAGI_HOSTED_STREAMING_SERVE", "1")
+    monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
+    from magi_agent.transport.gate2_sandbox_canary import (
+        Gate2SandboxWorkspaceCanaryConfig,
+    )
+
+    runtime = _selected_runtime(tmp_path)
+    runtime.gate2_sandbox_workspace_canary_config = Gate2SandboxWorkspaceCanaryConfig(
+        enabled=True
+    )
+    seen: dict[str, object] = {}
+
+    def fake_gate2_chat(rt, config, payload, *, request):
+        seen["gate"] = payload.get("gate")
+        seen["enabled"] = config.enabled
+        return JSONResponse(status_code=200, content={"status": "gate2_dispatched"})
+
+    monkeypatch.setattr(
+        streaming_chat_route_module,
+        "_run_gate2_sandbox_workspace_canary_chat",
+        fake_gate2_chat,
+    )
+    client = TestClient(
+        _make_app(runtime=runtime, engine_builder=_bypass_canary_builder)
+    )
+
+    response = client.post(
+        "/v1/chat/stream",
+        headers=_auth_headers(),
+        json={
+            "gate": "gate2_sandbox_workspace_canary",
+            "messages": [{"role": "user", "content": "gate2 canary"}],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "gate2_dispatched"}
+    assert seen == {"gate": "gate2_sandbox_workspace_canary", "enabled": True}
+
+
+def test_hosted_serve_gate2_absent_payload_takes_selected_stream(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    # No gate2 config → even a gate2-shaped payload flows down the normal
+    # selected gate5b stream path (mirrors completions).
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
+    monkeypatch.setenv("MAGI_HOSTED_STREAMING_SERVE", "1")
+    monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
+    monkeypatch.setenv("CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_WORKSPACE_ROOT", str(tmp_path))
+
+    def fail_gate2_chat(rt, config, payload, *, request):  # pragma: no cover
+        raise AssertionError("gate2 dispatch must not run without gate2 config")
+
+    monkeypatch.setattr(
+        streaming_chat_route_module,
+        "_run_gate2_sandbox_workspace_canary_chat",
+        fail_gate2_chat,
+    )
+    client = TestClient(
+        _make_app(
+            runtime=_selected_runtime(tmp_path, full_toolhost=True),
+            engine_builder=_bypass_canary_builder,
+        )
+    )
+
+    response = client.post(
+        "/v1/chat/stream",
+        headers=_auth_headers(),
+        json={
+            "gate": "gate2_sandbox_workspace_canary",
+            "sessionId": "s-hosted-gate2-absent",
+            "turnId": "t-hosted-gate2-absent",
+            "messages": [{"role": "user", "content": "Use the selected toolhost."}],
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert "selected full-toolhost ADK stream answer" in response.text
+
+
+def test_hosted_serve_malformed_json_returns_completions_shape(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
+    monkeypatch.setenv("MAGI_HOSTED_STREAMING_SERVE", "1")
+    monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
+    client = TestClient(
+        _make_app(
+            runtime=_selected_runtime(tmp_path),
+            engine_builder=_bypass_canary_builder,
+        )
+    )
+
+    response = client.post(
+        "/v1/chat/stream",
+        headers={**_auth_headers(), "content-type": "application/json"},
+        content="{not json",
+    )
+
+    assert response.status_code == 400
+    payload = response.json()
+    assert payload["status"] == "python_error"
+    assert payload["reason"] == "malformed_json"
+    assert payload["fallbackStatus"] == "fallback_to_typescript"
+    assert payload["responseAuthority"] == "typescript"
+
+
+def test_hosted_serve_malformed_json_route_disabled_returns_python_disabled(
+    monkeypatch,
+) -> None:
+    # Completions checks the canary route gate BEFORE parsing the body, so a
+    # malformed body on a gate-disabled pod answers 503 python_disabled.
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
+    monkeypatch.setenv("MAGI_HOSTED_STREAMING_SERVE", "1")
+    monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
+    client = TestClient(_make_app(engine_builder=_bypass_canary_builder))
+
+    response = client.post(
+        "/v1/chat/stream",
+        headers={**_auth_headers(), "content-type": "application/json"},
+        content="{not json",
+    )
+
+    assert response.status_code == 503
+    payload = response.json()
+    assert payload["status"] == "python_disabled"
+    assert payload["reason"] == "canary_gate_disabled"
+
+
+def test_hosted_serve_malformed_json_chat_route_off_returns_chat_route_disabled(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
+    monkeypatch.setenv("MAGI_HOSTED_STREAMING_SERVE", "1")
+    monkeypatch.delenv("CORE_AGENT_PYTHON_CHAT_ROUTE", raising=False)
+    client = TestClient(_make_app(engine_builder=_bypass_canary_builder))
+
+    response = client.post(
+        "/v1/chat/stream",
+        headers={**_auth_headers(), "content-type": "application/json"},
+        content="{not json",
+    )
+
+    assert response.status_code == 503
+    assert response.json()["error"] == "chat_route_disabled"
+
+
+def test_malformed_json_flag_off_keeps_legacy_shape(monkeypatch) -> None:
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
+    monkeypatch.delenv("MAGI_HOSTED_STREAMING_SERVE", raising=False)
+    monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
+    client = TestClient(_make_app())
+
+    response = client.post(
+        "/v1/chat/stream",
+        headers={**_auth_headers(), "content-type": "application/json"},
+        content="{not json",
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {"error": "malformed_json"}
+
+
 def test_hosted_serve_flag_off_gate_inactive_keeps_headless_fallthrough(
     monkeypatch,
 ) -> None:
