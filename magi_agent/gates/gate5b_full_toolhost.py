@@ -13,7 +13,7 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Self
 
-from magi_agent.config.env import MAGI_EDIT_FUZZY_MATCH_ENABLED as _EDIT_FUZZY_MATCH_ENABLED
+from magi_agent.config.env import edit_fuzzy_match_enabled as _edit_fuzzy_match_enabled
 
 from google.adk.tools import FunctionTool
 from pydantic import (
@@ -89,6 +89,36 @@ def _build_bash_env(cfg: EgressProxyConfig | None = None) -> dict[str, str]:
     env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin")}
     env.update(subprocess_env_overlay(cfg))
     return env
+
+def _decode_subprocess_capture(value: object) -> str:
+    """``TimeoutExpired.stdout/.stderr`` may be bytes even under ``text=True``."""
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return str(value)
+
+
+def _bounded_head_tail(text: str, max_bytes: int) -> str:
+    """Cap ``text`` keeping BOTH ends.
+
+    Test runners print failure summaries at the END of their output; a
+    head-only slice hides exactly the part the model needs. Split the budget
+    ~60/40 between head and tail with an explicit elision marker.
+    """
+    if len(text) <= max_bytes:
+        return text
+    head_budget = max(1, (max_bytes * 3) // 5)
+    tail_budget = max(0, max_bytes - head_budget)
+    head = text[:head_budget]
+    tail = text[len(text) - tail_budget :] if tail_budget else ""
+    elided = len(text) - head_budget - tail_budget
+    marker = (
+        f"\n[... {elided} bytes elided - output truncated; re-run with "
+        "head/tail/grep filters to see the elided region ...]\n"
+    )
+    return head + marker + tail
+
 
 Gate5BFullToolHostStatus = Literal["disabled", "blocked", "ready"]
 Gate5BFullToolOutcomeStatus = Literal["ok", "blocked", "error", "duplicate"]
@@ -404,14 +434,14 @@ class Gate5BFullToolHostConfig(_Gate5BFullModel):
     environment: str = "local"
     environment_allowlist: tuple[str, ...] = Field(default=(), alias="environmentAllowlist")
     allowed_tool_names: tuple[str, ...] = Field(default=(), alias="allowedToolNames")
-    max_tool_calls_per_turn: int = Field(default=0, ge=0, le=64, alias="maxToolCallsPerTurn")
+    max_tool_calls_per_turn: int = Field(default=0, ge=0, le=4096, alias="maxToolCallsPerTurn")
     max_per_tool_output_bytes: int = Field(
         default=8192,
         ge=1,
         le=131072,
         alias="maxPerToolOutputBytes",
     )
-    command_timeout_ms: int = Field(default=5000, ge=250, le=30000, alias="commandTimeoutMs")
+    command_timeout_ms: int = Field(default=5000, ge=250, le=600000, alias="commandTimeoutMs")
     format_on_write_enabled: bool = Field(default=False, alias="formatOnWriteEnabled")
     lsp_diagnostics_enabled: bool = Field(default=False, alias="lspDiagnosticsEnabled")
     lsp_diagnostics_cap: int = Field(default=20, ge=1, le=100, alias="lspDiagnosticsCap")
@@ -998,7 +1028,10 @@ class Gate5BFullToolHost:
             if not old_text:
                 raise ValueError("empty_old_text")
             current = target.read_text(encoding="utf-8", errors="replace")
-            if _EDIT_FUZZY_MATCH_ENABLED:
+            # Call-time read: the import-time constant froze BEFORE profile env
+            # defaults were applied, silently disabling fuzzy edits in eval runs.
+            fuzzy_enabled = _edit_fuzzy_match_enabled()
+            if fuzzy_enabled:
                 from magi_agent.coding.edit_matching import (
                     MultipleMatchesError as _MultipleMatchesError,
                     NoMatchError as _NoMatchError,
@@ -1023,7 +1056,7 @@ class Gate5BFullToolHost:
                 "pathDigest": _digest(target.relative_to(self.workspace_root).as_posix()),
                 "replacements": 1,
             }
-            if _EDIT_FUZZY_MATCH_ENABLED and self._last_edit_match_result is not None:
+            if fuzzy_enabled and self._last_edit_match_result is not None:
                 from magi_agent.coding.edit_matching import EditMatchResult as _EditMatchResult
                 if isinstance(self._last_edit_match_result, _EditMatchResult):
                     edit_result["matchTier"] = self._last_edit_match_result.tier
@@ -1083,18 +1116,40 @@ class Gate5BFullToolHost:
         command = raw_command.strip()
         if not command:
             raise ValueError("empty_command")
-        completed = subprocess.run(
-            command,
-            cwd=self.workspace_root,
-            shell=True,
-            capture_output=True,
-            text=True,
-            timeout=timeout_s,
-            env=_build_bash_env(),
-            check=False,
-        )
-        stdout = _redact(completed.stdout)[0 : self.config.max_per_tool_output_bytes]
-        stderr = _redact(completed.stderr)[0 : self.config.max_per_tool_output_bytes]
+        try:
+            completed = subprocess.run(
+                command,
+                cwd=self.workspace_root,
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=timeout_s,
+                env=_build_bash_env(),
+                check=False,
+            )
+        except subprocess.TimeoutExpired as exc:
+            # Surface what the command printed before the deadline — a bare
+            # "command_timeout" hides test progress/failure output the model
+            # needs to act on.
+            partial_stdout = _decode_subprocess_capture(exc.stdout)
+            partial_stderr = _decode_subprocess_capture(exc.stderr)
+            cap = self.config.max_per_tool_output_bytes
+            return {
+                "exitCode": None,
+                "timedOut": True,
+                "timeoutMs": int(timeout_s * 1000),
+                "note": (
+                    f"command timed out after {timeout_s:g}s; "
+                    "partial output captured below"
+                ),
+                "stdout": _bounded_head_tail(_redact(partial_stdout), cap),
+                "stderr": _bounded_head_tail(_redact(partial_stderr), cap),
+                "stdoutDigest": _digest(partial_stdout),
+                "stderrDigest": _digest(partial_stderr),
+            }
+        cap = self.config.max_per_tool_output_bytes
+        stdout = _bounded_head_tail(_redact(completed.stdout), cap)
+        stderr = _bounded_head_tail(_redact(completed.stderr), cap)
         return {
             "exitCode": completed.returncode,
             "stdout": stdout,
@@ -2286,17 +2341,35 @@ def _eval_ast(node: object) -> int | float:
     raise ValueError("unsupported calculation expression")
 
 
+def _encoded_size(value: object) -> int:
+    return len(
+        json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            default=repr,
+        ).encode("utf-8")
+    )
+
+
 def _bounded_output(value: object, max_bytes: int) -> object:
     sanitized = _sanitize_output(value)
-    encoded = json.dumps(
-        sanitized,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=True,
-        default=repr,
-    ).encode("utf-8")
-    if len(encoded) <= max_bytes:
+    if _encoded_size(sanitized) <= max_bytes:
         return sanitized
+    # Degrade gracefully before discarding: shrink the large string fields
+    # (stdout/stderr/content/...) head+tail so the model keeps the signal.
+    # Replacing the whole result with a digest gave the model zero recovery
+    # information and silently destroyed large-but-legitimate tool results.
+    if isinstance(sanitized, Mapping):
+        shrunk: dict[str, object] = dict(sanitized)
+        for scale in (2, 4, 10, 40):
+            field_budget = max(200, max_bytes // scale)
+            for key, item in list(shrunk.items()):
+                if isinstance(item, str) and len(item) > field_budget:
+                    shrunk[key] = _bounded_head_tail(item, field_budget)
+            if _encoded_size(shrunk) <= max_bytes:
+                return shrunk
     return {"truncated": True, "digest": _digest(sanitized)}
 
 

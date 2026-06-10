@@ -78,9 +78,12 @@ EVAL_RUNTIME_ENV_DEFAULTS: Mapping[str, str] = {
     # Profile identity
     "MAGI_RUNTIME_PROFILE": "eval",
     "MAGI_TASK_TYPES": "coding",
-    # Tool caps
+    # Tool caps. A coding agent must be able to run real test suites: 120s
+    # command budget, 128KB head+tail-bounded output, and a generous per-turn
+    # call budget (reference scaffolds routinely exceed 100 tool calls).
     "MAGI_TOOL_MAX_OUTPUT_BYTES": "131072",
-    "MAGI_TOOL_COMMAND_TIMEOUT_MS": "30000",
+    "MAGI_TOOL_COMMAND_TIMEOUT_MS": "120000",
+    "MAGI_TOOL_MAX_CALLS_PER_TURN": "512",
     # Coding capability ON
     "MAGI_FIRST_PARTY_TOOLS_ENABLED": "1",
     "MAGI_EDIT_FUZZY_MATCH_ENABLED": "1",

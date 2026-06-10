@@ -71,21 +71,25 @@ _SAFE_RUNTIME_PROFILES = frozenset({"safe", "off", "minimal", "conservative", "e
 # Default: ON in the local full runtime profile; set
 # MAGI_EDIT_FUZZY_MATCH_ENABLED=0 or MAGI_RUNTIME_PROFILE=safe|eval for
 # conservative/profile-scoped runs.
-MAGI_EDIT_FUZZY_MATCH_ENABLED: bool = (
-    (
-        os.environ.get("MAGI_EDIT_FUZZY_MATCH_ENABLED")
-        if os.environ.get("MAGI_EDIT_FUZZY_MATCH_ENABLED") is not None
-        else (
-            "0"
-            if (os.environ.get(RUNTIME_PROFILE_ENV) or "").strip().lower()
-            in _SAFE_RUNTIME_PROFILES
-            else "1"
-        )
-    )
-    .strip()
-    .lower()
-    in _TRUE_VALUES
-)
+def edit_fuzzy_match_enabled(env: "Mapping[str, str] | None" = None) -> bool:
+    """Call-time read of ``MAGI_EDIT_FUZZY_MATCH_ENABLED``.
+
+    The legacy module-level constant below froze at import time — BEFORE
+    ``apply_local_eval_runtime_defaults`` ran in ``cli/app.py`` — so eval runs
+    silently lost the fuzzy cascade even though the eval profile sets the env
+    to "1". Dispatch-time consumers (gate5b FileEdit) must use this function.
+    """
+    source = os.environ if env is None else env
+    explicit = source.get("MAGI_EDIT_FUZZY_MATCH_ENABLED")
+    if explicit is not None:
+        return explicit.strip().lower() in _TRUE_VALUES
+    profile = (source.get(RUNTIME_PROFILE_ENV) or "").strip().lower()
+    return profile not in _SAFE_RUNTIME_PROFILES
+
+
+# Deprecated import-time snapshot; kept for callers that still import the
+# constant. New code must call ``edit_fuzzy_match_enabled()``.
+MAGI_EDIT_FUZZY_MATCH_ENABLED: bool = edit_fuzzy_match_enabled()
 
 # ---------------------------------------------------------------------------
 # Coding: edit-match evidence enforcement flag (PR1)
