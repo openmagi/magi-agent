@@ -661,6 +661,7 @@ class Gate5B4C3LiveRunnerBoundary:
                     function_calls: list[Mapping[str, object]] = []
                     function_call_keys: set[str] = set()
                     function_responses_seen = False
+                    current_run_output_chunks: list[str] = []
                     current_run_kwargs = {**run_kwargs, "new_message": next_message}
                     async for event in runner.run_async(
                         **_allowlist_kwargs(
@@ -671,13 +672,20 @@ class Gate5B4C3LiveRunnerBoundary:
                         event_count += 1
                         chunk = _event_text(event)
                         if chunk:
-                            output_chunks.append(chunk)
-                            self._emit_public_event(
-                                {
-                                    "type": "text_delta",
-                                    "delta": chunk,
-                                }
+                            visible_delta = _event_visible_text_delta(
+                                event,
+                                chunk,
+                                current_run_output_chunks,
                             )
+                            if visible_delta:
+                                current_run_output_chunks.append(visible_delta)
+                                output_chunks.append(visible_delta)
+                                self._emit_public_event(
+                                    {
+                                        "type": "text_delta",
+                                        "delta": visible_delta,
+                                    }
+                                )
                         event_function_calls = _event_function_calls(event)
                         for function_call in event_function_calls:
                             function_call_key = _json_dumps(function_call)
@@ -1457,6 +1465,42 @@ def _event_text(event: object) -> str | None:
         if chunks:
             return "".join(chunks)
     return None
+
+
+def _event_visible_text_delta(
+    event: object,
+    text: str,
+    current_run_output_chunks: Sequence[str],
+) -> str | None:
+    """Return the new user-visible text for an ADK event.
+
+    ADK SSE runs can emit token-level ``partial=True`` events followed by a
+    final non-partial event whose content is the aggregate text for the same
+    model call. The final aggregate is useful for ADK's transcript, but sending
+    it again as a public delta duplicates the answer in hosted chat.
+    """
+
+    if _event_is_partial(event):
+        return text
+    current_text = "".join(current_run_output_chunks)
+    if not current_text:
+        return text
+    if text.startswith(current_text):
+        suffix = text[len(current_text) :]
+        return suffix or None
+    return text
+
+
+def _event_is_partial(event: object) -> bool:
+    value = _mapping_or_attr(event, "partial")
+    if isinstance(value, bool):
+        return value
+    dumped = _safe_model_dump_mapping(event)
+    if dumped is not None:
+        value = _mapping_or_attr(dumped, "partial")
+        if isinstance(value, bool):
+            return value
+    return False
 
 
 def _text_chunks_from_parts(parts: Sequence[object]) -> list[str]:
