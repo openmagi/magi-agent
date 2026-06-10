@@ -28,6 +28,12 @@ _STORE_ENDPOINT = "https://api.apify.com/v2/store"
 _SEARCH_LIMIT = 10
 _SEARCH_TIMEOUT_S = 30
 
+_RUN_SYNC_TEMPLATE = "https://api.apify.com/v2/actors/{actor_id}/run-sync-get-dataset-items"
+_DEFAULT_MAX_USD = "1.0"
+_RUN_TIMEOUT_S = 300
+_ITEMS_LIMIT = 100
+_MAX_BODY_BYTES = 200_000
+
 
 def _error(tool: str, code: str, message: str, **meta: object) -> ToolResult:
     return ToolResult(
@@ -89,3 +95,82 @@ async def apify_search_actors(arguments: dict[str, object], context: ToolContext
             "total_runs": stats.get("totalRuns"),
         })
     return ok_result("apify_search_actors", {"actors": actors, "count": len(actors)})
+
+
+async def apify_run_actor(arguments: dict[str, object], context: ToolContext) -> ToolResult:
+    """Run an Apify Actor and return its dataset items. Paid; needs APIFY_TOKEN.
+
+    Args:
+        actor_id: Tilde-separated id from apify_search_actors, e.g.
+            "apify~instagram-scraper".
+        run_input: The Actor's input as a JSON object (or a JSON string).
+
+    Returns:
+        The Actor's structured dataset items (run + fetch in one call). Hard-capped
+        at APIFY_MAX_USD_PER_RUN (default $1.00) and 300s by Apify.
+    """
+    actor_id = str(arguments.get("actor_id") or "").strip()
+    if not actor_id:
+        return _error("apify_run_actor", "apify_bad_input",
+                      "apify_run_actor requires 'actor_id' (e.g. 'apify~instagram-scraper').")
+    token = os.environ.get("APIFY_TOKEN", "")
+    if not token:
+        return _error("apify_run_actor", APIFY_NOT_CONFIGURED_ERROR_CODE,
+                      "apify_run_actor needs APIFY_TOKEN (your own Apify account). "
+                      "Discovery via apify_search_actors works without it; running an "
+                      "Actor costs money on your account.")
+    raw_input = arguments.get("run_input")
+    if isinstance(raw_input, str):
+        text = raw_input.strip()
+        try:
+            run_input: object = json.loads(text) if text else {}
+        except json.JSONDecodeError as exc:
+            return _error("apify_run_actor", "apify_bad_input",
+                          f"run_input must be valid JSON: {exc}")
+    elif isinstance(raw_input, dict):
+        run_input = raw_input
+    elif raw_input is None:
+        run_input = {}
+    else:
+        return _error("apify_run_actor", "apify_bad_input",
+                      "run_input must be a JSON object or JSON string.")
+    body = json.dumps(run_input).encode("utf-8")
+    query = urllib.parse.urlencode({
+        "token": token,
+        "timeout": _RUN_TIMEOUT_S,
+        "maxTotalChargeUsd": os.environ.get("APIFY_MAX_USD_PER_RUN", _DEFAULT_MAX_USD),
+        "format": "json",
+        "limit": _ITEMS_LIMIT,
+    })
+    safe_actor = urllib.parse.quote(actor_id, safe="~")
+    url = _RUN_SYNC_TEMPLATE.format(actor_id=safe_actor) + f"?{query}"
+    request = urllib.request.Request(
+        url, data=body, method="POST",
+        headers={"Content-Type": "application/json", "Accept": "application/json"},
+    )
+
+    def _run() -> bytes:
+        with urllib.request.urlopen(request, timeout=_RUN_TIMEOUT_S + 15) as response:  # noqa: S310
+            return response.read(_MAX_BODY_BYTES + 1)
+
+    try:
+        raw = await asyncio.to_thread(_run)
+    except urllib.error.HTTPError as exc:
+        if exc.code == 408:
+            return _error("apify_run_actor", "apify_run_timeout",
+                          "Actor run exceeded the 300s sync limit; narrow the input "
+                          "or run a smaller job.", http_status=408)
+        return _error("apify_run_actor", "apify_error",
+                      f"Apify returned HTTP {exc.code}.", http_status=exc.code)
+    except Exception as exc:  # noqa: BLE001  # token is in the URL — never echo exc detail
+        return _error("apify_run_actor", "apify_unreachable",
+                      f"Apify run failed ({type(exc).__name__}).")
+    if len(raw) > _MAX_BODY_BYTES:
+        raw = raw[:_MAX_BODY_BYTES]
+    try:
+        items = json.loads(raw.decode("utf-8", "replace"))
+    except json.JSONDecodeError:
+        items = []
+    item_count = len(items) if isinstance(items, list) else 0
+    return ok_result("apify_run_actor",
+                     {"actor_id": actor_id, "items": items, "item_count": item_count})

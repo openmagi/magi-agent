@@ -116,3 +116,96 @@ def test_search_actors_non_list_items_returns_empty(monkeypatch: pytest.MonkeyPa
     result = asyncio.run(apify.apify_search_actors({"query": "x"}, _ctx()))
     assert result.status == "ok"
     assert result.output["actors"] == []
+
+
+class _PostResponse:
+    def __init__(self, items: object) -> None:
+        self._stream = io.BytesIO(json.dumps(items).encode())
+
+    def __enter__(self) -> "_PostResponse":
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        pass
+
+    def read(self, n: int = -1) -> bytes:
+        return self._stream.read(n)
+
+
+def test_run_actor_without_token_is_not_configured(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("APIFY_TOKEN", raising=False)
+    result = asyncio.run(
+        apify.apify_run_actor({"actor_id": "apify~instagram-scraper", "run_input": "{}"}, _ctx())
+    )
+    assert result.status == "error"
+    assert result.error_code == apify.APIFY_NOT_CONFIGURED_ERROR_CODE
+
+
+def test_run_actor_missing_actor_id_is_bad_input(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("APIFY_TOKEN", "tok_secret")
+    result = asyncio.run(apify.apify_run_actor({"run_input": "{}"}, _ctx()))
+    assert result.status == "error"
+    assert result.error_code == "apify_bad_input"
+
+
+def test_run_actor_bad_json_input(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("APIFY_TOKEN", "tok_secret")
+    result = asyncio.run(
+        apify.apify_run_actor({"actor_id": "apify~x", "run_input": "{not json"}, _ctx())
+    )
+    assert result.status == "error"
+    assert result.error_code == "apify_bad_input"
+
+
+def test_run_actor_success_sends_cost_cap(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("APIFY_TOKEN", "tok_secret")
+    monkeypatch.delenv("APIFY_MAX_USD_PER_RUN", raising=False)
+    captured: list[urllib.request.Request] = []
+
+    def _open(request: urllib.request.Request, **_: object) -> _PostResponse:
+        captured.append(request)
+        return _PostResponse([{"post": 1}, {"post": 2}])
+
+    monkeypatch.setattr(urllib.request, "urlopen", _open)
+
+    result = asyncio.run(
+        apify.apify_run_actor(
+            {"actor_id": "apify~instagram-scraper", "run_input": {"directUrls": ["u"]}}, _ctx()
+        )
+    )
+    assert result.status == "ok"
+    assert result.output["item_count"] == 2
+    url = captured[0].full_url
+    assert "run-sync-get-dataset-items" in url
+    assert "apify~instagram-scraper" in url
+    assert "maxTotalChargeUsd=1.0" in url  # default cap applied
+    assert captured[0].method == "POST"
+
+
+def test_run_actor_408_is_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("APIFY_TOKEN", "tok_secret")
+
+    def _raise408(*_a: object, **_k: object) -> None:
+        raise urllib.error.HTTPError("https://api.apify.com/x", 408, "timeout", {}, None)
+
+    monkeypatch.setattr(urllib.request, "urlopen", _raise408)
+    result = asyncio.run(
+        apify.apify_run_actor({"actor_id": "apify~x", "run_input": "{}"}, _ctx())
+    )
+    assert result.status == "error"
+    assert result.error_code == "apify_run_timeout"
+
+
+def test_run_actor_never_leaks_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("APIFY_TOKEN", "tok_SUPER_SECRET")
+
+    def _raise(*_a: object, **_k: object) -> None:
+        raise urllib.error.URLError("boom https://api.apify.com/...?token=tok_SUPER_SECRET")
+
+    monkeypatch.setattr(urllib.request, "urlopen", _raise)
+    result = asyncio.run(
+        apify.apify_run_actor({"actor_id": "apify~x", "run_input": "{}"}, _ctx())
+    )
+    assert result.status == "error"
+    assert result.error_code == "apify_unreachable"
+    assert "tok_SUPER_SECRET" not in repr(result.model_dump())
