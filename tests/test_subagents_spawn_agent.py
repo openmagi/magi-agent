@@ -1,7 +1,7 @@
 """Tests for spawn_agent live-child-runner wiring (Task C).
 
 Coverage:
-- T1: Default (gate OFF) — EXACT byte-identical payload (liveChildRunnerAttached=False).
+- T1: Default (gate OFF) — honest not_attached payload (liveChildRunnerAttached=False).
 - T2: Gate ON + injected fake-backed runner via monkeypatch — liveChildRunnerAttached=True.
 - T3: Gate ON but child degrades (no key) — non-crashing blocked result, never raises.
 - T4: tools=[] enforcement — runner constructed with empty toolset.
@@ -43,7 +43,8 @@ def _context(**overrides: object) -> ToolContext:
 
 
 def test_spawn_agent_default_gate_off_byte_identical(monkeypatch) -> None:
-    """When is_live_child_runner_enabled() is False the payload is EXACT to today's."""
+    """When is_live_child_runner_enabled() is False the payload is the honest
+    not-attached receipt (07-PR2 D4 fix) while preserving every legacy key."""
     # Ensure the live gate is off (no env var set).
     monkeypatch.delenv("MAGI_CHILD_RUNNER_LIVE_ENABLED", raising=False)
     monkeypatch.delenv("MAGI_CHILD_RUNNER_LIVE_KILL_SWITCH", raising=False)
@@ -59,15 +60,18 @@ def test_spawn_agent_default_gate_off_byte_identical(monkeypatch) -> None:
     assert result.status == "ok"
     output = result.output
 
-    # Exact keys and values from the original implementation.
-    assert output["status"] == "queued_locally"
+    # Honest status — no longer a success-implying "queued_locally".
+    assert output["status"] == "not_attached"
+    assert output["reason"] == "live_child_runner_disabled"
     assert output["persona"] == "researcher"
     assert output["promptDigest"] == digest("Hello world")
     assert output["spawnDepth"] == 2
     assert output["liveChildRunnerAttached"] is False
-    # No extra keys added by the live path.
+    # Legacy keys preserved; reason/hint added by the honesty fix.
     assert set(output.keys()) == {
         "status",
+        "reason",
+        "hint",
         "persona",
         "promptDigest",
         "spawnDepth",
@@ -85,7 +89,7 @@ def test_spawn_agent_default_gate_off_empty_prompt(monkeypatch) -> None:
 
     result = asyncio.run(spawn_agent({}, _context()))
 
-    assert result.output["status"] == "queued_locally"
+    assert result.output["status"] == "not_attached"
     assert result.output["persona"] == "general"
     assert result.output["promptDigest"] == digest("")
     assert result.output["spawnDepth"] == 0
@@ -388,7 +392,8 @@ def test_spawn_agent_kill_switch_overrides_enabled_returns_gate_off_payload(
     monkeypatch,
 ) -> None:
     """MAGI_CHILD_RUNNER_LIVE_ENABLED=1 AND MAGI_CHILD_RUNNER_LIVE_KILL_SWITCH=1
-    → spawn_agent must return the EXACT gate-OFF payload (liveChildRunnerAttached=False).
+    → spawn_agent must return the gate-OFF honest not-attached payload
+    (liveChildRunnerAttached=False).
     """
     monkeypatch.setenv("MAGI_CHILD_RUNNER_LIVE_ENABLED", "1")
     monkeypatch.setenv("MAGI_CHILD_RUNNER_LIVE_KILL_SWITCH", "1")
@@ -404,14 +409,17 @@ def test_spawn_agent_kill_switch_overrides_enabled_returns_gate_off_payload(
     assert result.status == "ok"
     output = result.output
 
-    # Must be byte-identical to the gate-OFF payload — no live fields.
-    assert output["status"] == "queued_locally"
+    # Kill-switch routes through the gate-OFF branch → honest not-attached payload.
+    assert output["status"] == "not_attached"
+    assert output["reason"] == "live_child_runner_disabled"
     assert output["persona"] == "tester"
     assert output["promptDigest"] == digest("Hello kill switch")
     assert output["spawnDepth"] == 1
     assert output["liveChildRunnerAttached"] is False
     assert set(output.keys()) == {
         "status",
+        "reason",
+        "hint",
         "persona",
         "promptDigest",
         "spawnDepth",

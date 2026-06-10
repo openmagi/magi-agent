@@ -24,8 +24,18 @@ async def spawn_agent(arguments: dict[str, object], context: ToolContext) -> Too
     )
 
     if not is_live_child_runner_enabled():
+        # HONEST receipt (D4 fix): the previous "queued_locally" literal implied
+        # the task was accepted into a queue, but no child runner is attached or
+        # scheduled — nothing happens.  We surface an explicit not-attached status
+        # plus a machine-readable reason and a human activation hint.  All legacy
+        # keys are preserved so existing consumers keep working.
         output = {
-            "status": "queued_locally",
+            "status": "not_attached",
+            "reason": "live_child_runner_disabled",
+            "hint": (
+                "Live child runner is disabled. Set "
+                "MAGI_CHILD_RUNNER_LIVE_ENABLED=1 to spawn a real subagent."
+            ),
             "persona": persona,
             "promptDigest": digest(prompt),
             "spawnDepth": context.spawn_depth,
@@ -166,10 +176,15 @@ async def spawn_agent(arguments: dict[str, object], context: ToolContext) -> Too
 
 def spawn_worktree_apply(arguments: dict[str, object], context: ToolContext) -> ToolResult:
     patch_digest = digest(arguments.get("patch") or arguments.get("diff") or "")
+    # HONEST receipt (D4 fix): the previous "review_required" literal implied a
+    # patch was staged awaiting review, but no worktree mutation is ever
+    # attempted.  Surface an explicit unimplemented status + reason.  Legacy keys
+    # (patchDigest / worktreeMutationAttached) are preserved.
     return ok_result(
         "SpawnWorktreeApply",
         {
-            "status": "review_required",
+            "status": "unimplemented",
+            "reason": "worktree_apply_not_implemented",
             "patchDigest": patch_digest,
             "worktreeMutationAttached": False,
         },
