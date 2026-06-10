@@ -57,6 +57,7 @@ from magi_agent.cli.session_log import SessionLog
 from magi_agent.composio.config import resolve_composio_config
 from magi_agent.composio.mcp import (
     ComposioToolsetBundle,
+    attach_composio_toolsets_through_dispatcher,
     attach_composio_toolsets_to_runner,
     build_composio_toolset_bundle,
 )
@@ -738,6 +739,34 @@ def _build_composio_bundle_for_mode(
 
     composio_config = resolve_composio_config(os.environ)
     composio_bundle = build_composio_toolset_bundle(composio_config)
+
+    from magi_agent.config.env import composio_dispatch_enforced  # noqa: PLC0415
+
+    if composio_dispatch_enforced(os.environ):
+        # Hard-safety enforced path (PR2): route composio MCP calls through the
+        # RuntimePermissionArbiter so secret / sealed / workspace-escape
+        # arguments are blocked before the MCP body runs, AND record a receipt
+        # for every guarded call (the MCP-path analogue of ToolDispatcher
+        # appending receipts for native tools).
+        from magi_agent.composio.mcp import ComposioReceiptLedger  # noqa: PLC0415
+        from magi_agent.tools.context import ToolContext  # noqa: PLC0415
+        from magi_agent.tools.safety import (  # noqa: PLC0415
+            RuntimePermissionArbiter,
+        )
+
+        def _composio_context_factory(**_kwargs: object) -> ToolContext:
+            return ToolContext(botId="composio", channel="composio")
+
+        composio_attached = attach_composio_toolsets_through_dispatcher(
+            runner,
+            composio_bundle,
+            arbiter=RuntimePermissionArbiter(),
+            mode=mode if mode != "plan" else "act",
+            context_factory=_composio_context_factory,
+            receipt_ledger=ComposioReceiptLedger(),
+        )
+        return composio_bundle, composio_attached
+
     composio_attached = attach_composio_toolsets_to_runner(
         runner,
         composio_bundle,
