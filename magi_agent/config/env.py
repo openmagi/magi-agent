@@ -1949,6 +1949,26 @@ def _is_true(value: str | None) -> bool:
     return (value or "").strip().lower() in _TRUE_VALUES
 
 
+# ---------------------------------------------------------------------------
+# Native receipt honesty (cluster 13 D2)
+# ---------------------------------------------------------------------------
+# Master gate for the "honest-by-default, live-when-backed" native handler
+# behaviour. When enabled (the default), receipt-theater handlers that have no
+# real backing return a blocked ``*_not_configured`` error instead of a fake
+# ``status: ok`` digest the model would mis-report as a real state change. Set
+# MAGI_NATIVE_RECEIPTS_HONEST=0 to restore the legacy fake-ok behaviour
+# (rollback safety valve).
+NATIVE_RECEIPTS_HONEST_ENV = "MAGI_NATIVE_RECEIPTS_HONEST"
+
+
+def native_receipts_honest(env: Mapping[str, str] | None = None) -> bool:
+    if env is None:
+        import os as _os
+
+        env = _os.environ
+    return _env_bool_default_true(env.get(NATIVE_RECEIPTS_HONEST_ENV))
+
+
 def _runtime_profile_default_enabled(env: Mapping[str, str]) -> bool:
     profile = (env.get(RUNTIME_PROFILE_ENV) or "").strip().lower()
     return profile not in _SAFE_RUNTIME_PROFILES
