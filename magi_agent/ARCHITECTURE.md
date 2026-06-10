@@ -250,7 +250,7 @@ graph LR
 |---|---|---|---|
 | __init__.py | — | — | (root)/main.py, cli/tui/app.py |
 | __main__.py | — | main | — |
-| app.py | — | app_api, bootstrap, chat, config, control_requests, credentials, customize, dashboard, debug_trace, health, learning_dashboard, observability, openmagi_runtime, plugins, shadow_invocations, streaming_chat_route, tools | (root)/main.py |
+| app.py | — | app_api, bootstrap, chat, config, control_requests, credentials, customize, debug_trace, health, learning_dashboard, observability, openmagi_runtime, plugins, shadow_invocations, streaming_chat_route, tools, web_dashboard | (root)/main.py |
 | facades.py | High-level entry-point facades that compose existing modules. | bus, context, dispatcher, manifest, resolved, result | — |
 | main.py | — | app, chat, env, hosted_defaults, local_defaults, memory_bootstrap, models, observed_egress, openmagi_runtime, otel_noise, providers | (root)/__main__.py, cli/tests/test_app.py |
 
@@ -1218,7 +1218,7 @@ graph LR
 | message_builder.py | — | bus, context, injection, manifest, provider_adapter, resolved, splitter | cli/clipboard_image.py, cli/tool_runtime.py, runtime/context_attachments.py, shadow/gate5b4c3_runner_input_adapter.py, transport/chat.py, transport/generation_request.py |
 | model_tiers.py | — | — | evidence/final_output_gate.py, harness/long_context_eval.py, recipes/materializer.py, recipes/phase_routing_defaults.py, recipes/reliability_policy.py, runtime/adk_turn_runner.py, runtime/child_runner_boundary.py, runtime/child_runner_live.py, runtime/context_budget.py, runtime/phase_routing.py, runtime/reliability_budget.py, runtime/request_shape.py |
 | no_agent_watchdog.py | — | safety | runtime/events.py |
-| openmagi_runtime.py | — | apply, base, catalog, core_toolhost, manager, memory_write_wiring, models, native_catalog, primitives, profiles, registry, store, todo_toolhost, tool, tool_projection | (root)/app.py, (root)/main.py, cli/wiring.py, transport/app_api.py, transport/chat.py, transport/chat_routes.py, transport/chat_shared.py, transport/control_requests.py, transport/credentials.py, transport/customize.py, transport/dashboard.py, transport/gate2_sandbox_canary.py, transport/generation_request.py, transport/health.py, transport/learning_dashboard.py, transport/plugins.py, transport/product_admin.py, transport/shadow_invocations.py, transport/tools.py, transport/web_dashboard.py |
+| openmagi_runtime.py | — | apply, base, catalog, core_toolhost, manager, memory_write_wiring, models, native_catalog, primitives, profiles, registry, store, todo_toolhost, tool, tool_projection | (root)/app.py, (root)/main.py, cli/wiring.py, transport/app_api.py, transport/chat.py, transport/chat_routes.py, transport/chat_shared.py, transport/control_requests.py, transport/credentials.py, transport/customize.py, transport/gate2_sandbox_canary.py, transport/generation_request.py, transport/health.py, transport/learning_dashboard.py, transport/plugins.py, transport/product_admin.py, transport/shadow_invocations.py, transport/tools.py, transport/web_dashboard.py |
 | output_continuation.py | Output continuation — resume a deliverable that hit the model's per-response | — | cli/engine.py, cli/tests/test_engine_output_continuation.py |
 | phase_routing.py | — | model_tiers, reliability_budget | recipes/materializer.py, recipes/phase_routing_defaults.py |
 | policy_snapshot.py | — | — | — |
@@ -1512,7 +1512,7 @@ graph LR
 
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
-| __init__.py | — | health | adk_bridge/event_adapter.py, cli/tests/test_sse_sanitize_control_request.py, transport/dashboard.py, transport/sse.py |
+| __init__.py | — | health | adk_bridge/event_adapter.py, cli/tests/test_sse_sanitize_control_request.py, transport/sse.py |
 | active_turn.py | Process-local registry of in-flight streaming-chat turns. | permissions | cli/tests/test_streaming_driver.py, transport/streaming_chat_route.py, transport/streaming_driver.py |
 | app_api.py | Dashboard ``/v1/app/*`` API surface. | cli, openmagi_runtime, session_store, skills, tools | (root)/app.py, customize/catalog.py |
 | chat.py | Re-export shim for the decomposed Gate5B chat serving stack (08-PR1). | chat_routes, chat_shared, compiler, egress_critic, egress_gate, env, gate1a_egress_correlation, gate1a_readonly_tools, gate2_activation_loop_a, gate2_durable_evidence, gate2_readiness, gate2_sandbox_canary, gate5b4c3_live_runner_boundary, gate5b4c3_shadow_counter_store, gate5b4c3_shadow_generation_contract, gate5b_full_toolhost, gate8_readiness, generation_request, materializer, message_builder, observed_egress, openmagi_runtime, public_events, research_first_canary, session_identity, shadow_generations, usage_receipt_emit, user_visible_model_routing | (root)/app.py, (root)/main.py, transport/health.py, transport/streaming_chat_route.py |
@@ -1521,7 +1521,6 @@ graph LR
 | control_requests.py | Control-request REST surface consumed by the restored web dashboard. | openmagi_runtime | (root)/app.py |
 | credentials.py | Dashboard "Credentials" admin routes. | credentials_admin, durable_store, openmagi_runtime, tools | (root)/app.py |
 | customize.py | — | apply, catalog, openmagi_runtime, store, tools | (root)/app.py |
-| dashboard.py | — | openmagi_runtime, transport | (root)/app.py |
 | debug_trace.py | Debug endpoint exposing the current turn's execution trace. | trace_context | (root)/app.py |
 | egress_critic.py | Egress critic gate and live evidence projection for the chat serving path. | egress_gate, gate1a_readonly_tools, gate5b_full_toolhost, generation_request, mapping, projection, providers, readonly_classifier, reason_safety, user_visible_model_routing | transport/chat.py, transport/chat_routes.py |
 | gate2_sandbox_canary.py | Gate2 sandbox workspace canary chat + delivery-receipt logic. | chat_shared, gate2_activation_loop_a, gate2_durable_evidence, gate2_readiness, openmagi_runtime, user_visible_model_routing | transport/chat.py, transport/chat_routes.py |
@@ -1542,7 +1541,7 @@ graph LR
 | tool_preview.py | — | — | evidence/child_runtime_envelope.py, evidence/reports.py, evidence/tool_boundary.py, harness/general_automation/plan_act_switch.py, harness/general_automation/question_tool.py, harness/plan_gate.py, memory/adapters/local_file_writable.py, memory/projection.py, memory/prompt_projection.py, runtime/child_event_projection.py, runtime/control.py, runtime/events.py, runtime/work_console_snapshot.py, shadow/artifact_channel_delivery_contract.py, shadow/coding_child_conflict_resolution_contract.py, shadow/coding_verification_evidence_contract.py, shadow/delegated_workflow_evidence_contract.py, shadow/gate4c1_runner_shadow_invoker.py, shadow/memory_source_authority_contract.py, shadow/mission_lifecycle_contract.py, shadow/office_automation_contract.py, shadow/patch_file_policy_contract.py, shadow/path_shell_policy_contract.py, shadow/research_source_evidence_contract.py, shadow/toolhost_contract.py, shadow/web_acquisition_browser_provider_contract.py, shadow/workspace_adoption_preflight_contract.py, tools/event_projection.py |
 | tools.py | — | manifest, openmagi_runtime | (root)/app.py, transport/app_api.py, transport/credentials.py, transport/customize.py |
 | usage_receipt_emit.py | Runtime-direct usage receipt emitter. | — | transport/chat.py, transport/chat_routes.py |
-| web_dashboard.py | Serve the restored historical web dashboard (static Next.js export). | openmagi_runtime | — |
+| web_dashboard.py | Serve the web dashboard (static Next.js export) — the single dashboard path. | openmagi_runtime | (root)/app.py |
 
 ### web_acquisition/
 

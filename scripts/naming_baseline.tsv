@@ -34,7 +34,6 @@ openclaw	magi_agent/cli/tests/test_streaming_chat.py	1
 openclaw	magi_agent/runtime/session_identity.py	1
 openclaw	magi_agent/runtime/user_visible_model_routing.py	1
 openclaw	magi_agent/shadow/tool_policy.py	1
-openclaw	magi_agent/transport/dashboard.py	3
 openclaw	magi_agent/transport/streaming_chat_route.py	3
 openmagi	magi_agent/adk_bridge/artifact_service.py	1
 openmagi	magi_agent/adk_bridge/callback_adapter.py	4
@@ -221,7 +220,6 @@ openmagi	magi_agent/transport/chat_shared.py	4
 openmagi	magi_agent/transport/control_requests.py	3
 openmagi	magi_agent/transport/credentials.py	2
 openmagi	magi_agent/transport/customize.py	2
-openmagi	magi_agent/transport/dashboard.py	3
 openmagi	magi_agent/transport/gate2_sandbox_canary.py	13
 openmagi	magi_agent/transport/generation_request.py	7
 openmagi	magi_agent/transport/health.py	6
@@ -231,7 +229,7 @@ openmagi	magi_agent/transport/product_admin.py	16
 openmagi	magi_agent/transport/shadow_invocations.py	2
 openmagi	magi_agent/transport/streaming_chat_route.py	1
 openmagi	magi_agent/transport/tools.py	5
-openmagi	magi_agent/transport/web_dashboard.py	3
+openmagi	magi_agent/transport/web_dashboard.py	5
 openmagi	magi_agent/web_acquisition/live_fetch_provider.py	1
 openmagi	magi_agent/web_acquisition/live_provider_pack.py	8
 openmagi	magi_agent/web_acquisition/opencode_provider_router.py	2
