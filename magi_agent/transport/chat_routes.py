@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
+from datetime import datetime, timezone
 import inspect
 import json
 from json import JSONDecodeError
@@ -84,28 +85,22 @@ from magi_agent.shadow.gate5b4c3_shadow_counter_store import (
     Gate5B4C3ShadowCounterReservation,
 )
 from magi_agent.shadow.gate5b4c3_shadow_generation_contract import (
-    Gate5B4C3ShadowGenerationRequest,
     build_gate5b4c3_shadow_generation_diagnostic,
 )
 from magi_agent.transport.chat_shared import (
     Gate5BUserVisibleChatRouteConfig,
     _RUNNER_DIAGNOSTIC_PREVIEW_FORBIDDEN_RE,
     _bounded_public_text,
-    _camel_to_snake,
     _context_continuity_chat_diagnostic,
     _fallback_response,
     _is_sha256_digest,
     _reason_for_gate_error,
-    _route_config,
     _route_tool_bundle_full,
-    _route_tool_bundle_mode,
-    _route_tool_bundle_names,
     _route_tool_bundle_readonly,
     _route_tool_bundle_ready,
     _safe_label_or_default,
     _sha256_digest,
     _shadow_generation_route_config,
-    _utc_now_iso,
 )
 from magi_agent.transport.egress_critic import _maybe_run_egress_critic_gate
 from magi_agent.transport.gate2_sandbox_canary import (
@@ -116,6 +111,7 @@ from magi_agent.transport.gate2_sandbox_canary import (
     _run_gate2_sandbox_workspace_canary_chat,
 )
 from magi_agent.transport.generation_request import (
+    UserVisibleGenerationRequest,
     _build_user_visible_generation_request,
     build_gate5b_user_visible_canary_runner_request,
     sanitize_gate5b_model_visible_identity_text,
@@ -127,6 +123,50 @@ from magi_agent.transport.usage_receipt_emit import (
     emit_runtime_direct_usage_receipt,
     usage_receipt_enabled,
 )
+
+
+def _route_config(runtime: OpenMagiRuntime) -> Gate5BUserVisibleChatRouteConfig:
+    config = getattr(runtime, "gate5b_user_visible_chat_route_config", None)
+    if isinstance(config, Gate5BUserVisibleChatRouteConfig):
+        return config
+    return Gate5BUserVisibleChatRouteConfig()
+
+
+def _route_tool_bundle_names(
+    bundle: Gate1AReadOnlyToolBundle | Gate5BFullToolBundle | None,
+) -> list[str]:
+    if not _route_tool_bundle_ready(bundle):
+        return []
+    return list(bundle.exposed_tool_names)
+
+
+def _route_tool_bundle_mode(
+    bundle: Gate1AReadOnlyToolBundle | Gate5BFullToolBundle | None,
+) -> str:
+    if _route_tool_bundle_full(bundle):
+        return "gate5b_selected_full_toolhost"
+    if _route_tool_bundle_readonly(bundle):
+        return "gate1a_readonly_tools"
+    return "no_route_tools"
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace(
+        "+00:00",
+        "Z",
+    )
+
+
+def _camel_to_snake(value: str) -> str:
+    chars: list[str] = []
+    for char in value:
+        if char.isupper():
+            chars.append("_")
+            chars.append(char.lower())
+        else:
+            chars.append(char)
+    return "".join(chars).lstrip("_")
+
 
 _INCOMPLETE_RUNNER_OUTPUT_RE = re.compile(
     r"(?:"
@@ -1551,7 +1591,7 @@ def _boundary_runner_error_diagnostic(
 def _chat_runner_error_diagnostic(
     *,
     runtime: OpenMagiRuntime,
-    generation: Gate5B4C3ShadowGenerationRequest,
+    generation: UserVisibleGenerationRequest,
     gate1a_bundle: Gate1AReadOnlyToolBundle | Gate5BFullToolBundle,
     stage: str,
     reason_code: str,
@@ -1571,7 +1611,7 @@ def _chat_runner_error_diagnostic(
         "reasonCode": _safe_label_or_default(reason_code, "runner_error"),
         "requestDigest": generation.request_id_digest,
         "traceIdDigest": generation.trace_id_digest,
-        "routeMode": _safe_label_or_default(generation.mode, "unknown"),
+        "routeMode": "user_visible_generation",
         "gateMode": _route_tool_bundle_mode(gate1a_bundle),
         "toolsPolicy": _safe_label_or_default(
             generation.recipe_profile.tools_policy,

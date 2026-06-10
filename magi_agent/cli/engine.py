@@ -830,6 +830,7 @@ class MagiEngineDriver:
         goal_nudge: "GoalNudge | None" = None,
         output_continuation: "OutputContinuationConfig | None" = None,
         evidence_collector: Callable[[str], Sequence[object]] | None = None,
+        user_hook_bus: object | None = None,
     ) -> None:
         self._runner = runner
         self._max_event_count = max(1, int(max_event_count))
@@ -865,6 +866,14 @@ class MagiEngineDriver:
         # Shared across all turns of this driver instance: single-flight per
         # session id. Lazily built so construction stays cheap + import-clean.
         self._registry: object | None = None
+        # Cluster doc 11 PR2: CC-style user ``settings.json`` HookBus. ``None``
+        # (default, gate ``MAGI_USER_HOOKS_ENABLED`` OFF) -> no bridge attached
+        # and every turn is byte-identical to today. When set, ``_drive``
+        # bridges its BEFORE_TOOL_USE / AFTER_TOOL_USE hooks onto the runner's
+        # ADK before/after-tool callbacks (command executor only). Built once by
+        # the production wiring via ``cli.hook_wiring.build_user_hook_bus`` and
+        # injected here; local CLI / self-host only (never hosted multi-tenant).
+        self._user_hook_bus: object | None = user_hook_bus
 
     @property
     def runner(self) -> object | None:
@@ -1229,6 +1238,14 @@ class MagiEngineDriver:
         gate_attach = self._attach_gate_callback(
             runner=runner, gate=gate, turn_id=turn_id, cancel=cancel
         )
+        # Cluster doc 11 PR2: bridge user settings.json hooks onto the agent's
+        # before/after-tool callbacks AFTER the gate (so a gate deny still
+        # short-circuits first; conflict-matrix order:
+        # gate -> user hook -> control-plane -> runner_policy_route). No-op when
+        # ``_user_hook_bus`` is None (gate OFF) -> byte-identical to today.
+        hook_attach = self._attach_user_hook_bus(
+            runner=runner, session_id=session_id, turn_id=turn_id
+        )
         route_attach = self._attach_runner_policy_route(
             runner=runner,
             route_selection=route_selection,
@@ -1442,6 +1459,7 @@ class MagiEngineDriver:
                 break
         finally:
             self._restore_runner_policy_route(route_attach)
+            self._restore_user_hook_bus(hook_attach)
             self._restore_gate_callback(gate_attach)
 
         if cancelled:
@@ -1566,6 +1584,9 @@ class MagiEngineDriver:
             repair_gate_attach = self._attach_gate_callback(
                 runner=runner, gate=gate, turn_id=turn_id, cancel=cancel
             )
+            repair_hook_attach = self._attach_user_hook_bus(
+                runner=runner, session_id=session_id, turn_id=turn_id
+            )
             repair_route_attach = self._attach_runner_policy_route(
                 runner=runner,
                 route_selection=route_selection,
@@ -1609,6 +1630,7 @@ class MagiEngineDriver:
             finally:
                 await self._aclose_iter(adk_iter)
                 self._restore_runner_policy_route(repair_route_attach)
+                self._restore_user_hook_bus(repair_hook_attach)
                 self._restore_gate_callback(repair_gate_attach)
 
             if cancelled:
@@ -2300,6 +2322,43 @@ class MagiEngineDriver:
             attachment.agent.before_tool_callback = attachment.original
         except Exception:  # noqa: BLE001 - best-effort restore
             pass
+
+    def _attach_user_hook_bus(
+        self,
+        *,
+        runner: object,
+        session_id: str,
+        turn_id: str,
+    ) -> object | None:
+        """Attach the user (settings.json) HookBus tool-callback bridge.
+
+        No-op (returns ``None``) when ``_user_hook_bus`` is None (gate
+        ``MAGI_USER_HOOKS_ENABLED`` OFF) or the runner has no ``agent`` — so the
+        agentless ``MockRunner`` tests and the gate-OFF path are byte-identical.
+        The bridge is appended AFTER the gate callback (conflict-matrix order).
+        """
+        bus = self._user_hook_bus
+        if bus is None:
+            return None
+        from magi_agent.cli.hook_wiring import attach_hook_bus_tool_callbacks
+        from magi_agent.hooks.context import HookContext
+
+        hook_context = HookContext(
+            bot_id=self._user_id,
+            session_id=session_id,
+            turn_id=turn_id,
+        )
+        return attach_hook_bus_tool_callbacks(
+            runner=runner, bus=bus, hook_context=hook_context
+        )
+
+    @staticmethod
+    def _restore_user_hook_bus(attachment: object | None) -> None:
+        if attachment is None:
+            return
+        from magi_agent.cli.hook_wiring import restore_hook_bus_tool_callbacks
+
+        restore_hook_bus_tool_callbacks(attachment)  # type: ignore[arg-type]
 
     @staticmethod
     def _build_gate_before_tool(
