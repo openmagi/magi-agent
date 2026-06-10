@@ -13,13 +13,35 @@ Distinct from:
 This gate answers: "Is the final VALUE supported by what the agent already found?"
 
 Environment variable: MAGI_ANSWER_VERIFIER_MODE
-  values: off | audit | enforce   (default: off)
+  values:
+    off                             → gate disabled (default when unset)
+    audit                           → observe/log only, never mutate (default when enabled)
+    enforce                         → apply correction after safety guards (opt-in)
+    1 | true | yes | on (truthy)    → resolved to "audit" (enable-but-safe signal)
+    any other non-empty value       → resolved to "audit" (safe fallback)
+
+Audit-first principle (P5 — GAIA learnings):
+  When the verifier is enabled, the default safe mode is *audit* — it observes
+  and logs mismatches but never changes the answer.  *enforce* requires an
+  explicit string "enforce" because it can over-correct (backtick→grave).
+  Guards remain active in enforce mode; this change only sets the safe default.
 """
 from __future__ import annotations
 
+import os
+from collections.abc import Mapping
 from dataclasses import dataclass
 from hashlib import sha256
 from typing import Literal
+
+# ---------------------------------------------------------------------------
+# Env var name (single source of truth)
+# ---------------------------------------------------------------------------
+
+ANSWER_VERIFIER_MODE_ENV: str = "MAGI_ANSWER_VERIFIER_MODE"
+
+_VERIFIER_OFF_VALUES: frozenset[str] = frozenset({"", "0", "false", "no", "off"})
+_VERIFIER_ENFORCE_VALUES: frozenset[str] = frozenset({"enforce"})
 
 
 # ---------------------------------------------------------------------------
@@ -145,6 +167,39 @@ class AnswerVerifierResult:
     evidence_basis: str
     answer_digest: str
     execution_posture: AnswerVerifierExecutionPosture
+
+
+# ---------------------------------------------------------------------------
+# Env-var reader (audit-first default)
+# ---------------------------------------------------------------------------
+
+
+def read_verifier_mode_from_env(
+    env: Mapping[str, str] | None = None,
+) -> AnswerVerifierMode:
+    """Read ``MAGI_ANSWER_VERIFIER_MODE`` and resolve it to an :class:`AnswerVerifierMode`.
+
+    Resolution rules (audit-first, P5):
+
+    * Unset / empty / falsy values (``""``, ``"0"``, ``"false"``, ``"no"``,
+      ``"off"``) → ``"off"`` (gate disabled).
+    * Explicit ``"audit"`` (case-insensitive) → ``"audit"``.
+    * Explicit ``"enforce"`` (case-insensitive) → ``"enforce"`` (opt-in only).
+    * Generic truthy values (``"1"``, ``"true"``, ``"yes"``, ``"on"``) → ``"audit"``.
+    * Any other non-empty value (unrecognised) → ``"audit"`` (safe fallback).
+
+    The caller may pass an explicit ``env`` mapping for testing; defaults to
+    ``os.environ``.
+    """
+    source: Mapping[str, str] = os.environ if env is None else env
+    raw = (source.get(ANSWER_VERIFIER_MODE_ENV) or "").strip().lower()
+
+    if raw in _VERIFIER_OFF_VALUES:
+        return "off"
+    if raw in _VERIFIER_ENFORCE_VALUES:
+        return "enforce"
+    # "audit" or any truthy/unknown value → audit (safe default when enabled)
+    return "audit"
 
 
 # ---------------------------------------------------------------------------
@@ -289,6 +344,7 @@ def evaluate_answer_verifier(request: AnswerVerifierRequest) -> AnswerVerifierRe
 
 
 __all__ = [
+    "ANSWER_VERIFIER_MODE_ENV",
     "AnswerTypeHint",
     "AnswerVerifierEvidencePayload",
     "AnswerVerifierExecutionPosture",
@@ -297,4 +353,5 @@ __all__ = [
     "AnswerVerifierResult",
     "AnswerVerifierStatus",
     "evaluate_answer_verifier",
+    "read_verifier_mode_from_env",
 ]

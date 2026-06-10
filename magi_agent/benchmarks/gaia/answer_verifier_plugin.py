@@ -6,12 +6,14 @@ to GAIA-specific inputs (tool_call_log, fetched_sources).
 The answer_verifier.py module MUST remain benchmark-agnostic.
 
 Environment variable: MAGI_ANSWER_VERIFIER_MODE
-  values: off | audit | enforce   (default: off)
+  values: off | audit | enforce   (default: off when unset)
+  Audit-first: truthy values (1/true/yes/on) resolve to "audit" — never to
+  "enforce".  Use the explicit string "enforce" to opt into mutation.
+  See ``magi_agent.research.answer_verifier.read_verifier_mode_from_env``.
 """
 from __future__ import annotations
 
 import logging
-import os
 from collections.abc import Callable
 from typing import Any
 
@@ -19,6 +21,7 @@ from magi_agent.research.answer_verifier import (
     AnswerVerifierEvidencePayload,
     AnswerVerifierRequest,
     evaluate_answer_verifier,
+    read_verifier_mode_from_env,
 )
 from magi_agent.research.answer_verifier_checks import detect_answer_type
 
@@ -32,7 +35,7 @@ _GAIA_VERIFIER_ID = "gaia-answer-verifier"
 
 
 def _get_mode() -> str:
-    return os.environ.get("MAGI_ANSWER_VERIFIER_MODE", "off").strip().lower()
+    return read_verifier_mode_from_env()
 
 
 # ---------------------------------------------------------------------------
