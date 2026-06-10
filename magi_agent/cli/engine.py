@@ -2560,7 +2560,7 @@ def compile_intent_bindings(
     if not enabled:
         return {}
     bindings: dict[str, object] = {
-        "schemaVersion": "openmagi.recipeIntentBinding.v1",
+        "schemaVersion": "magi.recipeIntentBinding.v1",
         "enforcement": "hint",
         "productionWriteAllowed": False,
     }
