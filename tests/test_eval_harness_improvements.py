@@ -64,3 +64,43 @@ def test_eval_autonomy_block_disabled():
     from magi_agent.cli.tool_runtime import eval_autonomy_block
     text = eval_autonomy_block({"MAGI_EVAL_AUTONOMY_ENABLED": "0"})
     assert text == ""
+
+
+# ---------------------------------------------------------------------------
+# Task 3 — P3: engine zero-edit guard
+# ---------------------------------------------------------------------------
+
+from magi_agent.config.env import parse_eval_zero_edit_guard_enabled
+from magi_agent.cli.engine import should_reprompt_for_zero_edits
+
+
+def test_zero_edit_guard_parser_default_on():
+    assert parse_eval_zero_edit_guard_enabled({}) is True
+    assert parse_eval_zero_edit_guard_enabled({"MAGI_EVAL_ZERO_EDIT_GUARD_ENABLED": "0"}) is False
+
+
+def test_zero_edit_guard_parser_explicit_on():
+    assert parse_eval_zero_edit_guard_enabled({"MAGI_EVAL_ZERO_EDIT_GUARD_ENABLED": "1"}) is True
+
+
+def test_eval_defaults_set_zero_edit_guard_flag():
+    env = {"MAGI_RUNTIME_PROFILE": "eval"}
+    apply_local_eval_runtime_defaults(env)
+    assert env["MAGI_EVAL_ZERO_EDIT_GUARD_ENABLED"] == "1"
+
+
+def test_reprompt_when_no_edits_and_not_yet_retried():
+    assert should_reprompt_for_zero_edits(
+        file_edits=0, already_reprompted=False, enabled=True
+    ) is True
+
+
+def test_no_reprompt_when_edits_present():
+    assert should_reprompt_for_zero_edits(
+        file_edits=2, already_reprompted=False, enabled=True
+    ) is False
+
+
+def test_no_reprompt_when_already_retried_or_disabled():
+    assert should_reprompt_for_zero_edits(file_edits=0, already_reprompted=True, enabled=True) is False
+    assert should_reprompt_for_zero_edits(file_edits=0, already_reprompted=False, enabled=False) is False

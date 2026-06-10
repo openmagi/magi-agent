@@ -436,6 +436,33 @@ _ARTIFACT_EVENT_TYPES = frozenset(
 )
 _ERROR_EVENT_TYPES = frozenset({"error"})
 
+# ---------------------------------------------------------------------------
+# P3 — zero-edit guard (eval mode): track file-mutating tool calls per turn
+# and re-prompt once if a coding turn ends with no file edits.
+# ---------------------------------------------------------------------------
+# Tool names that perform file mutations (writes / edits / patches). When a
+# turn ends and none of these were observed, the guard fires a single "apply
+# it" re-invocation so the agent doesn't get away with just describing a fix.
+_EDIT_CLASS_TOOLS = frozenset({"FileEdit", "FileWrite", "Edit", "Write", "ApplyPatch"})
+
+
+def should_reprompt_for_zero_edits(
+    *, file_edits: int, already_reprompted: bool, enabled: bool
+) -> bool:
+    """Return True iff the zero-edit guard should fire a re-invocation.
+
+    Pure helper — no side effects, fully unit-testable without driving the
+    engine. The engine calls this after the main run loop concludes and before
+    yielding the terminal EngineResult.
+
+    Args:
+        file_edits: number of file-mutating tool calls observed this turn.
+        already_reprompted: True if we already fired the guard once this turn
+            (prevents infinite re-invocation).
+        enabled: value of ``parse_eval_zero_edit_guard_enabled(os.environ)``.
+    """
+    return bool(enabled and not already_reprompted and file_edits == 0)
+
 
 def _is_turn_end_event(event: Mapping[str, object]) -> bool:
     return event.get("type") == "turn_end"
@@ -1346,6 +1373,10 @@ class MagiEngineDriver:
         # Output-continuation budget: how many times we've resumed a response
         # truncated at the model's per-response output-token cap this turn.
         continuations_used = 0
+        # P3 zero-edit guard: count file-mutating tool calls this turn.
+        # zero_edit_retry_done ensures we fire the guard at most once per turn.
+        file_edit_calls = 0
+        zero_edit_retry_done = False
 
         try:
             while True:
@@ -1407,6 +1438,9 @@ class MagiEngineDriver:
                                 continue
                             self._collect_public_refs(safe, observed_public_refs)
                             self._track_pending_tool(safe, pending_tool_ids)
+                            # P3 zero-edit guard: count file-mutating tool calls.
+                            if safe.get("type") == "tool_start" and safe.get("name") in _EDIT_CLASS_TOOLS:
+                                file_edit_calls += 1
                             # PR4 goal-nudge: reset the goal-mode latch whenever a
                             # tool fires so the next clean stop is eligible for a
                             # nudge again (re-arm).
@@ -1579,6 +1613,81 @@ class MagiEngineDriver:
                 turn_id=turn_id,
             )
             return
+
+        # P3 zero-edit guard: if the coding turn ended without any file-mutating
+        # tool calls (agent described the fix but didn't apply it), re-invoke
+        # ONCE with an explicit "apply it" message reusing the same re-invocation
+        # seam as goal-nudge / output-continuation.  Gated by the eval flag so
+        # non-eval sessions are byte-identical to pre-P3.
+        import os as _os  # noqa: PLC0415
+        from magi_agent.config.env import parse_eval_zero_edit_guard_enabled  # noqa: PLC0415
+
+        if should_reprompt_for_zero_edits(
+            file_edits=file_edit_calls,
+            already_reprompted=zero_edit_retry_done,
+            enabled=parse_eval_zero_edit_guard_enabled(_os.environ),
+        ):
+            zero_edit_retry_done = True
+            _zero_edit_msg = "Apply the code change you described above by editing the file(s) now."
+            zero_edit_runner_input = runner_turn_input_cls(
+                userId=self._user_id,
+                sessionId=session_id,
+                turnId=turn_id,
+                invocationId=turn_id,
+                newMessage=types.Content(  # type: ignore[attr-defined]
+                    role="user",
+                    parts=[types.Part(text=_zero_edit_msg)],  # type: ignore[attr-defined]
+                ),
+                harnessState=effective_harness_state,
+            )
+            yield RuntimeEvent(
+                type="status",
+                payload={"type": "zero_edit_guard_retry", "turnId": turn_id},
+                turn_id=turn_id,
+            )
+            zero_edit_gate_attach = self._attach_gate_callback(
+                runner=runner, gate=gate, turn_id=turn_id, cancel=cancel
+            )
+            zero_edit_route_attach = self._attach_runner_policy_route(
+                runner=runner,
+                route_selection=route_selection,
+            )
+            zero_edit_iter: AsyncIterator[object] = adapter.run_turn(zero_edit_runner_input).__aiter__()  # type: ignore[union-attr]
+            try:
+                while True:
+                    if cancel.is_set():
+                        cancelled = True
+                        break
+                    _zstep = await self._next_adk_event(zero_edit_iter, cancel)
+                    if _zstep is _CANCELLED:
+                        cancelled = True
+                        break
+                    if _zstep is _EXHAUSTED:
+                        break
+                    _zadk_event = _zstep
+                    _zprojection = bridge.project_adk_event(_zadk_event, turn_id=turn_id)  # type: ignore[union-attr]
+                    for _zraw in _zprojection.agent_events:  # type: ignore[union-attr]
+                        _zsafe = sanitize(dict(_zraw))  # type: ignore[operator]
+                        if _zsafe is None:
+                            continue
+                        self._collect_public_refs(_zsafe, observed_public_refs)
+                        self._track_pending_tool(_zsafe, pending_tool_ids)
+                        yielded_events += 1
+                        self._observe_event(_zsafe, session_id, turn_id)
+                        yield RuntimeEvent(
+                            type=_map_event_kind(_zsafe.get("type")),
+                            payload=_zsafe,
+                            turn_id=turn_id,
+                        )
+            except Exception:  # noqa: BLE001 - fail-open: guard errors don't block the turn
+                pass
+            finally:
+                await self._aclose_iter(zero_edit_iter)
+                self._restore_runner_policy_route(zero_edit_route_attach)
+                self._restore_gate_callback(zero_edit_gate_attach)
+
+            # If cancelled during the guard retry, fall through to the cancel
+            # block below (cancelled flag is already set).
 
         while True:
             pre_final_gate = self._pre_final_gate_payload(
