@@ -1016,16 +1016,12 @@ graph LR
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
 | __init__.py | — | — | transport/health.py, transport/product_admin.py |
-| contracts.py | — | metrics, recorder, runtime_events, safety, traces | — |
 | health.py | — | daemon, scheduler_job_execution | gateway/daemon.py, transport/sse.py, transport/streaming_chat_route.py |
 | job_queue.py | — | safety | — |
-| metrics.py | — | runtime_events, safety | ops/contracts.py, ops/recorder.py, ops/scheduler_metrics.py |
+| metrics.py | — | runtime_events, safety | — |
 | otel_noise.py | Suppress a benign OpenTelemetry teardown log line. | — | (root)/main.py, cli/app.py |
-| recorder.py | — | metrics, runtime_events, safety, traces | ops/contracts.py |
-| runtime_events.py | — | safety | ops/contracts.py, ops/metrics.py, ops/recorder.py, ops/traces.py |
-| safety.py | — | — | artifacts/delivery_receipts.py, artifacts/render_verification.py, billing/quota.py, billing/spend_guard.py, connectors/credential_lease.py, connectors/marketplace.py, connectors/registry.py, gates/gate2_readiness.py, ops/contracts.py, ops/job_queue.py, ops/metrics.py, ops/recorder.py, ops/runtime_events.py, ops/traces.py, permissions/auto_control.py, runtime/heartbeat_contract.py, runtime/no_agent_watchdog.py, runtime/resume_decision.py, security/compliance.py, shadow/gate2_recipe_profile_resolver.py, tenancy/context.py, transport/product_admin.py |
-| scheduler_metrics.py | Scheduler-executor outcome metrics — Track A, PR A5. | metrics | — |
-| traces.py | — | runtime_events, safety | ops/contracts.py, ops/recorder.py |
+| runtime_events.py | — | safety | ops/metrics.py |
+| safety.py | — | — | artifacts/delivery_receipts.py, artifacts/render_verification.py, billing/quota.py, billing/spend_guard.py, connectors/credential_lease.py, connectors/marketplace.py, connectors/registry.py, gates/gate2_readiness.py, ops/job_queue.py, ops/metrics.py, ops/runtime_events.py, permissions/auto_control.py, runtime/heartbeat_contract.py, runtime/no_agent_watchdog.py, runtime/resume_decision.py, security/compliance.py, shadow/gate2_recipe_profile_resolver.py, tenancy/context.py, transport/product_admin.py |
 
 ### permissions/
 
