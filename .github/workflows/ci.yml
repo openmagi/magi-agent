@@ -1,0 +1,64 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Install Python
+        run: uv python install ${{ matrix.python-version }}
+      - name: Sync deps (dev + cli + files extras)
+        run: uv sync --python ${{ matrix.python-version }} --extra dev --extra cli --extra files
+      # Blocking gate: the whole suite must COLLECT. Repo-wide collection was
+      # impossible before this PR (duplicate-basename test_config.py modules);
+      # importlib import mode + pythonpath=tests (pyproject) fix it. Collection
+      # is the honest first ratchet — it catches syntax/import regressions on
+      # every PR without depending on the pre-existing red baseline below.
+      - name: Collect tests (blocking)
+        env:
+          MAGI_CONFIG: ${{ runner.temp }}/magi-ci-config.toml
+        run: uv run --no-sync pytest --co -q
+      # Advisory until the pre-existing failing baseline is triaged. Many tests
+      # fail on origin/main today (logic-drift fixtures + subprocess
+      # import-boundary probes), unrelated to this CI bootstrap. Flip to
+      # blocking (drop continue-on-error) once the baseline is green or
+      # quarantined in a follow-up PR.
+      - name: Run tests (advisory; ratchet to blocking later)
+        continue-on-error: true
+        env:
+          # Hermetic: never read a developer/CI host ~/.magi/config.toml.
+          MAGI_CONFIG: ${{ runner.temp }}/magi-ci-config.toml
+        run: uv run --no-sync pytest -q
+
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Sync deps (dev extra)
+        run: uv sync --extra dev
+      - name: Ruff (stage-1 fatal subset, blocking)
+        run: uv run --no-sync ruff check .
+      - name: Mypy (advisory, non-blocking)
+        run: uv run --no-sync mypy magi_agent
+        continue-on-error: true

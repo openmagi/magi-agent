@@ -8,6 +8,7 @@
 [CLI](docs/cli/magi.md) ·
 [Releases](https://github.com/openmagi/magi-agent/releases)
 
+![ci](https://github.com/openmagi/magi-agent/actions/workflows/ci.yml/badge.svg)
 ![status](https://img.shields.io/badge/status-early%20beta-f97316)
 ![install](https://img.shields.io/badge/install-Homebrew-2563eb)
 ![cli](https://img.shields.io/badge/CLI-magi-7c3aed)

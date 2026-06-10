@@ -14,10 +14,14 @@ uv run --extra cli magi --help
 ## Running Tests
 
 ```bash
-uv run --extra dev pytest -q
+uv run --extra dev --extra cli pytest -q
 uv run --extra dev ruff check .
-uv run --extra dev mypy magi_agent
+uv run --extra dev mypy magi_agent   # advisory: CI does not block on this yet
 ```
+
+`ruff` and `mypy` ship in the `dev` extra, so the commands above work from a
+fresh `uv sync --extra dev`. The `cli` extra (textual) is required for the full
+test suite to collect.
 
 ## Code Style
 
