@@ -631,7 +631,11 @@ graph LR
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
 | __init__.py | — | env, models | — |
+<<<<<<< HEAD
 | env.py | — | gate3a_replay, gate5b4c3_shadow_counter_store, gate5b4c3_shadow_generation_contract, models, pregate8_continuity_canary, shadow_generations | (root)/main.py, adk_bridge/anthropic_cache_model.py, adk_bridge/control_plane.py, adk_bridge/tool_adapter.py, browser/autonomous/config.py, cli/engine.py, cli/providers.py, cli/real_runner.py, cli/tests/test_app.py, cli/tool_runtime.py, cli/wiring.py, config/__init__.py, evidence/local_tool_collector.py, gates/gate5b_full_toolhost.py, harness/general_automation/constraint_reinjection.py, harness/general_automation/delegation.py, harness/general_automation/live_gate.py, harness/general_automation/plan_act_switch.py, harness/general_automation/question_tool.py, harness/general_automation/recipe_disclosure.py, harness/general_automation/task_completion.py, introspection/tool.py, plugins/native/missions.py, plugins/native/scheduled_work.py, plugins/native/taskboard.py, recipes/coding_mutation.py, shadow/gate5b4c3_runner_input_adapter.py, tools/dispatcher.py, tools/local_readonly.py, tools/safety.py, transport/chat.py, transport/chat_routes.py, transport/chat_shared.py |
+=======
+| env.py | — | gate3a_replay, gate5b4c3_shadow_counter_store, gate5b4c3_shadow_generation_contract, models, pregate8_continuity_canary, shadow_generations | (root)/main.py, adk_bridge/anthropic_cache_model.py, adk_bridge/control_plane.py, adk_bridge/tool_adapter.py, browser/autonomous/config.py, cli/engine.py, cli/providers.py, cli/real_runner.py, cli/tests/test_app.py, cli/tool_runtime.py, cli/wiring.py, config/__init__.py, evidence/local_tool_collector.py, gates/gate5b_full_toolhost.py, harness/general_automation/constraint_reinjection.py, harness/general_automation/delegation.py, harness/general_automation/live_gate.py, harness/general_automation/plan_act_switch.py, harness/general_automation/question_tool.py, harness/general_automation/recipe_disclosure.py, harness/general_automation/task_completion.py, introspection/tool.py, plugins/native/missions.py, plugins/native/scheduled_work.py, plugins/native/taskboard.py, recipes/coding_mutation.py, shadow/gate5b4c3_runner_input_adapter.py, tools/dispatcher.py, tools/local_readonly.py, tools/safety.py, transport/chat.py |
+>>>>>>> 556e129 (docs: regenerate module map after ops trace-stack removal)
 | models.py | — | pregate8_continuity_canary | (root)/main.py, config/__init__.py, config/env.py, gates/gate2_readiness.py, gates/gate3_readiness.py, gates/gate4_readiness.py, gates/gate5_readiness.py, gates/gate7_readiness.py, gates/gate8_readiness.py, runtime/openmagi_runtime.py |
 
 ### connectors/
@@ -755,7 +759,11 @@ graph LR
 | gate7_readiness.py | — | models | transport/health.py |
 | gate8_readiness.py | — | gate1a_egress_correlation, models | transport/chat.py, transport/chat_routes.py, transport/health.py |
 | goal_loop_readiness.py | Goal-loop rollout readiness gate — Track B, PR B5. | goal_loop | — |
+<<<<<<< HEAD
 | learning_live_readiness.py | Learning-layer LIVE adapter readiness gate — PR7. | config | harness/memory_recall.py, harness/memory_write.py, learning/live.py, transport/chat_routes.py |
+=======
+| learning_live_readiness.py | Learning-layer LIVE adapter readiness gate — PR7. | config | harness/memory_recall.py, harness/memory_write.py, learning/live.py, transport/chat.py |
+>>>>>>> 556e129 (docs: regenerate module map after ops trace-stack removal)
 | learning_readiness.py | Learning reflection readiness gate — PR2. | config | learning/bootstrap.py |
 | memory_write_readiness.py | Writable-memory rollout readiness gate — Track D, PR D5. | config | runtime/memory_write_wiring.py |
 | pregate8_continuity_canary.py | — | context_packet | config/env.py, config/models.py |
@@ -1019,10 +1027,9 @@ graph LR
 | __init__.py | — | — | transport/health.py, transport/product_admin.py |
 | health.py | — | daemon, scheduler_job_execution | gateway/daemon.py, transport/sse.py, transport/streaming_chat_route.py |
 | job_queue.py | — | safety | — |
-| metrics.py | — | runtime_events, safety | — |
+| metrics.py | — | safety | — |
 | otel_noise.py | Suppress a benign OpenTelemetry teardown log line. | — | (root)/main.py, cli/app.py |
-| runtime_events.py | — | safety | ops/metrics.py |
-| safety.py | — | — | artifacts/delivery_receipts.py, artifacts/render_verification.py, billing/quota.py, billing/spend_guard.py, connectors/credential_lease.py, connectors/marketplace.py, connectors/registry.py, gates/gate2_readiness.py, ops/job_queue.py, ops/metrics.py, ops/runtime_events.py, permissions/auto_control.py, runtime/heartbeat_contract.py, runtime/no_agent_watchdog.py, runtime/resume_decision.py, security/compliance.py, shadow/gate2_recipe_profile_resolver.py, tenancy/context.py, transport/product_admin.py |
+| safety.py | — | — | artifacts/delivery_receipts.py, artifacts/render_verification.py, billing/quota.py, billing/spend_guard.py, connectors/credential_lease.py, connectors/marketplace.py, connectors/registry.py, gates/gate2_readiness.py, ops/job_queue.py, ops/metrics.py, permissions/auto_control.py, runtime/heartbeat_contract.py, runtime/no_agent_watchdog.py, runtime/resume_decision.py, security/compliance.py, shadow/gate2_recipe_profile_resolver.py, tenancy/context.py, transport/product_admin.py |
 
 ### permissions/
 
@@ -1490,9 +1497,13 @@ graph LR
 | __init__.py | — | health | adk_bridge/event_adapter.py, cli/tests/test_sse_sanitize_control_request.py, transport/dashboard.py, transport/sse.py |
 | active_turn.py | Process-local registry of in-flight streaming-chat turns. | permissions | cli/tests/test_streaming_driver.py, transport/streaming_chat_route.py, transport/streaming_driver.py |
 | app_api.py | Dashboard ``/v1/app/*`` API surface. | cli, openmagi_runtime, session_store, skills, tools | (root)/app.py, customize/catalog.py |
+<<<<<<< HEAD
 | chat.py | Re-export shim for the decomposed Gate5B chat serving stack (08-PR1). | chat_routes, chat_shared, compiler, egress_critic, egress_gate, env, gate1a_egress_correlation, gate1a_readonly_tools, gate2_activation_loop_a, gate2_durable_evidence, gate2_readiness, gate2_sandbox_canary, gate5b4c3_live_runner_boundary, gate5b4c3_shadow_counter_store, gate5b4c3_shadow_generation_contract, gate5b_full_toolhost, gate8_readiness, generation_request, materializer, message_builder, observed_egress, openmagi_runtime, public_events, research_first_canary, session_identity, shadow_generations, usage_receipt_emit, user_visible_model_routing | (root)/app.py, (root)/main.py, transport/health.py, transport/streaming_chat_route.py |
 | chat_routes.py | Chat route registration and the Gate5B user-visible serving engine. | chat_shared, compiler, contracts, egress_critic, egress_gate, env, gate1a_egress_correlation, gate1a_readonly_tools, gate2_sandbox_canary, gate5b4c3_live_runner_boundary, gate5b4c3_shadow_counter_store, gate5b4c3_shadow_generation_contract, gate5b_full_toolhost, gate8_readiness, generation_request, learning_live_readiness, materializer, memory_mode_context, memory_turn_hook, observed_egress, openmagi_runtime, public_events, research_first_canary, session_identity, shadow_generations, usage_receipt_emit, user_visible_model_routing, wiring | transport/chat.py |
 | chat_shared.py | Shared primitives for the decomposed Gate5B chat serving stack. | env, gate1a_readonly_tools, gate5b4c3_live_runner_boundary, gate5b_full_toolhost, openmagi_runtime, shadow_generations, user_visible_model_routing | transport/chat.py, transport/chat_routes.py, transport/gate2_sandbox_canary.py, transport/generation_request.py |
+=======
+| chat.py | — | compiler, contracts, egress_gate, env, gate1a_egress_correlation, gate1a_readonly_tools, gate2_activation_loop_a, gate2_durable_evidence, gate2_readiness, gate5b4c3_live_runner_boundary, gate5b4c3_shadow_counter_store, gate5b4c3_shadow_generation_contract, gate5b_full_toolhost, gate8_readiness, learning_live_readiness, mapping, materializer, memory_mode_context, memory_turn_hook, message_builder, observed_egress, openmagi_runtime, projection, providers, public_events, readonly_classifier, reason_safety, research_first_canary, session_identity, shadow_generations, usage_receipt_emit, wiring | (root)/app.py, (root)/main.py, transport/health.py, transport/streaming_chat_route.py |
+>>>>>>> 556e129 (docs: regenerate module map after ops trace-stack removal)
 | control_requests.py | Control-request REST surface consumed by the restored web dashboard. | openmagi_runtime | (root)/app.py |
 | credentials.py | Dashboard "Credentials" admin routes. | credentials_admin, durable_store, openmagi_runtime, tools | (root)/app.py |
 | customize.py | — | apply, catalog, openmagi_runtime, store, tools | (root)/app.py |
