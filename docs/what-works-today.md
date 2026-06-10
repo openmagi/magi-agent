@@ -27,7 +27,7 @@ A scannable map of what the local `magi` CLI can actually do right now, what shi
 - **Evidence / governance enforcement boundaries** run in observe-only / local-fake mode. The ledger records, but no boundary verdict blocks output or side effects. [^3]
 - **External channel delivery** (Telegram / Discord live send).
 - **External integrations** (Composio).
-- **Always-on gateway daemon** — `magi gateway start` is a supervising daemon (runs until SIGINT/SIGTERM; `--once` keeps the legacy single scheduler tick), but it is gated by `MAGI_GATEWAY_DAEMON_ENABLED` and each watcher still respects its own gate (e.g. `MAGI_SCHEDULER_EXECUTOR_ENABLED`).
+- **Always-on gateway daemon** — `magi gateway start` is a supervising daemon (runs until SIGINT/SIGTERM; `--once` keeps the legacy single scheduler tick), but it is gated by `MAGI_GATEWAY_DAEMON_ENABLED` and each watcher still respects its own gate (e.g. `MAGI_SCHEDULER_EXECUTOR_ENABLED`). `magi gateway status` reports the env gate **and** actual daemon liveness (via the `~/.magi/gateway/daemon.pid` pidfile — a stale pidfile reads as `not running`, never a false positive).
 
 ### ❌ Planned
 

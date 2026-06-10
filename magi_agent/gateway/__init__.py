@@ -13,4 +13,4 @@ respects its own gate.  Nothing here constructs a real network client or calls
 """
 from __future__ import annotations
 
-__all__ = ["daemon", "service_install", "watchers"]
+__all__ = ["daemon", "pidfile", "service_install", "watchers"]

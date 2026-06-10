@@ -474,8 +474,24 @@ def gateway_root(ctx: typer.Context) -> None:
 
 @gateway_app.command("status")
 def gateway_status() -> None:
-    """Show whether the gateway daemon is enabled (env gate) — no side effects."""
+    """Show the env gate AND whether a daemon process is actually running.
+
+    Liveness is probed via the daemon pidfile (written by a real
+    ``gateway start``) — no side effects.  A stale pidfile reports
+    ``not running`` rather than a false positive.
+    """
     from magi_agent.gateway.daemon import is_gateway_daemon_enabled  # noqa: PLC0415
+    from magi_agent.gateway.pidfile import daemon_liveness  # noqa: PLC0415
+
+    liveness = daemon_liveness()
+    if liveness.running:
+        live_line = f"daemon process: running (pid {liveness.pid})."
+    elif liveness.pid is not None:
+        live_line = (
+            f"daemon process: not running (stale pidfile for pid {liveness.pid})."
+        )
+    else:
+        live_line = "daemon process: not running (no pidfile)."
 
     if is_gateway_daemon_enabled():
         typer.echo(
@@ -487,6 +503,7 @@ def gateway_status() -> None:
             "gateway daemon: disabled — set MAGI_GATEWAY_DAEMON_ENABLED=1 to "
             "enable always-on (each watcher also needs its own gate)."
         )
+    typer.echo(live_line)
 
 
 @gateway_app.command("start")
@@ -508,6 +525,7 @@ def gateway_start(
     """
     import asyncio  # noqa: PLC0415
     import contextlib  # noqa: PLC0415
+    import os  # noqa: PLC0415
     import signal  # noqa: PLC0415
 
     from magi_agent.gateway.daemon import (  # noqa: PLC0415
@@ -526,6 +544,10 @@ def gateway_start(
         return
 
     from magi_agent.gateway.daemon import build_default_gateway_daemon  # noqa: PLC0415
+    from magi_agent.gateway.pidfile import (  # noqa: PLC0415
+        remove_pidfile,
+        write_pidfile,
+    )
 
     daemon = build_default_gateway_daemon()
 
@@ -535,11 +557,18 @@ def gateway_start(
         for sig in (signal.SIGINT, signal.SIGTERM):
             with contextlib.suppress(NotImplementedError):
                 loop.add_signal_handler(sig, stop_event.set)
+        # Record liveness so `gateway status` can report a running daemon, and
+        # always clear it on shutdown (graceful or supervised) so a stale
+        # pidfile never reports a false positive.
+        write_pidfile(pid=os.getpid())
         typer.echo(
             "gateway daemon: supervising watchers (Ctrl-C or SIGTERM to stop). "
             "Each watcher still respects its own gate."
         )
-        await daemon.run(stop_event=stop_event)
+        try:
+            await daemon.run(stop_event=stop_event)
+        finally:
+            remove_pidfile()
         typer.echo("gateway daemon: stopped.")
 
     asyncio.run(_main())
