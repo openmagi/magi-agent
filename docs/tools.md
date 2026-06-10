@@ -49,6 +49,19 @@ tools are bound by the core toolhost (`core_toolhost.py`).
 Read / meta-read tools are concurrency-safe and available in both `plan` and
 `act` modes. Write and execute tools are `act`-only and mutate the workspace.
 
+### WebSearch / WebFetch (plugin web tools)
+
+`WebSearch` and `WebFetch` ship in the `openmagi.web` plugin, not the core
+registry above. They have **no fabricated fallback**: on a default install with
+no live web provider configured they return an honest
+`web_research_not_configured` error instead of simulated results. To activate
+live search/fetch, set `CORE_AGENT_PYTHON_LIVE_WEB_ACQUISITION_ENABLED=1` and
+`CORE_AGENT_PYTHON_WEB_PROVIDER_ROUTER_ENABLED=1`, then enable at least one
+provider: `CORE_AGENT_PYTHON_JINA_READER_ENABLED=1` (optionally with
+`MAGI_JINA_API_KEY`), `CORE_AGENT_PYTHON_INSANE_FETCH_ENABLED=1`, or
+`MAGI_PLATFORM_BASE_URL` + `MAGI_PLATFORM_API_KEY`. With those set, the
+handlers delegate to the live provider router.
+
 ### Example: invocation and approval
 
 A tool call is a proposal that must clear the permission gate. **How the gate is

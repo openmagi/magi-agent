@@ -13,6 +13,7 @@ A scannable map of what the local `magi` CLI can actually do right now, what shi
 | Permission prompts gating tools (`default` / `acceptEdits` / `bypassPermissions`) [^2] | External integrations (Composio) | Additional external authority for managed systems |
 | Sessions, headless NDJSON + interactive TUI | Recipe execution engine (manifests are metadata-only today) | |
 | Local HTTP dashboard (`magi-agent serve`) | Always-on gateway daemon — `magi gateway start` supervises the watcher fleet; `--once` for a single tick | |
+| | Live web search/fetch — `WebSearch` / `WebFetch` return an honest `web_research_not_configured` error (no simulated results) until a live provider is configured | |
 
 ### ✅ Works today
 
@@ -28,6 +29,7 @@ A scannable map of what the local `magi` CLI can actually do right now, what shi
 - **External channel delivery** (Telegram / Discord live send).
 - **External integrations** (Composio).
 - **Always-on gateway daemon** — `magi gateway start` is a supervising daemon (runs until SIGINT/SIGTERM; `--once` keeps the legacy single scheduler tick), but it is gated by `MAGI_GATEWAY_DAEMON_ENABLED` and each watcher still respects its own gate (e.g. `MAGI_SCHEDULER_EXECUTOR_ENABLED`).
+- **Live web search/fetch** (`WebSearch` / `WebFetch`): a default install has no live web provider, so these tools return an honest `web_research_not_configured` error — never simulated results. Once the live-web env gates plus at least one provider (jina-reader / insane-fetch / platform endpoint) are configured, the handlers delegate to the live provider router. See the WebSearch / WebFetch section in [Tools](/docs/tools).
 
 ### ❌ Planned
 
