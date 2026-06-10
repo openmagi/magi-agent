@@ -591,40 +591,6 @@ class TestPublicProjectionDigestSafety:
 
 
 # ---------------------------------------------------------------------------
-# Test: Integration with ProjectionWriteBoundaryResult
-# ---------------------------------------------------------------------------
-
-class TestProjectionBoundaryIntegration:
-    def test_final_projection_respects_write_boundary(self) -> None:
-        """Final projection must not claim any write authority."""
-        from magi_agent.runtime.projection_write_boundary import (
-            ProjectionWriteAuthorityFlags,
-        )
-        flags = ProjectionWriteAuthorityFlags()
-        assert flags.transcript_write_allowed is False
-        assert flags.sse_write_allowed is False
-        assert flags.production_receipt_allowed is False
-
-        # Final projection itself also blocks production mutation
-        proj = _full_evidence_projection()
-        assert proj.production_workspace_mutation_allowed is False
-
-    def test_coding_final_projection_write_boundary_denies(self) -> None:
-        """evaluate_coding_final_projection_write always denies."""
-        from magi_agent.runtime.projection_write_boundary import (
-            evaluate_coding_final_projection_write,
-        )
-        result = evaluate_coding_final_projection_write({
-            "target": "sse",
-            "operation": "coding_final_projection",
-            "sessionKey": "test-session",
-        })
-        assert result.allowed is False
-        assert result.durable_write_attempted is False
-        assert result.production_receipt_produced is False
-
-
-# ---------------------------------------------------------------------------
 # Test: SSE sanitizer blocks raw/private content
 # ---------------------------------------------------------------------------
 

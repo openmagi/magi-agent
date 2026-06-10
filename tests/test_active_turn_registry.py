@@ -1,10 +1,11 @@
 """Contract tests for the extracted ``ActiveTurnRegistry`` module.
 
-``ActiveTurnRegistry`` was extracted out of
+``ActiveTurnRegistry`` was extracted out of the retired
 ``runtime/runner_session_boundary.py`` into its own ADK-free module
-(``runtime/active_turn_registry.py``) so the dead boundary reference stack can be
-deleted without taking the one live part with it. These tests pin the
-single-flight behaviour against the *new* import path.
+(``runtime/active_turn_registry.py``) so the dead boundary reference stack could
+be deleted without taking the one live part with it. These tests pin the
+single-flight behaviour against the new import path; ``cli.engine`` is the sole
+production consumer.
 """
 
 from __future__ import annotations
@@ -65,11 +66,37 @@ def test_release_when_done_releases_slot_after_task_completes() -> None:
     assert asyncio.run(_scenario()) is True
 
 
-def test_importable_from_legacy_boundary_path() -> None:
-    # PR1 keeps a compatibility re-export from the boundary module so the
-    # boundary's ``__all__`` stays intact until PR2 deletes the file.
-    from magi_agent.runtime.runner_session_boundary import (
-        ActiveTurnRegistry as LegacyActiveTurnRegistry,
-    )
+def test_single_flight_per_session() -> None:
+    reg = ActiveTurnRegistry()
+    assert reg.try_acquire(session_key="session-1", turn_id="turn-1") is True
+    # Second concurrent turn for the same session is rejected.
+    assert reg.try_acquire(session_key="session-1", turn_id="turn-2") is False
+    reg.release(session_key="session-1", turn_id="turn-1")
+    # Slot is free again after release.
+    assert reg.try_acquire(session_key="session-1", turn_id="turn-3") is True
 
-    assert LegacyActiveTurnRegistry is ActiveTurnRegistry
+
+def test_release_with_mismatched_turn_id_is_noop() -> None:
+    reg = ActiveTurnRegistry()
+    assert reg.try_acquire(session_key="session-1", turn_id="turn-1") is True
+    reg.release(session_key="session-1", turn_id="other-turn")
+    # Holder unchanged: a new turn is still rejected.
+    assert reg.try_acquire(session_key="session-1", turn_id="turn-2") is False
+
+
+def test_release_when_done_frees_slot_after_task_completes() -> None:
+    async def _scenario() -> bool:
+        reg = ActiveTurnRegistry()
+        assert reg.try_acquire(session_key="session-1", turn_id="turn-1") is True
+
+        async def _turn() -> None:
+            await asyncio.sleep(0)
+
+        task = asyncio.create_task(_turn())
+        reg.release_when_done(session_key="session-1", turn_id="turn-1", task=task)
+        await task
+        # Done-callbacks run via call_soon; yield once so they fire.
+        await asyncio.sleep(0)
+        return reg.try_acquire(session_key="session-1", turn_id="turn-2")
+
+    assert asyncio.run(_scenario()) is True
