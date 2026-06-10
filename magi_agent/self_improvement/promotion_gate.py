@@ -33,6 +33,8 @@ SelfImprovementPromotionStatus: TypeAlias = Literal[
     "disabled",
     "blocked",
     "promotion_ready_local_fake",
+    "promotion_ready_live",
+    "promoted",
 ]
 
 _MODEL_CONFIG = ConfigDict(
@@ -54,6 +56,10 @@ class SelfImprovementPromotionConfig(BaseModel):
     local_fake_promotion_enabled: bool = Field(
         default=False,
         alias="localFakePromotionEnabled",
+    )
+    live_promotion_enabled: bool = Field(
+        default=False,
+        alias="livePromotionEnabled",
     )
     production_mutation_enabled: Literal[False] = Field(
         default=False,
@@ -357,9 +363,19 @@ class SelfImprovementPromotionGate:
             reasons.append("hard_invariant_downgrade_detected")
 
         unique_reasons = tuple(dict.fromkeys(reasons))
-        status: SelfImprovementPromotionStatus = (
-            "blocked" if unique_reasons else "promotion_ready_local_fake"
-        )
+        status: SelfImprovementPromotionStatus
+        if unique_reasons:
+            status = "blocked"
+        elif self.config.live_promotion_enabled:
+            # Live-promotion gate ON: a fully-passing, approved promotion that has
+            # already cleared the local-fake stage can advance past the fake
+            # terminus to a real promoted status. This advances the governance
+            # status only — frozen authority flags (production/automatic
+            # mutation) and the denied execution default are untouched, and no
+            # workspace artifact is mutated here (apply path is out of scope).
+            status = "promoted"
+        else:
+            status = "promotion_ready_local_fake"
         return _promotion_result(
             status=status,
             promotion_action_digest=action_digest,
