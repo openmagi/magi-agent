@@ -35,6 +35,7 @@ from magi_agent.cli.contracts import (
     ToolRendererRegistry,
 )
 from magi_agent.cli.tui.app import MagiTuiApp
+from magi_agent.cli.tui.tool_render import build_tool_renderers
 
 _TUI = CommandSurface(tui=True, headless=False)
 
@@ -88,12 +89,35 @@ class _ThinkingEngine:
         yield EngineResult(terminal=Terminal.completed, turn_id=turn_id)
 
 
-def _make_app(events: list[RuntimeEvent]) -> MagiTuiApp:
+def _make_app(events: list[RuntimeEvent], *, renderers=None) -> MagiTuiApp:
     return MagiTuiApp(
         engine=_ThinkingEngine(events),
         gate=_Allow(),
         commands=_Reg(),
-        renderers=ToolRendererRegistry(),
+        renderers=renderers if renderers is not None else ToolRendererRegistry(),
+    )
+
+
+def _bash_start(command: str) -> RuntimeEvent:
+    return RuntimeEvent(
+        type="tool",
+        payload={"type": "tool_start", "id": "c1", "name": "Bash",
+                 "input": {"command": command}},
+        turn_id="t",
+    )
+
+
+def _bash_end(stdout: str) -> RuntimeEvent:
+    return RuntimeEvent(
+        type="tool",
+        payload={
+            "type": "tool_end",
+            "id": "c1",
+            "name": "Bash",
+            "status": "ok",
+            "output_preview": {"stdout": stdout},
+        },
+        turn_id="t",
     )
 
 
@@ -180,5 +204,51 @@ def test_streaming_reasoning_deltas_are_coalesced_into_one_block() -> None:
             assert len(thinking) == 1, thinking
             # The latest delta is reflected in the coalesced preview.
             assert "step three" in thinking[0]
+
+    asyncio.run(_run())
+
+
+def test_interleaved_thinking_tool_thinking_keeps_one_thinking_block() -> None:
+    """Index-stability invariant: a tool block committing BETWEEN two thinking
+    deltas must NOT cause a duplicate thinking line, and the second thinking
+    delta must patch the ORIGINAL thinking line in place — never overwrite the
+    intervening tool block.
+
+    This locks the append-only ``_committed`` index-stability invariant. If
+    ``update_thinking`` keyed off a stale/absolute index instead of the stored
+    handle, the second delta ("b") would land on the TOOL block's slot — this
+    test would then see the tool entry mutated into thinking text (failing the
+    "$ echo hi"/stdout assertions) and/or a second thinking line.
+    """
+
+    async def _run() -> None:
+        app = _make_app(
+            [
+                _reasoning_event("a"),
+                _bash_start("echo hi"),
+                _bash_end("hi\n"),
+                _reasoning_event("b"),
+            ],
+            renderers=build_tool_renderers(),
+        )
+        async with app.run_test() as pilot:
+            app.start_turn("go")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            blocks = app.controller.committed_blocks_snapshot()
+
+            # Exactly ONE thinking block, coalesced to reflect the latest
+            # reasoning "b" (the deltas folded into the single line, NOT a
+            # duplicated second thinking line).
+            thinking = [b for b in blocks if "thinking" in b]
+            assert len(thinking) == 1, thinking
+            assert "b" in thinking[0], thinking
+
+            # The tool block is PRESENT and UNAFFECTED — the second thinking
+            # delta did not overwrite the intervening tool entry.
+            assert any("$ echo hi" in b for b in blocks), blocks
+            assert any("hi" in b and "thinking" not in b for b in blocks), blocks
+            # And the tool entry was never mutated into a thinking line.
+            assert not any("thinking" in b and "echo hi" in b for b in blocks), blocks
 
     asyncio.run(_run())

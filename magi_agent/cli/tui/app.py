@@ -1556,15 +1556,26 @@ class MagiTuiApp(App[None]):
         payload = event.payload if isinstance(event.payload, dict) else {}
         delta = _reasoning_text(payload)
         # Accumulate so the coalesced preview reflects the latest reasoning.
-        self._thinking_accum = (self._thinking_accum + " " + delta).strip() if (
-            self._thinking_handle is not None
-        ) else delta
+        # Gate the join on whether there's ALREADY accumulated text (the
+        # accumulator), not on the widget handle — appending only makes sense
+        # when prior reasoning exists, and this stays correct even if the first
+        # delta is empty (no leading-space artifact to mask).
+        self._thinking_accum = (
+            (self._thinking_accum + " " + delta).strip()
+            if self._thinking_accum
+            else delta.strip()
+        )
         node = _render_thinking_node(self._thinking_accum)
         if self._thinking_handle is None:
             self._thinking_handle = self.controller.commit_thinking(
                 node.rich, text=node.text
             )
         else:
+            # Position-freeze: if a tool/assistant block commits BETWEEN two
+            # thinking deltas, ``update_thinking`` keeps patching the ORIGINAL
+            # thinking line in place — its text updates while its on-screen
+            # position stays ABOVE the later block. This is intended coalescing
+            # (one thinking line per turn), NOT the index-drift bug.
             self.controller.update_thinking(
                 self._thinking_handle, node.rich, text=node.text
             )
