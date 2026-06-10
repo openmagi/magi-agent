@@ -81,15 +81,13 @@ def test_explicit_env_always_wins_setdefault_semantics():
     assert env["MAGI_OBS_HOME"] == "/custom/path"
 
 
-def test_overlay_scope_excludes_other_clusters():
-    # The control-stage overlay must NOT pull in C11 coding-repair/doc-coverage
-    # flags — those belong to a sibling PR (14-PR4). C9 MemoryWrite real-write
-    # also stays out (its persistence ties to the held memory master, 01-PR5).
+def test_overlay_scope_keeps_memory_write_out():
+    # C9 read-only introspection and C11 coding/doc controls are part of
+    # hosted ``full`` now, but MemoryWrite real persistence still depends on
+    # the held memory master and must stay out of every hosted stage.
     env = {HOSTED_DEPLOYMENT_ENV: "hosted", "MAGI_CONTROL_STAGE": "hardgate"}
     apply_hosted_runtime_defaults(env)
     for sibling in (
-        "MAGI_CODING_REPAIR_LOOP_ENABLED",
-        "MAGI_DOCUMENT_AUTHORING_COVERAGE",
         "MAGI_MEMORY_WRITE_ENABLED",
     ):
         assert sibling not in env, sibling
@@ -225,3 +223,48 @@ def test_explicit_introspection_flag_wins_over_stage():
     }
     apply_hosted_runtime_defaults(env)
     assert env[SELF_INTROSPECTION_FLAG] == "0"
+
+
+# --- 14-PR3 (C11): coding-repair loop + document-coverage gate -------------
+
+COVERAGE_ENV = "MAGI_DOCUMENT_AUTHORING_COVERAGE"
+REPAIR_ENV = "MAGI_CODING_REPAIR_LOOP_ENABLED"
+
+
+def test_stage_off_and_resilience_set_no_c11_controls():
+    for stage in ("off", "resilience"):
+        env = {HOSTED_DEPLOYMENT_ENV: "hosted", "MAGI_CONTROL_STAGE": stage}
+        apply_hosted_runtime_defaults(env)
+        assert REPAIR_ENV not in env, stage
+        assert COVERAGE_ENV not in env, stage
+
+
+def test_stage_full_enables_coding_repair_and_coverage_advisory():
+    env = {HOSTED_DEPLOYMENT_ENV: "hosted", "MAGI_CONTROL_STAGE": "full"}
+    apply_hosted_runtime_defaults(env)
+    # coding-repair loop on (C11): already ON locally per local_defaults.
+    assert env[REPAIR_ENV] == "1"
+    # doc-coverage starts ADVISORY (record-only) at full — never hard-block by
+    # default because false-block is the highest-risk item in this cluster.
+    assert env[COVERAGE_ENV] == "advisory"
+
+
+def test_stage_hardgate_promotes_coverage_to_block():
+    env = {HOSTED_DEPLOYMENT_ENV: "hosted", "MAGI_CONTROL_STAGE": "hardgate"}
+    apply_hosted_runtime_defaults(env)
+    assert env[REPAIR_ENV] == "1"
+    # hardgate promotes the coverage gate from advisory to hard-block.
+    assert env[COVERAGE_ENV] == "block"
+
+
+def test_explicit_c11_flag_wins_over_stage():
+    env = {
+        HOSTED_DEPLOYMENT_ENV: "hosted",
+        "MAGI_CONTROL_STAGE": "hardgate",
+        COVERAGE_ENV: "advisory",
+        REPAIR_ENV: "0",
+    }
+    apply_hosted_runtime_defaults(env)
+    # Operator overrides survive (setdefault semantics).
+    assert env[COVERAGE_ENV] == "advisory"
+    assert env[REPAIR_ENV] == "0"

@@ -31,11 +31,13 @@ do not move pass^k accuracy metrics — doc 14 §0/§3-2). This overlay is about
 *enable-ability* on hosted, not a performance claim; stage promotion is decided
 by operational/resilience metrics, not accuracy benches.
 
-The default stage is ``off``, which is byte-identical to today's hosted
-runtime. Stages are additive: ``full`` includes everything in ``resilience``
+* PR3 (C11, this change): coding-repair loop + the document-coverage gate.
+  ``full`` enables the coding-repair loop and runs the coverage gate in
+  *advisory* mode (record-only); ``hardgate`` promotes coverage to hard-block.
+
 and ``hardgate`` everything in ``full``. Per doc 14, C9 MemoryWrite real-write
-and C11 coding-repair / doc-coverage are explicitly NOT wired here — sibling PRs
-own those.
+is explicitly NOT wired here; C9 read-only introspection and C11
+coding-repair / doc-coverage are included in the hosted ``full`` overlay.
 """
 
 from __future__ import annotations
@@ -96,9 +98,25 @@ _C9_FULL_OVERLAY: Mapping[str, str] = {
     "MAGI_SELF_INTROSPECTION_ENABLED": "1",
 }
 
+# C11 ``full`` additions (14-PR3): coding-repair loop + document-coverage gate.
+# coding-repair is already ON locally (local_defaults.py). The document-coverage
+# gate starts in *advisory* mode at ``full`` (records failed-coverage counts for
+# false-block-rate telemetry but never hard-blocks) — it is the highest
+# false-block-risk control in this cluster, so it is promoted to ``block`` only
+# at ``hardgate`` after the advisory metrics are clean.
+_C11_FULL_OVERLAY: Mapping[str, str] = {
+    "MAGI_CODING_REPAIR_LOOP_ENABLED": "1",
+    "MAGI_DOCUMENT_AUTHORING_COVERAGE": "advisory",
+}
+
 # C3 ``hardgate`` promotion (PR2): flip self-review from shadow to live.
 _C3_HARDGATE_OVERLAY: Mapping[str, str] = {
     "MAGI_SELF_REVIEW_SHADOW": "0",
+}
+
+# C11 ``hardgate`` promotion (14-PR3): advisory -> hard-block document coverage.
+_C11_HARDGATE_OVERLAY: Mapping[str, str] = {
+    "MAGI_DOCUMENT_AUTHORING_COVERAGE": "block",
 }
 
 
@@ -116,9 +134,15 @@ def _compose(*fragments: Mapping[str, str]) -> Mapping[str, str]:
 # keeping the hosted runtime byte-identical to today.
 _RESILIENCE_OVERLAY = _compose(_C3_RESILIENCE_OVERLAY)
 _FULL_OVERLAY = _compose(
-    _RESILIENCE_OVERLAY, _OBSERVABILITY_OVERLAY, _C3_FULL_OVERLAY, _C9_FULL_OVERLAY
+    _RESILIENCE_OVERLAY,
+    _OBSERVABILITY_OVERLAY,
+    _C3_FULL_OVERLAY,
+    _C9_FULL_OVERLAY,
+    _C11_FULL_OVERLAY,
 )
-_HARDGATE_OVERLAY = _compose(_FULL_OVERLAY, _C3_HARDGATE_OVERLAY)
+_HARDGATE_OVERLAY = _compose(
+    _FULL_OVERLAY, _C3_HARDGATE_OVERLAY, _C11_HARDGATE_OVERLAY
+)
 
 HOSTED_CONTROL_STAGE_DEFAULTS: Mapping[str, Mapping[str, str]] = {
     "off": {},

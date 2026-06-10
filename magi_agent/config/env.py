@@ -1766,7 +1766,42 @@ def is_document_authoring_coverage_enabled(env: Mapping[str, str] | None = None)
     optional-blocking seam.
     """
     source = os.environ if env is None else env
-    return _is_true(source.get(MAGI_DOCUMENT_AUTHORING_COVERAGE_ENV))
+    return resolve_document_authoring_coverage_mode(source) != "off"
+
+
+DOCUMENT_AUTHORING_COVERAGE_MODES = ("off", "advisory", "block")
+
+
+def resolve_document_authoring_coverage_mode(env: Mapping[str, str] | None = None) -> str:
+    """Resolve the 3-state document-coverage gate mode (14-PR3, C11).
+
+    Returns one of ``off`` | ``advisory`` | ``block``. This generalizes the
+    historical boolean ``MAGI_DOCUMENT_AUTHORING_COVERAGE`` flag so the hosted
+    control-stage overlay can promote the gate gradually (``off`` -> ``advisory``
+    -> ``block``) instead of flipping straight to a hard block, which is the
+    highest false-block risk in the C11 cluster.
+
+    Resolution (all case/whitespace-insensitive):
+
+    * unset / empty / ``0`` / falsy   -> ``off``
+    * legacy truthy (``1``/``true``/``yes``/``on``) -> ``block`` (back-compat:
+      the old boolean ON meant hard-block)
+    * explicit ``off`` / ``advisory`` / ``block`` -> that mode
+    * anything else (typo) -> ``off`` (fail safe: never silently hard-block)
+
+    In ``advisory`` mode the verifier bus still computes the failed-coverage
+    count (for telemetry / false-block-rate measurement) but the engine does not
+    let it flip the pre-final decision to ``block``.
+    """
+    source = os.environ if env is None else env
+    raw = (source.get(MAGI_DOCUMENT_AUTHORING_COVERAGE_ENV) or "").strip().lower()
+    if not raw:
+        return "off"
+    if raw in DOCUMENT_AUTHORING_COVERAGE_MODES:
+        return raw
+    if _is_true(raw):
+        return "block"
+    return "off"
 
 
 MAGI_CONTROL_STAGE_ENV = "MAGI_CONTROL_STAGE"
@@ -2077,6 +2112,29 @@ def plan_act_gate_enabled(env: Mapping[str, str] | None = None) -> bool:
     return _is_true(env.get("MAGI_PLAN_ACT_GATE_ENABLED"))
 
 
+def plan_mode_tools_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Return True when the manifest-routed plan-mode tools are explicitly enabled.
+
+    Single source of truth for ``MAGI_PLAN_MODE_TOOLS_ENABLED`` (inventory B14 /
+    doc 12 PR2). This gate advertises the catalog ``AskUserQuestion`` /
+    ``EnterPlanMode`` / ``ExitPlanMode`` tools to the model by routing them to
+    their EXISTING General-Automation implementations
+    (:mod:`magi_agent.harness.general_automation.question_tool` /
+    :mod:`~magi_agent.harness.general_automation.plan_act_switch`).
+
+    Like :func:`plan_act_gate_enabled` this is a **strict default-OFF** gate: it
+    never defaults ON in the full runtime profile and flips to ``True`` only for
+    an explicit truthy value (``"1"``/``"true"``/``"yes"``/``"on"``). When OFF
+    the three tools stay manifest-only (no handler bound, not advertised), so
+    exposure is byte-identical to ``main``.
+    """
+    if env is None:
+        import os as _os
+
+        env = _os.environ
+    return _is_true(env.get("MAGI_PLAN_MODE_TOOLS_ENABLED"))
+
+
 def is_message_cache_enabled(env: Mapping[str, str] | None = None) -> bool:
     """Single source of truth for the message-tail prompt-cache flag.
 
@@ -2150,6 +2208,44 @@ def permission_scope_from_mode_enabled(env: Mapping[str, str] | None = None) -> 
     """
     source = os.environ if env is None else env
     return _is_true(source.get(MAGI_PERMISSION_SCOPE_FROM_MODE_ENV))
+
+
+MAGI_CONTROL_STORE_DURABLE_ENV = "MAGI_CONTROL_STORE_DURABLE"
+MAGI_CONTROL_STORE_PATH_ENV = "MAGI_CONTROL_STORE_PATH"
+
+
+def control_store_durable_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Single source of truth for the durable ControlRequestStore gate (A7).
+
+    Default OFF (strict truthy opt-in: "1"/"true"/"yes"/"on"). When OFF the CLI
+    permission gate keeps using the volatile in-memory
+    :class:`magi_agent.runtime.control.ControlRequestStore` — byte-identical to
+    before, and pending approvals are lost on process exit. When ON, the gate
+    swaps in
+    :class:`magi_agent.runtime.durable_control_store.DurableControlRequestStore`,
+    which appends every lifecycle mutation to an append-only JSONL log and
+    replays it on startup so out-of-band / always-on approvals survive a
+    restart. Like ``permission_scope_from_mode_enabled`` this is an additive,
+    default-disabled seam and deliberately does NOT follow the runtime-profile
+    default-ON convention.
+    """
+    source = os.environ if env is None else env
+    return _is_true(source.get(MAGI_CONTROL_STORE_DURABLE_ENV))
+
+
+def control_store_durable_path(env: Mapping[str, str] | None = None) -> Path | None:
+    """Resolve the JSONL log path for the durable ControlRequestStore.
+
+    Returns ``None`` when ``MAGI_CONTROL_STORE_PATH`` is unset/blank so the
+    caller can fall back to its own default location. The path is returned
+    as-is (not created) — the durable store creates parent directories lazily
+    on first write.
+    """
+    source = os.environ if env is None else env
+    raw = (source.get(MAGI_CONTROL_STORE_PATH_ENV) or "").strip()
+    if not raw:
+        return None
+    return Path(raw)
 
 
 MAGI_COMPOSIO_DISPATCH_ENFORCED_ENV = "MAGI_COMPOSIO_DISPATCH_ENFORCED"
