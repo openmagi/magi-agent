@@ -2812,10 +2812,15 @@ async def _run_live_chat_runner(
         cost_owner_waiver=generation_config.cost_owner_waiver,
     )
     if reservation.status != "reserved":
+        failure_reason = (
+            "counter_duplicate_replay"
+            if reservation.status == "duplicate_replay"
+            else f"counter_{reservation.reason}"
+        )
         return _fallback_response(
             status_code=503,
             status="python_disabled",
-            reason=f"counter_{reservation.reason}",
+            reason=failure_reason,
             runtime=runtime,
             counter_state=reservation.counter_state,
             counter_status=reservation.status,
