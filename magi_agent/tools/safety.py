@@ -10,7 +10,7 @@ from typing import Literal
 from pydantic import ValidationError
 
 from .context import ToolContext
-from .manifest import RuntimeMode, ToolManifest
+from .manifest import RuntimeMode, ToolManifest, ToolSource
 from .read_ledger import ReadLedger, WorkspaceMutationReadCheck, WorkspaceMutationReadDecision
 
 
@@ -333,6 +333,94 @@ class RuntimePermissionArbiter:
             scope=scope,
             policy_handled=False,
         )
+
+    def decide_external_mcp_call(
+        self,
+        tool_name: str,
+        arguments: dict[str, object],
+        context: ToolContext,
+        *,
+        mode: RuntimeMode,
+    ) -> RuntimeSafetyDecision:
+        """Hard-safety check for a manifest-less external MCP tool call (composio).
+
+        External MCP tools (e.g. composio) are not registered in the runtime
+        registry and therefore never carry a :class:`ToolManifest`, so the
+        manifest-keyed branches in :meth:`decide` (Bash / FileWrite / ...) never
+        fire for them. Without this seam composio calls bypass the secret /
+        sealed / workspace-escape invariants entirely (the security surface this
+        method closes).
+
+        A synthetic ``net`` external manifest stands in for the call, and every
+        string argument that looks like a filesystem path (either a known
+        path-arg name or anything resembling a path) is run through the same
+        :func:`_classify_path` used by the native file tools. The FIRST deny
+        wins. When no argument resolves to a denied path the call is allowed —
+        deliberately conservative-but-not-blocking, matching the default-OFF
+        seam contract (policy/approval stays with the agent-level policy gate).
+        """
+        manifest = _external_mcp_manifest(tool_name)
+        scope = _resolve_scope(context, runtime_mode=mode)
+
+        for candidate in _external_mcp_path_candidates(arguments):
+            path_decision = _classify_path(candidate, mutating=True, scope=scope)
+            if path_decision.action == "deny":
+                return _decision_for_path(
+                    path_decision, manifest, mode=mode, scope=scope
+                )
+
+        return _decision(
+            "allow",
+            manifest,
+            mode=mode,
+            reason_code="external_mcp_workspace_safe",
+            scope=scope,
+        )
+
+
+def _external_mcp_manifest(tool_name: str) -> ToolManifest:
+    """Best-effort synthetic manifest for a manifest-less external MCP tool.
+
+    Conservative defaults per plan 09 (PR2): ``permission=net``,
+    ``dangerous=False``. Used solely to satisfy the metadata shape of the
+    hard-safety decision helpers; it is NOT registered and grants no authority.
+    """
+    safe_name = tool_name if isinstance(tool_name, str) and tool_name else "external-mcp-tool"
+    return ToolManifest(
+        name=safe_name,
+        description="external MCP tool (synthetic hard-safety manifest)",
+        kind="external",
+        source=ToolSource(kind="external", package="composio"),
+        permission="net",
+        inputSchema={"type": "object"},
+        timeoutMs=60_000,
+    )
+
+
+def _external_mcp_path_candidates(arguments: dict[str, object]) -> tuple[str, ...]:
+    """Best-effort path-like string args from a manifest-less external tool call.
+
+    Includes the known native path-arg names plus any other string value that
+    *looks like* a path. Non-string / nested values are ignored — the arbiter
+    only constrains filesystem reach, not arbitrary payload content.
+    """
+    seen: set[str] = set()
+    candidates: list[str] = []
+
+    def _add(value: object) -> None:
+        if isinstance(value, str) and value and value not in seen:
+            seen.add(value)
+            candidates.append(value)
+
+    for name in _PATH_ARG_NAMES:
+        _add(arguments.get(name))
+    for key, value in arguments.items():
+        if key in _PATH_ARG_NAMES:
+            continue
+        if isinstance(value, str) and _looks_like_path(value):
+            _add(value)
+
+    return tuple(candidates)
 
 
 def _child_agent_decision(
