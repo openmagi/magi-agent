@@ -1967,7 +1967,10 @@ class MagiEngineDriver:
             phase=phase,
             route=route,
         )
-        return {
+        intent_bindings = compile_intent_bindings(
+            assembly, enabled=_recipe_intent_binding_enabled()
+        )
+        selection: dict[str, object] = {
             "schemaVersion": "openmagi.localRunnerRouteSelection.v1",
             "source": "recipe-materializer.phase-routing",
             "phase": phase,
@@ -1992,6 +1995,9 @@ class MagiEngineDriver:
                 "externalIntegrationAttached": False,
             },
         }
+        if intent_bindings:
+            selection["intentBindings"] = intent_bindings
+        return selection
 
     @staticmethod
     def _runner_policy_route_block_payload(
@@ -2424,6 +2430,7 @@ _CANCELLED = _Sentinel("adk_stream_cancelled")
 _MISSING = _Sentinel("missing")
 _RUNNER_POLICY_ROUTING_ENV = "MAGI_RUNNER_POLICY_ROUTING_ENABLED"
 _RUNNER_POLICY_ROUTE_BLOCKING_ENV = "MAGI_RUNNER_POLICY_ROUTE_BLOCKING_ENABLED"
+_RECIPE_INTENT_BINDING_ENV = "MAGI_RECIPE_INTENT_BINDING_ENABLED"
 _CODING_PHASES = frozenset(
     {"code_search", "patch_planning", "patch_generation", "test_interpretation"}
 )
@@ -2512,6 +2519,60 @@ def _runner_policy_route_blocking_enabled() -> bool:
     if raw is None:
         return False
     return raw.strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _recipe_intent_binding_enabled() -> bool:
+    """Whether emit-only recipe intents bind to hint-level runner effects.
+
+    Stage gate for doc 05 PR-3 (A1-G2). The code-level default stays OFF, so the
+    emitted runner-policy route selection is byte-identical to origin/main unless
+    an operator opts in. See ``parse_recipe_intent_binding_enabled``.
+    """
+    import os
+
+    raw = os.environ.get(_RECIPE_INTENT_BINDING_ENV)
+    if raw is None:
+        return False
+    return raw.strip().lower() not in {"0", "false", "no", "off"}
+
+
+def compile_intent_bindings(
+    assembly: RunnerPolicyAssembly,
+    *,
+    enabled: bool,
+) -> dict[str, object]:
+    """Bind the four emit-only recipe intent families to hint-level effects.
+
+    ``provider_intents`` / ``channel_intents`` / ``artifact_intents`` /
+    ``scheduler_intents`` are materialized as public-payload metadata but, unlike
+    ``tool_intents``, have no consumer driving a runner effect. This compiles them
+    into a hint-level binding payload that downstream seams (model selection,
+    channel delivery, pre-final artifact requirements, the 03-always-on
+    scheduler) can read.
+
+    The binding is intentionally *hint* level: it never asserts production-write
+    authority and never hard-forces a model/channel/provider (open-decision §6-2:
+    hint, not force; hard enforcement deferred to 14-controlplane).
+
+    When ``enabled`` is False this returns ``{}`` so the caller's emitted payload
+    stays byte-identical to origin/main.
+    """
+    if not enabled:
+        return {}
+    bindings: dict[str, object] = {
+        "schemaVersion": "magi.recipeIntentBinding.v1",
+        "enforcement": "hint",
+        "productionWriteAllowed": False,
+    }
+    if assembly.provider_intents:
+        bindings["providerPreferenceHints"] = list(assembly.provider_intents)
+    if assembly.channel_intents:
+        bindings["channelDeliveryHints"] = list(assembly.channel_intents)
+    if assembly.artifact_intents:
+        bindings["artifactDeliveryRequirements"] = list(assembly.artifact_intents)
+    if assembly.scheduler_intents:
+        bindings["schedulerReadinessHints"] = list(assembly.scheduler_intents)
+    return bindings
 
 
 def _phase_routes(phase_routing: Mapping[str, object]) -> dict[str, Mapping[str, object]]:
