@@ -1193,6 +1193,7 @@ graph LR
 | __init__.py | Research-layer contracts for first-party local harnesses. | — | — |
 | acceptance_criteria.py | — | — | research/child_roles.py, research/evidence_graph.py, research/policy_pack.py, research/repair.py |
 | action_claims.py | — | runtime_issuance | research/boundary_enforcement.py, research/child_roles.py, research/evidence_graph.py, research/final_projection_gate.py, research/policy_pack.py |
+| answer_policy.py | Answer Policy — configurable commit-vs-abstain seam (first-party, P6). | — | — |
 | answer_verifier.py | Answer Verifier — value-level verification against already-gathered evidence. | answer_verifier_checks | benchmarks/gaia/answer_verifier_plugin.py, research/answer_verifier_checks.py |
 | answer_verifier_checks.py | Answer Verifier Checks — detect type, build prompt, parse response, safety guards. | answer_verifier | benchmarks/gaia/answer_verifier_plugin.py, research/answer_verifier.py |
 | boundary_enforcement.py | — | action_claims, evidence_graph, runtime_issuance | research/final_projection_gate.py |
