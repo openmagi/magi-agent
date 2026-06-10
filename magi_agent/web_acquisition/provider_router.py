@@ -126,6 +126,10 @@ class WebAcquisitionProviderRouter:
     ) -> WebAcquisitionProviderResult:
         """Run the request through the provider chain with retry + fallback.
 
+        Fail-soft: any unexpected exception from the provider pack or internal
+        routing logic is caught here and returned as an exhausted result rather
+        than propagating to the caller.
+
         Parameters
         ----------
         request:
@@ -134,6 +138,21 @@ class WebAcquisitionProviderRouter:
             Internal hook.  Set to ``False`` in tests to skip ``time.sleep``
             without monkeypatching.
         """
+        try:
+            return self._run_inner(request, _sleep=_sleep)
+        except Exception:
+            return _exhausted_result(
+                request,
+                reason_codes=("router_unexpected_error",),
+            )
+
+    def _run_inner(
+        self,
+        request: WebAcquisitionProviderRequest,
+        *,
+        _sleep: bool = True,
+    ) -> WebAcquisitionProviderResult:
+        """Inner routing logic — separated so the outer ``run`` can catch all exceptions."""
         if not self.config.enabled:
             return _disabled_result(request)
 

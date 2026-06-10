@@ -807,6 +807,54 @@ class LocalChildRunnerBoundary:
                 diagnostics=diagnostics,
             )
         diagnostics["liveChildRunnerCalled"] = True
+
+        # Runtime-issued acceptance GATE: prove the runtime boundary (not the
+        # child) authored the acceptance before the result crosses back. Same
+        # token-validated flow the ADK-shadow path uses; the sanitised summary is
+        # still returned below so the child's usable work product reaches the
+        # parent. (Refs are runtime-derived here; sourcing them from a real child
+        # turn ledger is a follow-up.)
+        child_execution_id = (
+            f"child-exec-{_digest(f'{request.parent_execution_id}:{request.task_id}')}"
+        )
+        receipt_ref = (
+            f"receipt:{_digest(f'{request.parent_execution_id}:{request.task_id}:receipt')}"
+        )
+        audit_ref = (
+            f"audit:{_digest(f'{request.parent_execution_id}:{request.task_id}:live-child')}"
+        )
+        acceptance_envelope = _runtime_child_acceptance_envelope(
+            request,
+            child_execution_id=child_execution_id,
+            receipt_ref=receipt_ref,
+            audit_ref=audit_ref,
+            prompt_ref=prompt_ref,
+        )
+        policy = _runtime_child_acceptance_policy(
+            request,
+            child_execution_id=child_execution_id,
+            receipt_ref=receipt_ref,
+            audit_ref=audit_ref,
+        )
+        verdict = accept_real_child_envelope(
+            acceptance_envelope,
+            receipt_ref=receipt_ref,
+            policy=policy,
+        )
+        diagnostics["childAcceptanceStatus"] = verdict.status
+        diagnostics["childAcceptanceReason"] = ",".join(verdict.reason_codes)
+        if verdict.status != "accepted":
+            return _result(
+                request,
+                prompt_ref,
+                "blocked",
+                error_code="live_child_acceptance_rejected",
+                diagnostics=diagnostics,
+            )
+        diagnostics["childAcceptanceAcceptedEvidenceCount"] = len(
+            verdict.accepted_evidence_refs
+        )
+
         return ChildRunnerResult(
             status="ok",
             taskId=request.task_id,
