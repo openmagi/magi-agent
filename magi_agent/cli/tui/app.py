@@ -955,10 +955,14 @@ class MagiTuiApp(App[None]):
         # the dim indented line so lifecycle events (started → completed/failed)
         # for the SAME taskId coalesce into ONE updating line. Reset per turn.
         self._subagent_handles: dict[str, object] = {}
-        # Keybindings: defaults-only (no user keybindings.json wired in v1).
-        # load_keybindings(None) never raises and returns the built-in keymap.
-        # VIM mode + hot-reload are explicitly DEFERRED to v1.1.
-        self._key_bindings: list[ParsedBinding] = load_keybindings(None)[0]
+        # Keybindings: defaults merged with the user's ``keybindings.json`` if one
+        # exists under the CLI config root (PR4.4). ``load_keybindings`` never
+        # raises — a missing/malformed file or an unknown action degrades to
+        # defaults, so the app always has a usable keymap. VIM mode + hot-reload
+        # remain DEFERRED to v1.1.
+        self._key_bindings: list[ParsedBinding] = load_keybindings(
+            self._keybindings_path()
+        )[0]
         self._pending: tuple[Keystroke, ...] | None = None
         # The permission sink the engine's gate can race (Stream C/F wire it in).
         self.sink: TextualSink = TextualSink(self)
@@ -1003,6 +1007,23 @@ class MagiTuiApp(App[None]):
         import os  # noqa: PLC0415
 
         return os.environ.get("MAGI_TUI_LEGACY_RICHLOG", "") == "1"
+
+    @staticmethod
+    def _keybindings_path() -> str | None:
+        """Resolve the user keybindings config path, or ``None`` if absent.
+
+        Lives at ``<session-root>/keybindings.json`` where ``<session-root>`` is
+        ``~/.magi`` by default and overridable via ``MAGI_CLI_SESSION_DIR`` — the
+        SAME root ``session_log.py`` / ``history.py`` / the theme settings use, so
+        a single env isolates the whole CLI config tree in tests. Returns ``None``
+        when no file exists so ``load_keybindings(None)`` short-circuits to the
+        built-in defaults.
+        """
+
+        from magi_agent.cli.session_log import _session_root  # noqa: PLC0415
+
+        path = _session_root() / "keybindings.json"
+        return str(path) if path.exists() else None
 
     # -- composition --------------------------------------------------------
     def compose(self) -> ComposeResult:
