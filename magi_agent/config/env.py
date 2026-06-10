@@ -1747,6 +1747,37 @@ def is_document_authoring_coverage_enabled(env: Mapping[str, str] | None = None)
     return _is_true(source.get(MAGI_DOCUMENT_AUTHORING_COVERAGE_ENV))
 
 
+MAGI_CONTROL_STAGE_ENV = "MAGI_CONTROL_STAGE"
+MAGI_DEPLOYMENT_ENV = "MAGI_DEPLOYMENT"
+
+
+def resolve_control_stage(env: Mapping[str, str] | None = None) -> str:
+    """Single source of truth for the hosted control-stage selector.
+
+    Resolves ``MAGI_CONTROL_STAGE`` (``off|resilience|full|hardgate``), failing
+    safe to ``off`` for unknown/empty values so a typo never silently flips a
+    more aggressive stage. The actual env overlay lives in
+    :mod:`magi_agent.runtime.hosted_defaults`; this helper exists so callers read
+    the flag through ``config/env`` (15-flag-governance P1-6).
+    """
+    source = os.environ if env is None else env
+    from ..runtime.hosted_defaults import resolve_control_stage as _resolve  # noqa: PLC0415
+
+    return _resolve(source)
+
+
+def is_hosted_deployment(env: Mapping[str, str] | None = None) -> bool:
+    """Single source of truth for explicit hosted-deployment detection.
+
+    True only when ``MAGI_DEPLOYMENT=hosted`` is explicitly set. Reverse-detection
+    from the local-dev identity is intentionally avoided (doc 14 open-decision #2).
+    """
+    source = os.environ if env is None else env
+    from ..runtime.hosted_defaults import is_hosted_deployment as _is_hosted  # noqa: PLC0415
+
+    return _is_hosted(source)
+
+
 def is_format_on_write_enabled(env: Mapping[str, str]) -> bool:
     """Single source for the format-after-edit flag.
 

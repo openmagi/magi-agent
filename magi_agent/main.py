@@ -20,6 +20,7 @@ from .evidence.observed_egress import (
     build_gate1a_observed_egress_evidence_provider_from_env,
 )
 from .runtime.openmagi_runtime import OpenMagiRuntime
+from .runtime.hosted_defaults import apply_hosted_runtime_defaults
 from .runtime.local_defaults import (
     LOCAL_FULL_RUNTIME_DEFAULTS_ENABLED_ENV,
     LOCAL_FULL_RUNTIME_ENV_DEFAULTS,
@@ -76,6 +77,12 @@ def main(argv: Sequence[str] | None = None) -> None:
     if _local_runtime_defaults_active(config):
         apply_local_full_runtime_defaults(os.environ)
         _print_local_startup_notice(port)
+    else:
+        # Hosted bots (real bot_id/user_id/gateway_token) never inherit the
+        # local-dev full overlay. Apply the explicit hosted control-stage overlay
+        # instead: no-op unless MAGI_DEPLOYMENT=hosted, and byte-identical to
+        # today at the default stage (off). See runtime/hosted_defaults.py.
+        apply_hosted_runtime_defaults(os.environ)
     runtime = OpenMagiRuntime(config=config)
     runtime.gate5b4c3_shadow_generation_route_config = (
         parse_gate5b4c3_shadow_generation_route_env(os.environ)
