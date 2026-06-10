@@ -19,8 +19,9 @@ The runtime includes dedicated boundary modules that enforce policy at specific 
 - memory/write_boundary.py -- validates memory writes for safety and policy
 - runtime/child_runner_boundary.py -- governs child agent result imports
 - evidence/tool_boundary.py -- validates tool execution and produces evidence records
-- evidence/enforcement_boundary.py -- enforces evidence contract verdicts
 - runtime/activity_boundary.py -- general activity boundary for tool execution
+
+Evidence contract verdicts are enforced on the live output path by the engine pre-final gate (cli/engine.py) via the verifier bus (harness/verifier_bus.py), not by a separate enforcement-boundary module.
 
 ## Delivery and artifact evidence
 
