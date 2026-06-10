@@ -59,6 +59,12 @@
       "group": "Operate"
     },
     {
+      "slug": "default-off-gates",
+      "title": "Default-Off Gates",
+      "path": "docs/default-off-gates.md",
+      "group": "Operate"
+    },
+    {
       "slug": "hooks",
       "title": "Hooks",
       "path": "docs/hooks.md",

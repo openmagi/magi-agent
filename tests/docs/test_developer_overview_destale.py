@@ -52,12 +52,15 @@ def test_developer_overview_reflects_live_adk_invocation() -> None:
     assert "live" in text and "adk" in text
 
 
-def test_developer_overview_marks_default_off_gates_link_planned() -> None:
+def test_developer_overview_default_off_gates_link_is_live() -> None:
     text = DEV_OVERVIEW.read_text(encoding="utf-8")
-    # The /docs/default-off-gates page does not exist yet — the link must be
-    # marked planned so a contributor is not sent to a dead page.
-    if "/docs/default-off-gates" in text:
-        assert "planned" in text.lower()
+    # The /docs/default-off-gates page now exists (PR 15-PR1), so the link must
+    # NOT be tagged "planned, not yet published" — that wording would send a
+    # contributor away from real content.
+    assert "/docs/default-off-gates" in text
+    assert "page planned, not yet published" not in text
+    gates = DEV_OVERVIEW.parents[2] / "docs" / "default-off-gates.md"
+    assert gates.is_file()
 
 
 def test_what_works_today_acknowledges_pre_final_gate_blocks() -> None:

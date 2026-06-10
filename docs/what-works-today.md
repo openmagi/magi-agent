@@ -34,7 +34,7 @@ A scannable map of what the local `magi` CLI can actually do right now, what shi
 
 ### ❌ Planned
 
-- Live enforcement authority attached to real traffic and decisions ("Stage 3").
+- Live enforcement authority attached to real traffic and decisions ("Stage 3"). See [Default-Off Gates](/docs/default-off-gates) for the Stage 1/2/3 definitions and promotion criteria.
 - Additional external authority for managed systems.
 
 [^1]: `magi_agent/cli/wiring.py::_build_default_runner` selects a real model-backed ADK runner when a provider key or `~/.magi/config.toml` is configured (`magi_agent/cli/real_runner.py`), otherwise falls back to the model-free stub (`magi_agent/cli/local_runner.py`).
