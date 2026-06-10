@@ -37,8 +37,8 @@ import os
 from magi_agent.config.env import parse_eval_autonomy_enabled
 
 
-def test_eval_autonomy_parser_default_on():
-    assert parse_eval_autonomy_enabled({}) is True
+def test_eval_autonomy_parser_default_off():
+    assert parse_eval_autonomy_enabled({}) is False
     assert parse_eval_autonomy_enabled({"MAGI_EVAL_AUTONOMY_ENABLED": "0"}) is False
 
 
@@ -74,8 +74,8 @@ from magi_agent.config.env import parse_eval_zero_edit_guard_enabled
 from magi_agent.cli.engine import should_reprompt_for_zero_edits
 
 
-def test_zero_edit_guard_parser_default_on():
-    assert parse_eval_zero_edit_guard_enabled({}) is True
+def test_zero_edit_guard_parser_default_off():
+    assert parse_eval_zero_edit_guard_enabled({}) is False
     assert parse_eval_zero_edit_guard_enabled({"MAGI_EVAL_ZERO_EDIT_GUARD_ENABLED": "0"}) is False
 
 
