@@ -1800,6 +1800,33 @@ def is_hosted_deployment(env: Mapping[str, str] | None = None) -> bool:
     return _is_hosted(source)
 
 
+MAGI_HOSTED_STREAMING_SERVE_ENV = "MAGI_HOSTED_STREAMING_SERVE"
+
+
+def is_hosted_streaming_serve_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Single source of truth for hosted serving over the SSE stream route (08-PR3).
+
+    Default OFF (strict truthy opt-in: "1"/"true"/"yes"/"on"). When OFF the
+    ``/v1/chat/stream`` route is byte-identical to today: a request that does not
+    match the selected gate5b canary gate falls through to the local headless
+    engine path. When ON, the stream route serves with completions-equivalent
+    gating — gate2 sandbox-canary dispatch, honest ``python_disabled`` /
+    ``invalid_authority`` fallback JSON when the canary gate is not active, and
+    no local-engine fallthrough — so hosted chat-proxy can converge onto the
+    streaming route without minting a gate/counter/receipt bypass surface. Like
+    ``is_egress_gate_enabled`` this deliberately does NOT follow the
+    runtime-profile default-ON convention — it is an additive, default-disabled
+    serving mode.
+    """
+    # Delegate to the canonical config.flags registry; registered with a False
+    # default and the strict-truthy parser. Imported lazily to avoid a
+    # config<->flags import cycle.
+    from .flags import flag_bool
+
+    source = os.environ if env is None else env
+    return flag_bool(MAGI_HOSTED_STREAMING_SERVE_ENV, env=source)
+
+
 def is_format_on_write_enabled(env: Mapping[str, str]) -> bool:
     """Single source for the format-after-edit flag.
 
