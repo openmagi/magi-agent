@@ -30,6 +30,7 @@ def test_tool_result_accepts_prd_aliases_and_dumps_prd_wire_shape() -> None:
         "errorCode": None,
         "errorMessage": None,
         "durationMs": 123,
+        "latencyMs": None,
         "artifactRefs": ("artifact-1",),
         "fileRefs": ("workspace/report.md",),
         "deliveryReceipts": ("receipt-1",),
