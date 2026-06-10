@@ -51,3 +51,27 @@ def test_platform_command_selection():
         assert any("wl-paste" in c[0] for c in linux_cmds)
         assert any("xclip" in c[0] for c in linux_cmds)
     assert clipboard_commands("win32") == []
+
+
+import pytest
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        (b"\xff\xd8\xff\xe0" + b"\x00" * 32, "image/jpeg"),
+        (b"GIF89a" + b"\x00" * 32, "image/gif"),
+        (b"GIF87a" + b"\x00" * 32, "image/gif"),
+        (b"RIFF" + b"\x00\x00\x00\x00" + b"WEBP" + b"\x00" * 16, "image/webp"),
+    ],
+)
+def test_detects_media_type_from_magic_bytes(raw, expected):
+    block = read_clipboard_image(runner=lambda cmd: raw, platform="darwin")
+    assert block is not None
+    assert block["source"]["media_type"] == expected
+
+
+def test_riff_non_webp_is_not_treated_as_image():
+    # RIFF container that is NOT WebP (e.g. WAVE audio) must be rejected.
+    raw = b"RIFF" + b"\x00\x00\x00\x00" + b"WAVE" + b"\x00" * 16
+    assert read_clipboard_image(runner=lambda cmd: raw, platform="darwin") is None
