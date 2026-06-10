@@ -1064,7 +1064,7 @@ graph LR
 | native_catalog.py | — | manifest | runtime/openmagi_runtime.py |
 | sandbox_policy.py | — | manifest | connectors/marketplace.py, plugins/__init__.py, plugins/manifest.py |
 | shell_testrun_safe_subset.py | — | — | — |
-| tool_projection.py | — | manager, manifest | runtime/openmagi_runtime.py |
+| tool_projection.py | — | manager, manifest, model | runtime/openmagi_runtime.py |
 
 ### plugins/agentmemory/
 
@@ -1086,12 +1086,12 @@ graph LR
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
 | __init__.py | First-party native plugin tool handlers for the local Magi Agent runtime. | — | — |
-| _common.py | — | context, policy, result | artifacts/file_delivery_live.py, plugins/agentmemory/tools.py, plugins/native/apify.py, plugins/native/artifacts.py, plugins/native/coding.py, plugins/native/documents.py, plugins/native/knowledge.py, plugins/native/missions.py, plugins/native/scheduled_work.py, plugins/native/skills.py, plugins/native/source_ledger.py, plugins/native/subagents.py, plugins/native/taskboard.py, tools/document_write_tools.py |
+| _common.py | — | context, policy, result | artifacts/file_delivery_live.py, plugins/agentmemory/tools.py, plugins/native/apify.py, plugins/native/artifacts.py, plugins/native/coding.py, plugins/native/documents.py, plugins/native/knowledge.py, plugins/native/missions.py, plugins/native/scheduled_work.py, plugins/native/skills.py, plugins/native/source_ledger.py, plugins/native/subagents.py, plugins/native/taskboard.py, tools/document_write/canonical.py, tools/document_write/model.py, tools/document_write/orchestrator.py, tools/document_write_tools.py |
 | apify.py | Apify Actor marketplace tools — REST over api.apify.com. | _common, context, result | — |
 | artifacts.py | — | _common, context, result | — |
 | browser.py | — | context, provider_boundary, result, source_tools | — |
 | coding.py | — | _common, context, result | — |
-| documents.py | — | _common, _file_delivery_fakes, context, contract, document_write_tools, file_delivery, file_delivery_live, policy, result, spreadsheet_tools | — |
+| documents.py | — | _common, _file_delivery_fakes, context, contract, file_delivery, file_delivery_live, orchestrator, result, spreadsheet_tools | — |
 | knowledge.py | — | _common, context, policy, provider_boundary, result, source_tools | — |
 | missions.py | — | _common, context, env, policy, result | — |
 | scheduled_work.py | — | _common, context, env, policy, result | — |
@@ -1193,6 +1193,7 @@ graph LR
 | __init__.py | Research-layer contracts for first-party local harnesses. | — | — |
 | acceptance_criteria.py | — | — | research/child_roles.py, research/evidence_graph.py, research/policy_pack.py, research/repair.py |
 | action_claims.py | — | runtime_issuance | research/boundary_enforcement.py, research/child_roles.py, research/evidence_graph.py, research/final_projection_gate.py, research/policy_pack.py |
+| answer_policy.py | Answer Policy — configurable commit-vs-abstain seam (first-party, P6). | — | — |
 | answer_verifier.py | Answer Verifier — value-level verification against already-gathered evidence. | answer_verifier_checks | benchmarks/gaia/answer_verifier_plugin.py, research/answer_verifier_checks.py |
 | answer_verifier_checks.py | Answer Verifier Checks — detect type, build prompt, parse response, safety guards. | answer_verifier | benchmarks/gaia/answer_verifier_plugin.py, research/answer_verifier.py |
 | boundary_enforcement.py | — | action_claims, evidence_graph, runtime_issuance | research/final_projection_gate.py |
@@ -1475,12 +1476,12 @@ graph LR
 | catalog.py | — | manifest, registry | browser/autonomous/tool.py, gates/gate1a_readonly_tools.py, runtime/openmagi_runtime.py, tools/__init__.py, tools/file_tool_manifests.py, web_acquisition/reference_research_tools.py |
 | concurrency.py | Tool batch partitioning for concurrent execution. | registry | adk_bridge/tool_adapter.py, tools/concurrent_dispatcher.py |
 | concurrent_dispatcher.py | Concurrent tool dispatcher wrapping the base ToolDispatcher. | concurrency, context, manifest, result, trace_context | adk_bridge/tool_adapter.py |
-| context.py | — | session_identity | (root)/facades.py, adk_bridge/tool_adapter.py, browser/autonomous/tool.py, cli/tool_runtime.py, cli/wiring.py, gates/gate1a_readonly_tools.py, gates/gate5b_full_toolhost.py, harness/general_automation/delegation.py, harness/general_automation/live_gate.py, harness/general_automation/plan_act_switch.py, harness/general_automation/question_tool.py, harness/general_automation/recipe_disclosure.py, harness/memory_review.py, harness/memory_write_tool.py, introspection/tool.py, plugins/agentmemory/tools.py, plugins/native/_common.py, plugins/native/apify.py, plugins/native/artifacts.py, plugins/native/browser.py, plugins/native/coding.py, plugins/native/documents.py, plugins/native/knowledge.py, plugins/native/missions.py, plugins/native/scheduled_work.py, plugins/native/skills.py, plugins/native/source_ledger.py, plugins/native/subagents.py, plugins/native/taskboard.py, plugins/native/web.py, shadow/tool_policy.py, tools/archive_tools.py, tools/audio_tools.py, tools/base.py, tools/concurrent_dispatcher.py, tools/core_toolhost.py, tools/dispatcher.py, tools/document_tools.py, tools/document_write_tools.py, tools/image_tools.py, tools/kernel.py, tools/local_readonly.py, tools/music_tools.py, tools/permission.py, tools/safety.py, tools/spreadsheet_tools.py, tools/todo_toolhost.py, tools/video_tools.py, web_acquisition/reference_research_tools.py |
+| context.py | — | session_identity | (root)/facades.py, adk_bridge/tool_adapter.py, browser/autonomous/tool.py, cli/tool_runtime.py, cli/wiring.py, gates/gate1a_readonly_tools.py, gates/gate5b_full_toolhost.py, harness/general_automation/delegation.py, harness/general_automation/live_gate.py, harness/general_automation/plan_act_switch.py, harness/general_automation/question_tool.py, harness/general_automation/recipe_disclosure.py, harness/memory_review.py, harness/memory_write_tool.py, introspection/tool.py, plugins/agentmemory/tools.py, plugins/native/_common.py, plugins/native/apify.py, plugins/native/artifacts.py, plugins/native/browser.py, plugins/native/coding.py, plugins/native/documents.py, plugins/native/knowledge.py, plugins/native/missions.py, plugins/native/scheduled_work.py, plugins/native/skills.py, plugins/native/source_ledger.py, plugins/native/subagents.py, plugins/native/taskboard.py, plugins/native/web.py, shadow/tool_policy.py, tools/archive_tools.py, tools/audio_tools.py, tools/base.py, tools/concurrent_dispatcher.py, tools/core_toolhost.py, tools/dispatcher.py, tools/document_tools.py, tools/document_write/canonical.py, tools/document_write/html.py, tools/document_write/hwpx.py, tools/document_write/model.py, tools/document_write/orchestrator.py, tools/document_write/pdf.py, tools/document_write/text.py, tools/document_write_tools.py, tools/image_tools.py, tools/kernel.py, tools/local_readonly.py, tools/music_tools.py, tools/permission.py, tools/safety.py, tools/spreadsheet_tools.py, tools/todo_toolhost.py, tools/video_tools.py, web_acquisition/reference_research_tools.py |
 | core_toolhost.py | — | context, gate5b_full_toolhost, memory_mode_guard, registry, result | cli/tool_runtime.py, runtime/openmagi_runtime.py, tools/__init__.py |
 | deferred.py | DeferredToolRegistry — threshold-based lazy tool loading. | manifest, registry | adk_bridge/tool_adapter.py |
 | dispatcher.py | — | coding_tool_receipts, context, env, live_gate, manifest, permission, registry, result, schema_validation, trace_context | (root)/facades.py, adk_bridge/tool_adapter.py, cli/tool_runtime.py, cli/wiring.py, gates/gate5b_full_toolhost.py, shadow/tool_policy.py, tools/__init__.py |
 | document_tools.py | DocumentRead tool — extract text from documents in the workspace. | context, result, spreadsheet_tools | tools/document_write_tools.py, tools/file_toolhost.py |
-| document_write_tools.py | DocumentWrite DOCX backend — render markdown source into a ``.docx`` file. | _common, context, document_coverage, document_tools, policy, result | plugins/native/documents.py |
+| document_write_tools.py | DocumentWrite DOCX backend — render markdown source into a ``.docx`` file. | _common, context, document_coverage, document_tools, model, policy, result | tools/document_write/agentic.py, tools/document_write/canonical.py, tools/document_write/orchestrator.py, tools/document_write/pdf.py |
 | event_projection.py | — | kernel, public_events, tool_boundary, tool_preview | tools/kernel.py |
 | file_tool_manifests.py | Manifest declarations for the optional file & multimodal tool suite. | catalog, manifest, registry | cli/tool_runtime.py, cli/wiring.py |
 | file_toolhost.py | Handler bindings for the optional file & multimodal tool suite. | archive_tools, audio_tools, document_tools, image_tools, music_tools, registry, spreadsheet_tools, video_tools | cli/tool_runtime.py, cli/wiring.py |
@@ -1495,7 +1496,7 @@ graph LR
 | permission_scope.py | Mode-derived permission scope resolution (cluster 09 PR1). | manifest | cli/tool_runtime.py, cli/wiring.py |
 | read_ledger.py | — | — | gates/gate5b_full_toolhost.py, introspection/projection.py, introspection/tool.py, recipes/coding_mutation.py, recipes/coding_subagents.py, tools/safety.py, web_acquisition/reference_research_tools.py, workspace/read_ledger.py |
 | registry.py | — | base, manifest | adk_bridge/tool_adapter.py, browser/autonomous/tool.py, cli/readonly_classifier.py, cli/tool_runtime.py, cli/wiring.py, gates/gate1a_readonly_tools.py, gates/gate5b_full_toolhost.py, harness/memory_write_tool.py, introspection/tool.py, runtime/openmagi_runtime.py, tools/__init__.py, tools/catalog.py, tools/concurrency.py, tools/core_toolhost.py, tools/deferred.py, tools/dispatcher.py, tools/file_tool_manifests.py, tools/file_toolhost.py, tools/kernel.py, tools/scheduler.py, tools/todo_toolhost.py, tools/tool_search.py, web_acquisition/reference_research_tools.py |
-| result.py | — | — | (root)/facades.py, browser/autonomous/tool.py, browser/source_tools.py, evidence/coding_tool_receipts.py, evidence/extraction.py, evidence/local_tool_collector.py, gates/gate5b_full_toolhost.py, harness/general_automation/question_tool.py, harness/general_automation/recipe_disclosure.py, harness/memory_write_tool.py, introspection/tool.py, knowledge/source_tools.py, plugins/agentmemory/tools.py, plugins/mcp_adapter.py, plugins/native/_common.py, plugins/native/apify.py, plugins/native/artifacts.py, plugins/native/browser.py, plugins/native/coding.py, plugins/native/documents.py, plugins/native/knowledge.py, plugins/native/missions.py, plugins/native/scheduled_work.py, plugins/native/skills.py, plugins/native/source_ledger.py, plugins/native/subagents.py, plugins/native/taskboard.py, plugins/native/web.py, runtime/approval_resume.py, shadow/patch_file_policy_contract.py, shadow/path_shell_policy_contract.py, shadow/tool_policy.py, shadow/toolhost_contract.py, tools/__init__.py, tools/archive_tools.py, tools/audio_tools.py, tools/base.py, tools/concurrent_dispatcher.py, tools/core_toolhost.py, tools/dispatcher.py, tools/document_tools.py, tools/document_write_tools.py, tools/image_tools.py, tools/kernel.py, tools/local_readonly.py, tools/music_tools.py, tools/output_budget.py, tools/scheduler.py, tools/spreadsheet_tools.py, tools/todo_toolhost.py, tools/video_tools.py, web_acquisition/opencode_provider_router.py, web_acquisition/repo_research_tools.py, web_acquisition/research_tools.py, web_acquisition/tests/test_deep_research_orchestrator.py |
+| result.py | — | — | (root)/facades.py, browser/autonomous/tool.py, browser/source_tools.py, evidence/coding_tool_receipts.py, evidence/extraction.py, evidence/local_tool_collector.py, gates/gate5b_full_toolhost.py, harness/general_automation/question_tool.py, harness/general_automation/recipe_disclosure.py, harness/memory_write_tool.py, introspection/tool.py, knowledge/source_tools.py, plugins/agentmemory/tools.py, plugins/mcp_adapter.py, plugins/native/_common.py, plugins/native/apify.py, plugins/native/artifacts.py, plugins/native/browser.py, plugins/native/coding.py, plugins/native/documents.py, plugins/native/knowledge.py, plugins/native/missions.py, plugins/native/scheduled_work.py, plugins/native/skills.py, plugins/native/source_ledger.py, plugins/native/subagents.py, plugins/native/taskboard.py, plugins/native/web.py, runtime/approval_resume.py, shadow/patch_file_policy_contract.py, shadow/path_shell_policy_contract.py, shadow/tool_policy.py, shadow/toolhost_contract.py, tools/__init__.py, tools/archive_tools.py, tools/audio_tools.py, tools/base.py, tools/concurrent_dispatcher.py, tools/core_toolhost.py, tools/dispatcher.py, tools/document_tools.py, tools/document_write/canonical.py, tools/document_write/orchestrator.py, tools/document_write_tools.py, tools/image_tools.py, tools/kernel.py, tools/local_readonly.py, tools/music_tools.py, tools/output_budget.py, tools/scheduler.py, tools/spreadsheet_tools.py, tools/todo_toolhost.py, tools/video_tools.py, web_acquisition/opencode_provider_router.py, web_acquisition/repo_research_tools.py, web_acquisition/research_tools.py, web_acquisition/tests/test_deep_research_orchestrator.py |
 | safety.py | — | context, env, manifest, read_ledger | cli/wiring.py, tools/permission.py |
 | scheduler.py | — | kernel, manifest, registry, request_ledger, result, schema_validation | — |
 | schema_projection.py | — | — | plugins/mcp_adapter.py, tools/tool_search.py |
@@ -1505,6 +1506,40 @@ graph LR
 | tool_search.py | ToolSearchTool — search the tool registry by keyword or exact name. | manifest, registry, schema_projection | — |
 | video_tools.py | VideoFrames tool — extract frames from a video at timestamps and describe them. | context, image_tools, result, spreadsheet_tools | tools/audio_tools.py, tools/file_toolhost.py |
 | web_search_tools.py | Fast direct web tools — Brave Search + Firecrawl fetch. | — | — |
+
+### tools/document_write/
+
+| Module | Purpose | Depends On | Depended By |
+|---|---|---|---|
+| __init__.py | First-party DocumentWrite implementation package. | model | tools/document_write/orchestrator.py |
+| agentic.py | — | document_write_tools, hwpx, model | — |
+| canonical.py | — | _common, context, document_write_tools, html, model, result | tools/document_write/orchestrator.py |
+| html.py | — | context, markdown, model | tools/document_write/canonical.py, tools/document_write/orchestrator.py |
+| hwpx.py | — | context, markdown, model | tools/document_write/agentic.py, tools/document_write/orchestrator.py |
+| markdown.py | — | — | tools/document_write/html.py, tools/document_write/hwpx.py, tools/document_write/text.py |
+| model.py | — | _common, context, policy | plugins/tool_projection.py, tools/document_write/__init__.py, tools/document_write/agentic.py, tools/document_write/canonical.py, tools/document_write/html.py, tools/document_write/hwpx.py, tools/document_write/orchestrator.py, tools/document_write/pdf.py, tools/document_write/text.py, tools/document_write_tools.py |
+| orchestrator.py | — | _common, canonical, context, document_write, document_write_tools, html, hwpx, model, pdf, result, text | plugins/native/documents.py |
+| pdf.py | — | context, document_write_tools, model | tools/document_write/orchestrator.py |
+| text.py | — | context, markdown, model | tools/document_write/orchestrator.py |
+
+### tools/document_write/hwpx_runtime/scripts/
+
+| Module | Purpose | Depends On | Depended By |
+|---|---|---|---|
+| analyze_template.py | analyze_template.py — HWPX 문서 구조 심층 분석 | — | — |
+| build_hwpx.py | Build an HWPX document from templates and XML overrides. | — | — |
+| content_guard.py | Guard HWPX output against empty/template-only documents. | — | — |
+| create_document.py | Create an HWPX document from Markdown or JSON input. | — | — |
+| page_guard.py | page_guard.py - HWPX 레퍼런스 대비 페이지 드리프트 위험 검사 | — | — |
+| text_extract.py | Extract text from an HWPX document. | — | — |
+| validate.py | Validate the structural integrity of an HWPX file. | — | — |
+
+### tools/document_write/hwpx_runtime/scripts/office/
+
+| Module | Purpose | Depends On | Depended By |
+|---|---|---|---|
+| pack.py | Pack a directory back into an HWPX (ZIP) file. | — | — |
+| unpack.py | Unpack an HWPX file into a directory with pretty-printed XML. | — | — |
 
 ### transport/
 
@@ -1555,7 +1590,7 @@ graph LR
 | live_provider_pack.py | — | policy, provider_execution, provider_receipts | web_acquisition/provider_router.py, web_acquisition/research_tools.py, web_acquisition/tests/test_deep_research_orchestrator.py |
 | opencode_provider_router.py | — | policy, provider_boundary, research_tools, result | — |
 | page_navigator.py | Page content navigator for deep web research. | — | web_acquisition/cross_verifier.py, web_acquisition/deep_research.py, web_acquisition/tests/test_cross_verifier.py, web_acquisition/tests/test_page_navigator.py |
-| policy.py | — | — | browser/autonomous/safety_hooks.py, browser/autonomous/tool.py, browser/live_provider_pack.py, browser/provider_boundary.py, browser/source_tools.py, harness/general_automation/web_source_receipts.py, knowledge/source_tools.py, plugins/agentmemory/tools.py, plugins/native/_common.py, plugins/native/documents.py, plugins/native/knowledge.py, plugins/native/missions.py, plugins/native/scheduled_work.py, recipes/first_party/general_automation/web_acquisition_contracts.py, tools/document_write_tools.py, web_acquisition/acquisition_plan.py, web_acquisition/cross_verifier.py, web_acquisition/live_fetch_provider.py, web_acquisition/live_provider_pack.py, web_acquisition/opencode_provider_router.py, web_acquisition/provider_boundary.py, web_acquisition/provider_router.py, web_acquisition/providers/insane_fetch.py, web_acquisition/providers/jina_reader.py, web_acquisition/providers/platform_endpoint.py, web_acquisition/repo_research_tools.py, web_acquisition/research_tools.py |
+| policy.py | — | — | browser/autonomous/safety_hooks.py, browser/autonomous/tool.py, browser/live_provider_pack.py, browser/provider_boundary.py, browser/source_tools.py, harness/general_automation/web_source_receipts.py, knowledge/source_tools.py, plugins/agentmemory/tools.py, plugins/native/_common.py, plugins/native/knowledge.py, plugins/native/missions.py, plugins/native/scheduled_work.py, recipes/first_party/general_automation/web_acquisition_contracts.py, tools/document_write/model.py, tools/document_write_tools.py, web_acquisition/acquisition_plan.py, web_acquisition/cross_verifier.py, web_acquisition/live_fetch_provider.py, web_acquisition/live_provider_pack.py, web_acquisition/opencode_provider_router.py, web_acquisition/provider_boundary.py, web_acquisition/provider_router.py, web_acquisition/providers/insane_fetch.py, web_acquisition/providers/jina_reader.py, web_acquisition/providers/platform_endpoint.py, web_acquisition/repo_research_tools.py, web_acquisition/research_tools.py |
 | provider_boundary.py | — | policy | web_acquisition/__init__.py, web_acquisition/opencode_provider_router.py, web_acquisition/research_tools.py |
 | provider_router.py | Default-off provider router with retry and fallback for live web acquisition. | live_provider_pack, policy, provider_receipts | web_acquisition/__init__.py, web_acquisition/research_tools.py |
 | query_planner.py | Rule-based query planner for deep web research. | deep_research_config | web_acquisition/deep_research.py, web_acquisition/tests/test_query_planner.py |
