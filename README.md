@@ -9,6 +9,7 @@
 [Releases](https://github.com/openmagi/magi-agent/releases)
 
 ![status](https://img.shields.io/badge/status-early%20beta-f97316)
+![ci](https://github.com/openmagi/magi-agent/actions/workflows/ci.yml/badge.svg)
 ![install](https://img.shields.io/badge/install-Homebrew-2563eb)
 ![cli](https://img.shields.io/badge/CLI-magi-7c3aed)
 ![dashboard](https://img.shields.io/badge/dashboard-local-16a34a)

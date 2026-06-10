@@ -1,13 +1,12 @@
 """Real ADK-backed engine driver for the Magi headless CLI (PR-A2).
 
 ``MagiEngineDriver`` implements the :class:`EngineDriver` Protocol from
-``cli.contracts``. It drives a single turn through the ADK runner using the same
-adapter + bridge wiring as
-``runtime.runner_session_boundary._collect_runner_events`` (the reference
-implementation), but YIELDS each projected public event incrementally as a
-``RuntimeEvent`` instead of accumulating-then-returning. The terminal
-``EngineResult`` is delivered as the FINAL yielded item, per the consumption
-convention documented in ``cli.contracts``.
+``cli.contracts``. It is the production runner-driving path: it drives a
+single turn through the ADK runner via the adapter + bridge wiring and YIELDS
+each projected public event incrementally as a ``RuntimeEvent`` instead of
+accumulating-then-returning. The terminal ``EngineResult`` is delivered as the
+FINAL yielded item, per the consumption convention documented in
+``cli.contracts``.
 
 Import-cleanliness
 ------------------
@@ -396,8 +395,8 @@ def build_output_continuation_config(
     )
 
 
-# A sane default cap so a runaway stream can't yield forever. Mirrors the spirit
-# of RunnerSessionBoundaryConfig.max_event_count but headless can tolerate more.
+# A sane default cap so a runaway stream can't yield forever; headless can
+# tolerate a generous bound on ADK events consumed per turn.
 _DEFAULT_MAX_EVENT_COUNT = 4096
 
 

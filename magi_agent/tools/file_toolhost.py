@@ -24,8 +24,9 @@ def bind_file_toolhost_handlers(registry: "ToolRegistry") -> tuple[str, ...]:
 
     Returns the names of tools successfully bound.
     """
-    from .spreadsheet_tools import xlsx_read  # noqa: PLC0415
-    from .document_tools import document_read  # noqa: PLC0415
+    from .spreadsheet_tools import xlsx_read, xlsx_info  # noqa: PLC0415
+    from .document_tools import document_read, document_search  # noqa: PLC0415
+    from .archive_tools import archive_extract  # noqa: PLC0415
     from .image_tools import image_understand  # noqa: PLC0415
     from .audio_tools import audio_transcribe  # noqa: PLC0415
     from .video_tools import video_frames  # noqa: PLC0415
@@ -33,7 +34,10 @@ def bind_file_toolhost_handlers(registry: "ToolRegistry") -> tuple[str, ...]:
 
     _handlers: dict[str, object] = {
         "XLSXRead": xlsx_read,
+        "XLSXInfo": xlsx_info,
         "DocumentRead": document_read,
+        "DocumentSearch": document_search,
+        "ArchiveExtract": archive_extract,
         "ImageUnderstand": image_understand,
         "AudioTranscribe": audio_transcribe,
         "VideoFrames": video_frames,

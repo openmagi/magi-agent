@@ -10,6 +10,24 @@ The previous implementation tried to probe the ADK ``ToolContext`` for a
 the stub string ``"[vision model not available in this context]"``.  This
 module replaces that approach with a direct ``litellm.completion`` call so
 vision actually works.
+
+Structured extraction mode
+--------------------------
+Pass ``mode="structured"`` (or ``"extract"``) to ask the vision model to
+return *exact* data — numbers, table rows, coordinates, labels — in a clean
+machine-parseable form rather than prose.  This is critical for computation
+tasks (e.g. GAIA-style questions like "area of the green polygon", "average of
+the red numbers in the table") where prose descriptions cause mis-computation.
+
+Optionally pass ``verify=True`` to fire a second vision call that asks the
+model to confirm the extracted values against the original image.  This is
+disabled by default to control cost.
+
+Valid values for ``mode``:
+- ``"prose"`` (default, or omit) — unchanged prose description behaviour.
+- ``"structured"`` / ``"extract"`` — structured extraction.
+
+Any other value returns a ``blocked`` result with ``invalid_mode`` reason.
 """
 
 from __future__ import annotations
@@ -32,6 +50,26 @@ from .spreadsheet_tools import (
 _MAX_IMAGE_BYTES = 5 * 1024 * 1024  # 5 MiB
 _DEFAULT_PROMPT = "Describe this image in detail."
 
+# Prompt injected for structured extraction — demands exact data, no prose.
+_STRUCTURED_EXTRACTION_PROMPT = (
+    "Extract all visible data from this image exactly as it appears. "
+    "Transcribe every number, label, table cell, coordinate, and measurement verbatim — "
+    "do not summarize, do not paraphrase, do not omit any value. "
+    "If there is a table, output each row and column. "
+    "If there are numbers or measurements, list them all. "
+    "If there are polygon vertices or coordinates, list every point. "
+    "Return the result as structured data (JSON-style or clearly delimited), NOT as prose."
+)
+
+# Prompt for the optional verify pass — asks the model to confirm extracted values.
+_VERIFY_PROMPT_TEMPLATE = (
+    "Here is the structured data that was extracted from the image:\n\n{extracted}\n\n"
+    "Please verify that every value listed above matches what you can see in the image. "
+    "Correct any misread digit, label, or coordinate, and confirm or revise the output."
+)
+
+_VALID_MODES: frozenset[str] = frozenset({"prose", "structured", "extract"})
+
 _MIME_BY_EXT: dict[str, str] = {
     ".png": "image/png",
     ".jpg": "image/jpeg",
@@ -45,18 +83,41 @@ _MIME_BY_EXT: dict[str, str] = {
 def image_understand(arguments: Mapping[str, object], context: ToolContext) -> ToolResult:
     """Describe or answer a question about an image file in the workspace.
 
+    Parameters
+    ----------
+    arguments:
+        ``path``   — workspace-relative path to the image file (required).
+        ``prompt`` — user question or instruction (used in prose mode only).
+        ``mode``   — extraction mode:
+                     * ``"prose"`` (default) — returns a natural-language description.
+                     * ``"structured"`` / ``"extract"`` — returns exact data (numbers,
+                       table cells, coordinates, labels) in a structured/JSON form.
+        ``verify`` — when ``True`` and ``mode="structured"``, fires a second vision
+                     call to confirm the extracted values against the image.
+                     Disabled by default.
+
     The handler reads image bytes from the workspace, injects them as multipart
     ``inline_data`` content into the ADK session model, and returns the model's
-    description in ``output["description"]``.
-
-    When ``context.adk_tool_context`` is absent (unit-test mode), returns a
-    stub description so tests can verify path/extension/size logic without a
-    live model call.
+    description in ``output["description"]`` (prose mode) or
+    ``output["extracted_data"]`` (structured mode).
     """
     tool_name = "image_understand"
     path_text = _str_arg(arguments, "path")
     if path_text is None:
         return _blocked_result(tool_name, "path_required")
+
+    # Validate mode early so we don't do expensive I/O for an invalid request.
+    mode_raw = _str_arg(arguments, "mode") or "prose"
+    if mode_raw not in _VALID_MODES:
+        return _blocked_result(
+            tool_name,
+            "invalid_mode",
+            f"mode must be one of: {', '.join(sorted(_VALID_MODES))}; got {mode_raw!r}",
+        )
+    is_structured = mode_raw in {"structured", "extract"}
+
+    verify_flag = arguments.get("verify")
+    do_verify = bool(verify_flag) if verify_flag is not None else False
 
     try:
         root = _workspace_root(context)
@@ -89,6 +150,56 @@ def image_understand(arguments: Mapping[str, object], context: ToolContext) -> T
         return _error_result(tool_name, "image_read_failed")
 
     content_digest = f"sha256:{hashlib.sha256(image_bytes).hexdigest()}"
+
+    if is_structured:
+        # Structured extraction: ignore user prompt, use the structured prompt.
+        extraction_prompt = _STRUCTURED_EXTRACTION_PROMPT
+        extracted_data = _call_vision_model(
+            image_bytes=image_bytes,
+            mime_type=mime_type,
+            prompt=extraction_prompt,
+            adk_tool_context=context.adk_tool_context,
+        )
+
+        verify_output: str | None = None
+        if do_verify:
+            verify_prompt = _VERIFY_PROMPT_TEMPLATE.format(extracted=extracted_data)
+            verify_output = _call_vision_model(
+                image_bytes=image_bytes,
+                mime_type=mime_type,
+                prompt=verify_prompt,
+                adk_tool_context=context.adk_tool_context,
+            )
+
+        output: dict[str, object] = {
+            "extracted_data": extracted_data,
+            "mode": "structured",
+            "contentDigest": content_digest,
+        }
+        if verify_output is not None:
+            output["verifyOutput"] = verify_output
+
+        return ToolResult(
+            status="ok",
+            output=output,
+            llmOutput=output,
+            transcriptOutput={
+                "toolName": tool_name,
+                "contentDigest": content_digest,
+                "byteCount": byte_size,
+                "mode": "structured",
+            },
+            metadata={
+                **_base_metadata(tool_name, permission_class="read", mutates_workspace=False),
+                "contentDigest": content_digest,
+                "byteCount": byte_size,
+                "mimeType": mime_type,
+                "pathRef": resolved.path_ref,
+                "mode": "structured",
+            },
+        )
+
+    # Default prose mode — unchanged behaviour.
     prompt = _str_arg(arguments, "prompt") or _DEFAULT_PROMPT
 
     description = _call_vision_model(
@@ -98,14 +209,14 @@ def image_understand(arguments: Mapping[str, object], context: ToolContext) -> T
         adk_tool_context=context.adk_tool_context,
     )
 
-    output: dict[str, object] = {
+    prose_output: dict[str, object] = {
         "description": description,
         "contentDigest": content_digest,
     }
     return ToolResult(
         status="ok",
-        output=output,
-        llmOutput=output,
+        output=prose_output,
+        llmOutput=prose_output,
         transcriptOutput={
             "toolName": tool_name,
             "contentDigest": content_digest,

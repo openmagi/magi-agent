@@ -22,6 +22,8 @@ dependencies = [
 dev = [
   "httpx==0.28.1",
   "pytest==9.0.3",
+  "ruff==0.15.16",
+  "mypy==2.1.0",
 ]
 cli = [
   "textual==8.2.7",
@@ -113,3 +115,17 @@ magi_agent = [
 [tool.pytest.ini_options]
 testpaths = ["tests", "magi_agent/cli/tests"]
 addopts = "-q"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+# CI ratchet stage 1: fatal errors only (syntax errors, undefined names).
+# Widen (e.g. add "E", "F", "I") once the baseline is clean.
+select = ["E9", "F63", "F7", "F82"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+follow_imports = "silent"

@@ -783,9 +783,8 @@ async def _rehydrate(
 ) -> tuple[object | None, object | None, object | None, str | None]:
     """Best-effort ADK rehydration. Returns (service, session, result, reason).
 
-    Mirrors the production caller (``runner_session_boundary`` ~L748): create an
-    ADK session, then call ``import_committed_transcript`` with an enabled
-    ``SessionContinuityConfig``. Never raises — on any failure returns
+    Create an ADK session, then call ``import_committed_transcript`` with an
+    enabled ``SessionContinuityConfig``. Never raises — on any failure returns
     ``(None, None, None, <reason>)``.
     """
 

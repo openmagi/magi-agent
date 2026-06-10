@@ -55,6 +55,7 @@ if TYPE_CHECKING:
     from magi_agent.harness.general_automation.task_completion import (
         RequiredDeliverableEvidence,
     )
+    from magi_agent.hooks.manifest import HookManifest
 
 
 #: Name of the general-scoped constraint-reinjection hook. Referenced by the
