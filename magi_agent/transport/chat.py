@@ -92,6 +92,10 @@ from magi_agent.shadow.gate5b4c3_shadow_generation_contract import (
 from magi_agent.transport.shadow_generations import (
     Gate5B4C3ShadowGenerationRouteConfig,
 )
+from magi_agent.transport.usage_receipt_emit import (
+    emit_runtime_direct_usage_receipt,
+    usage_receipt_enabled,
+)
 
 
 MockedChatRunner = Callable[[Mapping[str, Any]], Mapping[str, Any]]
@@ -2526,6 +2530,44 @@ def _run_mocked_chat_runner(
     )
 
 
+def _swallow_task_result(task: "asyncio.Task[object]") -> None:
+    try:
+        task.exception()
+    except asyncio.CancelledError:
+        pass
+
+
+def _schedule_runtime_direct_usage_receipt(
+    *,
+    runtime: OpenMagiRuntime,
+    model: str,
+    usage: Mapping[str, int] | None,
+    turn_id: str,
+) -> None:
+    if not usage or not model:
+        return
+    if not usage_receipt_enabled(os.environ):
+        return
+    try:
+        coro = emit_runtime_direct_usage_receipt(
+            api_proxy_url=str(runtime.config.api_proxy_url),
+            gateway_token=runtime.config.gateway_token,
+            bot_id=runtime.config.bot_id,
+            user_id=runtime.config.user_id,
+            model=model,
+            usage=usage,
+            turn_id=turn_id,
+        )
+    except Exception:  # noqa: BLE001 - metering setup must not break the turn
+        return
+    try:
+        task = asyncio.create_task(coro)
+    except RuntimeError:
+        coro.close()
+        return
+    task.add_done_callback(_swallow_task_result)
+
+
 def _build_egress_evidence_view(
     gate1a_bundle: Gate1AReadOnlyToolBundle | Gate5BFullToolBundle,
 ):
@@ -3065,6 +3107,12 @@ async def _run_live_chat_runner(
             draft_text=boundary_result.output_text_internal or "",
             gate1a_bundle=gate1a_bundle,
         )
+    _schedule_runtime_direct_usage_receipt(
+        runtime=runtime,
+        model=boundary_result.selected_model,
+        usage=getattr(boundary_result, "usage_internal", None),
+        turn_id=generation.request_id_digest,
+    )
     return _python_ready_response(
         runtime=runtime,
         content=sanitize_gate5b_model_visible_identity_text(

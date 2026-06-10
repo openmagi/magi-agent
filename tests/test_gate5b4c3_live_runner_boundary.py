@@ -13,8 +13,10 @@ from magi_agent.shadow.gate5b4c3_live_runner_boundary import (
     Gate5B4C3LiveAdkPrimitives,
     Gate5B4C3LiveRunnerBoundary,
     Gate5B4C3LiveRunnerBoundaryResult,
+    _event_usage_metadata,
     _looks_like_incomplete_full_toolhost_output,
     _selected_full_toolhost_run_config,
+    _usage_dict,
 )
 from magi_agent.shadow.gate5b4c3_shadow_generation_contract import (
     Gate5B4C3ShadowGenerationBudgets,
@@ -1372,6 +1374,100 @@ def test_live_boundary_builds_litellm_model_for_fireworks_route(monkeypatch: pyt
     model = _FakeAgent.created_kwargs["model"]
     assert getattr(model, "openmagi_gate5b_litellm_model") is True
     assert getattr(model, "model") == "fireworks_ai/kimi-k2p6"
+
+
+class _UsageEvent:
+    def __init__(
+        self,
+        text: str,
+        prompt: int,
+        candidates: int,
+        cached: int = 0,
+    ) -> None:
+        self.content = _FakeContent(parts=[_FakePart(text)], role="model")
+
+        class _Usage:
+            prompt_token_count = prompt
+            candidates_token_count = candidates
+            cached_content_token_count = cached
+
+        self.usage_metadata = _Usage()
+
+
+class _UsageRunner(_FakeRunner):
+    async def run_async(self, **kwargs: object) -> object:
+        type(self).run_kwargs = kwargs
+        yield _UsageEvent("local diagnostic event only", prompt=1234, candidates=56)
+
+
+def _usage_primitives() -> Gate5B4C3LiveAdkPrimitives:
+    _FakeAgent.created_kwargs = {}
+    _UsageRunner.created_kwargs = {}
+    _UsageRunner.run_kwargs = {}
+    _UsageRunner.fail = False
+    _FakeGenerateContentConfig.created_kwargs = {}
+    return Gate5B4C3LiveAdkPrimitives(
+        Agent=_FakeAgent,
+        Runner=_UsageRunner,
+        InMemorySessionService=_FakeSessionService,
+        Content=_FakeContent,
+        Part=_FakePart,
+        GenerateContentConfig=_FakeGenerateContentConfig,
+    )
+
+
+def test_event_usage_metadata_reads_object_mapping_and_nested_shapes() -> None:
+    class _Meta:
+        prompt_token_count = 10
+        candidates_token_count = 4
+        cached_content_token_count = 2
+
+    class _Evt:
+        usage_metadata = _Meta()
+
+    assert _event_usage_metadata(_Evt()) == (10, 4, 2)
+    assert _event_usage_metadata(
+        {"usageMetadata": {"promptTokenCount": 7, "candidatesTokenCount": 3}}
+    ) == (7, 3, 0)
+    assert _event_usage_metadata(
+        {"llm_response": {"usage_metadata": {"prompt_token_count": 5}}}
+    ) == (5, 0, 0)
+    assert _event_usage_metadata({"text": "no usage here"}) is None
+
+
+def test_usage_dict_drops_all_zero_totals() -> None:
+    assert _usage_dict((0, 0, 0)) is None
+    assert _usage_dict((9, 1, 0)) == {
+        "inputTokens": 9,
+        "outputTokens": 1,
+        "cacheReadTokens": 0,
+    }
+
+
+def test_live_boundary_captures_usage_internal_on_completed_turn() -> None:
+    result = Gate5B4C3LiveRunnerBoundary(_usage_primitives).invoke(
+        _request(),
+        config=_enabled_config(),
+    )
+
+    assert result.status == "completed"
+    assert result.usage_internal == {
+        "inputTokens": 1234,
+        "outputTokens": 56,
+        "cacheReadTokens": 0,
+    }
+    assert "usageInternal" not in result.model_dump(by_alias=True)
+    assert "usage_internal" not in result.model_dump()
+
+
+def test_live_boundary_usage_internal_none_without_provider_usage() -> None:
+    result = Gate5B4C3LiveRunnerBoundary(_fake_primitives).invoke(
+        _request(),
+        config=_enabled_config(),
+    )
+
+    assert result.status == "completed"
+    assert result.usage_internal is None
 
 
 def test_live_boundary_uses_adapter_resolved_per_turn_output_cap() -> None:
