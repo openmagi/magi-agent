@@ -45,7 +45,10 @@ from magi_agent.channels.workflow_confirm_store import (
     PendingConfirmationStore,
 )
 from magi_agent.channels.workflow_gate import channel_workflows_enabled
-from magi_agent.channels.taskkind_classifier import FixedClassifier, TaskKindClassifier
+from magi_agent.channels.taskkind_classifier import FixedClassifier
+from magi_agent.channels.workflow_classifier_live import (
+    build_live_classifier_if_configured,
+)
 from magi_agent.channels.workflow_orchestrator import (
     WorkflowOrchestratorResult,
     resolve_confirmation,
@@ -418,10 +421,12 @@ def register_streaming_chat_routes(
         for workflow confirmation state. Defaults to the module-level
         ``_DEFAULT_CONFIRM_STORE`` (in-memory, process-scoped).
     eligibility_classifier:
-        Optional async classifier with ``aclassify(message_text) -> str``. Defaults
-        to :class:`~magi_agent.channels.taskkind_classifier.TaskKindClassifier` with
-        no model factory (auto-detect inert; returns ``"general"`` until a live model
-        is injected). The explicit ``/research`` path works regardless.
+        Optional async classifier with ``aclassify(message_text) -> str``. When
+        omitted the default is built by
+        :func:`~magi_agent.channels.workflow_classifier_live.build_live_classifier_if_configured`:
+        model-backed (auto-detect live) when a provider is configured, otherwise
+        the inert ``TaskKindClassifier`` (returns ``"general"`` — auto-detect off,
+        ``/research`` still works). An injected classifier takes precedence.
     """
 
     def _default_engine_builder(session_id: str, sink: object) -> tuple[object, object]:
@@ -461,10 +466,20 @@ def register_streaming_chat_routes(
     builder = engine_builder if engine_builder is not None else _default_engine_builder
 
     store = confirm_store if confirm_store is not None else _DEFAULT_CONFIRM_STORE
-    # Default classifier has NO model_factory → aclassify() returns "general"
-    # (auto-detect inert until a live model is wired). The explicit "/research"
-    # path works regardless. A hosted deployment injects a model-backed classifier.
-    classifier = eligibility_classifier if eligibility_classifier is not None else TaskKindClassifier()
+    # Classifier resolution (C5):
+    #   1. An explicitly injected ``eligibility_classifier`` always wins (hosted
+    #      deployments / tests inject their own model-backed classifier).
+    #   2. Otherwise build one from the local provider config: when a model is
+    #      configured the default classifier is model-backed (auto-detect goes
+    #      live); when nothing is configured it degrades to the inert
+    #      ``TaskKindClassifier`` (``aclassify`` → "general", the explicit
+    #      "/research" path still works). No new feature flag — the classifier is
+    #      live purely on the presence of a configured model.
+    classifier = (
+        eligibility_classifier
+        if eligibility_classifier is not None
+        else build_live_classifier_if_configured()
+    )
 
     async def _maybe_handle_workflow(
         prompt: str, session_id: str

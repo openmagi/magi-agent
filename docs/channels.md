@@ -122,6 +122,41 @@ the same default-off manifest invariant (`max_text_chars=2000`), and the same
 record-intent-instead-of-deliver behavior with secret / private-path redaction.
 Treat it as shadow until live delivery authority is attached.
 
+## Dynamic workflows
+
+> **Note — default-off.** Both gates below default to off; channel messages stay
+> a normal single turn until you opt in.
+
+A channel message can branch into a multi-step **workflow** (e.g. a guided
+research run) instead of a single LLM turn. This is double-gated:
+
+| Env flag | Effect |
+|---|---|
+| `MAGI_WORKFLOW_EXECUTOR_ENABLED` | Allows the workflow executor to *run* a confirmed workflow. |
+| `MAGI_CHANNEL_WORKFLOWS_ENABLED` | Allows the channel/serve surface to *engage* workflows at all. |
+
+Both must be truthy (`1`/`true`/`yes`/`on`) for a workflow to execute. With the
+channel gate on but the executor off, an eligible message still asks for
+confirmation but declines to execute.
+
+### Auto-detect vs explicit `/research`
+
+- The explicit `/research <query>` prefix always engages the research workflow
+  (when the channel gate is on), regardless of model configuration.
+- **Auto-detect** (a plain multi-step message being routed to a workflow) needs
+  a *model-backed classifier*. When no provider is configured the default
+  classifier is inert and returns `general` (auto-detect off, `/research` still
+  works). When a provider key is resolvable (via `MAGI_CONFIG` /
+  `~/.magi/config.toml` / provider env vars), the serve surface wires a
+  model-backed classifier automatically — no extra flag.
+- `MAGI_WORKFLOW_CLASSIFIER_MODEL` (optional) points auto-detect at a
+  cheaper/faster model than the main turn (e.g. a Haiku-class model). Each
+  inbound message then incurs one small classification call; classification is
+  fail-open (a classifier error never blocks normal chat).
+
+A hosted deployment may inject its own model-backed classifier; that injected
+classifier takes precedence over the local auto-wiring.
+
 ## See also
 
 - [what-works-today.md](what-works-today.md) — what is live vs shadow vs planned.
