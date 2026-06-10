@@ -1,3 +1,11 @@
+"""Live single-call tool dispatch boundary — the hot path every tool call crosses.
+
+``ToolDispatcher.dispatch`` enforces manifest/exposure/schema checks, the GA live
+gate and the permission policy, then runs the registered handler (with optional
+readonly thread offload). Consumed by adk_bridge/tool_adapter (the ADK FunctionTool
+wrapper), cli/tool_runtime, cli/wiring, facades, gates/gate5b_full_toolhost and
+shadow/tool_policy; ConcurrentToolDispatcher wraps it for batch dispatch.
+"""
 from __future__ import annotations
 
 import asyncio

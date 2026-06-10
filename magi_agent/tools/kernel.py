@@ -1,3 +1,11 @@
+"""Evidence-emitting tool execution kernel — default-OFF, not the live hot path.
+
+``ToolExecutionKernel.execute`` wraps tool execution in request-shape ledger
+recording, approval-resume grant checks, evidence records and output/metadata
+sanitization; handlers only run through an explicitly trusted local fake
+executor. Consumed by runtime/approval_resume, tools/scheduler and
+web_acquisition/reference_research_tools (tools/event_projection type-only).
+"""
 from __future__ import annotations
 
 import asyncio
