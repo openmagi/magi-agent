@@ -37,6 +37,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+      - name: Naming-leak ratchet gate
+        run: bash scripts/check_naming.sh
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
