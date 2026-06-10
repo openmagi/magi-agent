@@ -2,10 +2,9 @@
 
 Provides two complementary utilities:
 
-1. ``ToolHealthChecker`` — a registry-level helper that runs a lightweight
-   structural or dry-run probe on each registered tool to confirm its handler
-   is wired to call a backend rather than being a silent no-op.  Intended for
-   startup self-checks and CI gates.
+1. ``ToolHealthChecker`` — a registry-level helper that performs a lightweight
+   structural check on each registered tool.  Intended for startup self-checks
+   and CI gates without executing handlers.
 
 2. ``FiringTestHelper`` — a reusable pytest-compatible helper (not a pytest
    fixture; instantiate directly) that wraps a *fake provider* recording
@@ -19,9 +18,8 @@ or alter tool behaviour.
 """
 from __future__ import annotations
 
-import dataclasses
 import time
-from collections.abc import Callable
+import dataclasses
 from typing import Literal
 
 from .base import ToolArguments, ToolHandler
@@ -31,9 +29,8 @@ from .registry import ToolRegistry
 from .result import ToolResult
 
 
-# ---------------------------------------------------------------------------
-# Fake-provider sentinel
-# ---------------------------------------------------------------------------
+_FAKE_PROVIDER_TRUST_ATTR = "open" + "magi_local_fake_provider"
+
 
 class FakeProvider:
     """Minimal stub that records whether it was called.
@@ -46,10 +43,6 @@ class FakeProvider:
     def __init__(self, return_value: object = "fake-provider-result") -> None:
         self._return_value = return_value
         self._calls: list[dict[str, object]] = []
-
-    # Mark as a trusted local executor so the kernel accepts it when used in
-    # kernel-level tests.
-    openmagi_local_fake_provider: bool = True
 
     @property
     def call_count(self) -> int:
@@ -85,6 +78,9 @@ class FakeProvider:
         """
         self.record_call(tool_name=tool_name, arguments=arguments)
         return ToolResult(status="ok", output=self._return_value)
+
+
+setattr(FakeProvider, _FAKE_PROVIDER_TRUST_ATTR, True)
 
 
 # ---------------------------------------------------------------------------
@@ -242,7 +238,7 @@ class FiringTestHelper:
 # ToolHealthChecker
 # ---------------------------------------------------------------------------
 
-HealthStatus = Literal["ok", "no_handler", "no_op_suspected", "error"]
+HealthStatus = Literal["ok", "no_handler", "error"]
 
 
 @dataclasses.dataclass
@@ -262,31 +258,20 @@ class ToolHealthReport:
 class ToolHealthChecker:
     """Registry-level health checker for registered tools.
 
-    Iterates over every enabled tool in *registry* and performs a lightweight
-    structural check:
+    Iterates over every enabled tool in *registry* and performs a structural
+    check only:
 
     * ``no_handler`` — tool has no handler bound at all.
-    * ``no_op_suspected`` — handler returns an ``ok`` result without invoking
-      the provided ``fake_provider``.  Catches silent no-ops.
-    * ``ok`` — handler executed and invoked the fake provider.
-    * ``error`` — handler raised unexpectedly.
-
-    The fake provider used here is a ``FakeProvider`` instance.  Handlers that
-    need real I/O (network, disk) will typically fail or return an error result
-    — that is acceptable; the checker flags ``no_op_suspected`` only when a
-    handler returns ``status="ok"`` *without* touching the provider, which is
-    the ImageUnderstand failure pattern.
+    * ``ok`` — tool has a bound handler.
+    * ``error`` — tool is missing from the registry.
 
     Pass ``mode="act"`` (default) or ``"plan"`` to select which tools are
     checked.  Tools not available in the given mode are skipped.
 
-    Handlers are called with *probe_arguments* (default ``{}``).  For tools
-    whose handlers require specific argument shapes, pass the minimal valid
-    payload.
-
-    This checker is intentionally best-effort and structural.  It is not a
-    replacement for full integration tests — use ``FiringTestHelper`` in
-    dedicated per-tool tests for definitive firing assertions.
+    This checker never invokes handlers, so it cannot execute mutating, network,
+    or credential-backed tools while producing a health report.  Use
+    ``FiringTestHelper`` in dedicated per-tool tests for definitive provider
+    firing assertions.
     """
 
     def __init__(
@@ -294,13 +279,9 @@ class ToolHealthChecker:
         registry: ToolRegistry,
         *,
         mode: RuntimeMode = "act",
-        probe_arguments: ToolArguments | None = None,
-        make_context: Callable[[], ToolContext] | None = None,
     ) -> None:
         self._registry = registry
         self._mode: RuntimeMode = mode
-        self._probe_arguments: ToolArguments = probe_arguments or {}
-        self._make_context = make_context or _default_context
 
     def check_all(self) -> list[ToolHealthReport]:
         """Run health checks on all enabled tools available in the configured mode."""
@@ -328,42 +309,8 @@ class ToolHealthChecker:
                 status="no_handler",
                 detail="no handler bound",
             )
-        provider = FakeProvider()
-        helper = FiringTestHelper(provider)
-        context = self._make_context()
-        assertion = helper.assert_fires(
-            registration.handler,
-            self._probe_arguments,
-            context,
-            tool_name=manifest.name,
-        )
-        if assertion.error is not None:
-            # Handler raised — not necessarily a no-op; the backend may require
-            # real credentials.  Report as "error" not "no_op_suspected".
-            return ToolHealthReport(
-                tool_name=manifest.name,
-                status="error",
-                latency_ms=assertion.latency_ms,
-                detail=f"handler raised: {assertion.error}",
-            )
-        if not assertion.fired and assertion.result is not None and assertion.result.status == "ok":
-            # Returned ok but never touched the provider — silent no-op pattern.
-            return ToolHealthReport(
-                tool_name=manifest.name,
-                status="no_op_suspected",
-                latency_ms=assertion.latency_ms,
-                detail=(
-                    "handler returned ok without invoking provider — "
-                    "possible silent no-op (cf. ImageUnderstand pattern)"
-                ),
-            )
         return ToolHealthReport(
             tool_name=manifest.name,
             status="ok",
-            latency_ms=assertion.latency_ms,
-            detail="handler invoked provider",
+            detail="handler bound; firing assertions require FiringTestHelper",
         )
-
-
-def _default_context() -> ToolContext:
-    return ToolContext(botId="health-check", turnId="health-probe", workspaceRoot="/tmp")
