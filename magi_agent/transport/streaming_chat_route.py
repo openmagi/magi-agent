@@ -291,6 +291,8 @@ async def _drive_selected_gate5b_stream(
             for public_event in public_events:
                 if not isinstance(public_event, Mapping):
                     continue
+                if live_text_emitted and public_event.get("type") == "text_delta":
+                    continue
                 event_key = _event_key(public_event)
                 if event_key in emitted_event_keys:
                     continue

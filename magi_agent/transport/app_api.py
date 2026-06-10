@@ -26,12 +26,15 @@ from __future__ import annotations
 
 import os
 import re
+from importlib import resources
+from importlib.resources.abc import Traversable
 from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from magi_agent.plugins.native.skills import _skill_candidates
 from magi_agent.runtime.openmagi_runtime import OpenMagiRuntime
 from magi_agent.transport.tools import _unauthorized_response
 
@@ -54,6 +57,7 @@ _RUNTIME_HOOK_POINTS = ("beforeModelCall", "afterToolCall", "beforeCommit", "aft
 _FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
 _MAX_SEARCH_BYTES = 200_000
 _PREVIEW_CHARS = 240
+_SCRIPT_SUFFIXES = {".sh", ".py", ".js", ".ts"}
 _WORKSPACE_ENV_VARS = (
     "MAGI_AGENT_WORKSPACE",
     "CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_WORKSPACE_ROOT",
@@ -194,44 +198,33 @@ def _scan_skills() -> dict[str, Any]:
     issues: list[dict[str, Any]] = []
     seen: set[str] = set()
 
-    bases = [root / "skills", root / ".magi" / "skills", root / "docs" / "superpowers"]
-    for base in bases:
-        if not base.is_dir():
+    for relative in _skill_candidates(root):
+        ref = _skill_reference(root, relative)
+        if ref is None or ref["dir"] in seen:
             continue
-        for skill_md in sorted(base.rglob("SKILL.md"))[:100]:
-            skill_dir = skill_md.parent
-            try:
-                rel = skill_dir.relative_to(root).as_posix()
-            except ValueError:
-                rel = skill_dir.name
-            if rel in seen:
-                continue
-            seen.add(rel)
-            text = _read_text(skill_md, limit=_MAX_SEARCH_BYTES)
-            if text is None:
-                issues.append(
-                    {"dir": rel, "path": skill_md.as_posix(), "reason": "unreadable"}
-                )
-                continue
-            front = _parse_frontmatter(text)
-            scripts = [
-                p
-                for p in skill_dir.rglob("*")
-                if p.is_file() and p.suffix in {".sh", ".py", ".js", ".ts"}
-            ]
-            tags = [t.strip() for t in front.get("tags", "").split(",") if t.strip()]
-            loaded.append(
-                {
-                    "name": front.get("name") or skill_dir.name,
-                    "dir": rel,
-                    "path": skill_md.as_posix(),
-                    "description": front.get("description", ""),
-                    "tags": tags,
-                    "promptOnly": len(scripts) == 0,
-                    "scriptBacked": len(scripts) > 0,
-                    "runtimeHooks": 0,
-                }
+        seen.add(ref["dir"])
+        text = _read_skill_text(ref)
+        if text is None:
+            issues.append(
+                {"dir": ref["dir"], "path": ref["path"], "reason": "unreadable"}
             )
+            continue
+        front = _parse_frontmatter(text)
+        tags = [t.strip() for t in front.get("tags", "").split(",") if t.strip()]
+        script_backed = _skill_has_script(ref)
+        loaded.append(
+            {
+                "name": front.get("name") or Path(ref["dir"]).name,
+                "dir": ref["dir"],
+                "path": ref["path"],
+                "source": ref["source"],
+                "description": front.get("description", ""),
+                "tags": tags,
+                "promptOnly": not script_backed,
+                "scriptBacked": script_backed,
+                "runtimeHooks": 0,
+            }
+        )
 
     runtime_hooks = [
         {"name": point, "point": point, "kind": "builtin", "source": "runtime"}
@@ -245,6 +238,89 @@ def _scan_skills() -> dict[str, Any]:
         "runtimeHookCount": len(runtime_hooks),
         "loadedCount": len(loaded),
     }
+
+
+def _skill_reference(root: Path, relative: str) -> dict[str, Any] | None:
+    path_parts = Path(relative).parts
+    if not path_parts or path_parts[-1] != "SKILL.md":
+        return None
+    if relative.startswith("bundled/"):
+        try:
+            resource = resources.files("magi_agent").joinpath("skills", *path_parts)
+        except (FileNotFoundError, ModuleNotFoundError):
+            return None
+        return {
+            "dir": Path(relative).parent.as_posix(),
+            "path": relative,
+            "source": "bundled",
+            "resource": resource,
+            "filesystem_path": None,
+        }
+    legacy_prefix = "legacy-workspace/skills/"
+    if relative.startswith(legacy_prefix):
+        if root.name != "workspace" or root.parent.name != "workspace":
+            return None
+        inner = relative[len(legacy_prefix):]
+        path = root.parent / "skills" / inner
+        return {
+            "dir": Path(relative).parent.as_posix(),
+            "path": path.as_posix(),
+            "source": "legacy_workspace",
+            "resource": None,
+            "filesystem_path": path,
+        }
+    path = root / relative
+    return {
+        "dir": Path(relative).parent.as_posix(),
+        "path": path.as_posix(),
+        "source": "workspace",
+        "resource": None,
+        "filesystem_path": path,
+    }
+
+
+def _read_skill_text(ref: dict[str, Any]) -> str | None:
+    resource = ref.get("resource")
+    if isinstance(resource, Traversable):
+        try:
+            text = resource.read_text(encoding="utf-8")
+        except (FileNotFoundError, UnicodeDecodeError, OSError):
+            return None
+        return text[:_MAX_SEARCH_BYTES]
+    path = ref.get("filesystem_path")
+    if isinstance(path, Path):
+        return _read_text(path, limit=_MAX_SEARCH_BYTES)
+    return None
+
+
+def _skill_has_script(ref: dict[str, Any]) -> bool:
+    path = ref.get("filesystem_path")
+    if isinstance(path, Path):
+        skill_dir = path.parent
+        try:
+            return any(
+                p.is_file() and p.suffix in _SCRIPT_SUFFIXES
+                for p in skill_dir.rglob("*")
+            )
+        except OSError:
+            return False
+    resource = ref.get("resource")
+    if isinstance(resource, Traversable):
+        return _traversable_has_script(resource.parent)
+    return False
+
+
+def _traversable_has_script(node: Traversable) -> bool:
+    try:
+        children = list(node.iterdir())
+    except (FileNotFoundError, OSError):
+        return False
+    for child in children:
+        if child.is_file() and Path(child.name).suffix in _SCRIPT_SUFFIXES:
+            return True
+        if child.is_dir() and _traversable_has_script(child):
+            return True
+    return False
 
 
 # --------------------------------------------------------------------------- #

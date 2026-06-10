@@ -489,6 +489,17 @@ def _build_first_party_adk_tools(
         register_file_tool_manifests(registry)
         bind_file_toolhost_handlers(registry)
 
+    from magi_agent.config.env import browser_tool_enabled  # noqa: PLC0415
+
+    if browser_tool_enabled():
+        from magi_agent.browser.autonomous.tool import (  # noqa: PLC0415
+            bind_browser_toolhost_handler,
+            register_browser_tool_manifest,
+        )
+
+        register_browser_tool_manifest(registry)
+        bind_browser_toolhost_handler(registry)
+
     receipt_store = (
         general_automation_receipts
         if isinstance(general_automation_receipts, GeneralAutomationReceiptLedgerStore)

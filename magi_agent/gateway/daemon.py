@@ -228,4 +228,16 @@ class GatewayDaemon:
         state.state = "stopped"
 
 
-__all__ = ["GatewayDaemon", "GatewayWatcher", "is_gateway_daemon_enabled"]
+def build_default_gateway_daemon() -> GatewayDaemon:
+    """Daemon with the first-party watcher set (each watcher self-gates)."""
+    from magi_agent.gateway.watchers import build_default_watchers  # noqa: PLC0415
+
+    return GatewayDaemon(watchers=build_default_watchers())
+
+
+__all__ = [
+    "GatewayDaemon",
+    "GatewayWatcher",
+    "build_default_gateway_daemon",
+    "is_gateway_daemon_enabled",
+]

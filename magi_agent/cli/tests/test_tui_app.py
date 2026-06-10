@@ -1856,3 +1856,118 @@ def test_footer_elapsed_resets_across_two_turns() -> None:
             assert app._turn_started_monotonic is None
 
     asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
+# PR4.4 — App loads ~/.magi/keybindings.json (overridable via MAGI_CLI_SESSION_DIR)
+# ---------------------------------------------------------------------------
+def test_app_loads_user_keybindings_json(tmp_path, monkeypatch) -> None:
+    """A user keybindings.json under the session root is merged over defaults."""
+
+    import json
+
+    async def _run() -> None:
+        monkeypatch.setenv("MAGI_CLI_SESSION_DIR", str(tmp_path))
+        (tmp_path / "keybindings.json").write_text(
+            json.dumps(
+                {
+                    "bindings": [
+                        {"context": "Chat", "bindings": {"ctrl+s": "chat:cancel"}}
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+        # The user binding (ctrl+s -> chat:cancel) was merged after defaults.
+        actions = [
+            b.action
+            for b in app._key_bindings
+            if any(k.key == "s" and k.ctrl for k in b.chord)
+        ]
+        assert "chat:cancel" in actions
+
+    asyncio.run(_run())
+
+
+def test_app_keybindings_default_when_no_user_file(tmp_path, monkeypatch) -> None:
+    """No user file -> defaults only (ctrl+s stays chat:stash)."""
+
+    async def _run() -> None:
+        monkeypatch.setenv("MAGI_CLI_SESSION_DIR", str(tmp_path))
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+        actions = [
+            b.action
+            for b in app._key_bindings
+            if any(k.key == "s" and k.ctrl for k in b.chord)
+        ]
+        assert actions == ["chat:stash"]
+
+    asyncio.run(_run())
+
+
+def test_app_malformed_keybindings_falls_back(tmp_path, monkeypatch) -> None:
+    """A malformed keybindings.json degrades to defaults; the app still mounts."""
+
+    async def _run() -> None:
+        monkeypatch.setenv("MAGI_CLI_SESSION_DIR", str(tmp_path))
+        (tmp_path / "keybindings.json").write_text("{ not json", encoding="utf-8")
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+        # Defaults survived (ctrl+s -> chat:stash) and nothing crashed.
+        actions = [
+            b.action
+            for b in app._key_bindings
+            if any(k.key == "s" and k.ctrl for k in b.chord)
+        ]
+        assert "chat:stash" in actions
+
+
+    asyncio.run(_run())
+
+
+def test_app_keybindings_unknown_action_skipped(tmp_path, monkeypatch) -> None:
+    """An unknown action in the user file is skipped (graceful), not crashing."""
+
+    import json
+
+    async def _run() -> None:
+        monkeypatch.setenv("MAGI_CLI_SESSION_DIR", str(tmp_path))
+        (tmp_path / "keybindings.json").write_text(
+            json.dumps(
+                {
+                    "bindings": [
+                        {
+                            "context": "Chat",
+                            "bindings": {
+                                "ctrl+s": "chat:cancel",
+                                "ctrl+r": "chat:bogusAction",
+                            },
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+        # The valid override merged; the bogus one was dropped (no ctrl+r binding).
+        bound_keys = {
+            (k.key, k.ctrl)
+            for b in app._key_bindings
+            for k in b.chord
+        }
+        assert ("s", True) in bound_keys
+        assert ("r", True) not in bound_keys
+
+    asyncio.run(_run())

@@ -59,7 +59,7 @@ def _redact_last_error_preview(
 
 
 def _next_action(config: ComposioConfig, disabled_reason: str | None) -> str | None:
-    if disabled_reason == "missing_api_key":
+    if disabled_reason in {"missing_api_key", "not_configured"}:
         return "set COMPOSIO_API_KEY to enable integrations"
     if disabled_reason == "disabled_by_config":
         return "set MAGI_COMPOSIO_ENABLED=auto or on"

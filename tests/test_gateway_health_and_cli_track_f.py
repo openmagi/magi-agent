@@ -120,11 +120,13 @@ def test_gateway_start_gate_off_is_noop(monkeypatch: pytest.MonkeyPatch) -> None
     assert "disabled" in result.stdout.lower() or "not enabled" in result.stdout.lower()
 
 
-def test_gateway_start_with_scheduler_on_invokes_scheduler_executor_boundary(
+def test_gateway_start_once_with_scheduler_on_invokes_scheduler_executor_boundary(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
 ) -> None:
-    """Enabled gateway+scheduler config must consume the real scheduler seam."""
+    """`gateway start --once` (legacy single tick) must consume the real
+    scheduler seam.  The bare `gateway start` now supervises via GatewayDaemon
+    and does not exit on its own — covered by the CLI daemon tests."""
     from magi_agent.cli.app import app
     from magi_agent.harness.scheduler_executor import ScheduledJobRecord
     from magi_agent.harness.scheduler_job_store import SqliteScheduledJobSource
@@ -151,7 +153,7 @@ def test_gateway_start_with_scheduler_on_invokes_scheduler_executor_boundary(
     monkeypatch.setenv("MAGI_SCHEDULER_DB_PATH", str(db_path))
     monkeypatch.setenv("MAGI_SCHEDULER_LOCK_DIR", str(lock_dir))
 
-    result = runner.invoke(app, ["gateway", "start"])
+    result = runner.invoke(app, ["gateway", "start", "--once"])
 
     assert result.exit_code == 0
     assert "scheduler_cron" in result.stdout

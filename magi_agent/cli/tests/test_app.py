@@ -1054,4 +1054,6 @@ def test_local_serve_applies_full_runtime_defaults_without_route_hardblock(
     assert os.environ["MAGI_RUNNER_POLICY_ROUTING_ENABLED"] == "1"
     assert os.environ["MAGI_RUNNER_POLICY_ROUTE_BLOCKING_ENABLED"] == "0"
     assert os.environ["MAGI_GA_LIVE_ENABLED"] == "1"
+    assert os.environ["MAGI_BROWSER_TOOL_ENABLED"] == "1"
+    assert os.environ["MAGI_EVIDENCE_LEDGER_LIFECYCLE_ENABLED"] == "1"
     assert "MAGI_COMPOSIO_ENABLED" not in os.environ

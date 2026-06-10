@@ -20,7 +20,7 @@ imported lazily inside ``_lazy_engine_deps`` which is only called the first time
 Single-flight
 -------------
 A second concurrent turn for the same session id is rejected. We reuse the real
-``ActiveTurnRegistry`` from ``runner_session_boundary`` (a thread-safe
+``ActiveTurnRegistry`` from ``active_turn_registry`` (a thread-safe
 session-key -> turn-id map). A per-driver default registry is shared across all
 turns of a driver instance; on a concurrent turn we yield a terminal
 ``EngineResult(terminal=Terminal.aborted, error="active_session_turn")`` without
@@ -790,12 +790,12 @@ def _lazy_engine_deps() -> dict[str, object]:
 def _active_turn_registry():
     """Lazily build the real ActiveTurnRegistry (no ADK import needed).
 
-    runner_session_boundary imports ADK at *function* scope only, so importing
-    the module itself is import-clean — but we still defer it to keep engine.py's
-    module-load dependency graph minimal.
+    ``active_turn_registry`` is a standalone, ADK-free module, so importing it is
+    import-clean — but we still defer the import to keep engine.py's module-load
+    dependency graph minimal.
     """
 
-    from magi_agent.runtime.runner_session_boundary import (
+    from magi_agent.runtime.active_turn_registry import (
         ActiveTurnRegistry,
     )
 
@@ -948,6 +948,48 @@ class MagiEngineDriver:
             initial_messages = []
         return harness_state, initial_messages
 
+    @staticmethod
+    def _turn_images(turn_input: object) -> tuple[dict[str, object], ...]:
+        """Read ``image_blocks`` from a TurnInput dataclass or a bare dict.
+
+        Works the same dict-or-attr pattern as ``_turn_extra``. Returns an
+        empty tuple when the field is absent (e.g. a bare ``{"prompt": "…"}``
+        dict from ``run_headless``), which preserves pre-Task-2 behavior.
+        """
+        if isinstance(turn_input, dict):
+            value = turn_input.get("image_blocks", ())
+        else:
+            value = getattr(turn_input, "image_blocks", ())
+        return tuple(value or ())
+
+    @staticmethod
+    def _build_opening_parts(types: object, prompt: str, image_blocks: tuple) -> list:
+        """Build the ``parts`` list for the opening user message in a turn.
+
+        Always starts with a text part for ``prompt``, then appends one ADK
+        image part per valid block in ``image_blocks`` (base64 blocks only;
+        malformed / unsupported blocks are silently skipped by the gate5b4c3
+        helper).  The text part uses the same ``types.Part(text=...)``
+        constructor form used at all other build sites so that existing
+        fake-types test doubles continue to work without modification.  The
+        image factory (``types.Part.from_bytes``) is only referenced when
+        there are actually image blocks to process, so empty-block callers
+        never touch that attribute.
+        """
+        parts: list = [types.Part(text=prompt)]  # type: ignore[union-attr]
+        if image_blocks:
+            from magi_agent.shadow.gate5b4c3_image_parts import (  # noqa: PLC0415
+                image_blocks_to_parts,
+            )
+
+            parts.extend(
+                image_blocks_to_parts(
+                    list(image_blocks),
+                    part_factory=types.Part.from_bytes,  # type: ignore[union-attr]
+                )
+            )
+        return parts
+
     async def run_turn_stream(
         self,
         runtime: object,
@@ -962,6 +1004,7 @@ class MagiEngineDriver:
         # leaves behavior byte-for-byte identical to pre-F.
         session_id, turn_id, prompt = self._turn_identity(turn_input)
         harness_state, initial_messages = self._turn_extra(turn_input)
+        image_blocks = self._turn_images(turn_input)
 
         registry = self._get_registry()
         acquired = registry.try_acquire(session_key=session_id, turn_id=turn_id)  # type: ignore[attr-defined]
@@ -991,6 +1034,7 @@ class MagiEngineDriver:
             prompt=prompt,
             harness_state=harness_state,
             initial_messages=initial_messages,
+            image_blocks=image_blocks,
             cancel=cancel,
             gate=gate,
             goal_nudge=self._goal_nudge,
@@ -1017,6 +1061,7 @@ class MagiEngineDriver:
         prompt: str,
         harness_state: object | None = None,
         initial_messages: list | None = None,
+        image_blocks: tuple = (),
         cancel: asyncio.Event,
         gate: "PermissionGate | None" = None,
         goal_nudge: "GoalNudge | None" = None,
@@ -1160,7 +1205,7 @@ class MagiEngineDriver:
             invocationId=turn_id,
             newMessage=types.Content(  # type: ignore[attr-defined]
                 role="user",
-                parts=[types.Part(text=prompt)],  # type: ignore[attr-defined]
+                parts=self._build_opening_parts(types, prompt, image_blocks),
             ),
             # Threaded from the turn_input (TurnInput.harness_state / dict key).
             # A plain dict without the key leaves this None — identical to today.

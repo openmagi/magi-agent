@@ -3,8 +3,9 @@
 * ``UserMessage(Static)``      — the echoed prompt ("› <text>").
 * ``AssistantMessage(Markdown)`` — a finalized assistant turn (markdown + syntax).
 * ``StatusLine(Static)``       — terminal/control/error summaries.
-* ``ThinkingBlock(Collapsible)`` — Phase 4 reasoning; defined here so the widget
-  taxonomy lives in one module (used by PR4.2).
+* ``ThinkingBlock(Collapsible)`` — defined-but-unused per the 2026-06-09
+  revision (thinking renders as a dim one-line via ``commit_coalesced``, not a
+  Collapsible); kept here so the widget taxonomy lives in one module.
 
 These are thin subclasses so a query (``query_one(AssistantMessage)``) and CSS
 targeting are by type. ``Markdown`` parses its content on construction/update;
@@ -31,4 +32,6 @@ class StatusLine(Static):
 
 
 class ThinkingBlock(Collapsible):
-    """Collapsed, dimmed reasoning block (wired in Phase 4 / PR4.2)."""
+    """Collapsed, dimmed reasoning block — defined-but-unused per the 2026-06-09
+    revision (thinking renders as a dim one-line via ``commit_coalesced``, not a
+    Collapsible)."""
