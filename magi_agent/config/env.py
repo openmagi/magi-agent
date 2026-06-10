@@ -1766,7 +1766,42 @@ def is_document_authoring_coverage_enabled(env: Mapping[str, str] | None = None)
     optional-blocking seam.
     """
     source = os.environ if env is None else env
-    return _is_true(source.get(MAGI_DOCUMENT_AUTHORING_COVERAGE_ENV))
+    return resolve_document_authoring_coverage_mode(source) != "off"
+
+
+DOCUMENT_AUTHORING_COVERAGE_MODES = ("off", "advisory", "block")
+
+
+def resolve_document_authoring_coverage_mode(env: Mapping[str, str] | None = None) -> str:
+    """Resolve the 3-state document-coverage gate mode (14-PR3, C11).
+
+    Returns one of ``off`` | ``advisory`` | ``block``. This generalizes the
+    historical boolean ``MAGI_DOCUMENT_AUTHORING_COVERAGE`` flag so the hosted
+    control-stage overlay can promote the gate gradually (``off`` -> ``advisory``
+    -> ``block``) instead of flipping straight to a hard block, which is the
+    highest false-block risk in the C11 cluster.
+
+    Resolution (all case/whitespace-insensitive):
+
+    * unset / empty / ``0`` / falsy   -> ``off``
+    * legacy truthy (``1``/``true``/``yes``/``on``) -> ``block`` (back-compat:
+      the old boolean ON meant hard-block)
+    * explicit ``off`` / ``advisory`` / ``block`` -> that mode
+    * anything else (typo) -> ``off`` (fail safe: never silently hard-block)
+
+    In ``advisory`` mode the verifier bus still computes the failed-coverage
+    count (for telemetry / false-block-rate measurement) but the engine does not
+    let it flip the pre-final decision to ``block``.
+    """
+    source = os.environ if env is None else env
+    raw = (source.get(MAGI_DOCUMENT_AUTHORING_COVERAGE_ENV) or "").strip().lower()
+    if not raw:
+        return "off"
+    if raw in DOCUMENT_AUTHORING_COVERAGE_MODES:
+        return raw
+    if _is_true(raw):
+        return "block"
+    return "off"
 
 
 MAGI_CONTROL_STAGE_ENV = "MAGI_CONTROL_STAGE"
