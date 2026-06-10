@@ -4,7 +4,7 @@ An *instance* is one repository snapshot at a fixed anchor commit whose
 ``candidates`` form the discovery corpus (buggy functions plus distractors) and
 whose ``gold_problems`` enumerate the >=2 coexisting bugs the harness is meant to
 uncover. Models are frozen pydantic to match the repo style (see
-``magi_agent/benchmarks/gaia/dataset.py`` and ``magi_agent/discovery/models.py``).
+``benchmarks/gaia/dataset.py`` and ``magi_agent/discovery/models.py``).
 
 ``load_instances`` reads a local JSON/JSONL file and is what tests use.
 ``build_instances_from_swebench`` is a thin grouping utility (mirrors

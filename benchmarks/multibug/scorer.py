@@ -1,6 +1,6 @@
 """Pure scorer for the multi-problem discovery harness (TIDE §3.3).
 
-Zero I/O, zero model calls (mirrors ``magi_agent/benchmarks/gaia/scorer.py``).
+Zero I/O, zero model calls (mirrors ``benchmarks/gaia/scorer.py``).
 The retrieval metrics are deterministic and based on evidence-id overlap; the
 optional identification / resolution metrics are delegated to an INJECTABLE
 ``judge`` callable (default ``None`` → those components are omitted), so the
@@ -27,7 +27,7 @@ from collections.abc import Callable, Sequence
 
 from pydantic import BaseModel, ConfigDict
 
-from magi_agent.benchmarks.multibug.dataset import GoldProblem
+from benchmarks.multibug.dataset import GoldProblem
 from magi_agent.discovery.models import DiscoveryPrediction
 
 _MODEL_CONFIG = ConfigDict(frozen=True, extra="forbid")

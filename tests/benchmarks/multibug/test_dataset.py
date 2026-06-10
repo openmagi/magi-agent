@@ -5,7 +5,7 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from magi_agent.benchmarks.multibug.dataset import (
+from benchmarks.multibug.dataset import (
     GoldProblem,
     MultiProblemInstance,
     build_instances_from_swebench,

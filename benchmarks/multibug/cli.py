@@ -18,8 +18,8 @@ import json
 import os
 from collections.abc import Mapping, Sequence
 
-from magi_agent.benchmarks.multibug.dataset import load_instances
-from magi_agent.benchmarks.multibug.run import run_benchmark
+from benchmarks.multibug.dataset import load_instances
+from benchmarks.multibug.run import run_benchmark
 from magi_agent.discovery.grounding import GroundingMode
 
 #: Environment flag controlling the multi-problem harness.
@@ -72,7 +72,7 @@ def run_eval(
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Standalone CLI entrypoint (``python -m magi_agent.benchmarks.multibug.cli``)."""
+    """Standalone CLI entrypoint (``python -m benchmarks.multibug.cli``)."""
     import argparse  # noqa: PLC0415
 
     parser = argparse.ArgumentParser(
