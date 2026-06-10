@@ -246,9 +246,10 @@ class ToolDispatcher:
             result = handler(arguments, context)
             if isawaitable(result):
                 result = await result
+        _latency_ms = max(0, (time.monotonic_ns() - _t0) // 1_000_000)
         if trace is not None:
-            _dur = (time.monotonic_ns() - _t0) // 1_000_000
-            trace.record("tool", "ToolDispatcher", "execute", f"name={name}, status={result.status}", duration_ms=_dur)
+            trace.record("tool", "ToolDispatcher", "execute", f"name={name}, status={result.status}", duration_ms=_latency_ms)
+        result = _attach_latency(result, _latency_ms)
         result = self._attach_coding_receipt(name, arguments, result)
         return result
 
@@ -316,6 +317,7 @@ class ToolDispatcher:
             errorCode=result.error_code,
             errorMessage=result.error_message,
             durationMs=result.duration_ms,
+            latencyMs=result.latency_ms,
             artifactRefs=result.artifact_refs,
             fileRefs=result.file_refs,
             deliveryReceipts=result.delivery_receipts,
@@ -323,6 +325,37 @@ class ToolDispatcher:
             metadata=result.metadata,
             codingMutationReceipt=receipt.public_projection(),
         )
+
+
+def _attach_latency(result: ToolResult, latency_ms: int) -> ToolResult:
+    """Return a copy of *result* with ``latency_ms`` set.
+
+    Replaces an existing value if the handler happened to set one (unlikely —
+    handlers should not set the dispatcher-level field), so the dispatcher's
+    wall-clock measurement always wins.
+
+    Uses ``model_construct`` to avoid re-validating fields — the result is
+    already validated upstream, and certain test harnesses deliberately
+    construct results with out-of-spec status values for policy-boundary tests.
+    """
+    if result.latency_ms == latency_ms:
+        return result
+    return ToolResult.model_construct(
+        status=result.status,
+        output=result.output,
+        llm_output=result.llm_output,
+        transcript_output=result.transcript_output,
+        error_code=result.error_code,
+        error_message=result.error_message,
+        duration_ms=result.duration_ms,
+        latency_ms=latency_ms,
+        artifact_refs=result.artifact_refs,
+        file_refs=result.file_refs,
+        delivery_receipts=result.delivery_receipts,
+        retryable=result.retryable,
+        metadata=result.metadata,
+        coding_mutation_receipt=result.coding_mutation_receipt,
+    )
 
 
 def _general_automation_gate_result(
