@@ -81,14 +81,13 @@ def test_explicit_env_always_wins_setdefault_semantics():
     assert env["MAGI_OBS_HOME"] == "/custom/path"
 
 
-def test_overlay_scope_excludes_c9_clusters():
-    # The overlay must NOT pull in C9 introspection/memory-write flags — those
-    # belong to a sibling PR (14-PR6). (C11 coding-repair/doc-coverage ARE wired
-    # by 14-PR3; see the dedicated section below.)
+def test_overlay_scope_keeps_memory_write_out():
+    # C9 read-only introspection and C11 coding/doc controls are part of
+    # hosted ``full`` now, but MemoryWrite real persistence still depends on
+    # the held memory master and must stay out of every hosted stage.
     env = {HOSTED_DEPLOYMENT_ENV: "hosted", "MAGI_CONTROL_STAGE": "hardgate"}
     apply_hosted_runtime_defaults(env)
     for sibling in (
-        "MAGI_SELF_INTROSPECTION_ENABLED",
         "MAGI_MEMORY_WRITE_ENABLED",
     ):
         assert sibling not in env, sibling
@@ -168,6 +167,62 @@ def test_c3_controls_register_in_build_default_plane():
     plane = build_default_plane(env)
     # At least the resilience-family controls must register from the overlay.
     assert len(plane._controls) >= 1
+
+
+# --- PR6 (C9): InspectSelfEvidence + MemoryWrite wired into the stage overlay ---
+#
+# InspectSelfEvidence (read-only introspection) is low-risk and is exposed at
+# the ``full`` stage and above via MAGI_SELF_INTROSPECTION_ENABLED. MemoryWrite
+# real persistence ties to the held memory master (01-PR5), so the overlay must
+# keep it default-OFF at every stage — never set MAGI_MEMORY_WRITE_ENABLED.
+
+SELF_INTROSPECTION_FLAG = "MAGI_SELF_INTROSPECTION_ENABLED"
+MEMORY_WRITE_FLAG = "MAGI_MEMORY_WRITE_ENABLED"
+
+
+def test_stage_off_sets_no_introspection_flag():
+    env = {HOSTED_DEPLOYMENT_ENV: "hosted", "MAGI_CONTROL_STAGE": "off"}
+    apply_hosted_runtime_defaults(env)
+    assert SELF_INTROSPECTION_FLAG not in env
+
+
+def test_stage_resilience_does_not_enable_introspection():
+    # Introspection is a ``full``-stage capability — resilience stays minimal.
+    env = {HOSTED_DEPLOYMENT_ENV: "hosted", "MAGI_CONTROL_STAGE": "resilience"}
+    apply_hosted_runtime_defaults(env)
+    assert SELF_INTROSPECTION_FLAG not in env
+
+
+def test_stage_full_enables_introspection():
+    env = {HOSTED_DEPLOYMENT_ENV: "hosted", "MAGI_CONTROL_STAGE": "full"}
+    apply_hosted_runtime_defaults(env)
+    assert env[SELF_INTROSPECTION_FLAG] == "1"
+
+
+def test_stage_hardgate_keeps_introspection_on():
+    # hardgate is additive over full.
+    env = {HOSTED_DEPLOYMENT_ENV: "hosted", "MAGI_CONTROL_STAGE": "hardgate"}
+    apply_hosted_runtime_defaults(env)
+    assert env[SELF_INTROSPECTION_FLAG] == "1"
+
+
+def test_memory_write_stays_off_at_every_stage():
+    # MemoryWrite real persistence is held behind the memory master (01-PR5).
+    # No stage may flip MAGI_MEMORY_WRITE_ENABLED on.
+    for stage in ("off", "resilience", "full", "hardgate"):
+        env = {HOSTED_DEPLOYMENT_ENV: "hosted", "MAGI_CONTROL_STAGE": stage}
+        apply_hosted_runtime_defaults(env)
+        assert MEMORY_WRITE_FLAG not in env, stage
+
+
+def test_explicit_introspection_flag_wins_over_stage():
+    env = {
+        HOSTED_DEPLOYMENT_ENV: "hosted",
+        "MAGI_CONTROL_STAGE": "full",
+        SELF_INTROSPECTION_FLAG: "0",
+    }
+    apply_hosted_runtime_defaults(env)
+    assert env[SELF_INTROSPECTION_FLAG] == "0"
 
 
 # --- 14-PR3 (C11): coding-repair loop + document-coverage gate -------------
