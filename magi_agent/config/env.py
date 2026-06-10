@@ -1985,6 +1985,27 @@ def browser_tool_enabled(env: Mapping[str, str] | None = None) -> bool:
     )
 
 
+MAGI_PERMISSION_SCOPE_FROM_MODE_ENV = "MAGI_PERMISSION_SCOPE_FROM_MODE"
+
+
+def permission_scope_from_mode_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Single source of truth for the mode-derived permission-scope gate.
+
+    Default OFF (strict truthy opt-in: "1"/"true"/"yes"/"on"). When OFF the CLI
+    tool runtime keeps stamping the legacy hardcoded
+    ``permission_scope={"mode": "selected_full_toolhost", ...}`` onto every
+    ``ToolContext`` — byte-identical to before. When ON, the scope is derived
+    from the active permission mode via
+    :class:`magi_agent.tools.permission_scope.PermissionScopeResolver`, so the
+    ``default`` mode no longer preapproves mutating tools and the arbiter "ask"
+    branch can actually be reached. Like ``is_egress_gate_enabled`` this is an
+    additive, default-disabled seam and deliberately does NOT follow the
+    runtime-profile default-ON convention.
+    """
+    source = os.environ if env is None else env
+    return _is_true(source.get(MAGI_PERMISSION_SCOPE_FROM_MODE_ENV))
+
+
 def _is_true(value: str | None) -> bool:
     return (value or "").strip().lower() in _TRUE_VALUES
 
