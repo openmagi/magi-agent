@@ -1696,8 +1696,14 @@ def is_egress_gate_enabled(env: Mapping[str, str] | None = None) -> bool:
     NOT follow the runtime-profile default-ON convention — it is an additive,
     default-disabled seam.
     """
+    # Delegate to the canonical config.flags registry (PR2). Behaviour is
+    # byte-identical to the previous ``_is_true(source.get(...))`` form because
+    # MAGI_EGRESS_GATE_ENABLED is registered with a False default and the same
+    # strict-truthy parser. Imported lazily to avoid a config<->flags import cycle.
+    from .flags import flag_bool
+
     source = os.environ if env is None else env
-    return _is_true(source.get(MAGI_EGRESS_GATE_ENABLED_ENV))
+    return flag_bool(MAGI_EGRESS_GATE_ENABLED_ENV, env=source)
 
 
 MAGI_DOCUMENT_AUTHORING_COVERAGE_ENV = "MAGI_DOCUMENT_AUTHORING_COVERAGE"
