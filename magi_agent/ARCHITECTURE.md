@@ -460,7 +460,7 @@ graph LR
 | readonly_classifier.py | SmartApprove read-only classifier for the Magi permission gate (PR3). | contracts, real_runner, registry | channels/workflow_classifier_live.py, cli/engine.py, cli/permissions.py, cli/wiring.py, transport/egress_critic.py |
 | real_runner.py | A real, model-backed runner for the local ``magi`` CLI. | compiler, control_plane, engine, env, live_gate, local_tool_collector, materializer, providers, session_identity, session_service, task_completion, tool_runtime | benchmarks/gaia/harness.py, benchmarks/taubench/cli.py, cli/readonly_classifier.py, cli/tests/test_app.py, cli/tests/test_real_runner.py, cli/tests/test_runtime_policy_wiring.py, cli/wiring.py, discovery/orchestrator.py, runtime/child_runner_live.py |
 | session_log.py | Append-only JSONL session log for the Magi CLI (Stream B, PR-B1). | contracts, session_continuity, session_service, transcript | cli/headless.py, cli/tests/test_app.py, cli/tests/test_coldstart.py, cli/tests/test_session_log.py, cli/tui/app.py, cli/tui/history.py, cli/tui/theme.py, cli/wiring.py |
-| tool_runtime.py | Real tool runtime for the local ``magi`` CLI agent. | context, core_toolhost, dispatcher, env, file_tool_manifests, file_toolhost, identity, learning_recall, live_gate, local_tool_collector, manifest, memory_recall_block, memory_snapshot_cache, memory_write_wiring, message_builder, permission_scope, registry, session_identity, tool, tool_adapter, tools | cli/real_runner.py, cli/tests/test_identity.py, cli/tests/test_local_tool_evidence_wiring.py, cli/tests/test_plan_mode.py, cli/tests/test_tool_runtime.py, cli/wiring.py |
+| tool_runtime.py | Real tool runtime for the local ``magi`` CLI agent. | context, core_toolhost, dispatcher, env, file_tool_manifests, file_toolhost, identity, learning_recall, live_gate, local_tool_collector, manifest, memory_recall_block, memory_snapshot_cache, memory_write_wiring, message_builder, permission_scope, registry, session_identity, tool, tool_adapter, tools | cli/real_runner.py, cli/tests/test_identity.py, cli/tests/test_local_tool_evidence_wiring.py, cli/tests/test_plan_mode.py, cli/tests/test_tool_runtime.py, cli/wiring.py, runtime/child_runner_live.py |
 | wiring.py | Composition root for the Magi CLI (PR-F1, Stream F). | app, commands, config, context, contracts, dispatcher, engine, env, file_tool_manifests, file_toolhost, goal_nudge_wiring, hook_wiring, live_gate, local_runner, local_tool_collector, manifest, mcp, memory_mode_guard, openmagi_runtime, permission_scope, permissions, providers, readonly_classifier, real_runner, registry, runtime_sink, safety, session_identity, session_log, tool, tool_adapter, tool_render, tool_runtime | cli/app.py, cli/tests/test_app.py, cli/tests/test_coldstart.py, cli/tests/test_plan_mode.py, cli/tests/test_real_runner.py, cli/tests/test_runtime_policy_wiring.py, cli/tests/test_streaming_sink.py, transport/chat_routes.py, transport/streaming_chat_route.py |
 
 ### cli/commands/
@@ -746,7 +746,7 @@ graph LR
 | gate2_durable_evidence.py | Durable evidence store for Gate 2 selected sandbox canary. | — | transport/chat.py, transport/gate2_sandbox_canary.py |
 | ledger.py | — | builtin, types | evidence/__init__.py, evidence/local_tool_collector.py, harness/general_automation/constraint_reinjection.py, harness/general_automation/live_gate.py, harness/general_automation/task_completion.py, harness/verifier_bus.py, introspection/projection.py, introspection/tool.py, shadow/audit_reporter.py |
 | ledger_semantics.py | — | — | — |
-| local_tool_collector.py | — | env, extraction, ledger, result, types | cli/real_runner.py, cli/tests/test_local_tool_evidence_wiring.py, cli/tests/test_tool_runtime.py, cli/tool_runtime.py, cli/wiring.py |
+| local_tool_collector.py | — | env, extraction, ledger, result, types | cli/real_runner.py, cli/tests/test_local_tool_evidence_wiring.py, cli/tests/test_tool_runtime.py, cli/tool_runtime.py, cli/wiring.py, runtime/child_runner_live.py |
 | observed_egress.py | — | gate1a_egress_correlation | (root)/main.py, transport/chat.py, transport/chat_routes.py, transport/health.py |
 | reports.py | — | tool_preview, types | evidence/citation_audit.py, evidence/coding_verification.py, evidence/event_projection.py, evidence/source_ledger.py, evidence/subagent.py, shadow/audit_reporter.py, shadow/coding_verification_evidence_contract.py, shadow/research_source_evidence_contract.py |
 | research_final_gate.py | — | citation_audit, source_ledger, types | research/research_first_canary.py |
@@ -1097,7 +1097,7 @@ graph LR
 | scheduled_work.py | — | _common, context, env, policy, result | — |
 | skills.py | — | _common, context, result | cli/commands/builtins.py, transport/app_api.py |
 | source_ledger.py | — | _common, context, result | — |
-| subagents.py | — | _common, child_runner_boundary, child_runner_live, context, result | — |
+| subagents.py | — | _common, child_runner_boundary, child_runner_live, child_toolset, context, result | — |
 | taskboard.py | — | _common, context, env, result | — |
 | web.py | — | context, research_tools, result | — |
 
@@ -1230,7 +1230,8 @@ graph LR
 | checkpointing.py | — | — | — |
 | child_event_projection.py | — | child_runner_boundary, child_runtime_envelope, tool_preview | — |
 | child_runner_boundary.py | — | adk_turn_runner, child_acceptance, child_runtime_envelope, model_tiers, runtime_issuance, subagent | harness/workflow_executor.py, plugins/native/subagents.py, runtime/child_event_projection.py |
-| child_runner_live.py | A REAL, model-backed local child runner for the Child Runner boundary. | model_tiers, providers, real_runner | plugins/native/subagents.py |
+| child_runner_live.py | A REAL, model-backed local child runner for the Child Runner boundary. | child_toolset, local_tool_collector, model_tiers, providers, real_runner, tool_runtime | plugins/native/subagents.py |
+| child_toolset.py | Child-runner toolset profile resolution (PR1, doc 07). | local_readonly | plugins/native/subagents.py, runtime/child_runner_live.py |
 | commit_boundary.py | — | turn_utilities | — |
 | content_replacement.py | — | query_state | — |
 | context_attachments.py | — | context_packet, message_builder | — |
@@ -1487,7 +1488,7 @@ graph LR
 | health.py | Tool firing health checks (Principle 1 — "Built ≠ works"). | base, context, manifest, registry, result | — |
 | image_tools.py | ImageUnderstand tool — describe or Q&A an image file from the workspace. | context, providers, result, spreadsheet_tools | tools/file_toolhost.py, tools/music_tools.py, tools/video_tools.py |
 | kernel.py | — | context, event_projection, local_result_store, manifest, output_budget, permission, registry, request_ledger, result, schema_validation, tool_boundary | runtime/approval_resume.py, tools/event_projection.py, tools/scheduler.py, web_acquisition/reference_research_tools.py |
-| local_readonly.py | — | context, env, memory_mode_guard, read_format, result, ripgrep, runtime_receipts, source_ledger | web_acquisition/reference_research_tools.py |
+| local_readonly.py | — | context, env, memory_mode_guard, read_format, result, ripgrep, runtime_receipts, source_ledger | runtime/child_toolset.py, web_acquisition/reference_research_tools.py |
 | manifest.py | — | types | (root)/facades.py, adk_bridge/control_plane.py, adk_bridge/tool_adapter.py, browser/autonomous/tool.py, cli/tool_runtime.py, cli/wiring.py, context/hook.py, gates/gate1a_readonly_tools.py, gates/gate5b_full_toolhost.py, harness/general_automation/constraint_reinjection.py, harness/general_automation/package_manifest.py, harness/general_automation/package_tool_projection.py, harness/general_automation/question_tool.py, harness/general_automation/recipe_disclosure.py, harness/goal_loop_control.py, hooks/builtin/llm_safety_hooks.py, hooks/builtin/prompt_transforms.py, hooks/external_config.py, hooks/manifest.py, plugins/mcp_adapter.py, plugins/tool_projection.py, recipes/best_of_n.py, recipes/cross_verify.py, shadow/office_automation_contract.py, shadow/patch_file_policy_contract.py, shadow/path_shell_policy_contract.py, shadow/tool_policy.py, shadow/toolhost_contract.py, tools/__init__.py, tools/base.py, tools/catalog.py, tools/concurrent_dispatcher.py, tools/deferred.py, tools/dispatcher.py, tools/file_tool_manifests.py, tools/health.py, tools/kernel.py, tools/output_budget.py, tools/permission.py, tools/permission_scope.py, tools/registry.py, tools/safety.py, tools/scheduler.py, tools/schema_validation.py, tools/tool_search.py, transport/tools.py |
 | memory_mode_guard.py | Tool-level memory-mode hard enforcement. | patch_apply, session_identity | cli/learning_recall.py, cli/memory_recall_block.py, cli/wiring.py, gates/gate5b_full_toolhost.py, tools/core_toolhost.py, tools/local_readonly.py |
 | music_tools.py | MusicNotation tool — read musical notation from an image via vision model. | context, image_tools, result, spreadsheet_tools | tools/file_toolhost.py |
