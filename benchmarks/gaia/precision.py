@@ -1,4 +1,6 @@
-"""GAIA cross-verified precision pass — C1 + C2: web-fact and numeric re-check.
+"""GAIA cross-verified precision pass — C1 + C2 + dispatch gate.
+
+Default-OFF via ``MAGI_GAIA_PRECISION`` (off | audit | enforce).
 
 Default-OFF via ``MAGI_GAIA_PRECISION`` (off | audit | enforce).
 
@@ -15,10 +17,11 @@ Design principles (from the learnings doc, v4 run):
 from __future__ import annotations
 
 import logging
+import os
 import re
 from collections.abc import Callable
 
-__all__ = ["cross_verify_fact", "recompute_numeric"]
+__all__ = ["apply_precision_pass", "cross_verify_fact", "recompute_numeric"]
 
 _logger = logging.getLogger(__name__)
 
@@ -300,3 +303,145 @@ def _recompute_numeric_impl(
         exec_result_stripped,
     )
     return exec_result_stripped
+
+
+# ---------------------------------------------------------------------------
+# Dispatch + gate: apply_precision_pass
+# ---------------------------------------------------------------------------
+
+# Regex patterns on the question that trigger C2 (numeric re-computation)
+_NUMERIC_TRIGGER_PATTERNS = re.compile(
+    r"\b(how many|average|volume|length|maximum|percent|units|total|sum|calculate|compute)\b",
+    re.IGNORECASE,
+)
+
+
+def _read_precision_mode_from_env() -> str:
+    """Read MAGI_GAIA_PRECISION from os.environ; default 'off'."""
+    raw = os.environ.get("MAGI_GAIA_PRECISION", "off").strip().lower()
+    if raw in ("audit", "enforce"):
+        return raw
+    return "off"
+
+
+def apply_precision_pass(
+    question: str,
+    draft: str,
+    evidence: str,
+    *,
+    mode: str | None,
+    search_fn: Callable[[str], str],
+    fetch_fn: Callable[[str], str],
+    exec_fn: Callable[[str], str],
+    model: Callable[[str], str],
+) -> str:
+    """Dispatch C1 / C2 based on cheap deterministic triggers and mode gate.
+
+    Parameters
+    ----------
+    question:
+        The original GAIA question.
+    draft:
+        The agent's draft answer string.
+    evidence:
+        Evidence / context text already gathered by the agent.
+    mode:
+        ``'off'`` | ``'audit'`` | ``'enforce'`` | ``None``.
+        When ``None``, reads ``MAGI_GAIA_PRECISION`` from the environment
+        (default ``'off'``).
+    search_fn, fetch_fn, exec_fn, model:
+        Tool callables (injected; faked in tests).
+
+    Returns
+    -------
+    str
+        Possibly corrected draft; draft unchanged in off/audit modes.
+        Never raises.
+    """
+    try:
+        return _apply_precision_pass_impl(
+            question,
+            draft,
+            evidence,
+            mode=mode,
+            search_fn=search_fn,
+            fetch_fn=fetch_fn,
+            exec_fn=exec_fn,
+            model=model,
+        )
+    except Exception as exc:  # noqa: BLE001
+        _logger.debug("apply_precision_pass: fail-open on exception: %s", exc)
+        return draft
+
+
+def _apply_precision_pass_impl(
+    question: str,
+    draft: str,
+    evidence: str,
+    *,
+    mode: str | None,
+    search_fn: Callable[[str], str],
+    fetch_fn: Callable[[str], str],
+    exec_fn: Callable[[str], str],
+    model: Callable[[str], str],
+) -> str:
+    # Resolve mode
+    if mode is None:
+        resolved_mode = _read_precision_mode_from_env()
+    else:
+        resolved_mode = mode.strip().lower()
+        if resolved_mode not in ("audit", "enforce"):
+            resolved_mode = "off"
+
+    if resolved_mode == "off":
+        return draft
+
+    # Cheap deterministic triggers
+    is_short_fact = len(draft.strip()) <= _MAX_SHORT_FACT_CHARS
+    is_numeric_draft = _is_numeric(draft)
+    has_calc_keyword = bool(_NUMERIC_TRIGGER_PATTERNS.search(question))
+
+    trigger_c1 = is_short_fact
+    trigger_c2 = is_numeric_draft and has_calc_keyword
+
+    corrected = draft
+
+    if trigger_c2:
+        candidate = recompute_numeric(
+            question, draft, evidence, exec_fn=exec_fn, model=model
+        )
+        if resolved_mode == "enforce":
+            corrected = candidate
+        else:
+            # audit: log but keep draft
+            if candidate != draft:
+                _logger.info(
+                    "apply_precision_pass [audit] C2 would correct %r → %r",
+                    draft,
+                    candidate,
+                )
+
+    if trigger_c1 and corrected == draft:
+        # Run C1 only when C2 did not already change the answer (avoid double-correction)
+        candidate = cross_verify_fact(
+            question,
+            corrected,
+            search_fn=search_fn,
+            fetch_fn=fetch_fn,
+            model=model,
+        )
+        if resolved_mode == "enforce":
+            corrected = candidate
+        else:
+            # audit: log but keep draft
+            if candidate != draft:
+                _logger.info(
+                    "apply_precision_pass [audit] C1 would correct %r → %r",
+                    draft,
+                    candidate,
+                )
+
+    if resolved_mode == "audit":
+        return draft
+
+    return corrected

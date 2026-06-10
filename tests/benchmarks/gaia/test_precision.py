@@ -1,4 +1,4 @@
-"""Tests for GAIA cross-verified precision pass (PR1 + PR2: cross_verify_fact + recompute_numeric).
+"""Tests for GAIA cross-verified precision pass (PR1 + PR2 + PR3).
 
 Hermetic: all fakes injected — no network, no exec, no real model.
 
@@ -7,7 +7,10 @@ magi_agent/benchmarks/gaia/precision.py.
 """
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
+
+import pytest
 
 
 # ---------------------------------------------------------------------------
@@ -363,3 +366,195 @@ class TestRecomputeNumeric:
             model=_raising_model,
         )
         assert result == "55"
+
+
+# ---------------------------------------------------------------------------
+# PR3: apply_precision_pass
+# ---------------------------------------------------------------------------
+
+
+class TestApplyPrecisionPass:
+    """Dispatch + gate: mode=off|audit|enforce, default-OFF."""
+
+    def _import(self) -> Callable[..., str]:
+        from magi_agent.benchmarks.gaia.precision import apply_precision_pass
+
+        return apply_precision_pass
+
+    # ----------------------------------------------------------------- off
+    def test_mode_off_passthrough_no_fns_called(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """mode=off → returns draft unchanged without calling any fn."""
+        monkeypatch.setenv("MAGI_GAIA_PRECISION", "off")
+        fn = self._import()
+
+        search_calls: list[str] = []
+        exec_calls: list[str] = []
+
+        def _search(q: str) -> str:
+            search_calls.append(q)
+            return _fake_search_conflict(q)
+
+        def _exec(code: str) -> str:
+            exec_calls.append(code)
+            return _exec_eval(code)
+
+        result = fn(
+            question="How many box office records?",
+            draft="7",
+            evidence="Some evidence text.",
+            mode="off",
+            search_fn=_search,
+            fetch_fn=_fake_fetch_supports_6,
+            exec_fn=_exec,
+            model=_model_conflict_adopt_new,
+        )
+        assert result == "7"
+        assert search_calls == []
+        assert exec_calls == []
+
+    def test_default_mode_is_off(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """When MAGI_GAIA_PRECISION is not set, default is off (passthrough)."""
+        monkeypatch.delenv("MAGI_GAIA_PRECISION", raising=False)
+        fn = self._import()
+        result = fn(
+            question="How many?",
+            draft="7",
+            evidence="Some evidence.",
+            mode=None,  # should resolve to off
+            search_fn=_fake_search_conflict,
+            fetch_fn=_fake_fetch_supports_6,
+            exec_fn=_exec_eval,
+            model=_model_conflict_adopt_new,
+        )
+        assert result == "7"
+
+    # ---------------------------------------------------------------- audit
+    def test_audit_mode_does_not_change_answer_even_when_conflict_found(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """audit mode: computes correction internally but returns draft unchanged."""
+        monkeypatch.setenv("MAGI_GAIA_PRECISION", "audit")
+        fn = self._import()
+
+        with caplog.at_level(logging.DEBUG, logger="magi_agent"):
+            result = fn(
+                question="How many box office hits?",
+                draft="7",
+                evidence="Sources confirm 6 hits total.",
+                mode="audit",
+                search_fn=_fake_search_conflict,
+                fetch_fn=_fake_fetch_supports_6,
+                exec_fn=_exec_eval,
+                model=_model_conflict_adopt_new,
+            )
+
+        # draft unchanged in audit mode
+        assert result == "7"
+
+    # --------------------------------------------------------------- enforce
+    def test_enforce_mode_applies_c1_for_web_fact(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """enforce + short web-fact draft → C1 runs, correction applied."""
+        monkeypatch.setenv("MAGI_GAIA_PRECISION", "enforce")
+        fn = self._import()
+        result = fn(
+            question="How many box office hits did the film achieve?",
+            draft="7",
+            evidence="Box office records from official source.",
+            mode="enforce",
+            search_fn=_fake_search_conflict,
+            fetch_fn=_fake_fetch_supports_6,
+            exec_fn=_exec_eval,
+            model=_model_conflict_adopt_new,
+        )
+        assert result == "6"
+
+    def test_enforce_mode_applies_c2_for_numeric_calculation(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """enforce + 'average volume' numeric question → C2 runs, correction applied."""
+        monkeypatch.setenv("MAGI_GAIA_PRECISION", "enforce")
+        fn = self._import()
+        result = fn(
+            question="What is the average volume in cubic meters?",
+            draft="7",
+            evidence="The values are 6, 7, and 8 (average = 7).",
+            mode="enforce",
+            search_fn=_fake_search_no_conflict,
+            fetch_fn=_fake_fetch_supports_6,
+            exec_fn=_exec_eval,
+            model=_model_emit_code_mismatch,  # code emits 42
+        )
+        # C2 fires: code says 42, draft is 7 → adopt 42
+        assert result == "42"
+
+    def test_enforce_mode_no_trigger_for_long_non_numeric(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A long answer string (>50 chars) is not a short web-fact → no C1 trigger."""
+        monkeypatch.setenv("MAGI_GAIA_PRECISION", "enforce")
+        fn = self._import()
+        long_draft = "The quick brown fox jumps over the lazy dog and then does something else"
+        result = fn(
+            question="Describe the event in detail.",
+            draft=long_draft,
+            evidence="",
+            mode="enforce",
+            search_fn=_fake_search_conflict,
+            fetch_fn=_fake_fetch_supports_6,
+            exec_fn=_exec_eval,
+            model=_model_conflict_adopt_new,
+        )
+        # Too long to be a short fact → no trigger → pass through unchanged
+        assert result == long_draft
+
+    # ------------------------------------------------ over-correction guard
+    def test_no_free_reguess_without_evidence_conflict(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Core guard: when search AGREES with draft, draft must be returned unchanged.
+
+        This is the anti-over-correction test: the answer verifier was removed
+        because it changed e.g. 'backtick' → 'grave'. The precision pass must
+        ONLY correct on a genuine conflict signal grounded in evidence.
+        """
+        monkeypatch.setenv("MAGI_GAIA_PRECISION", "enforce")
+        fn = self._import()
+        result = fn(
+            question="What is the symbol for backtick?",
+            draft="backtick",
+            evidence="Standard name: backtick.",
+            mode="enforce",
+            search_fn=_fake_search_no_conflict,  # agrees with draft
+            fetch_fn=_fake_fetch_supports_6,
+            exec_fn=_exec_eval,
+            model=_model_agree,  # model says AGREE
+        )
+        # Must NOT change 'backtick' → something else when no conflict
+        assert result == "backtick"
+
+    # -------------------------------------------------------- fail-soft e2e
+    def test_all_fns_raising_returns_draft(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Even when all injected fns raise, precision pass must return draft."""
+        monkeypatch.setenv("MAGI_GAIA_PRECISION", "enforce")
+        fn = self._import()
+
+        def _boom(arg: str) -> str:
+            raise RuntimeError("boom")
+
+        result = fn(
+            question="How many?",
+            draft="original",
+            evidence="",
+            mode="enforce",
+            search_fn=_boom,
+            fetch_fn=_boom,
+            exec_fn=_boom,
+            model=_boom,
+        )
+        assert result == "original"
