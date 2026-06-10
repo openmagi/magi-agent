@@ -52,7 +52,6 @@ from magi_agent.cli.engine import (
     build_output_continuation_config,
 )
 from magi_agent.cli.goal_nudge_wiring import build_goal_nudge_from_env
-from magi_agent.cli.hook_wiring import build_user_hook_bus
 from magi_agent.cli.permissions import HeadlessSink, PermissionMode, RulesPermissionGate
 from magi_agent.cli.session_log import SessionLog
 from magi_agent.composio.config import resolve_composio_config
@@ -86,6 +85,17 @@ def local_runner_policy_routing_enabled_from_env() -> bool:
     if raw is None:
         return False
     return raw.strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _build_user_hook_bus_for_headless(*, workspace_root: str) -> object | None:
+    from magi_agent.config.env import is_user_hooks_enabled
+
+    if not is_user_hooks_enabled():
+        return None
+
+    from magi_agent.cli.hook_wiring import build_user_hook_bus
+
+    return build_user_hook_bus(workspace_root=workspace_root)
 
 
 @dataclass
@@ -248,7 +258,7 @@ def build_headless_runtime(
         # byte-identical. When ON (self-host / local CLI only), CC-style
         # ~/.magi/settings.json + <cwd>/.magi/settings.json command hooks are
         # bridged onto the before/after-tool callbacks.
-        user_hook_bus=build_user_hook_bus(workspace_root=effective_cwd),
+        user_hook_bus=_build_user_hook_bus_for_headless(workspace_root=effective_cwd),
     )
 
     # (C) Permission gate — default stays sink-less and therefore fail-safe on
