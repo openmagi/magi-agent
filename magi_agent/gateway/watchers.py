@@ -136,17 +136,34 @@ DEFAULT_CRON_TICK_INTERVAL_SECONDS = 60.0
 def build_default_watchers() -> tuple[GatewayWatcher, ...]:
     """First-party watcher set for ``magi gateway start`` (each self-gates).
 
-    Currently the scheduler-cron ticker only: channel watchers require
-    operator-injected provider ports and are NOT constructed here.  The cron
-    watcher carries its own ``MAGI_SCHEDULER_EXECUTOR_ENABLED`` gate, so with
-    that gate OFF the daemon records it as disabled and starts nothing.
+    Always includes the scheduler-cron ticker (gated by
+    ``MAGI_SCHEDULER_EXECUTOR_ENABLED``).  Live channel watchers are appended
+    only when their per-channel live gate is on AND the channel's credential is
+    configured — the channel-watcher builder is fail-closed and returns ``None``
+    otherwise, so with the gates OFF the fleet is byte-identical to cron-only.
+
+    The channel-watcher builders are imported lazily so importing this module
+    never pulls a network client (the concrete providers live behind that seam).
     """
-    return (
+    watchers: list[GatewayWatcher] = [
         build_scheduler_cron_watcher(
             driver=build_local_scheduler_cron_driver(),
             interval_seconds=DEFAULT_CRON_TICK_INTERVAL_SECONDS,
-        ),
+        )
+    ]
+
+    # Live channel watchers (self-host only; fail-closed). Lazy import avoids a
+    # module-level cycle (channel_watchers imports build_channel_poll_watcher
+    # from here) and keeps this module import-clean.
+    from magi_agent.gateway.channel_watchers import (  # noqa: PLC0415
+        build_telegram_channel_watcher,
     )
+
+    telegram_watcher = build_telegram_channel_watcher()
+    if telegram_watcher is not None:
+        watchers.append(telegram_watcher)
+
+    return tuple(watchers)
 
 
 # ---------------------------------------------------------------------------
