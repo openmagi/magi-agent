@@ -231,7 +231,15 @@ def test_run_actor_non_408_http_error_is_apify_error(monkeypatch: pytest.MonkeyP
 
 @pytest.mark.parametrize(
     ("env_value", "expected"),
-    [("0", "1.0"), ("-5", "1.0"), ("banana", "1.0"), ("0.50", "0.50")],
+    [
+        ("0", "1.0"),
+        ("-5", "1.0"),
+        ("banana", "1.0"),
+        ("inf", "1.0"),
+        ("1e309", "1.0"),
+        (" 0.50 ", "0.50"),
+        ("0.50", "0.50"),
+    ],
 )
 def test_run_actor_max_usd_env_validation(
     monkeypatch: pytest.MonkeyPatch, env_value: str, expected: str

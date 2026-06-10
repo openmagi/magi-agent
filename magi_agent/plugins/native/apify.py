@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import os
 import urllib.error
 import urllib.parse
@@ -53,9 +54,11 @@ def _resolve_max_usd() -> str:
     """
     raw = os.environ.get("APIFY_MAX_USD_PER_RUN")
     if raw:
+        value_text = raw.strip()
         try:
-            if float(raw) > 0:
-                return raw
+            value = float(value_text)
+            if math.isfinite(value) and value > 0:
+                return value_text
         except ValueError:
             pass
     return _DEFAULT_MAX_USD
