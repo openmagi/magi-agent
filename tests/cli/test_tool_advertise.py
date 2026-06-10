@@ -79,8 +79,8 @@ def test_core_tool_description_included(monkeypatch: pytest.MonkeyPatch) -> None
 
 def test_bash_description_included(monkeypatch: pytest.MonkeyPatch) -> None:
     instruction = _instruction(monkeypatch)
-    # Description from catalog.py: "Run a shell command in the workspace."
-    assert "Run a shell command in the workspace" in instruction
+    # Description from catalog.py (Bash manifest).
+    assert "Run a shell command with the workspace root" in instruction
 
 
 # ---------------------------------------------------------------------------
