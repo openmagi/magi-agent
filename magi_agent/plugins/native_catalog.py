@@ -394,7 +394,13 @@ _NATIVE_PLUGIN_DATA: tuple[Mapping[str, object], ...] = (
         "name": "OpenMagi Missions",
         "kind": "native",
         "version": "0.1.0-adk-scaffold",
-        "description": "Metadata for mission ledger coordination and export helpers.",
+        "description": (
+            "Mission ledger coordination surface. Honest-by-default "
+            "(MAGI_NATIVE_RECEIPTS_HONEST): MissionLedger returns "
+            "mission_ledger_not_configured until a mission backing is attached "
+            "(MAGI_MISSION_LEDGER_ATTACHED) instead of a fake local_recorded "
+            "receipt."
+        ),
         "publisher": "openmagi",
         "defaultInstalled": True,
         "defaultEnabled": True,
