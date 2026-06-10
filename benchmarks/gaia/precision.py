@@ -1,4 +1,4 @@
-"""GAIA cross-verified precision pass — C1: lightweight cross-verification.
+"""GAIA cross-verified precision pass — C1 + C2: web-fact and numeric re-check.
 
 Default-OFF via ``MAGI_GAIA_PRECISION`` (off | audit | enforce).
 
@@ -18,7 +18,7 @@ import logging
 import re
 from collections.abc import Callable
 
-__all__ = ["cross_verify_fact"]
+__all__ = ["cross_verify_fact", "recompute_numeric"]
 
 _logger = logging.getLogger(__name__)
 
@@ -192,3 +192,111 @@ def _cross_verify_fact_impl(
         return adopted_value
 
     return draft
+
+
+# ---------------------------------------------------------------------------
+# C2: recompute_numeric
+# ---------------------------------------------------------------------------
+
+# Regex to extract a Python code block from model output
+_CODE_BLOCK_RE = re.compile(r"```(?:python)?\s*(.*?)```", re.DOTALL | re.IGNORECASE)
+
+
+def _extract_code_block(text: str) -> str | None:
+    """Extract the first Python code block from *text*, or None."""
+    match = _CODE_BLOCK_RE.search(text)
+    if match:
+        return match.group(1).strip()
+    return None
+
+
+def recompute_numeric(
+    question: str,
+    draft: str,
+    evidence: str,
+    *,
+    exec_fn: Callable[[str], str],
+    model: Callable[[str], str],
+) -> str:
+    """Re-derive a numeric draft answer via code execution.
+
+    Parameters
+    ----------
+    question:
+        The original GAIA question.
+    draft:
+        The agent's draft answer (must look numeric to trigger).
+    evidence:
+        Evidence / context text already gathered by the agent.
+    exec_fn:
+        ``(code: str) -> str`` — executes Python code, returns stdout/result.
+    model:
+        ``(prompt: str) -> str`` — LLM callable that emits Python code.
+
+    Returns
+    -------
+    str
+        Code result if it disagrees with draft; otherwise draft unchanged.
+        Never raises.
+    """
+    try:
+        return _recompute_numeric_impl(
+            question, draft, evidence, exec_fn=exec_fn, model=model
+        )
+    except Exception as exc:  # noqa: BLE001
+        _logger.debug("recompute_numeric: fail-open on exception: %s", exc)
+        return draft
+
+
+def _recompute_numeric_impl(
+    question: str,
+    draft: str,
+    evidence: str,
+    *,
+    exec_fn: Callable[[str], str],
+    model: Callable[[str], str],
+) -> str:
+    if not _is_numeric(draft):
+        return draft
+
+    # Ask model to emit Python that re-derives the answer
+    code_prompt = (
+        f"Question: {question}\n"
+        f"Evidence / stated quantities:\n{evidence}\n\n"
+        f"Write a short Python snippet (≤10 lines) that re-derives the numeric "
+        f"answer from the stated quantities. Store the final answer in a variable "
+        f"named `result`. Return ONLY a Python code block, no explanation.\n"
+        f"Example format:\n"
+        f"```python\nresult = 3 + 4\n```"
+    )
+    model_output = model(code_prompt)
+    code = _extract_code_block(model_output)
+    if not code:
+        return draft
+
+    exec_result = exec_fn(code)
+
+    # Normalize: strip whitespace
+    exec_result_stripped = exec_result.strip()
+    draft_stripped = draft.strip()
+
+    if exec_result_stripped == "ERROR" or not exec_result_stripped:
+        return draft
+
+    # Compare numerically when possible, else string compare
+    try:
+        exec_num = float(exec_result_stripped.replace(",", "."))
+        draft_num = float(draft_stripped.replace(",", "."))
+        if abs(exec_num - draft_num) < 1e-9:
+            return draft  # agrees — keep draft
+    except ValueError:
+        if exec_result_stripped == draft_stripped:
+            return draft  # string equality — keep draft
+
+    # Disagrees → adopt code result
+    _logger.info(
+        "recompute_numeric: corrected %r → %r (code execution)",
+        draft,
+        exec_result_stripped,
+    )
+    return exec_result_stripped

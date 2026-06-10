@@ -1,4 +1,4 @@
-"""Tests for GAIA cross-verified precision pass (PR1: cross_verify_fact).
+"""Tests for GAIA cross-verified precision pass (PR1 + PR2: cross_verify_fact + recompute_numeric).
 
 Hermetic: all fakes injected — no network, no exec, no real model.
 
@@ -230,3 +230,136 @@ class TestCrossVerifyFact:
         assert fetch_calls == []
         # When fetch cap prevents resolution, draft is preserved
         assert result == "7"
+
+
+# ---------------------------------------------------------------------------
+# Helpers for PR2
+# ---------------------------------------------------------------------------
+
+
+def _raising_exec(code: str) -> str:
+    raise RuntimeError("exec error")
+
+
+def _model_emit_code_matching(prompt: str) -> str:
+    """Fake model: emits python that produces 7 (same as draft)."""
+    return "```python\nresult = 3 + 4\n```"
+
+
+def _model_emit_code_mismatch(prompt: str) -> str:
+    """Fake model: emits python that produces 42 (differs from draft)."""
+    return "```python\nresult = 6 * 7\n```"
+
+
+def _model_emit_no_code(prompt: str) -> str:
+    """Fake model: emits no code block."""
+    return "I cannot derive this from the given quantities."
+
+
+def _exec_eval(code: str) -> str:
+    """Minimal exec: eval the last assignment and return its str repr."""
+    for line in code.strip().splitlines():
+        if line.strip().startswith("result"):
+            try:
+                rhs = line.split("=", 1)[1].strip()
+                val = eval(rhs)  # noqa: S307 — hermetic test only
+                return str(val)
+            except Exception:
+                return "ERROR"
+    return "ERROR"
+
+
+# ---------------------------------------------------------------------------
+# PR2: recompute_numeric
+# ---------------------------------------------------------------------------
+
+
+class TestRecomputeNumeric:
+    """C2: re-derive numeric answer via exec; adopt if disagrees with draft."""
+
+    def _import(self) -> Callable[..., str]:
+        from magi_agent.benchmarks.gaia.precision import recompute_numeric
+
+        return recompute_numeric
+
+    # ----------------------------------------------------------- matching
+    def test_matching_result_returns_draft_unchanged(self) -> None:
+        """Code produces 7 (same as draft) → draft unchanged."""
+        fn = self._import()
+        result = fn(
+            "What is 3 + 4?",
+            "7",
+            "question states 3 + 4",
+            exec_fn=_exec_eval,
+            model=_model_emit_code_matching,
+        )
+        assert result == "7"
+
+    # ---------------------------------------------------------- mismatch
+    def test_mismatch_returns_code_result(self) -> None:
+        """Code produces 42 (differs from draft=7) → returns '42'."""
+        fn = self._import()
+        result = fn(
+            "What is 6 * 7?",
+            "7",
+            "question states 6 * 7",
+            exec_fn=_exec_eval,
+            model=_model_emit_code_mismatch,
+        )
+        assert result == "42"
+
+    # ------------------------------------------------------- non-numeric draft
+    def test_non_numeric_draft_returns_unchanged(self) -> None:
+        """Non-numeric draft (e.g. a name) → unchanged, no exec attempted."""
+        fn = self._import()
+        result = fn(
+            "Who was president?",
+            "Abraham Lincoln",
+            "some evidence",
+            exec_fn=_exec_eval,
+            model=_model_emit_code_matching,
+        )
+        assert result == "Abraham Lincoln"
+
+    # -------------------------------------------------------------- exec error
+    def test_exec_error_returns_draft(self) -> None:
+        """exec_fn raising → draft returned, never propagates."""
+        fn = self._import()
+        result = fn(
+            "What is the volume?",
+            "55",
+            "volume calculation evidence",
+            exec_fn=_raising_exec,
+            model=_model_emit_code_mismatch,
+        )
+        assert result == "55"
+
+    # ------------------------------------------------------ model returns no code
+    def test_no_code_returned_by_model_returns_draft(self) -> None:
+        """Model emits no code block → draft unchanged."""
+        fn = self._import()
+        result = fn(
+            "What is the count?",
+            "55",
+            "evidence here",
+            exec_fn=_exec_eval,
+            model=_model_emit_no_code,
+        )
+        assert result == "55"
+
+    # ----------------------------------------------------------- fail-soft
+    def test_model_error_returns_draft(self) -> None:
+        """model callable raising → draft returned, never propagates."""
+        fn = self._import()
+
+        def _raising_model(prompt: str) -> str:
+            raise RuntimeError("model crashed")
+
+        result = fn(
+            "What is the volume?",
+            "55",
+            "evidence",
+            exec_fn=_exec_eval,
+            model=_raising_model,
+        )
+        assert result == "55"
