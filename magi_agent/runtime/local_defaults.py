@@ -118,6 +118,9 @@ EVAL_RUNTIME_ENV_DEFAULTS: Mapping[str, str] = {
     "MAGI_LEARNING_ENABLED": "false",
     "MAGI_SKILL_CURATOR_ENABLED": "0",
     "MAGI_RUNNER_POLICY_ROUTING_ENABLED": "0",
+    # Eval-specific prompt + guard flags (P2 + P3)
+    "MAGI_EVAL_AUTONOMY_ENABLED": "1",
+    "MAGI_EVAL_ZERO_EDIT_GUARD_ENABLED": "1",
 }
 
 

@@ -27,3 +27,40 @@ def test_eval_loop_guard_thresholds_respect_explicit_override():
     env = {"MAGI_RUNTIME_PROFILE": "eval", "MAGI_LOOP_GUARD_HARD_THRESHOLD": "7"}
     apply_local_eval_runtime_defaults(env)
     assert env["MAGI_LOOP_GUARD_HARD_THRESHOLD"] == "7"  # setdefault must not override
+
+
+# ---------------------------------------------------------------------------
+# Task 2 — P2: eval autonomy + self-verification prompt directive
+# ---------------------------------------------------------------------------
+
+import os
+from magi_agent.config.env import parse_eval_autonomy_enabled
+
+
+def test_eval_autonomy_parser_default_on():
+    assert parse_eval_autonomy_enabled({}) is True
+    assert parse_eval_autonomy_enabled({"MAGI_EVAL_AUTONOMY_ENABLED": "0"}) is False
+
+
+def test_eval_autonomy_parser_explicit_on():
+    assert parse_eval_autonomy_enabled({"MAGI_EVAL_AUTONOMY_ENABLED": "1"}) is True
+    assert parse_eval_autonomy_enabled({"MAGI_EVAL_AUTONOMY_ENABLED": "true"}) is True
+
+
+def test_eval_defaults_set_autonomy_flag():
+    env = {"MAGI_RUNTIME_PROFILE": "eval"}
+    apply_local_eval_runtime_defaults(env)
+    assert env["MAGI_EVAL_AUTONOMY_ENABLED"] == "1"
+
+
+def test_eval_autonomy_block_enabled():
+    from magi_agent.cli.tool_runtime import eval_autonomy_block
+    text = eval_autonomy_block({"MAGI_EVAL_AUTONOMY_ENABLED": "1"})
+    assert "run the project's existing tests" in text.lower() or "test-verified" in text.lower()
+    assert "never ask for confirmation" in text.lower()
+
+
+def test_eval_autonomy_block_disabled():
+    from magi_agent.cli.tool_runtime import eval_autonomy_block
+    text = eval_autonomy_block({"MAGI_EVAL_AUTONOMY_ENABLED": "0"})
+    assert text == ""

@@ -481,6 +481,34 @@ def build_tool_advertisement_block(*, workspace_root: str | None = None) -> str:
         return ""
 
 
+def eval_autonomy_block(env: Mapping[str, str] | None = None) -> str:
+    """Return the eval-mode autonomy + self-verify system-prompt block.
+
+    Returns an empty string when ``MAGI_EVAL_AUTONOMY_ENABLED`` is falsy (or
+    when the env mapping explicitly disables it), so the caller's prompt is
+    byte-identical to the non-eval path when the flag is off.
+
+    Imported lazily inside to keep ``import cli.tool_runtime`` cold-clean.
+    """
+    import os as _os  # noqa: PLC0415
+
+    from magi_agent.config.env import parse_eval_autonomy_enabled  # noqa: PLC0415
+
+    source = env if env is not None else _os.environ
+    if not parse_eval_autonomy_enabled(source):
+        return ""
+    return (
+        "\n\n<autonomous_execution>\n"
+        "You are operating autonomously with write access and no human in the loop.\n"
+        "- Apply every fix by editing/creating files now. Never ask for confirmation "
+        "and never end by only describing the change — make it.\n"
+        "- Before you finish, VERIFY: run the project's existing tests for the code you "
+        "changed and a reproduction of the reported issue. If anything fails, fix it and "
+        "re-run until green. Do not conclude until your change is test-verified.\n"
+        "</autonomous_execution>"
+    )
+
+
 def build_cli_instruction(
     *,
     session_id: str,
@@ -665,6 +693,7 @@ def build_cli_instruction(
         "as debugging, planning, code review, research, writing, or UI work, "
         "load the relevant skill and follow its instructions.\n"
         "</skills>"
+        + eval_autonomy_block()
     )
 
     parts = [prompt]

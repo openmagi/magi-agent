@@ -1976,6 +1976,28 @@ def parse_evidence_completion_gate_enabled(env: Mapping[str, str]) -> bool:
     return _runtime_feature_enabled(env, "MAGI_EVIDENCE_COMPLETION_GATE_ENABLED")
 
 
+def parse_eval_autonomy_enabled(env: Mapping[str, str]) -> bool:
+    """MAGI_EVAL_AUTONOMY_ENABLED — when ON (default), appends an eval-specific
+    autonomy + self-verify directive block to the CLI system prompt. This
+    instructs the agent to apply every fix by editing files, never ask for
+    confirmation, and verify its changes by running existing tests before
+    concluding. Default ON (the ``_runtime_feature_enabled`` helper defaults to
+    ON outside the safe-runtime-profile set, and the eval profile explicitly
+    sets this to "1" in ``EVAL_RUNTIME_ENV_DEFAULTS``). Set
+    ``MAGI_EVAL_AUTONOMY_ENABLED=0`` to suppress the block."""
+    return _runtime_feature_enabled(env, "MAGI_EVAL_AUTONOMY_ENABLED")
+
+
+def parse_eval_zero_edit_guard_enabled(env: Mapping[str, str]) -> bool:
+    """MAGI_EVAL_ZERO_EDIT_GUARD_ENABLED — when ON (default), the engine turn
+    driver re-prompts once with "Apply the code change you described above by
+    editing the file(s) now." if a coding turn ends without any file-mutating
+    tool call. Prevents the agent from describing a fix without applying it.
+    Default ON; eval profile explicitly sets "1". Set
+    ``MAGI_EVAL_ZERO_EDIT_GUARD_ENABLED=0`` to suppress."""
+    return _runtime_feature_enabled(env, "MAGI_EVAL_ZERO_EDIT_GUARD_ENABLED")
+
+
 def parse_recipe_default_packs_expanded(env: Mapping[str, str]) -> bool:
     """MAGI_RECIPE_DEFAULT_PACKS_EXPANDED — stage gate for recipe default-pack
     expansion (doc 05 PR-2 / A1-G1). Default OFF.
