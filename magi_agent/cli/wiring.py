@@ -57,6 +57,7 @@ from magi_agent.cli.session_log import SessionLog
 from magi_agent.composio.config import resolve_composio_config
 from magi_agent.composio.mcp import (
     ComposioToolsetBundle,
+    attach_composio_toolsets_through_dispatcher,
     attach_composio_toolsets_to_runner,
     build_composio_toolset_bundle,
 )
@@ -85,6 +86,17 @@ def local_runner_policy_routing_enabled_from_env() -> bool:
     if raw is None:
         return False
     return raw.strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _build_user_hook_bus_for_headless(*, workspace_root: str) -> object | None:
+    from magi_agent.config.env import is_user_hooks_enabled
+
+    if not is_user_hooks_enabled():
+        return None
+
+    from magi_agent.cli.hook_wiring import build_user_hook_bus
+
+    return build_user_hook_bus(workspace_root=workspace_root)
 
 
 @dataclass
@@ -241,6 +253,13 @@ def build_headless_runtime(
         # engine streaming is byte-identical to pre-PR4. When ON, a clean stop
         # short of the goal triggers a bounded continuation (default mode "goal").
         goal_nudge=build_goal_nudge_from_env(),
+        # PR2 (cluster 11): production user-hook wiring. Default OFF
+        # (MAGI_USER_HOOKS_ENABLED) → build_user_hook_bus returns None → engine
+        # never attaches the HookBus tool-callback bridge and streaming is
+        # byte-identical. When ON (self-host / local CLI only), CC-style
+        # ~/.magi/settings.json + <cwd>/.magi/settings.json command hooks are
+        # bridged onto the before/after-tool callbacks.
+        user_hook_bus=_build_user_hook_bus_for_headless(workspace_root=effective_cwd),
     )
 
     # (C) Permission gate — default stays sink-less and therefore fail-safe on
@@ -720,6 +739,34 @@ def _build_composio_bundle_for_mode(
 
     composio_config = resolve_composio_config(os.environ)
     composio_bundle = build_composio_toolset_bundle(composio_config)
+
+    from magi_agent.config.env import composio_dispatch_enforced  # noqa: PLC0415
+
+    if composio_dispatch_enforced(os.environ):
+        # Hard-safety enforced path (PR2): route composio MCP calls through the
+        # RuntimePermissionArbiter so secret / sealed / workspace-escape
+        # arguments are blocked before the MCP body runs, AND record a receipt
+        # for every guarded call (the MCP-path analogue of ToolDispatcher
+        # appending receipts for native tools).
+        from magi_agent.composio.mcp import ComposioReceiptLedger  # noqa: PLC0415
+        from magi_agent.tools.context import ToolContext  # noqa: PLC0415
+        from magi_agent.tools.safety import (  # noqa: PLC0415
+            RuntimePermissionArbiter,
+        )
+
+        def _composio_context_factory(**_kwargs: object) -> ToolContext:
+            return ToolContext(botId="composio", channel="composio")
+
+        composio_attached = attach_composio_toolsets_through_dispatcher(
+            runner,
+            composio_bundle,
+            arbiter=RuntimePermissionArbiter(),
+            mode=mode if mode != "plan" else "act",
+            context_factory=_composio_context_factory,
+            receipt_ledger=ComposioReceiptLedger(),
+        )
+        return composio_bundle, composio_attached
+
     composio_attached = attach_composio_toolsets_to_runner(
         runner,
         composio_bundle,

@@ -328,6 +328,14 @@ FLAGS: tuple[FlagSpec, ...] = (
         default=True,
         summary="Enable the magi CLI surface (headless NDJSON + Textual TUI); flat default-ON.",
     ),
+    _b(
+        "MAGI_HOSTED_STREAMING_SERVE",
+        scope="hosted",
+        summary=(
+            "Serve hosted selected-gate5b chat over the SSE stream route with "
+            "completions-equivalent gates (no local-engine fallthrough)."
+        ),
+    ),
     # --- Runtime profile (string) ------------------------------------------
     FlagSpec(
         name="MAGI_RUNTIME_PROFILE",

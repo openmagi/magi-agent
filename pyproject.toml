@@ -95,6 +95,17 @@ magi = "magi_agent.cli.__main__:main"
 
 [tool.setuptools.packages.find]
 include = ["magi_agent*"]
+# Standalone benchmark harnesses (gaia / taubench / multibug) have zero runtime
+# consumers — they exist only for offline eval runs. Keep them in the repo but
+# drop them from the published wheel to shrink install size / attack surface.
+# The legal benchmark (magi_agent.benchmarks.legalbench + the legal_eval module)
+# stays: it is imported at runtime by `magi legal-eval` (cli/app.py) and the
+# first_party legal recipe, so it must remain importable from the wheel.
+exclude = [
+  "magi_agent.benchmarks.gaia*",
+  "magi_agent.benchmarks.taubench*",
+  "magi_agent.benchmarks.multibug*",
+]
 
 [tool.setuptools.package-data]
 magi_agent = [

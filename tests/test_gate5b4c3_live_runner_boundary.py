@@ -44,8 +44,6 @@ MODEL_ATTEMPT_DIGEST = "sha256:" + "5" * 64
 def _payload(**overrides: object) -> dict[str, object]:
     base: dict[str, object] = {
         "schemaVersion": "gate5b4c3.chatProxyShadowGeneration.v1",
-        "mode": "shadow_generation_diagnostic",
-        "responseAuthority": "typescript",
         "shadowGenerationId": "shadow_gen_001",
         "requestIdDigest": REQUEST_DIGEST,
         "traceIdDigest": TRACE_DIGEST,
