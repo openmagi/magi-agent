@@ -417,6 +417,57 @@ def _source_ledger_for_session(
         return ()
 
 
+def build_tool_advertisement_block(*, workspace_root: str | None = None) -> str:
+    """Build an ``<available_tools>`` XML block from the currently-enabled tool set.
+
+    Assembles a throw-away local runtime using the same env-gated registration
+    and bind-time policy path as :func:`build_cli_tool_runtime`. This keeps the
+    advertised catalog aligned with tools that become enabled only when their
+    host binds a handler (for example ``BrowserTask`` and
+    ``InspectSelfEvidence``).
+    Each enabled tool is emitted as one line::
+
+        ToolName [permission] — one-line description
+
+    The block is wrapped in ``<available_tools>`` / ``</available_tools>`` tags
+    so the model can identify the catalog section unambiguously.  A newly-
+    registered tool group (file tools, browser tool, …) automatically becomes
+    visible as soon as its env gate is turned on — no manual prompt edits needed.
+
+    Fail-open: any error returns an empty string so prompt assembly never breaks.
+    """
+    try:
+        registry = build_cli_tool_runtime(
+            workspace_root=str(Path(workspace_root or ".").resolve()),
+            session_id="tool-advertisement",
+        ).registry
+
+        lines: list[str] = []
+        for tool_name in sorted(registry._tools):  # noqa: SLF001
+            registration = registry._tools[tool_name]  # noqa: SLF001
+            if not registration.enabled:
+                continue
+            manifest = registration.manifest
+            # Emit: ToolName [permission] — first sentence of description
+            desc = manifest.description.split("\n")[0].rstrip()
+            lines.append(f"  {manifest.name} [{manifest.permission}] — {desc}")
+
+        if not lines:
+            return ""
+
+        tool_list = "\n".join(lines)
+        return (
+            "<available_tools>\n"
+            "The following tools are attached to this session. "
+            "Use the right tool for the task — newly-added tools are listed here "
+            "and may not be mentioned elsewhere in this prompt.\n"
+            f"{tool_list}\n"
+            "</available_tools>"
+        )
+    except Exception:
+        return ""
+
+
 def build_cli_instruction(
     *,
     session_id: str,
@@ -565,22 +616,36 @@ def build_cli_instruction(
         model=model,
         memory_snapshot_block=memory_snapshot_block,
     )
-    return (
-        f"{prompt}\n\n"
-        "<file_tools>\n"
-        "When the task involves an image, document, spreadsheet, or other "
-        "attached file:\n"
-        "- Use ImageUnderstand(path=..., prompt=...) for image files "
-        "(.png/.jpg/.jpeg/.gif/.webp/.bmp).\n"
-        "- Use DocumentRead(path=...) for document files "
-        "(.pdf/.docx/.pptx/.xml/.csv/.txt/.md/.rst).\n"
-        "- Use XLSXRead(path=...) for spreadsheet files (.xlsx/.xls).\n"
-        "- If a tool returns status='blocked' or status='needs_approval', "
-        "attempt an alternative approach: read the file with Bash (e.g. "
-        "`cat`, `python3`) before concluding the file is inaccessible.\n"
-        "- Never conclude 'unable to determine' solely because a tool returned "
-        "an error; try at least one alternative access path first.\n"
-        "</file_tools>\n\n"
+
+    # Registry-driven tool advertisement (Principle P2: "built ≠ used").
+    # Dynamically reflects which tools are attached — file/browser tools only
+    # appear when their env gate is on.  Fail-open: empty string when unavailable.
+    _tool_ad_block = build_tool_advertisement_block(workspace_root=workspace_root)
+
+    # File-tool usage guidance — only injected when file tools are actually
+    # enabled so the model is not directed to use unavailable tools.
+    from magi_agent.config.env import file_tools_enabled  # noqa: PLC0415
+
+    _file_tools_block = ""
+    if file_tools_enabled():
+        _file_tools_block = (
+            "<file_tools>\n"
+            "When the task involves an image, document, spreadsheet, or other "
+            "attached file:\n"
+            "- Use ImageUnderstand(path=..., prompt=...) for image files "
+            "(.png/.jpg/.jpeg/.gif/.webp/.bmp).\n"
+            "- Use DocumentRead(path=...) for document files "
+            "(.pdf/.docx/.pptx/.xml/.csv/.txt/.md/.rst).\n"
+            "- Use XLSXRead(path=...) for spreadsheet files (.xlsx/.xls).\n"
+            "- If a tool returns status='blocked' or status='needs_approval', "
+            "attempt an alternative approach: read the file with Bash (e.g. "
+            "`cat`, `python3`) before concluding the file is inaccessible.\n"
+            "- Never conclude 'unable to determine' solely because a tool returned "
+            "an error; try at least one alternative access path first.\n"
+            "</file_tools>"
+        )
+
+    _skills_block = (
         "<skills>\n"
         "Bundled first-party skills, including superpowers-style workflows, are "
         "available through the SkillLoader tool. Before specialized work such "
@@ -588,6 +653,14 @@ def build_cli_instruction(
         "load the relevant skill and follow its instructions.\n"
         "</skills>"
     )
+
+    parts = [prompt]
+    if _tool_ad_block:
+        parts.append(_tool_ad_block)
+    if _file_tools_block:
+        parts.append(_file_tools_block)
+    parts.append(_skills_block)
+    return "\n\n".join(parts)
 
 
 __all__ = [
@@ -597,6 +670,7 @@ __all__ = [
     "build_cli_adk_tools",
     "build_cli_instruction",
     "build_cli_tool_runtime",
+    "build_tool_advertisement_block",
     "bind_cli_local_full_tool_handlers",
     "wrap_cli_adk_tools_with_evidence_collector",
 ]
