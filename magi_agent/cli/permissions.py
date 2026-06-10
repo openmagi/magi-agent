@@ -105,6 +105,39 @@ from magi_agent.runtime.control import ControlRequestStore
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from magi_agent.cli.readonly_classifier import ReadOnlyClassifier
 
+
+# Default location for the durable control-request JSONL log when the gate is
+# ON but ``MAGI_CONTROL_STORE_PATH`` is unset.
+_DEFAULT_DURABLE_STORE_RELPATH = ".magi/control/requests.jsonl"
+
+
+def _default_control_store() -> ControlRequestStore:
+    """Build the default ControlRequestStore honouring the durable gate (A7).
+
+    Default (gate OFF) returns the volatile in-memory store, byte-identical to
+    the prior ``ControlRequestStore()`` default. When ``MAGI_CONTROL_STORE_DURABLE``
+    is truthy, returns a JSONL-backed durable store so pending approvals survive
+    a process restart. Imports are lazy to preserve this module's light import
+    contract (it must not pull config/env at import time).
+    """
+    from magi_agent.config.env import (
+        control_store_durable_enabled,
+        control_store_durable_path,
+    )
+
+    if not control_store_durable_enabled():
+        return ControlRequestStore()
+
+    from pathlib import Path
+
+    from magi_agent.runtime.durable_control_store import DurableControlRequestStore
+
+    path = control_store_durable_path()
+    if path is None:
+        path = Path.home() / _DEFAULT_DURABLE_STORE_RELPATH
+    return DurableControlRequestStore(path=path)
+
+
 __all__ = [
     "canonical_request_key",
     "RulesEngine",
@@ -241,9 +274,13 @@ class RulesPermissionGate(PermissionGate):
         self.rules: RulesEngine = rules if rules is not None else RulesEngine()
         self.sinks: list[PromptSink] = list(sinks) if sinks is not None else []
         # ``store`` is held for PR-C2 (the resolve-once race uses it); PR-C1
-        # does not exercise it but accepts it so wiring stays stable.
+        # does not exercise it but accepts it so wiring stays stable. When no
+        # store is injected, the backend is chosen by the durable gate (A7):
+        # OFF (default) -> volatile in-memory store, byte-identical to before;
+        # ON -> JSONL-backed durable store so pending approvals survive a
+        # restart. An explicitly injected ``store`` always wins.
         self.store: ControlRequestStore = (
-            store if store is not None else ControlRequestStore()
+            store if store is not None else _default_control_store()
         )
         # SmartApprove classifier (PR3). ``None`` means disabled (DEFAULT).
         # When set, a rule-miss ``ask`` is offered to the classifier BEFORE the
