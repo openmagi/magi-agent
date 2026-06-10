@@ -459,6 +459,73 @@ def test_selected_gate5b_stream_emits_live_sink_events_before_completion(
     assert payloads[-1]["terminal"] == "completed"
 
 
+def test_selected_gate5b_stream_skips_posthoc_text_after_live_text(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
+
+    async def fake_selected_chat_response(
+        runtime: object,
+        body: object,
+        *,
+        request: object,
+        public_event_sink=None,
+    ) -> JSONResponse:
+        assert public_event_sink is not None
+        public_event_sink({"type": "text_delta", "delta": "live chunk"})
+        return JSONResponse(
+            status_code=200,
+            content={
+                "status": "python_ready",
+                "publicEvents": [
+                    {"type": "turn_phase", "phase": "planning"},
+                    {"type": "text_delta", "delta": "live chunk final aggregate"},
+                ],
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "live chunk final aggregate",
+                        }
+                    }
+                ],
+            },
+        )
+
+    monkeypatch.setattr(
+        streaming_chat_route_module,
+        "run_gate5b_user_visible_chat_response",
+        fake_selected_chat_response,
+    )
+
+    async def _collect() -> list[dict]:
+        frames = _drive_selected_gate5b_stream(
+            SimpleNamespace(),
+            {"messages": [{"role": "user", "content": "stream selected"}]},
+            SimpleNamespace(),
+            session_id="s-selected-posthoc-text",
+            turn_id="t-selected-posthoc-text",
+        )
+        return [
+            payload
+            async for frame in frames
+            for payload in _data_lines(frame.decode("utf-8"))
+        ]
+
+    payloads = asyncio.run(_collect())
+
+    text_payloads = [
+        payload for payload in payloads if payload.get("type") == "text_delta"
+    ]
+    assert [payload["delta"] for payload in text_payloads] == ["live chunk"]
+    assert any(
+        payload.get("type") == "turn_phase" and payload.get("phase") == "planning"
+        for payload in payloads
+    )
+    assert payloads[-1]["type"] == "turn_result"
+    assert payloads[-1]["terminal"] == "completed"
+
+
 def test_selected_gate5b_stream_cancels_response_task_when_client_closes(
     monkeypatch,
 ) -> None:
