@@ -670,6 +670,17 @@ def _coding_repair_loop_enabled() -> bool:
     return coding_repair_loop_enabled()
 
 
+def _document_coverage_blocks(mode: str, failed_count: int) -> bool:
+    """Whether failed document coverage should flip the pre-final decision.
+
+    14-PR3 (C11): the gate is 3-state (``off`` | ``advisory`` | ``block``). Only
+    ``block`` mode lets a failed-coverage count contribute to a ``"block"``
+    decision; ``advisory`` records the count for telemetry but never blocks, and
+    ``off`` is inert.
+    """
+    return mode == "block" and failed_count > 0
+
+
 def _coding_repair_max_attempts(repair_policy: Mapping[str, object]) -> int:
     from magi_agent.coding.repair_loop import repair_max_attempts
 
@@ -2214,11 +2225,15 @@ class MagiEngineDriver:
         evidence_records: tuple[object, ...] = ()
         verifier_bus: dict[str, object] | None = None
         # Task C — OPTIONAL BLOCKING document-authoring coverage gate. Default OFF
-        # and strict-truthy env-gated; when off the bus call is behavior-identical
-        # to before and DocumentCoverage evidence stays audit-only.
-        from magi_agent.config.env import is_document_authoring_coverage_enabled
+        # and env-gated; when off the bus call is behavior-identical to before and
+        # DocumentCoverage evidence stays audit-only. 14-PR3 (C11) makes the gate
+        # 3-state: ``advisory`` still computes the failed-coverage count (for
+        # false-block-rate telemetry) but the engine does not block on it; only
+        # ``block`` flips the pre-final decision.
+        from magi_agent.config.env import resolve_document_authoring_coverage_mode
 
-        document_coverage_gate_enabled = is_document_authoring_coverage_enabled()
+        document_coverage_mode = resolve_document_authoring_coverage_mode()
+        document_coverage_gate_enabled = document_coverage_mode != "off"
         failed_document_coverage = 0
         if self._evidence_collector is not None:
             from magi_agent.harness.verifier_bus import execute_pre_final_verifier_bus
@@ -2248,9 +2263,12 @@ class MagiEngineDriver:
         missing_validators = [
             ref for ref in assembly.required_validators if ref not in observed_public_refs
         ]
+        document_coverage_blocks = _document_coverage_blocks(
+            document_coverage_mode, failed_document_coverage
+        )
         decision = (
             "block"
-            if (missing_evidence or missing_validators or failed_document_coverage)
+            if (missing_evidence or missing_validators or document_coverage_blocks)
             else "pass"
         )
 

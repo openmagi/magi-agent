@@ -11,7 +11,10 @@ follows the TOOL status (``"ok"``), so the coverage verdict lives in
 
 from __future__ import annotations
 
-from magi_agent.config.env import is_document_authoring_coverage_enabled
+from magi_agent.config.env import (
+    is_document_authoring_coverage_enabled,
+    resolve_document_authoring_coverage_mode,
+)
 from magi_agent.evidence.document_coverage import (
     DocumentCoverageBoundary,
     evidence_record_from_record,
@@ -191,6 +194,98 @@ def test_env_flag_defaults_off_and_is_strict_truthy() -> None:
             )
             is True
         )
+
+
+# -- 3-state mode (14-PR3, C11): off | advisory | block --------------------
+
+
+def test_coverage_mode_defaults_off() -> None:
+    assert resolve_document_authoring_coverage_mode({}) == "off"
+    assert resolve_document_authoring_coverage_mode({"MAGI_DOCUMENT_AUTHORING_COVERAGE": ""}) == "off"
+    assert (
+        resolve_document_authoring_coverage_mode({"MAGI_DOCUMENT_AUTHORING_COVERAGE": "0"}) == "off"
+    )
+
+
+def test_coverage_mode_legacy_truthy_maps_to_block() -> None:
+    # Backward compat: the historical boolean truthy values mean hard-block.
+    for truthy in ("1", "true", "yes", "on", "TRUE"):
+        assert (
+            resolve_document_authoring_coverage_mode(
+                {"MAGI_DOCUMENT_AUTHORING_COVERAGE": truthy}
+            )
+            == "block"
+        )
+
+
+def test_coverage_mode_explicit_advisory_and_block() -> None:
+    assert (
+        resolve_document_authoring_coverage_mode(
+            {"MAGI_DOCUMENT_AUTHORING_COVERAGE": "advisory"}
+        )
+        == "advisory"
+    )
+    assert (
+        resolve_document_authoring_coverage_mode(
+            {"MAGI_DOCUMENT_AUTHORING_COVERAGE": " ADVISORY "}
+        )
+        == "advisory"
+    )
+    assert (
+        resolve_document_authoring_coverage_mode(
+            {"MAGI_DOCUMENT_AUTHORING_COVERAGE": "block"}
+        )
+        == "block"
+    )
+    # "off" is an explicit, valid mode token too.
+    assert (
+        resolve_document_authoring_coverage_mode(
+            {"MAGI_DOCUMENT_AUTHORING_COVERAGE": "off"}
+        )
+        == "off"
+    )
+
+
+def test_coverage_mode_unknown_falls_back_to_off() -> None:
+    # A typo must fail safe (never silently hard-block).
+    assert (
+        resolve_document_authoring_coverage_mode(
+            {"MAGI_DOCUMENT_AUTHORING_COVERAGE": "bogus"}
+        )
+        == "off"
+    )
+
+
+def test_engine_document_coverage_blocks_only_in_block_mode() -> None:
+    # 14-PR3: the engine treats advisory as record-but-do-not-block.
+    from magi_agent.cli.engine import _document_coverage_blocks
+
+    # block mode: failed coverage contributes to the block decision.
+    assert _document_coverage_blocks("block", 2) is True
+    assert _document_coverage_blocks("block", 0) is False
+    # advisory mode: failed coverage is recorded for telemetry but never blocks.
+    assert _document_coverage_blocks("advisory", 2) is False
+    assert _document_coverage_blocks("advisory", 0) is False
+    # off mode: never blocks regardless of count.
+    assert _document_coverage_blocks("off", 5) is False
+
+
+def test_is_enabled_true_for_advisory_and_block() -> None:
+    # The verifier bus must still COMPUTE the coverage count in advisory mode
+    # (for telemetry); only the engine decides whether it BLOCKS. So the
+    # boolean "enabled" helper is true for both advisory and block.
+    assert (
+        is_document_authoring_coverage_enabled(
+            {"MAGI_DOCUMENT_AUTHORING_COVERAGE": "advisory"}
+        )
+        is True
+    )
+    assert (
+        is_document_authoring_coverage_enabled(
+            {"MAGI_DOCUMENT_AUTHORING_COVERAGE": "block"}
+        )
+        is True
+    )
 
 
 # -- Gate ON edge cases (items 1, 2, 7) ------------------------------------
