@@ -1,7 +1,7 @@
 """User-visible generation request, identity, and history contract builders.
 
 Pure move out of ``magi_agent/transport/chat.py`` (08-PR1). Builds the
-``Gate5B4C3ShadowGenerationRequest`` envelope for the user-visible serving
+``UserVisibleGenerationRequest`` envelope for the user-visible serving
 path plus its sanitization helpers: last-user-text/image extraction, bounded
 sanitized recent history, public identity policy, and the model-visible canary
 runner request. Behavior is unchanged; ``transport.chat`` re-exports these
@@ -37,6 +37,12 @@ from magi_agent.transport.chat_shared import (
     _route_tool_bundle_ready,
     _sha256_digest,
 )
+
+# Staged rename (08-PR2): the envelope is the first-party user-visible
+# generation contract, not a shadow diagnostic. New code should use this
+# alias; the Gate5B4C3* class name remains until the physical rename of the
+# contract module lands (wire schemaVersion is unchanged either way).
+UserVisibleGenerationRequest = Gate5B4C3ShadowGenerationRequest
 
 _APP_CHANNEL_HISTORY_SCHEMA = "openmagi.app_channel_history.v1"
 
@@ -81,7 +87,7 @@ def _build_user_visible_generation_request(
     canary_request_digest: str | None = None,
     gate1a_bundle: Gate1AReadOnlyToolBundle | Gate5BFullToolBundle | None = None,
     request_headers: Mapping[str, str] | None = None,
-) -> Gate5B4C3ShadowGenerationRequest:
+) -> UserVisibleGenerationRequest:
     if not isinstance(payload, Mapping):
         raise ValueError("chat payload must be an object")
     user_text = _extract_last_user_text(payload)
@@ -154,7 +160,7 @@ def _build_user_visible_generation_request(
         len(str(item["sanitizedText"]).encode("utf-8"))
         for item in history_messages
     )
-    return Gate5B4C3ShadowGenerationRequest.model_validate(
+    return UserVisibleGenerationRequest.model_validate(
         {
             "schemaVersion": "gate5b4c3.chatProxyShadowGeneration.v1",
             "shadowGenerationId": f"uv_canary_{request_digest.removeprefix('sha256:')[:24]}",

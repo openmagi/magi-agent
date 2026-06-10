@@ -85,7 +85,6 @@ from magi_agent.shadow.gate5b4c3_shadow_counter_store import (
     Gate5B4C3ShadowCounterReservation,
 )
 from magi_agent.shadow.gate5b4c3_shadow_generation_contract import (
-    Gate5B4C3ShadowGenerationRequest,
     build_gate5b4c3_shadow_generation_diagnostic,
 )
 from magi_agent.transport.chat_shared import (
@@ -112,6 +111,7 @@ from magi_agent.transport.gate2_sandbox_canary import (
     _run_gate2_sandbox_workspace_canary_chat,
 )
 from magi_agent.transport.generation_request import (
+    UserVisibleGenerationRequest,
     _build_user_visible_generation_request,
     build_gate5b_user_visible_canary_runner_request,
     sanitize_gate5b_model_visible_identity_text,
@@ -1591,7 +1591,7 @@ def _boundary_runner_error_diagnostic(
 def _chat_runner_error_diagnostic(
     *,
     runtime: OpenMagiRuntime,
-    generation: Gate5B4C3ShadowGenerationRequest,
+    generation: UserVisibleGenerationRequest,
     gate1a_bundle: Gate1AReadOnlyToolBundle | Gate5BFullToolBundle,
     stage: str,
     reason_code: str,
