@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import uuid
 
 from magi_agent.plugins.native._common import digest, ok_result
@@ -8,7 +7,7 @@ from magi_agent.tools.context import ToolContext
 from magi_agent.tools.result import ToolResult
 
 
-def spawn_agent(arguments: dict[str, object], context: ToolContext) -> ToolResult:
+async def spawn_agent(arguments: dict[str, object], context: ToolContext) -> ToolResult:
     prompt = str(arguments.get("prompt") or arguments.get("task") or "")
     persona = str(arguments.get("persona") or "general")
 
@@ -44,7 +43,7 @@ def spawn_agent(arguments: dict[str, object], context: ToolContext) -> ToolResul
     #    enforce v1 text-only; caller-supplied tools are intentionally NOT
     #    forwarded (prevents accidental tool escalation).
     # 3. Build ChildRunnerConfig with live gate ON.
-    # 4. Call boundary.run(request) via asyncio.run().
+    # 4. await boundary.run(request) on the dispatch event loop.
     # 5. Project the sanitised result envelope into the ToolResult output.
     # Any exception on the live path falls back to a blocked/ok result (never
     # raises out of spawn_agent).
@@ -122,36 +121,17 @@ def spawn_agent(arguments: dict[str, object], context: ToolContext) -> ToolResul
             liveChildRunnerEnabled=True,
         )
 
-        # Drive the async boundary from this sync tool.  asyncio.run() creates a
-        # new event loop for the coroutine; it raises RuntimeError if called from
-        # inside an already-running loop (e.g. an async test framework or an
-        # awaiting executor).  In that case we close the orphaned coroutine to
-        # suppress "never awaited" warnings and return the safe blocked fallback
-        # INLINE — no re-raise, so the outer except-Exception block is not
-        # triggered by this specific condition.
+        # Drive the async boundary directly on the dispatch event loop. The tool
+        # dispatcher awaits coroutine handlers (and never thread-offloads them),
+        # so awaiting here runs the child without spinning a nested event loop —
+        # the previous asyncio.run() raised RuntimeError on the live loop and
+        # silently degraded every production call to "blocked".
         boundary = LocalChildRunnerBoundary(
             config,
             child_runner=runner,
             agents_spawned_so_far=0,
         )
-        coro = boundary.run(request)
-        try:
-            result = asyncio.run(coro)
-        except RuntimeError:
-            # Called from inside a running event loop — close the orphaned coro
-            # to suppress "never awaited" warnings, then return the safe
-            # blocked payload immediately (degrade, never crash).
-            coro.close()
-            return ok_result(
-                "SpawnAgent",
-                {
-                    "status": "blocked",
-                    "persona": persona,
-                    "promptDigest": digest(prompt),
-                    "spawnDepth": context.spawn_depth,
-                    "liveChildRunnerAttached": False,
-                },
-            )
+        result = await boundary.run(request)
 
         # Project the sanitised envelope into the output payload.
         envelope = result.envelope
