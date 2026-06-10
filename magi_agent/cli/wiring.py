@@ -51,6 +51,7 @@ from magi_agent.cli.engine import (
     build_engine_recovery_policy,
     build_output_continuation_config,
 )
+from magi_agent.cli.goal_nudge_wiring import build_goal_nudge_from_env
 from magi_agent.cli.permissions import HeadlessSink, PermissionMode, RulesPermissionGate
 from magi_agent.cli.session_log import SessionLog
 from magi_agent.composio.config import resolve_composio_config
@@ -234,6 +235,11 @@ def build_headless_runtime(
         runner_policy_routing_enabled=runner_policy_routing_enabled,
         event_sink=event_sink,
         evidence_collector=evidence_collector if callable(evidence_collector) else None,
+        # PR4 (cluster 03 C4): production goal-nudge wiring. Default OFF
+        # (MAGI_GOAL_NUDGE_ENABLED) → build_goal_nudge_from_env returns None →
+        # engine streaming is byte-identical to pre-PR4. When ON, a clean stop
+        # short of the goal triggers a bounded continuation (default mode "goal").
+        goal_nudge=build_goal_nudge_from_env(),
     )
 
     # (C) Permission gate — default stays sink-less and therefore fail-safe on

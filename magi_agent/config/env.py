@@ -1700,6 +1700,26 @@ def is_egress_gate_enabled(env: Mapping[str, str] | None = None) -> bool:
     return _is_true(source.get(MAGI_EGRESS_GATE_ENABLED_ENV))
 
 
+MAGI_GOAL_NUDGE_ENABLED_ENV = "MAGI_GOAL_NUDGE_ENABLED"
+
+
+def is_goal_nudge_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Single source of truth for the production goal-nudge activation flag.
+
+    Default OFF (strict truthy opt-in: "1"/"true"/"yes"/"on"). When OFF, the
+    production CLI/serve engine wiring injects ``goal_nudge=None`` so
+    ``MagiEngineDriver._drive`` behaves byte-identically to pre-PR4. When ON,
+    ``cli.goal_nudge_wiring.build_goal_nudge_from_env`` constructs a
+    :class:`~magi_agent.runtime.goal_nudge.GoalNudge` (default ``mode="goal"``)
+    and threads it onto the engine so a clean stop short of the goal triggers a
+    bounded continuation. Like ``is_egress_gate_enabled`` this deliberately does
+    NOT follow the runtime-profile default-ON convention — it is an additive,
+    default-disabled seam.
+    """
+    source = os.environ if env is None else env
+    return _is_true(source.get(MAGI_GOAL_NUDGE_ENABLED_ENV))
+
+
 MAGI_DOCUMENT_AUTHORING_COVERAGE_ENV = "MAGI_DOCUMENT_AUTHORING_COVERAGE"
 
 
