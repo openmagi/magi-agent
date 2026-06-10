@@ -102,3 +102,17 @@ def test_search_actors_network_failure_is_soft(monkeypatch: pytest.MonkeyPatch) 
     result = asyncio.run(apify.apify_search_actors({"query": "x"}, _ctx()))
     assert result.status == "error"
     assert result.error_code == "apify_unreachable"
+
+
+def test_search_actors_missing_items_key_returns_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(urllib.request, "urlopen", _CapturingOpener({"data": {}}))
+    result = asyncio.run(apify.apify_search_actors({"query": "x"}, _ctx()))
+    assert result.status == "ok"
+    assert result.output["actors"] == []
+
+
+def test_search_actors_non_list_items_returns_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(urllib.request, "urlopen", _CapturingOpener({"data": {"items": 42}}))
+    result = asyncio.run(apify.apify_search_actors({"query": "x"}, _ctx()))
+    assert result.status == "ok"
+    assert result.output["actors"] == []

@@ -11,6 +11,7 @@ failure returns a structured ToolResult (mirrors plugins/native/web.py).
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import urllib.error
@@ -55,13 +56,18 @@ async def apify_search_actors(arguments: dict[str, object], context: ToolContext
     request = urllib.request.Request(
         f"{_STORE_ENDPOINT}?{params}", headers={"Accept": "application/json"},
     )
-    try:
+    def _fetch() -> object:
         with urllib.request.urlopen(request, timeout=_SEARCH_TIMEOUT_S) as response:  # noqa: S310
-            payload = json.load(response)
+            return json.load(response)
+
+    try:
+        payload = await asyncio.to_thread(_fetch)
     except Exception as exc:  # noqa: BLE001
         return _error("apify_search_actors", "apify_unreachable",
                       f"Apify store search failed: {exc!r}")
-    items = (((payload or {}).get("data") or {}).get("items")) or []
+    items = ((payload or {}).get("data") or {}).get("items")
+    if not isinstance(items, list):
+        items = []
     actors: list[dict[str, object]] = []
     for item in items:
         if not isinstance(item, dict):
@@ -71,11 +77,14 @@ async def apify_search_actors(arguments: dict[str, object], context: ToolContext
         if not username or not name:
             continue
         stats = item.get("stats") if isinstance(item.get("stats"), dict) else {}
+        categories = item.get("categories")
+        if not isinstance(categories, list):
+            categories = []
         actors.append({
             "actor_id": f"{username}~{name}",
             "title": str(item.get("title") or ""),
             "description": str(item.get("description") or "")[:500],
-            "categories": item.get("categories") or [],
+            "categories": categories,
             "rating": stats.get("actorReviewRating"),
             "total_runs": stats.get("totalRuns"),
         })
