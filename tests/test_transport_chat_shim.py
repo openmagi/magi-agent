@@ -193,6 +193,16 @@ EXTRACTED_MODULE_SYMBOLS: dict[str, list[str]] = {
         "build_public_identity_policy",
         "sanitize_gate5b_model_visible_identity_text",
     ],
+    "magi_agent.transport.egress_critic": [
+        "_EGRESS_CRITIC_DEFAULT_MODEL",
+        "_ENV_EGRESS_CRITIC_MODEL",
+        "_build_egress_evidence_view",
+        "_egress_critic_model_factory",
+        "_log_egress_critic_evidence",
+        "_maybe_run_egress_critic_gate",
+        "_production_egress_critic_model_factory",
+        "_safe_egress_critic_evidence_log_record",
+    ],
 }
 
 
