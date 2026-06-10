@@ -38,6 +38,16 @@ class ToolResult(BaseModel):
         validation_alias=AliasChoices("durationMs", "duration_ms"),
         serialization_alias="durationMs",
     )
+    # Wall-clock milliseconds measured by the dispatcher from the moment it
+    # hands control to the handler until the handler returns (or raises).
+    # Distinct from ``duration_ms``, which is optionally self-reported by the
+    # tool handler.  Always non-negative when present; None for results that
+    # were blocked before the handler ran (permission denied, disabled, etc.).
+    latency_ms: int | None = Field(
+        default=None,
+        validation_alias=AliasChoices("latencyMs", "latency_ms"),
+        serialization_alias="latencyMs",
+    )
     artifact_refs: tuple[str, ...] = Field(default=(), alias="artifactRefs")
     file_refs: tuple[str, ...] = Field(default=(), alias="fileRefs")
     delivery_receipts: tuple[str, ...] = Field(default=(), alias="deliveryReceipts")

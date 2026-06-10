@@ -145,25 +145,6 @@ def _exercise_default_off_boundary(boundary: str) -> tuple[object, _FakeProvider
             )
         )
         return result, provider
-    if boundary == "background_task":
-        from magi_agent.harness.background_tasks import (
-            BackgroundTaskBoundary,
-            BackgroundTaskConfig,
-            BackgroundTaskRequest,
-        )
-
-        result = BackgroundTaskBoundary(BackgroundTaskConfig()).execute(
-            BackgroundTaskRequest(
-                operation="TaskCreate",
-                requestId="e2e-task-1",
-                ownerDigest="owner:abc",
-                taskId="task:e2e",
-                promptPreview="safe long running goal",
-                channel=ChannelRef(type="web", channelId="web-session"),
-            ),
-            store=provider,
-        )
-        return result, provider
     if boundary == "channel_dispatch":
         from magi_agent.channels.dispatcher import (
             ChannelDispatchConfig,
@@ -197,7 +178,6 @@ def test_live_ts_surface_default_off_matrix_is_packaged() -> None:
         "browse_website_summarize",
         "send_generated_file_to_telegram",
         "scheduled_reminder",
-        "long_running_goal_subtask_notification",
         "coding_test_run_file_delivery",
         "discord_reply_with_attachment",
     )

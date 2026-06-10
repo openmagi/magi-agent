@@ -13,7 +13,6 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
-from datetime import datetime, timezone
 import hashlib
 import re
 from typing import Any
@@ -329,13 +328,6 @@ def build_gate5b_full_toolhost_config_from_env(
     )
 
 
-def _route_config(runtime: OpenMagiRuntime) -> Gate5BUserVisibleChatRouteConfig:
-    config = getattr(runtime, "gate5b_user_visible_chat_route_config", None)
-    if isinstance(config, Gate5BUserVisibleChatRouteConfig):
-        return config
-    return Gate5BUserVisibleChatRouteConfig()
-
-
 def _shadow_generation_route_config(
     runtime: OpenMagiRuntime,
 ) -> Gate5B4C3ShadowGenerationRouteConfig:
@@ -522,33 +514,8 @@ def _route_tool_bundle_readonly(
     return isinstance(bundle, Gate1AReadOnlyToolBundle) and bundle.status == "ready"
 
 
-def _route_tool_bundle_names(
-    bundle: Gate1AReadOnlyToolBundle | Gate5BFullToolBundle | None,
-) -> list[str]:
-    if not _route_tool_bundle_ready(bundle):
-        return []
-    return list(bundle.exposed_tool_names)
-
-
-def _route_tool_bundle_mode(
-    bundle: Gate1AReadOnlyToolBundle | Gate5BFullToolBundle | None,
-) -> str:
-    if _route_tool_bundle_full(bundle):
-        return "gate5b_selected_full_toolhost"
-    if _route_tool_bundle_readonly(bundle):
-        return "gate1a_readonly_tools"
-    return "no_route_tools"
-
-
 def _sha256_digest(value: str) -> str:
     return "sha256:" + hashlib.sha256(value.encode("utf-8")).hexdigest()
-
-
-def _utc_now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace(
-        "+00:00",
-        "Z",
-    )
 
 
 def _is_sha256_digest(value: object) -> bool:
@@ -577,14 +544,3 @@ def _int_env(value: object, *, fallback: int) -> int:
 
 def _csv_values(value: str) -> tuple[str, ...]:
     return tuple(item.strip() for item in value.split(",") if item.strip())
-
-
-def _camel_to_snake(value: str) -> str:
-    chars: list[str] = []
-    for char in value:
-        if char.isupper():
-            chars.append("_")
-            chars.append(char.lower())
-        else:
-            chars.append(char)
-    return "".join(chars).lstrip("_")

@@ -622,7 +622,6 @@
       "python_adk_live_producer_support": {
         "status": "default_off",
         "evidence": [
-          "magi-agent/magi_agent/harness/background_tasks.py",
           "magi-agent/magi_agent/recipes/coding_subagents.py"
         ],
         "notes": "Child execution and background activity are default-off for production frontend traffic."
