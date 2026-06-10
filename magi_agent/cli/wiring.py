@@ -52,6 +52,7 @@ from magi_agent.cli.engine import (
     build_output_continuation_config,
 )
 from magi_agent.cli.goal_nudge_wiring import build_goal_nudge_from_env
+from magi_agent.cli.hook_wiring import build_user_hook_bus
 from magi_agent.cli.permissions import HeadlessSink, PermissionMode, RulesPermissionGate
 from magi_agent.cli.session_log import SessionLog
 from magi_agent.composio.config import resolve_composio_config
@@ -241,6 +242,13 @@ def build_headless_runtime(
         # engine streaming is byte-identical to pre-PR4. When ON, a clean stop
         # short of the goal triggers a bounded continuation (default mode "goal").
         goal_nudge=build_goal_nudge_from_env(),
+        # PR2 (cluster 11): production user-hook wiring. Default OFF
+        # (MAGI_USER_HOOKS_ENABLED) → build_user_hook_bus returns None → engine
+        # never attaches the HookBus tool-callback bridge and streaming is
+        # byte-identical. When ON (self-host / local CLI only), CC-style
+        # ~/.magi/settings.json + <cwd>/.magi/settings.json command hooks are
+        # bridged onto the before/after-tool callbacks.
+        user_hook_bus=build_user_hook_bus(workspace_root=effective_cwd),
     )
 
     # (C) Permission gate — default stays sink-less and therefore fail-safe on
