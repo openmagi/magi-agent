@@ -17,6 +17,7 @@ from magi_agent.runtime.openmagi_runtime import OpenMagiRuntime
 
 EXPECTED_NATIVE_PLUGIN_IDS = (
     "openmagi.agentmemory",
+    "openmagi.apify",
     "openmagi.artifacts",
     "openmagi.browser",
     "openmagi.coding",
@@ -338,6 +339,7 @@ def test_audit_route_returns_snapshot_summary_with_forced_attachment_flags() -> 
     assert snapshot["summary"]["enabledPluginCount"] == len(EXPECTED_NATIVE_PLUGIN_IDS)
     assert snapshot["summary"]["optedOutPluginCount"] == 0
     assert snapshot["summary"]["declaredSecretNames"] == [
+        "APIFY_TOKEN",
         "FIRECRAWL_API_KEY",
         "GATEWAY_TOKEN",
     ]

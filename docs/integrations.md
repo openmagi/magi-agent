@@ -33,3 +33,35 @@ Channel delivery is also a projection boundary. User-visible messages should be 
   its outputs pass through `redact_composio_text` / `redact_composio_value`
   before they are surfaced. Treat it as a gated surface — enabling it does not
   bypass the side-effect boundary above.
+
+- **Apify Actors.** Magi Agent can discover and run Apify Actors for
+  platform-specific structured scraping (Instagram, TikTok, Google Maps, Amazon,
+  LinkedIn, …) when the general web-fetch tools hit anti-bot walls. Implemented
+  in `magi_agent/plugins/native/apify.py` and **enabled by default**.
+
+  ### Tools
+
+  - `apify_search_actors(query)` — Search the public Apify store by keyword
+    (e.g. `"instagram scraper"`, `"google maps"`). **Free — no account or token
+    needed.** Returns up to 10 Actors, each with `actor_id`, title, description,
+    categories, rating, and total run count.
+  - `apify_run_actor(actor_id, run_input)` — Run an Actor and return its
+    structured dataset items in one call. **Paid — billed to your own Apify
+    account.** Requires `APIFY_TOKEN`. Every run is hard-capped at
+    `APIFY_MAX_USD_PER_RUN` (default `$1.00`) and 300 seconds.
+
+  ### Setup (paid execution)
+
+  1. Create an account at <https://apify.com> (free tier includes trial credit).
+  2. Copy your API token from the Apify console.
+  3. Set the environment variables before starting Magi Agent:
+
+     ```bash
+     export APIFY_TOKEN="apify_api_..."
+     # optional: hard cost cap per run (default $1.00)
+     export APIFY_MAX_USD_PER_RUN="0.50"
+     ```
+
+  Discovery (`apify_search_actors`) works without a token. Running an Actor
+  (`apify_run_actor`) requires `APIFY_TOKEN` and is billed to your Apify
+  account; every run is capped at `APIFY_MAX_USD_PER_RUN`.

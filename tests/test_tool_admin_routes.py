@@ -38,6 +38,8 @@ EXPECTED_CORE_TOOL_NAMES = {
 EXPECTED_NATIVE_TOOL_NAMES = {
     "AgentMemorySearch",
     "AgentMemoryRemember",
+    "apify_search_actors",
+    "apify_run_actor",
     "ArtifactDelete",
     "ArtifactUpdate",
     "BatchRead",
