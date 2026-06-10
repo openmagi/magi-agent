@@ -188,6 +188,7 @@ def _selected_runtime(
     mocked_runner=None,
     full_toolhost: bool = False,
     authority: PythonRuntimeAuthorityConfig | None = None,
+    primitives_loader=None,
 ) -> OpenMagiRuntime:
     runtime = _make_runtime(
         authority=authority
@@ -196,6 +197,7 @@ def _selected_runtime(
             canaryRoutingAllowed=True,
         )
     )
+    default_loader = None if mocked_runner is not None else _fake_primitives
     runtime.gate5b_user_visible_chat_route_config = Gate5BUserVisibleChatRouteConfig(
         enabled=True,
         killSwitchEnabled=False,
@@ -204,7 +206,9 @@ def _selected_runtime(
         environment="production",
         environmentAllowlist=("production",),
         mockedRunner=mocked_runner,
-        adkPrimitivesLoader=None if mocked_runner is not None else _fake_primitives,
+        adkPrimitivesLoader=(
+            primitives_loader if primitives_loader is not None else default_loader
+        ),
     )
     if full_toolhost:
         runtime.gate5b_full_toolhost_config = Gate5BFullToolHostConfig.model_validate(
@@ -1017,6 +1021,162 @@ def test_malformed_json_flag_off_keeps_legacy_shape(monkeypatch) -> None:
 
     assert response.status_code == 400
     assert response.json() == {"error": "malformed_json"}
+
+
+# ---------------------------------------------------------------------------
+# 08-PR3 — gate/counter/receipt/critic EQUIVALENCE with /v1/chat/completions
+#
+# The hosted stream route serves through the same
+# run_gate5b_user_visible_chat_response boundary as completions; these tests
+# pin that equivalence end-to-end: identical counter reservation + finish
+# receipt records, identical usage-receipt scheduling, and identical egress
+# critic invocation for the same request body.
+# ---------------------------------------------------------------------------
+
+class _UsageFakeRunner(_FakeRunner):
+    """Fake ADK runner whose final event carries usage metadata."""
+
+    event_text = "selected equivalence ADK stream answer"
+
+    async def run_async(self, **kwargs: object) -> object:
+        type(self).run_kwargs = kwargs
+        yield SimpleNamespace(
+            content=SimpleNamespace(parts=[SimpleNamespace(text=self.event_text)]),
+            usage_metadata=SimpleNamespace(
+                prompt_token_count=17,
+                candidates_token_count=5,
+                total_token_count=22,
+            ),
+        )
+
+
+def _usage_fake_primitives() -> Gate5B4C3LiveAdkPrimitives:
+    primitives = _fake_primitives()
+    return Gate5B4C3LiveAdkPrimitives(
+        Agent=primitives.Agent,
+        Runner=_UsageFakeRunner,
+        InMemorySessionService=primitives.InMemorySessionService,
+        Content=primitives.Content,
+        Part=primitives.Part,
+        GenerateContentConfig=primitives.GenerateContentConfig,
+    )
+
+
+_COUNTER_TIMESTAMP_KEYS = {"reservedAtMs", "finishedAtMs"}
+
+
+def _normalized_counters(path: Path) -> object:
+    """Counter-store JSON with wall-clock timestamps masked."""
+
+    def _mask(node: object) -> object:
+        if isinstance(node, dict):
+            return {
+                key: (0 if key in _COUNTER_TIMESTAMP_KEYS else _mask(value))
+                for key, value in node.items()
+            }
+        if isinstance(node, list):
+            return [_mask(item) for item in node]
+        return node
+
+    return _mask(json.loads(path.read_text()))
+
+
+def test_hosted_stream_counter_receipt_critic_equivalence_with_completions(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
+    monkeypatch.setenv("MAGI_HOSTED_STREAMING_SERVE", "1")
+    monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
+
+    from magi_agent.app import create_app
+    from magi_agent.transport import chat_routes as chat_routes_module
+
+    # Capture the usage-receipt scheduling seam (sync, deterministic) and force
+    # the egress critic gate ON with a capturing fake — both seams live in the
+    # shared serving boundary, so both routes must hit them identically.
+    receipt_calls: list[dict[str, object]] = []
+
+    def fake_schedule_receipt(*, runtime, model, usage, turn_id) -> None:
+        receipt_calls.append(
+            {
+                "bot_id": runtime.config.bot_id,
+                "model": model,
+                "usage": dict(usage) if usage else None,
+                "turn_id": turn_id,
+            }
+        )
+
+    critic_calls: list[dict[str, object]] = []
+
+    async def fake_critic_gate(*, payload, draft_text, gate1a_bundle):
+        critic_calls.append({"draft_text": draft_text})
+        return None
+
+    monkeypatch.setattr(
+        chat_routes_module,
+        "_schedule_runtime_direct_usage_receipt",
+        fake_schedule_receipt,
+    )
+    monkeypatch.setattr(chat_routes_module, "is_egress_gate_enabled", lambda: True)
+    monkeypatch.setattr(
+        chat_routes_module, "_maybe_run_egress_critic_gate", fake_critic_gate
+    )
+
+    body = {
+        "sessionId": "s-equivalence",
+        "turnId": "t-equivalence",
+        "messages": [{"role": "user", "content": "equivalence probe"}],
+    }
+
+    def _serve(path: str, store_dir: Path):
+        store_dir.mkdir(parents=True, exist_ok=True)
+        monkeypatch.setenv(
+            "CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_WORKSPACE_ROOT", str(store_dir)
+        )
+        runtime = _selected_runtime(
+            store_dir,
+            full_toolhost=True,
+            primitives_loader=_usage_fake_primitives,
+        )
+        client = TestClient(create_app(runtime))
+        return client.post(path, headers=_auth_headers(), json=body)
+
+    completions_dir = tmp_path / "completions"
+    stream_dir = tmp_path / "stream"
+
+    completions_response = _serve("/v1/chat/completions", completions_dir)
+    completions_receipts = list(receipt_calls)
+    completions_critic = list(critic_calls)
+    receipt_calls.clear()
+    critic_calls.clear()
+
+    stream_response = _serve("/v1/chat/stream", stream_dir)
+    stream_receipts = list(receipt_calls)
+    stream_critic = list(critic_calls)
+
+    # Both served successfully through the selected path.
+    assert completions_response.status_code == 200, completions_response.text
+    assert completions_response.json()["status"] == "python_ready"
+    assert stream_response.status_code == 200, stream_response.text
+    assert stream_response.headers["content-type"].startswith("text/event-stream")
+    stream_payloads = _data_lines(stream_response.text)
+    assert stream_payloads[-1]["terminal"] == "completed"
+
+    # Counter store equivalence: same scope, same request digest, same
+    # reservation cost, same shadowGenerationId, same finish status/receipt —
+    # only wall-clock timestamps may differ.
+    completions_counters = _normalized_counters(completions_dir / "counters.json")
+    stream_counters = _normalized_counters(stream_dir / "counters.json")
+    assert stream_counters == completions_counters
+
+    # Usage-receipt scheduling equivalence (same model/usage/turn digest).
+    assert completions_receipts, "completions path must schedule a usage receipt"
+    assert stream_receipts == completions_receipts
+
+    # Egress critic equivalence (same draft text reaches the critic).
+    assert completions_critic, "completions path must invoke the egress critic"
+    assert stream_critic == completions_critic
 
 
 def test_hosted_serve_flag_off_gate_inactive_keeps_headless_fallthrough(
