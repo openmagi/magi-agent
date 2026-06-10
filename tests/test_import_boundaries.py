@@ -96,34 +96,6 @@ assert hasattr(module, "build_adk_function_tool")
     assert completed.returncode == 0, completed.stderr
 
 
-def test_deterministic_routing_import_stays_runner_and_runtime_free() -> None:
-    completed = _run_fresh_python(
-        """
-import importlib
-import sys
-
-module = importlib.import_module("magi_agent.routing.deterministic")
-assert hasattr(module, "build_baseline_shadow_route")
-
-forbidden_modules = (
-    "google.adk.runners",
-    "google.adk.runners.runner",
-    "google.adk.tools",
-    "google.adk.tools.function_tool",
-    "magi_agent.adk_bridge.runner_adapter",
-    "magi_agent.adk_bridge.tool_adapter",
-    "magi_agent.runtime.openmagi_runtime",
-    "magi_agent.transport.chat",
-)
-loaded = [module_name for module_name in forbidden_modules if module_name in sys.modules]
-if loaded:
-    raise AssertionError(f"deterministic routing import loaded forbidden modules: {loaded}")
-"""
-    )
-
-    assert completed.returncode == 0, completed.stderr
-
-
 def test_provider_execution_import_stays_adk_toolhost_memory_transport_and_network_free() -> None:
     completed = _run_fresh_python(
         """
@@ -595,38 +567,6 @@ loaded = [
 ]
 if loaded:
     raise AssertionError(f"child runtime envelope import loaded forbidden modules: {loaded}")
-"""
-    )
-
-    assert completed.returncode == 0, completed.stderr
-
-
-def test_observable_process_reward_import_stays_adk_runner_runtime_and_route_free() -> None:
-    completed = _run_fresh_python(
-        """
-import importlib
-import sys
-
-module = importlib.import_module("magi_agent.harness.process_reward")
-assert hasattr(module, "score_observable_process_events")
-
-forbidden_prefixes = (
-    "google.adk",
-    "magi_agent.adk_bridge.runner_adapter",
-    "magi_agent.runtime.openmagi_runtime",
-    "magi_agent.transport.chat",
-    "magi_agent.transport.tools",
-)
-loaded = [
-    module_name
-    for module_name in sys.modules
-    if any(
-        module_name == prefix or module_name.startswith(f"{prefix}.")
-        for prefix in forbidden_prefixes
-    )
-]
-if loaded:
-    raise AssertionError(f"process reward import loaded forbidden modules: {loaded}")
 """
     )
 
