@@ -209,6 +209,10 @@ EXTRACTED_MODULE_SYMBOLS: dict[str, list[str]] = {
         "Gate5BSelectedScopeReceiptPayload",
         "Gate5BUserVisibleDeliveryReceiptPayload",
         "_DELIVERY_RECEIPT_MODEL_CONFIG",
+        "_GATE2_PARENT_CREATE_BOOL_FIELDS",
+        "_GATE2_PARENT_CREATE_COUNT_FIELDS",
+        "_GATE2_PARENT_CREATE_LABEL_FIELDS",
+        "_GATE2_PARENT_CREATE_SAFE_LABEL_RE",
         "_build_gate2_body_digest",
         "_build_gate2_durable_evidence_store",
         "_build_gate2_request_digest",
@@ -222,6 +226,10 @@ EXTRACTED_MODULE_SYMBOLS: dict[str, list[str]] = {
         "_gate2_response_extra",
         "_gate2_sandbox_canary_authority",
         "_gate2_sandbox_canary_config",
+        "_gate2_message_content_to_text",
+        "_gate2_optional_bool",
+        "_gate2_parent_create_diagnostics_payload",
+        "_gate2_parent_create_safe_label",
         "_gate2_scope_match",
         "_gate2_selected_sandbox_root_readiness",
         "_minimal_gate2_exception_chain",
@@ -339,4 +347,22 @@ def test_extracted_modules_share_objects_with_shim() -> None:
             assert getattr(module, symbol) is getattr(chat, symbol), (
                 f"{module_name}.{symbol} is not the same object as "
                 f"transport.chat.{symbol}"
+            )
+
+
+# Names the pre-split chat.py imported from elsewhere and re-exported; the shim
+# must keep exposing them because external code patched/imported them via chat.
+PASSTHROUGH_REEXPORTS: dict[str, list[str]] = {
+    "magi_agent.runtime.message_builder": ["_collect_image_blocks"],
+    "magi_agent.runtime.session_identity": ["_memory_mode_from_header"],
+}
+
+
+def test_passthrough_reexports_survive_on_shim() -> None:
+    chat = importlib.import_module("magi_agent.transport.chat")
+    for module_name, symbols in PASSTHROUGH_REEXPORTS.items():
+        module = importlib.import_module(module_name)
+        for symbol in symbols:
+            assert getattr(module, symbol) is getattr(chat, symbol), (
+                f"shim lost passthrough re-export {symbol} from {module_name}"
             )
