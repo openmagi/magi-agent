@@ -118,20 +118,6 @@ def test_search_actors_non_list_items_returns_empty(monkeypatch: pytest.MonkeyPa
     assert result.output["actors"] == []
 
 
-class _PostResponse:
-    def __init__(self, items: object) -> None:
-        self._stream = io.BytesIO(json.dumps(items).encode())
-
-    def __enter__(self) -> "_PostResponse":
-        return self
-
-    def __exit__(self, *_: object) -> None:
-        pass
-
-    def read(self, n: int = -1) -> bytes:
-        return self._stream.read(n)
-
-
 def test_run_actor_without_token_is_not_configured(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("APIFY_TOKEN", raising=False)
     result = asyncio.run(
@@ -162,9 +148,9 @@ def test_run_actor_success_sends_cost_cap(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.delenv("APIFY_MAX_USD_PER_RUN", raising=False)
     captured: list[urllib.request.Request] = []
 
-    def _open(request: urllib.request.Request, **_: object) -> _PostResponse:
+    def _open(request: urllib.request.Request, **_: object) -> _FakeResponse:
         captured.append(request)
-        return _PostResponse([{"post": 1}, {"post": 2}])
+        return _FakeResponse([{"post": 1}, {"post": 2}])
 
     monkeypatch.setattr(urllib.request, "urlopen", _open)
 
@@ -209,3 +195,35 @@ def test_run_actor_never_leaks_token(monkeypatch: pytest.MonkeyPatch) -> None:
     assert result.status == "error"
     assert result.error_code == "apify_unreachable"
     assert "tok_SUPER_SECRET" not in repr(result.model_dump())
+
+
+def test_run_actor_empty_max_usd_env_falls_back_to_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("APIFY_TOKEN", "tok_secret")
+    monkeypatch.setenv("APIFY_MAX_USD_PER_RUN", "")  # set-but-empty must NOT disable the cap
+    captured: list[urllib.request.Request] = []
+
+    def _open(request: urllib.request.Request, **_: object) -> _FakeResponse:
+        captured.append(request)
+        return _FakeResponse([{"post": 1}])
+
+    monkeypatch.setattr(urllib.request, "urlopen", _open)
+    result = asyncio.run(
+        apify.apify_run_actor({"actor_id": "apify~x", "run_input": "{}"}, _ctx())
+    )
+    assert result.status == "ok"
+    assert "maxTotalChargeUsd=1.0" in captured[0].full_url
+
+
+def test_run_actor_non_408_http_error_is_apify_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("APIFY_TOKEN", "tok_secret")
+
+    def _raise403(*_a: object, **_k: object) -> None:
+        raise urllib.error.HTTPError("https://api.apify.com/x", 403, "forbidden", {}, None)
+
+    monkeypatch.setattr(urllib.request, "urlopen", _raise403)
+    result = asyncio.run(
+        apify.apify_run_actor({"actor_id": "apify~x", "run_input": "{}"}, _ctx())
+    )
+    assert result.status == "error"
+    assert result.error_code == "apify_error"
+    assert result.metadata.get("http_status") == 403

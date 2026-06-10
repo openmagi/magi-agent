@@ -138,7 +138,7 @@ async def apify_run_actor(arguments: dict[str, object], context: ToolContext) ->
     query = urllib.parse.urlencode({
         "token": token,
         "timeout": _RUN_TIMEOUT_S,
-        "maxTotalChargeUsd": os.environ.get("APIFY_MAX_USD_PER_RUN", _DEFAULT_MAX_USD),
+        "maxTotalChargeUsd": os.environ.get("APIFY_MAX_USD_PER_RUN") or _DEFAULT_MAX_USD,
         "format": "json",
         "limit": _ITEMS_LIMIT,
     })
