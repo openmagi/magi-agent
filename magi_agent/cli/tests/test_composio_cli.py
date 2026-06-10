@@ -9,15 +9,15 @@ def _make_app():
     return app
 
 
-def test_doctor_reports_composio_default_disabled(monkeypatch) -> None:
+def test_doctor_reports_composio_default_auto_unconfigured(monkeypatch) -> None:
     monkeypatch.delenv("COMPOSIO_API_KEY", raising=False)
     monkeypatch.delenv("MAGI_COMPOSIO_ENABLED", raising=False)
     result = CliRunner().invoke(_make_app(), ["doctor"], catch_exceptions=False)
 
     assert result.exit_code == 0
     assert "Composio: inactive" in result.output
-    assert "disabled_by_config" in result.output
-    assert "MAGI_COMPOSIO_ENABLED" in result.output
+    assert "not_configured" in result.output
+    assert "COMPOSIO_API_KEY" in result.output
 
 
 def test_doctor_reports_composio_missing_key_when_enabled(monkeypatch) -> None:

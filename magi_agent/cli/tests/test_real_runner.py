@@ -310,6 +310,39 @@ def test_first_party_adk_tools_attach_file_tools_when_gated(
     assert image_result["errorCode"] == "path_not_found"
 
 
+def test_first_party_adk_tools_attach_browser_task_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    monkeypatch.delenv("MAGI_BROWSER_TOOL_ENABLED", raising=False)
+    monkeypatch.delenv("MAGI_BROWSER_TOOL_KILL_SWITCH", raising=False)
+    monkeypatch.delenv("MAGI_RUNTIME_PROFILE", raising=False)
+
+    tools = _build_first_party_adk_tools(
+        cwd=tmp_path,
+        session_id="sid-browser-task",
+        mode="act",
+    )
+
+    assert "BrowserTask" in {getattr(tool, "name", None) for tool in tools}
+
+
+def test_first_party_adk_tools_respect_browser_kill_switch(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    monkeypatch.delenv("MAGI_BROWSER_TOOL_ENABLED", raising=False)
+    monkeypatch.setenv("MAGI_BROWSER_TOOL_KILL_SWITCH", "1")
+
+    tools = _build_first_party_adk_tools(
+        cwd=tmp_path,
+        session_id="sid-browser-task-off",
+        mode="act",
+    )
+
+    assert "BrowserTask" not in {getattr(tool, "name", None) for tool in tools}
+
+
 @pytest.mark.parametrize(
     "env",
     (
