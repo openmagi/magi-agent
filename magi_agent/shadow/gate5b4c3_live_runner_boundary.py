@@ -427,6 +427,39 @@ class Gate5B4C3LiveRunnerBoundary:
         *,
         config: Gate5B4C3ShadowGenerationConfig | None = None,
     ) -> Gate5B4C3LiveRunnerBoundaryResult:
+        """Run one boundary turn, releasing any session-service lease at the end.
+
+        Behind ``MAGI_HOSTED_SESSION_REUSE`` the session registry marks the
+        turn's ``(bot_id_digest, session_id)`` key busy (per-key single-flight)
+        so overlapping same-key turns — ``invoke()`` runs ``asyncio.run`` per
+        call and may execute on multiple worker threads — never mutate one
+        session service concurrently. The busy mark must drop only after the
+        turn fully stops consuming the runner (including the no-tool finalizer
+        rerun), so the release lives here, in a ``finally`` around the whole
+        turn body — covering every return and exception path.
+        """
+        session_lease_releases: list[Callable[[], None]] = []
+        try:
+            return await self._invoke_async_turn(
+                request,
+                config=config,
+                session_lease_releases=session_lease_releases,
+            )
+        finally:
+            for release_session_lease in session_lease_releases:
+                try:
+                    release_session_lease()
+                except Exception:
+                    # Lease release must never change the boundary result.
+                    pass
+
+    async def _invoke_async_turn(
+        self,
+        request: Gate5B4C3ShadowGenerationRequest,
+        *,
+        config: Gate5B4C3ShadowGenerationConfig | None = None,
+        session_lease_releases: list[Callable[[], None]],
+    ) -> Gate5B4C3LiveRunnerBoundaryResult:
         started = time.monotonic()
         diagnostic = build_gate5b4c3_shadow_generation_diagnostic(request, config=config)
         if not diagnostic.accepted:
@@ -566,6 +599,7 @@ class Gate5B4C3LiveRunnerBoundary:
             session_service, session_reused = self._acquire_session_service(
                 request,
                 primitives,
+                session_lease_releases,
             )
         except Exception as exc:
             return _setup_error_result(
@@ -964,15 +998,21 @@ class Gate5B4C3LiveRunnerBoundary:
         self,
         request: Gate5B4C3ShadowGenerationRequest,
         primitives: Gate5B4C3LiveAdkPrimitives,
+        session_lease_releases: list[Callable[[], None]],
     ) -> tuple[object, bool]:
         """Build (or, behind the reuse flag, fetch) the turn's session service.
 
         Flag OFF (default) preserves the historical fresh-instance-per-turn
-        behavior and performs no registry interaction at all. Flag ON consults
-        the process-scope registry keyed by the full
+        behavior and performs no registry interaction at all. Flag ON acquires
+        from the process-scope registry keyed by the full
         ``(bot_id_digest, session_id)`` pair — distinct bots or sessions can
-        never share session state. The second element reports whether an
-        existing live session was reused (registry hit).
+        never share session state — via :meth:`try_acquire`, which marks the
+        key busy for the duration of the turn; an overlapping same-key turn
+        gets a fresh, unregistered fallback service (single-flight). The
+        matching identity-checked release is appended to
+        ``session_lease_releases`` and runs in :meth:`invoke_async`'s
+        ``finally`` once the turn fully ends. The second element reports
+        whether an existing live session was reused (registry hit).
         """
         # Lazy import: shadow -> config is a function-level dependency by
         # convention in this package (avoids import cycles).
@@ -983,10 +1023,16 @@ class Gate5B4C3LiveRunnerBoundary:
         registry = self._session_service_registry
         if registry is None:
             registry = default_session_service_registry()
-        return registry.get_or_create(
-            (request.selection.bot_id_digest, _shadow_session_id(request)),
+        session_key = (request.selection.bot_id_digest, _shadow_session_id(request))
+        session_service, session_reused = registry.try_acquire(
+            session_key,
             primitives.InMemorySessionService,
         )
+        bound_registry = registry
+        session_lease_releases.append(
+            lambda: bound_registry.release(session_key, session_service)
+        )
+        return session_service, session_reused
 
     def _emit_public_event(self, payload: Mapping[str, object]) -> None:
         if self._public_event_sink is None:

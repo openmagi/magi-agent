@@ -252,6 +252,133 @@ def test_registry_concurrent_get_or_create_yields_single_instance_per_key() -> N
 
 
 # ---------------------------------------------------------------------------
+# Per-key single-flight (security finding 1): try_acquire / release
+# ---------------------------------------------------------------------------
+def test_registry_try_acquire_miss_creates_and_reuses_only_after_release() -> None:
+    registry, _clock = _registry()
+
+    first, first_reused = registry.try_acquire((BOT_A, SESSION_1), _FakeSessionService)
+    assert isinstance(first, _FakeSessionService)
+    assert first_reused is False
+    assert len(registry) == 1
+
+    assert registry.release((BOT_A, SESSION_1), first) is True
+    second, second_reused = registry.try_acquire((BOT_A, SESSION_1), _FakeSessionService)
+    assert second is first
+    assert second_reused is True
+
+
+def test_registry_try_acquire_busy_key_returns_fresh_unregistered_fallback() -> None:
+    registry, _clock = _registry()
+
+    held, _ = registry.try_acquire((BOT_A, SESSION_1), _FakeSessionService)
+    held.events.append("in-flight-turn-history")
+
+    # Second concurrent same-key acquire while the first turn still holds the
+    # key: a FRESH service, not reused, never the in-flight instance.
+    fallback, fallback_reused = registry.try_acquire(
+        (BOT_A, SESSION_1),
+        _FakeSessionService,
+    )
+
+    assert fallback_reused is False
+    assert fallback is not held
+    assert fallback.events == []
+    # The fallback is never registered: the held entry stays the only one.
+    assert len(registry) == 1
+
+    assert registry.release((BOT_A, SESSION_1), held) is True
+    reacquired, reacquired_reused = registry.try_acquire(
+        (BOT_A, SESSION_1),
+        _FakeSessionService,
+    )
+    assert reacquired is held
+    assert reacquired_reused is True
+
+
+def test_registry_release_is_identity_checked_and_idempotent() -> None:
+    registry, _clock = _registry()
+
+    held, _ = registry.try_acquire((BOT_A, SESSION_1), _FakeSessionService)
+    fallback, _ = registry.try_acquire((BOT_A, SESSION_1), _FakeSessionService)
+
+    # Releasing the unregistered busy-fallback must not clear the holder's
+    # mark — otherwise a third turn could reuse the still-in-flight service.
+    assert registry.release((BOT_A, SESSION_1), fallback) is False
+    still_fallback, still_reused = registry.try_acquire(
+        (BOT_A, SESSION_1),
+        _FakeSessionService,
+    )
+    assert still_reused is False
+    assert still_fallback is not held
+
+    assert registry.release((BOT_A, SESSION_1), held) is True
+    # Double release is a safe no-op (exception-safe finally paths may race).
+    assert registry.release((BOT_A, SESSION_1), held) is False
+
+
+def test_registry_release_in_finally_after_exception_restores_reuse() -> None:
+    registry, _clock = _registry()
+    key = (BOT_A, SESSION_1)
+
+    held, _ = registry.try_acquire(key, _FakeSessionService)
+    with pytest.raises(RuntimeError):
+        try:
+            raise RuntimeError("turn failed mid-runner")
+        finally:
+            registry.release(key, held)
+
+    reacquired, reacquired_reused = registry.try_acquire(key, _FakeSessionService)
+    assert reacquired is held
+    assert reacquired_reused is True
+
+
+def test_registry_release_after_eviction_is_noop_and_never_unmarks_new_holder() -> None:
+    registry, _clock = _registry(max_entries=1)
+    key = (BOT_A, SESSION_1)
+
+    old, _ = registry.try_acquire(key, _FakeSessionService)
+    # LRU pressure evicts the held entry while its turn is still running...
+    registry.try_acquire((BOT_A, SESSION_2), _FakeSessionService)
+    # ...and a new same-key turn registers a fresh entry it now holds.
+    new_holder, new_reused = registry.try_acquire(key, _FakeSessionService)
+    assert new_reused is False
+    assert new_holder is not old
+
+    # The stale lease from the evicted turn must not unmark the new holder.
+    assert registry.release(key, old) is False
+    fallback, fallback_reused = registry.try_acquire(key, _FakeSessionService)
+    assert fallback_reused is False
+    assert fallback is not new_holder
+    assert len(registry) == 1
+
+
+def test_registry_concurrent_try_acquire_same_key_never_shares_a_service() -> None:
+    registry, _clock = _registry(max_entries=8)
+    results: list[object] = []
+    results_lock = threading.Lock()
+    barrier = threading.Barrier(8)
+
+    def worker() -> None:
+        barrier.wait()
+        service, _reused = registry.try_acquire((BOT_A, SESSION_1), _FakeSessionService)
+        with results_lock:
+            results.append(service)
+
+    threads = [threading.Thread(target=worker) for _ in range(8)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    # No release happens between the acquires, so no two concurrent holders
+    # may ever observe the same instance: one registered + 7 busy-fallbacks.
+    assert len(results) == 8
+    assert len({id(service) for service in results}) == 8
+    assert len(registry) == 1
+
+
+# ---------------------------------------------------------------------------
 # Process-default registry + env-tunable caps
 # ---------------------------------------------------------------------------
 def test_default_registry_is_process_scoped_and_resettable() -> None:

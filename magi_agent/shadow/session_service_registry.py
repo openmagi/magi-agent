@@ -37,6 +37,20 @@ boundary's sync ``invoke()`` wrapper may, however, run from worker threads
 constructor-only) factory call — never across an ``await``. That is correct
 for both models and uncontended on the single-loop path.
 
+Per-key single-flight (busy-fallback)
+-------------------------------------
+The per-bot concurrency cap is not per-session, so two overlapping turns can
+arrive for the SAME key from different threads/loops. Handing both the same
+``InMemorySessionService`` would mutate one ADK session concurrently. The
+boundary therefore acquires through :meth:`SessionServiceRegistry.try_acquire`,
+which marks the entry busy for the duration of the turn; an overlapping
+same-key acquire gets a FRESH, never-registered fallback service
+(``reused=False`` — it seeds history exactly like a miss, behavior-identical
+to the flag-OFF path). :meth:`SessionServiceRegistry.release` is
+identity-checked and idempotent, so a stale lease (entry evicted or expired
+mid-turn, or a busy-fallback service) can never unmark another in-flight
+turn — which also keeps LRU/TTL eviction of a busy entry safe.
+
 Scope: the registry is process-local by design — hosted workers are per-bot
 pods, so cross-worker sharing and cross-restart persistence are explicitly out
 of scope for v1 (08-hosted-path open decision #3 resolved to the simple
@@ -47,6 +61,7 @@ from __future__ import annotations
 
 from collections import OrderedDict
 from collections.abc import Callable
+from dataclasses import dataclass
 import threading
 import time
 from typing import TypeAlias
@@ -59,6 +74,15 @@ SessionServiceFactory: TypeAlias = Callable[[], object]
 
 DEFAULT_MAX_ENTRIES = 64
 DEFAULT_TTL_SECONDS = 1800.0
+
+
+@dataclass
+class _RegistryEntry:
+    """Mutable per-key record: stored service + LRU/TTL + busy bookkeeping."""
+
+    service: object
+    last_used_at: float
+    in_use: bool = False
 
 
 class SessionServiceRegistry:
@@ -79,10 +103,8 @@ class SessionServiceRegistry:
         self._ttl_seconds = float(ttl_seconds)
         self._clock = clock if clock is not None else time.monotonic
         self._lock = threading.Lock()
-        # key -> (service, last_used_at); ordered least-recently-used first.
-        self._entries: OrderedDict[SessionServiceKey, tuple[object, float]] = (
-            OrderedDict()
-        )
+        # key -> _RegistryEntry; ordered least-recently-used first.
+        self._entries: OrderedDict[SessionServiceKey, _RegistryEntry] = OrderedDict()
 
     @property
     def max_entries(self) -> int:
@@ -103,6 +125,10 @@ class SessionServiceRegistry:
         key existed. The factory runs under the registry lock so concurrent
         callers of the same key observe exactly one instance; factories must
         therefore stay trivial constructors.
+
+        Note: this legacy accessor does not participate in busy-marking. Turn
+        execution paths that may overlap on the same key must use
+        :meth:`try_acquire` / :meth:`release` instead.
         """
         validated_key = _validated_key(key)
         now = self._clock()
@@ -110,15 +136,79 @@ class SessionServiceRegistry:
             self._purge_expired_locked(now)
             entry = self._entries.get(validated_key)
             if entry is not None:
-                service = entry[0]
-                self._entries[validated_key] = (service, now)
+                entry.last_used_at = now
                 self._entries.move_to_end(validated_key)
-                return service, True
+                return entry.service, True
             service = factory()
             while len(self._entries) >= self._max_entries:
                 self._entries.popitem(last=False)
-            self._entries[validated_key] = (service, now)
+            self._entries[validated_key] = _RegistryEntry(
+                service=service,
+                last_used_at=now,
+            )
             return service, False
+
+    def try_acquire(
+        self,
+        key: SessionServiceKey,
+        factory: SessionServiceFactory,
+    ) -> tuple[object, bool]:
+        """Single-flight ``get_or_create``: mark ``key`` busy for this turn.
+
+        Exactly one in-flight turn holds a key at a time:
+
+        * miss — build via ``factory``, register, mark busy, ``reused=False``;
+        * hit (idle) — mark busy, ``reused=True``;
+        * hit (busy) — **busy-fallback**: return a FRESH service built via
+          ``factory`` that is never registered (``reused=False``). The
+          overlapping turn seeds history exactly like a miss, and its later
+          :meth:`release` is an identity-checked no-op.
+
+        Callers must pair every ``try_acquire`` with a
+        ``release(key, service)`` in a ``finally`` once the turn stops using
+        the service.
+        """
+        validated_key = _validated_key(key)
+        now = self._clock()
+        with self._lock:
+            self._purge_expired_locked(now)
+            entry = self._entries.get(validated_key)
+            if entry is not None:
+                entry.last_used_at = now
+                self._entries.move_to_end(validated_key)
+                if entry.in_use:
+                    return factory(), False
+                entry.in_use = True
+                return entry.service, True
+            service = factory()
+            while len(self._entries) >= self._max_entries:
+                self._entries.popitem(last=False)
+            self._entries[validated_key] = _RegistryEntry(
+                service=service,
+                last_used_at=now,
+                in_use=True,
+            )
+            return service, False
+
+    def release(self, key: SessionServiceKey, service: object) -> bool:
+        """Clear the busy mark set by :meth:`try_acquire` for ``key``.
+
+        Identity-checked and idempotent: only the exact ``service`` instance
+        currently registered for ``key`` clears the mark, so a stale lease
+        (entry evicted/expired mid-turn) or a busy-fallback service can never
+        unmark a different in-flight turn. Safe to call from ``finally`` on
+        every path; returns True only when a busy mark was actually cleared.
+        """
+        validated_key = _validated_key(key)
+        now = self._clock()
+        with self._lock:
+            entry = self._entries.get(validated_key)
+            if entry is None or entry.service is not service or not entry.in_use:
+                return False
+            entry.in_use = False
+            entry.last_used_at = now
+            self._entries.move_to_end(validated_key)
+            return True
 
     def evict(self, key: SessionServiceKey) -> bool:
         """Drop ``key`` from the registry; True when an entry was removed."""
@@ -134,7 +224,7 @@ class SessionServiceRegistry:
         """Drop expired entries from the LRU front (caller holds the lock)."""
         while self._entries:
             oldest_key = next(iter(self._entries))
-            last_used = self._entries[oldest_key][1]
+            last_used = self._entries[oldest_key].last_used_at
             if now - last_used <= self._ttl_seconds:
                 break
             self._entries.popitem(last=False)

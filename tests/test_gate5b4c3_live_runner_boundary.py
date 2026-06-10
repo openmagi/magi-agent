@@ -4,6 +4,7 @@ import asyncio
 import json
 import subprocess
 import sys
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -1977,17 +1978,24 @@ _CURRENT_TURN_TEXT = "Please summarize the approved redacted note."
 
 
 class _MustNotTouchRegistry:
-    """Poisoned registry: any interaction fails the flag-OFF regression test."""
+    """Poisoned registry: any interaction fails the bypass regression tests."""
+
+    _MESSAGE = (
+        "session registry must not be consulted on this turn "
+        "(flag OFF, or no stable session key)"
+    )
 
     def get_or_create(self, *args: object, **kwargs: object) -> tuple[object, bool]:
-        raise AssertionError(
-            "session registry must not be consulted when MAGI_HOSTED_SESSION_REUSE is OFF"
-        )
+        raise AssertionError(self._MESSAGE)
+
+    def try_acquire(self, *args: object, **kwargs: object) -> tuple[object, bool]:
+        raise AssertionError(self._MESSAGE)
+
+    def release(self, *args: object, **kwargs: object) -> bool:
+        raise AssertionError(self._MESSAGE)
 
     def evict(self, *args: object, **kwargs: object) -> bool:
-        raise AssertionError(
-            "session registry must not be consulted when MAGI_HOSTED_SESSION_REUSE is OFF"
-        )
+        raise AssertionError(self._MESSAGE)
 
 
 class _SessionReuseManualClock:
@@ -2190,3 +2198,98 @@ def test_session_reuse_ttl_expiry_rebuilds_session_and_reseeds_history(
     # seeded again instead of resurrecting the stale session.
     assert fresh_service is not stale_service
     assert _HISTORY_MARKER in text_2
+
+
+class _OverlapBlockingRunner(_FakeRunner):
+    """Runner that parks mid-consumption so a second turn can overlap it."""
+
+    created_kwargs: dict[str, object] = {}
+    run_kwargs: dict[str, object] = {}
+    entered: threading.Event = threading.Event()
+    unblock: threading.Event = threading.Event()
+
+    def __init__(self, **kwargs: object) -> None:
+        type(self).created_kwargs = kwargs
+
+    async def run_async(self, **kwargs: object) -> object:
+        type(self).run_kwargs = kwargs
+        type(self).entered.set()
+        await asyncio.to_thread(type(self).unblock.wait, 10.0)
+        yield {"text": "overlapping turn finished"}
+
+
+def _overlap_blocking_primitives() -> Gate5B4C3LiveAdkPrimitives:
+    _OverlapBlockingRunner.created_kwargs = {}
+    _OverlapBlockingRunner.run_kwargs = {}
+    return Gate5B4C3LiveAdkPrimitives(
+        Agent=_FakeAgent,
+        Runner=_OverlapBlockingRunner,
+        InMemorySessionService=_FakeSessionService,
+        Content=_FakeContent,
+        Part=_FakePart,
+        GenerateContentConfig=_FakeGenerateContentConfig,
+    )
+
+
+def test_session_reuse_overlapping_same_key_turns_never_share_a_service(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Security finding 1: per-key single-flight with busy-fallback.
+
+    ``invoke()`` runs ``asyncio.run`` per call and may execute on multiple
+    worker threads. Two concurrent turns for the SAME (bot, session) key must
+    never mutate one InMemorySessionService from two threads/loops: the second
+    turn takes a fresh fallback service (seeding history exactly like a miss)
+    and the busy mark drops only when the first turn fully ends.
+    """
+    monkeypatch.setenv("MAGI_HOSTED_SESSION_REUSE", "1")
+    registry = SessionServiceRegistry(max_entries=4, ttl_seconds=60.0)
+    blocking_boundary = Gate5B4C3LiveRunnerBoundary(
+        _overlap_blocking_primitives,
+        adk_tools=(_ManualCalculationTool,),
+        session_service_registry=registry,  # type: ignore[arg-type]
+    )
+    overlap_boundary = _session_reuse_boundary(registry)
+    _OverlapBlockingRunner.entered = threading.Event()
+    _OverlapBlockingRunner.unblock = threading.Event()
+    first_turn: dict[str, object] = {}
+
+    def _run_first_turn() -> None:
+        first_turn["result"] = blocking_boundary.invoke(
+            _session_reuse_request(),
+            config=_session_reuse_config(),
+        )
+
+    first_thread = threading.Thread(target=_run_first_turn)
+    first_thread.start()
+    try:
+        assert _OverlapBlockingRunner.entered.wait(timeout=10.0)
+        first_service = _OverlapBlockingRunner.created_kwargs["session_service"]
+
+        # While the first turn still holds the key, a same-key turn must use a
+        # FRESH fallback service (never the in-flight one) and seed history
+        # exactly like a registry miss.
+        overlap_result, overlap_service, overlap_text = _invoke_session_reuse_turn(
+            overlap_boundary
+        )
+        assert overlap_result.status == "completed"
+        assert overlap_service is not first_service
+        assert _HISTORY_MARKER in overlap_text
+        # The fallback is never registered: the held entry stays the only one.
+        assert len(registry) == 1
+    finally:
+        _OverlapBlockingRunner.unblock.set()
+        first_thread.join(timeout=10.0)
+    assert not first_thread.is_alive()
+    first_result = first_turn["result"]
+    assert isinstance(first_result, Gate5B4C3LiveRunnerBoundaryResult)
+    assert first_result.status == "completed"
+
+    # The busy mark is released when the first turn ends: the next same-key
+    # turn reuses the first turn's registered service without re-seeding.
+    followup_result, followup_service, followup_text = _invoke_session_reuse_turn(
+        overlap_boundary
+    )
+    assert followup_result.status == "completed"
+    assert followup_service is first_service
+    assert _HISTORY_MARKER not in followup_text
