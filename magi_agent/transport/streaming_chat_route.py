@@ -165,8 +165,13 @@ def _extract_prompt_text(body: object) -> str:
     return "\n".join(part.strip() for part in text_parts if part.strip())
 
 
+def _python_chat_route_on() -> bool:
+    """True when the hosted python chat-route authority gate env flag is on."""
+    return os.environ.get("CORE_AGENT_PYTHON_CHAT_ROUTE", "off").lower() == "on"
+
+
 def _selected_gate5b_stream_active(runtime: object) -> bool:
-    if os.environ.get("CORE_AGENT_PYTHON_CHAT_ROUTE", "off").lower() != "on":
+    if not _python_chat_route_on():
         return False
     try:
         return gate5b_user_visible_chat_gate_active(runtime)
@@ -201,7 +206,7 @@ def _hosted_serve_malformed_json_refusal(runtime: object) -> JSONResponse:
     before the body is ever parsed) → gate2 parse branch (400) → canary route
     gate (503 ``python_disabled``) → 400 ``python_error``/``malformed_json``.
     """
-    if os.environ.get("CORE_AGENT_PYTHON_CHAT_ROUTE", "off").lower() != "on":
+    if not _python_chat_route_on():
         return _hosted_serve_chat_route_disabled_response(runtime)
     gate2_config = _gate2_sandbox_canary_config(runtime)
     if not gate2_config.enabled and not _route_config(runtime).enabled:
@@ -235,7 +240,7 @@ def _hosted_serve_gate_refusal(
     ``None`` only when the selected gate5b canary gate is fully active. Never
     falls through to the local headless engine.
     """
-    if os.environ.get("CORE_AGENT_PYTHON_CHAT_ROUTE", "off").lower() != "on":
+    if not _python_chat_route_on():
         return _hosted_serve_chat_route_disabled_response(runtime)
     gate2_config = _gate2_sandbox_canary_config(runtime)
     if (
