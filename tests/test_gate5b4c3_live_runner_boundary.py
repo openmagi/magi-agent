@@ -26,6 +26,7 @@ from magi_agent.shadow.gate5b4c3_shadow_generation_contract import (
     Gate5B4C3ShadowGenerationProviderCredentialBinding,
     Gate5B4C3ShadowGenerationRequest,
 )
+from magi_agent.shadow.session_service_registry import SessionServiceRegistry
 
 
 BOT_DIGEST = "sha256:" + "a" * 64
@@ -1964,3 +1965,228 @@ def test_completion_token_output_is_not_incomplete() -> None:
         )
         is False
     )
+
+
+# ── 08-PR5 hosted session reuse (default-OFF) — isolation/TTL/seed-on-miss ──
+
+
+SESSION_DIGEST_ALT = "sha256:" + "6" * 64
+BOT_DIGEST_ALT = "sha256:" + "9" * 64
+_HISTORY_MARKER = "Recent sanitized conversation:"
+_CURRENT_TURN_TEXT = "Please summarize the approved redacted note."
+
+
+class _MustNotTouchRegistry:
+    """Poisoned registry: any interaction fails the flag-OFF regression test."""
+
+    def get_or_create(self, *args: object, **kwargs: object) -> tuple[object, bool]:
+        raise AssertionError(
+            "session registry must not be consulted when MAGI_HOSTED_SESSION_REUSE is OFF"
+        )
+
+    def evict(self, *args: object, **kwargs: object) -> bool:
+        raise AssertionError(
+            "session registry must not be consulted when MAGI_HOSTED_SESSION_REUSE is OFF"
+        )
+
+
+class _SessionReuseManualClock:
+    def __init__(self) -> None:
+        self.now = 1_000.0
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
+
+    def __call__(self) -> float:
+        return self.now
+
+
+def _session_reuse_request(
+    *,
+    bot_digest: str = BOT_DIGEST,
+    session_digest: str = SESSION_DIGEST,
+) -> Gate5B4C3ShadowGenerationRequest:
+    return Gate5B4C3ShadowGenerationRequest.model_validate(
+        _payload(
+            selection={
+                **_payload()["selection"],  # type: ignore[arg-type]
+                "botIdDigest": bot_digest,
+                "sessionKeyDigest": session_digest,
+            },
+            turn={
+                **_payload()["turn"],  # type: ignore[arg-type]
+                "sanitizedRecentHistory": (
+                    {
+                        "role": "user",
+                        "sanitizedText": "What did you find last turn?",
+                        "sanitizedTextDigest": "sha256:" + "7" * 64,
+                    },
+                    {
+                        "role": "assistant",
+                        "sanitizedText": "I found a redacted fixture anomaly.",
+                        "sanitizedTextDigest": "sha256:" + "8" * 64,
+                    },
+                ),
+            },
+            modelRouting={
+                **_payload()["modelRouting"],  # type: ignore[arg-type]
+                "providerLabel": "google",
+                "modelLabel": "gemini-3.5-flash",
+                "shadowCredentialRef": "gate5b-google-api-key-smoke-v1",
+            },
+            recipeProfile={
+                **_payload()["recipeProfile"],  # type: ignore[arg-type]
+                "toolsPolicy": "selected_full_toolhost",
+                "sourceAuthority": "bounded_sanitized_recent_history",
+            },
+            policy={
+                **_payload()["policy"],  # type: ignore[arg-type]
+                "toolsDisabled": False,
+                "toolHostDispatchAllowed": True,
+            },
+            budgets={"maxSanitizedHistoryMessages": 2},
+        )
+    )
+
+
+def _session_reuse_config(
+    *,
+    bot_digest: str = BOT_DIGEST,
+) -> Gate5B4C3ShadowGenerationConfig:
+    return _gate1a_google_config().model_copy(update={"selected_bot_digest": bot_digest})
+
+
+def _session_reuse_boundary(registry: object) -> Gate5B4C3LiveRunnerBoundary:
+    return Gate5B4C3LiveRunnerBoundary(
+        _fake_primitives,
+        adk_tools=(_ManualCalculationTool,),
+        session_service_registry=registry,  # type: ignore[arg-type]
+    )
+
+
+def _invoke_session_reuse_turn(
+    boundary: Gate5B4C3LiveRunnerBoundary,
+    *,
+    bot_digest: str = BOT_DIGEST,
+    session_digest: str = SESSION_DIGEST,
+) -> tuple[Gate5B4C3LiveRunnerBoundaryResult, object, str]:
+    result = boundary.invoke(
+        _session_reuse_request(bot_digest=bot_digest, session_digest=session_digest),
+        config=_session_reuse_config(bot_digest=bot_digest),
+    )
+    service = _FakeRunner.created_kwargs["session_service"]
+    message = _FakeRunner.run_kwargs["new_message"]
+    assert isinstance(message, _FakeContent)
+    return result, service, message.parts[0].text
+
+
+def test_session_reuse_flag_off_default_builds_fresh_service_and_never_touches_registry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("MAGI_HOSTED_SESSION_REUSE", raising=False)
+    boundary = _session_reuse_boundary(_MustNotTouchRegistry())
+
+    first_result, first_service, first_text = _invoke_session_reuse_turn(boundary)
+    second_result, second_service, second_text = _invoke_session_reuse_turn(boundary)
+
+    assert first_result.status == "completed"
+    assert second_result.status == "completed"
+    assert isinstance(first_service, _FakeSessionService)
+    assert isinstance(second_service, _FakeSessionService)
+    # Flag OFF keeps today's behavior byte-identical: a fresh session service
+    # per turn and the sanitized history re-sent into every turn's message.
+    assert second_service is not first_service
+    for text in (first_text, second_text):
+        assert _HISTORY_MARKER in text
+        assert "user: What did you find last turn?" in text
+        assert _CURRENT_TURN_TEXT in text
+
+
+def test_session_reuse_two_turns_share_session_service_and_seed_history_only_on_miss(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MAGI_HOSTED_SESSION_REUSE", "1")
+    registry = SessionServiceRegistry(max_entries=4, ttl_seconds=60.0)
+    boundary = _session_reuse_boundary(registry)
+
+    first_result, first_service, first_text = _invoke_session_reuse_turn(boundary)
+    first_session_id = _FakeRunner.run_kwargs["session_id"]
+    second_result, second_service, second_text = _invoke_session_reuse_turn(boundary)
+    second_session_id = _FakeRunner.run_kwargs["session_id"]
+
+    assert first_result.status == "completed"
+    assert second_result.status == "completed"
+    assert second_session_id == first_session_id
+    # Registry hit: the second turn reuses the exact same session service.
+    assert second_service is first_service
+    # Miss seeds the re-sent sanitized history exactly as today...
+    assert _HISTORY_MARKER in first_text
+    assert "user: What did you find last turn?" in first_text
+    # ...but a hit must NOT re-ingest it (the session already holds the
+    # context); only the current sanitized turn text is sent.
+    assert _HISTORY_MARKER not in second_text
+    assert "What did you find last turn?" not in second_text
+    assert second_text == _CURRENT_TURN_TEXT
+
+
+def test_session_reuse_isolation_distinct_bot_digests_never_share_session_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MAGI_HOSTED_SESSION_REUSE", "1")
+    registry = SessionServiceRegistry(max_entries=4, ttl_seconds=60.0)
+    boundary = _session_reuse_boundary(registry)
+
+    _result_a, service_a, _text_a = _invoke_session_reuse_turn(
+        boundary,
+        bot_digest=BOT_DIGEST,
+    )
+    # Same session-key digest, different bot: must be a miss with a fresh
+    # service — bot A session state can never leak into bot B's turn.
+    result_b, service_b, text_b = _invoke_session_reuse_turn(
+        boundary,
+        bot_digest=BOT_DIGEST_ALT,
+    )
+
+    assert result_b.status == "completed"
+    assert service_b is not service_a
+    assert _HISTORY_MARKER in text_b
+
+
+def test_session_reuse_isolation_distinct_session_ids_never_share_session_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MAGI_HOSTED_SESSION_REUSE", "1")
+    registry = SessionServiceRegistry(max_entries=4, ttl_seconds=60.0)
+    boundary = _session_reuse_boundary(registry)
+
+    _result_1, service_1, _text_1 = _invoke_session_reuse_turn(
+        boundary,
+        session_digest=SESSION_DIGEST,
+    )
+    result_2, service_2, text_2 = _invoke_session_reuse_turn(
+        boundary,
+        session_digest=SESSION_DIGEST_ALT,
+    )
+
+    assert result_2.status == "completed"
+    assert service_2 is not service_1
+    assert _HISTORY_MARKER in text_2
+
+
+def test_session_reuse_ttl_expiry_rebuilds_session_and_reseeds_history(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MAGI_HOSTED_SESSION_REUSE", "1")
+    clock = _SessionReuseManualClock()
+    registry = SessionServiceRegistry(max_entries=4, ttl_seconds=60.0, clock=clock)
+    boundary = _session_reuse_boundary(registry)
+
+    _result_1, stale_service, _text_1 = _invoke_session_reuse_turn(boundary)
+    clock.advance(61.0)
+    result_2, fresh_service, text_2 = _invoke_session_reuse_turn(boundary)
+
+    assert result_2.status == "completed"
+    # Expired entry is evicted: a fresh service is built and the history is
+    # seeded again instead of resurrecting the stale session.
+    assert fresh_service is not stale_service
+    assert _HISTORY_MARKER in text_2

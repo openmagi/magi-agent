@@ -29,6 +29,10 @@ from magi_agent.shadow.gate5b4c3_runner_input_adapter import (
     build_gate5b4c3_runner_input,
 )
 from magi_agent.shadow.gate5b4c3_image_parts import image_blocks_to_parts
+from magi_agent.shadow.session_service_registry import (
+    SessionServiceRegistry,
+    default_session_service_registry,
+)
 
 
 Gate5B4C3LiveRunnerStatus: TypeAlias = Literal["skipped", "dropped", "completed", "error"]
@@ -398,6 +402,7 @@ class Gate5B4C3LiveRunnerBoundary:
         gate1a_egress_correlation_context: Gate1AEgressCorrelationContext | None = None,
         gate1a_egress_proxy_url: str | None = None,
         public_event_sink: Gate5B4C3PublicEventSink | None = None,
+        session_service_registry: SessionServiceRegistry | None = None,
     ) -> None:
         self._adk_primitives_loader = (
             adk_primitives_loader or load_gate5b4c3_live_adk_primitives
@@ -406,6 +411,7 @@ class Gate5B4C3LiveRunnerBoundary:
         self._gate1a_egress_correlation_context = gate1a_egress_correlation_context
         self._gate1a_egress_proxy_url = str(gate1a_egress_proxy_url or "").strip()
         self._public_event_sink = public_event_sink
+        self._session_service_registry = session_service_registry
 
     def invoke(
         self,
@@ -557,7 +563,10 @@ class Gate5B4C3LiveRunnerBoundary:
             "generate_content_config": generate_content_config,
         }
         try:
-            session_service = primitives.InMemorySessionService()
+            session_service, session_reused = self._acquire_session_service(
+                request,
+                primitives,
+            )
         except Exception as exc:
             return _setup_error_result(
                 request,
@@ -622,7 +631,15 @@ class Gate5B4C3LiveRunnerBoundary:
             )
         try:
             message = primitives.Content(
-                parts=_build_user_message_parts(runner_input, primitives=primitives),
+                parts=_build_user_message_parts(
+                    runner_input,
+                    primitives=primitives,
+                    # On a session-registry hit the reused ADK session already
+                    # holds the prior turns; re-ingesting the re-sent sanitized
+                    # history would duplicate context. History stays a
+                    # seed-on-miss (and the flag-OFF path always seeds).
+                    include_history=not session_reused,
+                ),
                 role="user",
             )
         except Exception as exc:
@@ -943,6 +960,34 @@ class Gate5B4C3LiveRunnerBoundary:
             usage=_usage_dict(tuple(usage_totals)),
         )
 
+    def _acquire_session_service(
+        self,
+        request: Gate5B4C3ShadowGenerationRequest,
+        primitives: Gate5B4C3LiveAdkPrimitives,
+    ) -> tuple[object, bool]:
+        """Build (or, behind the reuse flag, fetch) the turn's session service.
+
+        Flag OFF (default) preserves the historical fresh-instance-per-turn
+        behavior and performs no registry interaction at all. Flag ON consults
+        the process-scope registry keyed by the full
+        ``(bot_id_digest, session_id)`` pair — distinct bots or sessions can
+        never share session state. The second element reports whether an
+        existing live session was reused (registry hit).
+        """
+        # Lazy import: shadow -> config is a function-level dependency by
+        # convention in this package (avoids import cycles).
+        from magi_agent.config.env import is_hosted_session_reuse_enabled
+
+        if not is_hosted_session_reuse_enabled():
+            return primitives.InMemorySessionService(), False
+        registry = self._session_service_registry
+        if registry is None:
+            registry = default_session_service_registry()
+        return registry.get_or_create(
+            (request.selection.bot_id_digest, _shadow_session_id(request)),
+            primitives.InMemorySessionService,
+        )
+
     def _emit_public_event(self, payload: Mapping[str, object]) -> None:
         if self._public_event_sink is None:
             return
@@ -968,8 +1013,17 @@ def load_gate5b4c3_live_adk_primitives() -> Gate5B4C3LiveAdkPrimitives:
     )
 
 
-def _build_user_message_parts(runner_input: object, *, primitives: object) -> list:
-    parts = [primitives.Part.from_text(text=_runner_message_text(runner_input))]
+def _build_user_message_parts(
+    runner_input: object,
+    *,
+    primitives: object,
+    include_history: bool = True,
+) -> list:
+    parts = [
+        primitives.Part.from_text(
+            text=_runner_message_text(runner_input, include_history=include_history)
+        )
+    ]
     raw_blocks = getattr(runner_input, "sanitized_image_blocks", ()) or ()
     if not raw_blocks:
         return parts
@@ -990,8 +1044,12 @@ def _build_user_message_parts(runner_input: object, *, primitives: object) -> li
     return parts
 
 
-def _runner_message_text(runner_input: object) -> str:
+def _runner_message_text(runner_input: object, *, include_history: bool = True) -> str:
     current = str(getattr(runner_input, "sanitized_user_input", "") or "")
+    if not include_history:
+        # Session-reuse hit: the prior turns already live in the reused ADK
+        # session, so only the current sanitized turn text is sent.
+        return current
     history = getattr(runner_input, "sanitized_recent_history", ())
     if not history:
         return current
