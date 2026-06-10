@@ -303,6 +303,7 @@ def agent(
                 stream=None,  # default: sys.stdout
                 input_stream=inbound,  # type: ignore[arg-type]
                 mcp_servers=rt.mcp_servers,
+                session_log=rt.session_log,
             )
         )
         raise typer.Exit(code=exit_code)

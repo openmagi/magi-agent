@@ -1911,6 +1911,30 @@ def parse_recipe_default_packs_expanded(env: Mapping[str, str]) -> bool:
     return _is_true(env.get("MAGI_RECIPE_DEFAULT_PACKS_EXPANDED"))
 
 
+# Single source of truth for the CLI session-log write path (PR-04-PR1).
+CLI_SESSION_LOG_ENABLED_ENV = "MAGI_CLI_SESSION_LOG_ENABLED"
+
+
+def cli_session_log_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Whether the headless CLI persists a per-turn JSONL transcript.
+
+    Single source of truth for the ``MAGI_CLI_SESSION_LOG_ENABLED`` flag. This
+    gates the live drain tap that calls ``SessionLog.append`` for every turn,
+    which is the on-disk substrate ``--resume``/``--continue`` rehydration reads.
+
+    Stage-1 default-OFF: unlike most runtime feature flags this is **strict**
+    default-OFF (only an explicit truthy value enables it) — it is NOT tied to
+    the runtime profile, so a local-full install does not silently start writing
+    raw transcripts to disk until the value is flipped on. The local-full / eval
+    profiles register the flag at ``"0"`` so a later release can stage it ON.
+    """
+
+    import os as _os
+
+    source = env if env is not None else _os.environ
+    return _is_true(source.get(CLI_SESSION_LOG_ENABLED_ENV))
+
+
 def tool_concurrency_enabled(env: Mapping[str, str]) -> bool:
     """Single source of truth for the ``MAGI_TOOL_CONCURRENCY_ENABLED`` flag.
 
