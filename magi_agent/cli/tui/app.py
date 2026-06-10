@@ -974,15 +974,16 @@ class MagiTuiApp(App[None]):
         On success appends the block and shows a toast. On None shows a warning
         toast and leaves the buffer untouched.
         """
-        block = self._clipboard_reader()
-        if block:
+        try:
+            block = self._clipboard_reader()
+        except Exception as exc:  # reader shells out (pngpaste/xclip); never crash a turn
+            _notify.warning(self, f"Clipboard read failed: {exc}")
+            return
+        if block is not None:
             self._pending_attachments.append(block)
-            self.notify(
-                f"📎 image attached ({len(self._pending_attachments)})",
-                timeout=2,
-            )
+            _notify.info(self, f"📎 image attached ({len(self._pending_attachments)})")
         else:
-            self.notify("No image in clipboard", severity="warning", timeout=2)
+            _notify.warning(self, "No image in clipboard")
 
     def on_prompt_input_attach_image_requested(
         self, event: "PromptInput.AttachImageRequested"

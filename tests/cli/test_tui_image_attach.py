@@ -174,3 +174,14 @@ def test_multiple_attaches_accumulate_then_clear() -> None:
         assert list(app.pending_attachments) == []
 
     asyncio.run(_run())
+
+
+@pytest.mark.asyncio
+async def test_attach_survives_reader_exception():
+    def boom():
+        raise PermissionError("no clipboard access")
+
+    app = _make_app(boom)
+    async with app.run_test():
+        app.attach_clipboard_image()  # must not raise
+        assert list(app.pending_attachments) == []
