@@ -110,6 +110,41 @@ def test_default_with_key_but_missing_package_is_inactive_auto() -> None:
     assert cfg.disabled_reason == "missing_python_package"
 
 
+@pytest.mark.parametrize("profile", ("safe", "minimal", "off", "conservative", "eval"))
+def test_default_auto_with_key_respects_safe_runtime_profiles(profile: str) -> None:
+    from magi_agent.composio.config import resolve_composio_config
+
+    cfg = resolve_composio_config(
+        {
+            "COMPOSIO_API_KEY": "cp_test_secret",
+            "MAGI_RUNTIME_PROFILE": profile,
+        },
+        package_available=True,
+    )
+
+    assert cfg.enabled_mode == "auto"
+    assert cfg.active is False
+    assert cfg.configured is True
+    assert cfg.disabled_reason == "disabled_by_config"
+
+
+def test_explicit_on_with_key_overrides_safe_runtime_profile() -> None:
+    from magi_agent.composio.config import resolve_composio_config
+
+    cfg = resolve_composio_config(
+        {
+            "COMPOSIO_API_KEY": "cp_test_secret",
+            "MAGI_COMPOSIO_ENABLED": "on",
+            "MAGI_RUNTIME_PROFILE": "safe",
+        },
+        package_available=True,
+    )
+
+    assert cfg.enabled_mode == "on"
+    assert cfg.active is True
+    assert cfg.disabled_reason is None
+
+
 def test_explicit_on_with_key_uses_default_oss_entity() -> None:
     from magi_agent.composio.config import resolve_composio_config
 

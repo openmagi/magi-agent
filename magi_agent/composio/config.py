@@ -21,6 +21,8 @@ ComposioDisabledReason = Literal[
 
 _TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
 _FALSE_VALUES = frozenset({"0", "false", "no", "off"})
+_RUNTIME_PROFILE_ENV = "MAGI_RUNTIME_PROFILE"
+_SAFE_RUNTIME_PROFILES = frozenset({"safe", "off", "minimal", "conservative", "eval"})
 _SAFE_TOKEN_RE = re.compile(r"^[a-z][a-z0-9_:-]{0,80}$")
 _ENTITY_ID_UNSAFE_RE = re.compile(r"[^A-Za-z0-9_.:-]+")
 _ENTITY_SEGMENT_UNSAFE_RE = re.compile(r"[^A-Za-z0-9_.-]+")
@@ -140,7 +142,9 @@ def resolve_composio_config(
 
     if invalid_config:
         disabled_reason = "invalid_config"
-    elif enabled_mode == "off":
+    elif enabled_mode == "off" or (
+        enabled_mode == "auto" and not _runtime_profile_auto_enabled(env)
+    ):
         disabled_reason = "disabled_by_config"
     elif api_key is None:
         disabled_reason = (
@@ -187,6 +191,11 @@ def _parse_enabled_mode(raw: str | None) -> tuple[ComposioEnabledMode, bool]:
 
 def _composio_package_available() -> bool:
     return find_spec("composio") is not None
+
+
+def _runtime_profile_auto_enabled(env: Mapping[str, str]) -> bool:
+    profile = (env.get(_RUNTIME_PROFILE_ENV) or "").strip().lower()
+    return profile not in _SAFE_RUNTIME_PROFILES
 
 
 def _parse_credential_source(
