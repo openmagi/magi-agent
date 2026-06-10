@@ -793,7 +793,7 @@ graph LR
 | self_review_pipeline.py | C2 — LearningPipelineSink: routes self-review candidates through the learning eval-gate. | candidates, eval_gate, models, self_review, store, types | — |
 | skill_curator.py | C3 — SkillCurator: inactivity-triggered janitor for agent-authored learned items. | store, types | — |
 | verifier_bus.py | — | contracts, ledger, types | cli/engine.py, cli/tests/test_local_tool_evidence_wiring.py, evidence/coding_verification.py, evidence/event_projection.py, harness/cross_review.py, meta_orchestration/commit_adapter.py |
-| workflow_executor.py | Bounded workflow-executor — PR1 (skeleton) + PR3 (resumability). | child_runner_boundary, compiler, cross_review, dry_run, parallel_execution, public_events, research_child_runner, workflow_executor_readiness, workflow_result_cache | channels/workflow_orchestrator.py, recipes/workflow_recipe.py |
+| workflow_executor.py | Bounded workflow-executor — PR1 (skeleton) + PR3 (resumability). | child_runner_boundary, child_runner_live, child_toolset, compiler, cross_review, dry_run, parallel_execution, public_events, research_child_runner, runtime, workflow_executor_readiness, workflow_result_cache | channels/workflow_orchestrator.py, recipes/workflow_recipe.py |
 | workflow_result_cache.py | Within-run result cache for the workflow executor — PR3. | — | harness/workflow_executor.py |
 
 ### harness/coding/
@@ -1173,7 +1173,7 @@ graph LR
 
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
-| __init__.py | — | — | recipes/coding_subagents.py, recipes/cross_verify.py, recipes/research_child_runner.py |
+| __init__.py | — | — | harness/workflow_executor.py, recipes/coding_subagents.py, recipes/cross_verify.py, recipes/research_child_runner.py |
 | active_turn_registry.py | Single-flight registry for active turns, keyed by session. | — | cli/engine.py |
 | activity_boundary.py | — | — | — |
 | adk_turn_runner.py | — | model_tiers, request_shape, runner_adapter | runtime/child_runner_boundary.py |
@@ -1183,8 +1183,8 @@ graph LR
 | checkpointing.py | — | — | — |
 | child_event_projection.py | — | child_runner_boundary, child_runtime_envelope, tool_preview | — |
 | child_runner_boundary.py | — | adk_turn_runner, child_acceptance, child_runtime_envelope, model_tiers, runtime_issuance, subagent | harness/workflow_executor.py, plugins/native/subagents.py, runtime/child_event_projection.py |
-| child_runner_live.py | A REAL, model-backed local child runner for the Child Runner boundary. | child_toolset, local_tool_collector, model_tiers, providers, real_runner, tool_runtime | plugins/native/subagents.py |
-| child_toolset.py | Child-runner toolset profile resolution (PR1, doc 07). | local_readonly | plugins/native/subagents.py, runtime/child_runner_live.py |
+| child_runner_live.py | A REAL, model-backed local child runner for the Child Runner boundary. | child_toolset, local_tool_collector, model_tiers, providers, real_runner, tool_runtime | harness/workflow_executor.py, plugins/native/subagents.py |
+| child_toolset.py | Child-runner toolset profile resolution (PR1, doc 07). | local_readonly | harness/workflow_executor.py, plugins/native/subagents.py, runtime/child_runner_live.py |
 | commit_boundary.py | — | turn_utilities | — |
 | content_replacement.py | — | query_state | — |
 | context_attachments.py | — | context_packet, message_builder | — |

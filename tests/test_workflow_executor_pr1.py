@@ -236,6 +236,31 @@ class _InstrumentedFakeRunner:
         }
 
 
+class _EnvLiveChildRunner:
+    """Live child runner double constructed by env-default workflow wiring."""
+
+    openmagi_live_provider = True
+    instances: list["_EnvLiveChildRunner"] = []
+
+    def __init__(self, *, toolset_profile: str = "none", workspace_root: str | None = None) -> None:
+        self.toolset_profile = toolset_profile
+        self.workspace_root = workspace_root
+        self.calls = 0
+        type(self).instances.append(self)
+
+    async def run_child(self, request: object) -> dict[str, object]:
+        self.calls += 1
+        task_id = getattr(request, "task_id", "task-unknown")
+        return {
+            "childExecutionId": f"child-{task_id}",
+            "status": "completed",
+            "summary": "env live child completed",
+            "evidenceRefs": ("evidence:1111111111111111",),
+            "artifactRefs": (),
+            "auditEventRefs": (),
+        }
+
+
 # ---------------------------------------------------------------------------
 # Test 1 — validation failure ⇒ no dispatch
 # ---------------------------------------------------------------------------
@@ -362,6 +387,47 @@ def test_disabled_env_gate_causes_no_execution(monkeypatch: pytest.MonkeyPatch) 
     assert result.status == "disabled"
     assert result.child_tasks_dispatched == 0
     assert fake_runner.calls == 0
+
+
+def test_env_default_live_child_runner_dispatches_when_enabled(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    """Default execute_workflow(config=None) should honour the installed/full
+    env gates and construct a live child runner without caller injection."""
+    monkeypatch.setenv("MAGI_WORKFLOW_EXECUTOR_ENABLED", "1")
+    monkeypatch.setenv("MAGI_CHILD_RUNNER_LIVE_ENABLED", "1")
+    monkeypatch.setenv("MAGI_CHILD_RUNNER_TOOLSET", "readonly")
+    monkeypatch.setenv("MAGI_AGENT_WORKSPACE", str(tmp_path))
+    _EnvLiveChildRunner.instances.clear()
+
+    import magi_agent.runtime.child_runner_live as live_mod
+    from magi_agent.harness.workflow_executor import execute_workflow
+
+    monkeypatch.setattr(live_mod, "RealLocalChildRunner", _EnvLiveChildRunner)
+
+    result = asyncio.run(execute_workflow(_valid_contract()))
+
+    assert result.status == "accepted"
+    assert result.child_tasks_dispatched == 1
+    assert len(_EnvLiveChildRunner.instances) == 1
+    assert _EnvLiveChildRunner.instances[0].calls == 1
+    assert _EnvLiveChildRunner.instances[0].toolset_profile == "readonly"
+    assert _EnvLiveChildRunner.instances[0].workspace_root == str(tmp_path)
+
+
+def test_env_default_executor_without_live_child_runner_stays_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MAGI_WORKFLOW_EXECUTOR_ENABLED", "1")
+    monkeypatch.delenv("MAGI_CHILD_RUNNER_LIVE_ENABLED", raising=False)
+
+    from magi_agent.harness.workflow_executor import execute_workflow
+
+    result = asyncio.run(execute_workflow(_valid_contract()))
+
+    assert result.status == "disabled"
+    assert result.child_tasks_dispatched == 0
 
 
 # ---------------------------------------------------------------------------

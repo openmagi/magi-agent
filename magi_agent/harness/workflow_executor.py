@@ -96,6 +96,39 @@ def _executor_enabled() -> bool:
     return os.environ.get(_EXECUTOR_ENV_VAR, "").lower() in _TRUE_STRINGS
 
 
+def _live_child_runner_enabled_from_env() -> bool:
+    from magi_agent.runtime.child_runner_live import (  # noqa: PLC0415
+        is_live_child_runner_enabled,
+    )
+
+    return is_live_child_runner_enabled()
+
+
+def _default_config_from_env() -> "WorkflowExecutorConfig":
+    live_child_runner_enabled = _live_child_runner_enabled_from_env()
+    return WorkflowExecutorConfig(
+        enabled=_executor_enabled() and live_child_runner_enabled,
+        localFakeChildRunnerEnabled=False,
+        liveChildRunnerEnabled=live_child_runner_enabled,
+    )
+
+
+def _build_live_child_runner_from_env() -> object | None:
+    try:
+        from magi_agent.runtime import child_runner_live as live_mod  # noqa: PLC0415
+        from magi_agent.runtime.child_toolset import (  # noqa: PLC0415
+            resolve_child_toolset_profile,
+        )
+
+        workspace_root = os.environ.get("MAGI_AGENT_WORKSPACE") or None
+        return live_mod.RealLocalChildRunner(
+            toolset_profile=resolve_child_toolset_profile(),
+            workspace_root=workspace_root,
+        )
+    except Exception:
+        return None
+
+
 # ---------------------------------------------------------------------------
 # PR6 — best-effort telemetry helpers (never crash a run)
 # ---------------------------------------------------------------------------
@@ -262,6 +295,12 @@ class WorkflowExecutorConfig(BaseModel):
     real_child_execution_pack_enabled: bool = Field(
         default=False,
         alias="realChildExecutionPackEnabled",
+    )
+    #: Env/default-driven live child runner gate for real model-backed
+    #: subagent execution. Still requires a trusted live runner instance.
+    live_child_runner_enabled: bool = Field(
+        default=False,
+        alias="liveChildRunnerEnabled",
     )
     #: Run-level spawn budget.  The semaphore bounds concurrent children; this
     #: separately bounds the total number of child agents spawned in a parent run.
@@ -465,7 +504,9 @@ async def execute_workflow(
             function is byte-identical to the no-sink behaviour.
     """
     if config is None:
-        config = WorkflowExecutorConfig()
+        config = _default_config_from_env()
+    if child_runner is None and config.live_child_runner_enabled:
+        child_runner = _build_live_child_runner_from_env()
 
     # --- Step 1: governance gate (dry-run + validation) ---
     dry_run_report = dry_run_governed_workflow(contract)
@@ -575,8 +616,15 @@ async def execute_workflow(
     # Each child task gets its OWN single-task synthesis request so the
     # semaphore can gate them individually (true per-child bounding).
     recipe_config = ResearchChildRunnerConfig(
-        enabled=config.enabled and config.local_fake_child_runner_enabled,
+        enabled=(
+            config.enabled
+            and (
+                config.local_fake_child_runner_enabled
+                or config.live_child_runner_enabled
+            )
+        ),
         localFakeChildRunnerEnabled=config.local_fake_child_runner_enabled,
+        liveChildRunnerEnabled=config.live_child_runner_enabled,
         realChildExecutionPackEnabled=config.real_child_execution_pack_enabled,
         maxChildTasks=1,  # one task per dispatch call → per-child semaphore works correctly
     )
