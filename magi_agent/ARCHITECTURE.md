@@ -1250,7 +1250,7 @@ graph LR
 | heartbeat_boundary.py | — | heartbeat_contract, heartbeat_store | — |
 | heartbeat_contract.py | — | safety | runtime/events.py, runtime/heartbeat_boundary.py, runtime/heartbeat_store.py, runtime/resume_decision.py, runtime/stale_run_detector.py |
 | heartbeat_store.py | — | heartbeat_contract | runtime/heartbeat_boundary.py, runtime/stale_run_detector.py |
-| hosted_defaults.py | Hosted-deployment control-stage overlay (doc 14 PR1 — observability only). | — | (root)/main.py, config/env.py |
+| hosted_defaults.py | Hosted-deployment control-stage overlay. | — | (root)/main.py, config/env.py |
 | llm_stream_reader.py | — | — | — |
 | local_defaults.py | — | — | (root)/main.py, cli/app.py |
 | long_running_activity.py | — | receipt_utils | missions/background_tasks.py |
