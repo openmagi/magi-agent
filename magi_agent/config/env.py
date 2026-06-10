@@ -1931,6 +1931,24 @@ def general_automation_live_enabled(env: Mapping[str, str] | None = None) -> boo
     return _runtime_feature_enabled(env, "MAGI_GA_LIVE_ENABLED")
 
 
+def plan_act_gate_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Return True when the plan_act runner-wiring gate is explicitly enabled.
+
+    Single source of truth for ``MAGI_PLAN_ACT_GATE_ENABLED`` (cluster 06 PR4 /
+    inventory B9). This is a **strict default-OFF** gate: unlike the
+    profile-aware ``MAGI_*_ENABLED`` flags, it never defaults ON in the full
+    runtime profile. It only flips to ``True`` for an explicit truthy value
+    (``"1"``/``"true"``/``"yes"``/``"on"``), so the GA
+    ``plan_gate -> plan_act_switch -> delegation`` chain stays inert (and
+    byte-identical to ``main``) unless an operator opts in.
+    """
+    if env is None:
+        import os as _os
+
+        env = _os.environ
+    return _is_true(env.get("MAGI_PLAN_ACT_GATE_ENABLED"))
+
+
 def is_message_cache_enabled(env: Mapping[str, str] | None = None) -> bool:
     """Single source of truth for the message-tail prompt-cache flag.
 
