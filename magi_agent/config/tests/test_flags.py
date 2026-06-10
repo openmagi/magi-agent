@@ -19,6 +19,7 @@ from magi_agent.config.flags import (
     Stage,
     flag_bool,
     flag_int,
+    flag_profile_bool,
     flag_str,
     get_flag,
 )
@@ -57,12 +58,106 @@ def test_flag_specs_are_frozen() -> None:
 def test_flag_scope_and_stage_values_are_valid() -> None:
     valid_scopes = {"public", "hosted", "internal", "dev"}
     valid_stages = {"stage1", "stage2", "stage3"}
-    valid_kinds = {"bool", "str", "int"}
+    valid_kinds = {"bool", "str", "int", "profile_bool"}
     for spec in FLAGS:
         assert spec.scope in valid_scopes, spec
         assert spec.stage in valid_stages, spec
         assert spec.kind in valid_kinds, spec
         assert spec.summary, f"{spec.name} missing summary"
+
+
+# ---------------------------------------------------------------------------
+# Profile-aware default-ON flags must NOT be modelled as flat truthy bools.
+#
+# The spec (15-flag-governance.md PR2 risk) requires that flags read via
+# env._runtime_feature_enabled (profile-aware default-ON: ON in the full
+# runtime profile, OFF under MAGI_RUNTIME_PROFILE=safe|eval) are preserved as a
+# DISTINCT kind, not flattened to a strict-truthy bool/registry-default. These
+# tests pin that the registry metadata matches real env.py behaviour so the
+# later env-reference (PR4) and stage-table (PR5) generators do not
+# misrepresent flags to operators.
+# ---------------------------------------------------------------------------
+# All flags env.py reads via _runtime_feature_enabled (profile-aware default-ON).
+PROFILE_AWARE_DEFAULT_ON_FLAGS = (
+    "MAGI_LSP_DIAGNOSTICS_ENABLED",
+    "MAGI_RIPGREP_ENABLED",
+    "MAGI_APPLY_PATCH_ENABLED",
+    "MAGI_LOOP_GUARD_ENABLED",
+    "MAGI_ERROR_RECOVERY_ENABLED",
+    "MAGI_OUTPUT_CONTINUATION_ENABLED",
+    "MAGI_CONTEXT_COMPACTION_ENABLED",
+    "MAGI_EDIT_FORMAT_ON_WRITE_ENABLED",
+    "MAGI_EVIDENCE_COMPLETION_GATE_ENABLED",
+    "MAGI_SELF_INTROSPECTION_ENABLED",
+    "MAGI_EVIDENCE_LEDGER_LIFECYCLE_ENABLED",
+    "MAGI_EDIT_FUZZY_MATCH_ENABLED",
+)
+
+
+def test_profile_aware_flags_registered_as_profile_bool_kind() -> None:
+    for name in PROFILE_AWARE_DEFAULT_ON_FLAGS:
+        spec = get_flag(name)
+        assert spec.kind == "profile_bool", (
+            f"{name} is read via env._runtime_feature_enabled (profile-aware "
+            f"default-ON) but is registered as kind={spec.kind!r}; flattening it "
+            "to a strict-truthy bool misrepresents the default to operators"
+        )
+
+
+def test_profile_bool_flags_cannot_be_read_as_strict_bool() -> None:
+    # A profile_bool flag must NOT be readable through flag_bool — that path
+    # would silently impose strict-truthy / registry-default semantics.
+    with pytest.raises(TypeError):
+        flag_bool("MAGI_LSP_DIAGNOSTICS_ENABLED", env={})
+
+
+def test_flag_profile_bool_default_on_in_full_profile() -> None:
+    # Unset + no safe profile => default ON (matches _runtime_feature_enabled).
+    assert flag_profile_bool("MAGI_LSP_DIAGNOSTICS_ENABLED", env={}) is True
+
+
+@pytest.mark.parametrize("profile", ["safe", "eval", "off", "minimal", "conservative"])
+def test_flag_profile_bool_off_under_safe_profiles(profile: str) -> None:
+    env = {"MAGI_RUNTIME_PROFILE": profile}
+    assert flag_profile_bool("MAGI_LSP_DIAGNOSTICS_ENABLED", env=env) is False
+
+
+@pytest.mark.parametrize("value", ["0", "false", "no", "off"])
+def test_flag_profile_bool_explicit_false_wins(value: str) -> None:
+    env = {"MAGI_LSP_DIAGNOSTICS_ENABLED": value}
+    assert flag_profile_bool("MAGI_LSP_DIAGNOSTICS_ENABLED", env=env) is False
+
+
+@pytest.mark.parametrize("value", ["1", "true", "yes", "on"])
+def test_flag_profile_bool_explicit_true_wins_under_safe_profile(value: str) -> None:
+    env = {"MAGI_LSP_DIAGNOSTICS_ENABLED": value, "MAGI_RUNTIME_PROFILE": "safe"}
+    assert flag_profile_bool("MAGI_LSP_DIAGNOSTICS_ENABLED", env=env) is True
+
+
+def test_flag_profile_bool_rejects_plain_bool_kind() -> None:
+    # The strict default-OFF egress gate is a plain bool, not profile-aware.
+    with pytest.raises(TypeError):
+        flag_profile_bool("MAGI_EGRESS_GATE_ENABLED", env={})
+
+
+def test_flag_profile_bool_matches_env_runtime_feature_enabled() -> None:
+    # The registry reader must be byte-identical to the env.py source of truth
+    # for every profile-aware flag and a representative set of environments.
+    from magi_agent.config import env as env_module
+
+    envs = (
+        {},
+        {"MAGI_RUNTIME_PROFILE": "safe"},
+        {"MAGI_RUNTIME_PROFILE": "eval"},
+        {"MAGI_LSP_DIAGNOSTICS_ENABLED": "0"},
+        {"MAGI_LSP_DIAGNOSTICS_ENABLED": "1", "MAGI_RUNTIME_PROFILE": "safe"},
+        {"MAGI_LSP_DIAGNOSTICS_ENABLED": "garbage"},
+    )
+    for env in envs:
+        expected = env_module._runtime_feature_enabled(env, "MAGI_LSP_DIAGNOSTICS_ENABLED")
+        assert (
+            flag_profile_bool("MAGI_LSP_DIAGNOSTICS_ENABLED", env=env) is expected
+        ), env
 
 
 def test_master_memory_flag_is_registered_as_public() -> None:

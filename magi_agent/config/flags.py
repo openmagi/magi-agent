@@ -28,14 +28,27 @@ written here (PR4/PR5). A few already-standardized ``env.py`` ``is_*_enabled``
 helpers are re-implemented as thin delegations to keep behaviour
 byte-identical and prove the seam.
 
-Important: strict-truthy flags only
------------------------------------
-``flag_bool`` implements the *strict opt-in* semantics (``"1"/"true"/"yes"/"on"``
-truthy, everything else — including unset — falsey). It deliberately does NOT
-model the profile-aware default-ON behaviour of
-``env._runtime_feature_enabled`` (``MAGI_RUNTIME_PROFILE``-sensitive). Those
-flags keep their dedicated helper and are out of scope for this reader; mixing
-the two semantics into one ``flag_bool`` would silently flip default-ON gates.
+Two distinct boolean semantics
+------------------------------
+There are two real boolean shapes in the codebase and the registry models them
+as *separate kinds* so PR4/PR5 docs do not misrepresent them:
+
+* ``kind="bool"`` — strict opt-in (``"1"/"true"/"yes"/"on"`` truthy, everything
+  else — including unset — falsey, falling back to the registry ``default``).
+  Read with :func:`flag_bool`.
+* ``kind="profile_bool"`` — *profile-aware default-ON*, mirroring
+  ``env._runtime_feature_enabled``: unset (or an unrecognised value) resolves to
+  ON in the full runtime profile and OFF under ``MAGI_RUNTIME_PROFILE`` in
+  ``safe``/``eval``/etc.; an explicit ``"0"/"false"/...`` always wins. Read with
+  :func:`flag_profile_bool`. These flags carry **no** flat ``default`` truthy
+  value because their default is not a constant — it is a function of the
+  runtime profile. Modelling them as a plain ``default=False`` (or even
+  ``default=True``) ``bool`` would silently flatten the profile dimension and
+  mislead operators about when the gate is actually on (the spec's explicit
+  "별 kind로 보존, 단순 truthy로 뭉개지 말 것" rule, 15-flag-governance.md §3.2 / PR2 risk).
+
+:func:`flag_bool` and :func:`flag_profile_bool` each reject the other kind so a
+profile-aware gate can never be silently read through the strict-truthy path.
 """
 
 from __future__ import annotations
@@ -46,8 +59,10 @@ import os
 from typing import Literal
 
 # Reuse the single truthy convention already established in env.py rather than
-# inventing a new one (the cluster's explicit "no new truthy set" rule).
-from .env import _is_true
+# inventing a new one (the cluster's explicit "no new truthy set" rule). The
+# profile-aware reader delegates to env's _runtime_feature_enabled so there is
+# exactly one source of truth for the profile-default-ON resolution.
+from .env import _is_true, _runtime_feature_enabled
 
 __all__ = [
     "FlagScope",
@@ -58,6 +73,7 @@ __all__ = [
     "FLAGS_BY_NAME",
     "get_flag",
     "flag_bool",
+    "flag_profile_bool",
     "flag_str",
     "flag_int",
 ]
@@ -81,7 +97,15 @@ Stage = Literal["stage1", "stage2", "stage3"]
 * ``stage3`` — Authority/Traffic: authority attached to hosted live traffic.
 """
 
-FlagKind = Literal["bool", "str", "int"]
+FlagKind = Literal["bool", "profile_bool", "str", "int"]
+"""Reader semantics of a flag.
+
+* ``bool``         — strict-truthy opt-in with a flat registry ``default``.
+* ``profile_bool`` — profile-aware default-ON (``env._runtime_feature_enabled``):
+  unset resolves ON in the full profile, OFF under safe/eval profiles; explicit
+  values win. Carries ``default=None`` (its default is not a constant).
+* ``str`` / ``int`` — typed value flags.
+"""
 
 
 @dataclass(frozen=True)
@@ -106,6 +130,30 @@ def _b(
 ) -> FlagSpec:
     return FlagSpec(
         name=name, default=default, scope=scope, stage=stage, summary=summary, kind="bool"
+    )
+
+
+def _pb(
+    name: str,
+    *,
+    scope: FlagScope = "public",
+    stage: Stage = "stage1",
+    summary: str,
+) -> FlagSpec:
+    """Register a *profile-aware default-ON* flag (``env._runtime_feature_enabled``).
+
+    No flat ``default`` is taken because the default is a function of
+    ``MAGI_RUNTIME_PROFILE`` (ON in the full profile, OFF under safe/eval), not a
+    constant. ``default=None`` records "profile-resolved" for the generators.
+    """
+
+    return FlagSpec(
+        name=name,
+        default=None,
+        scope=scope,
+        stage=stage,
+        summary=summary,
+        kind="profile_bool",
     )
 
 
@@ -199,14 +247,15 @@ FLAGS: tuple[FlagSpec, ...] = (
         summary="Enable deferred (lazily-loaded) tool schemas.",
     ),
     # --- Coding harness -----------------------------------------------------
-    _b(
+    # Profile-aware default-ON (env._runtime_feature_enabled): ON in the full
+    # runtime profile, OFF under MAGI_RUNTIME_PROFILE=safe|eval.
+    _pb(
         "MAGI_EDIT_FUZZY_MATCH_ENABLED",
-        default=True,
         summary="Use the 9-stage fuzzy-match cascade for FileEdit (default-ON full profile).",
     ),
-    _b(
+    _pb(
         "MAGI_EDIT_FORMAT_ON_WRITE_ENABLED",
-        summary="Run a formatter on files written by the coding harness.",
+        summary="Run a formatter on files written by the coding harness (default-ON full profile).",
     ),
     _b(
         "MAGI_EDIT_RETRY_REFLECTION_ENABLED",
@@ -216,36 +265,34 @@ FLAGS: tuple[FlagSpec, ...] = (
         "MAGI_CODING_REPAIR_LOOP_ENABLED",
         summary="Enable the iterative coding repair loop on failing edits.",
     ),
-    _b(
+    _pb(
         "MAGI_LSP_DIAGNOSTICS_ENABLED",
-        summary="Surface LSP diagnostics to the coding harness.",
+        summary="Surface LSP diagnostics to the coding harness (default-ON full profile).",
     ),
-    _b(
+    _pb(
         "MAGI_RIPGREP_ENABLED",
-        summary="Use ripgrep for fast in-repo search when available.",
+        summary="Use ripgrep for fast in-repo search when available (default-ON full profile).",
     ),
-    _b(
+    _pb(
         "MAGI_APPLY_PATCH_ENABLED",
-        summary="Enable the apply-patch tool for multi-file edits.",
+        summary="Enable the apply-patch tool for multi-file edits (default-ON full profile).",
     ),
     # --- Evidence / verification gates -------------------------------------
     _b(
         "MAGI_EGRESS_GATE_ENABLED",
         summary="Run the evidence-grounded critic gate before chat egress.",
     ),
-    _b(
+    _pb(
         "MAGI_SELF_INTROSPECTION_ENABLED",
-        default=True,
         summary="Advertise the InspectSelfEvidence tool (default-ON full profile).",
     ),
-    _b(
+    _pb(
         "MAGI_EVIDENCE_LEDGER_LIFECYCLE_ENABLED",
-        default=True,
         summary="Build per-turn EvidenceLedger objects (default-ON full profile).",
     ),
-    _b(
+    _pb(
         "MAGI_EVIDENCE_COMPLETION_GATE_ENABLED",
-        summary="Block turn completion when required evidence is missing.",
+        summary="Block turn completion when required evidence is missing (default-ON full profile).",
     ),
     _b(
         "MAGI_DOCUMENT_AUTHORING_COVERAGE",
@@ -253,27 +300,33 @@ FLAGS: tuple[FlagSpec, ...] = (
         scope="public",
     ),
     # --- Resilience controls ------------------------------------------------
-    _b(
+    # Profile-aware default-ON (env._runtime_feature_enabled): ON in the full
+    # runtime profile, OFF under MAGI_RUNTIME_PROFILE=safe|eval.
+    _pb(
         "MAGI_LOOP_GUARD_ENABLED",
-        summary="Enable the repetition/loop guard brake.",
+        summary="Enable the repetition/loop guard brake (default-ON full profile).",
     ),
-    _b(
+    _pb(
         "MAGI_ERROR_RECOVERY_ENABLED",
-        summary="Enable automatic error-recovery retries.",
+        summary="Enable automatic error-recovery retries (default-ON full profile).",
     ),
-    _b(
+    _pb(
         "MAGI_OUTPUT_CONTINUATION_ENABLED",
-        summary="Enable automatic continuation of truncated model output.",
+        summary="Enable automatic continuation of truncated model output (default-ON full profile).",
     ),
-    _b(
+    _pb(
         "MAGI_CONTEXT_COMPACTION_ENABLED",
-        summary="Compact the working context when the token threshold is hit.",
+        summary="Compact the working context when the token threshold is hit (default-ON full profile).",
     ),
     # --- Surfaces -----------------------------------------------------------
+    # NOTE: flat default-ON, NOT profile-aware. cli/headless.py:_cli_enabled
+    # reads MAGI_CLI_ENABLED directly (unset => True regardless of
+    # MAGI_RUNTIME_PROFILE); it does not consult _runtime_feature_enabled, so a
+    # plain default=True bool is the faithful model here (kept as kind="bool").
     _b(
         "MAGI_CLI_ENABLED",
         default=True,
-        summary="Enable the magi CLI surface (headless NDJSON + Textual TUI).",
+        summary="Enable the magi CLI surface (headless NDJSON + Textual TUI); flat default-ON.",
     ),
     # --- Runtime profile (string) ------------------------------------------
     FlagSpec(
@@ -323,6 +376,25 @@ def flag_bool(name: str, *, env: Mapping[str, str] | None = None) -> bool:
     if raw is None:
         return bool(spec.default)
     return _is_true(raw)
+
+
+def flag_profile_bool(name: str, *, env: Mapping[str, str] | None = None) -> bool:
+    """Read a registered ``profile_bool`` flag (profile-aware default-ON).
+
+    Delegates to ``env._runtime_feature_enabled`` so there is exactly one source
+    of truth: an explicit ``"0"/"false"/...`` always wins; an explicit
+    ``"1"/"true"/...`` always wins; an unset/unrecognised value resolves to ON in
+    the full runtime profile and OFF under ``MAGI_RUNTIME_PROFILE`` in
+    ``safe``/``eval``/``minimal``/``conservative``/``off``.
+
+    Reading a non-``profile_bool`` flag raises so a strict-truthy gate can never
+    be misread through the profile-aware path (and vice versa via ``flag_bool``).
+    """
+
+    spec = get_flag(name)
+    if spec.kind != "profile_bool":
+        raise TypeError(f"flag {name!r} has kind {spec.kind!r}, not 'profile_bool'")
+    return _runtime_feature_enabled(_resolve_env(env), name)
 
 
 def flag_str(name: str, *, env: Mapping[str, str] | None = None) -> str | None:
