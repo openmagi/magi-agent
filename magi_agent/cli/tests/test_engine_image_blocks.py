@@ -47,33 +47,36 @@ def test_turn_input_carries_image_blocks():
 # ---------------------------------------------------------------------------
 
 
-def test_build_opening_parts_text_only():
+class _FakePart:
+    """Fake ``types.Part`` that mirrors the two call forms used by the engine.
+
+    - ``Part(text=...)``        → ``("text", <text>)``      (constructor)
+    - ``Part.from_bytes(...)``  → ``("image", <mime>, <data>)``  (classmethod)
+    """
+
+    def __new__(cls, *, text: str):  # type: ignore[misc]
+        return ("text", text)
+
+    @staticmethod
+    def from_bytes(*, data: bytes, mime_type: str):
+        return ("image", mime_type, data)
+
+
+def _make_fake_types():
     from types import SimpleNamespace
 
+    return SimpleNamespace(Part=_FakePart)
+
+
+def test_build_opening_parts_text_only():
     from magi_agent.cli.engine import MagiEngineDriver
 
-    fake_types = SimpleNamespace(
-        Part=SimpleNamespace(
-            from_text=lambda *, text: ("text", text),
-            from_bytes=lambda *, data, mime_type: ("image", mime_type, data),
-        )
-    )
-
-    result = MagiEngineDriver._build_opening_parts(fake_types, "hi", ())
+    result = MagiEngineDriver._build_opening_parts(_make_fake_types(), "hi", ())
     assert result == [("text", "hi")]
 
 
 def test_build_opening_parts_appends_image_after_text():
-    from types import SimpleNamespace
-
     from magi_agent.cli.engine import MagiEngineDriver
-
-    fake_types = SimpleNamespace(
-        Part=SimpleNamespace(
-            from_text=lambda *, text: ("text", text),
-            from_bytes=lambda *, data, mime_type: ("image", mime_type, data),
-        )
-    )
 
     blocks = (
         {
@@ -85,23 +88,14 @@ def test_build_opening_parts_appends_image_after_text():
             },
         },
     )
-    parts = MagiEngineDriver._build_opening_parts(fake_types, "describe", blocks)
+    parts = MagiEngineDriver._build_opening_parts(_make_fake_types(), "describe", blocks)
     assert parts[0] == ("text", "describe")
     assert parts[1] == ("image", "image/png", b"\x89PNG\r\n\x1a\n")
 
 
 def test_build_opening_parts_skips_invalid_block():
     """Non-image and non-base64 blocks must be skipped gracefully."""
-    from types import SimpleNamespace
-
     from magi_agent.cli.engine import MagiEngineDriver
-
-    fake_types = SimpleNamespace(
-        Part=SimpleNamespace(
-            from_text=lambda *, text: ("text", text),
-            from_bytes=lambda *, data, mime_type: ("image", mime_type, data),
-        )
-    )
 
     blocks = (
         {"type": "text", "text": "not an image"},
@@ -110,7 +104,7 @@ def test_build_opening_parts_skips_invalid_block():
             "source": {"type": "url", "url": "https://example.com/img.png"},
         },
     )
-    parts = MagiEngineDriver._build_opening_parts(fake_types, "hello", blocks)
+    parts = MagiEngineDriver._build_opening_parts(_make_fake_types(), "hello", blocks)
     # Only the text part — both image blocks are malformed/unsupported
     assert parts == [("text", "hello")]
 

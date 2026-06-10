@@ -969,21 +969,25 @@ class MagiEngineDriver:
         Always starts with a text part for ``prompt``, then appends one ADK
         image part per valid block in ``image_blocks`` (base64 blocks only;
         malformed / unsupported blocks are silently skipped by the gate5b4c3
-        helper). Uses ``types.Part.from_text`` / ``types.Part.from_bytes``
-        so the fake-types doubles in the test suite work without a real ADK
-        import.
+        helper).  The text part uses the same ``types.Part(text=...)``
+        constructor form used at all other build sites so that existing
+        fake-types test doubles continue to work without modification.  The
+        image factory (``types.Part.from_bytes``) is only referenced when
+        there are actually image blocks to process, so empty-block callers
+        never touch that attribute.
         """
-        from magi_agent.shadow.gate5b4c3_image_parts import (  # noqa: PLC0415
-            image_blocks_to_parts,
-        )
-
-        parts: list = [types.Part.from_text(text=prompt)]  # type: ignore[union-attr]
-        parts.extend(
-            image_blocks_to_parts(
-                list(image_blocks),
-                part_factory=types.Part.from_bytes,  # type: ignore[union-attr]
+        parts: list = [types.Part(text=prompt)]  # type: ignore[union-attr]
+        if image_blocks:
+            from magi_agent.shadow.gate5b4c3_image_parts import (  # noqa: PLC0415
+                image_blocks_to_parts,
             )
-        )
+
+            parts.extend(
+                image_blocks_to_parts(
+                    list(image_blocks),
+                    part_factory=types.Part.from_bytes,  # type: ignore[union-attr]
+                )
+            )
         return parts
 
     async def run_turn_stream(
