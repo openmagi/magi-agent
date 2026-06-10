@@ -9,6 +9,7 @@ Coverage:
 """
 from __future__ import annotations
 
+import asyncio
 import subprocess
 import sys
 from collections.abc import Mapping
@@ -53,7 +54,7 @@ def test_spawn_agent_default_gate_off_byte_identical(monkeypatch) -> None:
     arguments: dict[str, object] = {"prompt": "Hello world", "persona": "researcher"}
     ctx = _context(spawnDepth=2)
 
-    result = spawn_agent(arguments, ctx)
+    result = asyncio.run(spawn_agent(arguments, ctx))
 
     assert result.status == "ok"
     output = result.output
@@ -82,7 +83,7 @@ def test_spawn_agent_default_gate_off_empty_prompt(monkeypatch) -> None:
     from magi_agent.plugins.native._common import digest
     from magi_agent.plugins.native.subagents import spawn_agent
 
-    result = spawn_agent({}, _context())
+    result = asyncio.run(spawn_agent({}, _context()))
 
     assert result.output["status"] == "queued_locally"
     assert result.output["persona"] == "general"
@@ -99,7 +100,7 @@ def test_spawn_agent_default_gate_off_uses_task_fallback(monkeypatch) -> None:
     from magi_agent.plugins.native._common import digest
     from magi_agent.plugins.native.subagents import spawn_agent
 
-    result = spawn_agent({"task": "do something"}, _context())
+    result = asyncio.run(spawn_agent({"task": "do something"}, _context()))
 
     assert result.output["promptDigest"] == digest("do something")
     assert result.output["liveChildRunnerAttached"] is False
@@ -148,7 +149,7 @@ def test_spawn_agent_live_gate_on_returns_live_attached(monkeypatch) -> None:
     arguments: dict[str, object] = {"prompt": "Summarise the attached doc"}
     ctx = _context(spawnDepth=1)
 
-    result = spawn_agent(arguments, ctx)
+    result = asyncio.run(spawn_agent(arguments, ctx))
 
     assert result.status == "ok"
     output = result.output
@@ -197,7 +198,7 @@ def test_spawn_agent_live_output_sanitised(monkeypatch) -> None:
 
     from magi_agent.plugins.native.subagents import spawn_agent
 
-    result = spawn_agent({"prompt": "do it"}, _context())
+    result = asyncio.run(spawn_agent({"prompt": "do it"}, _context()))
 
     assert result.status == "ok"
     summary = str(result.output.get("summary", ""))
@@ -242,7 +243,7 @@ def test_spawn_agent_live_gate_on_child_blocked_does_not_raise(monkeypatch) -> N
     from magi_agent.plugins.native.subagents import spawn_agent
 
     # Must NOT raise.
-    result = spawn_agent({"prompt": "do it"}, _context())
+    result = asyncio.run(spawn_agent({"prompt": "do it"}, _context()))
 
     assert result.status == "ok"
     # The boundary returns ok-level result with blocked envelope, or a fallback.
@@ -280,7 +281,7 @@ def test_spawn_agent_live_gate_on_runner_raises_falls_back(monkeypatch) -> None:
     from magi_agent.plugins.native.subagents import spawn_agent
 
     # Must NOT raise.
-    result = spawn_agent({"prompt": "do it"}, _context())
+    result = asyncio.run(spawn_agent({"prompt": "do it"}, _context()))
 
     assert result.status == "ok"
     # The boundary catches the runner exception internally and returns status="error";
@@ -326,7 +327,7 @@ def test_spawn_agent_live_runner_constructed_with_empty_tools(monkeypatch) -> No
 
     from magi_agent.plugins.native.subagents import spawn_agent
 
-    spawn_agent({"prompt": "test", "tools": ["some_tool"]}, _context())
+    asyncio.run(spawn_agent({"prompt": "test", "tools": ["some_tool"]}, _context()))
 
     # The runner must have been constructed with an EMPTY toolset regardless of
     # what arguments were passed to spawn_agent.
@@ -398,7 +399,7 @@ def test_spawn_agent_kill_switch_overrides_enabled_returns_gate_off_payload(
     arguments: dict[str, object] = {"prompt": "Hello kill switch", "persona": "tester"}
     ctx = _context(spawnDepth=1)
 
-    result = spawn_agent(arguments, ctx)
+    result = asyncio.run(spawn_agent(arguments, ctx))
 
     assert result.status == "ok"
     output = result.output
@@ -458,7 +459,7 @@ def test_spawn_agent_live_depth_cap_blocks_without_running_child(monkeypatch) ->
 
     # spawn_depth=2 → child metadata spawnDepth=3 > max_spawn_depth=2 (default)
     ctx = _context(spawnDepth=2)
-    result = spawn_agent({"prompt": "deep nested task"}, ctx)
+    result = asyncio.run(spawn_agent({"prompt": "deep nested task"}, ctx))
 
     # The result must not raise and must be a valid ok-level ToolResult.
     assert result.status == "ok"
@@ -514,10 +515,45 @@ def test_spawn_agent_live_string_budget_ms_parsed_correctly(monkeypatch) -> None
         "prompt": "budget string test",
         "budget_ms": "5000",
     }
-    result = spawn_agent(arguments, _context())
+    result = asyncio.run(spawn_agent(arguments, _context()))
 
     # Must not crash.
     assert result.status == "ok"
     assert result.output is not None
     # The request must have received budget_ms=5000, not 0.
     assert captured_request.get("budget_ms") == 5000
+
+
+# ---------------------------------------------------------------------------
+# T9: Running-loop dispatch — the child must actually run when spawn_agent is
+# invoked the way the tool dispatcher invokes it (awaited on the live event
+# loop), NOT degrade to blocked. Regression for the async fix: the prior
+# sync + asyncio.run() implementation raised RuntimeError on the running loop
+# and silently returned liveChildRunnerAttached=False for every production call.
+# ---------------------------------------------------------------------------
+
+
+def test_spawn_agent_runs_child_inside_running_event_loop(monkeypatch) -> None:
+    monkeypatch.setenv("MAGI_CHILD_RUNNER_LIVE_ENABLED", "1")
+    monkeypatch.delenv("MAGI_CHILD_RUNNER_LIVE_KILL_SWITCH", raising=False)
+
+    import magi_agent.runtime.child_runner_live as _live_mod
+
+    monkeypatch.setattr(_live_mod, "RealLocalChildRunner", _FakeLiveChildRunner)
+
+    from magi_agent.plugins.native.subagents import spawn_agent
+
+    async def _dispatch_like_production() -> object:
+        # Mirror the tool dispatcher's normal path: call the handler, then await
+        # it if it returned a coroutine — all on the already-running loop.
+        result = spawn_agent({"prompt": "run inside loop"}, _context(spawnDepth=1))
+        if asyncio.iscoroutine(result):
+            result = await result
+        return result
+
+    result = asyncio.run(_dispatch_like_production())
+
+    assert result.status == "ok"
+    # The child actually ran — NOT the blocked degrade path.
+    assert result.output["liveChildRunnerAttached"] is True
+    assert "Fake child" in str(result.output.get("summary", ""))
