@@ -55,6 +55,15 @@ def main(argv: Sequence[str] | None = None) -> None:
     from .ops.otel_noise import silence_otel_detach_noise
 
     silence_otel_detach_noise()
+    # Install-default-on memory: overlay ~/.magi/config.toml[memory] on the
+    # install defaults ({enabled, prefer_local_search}) and setdefault the
+    # matching MAGI_MEMORY_* env vars so the runtime gates (memory_turn_hook on
+    # the SSE chat path, recall, projection) see them. Runs ONLY from this real
+    # ``magi-agent serve`` entrypoint (never during library/test imports);
+    # the code-level default is unchanged. Fail-soft.
+    from .cli.memory_bootstrap import apply_memory_config_bootstrap
+
+    apply_memory_config_bootstrap(os.environ)
     port = resolve_server_port(argv)
     config = _parse_runtime_config(os.environ)
     if _local_runtime_defaults_active(config):

@@ -808,4 +808,13 @@ def main() -> None:
     from magi_agent.ops.otel_noise import silence_otel_detach_noise
 
     silence_otel_detach_noise()
+    # Install-default-on memory: overlay ~/.magi/config.toml[memory] on the
+    # install defaults ({enabled, prefer_local_search}) and setdefault the
+    # matching MAGI_MEMORY_* env vars so the env-reading runtime gates see them.
+    # Runs ONLY from this real CLI entrypoint (never during library/test imports);
+    # the code-level default (resolve_memory_config(env={}) → master False) is
+    # unchanged. Fail-soft. See magi_agent/cli/memory_bootstrap.py.
+    from magi_agent.cli.memory_bootstrap import apply_memory_config_bootstrap
+
+    apply_memory_config_bootstrap(os.environ)
     app()

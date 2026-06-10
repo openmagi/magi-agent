@@ -876,6 +876,17 @@ async def _local_adk_chat_sse(
     # workspace memory tree and inject a <memory-recall> block. Gated + fail-soft
     # downstream (recall_enabled AND prefer_local_search, incognito-aware): when
     # off this is byte-identical (recall_query is just an unused string).
+    #
+    # TODO(PR-C offload): the recall search runs SYNCHRONOUSLY inside
+    # build_headless_runtime → build_cli_instruction (prompt assembly), so it is
+    # on this event loop. It already has an empty-tree guard
+    # (memory_recall_block._has_indexable_memory) + a tiny corpus + a qmd
+    # subprocess timeout, so it is cheap today. It is NOT offloaded here because
+    # build_headless_runtime is a single sync call that assembles the whole
+    # runtime (engine/gate/commands), not just recall — wrapping the lot in
+    # to_thread would move unrelated wiring off-loop. If the memory tree ever
+    # grows enough to matter, split the recall-block build out of prompt assembly
+    # and to_thread JUST that, mirroring the record_turn offload below.
     headless = build_headless_runtime(
         cwd=workspace_root,
         permission_mode="bypassPermissions",
@@ -941,7 +952,15 @@ async def _local_adk_chat_sse(
         # unless the (default-OFF) memory-mode routing gate bound it from the
         # ``x-core-agent-memory-mode`` header; ``.value`` yields the string form
         # ``record_turn`` compares against ``_NON_WRITING_MODES``.
-        record_turn(
+        #
+        # HOT-PATH OFFLOAD (PR-C): ``record_turn`` is synchronous and its
+        # first-turn ``_maybe_run_compaction`` can do ~300ms of file IO (a final
+        # review measured it). Run it on a worker thread via ``asyncio.to_thread``
+        # so the daily flush + compaction build never block this SSE event loop.
+        # Still fail-soft (record_turn swallows its own errors) and gated (no-op
+        # when memory is off); the await just keeps the loop responsive.
+        await asyncio.to_thread(
+            record_turn,
             workspace_root=workspace_root,
             session_id=session_id,
             turn_id=turn_id,
