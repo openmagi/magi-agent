@@ -107,9 +107,11 @@ def test_web_search_delegates_to_live_boundary_when_configured(
     live_env: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     boundary = _RecordingBoundary()
+    # PR-2: the plugin now delegates via build_native_web_boundary, which returns
+    # the env-assembled live boundary (or None → not-configured error).
     monkeypatch.setattr(
-        "magi_agent.plugins.native.web.build_live_research_boundary",
-        lambda: boundary,
+        "magi_agent.plugins.native.web.build_native_web_boundary",
+        lambda env=None: boundary,
     )
 
     result = asyncio.run(web_search({"query": "openmagi"}, _context()))
@@ -123,8 +125,8 @@ def test_web_fetch_delegates_to_live_boundary_when_configured(
 ) -> None:
     boundary = _RecordingBoundary()
     monkeypatch.setattr(
-        "magi_agent.plugins.native.web.build_live_research_boundary",
-        lambda: boundary,
+        "magi_agent.plugins.native.web.build_native_web_boundary",
+        lambda env=None: boundary,
     )
 
     result = asyncio.run(web_fetch({"url": "https://example.com/"}, _context()))
