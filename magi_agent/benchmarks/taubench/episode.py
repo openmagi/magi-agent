@@ -14,6 +14,8 @@ from google.genai import types
 from magi_agent.benchmarks.taubench.reliability import (
     ReliabilityConfig,
     WriteLedger,
+    completion_review_nudge,
+    is_conclusion,
     verify_final,
 )
 
@@ -71,6 +73,7 @@ def run_episode(
     cfg = reliability or ReliabilityConfig()
     led = ledger if ledger is not None else WriteLedger()
     nudged = False
+    reviewed = False
 
     async def _run_turn(message: str) -> str:
         texts: list[str] = []
@@ -108,6 +111,15 @@ def run_episode(
                 nudged = True
                 obs = nudge
                 continue  # give the agent one grounded turn; skip this respond
+        if cfg.completion_review and not reviewed:
+            try:
+                conclude = is_conclusion(agent_text)
+            except Exception:
+                conclude = False
+            if conclude:
+                reviewed = True
+                obs = completion_review_nudge()
+                continue  # one grounded turn to complete/scope-correct; skip respond
         # the agent's tool calls already hit env.step during the turn (via FunctionTools,
         # which call state.observe). Now route the agent's user-facing text as a respond.
         resp = env.step(
