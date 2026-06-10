@@ -180,6 +180,10 @@ def verify_final(ledger: WriteLedger, agent_text: str) -> str | None:
 # Conclusion = the agent is wrapping up: either a success claim (reuse the L2
 # success markers) OR a refusal/closure. Catches both under-action (refusal that
 # leaves work undone) and premature success claims. Lowercased substring match.
+# Deliberately broad: a mid-task "cannot"/"unfortunately" may trigger early, but
+# that is tolerated because L4 only injects a one-shot reasoning prompt (no block),
+# so a slightly-early self-review is low-cost. Narrow the markers if measurement
+# shows the trigger is too eager.
 _CONCLUSION_MARKERS = _SUCCESS_MARKERS + (
     "unable to",
     "not able to",
