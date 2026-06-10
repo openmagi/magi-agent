@@ -336,6 +336,30 @@ FLAGS: tuple[FlagSpec, ...] = (
             "completions-equivalent gates (no local-engine fallthrough)."
         ),
     ),
+    _b(
+        "MAGI_HOSTED_SESSION_REUSE",
+        scope="hosted",
+        summary=(
+            "Reuse the in-memory ADK session service across hosted turns keyed by "
+            "(bot digest, session id); OFF keeps the fresh-per-turn behavior."
+        ),
+    ),
+    FlagSpec(
+        name="MAGI_HOSTED_SESSION_REUSE_MAX_ENTRIES",
+        default=64,
+        scope="hosted",
+        stage="stage1",
+        summary="LRU capacity (distinct sessions) of the hosted session-reuse registry.",
+        kind="int",
+    ),
+    FlagSpec(
+        name="MAGI_HOSTED_SESSION_REUSE_TTL_SECONDS",
+        default=1800,
+        scope="hosted",
+        stage="stage1",
+        summary="Idle TTL in seconds before a reusable hosted session is evicted.",
+        kind="int",
+    ),
     # --- Runtime profile (string) ------------------------------------------
     FlagSpec(
         name="MAGI_RUNTIME_PROFILE",
