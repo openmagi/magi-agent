@@ -8,7 +8,8 @@ A scannable map of what the local `magi` CLI can actually do right now, what shi
 
 | ✅ Works today (local CLI + provider key) | 🚧 Default-off / shadow today | ❌ Planned |
 |---|---|---|
-| Real model calls — 4 providers (Anthropic / OpenAI / Gemini / Fireworks) via LiteLlm [^1] | Evidence / governance enforcement boundaries (observe-only / local-fake) [^3] | Live enforcement authority attached to traffic (Stage 3) [^3] |
+| Real model calls — 4 providers (Anthropic / OpenAI / Gemini / Fireworks) via LiteLlm [^1] | Rollout enforcement boundaries (observe-only / local-fake) [^3] | Live enforcement authority attached to traffic (Stage 3) [^3] |
+| Pre-final completion/evidence gate — default-ON, blocks coding-turn output [^4] | | |
 | First-party local tools: file read/write/edit, patch apply, Bash — on by default [^2] | External channel delivery (Telegram / Discord live send) | Cross-boundary repair orchestration across multiple contracts |
 | Permission prompts gating tools (`default` / `acceptEdits` / `bypassPermissions`) [^2] | External integrations (Composio) | Additional external authority for managed systems |
 | Sessions, headless NDJSON + interactive TUI | Recipe execution engine (manifests are metadata-only today) | |
@@ -25,7 +26,7 @@ A scannable map of what the local `magi` CLI can actually do right now, what shi
 
 ### 🚧 Default-off / shadow today
 
-- **Evidence / governance enforcement boundaries** run in observe-only / local-fake mode. The ledger records, but no boundary verdict blocks output or side effects. [^3]
+- **Evidence / governance enforcement boundaries** (the rollout boundary modules) run in observe-only / local-fake mode — the ledger records, but those boundary verdicts are not attached to live traffic. [^3] **One exception that already blocks today:** the pre-final completion/evidence gate (`magi_agent/cli/engine.py`) is default-ON and, on coding turns, blocks output with a `pre_final_evidence_gate_blocked` terminal error when the required evidence is missing and repair cannot satisfy it. [^4]
 - **External channel delivery** (Telegram / Discord live send).
 - **External integrations** (Composio).
 - **Always-on gateway daemon** — `magi gateway start` is a supervising daemon (runs until SIGINT/SIGTERM; `--once` keeps the legacy single scheduler tick), but it is gated by `MAGI_GATEWAY_DAEMON_ENABLED` and each watcher still respects its own gate (e.g. `MAGI_SCHEDULER_EXECUTOR_ENABLED`).
@@ -39,3 +40,4 @@ A scannable map of what the local `magi` CLI can actually do right now, what shi
 [^1]: `magi_agent/cli/wiring.py::_build_default_runner` selects a real model-backed ADK runner when a provider key or `~/.magi/config.toml` is configured (`magi_agent/cli/real_runner.py`), otherwise falls back to the model-free stub (`magi_agent/cli/local_runner.py`).
 [^2]: `magi_agent/cli/wiring.py::_build_first_party_adk_tools` / `_first_party_tools_enabled` (True unless `MAGI_FIRST_PARTY_TOOLS_ENABLED` is off); permission modes in `magi_agent/cli/permissions.py`.
 [^3]: `magi_agent/evidence/rollout.py::EvidenceRolloutMetadata` — `traffic_attached` / `execution_attached` are `Literal[False]`, meaning the enforcement boundary is not attached to live traffic/decisions. These flags govern whether the governance layer blocks/gates the agent, not whether the agent can execute tasks.
+[^4]: `magi_agent/cli/engine.py::_pre_final_gate_payload` / `_pre_final_gate_applies` — the pre-final gate is evaluated before a turn finalizes. When a coding turn is missing required evidence and the repair loop cannot satisfy it, the engine yields an `EngineResult` with `error="pre_final_evidence_gate_blocked"` and returns, so the turn's output is withheld. `_pre_final_gate_applies` defaults to gating (returns `True` when the dev-coding pack is not explicitly selected) and gates coding turns when it is.
