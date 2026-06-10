@@ -34,4 +34,12 @@ EXPOSE 8080
 
 USER magi
 
+# Plain-docker liveness only — Kubernetes ignores HEALTHCHECK and uses its
+# own probes. GET /healthz returns 200 when healthy and 503 otherwise;
+# urllib raises on non-2xx (and on connection failure), which exits non-zero
+# and marks the container unhealthy. python urllib avoids needing curl/wget
+# in the slim image. Honors CORE_AGENT_PORT (default 8080, set above).
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD ["python", "-c", "import os, sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:' + os.environ.get('CORE_AGENT_PORT', '8080') + '/healthz', timeout=4).status == 200 else 1)"]
+
 CMD ["python", "-m", "magi_agent"]
