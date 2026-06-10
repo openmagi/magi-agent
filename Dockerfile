@@ -33,6 +33,7 @@ ENV CORE_AGENT_PORT=8080 \
 EXPOSE 8080
 
 USER magi
+WORKDIR /home/magi
 
 # Plain-docker liveness only — Kubernetes ignores HEALTHCHECK and uses its
 # own probes. GET /healthz returns 200 when healthy and 503 otherwise;

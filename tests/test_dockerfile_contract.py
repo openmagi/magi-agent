@@ -32,3 +32,11 @@ def test_build_metadata_args_are_in_final_stage_scope() -> None:
         "CORE_AGENT_EXPECTED_IMAGE_DIGEST",
     ):
         assert final_stage.count(f"ARG {name}") == 1
+
+
+def test_non_root_runtime_uses_writable_workdir() -> None:
+    """Plain docker runs must not start local-full defaults from root-owned /app."""
+    dockerfile = DOCKERFILE.read_text(encoding="utf-8")
+    after_user = dockerfile.split("USER magi", maxsplit=1)[1]
+
+    assert "WORKDIR /home/magi" in after_user
