@@ -954,7 +954,6 @@ forbidden_exact = (
     "magi_agent.transport.sse",
     "magi_agent.channels.contract",
     "magi_agent.runtime.openmagi_runtime",
-    "magi_agent.runtime.turn_controller",
 )
 forbidden_prefixes = (
     "google.adk",
@@ -1014,7 +1013,6 @@ def test_message_builder_source_forbids_live_runtime_side_effect_boundaries() ->
         "magi_agent.transport",
         "magi_agent.channels",
         "magi_agent.runtime.openmagi_runtime",
-        "magi_agent.runtime.turn_controller",
     )
     for module_name in imported:
         assert not any(

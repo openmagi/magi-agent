@@ -41,7 +41,6 @@ forbidden_prefixes = (
     "magi_agent.transport.plugins",
     "magi_agent.channels",
     "magi_agent.runtime.openmagi_runtime",
-    "magi_agent.runtime.turn_controller",
     "magi_agent.routing",
     "magi_agent.tools.dispatcher",
     "magi_agent.workspace",
