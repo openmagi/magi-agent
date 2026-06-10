@@ -2297,6 +2297,28 @@ def control_store_durable_path(env: Mapping[str, str] | None = None) -> Path | N
     return Path(raw)
 
 
+MAGI_CONTROL_STORE_OOB_RESOLVE_ENV = "MAGI_CONTROL_STORE_OOB_RESOLVE"
+
+
+def control_store_oob_resolve_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Single source of truth for the out-of-band control-resolve gate (A7 / PR-5).
+
+    Default OFF (strict truthy opt-in: "1"/"true"/"yes"/"on"). Building on the
+    durable JSONL queue (see :func:`control_store_durable_enabled`), this gate
+    governs whether the out-of-band resolve seam in
+    :mod:`magi_agent.runtime.control_oob` is exposed to external callers (a
+    channel / gateway daemon / dashboard approving a pending request from a
+    *separate* process). When OFF the seam is dormant and no behaviour changes —
+    pending approvals are still only resolvable by the in-turn CLI gate. When ON,
+    an external resolve is appended to the durable log and the originating
+    process consumes it on its next queue refresh. Like
+    ``control_store_durable_enabled`` this is an additive, default-disabled seam
+    and deliberately does NOT follow the runtime-profile default-ON convention.
+    """
+    source = os.environ if env is None else env
+    return _is_true(source.get(MAGI_CONTROL_STORE_OOB_RESOLVE_ENV))
+
+
 MAGI_COMPOSIO_DISPATCH_ENFORCED_ENV = "MAGI_COMPOSIO_DISPATCH_ENFORCED"
 
 
