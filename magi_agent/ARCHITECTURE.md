@@ -248,7 +248,7 @@ graph LR
 
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
-| __init__.py | — | — | (root)/main.py |
+| __init__.py | — | — | (root)/main.py, cli/tui/app.py |
 | __main__.py | — | main | — |
 | app.py | — | app_api, bootstrap, chat, config, control_requests, credentials, customize, dashboard, debug_trace, health, learning_dashboard, observability, openmagi_runtime, plugins, shadow_invocations, streaming_chat_route, tools | (root)/main.py |
 | facades.py | High-level entry-point facades that compose existing modules. | bus, context, dispatcher, manifest, resolved, result | — |
@@ -530,10 +530,10 @@ graph LR
 | __init__.py | Interactive Textual TUI for the Magi headless CLI (Stream E). | — | cli/tests/test_tui_app.py, cli/tests/test_tui_notify.py, cli/tests/test_tui_tool_render.py, cli/tui/app.py |
 | _bench.py | Headless throughput benchmark for the streaming-transcript spike (PR-E1). | transcript | cli/tests/test_tui_transcript.py |
 | app.py | Interactive Textual App + REPL loop for the Magi CLI (PR-E2). | autocomplete, clipboard_image, contracts, diff, executor, footer, help, history, input, loader, markdown, model, palette, providers, resolver, schema, session, session_log, sidebar, theme, transcript, transcript_view, tui, whichkey | cli/tests/test_app.py, cli/tests/test_e2e_parity.py, cli/tests/test_model_picker_wire.py, cli/tests/test_tui_app.py, cli/tests/test_tui_followups.py, cli/tests/test_tui_history.py, cli/tests/test_tui_input.py, cli/tests/test_tui_palette.py, cli/tests/test_tui_subagent.py, cli/tests/test_tui_theme.py, cli/tests/test_tui_thinking.py, cli/tests/test_tui_visual.py, cli/tests/test_tui_whichkey.py, cli/wiring.py |
-| autocomplete.py | Prefix autocomplete router for the Magi TUI input (PR-E2). | contracts | cli/tests/test_tui_autocomplete.py, cli/tests/test_tui_input.py, cli/tui/app.py |
+| autocomplete.py | Prefix autocomplete router for the Magi TUI input (PR-E2). | contracts | cli/tests/test_tui_autocomplete.py, cli/tests/test_tui_input.py, cli/tui/app.py, cli/tui/input.py |
 | footer.py | Bottom status footer for the Magi TUI (PR3.1). | — | cli/tests/test_tui_app.py, cli/tests/test_tui_footer.py, cli/tui/app.py |
 | history.py | Per-session input history + draft stash for the Magi TUI (PR1.2 / PR1.3). | session_log | cli/tests/test_tui_history.py, cli/tests/test_tui_input.py, cli/tui/app.py, cli/tui/input.py |
-| input.py | Prompt input widget + submission routing for the Magi TUI (PR-E2 / PR1.1). | contracts, history | cli/tests/test_tui_input.py, cli/tui/app.py |
+| input.py | Prompt input widget + submission routing for the Magi TUI (PR-E2 / PR1.1). | autocomplete, contracts, history | cli/tests/test_tui_input.py, cli/tui/app.py |
 | notify.py | Toast + bell helpers for the Magi TUI (PR3.3 + PR3.4). | — | — |
 | palette.py | Textual command-palette providers for the Magi TUI (PR2.1+). | contracts, theme | cli/tests/test_tui_app.py, cli/tests/test_tui_palette.py, cli/tests/test_tui_theme.py, cli/tui/app.py, cli/tui/dialogs/help.py |
 | sidebar.py | Toggleable left sidebar for the Magi TUI (PR3.2). | — | cli/tests/test_tui_sidebar.py, cli/tui/app.py |
