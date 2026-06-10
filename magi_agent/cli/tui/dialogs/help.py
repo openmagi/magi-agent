@@ -49,6 +49,10 @@ ENV_HELP: tuple[tuple[str, str], ...] = (
         "MAGI_TUI_NOTIFY_BELL=1",
         "Ring the terminal bell on turn-done / permission when unfocused",
     ),
+    (
+        "MAGI_STREAM_THINKING=1",
+        "show the agent's reasoning as a dim one-line trace",
+    ),
 )
 
 
