@@ -959,6 +959,13 @@ async def _local_adk_chat_sse(
         # so the daily flush + compaction build never block this SSE event loop.
         # Still fail-soft (record_turn swallows its own errors) and gated (no-op
         # when memory is off); the await just keeps the loop responsive.
+        #
+        # CONCURRENCY: offloading makes genuine concurrent execution possible, and
+        # compaction_tree.append_daily_entry is read-modify-write (atomic write,
+        # but last-writer-wins if two same-workspace turns finalize concurrently →
+        # a daily entry could be lost). Acceptable for the single-user local CLI;
+        # a lock here would only be needed if concurrent same-workspace turns
+        # become common.
         await asyncio.to_thread(
             record_turn,
             workspace_root=workspace_root,

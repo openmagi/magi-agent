@@ -814,7 +814,18 @@ def main() -> None:
     # Runs ONLY from this real CLI entrypoint (never during library/test imports);
     # the code-level default (resolve_memory_config(env={}) → master False) is
     # unchanged. Fail-soft. See magi_agent/cli/memory_bootstrap.py.
-    from magi_agent.cli.memory_bootstrap import apply_memory_config_bootstrap
+    #
+    # Gate by runtime profile, mirroring apply_local_full_runtime_defaults: the
+    # lean/opt-out profiles (safe|minimal|off|conservative|eval) must NOT inherit
+    # install-default-on memory — they leave it at the code default (off) unless
+    # config/env explicitly enables it. This keeps the eval measurement profile
+    # free of per-turn file IO + the <memory-recall> prompt block.
+    from magi_agent.runtime.local_defaults import (  # noqa: PLC0415
+        local_full_runtime_defaults_enabled,
+    )
 
-    apply_memory_config_bootstrap(os.environ)
+    if local_full_runtime_defaults_enabled(os.environ):
+        from magi_agent.cli.memory_bootstrap import apply_memory_config_bootstrap
+
+        apply_memory_config_bootstrap(os.environ)
     app()

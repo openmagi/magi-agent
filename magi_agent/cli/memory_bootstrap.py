@@ -54,11 +54,11 @@ import logging
 from collections.abc import Mapping, MutableMapping
 
 from magi_agent.memory.config import (
-    CONFIG_TABLE,
     MASTER_ENV_VAR,
     PREFER_LOCAL_SEARCH_ENV_VAR,
-    _coerce_bool,
+    coerce_bool,
 )
+from magi_agent.memory.config import _memory_table as _config_memory_table
 
 logger = logging.getLogger(__name__)
 
@@ -115,15 +115,18 @@ def apply_memory_config_bootstrap(
 
 
 def _memory_table(config: Mapping[str, object] | None) -> Mapping[str, object]:
-    """Return the ``[memory]`` table from ``config`` (or ``~/.magi/config.toml``)."""
+    """Return the ``[memory]`` table from ``config`` (or ``~/.magi/config.toml``).
+
+    The dict → ``[memory]`` extraction reuses
+    :func:`magi_agent.memory.config._memory_table` so the two modules share one
+    table-extraction rule; the bootstrap adds only the file-load when ``config``
+    is omitted.
+    """
     if config is None:
         from magi_agent.cli.providers import _load_config_file  # noqa: PLC0415
 
         config = _load_config_file()
-    if not isinstance(config, Mapping):
-        return {}
-    section = config.get(CONFIG_TABLE)
-    return section if isinstance(section, Mapping) else {}
+    return _config_memory_table(config)
 
 
 def _effective_bool(
@@ -131,7 +134,7 @@ def _effective_bool(
 ) -> bool:
     """config.toml value (coerced) if present+valid, else the install default."""
     if config_key in table:
-        coerced = _coerce_bool(table.get(config_key))
+        coerced = coerce_bool(table.get(config_key))
         if coerced is not None:
             return coerced
     return install_default

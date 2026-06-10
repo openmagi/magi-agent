@@ -24,6 +24,7 @@ from .runtime.local_defaults import (
     LOCAL_FULL_RUNTIME_DEFAULTS_ENABLED_ENV,
     LOCAL_FULL_RUNTIME_ENV_DEFAULTS,
     apply_local_full_runtime_defaults,
+    local_full_runtime_defaults_enabled,
 )
 from .transport.chat import (
     build_gate1a_readonly_tools_config_from_env,
@@ -61,9 +62,15 @@ def main(argv: Sequence[str] | None = None) -> None:
     # the SSE chat path, recall, projection) see them. Runs ONLY from this real
     # ``magi-agent serve`` entrypoint (never during library/test imports);
     # the code-level default is unchanged. Fail-soft.
-    from .cli.memory_bootstrap import apply_memory_config_bootstrap
+    #
+    # Gate by runtime profile, mirroring apply_local_full_runtime_defaults below:
+    # the lean/opt-out profiles (safe|minimal|off|conservative|eval) must NOT
+    # inherit install-default-on memory — they leave it at the code default (off)
+    # unless config/env explicitly enables it.
+    if local_full_runtime_defaults_enabled(os.environ):
+        from .cli.memory_bootstrap import apply_memory_config_bootstrap
 
-    apply_memory_config_bootstrap(os.environ)
+        apply_memory_config_bootstrap(os.environ)
     port = resolve_server_port(argv)
     config = _parse_runtime_config(os.environ)
     if _local_runtime_defaults_active(config):

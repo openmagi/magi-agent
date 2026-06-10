@@ -22,6 +22,8 @@ from __future__ import annotations
 from datetime import date
 from pathlib import Path
 
+import pytest
+
 from magi_agent.cli.memory_bootstrap import apply_memory_config_bootstrap
 from magi_agent.memory.config import (
     MASTER_ENV_VAR,
@@ -100,6 +102,25 @@ def test_unrecognized_config_value_uses_install_default() -> None:
     env: dict[str, str] = {}
     apply_memory_config_bootstrap(env, config={"memory": {"enabled": 2}})
     assert env[MASTER_ENV_VAR] == "1"
+
+
+def test_config_present_without_memory_section_applies_install_defaults() -> None:
+    # A config with OTHER sections but NO ``[memory]`` table → the install
+    # defaults still apply (memory on); the missing section is not "off".
+    env: dict[str, str] = {}
+    apply_memory_config_bootstrap(env, config={"providers": {"anthropic": {}}})
+    assert env[MASTER_ENV_VAR] == "1"
+    assert env[PREFER_LOCAL_SEARCH_ENV_VAR] == "1"
+
+
+def test_unknown_memory_key_ignored_install_defaults_applied() -> None:
+    # An unknown key inside ``[memory]`` is ignored: the install defaults apply
+    # and ONLY the two known env vars are set (no env var for the bogus key).
+    env: dict[str, str] = {}
+    apply_memory_config_bootstrap(env, config={"memory": {"bogus": True}})
+    assert set(env) == {MASTER_ENV_VAR, PREFER_LOCAL_SEARCH_ENV_VAR}
+    assert env[MASTER_ENV_VAR] == "1"
+    assert env[PREFER_LOCAL_SEARCH_ENV_VAR] == "1"
 
 
 def test_loads_config_file_when_config_omitted(monkeypatch) -> None:
@@ -221,6 +242,8 @@ def test_cli_app_main_invokes_bootstrap(monkeypatch) -> None:
     )
     # Stop short of actually running the Typer app / agent.
     monkeypatch.setattr(app_mod, "app", lambda: None)
+    # The bootstrap is gated by runtime profile — assert under the full default.
+    monkeypatch.delenv("MAGI_RUNTIME_PROFILE", raising=False)
     app_mod.main()
     assert calls and calls[0] is app_mod.os.environ
 
@@ -236,5 +259,88 @@ def test_serve_main_invokes_bootstrap(monkeypatch, tmp_path) -> None:
     )
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(main_module.uvicorn, "run", lambda app, **kwargs: None)
+    # The bootstrap is gated by runtime profile — assert under the full default.
+    monkeypatch.delenv("MAGI_RUNTIME_PROFILE", raising=False)
     main_module.main(["serve", "--port", "9097"])
+    assert calls and calls[0] is main_module.os.environ
+
+
+# ---------------------------------------------------------------------------
+# PROFILE GATING — install-default-on memory applies ONLY under the full profile
+# ---------------------------------------------------------------------------
+#
+# The bootstrap is gated at the entrypoints by
+# ``runtime.local_defaults.local_full_runtime_defaults_enabled`` (the SAME
+# predicate that gates ``apply_local_full_runtime_defaults``): the lean/opt-out
+# profiles (safe|minimal|off|conservative|eval) must NOT inherit memory-on; they
+# leave memory at the code default (off) unless config/env explicitly enables it.
+
+
+def _spy_cli_app_main(monkeypatch) -> list[object]:
+    """Patch cli.app:main to spy on bootstrap invocation; return the call list."""
+    import magi_agent.cli.app as app_mod
+    import magi_agent.cli.memory_bootstrap as bootstrap_mod
+
+    calls: list[object] = []
+    monkeypatch.setattr(
+        bootstrap_mod, "apply_memory_config_bootstrap", lambda env: calls.append(env)
+    )
+    monkeypatch.setattr(app_mod, "app", lambda: None)
+    return calls
+
+
+@pytest.mark.parametrize("profile", ["safe", "eval", "minimal", "off", "conservative"])
+def test_cli_app_main_skips_bootstrap_under_lean_profile(monkeypatch, profile) -> None:
+    """``magi --profile safe/eval/...`` must NOT run the memory bootstrap."""
+    import magi_agent.cli.app as app_mod
+
+    calls = _spy_cli_app_main(monkeypatch)
+    monkeypatch.setenv("MAGI_RUNTIME_PROFILE", profile)
+    app_mod.main()
+    assert calls == [], f"profile={profile} must leave memory at code default (off)"
+
+
+def test_cli_app_main_runs_bootstrap_under_full_profile(monkeypatch) -> None:
+    """No profile / full profile → the memory bootstrap runs (memory on)."""
+    import magi_agent.cli.app as app_mod
+
+    calls = _spy_cli_app_main(monkeypatch)
+    monkeypatch.delenv("MAGI_RUNTIME_PROFILE", raising=False)
+    app_mod.main()
+    assert calls and calls[0] is app_mod.os.environ
+
+
+def _spy_serve_main(monkeypatch, tmp_path) -> list[object]:
+    from magi_agent import main as main_module
+    import magi_agent.cli.memory_bootstrap as bootstrap_mod
+
+    calls: list[object] = []
+    monkeypatch.setattr(
+        bootstrap_mod, "apply_memory_config_bootstrap", lambda env: calls.append(env)
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(main_module.uvicorn, "run", lambda app, **kwargs: None)
+    return calls
+
+
+@pytest.mark.parametrize("profile", ["safe", "eval"])
+def test_serve_main_skips_bootstrap_under_lean_profile(
+    monkeypatch, tmp_path, profile
+) -> None:
+    """``magi-agent serve`` under safe/eval must NOT run the memory bootstrap."""
+    from magi_agent import main as main_module
+
+    calls = _spy_serve_main(monkeypatch, tmp_path)
+    monkeypatch.setenv("MAGI_RUNTIME_PROFILE", profile)
+    main_module.main(["serve", "--port", "9098"])
+    assert calls == [], f"profile={profile} must leave memory at code default (off)"
+
+
+def test_serve_main_runs_bootstrap_under_full_profile(monkeypatch, tmp_path) -> None:
+    """``magi-agent serve`` with no profile → the memory bootstrap runs."""
+    from magi_agent import main as main_module
+
+    calls = _spy_serve_main(monkeypatch, tmp_path)
+    monkeypatch.delenv("MAGI_RUNTIME_PROFILE", raising=False)
+    main_module.main(["serve", "--port", "9099"])
     assert calls and calls[0] is main_module.os.environ
