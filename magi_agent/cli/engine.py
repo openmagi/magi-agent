@@ -395,8 +395,8 @@ def build_output_continuation_config(
     )
 
 
-# A sane default cap so a runaway stream can't yield forever. Mirrors the spirit
-# of RunnerSessionBoundaryConfig.max_event_count but headless can tolerate more.
+# A sane default cap so a runaway stream can't yield forever; headless can
+# tolerate a generous bound on ADK events consumed per turn.
 _DEFAULT_MAX_EVENT_COUNT = 4096
 
 
