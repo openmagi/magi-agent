@@ -21,7 +21,8 @@ def run_with_retry(
     base_delay: float = 2.0,
 ) -> tuple[bool, bool]:
     """Run an episode attempt; retry up to `retries` times on infra_error, with a
-    bounded linear backoff (`base_delay * attempt_number`) between attempts.
+    bounded linear backoff (`base_delay * retry_number`, i.e. 2s then 4s with the
+    defaults) between attempts.
 
     `sleep` is injectable so tests run without real delay. Returns
     (success, infra_failed) where infra_failed=True means every attempt
