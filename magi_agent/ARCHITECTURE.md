@@ -1025,16 +1025,12 @@ graph LR
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
 | __init__.py | — | — | transport/health.py, transport/product_admin.py |
-| contracts.py | — | metrics, recorder, runtime_events, safety, traces | — |
 | health.py | — | daemon, scheduler_job_execution | gateway/daemon.py, transport/sse.py, transport/streaming_chat_route.py |
 | job_queue.py | — | safety | — |
-| metrics.py | — | runtime_events, safety | ops/contracts.py, ops/recorder.py, ops/scheduler_metrics.py |
+| metrics.py | — | runtime_events, safety | — |
 | otel_noise.py | Suppress a benign OpenTelemetry teardown log line. | — | (root)/main.py, cli/app.py |
-| recorder.py | — | metrics, runtime_events, safety, traces | ops/contracts.py |
-| runtime_events.py | — | safety | ops/contracts.py, ops/metrics.py, ops/recorder.py, ops/traces.py |
-| safety.py | — | — | artifacts/delivery_receipts.py, artifacts/render_verification.py, billing/quota.py, billing/spend_guard.py, connectors/credential_lease.py, connectors/marketplace.py, connectors/registry.py, gates/gate2_readiness.py, ops/contracts.py, ops/job_queue.py, ops/metrics.py, ops/recorder.py, ops/runtime_events.py, ops/traces.py, permissions/auto_control.py, runtime/heartbeat_contract.py, runtime/no_agent_watchdog.py, runtime/resume_decision.py, security/compliance.py, shadow/gate2_recipe_profile_resolver.py, tenancy/context.py, transport/product_admin.py |
-| scheduler_metrics.py | Scheduler-executor outcome metrics — Track A, PR A5. | metrics | — |
-| traces.py | — | runtime_events, safety | ops/contracts.py, ops/recorder.py |
+| runtime_events.py | — | safety | ops/metrics.py |
+| safety.py | — | — | artifacts/delivery_receipts.py, artifacts/render_verification.py, billing/quota.py, billing/spend_guard.py, connectors/credential_lease.py, connectors/marketplace.py, connectors/registry.py, gates/gate2_readiness.py, ops/job_queue.py, ops/metrics.py, ops/runtime_events.py, permissions/auto_control.py, runtime/heartbeat_contract.py, runtime/no_agent_watchdog.py, runtime/resume_decision.py, security/compliance.py, shadow/gate2_recipe_profile_resolver.py, tenancy/context.py, transport/product_admin.py |
 
 ### permissions/
 
@@ -1090,7 +1086,7 @@ graph LR
 | source_ledger.py | — | _common, context, result | — |
 | subagents.py | — | _common, child_runner_boundary, child_runner_live, context, result | — |
 | taskboard.py | — | _common, context, result | — |
-| web.py | — | context, result | — |
+| web.py | — | context, research_tools, result | — |
 
 ### prompt/
 
@@ -1544,7 +1540,7 @@ graph LR
 | query_planner.py | Rule-based query planner for deep web research. | deep_research_config | web_acquisition/deep_research.py, web_acquisition/tests/test_query_planner.py |
 | reference_research_tools.py | — | catalog, context, kernel, local_readonly, read_ledger, registry | — |
 | repo_research_tools.py | — | policy, result, source_ledger, source_proof | — |
-| research_tools.py | — | insane_fetch, jina_reader, live_provider_pack, platform_endpoint, policy, provider_boundary, provider_router, result, source_ledger | benchmarks/gaia/web_tools.py, web_acquisition/deep_research.py, web_acquisition/opencode_provider_router.py, web_acquisition/tests/test_deep_research_orchestrator.py, web_acquisition/tests/test_gaia_web_tools_deep_research.py |
+| research_tools.py | — | insane_fetch, jina_reader, live_provider_pack, platform_endpoint, policy, provider_boundary, provider_router, result, source_ledger | benchmarks/gaia/web_tools.py, plugins/native/web.py, web_acquisition/deep_research.py, web_acquisition/opencode_provider_router.py, web_acquisition/tests/test_deep_research_orchestrator.py, web_acquisition/tests/test_gaia_web_tools_deep_research.py |
 
 ### web_acquisition/providers/
 

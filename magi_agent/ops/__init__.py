@@ -3,16 +3,11 @@ from __future__ import annotations
 from importlib import import_module
 
 __all__ = [
-    "InMemoryRuntimeOpsRecorder",
-    "InMemoryOpsRecorder",
     "RuntimeMetricRecord",
     "RuntimeMetricsSnapshot",
     "RuntimeOperationEvent",
-    "RuntimeOperationReceipt",
     "RuntimeOpsAttachmentFlags",
-    "RuntimeTraceSnapshot",
     "build_runtime_metrics_snapshot",
-    "build_runtime_trace_snapshot",
     "default_runtime_ops_health_metadata",
     "project_runtime_operation_event",
     "scheduler_executor_health_projection",
@@ -20,16 +15,11 @@ __all__ = [
 ]
 
 _LAZY_EXPORTS = {
-    "InMemoryRuntimeOpsRecorder": (".recorder", "InMemoryRuntimeOpsRecorder"),
-    "InMemoryOpsRecorder": (".recorder", "InMemoryOpsRecorder"),
     "RuntimeMetricRecord": (".metrics", "RuntimeMetricRecord"),
     "RuntimeMetricsSnapshot": (".metrics", "RuntimeMetricsSnapshot"),
     "RuntimeOperationEvent": (".runtime_events", "RuntimeOperationEvent"),
-    "RuntimeOperationReceipt": (".recorder", "RuntimeOperationReceipt"),
     "RuntimeOpsAttachmentFlags": (".metrics", "RuntimeOpsAttachmentFlags"),
-    "RuntimeTraceSnapshot": (".traces", "RuntimeTraceSnapshot"),
     "build_runtime_metrics_snapshot": (".metrics", "build_runtime_metrics_snapshot"),
-    "build_runtime_trace_snapshot": (".traces", "build_runtime_trace_snapshot"),
     "default_runtime_ops_health_metadata": (".health", "default_runtime_ops_health_metadata"),
     "project_runtime_operation_event": (".runtime_events", "project_runtime_operation_event"),
     "scheduler_executor_health_projection": (".health", "scheduler_executor_health_projection"),
