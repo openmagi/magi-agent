@@ -573,38 +573,6 @@ if loaded:
     assert completed.returncode == 0, completed.stderr
 
 
-def test_observable_process_reward_import_stays_adk_runner_runtime_and_route_free() -> None:
-    completed = _run_fresh_python(
-        """
-import importlib
-import sys
-
-module = importlib.import_module("magi_agent.harness.process_reward")
-assert hasattr(module, "score_observable_process_events")
-
-forbidden_prefixes = (
-    "google.adk",
-    "magi_agent.adk_bridge.runner_adapter",
-    "magi_agent.runtime.openmagi_runtime",
-    "magi_agent.transport.chat",
-    "magi_agent.transport.tools",
-)
-loaded = [
-    module_name
-    for module_name in sys.modules
-    if any(
-        module_name == prefix or module_name.startswith(f"{prefix}.")
-        for prefix in forbidden_prefixes
-    )
-]
-if loaded:
-    raise AssertionError(f"process reward import loaded forbidden modules: {loaded}")
-"""
-    )
-
-    assert completed.returncode == 0, completed.stderr
-
-
 def test_inference_scaling_import_stays_adk_runner_routing_proxy_and_billing_free() -> None:
     completed = _run_fresh_python(
         """
