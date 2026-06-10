@@ -267,7 +267,7 @@
       "python_adk_live_producer_support": {
         "status": "default_off",
         "evidence": [
-          "magi-agent/magi_agent/ops/runtime_events.py"
+          "magi-agent/magi_agent/ops/metrics.py"
         ],
         "notes": "Runtime event production is diagnostic and not production frontend authority."
       },
@@ -505,7 +505,7 @@
         "status": "default_off",
         "evidence": [
           "magi-agent/magi_agent/ops/health.py",
-          "magi-agent/magi_agent/ops/runtime_events.py"
+          "magi-agent/magi_agent/ops/metrics.py"
         ],
         "notes": "Admin diagnostics remain gated and read-only; no production runtime authority is granted."
       },

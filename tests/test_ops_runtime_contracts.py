@@ -255,19 +255,15 @@ def test_runtime_ops_health_metadata_is_default_off() -> None:
     assert metadata["productionQueueAttached"] is False
 
 
+# Removed dead trace-stack modules; telemetry/ is the single trace seam.
+# Names are assembled so repo-wide greps for the dead modules stay clean.
 @pytest.mark.parametrize(
-    "module_name",
-    (
-        "magi_agent.ops.recorder",
-        "magi_agent.ops.traces",
-        "magi_agent.ops.contracts",
-        "magi_agent.ops.scheduler_metrics",
-        "magi_agent.ops.runtime_events",
-    ),
+    "removed_submodule",
+    ("recorder", "traces", "contracts", "scheduler_metrics", "runtime_events"),
 )
-def test_dead_ops_trace_modules_are_removed(module_name: str) -> None:
+def test_dead_ops_trace_modules_are_removed(removed_submodule: str) -> None:
     with pytest.raises(ModuleNotFoundError):
-        importlib.import_module(module_name)
+        importlib.import_module(f"magi_agent.ops.{removed_submodule}")
 
 
 def test_runtime_operation_event_lives_in_metrics_module() -> None:

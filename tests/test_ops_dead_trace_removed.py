@@ -1,16 +1,17 @@
 """Guard test: the dead ops trace stack must stay deleted (16-PR1).
 
-These four ops/ submodules had zero non-test consumers and were removed to
-collapse the runtime onto the single ``telemetry/`` trace seam:
+These ops/ submodules had zero non-test consumers or were folded into metrics,
+collapsing runtime ops onto the single ``telemetry/`` trace seam:
 
   - magi_agent.ops.recorder
   - magi_agent.ops.traces
   - magi_agent.ops.contracts
   - magi_agent.ops.scheduler_metrics
+  - magi_agent.ops.runtime_events
 
-The live ops surface (safety/health/metrics/job_queue/otel_noise/runtime_events)
-is preserved; this test asserts only that the dead modules and their lazy
-re-exports are gone, so they cannot silently reappear.
+The live ops surface (safety/health/metrics/job_queue/otel_noise) is preserved;
+this test asserts only that the dead modules and their lazy re-exports are gone,
+so they cannot silently reappear.
 """
 
 from __future__ import annotations
@@ -25,6 +26,7 @@ DEAD_OPS_MODULES = (
     "magi_agent.ops.traces",
     "magi_agent.ops.contracts",
     "magi_agent.ops.scheduler_metrics",
+    "magi_agent.ops.runtime_events",
 )
 
 # Symbols that used to be lazy re-exported from magi_agent.ops via the dead
@@ -37,15 +39,15 @@ DEAD_OPS_REEXPORTS = (
     "build_runtime_trace_snapshot",
 )
 
-# Live re-exports that must keep resolving (regression guard for preserved
-# ops surface — runtime_events is intentionally kept, folded only via metrics).
+# Live re-exports that must keep resolving (regression guard for preserved ops
+# surface; runtime operation events now live in metrics).
 LIVE_OPS_REEXPORTS = (
     "RuntimeMetricRecord",
     "RuntimeMetricsSnapshot",
     "RuntimeOperationEvent",
     "RuntimeOpsAttachmentFlags",
+    "build_runtime_metrics_snapshot",
     "default_runtime_ops_health_metadata",
-    "project_runtime_operation_event",
     "safe_metadata",
 )
 
