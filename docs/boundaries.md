@@ -51,16 +51,9 @@ class ToolEvidenceRecord(BaseModel):
     duration_ms: int | None
 ```
 
-## Evidence enforcement boundary
+## Evidence enforcement
 
-The evidence enforcement boundary (evidence/enforcement_boundary.py) evaluates an EvidenceContract against collected evidence records and produces an EvidenceEnforcementDecision. It determines whether evidence is sufficient to proceed, requires repair, or should block. Status: implemented, evaluation is default-off (config.enabled=False).
-
-- EvidenceEnforcementStatus: disabled, evaluation_intent, pass, audit_missing, repair_required, escalate_required, block_ready_local_fake.
-- EvidenceEnforcementAction: audit, pass, repair, escalate, block_intent.
-- EvidenceEnforcementDomain: research, coding, completion, general.
-- EvidenceEnforcementConfig gates evaluation: enabled, local_fake_evaluation_enabled, evidence_block_enabled (Literal[False]), final_answer_blocking_enabled (Literal[False]).
-- EvidenceEnforcementAuthorityFlags: all fields Literal[False] including evidence_block_enabled, final_answer_blocked, live_tool_dispatched, shell_git_or_test_executed, production_writes_enabled, route_attached.
-- When the verdict fails with block_ready state: if repair_allowed, status is repair_required; if escalation_allowed, status is escalate_required; otherwise status is block_ready_local_fake with action block_intent.
+Evidence enforcement happens on the live output path in the engine pre-final gate. A turn collects EvidenceRecords from tool calls, matches them against an EvidenceContract, and produces an EvidenceContractVerdict. For coding-domain turns the engine pre-final gate (cli/engine.py) consumes that verdict via the verifier bus (harness/verifier_bus.py) and, when it reaches a block_ready state, blocks the final answer or triggers a repair loop by default. There is a single live enforcement path; there is no separate standalone enforcement-boundary module.
 
 ## Memory write boundary
 

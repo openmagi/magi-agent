@@ -2,17 +2,16 @@
 
 How the runtime handles missing evidence: retry, downgrade, approve, fallback, abstain, or block.
 
-When evidence is missing or validation fails, the enforcement decision flow determines the next action. Repair is currently implicit in the enforcement boundary and commit boundary block plans, not a separate framework.
+When evidence is missing or validation fails, the enforcement decision flow determines the next action. Repair is currently implicit in the engine pre-final gate and commit boundary block plans, not a separate framework.
 
 ## Evidence enforcement repair flow
 
-When the evidence enforcement boundary evaluates a contract and the verdict fails (state is block_ready), the enforcement decision depends on the request flags. This is the current repair mechanism, implemented in EvidenceEnforcementBoundary.evaluate().
+When an evidence contract verdict fails (state is block_ready), the next action is decided on the live output path by the engine pre-final gate (cli/engine.py) via the verifier bus (harness/verifier_bus.py).
 
-- If verdict.ok is True: status=pass, action=pass. No repair needed.
-- If verdict is block_ready and repair_allowed is True: status=repair_required, action=repair. The caller should gather more evidence and retry.
-- If verdict is block_ready and escalation_allowed is True: status=escalate_required, action=escalate. The caller should escalate to a higher authority (e.g. human review).
-- If verdict is block_ready and neither flag is set: status=block_ready_local_fake, action=block_intent. The intent to block is recorded but not enforced (because evidence_block_enabled is Literal[False]).
-- If verdict is not block_ready (state is missing or failed): status=audit_missing, action=audit. Missing evidence is logged but does not block.
+- If verdict.ok is True: the gate passes the turn. No repair needed.
+- If verdict is block_ready for a coding-domain turn: the gate blocks the final answer (Terminal.error, error="pre_final_evidence_gate_blocked"); with MAGI_CODING_REPAIR_LOOP_ENABLED it drives a repair loop that gathers more evidence and retries. This is live and on by default for the coding domain.
+- For research-domain turns, the final-projection gate records the same verdict for diagnostics only: a block_ready verdict becomes "block_ready_local_fake" (its final_answer_blocking_enabled flag is Literal[False]) and does not block output.
+- If verdict is not block_ready (state is missing or failed): missing evidence is logged to the audit ledger but does not block.
 
 ## Commit boundary block plans
 
