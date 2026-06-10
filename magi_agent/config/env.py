@@ -1959,6 +1959,33 @@ def cli_session_log_enabled(env: Mapping[str, str] | None = None) -> bool:
     return _is_true(source.get(CLI_SESSION_LOG_ENABLED_ENV))
 
 
+# Single source of truth for the CLI ``--resume``/``--continue`` rehydration
+# safety net (PR-04-PR2).
+CLI_RESUME_ENABLED_ENV = "MAGI_CLI_RESUME_ENABLED"
+
+
+def cli_resume_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Whether ``--resume``/``--continue`` rehydrate prior conversation context.
+
+    Single source of truth for the ``MAGI_CLI_RESUME_ENABLED`` flag. When OFF,
+    ``--resume``/``--continue`` still thread a session id (and the headless turn
+    runs), but no prior transcript is replayed — preserving the pre-PR2 "id only"
+    behavior. When ON, the entrypoint calls ``session_log.prepare_resume`` and
+    feeds the reconstructed ``initial_messages`` into the engine.
+
+    Stage-1 default-OFF (strict, like ``MAGI_CLI_SESSION_LOG_ENABLED``): only an
+    explicit truthy value enables it, independent of the runtime profile. If the
+    session-log write path is OFF there is no transcript to read, so resume is a
+    graceful no-op regardless of this flag. The local-full / eval profiles
+    register the flag at ``"0"`` so a later release can stage it ON.
+    """
+
+    import os as _os
+
+    source = env if env is not None else _os.environ
+    return _is_true(source.get(CLI_RESUME_ENABLED_ENV))
+
+
 def tool_concurrency_enabled(env: Mapping[str, str]) -> bool:
     """Single source of truth for the ``MAGI_TOOL_CONCURRENCY_ENABLED`` flag.
 
