@@ -32,6 +32,7 @@ graph LR
     browser --> tools
     browser --> web_acquisition
     channels --> cli
+    channels --> egress_proxy
     channels --> harness
     channels --> recipes
     channels --> runtime
@@ -345,7 +346,7 @@ graph LR
 | push_delivery.py | — | contract, provider_execution, provider_receipts, runtime_boundary | — |
 | research_command.py | — | cost_estimate, workflow_recipe | channels/workflow_confirm_store.py, channels/workflow_orchestrator.py |
 | runtime_boundary.py | — | contract, dispatcher | channels/dispatcher.py, channels/push_delivery.py, channels/telegram_adapter.py, harness/scheduler_runtime.py |
-| slack_live.py | E4 — Gated live Slack adapter. | platform_registry, scheduler_delivery | — |
+| slack_live.py | E4 — Gated live Slack adapter. | platform_registry, scheduler_delivery, slack_urllib | channels/providers/slack_urllib.py |
 | taskkind_classifier.py | — | inference_scaling | channels/workflow_classifier_live.py, transport/streaming_chat_route.py |
 | telegram_adapter.py | — | contract, dispatcher, provider_execution, provider_receipts, runtime_boundary | channels/providers/telegram_httpx.py, channels/telegram_live.py, gateway/channel_watchers.py |
 | telegram_boundary.py | — | — | — |
@@ -362,6 +363,7 @@ graph LR
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
 | __init__.py | Concrete channel provider implementations (the ONLY place a real network | — | — |
+| slack_urllib.py | Concrete out-of-box Slack provider over stdlib ``urllib`` (B1). | config, slack_live | channels/slack_live.py |
 | telegram_httpx.py | Concrete live Telegram provider over ``httpx`` (B17). | telegram_adapter | gateway/channel_watchers.py |
 
 ### cli/
@@ -648,7 +650,7 @@ graph LR
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
 | __init__.py | — | config | — |
-| config.py | — | — | (root)/app.py, egress_proxy/__init__.py, egress_proxy/injection.py, gates/gate5b_full_toolhost.py, web_acquisition/live_fetch_provider.py |
+| config.py | — | — | (root)/app.py, channels/providers/slack_urllib.py, egress_proxy/__init__.py, egress_proxy/injection.py, gates/gate5b_full_toolhost.py, web_acquisition/live_fetch_provider.py |
 | evidence.py | — | gate1a_egress_correlation | — |
 | injection.py | — | config | gates/gate5b_full_toolhost.py, web_acquisition/live_fetch_provider.py |
 
