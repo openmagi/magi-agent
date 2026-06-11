@@ -49,3 +49,38 @@ class Capability(str, Enum):
     @classmethod
     def all_tokens(cls) -> frozenset["Capability"]:
         return frozenset(cls)
+
+
+@dataclass(frozen=True)
+class SessionReadView:
+    """Narrow, frozen projection of the ADK session for read-only impl access."""
+
+    invocation_id: str
+    agent_name: str
+    turn_index: int
+    _state: Mapping[str, Any] = field(default_factory=dict)
+
+    def __init__(self, *, invocation_id: str, agent_name: str, turn_index: int,
+                 state: Mapping[str, Any] | None = None) -> None:
+        object.__setattr__(self, "invocation_id", invocation_id)
+        object.__setattr__(self, "agent_name", agent_name)
+        object.__setattr__(self, "turn_index", turn_index)
+        # snapshot copy — never alias the live ADK state dict
+        object.__setattr__(self, "_state", dict(state or {}))
+
+    def get_state(self, key: str, default: Any = None) -> Any:
+        return self._state.get(key, default)
+
+    def state_keys(self) -> tuple[str, ...]:
+        return tuple(self._state.keys())
+
+
+@dataclass(frozen=True)
+class EvidenceReadView:
+    """Read-only view of evidence already present and still owed this turn."""
+
+    present: tuple[str, ...] = ()
+    owed: tuple[str, ...] = ()
+
+    def has(self, evidence_type: str) -> bool:
+        return evidence_type in self.present
