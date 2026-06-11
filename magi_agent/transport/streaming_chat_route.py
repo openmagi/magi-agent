@@ -95,6 +95,7 @@ __all__ = [
 _DEFAULT_PER_CHILD_TOKENS = 8000
 _DEFAULT_MODEL_MICROCENTS_PER_1K = 120
 _SELECTED_FULL_TOOLHOST_TURN_ID = "turn-gate5b-full-toolhost"
+_SELECTED_STREAM_HEARTBEAT_INTERVAL_SECONDS = 5.0
 # Process-wide default store so a confirmation prompt issued on one /v1/chat/stream
 # request survives until the user's yes/no arrives on the NEXT request.
 _DEFAULT_CONFIRM_STORE: PendingConfirmationStore = InMemoryPendingConfirmationStore()
@@ -337,6 +338,8 @@ def _runtime_scope_digest(value: object) -> str:
 
 def _selected_full_toolhost_stream_start_events(
     runtime: object,
+    *,
+    turn_id: str,
 ) -> tuple[Mapping[str, object], ...]:
     """Return immediate Work-panel events for the selected full-toolhost stream."""
     try:
@@ -362,13 +365,52 @@ def _selected_full_toolhost_stream_start_events(
     except Exception:
         return ()
     return (
-        turn_phase_event(turn_id=_SELECTED_FULL_TOOLHOST_TURN_ID, phase="executing"),
+        turn_phase_event(turn_id=turn_id, phase="executing"),
         {
             "type": "llm_progress",
-            "turnId": _SELECTED_FULL_TOOLHOST_TURN_ID,
+            "turnId": turn_id,
             "stage": "started",
             "label": "Running Python ADK",
             "detail": "Selected first-party toolhost active",
+        },
+    )
+
+
+def _selected_stream_public_event_for_turn(
+    payload: Mapping[str, object],
+    *,
+    turn_id: str,
+) -> dict[str, object]:
+    event = dict(payload)
+    if (
+        event.get("type") in {"turn_phase", "llm_progress", "heartbeat"}
+        or event.get("turnId") == _SELECTED_FULL_TOOLHOST_TURN_ID
+    ):
+        event["turnId"] = turn_id
+    return event
+
+
+def _selected_stream_pending_events(
+    *,
+    turn_id: str,
+    heartbeat_iter: int,
+    elapsed_ms: int,
+) -> tuple[Mapping[str, object], ...]:
+    return (
+        {
+            "type": "heartbeat",
+            "turnId": turn_id,
+            "iter": heartbeat_iter,
+            "elapsedMs": elapsed_ms,
+        },
+        {
+            "type": "llm_progress",
+            "turnId": turn_id,
+            "stage": "waiting",
+            "label": "Running Python ADK",
+            "detail": "Waiting for selected model or tool progress",
+            "iter": heartbeat_iter,
+            "elapsedMs": elapsed_ms,
         },
     )
 
@@ -391,7 +433,7 @@ async def _drive_selected_gate5b_stream(
 
     def _enqueue_public_event(payload: Mapping[str, object]) -> None:
         nonlocal live_text_emitted
-        event = dict(payload)
+        event = _selected_stream_public_event_for_turn(payload, turn_id=turn_id)
         if event.get("type") == "text_delta":
             live_text_emitted = True
         live_events.put_nowait(event)
@@ -406,17 +448,28 @@ async def _drive_selected_gate5b_stream(
 
     response_task = asyncio.create_task(_run_selected_response())
     try:
-        for public_event in _selected_full_toolhost_stream_start_events(runtime):
+        for public_event in _selected_full_toolhost_stream_start_events(
+            runtime,
+            turn_id=turn_id,
+        ):
             emitted_event_keys.add(_event_key(public_event))
             frame = _runtime_event_frame(public_event, turn_id=turn_id)
             if frame is not None:
                 yield frame
+        loop = asyncio.get_running_loop()
+        stream_started_at = loop.time()
+        heartbeat_iter = 0
+        heartbeat_interval = max(
+            0.001,
+            float(_SELECTED_STREAM_HEARTBEAT_INTERVAL_SECONDS),
+        )
         while True:
             if response_task.done() and live_events.empty():
                 break
             next_event_task = asyncio.create_task(live_events.get())
             done, _pending = await asyncio.wait(
                 {response_task, next_event_task},
+                timeout=None if response_task.done() else heartbeat_interval,
                 return_when=asyncio.FIRST_COMPLETED,
             )
             if next_event_task in done:
@@ -431,6 +484,19 @@ async def _drive_selected_gate5b_stream(
                 await next_event_task
             except asyncio.CancelledError:
                 pass
+            if response_task in done or response_task.done():
+                continue
+            heartbeat_iter += 1
+            elapsed_ms = int((loop.time() - stream_started_at) * 1000)
+            for public_event in _selected_stream_pending_events(
+                turn_id=turn_id,
+                heartbeat_iter=heartbeat_iter,
+                elapsed_ms=elapsed_ms,
+            ):
+                emitted_event_keys.add(_event_key(public_event))
+                frame = _runtime_event_frame(public_event, turn_id=turn_id)
+                if frame is not None:
+                    yield frame
         response = response_task.result()
         payload = _json_response_mapping(response)
     except Exception:
@@ -465,12 +531,18 @@ async def _drive_selected_gate5b_stream(
             for public_event in public_events:
                 if not isinstance(public_event, Mapping):
                     continue
+                public_event = _selected_stream_public_event_for_turn(
+                    public_event,
+                    turn_id=turn_id,
+                )
                 if live_text_emitted and public_event.get("type") == "text_delta":
                     continue
                 event_key = _event_key(public_event)
                 if event_key in emitted_event_keys:
                     continue
                 emitted_event_keys.add(event_key)
+                if public_event.get("type") == "text_delta":
+                    live_text_emitted = True
                 frame = _runtime_event_frame(public_event, turn_id=turn_id)
                 if frame is not None:
                     yield frame

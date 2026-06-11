@@ -652,13 +652,13 @@ def test_selected_full_toolhost_stream_starts_work_events_before_response_finish
 
     assert payloads[0] == {
         "type": "turn_phase",
-        "turnId": "turn-gate5b-full-toolhost",
+        "turnId": "t-selected-start-events",
         "phase": "executing",
         "turn_id": "t-selected-start-events",
     }
     assert payloads[1] == {
         "type": "llm_progress",
-        "turnId": "turn-gate5b-full-toolhost",
+        "turnId": "t-selected-start-events",
         "label": "Running Python ADK",
         "stage": "started",
         "detail": "Selected first-party toolhost active",
@@ -669,6 +669,149 @@ def test_selected_full_toolhost_stream_starts_work_events_before_response_finish
         for payload in payloads
         if payload.get("type") in {"turn_phase", "llm_progress"}
     ] == payloads[:2]
+    assert payloads[-1]["type"] == "turn_result"
+    assert payloads[-1]["terminal"] == "completed"
+
+
+def test_selected_full_toolhost_stream_ticks_progress_while_response_pending(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
+    monkeypatch.setattr(
+        streaming_chat_route_module,
+        "_SELECTED_STREAM_HEARTBEAT_INTERVAL_SECONDS",
+        0.01,
+        raising=False,
+    )
+    release_response = asyncio.Event()
+    response_finished = asyncio.Event()
+
+    async def fake_selected_chat_response(
+        runtime: object,
+        body: object,
+        *,
+        request: object,
+        public_event_sink=None,
+    ) -> JSONResponse:
+        assert public_event_sink is not None
+        await release_response.wait()
+        response_finished.set()
+        return JSONResponse(
+            status_code=200,
+            content={
+                "status": "python_ready",
+                "publicEvents": [
+                    {
+                        "type": "turn_phase",
+                        "turnId": "turn-gate5b-full-toolhost",
+                        "phase": "executing",
+                    },
+                    {
+                        "type": "llm_progress",
+                        "turnId": "turn-gate5b-full-toolhost",
+                        "stage": "started",
+                        "label": "Running Python ADK",
+                        "detail": "Selected first-party toolhost active",
+                    },
+                ],
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "delayed full-toolhost answer",
+                        }
+                    }
+                ],
+            },
+        )
+
+    monkeypatch.setattr(
+        streaming_chat_route_module,
+        "run_gate5b_user_visible_chat_response",
+        fake_selected_chat_response,
+    )
+
+    async def _collect() -> list[dict]:
+        frames = _drive_selected_gate5b_stream(
+            _selected_runtime(tmp_path, full_toolhost=True),
+            {"messages": [{"role": "user", "content": "stream selected"}]},
+            SimpleNamespace(),
+            session_id="s-selected-pending-ticker",
+            turn_id="t-selected-pending-ticker",
+        )
+        try:
+            first_frame = await asyncio.wait_for(anext(frames), timeout=1)
+            first_payloads = _data_lines(first_frame.decode("utf-8"))
+            second_frame = await asyncio.wait_for(anext(frames), timeout=1)
+            second_payloads = _data_lines(second_frame.decode("utf-8"))
+            pending_frames = [
+                await asyncio.wait_for(anext(frames), timeout=0.25),
+                await asyncio.wait_for(anext(frames), timeout=0.25),
+            ]
+            pending_payloads = [
+                payload
+                for frame in pending_frames
+                for payload in _data_lines(frame.decode("utf-8"))
+            ]
+            assert response_finished.is_set() is False
+
+            release_response.set()
+            remaining_frames = [frame async for frame in frames]
+            remaining_payloads = [
+                payload
+                for frame in remaining_frames
+                for payload in _data_lines(frame.decode("utf-8"))
+            ]
+            return (
+                first_payloads
+                + second_payloads
+                + pending_payloads
+                + remaining_payloads
+            )
+        finally:
+            release_response.set()
+            await frames.aclose()
+
+    payloads = asyncio.run(_collect())
+
+    assert payloads[0] == {
+        "type": "turn_phase",
+        "turnId": "t-selected-pending-ticker",
+        "phase": "executing",
+        "turn_id": "t-selected-pending-ticker",
+    }
+    assert payloads[1] == {
+        "type": "llm_progress",
+        "turnId": "t-selected-pending-ticker",
+        "label": "Running Python ADK",
+        "stage": "started",
+        "detail": "Selected first-party toolhost active",
+        "turn_id": "t-selected-pending-ticker",
+    }
+    pending_payloads = payloads[2:4]
+    assert any(
+        payload.get("type") == "heartbeat"
+        and payload.get("turnId") == "t-selected-pending-ticker"
+        for payload in pending_payloads
+    )
+    assert any(
+        payload.get("type") == "llm_progress"
+        and payload.get("turnId") == "t-selected-pending-ticker"
+        and payload.get("stage") == "waiting"
+        for payload in pending_payloads
+    )
+    assert all(
+        payload.get("turnId") == "t-selected-pending-ticker"
+        for payload in payloads
+        if payload.get("type") in {"heartbeat", "llm_progress", "turn_phase"}
+    )
+    text_payloads = [
+        payload for payload in payloads if payload.get("type") == "text_delta"
+    ]
+    assert [payload["delta"] for payload in text_payloads] == [
+        "delayed full-toolhost answer"
+    ]
     assert payloads[-1]["type"] == "turn_result"
     assert payloads[-1]["terminal"] == "completed"
 
