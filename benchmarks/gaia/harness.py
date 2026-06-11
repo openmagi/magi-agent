@@ -20,6 +20,22 @@ from magi_agent.runtime.best_effort_answer import (
     is_non_answer,
 )
 
+# Generic capability advertisement (default-OFF, benchmark prompt layer only).
+# Anti-overfit: GENERIC text only — no benchmark name, channel, video, or
+# answer value. Mirrors the first-party VideoFrames/AudioTranscribe behavior.
+REMOTE_MEDIA_CAPABILITY_NOTE = (
+    "\n\nNOTE: VideoFrames/AudioTranscribe accept a remote video/media URL "
+    "(e.g. YouTube) and return captions/transcript or sampled frames. Use them "
+    "when the question references content in an online video or media file."
+)
+
+
+def _is_remote_media_advertise_enabled() -> bool:
+    import os  # noqa: PLC0415
+
+    val = os.environ.get("MAGI_GAIA_REMOTE_MEDIA_ADVERTISE_ENABLED", "").strip().lower()
+    return val in {"1", "true", "yes", "on"}
+
 
 def run_gaia_question(
     question: GaiaQuestion,
@@ -73,12 +89,21 @@ def run_gaia_question(
             f"to read it when answering the question."
         )
 
+    # 3b. Optional, default-OFF generic remote-media capability advertisement.
+    #     This is a GENERIC agent-capability hint living ONLY in the benchmark
+    #     prompt layer (never in first-party logic). It names no benchmark
+    #     target, channel, video, or answer value. Byte-identical when OFF.
+    remote_media_note = ""
+    if _is_remote_media_advertise_enabled():
+        remote_media_note = REMOTE_MEDIA_CAPABILITY_NOTE
+
     # 4. Build runner.
     # gaia_system_prompt() returns GAIA_SYSTEM_PROMPT byte-identically when
     # MAGI_COMPUTE_VIA_CODE_ENABLED is unset (default), and appends the scoped
     # compute-via-code reminder only when the flag is on.
     instruction = (
-        f"{gaia_system_prompt()}\n\nQUESTION:\n{question.question}{attachment_note}"
+        f"{gaia_system_prompt()}\n\nQUESTION:\n{question.question}"
+        f"{attachment_note}{remote_media_note}"
     )
     runner: CliModelRunner = build_cli_model_runner(
         config,

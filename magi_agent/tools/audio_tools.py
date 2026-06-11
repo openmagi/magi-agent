@@ -258,6 +258,19 @@ def _audio_transcribe_url(
     if not _is_video_download_enabled():
         return _blocked_result(tool_name, "video_download_not_enabled")
 
+    # SSRF preflight: static string-level validation of the user-supplied URL
+    # only (no DNS/redirect resolution). Runs AFTER the gate and BEFORE the
+    # download provider/try-block so a block maps to status='blocked'.
+    from .media_egress import (  # noqa: PLC0415
+        MediaEgressBlocked,
+        assert_media_url_allowed,
+    )
+
+    try:
+        assert_media_url_allowed(url)
+    except MediaEgressBlocked as exc:
+        return _blocked_result(tool_name, "media_url_egress_blocked", exc.reason_code)
+
     # Import video_tools lazily to avoid circular dependency at module level
     try:
         from .video_tools import (  # noqa: PLC0415
