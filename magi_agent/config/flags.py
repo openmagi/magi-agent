@@ -352,6 +352,13 @@ FLAGS: tuple[FlagSpec, ...] = (
         "MAGI_APPLY_PATCH_ENABLED",
         summary="Enable the apply-patch tool for multi-file edits (default-ON full profile).",
     ),
+    _b(
+        "MAGI_TOOL_SYNTHESIS_NUDGE_ENABLED",
+        summary=(
+            "Live-SWE-style tool-synthesis: per-step reflection nudge + "
+            "'create your own tools' recipe block (frontier-tier models only)."
+        ),
+    ),
     # --- Evidence / verification gates -------------------------------------
     _b(
         "MAGI_EGRESS_GATE_ENABLED",

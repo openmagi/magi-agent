@@ -24,8 +24,10 @@ Skip rules (all return ``None`` → original result untouched):
   e.g. ``MAGI_EDIT_RETRY_REFLECTION``) — never stack guidance on guidance,
 - truncated/oversized observations, mirroring Live-SWE behavior: a boolean
   ``truncated`` flag at the top level or one level deep
-  (``output``/``llmOutput``/``transcriptOutput``), or the gate5b Bash
-  head/tail elision marker embedded in string output.
+  (``output``/``llmOutput``/``transcriptOutput``), the MCP / output-budget
+  ``truncation`` projection (``llmPreviewTruncated`` /
+  ``transcriptPreviewTruncated``), or the gate5b Bash head/tail elision
+  marker embedded in string output.
 
 Activation is owned by the caller: ``build_tool_synthesis_nudge_plugin``
 returns ``None`` unless ``enabled=True`` (flag + tier resolution happens in
@@ -53,10 +55,16 @@ _SYNTHETIC_RESPONSE_MARKER_KEY = "response_type"
 
 #: Stable literal inside gate5b's Bash head/tail elision marker
 #: (``gate5b_full_toolhost._bounded_head_tail`` / ``_BoundedPipeCapture``).
-_BASH_ELISION_MARKER = "output truncated"
+#: Long slice on purpose: a bare "output truncated" substring appears in
+#: ordinary content (logs, this repo's own source) and would suppress nudges.
+_BASH_ELISION_MARKER = "bytes elided - output truncated"
 
 #: Result keys whose nested mapping/string payloads are checked for truncation.
 _OUTPUT_KEYS = ("output", "llmOutput", "transcriptOutput")
+
+#: camelCase flags inside the MCP / output-budget ``truncation`` projection
+#: (``tools/output_budget.py`` ``public_projection``).
+_TRUNCATION_PROJECTION_KEYS = ("llmPreviewTruncated", "transcriptPreviewTruncated")
 
 
 class MagiToolSynthesisNudgePlugin(BasePlugin):
@@ -96,10 +104,16 @@ def _is_truncated(result: Mapping[str, Any]) -> bool:
     """Best-effort truncation detection at the after-tool seam.
 
     Checks the boolean ``truncated`` markers tools emit (top level and one
-    level deep under the output keys) plus gate5b's inline Bash elision
-    marker. Deeper truncation signals are NOT plumbed here — see PR notes.
+    level deep under the output keys), the MCP / output-budget ``truncation``
+    projection mapping, plus gate5b's inline Bash elision marker. Deeper
+    truncation signals are NOT plumbed here — see PR notes.
     """
     if result.get("truncated"):
+        return True
+    truncation = result.get("truncation")
+    if isinstance(truncation, Mapping) and any(
+        truncation.get(key) for key in _TRUNCATION_PROJECTION_KEYS
+    ):
         return True
     for key in _OUTPUT_KEYS:
         value = result.get(key)

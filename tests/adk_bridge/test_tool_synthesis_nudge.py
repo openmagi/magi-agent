@@ -113,6 +113,49 @@ class TestPluginSkips:
         )
         assert _after(plugin, {"status": "ok", "output": marker}) is None
 
+    def test_skips_output_budget_truncation_projection(self) -> None:
+        # MCP / output-budget projections (tools/output_budget.py
+        # ``public_projection``) signal truncation as a nested ``truncation``
+        # mapping with camelCase flags, not a boolean ``truncated`` key.
+        plugin = MagiToolSynthesisNudgePlugin()
+        result = {
+            "status": "ok",
+            "llmPreview": "abc",
+            "truncation": {
+                "llmPreviewTruncated": True,
+                "transcriptPreviewTruncated": False,
+            },
+        }
+        assert _after(plugin, result) is None
+
+    def test_skips_transcript_truncated_projection(self) -> None:
+        plugin = MagiToolSynthesisNudgePlugin()
+        result = {
+            "status": "ok",
+            "llmPreview": "abc",
+            "truncation": {
+                "llmPreviewTruncated": False,
+                "transcriptPreviewTruncated": True,
+            },
+        }
+        assert _after(plugin, result) is None
+
+    def test_untruncated_output_budget_projection_still_nudged(self) -> None:
+        plugin = MagiToolSynthesisNudgePlugin()
+        result = _after(
+            plugin,
+            {
+                "status": "ok",
+                "llmPreview": "abc",
+                "truncation": {
+                    "llmPreviewTruncated": False,
+                    "transcriptPreviewTruncated": False,
+                },
+            },
+        )
+        assert result is not None
+        assert TOOL_SYNTHESIS_NUDGE_RESPONSE_KEY in result
+
     def test_untruncated_nested_output_still_nudged(self) -> None:
         plugin = MagiToolSynthesisNudgePlugin()
         result = _after(
