@@ -1,6 +1,8 @@
 """D2-D4 — default-OFF prompt guidance block builders (Fable port)."""
 from __future__ import annotations
 
+import pytest
+
 from magi_agent.runtime.prompt_guidance import (
     action_discipline_examples_block,
     anti_rationalization_block,
@@ -51,14 +53,32 @@ def test_blocks_are_lean() -> None:
         assert 0 < len(block) <= 800  # tag overhead on top of ~600-char budget
 
 
-def test_builders_fail_open(monkeypatch) -> None:
+@pytest.mark.parametrize(
+    ("builder", "helper_name", "enabled_env"),
+    (
+        (
+            action_discipline_examples_block,
+            "is_prompt_examples_enabled",
+            {"MAGI_PROMPT_EXAMPLES_ENABLED": "1"},
+        ),
+        (
+            search_decision_block,
+            "is_prompt_search_rules_enabled",
+            {"MAGI_PROMPT_SEARCH_RULES_ENABLED": "1", **_KEYS},
+        ),
+        (
+            anti_rationalization_block,
+            "is_prompt_redflags_enabled",
+            {"MAGI_PROMPT_REDFLAGS_ENABLED": "1"},
+        ),
+    ),
+)
+def test_builders_fail_open(monkeypatch, builder, helper_name, enabled_env) -> None:
     def boom(_env=None):  # noqa: ANN001
         raise RuntimeError("synthetic")
 
-    monkeypatch.setattr("magi_agent.config.env.is_prompt_examples_enabled", boom)
-    assert action_discipline_examples_block(
-        {"MAGI_PROMPT_EXAMPLES_ENABLED": "1"}
-    ) == ""
+    monkeypatch.setattr(f"magi_agent.config.env.{helper_name}", boom)
+    assert builder(enabled_env) == ""
 
 
 def test_cli_instruction_off_by_default(monkeypatch) -> None:

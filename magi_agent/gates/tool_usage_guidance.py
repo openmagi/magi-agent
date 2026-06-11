@@ -16,6 +16,11 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
+__all__ = [
+    "TOOL_USAGE_GUIDANCE",
+    "apply_usage_guidance",
+]
+
 TOOL_USAGE_GUIDANCE: dict[str, str] = {
     "WebSearch": (
         "Use when: facts that change over time (prices, versions, current "
