@@ -51,11 +51,15 @@ _COMPUTE_VIA_CODE_REMINDER = (
     "\n\n"
     "COMPUTE NUMERIC ANSWERS WITH CODE: for any arithmetic, unit conversion, "
     "statistics (mean/median/sum/average), or checksum/validation step, write "
-    "and run code with the Bash or Calculation tool and report the value the "
-    "tool returned — never compute it in your head. This applies to NUMERIC "
-    "computation only; it does NOT change how you read inputs from an image — "
-    "still use ImageUnderstand with structured extraction to obtain the exact "
-    "values first, then run the arithmetic on them with code."
+    "and run code with the Bash or Calculation tool rather than computing it in "
+    "your head. This applies to NUMERIC computation only; it does NOT change how "
+    "you read inputs from an image — still use ImageUnderstand with structured "
+    "extraction to obtain the exact values first, then run the arithmetic on them "
+    "with code. IMPORTANT: the tool's raw value is an intermediate result, not "
+    "necessarily the final answer — before you write the FINAL ANSWER, convert it "
+    "to the exact units, scale, and rounding the question asks for (e.g. if it "
+    "asks 'how many THOUSAND hours', divide the computed hours by 1000). The "
+    "question's requested format takes precedence over the raw computed value."
 )
 
 
@@ -138,7 +142,12 @@ def extract_final_answer(text: str) -> str:
     tail = text[matches[-1].end():]
     lines = tail.splitlines()
     answer = lines[0] if lines else ""
-    return answer.strip().rstrip(".").strip()
+    answer = answer.strip().rstrip(".").strip()
+    # Strip surrounding markdown emphasis / code markers the model may wrap the
+    # answer in — e.g. "**FINAL ANSWER:** 6" leaves a leading "**" on the tail,
+    # and "`6`" / "**6**" should score as "6". Only affects the answer's ends.
+    answer = answer.strip("*_`").strip()
+    return answer
 
 
 __all__ = [

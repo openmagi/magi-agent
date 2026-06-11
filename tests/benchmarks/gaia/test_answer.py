@@ -20,6 +20,24 @@ def test_returns_empty_when_absent() -> None:
     assert extract_final_answer("no answer here") == ""
 
 
+def test_strips_surrounding_markdown_emphasis() -> None:
+    # "**FINAL ANSWER:** 6" leaves a leading "**" on the tail after the regex
+    # match; the closing bold marker must not pollute the scored answer.
+    assert extract_final_answer("**FINAL ANSWER:** 6") == "6"
+    assert extract_final_answer("FINAL ANSWER: **42**") == "42"
+    assert extract_final_answer("FINAL ANSWER: `egalitarian`") == "egalitarian"
+
+
+def test_compute_reminder_defers_units_to_question() -> None:
+    from benchmarks.gaia.answer import gaia_system_prompt
+
+    prompt = gaia_system_prompt({"MAGI_COMPUTE_VIA_CODE_ENABLED": "1"})
+    # The compute directive must tell the agent the raw tool value is intermediate
+    # and the question's requested units/scale take precedence (conflict fix).
+    assert "thousand" in prompt.lower()
+    assert "precedence" in prompt.lower()
+
+
 def test_prompt_mentions_final_answer_contract() -> None:
     assert "FINAL ANSWER" in GAIA_SYSTEM_PROMPT
 
