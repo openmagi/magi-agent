@@ -928,6 +928,19 @@ def build_cli_instruction(
 
     _tool_synthesis_block = build_tool_synthesis_instruction_block(model_label=model)
 
+    # Fable-pattern guidance blocks — default-OFF; each returns "" when
+    # inactive so prompt assembly stays byte-identical (same contract as the
+    # blocks above).
+    from magi_agent.runtime.prompt_guidance import (  # noqa: PLC0415
+        action_discipline_examples_block,
+        anti_rationalization_block,
+        search_decision_block,
+    )
+
+    _examples_block = action_discipline_examples_block()
+    _search_rules_block = search_decision_block()
+    _redflags_block = anti_rationalization_block()
+
     # Compute-via-code directive (default-OFF: MAGI_COMPUTE_VIA_CODE_ENABLED).
     # Returns "" when the gate is off, so the assembled prompt is byte-identical
     # to pre-wiring. Only appended when non-empty so no extra "\n\n" separator
@@ -960,6 +973,12 @@ def build_cli_instruction(
     parts.append(_skills_block)
     if _tool_synthesis_block:
         parts.append(_tool_synthesis_block)
+    if _examples_block:
+        parts.append(_examples_block)
+    if _search_rules_block:
+        parts.append(_search_rules_block)
+    if _redflags_block:
+        parts.append(_redflags_block)
     if _compute_block:
         parts.append(_compute_block)
     if _format_adherence_block:
