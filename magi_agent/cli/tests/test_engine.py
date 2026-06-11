@@ -37,10 +37,16 @@ from google.genai import types  # noqa: E402
 # ---------------------------------------------------------------------------
 # Fake-event + mock-runner helpers (real ADK objects)
 # ---------------------------------------------------------------------------
-def _text_event(text: str, *, partial: bool = True) -> Event:
+def _text_event(
+    text: str,
+    *,
+    partial: bool = True,
+    turn_complete: bool = False,
+) -> Event:
     return Event(
         author="model",
         partial=partial,
+        turn_complete=turn_complete,
         content=types.Content(role="model", parts=[types.Part(text=text)]),
     )
 
@@ -511,6 +517,42 @@ def test_headless_stream_json_with_magi_driver_emits_one_result(
     )
 
 
+def test_headless_stream_json_with_final_only_adk_text_emits_assistant_frame(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MAGI_CLI_ENABLED", "1")
+    runner = MockRunner(
+        [_text_event("final-only answer", partial=False, turn_complete=True)]
+    )
+    buffer = io.StringIO()
+
+    code = asyncio.run(
+        run_headless(
+            "hi",
+            output="stream-json",
+            include_partial=True,
+            driver=MagiEngineDriver(runner=runner),
+            stream=buffer,
+        )
+    )
+
+    assert code == 0
+    objs = [json.loads(line) for line in buffer.getvalue().splitlines() if line]
+    assistant = [obj for obj in objs if obj.get("type") == "assistant"]
+    token_events = [
+        obj
+        for obj in objs
+        if obj.get("type") == "stream_event"
+        and obj.get("event", {}).get("type") == "token"
+    ]
+    result = next(obj for obj in objs if obj.get("type") == "result")
+
+    assert assistant
+    assert assistant[0]["message"]["content"] == "final-only answer"
+    assert token_events
+    assert result["result"] == "final-only answer"
+
+
 def test_headless_text_mode_with_magi_driver_surfaces_text(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -528,6 +570,28 @@ def test_headless_text_mode_with_magi_driver_surfaces_text(
     )
     assert code == 0
     assert buffer.getvalue() == "real answer\n"
+
+
+def test_headless_text_mode_with_final_only_adk_text_surfaces_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MAGI_CLI_ENABLED", "1")
+    runner = MockRunner(
+        [_text_event("final-only text", partial=False, turn_complete=True)]
+    )
+    buffer = io.StringIO()
+
+    code = asyncio.run(
+        run_headless(
+            "hi",
+            output="text",
+            driver=MagiEngineDriver(runner=runner),
+            stream=buffer,
+        )
+    )
+
+    assert code == 0
+    assert buffer.getvalue() == "final-only text\n"
 
 
 class _RaisingRunner:
