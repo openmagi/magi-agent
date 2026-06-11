@@ -203,6 +203,12 @@
       "group": "Recipes"
     },
     {
+      "slug": "api-stability",
+      "title": "API Stability",
+      "path": "docs/api-stability.md",
+      "group": "Recipes"
+    },
+    {
       "slug": "source-verified-research",
       "title": "Source-Verified Research",
       "path": "docs/source-verified-research.md",
