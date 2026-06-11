@@ -20,8 +20,9 @@ exception.  ``MAGI_DOCUMENT_QA_MODEL`` overrides the model id so a cheap
 
 from __future__ import annotations
 
-import os
 from collections.abc import Callable, Mapping
+
+from magi_agent.config.flags import flag_str
 
 from .context import ToolContext
 from .file_markdown import convert_file_to_markdown, truncate_head_tail
@@ -182,7 +183,7 @@ def _call_qa_model(
         model_id = _FALLBACK_MODEL_ID
         api_key = None
 
-    model_override = os.environ.get("MAGI_DOCUMENT_QA_MODEL", "").strip()
+    model_override = (flag_str("MAGI_DOCUMENT_QA_MODEL") or "").strip()
     if model_override:
         model_id = model_override
 
