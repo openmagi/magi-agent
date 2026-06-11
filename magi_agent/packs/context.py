@@ -278,6 +278,75 @@ class EvidenceProducerCtx:
         return tuple(self._emitted)
 
 
+@dataclass(frozen=True)
+class ProducerSpec:
+    """Declarative descriptor for an ``evidence_producer`` primitive.
+
+    Frozen, capability-parity data: the evidence type it emits, the public ref it
+    contributes to the live ``observed_public_refs`` set, and the surfaces that
+    may emit it. ``public_ref`` MUST carry a recognized public-ref prefix
+    (``evidence:``/``verifier:``/``receipt:sha256:``/``sha256:``) so it reaches
+    the live ``harness/verifier_bus`` enforce path.
+    """
+
+    evidence_type: str
+    public_ref: str
+    producer_surfaces: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class ConnectorSpec:
+    """Declarative descriptor for a ``connector`` (MCP) primitive: a server ref
+    plus the ``ToolManifest``s it projects into the live tool registry."""
+
+    server_ref: str
+    tool_manifests: tuple[Any, ...] = ()
+    readonly: bool = True
+
+
+@dataclass(frozen=True)
+class ToolProvideContext:
+    """D5 typed context a ``tool`` impl receives: a single ``register`` capability
+    that accepts a ``ToolManifest``. No god-object, no first-party-only kwarg."""
+
+    register: Callable[[Any], None]
+
+
+@dataclass(frozen=True)
+class EvidenceProducerProvideContext:
+    """D5 typed context an ``evidence_producer`` impl receives: ``register(ref, spec)``."""
+
+    register: Callable[[str, ProducerSpec], None]
+
+
+@dataclass(frozen=True)
+class RecipeProvideContext:
+    """D5 typed context a ``recipe`` impl receives: ``register(ref, manifest)``."""
+
+    register: Callable[[str, Any], None]
+
+
+@dataclass(frozen=True)
+class ConnectorProvideContext:
+    """D5 typed context a ``connector`` impl receives: ``register(ref, spec)``."""
+
+    register: Callable[[str, ConnectorSpec], None]
+
+
+@dataclass(frozen=True)
+class HarnessProvideContext:
+    """D5 typed context a ``harness`` impl receives: ``register(ref, pack)``."""
+
+    register: Callable[[str, Any], None]
+
+
+@dataclass(frozen=True)
+class CallbackProvideContext:
+    """D5 typed context a ``callback`` impl receives: ``register(manifest, handler)``."""
+
+    register: Callable[[Any, Any], None]
+
+
 class GatePositionViolation(ValueError):
     """A before_tool deciding impl ran with gate_position 'after' (would bypass the
     agent-level permission gate). Mirrors ControlPlane.register's footgun guard."""
@@ -382,4 +451,7 @@ __all__ = [
     "BeforeToolCtx", "AfterToolCtx", "BeforeModelCtx", "AfterAgentCtx",
     "ToolCtx", "ValidatorCtx", "ValidatorVerdict", "EvidenceProducerCtx",
     "ContextDispatcher", "GatePositionViolation",
+    "ProducerSpec", "ConnectorSpec",
+    "ToolProvideContext", "EvidenceProducerProvideContext", "RecipeProvideContext",
+    "ConnectorProvideContext", "HarnessProvideContext", "CallbackProvideContext",
 ]
