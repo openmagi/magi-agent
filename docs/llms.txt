@@ -70,6 +70,7 @@ The source checkout is for contributors developing the runtime. Normal users ins
 - Harnesses: https://openmagi.ai/docs/harnesses - Harnesses are reusable runtime contracts that make a workflow checkable. A
 - Build a Recipe: https://openmagi.ai/docs/build-a-recipe - Step-by-step guide to creating a new recipe pack with tool, evidence, and validator refs.
 - Build a Harness: https://openmagi.ai/docs/build-a-harness - Step-by-step guide to creating evidence contracts and attaching them to the harness engine.
+- API Stability: https://openmagi.ai/docs/api-stability - Stability tiers for public harness, evidence, recipe, tool, and configuration extension surfaces.
 - Source-Verified Research: https://openmagi.ai/docs/source-verified-research - Worked example of a research recipe requiring SourceInspection and WebSearch evidence before claims.
 - Coding Verification: https://openmagi.ai/docs/coding-verification - Worked example of a coding recipe requiring GitDiff, TestRun, and CodeDiagnostics evidence.
 - General Automation: https://openmagi.ai/docs/general-automation - Worked example covering approval gates, delivery boundaries, artifact verification, and commit boundaries using openmagi.office-automation and openmagi.spreadsheet-automation packs.
