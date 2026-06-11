@@ -50,6 +50,8 @@ jobs:
         run: bash scripts/check_module_map.sh
       - name: env-reference drift gate
         run: bash scripts/check_env_reference.sh
+      - name: xfail budget ratchet gate
+        run: uv run --no-sync python scripts/check_xfail_budget.py
       - name: Mypy (advisory, non-blocking)
         run: uv run --no-sync mypy magi_agent
         continue-on-error: true
