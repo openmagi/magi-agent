@@ -585,7 +585,11 @@ def test_event_bridge_preserves_final_text_transcript_in_mixed_function_response
             "status": "ok",
             "output_preview": '{"results": ["alpha"]}',
             "durationMs": 0,
-        }
+        },
+        {
+            "type": "text_delta",
+            "delta": "Found one result.",
+        },
     ]
     assert [entry.kind for entry in projection.transcript_entries] == [
         "tool_result",
@@ -787,7 +791,7 @@ def test_event_bridge_projects_final_text_to_transcript_entry() -> None:
     assert projection.transcript_entries[0].text == "final"
 
 
-def test_event_bridge_projects_final_text_to_public_turn_end_without_public_text() -> None:
+def test_event_bridge_projects_final_text_to_public_delta_before_turn_end() -> None:
     bridge = OpenMagiEventBridge(live_compatible=True)
     final_text = (
         "final transcript text with Authorization: Bearer final.SECRET "
@@ -799,8 +803,13 @@ def test_event_bridge_projects_final_text_to_public_turn_end_without_public_text
         turn_id="turn-final",
     )
 
-    assert len(projection.agent_events) == 1
-    turn_end = projection.agent_events[0]
+    assert len(projection.agent_events) == 2
+    text_delta = projection.agent_events[0]
+    assert text_delta == {
+        "type": "text_delta",
+        "delta": "final transcript text with Authorization: Bearer [redacted] path=[redacted-path]",
+    }
+    turn_end = projection.agent_events[1]
     assert turn_end == {
         "type": "turn_end",
         "turnId": "turn-final",
@@ -809,7 +818,6 @@ def test_event_bridge_projects_final_text_to_public_turn_end_without_public_text
     }
     assert projection.legacy_deltas == []
     rendered_agent_events = json.dumps(projection.agent_events)
-    assert "final transcript text" not in rendered_agent_events
     assert "final.SECRET" not in rendered_agent_events
     assert "/workspace/private/final.txt" not in rendered_agent_events
     assert projection.transcript_entries[0].kind == "assistant_text"

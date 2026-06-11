@@ -117,6 +117,20 @@ def build_cli_tool_runtime(
         register_browser_tool_manifest(registry)
         bind_browser_toolhost_handler(registry)
 
+    # Optional persistent Python code-execution tool (MAGI_CODE_ACTION_ENABLED=true).
+    # Strict opt-in default-OFF: when unset the module is never imported and the
+    # registry is byte-identical to before.
+    from magi_agent.config.env import code_action_enabled  # noqa: PLC0415
+
+    if code_action_enabled():
+        from magi_agent.tools.python_exec import (  # noqa: PLC0415
+            bind_python_exec_handler,
+            register_python_exec_manifest,
+        )
+
+        register_python_exec_manifest(registry)
+        bind_python_exec_handler(registry)
+
     receipt_store = general_automation_receipts or GeneralAutomationReceiptLedgerStore()
     dispatcher = ToolDispatcher(
         registry,
