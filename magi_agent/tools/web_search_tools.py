@@ -253,6 +253,19 @@ def research_fact(
 # ---------------------------------------------------------------------------
 
 
+def _research_fact_tool(question: str) -> str:
+    """Research a factual question by reading multiple web sources in parallel and return a consolidated evidence brief (URL + snippet per source, with agreement/disagreement made visible)."""
+    return research_fact(question)
+
+
+# ADK builds a function declaration from the callable's signature; the public
+# research_fact carries injectable keyword-only callables (search_fn/fetch_fn)
+# which made FunctionTool._get_declaration raise ValueError at agent-build
+# time. The registered tool is this question-only wrapper; __name__ keeps the
+# advertised tool name.
+_research_fact_tool.__name__ = "research_fact"
+
+
 def build_web_search_tools() -> list[object]:
     """Return ADK FunctionTools for web_search, web_fetch, and research_fact.
 
@@ -265,4 +278,8 @@ def build_web_search_tools() -> list[object]:
         return []
     from google.adk.tools import FunctionTool  # noqa: PLC0415
 
-    return [FunctionTool(web_search), FunctionTool(web_fetch), FunctionTool(research_fact)]
+    return [
+        FunctionTool(web_search),
+        FunctionTool(web_fetch),
+        FunctionTool(_research_fact_tool),
+    ]

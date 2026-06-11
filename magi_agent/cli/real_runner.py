@@ -322,16 +322,27 @@ def _model_reasoning_kwargs(env: Mapping[str, str] | None = None) -> dict[str, o
     signatures). Without these kwargs the runtime benchmarks the model in a
     strictly weaker mode.
 
+    * ``MAGI_MODEL_THINKING_TYPE=adaptive`` — send ``thinking={"type":
+      "adaptive"}`` directly; highest precedence. Escape hatch for adaptive-only
+      models when bypassing litellm's effort mapping.
     * ``MAGI_MODEL_THINKING_BUDGET_TOKENS`` (int > 0) — explicit Anthropic-style
-      ``thinking`` budget; takes precedence.
+      ``{"type": "enabled", "budget_tokens": N}``. ONLY for models that support
+      budgeted thinking (e.g. Sonnet 4.5). Adaptive-only models (Opus 4.7/4.8)
+      REJECT this shape with a 400 — use ``MAGI_MODEL_REASONING_EFFORT`` (or
+      ``MAGI_MODEL_THINKING_TYPE=adaptive``) for those.
     * ``MAGI_MODEL_REASONING_EFFORT`` — litellm's cross-provider
-      ``reasoning_effort`` (``low``/``medium``/``high``); ``off``/``none``
-      disable.
+      ``reasoning_effort`` (``minimal``/``low``/``medium``/``high``/``xhigh``/
+      ``max``); ``off``/``none`` disable. RECOMMENDED knob: litellm maps it
+      per-model — adaptive models get ``thinking={"type": "adaptive"}`` plus
+      ``output_config.effort``, budget models get an enabled budget.
 
     Unset ⇒ ``{}`` ⇒ build byte-identical to before (default OFF).
     """
 
     source = os.environ if env is None else env
+    thinking_type = (source.get("MAGI_MODEL_THINKING_TYPE") or "").strip().lower()
+    if thinking_type == "adaptive":
+        return {"thinking": {"type": "adaptive"}}
     budget_raw = (source.get("MAGI_MODEL_THINKING_BUDGET_TOKENS") or "").strip()
     if budget_raw:
         try:

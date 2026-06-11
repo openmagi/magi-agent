@@ -599,3 +599,29 @@ def test_build_web_search_tools_excludes_research_fact_when_keys_absent(
     tools = build_web_search_tools()
 
     assert tools == []
+
+
+def test_build_web_search_tools_declarations_build(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ADK must be able to build a function declaration for EVERY returned tool.
+
+    research_fact's injectable keyword-only callables (search_fn/fetch_fn) made
+    ``FunctionTool._get_declaration`` raise ValueError at agent-build time when
+    both keys were set — the live run produced empty answers. The registered
+    tool must expose only the model-facing ``question`` parameter.
+    """
+    from magi_agent.tools.web_search_tools import build_web_search_tools
+
+    monkeypatch.setenv("BRAVE_API_KEY", "brave-key")
+    monkeypatch.setenv("FIRECRAWL_API_KEY", "fc-key")
+
+    tools = build_web_search_tools()
+    assert tools, "expected tools when both keys are set"
+    for tool in tools:
+        declaration = tool._get_declaration()
+        assert declaration is not None, f"no declaration for {tool}"
+
+    research = next(t for t in tools if getattr(t, "name", "") == "research_fact")
+    params = research._get_declaration().parameters
+    assert set(params.properties.keys()) == {"question"}
