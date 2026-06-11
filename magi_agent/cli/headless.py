@@ -604,12 +604,29 @@ class _InboundReader:
         self._loop = None
 
 
+def _build_research_audit() -> "object | None":
+    """Return a live ResearchLiveAudit when the audit mode is enabled, else None.
+
+    Audit-first research governance: observe-only, default OFF, deterministic
+    (no model calls). The lazy import keeps ``import cli.headless`` cold-clean.
+    """
+    from magi_agent.research.live_audit import (  # noqa: PLC0415
+        ResearchLiveAudit,
+        research_governance_mode,
+    )
+
+    if research_governance_mode() != "audit":
+        return None
+    return ResearchLiveAudit()
+
+
 async def _project_stream(
     gen: AsyncGenerator[RuntimeEvent, EngineResult],
     writer: NdjsonWriter,
     *,
     session_id: str,
     include_partial: bool,
+    research_audit: object | None = None,
 ) -> tuple[str, EngineResult]:
     """Consume the engine generator, emitting projected NDJSON frames live.
 
@@ -648,6 +665,8 @@ async def _project_stream(
                         },
                     )
                 )
+            if research_audit is not None:
+                research_audit.observe_event(event.type, event.payload)  # type: ignore[attr-defined]
             if event.type == "token":
                 text = _token_text(event.payload)
                 if text:
@@ -672,6 +691,14 @@ async def _project_stream(
                 )
         # Stream ended; flush any trailing assistant text.
         await flush_tokens()
+        if research_audit is not None:
+            report = research_audit.report("".join(all_text))  # type: ignore[attr-defined]
+            await writer.write(
+                _system_status_frame(
+                    RuntimeEvent(type="status", payload=report),
+                    session_id=session_id,
+                )
+            )
     finally:
         await gen.aclose()
 
@@ -806,6 +833,16 @@ async def run_headless(
             gen = _tap_session_log(gen, session_log)
         events, terminal = await drain(gen)
         assistant_text = _accumulate_text(events)
+        research_audit = _build_research_audit()
+        if research_audit is not None:
+            for event in events:
+                research_audit.observe_event(event.type, event.payload)  # type: ignore[attr-defined]
+            import json as _json  # noqa: PLC0415
+
+            _log(
+                "research_governance_audit "
+                + _json.dumps(research_audit.report(assistant_text), sort_keys=True)  # type: ignore[attr-defined]
+            )
         result_frame = _build_result_frame(
             session_id=sid, assistant_text=assistant_text, terminal=terminal
         )
@@ -883,7 +920,11 @@ async def run_headless(
             assert session_log is not None
             gen = _tap_session_log(gen, session_log)
         assistant_text, terminal = await _project_stream(
-            gen, writer, session_id=sid, include_partial=include_partial
+            gen,
+            writer,
+            session_id=sid,
+            include_partial=include_partial,
+            research_audit=_build_research_audit(),
         )
         result_frame = _build_result_frame(
             session_id=sid, assistant_text=assistant_text, terminal=terminal
