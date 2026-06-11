@@ -1686,6 +1686,27 @@ def is_evidence_ledger_lifecycle_enabled(env: Mapping[str, str] | None = None) -
     return _runtime_feature_enabled(source, MAGI_EVIDENCE_LEDGER_LIFECYCLE_ENABLED_ENV)
 
 
+MAGI_GROUNDED_ANSWER_GUARD_ENABLED_ENV = "MAGI_GROUNDED_ANSWER_GUARD_ENABLED"
+
+
+def is_grounded_answer_guard_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Single source of truth for the grounded-answer guard activation flag.
+
+    Default OFF (strict truthy opt-in: "1"/"true"/"yes"/"on"). When OFF, the
+    grounded-answer guard never runs: callers emit no grounding metadata and no
+    prompt/answer surface is altered, so behaviour is byte-identical to today.
+    When ON, a caller (the GAIA harness / CLI layer) may compute a
+    :class:`~magi_agent.research.grounded_answer_guard.GroundedAnswerVerdict`
+    against its collected tool corpus and record ``verifierEvidenceStatus`` as
+    out-of-band metadata. Like ``is_egress_gate_enabled`` /
+    ``is_goal_nudge_enabled`` this deliberately does NOT follow the
+    runtime-profile default-ON convention — it is an additive, default-disabled
+    seam.
+    """
+    source = os.environ if env is None else env
+    return _is_true(source.get(MAGI_GROUNDED_ANSWER_GUARD_ENABLED_ENV))
+
+
 MAGI_EGRESS_GATE_ENABLED_ENV = "MAGI_EGRESS_GATE_ENABLED"
 
 

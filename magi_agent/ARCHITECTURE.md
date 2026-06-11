@@ -1133,6 +1133,7 @@ graph LR
 | event_projection.py | — | citation_audit, public_events, runtime_issuance, source_proof | research/research_first_canary.py |
 | evidence_graph.py | — | acceptance_criteria, action_claims, child_runtime_envelope, claim_graph, source_proof | research/boundary_enforcement.py, research/final_projection_gate.py, research/repair.py |
 | final_projection_gate.py | — | action_claims, boundary_enforcement, evidence_graph | — |
+| grounded_answer_guard.py | General grounded-answer guard (anti-fabrication lever). | — | — |
 | live_audit.py | Live, observe-only research-governance audit (audit-first). | — | cli/headless.py |
 | meta_adapter.py | — | child_acceptance, child_roles, task_plan | — |
 | output_contract_gate.py | Output-Contract Adherence Gate — general format-discipline gate for final answers. | — | — |
