@@ -446,16 +446,13 @@ def _required_deliverable_evidence_from_assembly(
 
     ``assembly.evidence_requirements`` is a tuple of public evidence *labels*
     (e.g. ``"artifact_delivery_ref"``, ``"office_preview"``, ``"source_ledger"``),
-    not booleans. The GA completion verifier (task_completion.py) tracks two
-    deliverable kinds — artifact refs and snapshot refs — so we map the label
-    vocabulary onto those booleans:
-
-    * ``requires_artifact_ref`` — any label mentioning ``"artifact"`` (e.g.
-      ``"artifact_delivery_ref"``).
-    * ``requires_snapshot_ref`` — any label mentioning ``"snapshot"``. No current
-      first-party label uses ``"snapshot"`` and snapshot enforcement is disabled
-      in the verifier (``ENFORCE_SNAPSHOT_REQUIREMENT=False``), so this stays
-      ``False`` in practice — kept for forward-compat with the label vocabulary.
+    not booleans. Delegates to
+    :func:`~magi_agent.harness.general_automation.task_completion.required_deliverable_evidence_from_labels`
+    (any label mentioning ``"artifact"`` requires an artifact deliverable
+    receipt) so this runner and the engine's flag-gated pre-final deliverable
+    gate share one mapping. The former forward-compat ``"snapshot"`` label
+    mapping was deleted (A4): no first-party label ever used it and snapshot
+    enforcement was removed from the verifier.
 
     Returns ``None`` when no assembly is available, so the constraint control is
     not registered (byte-identical to ``main``).
@@ -463,14 +460,11 @@ def _required_deliverable_evidence_from_assembly(
     if assembly is None:
         return None
     from magi_agent.harness.general_automation.task_completion import (  # noqa: PLC0415
-        RequiredDeliverableEvidence,
+        required_deliverable_evidence_from_labels,
     )
 
     labels = tuple(getattr(assembly, "evidence_requirements", ()) or ())
-    return RequiredDeliverableEvidence(
-        requires_artifact_ref=any("artifact" in label for label in labels),
-        requires_snapshot_ref=any("snapshot" in label for label in labels),
-    )
+    return required_deliverable_evidence_from_labels(labels)
 
 
 def _build_default_runner_policy_assembly(

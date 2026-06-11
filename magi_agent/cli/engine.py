@@ -2372,6 +2372,13 @@ class MagiEngineDriver:
         missing_validators = [
             ref for ref in assembly.required_validators if ref not in observed_public_refs
         ]
+        # A4 — flag-gated GA deliverable completion gate. Promotes the Track 19
+        # PR3 receipt-grounded check (an artifact deliverable receipt must
+        # actually exist for the turn, not just a label match) onto this LIVE
+        # pre-final seam. Default OFF ⇒ empty ⇒ payload byte-identical to main.
+        missing_evidence.extend(
+            self._ga_deliverable_missing_labels(evidence_records)
+        )
         document_coverage_blocks = _document_coverage_blocks(
             document_coverage_mode, failed_document_coverage
         )
@@ -2448,6 +2455,49 @@ class MagiEngineDriver:
                 latest_test_evidence=latest_test_evidence,
             )
         return payload
+
+    def _ga_deliverable_missing_labels(
+        self,
+        evidence_records: Sequence[object],
+    ) -> list[str]:
+        """A4 — still-owed GA deliverable labels for the live pre-final gate.
+
+        Behind strict default-OFF ``MAGI_GA_DELIVERABLE_GATE_ENABLED``. When ON
+        and the assembled policy's evidence labels require an artifact
+        deliverable (any label mentioning ``"artifact"``), the turn's collected
+        evidence records — which include the GA receipt-ledger entries and,
+        with the flag ON, the ``localArtifactReceipt`` projection emitted by
+        the spreadsheet write tool — must contain an actual artifact ref.
+        Missing ⇒ ``["ga_deliverable:artifactRef"]``, a blocked-reason the
+        model can act on (produce the artifact and emit its receipt). Reuses
+        the previously-dormant Track 19 PR3 verifier logic; no new policy is
+        invented here. Default OFF ⇒ ``[]`` ⇒ byte-identical to main.
+        """
+        import os  # noqa: PLC0415
+
+        from magi_agent.config.env import (  # noqa: PLC0415
+            parse_ga_deliverable_gate_enabled,
+        )
+
+        if not parse_ga_deliverable_gate_enabled(os.environ):
+            return []
+        assembly = self._runner_policy_assembly
+        if assembly is None:
+            return []
+        from magi_agent.harness.general_automation.task_completion import (  # noqa: PLC0415
+            missing_deliverable_labels,
+            required_deliverable_evidence_from_labels,
+        )
+
+        required = required_deliverable_evidence_from_labels(
+            tuple(getattr(assembly, "evidence_requirements", ()) or ())
+        )
+        if required.is_empty():
+            return []
+        return [
+            f"ga_deliverable:{label}"
+            for label in missing_deliverable_labels(required, evidence_records)
+        ]
 
     @staticmethod
     def _collect_public_refs(value: object, refs: set[str]) -> None:

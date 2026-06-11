@@ -400,6 +400,16 @@ def _local_receipt_projection(
             "codingMutationReceipt": result.coding_mutation_receipt,
         }
     receipts = _receipt_projections(metadata)
+    # A4 — GA deliverable gate visibility. ``localArtifactReceipt`` (written by
+    # the spreadsheet write tool) is intentionally NOT in
+    # ``_RECEIPT_METADATA_KEYS``: keeping it out preserves the flag-OFF record
+    # shape byte-identical to main. With ``MAGI_GA_DELIVERABLE_GATE_ENABLED``
+    # ON it must be visible to the engine's pre-final deliverable check or a
+    # successfully delivered artifact would false-block the gate.
+    if _ga_deliverable_gate_enabled():
+        deliverable_receipt = metadata.get("localArtifactReceipt")
+        if deliverable_receipt is not None:
+            receipts["localArtifactReceipt"] = _receipt_value(deliverable_receipt)
     execution_receipt = receipts.get("toolExecutionReceipt")
     if (
         synthesize_execution_receipt
@@ -441,6 +451,16 @@ def _local_receipt_projection(
         "receiptRefs": receipt_refs,
         "receipts": receipts,
     }
+
+
+def _ga_deliverable_gate_enabled() -> bool:
+    import os  # noqa: PLC0415
+
+    from magi_agent.config.env import (  # noqa: PLC0415
+        parse_ga_deliverable_gate_enabled,
+    )
+
+    return parse_ga_deliverable_gate_enabled(os.environ)
 
 
 def _receipt_projections(metadata: Mapping[str, object]) -> dict[str, object]:

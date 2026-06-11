@@ -2222,6 +2222,20 @@ def plan_act_gate_enabled(env: Mapping[str, str] | None = None) -> bool:
     return _is_true(env.get("MAGI_PLAN_ACT_GATE_ENABLED"))
 
 
+def parse_ga_deliverable_gate_enabled(env: Mapping[str, str]) -> bool:
+    """MAGI_GA_DELIVERABLE_GATE_ENABLED — GA deliverable completion gate (A4).
+
+    Promotes the Track 19 PR3 General-Automation deliverable check (an artifact
+    receipt must exist before finalise) onto the LIVE pre-final evidence gate in
+    ``cli.engine`` and keeps ``localArtifactReceipt`` visible in the local tool
+    evidence projection so a delivered artifact satisfies the gate. This is a
+    **strict default-OFF** gate: it never defaults ON in any runtime profile and
+    only flips for an explicit truthy value, so flag-OFF behavior stays
+    byte-identical to ``main``.
+    """
+    return _is_true(env.get("MAGI_GA_DELIVERABLE_GATE_ENABLED"))
+
+
 def plan_mode_tools_enabled(env: Mapping[str, str] | None = None) -> bool:
     """Return True when the manifest-routed plan-mode tools are explicitly enabled.
 

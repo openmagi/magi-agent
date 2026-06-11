@@ -2,12 +2,16 @@
 
 The completion verifier is deterministic and flag-gated. For the ``general``
 role with ``MAGI_GA_LIVE_ENABLED`` ON, a would-be finalise whose active
-contract declared required deliverable evidence (artifact / snapshot refs) is
-routed to *repair* (re-enter the loop with a synthetic "you still owe X"
-message) instead of finalising, unless the evidence is present in the ledger.
+contract declared required deliverable evidence (artifact refs) is routed to
+*repair* (re-enter the loop with a synthetic "you still owe X" message)
+instead of finalising, unless the evidence is present in the ledger.
 
 For any non-general role, flag-OFF, or a contract with no required deliverable
 evidence, the gate is inert and finalise proceeds byte-identically to today.
+
+Snapshot enforcement (``ENFORCE_SNAPSHOT_REQUIREMENT`` / ``requires_snapshot_ref``)
+was DELETED (A4): nothing ever produced a snapshot ref, so the verifier
+requirement is artifact-only now (see tests/test_ga_deliverable_gate.py).
 """
 from __future__ import annotations
 
@@ -15,7 +19,6 @@ from typing import Any
 
 from magi_agent.evidence.ledger import EvidenceLedger
 from magi_agent.harness.general_automation.task_completion import (
-    ENFORCE_SNAPSHOT_REQUIREMENT,
     RequiredDeliverableEvidence,
     TaskCompletionVerdict,
     TaskCompletionVerifier,
@@ -69,11 +72,8 @@ def _ledger() -> EvidenceLedger:
     )
 
 
-def _required_both() -> RequiredDeliverableEvidence:
-    return RequiredDeliverableEvidence(
-        requires_artifact_ref=True,
-        requires_snapshot_ref=True,
-    )
+def _required_artifact() -> RequiredDeliverableEvidence:
+    return RequiredDeliverableEvidence(requires_artifact_ref=True)
 
 
 # ---------------------------------------------------------------------------
@@ -85,7 +85,6 @@ def test_required_evidence_derived_from_spreadsheet_write_contract() -> None:
     contract = get_spreadsheet_operation_contract("spreadsheet.write")
     required = required_deliverable_evidence_for_contract(contract)
     assert required.requires_artifact_ref is True
-    assert required.requires_snapshot_ref is True
     assert required.is_empty() is False
 
 
@@ -93,7 +92,6 @@ def test_required_evidence_empty_for_read_only_contract() -> None:
     contract = get_spreadsheet_operation_contract("spreadsheet.read")
     required = required_deliverable_evidence_for_contract(contract)
     assert required.requires_artifact_ref is False
-    assert required.requires_snapshot_ref is False
     assert required.is_empty() is True
 
 
@@ -103,11 +101,8 @@ def test_required_evidence_empty_for_read_only_contract() -> None:
 
 
 def test_verifier_passes_when_required_refs_present() -> None:
-    ledger = _ledger().append_artifact_ref(
-        "artifact:spreadsheet:out",
-        metadata={"snapshotRef": "snapshot:spreadsheet:src"},
-    )
-    verdict = TaskCompletionVerifier().evaluate(ledger, _required_both())
+    ledger = _ledger().append_artifact_ref("artifact:spreadsheet:out")
+    verdict = TaskCompletionVerifier().evaluate(ledger, _required_artifact())
     assert verdict.status == "pass"
     assert verdict.missing == ()
     assert verdict.repair_message is None
@@ -115,29 +110,21 @@ def test_verifier_passes_when_required_refs_present() -> None:
 
 def test_verifier_fails_with_repair_naming_missing_items() -> None:
     ledger = _ledger()
-    verdict = TaskCompletionVerifier().evaluate(ledger, _required_both())
+    verdict = TaskCompletionVerifier().evaluate(ledger, _required_artifact())
     assert verdict.status == "fail"
     assert verdict.action == "repair"
     assert "artifactRef" in verdict.missing
-    # snapshotRef is only in missing when ENFORCE_SNAPSHOT_REQUIREMENT is True
-    if ENFORCE_SNAPSHOT_REQUIREMENT:
-        assert "snapshotRef" in verdict.missing
-        assert verdict.repair_message is not None
-        assert "snapshotRef" in verdict.repair_message
     assert verdict.repair_message is not None
     assert "artifactRef" in verdict.repair_message
 
 
-def test_verifier_fails_when_only_snapshot_missing() -> None:
+def test_verifier_passes_when_artifact_present() -> None:
+    # Snapshot enforcement was deleted (A4): an artifact ref alone satisfies
+    # the requirement.
     ledger = _ledger().append_artifact_ref("artifact:spreadsheet:out")
-    verdict = TaskCompletionVerifier().evaluate(ledger, _required_both())
-    if ENFORCE_SNAPSHOT_REQUIREMENT:
-        assert verdict.status == "fail"
-        assert verdict.missing == ("snapshotRef",)
-    else:
-        # artifact is present and snapshot is not enforced → pass
-        assert verdict.status == "pass"
-        assert verdict.missing == ()
+    verdict = TaskCompletionVerifier().evaluate(ledger, _required_artifact())
+    assert verdict.status == "pass"
+    assert verdict.missing == ()
 
 
 def test_verifier_inert_when_no_required_evidence() -> None:
@@ -154,17 +141,14 @@ def test_verifier_inert_when_no_required_evidence() -> None:
 
 
 def test_general_flag_on_with_evidence_finalises() -> None:
-    ledger = _ledger().append_artifact_ref(
-        "artifact:spreadsheet:out",
-        metadata={"snapshotRef": "snapshot:spreadsheet:src"},
-    )
+    ledger = _ledger().append_artifact_ref("artifact:spreadsheet:out")
     deps = RecordingDeps()
     state = StopReasonHandlerState()
     messages: list[dict[str, Any]] = []
 
     gate = completion_repair_decision(
         ledger=ledger,
-        required=_required_both(),
+        required=_required_artifact(),
         agent_role="general",
         env={"MAGI_GA_LIVE_ENABLED": "1"},
     )
@@ -197,7 +181,7 @@ def test_general_flag_on_missing_evidence_recovers_with_synthetic_message() -> N
 
     gate = completion_repair_decision(
         ledger=ledger,
-        required=_required_both(),
+        required=_required_artifact(),
         agent_role="general",
         env={"MAGI_GA_LIVE_ENABLED": "1"},
     )
@@ -229,7 +213,7 @@ def test_completion_recover_preserves_assistant_text_block() -> None:
 
     gate = completion_repair_decision(
         ledger=ledger,
-        required=_required_both(),
+        required=_required_artifact(),
         agent_role="general",
         env={"MAGI_GA_LIVE_ENABLED": "1"},
     )
@@ -267,7 +251,7 @@ def test_completion_repair_bounded_then_finalises_with_audit() -> None:
 
     gate = completion_repair_decision(
         ledger=ledger,
-        required=_required_both(),
+        required=_required_artifact(),
         agent_role="general",
         env={"MAGI_GA_LIVE_ENABLED": "1"},
     )
@@ -300,7 +284,7 @@ def test_non_general_role_gate_inert() -> None:
     ledger = _ledger()
     gate = completion_repair_decision(
         ledger=ledger,
-        required=_required_both(),
+        required=_required_artifact(),
         agent_role="coding",
         env={"MAGI_GA_LIVE_ENABLED": "1"},
     )
@@ -311,7 +295,7 @@ def test_flag_off_gate_inert() -> None:
     ledger = _ledger()
     gate = completion_repair_decision(
         ledger=ledger,
-        required=_required_both(),
+        required=_required_artifact(),
         agent_role="general",
         env={"MAGI_GA_LIVE_ENABLED": "0"},
     )
@@ -326,7 +310,7 @@ def test_flag_off_finalise_unchanged() -> None:
 
     gate = completion_repair_decision(
         ledger=ledger,
-        required=_required_both(),
+        required=_required_artifact(),
         agent_role="general",
         env={"MAGI_GA_LIVE_ENABLED": "0"},
     )
@@ -416,15 +400,9 @@ def test_completion_verifier_does_not_disturb_hard_safety_ordering() -> None:
 
 def test_verifier_passes_with_real_runtime_ledger_entry() -> None:
     """The live spreadsheet.write flow writes artifactRef inside
-    metadata["localArtifactReceipt"]["artifactRef"]; no snapshotRef is
-    produced yet (ENFORCE_SNAPSHOT_REQUIREMENT=False). The verifier must PASS
-    because _collect_keys recurses into nested metadata and finds artifactRef,
-    and snapshot enforcement is deferred.
+    metadata["localArtifactReceipt"]["artifactRef"]. The verifier must PASS
+    because _collect_keys recurses into nested metadata and finds artifactRef.
     """
-    assert ENFORCE_SNAPSHOT_REQUIREMENT is False, (
-        "This test documents the current behaviour with snapshot enforcement OFF. "
-        "Update it when flipping ENFORCE_SNAPSHOT_REQUIREMENT to True."
-    )
     ledger = _ledger()
     # Populate ledger the way the real runtime does for a spreadsheet.write:
     # artifactRef is nested under localArtifactReceipt in metadata.
@@ -432,21 +410,18 @@ def test_verifier_passes_with_real_runtime_ledger_entry() -> None:
         "artifact:spreadsheet:out",
         metadata={"localArtifactReceipt": {"artifactRef": "artifact:spreadsheet:out"}},
     )
-    # _required_both() includes requires_snapshot_ref=True but with enforcement
-    # OFF the verifier should not demand it.
-    verdict = TaskCompletionVerifier().evaluate(ledger, _required_both())
+    verdict = TaskCompletionVerifier().evaluate(ledger, _required_artifact())
     assert verdict.status == "pass", (
         f"Expected pass with real runtime ledger entry; missing={verdict.missing}"
     )
     assert verdict.missing == ()
 
 
-def test_gate_passes_with_real_runtime_ledger_no_snapshot() -> None:
+def test_gate_passes_with_real_runtime_ledger() -> None:
     """End-to-end: with flag ON and a ledger populated as the real runtime
-    does (artifact ref via nested metadata, no snapshotRef), the gate returns
-    None (pass) so handle_stop_reason finalises normally.
+    does (artifact ref via nested metadata), the gate returns None (pass) so
+    handle_stop_reason finalises normally.
     """
-    assert ENFORCE_SNAPSHOT_REQUIREMENT is False
     ledger = _ledger()
     ledger = ledger.append_artifact_ref(
         "artifact:spreadsheet:out",
@@ -454,12 +429,11 @@ def test_gate_passes_with_real_runtime_ledger_no_snapshot() -> None:
     )
     gate = completion_repair_decision(
         ledger=ledger,
-        required=_required_both(),
+        required=_required_artifact(),
         agent_role="general",
         env={"MAGI_GA_LIVE_ENABLED": "1"},
     )
-    # Gate must be None (pass) because the artifact requirement is satisfied
-    # and snapshot enforcement is OFF.
+    # Gate must be None (pass) because the artifact requirement is satisfied.
     assert gate is None
 
 
