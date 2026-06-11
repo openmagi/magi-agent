@@ -13,9 +13,16 @@ from typing import Any, ClassVar, Literal, Self, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
 
+from magi_agent.config.env import parse_output_continuation_env
 from magi_agent.evidence.gate1a_egress_correlation import (
     Gate1AEgressCorrelationContext,
     build_gate1a_proxy_http_options,
+)
+from magi_agent.runtime.output_continuation import (
+    OutputContinuationConfig,
+    build_continuation_message,
+    should_continue,
+    stop_reason_is_truncated,
 )
 from magi_agent.shadow.gate5b4c3_shadow_generation_contract import (
     Gate5B4C3ModelRoutingSource,
@@ -715,8 +722,12 @@ class Gate5B4C3LiveRunnerBoundary:
         event_count = 0
         output_chunks: list[str] = []
         manual_continuations = 0
+        output_continuations = 0
         tool_only_events_seen = False
         usage_totals = [0, 0, 0]
+        output_continuation = (
+            _output_continuation_config_from_env() if selected_full_toolhost else None
+        )
         try:
             async with asyncio.timeout(request.budgets.python_runner_timeout_ms / 1000):
                 next_message: object = message
@@ -726,6 +737,7 @@ class Gate5B4C3LiveRunnerBoundary:
                     function_responses_seen = False
                     current_run_output_chunks: list[str] = []
                     stream_usage: tuple[int, int, int] | None = None
+                    current_run_truncated = False
                     current_run_kwargs = {**run_kwargs, "new_message": next_message}
                     async for event in runner.run_async(
                         **_allowlist_kwargs(
@@ -754,6 +766,8 @@ class Gate5B4C3LiveRunnerBoundary:
                         event_usage = _event_usage_metadata(event)
                         if event_usage is not None:
                             stream_usage = event_usage
+                        if not current_run_truncated:
+                            current_run_truncated = _event_finish_reason_is_truncated(event)
                         event_function_calls = _event_function_calls(event)
                         for function_call in event_function_calls:
                             function_call_key = _json_dumps(function_call)
@@ -772,6 +786,36 @@ class Gate5B4C3LiveRunnerBoundary:
                         usage_totals[0] += stream_usage[0]
                         usage_totals[1] += stream_usage[1]
                         usage_totals[2] += stream_usage[2]
+                    if (
+                        selected_full_toolhost
+                        and event_count < 64
+                        and not function_calls
+                        and not function_responses_seen
+                        and _should_continue_truncated_output(
+                            output_continuation,
+                            truncated=current_run_truncated,
+                            output_seen=bool(current_run_output_chunks),
+                            continuations_used=output_continuations,
+                        )
+                    ):
+                        output_continuations += 1
+                        assert output_continuation is not None
+                        self._emit_public_event(
+                            {
+                                "type": "output_continuation",
+                                "continuation": output_continuations,
+                                "max": output_continuation.max_continuations,
+                            }
+                        )
+                        next_message = primitives.Content(
+                            parts=[
+                                primitives.Part.from_text(
+                                    text=_build_output_continuation_message()
+                                )
+                            ],
+                            role="user",
+                        )
+                        continue
                     # Drive pending tool calls to execution even when the model
                     # also emitted preamble text in the same turn. Short-circuiting
                     # on `output_chunks` here discarded the model's unexecuted tool
@@ -1619,6 +1663,77 @@ def _event_text(event: object) -> str | None:
         if chunks:
             return "".join(chunks)
     return None
+
+
+def _output_continuation_config_from_env() -> OutputContinuationConfig | None:
+    parsed = parse_output_continuation_env(os.environ)
+    if not parsed.enabled:
+        return None
+    return OutputContinuationConfig(
+        enabled=True,
+        max_continuations=parsed.max_continuations,
+    )
+
+
+def _build_output_continuation_message() -> str:
+    return build_continuation_message()
+
+
+def _should_continue_truncated_output(
+    config: OutputContinuationConfig | None,
+    *,
+    truncated: bool,
+    output_seen: bool,
+    continuations_used: int,
+) -> bool:
+    return should_continue(
+        config,
+        truncated=truncated,
+        output_seen=output_seen,
+        continuations_used=continuations_used,
+    )
+
+
+def _event_finish_reason_is_truncated(event: object) -> bool:
+    return stop_reason_is_truncated(_event_finish_reason(event))
+
+
+def _event_finish_reason(event: object, *, depth: int = 0) -> str | None:
+    if depth > 3:
+        return None
+    for candidate in (event, _safe_model_dump_mapping(event)):
+        if candidate is None:
+            continue
+        for name in (
+            "finish_reason",
+            "finishReason",
+            "stop_reason",
+            "stopReason",
+            "finish_message",
+            "finishMessage",
+        ):
+            normalized = _normalize_finish_reason(_mapping_or_attr(candidate, name))
+            if normalized is not None:
+                return normalized
+        for nested_name in ("llm_response", "llmResponse", "response"):
+            nested = _mapping_or_attr(candidate, nested_name)
+            if nested is None:
+                continue
+            nested_reason = _event_finish_reason(nested, depth=depth + 1)
+            if nested_reason is not None:
+                return nested_reason
+    return None
+
+
+def _normalize_finish_reason(value: object) -> str | None:
+    if value is None:
+        return None
+    enum_value = getattr(value, "value", None) or getattr(value, "name", None)
+    if isinstance(enum_value, str):
+        return enum_value
+    if isinstance(value, str):
+        return value
+    return str(value)
 
 
 def _event_visible_text_delta(
