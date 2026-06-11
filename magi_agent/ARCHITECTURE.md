@@ -177,6 +177,7 @@ graph LR
     runtime --> ops
     runtime --> plugins
     runtime --> prompt
+    runtime --> research
     runtime --> shadow
     runtime --> shared
     runtime --> tools
@@ -1121,7 +1122,7 @@ graph LR
 | __init__.py | Research-layer contracts for first-party local harnesses. | — | — |
 | acceptance_criteria.py | — | — | research/child_roles.py, research/evidence_graph.py, research/policy_pack.py, research/repair.py |
 | action_claims.py | — | runtime_issuance | research/boundary_enforcement.py, research/child_roles.py, research/evidence_graph.py, research/final_projection_gate.py, research/policy_pack.py |
-| answer_policy.py | Answer Policy — configurable commit-vs-abstain seam (first-party, P6). | — | — |
+| answer_policy.py | Answer Policy — configurable commit-vs-abstain seam (first-party, P6). | — | runtime/best_effort_answer.py |
 | answer_verifier.py | Answer Verifier — value-level verification against already-gathered evidence. | answer_verifier_checks | research/answer_verifier_checks.py |
 | answer_verifier_checks.py | Answer Verifier Checks — detect type, build prompt, parse response, safety guards. | answer_verifier | research/answer_verifier.py |
 | boundary_enforcement.py | — | action_claims, evidence_graph, runtime_issuance | research/final_projection_gate.py |
@@ -1155,6 +1156,7 @@ graph LR
 | adk_turn_runner.py | — | model_tiers, request_shape, runner_adapter | runtime/child_runner_boundary.py |
 | admission.py | — | — | — |
 | approval_resume.py | — | kernel, request_ledger, result | — |
+| best_effort_answer.py | Best-effort finalization — first-party never-empty answer mechanism. | answer_policy | — |
 | cache_safe_params.py | — | query_state | — |
 | checkpointing.py | — | — | — |
 | child_event_projection.py | — | child_runner_boundary, child_runtime_envelope, tool_preview | — |
