@@ -1347,6 +1347,23 @@ def test_live_boundary_runs_no_tool_finalizer_after_adk_tool_only_events() -> No
     ]
 
 
+def test_live_boundary_streams_no_tool_finalizer_text_delta() -> None:
+    public_events: list[dict[str, object]] = []
+    primitives = _auto_tool_loop_primitives()
+
+    result = Gate5B4C3LiveRunnerBoundary(
+        lambda: primitives,
+        adk_tools=(_ManualCalculationTool,),
+        public_event_sink=lambda event: public_events.append(dict(event)),
+    ).invoke(_selected_full_toolhost_request(), config=_enabled_config())
+
+    assert result.status == "completed"
+    assert result.output_text_internal == "final answer after no-tool finalizer"
+    assert [
+        event["delta"] for event in public_events if event.get("type") == "text_delta"
+    ] == ["final answer after no-tool finalizer"]
+
+
 def test_live_boundary_rejects_promise_only_full_toolhost_output() -> None:
     result = Gate5B4C3LiveRunnerBoundary(
         _promise_only_primitives,

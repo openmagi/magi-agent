@@ -1,3 +1,4 @@
+import json
 import os
 from collections.abc import Mapping, Sequence
 
@@ -89,6 +90,54 @@ async def test_selected_scope_exposes_full_workspace_tools_and_receipts(tmp_path
 
     assert bash_outcome.status == "ok"
     assert bash_outcome.coding_mutation_receipt is not None
+
+
+@pytest.mark.asyncio
+async def test_full_toolhost_dispatch_emits_live_public_tool_progress_events(tmp_path):
+    public_events: list[dict[str, object]] = []
+    bundle = build_gate5b_full_toolhost_bundle(
+        config=Gate5BFullToolHostConfig.model_validate(
+            {
+                "enabled": True,
+                "killSwitchEnabled": False,
+                "routeAttachmentEnabled": True,
+                "selectedBotDigest": _sha256("bot-test"),
+                "selectedOwnerDigest": _sha256("user-test"),
+                "environment": "production",
+                "environmentAllowlist": ("production",),
+                "allowedToolNames": GATE5B_FULL_TOOLHOST_TOOL_NAMES,
+                "maxToolCallsPerTurn": 8,
+            }
+        ),
+        scope={
+            "selectedBotDigest": _sha256("bot-test"),
+            "selectedOwnerDigest": _sha256("user-test"),
+            "environment": "production",
+        },
+        workspace_root=tmp_path,
+        public_event_sink=lambda event: public_events.append(dict(event)),
+    )
+
+    outcome = await bundle.host.dispatch(
+        "FileWrite",
+        {"path": "notes/live.txt", "content": "live event content\n"},
+        request_digest=_sha256("request-live-events"),
+        tool_call_id="call-live-events",
+    )
+
+    assert outcome.status == "ok"
+    assert [event["type"] for event in public_events] == [
+        "tool_start",
+        "tool_progress",
+        "tool_end",
+    ]
+    assert public_events[0]["name"] == "FileWrite"
+    assert public_events[1]["status"] == "in_progress"
+    assert public_events[2]["status"] == "ok"
+    assert public_events[0]["id"] == public_events[1]["id"] == public_events[2]["id"]
+    serialized = json.dumps(public_events)
+    assert "live event content" not in serialized
+    assert "receipt:sha256:" in serialized
 
 
 @pytest.mark.asyncio
