@@ -84,3 +84,119 @@ class EvidenceReadView:
 
     def has(self, evidence_type: str) -> bool:
         return evidence_type in self.present
+
+
+class _ReadOnlyMapping(Mapping[str, Any]):
+    """A read-only view over a dict (impls cannot mutate tool_args directly)."""
+
+    def __init__(self, data: Mapping[str, Any]) -> None:
+        self._data = dict(data)
+
+    def __getitem__(self, key: str) -> Any:
+        return self._data[key]
+
+    def __iter__(self):
+        return iter(self._data)
+
+    def __len__(self) -> int:
+        return len(self._data)
+
+
+class BeforeToolCtx:
+    """Capabilities: read tool_name/tool_args, read session+evidence, decide()."""
+
+    capabilities: frozenset[Capability] = frozenset(
+        {Capability.READ_SESSION, Capability.READ_EVIDENCE,
+         Capability.DECIDE_TOOL, Capability.REWRITE_TOOL_ARGS}
+    )
+
+    def __init__(self, *, tool_name: str, tool_args: Mapping[str, Any],
+                 session: SessionReadView, evidence: EvidenceReadView,
+                 capabilities: frozenset[Capability] | None = None) -> None:
+        self.tool_name = tool_name
+        self.tool_args: Mapping[str, Any] = _ReadOnlyMapping(tool_args)
+        self.session = session
+        self.evidence = evidence
+        if capabilities is not None:  # hosted may restrict; local passes full set
+            self.capabilities = capabilities
+        self._decision = ToolDecision(action="allow")
+
+    def decide(self, action: Literal["allow", "deny", "rewrite"], *,
+               reason: str | None = None,
+               deny_result: dict[str, Any] | None = None,
+               updated_args: dict[str, Any] | None = None) -> None:
+        if action == "deny" and deny_result is None:
+            deny_result = {"error": reason or "denied by control-plane impl"}
+        self._decision = ToolDecision(
+            action=action, deny_result=deny_result, updated_args=updated_args
+        )
+
+    def decision(self) -> ToolDecision:
+        return self._decision
+
+
+class AfterToolCtx:
+    """Capabilities: read result, override() it."""
+
+    capabilities: frozenset[Capability] = frozenset(
+        {Capability.READ_SESSION, Capability.OVERRIDE_TOOL_RESULT}
+    )
+
+    def __init__(self, *, tool_name: str, tool_args: Mapping[str, Any],
+                 result: Any, session: SessionReadView,
+                 capabilities: frozenset[Capability] | None = None) -> None:
+        self.tool_name = tool_name
+        self.tool_args: Mapping[str, Any] = _ReadOnlyMapping(tool_args)
+        self.result = result
+        self.session = session
+        if capabilities is not None:
+            self.capabilities = capabilities
+        self._override: dict[str, Any] | None = None
+
+    def override(self, result: dict[str, Any]) -> None:
+        self._override = result
+
+    def override_result(self) -> dict[str, Any] | None:
+        return self._override
+
+
+class BeforeModelCtx:
+    """Capabilities: mutate the outgoing model request via reinject()/clear_tools()."""
+
+    capabilities: frozenset[Capability] = frozenset(
+        {Capability.READ_SESSION, Capability.MUTATE_MODEL_REQUEST,
+         Capability.REINJECT_MESSAGE, Capability.CLEAR_TOOLS}
+    )
+
+    def __init__(self, *, session: SessionReadView,
+                 capabilities: frozenset[Capability] | None = None) -> None:
+        self.session = session
+        if capabilities is not None:
+            self.capabilities = capabilities
+        self._reinjections: list[tuple[str, str]] = []
+        self._clear_tools = False
+
+    def reinject(self, *, role: str, text: str) -> None:
+        self._reinjections.append((role, text))
+
+    def clear_tools(self) -> None:
+        self._clear_tools = True
+
+    def pending_reinjections(self) -> tuple[tuple[str, str], ...]:
+        return tuple(self._reinjections)
+
+    def wants_clear_tools(self) -> bool:
+        return self._clear_tools
+
+
+class AfterAgentCtx:
+    """Observe-only: a completed turn. No decision surface."""
+
+    capabilities: frozenset[Capability] = frozenset({Capability.READ_SESSION})
+
+    def __init__(self, *, agent_name: str, session: SessionReadView,
+                 capabilities: frozenset[Capability] | None = None) -> None:
+        self.agent_name = agent_name
+        self.session = session
+        if capabilities is not None:
+            self.capabilities = capabilities
