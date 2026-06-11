@@ -132,3 +132,35 @@ def test_autonomy_block_includes_existing_test_discovery(monkeypatch):
     assert "cold-interpreter import" in text
     assert "Before deleting any file" in text
     assert "behavior-based assertions" in text
+
+
+# ---------------------------------------------------------------------------
+# New task — deadline-awareness nudge (default-OFF, env-driven)
+# ---------------------------------------------------------------------------
+
+from magi_agent.runtime import deadline as deadline_mod
+
+
+def test_deadline_inert_when_unset():
+    deadline_mod.reset_for_tests()
+    assert deadline_mod.deadline_note({}, now=0.0) is None
+    assert deadline_mod.deadline_note({}, now=10_000.0) is None
+
+
+def test_deadline_fires_once_per_threshold():
+    deadline_mod.reset_for_tests()
+    env = {"MAGI_EVAL_DEADLINE_SECONDS": "1000"}
+    assert deadline_mod.deadline_note(env, now=0.0) is None        # anchor
+    assert deadline_mod.deadline_note(env, now=100.0) is None      # 10%
+    note60 = deadline_mod.deadline_note(env, now=650.0)            # 65%
+    assert note60 is not None and "60%" in note60
+    assert deadline_mod.deadline_note(env, now=700.0) is None      # no repeat
+    note85 = deadline_mod.deadline_note(env, now=900.0)            # 90%
+    assert note85 is not None and "85%" in note85
+    assert deadline_mod.deadline_note(env, now=950.0) is None
+
+
+def test_deadline_invalid_value_inert():
+    deadline_mod.reset_for_tests()
+    assert deadline_mod.deadline_note({"MAGI_EVAL_DEADLINE_SECONDS": "abc"}, now=0.0) is None
+    assert deadline_mod.deadline_note({"MAGI_EVAL_DEADLINE_SECONDS": "-5"}, now=0.0) is None
