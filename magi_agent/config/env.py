@@ -1951,6 +1951,60 @@ def is_tool_synthesis_nudge_enabled(env: Mapping[str, str] | None = None) -> boo
     return _is_true(source.get(MAGI_TOOL_SYNTHESIS_NUDGE_ENABLED_ENV))
 
 
+MAGI_TOOL_USAGE_GUIDANCE_ENABLED_ENV = "MAGI_TOOL_USAGE_GUIDANCE_ENABLED"
+
+
+def is_tool_usage_guidance_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Gate for per-tool usage-guidance synthesis into gate5b ADK descriptions.
+
+    Default OFF (strict truthy opt-in). OFF keeps every gate5b tool docstring
+    byte-identical to today; ON appends a lean "Use when / Do NOT use when"
+    block (``magi_agent.gates.tool_usage_guidance``) for registered tools.
+    """
+    source = os.environ if env is None else env
+    return _is_true(source.get(MAGI_TOOL_USAGE_GUIDANCE_ENABLED_ENV))
+
+
+MAGI_PROMPT_EXAMPLES_ENABLED_ENV = "MAGI_PROMPT_EXAMPLES_ENABLED"
+
+
+def is_prompt_examples_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Gate for the action-discipline example-pairs prompt block.
+
+    Default OFF. ON appends ``<action_discipline_examples>`` (positive/negative
+    contrast pairs: act-vs-ask, finish-vs-defer) in ``build_cli_instruction``.
+    """
+    source = os.environ if env is None else env
+    return _is_true(source.get(MAGI_PROMPT_EXAMPLES_ENABLED_ENV))
+
+
+MAGI_PROMPT_SEARCH_RULES_ENABLED_ENV = "MAGI_PROMPT_SEARCH_RULES_ENABLED"
+
+
+def is_prompt_search_rules_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Gate for the search-decision heuristics prompt block.
+
+    Default OFF. Even when ON, the block only fires when web tools are
+    available (``BRAVE_API_KEY`` AND ``FIRECRAWL_API_KEY`` — same rule as
+    ``web_research_guidance_block``: never direct the model to absent tools).
+    """
+    source = os.environ if env is None else env
+    return _is_true(source.get(MAGI_PROMPT_SEARCH_RULES_ENABLED_ENV))
+
+
+MAGI_PROMPT_REDFLAGS_ENABLED_ENV = "MAGI_PROMPT_REDFLAGS_ENABLED"
+
+
+def is_prompt_redflags_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Gate for the anti-rationalization red-flags prompt block.
+
+    Default OFF. ON appends ``<red_flags>`` ("this thought means stop and
+    correct course" table) in ``build_cli_instruction``.
+    """
+    source = os.environ if env is None else env
+    return _is_true(source.get(MAGI_PROMPT_REDFLAGS_ENABLED_ENV))
+
+
 MAGI_DOCUMENT_AUTHORING_COVERAGE_ENV = "MAGI_DOCUMENT_AUTHORING_COVERAGE"
 
 
