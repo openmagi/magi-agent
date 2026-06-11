@@ -588,6 +588,10 @@ def compute_via_code_block(env: Mapping[str, str] | None = None) -> str:
         "extract source values: keep using the appropriate file/vision/web tool "
         "(e.g. structured image extraction) to obtain the inputs, then compute "
         "with code.\n"
+        "- The tool's raw value is an INTERMEDIATE result: before committing the "
+        "final answer, convert it to the exact units, scale, and rounding the "
+        "request asks for (e.g. 'how many thousand X' -> divide by 1000). The "
+        "requested output format takes precedence over the raw computed value.\n"
         "</compute_via_code>"
     )
 
