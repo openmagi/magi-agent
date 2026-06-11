@@ -392,6 +392,11 @@ class RealLocalChildRunner:
                 instruction=_CHILD_INSTRUCTION if not tools else None,
                 model_factory=self._model_factory,
                 workspace_root=workspace,
+                # Child runners may intentionally share the parent workspace for
+                # read-only tool access, but they must not build memory
+                # snapshots from production-mounted workspace paths. The parent
+                # prompt already carries the delegation context.
+                memory_mode="incognito",
                 session_id=session_id,
                 local_tool_evidence_collector=evidence_collector,
             )
