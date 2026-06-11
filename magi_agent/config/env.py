@@ -1906,6 +1906,36 @@ def parse_facts_replan_env(env: Mapping[str, str] | None = None):
     )
 
     return _parse_facts_replan_env(env)
+MAGI_STEP_DECOMPOSITION_ENABLED_ENV = "MAGI_STEP_DECOMPOSITION_ENABLED"
+
+
+def is_step_decomposition_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Single source of truth for the multi-step decomposition guidance flag.
+
+    Default OFF (strict truthy opt-in: "1"/"true"/"yes"/"on"). When OFF, the
+    ``build_cli_instruction`` system prompt and the GAIA harness instruction are
+    byte-identical to the pre-flag baseline. When ON, the system prompt carries
+    one ``<step_decomposition>`` block that asks the agent to enumerate the
+    dependent sub-steps of a multi-hop question up front and resolve/confirm each
+    before proceeding — a *light*, prompt-only nudge that reuses the existing
+    planning/TodoWrite seams (no new control loop, no orchestrator, no extra
+    model calls). This targets long L3 chains where one broken intermediate link
+    yields a wrong final answer.
+
+    Delegates to the canonical ``config.flags`` registry (``flag_bool``) backed by
+    the ``MAGI_STEP_DECOMPOSITION_ENABLED`` ``FlagSpec``, matching
+    ``is_egress_gate_enabled`` exactly: byte-identical to the raw
+    ``_is_true(source.get(...))`` form because the flag is registered with a
+    ``False`` default and the same strict-truthy parser. Like
+    ``is_egress_gate_enabled`` / ``is_goal_nudge_enabled`` this is an additive,
+    default-disabled seam and does NOT follow the runtime-profile default-ON
+    convention (A/B evidence gates any default flip). Imported lazily to avoid a
+    config<->flags import cycle.
+    """
+    from .flags import flag_bool
+
+    source = os.environ if env is None else env
+    return flag_bool(MAGI_STEP_DECOMPOSITION_ENABLED_ENV, env=source)
 
 
 MAGI_USER_HOOKS_ENABLED_ENV = "MAGI_USER_HOOKS_ENABLED"
@@ -2321,6 +2351,24 @@ def compute_via_code_enabled(env: Mapping[str, str] | None = None) -> bool:
     return _is_true(source.get(MAGI_COMPUTE_VIA_CODE_ENABLED_ENV))
 
 
+def parse_format_adherence_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """MAGI_FORMAT_ADHERENCE_ENABLED — when ON (default OFF), appends a general
+    output-format-adherence guidance block to the CLI system prompt. The block
+    instructs the agent to re-read the question's explicit output requirements
+    (units/scale, rounding precision, requested name/format) before finalizing,
+    and to not add unrequested units or words.
+
+    This is a GENERAL agent capability — the block contains no benchmark-specific
+    text. Default OFF so non-opted-in sessions are byte-identical to origin/main
+    (the ``<output_format_adherence>`` marker is simply absent when the flag is
+    unset). Operators/eval profiles opt in by setting
+    ``MAGI_FORMAT_ADHERENCE_ENABLED=1``."""
+    import os as _os  # noqa: PLC0415
+
+    source = env if env is not None else _os.environ
+    return _is_true(source.get("MAGI_FORMAT_ADHERENCE_ENABLED"))
+
+
 def parse_eval_zero_edit_guard_enabled(env: Mapping[str, str]) -> bool:
     """MAGI_EVAL_ZERO_EDIT_GUARD_ENABLED — when ON (default OFF; enabled by
     the eval profile), the engine turn driver re-prompts once with "Apply the
@@ -2330,6 +2378,27 @@ def parse_eval_zero_edit_guard_enabled(env: Mapping[str, str]) -> bool:
     byte-identical to origin/main. The eval profile opts in by setting
     ``MAGI_EVAL_ZERO_EDIT_GUARD_ENABLED=1`` in ``EVAL_RUNTIME_ENV_DEFAULTS``."""
     return _is_true(env.get("MAGI_EVAL_ZERO_EDIT_GUARD_ENABLED"))
+
+
+def multi_file_join_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """MAGI_MULTI_FILE_JOIN_ENABLED — multi-file cross-reference robustness.
+
+    Strict default-OFF opt-in (only "1"/"true"/"yes"/"on" enable it; like
+    :func:`parse_eval_autonomy_enabled` it deliberately does NOT follow the
+    runtime-profile default-ON convention). When ON, a domain-neutral
+    ``<multi_file_join>`` guidance block is appended to the agent's system
+    instruction: after ``ArchiveExtract``, exhaustively enumerate ALL extracted
+    files, read structured data (XLSX/XML) in full, and perform the cross-file
+    join/dedup PROGRAMMATICALLY via Bash rather than by eye.
+
+    The SAME helper builds the block on both the production CLI/serve path
+    (:func:`magi_agent.cli.tool_runtime.build_cli_instruction`) and the GAIA
+    bench path (:func:`benchmarks.gaia.harness.run_gaia_question`), so the A/B
+    plan measures the lever the flag actually exercises. Default OFF so every
+    path is byte-identical to origin/main when unset.
+    """
+    source = os.environ if env is None else env
+    return _is_true(source.get("MAGI_MULTI_FILE_JOIN_ENABLED"))
 
 
 def parse_recipe_default_packs_expanded(env: Mapping[str, str]) -> bool:

@@ -384,10 +384,32 @@ FLAGS: tuple[FlagSpec, ...] = (
             "statistics, and checksums by running code instead of mental math."
         ),
     ),
+    _b(
+        "MAGI_FORMAT_ADHERENCE_ENABLED",
+        summary=(
+            "Append a general prompt self-check for exact requested units, scale, "
+            "rounding precision, names, and answer format."
+        ),
+    ),
+    _b(
+        "MAGI_MULTI_FILE_JOIN_ENABLED",
+        summary=(
+            "Append multi-file cross-reference guidance: enumerate archives, "
+            "read structured files fully, and run joins/dedup programmatically."
+        ),
+    ),
     # --- Evidence / verification gates -------------------------------------
     _b(
         "MAGI_EGRESS_GATE_ENABLED",
         summary="Run the evidence-grounded critic gate before chat egress.",
+    ),
+    _b(
+        "MAGI_STEP_DECOMPOSITION_ENABLED",
+        summary=(
+            "Inject a light first-pass guidance asking the agent to enumerate "
+            "dependent sub-steps up front and confirm each before proceeding "
+            "(prompt-only nudge; reuses existing planning seams)."
+        ),
     ),
     _b(
         "MAGI_GA_DELIVERABLE_GATE_ENABLED",

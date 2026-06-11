@@ -95,6 +95,7 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 - `MAGI_FACTS_REPLAN_INTERVAL` (default `4`) — Working steps between facts surveys (>= 1; a non-positive value disables the control).
 - `MAGI_FACTS_REPLAN_MAX_PER_TURN` (default `5`) — Hard cap on facts surveys injected per (session, turn) (>= 1; a non-positive value disables the control).
 - `MAGI_FILE_DELIVERY_LIVE_ENABLED` (default off) — Enable the live file-delivery tool (vs receipt-only).
+- `MAGI_FORMAT_ADHERENCE_ENABLED` (default off) — Append a general prompt self-check for exact requested units, scale, rounding precision, names, and answer format.
 - `MAGI_GA_DELIVERABLE_GATE_ENABLED` (default off) — Enable the GA artifact-deliverable pre-final gate; strict default-OFF and inert unless explicitly set.
 - `MAGI_GOAL_LOOP_ENABLED` (default off) — Enable the autonomous goal-loop scheduler.
 - `MAGI_HEADTAIL_TRUNCATION_ENABLED` (default off) — Use head+tail (middle-elision) truncation for tool output caps instead of head-only, so document/page tails stay visible.
@@ -111,6 +112,7 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 - `MAGI_MEMORY_QMD_LIVE_ENABLED` (default off) — Use the live qmd search backend for memory recall.
 - `MAGI_MEMORY_RECALL_ENABLED` (default off) — Enable memory recall/injection into the working context.
 - `MAGI_MEMORY_WRITE_ENABLED` (default off) — Allow the memory subsystem to persist writes (vs read-only recall).
+- `MAGI_MULTI_FILE_JOIN_ENABLED` (default off) — Append multi-file cross-reference guidance: enumerate archives, read structured files fully, and run joins/dedup programmatically.
 - `MAGI_OBSERVABILITY_ENABLED` (default off) — Enable the hook-tap observability module (bot-activity visibility).
 - `MAGI_OUTPUT_CONTINUATION_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Enable automatic continuation of truncated model output (default-ON full profile).
 - `MAGI_RESEARCH_FACT_GUIDANCE_ENABLED` (default off) — Enable research_fact cross-check guidance: consolidated brief header/footer plus the <web_research> system-prompt block (requires BRAVE_API_KEY + FIRECRAWL_API_KEY).
@@ -118,6 +120,7 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 - `MAGI_RIPGREP_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Use ripgrep for fast in-repo search when available (default-ON full profile).
 - `MAGI_RUNTIME_PROFILE` (no default) — Runtime profile selector (safe/off/minimal/conservative/eval). Safe profiles disable default-ON resilience seams.
 - `MAGI_SELF_INTROSPECTION_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Advertise the InspectSelfEvidence tool (default-ON full profile).
+- `MAGI_STEP_DECOMPOSITION_ENABLED` (default off) — Inject a light first-pass guidance asking the agent to enumerate dependent sub-steps up front and confirm each before proceeding (prompt-only nudge; reuses existing planning seams).
 - `MAGI_TOOL_SYNTHESIS_NUDGE_ENABLED` (default off) — Live-SWE-style tool-synthesis: per-step reflection nudge + 'create your own tools' recipe block (frontier-tier models only).
 - `MAGI_VISION_MODEL` (no default) — Vision-sidecar model override for image_understand (bare model id, same semantics as MAGI_MODEL); unset keeps the main provider/model.
 - `MAGI_VISION_PROVIDER` (no default) — Optional provider for MAGI_VISION_MODEL (anthropic|openai|gemini|fireworks); unset inherits the main provider's credentials.

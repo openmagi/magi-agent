@@ -592,6 +592,130 @@ def compute_via_code_block(env: Mapping[str, str] | None = None) -> str:
     )
 
 
+def output_format_adherence_block(env: Mapping[str, str] | None = None) -> str:
+    """Return the output-format-adherence guidance block.
+
+    Returns an empty string when ``MAGI_FORMAT_ADHERENCE_ENABLED`` is falsy (the
+    default) so the caller's prompt is byte-identical to the non-gated path: the
+    ``<output_format_adherence>`` marker is simply absent. When on, returns a
+    GENERAL guidance block (no benchmark-specific text) telling the agent to
+    conform to the question's explicit output requirements before finalizing.
+
+    Imported lazily inside to keep ``import cli.tool_runtime`` cold-clean.
+    """
+    import os as _os  # noqa: PLC0415
+
+    from magi_agent.config.env import parse_format_adherence_enabled  # noqa: PLC0415
+
+    source = env if env is not None else _os.environ
+    if not parse_format_adherence_enabled(source):
+        return ""
+    return (
+        "<output_format_adherence>\n"
+        "Before you give your final answer, re-read the question's explicit "
+        "output requirements and conform to them exactly:\n"
+        "- Units & scale: report the value in the units and at the scale the "
+        "question asks for (e.g. thousands vs the raw count, kilometers vs "
+        "meters). Convert if necessary.\n"
+        "- Rounding precision: round to the precision the question requests "
+        "(e.g. nearest picometer, two decimal places) — no more, no fewer "
+        "significant figures than asked.\n"
+        "- Name & format: use the canonical name or format requested (full "
+        "name vs abbreviation, the exact character/symbol asked for, the "
+        "requested ordering or separators).\n"
+        "- Do not add units, words, articles, or explanation that the question "
+        "did not request; answer with exactly what was asked and nothing more.\n"
+        "</output_format_adherence>"
+    )
+
+
+def step_decomposition_block(env: Mapping[str, str] | None = None) -> str:
+    """Return the multi-step decomposition guidance system-prompt block.
+
+    Returns an empty string when ``MAGI_STEP_DECOMPOSITION_ENABLED`` is falsy (or
+    when the env mapping explicitly disables it), so the caller's prompt is
+    byte-identical to the non-decomposition path when the flag is off. When on it
+    returns a leading-``\\n\\n`` block (matching ``eval_autonomy_block``) so it
+    appends cleanly into the ``"\\n\\n".join(parts)`` assembly.
+
+    This is a *light*, prompt-only nudge — it asks the model to plan the
+    dependent sub-steps of a multi-hop question and confirm each before
+    proceeding, reusing the existing planning/TodoWrite seams. It is a GENERAL
+    agent capability with no benchmark-specific text; GAIA advertisement lives in
+    the benchmark prompt layer only.
+
+    Imported lazily inside to keep ``import cli.tool_runtime`` cold-clean.
+    """
+    import os as _os  # noqa: PLC0415
+
+    from magi_agent.config.env import is_step_decomposition_enabled  # noqa: PLC0415
+
+    source = env if env is not None else _os.environ
+    if not is_step_decomposition_enabled(source):
+        return ""
+    return (
+        "\n\n<step_decomposition>\n"
+        "For a multi-step question whose answer depends on a chain of "
+        "intermediate facts (A leads to B leads to C ...), do not jump straight "
+        "to the final answer.\n"
+        "- First enumerate the ordered, dependent sub-steps you must resolve "
+        "(use your planning/TodoWrite seam if available).\n"
+        "- Resolve and explicitly confirm each sub-step's result before using it "
+        "as input to the next; if a link is uncertain, verify it before "
+        "proceeding rather than guessing onward.\n"
+        "- Carry the confirmed intermediate result forward verbatim so a wrong "
+        "or paraphrased link does not silently corrupt the final answer.\n"
+        "Keep this lightweight — it is a planning discipline, not a reason to add "
+        "extra tool calls beyond what each sub-step needs.\n"
+        "</step_decomposition>"
+    )
+
+
+def multi_file_join_block(env: Mapping[str, str] | None = None) -> str:
+    """Return the multi-file cross-reference robustness block (default-OFF).
+
+    Returns an empty string when ``MAGI_MULTI_FILE_JOIN_ENABLED`` is falsy (the
+    default) so the caller's prompt is byte-identical to the non-flagged path.
+    When ON, returns a SINGLE domain-neutral guidance block instructing the
+    agent, after ``ArchiveExtract``, to: (1) exhaustively enumerate ALL
+    extracted files, (2) read structured data (XLSX/XML) in full, and (3)
+    perform any cross-file join / dedup PROGRAMMATICALLY via Bash rather than by
+    eye.
+
+    Anti-overfit: the text names no benchmark and no benchmark-specific entity
+    — it is general multi-file-reasoning hygiene. The IDENTICAL string is reused
+    by the GAIA bench harness so the A/B arm exercises this exact lever.
+
+    Imported lazily inside to keep ``import cli.tool_runtime`` cold-clean.
+    """
+    import os as _os  # noqa: PLC0415
+
+    from magi_agent.config.env import multi_file_join_enabled  # noqa: PLC0415
+
+    source = env if env is not None else _os.environ
+    if not multi_file_join_enabled(source):
+        return ""
+    return (
+        "<multi_file_join>\n"
+        "When a task provides multiple files — especially an archive you opened "
+        "with ArchiveExtract — do NOT reason about the relationship between files "
+        "by eye. Eyeballing a cross-reference across files is the most common "
+        "source of join/dedup errors.\n"
+        "1. After ArchiveExtract, exhaustively enumerate ALL extracted files "
+        "(e.g. `ls -R` via Bash). Do not assume there are only one or two.\n"
+        "2. Read every structured file in FULL: use XLSXInfo + XLSXRead for "
+        "spreadsheets and DocumentRead for XML/CSV — read all rows/sheets, not a "
+        "sampled excerpt.\n"
+        "3. Perform any cross-file join, lookup, dedup, or "
+        "'find the item that appears only once / under a different name' step "
+        "PROGRAMMATICALLY via Bash (python3/awk/grep) over the extracted data. "
+        "Normalize keys (case, whitespace, synonyms) explicitly in code, then let "
+        "the program report the matched/unmatched rows.\n"
+        "4. Base your answer on the program's output, not on a visual scan.\n"
+        "</multi_file_join>"
+    )
+
+
 def build_cli_instruction(
     *,
     session_id: str,
@@ -779,6 +903,12 @@ def build_cli_instruction(
 
     _web_research_block = web_research_guidance_block()
 
+    # Multi-step decomposition guidance — gated on MAGI_STEP_DECOMPOSITION_ENABLED.
+    # Returns "" when off (default), keeping the prompt byte-identical to baseline
+    # (same fail-off pattern as _file_tools_block / _web_research_block). The
+    # leading "\n\n" is stripped below so the join spacing stays uniform.
+    _decomposition_block = step_decomposition_block()
+
     _skills_block = (
         "<skills>\n"
         "Bundled first-party skills, including superpowers-style workflows, are "
@@ -817,6 +947,17 @@ def build_cli_instruction(
     # is emitted in the off path (byte-identity guard).
     _compute_block = compute_via_code_block()
 
+    # Output-format-adherence guidance (default-OFF: MAGI_FORMAT_ADHERENCE_ENABLED).
+    # Returns "" when the gate is off so the joined prompt is byte-identical to
+    # pre-wiring (no <output_format_adherence> marker). General capability — the
+    # block carries no benchmark-specific text.
+    _format_adherence_block = output_format_adherence_block()
+
+    # Multi-file cross-reference robustness (MAGI_MULTI_FILE_JOIN_ENABLED).
+    # Default-OFF separate concatenated string ("" when the flag is unset), so
+    # the returned prompt is byte-identical to pre-change behavior off the flag.
+    _multi_file_join_block = multi_file_join_block()
+
     parts = [prompt]
     if _tool_ad_block:
         parts.append(_tool_ad_block)
@@ -824,6 +965,11 @@ def build_cli_instruction(
         parts.append(_file_tools_block)
     if _web_research_block:
         parts.append(_web_research_block)
+    if _decomposition_block:
+        # Strip the leading "\n\n" separator the helper carries (so it composes
+        # standalone, like eval_autonomy_block) before appending into the
+        # "\n\n".join(parts) assembly — avoids a doubled blank line.
+        parts.append(_decomposition_block.lstrip("\n"))
     parts.append(_skills_block)
     if _tool_synthesis_block:
         parts.append(_tool_synthesis_block)
@@ -835,6 +981,10 @@ def build_cli_instruction(
         parts.append(_redflags_block)
     if _compute_block:
         parts.append(_compute_block)
+    if _format_adherence_block:
+        parts.append(_format_adherence_block)
+    if _multi_file_join_block:
+        parts.append(_multi_file_join_block)
     return "\n\n".join(parts)
 
 
@@ -847,6 +997,9 @@ __all__ = [
     "build_cli_tool_runtime",
     "build_tool_advertisement_block",
     "compute_via_code_block",
+    "multi_file_join_block",
     "bind_cli_local_full_tool_handlers",
+    "output_format_adherence_block",
+    "step_decomposition_block",
     "wrap_cli_adk_tools_with_evidence_collector",
 ]

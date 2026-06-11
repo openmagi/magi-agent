@@ -5,7 +5,6 @@
 ```mermaid
 graph LR
     rules
-    sandbox
     adk_bridge --> config
     adk_bridge --> harness
     adk_bridge --> hooks
@@ -206,6 +205,7 @@ graph LR
     tools --> harness
     tools --> plugins
     tools --> runtime
+    tools --> sandbox
     tools --> telemetry
     tools --> transport
     tools --> web_acquisition
@@ -1268,7 +1268,7 @@ graph LR
 | browser.py | — | network, policy | — |
 | child_workspace.py | — | filesystem, policy | — |
 | filesystem.py | — | policy | sandbox/child_workspace.py, sandbox/process.py |
-| network.py | — | policy | sandbox/browser.py, sandbox/process.py |
+| network.py | — | policy | sandbox/browser.py, sandbox/process.py, tools/media_egress.py |
 | policy.py | — | — | sandbox/browser.py, sandbox/child_workspace.py, sandbox/filesystem.py, sandbox/network.py, sandbox/process.py |
 | process.py | — | filesystem, network, policy | — |
 
@@ -1402,7 +1402,7 @@ graph LR
 | __init__.py | — | base, catalog, core_toolhost, dispatcher, manifest, permission, registry, result | cli/tool_runtime.py, tools/tests/test_ask_user_question_toolhost.py, tools/tests/test_plan_mode_toolhost.py |
 | archive_tools.py | ArchiveExtract tool — extract and inspect .zip archives in the workspace. | context, result, spreadsheet_tools, truncation | tools/file_markdown.py, tools/file_toolhost.py |
 | ask_user_question_toolhost.py | Route the catalog ``AskUserQuestion`` tool to the GA blocking-question flow. | context, env, question_tool, registry, result | cli/tool_runtime.py, tools/tests/test_ask_user_question_toolhost.py |
-| audio_tools.py | AudioTranscribe tool — transcribe audio files in the workspace via ASR. | context, result, spreadsheet_tools, video_tools | tools/file_toolhost.py |
+| audio_tools.py | AudioTranscribe tool — transcribe audio files in the workspace via ASR. | context, media_egress, result, spreadsheet_tools, video_tools | tools/file_toolhost.py |
 | base.py | — | context, manifest, result | runtime/openmagi_runtime.py, tools/__init__.py, tools/health.py, tools/registry.py |
 | catalog.py | — | manifest, registry | browser/autonomous/tool.py, gates/gate1a_readonly_tools.py, runtime/openmagi_runtime.py, tools/__init__.py, tools/file_tool_manifests.py, tools/python_exec.py, tools/tests/test_catalog_honest_manifests.py, web_acquisition/reference_research_tools.py |
 | concurrency.py | Tool batch partitioning for concurrent execution. | registry | adk_bridge/tool_adapter.py, tools/concurrent_dispatcher.py |
@@ -1424,6 +1424,7 @@ graph LR
 | kernel.py | Evidence-emitting tool execution kernel — default-OFF, not the live hot path. | context, dispatch_shared, event_projection, local_result_store, manifest, output_budget, permission, registry, request_ledger, result, schema_validation, tool_boundary | runtime/approval_resume.py, tools/event_projection.py, tools/scheduler.py, web_acquisition/reference_research_tools.py |
 | local_readonly.py | — | context, env, memory_mode_guard, read_format, result, ripgrep, runtime_receipts, source_ledger | runtime/child_toolset.py, web_acquisition/reference_research_tools.py |
 | manifest.py | — | types | (root)/facades.py, adk_bridge/control_plane.py, adk_bridge/tool_adapter.py, browser/autonomous/tool.py, cli/tool_runtime.py, cli/wiring.py, context/hook.py, gates/gate1a_readonly_tools.py, gates/gate5b_full_toolhost.py, harness/general_automation/constraint_reinjection.py, harness/general_automation/package_manifest.py, harness/general_automation/package_tool_projection.py, harness/general_automation/question_tool.py, harness/general_automation/recipe_disclosure.py, harness/goal_loop_control.py, hooks/builtin/llm_safety_hooks.py, hooks/builtin/prompt_transforms.py, hooks/external_config.py, hooks/manifest.py, plugins/mcp_adapter.py, plugins/tool_projection.py, recipes/best_of_n.py, recipes/cross_verify.py, shadow/office_automation_contract.py, shadow/patch_file_policy_contract.py, shadow/path_shell_policy_contract.py, shadow/tool_policy.py, shadow/toolhost_contract.py, tools/__init__.py, tools/base.py, tools/catalog.py, tools/concurrent_dispatcher.py, tools/deferred.py, tools/dispatch_shared.py, tools/dispatcher.py, tools/file_tool_manifests.py, tools/health.py, tools/kernel.py, tools/output_budget.py, tools/permission.py, tools/permission_scope.py, tools/python_exec.py, tools/registry.py, tools/safety.py, tools/scheduler.py, tools/schema_validation.py, tools/tool_search.py, transport/tools.py |
+| media_egress.py | SSRF preflight for remote media (video/audio URL) acquisition. | network | tools/audio_tools.py, tools/video_tools.py |
 | memory_mode_guard.py | Tool-level memory-mode hard enforcement. | patch_apply, session_identity | cli/learning_recall.py, cli/memory_recall_block.py, cli/wiring.py, gates/gate5b_full_toolhost.py, tools/core_toolhost.py, tools/local_readonly.py |
 | music_tools.py | MusicNotation tool — read musical notation from an image via vision model. | context, image_tools, result, spreadsheet_tools | tools/file_toolhost.py |
 | output_budget.py | — | manifest, result | artifacts/local_result_store.py, plugins/mcp_adapter.py, tools/kernel.py |
@@ -1443,7 +1444,7 @@ graph LR
 | todo_toolhost.py | — | context, registry, result | runtime/openmagi_runtime.py |
 | tool_search.py | ToolSearchTool — search the tool registry by keyword or exact name. | manifest, registry, schema_projection | — |
 | truncation.py | Shared head+tail ("middle") truncation for tool outputs. | — | tools/archive_tools.py, tools/document_tools.py, tools/web_search_tools.py |
-| video_tools.py | VideoFrames tool — extract frames from a video at timestamps and describe them. | context, image_tools, result, spreadsheet_tools | tools/audio_tools.py, tools/file_toolhost.py |
+| video_tools.py | VideoFrames tool — extract frames from a video at timestamps and describe them. | context, image_tools, media_egress, result, spreadsheet_tools | tools/audio_tools.py, tools/file_toolhost.py |
 | web_search_tools.py | Fast direct web tools — Brave Search (or opt-in SerpAPI) + Firecrawl fetch. | env, truncation | cli/tool_runtime.py |
 
 ### tools/document_write/

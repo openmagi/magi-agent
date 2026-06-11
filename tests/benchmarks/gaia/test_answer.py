@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from benchmarks.gaia.answer import GAIA_SYSTEM_PROMPT, extract_final_answer
+from benchmarks.gaia.answer import (
+    GAIA_FORMAT_ADHERENCE_NOTE,
+    GAIA_SYSTEM_PROMPT,
+    extract_final_answer,
+)
 
 
 def test_extracts_last_final_answer() -> None:
@@ -64,3 +68,26 @@ class TestToolAdvertising:
     def test_prompt_still_has_best_guess(self) -> None:
         lowered = GAIA_SYSTEM_PROMPT.lower()
         assert "best" in lowered and "guess" in lowered
+
+
+# ---------------------------------------------------------------------------
+# Format-adherence advertisement note (benchmark prompt layer).
+# The note is imported by harness.py by name and advertises the general
+# output-format-adherence capability to the GAIA agent before it finalizes.
+# ---------------------------------------------------------------------------
+
+
+class TestFormatAdherenceNote:
+    def test_note_exists_and_nonempty(self) -> None:
+        assert isinstance(GAIA_FORMAT_ADHERENCE_NOTE, str)
+        assert GAIA_FORMAT_ADHERENCE_NOTE.strip()
+
+    def test_note_covers_units_scale_rounding_name_format(self) -> None:
+        lowered = GAIA_FORMAT_ADHERENCE_NOTE.lower()
+        assert "unit" in lowered and "scale" in lowered
+        assert "round" in lowered
+        assert "name" in lowered and "format" in lowered
+
+    def test_note_forbids_unrequested_units(self) -> None:
+        lowered = GAIA_FORMAT_ADHERENCE_NOTE.lower()
+        assert "do not add" in lowered
