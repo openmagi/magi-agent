@@ -601,6 +601,27 @@ class _PartialAggregateRunner(_FakeRunner):
         yield _PartialAggregateEvent("EXACTLY_ONCE_SENTINEL_9Q4Z", partial=False)
 
 
+class _FinishReasonTextEvent(_FakeEvent):
+    def __init__(self, text: str, finish_reason: str) -> None:
+        super().__init__(text)
+        self.finish_reason = finish_reason
+
+
+class _OutputContinuationRunner(_FakeRunner):
+    calls: list[dict[str, object]] = []
+
+    async def run_async(self, **kwargs: object) -> object:
+        type(self).run_kwargs = kwargs
+        type(self).calls.append(kwargs)
+        if len(type(self).calls) == 1:
+            yield _FinishReasonTextEvent("section one is cut", "length")
+            return
+        message = kwargs["new_message"]
+        assert isinstance(message, _FakeContent)
+        assert "Continue exactly where you left off" in message.parts[0].text
+        yield _FakeEvent(" off and then finishes. END_LONG_SMOKE")
+
+
 class _ModelDumpFunctionCallOnlyEvent:
     @property
     def text(self) -> str:
@@ -854,6 +875,22 @@ def _partial_aggregate_primitives() -> Gate5B4C3LiveAdkPrimitives:
     return Gate5B4C3LiveAdkPrimitives(
         Agent=_FakeAgent,
         Runner=_PartialAggregateRunner,
+        InMemorySessionService=_FakeSessionService,
+        Content=_FakeContent,
+        Part=_FakePart,
+        GenerateContentConfig=_FakeGenerateContentConfig,
+    )
+
+
+def _output_continuation_primitives() -> Gate5B4C3LiveAdkPrimitives:
+    _FakeAgent.created_kwargs = {}
+    _OutputContinuationRunner.created_kwargs = {}
+    _OutputContinuationRunner.run_kwargs = {}
+    _OutputContinuationRunner.calls = []
+    _FakeGenerateContentConfig.created_kwargs = {}
+    return Gate5B4C3LiveAdkPrimitives(
+        Agent=_FakeAgent,
+        Runner=_OutputContinuationRunner,
         InMemorySessionService=_FakeSessionService,
         Content=_FakeContent,
         Part=_FakePart,
@@ -1334,6 +1371,49 @@ def test_live_boundary_does_not_reemit_final_aggregate_after_partial_deltas() ->
         event["delta"] for event in public_events if event.get("type") == "text_delta"
     ]
     assert text_deltas == ["EX", "ACTLY_ONCE_SENTINEL_9Q4Z"]
+
+
+def test_live_boundary_continues_selected_full_toolhost_output_truncated_by_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MAGI_OUTPUT_CONTINUATION_ENABLED", "1")
+    monkeypatch.setenv("MAGI_MAX_OUTPUT_CONTINUATIONS", "2")
+    public_events: list[dict[str, object]] = []
+
+    result = Gate5B4C3LiveRunnerBoundary(
+        _output_continuation_primitives,
+        adk_tools=(_ManualCalculationTool,),
+        public_event_sink=lambda event: public_events.append(dict(event)),
+    ).invoke(_selected_full_toolhost_request(), config=_enabled_config())
+
+    assert result.status == "completed"
+    assert result.reason == "runner_completed"
+    assert result.output_text_internal == (
+        "section one is cut off and then finishes. END_LONG_SMOKE"
+    )
+    assert len(_OutputContinuationRunner.calls) == 2
+    assert result.event_count == 2
+    assert public_events == [
+        {"type": "text_delta", "delta": "section one is cut"},
+        {"type": "output_continuation", "continuation": 1, "max": 2},
+        {"type": "text_delta", "delta": " off and then finishes. END_LONG_SMOKE"},
+    ]
+
+
+def test_live_boundary_output_continuation_can_be_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MAGI_OUTPUT_CONTINUATION_ENABLED", "0")
+
+    result = Gate5B4C3LiveRunnerBoundary(
+        _output_continuation_primitives,
+        adk_tools=(_ManualCalculationTool,),
+    ).invoke(_selected_full_toolhost_request(), config=_enabled_config())
+
+    assert result.status == "completed"
+    assert result.reason == "runner_completed"
+    assert result.output_text_internal == "section one is cut"
+    assert len(_OutputContinuationRunner.calls) == 1
 
 
 def test_live_boundary_fails_closed_on_tool_policy_mismatch_before_adk_load() -> None:
