@@ -59,6 +59,29 @@ _COMPUTE_VIA_CODE_REMINDER = (
 )
 
 
+# Output-format-adherence advertisement (benchmark prompt layer). This is the
+# GAIA-facing wording of the general output-format-adherence capability
+# implemented in magi_agent/cli/tool_runtime.output_format_adherence_block.
+# Keeping the GAIA-specific phrasing HERE (not in first-party logic) preserves
+# the anti-overfit boundary: the general mechanism is benchmark-agnostic; only
+# this advertisement names GAIA's exact answer conventions.
+GAIA_FORMAT_ADHERENCE_NOTE = (
+    "FORMAT ADHERENCE — before you write the FINAL ANSWER line, re-read the "
+    "question's exact output requirements and conform to them:\n"
+    "- Units & scale: answer in the units and at the scale asked for "
+    "(e.g. '17 thousand' vs 17000); convert when the question specifies a unit "
+    "or scale, and omit units when none are requested.\n"
+    "- Rounding precision: round to the precision the question requests "
+    "(e.g. 'to the nearest picometer' -> 1.456, not 1.46); do not over- or "
+    "under-round.\n"
+    "- Name & format: use the canonical name or exact format requested (full "
+    "name vs abbreviation, the exact symbol/character asked for such as a grave "
+    "accent rather than a backtick, the requested ordering/separators).\n"
+    "- Do not add units, articles, words, or explanation the question did not "
+    "request; the FINAL ANSWER must be exactly what was asked and nothing more."
+)
+
+
 def gaia_system_prompt(env: Mapping[str, str] | None = None) -> str:
     """Return the GAIA system prompt, optionally with the compute-via-code
     reminder appended.
@@ -90,4 +113,9 @@ def extract_final_answer(text: str) -> str:
     return answer.strip().rstrip(".").strip()
 
 
-__all__ = ["GAIA_SYSTEM_PROMPT", "gaia_system_prompt", "extract_final_answer"]
+__all__ = [
+    "GAIA_FORMAT_ADHERENCE_NOTE",
+    "GAIA_SYSTEM_PROMPT",
+    "gaia_system_prompt",
+    "extract_final_answer",
+]

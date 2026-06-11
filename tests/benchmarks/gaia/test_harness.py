@@ -118,3 +118,29 @@ def test_default_env_unset_keeps_empty_answer(tmp_path, monkeypatch) -> None:
     )
     assert answer == ""
     assert len(calls) == 1, "default abstain must not run a second turn"
+
+
+def test_harness_instruction_advertises_format_adherence(tmp_path, monkeypatch) -> None:
+    # The GAIA harness must advertise the format-adherence note in the instruction
+    # it forwards to the runner. Capture the instruction via build_cli_model_runner.
+    import benchmarks.gaia.harness as harness_mod
+    from benchmarks.gaia.answer import GAIA_FORMAT_ADHERENCE_NOTE
+
+    captured: dict[str, str] = {}
+    real_build = harness_mod.build_cli_model_runner
+
+    def _spy(config, *, instruction, **kwargs):
+        captured["instruction"] = instruction
+        return real_build(config, instruction=instruction, **kwargs)
+
+    monkeypatch.setattr(harness_mod, "build_cli_model_runner", _spy)
+
+    q = GaiaQuestion(
+        task_id="c", question="What word?", level=1, final_answer="egalitarian"
+    )
+    run_gaia_question(
+        q,
+        workspace_root=str(tmp_path),
+        model_factory=lambda cfg: _ScriptedLlm(model="fake"),
+    )
+    assert GAIA_FORMAT_ADHERENCE_NOTE in captured["instruction"]

@@ -384,6 +384,13 @@ FLAGS: tuple[FlagSpec, ...] = (
             "statistics, and checksums by running code instead of mental math."
         ),
     ),
+    _b(
+        "MAGI_FORMAT_ADHERENCE_ENABLED",
+        summary=(
+            "Append a general prompt self-check for exact requested units, scale, "
+            "rounding precision, names, and answer format."
+        ),
+    ),
     # --- Evidence / verification gates -------------------------------------
     _b(
         "MAGI_EGRESS_GATE_ENABLED",

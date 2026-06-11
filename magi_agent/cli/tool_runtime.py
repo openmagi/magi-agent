@@ -592,6 +592,43 @@ def compute_via_code_block(env: Mapping[str, str] | None = None) -> str:
     )
 
 
+def output_format_adherence_block(env: Mapping[str, str] | None = None) -> str:
+    """Return the output-format-adherence guidance block.
+
+    Returns an empty string when ``MAGI_FORMAT_ADHERENCE_ENABLED`` is falsy (the
+    default) so the caller's prompt is byte-identical to the non-gated path: the
+    ``<output_format_adherence>`` marker is simply absent. When on, returns a
+    GENERAL guidance block (no benchmark-specific text) telling the agent to
+    conform to the question's explicit output requirements before finalizing.
+
+    Imported lazily inside to keep ``import cli.tool_runtime`` cold-clean.
+    """
+    import os as _os  # noqa: PLC0415
+
+    from magi_agent.config.env import parse_format_adherence_enabled  # noqa: PLC0415
+
+    source = env if env is not None else _os.environ
+    if not parse_format_adherence_enabled(source):
+        return ""
+    return (
+        "<output_format_adherence>\n"
+        "Before you give your final answer, re-read the question's explicit "
+        "output requirements and conform to them exactly:\n"
+        "- Units & scale: report the value in the units and at the scale the "
+        "question asks for (e.g. thousands vs the raw count, kilometers vs "
+        "meters). Convert if necessary.\n"
+        "- Rounding precision: round to the precision the question requests "
+        "(e.g. nearest picometer, two decimal places) — no more, no fewer "
+        "significant figures than asked.\n"
+        "- Name & format: use the canonical name or format requested (full "
+        "name vs abbreviation, the exact character/symbol asked for, the "
+        "requested ordering or separators).\n"
+        "- Do not add units, words, articles, or explanation that the question "
+        "did not request; answer with exactly what was asked and nothing more.\n"
+        "</output_format_adherence>"
+    )
+
+
 def build_cli_instruction(
     *,
     session_id: str,
@@ -804,6 +841,12 @@ def build_cli_instruction(
     # is emitted in the off path (byte-identity guard).
     _compute_block = compute_via_code_block()
 
+    # Output-format-adherence guidance (default-OFF: MAGI_FORMAT_ADHERENCE_ENABLED).
+    # Returns "" when the gate is off so the joined prompt is byte-identical to
+    # pre-wiring (no <output_format_adherence> marker). General capability — the
+    # block carries no benchmark-specific text.
+    _format_adherence_block = output_format_adherence_block()
+
     parts = [prompt]
     if _tool_ad_block:
         parts.append(_tool_ad_block)
@@ -816,6 +859,8 @@ def build_cli_instruction(
         parts.append(_tool_synthesis_block)
     if _compute_block:
         parts.append(_compute_block)
+    if _format_adherence_block:
+        parts.append(_format_adherence_block)
     return "\n\n".join(parts)
 
 
@@ -829,5 +874,6 @@ __all__ = [
     "build_tool_advertisement_block",
     "compute_via_code_block",
     "bind_cli_local_full_tool_handlers",
+    "output_format_adherence_block",
     "wrap_cli_adk_tools_with_evidence_collector",
 ]

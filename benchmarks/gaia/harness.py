@@ -9,7 +9,11 @@ from typing import Callable
 
 from google.genai import types
 
-from benchmarks.gaia.answer import extract_final_answer, gaia_system_prompt
+from benchmarks.gaia.answer import (
+    GAIA_FORMAT_ADHERENCE_NOTE,
+    extract_final_answer,
+    gaia_system_prompt,
+)
 from benchmarks.gaia.dataset import GaiaQuestion
 from magi_agent.cli.providers import ProviderConfig
 from magi_agent.cli.real_runner import CliModelRunner, build_cli_model_runner
@@ -101,9 +105,14 @@ def run_gaia_question(
     # gaia_system_prompt() returns GAIA_SYSTEM_PROMPT byte-identically when
     # MAGI_COMPUTE_VIA_CODE_ENABLED is unset (default), and appends the scoped
     # compute-via-code reminder only when the flag is on.
+    # Advertise the output-format-adherence guidance in the GAIA prompt layer.
+    # This is the benchmark advertisement of the general capability (the
+    # first-party block lives in cli.tool_runtime, gated default-OFF); the GAIA
+    # harness always advertises it because format conformance is part of GAIA's
+    # scoring contract.
     instruction = (
-        f"{gaia_system_prompt()}\n\nQUESTION:\n{question.question}"
-        f"{attachment_note}{remote_media_note}"
+        f"{gaia_system_prompt()}\n\n{GAIA_FORMAT_ADHERENCE_NOTE}"
+        f"\n\nQUESTION:\n{question.question}{attachment_note}{remote_media_note}"
     )
     runner: CliModelRunner = build_cli_model_runner(
         config,
