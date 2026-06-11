@@ -1054,6 +1054,24 @@ class _ResilienceLoopControl(BaseLoopControl):
             tool=tool, tool_args=args, tool_context=tool_context, result=result
         )
 
+    async def apply_after_tool(
+        self,
+        ctx: Any,
+        *,
+        tool: Any,
+        args: dict[str, Any],
+        tool_context: Any,
+        result: Any,
+    ) -> dict[str, Any] | None:
+        """Typed-context entry point (S-C): drive the loop guard against the
+        runtime-owned ``PerInvocationState`` from the context (falls back to the
+        plugin default state when the context carries none). Behavior is
+        byte-identical to ``after_tool_callback``."""
+        state = getattr(ctx, "per_invocation", None) or self._plugin._default_state
+        return self._plugin.guard_with_state(
+            state=state, tool=tool, tool_args=args, tool_context=tool_context, result=result
+        )
+
 
 class _CompactionLoopControl(BaseLoopControl):
     """Thin LoopControl adapter delegating to MagiContextCompactionPlugin."""
