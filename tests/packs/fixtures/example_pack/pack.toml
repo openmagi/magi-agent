@@ -1,0 +1,24 @@
+packId = "example.demo"
+displayName = "Example demo pack"
+description = "fixture exercising the full pipeline"
+
+[[provides]]
+type = "tool"
+ref = "DemoTool"
+impl = "tests.packs.fixtures.example_pack.impls:demo_tool"
+
+[[provides]]
+type = "validator"
+ref = "validator:demo@1"
+impl = "tests.packs.fixtures.example_pack.impls:DemoValidator"
+
+[[provides]]
+type = "control_plane"
+ref = "cp.demo@1"
+impl = "tests.packs.fixtures.example_pack.impls:DemoControl"
+priority = 7
+
+[[provides]]
+type = "recipe"
+ref = "recipe.demo@1"
+spec = "recipes/demo.toml"
