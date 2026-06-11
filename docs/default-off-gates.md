@@ -93,6 +93,9 @@ Representative flags:
   on changes recall/persistence behaviour for the local agent.
 - `MAGI_CHANNEL_WORKFLOWS_ENABLED` — bot-user dynamic channel workflows
   (classifier-driven routing) at the channel scope.
+- `MAGI_FACTS_REPLAN_ENABLED` — injects a periodic in-context facts survey +
+  plan refresh into the live model loop every N working steps (non-decomposing
+  replanning); off by default, the model loop is byte-identical.
 - `MAGI_RUNTIME_PROFILE` — selects a runtime profile (`safe` / `eval` / …) that
   reversibly disables the default-ON resilience seams.
 

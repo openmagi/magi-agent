@@ -1203,7 +1203,17 @@ def build_default_plane(
             )
         )
 
-    # 7. Tool-synthesis reflection nudge (MAGI_TOOL_SYNTHESIS_NUDGE_ENABLED,
+    # 7. Facts-survey replanning (MAGI_FACTS_REPLAN_ENABLED, default OFF).
+    # Imported here (like the other adk_bridge builders above) to avoid a
+    # circular import: facts_replan_control imports BaseLoopControl from this
+    # module.
+    from magi_agent.adk_bridge.facts_replan_control import build_facts_replan_control
+
+    facts_replan = build_facts_replan_control(env)
+    if facts_replan is not None:
+        plane.register(facts_replan)
+
+    # 8. Tool-synthesis reflection nudge (MAGI_TOOL_SYNTHESIS_NUDGE_ENABLED,
     # default OFF + frontier-tier model only). Registered LAST so edit-retry /
     # resilience overrides win the first-non-None-wins after-tool fan-out.
     # Callers that do not pass a model label (all pre-existing build sites)
