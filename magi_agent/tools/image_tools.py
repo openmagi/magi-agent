@@ -342,6 +342,7 @@ def _call_vision_model_via_litellm(
         resolve_vision_provider_config,
     )
     from magi_agent.config.env import LOCAL_DEV_MODEL_SENTINEL  # noqa: PLC0415
+    from magi_agent.config.flags import flag_str  # noqa: PLC0415
 
     b64 = base64.b64encode(image_bytes).decode()
     messages = [
@@ -370,11 +371,11 @@ def _call_vision_model_via_litellm(
     # --- Vision-sidecar override (MAGI_VISION_MODEL / MAGI_VISION_PROVIDER) ---
     vision_cfg = resolve_vision_provider_config(env=os.environ)
     route_skipped: str | None = None
-    raw_vision_model = (os.environ.get("MAGI_VISION_MODEL") or "").strip()
+    raw_vision_model = (flag_str("MAGI_VISION_MODEL") or "").strip()
     if vision_cfg is None and raw_vision_model and raw_vision_model != LOCAL_DEV_MODEL_SENTINEL:
         # The resolver collapses all failures to None; classify the skip reason
         # here so the receipt is honest (never silent).
-        raw_provider = (os.environ.get("MAGI_VISION_PROVIDER") or "").strip().lower()
+        raw_provider = (flag_str("MAGI_VISION_PROVIDER") or "").strip().lower()
         if raw_provider and raw_provider not in SUPPORTED_PROVIDERS:
             route_skipped = "vision_provider_unsupported"
         elif raw_provider:
