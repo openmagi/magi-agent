@@ -1094,6 +1094,22 @@ class _CompactionLoopControl(BaseLoopControl):
         )
         return None
 
+    async def apply_before_model(
+        self,
+        ctx: Any,
+        *,
+        llm_request: Any,
+    ) -> None:
+        """Typed-context entry point (S-D): apply the compaction decision exposed
+        on ``ctx.compaction``. Delegates to the plugin's own ``apply_before_model``,
+        which reads the :class:`CompactionCapability` off the context (falling back
+        to the plugin's own capability when none is supplied). The boundary +
+        session services stay encapsulated behind the capability; a user pack can
+        author an equivalent compaction control with the same narrow handle.
+        Behavior is byte-identical to ``on_before_model``."""
+        await self._plugin.apply_before_model(ctx, llm_request=llm_request)
+        return None
+
 
 # ---------------------------------------------------------------------------
 # Extended ControlPlanePlugin — also forwards resilience-only callbacks
