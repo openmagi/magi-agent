@@ -903,6 +903,7 @@ class Gate5B4C3LiveRunnerBoundary:
                     run_kwargs=run_kwargs,
                     agent_kwargs=agent_kwargs,
                     runner_kwargs=runner_kwargs,
+                    public_event_sink=self._emit_public_event,
                 )
                 event_count += finalizer_events
                 if finalizer_output:
@@ -972,6 +973,7 @@ class Gate5B4C3LiveRunnerBoundary:
                 run_kwargs=run_kwargs,
                 agent_kwargs=agent_kwargs,
                 runner_kwargs=runner_kwargs,
+                public_event_sink=self._emit_public_event,
             )
             event_count += finalizer_events
             output_text = finalizer_output
@@ -2058,6 +2060,10 @@ async def _run_manual_tool_calls(
         name = str(call.get("name", ""))
         args = call.get("args")
         safe_args = dict(args) if isinstance(args, Mapping) else {}
+        tool = tool_by_name.get(name)
+        tool_emits_public_events = (
+            tool is not None and _tool_emits_public_events(tool)
+        )
         tool_event_id = _manual_tool_event_id(
             name=name,
             args=safe_args,
@@ -2065,9 +2071,8 @@ async def _run_manual_tool_calls(
             index=index,
         )
         started = time.monotonic()
-        if public_event_sink is not None:
+        if public_event_sink is not None and not tool_emits_public_events:
             public_event_sink(tool_start_event(tool_id=tool_event_id, name=name))
-        tool = tool_by_name.get(name)
         if tool is None:
             result_digest = _digest(
                 {
@@ -2076,7 +2081,7 @@ async def _run_manual_tool_calls(
                     "reason": "tool_not_registered",
                 }
             )
-            if public_event_sink is not None:
+            if public_event_sink is not None and not tool_emits_public_events:
                 public_event_sink(
                     tool_end_event(
                         tool_id=tool_event_id,
@@ -2101,7 +2106,7 @@ async def _run_manual_tool_calls(
             result = {"status": "error", "reason": "tool_execution_failed"}
         manual_status = _manual_tool_status(result)
         result_digest = _digest(result)
-        if public_event_sink is not None:
+        if public_event_sink is not None and not tool_emits_public_events:
             public_event_sink(
                 tool_end_event(
                     tool_id=tool_event_id,
@@ -2154,6 +2159,13 @@ async def _invoke_manual_tool(tool: object, args: Mapping[str, object]) -> objec
     raise TypeError("manual tool is not invocable")
 
 
+def _tool_emits_public_events(tool: object) -> bool:
+    if getattr(tool, "_magi_gate5b_emits_public_events", False):
+        return True
+    func = getattr(tool, "func", None)
+    return bool(getattr(func, "_magi_gate5b_emits_public_events", False))
+
+
 def _manual_tool_invocation_args(args: Mapping[str, object]) -> dict[str, object]:
     safe_args = dict(args)
     if set(safe_args) == {"arguments"} and isinstance(safe_args["arguments"], Mapping):
@@ -2170,6 +2182,7 @@ async def _run_no_tool_finalizer(
     run_kwargs: Mapping[str, object],
     agent_kwargs: Mapping[str, object],
     runner_kwargs: Mapping[str, object],
+    public_event_sink: Gate5B4C3PublicEventSink | None = None,
 ) -> tuple[str | None, int]:
     try:
         finalizer_agent_kwargs = {
@@ -2213,7 +2226,20 @@ async def _run_no_tool_finalizer(
             finalizer_events += 1
             chunk = _event_text(event)
             if chunk:
-                finalizer_chunks.append(chunk)
+                visible_delta = _event_visible_text_delta(
+                    event,
+                    chunk,
+                    finalizer_chunks,
+                )
+                if visible_delta:
+                    finalizer_chunks.append(visible_delta)
+                    if public_event_sink is not None:
+                        public_event_sink(
+                            {
+                                "type": "text_delta",
+                                "delta": visible_delta,
+                            }
+                        )
             if finalizer_events >= 8:
                 break
     except Exception:

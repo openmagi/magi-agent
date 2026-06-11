@@ -955,7 +955,10 @@ async def run_gate5b_user_visible_chat_response(
         request.headers.get("x-core-agent-memory-mode")
     )
     gate5b_full_bundle = _gate5b_full_toolhost_bundle(
-        runtime, route_config, memory_mode=memory_mode
+        runtime,
+        route_config,
+        memory_mode=memory_mode,
+        public_event_sink=public_event_sink,
     )
     tool_bundle = (
         gate5b_full_bundle
@@ -1075,6 +1078,7 @@ def _gate5b_full_toolhost_bundle(
     route_config: Gate5BUserVisibleChatRouteConfig,
     *,
     memory_mode: "MemoryMode | str" = "normal",
+    public_event_sink: Callable[[Mapping[str, object]], None] | None = None,
 ) -> Gate5BFullToolBundle:
     return build_gate5b_full_toolhost_bundle(
         config=_gate5b_full_toolhost_config(runtime),
@@ -1086,6 +1090,7 @@ def _gate5b_full_toolhost_bundle(
         workspace_root=_gate5b_full_toolhost_workspace_root(),
         tool_registry=runtime.tool_registry,
         memory_mode=memory_mode,
+        public_event_sink=public_event_sink,
     )
 
 

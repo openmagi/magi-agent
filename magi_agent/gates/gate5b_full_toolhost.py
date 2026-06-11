@@ -48,6 +48,11 @@ from magi_agent.evidence.edit_match_receipts import (
     EditMatchReceiptBoundary,
     EditMatchReceiptRecord,
 )
+from magi_agent.runtime.public_events import (
+    tool_end_event,
+    tool_progress_event,
+    tool_start_event,
+)
 from magi_agent.tools.context import ToolContext
 from magi_agent.tools.dispatcher import ToolDispatcher
 from magi_agent.tools.manifest import RuntimeMode, ToolManifest, ToolSource
@@ -808,6 +813,7 @@ class Gate5BFullToolHost:
         read_ledger_enabled: bool = False,
         diagnostics_provider: DiagnosticsProvider | None = None,
         memory_mode: "MemoryMode | str" = "normal",
+        public_event_sink: Callable[[Mapping[str, object]], None] | None = None,
     ) -> None:
         self.config = config
         self.workspace_root = workspace_root.resolve()
@@ -817,6 +823,7 @@ class Gate5BFullToolHost:
         self.counter = Gate5BFullToolCounter(config)
         self._tool_registry = tool_registry
         self._tool_dispatcher = ToolDispatcher(tool_registry) if tool_registry is not None else None
+        self._public_event_sink = public_event_sink
         self.receipt_boundary = CodingToolReceiptBoundary(
             CodingToolReceiptConfig(enabled=True)
         )
@@ -911,6 +918,51 @@ class Gate5BFullToolHost:
             return output
         return _filter_protected_memory_matches(output)
 
+    @property
+    def public_tool_events_enabled(self) -> bool:
+        return self._public_event_sink is not None
+
+    def _emit_public_event(self, payload: Mapping[str, object]) -> None:
+        if self._public_event_sink is None:
+            return
+        try:
+            self._public_event_sink(dict(payload))
+        except Exception:
+            return
+
+    def _emit_public_tool_start(self, *, tool_event_id: str, tool_name: str) -> None:
+        self._emit_public_event(tool_start_event(tool_id=tool_event_id, name=tool_name))
+        self._emit_public_event(
+            tool_progress_event(
+                tool_id=tool_event_id,
+                label=tool_name,
+                status="in_progress",
+                message="Tool dispatch started",
+            )
+        )
+
+    def _emit_public_tool_end(
+        self,
+        *,
+        tool_event_id: str,
+        outcome: Gate5BFullToolOutcome,
+    ) -> None:
+        receipt = outcome.receipt
+        receipt_ref = f"receipt:{receipt.bounded_output_digest}"
+        status = "ok" if outcome.status == "ok" else "error"
+        self._emit_public_event(
+            tool_end_event(
+                tool_id=tool_event_id,
+                status=status,
+                output_preview=(
+                    f"bytes={receipt.output_byte_count} "
+                    f"result={receipt.bounded_output_digest}"
+                ),
+                error=None if status == "ok" else outcome.reason,
+                receipt_refs=(receipt_ref,),
+            )
+        )
+
     async def dispatch(
         self,
         tool_name: str,
@@ -922,128 +974,146 @@ class Gate5BFullToolHost:
         args = dict(arguments or {})
         tool_call_digest = _digest({"tool": tool_name, "id": tool_call_id})
         argument_digest = _digest(args)
-        preflight = self.counter.before_call(
-            request_digest=request_digest,
-            tool_call_digest=tool_call_digest,
-            argument_digest=argument_digest,
-            tool_name=tool_name,
-        )
-        if preflight is not None:
-            return preflight
-        if tool_name not in self.exposed_tool_names:
-            return self.counter.blocked(
-                request_digest=request_digest,
-                tool_call_digest=tool_call_digest,
-                tool_name=tool_name,
-                reason="tool_not_allowlisted",
-                argument_digest=argument_digest,
-            )
+        tool_event_id = _gate5b_live_tool_event_id(tool_call_digest)
+        outcome: Gate5BFullToolOutcome | None = None
+        self._emit_public_tool_start(tool_event_id=tool_event_id, tool_name=tool_name)
         try:
-            # Clear any stale edit-match result from a previous call before
-            # invoking the handler so dispatch never reads stale state.
-            self._last_edit_match_result = None
-            # Channel memory-mode hard enforcement. The gate5b host executes
-            # FileRead/Grep/FileWrite/FileEdit/PatchApply/Bash directly via
-            # _handle, bypassing the core_toolhost guard, so it must enforce
-            # the same protected-memory rules here. Raised inside the try block
-            # so the existing Gate5BFullToolRegistryBlocked handler surfaces it
-            # as a "memory_mode_blocked" blocked outcome.
-            self._enforce_memory_mode(tool_name, args)
-            self._preflight_legacy_tool(tool_name, args, tool_call_id=tool_call_id)
-            output = await self._handle(tool_name, args, tool_call_id=tool_call_id)
-            output = self._filter_memory_mode_output(tool_name, output)
-            # The diagnostics collection does blocking stdio reads against the
-            # language server. Run it off the event loop so a slow/hung server
-            # can't stall concurrent requests (mirrors the to_thread pattern in
-            # hooks/bus.py and storage/session_store.py). Fail-open downstream.
-            diagnostics_receipt = await asyncio.to_thread(
-                self._after_write_diagnostics, tool_name, args, output
-            )
-            # Build an EditMatch evidence receipt when the fuzzy cascade was used
-            # (i.e. when _handle stored an EditMatchResult in _last_edit_match_result).
-            edit_match_receipt = self._build_edit_match_receipt(output)
-            result = ToolResult(status="ok", output=output)
-            coding_receipt = self.receipt_boundary.extract_receipt(
-                tool_call_id=tool_call_id,
-                tool_name=tool_name,
-                arguments=args,
-                result=result,
-            )
-            return self.counter.finish_call(
+            preflight = self.counter.before_call(
                 request_digest=request_digest,
                 tool_call_digest=tool_call_digest,
                 argument_digest=argument_digest,
                 tool_name=tool_name,
-                status="ok",
-                output_preview=_bounded_output(output, self.config.max_per_tool_output_bytes),
-                output_byte_count=_encoded_len(output),
-                coding_mutation_receipt=coding_receipt,
-                code_diagnostics_receipt=diagnostics_receipt,
-                edit_match_receipt=edit_match_receipt,
             )
-        except Gate5BFullToolRegistryBlocked as error:
-            return self.counter.blocked(
-                request_digest=request_digest,
-                tool_call_digest=tool_call_digest,
-                tool_name=tool_name,
-                reason=error.reason,
-                argument_digest=argument_digest,
-            )
-        except Gate5BFullToolReadLedgerError as ledger_error:
-            # Ledger blocks are recoverable: read the file, then retry the SAME
-            # call. Do not record the block, so the retry is not flagged as a
-            # duplicate/digest conflict.
-            return self.counter.blocked(
-                request_digest=request_digest,
-                tool_call_digest=tool_call_digest,
-                tool_name=tool_name,
-                reason=ledger_error.reason,
-                record=False,
-            )
-        except Gate5BFullToolPathPolicyError:
-            return self.counter.blocked(
-                request_digest=request_digest,
-                tool_call_digest=tool_call_digest,
-                tool_name=tool_name,
-                reason="path_policy_denied",
-                argument_digest=argument_digest,
-            )
-        except subprocess.TimeoutExpired:
-            result = ToolResult(status="error", errorMessage="command_timeout")
-            coding_receipt = self.receipt_boundary.extract_receipt(
-                tool_call_id=tool_call_id,
-                tool_name=tool_name,
-                arguments=args,
-                result=result,
-            )
-            return self.counter.finish_call(
-                request_digest=request_digest,
-                tool_call_digest=tool_call_digest,
-                argument_digest=argument_digest,
-                tool_name=tool_name,
-                status="error",
-                output_preview={"error": "command_timeout"},
-                output_byte_count=0,
-                coding_mutation_receipt=coding_receipt,
-            )
-        except (OSError, ValueError, TypeError):
-            result = ToolResult(status="error", errorMessage="tool_error")
-            coding_receipt = self.receipt_boundary.extract_receipt(
-                tool_call_id=tool_call_id,
-                tool_name=tool_name,
-                arguments=args,
-                result=result,
-            )
-            return self.counter.finish_call(
-                request_digest=request_digest,
-                tool_call_digest=tool_call_digest,
-                argument_digest=argument_digest,
-                tool_name=tool_name,
-                status="error",
-                output_preview={"error": "tool_error"},
-                output_byte_count=0,
-                coding_mutation_receipt=coding_receipt,
-            )
+            if preflight is not None:
+                outcome = preflight
+                return outcome
+            if tool_name not in self.exposed_tool_names:
+                outcome = self.counter.blocked(
+                    request_digest=request_digest,
+                    tool_call_digest=tool_call_digest,
+                    tool_name=tool_name,
+                    reason="tool_not_allowlisted",
+                    argument_digest=argument_digest,
+                )
+                return outcome
+            try:
+                # Clear any stale edit-match result from a previous call before
+                # invoking the handler so dispatch never reads stale state.
+                self._last_edit_match_result = None
+                # Channel memory-mode hard enforcement. The gate5b host executes
+                # FileRead/Grep/FileWrite/FileEdit/PatchApply/Bash directly via
+                # _handle, bypassing the core_toolhost guard, so it must enforce
+                # the same protected-memory rules here. Raised inside the try block
+                # so the existing Gate5BFullToolRegistryBlocked handler surfaces it
+                # as a "memory_mode_blocked" blocked outcome.
+                self._enforce_memory_mode(tool_name, args)
+                self._preflight_legacy_tool(tool_name, args, tool_call_id=tool_call_id)
+                output = await self._handle(tool_name, args, tool_call_id=tool_call_id)
+                output = self._filter_memory_mode_output(tool_name, output)
+                # The diagnostics collection does blocking stdio reads against the
+                # language server. Run it off the event loop so a slow/hung server
+                # can't stall concurrent requests (mirrors the to_thread pattern in
+                # hooks/bus.py and storage/session_store.py). Fail-open downstream.
+                diagnostics_receipt = await asyncio.to_thread(
+                    self._after_write_diagnostics, tool_name, args, output
+                )
+                # Build an EditMatch evidence receipt when the fuzzy cascade was used
+                # (i.e. when _handle stored an EditMatchResult in _last_edit_match_result).
+                edit_match_receipt = self._build_edit_match_receipt(output)
+                result = ToolResult(status="ok", output=output)
+                coding_receipt = self.receipt_boundary.extract_receipt(
+                    tool_call_id=tool_call_id,
+                    tool_name=tool_name,
+                    arguments=args,
+                    result=result,
+                )
+                outcome = self.counter.finish_call(
+                    request_digest=request_digest,
+                    tool_call_digest=tool_call_digest,
+                    argument_digest=argument_digest,
+                    tool_name=tool_name,
+                    status="ok",
+                    output_preview=_bounded_output(output, self.config.max_per_tool_output_bytes),
+                    output_byte_count=_encoded_len(output),
+                    coding_mutation_receipt=coding_receipt,
+                    code_diagnostics_receipt=diagnostics_receipt,
+                    edit_match_receipt=edit_match_receipt,
+                )
+                return outcome
+            except Gate5BFullToolRegistryBlocked as error:
+                outcome = self.counter.blocked(
+                    request_digest=request_digest,
+                    tool_call_digest=tool_call_digest,
+                    tool_name=tool_name,
+                    reason=error.reason,
+                    argument_digest=argument_digest,
+                )
+                return outcome
+            except Gate5BFullToolReadLedgerError as ledger_error:
+                # Ledger blocks are recoverable: read the file, then retry the SAME
+                # call. Do not record the block, so the retry is not flagged as a
+                # duplicate/digest conflict.
+                outcome = self.counter.blocked(
+                    request_digest=request_digest,
+                    tool_call_digest=tool_call_digest,
+                    tool_name=tool_name,
+                    reason=ledger_error.reason,
+                    record=False,
+                )
+                return outcome
+            except Gate5BFullToolPathPolicyError:
+                outcome = self.counter.blocked(
+                    request_digest=request_digest,
+                    tool_call_digest=tool_call_digest,
+                    tool_name=tool_name,
+                    reason="path_policy_denied",
+                    argument_digest=argument_digest,
+                )
+                return outcome
+            except subprocess.TimeoutExpired:
+                result = ToolResult(status="error", errorMessage="command_timeout")
+                coding_receipt = self.receipt_boundary.extract_receipt(
+                    tool_call_id=tool_call_id,
+                    tool_name=tool_name,
+                    arguments=args,
+                    result=result,
+                )
+                outcome = self.counter.finish_call(
+                    request_digest=request_digest,
+                    tool_call_digest=tool_call_digest,
+                    argument_digest=argument_digest,
+                    tool_name=tool_name,
+                    status="error",
+                    output_preview={"error": "command_timeout"},
+                    output_byte_count=0,
+                    coding_mutation_receipt=coding_receipt,
+                )
+                return outcome
+            except (OSError, ValueError, TypeError):
+                result = ToolResult(status="error", errorMessage="tool_error")
+                coding_receipt = self.receipt_boundary.extract_receipt(
+                    tool_call_id=tool_call_id,
+                    tool_name=tool_name,
+                    arguments=args,
+                    result=result,
+                )
+                outcome = self.counter.finish_call(
+                    request_digest=request_digest,
+                    tool_call_digest=tool_call_digest,
+                    argument_digest=argument_digest,
+                    tool_name=tool_name,
+                    status="error",
+                    output_preview={"error": "tool_error"},
+                    output_byte_count=0,
+                    coding_mutation_receipt=coding_receipt,
+                )
+                return outcome
+        finally:
+            if outcome is not None:
+                self._emit_public_tool_end(
+                    tool_event_id=tool_event_id,
+                    outcome=outcome,
+                )
 
     def _ripgrep_active(self) -> bool:
         # NOTE: reads self.config.ripgrep_enabled — frozen at construction time.
@@ -1860,6 +1930,7 @@ def build_gate5b_full_toolhost_bundle(
     read_ledger_enabled: bool | None = None,
     diagnostics_provider: DiagnosticsProvider | None = None,
     memory_mode: "MemoryMode | str" = "normal",
+    public_event_sink: Callable[[Mapping[str, object]], None] | None = None,
 ) -> Gate5BFullToolBundle:
     safe_config = Gate5BFullToolHostConfig.model_validate(config or {})
     workspace = Path(workspace_root)
@@ -1883,6 +1954,7 @@ def build_gate5b_full_toolhost_bundle(
         read_ledger_enabled=read_ledger_enabled,
         diagnostics_provider=diagnostics_provider,
         memory_mode=memory_mode,
+        public_event_sink=public_event_sink,
     )
     if selected_scope_error is not None:
         return Gate5BFullToolBundle(
@@ -2078,12 +2150,19 @@ def _apply_patch_tool_swap(
 
 
 def _build_adk_tool(host: Gate5BFullToolHost, name: str) -> FunctionTool:
+    def function_tool(func: Callable[..., object]) -> FunctionTool:
+        return _function_tool(
+            name,
+            func,
+            emits_public_events=host.public_tool_events_enabled,
+        )
+
     if name == "Clock":
 
         async def invoke_clock(tool_context: object | None = None) -> dict[str, object]:
             return await _dispatch_adk_tool(host, "Clock", {}, tool_context)
 
-        return _function_tool(name, invoke_clock)
+        return function_tool(invoke_clock)
 
     if name == "Calculation":
 
@@ -2093,21 +2172,21 @@ def _build_adk_tool(host: Gate5BFullToolHost, name: str) -> FunctionTool:
         ) -> dict[str, object]:
             return await _dispatch_adk_tool(host, "Calculation", {"expression": expression}, tool_context)
 
-        return _function_tool(name, invoke_calculation)
+        return function_tool(invoke_calculation)
 
     if name == "FileRead":
 
         async def invoke_file_read(path: str = "", tool_context: object | None = None) -> dict[str, object]:
             return await _dispatch_adk_tool(host, "FileRead", {"path": path}, tool_context)
 
-        return _function_tool(name, invoke_file_read)
+        return function_tool(invoke_file_read)
 
     if name == "Glob":
 
         async def invoke_glob(pattern: str = "*", tool_context: object | None = None) -> dict[str, object]:
             return await _dispatch_adk_tool(host, "Glob", {"pattern": pattern}, tool_context)
 
-        return _function_tool(name, invoke_glob)
+        return function_tool(invoke_glob)
 
     if name == "Grep":
 
@@ -2118,7 +2197,7 @@ def _build_adk_tool(host: Gate5BFullToolHost, name: str) -> FunctionTool:
         ) -> dict[str, object]:
             return await _dispatch_adk_tool(host, "Grep", {"pattern": pattern, "glob": glob}, tool_context)
 
-        return _function_tool(name, invoke_grep)
+        return function_tool(invoke_grep)
 
     if name == "FileWrite":
 
@@ -2129,7 +2208,7 @@ def _build_adk_tool(host: Gate5BFullToolHost, name: str) -> FunctionTool:
         ) -> dict[str, object]:
             return await _dispatch_adk_tool(host, "FileWrite", {"path": path, "content": content}, tool_context)
 
-        return _function_tool(name, invoke_file_write)
+        return function_tool(invoke_file_write)
 
     if name == "FileEdit":
 
@@ -2141,7 +2220,7 @@ def _build_adk_tool(host: Gate5BFullToolHost, name: str) -> FunctionTool:
         ) -> dict[str, object]:
             return await _dispatch_adk_tool(host, "FileEdit", {"path": path, "oldText": oldText, "newText": newText}, tool_context)
 
-        return _function_tool(name, invoke_file_edit)
+        return function_tool(invoke_file_edit)
 
     if name == "PatchApply":
 
@@ -2158,14 +2237,14 @@ def _build_adk_tool(host: Gate5BFullToolHost, name: str) -> FunctionTool:
                 arguments["patch"] = patch
             return await _dispatch_adk_tool(host, "PatchApply", arguments, tool_context)
 
-        return _function_tool(name, invoke_patch_apply)
+        return function_tool(invoke_patch_apply)
 
     if name == "Bash":
 
         async def invoke_bash(command: str = "", tool_context: object | None = None) -> dict[str, object]:
             return await _dispatch_adk_tool(host, "Bash", {"command": command}, tool_context)
 
-        return _function_tool(name, invoke_bash)
+        return function_tool(invoke_bash)
 
     tool_name = name
 
@@ -2202,7 +2281,7 @@ def _build_adk_tool(host: Gate5BFullToolHost, name: str) -> FunctionTool:
         )
         return await _dispatch_adk_tool(host, tool_name, arguments, tool_context)
 
-    return _function_tool(name, invoke_registry_tool)
+    return function_tool(invoke_registry_tool)
 
 
 def _registry_adk_arguments(**values: str) -> dict[str, object]:
@@ -2230,10 +2309,23 @@ async def _dispatch_adk_tool(
     return outcome.model_dump(by_alias=True, mode="json", warnings=False)
 
 
-def _function_tool(name: str, func: Callable[..., object]) -> FunctionTool:
+def _function_tool(
+    name: str,
+    func: Callable[..., object],
+    *,
+    emits_public_events: bool = False,
+) -> FunctionTool:
     func.__name__ = name
     func.__doc__ = f"Gate 5B selected full toolhost {name} tool."
-    return FunctionTool(func, require_confirmation=False)
+    if emits_public_events:
+        setattr(func, "_magi_gate5b_emits_public_events", True)
+    tool = FunctionTool(func, require_confirmation=False)
+    if emits_public_events:
+        try:
+            setattr(tool, "_magi_gate5b_emits_public_events", True)
+        except Exception:
+            pass
+    return tool
 
 
 def _read_offset(value: object) -> int:
@@ -2595,6 +2687,12 @@ def _encoded_len(value: object) -> int:
 def _digest(value: object) -> str:
     material = json.dumps(value, sort_keys=True, default=repr, separators=(",", ":"))
     return "sha256:" + hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+
+def _gate5b_live_tool_event_id(tool_call_digest: str) -> str:
+    if tool_call_digest.startswith("sha256:") and len(tool_call_digest) >= 19:
+        return f"tu_{tool_call_digest[7:19]}"
+    return "tu_gate5b"
 
 
 def _safe_reason_label(value: str) -> str:
