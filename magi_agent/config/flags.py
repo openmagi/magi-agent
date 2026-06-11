@@ -250,6 +250,24 @@ FLAGS: tuple[FlagSpec, ...] = (
         summary="Enable the live file-delivery tool (vs receipt-only).",
     ),
     _b(
+        "MAGI_DOCUMENT_QA_ENABLED",
+        summary=(
+            "Expose the question-conditioned DocumentQA file-QA sidecar tool "
+            "(requires MAGI_FILE_TOOLS_ENABLED); strict default-OFF in all profiles."
+        ),
+    ),
+    FlagSpec(
+        name="MAGI_DOCUMENT_QA_MODEL",
+        default="",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Model id override for the DocumentQA sidecar call (e.g. a cheap "
+            "haiku-class model); unset uses the configured provider model."
+        ),
+        kind="str",
+    ),
+    _b(
         "MAGI_CROSS_VERIFY_ENABLED",
         summary="Enable the cross-verification gate over spawned-agent results.",
     ),

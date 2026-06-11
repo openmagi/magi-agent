@@ -2261,6 +2261,23 @@ def plan_mode_tools_enabled(env: Mapping[str, str] | None = None) -> bool:
     return _is_true(env.get("MAGI_PLAN_MODE_TOOLS_ENABLED"))
 
 
+def document_qa_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Return True when the question-conditioned DocumentQA sidecar tool is enabled.
+
+    Single source of truth for ``MAGI_DOCUMENT_QA_ENABLED``. Like
+    :func:`plan_mode_tools_enabled` this is a **strict default-OFF** gate: it
+    never defaults ON in any runtime profile (the outer
+    ``MAGI_FILE_TOOLS_ENABLED`` suite gate is profile-default-ON locally, so
+    riding only that gate would silently flip the new tool ON for local users)
+    and flips to ``True`` only for an explicit truthy value. When OFF the
+    ``DocumentQA`` manifest is not registered and no handler is bound, so
+    registry contents stay byte-identical to before.
+    """
+    from .flags import flag_bool
+
+    return flag_bool("MAGI_DOCUMENT_QA_ENABLED", env=env)
+
+
 def is_message_cache_enabled(env: Mapping[str, str] | None = None) -> bool:
     """Single source of truth for the message-tail prompt-cache flag.
 

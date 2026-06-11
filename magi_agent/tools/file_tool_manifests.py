@@ -204,6 +204,31 @@ _XLSX_INFO_SCHEMA: dict[str, object] = {
     },
 }
 
+_DOCUMENT_QA_SCHEMA: dict[str, object] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["path", "question"],
+    "properties": {
+        "path": {"type": "string"},
+        "question": {
+            "type": "string",
+            "description": (
+                "The specific question to answer about the file "
+                "(e.g. 'What does clause 7 say about termination?')."
+            ),
+        },
+        "maxContentChars": {
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 100000,
+            "description": (
+                "Optional cap on the converted document content sent to the "
+                "sidecar model. Default: 100000."
+            ),
+        },
+    },
+}
+
 _FILE_TOOL_MANIFESTS: tuple[ToolManifest, ...] = (
     ToolManifest(
         name="XLSXRead",
@@ -404,9 +429,44 @@ _FILE_TOOL_MANIFESTS: tuple[ToolManifest, ...] = (
 )
 
 
+# Registered (and bound) ONLY when document_qa_enabled() — strict default-OFF
+# inner gate on top of the MAGI_FILE_TOOLS_ENABLED outer suite gate, because
+# the outer gate is profile-default-ON in local profiles.
+_DOCUMENT_QA_MANIFEST = ToolManifest(
+    name="DocumentQA",
+    description=(
+        "Answer a specific question about a file (PDF, DOCX, PPTX, XML, CSV, "
+        "TXT, MD, RST, XLSX, ZIP listing) via a sidecar model — only the "
+        "compact answer enters your context, never the raw file content. "
+        "Prefer DocumentQA over DocumentRead when you have a specific question "
+        "about a file; use DocumentRead when you need the raw text itself."
+    ),
+    kind="core",
+    source=CORE_TOOL_SOURCE,
+    permission="read",
+    inputSchema=_DOCUMENT_QA_SCHEMA,
+    availableInModes=("plan", "act"),
+    tags=("workspace", "file", "document", "qa", "read", "multimodal-file"),
+    parallelSafety="readonly",
+    mutatesWorkspace=False,
+    dangerous=False,
+    timeoutMs=120_000,
+    costClass="medium",
+    latencyClass="interactive",
+    budget=Budget(max_calls_per_turn=4, max_parallel=1, outputChars=8_000),
+    enabled_by_default=False,
+    opt_out=True,
+)
+
+
 def file_tool_manifests() -> tuple[ToolManifest, ...]:
     """Return copies of all four file-tool manifests."""
     return tuple(m.model_copy(deep=True) for m in _FILE_TOOL_MANIFESTS)
+
+
+def document_qa_manifest() -> ToolManifest:
+    """Return a copy of the gated DocumentQA manifest."""
+    return _DOCUMENT_QA_MANIFEST.model_copy(deep=True)
 
 
 def register_file_tool_manifests(registry: ToolRegistry) -> tuple[ToolManifest, ...]:
@@ -415,14 +475,23 @@ def register_file_tool_manifests(registry: ToolRegistry) -> tuple[ToolManifest, 
     All manifests are registered with ``enabled_by_default=False``; the caller
     must call ``bind_file_toolhost_handlers`` to bind handlers and enable them
     via registry policy.
+
+    The ``DocumentQA`` manifest is appended only when the strict
+    ``MAGI_DOCUMENT_QA_ENABLED`` inner gate is on; with the flag unset the
+    registered set is byte-identical to before.
     """
+    from magi_agent.config.env import document_qa_enabled  # noqa: PLC0415
+
     manifests = file_tool_manifests()
+    if document_qa_enabled():
+        manifests = (*manifests, document_qa_manifest())
     for manifest in manifests:
         registry.register(manifest.model_copy(deep=True))
     return manifests
 
 
 __all__ = [
+    "document_qa_manifest",
     "file_tool_manifests",
     "register_file_tool_manifests",
 ]
