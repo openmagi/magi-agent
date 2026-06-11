@@ -125,7 +125,10 @@ def test_audit_does_not_treat_failed_web_tool_url_as_source():
     report = audit.report("The answer cites https://example.com/private.")
 
     assert report["sourceUrlCount"] == 0
-    assert "https://example.com/private" in report["citedWithoutSource"]
+    # Refined classification: a URL touched by a FAILED fetch is its own
+    # deterministic class (citedAfterFailedFetch), not citedWithoutSource.
+    assert "https://example.com/private" in report["citedAfterFailedFetch"]
+    assert report["verdict"] == "attention"
     assert report["verdict"] == "attention"
 
 
@@ -307,3 +310,88 @@ def test_text_mode_output_unchanged_and_audit_logged(monkeypatch):
     # stdout contract unchanged (single text body, no audit JSON on stdout)
     assert "research_governance_audit" not in raw
     assert any("research_governance_audit" in line for line in logged)
+
+
+# ---------------------------------------------------------------------------
+# Second deterministic class (A2 expansion): citing a FAILED fetch.
+# The web tools are fail-soft (they return "fetch error: ..." strings with an
+# ok ToolResult), so failure detection is string-prefix based, and a failed
+# fetch's URLs must not count as sources.
+# ---------------------------------------------------------------------------
+
+
+def _tool_start_with_input(tool_id: str, name: str, input_preview: str) -> dict:
+    return {
+        "type": "tool_start",
+        "id": tool_id,
+        "name": name,
+        "input_preview": input_preview,
+    }
+
+
+def test_cited_after_failed_fetch_is_flagged():
+    from magi_agent.research.live_audit import ResearchLiveAudit
+
+    audit = ResearchLiveAudit()
+    audit.observe_event(
+        "tool", _tool_start_with_input("t1", "web_fetch", "url=https://dead.example/page")
+    )
+    audit.observe_event("tool", _tool_end("t1", "fetch error: HTTPError(404)"))
+
+    report = audit.report("According to https://dead.example/page, X is true.")
+
+    assert "https://dead.example/page" in report["citedAfterFailedFetch"]
+    assert report["verdict"] == "attention"
+
+
+def test_failed_fetch_urls_do_not_count_as_sources():
+    from magi_agent.research.live_audit import ResearchLiveAudit
+
+    audit = ResearchLiveAudit()
+    audit.observe_event(
+        "tool", _tool_start_with_input("t1", "web_fetch", "url=https://dead.example/p")
+    )
+    audit.observe_event(
+        "tool", _tool_end("t1", "fetch error: timeout for https://dead.example/p")
+    )
+
+    report = audit.report("See https://dead.example/p.")
+
+    # The URL appears in the failed output, but a failed fetch is NOT a source.
+    assert report["sourceUrlCount"] == 0
+    assert "https://dead.example/p" in report["citedAfterFailedFetch"]
+
+
+def test_later_successful_fetch_clears_failed_flag():
+    from magi_agent.research.live_audit import ResearchLiveAudit
+
+    audit = ResearchLiveAudit()
+    audit.observe_event(
+        "tool", _tool_start_with_input("t1", "web_fetch", "url=https://flaky.example/p")
+    )
+    audit.observe_event("tool", _tool_end("t1", "fetch error: 503"))
+    audit.observe_event(
+        "tool", _tool_start_with_input("t2", "web_fetch", "url=https://flaky.example/p")
+    )
+    audit.observe_event(
+        "tool", _tool_end("t2", "content of https://flaky.example/p loaded fine")
+    )
+
+    report = audit.report("Per https://flaky.example/p, X.")
+
+    assert report["citedAfterFailedFetch"] == []
+    assert report["citedWithoutSource"] == []
+    assert report["verdict"] == "pass"
+
+
+def test_enforce_reprompt_names_failed_fetch_urls():
+    from magi_agent.research.live_audit import enforce_reprompt_message
+
+    message = enforce_reprompt_message(
+        {
+            "citedWithoutSource": [],
+            "citedAfterFailedFetch": ["https://dead.example/page"],
+            "verdict": "attention",
+        }
+    )
+    assert "https://dead.example/page" in message
