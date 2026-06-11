@@ -96,6 +96,8 @@ _ALLOWED_AGENT_KWARGS = (
 _ALLOWED_RUNNER_KWARGS = ("agent", "app_name", "auto_create_session", "session_service")
 _ALLOWED_RUN_ASYNC_KWARGS = ("new_message", "run_config", "session_id", "user_id")
 _MAX_MANUAL_TOOL_CONTINUATIONS = 4
+_MANUAL_TOOL_EVENT_LIMIT = 64
+_SELECTED_FULL_TOOLHOST_TEXT_EVENT_LIMIT = 512
 _MAX_MANUAL_TOOL_RESULTS_BYTES = 8192
 _ERROR_REDACTION_RE = re.compile(
     r"(?:"
@@ -780,7 +782,9 @@ class Gate5B4C3LiveRunnerBoundary:
                             tool_only_events_seen = True
                         if event_function_responses:
                             function_responses_seen = True
-                        if event_count >= 64:
+                        if event_count >= _stream_event_limit(
+                            selected_full_toolhost=selected_full_toolhost
+                        ):
                             break
                     if stream_usage is not None:
                         usage_totals[0] += stream_usage[0]
@@ -788,7 +792,10 @@ class Gate5B4C3LiveRunnerBoundary:
                         usage_totals[2] += stream_usage[2]
                     if (
                         selected_full_toolhost
-                        and event_count < 64
+                        and event_count
+                        < _stream_event_limit(
+                            selected_full_toolhost=selected_full_toolhost
+                        )
                         and not function_calls
                         and not function_responses_seen
                         and _should_continue_truncated_output(
@@ -1673,6 +1680,12 @@ def _output_continuation_config_from_env() -> OutputContinuationConfig | None:
         enabled=True,
         max_continuations=parsed.max_continuations,
     )
+
+
+def _stream_event_limit(*, selected_full_toolhost: bool) -> int:
+    if selected_full_toolhost:
+        return _SELECTED_FULL_TOOLHOST_TEXT_EVENT_LIMIT
+    return _MANUAL_TOOL_EVENT_LIMIT
 
 
 def _build_output_continuation_message() -> str:
