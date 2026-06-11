@@ -9,7 +9,7 @@ from typing import Callable
 
 from google.genai import types
 
-from benchmarks.gaia.answer import GAIA_SYSTEM_PROMPT, extract_final_answer
+from benchmarks.gaia.answer import extract_final_answer, gaia_system_prompt
 from benchmarks.gaia.dataset import GaiaQuestion
 from magi_agent.cli.providers import ProviderConfig
 from magi_agent.cli.real_runner import CliModelRunner, build_cli_model_runner
@@ -74,7 +74,12 @@ def run_gaia_question(
         )
 
     # 4. Build runner.
-    instruction = f"{GAIA_SYSTEM_PROMPT}\n\nQUESTION:\n{question.question}{attachment_note}"
+    # gaia_system_prompt() returns GAIA_SYSTEM_PROMPT byte-identically when
+    # MAGI_COMPUTE_VIA_CODE_ENABLED is unset (default), and appends the scoped
+    # compute-via-code reminder only when the flag is on.
+    instruction = (
+        f"{gaia_system_prompt()}\n\nQUESTION:\n{question.question}{attachment_note}"
+    )
     runner: CliModelRunner = build_cli_model_runner(
         config,
         instruction=instruction,

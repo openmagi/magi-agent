@@ -377,6 +377,13 @@ FLAGS: tuple[FlagSpec, ...] = (
             "'create your own tools' recipe block (frontier-tier models only)."
         ),
     ),
+    _b(
+        "MAGI_COMPUTE_VIA_CODE_ENABLED",
+        summary=(
+            "Append a general prompt directive to compute arithmetic, conversions, "
+            "statistics, and checksums by running code instead of mental math."
+        ),
+    ),
     # --- Evidence / verification gates -------------------------------------
     _b(
         "MAGI_EGRESS_GATE_ENABLED",
