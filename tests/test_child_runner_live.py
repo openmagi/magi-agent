@@ -517,6 +517,39 @@ def test_run_child_readonly_profile_forwards_readonly_tools_to_builder(
     assert "Bash" not in tool_names
 
 
+def test_readonly_child_toolset_does_not_build_full_local_handlers(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """Readonly child tools must not initialize full local writable surfaces."""
+
+    import magi_agent.cli.tool_runtime as tool_runtime
+
+    def fail_full_handler_bind(*args: object, **kwargs: object) -> None:
+        raise AssertionError("full local handlers should not be built")
+
+    monkeypatch.setattr(
+        tool_runtime,
+        "bind_cli_local_full_tool_handlers",
+        fail_full_handler_bind,
+    )
+
+    runner = RealLocalChildRunner(
+        toolset_profile="readonly",
+        workspace_root=str(tmp_path),
+    )
+
+    tools, collector = runner._resolve_turn_toolset("child-session-readonly")
+
+    assert collector is not None
+    assert {str(tool.name) for tool in tools} == {
+        "FileRead",
+        "Glob",
+        "Grep",
+        "GitDiff",
+    }
+
+
 def test_run_child_readonly_profile_promotes_tool_receipts_to_evidence_refs() -> None:
     """When a toolset runs, the collected tool-call receipts surface as the
     child's ``evidenceRefs`` (promoted to the envelope by the boundary)."""

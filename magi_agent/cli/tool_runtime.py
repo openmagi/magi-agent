@@ -60,6 +60,7 @@ def build_cli_tool_runtime(
     permission_mode: str = "default",
     general_automation_receipts: "GeneralAutomationReceiptLedgerStore | None" = None,
     local_tool_evidence_collector: "LocalToolEvidenceCollector | None" = None,
+    include_local_full_handlers: bool = True,
 ) -> CliToolRuntime:
     """Assemble the registry, dispatcher, and tool-context factory.
 
@@ -83,12 +84,13 @@ def build_cli_tool_runtime(
     registry = ToolRegistry()
     register_core_tool_manifests(registry)
     bind_core_toolhost_handlers(registry)
-    bind_cli_local_full_tool_handlers(
-        registry,
-        workspace_root=workspace_root,
-        bot_id=CLI_BOT_ID,
-        user_id=CLI_USER_ID,
-    )
+    if include_local_full_handlers:
+        bind_cli_local_full_tool_handlers(
+            registry,
+            workspace_root=workspace_root,
+            bot_id=CLI_BOT_ID,
+            user_id=CLI_USER_ID,
+        )
 
     # Optional file & multimodal tools (MAGI_FILE_TOOLS_ENABLED=true).
     # Guarded here so the gate is evaluated at build time, not import time.
@@ -182,6 +184,7 @@ def build_cli_adk_tools(
     permission_mode: str = "default",
     general_automation_receipts: "GeneralAutomationReceiptLedgerStore | None" = None,
     local_tool_evidence_collector: "LocalToolEvidenceCollector | None" = None,
+    include_local_full_handlers: bool = True,
 ) -> list[object]:
     """Build the ADK FunctionTools exposing the real core tools for the CLI."""
 
@@ -196,6 +199,7 @@ def build_cli_adk_tools(
         permission_mode=permission_mode,
         general_automation_receipts=general_automation_receipts,
         local_tool_evidence_collector=local_tool_evidence_collector,
+        include_local_full_handlers=include_local_full_handlers,
     )
     tools = build_adk_function_tools_for_registry(
         runtime.registry,
