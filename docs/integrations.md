@@ -26,13 +26,18 @@ Channel delivery is also a projection boundary. User-visible messages should be 
   local-fake receipts, not real delivery. Full guide:
   [channels.md](channels.md).
 
-- **Composio external tools.** An optional external-integration surface lives
-  under `magi_agent/composio/` (config, health, and redaction modules). It is
-  **optional and default-off**: it requires an explicit Composio configuration
-  (scope + credential) and approval before any external tool can be reached, and
-  its outputs pass through `redact_composio_text` / `redact_composio_value`
-  before they are surfaced. Treat it as a gated surface — enabling it does not
-  bypass the side-effect boundary above.
+- **Composio external tools — ON HOLD.** An optional external-integration
+  surface lives under `magi_agent/composio/` (config, health, and redaction
+  modules only; no live end-to-end connection ships today). The integration is
+  **deliberately on hold**: measured GAIA usage showed the per-call MCP
+  connect/teardown latency made multi-hop web tasks time out, and the direct
+  web tools (Brave search + Firecrawl fetch + `research_fact`, which
+  auto-activate when `BRAVE_API_KEY`/`FIRECRAWL_API_KEY` are set) replaced it
+  as the supported web path. The config/health/redaction modules remain so an
+  operator-driven revival has a seam, but no new Composio capability will be
+  added unless a concrete use case the direct tools cannot serve appears.
+  Treat it as a gated, dormant surface — enabling it does not bypass the
+  side-effect boundary above.
 
 - **Apify Actors.** Magi Agent can discover and run Apify Actors for
   platform-specific structured scraping (Instagram, TikTok, Google Maps, Amazon,
