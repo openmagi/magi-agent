@@ -347,6 +347,148 @@ class CallbackProvideContext:
     register: Callable[[Any, Any], None]
 
 
+# ---------------------------------------------------------------------------
+# Phase 5 (S-0): shared control-plane seam surface.
+#
+# The four hard control-plane seams (S-A evidence ledger, S-B turn snapshot +
+# fork runner, S-C per-invocation mutable state, S-D compaction) each need a
+# capability the per-hook ctx classes above don't carry. ControlPlaneContext is
+# the SHARED carrier all four reuse: first-party and user ``control_plane`` impls
+# receive the identical object (the §1 "no privilege" keystone). The dispatcher
+# fills the relevant fields in per seam; everything else stays ``None``.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class EvidenceLedgerView:
+    """S-A read-only view: the per-turn evidence ledger + open controls.
+
+    Surfaces exactly the two reads ``GaConstraintReinjectionControl`` needs
+    (``ledger_for_turn`` / ``open_controls_for_turn`` already resolved for the
+    active turn) WITHOUT handing the control the mutable receipt-store object. A
+    user pack receives the same view, so it can author an equivalent reminder
+    control with zero privileged access.
+    """
+
+    ledger: Any  # EvidenceLedger | None (already resolved for this turn)
+    open_controls: tuple[Any, ...]  # resolved open controls for the turn
+    contract_required: Any  # RequiredDeliverableEvidence | None
+    agent_role: str = "general"
+
+
+@dataclass(frozen=True)
+class TurnSnapshot:
+    """S-B pre-extracted typed snapshot of the just-finished turn.
+
+    The runtime extracts this from the ADK session/event tree ONCE and places it
+    on the context, so a control never has to traverse ``session.events`` itself
+    (the privileged nested traversal). Mirrors the legacy
+    ``_SelfReviewTurnSnapshot``.
+    """
+
+    session_id: str
+    turn_id: str
+    system_prompt_blocks: tuple[dict[str, Any], ...]
+    parent_assistant_message: dict[str, Any]
+
+
+class PerInvocationState:
+    """S-C runtime-owned mutable per-invocation state with LRU bound + clear hook.
+
+    The ONLY mutable struct in the control-plane context. It replaces each
+    control's private ``self._attempts`` / ``self._detectors`` /
+    ``self._recovery_state`` so per-invocation state lives in the runtime, not in
+    a control instance a user pack cannot reach. Bounded (LRU-ish: dict insertion
+    order, evict oldest) so it never leaks across turns whose clear hook never
+    fires (e.g. a turn that raised). ``clear_invocation`` is the
+    clear-on-turn-complete hook the dispatcher calls from ``after_run``.
+    """
+
+    def __init__(self, *, max_scopes: int = 256) -> None:
+        self._max_scopes = max_scopes
+        # keyed (invocation_id, name) -> scalar value
+        self._store: dict[tuple[str, str], Any] = {}
+        # opaque per-invocation objects (e.g. a loop detector) keyed by id then name
+        self._objects: dict[str, dict[str, Any]] = {}
+
+    # -- scalar scoped counters (edit-retry attempts, recovery attempt counts) --
+    def get_scoped(self, invocation_id: str, name: str, *, default: Any = None) -> Any:
+        return self._store.get((invocation_id, name), default)
+
+    def set_scoped(self, invocation_id: str, name: str, value: Any) -> None:
+        self._store[(invocation_id, name)] = value
+        self._bound()
+
+    def pop_scoped(self, invocation_id: str, name: str) -> None:
+        self._store.pop((invocation_id, name), None)
+
+    # -- per-invocation opaque objects (loop detectors / recovery state objs) ----
+    def get_object(self, invocation_id: str, name: str, factory: Callable[[], Any]) -> Any:
+        bucket = self._objects.setdefault(invocation_id, {})
+        if name not in bucket:
+            bucket[name] = factory()
+            self._bound()
+        return bucket[name]
+
+    def peek_object(self, invocation_id: str, name: str, *, default: Any = None) -> Any:
+        return self._objects.get(invocation_id, {}).get(name, default)
+
+    def set_object(self, invocation_id: str, name: str, value: Any) -> None:
+        self._objects.setdefault(invocation_id, {})[name] = value
+        self._bound()
+
+    # -- clear-on-turn-complete hook (called by the dispatcher's after_run) ------
+    def clear_invocation(self, invocation_id: str) -> None:
+        self._store = {
+            k: v for k, v in self._store.items() if k[0] != invocation_id
+        }
+        self._objects.pop(invocation_id, None)
+
+    def _bound(self) -> None:
+        # Bound the scalar store by distinct invocation id (oldest-first eviction).
+        while self._distinct_scalar_invocations() > self._max_scopes:
+            oldest = next(iter(self._store))[0]
+            self._store = {k: v for k, v in self._store.items() if k[0] != oldest}
+        while len(self._objects) > self._max_scopes:
+            self._objects.pop(next(iter(self._objects)), None)
+
+    def _distinct_scalar_invocations(self) -> int:
+        return len({k[0] for k in self._store})
+
+
+@dataclass(frozen=True)
+class ControlPlaneContext:
+    """The SHARED Phase-5 seam carrier for ``control_plane`` impls.
+
+    Every first-party LoopControl (and every user-authored control_plane impl)
+    receives this identical object — no privileged receipt-store handle, no
+    god-object, no per-control private mutable ``self.*`` state. Each seam reads
+    only the field it needs; the dispatcher populates the relevant field(s) and
+    leaves the rest ``None`` (built via ``minimal`` for control-isolation tests).
+
+    - ``evidence``       — S-A resolved :class:`EvidenceLedgerView`.
+    - ``turn_snapshot``  — S-B pre-extracted :class:`TurnSnapshot`.
+    - ``fork_runner``    — S-B public ForkRunner capability (full-trust local).
+    - ``per_invocation`` — S-C runtime-owned :class:`PerInvocationState`.
+    - ``compaction``     — S-D narrowed compaction-decision capability.
+    """
+
+    evidence: EvidenceLedgerView | None = None
+    turn_snapshot: TurnSnapshot | None = None
+    fork_runner: Any | None = None        # public ForkRunner capability (full-trust)
+    per_invocation: PerInvocationState | None = None
+    compaction: Any | None = None         # narrowed compaction-decision capability
+
+    @classmethod
+    def minimal(cls, **overrides: Any) -> "ControlPlaneContext":
+        """Build a context with only the supplied seam fields populated.
+
+        Used by control unit tests and per-control isolation. The live dispatcher
+        (S-A…S-D integration, Phase 6) builds the full context from ADK args.
+        """
+        return cls(**overrides)
+
+
 class GatePositionViolation(ValueError):
     """A before_tool deciding impl ran with gate_position 'after' (would bypass the
     agent-level permission gate). Mirrors ControlPlane.register's footgun guard."""
@@ -450,6 +592,8 @@ __all__ = [
     "SessionReadView", "EvidenceReadView",
     "BeforeToolCtx", "AfterToolCtx", "BeforeModelCtx", "AfterAgentCtx",
     "ToolCtx", "ValidatorCtx", "ValidatorVerdict", "EvidenceProducerCtx",
+    "ControlPlaneContext", "EvidenceLedgerView", "TurnSnapshot",
+    "PerInvocationState",
     "ContextDispatcher", "GatePositionViolation",
     "ProducerSpec", "ConnectorSpec",
     "ToolProvideContext", "EvidenceProducerProvideContext", "RecipeProvideContext",
