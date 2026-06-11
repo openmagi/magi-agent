@@ -153,3 +153,77 @@ def test_levers_off_by_default_do_not_interfere() -> None:
     out = asyncio.run(callables["book_reservation"]({"user_id": "u1", "flight_type": "one way"}, None))
     assert "booked" in str(out).lower()  # executed despite invalid enum (validation off)
     assert len(env.steps) == 1
+
+
+def _spec(name: str) -> dict:
+    return {"type": "function", "function": {"name": name, "description": "d",
+        "parameters": {"type": "object", "properties": {"id": {"type": "string"}}}}}
+
+
+@dataclass
+class _MultiToolEnv:
+    tools_info: tuple = (_spec("book_x"), _spec("cancel_y"), _spec("get_thing"))
+    steps: list = field(default_factory=list)
+
+    def step(self, action):
+        self.steps.append(action)
+        return FakeResp(observation=f"ok {action.name}", reward=0.0, done=False)
+
+
+def _grounded_callables(env: _MultiToolEnv) -> dict:
+    cfg = ReliabilityConfig(grounded_args=True)
+    return build_env_tool_callables(
+        env, state=EpisodeState(), action_factory=FakeAction, reliability=cfg
+    )
+
+
+def test_grounded_args_first_write_call_prompts_instead_of_executing() -> None:
+    env = _MultiToolEnv()
+    callables = _grounded_callables(env)
+    out1 = asyncio.run(callables["book_x"]({"id": "1"}, None))
+    assert "book_x" in str(out1)
+    assert env.steps == []  # first call prompted, never executed
+    out2 = asyncio.run(callables["book_x"]({"id": "1"}, None))
+    assert "ok book_x" in str(out2)
+    assert len(env.steps) == 1  # second identical call executed
+
+
+def test_grounded_args_one_shot_per_tool_name() -> None:
+    env = _MultiToolEnv()
+    callables = _grounded_callables(env)
+    asyncio.run(callables["book_x"]({"id": "1"}, None))  # prompt
+    asyncio.run(callables["book_x"]({"id": "1"}, None))  # execute
+    out = asyncio.run(callables["cancel_y"]({"id": "2"}, None))
+    assert "cancel_y" in str(out)
+    assert len(env.steps) == 1  # cancel_y prompted, not executed
+    out = asyncio.run(callables["book_x"]({"id": "9"}, None))  # NEW args, same name
+    assert "ok book_x" in str(out)
+    assert len(env.steps) == 2  # executed immediately, no second prompt
+
+
+def test_grounded_args_corrected_args_execute_without_second_prompt() -> None:
+    env = _MultiToolEnv()
+    callables = _grounded_callables(env)
+    out1 = asyncio.run(callables["book_x"]({"id": "A"}, None))
+    assert "book_x" in str(out1)
+    assert env.steps == []
+    out2 = asyncio.run(callables["book_x"]({"id": "B"}, None))
+    assert "ok book_x" in str(out2)
+    assert len(env.steps) == 1
+    assert env.steps[0].kwargs == {"id": "B"}  # env receives the corrected args
+
+
+def test_grounded_args_read_tools_unaffected() -> None:
+    env = _MultiToolEnv()
+    callables = _grounded_callables(env)
+    out = asyncio.run(callables["get_thing"]({"id": "1"}, None))
+    assert "ok get_thing" in str(out)
+    assert len(env.steps) == 1  # executed immediately, no prompt
+
+
+def test_grounded_args_off_no_behavior_change() -> None:
+    env = _MultiToolEnv()
+    callables = build_env_tool_callables(env, state=EpisodeState(), action_factory=FakeAction)
+    out = asyncio.run(callables["book_x"]({"id": "1"}, None))
+    assert "ok book_x" in str(out)
+    assert len(env.steps) == 1  # default config: first write executes immediately

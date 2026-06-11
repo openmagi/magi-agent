@@ -11,6 +11,7 @@ from benchmarks.taubench.episode import EpisodeState
 from benchmarks.taubench.reliability import (
     ReliabilityConfig,
     WriteLedger,
+    grounding_prompt,
     looks_like_error,
     validate_args,
 )
@@ -43,6 +44,7 @@ def build_env_tool_callables(
     """
     cfg = reliability or ReliabilityConfig()
     led = ledger if ledger is not None else WriteLedger()
+    grounding_prompted: set[str] = set()
     callables: dict[str, Callable] = {}
     for spec in _tool_specs(env):
         name = spec["name"]
@@ -72,6 +74,13 @@ def build_env_tool_callables(
                             f"Duplicate write blocked: '{tool_name}' with these "
                             "arguments already completed successfully. Do not repeat it."
                         )
+                if cfg.grounded_args and is_write:
+                    try:
+                        if tool_name not in grounding_prompted:
+                            grounding_prompted.add(tool_name)
+                            return grounding_prompt(tool_name, args)
+                    except Exception:
+                        pass
                 try:
                     resp = env.step(action_factory(name=tool_name, kwargs=dict(args)))
                 except Exception as exc:  # surface as observation, not infra error

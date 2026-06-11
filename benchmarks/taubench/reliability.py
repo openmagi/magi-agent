@@ -22,6 +22,7 @@ class ReliabilityConfig(BaseModel):
     dup_write_guard: bool = False
     verify_before_final: bool = False
     completion_review: bool = False
+    grounded_args: bool = False
 
     @property
     def any_enabled(self) -> bool:
@@ -30,6 +31,7 @@ class ReliabilityConfig(BaseModel):
             or self.dup_write_guard
             or self.verify_before_final
             or self.completion_review
+            or self.grounded_args
         )
 
 
@@ -220,11 +222,36 @@ def completion_review_nudge() -> str:
     )
 
 
+def grounding_prompt(tool_name: str, arguments: dict) -> str:
+    """One-time pre-execution grounding check for a write tool call.
+
+    Domain-agnostic: asks the model to verify each argument value has a
+    concrete source in THIS conversation before re-issuing the call.
+    """
+    try:
+        args_json = json.dumps(arguments or {}, sort_keys=True, default=str, indent=1)
+    except (TypeError, ValueError):
+        args_json = repr(arguments)
+    return (
+        f"HOLD — grounding check before this write executes. You called "
+        f"'{tool_name}' with:\n{args_json}\n"
+        "For each argument value, verify its source: (1) the user explicitly "
+        "stated it in this conversation, (2) it comes from a tool result you "
+        "fetched for THIS request, or (3) the user explicitly told you to take "
+        "it from their stored data. Do not reuse values copied from unrelated "
+        "records, and do not fill in values the user never confirmed. If every "
+        f"value is grounded, call '{tool_name}' again with the same arguments "
+        "to execute. If any value is not grounded, correct it or ask the user "
+        "first."
+    )
+
+
 __all__ = [
     "DEFAULT_WRITE_PREFIXES",
     "ReliabilityConfig",
     "WriteLedger",
     "completion_review_nudge",
+    "grounding_prompt",
     "is_conclusion",
     "looks_like_error",
     "validate_args",

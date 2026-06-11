@@ -165,3 +165,38 @@ def test_completion_review_nudge_is_general_no_domain_tokens() -> None:
     low = msg.lower()
     for tok in ("flight", "reservation", "cabin", "airline", "baggage", "certificate"):
         assert tok not in low
+
+
+from benchmarks.taubench.reliability import grounding_prompt
+
+
+class TestGroundedArgsConfig:
+    def test_default_off(self) -> None:
+        cfg = ReliabilityConfig()
+        assert cfg.grounded_args is False
+        assert cfg.any_enabled is False
+
+    def test_any_enabled_when_on(self) -> None:
+        assert ReliabilityConfig(grounded_args=True).any_enabled is True
+
+
+class TestGroundingPrompt:
+    def test_echoes_tool_and_arguments(self) -> None:
+        msg = grounding_prompt("book_thing", {"a": 1, "b": "x"})
+        assert "book_thing" in msg
+        assert '"a": 1' in msg
+        assert '"b": "x"' in msg
+
+    def test_instructs_reissue_and_source_check(self) -> None:
+        msg = grounding_prompt("t", {}).lower()
+        assert "call" in msg and "again" in msg
+        assert "user" in msg
+
+    def test_domain_agnostic(self) -> None:
+        msg = grounding_prompt("t", {}).lower()
+        for token in ("flight", "reservation", "airline", "baggage", "cabin"):
+            assert token not in msg
+
+    def test_unserializable_args_do_not_raise(self) -> None:
+        msg = grounding_prompt("t", {"x": object()})
+        assert "t" in msg
