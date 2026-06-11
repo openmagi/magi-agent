@@ -455,6 +455,27 @@ class MaxStepsBrakeControl(BaseLoopControl):
         callback_context: Any,
         llm_request: Any,
     ) -> None:
+        # Phase 5: ADK hook is a thin delegate to the typed-context entry point.
+        # This control needs only the outgoing request, so the context carries no
+        # seam fields; behavior is byte-identical to the pre-migration body.
+        from magi_agent.packs.context import ControlPlaneContext
+
+        return await self.apply_before_model(
+            ControlPlaneContext.minimal(), llm_request=llm_request
+        )
+
+    async def apply_before_model(
+        self,
+        ctx: Any,
+        *,
+        llm_request: Any,
+    ) -> None:
+        """Typed-context entry point (the template for the seam migrations).
+
+        ``ctx`` is a :class:`ControlPlaneContext`; this control reads only the
+        outgoing request (the wrap-up brake — it needs no seam capability). A
+        user pack authoring an equivalent brake receives the same context.
+        """
         from magi_agent.runtime.turn_policy import MAX_STEPS_WRAP_UP_MESSAGE
 
         if self.max_iterations <= 0:

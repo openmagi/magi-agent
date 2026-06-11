@@ -216,6 +216,51 @@ def test_max_steps_brake_not_in_local_runner_by_default(
     assert not any("max_steps" in name for name in control_names)
 
 
+# ---------------------------------------------------------------------------
+# Phase 5 Task 5.1: typed-context entry point (template for the seam migrations)
+# ---------------------------------------------------------------------------
+
+
+def test_max_steps_brake_reads_request_via_typed_context() -> None:
+    """apply_before_model takes a ControlPlaneContext; behavior is identical to
+    on_before_model — wrap-up injected and tools cleared on the final iteration."""
+    from magi_agent.packs.context import ControlPlaneContext
+
+    ctrl = MaxStepsBrakeControl(max_iterations=2, iteration=1)  # final iteration
+    req = _FakeLlmRequest(
+        contents=[{"role": "user", "content": "go"}],
+        tools=[{"type": "function", "name": "Read"}],
+    )
+    ctx = ControlPlaneContext.minimal()
+    _run(ctrl.apply_before_model(ctx, llm_request=req))
+
+    assert _has_wrap_up(req.contents)
+    assert req.config.tools == []
+
+
+def test_max_steps_brake_typed_context_not_final_is_noop() -> None:
+    """Before the final iteration the typed-context path mutates nothing."""
+    from magi_agent.packs.context import ControlPlaneContext
+
+    ctrl = MaxStepsBrakeControl(max_iterations=5, iteration=2)  # not final
+    initial = [{"role": "user", "content": "go"}]
+    req = _FakeLlmRequest(contents=list(initial), tools=[{"type": "function"}])
+    _run(ctrl.apply_before_model(ControlPlaneContext.minimal(), llm_request=req))
+
+    assert req.contents == initial
+    assert len(req.config.tools) == 1
+
+
+def test_max_steps_brake_on_before_model_delegates_to_apply() -> None:
+    """on_before_model is a thin delegate; the legacy ADK hook still works."""
+    ctrl = MaxStepsBrakeControl(max_iterations=3, iteration=2)
+    req = _FakeLlmRequest(contents=[], tools=[{"type": "function", "name": "Read"}])
+    _run(ctrl.on_before_model(callback_context=_FakeCallbackContext(), llm_request=req))
+
+    assert _has_wrap_up(req.contents)
+    assert req.config.tools == []
+
+
 def test_max_steps_brake_not_in_real_runner_by_default(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
