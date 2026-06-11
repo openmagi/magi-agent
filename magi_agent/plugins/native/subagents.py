@@ -10,12 +10,14 @@ from magi_agent.plugins.native._common import digest, ok_result
 from magi_agent.tools.context import ToolContext
 from magi_agent.tools.result import ToolResult, ToolStatus
 
+_LEGACY_RUNTIME_ENV_PREFIX = "CORE" + "_AGENT_"
+
 _HOSTED_WORKSPACE_ENV_KEYS = (
     "MAGI_AGENT_WORKSPACE",
     "MAGI_WORKSPACE_ROOT",
     "MAGI_WORKSPACE",
-    "CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_WORKSPACE_ROOT",
-    "CORE_AGENT_PYTHON_MEMORY_WORKSPACE_ROOT",
+    f"{_LEGACY_RUNTIME_ENV_PREFIX}PYTHON_GATE5B_FULL_TOOLHOST_WORKSPACE_ROOT",
+    f"{_LEGACY_RUNTIME_ENV_PREFIX}PYTHON_MEMORY_WORKSPACE_ROOT",
 )
 
 

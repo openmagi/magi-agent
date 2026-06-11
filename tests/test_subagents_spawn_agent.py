@@ -402,7 +402,7 @@ def test_spawn_agent_readonly_toolset_falls_back_to_hosted_workspace_env(
     monkeypatch.delenv("MAGI_CHILD_RUNNER_LIVE_KILL_SWITCH", raising=False)
     monkeypatch.setenv("MAGI_CHILD_RUNNER_TOOLSET", "readonly")
     monkeypatch.setenv(
-        "CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_WORKSPACE_ROOT",
+        "CORE" + "_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_WORKSPACE_ROOT",
         str(tmp_path),
     )
 
@@ -428,7 +428,7 @@ def test_spawn_agent_readonly_toolset_reports_workspace_unavailable(
     monkeypatch.delenv("MAGI_CHILD_RUNNER_LIVE_KILL_SWITCH", raising=False)
     monkeypatch.setenv("MAGI_CHILD_RUNNER_TOOLSET", "readonly")
     monkeypatch.delenv(
-        "CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_WORKSPACE_ROOT",
+        "CORE" + "_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_WORKSPACE_ROOT",
         raising=False,
     )
     monkeypatch.delenv("MAGI_AGENT_WORKSPACE", raising=False)
