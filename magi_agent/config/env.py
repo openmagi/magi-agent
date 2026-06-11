@@ -191,6 +191,42 @@ def parse_edit_retry_reflection_env(
     return EditRetryReflectionEnv(enabled=enabled, max_attempts=max_attempts)
 
 
+# Single source of truth for the generic tool-exception reflection flags
+# (hermes mechanism 1, raise path). When enabled, a raising tool (any tool
+# except FileEdit/PatchApply, which keep their specialized edit-retry handler)
+# is converted into a model-visible corrective tool_result with retry guidance
+# and a per-invocation attempt budget instead of killing the whole turn.
+#
+# Deliberately a STRICT default-OFF truthy parse (NOT _runtime_feature_enabled,
+# which defaults ON under the unset/full profile): the flag is profile-
+# independent so eval-profile benchmark runs can opt in explicitly.
+TOOL_EXCEPTION_REFLECTION_ENABLED_ENV = "MAGI_TOOL_EXCEPTION_REFLECTION_ENABLED"
+TOOL_EXCEPTION_MAX_ATTEMPTS_ENV = "MAGI_TOOL_EXCEPTION_MAX_ATTEMPTS"
+_TOOL_EXCEPTION_MAX_ATTEMPTS_DEFAULT = 2
+
+
+@dataclass(frozen=True)
+class ToolExceptionReflectionEnv:
+    enabled: bool = False
+    max_attempts: int = _TOOL_EXCEPTION_MAX_ATTEMPTS_DEFAULT
+
+
+def parse_tool_exception_reflection_env(
+    env: Mapping[str, str],
+) -> ToolExceptionReflectionEnv:
+    enabled = _is_true(env.get(TOOL_EXCEPTION_REFLECTION_ENABLED_ENV))
+    max_attempts = _int_env(
+        env,
+        TOOL_EXCEPTION_MAX_ATTEMPTS_ENV,
+        _TOOL_EXCEPTION_MAX_ATTEMPTS_DEFAULT,
+    )
+    if max_attempts < 1:
+        raise RuntimeEnvError(
+            f"{TOOL_EXCEPTION_MAX_ATTEMPTS_ENV} must be >= 1"
+        )
+    return ToolExceptionReflectionEnv(enabled=enabled, max_attempts=max_attempts)
+
+
 # Single source of truth for the PR12 loop-guard wiring flags.
 # When enabled, the live ADK Runner attaches a MagiResiliencePlugin whose
 # after_tool_callback drives the existing ToolCallLoopDetector: N identical

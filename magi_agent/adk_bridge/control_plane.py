@@ -884,6 +884,23 @@ class _EditRetryLoopControl(BaseLoopControl):
         )
 
 
+class _ToolExceptionReflectionLoopControl(BaseLoopControl):
+    """Thin LoopControl adapter exposing MagiToolExceptionReflectionPlugin.
+
+    The plugin only implements the raise path (``on_tool_error_callback``)
+    plus the ``after_run_callback`` sweep — neither is a LoopControl hook;
+    both are forwarded at the plugin level by ``_ExtendedControlPlanePlugin``.
+    This adapter exists solely to expose ``._plugin`` to that fan-out.
+    """
+
+    def __init__(self, plugin: Any) -> None:
+        self._plugin = plugin
+
+    @property
+    def name(self) -> str:  # type: ignore[override]
+        return getattr(self._plugin, "name", "magi_tool_exception_reflection_control")
+
+
 class _ResilienceLoopControl(BaseLoopControl):
     """Thin LoopControl adapter delegating ``after_tool_callback`` to MagiResiliencePlugin."""
 
@@ -1083,10 +1100,14 @@ def build_default_plane(
         parse_edit_retry_reflection_env,
         parse_error_recovery_env,
         parse_loop_guard_env,
+        parse_tool_exception_reflection_env,
     )
     from magi_agent.adk_bridge.context_compaction import build_context_compaction_plugin
     from magi_agent.adk_bridge.edit_retry_reflection import build_edit_retry_reflection_plugin
     from magi_agent.adk_bridge.resilience_plugin import build_resilience_plugin
+    from magi_agent.adk_bridge.tool_exception_reflection import (
+        build_tool_exception_reflection_plugin,
+    )
 
     plane = ControlPlane()
 
@@ -1114,7 +1135,20 @@ def build_default_plane(
     if resilience_plugin is not None:
         plane.register(_ResilienceLoopControl(resilience_plugin))
 
-    # 3. Context compaction (MAGI_CONTEXT_COMPACTION_ENABLED, default OFF).
+    # 3. Generic tool-exception reflection (MAGI_TOOL_EXCEPTION_REFLECTION_ENABLED,
+    #    strict default OFF, profile-independent). Registered AFTER the edit-retry
+    #    control so edit-retry keeps fan-out priority (first non-None wins) for
+    #    FileEdit/PatchApply when both are on; the generic plugin additionally
+    #    hard-skips those tools.
+    tool_exception_env = parse_tool_exception_reflection_env(env)
+    tool_exception_plugin = build_tool_exception_reflection_plugin(
+        enabled=tool_exception_env.enabled,
+        max_attempts=tool_exception_env.max_attempts,
+    )
+    if tool_exception_plugin is not None:
+        plane.register(_ToolExceptionReflectionLoopControl(tool_exception_plugin))
+
+    # 4. Context compaction (MAGI_CONTEXT_COMPACTION_ENABLED, default OFF).
     compaction_env = parse_context_compaction_env(env)
     compaction_plugin = build_context_compaction_plugin(
         enabled=compaction_env.enabled,
@@ -1124,7 +1158,7 @@ def build_default_plane(
     if compaction_plugin is not None:
         plane.register(_CompactionLoopControl(compaction_plugin))
 
-    # 4. MaxStepsBrake (MAGI_MAX_STEPS_BRAKE_ENABLED, default OFF — new seam).
+    # 5. MaxStepsBrake (MAGI_MAX_STEPS_BRAKE_ENABLED, default OFF — new seam).
     if _is_true(env.get(MAX_STEPS_BRAKE_ENABLED_ENV, "")):
         # Iteration tracking is per-invocation; default max_iterations is 0 (no-op)
         # until a runner sets a real budget. The control wires the seam; the runner
@@ -1136,7 +1170,7 @@ def build_default_plane(
         # an engine.py concern (PR4 scope); here we only prove the seam is wired.
         plane.register(MaxStepsBrakeControl(max_iterations=0, iteration=0))
 
-    # 5. Self-review C1 (MAGI_SELF_REVIEW_ENABLED, default OFF).
+    # 6. Self-review C1 (MAGI_SELF_REVIEW_ENABLED, default OFF).
     if _is_true(env.get(SELF_REVIEW_ENABLED_ENV, "")):
         plane.register(
             SelfReviewAfterTurnControl(
@@ -1148,7 +1182,7 @@ def build_default_plane(
             )
         )
 
-    # 6. GA constraint reminder (MAGI_GA_LIVE_ENABLED + general role).
+    # 7. GA constraint reminder (MAGI_GA_LIVE_ENABLED + general role).
     # Registered ONLY when BOTH a receipts store and a contract requirement are
     # provided and the runtime profile enables GA live controls. Full local
     # profile defaults ON; safe/minimal profiles or explicit false values keep
