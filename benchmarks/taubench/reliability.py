@@ -1,10 +1,15 @@
 # magi_agent/benchmarks/taubench/reliability.py
 """Pure, network-free reliability levers for the τ-bench driver boundary.
 
-No tau_bench import, no ADK import. Three general levers:
+No tau_bench import, no ADK import. Six general levers:
 - L1 validate_args: schema-driven argument validation before a tool runs.
 - L3 WriteLedger / dup guard: block re-executing an identical successful write.
 - L2 verify_final: ground a success claim against recorded write outcomes.
+- L4 completion_review: one-shot conclusion-time "did I do all and only what
+  was asked?" self-review.
+- L5 grounded_args: one-shot pre-execution grounding check for write-tool args.
+- L6 open_items_review: one-shot conclusion-time itemized checklist of every
+  user request with per-item status and per-item policy evaluation.
 """
 from __future__ import annotations
 
@@ -23,6 +28,7 @@ class ReliabilityConfig(BaseModel):
     verify_before_final: bool = False
     completion_review: bool = False
     grounded_args: bool = False
+    open_items_review: bool = False
 
     @property
     def any_enabled(self) -> bool:
@@ -32,6 +38,7 @@ class ReliabilityConfig(BaseModel):
             or self.verify_before_final
             or self.completion_review
             or self.grounded_args
+            or self.open_items_review
         )
 
 
@@ -246,6 +253,27 @@ def grounding_prompt(tool_name: str, arguments: dict) -> str:
     )
 
 
+def open_items_review_prompt() -> str:
+    """Structured conclusion-time review: itemize every user request with an
+    explicit status, evaluate each item separately, finish open allowed items.
+
+    Sharper successor to ``completion_review_nudge``: demands a checklist with
+    per-item status and a quoted policy line for refusals, so one impossible
+    item cannot silently take the others down with it.
+    """
+    return (
+        "Before you finish: write an explicit checklist of EVERY request the "
+        "user made in this conversation, one line each, with a status: "
+        "[done — name the tool call], [not done], or [refused — quote the "
+        "exact rule that forbids it]. Evaluate each item separately and check "
+        "it against the policy individually; one item being impossible does "
+        "not make the others impossible. If any item is [not done] and the "
+        "policy allows it, do it now before replying. Only give your final "
+        "answer once every item is done or has a quoted rule justifying why "
+        "not."
+    )
+
+
 __all__ = [
     "DEFAULT_WRITE_PREFIXES",
     "ReliabilityConfig",
@@ -254,6 +282,7 @@ __all__ = [
     "grounding_prompt",
     "is_conclusion",
     "looks_like_error",
+    "open_items_review_prompt",
     "validate_args",
     "verify_final",
 ]

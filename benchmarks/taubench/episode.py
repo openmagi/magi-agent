@@ -16,6 +16,7 @@ from benchmarks.taubench.reliability import (
     WriteLedger,
     completion_review_nudge,
     is_conclusion,
+    open_items_review_prompt,
     verify_final,
 )
 
@@ -74,6 +75,7 @@ def run_episode(
     led = ledger if ledger is not None else WriteLedger()
     nudged = False
     reviewed = False
+    items_reviewed = False
 
     async def _run_turn(message: str) -> str:
         texts: list[str] = []
@@ -120,6 +122,16 @@ def run_episode(
                 reviewed = True
                 obs = completion_review_nudge()
                 continue  # one grounded turn to complete/scope-correct; skip respond
+        # Lever precedence per turn is L2 -> L4 -> L6, each one-shot per episode.
+        if cfg.open_items_review and not items_reviewed:
+            try:
+                conclude = is_conclusion(agent_text)
+            except Exception:
+                conclude = False
+            if conclude:
+                items_reviewed = True
+                obs = open_items_review_prompt()
+                continue
         # the agent's tool calls already hit env.step during the turn (via FunctionTools,
         # which call state.observe). Now route the agent's user-facing text as a respond.
         resp = env.step(

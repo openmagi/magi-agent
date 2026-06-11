@@ -1,7 +1,11 @@
 # tests/benchmarks/taubench/test_reliability.py
 from __future__ import annotations
 
-from benchmarks.taubench.reliability import ReliabilityConfig, validate_args
+from benchmarks.taubench.reliability import (
+    ReliabilityConfig,
+    open_items_review_prompt,
+    validate_args,
+)
 
 AIRLINE_SPEC = {
     "type": "object",
@@ -200,3 +204,30 @@ class TestGroundingPrompt:
     def test_unserializable_args_do_not_raise(self) -> None:
         msg = grounding_prompt("t", {"x": object()})
         assert "t" in msg
+
+
+class TestOpenItemsConfig:
+    def test_default_off(self):
+        cfg = ReliabilityConfig()
+        assert cfg.open_items_review is False
+        assert cfg.any_enabled is False
+
+    def test_any_enabled_when_on(self):
+        assert ReliabilityConfig(open_items_review=True).any_enabled is True
+
+
+class TestOpenItemsReviewPrompt:
+    def test_demands_itemized_checklist_with_statuses(self):
+        msg = open_items_review_prompt().lower()
+        assert "every request" in msg
+        assert "done" in msg and "not done" in msg and "refused" in msg
+
+    def test_demands_per_item_policy_evaluation(self):
+        msg = open_items_review_prompt().lower()
+        assert "separately" in msg
+        assert "policy" in msg
+
+    def test_domain_agnostic(self):
+        msg = open_items_review_prompt().lower()
+        for token in ("flight", "reservation", "airline", "baggage", "cabin"):
+            assert token not in msg
