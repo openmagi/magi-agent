@@ -88,6 +88,9 @@ if TYPE_CHECKING:  # pragma: no cover - typing only, never imported at runtime
         RecoveryAttemptState,
         RecoveryEngine,
     )
+    from magi_agent.runtime.empty_response_recovery import (
+        EmptyResponseRecoveryConfig,
+    )
     from magi_agent.runtime.goal_nudge import GoalNudge
     from magi_agent.runtime.output_continuation import OutputContinuationConfig
 
@@ -392,6 +395,34 @@ def build_output_continuation_config(
     return OutputContinuationConfig(
         enabled=True,
         max_continuations=parsed.max_continuations,
+    )
+
+
+def build_empty_response_recovery_config(
+    env: object = None,
+) -> "EmptyResponseRecoveryConfig | None":
+    """Build the empty-response recovery config from env, or ``None`` when OFF.
+
+    Reuses ``MAGI_EMPTY_RESPONSE_RECOVERY_ENABLED`` /
+    ``MAGI_EMPTY_RESPONSE_MAX_RECOVERIES`` (single source of truth in
+    ``config.env``; strict truthy opt-in, default OFF). ``None`` leaves
+    streaming byte-for-byte identical to the pre-recovery path.
+    """
+
+    import os
+
+    from magi_agent.config.env import parse_empty_response_recovery_env
+    from magi_agent.runtime.empty_response_recovery import (
+        EmptyResponseRecoveryConfig,
+    )
+
+    mapping = env if isinstance(env, dict) else os.environ
+    parsed = parse_empty_response_recovery_env(mapping)
+    if not parsed.enabled:
+        return None
+    return EmptyResponseRecoveryConfig(
+        enabled=True,
+        max_recoveries=parsed.max_recoveries,
     )
 
 
@@ -918,6 +949,7 @@ class MagiEngineDriver:
         event_sink: object | None = None,
         goal_nudge: "GoalNudge | None" = None,
         output_continuation: "OutputContinuationConfig | None" = None,
+        empty_response_recovery: "EmptyResponseRecoveryConfig | None" = None,
         evidence_collector: Callable[[str], Sequence[object]] | None = None,
         user_hook_bus: object | None = None,
     ) -> None:
@@ -942,6 +974,14 @@ class MagiEngineDriver:
         # (default) -> no continuation logic; streaming is byte-identical.
         self._output_continuation: "OutputContinuationConfig | None" = (
             output_continuation
+        )
+        # R2 empty-response recovery (hermes mechanism 3): bounded corrective
+        # re-invocation on a tools-ran-but-silent stop + one grace re-invocation
+        # after event-budget exhaustion. ``None`` (default, flag
+        # MAGI_EMPTY_RESPONSE_RECOVERY_ENABLED OFF) -> no recovery logic;
+        # ``_drive`` control flow is byte-identical to pre-R2.
+        self._empty_response_recovery: "EmptyResponseRecoveryConfig | None" = (
+            empty_response_recovery
         )
         # Optional evidence-collector DI seam (PR4 follow-up). When set,
         # _collect_evidence delegates to this callable instead of returning ().
@@ -1136,6 +1176,7 @@ class MagiEngineDriver:
             gate=gate,
             goal_nudge=self._goal_nudge,
             output_continuation=self._output_continuation,
+            empty_response_recovery=self._empty_response_recovery,
         )
         try:
             async for item in driver_gen:
@@ -1163,6 +1204,7 @@ class MagiEngineDriver:
         gate: "PermissionGate | None" = None,
         goal_nudge: "GoalNudge | None" = None,
         output_continuation: "OutputContinuationConfig | None" = None,
+        empty_response_recovery: "EmptyResponseRecoveryConfig | None" = None,
     ) -> AsyncGenerator[RuntimeEvent, EngineResult]:
         # PR-04-PR2 (resume rehydration): consume ``initial_messages`` by
         # synthesizing the prior transcript into a prefix on the opening user
@@ -1297,6 +1339,15 @@ class MagiEngineDriver:
             stop_reason_is_truncated,
         )
 
+        # Empty-response recovery helpers (R2, pure, dependency-light). Same
+        # deferred-import pattern as output_continuation above.
+        from magi_agent.runtime.empty_response_recovery import (  # noqa: PLC0415
+            build_empty_response_message,
+            build_grace_message,
+            should_grace,
+            should_recover_empty,
+        )
+
         types = deps["types"]
         adapter = deps["OpenMagiRunnerAdapter"](runner=runner)  # type: ignore[operator]
         bridge = deps["OpenMagiEventBridge"](live_compatible=True)  # type: ignore[operator]
@@ -1373,6 +1424,13 @@ class MagiEngineDriver:
         # Output-continuation budget: how many times we've resumed a response
         # truncated at the model's per-response output-token cap this turn.
         continuations_used = 0
+        # R2 empty-response recovery budgets. When empty_response_recovery is
+        # None/disabled the decision helpers always return False and
+        # grace_event_extra stays 0, so the budget comparison and control flow
+        # below are byte-identical to pre-R2.
+        recoveries_used = 0
+        graces_used = 0
+        grace_event_extra = 0
         # P3 zero-edit guard: count file-mutating tool calls this turn.
         # zero_edit_retry_done ensures we fire the guard at most once per turn.
         file_edit_calls = 0
@@ -1392,6 +1450,13 @@ class MagiEngineDriver:
                 # Set when this attempt's final response stopped at the output
                 # token cap (finish_reason length/max_tokens) — resumable.
                 attempt_truncated = False
+                # R2 per-attempt bookkeeping: did a tool run / was any
+                # user-visible output emitted / did this attempt hit the event
+                # budget. Only written when empty_response_recovery is set, so
+                # the OFF path is untouched.
+                attempt_tool_ran = False
+                attempt_text_seen = False
+                budget_exhausted = False
                 try:
                     while True:
                         if cancel.is_set():
@@ -1446,6 +1511,19 @@ class MagiEngineDriver:
                             # nudge again (re-arm).
                             if goal_nudge is not None and safe.get("type") == "tool_start":
                                 goal_check_pending = False
+                            # R2: classify this attempt's activity for the
+                            # empty-response decision. Tool events are tracked
+                            # separately; "text seen" reuses the continuation
+                            # output classifier minus the tool family.
+                            if empty_response_recovery is not None:
+                                if safe.get("type") == "tool_start":
+                                    attempt_tool_ran = True
+                                elif safe.get(
+                                    "type"
+                                ) not in _TOOL_EVENT_TYPES and _is_continuation_output_event(
+                                    safe
+                                ):
+                                    attempt_text_seen = True
                             attempt_yielded += 1
                             yielded_events += 1
                             self._observe_event(safe, session_id, turn_id)
@@ -1455,7 +1533,13 @@ class MagiEngineDriver:
                                 turn_id=turn_id,
                             )
 
-                        if event_count >= self._max_event_count:
+                        # R2: grace_event_extra is 0 unless the single grace
+                        # re-invocation fired, so the OFF-path comparison is
+                        # unchanged. event_count is cumulative across attempts;
+                        # the allowance is ADDED to the cap (a reset would
+                        # re-break the grace attempt after one event).
+                        if event_count >= self._max_event_count + grace_event_extra:
+                            budget_exhausted = True
                             break
                 except Exception as exc:  # noqa: BLE001 - surface as terminal error
                     attempt_error = exc
@@ -1501,6 +1585,83 @@ class MagiEngineDriver:
                             turn_id=turn_id,
                         )
                         continue  # re-invoke run_async to resume truncated output
+                    # R2 empty-response recovery (hermes mechanism 3). Grace
+                    # first: budget exhaustion means the attempt was cut off
+                    # mid-task, so "produce your final answer now" outranks the
+                    # narrower tools-ran-but-silent recovery. Both run BEFORE
+                    # goal-nudge deliberately — an empty stop must get its
+                    # specific corrective message, not the generic nudge (which
+                    # would otherwise consume the stop). Config None/disabled →
+                    # both helpers return False → byte-identical control flow.
+                    if should_grace(
+                        empty_response_recovery,
+                        budget_exhausted=budget_exhausted,
+                        text_seen=attempt_text_seen,
+                        graces_used=graces_used,
+                    ):
+                        graces_used += 1
+                        grace_event_extra = (
+                            empty_response_recovery.grace_event_allowance  # type: ignore[union-attr]
+                        )
+                        runner_input = runner_turn_input_cls(
+                            userId=self._user_id,
+                            sessionId=session_id,
+                            turnId=turn_id,
+                            invocationId=turn_id,
+                            newMessage=types.Content(  # type: ignore[attr-defined]
+                                role="user",
+                                parts=[
+                                    types.Part(text=build_grace_message())  # type: ignore[attr-defined]
+                                ],
+                            ),
+                            harnessState=effective_harness_state,
+                        )
+                        yield RuntimeEvent(
+                            type="status",
+                            payload={
+                                "type": "empty_response_grace",
+                                "grace": graces_used,
+                                "max": 1,
+                            },
+                            turn_id=turn_id,
+                        )
+                        continue  # re-invoke run_async (genuine new model call)
+                    # Recovery targets the model returning empty after a CLEAN
+                    # stop. A budget-exhausted attempt was cut by US — only the
+                    # single grace above may answer it; re-invoking against an
+                    # already-exceeded cap would just re-break immediately.
+                    if not budget_exhausted and should_recover_empty(
+                        empty_response_recovery,
+                        tool_ran=attempt_tool_ran,
+                        text_seen=attempt_text_seen,
+                        recoveries_used=recoveries_used,
+                    ):
+                        recoveries_used += 1
+                        runner_input = runner_turn_input_cls(
+                            userId=self._user_id,
+                            sessionId=session_id,
+                            turnId=turn_id,
+                            invocationId=turn_id,
+                            newMessage=types.Content(  # type: ignore[attr-defined]
+                                role="user",
+                                parts=[
+                                    types.Part(  # type: ignore[attr-defined]
+                                        text=build_empty_response_message()
+                                    )
+                                ],
+                            ),
+                            harnessState=effective_harness_state,
+                        )
+                        yield RuntimeEvent(
+                            type="status",
+                            payload={
+                                "type": "empty_response_recovery",
+                                "recovery": recoveries_used,
+                                "max": empty_response_recovery.max_recoveries,  # type: ignore[union-attr]
+                            },
+                            turn_id=turn_id,
+                        )
+                        continue  # re-invoke run_async (genuine new model call)
                     # PR4 goal-nudge: at the clean-break path, check whether a
                     # nudge re-invocation is warranted before breaking.
                     if goal_nudge is not None and nudges_used < goal_nudge.max_nudges:

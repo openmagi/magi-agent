@@ -272,3 +272,67 @@ def test_parse_runtime_env_requires_existing_identity_and_proxy_fields() -> None
         parse_runtime_env(env)
 
     assert "BOT_ID" in str(excinfo.value)
+
+
+# ---------------------------------------------------------------------------
+# Generic tool-exception reflection env (MAGI_TOOL_EXCEPTION_REFLECTION_ENABLED)
+# ---------------------------------------------------------------------------
+
+
+def test_parse_tool_exception_reflection_env_defaults_off() -> None:
+    from magi_agent.config.env import parse_tool_exception_reflection_env
+
+    cfg = parse_tool_exception_reflection_env({})
+
+    assert cfg.enabled is False
+    assert cfg.max_attempts == 2
+
+
+def test_parse_tool_exception_reflection_env_is_profile_independent() -> None:
+    """Unlike _runtime_feature_enabled flags, the unset flag stays OFF even
+    under the full runtime profile (eval-profile benchmark runs opt in
+    explicitly)."""
+    from magi_agent.config.env import parse_tool_exception_reflection_env
+
+    assert parse_tool_exception_reflection_env({"MAGI_RUNTIME_PROFILE": "full"}).enabled is False
+    assert parse_tool_exception_reflection_env({"MAGI_RUNTIME_PROFILE": "eval"}).enabled is False
+    assert (
+        parse_tool_exception_reflection_env(
+            {"MAGI_RUNTIME_PROFILE": "eval", "MAGI_TOOL_EXCEPTION_REFLECTION_ENABLED": "1"}
+        ).enabled
+        is True
+    )
+
+
+def test_parse_tool_exception_reflection_env_opt_in_and_budget() -> None:
+    from magi_agent.config.env import parse_tool_exception_reflection_env
+
+    on = parse_tool_exception_reflection_env(
+        {
+            "MAGI_TOOL_EXCEPTION_REFLECTION_ENABLED": "1",
+            "MAGI_TOOL_EXCEPTION_MAX_ATTEMPTS": "3",
+        }
+    )
+    assert on.enabled is True
+    assert on.max_attempts == 3
+
+    true_form = parse_tool_exception_reflection_env(
+        {"MAGI_TOOL_EXCEPTION_REFLECTION_ENABLED": "true"}
+    )
+    assert true_form.enabled is True
+    assert true_form.max_attempts == 2
+
+    off = parse_tool_exception_reflection_env(
+        {"MAGI_TOOL_EXCEPTION_REFLECTION_ENABLED": "0"}
+    )
+    assert off.enabled is False
+
+
+def test_parse_tool_exception_reflection_env_rejects_invalid_budget() -> None:
+    from magi_agent.config.env import (
+        RuntimeEnvError as _RuntimeEnvError,
+        parse_tool_exception_reflection_env,
+    )
+
+    with pytest.raises(_RuntimeEnvError):
+        parse_tool_exception_reflection_env({"MAGI_TOOL_EXCEPTION_MAX_ATTEMPTS": "0"})
