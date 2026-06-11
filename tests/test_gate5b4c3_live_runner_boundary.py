@@ -1218,12 +1218,24 @@ def test_live_boundary_streams_manual_tool_events_as_they_execute() -> None:
     event_types = [event.get("type") for event in public_events]
     assert event_types == [
         "text_delta",
+        "turn_phase",
         "tool_start",
         "tool_end",
+        "turn_phase",
         "text_delta",
     ]
-    tool_start = public_events[1]
-    tool_end = public_events[2]
+    assert public_events[1] == {
+        "type": "turn_phase",
+        "turnId": "turn_opaque_001",
+        "phase": "executing",
+    }
+    assert public_events[4] == {
+        "type": "turn_phase",
+        "turnId": "turn_opaque_001",
+        "phase": "committing",
+    }
+    tool_start = public_events[2]
+    tool_end = public_events[3]
     assert tool_start["name"] == "Calculation"
     assert str(tool_start["id"]).startswith("tu_")
     assert tool_end["id"] == tool_start["id"]

@@ -24,7 +24,11 @@ from magi_agent.runtime.output_continuation import (
     should_continue,
     stop_reason_is_truncated,
 )
-from magi_agent.runtime.public_events import tool_end_event, tool_start_event
+from magi_agent.runtime.public_events import (
+    tool_end_event,
+    tool_start_event,
+    turn_phase_event,
+)
 from magi_agent.shadow.gate5b4c3_shadow_generation_contract import (
     Gate5B4C3ModelRoutingSource,
     Gate5B4C3ShadowGenerationAuthorityFlags,
@@ -841,6 +845,12 @@ class Gate5B4C3LiveRunnerBoundary:
                         break
                     if manual_continuations >= _MAX_MANUAL_TOOL_CONTINUATIONS:
                         break
+                    self._emit_public_event(
+                        turn_phase_event(
+                            turn_id=request.turn.turn_id,
+                            phase="executing",
+                        )
+                    )
                     manual_results = await _run_manual_tool_calls(
                         function_calls,
                         self._adk_tools,
@@ -848,6 +858,12 @@ class Gate5B4C3LiveRunnerBoundary:
                     )
                     if not manual_results:
                         break
+                    self._emit_public_event(
+                        turn_phase_event(
+                            turn_id=request.turn.turn_id,
+                            phase="committing",
+                        )
+                    )
                     manual_continuations += 1
                     next_message = primitives.Content(
                         parts=[
