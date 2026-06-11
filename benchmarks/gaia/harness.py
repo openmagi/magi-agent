@@ -108,11 +108,25 @@ def run_gaia_question(
     # compute-via-code reminder only when the flag is on. The format-adherence
     # note is always advertised (GAIA scoring contract); the step-decomposition
     # block is gated default-OFF and returns "" unless MAGI_STEP_DECOMPOSITION_ENABLED.
+    #
+    # The GAIA harness builds its own instruction and passes it as instruction=
+    # to build_cli_model_runner, so build_cli_instruction (the production CLI/
+    # serve path) is NEVER called here. To make the multi-file cross-reference
+    # lever's A/B plan measure the path the flag actually touches, we append the
+    # SAME domain-neutral <multi_file_join> block the production path emits,
+    # behind the SAME MAGI_MULTI_FILE_JOIN_ENABLED gate. Default-OFF: when the
+    # flag is unset the appended block is "" so the instruction is byte-identical
+    # to before (Arm A control is uncontaminated).
+    from magi_agent.cli.tool_runtime import multi_file_join_block  # noqa: PLC0415
+
     instruction = (
         f"{gaia_system_prompt()}\n\n{GAIA_FORMAT_ADHERENCE_NOTE}"
         f"{gaia_step_decomposition_block()}"
         f"\n\nQUESTION:\n{question.question}{attachment_note}{remote_media_note}"
     )
+    _multi_file_join_block = multi_file_join_block()
+    if _multi_file_join_block:
+        instruction = f"{instruction}\n\n{_multi_file_join_block}"
     runner: CliModelRunner = build_cli_model_runner(
         config,
         instruction=instruction,

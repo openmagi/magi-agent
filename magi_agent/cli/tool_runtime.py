@@ -671,6 +671,51 @@ def step_decomposition_block(env: Mapping[str, str] | None = None) -> str:
     )
 
 
+def multi_file_join_block(env: Mapping[str, str] | None = None) -> str:
+    """Return the multi-file cross-reference robustness block (default-OFF).
+
+    Returns an empty string when ``MAGI_MULTI_FILE_JOIN_ENABLED`` is falsy (the
+    default) so the caller's prompt is byte-identical to the non-flagged path.
+    When ON, returns a SINGLE domain-neutral guidance block instructing the
+    agent, after ``ArchiveExtract``, to: (1) exhaustively enumerate ALL
+    extracted files, (2) read structured data (XLSX/XML) in full, and (3)
+    perform any cross-file join / dedup PROGRAMMATICALLY via Bash rather than by
+    eye.
+
+    Anti-overfit: the text names no benchmark and no benchmark-specific entity
+    — it is general multi-file-reasoning hygiene. The IDENTICAL string is reused
+    by the GAIA bench harness so the A/B arm exercises this exact lever.
+
+    Imported lazily inside to keep ``import cli.tool_runtime`` cold-clean.
+    """
+    import os as _os  # noqa: PLC0415
+
+    from magi_agent.config.env import multi_file_join_enabled  # noqa: PLC0415
+
+    source = env if env is not None else _os.environ
+    if not multi_file_join_enabled(source):
+        return ""
+    return (
+        "<multi_file_join>\n"
+        "When a task provides multiple files — especially an archive you opened "
+        "with ArchiveExtract — do NOT reason about the relationship between files "
+        "by eye. Eyeballing a cross-reference across files is the most common "
+        "source of join/dedup errors.\n"
+        "1. After ArchiveExtract, exhaustively enumerate ALL extracted files "
+        "(e.g. `ls -R` via Bash). Do not assume there are only one or two.\n"
+        "2. Read every structured file in FULL: use XLSXInfo + XLSXRead for "
+        "spreadsheets and DocumentRead for XML/CSV — read all rows/sheets, not a "
+        "sampled excerpt.\n"
+        "3. Perform any cross-file join, lookup, dedup, or "
+        "'find the item that appears only once / under a different name' step "
+        "PROGRAMMATICALLY via Bash (python3/awk/grep) over the extracted data. "
+        "Normalize keys (case, whitespace, synonyms) explicitly in code, then let "
+        "the program report the matched/unmatched rows.\n"
+        "4. Base your answer on the program's output, not on a visual scan.\n"
+        "</multi_file_join>"
+    )
+
+
 def build_cli_instruction(
     *,
     session_id: str,
@@ -895,6 +940,11 @@ def build_cli_instruction(
     # block carries no benchmark-specific text.
     _format_adherence_block = output_format_adherence_block()
 
+    # Multi-file cross-reference robustness (MAGI_MULTI_FILE_JOIN_ENABLED).
+    # Default-OFF separate concatenated string ("" when the flag is unset), so
+    # the returned prompt is byte-identical to pre-change behavior off the flag.
+    _multi_file_join_block = multi_file_join_block()
+
     parts = [prompt]
     if _tool_ad_block:
         parts.append(_tool_ad_block)
@@ -914,6 +964,8 @@ def build_cli_instruction(
         parts.append(_compute_block)
     if _format_adherence_block:
         parts.append(_format_adherence_block)
+    if _multi_file_join_block:
+        parts.append(_multi_file_join_block)
     return "\n\n".join(parts)
 
 
@@ -926,6 +978,7 @@ __all__ = [
     "build_cli_tool_runtime",
     "build_tool_advertisement_block",
     "compute_via_code_block",
+    "multi_file_join_block",
     "bind_cli_local_full_tool_handlers",
     "output_format_adherence_block",
     "step_decomposition_block",
