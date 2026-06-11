@@ -117,6 +117,20 @@ def build_cli_tool_runtime(
         register_browser_tool_manifest(registry)
         bind_browser_toolhost_handler(registry)
 
+    # Optional persistent Python code-execution tool (MAGI_CODE_ACTION_ENABLED=true).
+    # Strict opt-in default-OFF: when unset the module is never imported and the
+    # registry is byte-identical to before.
+    from magi_agent.config.env import code_action_enabled  # noqa: PLC0415
+
+    if code_action_enabled():
+        from magi_agent.tools.python_exec import (  # noqa: PLC0415
+            bind_python_exec_handler,
+            register_python_exec_manifest,
+        )
+
+        register_python_exec_manifest(registry)
+        bind_python_exec_handler(registry)
+
     receipt_store = general_automation_receipts or GeneralAutomationReceiptLedgerStore()
     dispatcher = ToolDispatcher(
         registry,
@@ -703,6 +717,16 @@ def build_cli_instruction(
             "</file_tools>"
         )
 
+    # Web-research cross-check guidance — gated on
+    # MAGI_RESEARCH_FACT_GUIDANCE_ENABLED AND both provider keys
+    # (BRAVE_API_KEY + FIRECRAWL_API_KEY) so the model is never directed to a
+    # tool that is not registered. Returns "" when off/unavailable/on error,
+    # keeping the default prompt byte-identical (same pattern as
+    # _file_tools_block / build_tool_advertisement_block fail-open).
+    from magi_agent.tools.web_search_tools import web_research_guidance_block  # noqa: PLC0415
+
+    _web_research_block = web_research_guidance_block()
+
     _skills_block = (
         "<skills>\n"
         "Bundled first-party skills, including superpowers-style workflows, are "
@@ -713,12 +737,25 @@ def build_cli_instruction(
         + eval_autonomy_block()
     )
 
+    # Live-SWE-style "creating your own tools" recipe block. Default-OFF
+    # (MAGI_TOOL_SYNTHESIS_NUDGE_ENABLED) and frontier-tier gated; returns ""
+    # when inactive so prompt assembly stays byte-identical.
+    from magi_agent.runtime.tool_synthesis import (  # noqa: PLC0415
+        build_tool_synthesis_instruction_block,
+    )
+
+    _tool_synthesis_block = build_tool_synthesis_instruction_block(model_label=model)
+
     parts = [prompt]
     if _tool_ad_block:
         parts.append(_tool_ad_block)
     if _file_tools_block:
         parts.append(_file_tools_block)
+    if _web_research_block:
+        parts.append(_web_research_block)
     parts.append(_skills_block)
+    if _tool_synthesis_block:
+        parts.append(_tool_synthesis_block)
     return "\n\n".join(parts)
 
 

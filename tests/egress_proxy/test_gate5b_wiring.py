@@ -11,10 +11,11 @@ def _sha256(value: str) -> str:
     return "sha256:" + hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
-def test_bash_env_byte_identical_when_disabled(monkeypatch):
+def test_bash_env_has_no_proxy_overlay_when_disabled(monkeypatch):
     monkeypatch.delenv("MAGI_EGRESS_PROXY_ENABLED", raising=False)
     env = g5._build_bash_env(EgressProxyConfig.from_env({}))
-    assert set(env.keys()) == {"PATH"}
+    # No proxy overlay keys; only PATH plus the non-interactive hygiene defaults.
+    assert set(env.keys()) == {"PATH", *g5._NONINTERACTIVE_ENV_DEFAULTS}
 
 
 def test_bash_env_has_overlay_when_enabled(tmp_path):

@@ -86,6 +86,61 @@ def test_pr6_model_only_turn_projects_normalized_transcript_and_sse_order() -> N
     ]
 
 
+def test_final_only_model_turn_projects_text_delta_agent_event() -> None:
+    bridge = OpenMagiEventBridge()
+    turn_id = "final-only-turn"
+
+    projection = bridge.project_adk_event(
+        _text_event(
+            "Final-only answer.",
+            turn_id=turn_id,
+            partial=False,
+            turn_complete=True,
+        ),
+        turn_id=turn_id,
+    )
+
+    assert projection.agent_events == [
+        {"type": "text_delta", "delta": "Final-only answer."}
+    ]
+    assert [event.type for event in projection.normalized_events] == [
+        "model.message.completed"
+    ]
+    assert [entry.kind for entry in projection.transcript_entries] == [
+        "assistant_text"
+    ]
+    assert projection.transcript_entries[0].text == "Final-only answer."
+
+
+def test_final_aggregate_after_partial_emits_only_unstreamed_suffix() -> None:
+    bridge = OpenMagiEventBridge()
+    turn_id = "partial-then-final-turn"
+
+    partial = bridge.project_adk_event(
+        _text_event("Hello ", turn_id=turn_id, partial=True, timestamp=1),
+        turn_id=turn_id,
+    )
+    final = bridge.project_adk_event(
+        _text_event(
+            "Hello world.",
+            turn_id=turn_id,
+            partial=False,
+            turn_complete=True,
+            timestamp=2,
+        ),
+        turn_id=turn_id,
+    )
+
+    text_deltas = [
+        event["delta"]
+        for projection in (partial, final)
+        for event in projection.agent_events
+        if event.get("type") == "text_delta"
+    ]
+    assert text_deltas == ["Hello ", "world."]
+    assert final.transcript_entries[0].text == "Hello world."
+
+
 def test_pr6_single_tool_pair_uses_stable_call_id_and_public_tool_order() -> None:
     bridge = OpenMagiEventBridge()
     turn_id = "pr6-turn-tool"

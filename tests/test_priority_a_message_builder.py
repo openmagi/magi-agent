@@ -844,6 +844,48 @@ def test_coding_discipline_block_absent_when_coding_agent_false() -> None:
     assert "<coding-discipline>" not in out
 
 
+def test_coding_workflow_block_present_for_coding_agent() -> None:
+    builder = _builder()
+    out = builder.build_system_prompt(
+        session_key="s1",
+        turn_id="t1",
+        identity={},
+        now=_utc("2026-05-28T00:00:00Z"),
+        coding_agent=True,
+    )
+    assert "<coding-workflow>" in out
+    assert "reproduces the issue" in out
+    assert "confirm it fails" in out
+    assert "Re-run the reproduction" in out
+    assert "</coding-workflow>" in out
+
+
+def test_coding_workflow_block_absent_for_non_coding_agent() -> None:
+    builder = _builder()
+    out = builder.build_system_prompt(
+        session_key="s1",
+        turn_id="t1",
+        identity={},
+        now=_utc("2026-05-28T00:00:00Z"),
+    )
+    assert "<coding-workflow>" not in out
+    assert "</coding-workflow>" not in out
+
+
+def test_coding_workflow_block_appears_after_coding_discipline() -> None:
+    builder = _builder()
+    out = builder.build_system_prompt(
+        session_key="s1",
+        turn_id="t1",
+        identity={},
+        now=_utc("2026-05-28T00:00:00Z"),
+        coding_agent=True,
+    )
+    discipline_pos = out.index("<coding-discipline>")
+    workflow_pos = out.index("<coding-workflow>")
+    assert discipline_pos < workflow_pos
+
+
 def test_output_efficiency_block_always_present() -> None:
     builder = _builder()
     out = builder.build_system_prompt(

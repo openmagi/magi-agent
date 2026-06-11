@@ -169,7 +169,10 @@ def test_output_budget_separates_full_result_previews_counts_and_digest_refs() -
 
     assert budgeted.raw_result.output == result.output
     assert projection["status"] == "ok"
-    assert projection["llmPreview"] == "L" * 32
+    # Head+tail truncation: 120 chars into a 32-char budget keeps both ends.
+    assert projection["llmPreview"] == "L" * 6 + "\n<108 chars elided>\n" + "L" * 6
+    assert len(projection["llmPreview"]) <= 32
+    # Budget too small for the elision marker → head-only clamp.
     assert projection["transcriptPreview"] == "T" * 20
     assert projection["counts"]["rawBytes"] > projection["counts"]["llmPreviewBytes"]
     assert projection["truncation"]["llmPreviewTruncated"] is True
@@ -290,8 +293,11 @@ def test_pr3_local_loop_validates_budgets_stores_and_projects_without_live_autho
     dumped = str(projection)
 
     assert projection["validation"]["valid"] is True
-    assert projection["llmPreview"] == "L" * 48
-    assert projection["transcriptPreview"] == "T" * 24
+    # Head+tail truncation with elision markers, within each char budget.
+    assert projection["llmPreview"] == "L" * 14 + "\n<72 chars elided>\n" + "L" * 14
+    assert len(projection["llmPreview"]) <= 48
+    assert projection["transcriptPreview"] == "T" * 3 + "\n<75 chars elided>\n" + "T" * 2
+    assert len(projection["transcriptPreview"]) <= 24
     assert projection["storeRef"] == receipt.ref
     assert projection["authorityFlags"]["productionStorageWritten"] is False
     assert projection["authorityFlags"]["adkArtifactServiceAttached"] is False

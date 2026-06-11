@@ -242,12 +242,64 @@ FLAGS: tuple[FlagSpec, ...] = (
         kind="str",
     ),
     _b(
+        "MAGI_RESEARCH_FACT_GUIDANCE_ENABLED",
+        summary=(
+            "Enable research_fact cross-check guidance: consolidated brief "
+            "header/footer plus the <web_research> system-prompt block "
+            "(requires BRAVE_API_KEY + FIRECRAWL_API_KEY)."
+        ),
+    ),
+    _b(
         "MAGI_BROWSER_TOOL_ENABLED",
         summary="Expose the browser-use autonomous vision BrowserTask tool.",
     ),
     _b(
+        "MAGI_CODE_ACTION_ENABLED",
+        summary="Expose the persistent PythonExec code-execution tool.",
+    ),
+    FlagSpec(
+        name="MAGI_CODE_ACTION_TIMEOUT_MS",
+        default=30_000,
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Per-call wall-clock timeout (ms) for the PythonExec tool; "
+            "clamped to 1000-120000."
+        ),
+        kind="int",
+    ),
+    FlagSpec(
+        name="MAGI_CODE_ACTION_MAX_OUTPUT_BYTES",
+        default=8_192,
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Head+tail output cap per stream (bytes) for PythonExec results; "
+            "clamped to 1024-65536."
+        ),
+        kind="int",
+    ),
+    _b(
         "MAGI_FILE_DELIVERY_LIVE_ENABLED",
         summary="Enable the live file-delivery tool (vs receipt-only).",
+    ),
+    _b(
+        "MAGI_DOCUMENT_QA_ENABLED",
+        summary=(
+            "Expose the question-conditioned DocumentQA file-QA sidecar tool "
+            "(requires MAGI_FILE_TOOLS_ENABLED); strict default-OFF in all profiles."
+        ),
+    ),
+    FlagSpec(
+        name="MAGI_DOCUMENT_QA_MODEL",
+        default="",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Model id override for the DocumentQA sidecar call (e.g. a cheap "
+            "haiku-class model); unset uses the configured provider model."
+        ),
+        kind="str",
     ),
     _b(
         "MAGI_CROSS_VERIFY_ENABLED",
@@ -256,6 +308,36 @@ FLAGS: tuple[FlagSpec, ...] = (
     _b(
         "MAGI_DEFERRED_TOOLS_ENABLED",
         summary="Enable deferred (lazily-loaded) tool schemas.",
+    ),
+    _b(
+        "MAGI_HEADTAIL_TRUNCATION_ENABLED",
+        summary=(
+            "Use head+tail (middle-elision) truncation for tool output caps "
+            "instead of head-only, so document/page tails stay visible."
+        ),
+    ),
+    # --- Vision sidecar (string overrides) -----------------------------------
+    FlagSpec(
+        name="MAGI_VISION_MODEL",
+        default="",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Vision-sidecar model override for image_understand (bare model id, "
+            "same semantics as MAGI_MODEL); unset keeps the main provider/model."
+        ),
+        kind="str",
+    ),
+    FlagSpec(
+        name="MAGI_VISION_PROVIDER",
+        default="",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Optional provider for MAGI_VISION_MODEL (anthropic|openai|gemini|"
+            "fireworks); unset inherits the main provider's credentials."
+        ),
+        kind="str",
     ),
     # --- Coding harness -----------------------------------------------------
     # Profile-aware default-ON (env._runtime_feature_enabled): ON in the full
@@ -287,6 +369,13 @@ FLAGS: tuple[FlagSpec, ...] = (
     _pb(
         "MAGI_APPLY_PATCH_ENABLED",
         summary="Enable the apply-patch tool for multi-file edits (default-ON full profile).",
+    ),
+    _b(
+        "MAGI_TOOL_SYNTHESIS_NUDGE_ENABLED",
+        summary=(
+            "Live-SWE-style tool-synthesis: per-step reflection nudge + "
+            "'create your own tools' recipe block (frontier-tier models only)."
+        ),
     ),
     # --- Evidence / verification gates -------------------------------------
     _b(

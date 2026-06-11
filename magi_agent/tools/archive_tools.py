@@ -27,6 +27,7 @@ from .spreadsheet_tools import (
     _resolve_workspace_path,
     _workspace_root,
 )
+from .truncation import cap_text
 
 _MAX_ARCHIVE_BYTES = 50 * 1024 * 1024  # 50 MiB
 _MAX_ENTRY_CHARS = 200_000
@@ -119,9 +120,7 @@ def archive_extract(
                 except Exception:  # noqa: BLE001
                     text = raw_bytes.decode("latin-1", errors="replace")
 
-                if len(text) > _MAX_ENTRY_CHARS:
-                    text = text[:_MAX_ENTRY_CHARS]
-                    truncated = True
+                text, truncated = cap_text(text, _MAX_ENTRY_CHARS)
                 entry_content = text
 
     except zipfile.BadZipFile:

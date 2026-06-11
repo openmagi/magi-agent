@@ -31,6 +31,7 @@ from .spreadsheet_tools import (
     _workspace_root,
     _markdown_table,
 )
+from .truncation import cap_text
 
 _MAX_DOCUMENT_BYTES = 20 * 1024 * 1024  # 20 MiB
 _DEFAULT_MAX_CHARS = 40_000
@@ -375,9 +376,7 @@ def _finish_document_result(
     content_digest: str,
 ) -> ToolResult:
     sanitized, redacted = _sanitize_text(raw_text)
-    truncated = len(sanitized) > max_chars
-    if truncated:
-        sanitized = sanitized[:max_chars]
+    sanitized, truncated = cap_text(sanitized, max_chars)
 
     output: dict[str, object] = {
         "text": sanitized,

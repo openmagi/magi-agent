@@ -13,6 +13,12 @@ from benchmarks.gaia.answer import GAIA_SYSTEM_PROMPT, extract_final_answer
 from benchmarks.gaia.dataset import GaiaQuestion
 from magi_agent.cli.providers import ProviderConfig
 from magi_agent.cli.real_runner import CliModelRunner, build_cli_model_runner
+from magi_agent.research.answer_policy import should_force_answer
+from magi_agent.runtime.best_effort_answer import (
+    BestEffortConfig,
+    finalize_answer,
+    is_non_answer,
+)
 
 
 def run_gaia_question(
@@ -78,10 +84,8 @@ def run_gaia_question(
     )
 
     # 5. Drive runner to completion, collecting all model text parts.
-    async def _drive() -> list[str]:
-        new_message = types.Content(
-            role="user", parts=[types.Part(text=question.question)]
-        )
+    async def _drive(message_text: str) -> list[str]:
+        new_message = types.Content(role="user", parts=[types.Part(text=message_text)])
         texts: list[str] = []
         async for event in runner.run_async(
             user_id="gaia-harness",
@@ -95,11 +99,31 @@ def run_gaia_question(
                     texts.append(text)
         return texts
 
-    texts = asyncio.run(_drive())
+    texts = asyncio.run(_drive(question.question))
     joined = "\n".join(texts)
 
-    # 6. Extract and return the final answer.
-    return extract_final_answer(joined)
+    # 6. Extract the final answer.
+    answer = extract_final_answer(joined)
+
+    # 7. Best-effort rescue (env-gated, default-OFF): when MAGI_ANSWER_POLICY=commit
+    #    and the run produced a non-answer, drive ONE additional synthesis turn
+    #    through the same runner session (at most once per question, no retry loop).
+    if should_force_answer() and is_non_answer(answer):
+
+        def _second_turn_provider(prompt: str) -> str:
+            return "\n".join(asyncio.run(_drive(prompt)))
+
+        final = finalize_answer(
+            question.question,
+            answer,
+            joined,
+            _second_turn_provider,
+            config=BestEffortConfig(label_uncertainty=False),  # GAIA scorer needs bare answers
+        )
+        if final.synthesized:
+            answer = extract_final_answer(final.text) or final.text.strip()
+
+    return answer
 
 
 __all__ = ["run_gaia_question"]

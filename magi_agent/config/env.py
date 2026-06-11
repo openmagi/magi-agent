@@ -1832,6 +1832,27 @@ def is_goal_nudge_enabled(env: Mapping[str, str] | None = None) -> bool:
     return _is_true(source.get(MAGI_GOAL_NUDGE_ENABLED_ENV))
 
 
+MAGI_RESEARCH_FACT_GUIDANCE_ENABLED_ENV = "MAGI_RESEARCH_FACT_GUIDANCE_ENABLED"
+
+
+def is_research_fact_guidance_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Single source of truth for the research_fact cross-check guidance flag.
+
+    Default OFF (strict truthy opt-in: "1"/"true"/"yes"/"on"). When OFF, the
+    ``research_fact`` evidence brief and ``build_cli_instruction`` output are
+    byte-identical to the pre-flag baseline. When ON, ``research_fact`` wraps a
+    successful multi-source brief in a consolidation scaffold (question echo +
+    fetched-source count header, deterministic cross-check footer) and — when
+    BRAVE_API_KEY + FIRECRAWL_API_KEY are also present — the system prompt
+    carries one ``<web_research>`` block advertising the tool with a
+    read-and-compare few-shot. Like ``is_goal_nudge_enabled`` this deliberately
+    does NOT follow the runtime-profile default-ON convention — it is an
+    additive, default-disabled seam (A/B evidence gates any default flip).
+    """
+    source = os.environ if env is None else env
+    return _is_true(source.get(MAGI_RESEARCH_FACT_GUIDANCE_ENABLED_ENV))
+
+
 MAGI_USER_HOOKS_ENABLED_ENV = "MAGI_USER_HOOKS_ENABLED"
 
 
@@ -1852,6 +1873,27 @@ def is_user_hooks_enabled(env: Mapping[str, str] | None = None) -> bool:
     """
     source = os.environ if env is None else env
     return _is_true(source.get(MAGI_USER_HOOKS_ENABLED_ENV))
+
+
+MAGI_TOOL_SYNTHESIS_NUDGE_ENABLED_ENV = "MAGI_TOOL_SYNTHESIS_NUDGE_ENABLED"
+
+
+def is_tool_synthesis_nudge_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Master gate for the Live-SWE-style tool-synthesis reflection nudge.
+
+    Default OFF (strict truthy opt-in: "1"/"true"/"yes"/"on"). When OFF, the
+    per-step reflection nudge plugin is never registered on the control plane
+    and ``build_cli_instruction`` never appends the "creating your own tools"
+    recipe block — a turn is byte-identical to today. When ON, BOTH surfaces
+    activate ONLY for frontier-tier models (``sota``/``reasoning`` in the
+    ``ModelTierRegistry``; see ``magi_agent.runtime.tool_synthesis``) because
+    the mechanism measurably HURTS weak models (Live-SWE ablation:
+    GPT-5-Nano 44%->14%). Like ``is_goal_nudge_enabled`` this is an additive,
+    default-disabled seam and does NOT follow the runtime-profile default-ON
+    convention.
+    """
+    source = os.environ if env is None else env
+    return _is_true(source.get(MAGI_TOOL_SYNTHESIS_NUDGE_ENABLED_ENV))
 
 
 MAGI_DOCUMENT_AUTHORING_COVERAGE_ENV = "MAGI_DOCUMENT_AUTHORING_COVERAGE"
@@ -2363,6 +2405,23 @@ def plan_mode_tools_enabled(env: Mapping[str, str] | None = None) -> bool:
     return _is_true(env.get("MAGI_PLAN_MODE_TOOLS_ENABLED"))
 
 
+def document_qa_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Return True when the question-conditioned DocumentQA sidecar tool is enabled.
+
+    Single source of truth for ``MAGI_DOCUMENT_QA_ENABLED``. Like
+    :func:`plan_mode_tools_enabled` this is a **strict default-OFF** gate: it
+    never defaults ON in any runtime profile (the outer
+    ``MAGI_FILE_TOOLS_ENABLED`` suite gate is profile-default-ON locally, so
+    riding only that gate would silently flip the new tool ON for local users)
+    and flips to ``True`` only for an explicit truthy value. When OFF the
+    ``DocumentQA`` manifest is not registered and no handler is bound, so
+    registry contents stay byte-identical to before.
+    """
+    from .flags import flag_bool
+
+    return flag_bool("MAGI_DOCUMENT_QA_ENABLED", env=env)
+
+
 def is_message_cache_enabled(env: Mapping[str, str] | None = None) -> bool:
     """Single source of truth for the message-tail prompt-cache flag.
 
@@ -2415,6 +2474,29 @@ def browser_tool_enabled(env: Mapping[str, str] | None = None) -> bool:
     return _runtime_feature_enabled(env, "MAGI_BROWSER_TOOL_ENABLED") and not _is_true(
         env.get("MAGI_BROWSER_TOOL_KILL_SWITCH")
     )
+
+
+MAGI_CODE_ACTION_ENABLED_ENV = "MAGI_CODE_ACTION_ENABLED"
+
+
+def code_action_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Single source of truth for the persistent PythonExec code-action gate.
+
+    Default OFF (strict truthy opt-in: "1"/"true"/"yes"/"on"). When OFF the
+    ``PythonExec`` tool module is never imported and the tool is absent from
+    the registry, manifests, and the advertised instruction — byte-identical
+    to before. When ON, a persistent per-session Python interpreter tool is
+    registered (variables/imports survive across calls in one session). Like
+    ``is_egress_gate_enabled`` this deliberately does NOT follow the
+    runtime-profile default-ON convention — it is an additive,
+    default-disabled seam.
+    """
+    # Delegate to the canonical config.flags registry. Imported lazily to
+    # avoid a config<->flags import cycle.
+    from .flags import flag_bool
+
+    source = os.environ if env is None else env
+    return flag_bool(MAGI_CODE_ACTION_ENABLED_ENV, env=source)
 
 
 MAGI_PERMISSION_SCOPE_FROM_MODE_ENV = "MAGI_PERMISSION_SCOPE_FROM_MODE"
