@@ -29,6 +29,10 @@ from magi_agent.shadow.gate5b4c3_runner_input_adapter import (
     build_gate5b4c3_runner_input,
 )
 from magi_agent.shadow.gate5b4c3_image_parts import image_blocks_to_parts
+from magi_agent.shadow.session_service_registry import (
+    SessionServiceRegistry,
+    default_session_service_registry,
+)
 
 
 Gate5B4C3LiveRunnerStatus: TypeAlias = Literal["skipped", "dropped", "completed", "error"]
@@ -389,6 +393,10 @@ AdkPrimitivesLoader: TypeAlias = Callable[[], Gate5B4C3LiveAdkPrimitives]
 Gate5B4C3PublicEventSink: TypeAlias = Callable[[Mapping[str, object]], None]
 
 
+def _noop() -> None:
+    return None
+
+
 class Gate5B4C3LiveRunnerBoundary:
     def __init__(
         self,
@@ -398,6 +406,7 @@ class Gate5B4C3LiveRunnerBoundary:
         gate1a_egress_correlation_context: Gate1AEgressCorrelationContext | None = None,
         gate1a_egress_proxy_url: str | None = None,
         public_event_sink: Gate5B4C3PublicEventSink | None = None,
+        session_service_registry: SessionServiceRegistry | None = None,
     ) -> None:
         self._adk_primitives_loader = (
             adk_primitives_loader or load_gate5b4c3_live_adk_primitives
@@ -406,6 +415,7 @@ class Gate5B4C3LiveRunnerBoundary:
         self._gate1a_egress_correlation_context = gate1a_egress_correlation_context
         self._gate1a_egress_proxy_url = str(gate1a_egress_proxy_url or "").strip()
         self._public_event_sink = public_event_sink
+        self._session_service_registry = session_service_registry
 
     def invoke(
         self,
@@ -420,6 +430,39 @@ class Gate5B4C3LiveRunnerBoundary:
         request: Gate5B4C3ShadowGenerationRequest,
         *,
         config: Gate5B4C3ShadowGenerationConfig | None = None,
+    ) -> Gate5B4C3LiveRunnerBoundaryResult:
+        """Run one boundary turn, releasing any session-service lease at the end.
+
+        Behind ``MAGI_HOSTED_SESSION_REUSE`` the session registry marks the
+        turn's ``(bot_id_digest, session_id)`` key busy (per-key single-flight)
+        so overlapping same-key turns — ``invoke()`` runs ``asyncio.run`` per
+        call and may execute on multiple worker threads — never mutate one
+        session service concurrently. The busy mark must drop only after the
+        turn fully stops consuming the runner (including the no-tool finalizer
+        rerun), so the release lives here, in a ``finally`` around the whole
+        turn body — covering every return and exception path.
+        """
+        session_lease_releases: list[Callable[[], None]] = []
+        try:
+            return await self._invoke_async_turn(
+                request,
+                config=config,
+                session_lease_releases=session_lease_releases,
+            )
+        finally:
+            for release_session_lease in session_lease_releases:
+                try:
+                    release_session_lease()
+                except Exception:
+                    # Lease release must never change the boundary result.
+                    pass
+
+    async def _invoke_async_turn(
+        self,
+        request: Gate5B4C3ShadowGenerationRequest,
+        *,
+        config: Gate5B4C3ShadowGenerationConfig | None = None,
+        session_lease_releases: list[Callable[[], None]],
     ) -> Gate5B4C3LiveRunnerBoundaryResult:
         started = time.monotonic()
         diagnostic = build_gate5b4c3_shadow_generation_diagnostic(request, config=config)
@@ -557,7 +600,13 @@ class Gate5B4C3LiveRunnerBoundary:
             "generate_content_config": generate_content_config,
         }
         try:
-            session_service = primitives.InMemorySessionService()
+            session_service, session_reused, mark_session_seeded = (
+                self._acquire_session_service(
+                    request,
+                    primitives,
+                    session_lease_releases,
+                )
+            )
         except Exception as exc:
             return _setup_error_result(
                 request,
@@ -622,7 +671,15 @@ class Gate5B4C3LiveRunnerBoundary:
             )
         try:
             message = primitives.Content(
-                parts=_build_user_message_parts(runner_input, primitives=primitives),
+                parts=_build_user_message_parts(
+                    runner_input,
+                    primitives=primitives,
+                    # On a session-registry hit the reused ADK session already
+                    # holds the prior turns; re-ingesting the re-sent sanitized
+                    # history would duplicate context. History stays a
+                    # seed-on-miss (and the flag-OFF path always seeds).
+                    include_history=not session_reused,
+                ),
                 role="user",
             )
         except Exception as exc:
@@ -676,6 +733,7 @@ class Gate5B4C3LiveRunnerBoundary:
                             _ALLOWED_RUN_ASYNC_KWARGS,
                         )
                     ):
+                        mark_session_seeded()
                         event_count += 1
                         chunk = _event_text(event)
                         if chunk:
@@ -943,6 +1001,69 @@ class Gate5B4C3LiveRunnerBoundary:
             usage=_usage_dict(tuple(usage_totals)),
         )
 
+    def _acquire_session_service(
+        self,
+        request: Gate5B4C3ShadowGenerationRequest,
+        primitives: Gate5B4C3LiveAdkPrimitives,
+        session_lease_releases: list[Callable[[], None]],
+    ) -> tuple[object, bool, Callable[[], None]]:
+        """Build (or, behind the reuse flag, fetch) the turn's session service.
+
+        Flag OFF (default) preserves the historical fresh-instance-per-turn
+        behavior and performs no registry interaction at all. Flag ON acquires
+        from the process-scope registry keyed by the full
+        ``(bot_id_digest, session_id)`` pair — distinct bots or sessions can
+        never share session state — via :meth:`try_acquire`, which marks the
+        key busy for the duration of the turn; an overlapping same-key turn
+        gets a fresh, unregistered fallback service (single-flight). The
+        matching identity-checked release is appended to
+        ``session_lease_releases`` and runs in :meth:`invoke_async`'s
+        ``finally`` once the turn fully ends. The second element reports
+        whether an existing live session was reused (registry hit).
+
+        Miss-created registry entries are provisional until the boundary sees
+        a runner event, which is the first local proof that ADK consumed and
+        seeded the new message. If setup or early runner execution fails before
+        that, the release discards the exact provisional service and the next
+        same-key turn reseeds sanitized history.
+
+        Requests without a stable ``session_key_digest`` bypass the registry
+        entirely (fresh service, never registered): their session id falls
+        back to the per-request-unique request digest, so a registry entry
+        could never be reused — each one would only churn the LRU and evict
+        this bot's live sessions.
+        """
+        # Lazy import: shadow -> config is a function-level dependency by
+        # convention in this package (avoids import cycles).
+        from magi_agent.config.env import is_hosted_session_reuse_enabled
+
+        if not is_hosted_session_reuse_enabled():
+            return primitives.InMemorySessionService(), False, _noop
+        if not request.selection.session_key_digest:
+            return primitives.InMemorySessionService(), False, _noop
+        registry = self._session_service_registry
+        if registry is None:
+            registry = default_session_service_registry()
+        session_key = (request.selection.bot_id_digest, _shadow_session_id(request))
+        session_service, session_reused = registry.try_acquire(
+            session_key,
+            primitives.InMemorySessionService,
+        )
+        seed_completed = {"value": session_reused}
+
+        def mark_session_seeded() -> None:
+            seed_completed["value"] = True
+
+        bound_registry = registry
+        session_lease_releases.append(
+            lambda: bound_registry.release(
+                session_key,
+                session_service,
+                seeded=seed_completed["value"],
+            )
+        )
+        return session_service, session_reused, mark_session_seeded
+
     def _emit_public_event(self, payload: Mapping[str, object]) -> None:
         if self._public_event_sink is None:
             return
@@ -968,8 +1089,17 @@ def load_gate5b4c3_live_adk_primitives() -> Gate5B4C3LiveAdkPrimitives:
     )
 
 
-def _build_user_message_parts(runner_input: object, *, primitives: object) -> list:
-    parts = [primitives.Part.from_text(text=_runner_message_text(runner_input))]
+def _build_user_message_parts(
+    runner_input: object,
+    *,
+    primitives: object,
+    include_history: bool = True,
+) -> list:
+    parts = [
+        primitives.Part.from_text(
+            text=_runner_message_text(runner_input, include_history=include_history)
+        )
+    ]
     raw_blocks = getattr(runner_input, "sanitized_image_blocks", ()) or ()
     if not raw_blocks:
         return parts
@@ -990,8 +1120,12 @@ def _build_user_message_parts(runner_input: object, *, primitives: object) -> li
     return parts
 
 
-def _runner_message_text(runner_input: object) -> str:
+def _runner_message_text(runner_input: object, *, include_history: bool = True) -> str:
     current = str(getattr(runner_input, "sanitized_user_input", "") or "")
+    if not include_history:
+        # Session-reuse hit: the prior turns already live in the reused ADK
+        # session, so only the current sanitized turn text is sent.
+        return current
     history = getattr(runner_input, "sanitized_recent_history", ())
     if not history:
         return current

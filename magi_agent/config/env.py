@@ -1866,6 +1866,63 @@ def is_hosted_streaming_serve_enabled(env: Mapping[str, str] | None = None) -> b
     return flag_bool(MAGI_HOSTED_STREAMING_SERVE_ENV, env=source)
 
 
+MAGI_HOSTED_SESSION_REUSE_ENV = "MAGI_HOSTED_SESSION_REUSE"
+MAGI_HOSTED_SESSION_REUSE_MAX_ENTRIES_ENV = "MAGI_HOSTED_SESSION_REUSE_MAX_ENTRIES"
+MAGI_HOSTED_SESSION_REUSE_TTL_SECONDS_ENV = "MAGI_HOSTED_SESSION_REUSE_TTL_SECONDS"
+
+
+def is_hosted_session_reuse_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Single source of truth for hosted session-service reuse (08-PR5).
+
+    Default OFF (strict truthy opt-in: "1"/"true"/"yes"/"on"). When OFF the
+    live runner boundary builds a fresh ``InMemorySessionService`` per turn —
+    byte-identical to today, with no registry interaction at all. When ON the
+    boundary acquires the session service from a process-scope LRU+TTL registry
+    keyed by ``(bot_id_digest, session_id)`` so multiturn context survives
+    across turns and the re-sent sanitized history is only used to seed a
+    registry miss. Hosted is multitenant — session leakage equals cross-user
+    data exposure — so like ``is_hosted_streaming_serve_enabled`` this is an
+    additive, default-disabled serving mode and deliberately does NOT follow
+    the runtime-profile default-ON convention.
+    """
+    # Delegate to the canonical config.flags registry; imported lazily to
+    # avoid a config<->flags import cycle.
+    from .flags import flag_bool
+
+    source = os.environ if env is None else env
+    return flag_bool(MAGI_HOSTED_SESSION_REUSE_ENV, env=source)
+
+
+def hosted_session_reuse_max_entries(env: Mapping[str, str] | None = None) -> int:
+    """LRU capacity of the hosted session-reuse registry (default 64).
+
+    Invalid values fall back to the registered default; non-positive values
+    clamp to 1 so a mis-set cap can never produce an unbounded registry.
+    """
+    from .flags import flag_int, get_flag
+
+    source = os.environ if env is None else env
+    value = flag_int(MAGI_HOSTED_SESSION_REUSE_MAX_ENTRIES_ENV, env=source)
+    if value is None:
+        value = int(get_flag(MAGI_HOSTED_SESSION_REUSE_MAX_ENTRIES_ENV).default or 64)
+    return max(1, value)
+
+
+def hosted_session_reuse_ttl_seconds(env: Mapping[str, str] | None = None) -> float:
+    """Idle TTL of reusable hosted sessions in seconds (default 1800 = 30min).
+
+    Invalid values fall back to the registered default; non-positive values
+    clamp to 1 second so eviction can never be disabled by configuration.
+    """
+    from .flags import flag_int, get_flag
+
+    source = os.environ if env is None else env
+    value = flag_int(MAGI_HOSTED_SESSION_REUSE_TTL_SECONDS_ENV, env=source)
+    if value is None:
+        value = int(get_flag(MAGI_HOSTED_SESSION_REUSE_TTL_SECONDS_ENV).default or 1800)
+    return float(max(1, value))
+
+
 def is_format_on_write_enabled(env: Mapping[str, str]) -> bool:
     """Single source for the format-after-edit flag.
 
