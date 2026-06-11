@@ -257,6 +257,13 @@ FLAGS: tuple[FlagSpec, ...] = (
         "MAGI_DEFERRED_TOOLS_ENABLED",
         summary="Enable deferred (lazily-loaded) tool schemas.",
     ),
+    _b(
+        "MAGI_HEADTAIL_TRUNCATION_ENABLED",
+        summary=(
+            "Use head+tail (middle-elision) truncation for tool output caps "
+            "instead of head-only, so document/page tails stay visible."
+        ),
+    ),
     # --- Vision sidecar (string overrides) -----------------------------------
     FlagSpec(
         name="MAGI_VISION_MODEL",

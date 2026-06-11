@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
 from .manifest import Budget
 from .result import ToolResult
+from .truncation import is_headtail_truncation_enabled, truncate_middle
 
 
 _MODEL_CONFIG = ConfigDict(
@@ -21,7 +22,6 @@ _MODEL_CONFIG = ConfigDict(
 )
 _DEFAULT_LLM_PREVIEW_CHARS = 4000
 _DEFAULT_TRANSCRIPT_PREVIEW_CHARS = 1200
-_ELISION_MARKER_TEMPLATE = "\n<{} chars elided>\n"
 _PRIVATE_TEXT_RE = re.compile(
     r"(?:"
     r"authorization\s*:\s*bearer\s+[A-Za-z0-9._~+/=-]+|"
@@ -244,25 +244,9 @@ def _preview_value(value: object, limit: int) -> tuple[object | None, bool]:
     safe = _safe_text(text)
     if len(safe) <= limit:
         return safe, False
-    return _truncate_head_tail(safe, limit), True
-
-
-def _truncate_head_tail(text: str, limit: int) -> str:
-    """Keep head + tail halves with an elision marker, within the char budget.
-
-    The marker reserve uses the digit-count upper bound (elided <= len(text)),
-    so the returned string never exceeds ``limit``. When the budget is too
-    small to fit the marker plus at least one char on each side, degrade to a
-    plain head-only clamp.
-    """
-    marker_reserve = len(_ELISION_MARKER_TEMPLATE.format(len(text)))
-    kept = limit - marker_reserve
-    if kept < 2:
-        return text[:limit]
-    head_len = kept - kept // 2
-    tail_len = kept // 2
-    marker = _ELISION_MARKER_TEMPLATE.format(len(text) - kept)
-    return text[:head_len] + marker + text[-tail_len:]
+    if is_headtail_truncation_enabled():
+        return truncate_middle(safe, limit), True
+    return safe[:limit], True
 
 
 def _stable_json_bytes(value: object) -> bytes:

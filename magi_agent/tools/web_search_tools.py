@@ -26,6 +26,8 @@ from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import TYPE_CHECKING, Literal
 
+from .truncation import cap_text
+
 if TYPE_CHECKING:
     pass
 
@@ -298,9 +300,8 @@ def web_fetch(url: str) -> str:
     if "error" in data:
         return _append_receipt_footer(f"fetch error: {data['error']}", data)
     md = str((data.get("data") or {}).get("markdown") or "")  # type: ignore[union-attr]
-    return _append_receipt_footer(
-        md[:_FIRECRAWL_MAX_CHARS] if md else "No content.", data
-    )
+    text = cap_text(md, _FIRECRAWL_MAX_CHARS)[0] if md else "No content."
+    return _append_receipt_footer(text, data)
 
 
 # ---------------------------------------------------------------------------
@@ -386,7 +387,7 @@ def research_fact(
             )
             md = str((raw.get("data") or {}).get("markdown") or "")  # type: ignore[union-attr]
             if md:
-                return idx, url, md[:_RESEARCH_FETCH_MAX_CHARS], latency
+                return idx, url, cap_text(md, _RESEARCH_FETCH_MAX_CHARS)[0], latency
             # fetch returned empty content — skip
             return idx, url, None, latency
         except Exception:  # noqa: BLE001
