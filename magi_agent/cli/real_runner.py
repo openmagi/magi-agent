@@ -454,6 +454,34 @@ def _loaded_pack_validator_refs() -> tuple[str, ...]:
         return ()
 
 
+def _local_trust_missing_evidence_action(
+    materialized_action: str,
+    *,
+    env: Mapping[str, str] | None = None,
+) -> str:
+    """Local full-trust enforces authored rules by default (drop hosted staging).
+
+    Hosted runs stage authority — a missing authored evidence requirement only
+    *audits*. For OSS local full-trust the author IS the operator, so a missing
+    requirement should enforce (``repair_required``) by default. Safe/eval/minimal
+    profiles (the same set that gates every other full-runtime feature via
+    ``_runtime_profile_default_enabled``) keep the conservative hosted ``audit``
+    posture. An explicit ``repair_required`` is never downgraded; any non-``audit``
+    materialized action is passed through unchanged (only the conservative hosted
+    ``audit`` default is flipped).
+    """
+    from magi_agent.config.env import (  # noqa: PLC0415
+        _runtime_profile_default_enabled,
+    )
+
+    source = os.environ if env is None else env
+    if materialized_action == "repair_required":
+        return "repair_required"
+    if materialized_action == "audit" and _runtime_profile_default_enabled(source):
+        return "repair_required"
+    return materialized_action
+
+
 def _build_default_runner_policy_assembly(
     *,
     model_provider: str,
@@ -510,7 +538,9 @@ def _build_default_runner_policy_assembly(
             _loaded_pack_validator_refs(),
         )
     )
-    missing_action = plan.final_gate_policy.missing_evidence_action
+    missing_action = _local_trust_missing_evidence_action(
+        plan.final_gate_policy.missing_evidence_action
+    )
     attachment_flags = dict(plan.attachment_flags)
     attachment_flags["livePolicyCallbackAttached"] = live_policy_callback_attached
     return RunnerPolicyAssembly(
