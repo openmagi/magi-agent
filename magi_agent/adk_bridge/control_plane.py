@@ -545,11 +545,16 @@ class GaConstraintReinjectionControl(BaseLoopControl):
     def __init__(
         self,
         *,
-        receipts: Any,
-        contract_required: Any,
+        receipts: Any | None = None,
+        contract_required: Any | None = None,
         agent_role: str = "general",
         env: dict[str, str] | None = None,
     ) -> None:
+        # Phase 5 / S-A: ``receipts`` and ``contract_required`` are now OPTIONAL.
+        # The typed-context path (``apply_before_model``) reads an already-resolved
+        # EvidenceLedgerView and needs no store handle at all. The legacy ADK hook
+        # (``on_before_model``) still resolves the view from the store when one was
+        # supplied (dual-load until Phase 6 builds the view in the dispatcher).
         self._receipts = receipts
         self._contract_required = contract_required
         self._agent_role = agent_role
@@ -561,10 +566,28 @@ class GaConstraintReinjectionControl(BaseLoopControl):
         callback_context: Any,
         llm_request: Any,
     ) -> None:
-        from magi_agent.harness.general_automation.constraint_reinjection import (
-            ga_constraint_reinjection,
-        )
+        # Dual-load: resolve the EvidenceLedgerView from the legacy receipt-store
+        # handle, then delegate to the typed-context path. Phase 6 has the
+        # dispatcher build the view and this store branch goes away.
+        from magi_agent.packs.context import ControlPlaneContext
 
+        view = self._resolve_view_from_store(callback_context)
+        ctx = ControlPlaneContext.minimal(evidence=view)
+        return await self.apply_before_model(ctx, llm_request=llm_request)
+
+    def _resolve_view_from_store(self, callback_context: Any) -> Any:
+        """Resolve the active turn's EvidenceLedgerView from the receipt store.
+
+        Reproduces the pre-migration store lookup verbatim — resolve
+        (session_id, turn_id), then ``ledger_for_turn`` / ``open_controls_for_turn``
+        — and packs the result into a read-only :class:`EvidenceLedgerView`. Returns
+        ``None`` (a no-op view) when there is no store/contract or no ledger for the
+        turn, exactly as the legacy body short-circuited.
+        """
+        from magi_agent.packs.context import EvidenceLedgerView
+
+        if self._receipts is None or self._contract_required is None:
+            return None
         session = getattr(callback_context, "session", None)
         session_id = _non_empty_str(getattr(session, "id", None))
         turn_id = _non_empty_str(getattr(callback_context, "invocation_id", None))
@@ -572,21 +595,48 @@ class GaConstraintReinjectionControl(BaseLoopControl):
             turn_id = _latest_event_invocation_id(session)
         if session_id is None or turn_id is None:
             return None
-
         ledger = self._receipts.ledger_for_turn(
             session_id=session_id, turn_id=turn_id
         )
         if ledger is None:
             return None
-        open_controls = self._receipts.open_controls_for_turn(
-            session_id=session_id, turn_id=turn_id
+        open_controls = tuple(
+            self._receipts.open_controls_for_turn(
+                session_id=session_id, turn_id=turn_id
+            )
         )
-
-        reminder = ga_constraint_reinjection(
-            contract_required=self._contract_required,
+        return EvidenceLedgerView(
             ledger=ledger,
             open_controls=open_controls,
+            contract_required=self._contract_required,
             agent_role=self._agent_role,
+        )
+
+    async def apply_before_model(
+        self,
+        ctx: Any,
+        *,
+        llm_request: Any,
+    ) -> None:
+        """Typed-context entry point (S-A): read the resolved EvidenceLedgerView off
+        ``ctx.evidence`` — never a mutable receipt-store object. A user pack
+        authoring an equivalent reminder receives the same view, so it can build the
+        reminder with zero privileged access. Behavior is byte-identical to the
+        pre-migration body.
+        """
+        from magi_agent.harness.general_automation.constraint_reinjection import (
+            ga_constraint_reinjection,
+        )
+
+        view = getattr(ctx, "evidence", None)
+        if view is None or getattr(view, "ledger", None) is None:
+            return None
+
+        reminder = ga_constraint_reinjection(
+            contract_required=view.contract_required,
+            ledger=view.ledger,
+            open_controls=view.open_controls,
+            agent_role=view.agent_role,
             env=self._env if self._env is not None else dict(os.environ),
         )
         if not reminder:
