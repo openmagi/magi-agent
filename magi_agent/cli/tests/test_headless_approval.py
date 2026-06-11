@@ -84,14 +84,17 @@ def _run_stream_json(
     os.environ["MAGI_CLI_ENABLED"] = "1"
     try:
         code = asyncio.run(
-            run_headless(
-                "go",
-                output="stream-json",
-                gate=gate,
-                driver=driver,
-                permission_mode=permission_mode,  # type: ignore[arg-type]
-                stream=out,
-                input_stream=input_stream,
+            asyncio.wait_for(
+                run_headless(
+                    "go",
+                    output="stream-json",
+                    gate=gate,
+                    driver=driver,
+                    permission_mode=permission_mode,  # type: ignore[arg-type]
+                    stream=out,
+                    input_stream=input_stream,
+                ),
+                timeout=5.0,
             )
         )
     finally:
@@ -102,6 +105,39 @@ def _run_stream_json(
 
     frames = [json.loads(line) for line in out.getvalue().splitlines() if line.strip()]
     return code, frames
+
+
+def _run_text(
+    *,
+    runner: GateAwareRunner,
+    gate: RulesPermissionGate,
+    permission_mode: str = "default",
+) -> tuple[int, str]:
+    """Drive ``run_headless`` in text mode; return (exit_code, output)."""
+
+    out = io.StringIO()
+    driver = MagiEngineDriver(runner=runner)
+
+    prev = os.environ.get("MAGI_CLI_ENABLED")
+    os.environ["MAGI_CLI_ENABLED"] = "1"
+    try:
+        code = asyncio.run(
+            run_headless(
+                "go",
+                output="text",
+                gate=gate,
+                driver=driver,
+                permission_mode=permission_mode,  # type: ignore[arg-type]
+                stream=out,
+            )
+        )
+    finally:
+        if prev is None:
+            os.environ.pop("MAGI_CLI_ENABLED", None)
+        else:
+            os.environ["MAGI_CLI_ENABLED"] = prev
+
+    return code, out.getvalue()
 
 
 def _control_requests(frames: list[dict]) -> list[dict]:
@@ -241,6 +277,22 @@ def test_accept_edits_mode_auto_allows_edit_tool_no_frame() -> None:
     assert code == 0
 
 
+def test_accept_edits_text_mode_auto_allows_edit_tool_without_inbound() -> None:
+    """One-shot text output has no inbound approver, but acceptEdits still allows edits."""
+
+    runner = GateAwareRunner(tool_name="Write", tool_args={"path": "a.txt"})
+    code, output = _run_text(
+        runner=runner,
+        gate=_bare_gate(),
+        permission_mode="acceptEdits",
+    )
+
+    assert runner.executed == [{"path": "a.txt"}]
+    assert runner.blocked == []
+    assert code == 0
+    assert "permission_denied" not in output
+
+
 def test_accept_edits_mode_non_edit_tool_still_prompts() -> None:
     """acceptEdits does NOT auto-allow a non-edit tool: it still prompts and
     honors the inbound answer."""
@@ -256,6 +308,28 @@ def test_accept_edits_mode_non_edit_tool_still_prompts() -> None:
 
     assert len(_control_requests(frames)) == 1  # non-edit tool DID prompt
     assert runner.executed == [{"cmd": "ls"}]
+    assert code == 0
+
+
+def test_accept_edits_stream_json_non_edit_without_inbound_denies_without_hanging() -> None:
+    """No inbound approver means non-edit tools fail closed instead of blocking."""
+
+    runner = GateAwareRunner(tool_name="Bash", tool_args={"cmd": "ls"})
+    code, frames = _run_stream_json(
+        runner=runner,
+        gate=_bare_gate(),
+        permission_mode="acceptEdits",
+    )
+
+    assert _control_requests(frames) == []
+    assert runner.executed == []
+    assert runner.blocked == [
+        {
+            "status": "blocked",
+            "error": "permission_denied",
+            "tool": "Bash",
+        }
+    ]
     assert code == 0
 
 
