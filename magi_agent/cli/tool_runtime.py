@@ -190,6 +190,13 @@ def build_cli_adk_tools(
         tool_context_factory=runtime.tool_context_factory,
         attach_enabled=True,
     )
+    # Fast direct web tools auto-activate on provider-key presence (the builder
+    # is key-gated and returns [] without BRAVE+FIRECRAWL keys, so keyless
+    # installs are byte-identical). These previously existed with zero
+    # consumers — a fresh install with keys still had no live web capability.
+    from magi_agent.tools.web_search_tools import build_web_search_tools  # noqa: PLC0415
+
+    tools = [*tools, *build_web_search_tools()]
     return wrap_cli_adk_tools_with_evidence_collector(
         tools,
         collector=local_tool_evidence_collector,

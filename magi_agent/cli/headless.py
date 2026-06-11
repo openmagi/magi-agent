@@ -742,6 +742,9 @@ async def _project_stream(
             report = research_audit.report(  # type: ignore[attr-defined]
                 "".join(all_text), mode=governance_mode
             )
+            from magi_agent.research.live_audit import persist_audit_report  # noqa: PLC0415
+
+            persist_audit_report(report, session_id=session_id)
         if defer_assistant_output and all_text and not _enforce_retry_needed(governance_mode, report):
             await writer.write(
                 _assistant_text_frame("".join(all_text), session_id=session_id)
@@ -899,6 +902,11 @@ async def run_headless(
                 research_audit.observe_event(event.type, event.payload)  # type: ignore[attr-defined]
             report = research_audit.report(assistant_text, mode=governance_mode)  # type: ignore[attr-defined]
             _log("research_governance_audit " + _json.dumps(report, sort_keys=True))
+            from magi_agent.research.live_audit import (  # noqa: PLC0415
+                persist_audit_report,
+            )
+
+            persist_audit_report(report, session_id=sid)
             if _enforce_retry_needed(governance_mode, report):
                 from magi_agent.research.live_audit import (  # noqa: PLC0415
                     ResearchLiveAudit,

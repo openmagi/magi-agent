@@ -36,6 +36,10 @@ LOCAL_FULL_RUNTIME_ENV_DEFAULTS: Mapping[str, str] = {
     "MAGI_MODEL_AWARE_PROMPTS_ENABLED": "1",
     "MAGI_CODING_REPAIR_LOOP_ENABLED": "1",
     "MAGI_GA_LIVE_ENABLED": "1",
+    # A1 measurement: observe-only citation audit on by default in the full
+    # local profile; reports persist to the durable evidence dir so the
+    # default-ON enforce flip can be justified with measured FP data.
+    "MAGI_RESEARCH_GOVERNANCE_MODE": "audit",
     "MAGI_MESSAGE_CACHE_ENABLED": "1",
     "MAGI_FILE_TOOLS_ENABLED": "1",
     "MAGI_BROWSER_TOOL_ENABLED": "1",

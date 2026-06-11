@@ -34,6 +34,14 @@ _WEB_SOURCE_TOOL_NAMES = frozenset(
 _URL_RE = re.compile(r"https?://[^\s\"'<>\\)\]]+")
 _SUCCESS_TOOL_STATUSES = frozenset({"ok", "success", "completed"})
 
+#: Fail-soft error prefixes the web tools embed in ok-status results.
+_WEB_FAILURE_MARKERS = (
+    "fetch error:",
+    "search error:",
+    "research_fact: search failed",
+    "research_fact: no results",
+)
+
 
 def research_governance_mode(env: Mapping[str, str] | None = None) -> str:
     """Return ``"off"`` / ``"audit"`` / ``"enforce"``.
@@ -53,11 +61,23 @@ def research_governance_mode(env: Mapping[str, str] | None = None) -> str:
 def enforce_reprompt_message(report: Mapping[str, object]) -> str:
     """One bounded corrective re-prompt for the deterministic citation class."""
     offending = report.get("citedWithoutSource") or []
-    listing = "\n".join(f"- {url}" for url in offending)  # type: ignore[union-attr]
+    failed = report.get("citedAfterFailedFetch") or []
+    sections: list[str] = []
+    if offending:
+        listing = "\n".join(f"- {url}" for url in offending)  # type: ignore[union-attr]
+        sections.append(
+            "your answer cites the following URL(s) that were never fetched or "
+            f"returned by any tool this turn:\n{listing}"
+        )
+    if failed:
+        failed_listing = "\n".join(f"- {url}" for url in failed)  # type: ignore[union-attr]
+        sections.append(
+            "your answer cites the following URL(s) whose fetch FAILED this turn "
+            f"(you have not actually read them):\n{failed_listing}"
+        )
+    body = "\n".join(sections)
     return (
-        "Citation check failed: your answer cites the following URL(s) that were "
-        "never fetched or returned by any tool this turn:\n"
-        f"{listing}\n"
+        f"Citation check failed: {body}\n"
         "For each one, either fetch it now to verify it supports your claim, or "
         "remove the citation. Then restate the corrected final answer in full."
     )
@@ -75,7 +95,9 @@ class ResearchLiveAudit:
 
     def __init__(self) -> None:
         self._tool_names: dict[str, str] = {}
+        self._requested_urls: dict[str, list[str]] = {}
         self._source_urls: dict[str, None] = {}
+        self._failed_urls: dict[str, None] = {}
 
     def observe_event(self, event_type: str, payload: Mapping[str, object]) -> None:
         """Feed a runtime event; only web-tool starts/ends are recorded."""
@@ -89,43 +111,91 @@ class ResearchLiveAudit:
             )
             if name:
                 self._tool_names[tool_id] = name
+            self._requested_urls[tool_id] = _extract_urls(
+                str(payload.get("input_preview") or payload.get("inputPreview") or "")
+            )
             return
         if inner != "tool_end":
             return
         name = self._tool_names.get(tool_id, "")
         if name not in _WEB_SOURCE_TOOL_NAMES:
             return
-        status = str(payload.get("status") or "").strip().lower()
-        if status not in _SUCCESS_TOOL_STATUSES:
-            return
         try:
             rendered = json.dumps(payload, default=str)
         except (TypeError, ValueError):
             rendered = str(payload)
+        status = str(payload.get("status") or "").strip().lower()
+        # The web tools are fail-soft: provider failures come back as ok-status
+        # results carrying an error STRING — detect both shapes.
+        failed = status not in _SUCCESS_TOOL_STATUSES or any(
+            marker in rendered for marker in _WEB_FAILURE_MARKERS
+        )
+        if failed:
+            # A failed fetch is NOT a source; the URLs it touched are now a
+            # second deterministic class — citing a page you failed to read.
+            for url in (*self._requested_urls.get(tool_id, ()), *_extract_urls(rendered)):
+                if url not in self._source_urls:
+                    self._failed_urls.setdefault(url, None)
+            return
         for url in _extract_urls(rendered):
             self._source_urls.setdefault(url, None)
+            self._failed_urls.pop(url, None)  # a later successful read clears it
 
     def report(self, final_text: str, *, mode: str = "audit") -> dict[str, object]:
         """Deterministic audit report; never raises, never blocks by itself."""
         cited = _extract_urls(final_text)
         sources = list(self._source_urls)
-        cited_without_source = [url for url in cited if url not in self._source_urls]
+        cited_after_failed_fetch = [
+            url for url in cited if url in self._failed_urls and url not in self._source_urls
+        ]
+        cited_without_source = [
+            url
+            for url in cited
+            if url not in self._source_urls and url not in self._failed_urls
+        ]
         cited_set = set(cited)
         sources_uncited = [url for url in sources if url not in cited_set]
+        attention = bool(cited_without_source or cited_after_failed_fetch)
         return {
             "type": "research_governance_audit",
             "mode": mode,
             "sourceUrlCount": len(sources),
             "citedUrlCount": len(cited),
             "citedWithoutSource": cited_without_source,
+            "citedAfterFailedFetch": cited_after_failed_fetch,
             "sourcesUncited": sources_uncited,
-            "verdict": "attention" if cited_without_source else "pass",
+            "verdict": "attention" if attention else "pass",
         }
+
+
+def persist_audit_report(report: Mapping[str, object], *, session_id: str) -> None:
+    """Append an audit report to the durable evidence dir (A1 measurement).
+
+    Default-ON enforce must be justified with measured false-positive data, not
+    assertion — reports accumulate in ``research_audit.jsonl`` next to the
+    durable tool-evidence ledger, honoring the same ``MAGI_EVIDENCE_LEDGER_DIR``
+    semantics (path override; ``off`` disables; default ``<cwd>/.magi/evidence``).
+    Fail-soft: persistence problems never affect the turn.
+    """
+    from pathlib import Path  # noqa: PLC0415
+
+    raw_dir = (os.environ.get("MAGI_EVIDENCE_LEDGER_DIR") or "").strip()
+    if raw_dir.lower() in ("off", "0", "false", "none", "disable", "disabled"):
+        return
+    try:
+        target_dir = Path(raw_dir) if raw_dir else Path.cwd() / ".magi" / "evidence"
+        target_dir.mkdir(parents=True, exist_ok=True)
+        entry = {"sessionId": session_id, "report": dict(report)}
+        with (target_dir / "research_audit.jsonl").open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(entry, sort_keys=True, default=str) + "\n")
+    except OSError:
+        return
 
 
 __all__ = [
     "RESEARCH_GOVERNANCE_MODE_ENV",
     "ResearchLiveAudit",
     "enforce_reprompt_message",
+    "persist_audit_report",
     "research_governance_mode",
 ]

@@ -16,6 +16,10 @@ def pytest_configure(config: pytest.Config) -> None:
     # — keep the suite from littering the repo. Tests exercising the default-ON
     # behavior delenv this and chdir to a tmp_path.
     os.environ.setdefault("MAGI_EVIDENCE_LEDGER_DIR", "off")
+    # Same hygiene for the (full-profile default-ON) research audit: ambient
+    # env leaked by profile-applying tests must not add audit frames to
+    # unrelated projection tests. Audit tests opt in via monkeypatch.setenv.
+    os.environ.setdefault("MAGI_RESEARCH_GOVERNANCE_MODE", "off")
 
 
 @pytest.hookimpl(tryfirst=True)
