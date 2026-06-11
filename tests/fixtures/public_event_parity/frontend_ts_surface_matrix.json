@@ -454,18 +454,16 @@
       "python_adk_parser_sanitizer_support": {
         "status": "contract_only",
         "evidence": [
-          "magi-agent/magi_agent/authoring/contracts.py",
-          "magi-agent/magi_agent/authoring/projection.py"
+          "magi-agent/magi_agent/recipes/compiler.py"
         ],
-        "notes": "Python authoring contracts project recipe metadata, but do not own TS customization routes."
+        "notes": "Recipe customization is represented by recipe compiler metadata; the deleted authoring package is no longer a live or contract surface."
       },
       "python_adk_live_producer_support": {
-        "status": "default_off",
+        "status": "missing",
         "evidence": [
-          "magi-agent/magi_agent/authoring/dry_run.py",
-          "magi-agent/tests/test_authoring_recipe_dry_run.py"
+          "magi-agent/tests/fixtures/public_event_parity/frontend_ts_surface_matrix.json"
         ],
-        "notes": "Authoring dry-run is gated and not production builder authority."
+        "notes": "No Python authoring dry-run producer remains after promote-or-delete cleanup; customize routes stay frontend/web-owned."
       },
       "chat_proxy_compatibility": {
         "status": "not_applicable",
@@ -477,7 +475,7 @@
       "current_status": "default_off",
       "owning_layer": "Python ADK harness/recipe/plugin",
       "pr_slice_assignment": "PR5 Product-Plane And Admin Dashboard Live Projection Readiness - recipe pack builder",
-      "activation_gate": "Keep Python authoring off until dry-run, review, and persistence parity are proven."
+      "activation_gate": "Python authoring is removed; future live customize authority requires a new explicit implementation and review gate."
     },
     {
       "frontend_surface": "product_plane_admin_runtime_services",
@@ -741,10 +739,9 @@
       "python_adk_live_producer_support": {
         "status": "contract_only",
         "evidence": [
-          "magi-agent/magi_agent/authoring/projection.py",
           "magi-agent/magi_agent/artifacts/output_registry_boundary.py"
         ],
-        "notes": "Draft metadata projection exists, but live document authoring is not a production frontend producer."
+        "notes": "Draft output registry projection exists, but the deleted authoring package is not a live document-draft producer."
       },
       "chat_proxy_compatibility": {
         "status": "supported",

@@ -230,6 +230,17 @@ FLAGS: tuple[FlagSpec, ...] = (
         "MAGI_DEEP_WEB_RESEARCH_ENABLED",
         summary="Enable the live deep web-research harness (search + fetch + verify).",
     ),
+    FlagSpec(
+        name="MAGI_RESEARCH_GOVERNANCE_MODE",
+        default="off",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Research governance mode. `off` is inert; `audit` records "
+            "source/citation mismatches without blocking."
+        ),
+        kind="str",
+    ),
     _b(
         "MAGI_BROWSER_TOOL_ENABLED",
         summary="Expose the browser-use autonomous vision BrowserTask tool.",
@@ -289,6 +300,17 @@ FLAGS: tuple[FlagSpec, ...] = (
     _pb(
         "MAGI_EVIDENCE_LEDGER_LIFECYCLE_ENABLED",
         summary="Build per-turn EvidenceLedger objects (default-ON full profile).",
+    ),
+    FlagSpec(
+        name="MAGI_EVIDENCE_LEDGER_DIR",
+        default="",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Directory for opt-in durable per-session JSONL evidence ledgers; "
+            "unset keeps the lean in-memory live view only."
+        ),
+        kind="str",
     ),
     _pb(
         "MAGI_EVIDENCE_COMPLETION_GATE_ENABLED",
