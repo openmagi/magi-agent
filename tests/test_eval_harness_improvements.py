@@ -117,3 +117,18 @@ def test_no_reprompt_when_edits_present():
 def test_no_reprompt_when_already_retried_or_disabled():
     assert should_reprompt_for_zero_edits(file_edits=0, already_reprompted=True, enabled=True) is False
     assert should_reprompt_for_zero_edits(file_edits=0, already_reprompted=False, enabled=False) is False
+
+
+# ---------------------------------------------------------------------------
+# New task — verification-discipline bullets in autonomy block
+# ---------------------------------------------------------------------------
+
+
+def test_autonomy_block_includes_existing_test_discovery(monkeypatch):
+    monkeypatch.setenv("MAGI_EVAL_AUTONOMY_ENABLED", "1")
+    from magi_agent.cli.tool_runtime import eval_autonomy_block
+    text = eval_autonomy_block()
+    assert "parametrized variants" in text
+    assert "cold-interpreter import" in text
+    assert "Before deleting any file" in text
+    assert "behavior-based assertions" in text
