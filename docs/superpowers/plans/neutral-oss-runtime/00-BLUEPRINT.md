@@ -20,7 +20,7 @@ executing pack code), and point at impls via `module:symbol`. First-party ships 
 packs in the same format/loader**. Each primitive impl receives only a narrow typed context, so
 first-party and third-party have identical capability.
 
-**Tech stack:** Python 3.12+, `uv`, pydantic v2 (frozen models, `extra="forbid"`), Google ADK
+**Tech stack:** Python 3.11+ (repo `requires-python = ">=3.11"`), `uv`, pydantic v2 (frozen models, `extra="forbid"`), Google ADK
 (`google.adk`), `tomllib` (stdlib), pytest. Runtime entrypoints: `magi_agent/main.py` (serve),
 `magi_agent/cli/real_runner.py` (`build_cli_model_runner`), `magi_agent/adk_bridge/` (ADK seam).
 
