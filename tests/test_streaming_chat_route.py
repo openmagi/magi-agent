@@ -570,6 +570,97 @@ def test_selected_gate5b_stream_emits_live_sink_events_before_completion(
     assert payloads[-1]["terminal"] == "completed"
 
 
+def test_selected_gate5b_stream_emits_tool_events_before_final_text(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
+    release_response = asyncio.Event()
+    tool_result_ref = "result:sha256:" + ("1" * 64)
+
+    async def fake_selected_chat_response(
+        runtime: object,
+        body: object,
+        *,
+        request: object,
+        public_event_sink=None,
+    ) -> JSONResponse:
+        assert public_event_sink is not None
+        public_event_sink(
+            {
+                "type": "turn_phase",
+                "turnId": "t-selected-tools",
+                "phase": "executing",
+            }
+        )
+        public_event_sink(
+            {"type": "tool_start", "id": "tool-selected-1", "name": "Calculation"}
+        )
+        public_event_sink(
+            {
+                "type": "tool_end",
+                "id": "tool-selected-1",
+                "status": "ok",
+                "output_preview": tool_result_ref,
+            }
+        )
+        await release_response.wait()
+        return JSONResponse(
+            status_code=200,
+            content={
+                "status": "python_ready",
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "content": "final answer after selected tool",
+                        }
+                    }
+                ],
+            },
+        )
+
+    monkeypatch.setattr(
+        streaming_chat_route_module,
+        "run_gate5b_user_visible_chat_response",
+        fake_selected_chat_response,
+    )
+
+    async def _collect() -> list[dict]:
+        frames = _drive_selected_gate5b_stream(
+            SimpleNamespace(),
+            {"messages": [{"role": "user", "content": "stream selected tools"}]},
+            SimpleNamespace(),
+            session_id="s-selected-tools",
+            turn_id="t-selected-tools",
+        )
+        live_payloads: list[dict] = []
+        for _ in range(3):
+            frame = await asyncio.wait_for(anext(frames), timeout=1)
+            live_payloads.extend(_data_lines(frame.decode("utf-8")))
+        release_response.set()
+        remaining_frames = [frame async for frame in frames]
+        remaining_payloads = [
+            payload
+            for frame in remaining_frames
+            for payload in _data_lines(frame.decode("utf-8"))
+        ]
+        return live_payloads + remaining_payloads
+
+    payloads = asyncio.run(_collect())
+
+    event_types = [payload.get("type") for payload in payloads]
+    assert event_types[:3] == ["turn_phase", "tool_start", "tool_end"]
+    assert payloads[0]["phase"] == "executing"
+    assert payloads[1]["id"] == "tool-selected-1"
+    assert payloads[1]["name"] == "Calculation"
+    assert payloads[2]["id"] == "tool-selected-1"
+    assert payloads[2]["status"] == "ok"
+    assert payloads[2]["output_preview"] == tool_result_ref
+    assert event_types.index("tool_end") < event_types.index("text_delta")
+    assert event_types[-1] == "turn_result"
+    assert payloads[-1]["terminal"] == "completed"
+
+
 def test_selected_full_toolhost_stream_starts_work_events_before_response_finishes(
     monkeypatch,
     tmp_path: Path,
