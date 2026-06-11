@@ -5,13 +5,12 @@ the flag-ON/flag-OFF behavior of every call site wired in this PR:
 
 - ``web_fetch`` / ``research_fact`` (``tools/web_search_tools.py``)
 - ``document_read`` (``tools/document_tools.py``)
-- ``budget_tool_result`` previews (``tools/output_budget.py``)
 
 Hermetic — no network. HTTP calls are intercepted via monkeypatch on
 ``urllib.request.urlopen``; ``research_fact`` uses its injectable callables.
 
-Default-OFF proof: with ``MAGI_HEADTAIL_TRUNCATION_ENABLED`` unset, every
-call site is byte-identical to the legacy head-only slice (the pre-existing
+Default-OFF proof: with ``MAGI_HEADTAIL_TRUNCATION_ENABLED`` unset, the new
+call sites are byte-identical to the legacy head-only slice (the pre-existing
 ``tests/test_web_search_tools.py::test_web_fetch_truncates_long_content``
 also keeps passing unmodified).
 """
@@ -368,7 +367,7 @@ class TestDocumentReadCallSite:
 
 
 class TestOutputBudgetCallSite:
-    def test_flag_on_preview_keeps_tail_and_digest_unchanged(
+    def test_preview_keeps_tail_and_digest_unchanged_regardless_of_flag(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         from magi_agent.tools.output_budget import budget_tool_result
@@ -381,18 +380,20 @@ class TestOutputBudgetCallSite:
         off = budget_tool_result(ToolResult(status="ok", output=text), llm_preview_chars=100)
         assert off.truncation.llm_preview_truncated is True
         assert isinstance(off.llm_preview, str)
-        assert sentinel not in off.llm_preview  # legacy head-only
+        assert sentinel in off.llm_preview
+        assert "chars elided" in off.llm_preview
 
         monkeypatch.setenv(HEADTAIL_TRUNCATION_ENV, "1")
         on = budget_tool_result(ToolResult(status="ok", output=text), llm_preview_chars=100)
         assert on.truncation.llm_preview_truncated is True
         assert isinstance(on.llm_preview, str)
         assert sentinel in on.llm_preview
-        assert "elided - output truncated" in on.llm_preview
+        assert "chars elided" in on.llm_preview
 
         # digest / raw blob are computed from the raw result and are unaffected
         assert on.digest == off.digest
         assert on.raw_blob == off.raw_blob
+        assert on.llm_preview == off.llm_preview
 
     def test_flag_on_within_budget_unchanged(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from magi_agent.tools.output_budget import budget_tool_result
