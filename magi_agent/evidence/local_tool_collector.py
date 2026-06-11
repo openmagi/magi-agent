@@ -140,12 +140,13 @@ class LocalToolEvidenceCollector:
         status: str,
         records: list[object],
     ) -> None:
-        """Opt-in durable JSONL sink (``MAGI_EVIDENCE_LEDGER_DIR``).
+        """Durable JSONL sink — ON by default (``MAGI_EVIDENCE_LEDGER_DIR``).
 
         The in-memory view keeps only the last ``_MAX_SESSION_LEDGERS`` turns —
-        a lean live view, NOT an audit store. When the operator sets a ledger
-        directory, every recorded entry is also appended to
-        ``<dir>/<session_id>.jsonl`` so a durable audit trail exists.
+        a lean live view, NOT an audit store. A governance-identity runtime
+        ships its audit trail on by default: entries append to
+        ``<cwd>/.magi/evidence/<session_id>.jsonl``. Set the env to a directory
+        to relocate, or to ``off``/``0``/``false``/``none`` to disable.
         Fail-soft: persistence problems never break the tool path.
         """
         import json as _json  # noqa: PLC0415
@@ -153,10 +154,10 @@ class LocalToolEvidenceCollector:
         from pathlib import Path  # noqa: PLC0415
 
         raw_dir = (_os.environ.get("MAGI_EVIDENCE_LEDGER_DIR") or "").strip()
-        if not raw_dir:
+        if raw_dir.lower() in ("off", "0", "false", "none", "disable", "disabled"):
             return
         try:
-            target_dir = Path(raw_dir)
+            target_dir = Path(raw_dir) if raw_dir else Path.cwd() / ".magi" / "evidence"
             target_dir.mkdir(parents=True, exist_ok=True)
             safe_session = "".join(
                 c if c.isalnum() or c in "-_." else "_" for c in session_id
