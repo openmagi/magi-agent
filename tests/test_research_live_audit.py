@@ -28,9 +28,17 @@ def test_research_governance_mode_default_off():
 
     assert research_governance_mode({}) == "off"
     assert research_governance_mode({"MAGI_RESEARCH_GOVERNANCE_MODE": ""}) == "off"
-    # enforce is NOT accepted yet — audit-first; unknown values fall to off.
-    assert research_governance_mode({"MAGI_RESEARCH_GOVERNANCE_MODE": "enforce"}) == "off"
     assert research_governance_mode({"MAGI_RESEARCH_GOVERNANCE_MODE": "banana"}) == "off"
+
+
+def test_research_governance_mode_enforce_accepted():
+    # Promotion decision (A1): the cited-without-source class is deterministic
+    # (citing a URL never fetched is verifiably wrong), so enforce is accepted
+    # for THAT class only — semantics are one bounded re-prompt, never a
+    # silent rewrite.
+    from magi_agent.research.live_audit import research_governance_mode
+
+    assert research_governance_mode({"MAGI_RESEARCH_GOVERNANCE_MODE": "enforce"}) == "enforce"
 
 
 def test_research_governance_mode_audit():
@@ -161,6 +169,110 @@ def test_stream_json_emits_audit_frame_when_enabled(monkeypatch):
 def test_stream_json_no_audit_frame_by_default(monkeypatch):
     raw = _run("stream-json", monkeypatch, None)
     assert "research_governance_audit" not in raw
+
+
+def test_enforce_reprompt_message_names_offending_urls():
+    from magi_agent.research.live_audit import enforce_reprompt_message
+
+    message = enforce_reprompt_message(
+        {"citedWithoutSource": ["https://uncovered.org/z"], "verdict": "attention"}
+    )
+    assert "https://uncovered.org/z" in message
+    assert "fetch" in message.lower()
+
+
+class _CountingWebTurnDriver(_WebTurnDriver):
+    """First turn cites an unfetched URL; the retry turn answers cleanly."""
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def run_turn_stream(self, _session, turn_input, *, cancel=None, gate=None):
+        prompt = str((turn_input or {}).get("prompt", ""))
+        self.calls.append(prompt)
+        if len(self.calls) == 1:
+            return super().run_turn_stream(_session, turn_input, cancel=cancel, gate=gate)
+
+        async def _gen():
+            yield RuntimeEvent(
+                type="token",
+                payload={"type": "text_delta", "delta": "Corrected: no stray citations."},
+                turn_id="t",
+            )
+            yield EngineResult(
+                terminal=Terminal.completed, usage={}, cost_usd=0.0, error=None
+            )
+
+        return _gen()
+
+
+def test_enforce_runs_one_bounded_retry_stream_json(monkeypatch):
+    from magi_agent.cli.headless import run_headless
+
+    monkeypatch.setenv("MAGI_CLI_ENABLED", "1")
+    monkeypatch.setenv("MAGI_RESEARCH_GOVERNANCE_MODE", "enforce")
+    driver = _CountingWebTurnDriver()
+    out = io.StringIO()
+    code = asyncio.run(
+        run_headless("what is X?", output="stream-json", driver=driver, stream=out)
+    )
+    assert code == 0
+    assert len(driver.calls) == 2
+    assert "uncovered.org/z" in driver.calls[1]  # re-prompt names the URL
+    raw = out.getvalue()
+    assert "research_governance_enforce_retry" in raw
+    assert "Corrected: no stray citations." in raw
+
+
+def test_audit_mode_never_retries(monkeypatch):
+    from magi_agent.cli.headless import run_headless
+
+    monkeypatch.setenv("MAGI_CLI_ENABLED", "1")
+    monkeypatch.setenv("MAGI_RESEARCH_GOVERNANCE_MODE", "audit")
+    driver = _CountingWebTurnDriver()
+    out = io.StringIO()
+    asyncio.run(run_headless("q", output="stream-json", driver=driver, stream=out))
+    assert len(driver.calls) == 1
+
+
+def test_enforce_text_mode_returns_corrected_answer(monkeypatch):
+    from magi_agent.cli.headless import run_headless
+
+    monkeypatch.setenv("MAGI_CLI_ENABLED", "1")
+    monkeypatch.setenv("MAGI_RESEARCH_GOVERNANCE_MODE", "enforce")
+    driver = _CountingWebTurnDriver()
+    out = io.StringIO()
+    code = asyncio.run(run_headless("q", output="text", driver=driver, stream=out))
+    assert code == 0
+    assert len(driver.calls) == 2
+    assert "Corrected: no stray citations." in out.getvalue()
+
+
+def test_enforce_clean_answer_no_retry(monkeypatch):
+    from magi_agent.cli.headless import run_headless
+
+    class _CleanDriver(_CountingWebTurnDriver):
+        def run_turn_stream(self, _session, turn_input, *, cancel=None, gate=None):
+            self.calls.append(str((turn_input or {}).get("prompt", "")))
+
+            async def _gen():
+                yield RuntimeEvent(
+                    type="token",
+                    payload={"type": "text_delta", "delta": "No citations at all."},
+                    turn_id="t",
+                )
+                yield EngineResult(
+                    terminal=Terminal.completed, usage={}, cost_usd=0.0, error=None
+                )
+
+            return _gen()
+
+    monkeypatch.setenv("MAGI_CLI_ENABLED", "1")
+    monkeypatch.setenv("MAGI_RESEARCH_GOVERNANCE_MODE", "enforce")
+    driver = _CleanDriver()
+    out = io.StringIO()
+    asyncio.run(run_headless("q", output="stream-json", driver=driver, stream=out))
+    assert len(driver.calls) == 1
 
 
 def test_text_mode_output_unchanged_and_audit_logged(monkeypatch):
