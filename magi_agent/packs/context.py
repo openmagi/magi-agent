@@ -276,3 +276,110 @@ class EvidenceProducerCtx:
 
     def emitted(self) -> tuple[dict[str, Any], ...]:
         return tuple(self._emitted)
+
+
+class GatePositionViolation(ValueError):
+    """A before_tool deciding impl ran with gate_position 'after' (would bypass the
+    agent-level permission gate). Mirrors ControlPlane.register's footgun guard."""
+
+
+def _build_session_view(adk_ctx: Any) -> SessionReadView:
+    """Build a narrow read-view from an ADK ToolContext/CallbackContext duck-type."""
+    state = getattr(adk_ctx, "state", None)
+    state_map: Mapping[str, Any]
+    try:
+        state_map = dict(state) if state is not None else {}
+    except TypeError:
+        state_map = {}
+    turn = state_map.get("turn", 0)
+    return SessionReadView(
+        invocation_id=str(getattr(adk_ctx, "invocation_id", "") or ""),
+        agent_name=str(getattr(adk_ctx, "agent_name", "") or ""),
+        turn_index=int(turn) if isinstance(turn, int) else 0,
+        state=state_map,
+    )
+
+
+class ContextDispatcher:
+    """Builds typed contexts from raw ADK args and applies impl decisions back to ADK.
+
+    Mirrors the existing ``ControlPlane`` fan-out exactly so Phase 5 can swap the
+    hand-assembled controls for registry-loaded impls with no behavior change.
+    """
+
+    def __init__(self, registry: Any) -> None:
+        self._reg = registry
+
+    def _control_entries(self) -> list[Any]:
+        return self._reg.list(ptype=PrimitiveType.CONTROL_PLANE)
+
+    def dispatch_before_tool(self, *, tool_name: str, args: dict[str, Any],
+                             tool_context: Any,
+                             evidence: EvidenceReadView | None = None) -> dict[str, Any] | None:
+        session = _build_session_view(tool_context)
+        ev = evidence or EvidenceReadView()
+        for entry in self._control_entries():
+            ctx = BeforeToolCtx(tool_name=tool_name, tool_args=args,
+                                session=session, evidence=ev)
+            entry.impl(ctx)
+            decision = ctx.decision()
+            if decision.action == "allow":
+                continue
+            # gate_position guard: a deciding before_tool impl MUST opt into
+            # plugin-level execution ('before'); the default ('after'/None) preserves
+            # the agent-level permission gate by forbidding the decision.
+            if entry.gate_position != "before":
+                raise GatePositionViolation(
+                    f"control_plane:{entry.ref} decided '{decision.action}' on before_tool "
+                    f"with gate_position={entry.gate_position!r}; set gate_position='before' "
+                    f"to run at plugin level (this bypasses the permission gate — opt in "
+                    f"explicitly) or move the decision to a later hook."
+                )
+            if decision.action == "deny":
+                return decision.deny_result
+            if decision.action == "rewrite" and decision.updated_args is not None:
+                args.clear()
+                args.update(decision.updated_args)
+                # continue (no short-circuit on rewrite) — mirrors ControlPlane
+        return None
+
+    def dispatch_after_tool(self, *, tool_name: str, args: dict[str, Any],
+                            result: Any, tool_context: Any) -> dict[str, Any] | None:
+        session = _build_session_view(tool_context)
+        for entry in self._control_entries():
+            ctx = AfterToolCtx(tool_name=tool_name, tool_args=args,
+                               result=result, session=session)
+            entry.impl(ctx)
+            override = ctx.override_result()
+            if override is not None:
+                return override  # first non-None wins
+        return None
+
+    def dispatch_before_model(self, *, callback_context: Any, llm_request: Any) -> None:
+        session = _build_session_view(callback_context)
+        for entry in self._control_entries():
+            ctx = BeforeModelCtx(session=session)
+            entry.impl(ctx)
+            for role, text in ctx.pending_reinjections():
+                llm_request.contents.append({"role": role, "content": text})
+            if ctx.wants_clear_tools():
+                cfg = getattr(llm_request, "config", None)
+                if cfg is not None and getattr(cfg, "tools", None) is not None:
+                    cfg.tools = []
+        return None
+
+    def dispatch_after_agent(self, *, agent_name: str, callback_context: Any) -> None:
+        session = _build_session_view(callback_context)
+        for entry in self._control_entries():
+            ctx = AfterAgentCtx(agent_name=agent_name, session=session)
+            entry.impl(ctx)
+        return None
+
+
+__all__ = [
+    "PrimitiveType", "Capability",
+    "SessionReadView", "EvidenceReadView",
+    "BeforeToolCtx", "AfterToolCtx", "BeforeModelCtx", "AfterAgentCtx",
+    "ToolCtx", "ValidatorCtx", "ValidatorVerdict", "EvidenceProducerCtx",
+    "ContextDispatcher", "GatePositionViolation",
+]
