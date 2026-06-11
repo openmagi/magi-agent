@@ -30,6 +30,7 @@ Auth is checked first (before the feature gate) on all three routes.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import uuid
@@ -63,6 +64,7 @@ from magi_agent.runtime.memory_mode_context import (
     memory_mode_request_scope,
 )
 from magi_agent.config.env import is_hosted_streaming_serve_enabled
+from magi_agent.gates.gate5b_full_toolhost import Gate5BFullToolHostConfig
 from magi_agent.transport.active_turn import ACTIVE_TURNS, ActiveTurn
 # NOTE: the underscore-named helpers below are owned by the decomposed chat
 # modules (chat_shared / chat_routes); they are imported via the
@@ -81,6 +83,7 @@ from magi_agent.transport.chat import (
 from magi_agent.transport.streaming_chat import frame_for_event, frame_for_terminal
 from magi_agent.transport.streaming_driver import drive_streaming_chat
 from magi_agent.transport.streaming_sink import build_streaming_prompt_sink
+from magi_agent.runtime.public_events import turn_phase_event
 
 __all__ = [
     "register_streaming_chat_routes",
@@ -91,6 +94,7 @@ __all__ = [
 
 _DEFAULT_PER_CHILD_TOKENS = 8000
 _DEFAULT_MODEL_MICROCENTS_PER_1K = 120
+_SELECTED_FULL_TOOLHOST_TURN_ID = "turn-gate5b-full-toolhost"
 # Process-wide default store so a confirmation prompt issued on one /v1/chat/stream
 # request survives until the user's yes/no arrives on the NEXT request.
 _DEFAULT_CONFIRM_STORE: PendingConfirmationStore = InMemoryPendingConfirmationStore()
@@ -325,6 +329,50 @@ def _runtime_event_frame(payload: Mapping[str, object], *, turn_id: str) -> byte
     )
 
 
+def _runtime_scope_digest(value: object) -> str:
+    if not isinstance(value, str) or not value:
+        return ""
+    return "sha256:" + hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _selected_full_toolhost_stream_start_events(
+    runtime: object,
+) -> tuple[Mapping[str, object], ...]:
+    """Return immediate Work-panel events for the selected full-toolhost stream."""
+    try:
+        full_toolhost_config = getattr(runtime, "gate5b_full_toolhost_config", None)
+        if not isinstance(full_toolhost_config, Gate5BFullToolHostConfig):
+            return ()
+        route_config = _route_config(runtime)
+        runtime_config = getattr(runtime, "config", None)
+        environment = route_config.environment or "local"
+        if (
+            not full_toolhost_config.enabled
+            or full_toolhost_config.kill_switch_enabled
+            or not full_toolhost_config.route_attachment_enabled
+            or full_toolhost_config.max_tool_calls_per_turn <= 0
+            or full_toolhost_config.selected_bot_digest
+            != _runtime_scope_digest(getattr(runtime_config, "bot_id", None))
+            or full_toolhost_config.selected_owner_digest
+            != _runtime_scope_digest(getattr(runtime_config, "user_id", None))
+            or full_toolhost_config.environment != environment
+            or environment not in full_toolhost_config.environment_allowlist
+        ):
+            return ()
+    except Exception:
+        return ()
+    return (
+        turn_phase_event(turn_id=_SELECTED_FULL_TOOLHOST_TURN_ID, phase="executing"),
+        {
+            "type": "llm_progress",
+            "turnId": _SELECTED_FULL_TOOLHOST_TURN_ID,
+            "stage": "started",
+            "label": "Running Python ADK",
+            "detail": "Selected first-party toolhost active",
+        },
+    )
+
+
 async def _drive_selected_gate5b_stream(
     runtime: object,
     body: object,
@@ -358,6 +406,11 @@ async def _drive_selected_gate5b_stream(
 
     response_task = asyncio.create_task(_run_selected_response())
     try:
+        for public_event in _selected_full_toolhost_stream_start_events(runtime):
+            emitted_event_keys.add(_event_key(public_event))
+            frame = _runtime_event_frame(public_event, turn_id=turn_id)
+            if frame is not None:
+                yield frame
         while True:
             if response_task.done() and live_events.empty():
                 break
