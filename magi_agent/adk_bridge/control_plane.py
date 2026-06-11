@@ -716,8 +716,15 @@ class SelfReviewAfterTurnControl(BaseLoopControl):
         agent: Any,
         callback_context: Any,
     ) -> None:
+        # Dual-load: extract the turn snapshot the legacy way (privileged
+        # session/event traversal), convert it to the typed ``TurnSnapshot``, and
+        # delegate to the typed-context path supplying this control's own
+        # ForkRunner. Phase 6 has the dispatcher pre-extract the snapshot and
+        # place the ForkRunner on the context, after which this branch is removed.
+        from magi_agent.packs.context import ControlPlaneContext, TurnSnapshot
+
         try:
-            snapshot = _extract_self_review_turn_snapshot(
+            legacy = _extract_self_review_turn_snapshot(
                 agent=agent,
                 callback_context=callback_context,
             )
@@ -727,10 +734,34 @@ class SelfReviewAfterTurnControl(BaseLoopControl):
                 exc_info=True,
             )
             return None
-        if snapshot is None:
+        if legacy is None:
             return None
 
-        self._schedule(self._run_self_review(snapshot))
+        snapshot = TurnSnapshot(
+            session_id=legacy.session_id,
+            turn_id=legacy.turn_id,
+            system_prompt_blocks=tuple(legacy.system_prompt_blocks),
+            parent_assistant_message=dict(legacy.parent_assistant_message),
+        )
+        ctx = ControlPlaneContext.minimal(
+            turn_snapshot=snapshot,
+            fork_runner=self._fork_runner_or_default(),
+        )
+        return await self.apply_after_agent(ctx)
+
+    async def apply_after_agent(self, ctx: Any) -> None:
+        """Typed-context path: schedule the C1 fork from a pre-extracted
+        ``TurnSnapshot`` using the ForkRunner exposed on the context (a public,
+        full-trust local capability per the neutral-runtime blueprint).
+
+        Observational: returns ``None`` immediately and only schedules the fork,
+        so the ADK post-turn callback can never alter the parent turn.
+        """
+        snapshot = getattr(ctx, "turn_snapshot", None)
+        if snapshot is None:
+            return None
+        fork_runner = getattr(ctx, "fork_runner", None) or self._fork_runner_or_default()
+        self._schedule(self._run_self_review_with(snapshot, fork_runner))
         return None
 
     def _schedule(self, coro: Coroutine[Any, Any, None]) -> None:
@@ -763,15 +794,15 @@ class SelfReviewAfterTurnControl(BaseLoopControl):
         except Exception:
             logger.debug("self-review after-turn background task failed", exc_info=True)
 
-    async def _run_self_review(self, snapshot: _SelfReviewTurnSnapshot) -> None:
+    async def _run_self_review_with(self, snapshot: Any, fork_runner: Any) -> None:
         from magi_agent.harness.self_review import run_self_review_hook
 
         await run_self_review_hook(
             session_id=snapshot.session_id,
             turn_id=snapshot.turn_id,
-            system_prompt_blocks=snapshot.system_prompt_blocks,
-            parent_assistant_message=snapshot.parent_assistant_message,
-            fork_runner=self._fork_runner_or_default(),
+            system_prompt_blocks=list(snapshot.system_prompt_blocks),
+            parent_assistant_message=dict(snapshot.parent_assistant_message),
+            fork_runner=fork_runner,
             candidate_sink=self._candidate_sink,
             config=self._config,
             now=self._now,
