@@ -309,6 +309,63 @@ def resolve_provider_config(
     return None
 
 
+def resolve_vision_provider_config(
+    *,
+    env: Mapping[str, str] | None = None,
+    config: Mapping[str, object] | None = None,
+) -> ProviderConfig | None:
+    """Resolve the vision-sidecar override, or ``None`` for the default path.
+
+    The override is triggered by ``MAGI_VISION_MODEL`` (bare provider-native
+    model id, same semantics as ``MAGI_MODEL``). ``MAGI_VISION_PROVIDER``
+    optionally names which provider's credentials to use; when unset, the main
+    resolved provider's credentials are reused with only the model swapped.
+
+    Returns ``None`` when ``MAGI_VISION_MODEL`` is unset/blank/sentinel, when
+    an explicit ``MAGI_VISION_PROVIDER`` is unsupported or has no resolvable
+    API key, or when no main provider exists to inherit credentials from.
+    NEVER raises (this feeds the fail-soft tool path in ``image_tools``).
+    """
+
+    try:
+        env = os.environ if env is None else env
+
+        model = _clean_model(env.get("MAGI_VISION_MODEL"))
+        if model is None:
+            return None
+
+        config = _load_config_file() if config is None else config
+
+        vision_provider = _clean(env.get("MAGI_VISION_PROVIDER"))
+        if vision_provider is not None:
+            provider = vision_provider.lower()
+            if provider not in SUPPORTED_PROVIDERS:
+                # Unlike resolve_provider_config (UnknownProviderError), a tool-path
+                # misconfiguration must degrade to the main path, not crash.
+                return None
+            api_key: str | None = None
+            provider_block = _section(config, "providers").get(provider)
+            if isinstance(provider_block, dict):
+                api_key = _clean(provider_block.get("api_key"))
+            if not api_key:
+                for env_name in _PROVIDER_ENV_KEYS[provider]:
+                    from_env = _clean(env.get(env_name))
+                    if from_env:
+                        api_key = from_env
+                        break
+            if not api_key:
+                return None
+            return ProviderConfig(provider=provider, model=model, api_key=api_key)
+
+        # No explicit vision provider: inherit the main provider's credentials.
+        main = resolve_provider_config(env=env, config=config)
+        if main is None:
+            return None
+        return ProviderConfig(provider=main.provider, model=model, api_key=main.api_key)
+    except Exception:  # noqa: BLE001 — tool path: degrade to the main path, never crash.
+        return None
+
+
 def model_choices_from_config(current: str | None = None) -> list[str]:
     """Return candidate model ids with ``current`` first (if known).
 
@@ -385,6 +442,7 @@ __all__ = [
     "UnknownProviderError",
     "default_model_for",
     "resolve_provider_config",
+    "resolve_vision_provider_config",
     "persist_model",
     "model_choices_from_config",
 ]
