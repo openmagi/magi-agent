@@ -102,7 +102,15 @@ def validate_args(parameters: dict, arguments: dict) -> str | None:
     return None
 
 
-DEFAULT_WRITE_PREFIXES = ("book_", "cancel_", "update_", "send_")
+DEFAULT_WRITE_PREFIXES = (
+    "book_",
+    "cancel_",
+    "update_",
+    "modify_",
+    "return_",
+    "exchange_",
+    "send_",
+)
 
 
 class WriteLedger:
@@ -128,6 +136,9 @@ class WriteLedger:
 
     def record(self, tool_name: str, arguments: dict, *, ok: bool) -> None:
         self._records.append((tool_name, self._key(arguments), ok))
+
+    def write_fingerprint(self, tool_name: str, arguments: dict) -> tuple[str, str]:
+        return (tool_name, self._key(arguments))
 
     def is_repeat_write(self, tool_name: str, arguments: dict) -> bool:
         key = self._key(arguments)
@@ -262,7 +273,7 @@ def open_items_review_prompt() -> str:
     item cannot silently take the others down with it.
     """
     return (
-        "Before you finish: write an explicit checklist of EVERY request the "
+        "Before you finish: privately review an explicit checklist of EVERY request the "
         "user made in this conversation, one line each, with a status: "
         "[done — name the tool call], [not done], or [refused — quote the "
         "exact rule that forbids it]. Evaluate each item separately and check "
@@ -270,7 +281,8 @@ def open_items_review_prompt() -> str:
         "not make the others impossible. If any item is [not done] and the "
         "policy allows it, do it now before replying. Only give your final "
         "answer once every item is done or has a quoted rule justifying why "
-        "not."
+        "not. Do not include this private checklist in the user-facing response "
+        "unless the user explicitly asks for it."
     )
 
 

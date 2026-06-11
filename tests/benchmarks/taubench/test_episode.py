@@ -340,17 +340,17 @@ def test_l2_takes_precedence_within_a_turn() -> None:
     assert result.done is True
 
 
-def test_open_items_review_injects_once_on_conclusion() -> None:
-    env = FakeEnv(script=[
-        FakeResp("user-reply", 0.0, False),
-        FakeResp("###STOP###", 1.0, True),
-    ])
+def test_open_items_review_is_private_instruction_not_user_observation() -> None:
+    env = FakeEnv(script=[FakeResp("###STOP###", 1.0, True)])
     state = EpisodeState()
     seen: list[str] = []
+    instructions: list[str] = []
     calls = {"n": 0}
-    texts = ["I'm sorry, I cannot do that.", "ok", "bye"]
+    texts = ["I'm sorry, I cannot do that."]
 
     def factory(*, instruction, tools):
+        instructions.append(instruction)
+
         class _R:
             async def run_async(self, **kw):
                 seen.append(_text_of(kw["new_message"]))
@@ -365,11 +365,10 @@ def test_open_items_review_injects_once_on_conclusion() -> None:
         reliability=ReliabilityConfig(open_items_review=True),
     )
     respond_contents = [a.kwargs["content"] for a in env.steps if a.name == "respond"]
-    # The conclusion was NOT routed as a respond — the L6 review replaced it.
-    assert "I'm sorry, I cannot do that." not in respond_contents
-    assert respond_contents[0] == "ok"
-    # The structured review was delivered to the agent as the next observation.
-    assert any("checklist" in m for m in seen)
+    assert respond_contents == ["I'm sorry, I cannot do that."]
+    assert len(seen) == 1
+    assert not any("checklist" in m.lower() for m in seen)
+    assert any("checklist" in i.lower() for i in instructions)
     assert result.done is True
 
 
@@ -423,18 +422,20 @@ def test_open_items_review_not_triggered_by_question() -> None:
     assert result.done is True
 
 
-def test_l4_and_l6_compose_one_shot_each() -> None:
+def test_l4_runtime_review_composes_with_l6_private_instruction() -> None:
     env = FakeEnv(script=[FakeResp("###STOP###", 1.0, True)])
     state = EpisodeState()
     seen: list[str] = []
+    instructions: list[str] = []
     calls = {"n": 0}
     texts = [
         "I'm sorry, I cannot do that.",       # turn 1 -> L4 nudge
-        "Unfortunately that is not possible.",  # turn 2 -> L6 review
-        "ok",                                   # turn 3 -> respond -> STOP
+        "Unfortunately that is not possible.",  # turn 2 -> respond -> STOP
     ]
 
     def factory(*, instruction, tools):
+        instructions.append(instruction)
+
         class _R:
             async def run_async(self, **kw):
                 seen.append(_text_of(kw["new_message"]))
@@ -449,7 +450,8 @@ def test_l4_and_l6_compose_one_shot_each() -> None:
         reliability=ReliabilityConfig(completion_review=True, open_items_review=True),
     )
     respond_contents = [a.kwargs["content"] for a in env.steps if a.name == "respond"]
-    assert respond_contents == ["ok"]
+    assert respond_contents == ["Unfortunately that is not possible."]
     assert any("every concrete action" in m for m in seen)  # L4 fired first
-    assert any("checklist" in m for m in seen)              # L6 fired second
+    assert not any("checklist" in m.lower() for m in seen)  # L6 is not user-visible
+    assert any("checklist" in i.lower() for i in instructions)
     assert result.done is True

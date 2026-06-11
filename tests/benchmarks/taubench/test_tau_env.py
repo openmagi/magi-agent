@@ -188,7 +188,7 @@ def test_grounded_args_first_write_call_prompts_instead_of_executing() -> None:
     assert len(env.steps) == 1  # second identical call executed
 
 
-def test_grounded_args_one_shot_per_tool_name() -> None:
+def test_grounded_args_one_shot_per_tool_and_argument_fingerprint() -> None:
     env = _MultiToolEnv()
     callables = _grounded_callables(env)
     asyncio.run(callables["book_x"]({"id": "1"}, None))  # prompt
@@ -197,18 +197,24 @@ def test_grounded_args_one_shot_per_tool_name() -> None:
     assert "cancel_y" in str(out)
     assert len(env.steps) == 1  # cancel_y prompted, not executed
     out = asyncio.run(callables["book_x"]({"id": "9"}, None))  # NEW args, same name
+    assert "book_x" in str(out)
+    assert len(env.steps) == 1  # changed args require a new grounding prompt
+    out = asyncio.run(callables["book_x"]({"id": "9"}, None))
     assert "ok book_x" in str(out)
-    assert len(env.steps) == 2  # executed immediately, no second prompt
+    assert len(env.steps) == 2  # acknowledged fingerprint now executes
 
 
-def test_grounded_args_corrected_args_execute_without_second_prompt() -> None:
+def test_grounded_args_corrected_args_require_their_own_acknowledgement() -> None:
     env = _MultiToolEnv()
     callables = _grounded_callables(env)
     out1 = asyncio.run(callables["book_x"]({"id": "A"}, None))
     assert "book_x" in str(out1)
     assert env.steps == []
     out2 = asyncio.run(callables["book_x"]({"id": "B"}, None))
-    assert "ok book_x" in str(out2)
+    assert "book_x" in str(out2)
+    assert env.steps == []
+    out3 = asyncio.run(callables["book_x"]({"id": "B"}, None))
+    assert "ok book_x" in str(out3)
     assert len(env.steps) == 1
     assert env.steps[0].kwargs == {"id": "B"}  # env receives the corrected args
 

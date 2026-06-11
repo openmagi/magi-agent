@@ -65,17 +65,19 @@ def run_episode(
     # set done. The caller owns it so the tools and the loop see the same object.
     reset = env.reset(task_index)
     obs = reset.observation
-    runner = runner_factory(instruction=instruction or env.wiki, tools=tools)
+    cfg = reliability or ReliabilityConfig()
+    base_instruction = instruction or env.wiki
+    if cfg.open_items_review:
+        base_instruction = f"{base_instruction}\n\n{open_items_review_prompt()}"
+    runner = runner_factory(instruction=base_instruction, tools=tools)
     # One session_id for the whole episode: ADK's Runner.run_async REQUIRES it
     # (CliModelRunner forwards kwargs raw, so it must be passed). Unique per episode
     # so trials stay isolated; constant across this episode's turns so multi-turn
     # conversation history is preserved.
     episode_session_id = session_id or f"taubench-{uuid.uuid4().hex}"
-    cfg = reliability or ReliabilityConfig()
     led = ledger if ledger is not None else WriteLedger()
     nudged = False
     reviewed = False
-    items_reviewed = False
 
     async def _run_turn(message: str) -> str:
         texts: list[str] = []
@@ -122,16 +124,8 @@ def run_episode(
                 reviewed = True
                 obs = completion_review_nudge()
                 continue  # one grounded turn to complete/scope-correct; skip respond
-        # Lever precedence per turn is L2 -> L4 -> L6, each one-shot per episode.
-        if cfg.open_items_review and not items_reviewed:
-            try:
-                conclude = is_conclusion(agent_text)
-            except Exception:
-                conclude = False
-            if conclude:
-                items_reviewed = True
-                obs = open_items_review_prompt()
-                continue
+        # Lever precedence per turn is L2 -> L4. L6 is attached as private
+        # runner instruction when enabled so it never becomes a user-sim turn.
         # the agent's tool calls already hit env.step during the turn (via FunctionTools,
         # which call state.observe). Now route the agent's user-facing text as a respond.
         resp = env.step(

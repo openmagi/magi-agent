@@ -44,7 +44,7 @@ def build_env_tool_callables(
     """
     cfg = reliability or ReliabilityConfig()
     led = ledger if ledger is not None else WriteLedger()
-    grounding_prompted: set[str] = set()
+    grounding_prompted: set[tuple[str, str]] = set()
     callables: dict[str, Callable] = {}
     for spec in _tool_specs(env):
         name = spec["name"]
@@ -76,8 +76,9 @@ def build_env_tool_callables(
                         )
                 if cfg.grounded_args and is_write:
                     try:
-                        if tool_name not in grounding_prompted:
-                            grounding_prompted.add(tool_name)
+                        fingerprint = led.write_fingerprint(tool_name, args)
+                        if fingerprint not in grounding_prompted:
+                            grounding_prompted.add(fingerprint)
                             return grounding_prompt(tool_name, args)
                     except Exception:
                         pass

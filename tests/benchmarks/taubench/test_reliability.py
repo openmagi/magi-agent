@@ -70,8 +70,12 @@ def test_is_write_by_prefix() -> None:
     assert led.is_write("book_reservation") is True
     assert led.is_write("cancel_reservation") is True
     assert led.is_write("update_reservation_flights") is True
+    assert led.is_write("modify_order_address") is True
+    assert led.is_write("return_order") is True
+    assert led.is_write("exchange_order_item") is True
     assert led.is_write("send_certificate") is True
     assert led.is_write("get_reservation_details") is False
+    assert led.is_write("find_order") is False
 
 
 def test_repeat_write_same_name_and_args_order_independent() -> None:
