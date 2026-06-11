@@ -1,0 +1,12 @@
+# Declarative RecipePackManifest spec (camelCase aliases match
+# magi_agent/recipes/compiler.py RecipePackManifest). Read + validated by the
+# pack projector into the live recipe registry.
+
+packId = "openmagi.authoring-static"
+version = "1"
+displayName = "Authoring (static)"
+description = "Read-only source authoring recipe: open source + exact-quote validators."
+defaultEnabled = true
+toolRefs = ["FileRead", "SourceOpen"]
+validatorRefs = ["verifier:sourceOpened@1", "verifier:quoteExactMatch@1"]
+evidenceRefs = ["evidence:openedSourceSnapshot@1", "evidence:quoteDigest@1"]

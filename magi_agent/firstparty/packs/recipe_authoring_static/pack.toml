@@ -1,0 +1,13 @@
+# Bundled first-party recipe pack (declarative spec; no impl). The loader builds
+# the catalog WITHOUT importing code (D3) — the recipe is pure data resolved from
+# the spec relpath. Schema = magi_agent/packs/manifest.py (top-level packId).
+
+packId = "openmagi.recipe-authoring-static"
+displayName = "Authoring (static) recipe pack"
+version = "1.0.0"
+description = "First-party declarative authoring recipe bundled as a removable pack."
+
+[[provides]]
+type = "recipe"
+ref = "recipe:authoring-static@1"
+spec = "authoring_static.recipe.toml"

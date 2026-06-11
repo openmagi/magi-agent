@@ -259,7 +259,19 @@ def project_into_registries(
         ptype = primitive.type
         ref = primitive.ref
         impl = primitive.impl
+        # Declarative recipe: no impl, a ``spec`` relpath resolved by the loader.
+        # Read it, validate as a RecipePackManifest, and register (D3 declarative).
         if impl is None:
+            spec_path = getattr(primitive, "spec_path", None)
+            if ptype == "recipe" and spec_path is not None:
+                import tomllib as _tomllib
+
+                from magi_agent.recipes.compiler import RecipePackManifest
+
+                with open(spec_path, "rb") as _fh:
+                    _raw = _tomllib.load(_fh)
+                registries.recipes.replace(ref, RecipePackManifest.model_validate(_raw))
+                registered.append(ref)
             continue
         if ptype == "tool":
             impl(_ctx.ToolProvideContext(register=_provide_tool(registries, ref)))
