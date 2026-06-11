@@ -254,6 +254,32 @@ FLAGS: tuple[FlagSpec, ...] = (
         summary="Expose the browser-use autonomous vision BrowserTask tool.",
     ),
     _b(
+        "MAGI_CODE_ACTION_ENABLED",
+        summary="Expose the persistent PythonExec code-execution tool.",
+    ),
+    FlagSpec(
+        name="MAGI_CODE_ACTION_TIMEOUT_MS",
+        default=30_000,
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Per-call wall-clock timeout (ms) for the PythonExec tool; "
+            "clamped to 1000-120000."
+        ),
+        kind="int",
+    ),
+    FlagSpec(
+        name="MAGI_CODE_ACTION_MAX_OUTPUT_BYTES",
+        default=8_192,
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Head+tail output cap per stream (bytes) for PythonExec results; "
+            "clamped to 1024-65536."
+        ),
+        kind="int",
+    ),
+    _b(
         "MAGI_FILE_DELIVERY_LIVE_ENABLED",
         summary="Enable the live file-delivery tool (vs receipt-only).",
     ),

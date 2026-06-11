@@ -2336,6 +2336,29 @@ def browser_tool_enabled(env: Mapping[str, str] | None = None) -> bool:
     )
 
 
+MAGI_CODE_ACTION_ENABLED_ENV = "MAGI_CODE_ACTION_ENABLED"
+
+
+def code_action_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Single source of truth for the persistent PythonExec code-action gate.
+
+    Default OFF (strict truthy opt-in: "1"/"true"/"yes"/"on"). When OFF the
+    ``PythonExec`` tool module is never imported and the tool is absent from
+    the registry, manifests, and the advertised instruction — byte-identical
+    to before. When ON, a persistent per-session Python interpreter tool is
+    registered (variables/imports survive across calls in one session). Like
+    ``is_egress_gate_enabled`` this deliberately does NOT follow the
+    runtime-profile default-ON convention — it is an additive,
+    default-disabled seam.
+    """
+    # Delegate to the canonical config.flags registry. Imported lazily to
+    # avoid a config<->flags import cycle.
+    from .flags import flag_bool
+
+    source = os.environ if env is None else env
+    return flag_bool(MAGI_CODE_ACTION_ENABLED_ENV, env=source)
+
+
 MAGI_PERMISSION_SCOPE_FROM_MODE_ENV = "MAGI_PERMISSION_SCOPE_FROM_MODE"
 
 

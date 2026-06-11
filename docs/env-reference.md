@@ -71,6 +71,9 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 - `MAGI_BROWSER_TOOL_ENABLED` (default off) — Expose the browser-use autonomous vision BrowserTask tool.
 - `MAGI_CHANNEL_WORKFLOWS_ENABLED` (default off) — Enable bot-user dynamic channel workflows (classifier-driven).
 - `MAGI_CLI_ENABLED` (default on) — Enable the magi CLI surface (headless NDJSON + Textual TUI); flat default-ON.
+- `MAGI_CODE_ACTION_ENABLED` (default off) — Expose the persistent PythonExec code-execution tool.
+- `MAGI_CODE_ACTION_MAX_OUTPUT_BYTES` (default `8192`) — Head+tail output cap per stream (bytes) for PythonExec results; clamped to 1024-65536.
+- `MAGI_CODE_ACTION_TIMEOUT_MS` (default `30000`) — Per-call wall-clock timeout (ms) for the PythonExec tool; clamped to 1000-120000.
 - `MAGI_CODING_REPAIR_LOOP_ENABLED` (default off) — Enable the iterative coding repair loop on failing edits.
 - `MAGI_CONTEXT_COMPACTION_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Compact the working context when the token threshold is hit (default-ON full profile).
 - `MAGI_CROSS_VERIFY_ENABLED` (default off) — Enable the cross-verification gate over spawned-agent results.
