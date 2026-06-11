@@ -39,6 +39,17 @@ _TEST_COMMAND_PREFIXES = (
 _MAX_SESSION_LEDGERS = 25
 
 
+def _public_record_projection(record: object) -> object:
+    """JSON-safe projection of an evidence record for the durable sink."""
+    dump = getattr(record, "model_dump", None)
+    if callable(dump):
+        try:
+            return dump(mode="json", by_alias=True)
+        except (TypeError, ValueError):
+            return str(record)
+    return str(record)
+
+
 class LocalToolEvidenceCollector:
     """Local-only collector for CLI/dashboard tool receipts.
 
@@ -102,6 +113,14 @@ class LocalToolEvidenceCollector:
 
         if records:
             self._records.setdefault((session_id, turn_id), []).extend(records)
+            self._maybe_persist_records(
+                session_id=session_id,
+                turn_id=turn_id,
+                tool_call_id=tool_call_id,
+                tool_name=tool_name,
+                status=tool_result.status,
+                records=records,
+            )
 
         self._maybe_append_evidence_ledger_record(
             session_id=session_id,
@@ -110,6 +129,52 @@ class LocalToolEvidenceCollector:
             status=tool_result.status,
         )
         return tuple(records)
+
+    @staticmethod
+    def _maybe_persist_records(
+        *,
+        session_id: str,
+        turn_id: str,
+        tool_call_id: str,
+        tool_name: str,
+        status: str,
+        records: list[object],
+    ) -> None:
+        """Opt-in durable JSONL sink (``MAGI_EVIDENCE_LEDGER_DIR``).
+
+        The in-memory view keeps only the last ``_MAX_SESSION_LEDGERS`` turns —
+        a lean live view, NOT an audit store. When the operator sets a ledger
+        directory, every recorded entry is also appended to
+        ``<dir>/<session_id>.jsonl`` so a durable audit trail exists.
+        Fail-soft: persistence problems never break the tool path.
+        """
+        import json as _json  # noqa: PLC0415
+        import os as _os  # noqa: PLC0415
+        from pathlib import Path  # noqa: PLC0415
+
+        raw_dir = (_os.environ.get("MAGI_EVIDENCE_LEDGER_DIR") or "").strip()
+        if not raw_dir:
+            return
+        try:
+            target_dir = Path(raw_dir)
+            target_dir.mkdir(parents=True, exist_ok=True)
+            safe_session = "".join(
+                c if c.isalnum() or c in "-_." else "_" for c in session_id
+            ) or "session"
+            path = target_dir / f"{safe_session}.jsonl"
+            with path.open("a", encoding="utf-8") as handle:
+                for record in records:
+                    entry = {
+                        "sessionId": session_id,
+                        "turnId": turn_id,
+                        "toolCallId": tool_call_id,
+                        "toolName": tool_name,
+                        "status": status,
+                        "record": _public_record_projection(record),
+                    }
+                    handle.write(_json.dumps(entry, sort_keys=True, default=str) + "\n")
+        except OSError:
+            return
 
     def evidence_ledgers_for_session(
         self,

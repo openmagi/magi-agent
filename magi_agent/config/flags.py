@@ -230,6 +230,17 @@ FLAGS: tuple[FlagSpec, ...] = (
         "MAGI_DEEP_WEB_RESEARCH_ENABLED",
         summary="Enable the live deep web-research harness (search + fetch + verify).",
     ),
+    FlagSpec(
+        name="MAGI_RESEARCH_GOVERNANCE_MODE",
+        default="off",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Research governance mode. `off` is inert; `audit` records "
+            "source/citation mismatches without blocking."
+        ),
+        kind="str",
+    ),
     _b(
         "MAGI_BROWSER_TOOL_ENABLED",
         summary="Expose the browser-use autonomous vision BrowserTask tool.",
@@ -290,6 +301,17 @@ FLAGS: tuple[FlagSpec, ...] = (
         "MAGI_EVIDENCE_LEDGER_LIFECYCLE_ENABLED",
         summary="Build per-turn EvidenceLedger objects (default-ON full profile).",
     ),
+    FlagSpec(
+        name="MAGI_EVIDENCE_LEDGER_DIR",
+        default="",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Directory for opt-in durable per-session JSONL evidence ledgers; "
+            "unset keeps the lean in-memory live view only."
+        ),
+        kind="str",
+    ),
     _pb(
         "MAGI_EVIDENCE_COMPLETION_GATE_ENABLED",
         summary="Block turn completion when required evidence is missing (default-ON full profile).",
@@ -335,6 +357,30 @@ FLAGS: tuple[FlagSpec, ...] = (
             "Serve hosted selected-gate5b chat over the SSE stream route with "
             "completions-equivalent gates (no local-engine fallthrough)."
         ),
+    ),
+    _b(
+        "MAGI_HOSTED_SESSION_REUSE",
+        scope="hosted",
+        summary=(
+            "Reuse the in-memory ADK session service across hosted turns keyed by "
+            "(bot digest, session id); OFF keeps the fresh-per-turn behavior."
+        ),
+    ),
+    FlagSpec(
+        name="MAGI_HOSTED_SESSION_REUSE_MAX_ENTRIES",
+        default=64,
+        scope="hosted",
+        stage="stage1",
+        summary="LRU capacity (distinct sessions) of the hosted session-reuse registry.",
+        kind="int",
+    ),
+    FlagSpec(
+        name="MAGI_HOSTED_SESSION_REUSE_TTL_SECONDS",
+        default=1800,
+        scope="hosted",
+        stage="stage1",
+        summary="Idle TTL in seconds before a reusable hosted session is evicted.",
+        kind="int",
     ),
     # --- Runtime profile (string) ------------------------------------------
     FlagSpec(

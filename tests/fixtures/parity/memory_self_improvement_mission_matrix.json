@@ -609,6 +609,10 @@
           "state": "existing"
         },
         {
+          "path": "evals/release_gates.py",
+          "state": "existing"
+        },
+        {
           "path": "magi_agent/shadow/adk_eval_fixture_contract.py",
           "state": "existing"
         },
@@ -621,23 +625,20 @@
           "state": "existing"
         },
         {
-          "path": "magi_agent/self_improvement/__init__.py",
+          "path": "tests/fixtures/parity/memory_self_improvement_mission_matrix.json",
           "state": "existing"
         },
         {
-          "path": "magi_agent/self_improvement/eval_capture.py",
-          "state": "existing"
-        },
-        {
-          "path": "magi_agent/self_improvement/failure_cluster.py",
-          "state": "existing"
-        },
-        {
-          "path": "tests/test_self_improvement_eval_capture.py",
+          "path": "tests/test_memory_self_improvement_mission_parity_matrix.py",
           "state": "existing"
         }
       ],
-      "missingImplementation": [],
+      "missingImplementation": [
+        {
+          "path": "tests/planned_memory_mission/pr11_self_improvement_live_eval_capture.py",
+          "state": "planned_missing"
+        }
+      ],
       "owningLayer": "Self-improvement recipe/harness/plugin",
       "adkPrimitive": "google.adk.evaluation.AgentEvaluator boundary",
       "prSliceAssignment": "PR11",
@@ -645,11 +646,11 @@
         "durable_store_sqlite_oss_runtime_state"
       ],
       "activationGate": "eval capture local only; automatic code/config mutation denied",
-      "implementationStatus": "local_fake",
+      "implementationStatus": "contract_only",
       "defaultOff": true,
       "trafficAttached": false,
       "productionAuthority": false,
-      "notes": "PR11 adds local fake self-improvement eval capture and deterministic failure clustering. Eval observations are digest-only and bind policy snapshot digest, recipe id, validator results, terminal state, ADK Evaluation boundary ref, and denied mutation refs. Raw prompt/output/tool logs, private paths, auth headers, cookies, hidden reasoning, and secret material are excluded or sanitized. Automatic code/config/deploy/secret mutation, live ADK Evaluation execution, model calls, ToolHost execution, production writes, and user-visible output remain disabled."
+      "notes": "PR11 local-fake self-improvement eval capture was removed by the promote-or-delete cleanup. The remaining live surface is the ADK eval vocabulary and regression-gate contract only; no self_improvement package, model call, ToolHost execution, production write, automatic code/config/deploy/secret mutation, or user-visible output is attached."
     },
     {
       "id": "self_improvement_proposal_recipe",
@@ -663,19 +664,20 @@
           "state": "existing"
         },
         {
-          "path": "magi_agent/self_improvement/__init__.py",
+          "path": "tests/fixtures/parity/memory_self_improvement_mission_matrix.json",
           "state": "existing"
         },
         {
-          "path": "magi_agent/self_improvement/proposals.py",
-          "state": "existing"
-        },
-        {
-          "path": "tests/test_self_improvement_proposal_recipe.py",
+          "path": "tests/test_memory_self_improvement_mission_parity_matrix.py",
           "state": "existing"
         }
       ],
-      "missingImplementation": [],
+      "missingImplementation": [
+        {
+          "path": "tests/planned_memory_mission/pr12_self_improvement_live_proposal_executor.py",
+          "state": "planned_missing"
+        }
+      ],
       "owningLayer": "Self-improvement recipe/harness/plugin",
       "adkPrimitive": "ADK Runner for proposal generation only when separately gated",
       "prSliceAssignment": "PR12",
@@ -683,11 +685,11 @@
         "self_improvement_eval_capture"
       ],
       "activationGate": "proposal-only dry run; no direct production changes",
-      "implementationStatus": "local_fake",
+      "implementationStatus": "contract_only",
       "defaultOff": true,
       "trafficAttached": false,
       "productionAuthority": false,
-      "notes": "PR12 adds a default-off structured proposal recipe and local fake proposal-only dry run. Proposals require eval observation digest refs and policy snapshot digest binding, emit denied direct-change refs for production/code/config/deploy/secret/DB/sealed-file requests, and only allow recipe change, harness config change, plugin config change, test fixture addition, docs note, or blocked proposal types. Live ADK Runner, model calls, ToolHost execution, deploy/secret/DB/sealed-file mutation, production writes, and user-visible output remain disabled."
+      "notes": "The self-improvement recipe manifest remains as inert recipe metadata, but the local-fake proposal executor package was removed. There is no live ADK runner, model call, ToolHost execution, deploy/secret/DB/sealed-file mutation, production write, or user-visible output."
     },
     {
       "id": "self_improvement_review_promotion_gate",
@@ -709,23 +711,20 @@
           "state": "existing"
         },
         {
-          "path": "magi_agent/self_improvement/__init__.py",
+          "path": "tests/fixtures/parity/memory_self_improvement_mission_matrix.json",
           "state": "existing"
         },
         {
-          "path": "magi_agent/self_improvement/review_gate.py",
-          "state": "existing"
-        },
-        {
-          "path": "magi_agent/self_improvement/promotion_gate.py",
-          "state": "existing"
-        },
-        {
-          "path": "tests/test_self_improvement_review_promotion_gate.py",
+          "path": "tests/test_memory_self_improvement_mission_parity_matrix.py",
           "state": "existing"
         }
       ],
-      "missingImplementation": [],
+      "missingImplementation": [
+        {
+          "path": "tests/planned_memory_mission/pr13_self_improvement_live_review_promotion.py",
+          "state": "planned_missing"
+        }
+      ],
       "owningLayer": "Self-improvement recipe/harness/plugin",
       "adkPrimitive": "google.adk.evaluation.AgentEvaluator plus approval receipt boundary",
       "prSliceAssignment": "PR13",
@@ -733,11 +732,11 @@
         "self_improvement_proposal_recipe"
       ],
       "activationGate": "promotion dry run only; owner approval required for any real promotion",
-      "implementationStatus": "local_fake",
+      "implementationStatus": "contract_only",
       "defaultOff": true,
       "trafficAttached": false,
       "productionAuthority": false,
-      "notes": "PR13 adds default-off local fake self-improvement review and promotion gates. Promotion action digests bind proposal digest, affected recipe/plugin digest, promotion scope, and policy snapshot digest to an approval receipt. Promotion blocks on eval regression, approval mismatch, selector fallback, raw projection, plugin sandbox overreach, or hard invariant downgrade. Actual repo/config/deploy/secret/DB mutation, model calls, ToolHost execution, production writes, and user-visible output remain disabled."
+      "notes": "Review and promotion local-fake modules were removed. Approval receipts and eval-regression contracts remain as reusable substrate, but no self-improvement promotion, repo/config/deploy/secret/DB mutation, model call, ToolHost execution, production write, or user-visible output is attached."
     },
     {
       "id": "rollback_regression_drift_watch",
@@ -755,23 +754,20 @@
           "state": "existing"
         },
         {
-          "path": "magi_agent/self_improvement/__init__.py",
+          "path": "tests/fixtures/parity/memory_self_improvement_mission_matrix.json",
           "state": "existing"
         },
         {
-          "path": "magi_agent/self_improvement/rollback.py",
-          "state": "existing"
-        },
-        {
-          "path": "magi_agent/self_improvement/drift_watch.py",
-          "state": "existing"
-        },
-        {
-          "path": "tests/test_self_improvement_rollback_drift.py",
+          "path": "tests/test_memory_self_improvement_mission_parity_matrix.py",
           "state": "existing"
         }
       ],
-      "missingImplementation": [],
+      "missingImplementation": [
+        {
+          "path": "tests/planned_memory_mission/pr14_self_improvement_live_rollback_drift.py",
+          "state": "planned_missing"
+        }
+      ],
       "owningLayer": "Self-improvement recipe/harness/plugin",
       "adkPrimitive": "google.adk.evaluation.AgentEvaluator for regression observations",
       "prSliceAssignment": "PR14",
@@ -779,11 +775,11 @@
         "self_improvement_review_promotion_gate"
       ],
       "activationGate": "automatic rollback denied except local fake test mode",
-      "implementationStatus": "local_fake",
+      "implementationStatus": "contract_only",
       "defaultOff": true,
       "trafficAttached": false,
       "productionAuthority": false,
-      "notes": "PR14 adds default-off rollback receipts for recipe, harness config, and plugin config promotions; replay policy snapshot binding; and drift watch for recipe digest, harness config digest, plugin config digest, model tier, policy snapshot, eval threshold, and plugin supply-chain digest changes. Old runs retain their original effective policy snapshot through an original run receipt digest and replay creates no side effects. Automatic rollback execution is denied unless a bound approval receipt is present, constraints verify, and local fake rollback execution is explicitly enabled. Production rollback, repo/config/deploy/secret/DB mutation, model calls, ToolHost execution, production writes, and user-visible output remain disabled."
+      "notes": "Rollback and drift-watch local-fake modules were removed. Regression gates and policy snapshot contracts remain, but automatic rollback execution, production rollback, repo/config/deploy/secret/DB mutation, model calls, ToolHost execution, production writes, and user-visible output remain absent."
     },
     {
       "id": "integrated_memory_mission_self_improvement_readiness",
@@ -813,7 +809,7 @@
           "state": "existing"
         },
         {
-          "path": "tests/test_memory_mission_self_improvement_integration_contract.py",
+          "path": "tests/test_memory_self_improvement_mission_parity_matrix.py",
           "state": "existing"
         }
       ],
@@ -856,7 +852,7 @@
           "state": "existing"
         },
         {
-          "path": "tests/test_memory_mission_self_improvement_integration_contract.py",
+          "path": "tests/test_memory_self_improvement_mission_parity_matrix.py",
           "state": "existing"
         }
       ],

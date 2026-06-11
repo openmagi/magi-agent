@@ -152,35 +152,38 @@ PR10_CURRENT_SLICE_REFS = {
     "tests/test_public_event_parity_matrix.py",
     "tests/test_public_event_golden_fixtures.py",
 }
+SELF_IMPROVEMENT_RETIRED_REFS = {
+    "tests/fixtures/parity/memory_self_improvement_mission_matrix.json",
+    "tests/test_memory_self_improvement_mission_parity_matrix.py",
+}
 PR11_CURRENT_SLICE_REFS = {
-    "magi_agent/self_improvement/__init__.py",
-    "magi_agent/self_improvement/eval_capture.py",
-    "magi_agent/self_improvement/failure_cluster.py",
-    "tests/test_self_improvement_eval_capture.py",
+    "evals/regression_gates.py",
+    "evals/release_gates.py",
+    "magi_agent/shadow/adk_eval_fixture_contract.py",
+    "tests/test_adk_eval_contract_golden_fixtures.py",
+    "tests/test_eval_regression_gates_contract.py",
+    *SELF_IMPROVEMENT_RETIRED_REFS,
 }
 PR12_CURRENT_SLICE_REFS = {
     "magi_agent/recipes/first_party/self_improvement.py",
-    "magi_agent/self_improvement/__init__.py",
-    "magi_agent/self_improvement/proposals.py",
-    "tests/test_self_improvement_proposal_recipe.py",
+    *SELF_IMPROVEMENT_RETIRED_REFS,
 }
 PR13_CURRENT_SLICE_REFS = {
-    "magi_agent/self_improvement/__init__.py",
-    "magi_agent/self_improvement/review_gate.py",
-    "magi_agent/self_improvement/promotion_gate.py",
-    "tests/test_self_improvement_review_promotion_gate.py",
+    "magi_agent/harness/approval_receipts.py",
+    "tests/test_approval_receipts_contract.py",
+    "tests/test_eval_regression_gates_contract.py",
+    *SELF_IMPROVEMENT_RETIRED_REFS,
 }
 PR14_CURRENT_SLICE_REFS = {
-    "magi_agent/self_improvement/__init__.py",
-    "magi_agent/self_improvement/rollback.py",
-    "magi_agent/self_improvement/drift_watch.py",
-    "tests/test_self_improvement_rollback_drift.py",
+    "evals/regression_gates.py",
+    "tests/test_policy_evaluation_snapshot_contract.py",
+    *SELF_IMPROVEMENT_RETIRED_REFS,
 }
 PR15_CURRENT_SLICE_REFS = {
     "README.md",
     "docs/superpowers/plans/2026-05-23-python-adk-memory-self-improvement-mission-parity.md",
     "tests/fixtures/parity/memory_self_improvement_mission_matrix.json",
-    "tests/test_memory_mission_self_improvement_integration_contract.py",
+    "tests/test_memory_self_improvement_mission_parity_matrix.py",
 }
 
 
@@ -408,25 +411,20 @@ def test_pr11_current_slice_paths_are_existing_and_live_activation_remains_block
 
     assert PR11_CURRENT_SLICE_REFS <= existing_refs
     assert not (PR11_CURRENT_SLICE_REFS & missing_refs)
-    assert row["implementationStatus"] == "local_fake"
+    assert row["implementationStatus"] == "contract_only"
     assert row["defaultOff"] is True
     assert row["trafficAttached"] is False
     assert row["productionAuthority"] is False
-    assert "local fake self-improvement eval capture" in notes
-    assert "deterministic failure clustering" in notes
-    assert "policy snapshot digest" in notes
-    assert "recipe id" in notes
-    assert "validator results" in notes
-    assert "terminal state" in notes
-    assert "adk evaluation boundary ref" in notes
-    assert "denied mutation refs" in notes
-    assert "raw prompt/output/tool logs" in notes
-    assert "automatic code/config/deploy/secret mutation" in notes
-    assert "live adk evaluation execution" in notes
-    assert "model calls" in notes
+    assert "local-fake self-improvement eval capture was removed" in notes
+    assert "promote-or-delete cleanup" in notes
+    assert "adk eval vocabulary" in notes
+    assert "regression-gate contract" in notes
+    assert "no self_improvement package" in notes
+    assert "model call" in notes
     assert "toolhost execution" in notes
-    assert "production writes" in notes
-    assert "user-visible output remain disabled" in notes
+    assert "production write" in notes
+    assert "automatic code/config/deploy/secret mutation" in notes
+    assert "user-visible output is attached" in notes
 
 
 def test_pr12_current_slice_paths_are_existing_and_live_activation_remains_blocked() -> None:
@@ -438,21 +436,19 @@ def test_pr12_current_slice_paths_are_existing_and_live_activation_remains_block
 
     assert PR12_CURRENT_SLICE_REFS <= existing_refs
     assert not (PR12_CURRENT_SLICE_REFS & missing_refs)
-    assert row["implementationStatus"] == "local_fake"
+    assert row["implementationStatus"] == "contract_only"
     assert row["defaultOff"] is True
     assert row["trafficAttached"] is False
     assert row["productionAuthority"] is False
-    assert "structured proposal" in notes
-    assert "eval observation" in notes
-    assert "policy snapshot digest" in notes
-    assert "denied direct-change refs" in notes
-    assert "proposal-only dry run" in notes
-    assert "live adk runner" in notes
-    assert "model calls" in notes
+    assert "recipe manifest remains" in notes
+    assert "inert recipe metadata" in notes
+    assert "local-fake proposal executor package was removed" in notes
+    assert "no live adk runner" in notes
+    assert "model call" in notes
     assert "toolhost execution" in notes
     assert "deploy/secret/db/sealed-file mutation" in notes
-    assert "production writes" in notes
-    assert "user-visible output remain disabled" in notes
+    assert "production write" in notes
+    assert "user-visible output" in notes
 
 
 def test_pr13_current_slice_paths_are_existing_and_live_activation_remains_blocked() -> None:
@@ -464,26 +460,19 @@ def test_pr13_current_slice_paths_are_existing_and_live_activation_remains_block
 
     assert PR13_CURRENT_SLICE_REFS <= existing_refs
     assert not (PR13_CURRENT_SLICE_REFS & missing_refs)
-    assert row["implementationStatus"] == "local_fake"
+    assert row["implementationStatus"] == "contract_only"
     assert row["defaultOff"] is True
     assert row["trafficAttached"] is False
     assert row["productionAuthority"] is False
-    assert "approval receipt" in notes
-    assert "proposal digest" in notes
-    assert "affected recipe/plugin digest" in notes
-    assert "promotion scope" in notes
-    assert "policy snapshot digest" in notes
-    assert "eval regression" in notes
-    assert "approval mismatch" in notes
-    assert "selector fallback" in notes
-    assert "raw projection" in notes
-    assert "plugin sandbox overreach" in notes
-    assert "hard invariant downgrade" in notes
+    assert "review and promotion local-fake modules were removed" in notes
+    assert "approval receipts" in notes
+    assert "eval-regression contracts" in notes
+    assert "no self-improvement promotion" in notes
     assert "repo/config/deploy/secret/db mutation" in notes
-    assert "model calls" in notes
+    assert "model call" in notes
     assert "toolhost execution" in notes
-    assert "production writes" in notes
-    assert "user-visible output remain disabled" in notes
+    assert "production write" in notes
+    assert "user-visible output is attached" in notes
 
 
 def test_pr14_current_slice_paths_are_existing_and_live_activation_remains_blocked() -> None:
@@ -495,25 +484,20 @@ def test_pr14_current_slice_paths_are_existing_and_live_activation_remains_block
 
     assert PR14_CURRENT_SLICE_REFS <= existing_refs
     assert not (PR14_CURRENT_SLICE_REFS & missing_refs)
-    assert row["implementationStatus"] == "local_fake"
+    assert row["implementationStatus"] == "contract_only"
     assert row["defaultOff"] is True
     assert row["trafficAttached"] is False
     assert row["productionAuthority"] is False
-    assert "rollback receipts" in notes
-    assert "replay policy snapshot binding" in notes
-    assert "model tier" in notes
-    assert "policy snapshot" in notes
-    assert "eval threshold" in notes
-    assert "plugin supply-chain digest" in notes
-    assert "old runs retain their original effective policy snapshot" in notes
-    assert "replay creates no side effects" in notes
-    assert "automatic rollback execution is denied" in notes
+    assert "rollback and drift-watch local-fake modules were removed" in notes
+    assert "regression gates" in notes
+    assert "policy snapshot contracts" in notes
+    assert "automatic rollback execution" in notes
     assert "production rollback" in notes
     assert "repo/config/deploy/secret/db mutation" in notes
     assert "model calls" in notes
     assert "toolhost execution" in notes
     assert "production writes" in notes
-    assert "user-visible output remain disabled" in notes
+    assert "user-visible output remain absent" in notes
 
 
 def test_pr15_current_slice_paths_are_existing_and_activation_blockers_remain_explicit() -> None:

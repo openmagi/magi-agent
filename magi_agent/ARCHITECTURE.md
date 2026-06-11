@@ -4,7 +4,6 @@
 
 ```mermaid
 graph LR
-    authoring
     rules
     sandbox
     adk_bridge --> config
@@ -55,6 +54,7 @@ graph LR
     cli --> ops
     cli --> plugins
     cli --> recipes
+    cli --> research
     cli --> runtime
     cli --> shadow
     cli --> tools
@@ -184,9 +184,6 @@ graph LR
     runtime --> tools
     runtime --> transport
     security --> ops
-    self_improvement --> adk_bridge
-    self_improvement --> harness
-    self_improvement --> runtime
     shadow --> adk_bridge
     shadow --> channels
     shadow --> config
@@ -270,7 +267,7 @@ graph LR
 | local_toolhost.py | — | — | adk_bridge/local_runner.py |
 | memory_service.py | — | — | — |
 | policy_boundary.py | — | control | — |
-| primitives.py | — | — | runtime/openmagi_runtime.py, self_improvement/eval_capture.py |
+| primitives.py | — | — | runtime/openmagi_runtime.py |
 | resilience_plugin.py | Live ADK resilience plugin — loop guard + multi-strategy error recovery. | engine, error_recovery, loop_detectors, strategies | adk_bridge/control_plane.py |
 | runner_adapter.py | — | — | cli/engine.py, harness/cron_turn_runner_adapter.py, runtime/adk_turn_runner.py, shadow/fixture_runner.py |
 | session_service.py | — | session_store | adk_bridge/context_compaction.py, adk_bridge/local_runner.py, cli/real_runner.py, cli/session_log.py |
@@ -289,23 +286,6 @@ graph LR
 | local_result_store.py | — | output_budget | tools/kernel.py |
 | output_registry_boundary.py | — | — | artifacts/__init__.py |
 | render_verification.py | — | durable_store, safety | — |
-
-### authoring/
-
-| Module | Purpose | Depends On | Depended By |
-|---|---|---|---|
-| __init__.py | — | compiler, contracts, dry_run | — |
-| audit_events.py | — | — | — |
-| backup_restore.py | — | — | — |
-| compiler.py | — | contracts | authoring/__init__.py, authoring/dry_run.py, authoring/harness.py, authoring/projection.py, authoring/tool_contracts.py |
-| contracts.py | — | — | authoring/__init__.py, authoring/compiler.py, authoring/dry_run.py, authoring/harness.py, authoring/projection.py, authoring/storage.py, authoring/tool_contracts.py |
-| dry_run.py | — | compiler, contracts | authoring/__init__.py, authoring/harness.py, authoring/projection.py, authoring/tool_contracts.py |
-| export_package.py | — | generated_proposals | — |
-| generated_proposals.py | — | — | authoring/export_package.py |
-| harness.py | — | compiler, contracts, dry_run, tool_contracts | authoring/projection.py |
-| projection.py | — | compiler, contracts, dry_run, harness | — |
-| storage.py | — | contracts | — |
-| tool_contracts.py | — | compiler, contracts, dry_run | authoring/harness.py |
 
 ### benchmarks/
 
@@ -398,7 +378,7 @@ graph LR
 | contracts.py | Stable interface surface for the Magi headless CLI. | control, events | cli/commands/builtins.py, cli/commands/bundled.py, cli/commands/control.py, cli/commands/discovery.py, cli/commands/executor.py, cli/commands/mcp_commands.py, cli/commands/registry.py, cli/commands/session_history.py, cli/commands/skill_commands.py, cli/engine.py, cli/headless.py, cli/permissions.py, cli/readonly_classifier.py, cli/session_log.py, cli/tests/test_app.py, cli/tests/test_coldstart.py, cli/tests/test_command_executor.py, cli/tests/test_commands.py, cli/tests/test_contracts_a3.py, cli/tests/test_e2e_parity.py, cli/tests/test_engine.py, cli/tests/test_engine_gate.py, cli/tests/test_engine_image_blocks.py, cli/tests/test_engine_output_continuation.py, cli/tests/test_engine_recovery.py, cli/tests/test_headless.py, cli/tests/test_headless_projection.py, cli/tests/test_model_picker_wire.py, cli/tests/test_permissions.py, cli/tests/test_phase_route_consumption.py, cli/tests/test_runtime_policy_wiring.py, cli/tests/test_session_log.py, cli/tests/test_slash_p1_sources.py, cli/tests/test_slash_p2_control.py, cli/tests/test_slash_p2_mcp.py, cli/tests/test_slash_p3_seams.py, cli/tests/test_streaming_chat.py, cli/tests/test_streaming_driver.py, cli/tests/test_tui_app.py, cli/tests/test_tui_autocomplete.py, cli/tests/test_tui_followups.py, cli/tests/test_tui_input.py, cli/tests/test_tui_palette.py, cli/tests/test_tui_subagent.py, cli/tests/test_tui_theme.py, cli/tests/test_tui_thinking.py, cli/tests/test_tui_tool_render.py, cli/tests/test_tui_transcript.py, cli/tests/test_tui_visual.py, cli/tests/test_tui_whichkey.py, cli/tests/test_tui_widgets.py, cli/tui/app.py, cli/tui/autocomplete.py, cli/tui/input.py, cli/tui/palette.py, cli/tui/tool_render.py, cli/tui/widgets/tool_card.py, cli/wiring.py, transport/chat_routes.py, transport/streaming_chat.py, transport/streaming_chat_route.py, transport/streaming_driver.py |
 | engine.py | Real ADK-backed engine driver for the Magi headless CLI (PR-A2). | active_turn_registry, context, contracts, env, error_recovery, event_adapter, events, gate5b4c3_image_parts, goal_nudge, hook_wiring, output_continuation, permissions, readonly_classifier, repair_loop, runner_adapter, sse, verifier_bus | cli/headless.py, cli/real_runner.py, cli/tests/test_app.py, cli/tests/test_coldstart.py, cli/tests/test_contracts_a3.py, cli/tests/test_engine.py, cli/tests/test_engine_gate.py, cli/tests/test_engine_image_blocks.py, cli/tests/test_engine_output_continuation.py, cli/tests/test_engine_recovery.py, cli/tests/test_headless_approval.py, cli/tests/test_phase_route_consumption.py, cli/tests/test_runtime_policy_wiring.py, cli/wiring.py |
 | goal_nudge_wiring.py | PR4 (cluster 03 C4) — production wiring for the goal-nudge continuation. | env, goal_nudge | cli/wiring.py |
-| headless.py | Headless entrypoint for the Magi CLI (PR-A1). | commands, contracts, engine, env, ndjson, permissions, protocol, redaction, session_log | cli/app.py, cli/tests/test_app.py, cli/tests/test_contracts_a3.py, cli/tests/test_e2e_parity.py, cli/tests/test_engine.py, cli/tests/test_engine_gate.py, cli/tests/test_engine_output_continuation.py, cli/tests/test_engine_recovery.py, cli/tests/test_headless.py, cli/tests/test_headless_approval.py, cli/tests/test_headless_projection.py, cli/tests/test_permissions.py |
+| headless.py | Headless entrypoint for the Magi CLI (PR-A1). | commands, contracts, engine, env, live_audit, ndjson, permissions, protocol, redaction, session_log | cli/app.py, cli/tests/test_app.py, cli/tests/test_contracts_a3.py, cli/tests/test_e2e_parity.py, cli/tests/test_engine.py, cli/tests/test_engine_gate.py, cli/tests/test_engine_output_continuation.py, cli/tests/test_engine_recovery.py, cli/tests/test_headless.py, cli/tests/test_headless_approval.py, cli/tests/test_headless_projection.py, cli/tests/test_permissions.py |
 | hook_wiring.py | Bridge CC-style user ``settings.json`` hooks into the CLI engine's ADK | bus, command_executor, context, env, external_config, manifest, resolved, settings_loader | cli/engine.py, cli/wiring.py |
 | identity.py | Identity + project-context loading for the local ``magi`` CLI agent. | — | cli/tests/test_identity.py, cli/tool_runtime.py |
 | learning_recall.py | CLI learning-recall block builder. | config, contracts, injection, memory_mode_guard, memory_recall, memory_write, models, namespaces, store | cli/tool_runtime.py |
@@ -598,7 +578,7 @@ graph LR
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
 | __init__.py | — | env, models | config/tests/test_flags.py |
-| env.py | — | flags, gate3a_replay, gate5b4c3_shadow_counter_store, gate5b4c3_shadow_generation_contract, hosted_defaults, models, pregate8_continuity_canary, shadow_generations | (root)/main.py, adk_bridge/anthropic_cache_model.py, adk_bridge/control_plane.py, adk_bridge/tool_adapter.py, browser/autonomous/config.py, cli/app.py, cli/engine.py, cli/goal_nudge_wiring.py, cli/headless.py, cli/hook_wiring.py, cli/permissions.py, cli/providers.py, cli/real_runner.py, cli/tests/test_app.py, cli/tool_runtime.py, cli/wiring.py, config/__init__.py, config/flags.py, evidence/local_tool_collector.py, gates/gate5b_full_toolhost.py, harness/general_automation/constraint_reinjection.py, harness/general_automation/delegation.py, harness/general_automation/live_gate.py, harness/general_automation/plan_act_switch.py, harness/general_automation/question_tool.py, harness/general_automation/recipe_disclosure.py, harness/general_automation/task_completion.py, introspection/tool.py, plugins/native/missions.py, plugins/native/scheduled_work.py, plugins/native/skills.py, plugins/native/taskboard.py, recipes/coding_mutation.py, recipes/compiler.py, shadow/gate5b4c3_runner_input_adapter.py, tools/ask_user_question_toolhost.py, tools/core_toolhost.py, tools/dispatcher.py, tools/local_readonly.py, tools/plan_mode_toolhost.py, tools/safety.py, transport/chat.py, transport/chat_routes.py, transport/chat_shared.py, transport/streaming_chat_route.py |
+| env.py | — | flags, gate3a_replay, gate5b4c3_shadow_counter_store, gate5b4c3_shadow_generation_contract, hosted_defaults, models, pregate8_continuity_canary, shadow_generations | (root)/main.py, adk_bridge/anthropic_cache_model.py, adk_bridge/control_plane.py, adk_bridge/tool_adapter.py, browser/autonomous/config.py, cli/app.py, cli/engine.py, cli/goal_nudge_wiring.py, cli/headless.py, cli/hook_wiring.py, cli/permissions.py, cli/providers.py, cli/real_runner.py, cli/tests/test_app.py, cli/tool_runtime.py, cli/wiring.py, config/__init__.py, config/flags.py, evidence/local_tool_collector.py, gates/gate5b_full_toolhost.py, harness/general_automation/constraint_reinjection.py, harness/general_automation/delegation.py, harness/general_automation/live_gate.py, harness/general_automation/plan_act_switch.py, harness/general_automation/question_tool.py, harness/general_automation/recipe_disclosure.py, harness/general_automation/task_completion.py, introspection/tool.py, plugins/native/missions.py, plugins/native/scheduled_work.py, plugins/native/skills.py, plugins/native/taskboard.py, recipes/coding_mutation.py, recipes/compiler.py, shadow/gate5b4c3_live_runner_boundary.py, shadow/gate5b4c3_runner_input_adapter.py, shadow/session_service_registry.py, tools/ask_user_question_toolhost.py, tools/core_toolhost.py, tools/dispatcher.py, tools/local_readonly.py, tools/plan_mode_toolhost.py, tools/safety.py, transport/chat.py, transport/chat_routes.py, transport/chat_shared.py, transport/streaming_chat_route.py |
 | flags.py | Canonical feature-flag registry + typed reader (single source of truth). | env | config/env.py, config/tests/test_flags.py |
 | models.py | — | pregate8_continuity_canary | (root)/main.py, config/__init__.py, config/env.py, gates/gate2_readiness.py, gates/gate3_readiness.py, gates/gate4_readiness.py, gates/gate5_readiness.py, gates/gate7_readiness.py, gates/gate8_readiness.py, runtime/openmagi_runtime.py |
 
@@ -752,7 +732,7 @@ graph LR
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
 | __init__.py | — | approval_receipts, discipline_boundary, profiles, repair_policy | — |
-| approval_receipts.py | — | — | harness/__init__.py, self_improvement/promotion_gate.py, self_improvement/rollback.py |
+| approval_receipts.py | — | — | harness/__init__.py |
 | audit.py | — | presets | — |
 | autopilot.py | — | — | — |
 | cron_runtime.py | — | config, contract, learning_executor, provider_receipts | learning/api.py, learning/bootstrap.py |
@@ -1155,6 +1135,7 @@ graph LR
 | event_projection.py | — | citation_audit, public_events, runtime_issuance, source_proof | research/research_first_canary.py |
 | evidence_graph.py | — | acceptance_criteria, action_claims, child_runtime_envelope, claim_graph, source_proof | research/boundary_enforcement.py, research/final_projection_gate.py, research/repair.py |
 | final_projection_gate.py | — | action_claims, boundary_enforcement, evidence_graph | — |
+| live_audit.py | Live, observe-only research-governance audit (audit-first). | — | cli/headless.py |
 | meta_adapter.py | — | child_acceptance, child_roles, task_plan | — |
 | output_contract_gate.py | Output-Contract Adherence Gate — general format-discipline gate for final answers. | — | — |
 | policy_pack.py | — | acceptance_criteria, action_claims, repair | — |
@@ -1228,7 +1209,7 @@ graph LR
 | public_events.py | — | — | evidence/event_projection.py, harness/cross_review.py, harness/workflow_executor.py, meta_orchestration/event_projection.py, research/event_projection.py, research/research_first_canary.py, runtime/events.py, runtime/work_console_snapshot.py, tools/event_projection.py, transport/chat.py, transport/chat_routes.py, transport/sse.py |
 | query_state.py | — | — | adk_bridge/context_compaction.py, runtime/cache_safe_params.py, runtime/content_replacement.py, runtime/context_lifecycle.py |
 | readiness.py | — | — | transport/health.py |
-| receipt_utils.py | — | — | missions/background_tasks.py, runtime/long_running_activity.py, self_improvement/drift_watch.py, self_improvement/eval_capture.py, self_improvement/failure_cluster.py, self_improvement/promotion_gate.py, self_improvement/proposals.py, self_improvement/review_gate.py, self_improvement/rollback.py |
+| receipt_utils.py | — | — | missions/background_tasks.py, runtime/long_running_activity.py |
 | reliability_budget.py | — | model_tiers | recipes/materializer.py, runtime/phase_routing.py |
 | request_ledger.py | — | — | runtime/approval_resume.py, tools/kernel.py, tools/scheduler.py |
 | request_shape.py | — | model_tiers | harness/long_context_eval.py, runtime/adk_turn_runner.py |
@@ -1298,19 +1279,6 @@ graph LR
 | posture.py | — | — | security/__init__.py |
 | sandbox_preflight.py | — | — | security/__init__.py |
 
-### self_improvement/
-
-| Module | Purpose | Depends On | Depended By |
-|---|---|---|---|
-| __init__.py | — | drift_watch, eval_capture, failure_cluster, promotion_gate, proposals, review_gate, rollback | — |
-| drift_watch.py | — | receipt_utils, review_gate | self_improvement/__init__.py |
-| eval_capture.py | — | primitives, receipt_utils | self_improvement/__init__.py, self_improvement/failure_cluster.py |
-| failure_cluster.py | — | eval_capture, receipt_utils | self_improvement/__init__.py |
-| promotion_gate.py | — | approval_receipts, receipt_utils, review_gate | self_improvement/__init__.py |
-| proposals.py | — | receipt_utils | self_improvement/__init__.py |
-| review_gate.py | — | receipt_utils | self_improvement/__init__.py, self_improvement/drift_watch.py, self_improvement/promotion_gate.py, self_improvement/rollback.py |
-| rollback.py | — | approval_receipts, receipt_utils, review_gate | self_improvement/__init__.py |
-
 ### shadow/
 
 | Module | Purpose | Depends On | Depended By |
@@ -1348,7 +1316,7 @@ graph LR
 | gate5b4_internal_endpoint_contract.py | — | — | — |
 | gate5b4c2_shadow_invocation_contract.py | — | — | transport/shadow_invocations.py |
 | gate5b4c3_image_parts.py | Convert sanitized Anthropic-style image blocks into ADK content parts. | — | cli/engine.py, shadow/gate5b4c3_live_runner_boundary.py |
-| gate5b4c3_live_runner_boundary.py | — | anthropic_cache_model, gate1a_egress_correlation, gate5b4c3_image_parts, gate5b4c3_runner_input_adapter, gate5b4c3_shadow_generation_contract | shadow/gate5b4c3_shadow_parity.py, transport/chat.py, transport/chat_routes.py, transport/chat_shared.py |
+| gate5b4c3_live_runner_boundary.py | — | anthropic_cache_model, env, gate1a_egress_correlation, gate5b4c3_image_parts, gate5b4c3_runner_input_adapter, gate5b4c3_shadow_generation_contract, session_service_registry | shadow/gate5b4c3_shadow_parity.py, transport/chat.py, transport/chat_routes.py, transport/chat_shared.py |
 | gate5b4c3_runner_input_adapter.py | — | env, gate5b4c3_shadow_generation_contract, message_builder | shadow/gate5b4c3_live_runner_boundary.py |
 | gate5b4c3_shadow_comparison.py | — | gate5b4c3_shadow_generation_contract, gate5b4c3_shadow_generation_report | — |
 | gate5b4c3_shadow_counter_store.py | — | — | config/env.py, shadow/gate5b4c3_shadow_generation_report.py, transport/chat.py, transport/chat_routes.py, transport/shadow_generations.py |
@@ -1370,6 +1338,7 @@ graph LR
 | redacted_ts_bundle.py | — | fixture_runner | — |
 | research_runner_capture.py | — | — | — |
 | research_source_evidence_contract.py | — | contracts, reports, tool_preview, types | — |
+| session_service_registry.py | Process-scope session-service registry for hosted turn reuse (08-PR5). | env | shadow/gate5b4c3_live_runner_boundary.py |
 | tool_policy.py | — | context, dispatcher, manifest, result | — |
 | toolhost_contract.py | — | control, manifest, result, tool_preview | shadow/path_shell_policy_contract.py |
 | ts_parity_replay.py | — | control, sse, transcript | — |
