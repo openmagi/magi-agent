@@ -47,11 +47,12 @@ gate5b FileEdit on ``main`` today raises ``ValueError("old_text_not_found")``
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping, MutableMapping
 from typing import Any
 
 from google.adk.plugins.base_plugin import BasePlugin
 
+from magi_agent.packs.context import PerInvocationState
 from magi_agent.recipes.retry_repair_policies import coding_edit_retry_repair_rules
 from magi_agent.runtime.turn_utilities import RetryController
 
@@ -99,6 +100,50 @@ _NOT_FOUND_MARKERS = (
 )
 
 
+class _ScopedScalarView(MutableMapping[tuple[str, str], Any]):
+    """Live write-through ``(scope, name) -> value`` view over a PerInvocationState.
+
+    Phase 5 / S-C moves the edit-retry attempt counters out of a plugin-private
+    ``dict`` and into the runtime-owned :class:`PerInvocationState` scalar store
+    (which is keyed identically by ``(invocation_id, name)``). This view exposes
+    the SAME mapping surface the legacy ``self._attempts`` dict had — item
+    assignment, membership, iteration, equality — but every read/write goes
+    straight through to ``PerInvocationState`` so there is exactly one owner of
+    the mutable state. Writes route through ``set_scoped`` so the LRU bound is
+    enforced on insert, mirroring the pre-migration behavior.
+    """
+
+    def __init__(self, state: PerInvocationState) -> None:
+        self._state = state
+
+    def __getitem__(self, key: tuple[str, str]) -> Any:
+        scope, name = key
+        sentinel = object()
+        value = self._state.get_scoped(scope, name, default=sentinel)
+        if value is sentinel:
+            raise KeyError(key)
+        return value
+
+    def __setitem__(self, key: tuple[str, str], value: Any) -> None:
+        scope, name = key
+        self._state.set_scoped(scope, name, value)
+
+    def __delitem__(self, key: tuple[str, str]) -> None:
+        scope, name = key
+        if key not in self:
+            raise KeyError(key)
+        self._state.pop_scoped(scope, name)
+
+    def __iter__(self) -> Iterator[tuple[str, str]]:
+        return iter(dict(self._state._store))
+
+    def __len__(self) -> int:
+        return len(self._state._store)
+
+    def __repr__(self) -> str:  # pragma: no cover - debug aid only
+        return f"_ScopedScalarView({dict(self._state._store)!r})"
+
+
 class MagiEditRetryReflectionPlugin(BasePlugin):
     """ADK plugin that re-injects corrective guidance after an edit failure.
 
@@ -106,6 +151,13 @@ class MagiEditRetryReflectionPlugin(BasePlugin):
     invocation id) so that ``max_attempts`` is enforced per turn and never grows
     unbounded across turns. The controller and the repair rules are reused
     as-is; this plugin only adapts the ADK tool boundary to them.
+
+    Phase 5 / S-C: the per-invocation attempt counters live in a runtime-owned
+    :class:`PerInvocationState` (``self._default_state``) rather than a private
+    dict, so a user-authored equivalent control gets the same state struct off
+    the typed context. The legacy ``self._attempts`` mapping is preserved as a
+    live write-through view over that state (the ADK callbacks below feed the
+    default state; the dispatcher supplies a context-owned state in Phase 6).
     """
 
     def __init__(
@@ -118,17 +170,30 @@ class MagiEditRetryReflectionPlugin(BasePlugin):
         if max_attempts < 1:
             raise ValueError("max_attempts must be >= 1")
         self.max_attempts = max_attempts
-        # attempt counts keyed by (scope_key, tool_name)
-        self._attempts: dict[tuple[str, str], int] = {}
+        # Runtime-owned per-invocation state (the ONE owner of the mutable attempt
+        # counters). Replaces the old plugin-private ``self._attempts`` dict; the
+        # legacy attribute is now a live write-through view over this struct.
+        self._default_state = PerInvocationState()
         # One controller for the whole plugin: repair-rule selection is pure (it
         # depends only on the per-call decision input), and the controller's own
         # ``exhausted``/``last_error`` state is unused here — the attempt budget
-        # is enforced via the external ``_attempts`` counter we feed in. Caching
+        # is enforced via the external attempt counter we feed in. Caching
         # avoids allocating rule objects on every failed edit.
         self._controller = RetryController(
             max_attempts=self.max_attempts,
             repair_rules=coding_edit_retry_repair_rules(),
         )
+
+    @property
+    def _attempts(self) -> MutableMapping[tuple[str, str], Any]:
+        """Live ``(scope_key, tool_name) -> attempt`` view over the runtime state.
+
+        Backward-compatible surface: the per-invocation attempt counters now live
+        in ``self._default_state`` (a :class:`PerInvocationState`). This view lets
+        existing callers/tests read, assign, and sweep counters exactly as they did
+        against the old dict, while the actual storage is the runtime-owned struct.
+        """
+        return _ScopedScalarView(self._default_state)
 
     # -- ADK callbacks ----------------------------------------------------
 
@@ -181,32 +246,42 @@ class MagiEditRetryReflectionPlugin(BasePlugin):
         """Sweep attempt counters for the invocation that just finished.
 
         The plugin instance lives for the whole process, so without this cleanup
-        ``_attempts`` would grow unbounded: keys only pop on a *successful* edit
-        (``_reset``), never when the budget is exhausted or the turn simply ends
-        without a final success. The invocation id is the scope key, so on run
-        completion we drop every counter belonging to that invocation.
+        the attempt counters would grow unbounded: keys only pop on a *successful*
+        edit (``_reset``), never when the budget is exhausted or the turn simply
+        ends without a final success. The invocation id is the scope key, so on
+        run completion we drop every counter belonging to that invocation via the
+        runtime state's clear-on-turn-complete hook.
         """
         inv = getattr(invocation_context, "invocation_id", None)
         if isinstance(inv, str) and inv:
-            self._attempts = {k: v for k, v in self._attempts.items() if k[0] != inv}
+            self._default_state.clear_invocation(inv)
 
     # -- core -------------------------------------------------------------
 
-    def _maybe_reflect(
+    def reflect_with_state(
         self,
         *,
+        state: PerInvocationState,
         tool: Any,
         tool_args: dict[str, Any],
         tool_context: Any,
         reason: str,
     ) -> dict[str, Any] | None:
+        """Pure decision over a runtime-owned :class:`PerInvocationState` (S-C).
+
+        Replaces the instance-private ``self._attempts`` mutation: the caller
+        (the ADK callbacks below, or the typed-context control adapter) supplies
+        the shared state. The attempt counter is read/incremented on ``state``;
+        everything else (error classification, repair-rule selection, fail-closed
+        budget) is byte-identical to the pre-migration ``_maybe_reflect``.
+        """
         tool_name = _tool_name(tool)
         if tool_name not in _EDIT_TOOL_NAMES:
             return None
 
         scope_key = _scope_key(tool_context)
-        attempt = self._attempts.get((scope_key, tool_name), 0) + 1
-        self._attempts[(scope_key, tool_name)] = attempt
+        attempt = state.get_scoped(scope_key, tool_name, default=0) + 1
+        state.set_scoped(scope_key, tool_name, attempt)
 
         error_code = _classify_edit_error_code(reason, tool_args)
 
@@ -239,8 +314,26 @@ class MagiEditRetryReflectionPlugin(BasePlugin):
             "reflection_guidance": decision.hidden_user_message,
         }
 
+    def _maybe_reflect(
+        self,
+        *,
+        tool: Any,
+        tool_args: dict[str, Any],
+        tool_context: Any,
+        reason: str,
+    ) -> dict[str, Any] | None:
+        # ADK-callback path: feed the plugin's runtime-owned default state. The
+        # typed-context path supplies a context-owned state instead (Phase 6).
+        return self.reflect_with_state(
+            state=self._default_state,
+            tool=tool,
+            tool_args=tool_args,
+            tool_context=tool_context,
+            reason=reason,
+        )
+
     def _reset(self, tool_context: Any, tool_name: str) -> None:
-        self._attempts.pop((_scope_key(tool_context), tool_name), None)
+        self._default_state.pop_scoped(_scope_key(tool_context), tool_name)
 
 
 # -- helpers --------------------------------------------------------------

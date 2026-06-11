@@ -985,6 +985,52 @@ class _EditRetryLoopControl(BaseLoopControl):
             tool=tool, tool_args=args, tool_context=tool_context, result=result
         )
 
+    async def apply_after_tool(
+        self,
+        ctx: Any,
+        *,
+        tool: Any,
+        args: dict[str, Any],
+        tool_context: Any,
+        result: Any,
+    ) -> dict[str, Any] | None:
+        """Typed-context entry point (S-C): mutate the runtime-owned
+        ``PerInvocationState`` from the context instead of plugin-private state.
+
+        Behavior is byte-identical to ``after_tool_callback``: skip our own
+        injected response, reset the counter on a non-error result, else run the
+        reflection decision against the shared state. Falls back to the plugin's
+        default state when the context carries none (pre-dispatcher call sites)."""
+        from collections.abc import Mapping
+
+        from magi_agent.adk_bridge.edit_retry_reflection import (
+            EDIT_RETRY_REFLECTION_RESPONSE_TYPE,
+            _error_reason_from_result,
+            _scope_key,
+            _tool_name,
+        )
+
+        # Never recurse on our own injected response.
+        if (
+            isinstance(result, Mapping)
+            and result.get("response_type") == EDIT_RETRY_REFLECTION_RESPONSE_TYPE
+        ):
+            return None
+
+        state = getattr(ctx, "per_invocation", None) or self._plugin._default_state
+        reason = _error_reason_from_result(result)
+        if reason is None:
+            # Successful (or non-error) edit -> reset the per-tool attempt count.
+            state.pop_scoped(_scope_key(tool_context), _tool_name(tool))
+            return None
+        return self._plugin.reflect_with_state(
+            state=state,
+            tool=tool,
+            tool_args=args,
+            tool_context=tool_context,
+            reason=reason,
+        )
+
 
 class _ResilienceLoopControl(BaseLoopControl):
     """Thin LoopControl adapter delegating ``after_tool_callback`` to MagiResiliencePlugin."""
