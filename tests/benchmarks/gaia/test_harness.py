@@ -61,3 +61,60 @@ def test_attachment_is_copied_into_workspace(tmp_path) -> None:
     copied = workspace / "data.txt"
     assert copied.exists(), "attachment was not copied into workspace_root"
     assert copied.read_text(encoding="utf-8") == "attachment contents\n"
+
+
+# ---------------------------------------------------------------------------
+# Best-effort finalization wiring (MAGI_ANSWER_POLICY, default abstain)
+# ---------------------------------------------------------------------------
+
+
+def _abstain_then_answer_llm(calls: list[object]) -> BaseLlm:
+    """Scripted LLM: abstains on turn 1, commits on turn 2; records each call."""
+
+    class _AbstainThenAnswerLlm(BaseLlm):
+        async def generate_content_async(
+            self, llm_request: object, stream: bool = False
+        ) -> AsyncGenerator[LlmResponse, None]:
+            calls.append(llm_request)
+            text = (
+                "reasoning... cannot determine"
+                if len(calls) == 1
+                else "FINAL ANSWER: egalitarian"
+            )
+            yield LlmResponse(
+                content=types.Content(role="model", parts=[types.Part(text=text)])
+            )
+
+    return _AbstainThenAnswerLlm(model="fake")
+
+
+def test_commit_policy_rescues_abstaining_run(tmp_path, monkeypatch) -> None:
+    """MAGI_ANSWER_POLICY=commit → a second synthesis turn rescues the answer."""
+    monkeypatch.setenv("MAGI_ANSWER_POLICY", "commit")
+    calls: list[object] = []
+    q = GaiaQuestion(
+        task_id="c", question="What word?", level=1, final_answer="egalitarian"
+    )
+    answer = run_gaia_question(
+        q,
+        workspace_root=str(tmp_path),
+        model_factory=lambda cfg: _abstain_then_answer_llm(calls),
+    )
+    assert answer == "egalitarian"
+    assert len(calls) == 2, "rescue must run exactly one extra turn"
+
+
+def test_default_env_unset_keeps_empty_answer(tmp_path, monkeypatch) -> None:
+    """Default-OFF proof: env unset → empty answer exactly as before, one turn only."""
+    monkeypatch.delenv("MAGI_ANSWER_POLICY", raising=False)
+    calls: list[object] = []
+    q = GaiaQuestion(
+        task_id="d", question="What word?", level=1, final_answer="egalitarian"
+    )
+    answer = run_gaia_question(
+        q,
+        workspace_root=str(tmp_path),
+        model_factory=lambda cfg: _abstain_then_answer_llm(calls),
+    )
+    assert answer == ""
+    assert len(calls) == 1, "default abstain must not run a second turn"
