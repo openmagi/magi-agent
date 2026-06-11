@@ -231,6 +231,47 @@ def test_selected_full_toolhost_adk_declarations_are_google_schema_compatible(tm
         assert not _contains_key(payload, "any_of")
 
 
+def test_selected_full_toolhost_spawn_agent_declares_delegation_schema(tmp_path):
+    runtime = _runtime()
+    bundle = build_gate5b_full_toolhost_bundle(
+        config=Gate5BFullToolHostConfig.model_validate(
+            {
+                "enabled": True,
+                "killSwitchEnabled": False,
+                "routeAttachmentEnabled": True,
+                "selectedBotDigest": _sha256("bot-test"),
+                "selectedOwnerDigest": _sha256("user-test"),
+                "environment": "production",
+                "environmentAllowlist": ("production",),
+                "allowedToolNames": GATE5B_FULL_TOOLHOST_TOOL_NAMES,
+                "maxToolCallsPerTurn": 8,
+            }
+        ),
+        scope={
+            "selectedBotDigest": _sha256("bot-test"),
+            "selectedOwnerDigest": _sha256("user-test"),
+            "environment": "production",
+        },
+        workspace_root=tmp_path,
+        tool_registry=runtime.tool_registry,
+    )
+
+    spawn = next(tool for tool in bundle.tools if tool.name == "SpawnAgent")
+    declaration = spawn._get_declaration()
+    assert declaration is not None
+    payload = declaration.model_dump(by_alias=True, exclude_none=True, mode="json")
+    properties = payload["parameters"]["properties"]
+
+    assert {"prompt", "task", "persona", "provider", "model", "budgetMs"}.issubset(
+        set(properties)
+    )
+    assert "query" not in properties
+    assert "path" not in properties
+    assert "content" not in properties
+    assert "delegate" in str(payload["description"]).lower()
+    assert "subtask" in str(payload["description"]).lower()
+
+
 def _contains_key(value: object, key: str) -> bool:
     if isinstance(value, Mapping):
         return key in value or any(_contains_key(child, key) for child in value.values())
