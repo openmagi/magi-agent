@@ -1,0 +1,15 @@
+# Bundled first-party callback pack (no privilege; same loader/format). callback
+# is an ordered type so priority/phase are allowed. Schema =
+# magi_agent/packs/manifest.py (top-level packId/displayName).
+
+packId = "openmagi.callback-turn-audit"
+displayName = "Turn-start audit callback"
+version = "1.0.0"
+description = "First-party turn-start audit callback bundled as a removable pack."
+
+[[provides]]
+type = "callback"
+ref = "turn-audit"
+impl = "magi_agent.firstparty.packs.callback_turn_audit.impl:provide_callback"
+priority = 100
+phase = "beforeTurnStart"
