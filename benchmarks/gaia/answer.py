@@ -101,6 +101,34 @@ def gaia_system_prompt(env: Mapping[str, str] | None = None) -> str:
     if not compute_via_code_enabled(source):
         return GAIA_SYSTEM_PROMPT
     return GAIA_SYSTEM_PROMPT + _COMPUTE_VIA_CODE_REMINDER
+def gaia_step_decomposition_block(env: Mapping[str, str] | None = None) -> str:
+    """Return the GAIA-side multi-step decomposition advertisement, or "".
+
+    Gated on the same ``MAGI_STEP_DECOMPOSITION_ENABLED`` flag as the first-party
+    ``cli.tool_runtime.step_decomposition_block``. Default OFF, so the harness
+    instruction at ``harness.py`` is byte-identical to baseline (the static
+    ``GAIA_SYSTEM_PROMPT`` constant is never mutated). This is the benchmark
+    *advertisement* layer only — it wires the same GENERAL capability into the
+    GAIA runner instruction. GAIA-specific wording is permitted here because this
+    file lives in the benchmark layer, never in first-party logic.
+
+    Imported lazily to keep ``benchmarks.gaia.answer`` import cheap and to reuse
+    the single source-of-truth gate.
+    """
+    from magi_agent.config.env import is_step_decomposition_enabled
+
+    if not is_step_decomposition_enabled(env):
+        return ""
+    return (
+        "\n\n<step_decomposition>\n"
+        "Many GAIA L3 questions are multi-hop: the answer depends on a chain of "
+        "intermediate facts (e.g. word -> root -> translation -> source -> "
+        "value). Before answering, enumerate the ordered, dependent sub-steps; "
+        "resolve and explicitly confirm each sub-step's result before feeding it "
+        "into the next, and carry confirmed intermediate values forward verbatim "
+        "so one wrong link does not corrupt your FINAL ANSWER.\n"
+        "</step_decomposition>"
+    )
 
 
 def extract_final_answer(text: str) -> str:
@@ -117,5 +145,6 @@ __all__ = [
     "GAIA_FORMAT_ADHERENCE_NOTE",
     "GAIA_SYSTEM_PROMPT",
     "gaia_system_prompt",
+    "gaia_step_decomposition_block",
     "extract_final_answer",
 ]

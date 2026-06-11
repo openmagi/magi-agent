@@ -12,6 +12,7 @@ from google.genai import types
 from benchmarks.gaia.answer import (
     GAIA_FORMAT_ADHERENCE_NOTE,
     extract_final_answer,
+    gaia_step_decomposition_block,
     gaia_system_prompt,
 )
 from benchmarks.gaia.dataset import GaiaQuestion
@@ -104,14 +105,12 @@ def run_gaia_question(
     # 4. Build runner.
     # gaia_system_prompt() returns GAIA_SYSTEM_PROMPT byte-identically when
     # MAGI_COMPUTE_VIA_CODE_ENABLED is unset (default), and appends the scoped
-    # compute-via-code reminder only when the flag is on.
-    # Advertise the output-format-adherence guidance in the GAIA prompt layer.
-    # This is the benchmark advertisement of the general capability (the
-    # first-party block lives in cli.tool_runtime, gated default-OFF); the GAIA
-    # harness always advertises it because format conformance is part of GAIA's
-    # scoring contract.
+    # compute-via-code reminder only when the flag is on. The format-adherence
+    # note is always advertised (GAIA scoring contract); the step-decomposition
+    # block is gated default-OFF and returns "" unless MAGI_STEP_DECOMPOSITION_ENABLED.
     instruction = (
         f"{gaia_system_prompt()}\n\n{GAIA_FORMAT_ADHERENCE_NOTE}"
+        f"{gaia_step_decomposition_block()}"
         f"\n\nQUESTION:\n{question.question}{attachment_note}{remote_media_note}"
     )
     runner: CliModelRunner = build_cli_model_runner(
