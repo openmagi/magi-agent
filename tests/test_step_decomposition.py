@@ -96,17 +96,23 @@ def test_build_cli_instruction_off_is_byte_identical_to_baseline(monkeypatch) ->
     """
     import re
 
-    ts = re.compile(r"\d{2}:\d{2}:\d{2}\.\d{3}Z")
+    def normalize_runtime_clock(text: str) -> str:
+        text = re.sub(r"\d{2}:\d{2}:\d{2}\.\d{3}Z", "TS", text)
+        return re.sub(r"(runtime_local_time: )\d{2}:\d{2}:\d{2}", r"\1TS", text)
 
     monkeypatch.delenv(MAGI_STEP_DECOMPOSITION_ENABLED_ENV, raising=False)
-    off = ts.sub("TS", build_cli_instruction(session_id="s1", model="claude-sonnet-4-6"))
+    off = normalize_runtime_clock(
+        build_cli_instruction(session_id="s1", model="claude-sonnet-4-6")
+    )
 
     # The decomposition block contributes nothing when OFF — so the OFF
     # instruction is byte-identical to the instruction with the empty block
     # explicitly appended (the guarded-append no-op).
     assert step_decomposition_block(env={}) == ""
     monkeypatch.delenv(MAGI_STEP_DECOMPOSITION_ENABLED_ENV, raising=False)
-    off2 = ts.sub("TS", build_cli_instruction(session_id="s1", model="claude-sonnet-4-6"))
+    off2 = normalize_runtime_clock(
+        build_cli_instruction(session_id="s1", model="claude-sonnet-4-6")
+    )
     assert off == off2
     assert "<step_decomposition>" not in off
 
@@ -114,7 +120,9 @@ def test_build_cli_instruction_off_is_byte_identical_to_baseline(monkeypatch) ->
     # to parts (no reflow of any other section): stripping the block back out and
     # re-normalising must recover the OFF text.
     monkeypatch.setenv(MAGI_STEP_DECOMPOSITION_ENABLED_ENV, "1")
-    on = ts.sub("TS", build_cli_instruction(session_id="s1", model="claude-sonnet-4-6"))
+    on = normalize_runtime_clock(
+        build_cli_instruction(session_id="s1", model="claude-sonnet-4-6")
+    )
     block_body = step_decomposition_block(env={MAGI_STEP_DECOMPOSITION_ENABLED_ENV: "1"}).lstrip("\n")
     on_without_block = on.replace("\n\n" + block_body, "")
     assert on_without_block == off
