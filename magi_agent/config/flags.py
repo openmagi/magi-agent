@@ -397,6 +397,14 @@ FLAGS: tuple[FlagSpec, ...] = (
         summary="Run the evidence-grounded critic gate before chat egress.",
     ),
     _b(
+        "MAGI_STEP_DECOMPOSITION_ENABLED",
+        summary=(
+            "Inject a light first-pass guidance asking the agent to enumerate "
+            "dependent sub-steps up front and confirm each before proceeding "
+            "(prompt-only nudge; reuses existing planning seams)."
+        ),
+    ),
+    _b(
         "MAGI_GA_DELIVERABLE_GATE_ENABLED",
         stage="stage2",
         summary=(

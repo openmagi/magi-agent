@@ -1906,6 +1906,36 @@ def parse_facts_replan_env(env: Mapping[str, str] | None = None):
     )
 
     return _parse_facts_replan_env(env)
+MAGI_STEP_DECOMPOSITION_ENABLED_ENV = "MAGI_STEP_DECOMPOSITION_ENABLED"
+
+
+def is_step_decomposition_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Single source of truth for the multi-step decomposition guidance flag.
+
+    Default OFF (strict truthy opt-in: "1"/"true"/"yes"/"on"). When OFF, the
+    ``build_cli_instruction`` system prompt and the GAIA harness instruction are
+    byte-identical to the pre-flag baseline. When ON, the system prompt carries
+    one ``<step_decomposition>`` block that asks the agent to enumerate the
+    dependent sub-steps of a multi-hop question up front and resolve/confirm each
+    before proceeding — a *light*, prompt-only nudge that reuses the existing
+    planning/TodoWrite seams (no new control loop, no orchestrator, no extra
+    model calls). This targets long L3 chains where one broken intermediate link
+    yields a wrong final answer.
+
+    Delegates to the canonical ``config.flags`` registry (``flag_bool``) backed by
+    the ``MAGI_STEP_DECOMPOSITION_ENABLED`` ``FlagSpec``, matching
+    ``is_egress_gate_enabled`` exactly: byte-identical to the raw
+    ``_is_true(source.get(...))`` form because the flag is registered with a
+    ``False`` default and the same strict-truthy parser. Like
+    ``is_egress_gate_enabled`` / ``is_goal_nudge_enabled`` this is an additive,
+    default-disabled seam and does NOT follow the runtime-profile default-ON
+    convention (A/B evidence gates any default flip). Imported lazily to avoid a
+    config<->flags import cycle.
+    """
+    from .flags import flag_bool
+
+    source = os.environ if env is None else env
+    return flag_bool(MAGI_STEP_DECOMPOSITION_ENABLED_ENV, env=source)
 
 
 MAGI_USER_HOOKS_ENABLED_ENV = "MAGI_USER_HOOKS_ENABLED"

@@ -629,6 +629,48 @@ def output_format_adherence_block(env: Mapping[str, str] | None = None) -> str:
     )
 
 
+def step_decomposition_block(env: Mapping[str, str] | None = None) -> str:
+    """Return the multi-step decomposition guidance system-prompt block.
+
+    Returns an empty string when ``MAGI_STEP_DECOMPOSITION_ENABLED`` is falsy (or
+    when the env mapping explicitly disables it), so the caller's prompt is
+    byte-identical to the non-decomposition path when the flag is off. When on it
+    returns a leading-``\\n\\n`` block (matching ``eval_autonomy_block``) so it
+    appends cleanly into the ``"\\n\\n".join(parts)`` assembly.
+
+    This is a *light*, prompt-only nudge — it asks the model to plan the
+    dependent sub-steps of a multi-hop question and confirm each before
+    proceeding, reusing the existing planning/TodoWrite seams. It is a GENERAL
+    agent capability with no benchmark-specific text; GAIA advertisement lives in
+    the benchmark prompt layer only.
+
+    Imported lazily inside to keep ``import cli.tool_runtime`` cold-clean.
+    """
+    import os as _os  # noqa: PLC0415
+
+    from magi_agent.config.env import is_step_decomposition_enabled  # noqa: PLC0415
+
+    source = env if env is not None else _os.environ
+    if not is_step_decomposition_enabled(source):
+        return ""
+    return (
+        "\n\n<step_decomposition>\n"
+        "For a multi-step question whose answer depends on a chain of "
+        "intermediate facts (A leads to B leads to C ...), do not jump straight "
+        "to the final answer.\n"
+        "- First enumerate the ordered, dependent sub-steps you must resolve "
+        "(use your planning/TodoWrite seam if available).\n"
+        "- Resolve and explicitly confirm each sub-step's result before using it "
+        "as input to the next; if a link is uncertain, verify it before "
+        "proceeding rather than guessing onward.\n"
+        "- Carry the confirmed intermediate result forward verbatim so a wrong "
+        "or paraphrased link does not silently corrupt the final answer.\n"
+        "Keep this lightweight — it is a planning discipline, not a reason to add "
+        "extra tool calls beyond what each sub-step needs.\n"
+        "</step_decomposition>"
+    )
+
+
 def build_cli_instruction(
     *,
     session_id: str,
@@ -816,6 +858,12 @@ def build_cli_instruction(
 
     _web_research_block = web_research_guidance_block()
 
+    # Multi-step decomposition guidance — gated on MAGI_STEP_DECOMPOSITION_ENABLED.
+    # Returns "" when off (default), keeping the prompt byte-identical to baseline
+    # (same fail-off pattern as _file_tools_block / _web_research_block). The
+    # leading "\n\n" is stripped below so the join spacing stays uniform.
+    _decomposition_block = step_decomposition_block()
+
     _skills_block = (
         "<skills>\n"
         "Bundled first-party skills, including superpowers-style workflows, are "
@@ -854,6 +902,11 @@ def build_cli_instruction(
         parts.append(_file_tools_block)
     if _web_research_block:
         parts.append(_web_research_block)
+    if _decomposition_block:
+        # Strip the leading "\n\n" separator the helper carries (so it composes
+        # standalone, like eval_autonomy_block) before appending into the
+        # "\n\n".join(parts) assembly — avoids a doubled blank line.
+        parts.append(_decomposition_block.lstrip("\n"))
     parts.append(_skills_block)
     if _tool_synthesis_block:
         parts.append(_tool_synthesis_block)
@@ -875,5 +928,6 @@ __all__ = [
     "compute_via_code_block",
     "bind_cli_local_full_tool_handlers",
     "output_format_adherence_block",
+    "step_decomposition_block",
     "wrap_cli_adk_tools_with_evidence_collector",
 ]
