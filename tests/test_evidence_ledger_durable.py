@@ -9,6 +9,7 @@ never break the tool path.
 from __future__ import annotations
 
 import json
+import stat
 
 from magi_agent.evidence.local_tool_collector import LocalToolEvidenceCollector
 
@@ -23,8 +24,21 @@ def _record(collector: LocalToolEvidenceCollector, turn: str = "turn-1") -> None
     )
 
 
-def test_no_files_written_by_default(tmp_path, monkeypatch) -> None:
+def test_default_on_writes_under_workspace_local_dir(tmp_path, monkeypatch) -> None:
+    # C1 decision: a governance-identity product ships its audit trail ON by
+    # default — <cwd>/.magi/evidence/<session>.jsonl. Opt out with =off.
     monkeypatch.delenv("MAGI_EVIDENCE_LEDGER_DIR", raising=False)
+    monkeypatch.chdir(tmp_path)
+    _record(LocalToolEvidenceCollector())
+    path = tmp_path / ".magi" / "evidence" / "sess-1.jsonl"
+    assert path.exists()
+    assert json.loads(path.read_text().splitlines()[0])["toolName"] == "FileRead"
+    assert stat.S_IMODE(path.parent.stat().st_mode) == 0o700
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+
+def test_off_value_disables_persistence(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("MAGI_EVIDENCE_LEDGER_DIR", "off")
     monkeypatch.chdir(tmp_path)
     _record(LocalToolEvidenceCollector())
     assert list(tmp_path.iterdir()) == []

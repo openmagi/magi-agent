@@ -32,18 +32,35 @@ _WEB_SOURCE_TOOL_NAMES = frozenset(
 )
 
 _URL_RE = re.compile(r"https?://[^\s\"'<>\\)\]]+")
+_SUCCESS_TOOL_STATUSES = frozenset({"ok", "success", "completed"})
 
 
 def research_governance_mode(env: Mapping[str, str] | None = None) -> str:
-    """Return ``"audit"`` or ``"off"`` (the only modes that exist today).
+    """Return ``"off"`` / ``"audit"`` / ``"enforce"``.
 
-    ``enforce`` deliberately resolves to ``off``: enforcement must be a
-    measured, separate step — silently treating it as audit would misrepresent
-    the operator's intent, and blocking without evidence is a known regression.
+    ``enforce`` covers ONLY the deterministic cited-without-source class
+    (citing a URL the turn never fetched is verifiably wrong — near-zero false
+    positives) and its semantics are one bounded re-prompt, never a silent
+    rewrite (the GAIA answer-verifier lesson). Unknown values fall to ``off``.
     """
     source = os.environ if env is None else env
     raw = (source.get(RESEARCH_GOVERNANCE_MODE_ENV) or "").strip().lower()
-    return "audit" if raw == "audit" else "off"
+    if raw in ("audit", "enforce"):
+        return raw
+    return "off"
+
+
+def enforce_reprompt_message(report: Mapping[str, object]) -> str:
+    """One bounded corrective re-prompt for the deterministic citation class."""
+    offending = report.get("citedWithoutSource") or []
+    listing = "\n".join(f"- {url}" for url in offending)  # type: ignore[union-attr]
+    return (
+        "Citation check failed: your answer cites the following URL(s) that were "
+        "never fetched or returned by any tool this turn:\n"
+        f"{listing}\n"
+        "For each one, either fetch it now to verify it supports your claim, or "
+        "remove the citation. Then restate the corrected final answer in full."
+    )
 
 
 def _extract_urls(text: str) -> list[str]:
@@ -78,6 +95,9 @@ class ResearchLiveAudit:
         name = self._tool_names.get(tool_id, "")
         if name not in _WEB_SOURCE_TOOL_NAMES:
             return
+        status = str(payload.get("status") or "").strip().lower()
+        if status not in _SUCCESS_TOOL_STATUSES:
+            return
         try:
             rendered = json.dumps(payload, default=str)
         except (TypeError, ValueError):
@@ -85,8 +105,8 @@ class ResearchLiveAudit:
         for url in _extract_urls(rendered):
             self._source_urls.setdefault(url, None)
 
-    def report(self, final_text: str) -> dict[str, object]:
-        """Deterministic audit report; never raises, never blocks."""
+    def report(self, final_text: str, *, mode: str = "audit") -> dict[str, object]:
+        """Deterministic audit report; never raises, never blocks by itself."""
         cited = _extract_urls(final_text)
         sources = list(self._source_urls)
         cited_without_source = [url for url in cited if url not in self._source_urls]
@@ -94,7 +114,7 @@ class ResearchLiveAudit:
         sources_uncited = [url for url in sources if url not in cited_set]
         return {
             "type": "research_governance_audit",
-            "mode": "audit",
+            "mode": mode,
             "sourceUrlCount": len(sources),
             "citedUrlCount": len(cited),
             "citedWithoutSource": cited_without_source,
@@ -106,5 +126,6 @@ class ResearchLiveAudit:
 __all__ = [
     "RESEARCH_GOVERNANCE_MODE_ENV",
     "ResearchLiveAudit",
+    "enforce_reprompt_message",
     "research_governance_mode",
 ]

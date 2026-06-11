@@ -86,13 +86,24 @@ def test_eval_explicit_flag_wins():
     ) == "acceptEdits"
 
 
-def test_non_eval_default_flag_stays_default():
+def test_non_eval_default_flag_resolves_to_accept_edits():
+    # B9: a one-shot headless run has no interactive approver — leaving it on
+    # "default" denied every write tool, while the interactive TUI already
+    # defaults to acceptEdits. Headless inherits the same default; an explicit
+    # --permission-mode always wins.
     assert resolve_headless_permission_mode(
         permission_mode="default", flag_is_default=True, runtime_profile=None
-    ) == "default"
+    ) == "acceptEdits"
 
 
-def test_full_profile_default_flag_stays_default():
+def test_full_profile_default_flag_resolves_to_accept_edits():
     assert resolve_headless_permission_mode(
         permission_mode="default", flag_is_default=True, runtime_profile="full"
+    ) == "acceptEdits"
+
+
+def test_explicit_default_mode_is_respected():
+    # The operator explicitly asked for strict default mode — keep it.
+    assert resolve_headless_permission_mode(
+        permission_mode="default", flag_is_default=False, runtime_profile=None
     ) == "default"
