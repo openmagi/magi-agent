@@ -486,6 +486,7 @@ class RealLocalChildRunner:
                 workspace_root=workspace,
                 session_id=session_id,
                 local_tool_evidence_collector=collector,
+                include_local_full_handlers=self._toolset_profile != "readonly",
             )
         )
 
