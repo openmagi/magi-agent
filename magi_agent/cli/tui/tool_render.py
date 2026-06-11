@@ -93,6 +93,54 @@ def _first_str(data: dict, keys: tuple[str, ...]) -> str:
     return ""
 
 
+# Arg keys most tools use for their primary argument — tried in order when a
+# card renderer has no tool-specific primary keys (unknown/dynamic tools).
+_GENERIC_ARG_KEYS = (
+    "path",
+    "file_path",
+    "command",
+    "pattern",
+    "query",
+    "prompt",
+    "task",
+    "url",
+    "file",
+)
+
+_ARG_HEAD_MAX = 80
+
+
+def _clip(value: str) -> str:
+    return value if len(value) <= _ARG_HEAD_MAX else value[: _ARG_HEAD_MAX - 1] + "…"
+
+
+def _string_head(value: str) -> str:
+    """Compact one-line head of a raw string input (e.g. truncated JSON).
+
+    A >MAX_TOOL_PREVIEW ``input_preview`` is truncated by the bridge into
+    INVALID JSON, which reaches the renderer as a raw string — show its head
+    (minus leading JSON scaffolding) instead of nothing.
+    """
+
+    collapsed = " ".join(value.split())
+    collapsed = collapsed.lstrip("{[\"' ")
+    return _clip(collapsed)
+
+
+def _generic_arg(data: dict) -> str:
+    """Best-effort primary arg for tools without a registered renderer."""
+
+    arg = _first_str(data, _GENERIC_ARG_KEYS)
+    if arg:
+        return _clip(arg)
+    for key, value in data.items():
+        if isinstance(value, str) and value:
+            return f"{key}={_clip(value)}"
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return f"{key}={value}"
+    return ""
+
+
 def _result_text(result: object) -> str:
     """Best-effort extraction of human-readable text from a tool result.
 
@@ -189,7 +237,7 @@ class ToolCardRenderer:
         self._primary_keys = primary_keys
 
     def render_call(self, partial_input: object) -> RenderNode:
-        return _call_node(self._name, _first_str(_as_dict(partial_input), self._primary_keys))
+        return _call_node(self._name, self._arg(partial_input))
 
     def render_result(self, result: object) -> RenderNode:
         return _result_node(result)
@@ -198,7 +246,13 @@ class ToolCardRenderer:
         return _result_node(p)
 
     def render_rejected(self, r: object) -> RenderNode:
-        return _call_node(self._name, _first_str(_as_dict(r), self._primary_keys), rejected=True)
+        return _call_node(self._name, self._arg(r), rejected=True)
+
+    def _arg(self, partial_input: object) -> str:
+        if isinstance(partial_input, str) and partial_input.strip():
+            return _string_head(partial_input)
+        data = _as_dict(partial_input)
+        return _first_str(data, self._primary_keys) or _generic_arg(data)
 
     def extract_search_text(self, node: object) -> str:
         return _search_text(node)

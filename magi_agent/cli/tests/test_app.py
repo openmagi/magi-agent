@@ -403,11 +403,22 @@ class TestModeBranchInteractive:
             runner.invoke(app_module.app, extra_args, catch_exceptions=False)
         return captured.get("permission_mode")
 
-    def test_interactive_default_upgrades_to_accept_edits(
+    def test_interactive_default_upgrades_to_bypass_permissions(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path
     ) -> None:
-        """Bare `magi` (no --permission-mode) launches the TUI in acceptEdits."""
-        assert self._launch_tui(monkeypatch, tmp_path, []) == "acceptEdits"
+        """Bare `magi` (no --permission-mode) launches the TUI in bypassPermissions."""
+        assert self._launch_tui(monkeypatch, tmp_path, []) == "bypassPermissions"
+
+    def test_interactive_explicit_accept_edits_is_honored(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path
+    ) -> None:
+        """An explicit --permission-mode acceptEdits is passed through unchanged."""
+        assert (
+            self._launch_tui(
+                monkeypatch, tmp_path, ["--permission-mode", "acceptEdits"]
+            )
+            == "acceptEdits"
+        )
 
     def test_interactive_explicit_mode_is_honored(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path

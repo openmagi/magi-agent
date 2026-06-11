@@ -153,6 +153,13 @@ def _extract_prompt_text(body: object) -> str:
     for message in messages:
         if not isinstance(message, Mapping):
             continue
+        # Only user-authored text. Joining assistant/system text used to let the
+        # bot's own "코드 작성/편집" self-introduction trip the coding-evidence
+        # gate's prompt classifier on every later turn of the session. A message
+        # without a role is treated as user for bare {content} payload compat.
+        role = message.get("role")
+        if role is not None and role != "user":
+            continue
         content = message.get("content")
         if isinstance(content, str):
             text_parts.append(content)

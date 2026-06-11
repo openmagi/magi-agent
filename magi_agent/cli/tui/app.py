@@ -915,7 +915,10 @@ class MagiTuiApp(App[None]):
         flush_interval: float = DEFAULT_FLUSH_INTERVAL,
         clipboard_reader: Callable[[], dict | None] | None = None,
     ) -> None:
-        super().__init__()
+        # ansi_color=True renders with the terminal's own default colors; the
+        # flat-look's ``background: transparent`` CSS alone still paints the
+        # App-level theme background (solid #1a1b26) without it.
+        super().__init__(ansi_color=True)
         self._engine = engine
         self._gate = gate
         self._commands = commands
@@ -933,6 +936,10 @@ class MagiTuiApp(App[None]):
         # compaction is gated runtime authority (Stream B/E).
         self.compact_requests = 0
         self._renderers = renderers
+        # tool_use id -> tool name (tool_end payloads carry no name) and the
+        # per-name synthesized card renderers for unregistered tools.
+        self._tool_names_by_id: dict[str, str] = {}
+        self._dynamic_tool_renderers: dict[str, object] = {}
         self._runtime = runtime
         self._session_id = session_id
         # Per-session ↑/↓ input history (persisted JSONL under the session root).
@@ -1570,6 +1577,8 @@ class MagiTuiApp(App[None]):
         # mid-chord (e.g. submit fired) must not leave the hint stuck visible.
         self._pending = None
         self._hide_whichkey()
+        # Fresh id->name tool map per turn (ids are turn-scoped).
+        self._tool_names_by_id = {}
         self.update_footer(state="running")
         self._echo_user(prompt)
         self._run_turn(prompt, turn_id, cancel)
@@ -1724,8 +1733,17 @@ class MagiTuiApp(App[None]):
 
         payload = event.payload
         name = _tool_name(payload)
-        renderer = self._renderers.get(name)
         inner = _inner_type(payload)
+        # The sanitized public tool_end/tool_progress payloads carry NO name —
+        # resolve it from the matching tool_start id so the result preview goes
+        # through the same renderer (instead of the anonymous fallback).
+        tool_id = payload.get("id")
+        if isinstance(tool_id, str) and tool_id:
+            if inner == "tool_start" and name != "tool":
+                self._tool_names_by_id[tool_id] = name
+            elif name == "tool":
+                name = self._tool_names_by_id.get(tool_id, name)
+        renderer = self._lookup_tool_renderer(name)
         if inner == "tool_start":
             # Fold this tool_start into the sidebar panes (todo / recent files)
             # BEFORE rendering the call, so the side panes track activity even
@@ -1743,6 +1761,21 @@ class MagiTuiApp(App[None]):
             self.controller.commit_block(_status_summary(event))
             return
         self._commit_render_node(node, tool_name=name)
+
+    def _lookup_tool_renderer(self, name: str) -> object:
+        """Resolve a renderer for ``name``, synthesizing a named card renderer
+        for tools without a registered one so unknown tools still render a
+        ``● Name(arg)`` header instead of a bare dot."""
+
+        if name and name != "tool" and not self._renderers.is_registered(name):
+            renderer = self._dynamic_tool_renderers.get(name)
+            if renderer is None:
+                from magi_agent.cli.tui.tool_render import ToolCardRenderer  # noqa: PLC0415
+
+                renderer = ToolCardRenderer(name)
+                self._dynamic_tool_renderers[name] = renderer
+            return renderer
+        return self._renderers.get(name)
 
     def _commit_render_node(self, node: object, *, tool_name: str = "") -> None:
         """Commit a ``RenderNode`` as a compact one-line block.

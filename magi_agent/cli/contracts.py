@@ -268,6 +268,9 @@ class ToolRendererRegistry:
     def get(self, name: str) -> ToolRenderer:
         return self._renderers.get(name, self._fallback)
 
+    def is_registered(self, name: str) -> bool:
+        return name in self._renderers
+
 
 # ---------------------------------------------------------------------------
 # Commands
