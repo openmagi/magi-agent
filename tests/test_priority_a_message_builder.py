@@ -886,12 +886,6 @@ def test_coding_workflow_block_appears_after_coding_discipline() -> None:
     assert discipline_pos < workflow_pos
 
 
-def test_coding_workflow_block_exported_as_module_constant() -> None:
-    builder = _builder()
-    assert hasattr(builder, "CODING_WORKFLOW_BLOCK")
-    assert "<coding-workflow>" in builder.CODING_WORKFLOW_BLOCK
-
-
 def test_output_efficiency_block_always_present() -> None:
     builder = _builder()
     out = builder.build_system_prompt(

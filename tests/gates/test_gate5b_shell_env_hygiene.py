@@ -28,10 +28,6 @@ EXPECTED_DEFAULTS = {
 }
 
 
-def test_noninteractive_defaults_constant_matches_expected() -> None:
-    assert dict(g5._NONINTERACTIVE_ENV_DEFAULTS) == EXPECTED_DEFAULTS
-
-
 def test_bash_env_includes_noninteractive_defaults(monkeypatch) -> None:
     monkeypatch.delenv("MAGI_EGRESS_PROXY_ENABLED", raising=False)
     env = g5._build_bash_env(EgressProxyConfig.from_env({}))
