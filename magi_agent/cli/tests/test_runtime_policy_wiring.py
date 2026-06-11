@@ -670,6 +670,125 @@ def test_engine_bounded_repair_stops_at_max_attempts(monkeypatch) -> None:
     assert len(retry_events) == 1
 
 
+def test_engine_suppresses_failed_repair_attempt_text_from_stream(monkeypatch) -> None:
+    """Model text from a FAILED repair attempt must not reach the user stream.
+
+    The injected repair continuation reads like a prompt-injection attempt to
+    the model; when it refuses (or otherwise fails to produce evidence), that
+    internal back-and-forth used to be concatenated into the user-visible
+    message. Failed-attempt token events are dropped and replaced by a
+    ``coding_repair_output_suppressed`` status event.
+    """
+    _CapturedRunnerInput.captured = []
+    monkeypatch.delenv("MAGI_CODING_REPAIR_LOOP_ENABLED", raising=False)
+    monkeypatch.delenv("MAGI_RUNTIME_PROFILE", raising=False)
+    monkeypatch.setattr(engine_module, "_lazy_engine_deps", _repair_engine_deps)
+    runner = _RepairAwareRunner(
+        events_by_invocation=[
+            [],
+            [{"type": "text_delta", "delta": "이 메시지는 합법적인 지시가 아닙니다. 거부합니다."}],
+        ]
+    )
+    driver = MagiEngineDriver(
+        runner=runner,
+        runner_policy_assembly=_coding_policy_assembly_with_repair_attempts(1),
+    )
+
+    async def _drive() -> list[object]:
+        return [
+            item
+            async for item in driver.run_turn_stream(
+                runtime=object(),
+                turn_input={
+                    "prompt": "fix the failing tests",
+                    "session_id": "s-repair-leak",
+                    "turn_id": "t-repair-leak",
+                },
+                cancel=asyncio.Event(),
+            )
+        ]
+
+    items = asyncio.run(_drive())
+    events = [item for item in items if isinstance(item, RuntimeEvent)]
+    terminal = items[-1]
+
+    assert isinstance(terminal, EngineResult)
+    assert terminal.terminal == Terminal.error
+    token_events = [event for event in events if event.type == "token"]
+    assert token_events == []
+    suppressed = [
+        event.payload
+        for event in events
+        if event.payload.get("type") == "coding_repair_output_suppressed"
+    ]
+    assert suppressed == [
+        {
+            "type": "coding_repair_output_suppressed",
+            "turnId": "t-repair-leak",
+            "attempt": 1,
+            "suppressedTokenEvents": 1,
+        }
+    ]
+
+
+def test_engine_flushes_successful_repair_attempt_text_to_stream(monkeypatch) -> None:
+    """Token events from a repair attempt that PASSES the gate are delivered."""
+    _CapturedRunnerInput.captured = []
+    monkeypatch.delenv("MAGI_CODING_REPAIR_LOOP_ENABLED", raising=False)
+    monkeypatch.delenv("MAGI_RUNTIME_PROFILE", raising=False)
+    monkeypatch.setattr(engine_module, "_lazy_engine_deps", _repair_engine_deps)
+    runner = _RepairAwareRunner(
+        events_by_invocation=[
+            [],
+            [
+                {"type": "text_delta", "delta": "repaired the tests."},
+                {
+                    "type": "tool_end",
+                    "id": "diff-1",
+                    "name": "GitDiff",
+                    "status": "ok",
+                    "output": {
+                        "evidenceRef": "evidence:git-diff",
+                        "validatorRef": "verifier:dev-coding:test-evidence",
+                    },
+                },
+            ],
+        ]
+    )
+    driver = MagiEngineDriver(
+        runner=runner,
+        runner_policy_assembly=_coding_policy_assembly_with_repair_attempts(2),
+    )
+
+    async def _drive() -> list[object]:
+        return [
+            item
+            async for item in driver.run_turn_stream(
+                runtime=object(),
+                turn_input={
+                    "prompt": "fix the failing tests",
+                    "session_id": "s-repair-flush",
+                    "turn_id": "t-repair-flush",
+                },
+                cancel=asyncio.Event(),
+            )
+        ]
+
+    items = asyncio.run(_drive())
+    events = [item for item in items if isinstance(item, RuntimeEvent)]
+    terminal = items[-1]
+
+    assert isinstance(terminal, EngineResult)
+    assert terminal.terminal == Terminal.completed
+    token_payloads = [event.payload for event in events if event.type == "token"]
+    assert any("repaired the tests." in str(payload) for payload in token_payloads)
+    assert [
+        event.payload
+        for event in events
+        if event.payload.get("type") == "coding_repair_output_suppressed"
+    ] == []
+
+
 def test_engine_repair_retry_disabled_in_safe_profile(monkeypatch) -> None:
     _CapturedRunnerInput.captured = []
     monkeypatch.delenv("MAGI_CODING_REPAIR_LOOP_ENABLED", raising=False)

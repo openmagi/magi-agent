@@ -191,6 +191,19 @@ def test_theme_provider_registered_on_commands() -> None:
     assert ThemeProvider in MagiTuiApp.COMMANDS
 
 
+def test_app_uses_terminal_ansi_colors() -> None:
+    """The app must run with ``ansi_color=True``.
+
+    ``Screen { background: transparent }`` alone only reveals the App-level
+    theme background (a solid #1a1b26 under tokyo-night), NOT the terminal's
+    own background. ``ansi_color=True`` makes Textual emit ANSI default
+    colors so the user's terminal background actually shows through.
+    """
+
+    app = _make_app()
+    assert app.ansi_color is True
+
+
 def test_theme_switch_keeps_regions_transparent() -> None:
     """A theme switch must NOT repaint Screen/transcript with a solid bg.
 

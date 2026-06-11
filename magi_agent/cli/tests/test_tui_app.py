@@ -2040,3 +2040,97 @@ def test_app_keybindings_unknown_action_skipped(tmp_path, monkeypatch) -> None:
         assert ("r", True) not in bound_keys
 
     asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
+# Tool rendering: tool_end inherits the tool_start name; unknown tools get a
+# named header instead of a bare dot (CC-style detail parity)
+# ---------------------------------------------------------------------------
+def test_tool_end_uses_tool_start_name_for_renderer_dispatch() -> None:
+    async def _run() -> None:
+        from magi_agent.cli.tui.tool_render import build_tool_renderers
+
+        class _ToolEngine(FakeEngineDriver):
+            async def run_turn_stream(self, runtime, turn_input, *, cancel, gate=None):
+                turn_id = getattr(turn_input, "turn_id", "t")
+                yield RuntimeEvent(
+                    type="tool",
+                    payload={
+                        "type": "tool_start",
+                        "id": "call-1",
+                        "name": "Bash",
+                        "input_preview": '{"command": "ls -la"}',
+                    },
+                    turn_id=turn_id,
+                )
+                # tool_end carries NO name (sanitized public payload) — the app
+                # must resolve it from the tool_start id.
+                yield RuntimeEvent(
+                    type="tool",
+                    payload={
+                        "type": "tool_end",
+                        "id": "call-1",
+                        "status": "ok",
+                        "output_preview": '{"output": {"stdout": "total 0"}}',
+                    },
+                    turn_id=turn_id,
+                )
+                yield EngineResult(terminal=Terminal.completed, turn_id=turn_id)
+
+        app = MagiTuiApp(
+            engine=_ToolEngine(),
+            gate=AllowGate(),
+            commands=FakeRegistry(["compact"]),
+            renderers=build_tool_renderers(),
+        )
+        async with app.run_test() as pilot:
+            app.start_turn("run ls")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            blocks = app.controller.committed_blocks_snapshot()
+        joined = "\n".join(blocks)
+        # Call header renders through the real BashRenderer ("$ <command>") and
+        # the result preview resolves through the SAME renderer via the
+        # remembered tool_start name (not the anonymous "tool" fallback).
+        assert "$ ls -la" in joined
+        assert "total 0" in joined
+        assert "tool:" not in joined
+
+    asyncio.run(_run())
+
+
+def test_unknown_tool_renders_named_header_with_arg() -> None:
+    async def _run() -> None:
+        from magi_agent.cli.tui.tool_render import build_tool_renderers
+
+        class _ToolEngine(FakeEngineDriver):
+            async def run_turn_stream(self, runtime, turn_input, *, cancel, gate=None):
+                turn_id = getattr(turn_input, "turn_id", "t")
+                yield RuntimeEvent(
+                    type="tool",
+                    payload={
+                        "type": "tool_start",
+                        "id": "spawn-1",
+                        "name": "SpawnAgent",
+                        "input_preview": '{"prompt": "calc 1+1", "persona": "general"}',
+                    },
+                    turn_id=turn_id,
+                )
+                yield EngineResult(terminal=Terminal.completed, turn_id=turn_id)
+
+        app = MagiTuiApp(
+            engine=_ToolEngine(),
+            gate=AllowGate(),
+            commands=FakeRegistry(["compact"]),
+            renderers=build_tool_renderers(),
+        )
+        async with app.run_test() as pilot:
+            app.start_turn("spawn one")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            blocks = app.controller.committed_blocks_snapshot()
+        joined = "\n".join(blocks)
+        assert "SpawnAgent" in joined
+        assert "calc 1+1" in joined
+
+    asyncio.run(_run())

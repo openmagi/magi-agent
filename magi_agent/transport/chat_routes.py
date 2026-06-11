@@ -472,6 +472,12 @@ def _local_chat_prompt_text(payload: object) -> str:
     for message in messages:
         if not isinstance(message, Mapping):
             continue
+        # Only user-authored text — assistant/system text in the joined prompt
+        # poisoned the coding-evidence-gate prompt classifier (see
+        # streaming_chat_route._extract_prompt_text). Missing role = user.
+        role = message.get("role")
+        if role is not None and role != "user":
+            continue
         content = message.get("content")
         if isinstance(content, str):
             text_parts.append(content)

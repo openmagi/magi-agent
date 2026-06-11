@@ -209,3 +209,29 @@ def test_register_default_renderers_into_existing_registry() -> None:
     registry = ToolRendererRegistry()
     tool_render.register_default_renderers(registry)
     assert isinstance(registry.get("Edit"), tool_render.EditRenderer)
+
+
+# ---------------------------------------------------------------------------
+# Generic-arg fallback: unknown tools still show a meaningful header
+# ---------------------------------------------------------------------------
+def test_card_renderer_generic_arg_fallback_for_unknown_keys() -> None:
+    node = tool_render.ToolCardRenderer("SpawnAgent").render_call(
+        {"prompt": "calc 1+1", "persona": "general"}
+    )
+    assert "SpawnAgent" in node.text
+    assert "calc 1+1" in node.text
+
+
+def test_card_renderer_string_input_shows_head_not_nothing() -> None:
+    # A >400-char input_preview is truncated by the bridge into INVALID JSON,
+    # which reaches the renderer as a raw string. Show its head, not "".
+    truncated = '{"command": "echo hello world", "description": "long...'
+    node = tool_render.ToolCardRenderer("Bash").render_call(truncated)
+    assert "Bash" in node.text
+    assert "echo hello world" in node.text
+
+
+def test_registry_is_registered() -> None:
+    registry = tool_render.build_tool_renderers()
+    assert registry.is_registered("Bash")
+    assert not registry.is_registered("SpawnAgent")

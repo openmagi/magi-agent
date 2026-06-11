@@ -1689,6 +1689,12 @@ class MagiEngineDriver:
             # If cancelled during the guard retry, fall through to the cancel
             # block below (cancelled flag is already set).
 
+        # Model text produced DURING a bounded repair attempt is held here and
+        # only delivered if that attempt actually un-blocks the gate. A failed
+        # attempt's text is internal repair dialogue (often the model refusing
+        # the synthetic repair continuation) — leaking it concatenated the whole
+        # exchange into the user-visible reply.
+        repair_token_buffer: list[RuntimeEvent] = []
         while True:
             pre_final_gate = self._pre_final_gate_payload(
                 session_id=session_id,
@@ -1702,7 +1708,22 @@ class MagiEngineDriver:
                 break
             yield RuntimeEvent(type="status", payload=pre_final_gate, turn_id=turn_id)
             if pre_final_gate["decision"] != "block":
+                for buffered in repair_token_buffer:
+                    yield buffered
+                repair_token_buffer = []
                 break
+            if repair_token_buffer:
+                yield RuntimeEvent(
+                    type="status",
+                    payload={
+                        "type": "coding_repair_output_suppressed",
+                        "turnId": turn_id,
+                        "attempt": repair_attempts,
+                        "suppressedTokenEvents": len(repair_token_buffer),
+                    },
+                    turn_id=turn_id,
+                )
+                repair_token_buffer = []
 
             repair_decision = pre_final_gate.get("repairDecision")
             repair_policy = pre_final_gate.get("repairPolicy")
@@ -1800,11 +1821,19 @@ class MagiEngineDriver:
                         self._track_pending_tool(safe, pending_tool_ids)
                         yielded_events += 1
                         self._observe_event(safe, session_id, turn_id)
-                        yield RuntimeEvent(
-                            type=_map_event_kind(safe.get("type")),
+                        event_kind = _map_event_kind(safe.get("type"))
+                        runtime_event = RuntimeEvent(
+                            type=event_kind,
                             payload=safe,
                             turn_id=turn_id,
                         )
+                        if event_kind == "token":
+                            # Held until the gate re-evaluates: delivered on
+                            # pass, suppressed on another block (see the
+                            # repair_token_buffer handling at the loop top).
+                            repair_token_buffer.append(runtime_event)
+                        else:
+                            yield runtime_event
 
                     if event_count >= self._max_event_count:
                         break

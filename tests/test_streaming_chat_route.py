@@ -1564,7 +1564,33 @@ def test_extract_prompt_text_string_content() -> None:
     }
     result = _extract_prompt_text(body)
     assert "Hello world" in result
-    assert "You are helpful." in result
+    assert "You are helpful." not in result
+
+
+def test_extract_prompt_text_excludes_assistant_messages() -> None:
+    """Assistant replies must never be joined into the turn prompt.
+
+    The bot's own self-introduction mentions coding ("코드 작성/편집 ...");
+    joining it into the prompt made the coding-evidence-gate prompt classifier
+    treat EVERY later turn of the session as a coding task, which triggered the
+    bounded-repair loop on casual chat.
+    """
+    body = {
+        "messages": [
+            {"role": "user", "content": "넌 누구니"},
+            {"role": "assistant", "content": "코드 작성/편집을 도와드립니다."},
+            {"role": "user", "content": "서브에이전트 3개 스폰해줘"},
+        ]
+    }
+    result = _extract_prompt_text(body)
+    assert "넌 누구니" in result
+    assert "서브에이전트 3개 스폰해줘" in result
+    assert "코드" not in result
+
+
+def test_extract_prompt_text_missing_role_treated_as_user() -> None:
+    body = {"messages": [{"content": "bare message"}]}
+    assert _extract_prompt_text(body) == "bare message"
 
 
 def test_extract_prompt_text_block_content() -> None:
