@@ -139,6 +139,29 @@ These are optional and usually set by release or container builds.
 - `MAGI_FIRST_PARTY_TOOLS_ENABLED` — Disable first-party tools when set to
   `0`/`false`/`no`/`off`.
 
+## Direct web tools (search / fetch / research)
+
+The fast direct web tools (`web_search`, `web_fetch`, `research_fact`)
+auto-activate on key presence and register no tools otherwise:
+
+- `BRAVE_API_KEY` — enables Brave web search (the default search provider).
+- `FIRECRAWL_API_KEY` — enables Firecrawl page fetch. Required for the web
+  toolset to register at all.
+- `MAGI_WEB_SEARCH_PROVIDER` (default unset → `brave`) — set to `serpapi`
+  (together with `SERPAPI_API_KEY`) to serve `web_search`/`research_fact` from
+  a real Google SERP via SerpAPI instead of Brave; responses are normalized to
+  the same shape, and Google answer boxes appear as a `[answer box]` first
+  result. Any other value, or a missing `SERPAPI_API_KEY`, falls back to
+  Brave. Unset is byte-identical to before this flag existed.
+- `SERPAPI_API_KEY` — SerpAPI key; only used when
+  `MAGI_WEB_SEARCH_PROVIDER=serpapi`.
+- `MAGI_WEB_TOOL_LATENCY_RECEIPTS_ENABLED` (default off) — set to
+  `1`/`true`/`yes`/`on` to append a one-line
+  `[receipt] provider=<name> latency_ms=<int>` footer to
+  `web_search`/`web_fetch` output and per-source `(latency_ms=<int>)`
+  annotations to `research_fact` briefs, so the agent can budget around slow
+  providers/URLs.
+
 ## Authority and rollout flags
 
 The authority flags below correspond to PythonRuntimeAuthorityConfig fields and

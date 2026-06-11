@@ -1428,7 +1428,7 @@ graph LR
 | todo_toolhost.py | — | context, registry, result | runtime/openmagi_runtime.py |
 | tool_search.py | ToolSearchTool — search the tool registry by keyword or exact name. | manifest, registry, schema_projection | — |
 | video_tools.py | VideoFrames tool — extract frames from a video at timestamps and describe them. | context, image_tools, result, spreadsheet_tools | tools/audio_tools.py, tools/file_toolhost.py |
-| web_search_tools.py | Fast direct web tools — Brave Search + Firecrawl fetch. | — | cli/tool_runtime.py |
+| web_search_tools.py | Fast direct web tools — Brave Search (or opt-in SerpAPI) + Firecrawl fetch. | — | cli/tool_runtime.py |
 
 ### tools/document_write/
 

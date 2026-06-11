@@ -625,3 +625,664 @@ def test_build_web_search_tools_declarations_build(
     research = next(t for t in tools if getattr(t, "name", "") == "research_fact")
     params = research._get_declaration().parameters
     assert set(params.properties.keys()) == {"question"}
+
+
+# ---------------------------------------------------------------------------
+# Item 06: SerpAPI provider option + latency receipts
+# ---------------------------------------------------------------------------
+
+_SERPAPI_ENDPOINT = "https://serpapi.com/search.json"
+
+# Assembled at runtime so the fixture never looks like a real credential.
+_FAKE_SERPAPI_KEY = "serp" + "api-" + "test-" + "key"
+
+
+def _serpapi_response(
+    organic: list[dict[str, str]],
+    answer_box: dict[str, str] | None = None,
+) -> dict[str, object]:
+    payload: dict[str, object] = {"organic_results": organic}
+    if answer_box is not None:
+        payload["answer_box"] = answer_box
+    return payload
+
+
+def _clear_item06_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Remove every env var item 06 reads so each test starts hermetic."""
+    for name in (
+        "MAGI_WEB_SEARCH_PROVIDER",
+        "MAGI_WEB_TOOL_LATENCY_RECEIPTS_ENABLED",
+        "SERPAPI_API_KEY",
+        "BRAVE_API_KEY",
+        "FIRECRAWL_API_KEY",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+
+class _ScriptedClock:
+    """Deterministic stand-in for time.monotonic; repeats the last value."""
+
+    def __init__(self, *values: float) -> None:
+        self._values = list(values)
+        self._last = values[-1] if values else 0.0
+
+    def __call__(self) -> float:
+        if self._values:
+            self._last = self._values.pop(0)
+        return self._last
+
+
+# --- default-OFF proof ------------------------------------------------------
+
+
+def test_default_off_serpapi_key_alone_is_byte_identical_to_brave(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """SERPAPI_API_KEY set but both flags unset → Brave endpoint, baseline output.
+
+    This is the required proof that with the provider flag and the latency flag
+    unset, behavior is byte-identical to before this feature existed.
+    """
+    from magi_agent.tools.web_search_tools import web_search, web_search_raw
+
+    _clear_item06_env(monkeypatch)
+    monkeypatch.setenv("SERPAPI_API_KEY", _FAKE_SERPAPI_KEY)
+    monkeypatch.setenv("BRAVE_API_KEY", "test-brave-key")
+    results = [
+        {"title": "Alpha", "url": "https://alpha.example.com", "description": "Alpha snippet"},
+        {"title": "Beta", "url": "https://beta.example.com", "description": "Beta snippet"},
+    ]
+    opener = _CapturingOpener(_brave_response(results))
+    monkeypatch.setattr("urllib.request.urlopen", opener)
+
+    output = web_search("test query")
+
+    # Brave endpoint hit, SerpAPI never contacted
+    assert _BRAVE_ENDPOINT in opener.captured_requests[0].full_url
+    assert all("serpapi.com" not in r.full_url for r in opener.captured_requests)
+    # Byte-identical to the baseline formatting expectation
+    expected = (
+        "Alpha\nhttps://alpha.example.com\nAlpha snippet"
+        "\n\n"
+        "Beta\nhttps://beta.example.com\nBeta snippet"
+    )
+    assert output == expected
+
+    raw = web_search_raw("test query")
+    assert "latency_ms" not in raw
+    assert "provider" not in raw
+
+
+def test_latency_receipts_explicit_falsy_value_is_byte_identical(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """MAGI_WEB_TOOL_LATENCY_RECEIPTS_ENABLED=0 behaves exactly like unset."""
+    from magi_agent.tools.web_search_tools import web_search, web_search_raw
+
+    _clear_item06_env(monkeypatch)
+    monkeypatch.setenv("BRAVE_API_KEY", "test-brave-key")
+    monkeypatch.setenv("MAGI_WEB_TOOL_LATENCY_RECEIPTS_ENABLED", "0")
+    results = [
+        {"title": "Alpha", "url": "https://alpha.example.com", "description": "Alpha snippet"},
+    ]
+    opener = _CapturingOpener(_brave_response(results))
+    monkeypatch.setattr("urllib.request.urlopen", opener)
+
+    assert web_search("q") == "Alpha\nhttps://alpha.example.com\nAlpha snippet"
+    raw = web_search_raw("q")
+    assert "latency_ms" not in raw
+    assert "provider" not in raw
+
+
+# --- provider resolution ----------------------------------------------------
+
+
+def test_resolve_search_provider_matrix() -> None:
+    from magi_agent.tools.web_search_tools import _resolve_search_provider
+
+    key = "k" + "1"
+    assert (
+        _resolve_search_provider({"MAGI_WEB_SEARCH_PROVIDER": "serpapi", "SERPAPI_API_KEY": key})
+        == "serpapi"
+    )
+    # Flag without key → fail-soft fallback to brave
+    assert _resolve_search_provider({"MAGI_WEB_SEARCH_PROVIDER": "serpapi"}) == "brave"
+    assert (
+        _resolve_search_provider({"MAGI_WEB_SEARCH_PROVIDER": "serpapi", "SERPAPI_API_KEY": ""})
+        == "brave"
+    )
+    # Unknown values → brave (no raise)
+    assert (
+        _resolve_search_provider({"MAGI_WEB_SEARCH_PROVIDER": "google", "SERPAPI_API_KEY": key})
+        == "brave"
+    )
+    assert (
+        _resolve_search_provider({"MAGI_WEB_SEARCH_PROVIDER": "bing", "SERPAPI_API_KEY": key})
+        == "brave"
+    )
+    # Unset → brave
+    assert _resolve_search_provider({}) == "brave"
+    # Case/whitespace normalization
+    assert (
+        _resolve_search_provider({"MAGI_WEB_SEARCH_PROVIDER": "  SerpAPI ", "SERPAPI_API_KEY": key})
+        == "serpapi"
+    )
+
+
+def test_resolve_search_provider_reads_os_environ_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from magi_agent.tools.web_search_tools import _resolve_search_provider
+
+    _clear_item06_env(monkeypatch)
+    monkeypatch.setenv("MAGI_WEB_SEARCH_PROVIDER", "serpapi")
+    monkeypatch.setenv("SERPAPI_API_KEY", _FAKE_SERPAPI_KEY)
+    assert _resolve_search_provider() == "serpapi"
+
+
+# --- serpapi_search_raw -----------------------------------------------------
+
+
+def test_serpapi_search_raw_normalizes_to_brave_shape(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from magi_agent.tools.web_search_tools import serpapi_search_raw
+
+    _clear_item06_env(monkeypatch)
+    monkeypatch.setenv("SERPAPI_API_KEY", _FAKE_SERPAPI_KEY)
+    organic = [
+        {"title": "Alpha", "link": "https://alpha.example.com", "snippet": "Alpha snippet"},
+        {"title": "Beta", "link": "https://beta.example.com", "snippet": "Beta snippet"},
+    ]
+    opener = _CapturingOpener(_serpapi_response(organic))
+    monkeypatch.setattr("urllib.request.urlopen", opener)
+
+    data = serpapi_search_raw("hello world")
+
+    req = opener.captured_requests[0]
+    assert req.full_url.startswith(_SERPAPI_ENDPOINT)
+    assert "engine=google" in req.full_url
+    assert "hello+world" in req.full_url or "hello%20world" in req.full_url
+    assert f"api_key={_FAKE_SERPAPI_KEY}" in req.full_url
+    assert "num=8" in req.full_url
+    assert data == {
+        "web": {
+            "results": [
+                {
+                    "title": "Alpha",
+                    "url": "https://alpha.example.com",
+                    "description": "Alpha snippet",
+                },
+                {
+                    "title": "Beta",
+                    "url": "https://beta.example.com",
+                    "description": "Beta snippet",
+                },
+            ]
+        }
+    }
+
+
+def test_serpapi_search_raw_missing_key_is_error_dict(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from magi_agent.tools.web_search_tools import serpapi_search_raw
+
+    _clear_item06_env(monkeypatch)
+
+    data = serpapi_search_raw("q")
+
+    assert "SERPAPI_API_KEY" in str(data.get("error"))
+
+
+def test_serpapi_answer_box_prepended_and_capped_at_eight(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from magi_agent.tools.web_search_tools import serpapi_search_raw
+
+    _clear_item06_env(monkeypatch)
+    monkeypatch.setenv("SERPAPI_API_KEY", _FAKE_SERPAPI_KEY)
+    organic = [
+        {"title": f"R{i}", "link": f"https://r{i}.example.com", "snippet": f"s{i}"}
+        for i in range(10)
+    ]
+    answer_box = {
+        "title": "Population of X",
+        "link": "https://answer.example.com",
+        "answer": "42 million",
+    }
+    opener = _CapturingOpener(_serpapi_response(organic, answer_box))
+    monkeypatch.setattr("urllib.request.urlopen", opener)
+
+    data = serpapi_search_raw("population of X")
+
+    results = data["web"]["results"]  # type: ignore[index]
+    assert len(results) == 8
+    first = results[0]
+    assert first["title"] == "[answer box] Population of X"
+    assert first["url"] == "https://answer.example.com"
+    assert first["description"] == "42 million"
+    # Remaining slots come from organic results, in order
+    assert results[1]["title"] == "R0"
+
+
+def test_serpapi_answer_box_uses_snippet_when_answer_absent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from magi_agent.tools.web_search_tools import serpapi_search_raw
+
+    _clear_item06_env(monkeypatch)
+    monkeypatch.setenv("SERPAPI_API_KEY", _FAKE_SERPAPI_KEY)
+    answer_box = {"title": "T", "link": "https://a.example.com", "snippet": "snippet text"}
+    opener = _CapturingOpener(_serpapi_response([], answer_box))
+    monkeypatch.setattr("urllib.request.urlopen", opener)
+
+    data = serpapi_search_raw("q")
+
+    results = data["web"]["results"]  # type: ignore[index]
+    assert results[0]["description"] == "snippet text"
+
+
+def test_serpapi_answer_box_skipped_when_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An answer_box with neither answer nor snippet is not prepended."""
+    from magi_agent.tools.web_search_tools import serpapi_search_raw
+
+    _clear_item06_env(monkeypatch)
+    monkeypatch.setenv("SERPAPI_API_KEY", _FAKE_SERPAPI_KEY)
+    organic = [{"title": "R0", "link": "https://r0.example.com", "snippet": "s0"}]
+    opener = _CapturingOpener(_serpapi_response(organic, {"type": "weather"}))
+    monkeypatch.setattr("urllib.request.urlopen", opener)
+
+    data = serpapi_search_raw("q")
+
+    results = data["web"]["results"]  # type: ignore[index]
+    assert len(results) == 1
+    assert results[0]["title"] == "R0"
+
+
+def test_serpapi_empty_results_yield_empty_brave_shape(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """organic_results missing and no usable answer_box → empty results list."""
+    from magi_agent.tools.web_search_tools import serpapi_search_raw, web_search
+
+    _clear_item06_env(monkeypatch)
+    monkeypatch.setenv("MAGI_WEB_SEARCH_PROVIDER", "serpapi")
+    monkeypatch.setenv("SERPAPI_API_KEY", _FAKE_SERPAPI_KEY)
+    opener = _CapturingOpener({"search_metadata": {"status": "Success"}})
+    monkeypatch.setattr("urllib.request.urlopen", opener)
+
+    assert serpapi_search_raw("q") == {"web": {"results": []}}
+    assert web_search("q") == "No results."
+
+
+def test_serpapi_search_raw_failsoft_on_network_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from magi_agent.tools.web_search_tools import serpapi_search_raw
+
+    _clear_item06_env(monkeypatch)
+    monkeypatch.setenv("SERPAPI_API_KEY", _FAKE_SERPAPI_KEY)
+    monkeypatch.setattr("urllib.request.urlopen", _ErrorOpener())
+
+    data = serpapi_search_raw("q")
+
+    assert "error" in data
+    assert "refused" in str(data["error"]) or "URLError" in str(data["error"])
+
+
+def test_serpapi_error_body_becomes_error_dict_and_error_string(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A SerpAPI-side {"error": ...} body (bad key/quota) → error dict + string."""
+    from magi_agent.tools.web_search_tools import serpapi_search_raw, web_search
+
+    _clear_item06_env(monkeypatch)
+    monkeypatch.setenv("MAGI_WEB_SEARCH_PROVIDER", "serpapi")
+    monkeypatch.setenv("SERPAPI_API_KEY", _FAKE_SERPAPI_KEY)
+    opener = _CapturingOpener({"error": "Invalid API key. Your account is suspended."})
+    monkeypatch.setattr("urllib.request.urlopen", opener)
+
+    data = serpapi_search_raw("q")
+    assert data["error"] == "Invalid API key. Your account is suspended."
+
+    output = web_search("q")
+    assert output.startswith("search error:")
+    assert "Invalid API key" in output
+
+
+# --- dispatch ---------------------------------------------------------------
+
+
+def test_web_search_raw_dispatches_to_serpapi_when_selected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from magi_agent.tools.web_search_tools import web_search_raw
+
+    _clear_item06_env(monkeypatch)
+    monkeypatch.setenv("MAGI_WEB_SEARCH_PROVIDER", "serpapi")
+    monkeypatch.setenv("SERPAPI_API_KEY", _FAKE_SERPAPI_KEY)
+    # Brave key also present — provider flag must win
+    monkeypatch.setenv("BRAVE_API_KEY", "test-brave-key")
+    organic = [{"title": "T", "link": "https://t.example.com", "snippet": "d"}]
+    opener = _CapturingOpener(_serpapi_response(organic))
+    monkeypatch.setattr("urllib.request.urlopen", opener)
+
+    data = web_search_raw("q")
+
+    assert len(opener.captured_requests) == 1
+    assert opener.captured_requests[0].full_url.startswith(_SERPAPI_ENDPOINT)
+    assert all(_BRAVE_ENDPOINT not in r.full_url for r in opener.captured_requests)
+    assert data == {
+        "web": {
+            "results": [
+                {"title": "T", "url": "https://t.example.com", "description": "d"},
+            ]
+        }
+    }
+
+
+def test_web_search_raw_dispatches_to_brave_when_flag_points_elsewhere(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from magi_agent.tools.web_search_tools import web_search_raw
+
+    _clear_item06_env(monkeypatch)
+    monkeypatch.setenv("MAGI_WEB_SEARCH_PROVIDER", "google")
+    monkeypatch.setenv("SERPAPI_API_KEY", _FAKE_SERPAPI_KEY)
+    monkeypatch.setenv("BRAVE_API_KEY", "test-brave-key")
+    opener = _CapturingOpener(_brave_response([]))
+    monkeypatch.setattr("urllib.request.urlopen", opener)
+
+    web_search_raw("q")
+
+    assert len(opener.captured_requests) == 1
+    assert _BRAVE_ENDPOINT in opener.captured_requests[0].full_url
+    assert all("serpapi.com" not in r.full_url for r in opener.captured_requests)
+
+
+# --- build_web_search_tools gate --------------------------------------------
+
+
+def test_build_web_search_tools_serpapi_satisfies_search_side(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """SERPAPI key + provider flag + FIRECRAWL key, NO Brave key → 3 tools."""
+    from magi_agent.tools.web_search_tools import build_web_search_tools
+
+    _clear_item06_env(monkeypatch)
+    monkeypatch.setenv("MAGI_WEB_SEARCH_PROVIDER", "serpapi")
+    monkeypatch.setenv("SERPAPI_API_KEY", _FAKE_SERPAPI_KEY)
+    monkeypatch.setenv("FIRECRAWL_API_KEY", "fc-key")
+
+    tools = build_web_search_tools()
+
+    assert len(tools) == 3
+    names = {getattr(t, "name", "") for t in tools}
+    assert names == {"web_search", "web_fetch", "research_fact"}
+
+
+def test_build_web_search_tools_serpapi_without_firecrawl_returns_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from magi_agent.tools.web_search_tools import build_web_search_tools
+
+    _clear_item06_env(monkeypatch)
+    monkeypatch.setenv("MAGI_WEB_SEARCH_PROVIDER", "serpapi")
+    monkeypatch.setenv("SERPAPI_API_KEY", _FAKE_SERPAPI_KEY)
+
+    assert build_web_search_tools() == []
+
+
+def test_build_web_search_tools_provider_flag_without_key_returns_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Provider flag set but no SERPAPI key and no Brave key → []."""
+    from magi_agent.tools.web_search_tools import build_web_search_tools
+
+    _clear_item06_env(monkeypatch)
+    monkeypatch.setenv("MAGI_WEB_SEARCH_PROVIDER", "serpapi")
+    monkeypatch.setenv("FIRECRAWL_API_KEY", "fc-key")
+
+    assert build_web_search_tools() == []
+
+
+def test_build_web_search_tools_serpapi_key_alone_without_flag_returns_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """SERPAPI key present but provider flag unset and no Brave key → [] (flag-gated)."""
+    from magi_agent.tools.web_search_tools import build_web_search_tools
+
+    _clear_item06_env(monkeypatch)
+    monkeypatch.setenv("SERPAPI_API_KEY", _FAKE_SERPAPI_KEY)
+    monkeypatch.setenv("FIRECRAWL_API_KEY", "fc-key")
+
+    assert build_web_search_tools() == []
+
+
+# --- research_fact end-to-end via serpapi provider ---------------------------
+
+
+def test_research_fact_end_to_end_with_serpapi_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """research_fact with the default search_fn (real web_search_raw) over SerpAPI.
+
+    Proves the normalized SerpAPI shape is consumed downstream unchanged.
+    """
+    from magi_agent.tools.web_search_tools import research_fact
+
+    _clear_item06_env(monkeypatch)
+    monkeypatch.setenv("MAGI_WEB_SEARCH_PROVIDER", "serpapi")
+    monkeypatch.setenv("SERPAPI_API_KEY", _FAKE_SERPAPI_KEY)
+    organic = [
+        {"title": "Src1", "link": "https://src1.example.com", "snippet": "sn1"},
+        {"title": "Src2", "link": "https://src2.example.com", "snippet": "sn2"},
+    ]
+    opener = _CapturingOpener(_serpapi_response(organic))
+    monkeypatch.setattr("urllib.request.urlopen", opener)
+    content_map = {
+        "https://src1.example.com": "content-one",
+        "https://src2.example.com": "content-two",
+    }
+
+    result = research_fact(
+        "What is X?",
+        fetch_fn=_make_fetch_fn(content_map),
+        n=2,
+    )
+
+    assert opener.captured_requests[0].full_url.startswith(_SERPAPI_ENDPOINT)
+    assert "https://src1.example.com" in result
+    assert "content-one" in result
+    assert "https://src2.example.com" in result
+    assert "content-two" in result
+
+
+# --- latency receipts (flag ON) ----------------------------------------------
+
+
+def test_latency_receipts_web_search_raw_exact_ms(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from magi_agent.tools import web_search_tools
+    from magi_agent.tools.web_search_tools import web_search_raw
+
+    _clear_item06_env(monkeypatch)
+    monkeypatch.setenv("BRAVE_API_KEY", "test-brave-key")
+    monkeypatch.setenv("MAGI_WEB_TOOL_LATENCY_RECEIPTS_ENABLED", "1")
+    opener = _CapturingOpener(_brave_response([]))
+    monkeypatch.setattr("urllib.request.urlopen", opener)
+    monkeypatch.setattr(web_search_tools, "_clock", _ScriptedClock(5.0, 5.412))
+
+    raw = web_search_raw("q")
+
+    assert raw["latency_ms"] == 412
+    assert raw["provider"] == "brave"
+
+
+def test_latency_receipts_serpapi_provider_label(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from magi_agent.tools import web_search_tools
+    from magi_agent.tools.web_search_tools import web_search_raw
+
+    _clear_item06_env(monkeypatch)
+    monkeypatch.setenv("MAGI_WEB_SEARCH_PROVIDER", "serpapi")
+    monkeypatch.setenv("SERPAPI_API_KEY", _FAKE_SERPAPI_KEY)
+    monkeypatch.setenv("MAGI_WEB_TOOL_LATENCY_RECEIPTS_ENABLED", "true")
+    opener = _CapturingOpener(_serpapi_response([]))
+    monkeypatch.setattr("urllib.request.urlopen", opener)
+    monkeypatch.setattr(web_search_tools, "_clock", _ScriptedClock(1.0, 1.05))
+
+    raw = web_search_raw("q")
+
+    assert raw["provider"] == "serpapi"
+    assert raw["latency_ms"] == 50
+
+
+def test_latency_receipts_measured_on_error_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from magi_agent.tools import web_search_tools
+    from magi_agent.tools.web_search_tools import web_search_raw
+
+    _clear_item06_env(monkeypatch)
+    monkeypatch.setenv("BRAVE_API_KEY", "test-brave-key")
+    monkeypatch.setenv("MAGI_WEB_TOOL_LATENCY_RECEIPTS_ENABLED", "yes")
+    monkeypatch.setattr("urllib.request.urlopen", _ErrorOpener())
+    monkeypatch.setattr(web_search_tools, "_clock", _ScriptedClock(2.0, 2.007))
+
+    raw = web_search_raw("q")
+
+    assert "error" in raw
+    assert raw["latency_ms"] == 7
+    assert raw["provider"] == "brave"
+
+
+def test_latency_receipts_footer_on_web_search_success_and_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import re
+
+    from magi_agent.tools.web_search_tools import web_search
+
+    _clear_item06_env(monkeypatch)
+    monkeypatch.setenv("BRAVE_API_KEY", "test-brave-key")
+    monkeypatch.setenv("MAGI_WEB_TOOL_LATENCY_RECEIPTS_ENABLED", "1")
+    results = [{"title": "T", "url": "https://t.example.com", "description": "d"}]
+    opener = _CapturingOpener(_brave_response(results))
+    monkeypatch.setattr("urllib.request.urlopen", opener)
+
+    output = web_search("q")
+    assert re.search(r"\n\n\[receipt\] provider=brave latency_ms=\d+$", output)
+    assert output.startswith("T\nhttps://t.example.com\nd")
+
+    # Error string also carries the footer
+    monkeypatch.setattr("urllib.request.urlopen", _ErrorOpener())
+    err_output = web_search("q")
+    assert err_output.startswith("search error:")
+    assert re.search(r"\n\n\[receipt\] provider=brave latency_ms=\d+$", err_output)
+
+
+def test_latency_receipts_footer_on_web_fetch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import re
+
+    from magi_agent.tools.web_search_tools import web_fetch
+
+    _clear_item06_env(monkeypatch)
+    monkeypatch.setenv("FIRECRAWL_API_KEY", "fc-key")
+    monkeypatch.setenv("MAGI_WEB_TOOL_LATENCY_RECEIPTS_ENABLED", "on")
+    opener = _CapturingOpener(_firecrawl_response("# Page"))
+    monkeypatch.setattr("urllib.request.urlopen", opener)
+
+    output = web_fetch("https://example.com")
+    assert output.startswith("# Page")
+    assert re.search(r"\n\n\[receipt\] provider=firecrawl latency_ms=\d+$", output)
+
+    monkeypatch.setattr("urllib.request.urlopen", _ErrorOpener())
+    err_output = web_fetch("https://example.com")
+    assert err_output.startswith("fetch error:")
+    assert re.search(r"\n\n\[receipt\] provider=firecrawl latency_ms=\d+$", err_output)
+
+
+def test_latency_receipts_research_fact_per_source_annotation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from magi_agent.tools.web_search_tools import research_fact
+
+    _clear_item06_env(monkeypatch)
+    monkeypatch.setenv("MAGI_WEB_TOOL_LATENCY_RECEIPTS_ENABLED", "1")
+    urls = ["https://a.example.com"]
+
+    def fetch_with_latency(url: str) -> dict[str, object]:
+        return {"data": {"markdown": f"content {url}"}, "latency_ms": 77, "provider": "firecrawl"}
+
+    result = research_fact(
+        "q",
+        search_fn=_make_search_fn(urls),
+        fetch_fn=fetch_with_latency,
+        n=1,
+    )
+
+    assert "[1] https://a.example.com (latency_ms=77)" in result
+
+
+def test_latency_receipts_research_fact_fallback_search_latency(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from magi_agent.tools.web_search_tools import research_fact
+
+    _clear_item06_env(monkeypatch)
+    monkeypatch.setenv("MAGI_WEB_TOOL_LATENCY_RECEIPTS_ENABLED", "1")
+
+    def search_with_latency(query: str) -> dict[str, object]:
+        return {
+            "web": {
+                "results": [
+                    {"url": "https://a.example.com", "description": "snip-a", "title": "A"},
+                ]
+            },
+            "latency_ms": 33,
+            "provider": "brave",
+        }
+
+    def always_raises(url: str) -> dict[str, object]:
+        raise RuntimeError("boom")
+
+    result = research_fact(
+        "q",
+        search_fn=search_with_latency,
+        fetch_fn=always_raises,
+        n=1,
+    )
+
+    assert "(search latency_ms=33)" in result
+    assert "snip-a" in result
+
+
+def test_latency_receipts_off_research_fact_ignores_stray_latency_keys(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Flag OFF: even an injected fn returning latency keys must not annotate."""
+    from magi_agent.tools.web_search_tools import research_fact
+
+    _clear_item06_env(monkeypatch)
+    urls = ["https://a.example.com"]
+
+    def fetch_with_latency(url: str) -> dict[str, object]:
+        return {"data": {"markdown": "content-x"}, "latency_ms": 77}
+
+    result = research_fact(
+        "q",
+        search_fn=_make_search_fn(urls),
+        fetch_fn=fetch_with_latency,
+        n=1,
+    )
+
+    assert "latency_ms" not in result
+    assert "[1] https://a.example.com\ncontent-x" in result
