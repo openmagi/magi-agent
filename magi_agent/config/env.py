@@ -2247,6 +2247,26 @@ def parse_eval_autonomy_enabled(env: Mapping[str, str]) -> bool:
     return _is_true(env.get("MAGI_EVAL_AUTONOMY_ENABLED"))
 
 
+# Single source of truth for the compute-via-code directive flag.
+MAGI_COMPUTE_VIA_CODE_ENABLED_ENV = "MAGI_COMPUTE_VIA_CODE_ENABLED"
+
+
+def compute_via_code_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """MAGI_COMPUTE_VIA_CODE_ENABLED — when ON (default OFF), appends a general
+    agent-hygiene directive to the system prompt instructing the agent to WRITE
+    AND RUN code via the existing Bash/Calculation tools for ANY arithmetic,
+    unit conversion, statistics, or checksum/validation — and never compute the
+    value in its head.
+
+    This is a general capability (not GAIA-specific): in-head arithmetic is a
+    measured failure mode even when the agent has working compute tools. Default
+    OFF so non-opted-in sessions assemble a byte-identical prompt to
+    origin/main. Strict default-OFF via :func:`_is_true` (mirrors
+    :func:`parse_eval_autonomy_enabled`)."""
+    source = env if env is not None else os.environ
+    return _is_true(source.get(MAGI_COMPUTE_VIA_CODE_ENABLED_ENV))
+
+
 def parse_eval_zero_edit_guard_enabled(env: Mapping[str, str]) -> bool:
     """MAGI_EVAL_ZERO_EDIT_GUARD_ENABLED — when ON (default OFF; enabled by
     the eval profile), the engine turn driver re-prompts once with "Apply the

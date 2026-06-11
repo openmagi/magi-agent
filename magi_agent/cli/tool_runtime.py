@@ -540,6 +540,44 @@ def eval_autonomy_block(env: Mapping[str, str] | None = None) -> str:
     )
 
 
+def compute_via_code_block(env: Mapping[str, str] | None = None) -> str:
+    """Return the compute-via-code directive system-prompt block.
+
+    Returns an empty string when ``MAGI_COMPUTE_VIA_CODE_ENABLED`` is falsy (or
+    when the env mapping explicitly disables it), so the caller's prompt is
+    byte-identical to the non-directive path when the flag is off.
+
+    The directive is a GENERAL agent-hygiene capability — it carries no
+    benchmark-specific text — instructing the agent to compute numeric results
+    by writing and running code rather than computing them mentally. Imported
+    lazily inside to keep ``import cli.tool_runtime`` cold-clean.
+    """
+    import os as _os  # noqa: PLC0415
+
+    from magi_agent.config.env import compute_via_code_enabled  # noqa: PLC0415
+
+    source = env if env is not None else _os.environ
+    if not compute_via_code_enabled(source):
+        return ""
+    return (
+        "<compute_via_code>\n"
+        "For ANY arithmetic, unit conversion, statistics (mean/median/sum), or "
+        "checksum/validation computation, WRITE AND RUN code via the Bash or "
+        "Calculation tool and report the value the tool returned. Do NOT compute "
+        "such values in your head — even simple-looking ones — because mental "
+        "arithmetic is a frequent source of wrong answers.\n"
+        "- Bigger multi-step math, conversions, or aggregates: write a short "
+        "Python snippet and run it with Bash (`python3 -c ...`).\n"
+        "- Checksum/validation (e.g. ISBN-like check digits): implement the "
+        "exact algorithm in code rather than estimating.\n"
+        "This applies only to NUMERIC computation. It does NOT change how you "
+        "extract source values: keep using the appropriate file/vision/web tool "
+        "(e.g. structured image extraction) to obtain the inputs, then compute "
+        "with code.\n"
+        "</compute_via_code>"
+    )
+
+
 def build_cli_instruction(
     *,
     session_id: str,
@@ -746,6 +784,12 @@ def build_cli_instruction(
 
     _tool_synthesis_block = build_tool_synthesis_instruction_block(model_label=model)
 
+    # Compute-via-code directive (default-OFF: MAGI_COMPUTE_VIA_CODE_ENABLED).
+    # Returns "" when the gate is off, so the assembled prompt is byte-identical
+    # to pre-wiring. Only appended when non-empty so no extra "\n\n" separator
+    # is emitted in the off path (byte-identity guard).
+    _compute_block = compute_via_code_block()
+
     parts = [prompt]
     if _tool_ad_block:
         parts.append(_tool_ad_block)
@@ -756,6 +800,8 @@ def build_cli_instruction(
     parts.append(_skills_block)
     if _tool_synthesis_block:
         parts.append(_tool_synthesis_block)
+    if _compute_block:
+        parts.append(_compute_block)
     return "\n\n".join(parts)
 
 
@@ -767,6 +813,7 @@ __all__ = [
     "build_cli_instruction",
     "build_cli_tool_runtime",
     "build_tool_advertisement_block",
+    "compute_via_code_block",
     "bind_cli_local_full_tool_handlers",
     "wrap_cli_adk_tools_with_evidence_collector",
 ]

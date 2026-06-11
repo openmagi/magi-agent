@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 
 GAIA_SYSTEM_PROMPT = (
     "You are a general AI assistant solving a GAIA benchmark question. "
@@ -16,8 +17,8 @@ GAIA_SYSTEM_PROMPT = (
     "- Spreadsheet structure → use XLSXInfo to inspect sheet names/columns, "
     "then XLSXRead with cellRange to fetch only the relevant cells.\n"
     "- Numbers, tables, or coordinates in an image → use ImageUnderstand with "
-    "structured extraction (not prose) to get exact values, then compute "
-    "yourself.\n"
+    "structured extraction (not prose) to read the exact values, then run any "
+    "arithmetic on them with the Bash/Calculation tool.\n"
     "- Web facts → use web_search for a fast Brave search, then web_fetch the "
     "best-matching URL for full page content.\n"
     "\n"
@@ -46,6 +47,39 @@ GAIA_SYSTEM_PROMPT = (
 )
 
 
+_COMPUTE_VIA_CODE_REMINDER = (
+    "\n\n"
+    "COMPUTE NUMERIC ANSWERS WITH CODE: for any arithmetic, unit conversion, "
+    "statistics (mean/median/sum/average), or checksum/validation step, write "
+    "and run code with the Bash or Calculation tool and report the value the "
+    "tool returned — never compute it in your head. This applies to NUMERIC "
+    "computation only; it does NOT change how you read inputs from an image — "
+    "still use ImageUnderstand with structured extraction to obtain the exact "
+    "values first, then run the arithmetic on them with code."
+)
+
+
+def gaia_system_prompt(env: Mapping[str, str] | None = None) -> str:
+    """Return the GAIA system prompt, optionally with the compute-via-code
+    reminder appended.
+
+    When ``MAGI_COMPUTE_VIA_CODE_ENABLED`` is falsy (default), returns
+    :data:`GAIA_SYSTEM_PROMPT` byte-identically. When the flag is on, appends a
+    scoped reminder telling the agent to compute numeric results with code (and
+    explicitly NOT to override image value extraction) — the benchmark-layer
+    advertisement for the general first-party directive. Imported lazily to keep
+    the module's import surface cold-clean.
+    """
+    import os as _os  # noqa: PLC0415
+
+    from magi_agent.config.env import compute_via_code_enabled  # noqa: PLC0415
+
+    source = env if env is not None else _os.environ
+    if not compute_via_code_enabled(source):
+        return GAIA_SYSTEM_PROMPT
+    return GAIA_SYSTEM_PROMPT + _COMPUTE_VIA_CODE_REMINDER
+
+
 def extract_final_answer(text: str) -> str:
     matches = list(re.finditer(r"final answer\s*:", text, re.IGNORECASE))
     if not matches:
@@ -56,4 +90,4 @@ def extract_final_answer(text: str) -> str:
     return answer.strip().rstrip(".").strip()
 
 
-__all__ = ["GAIA_SYSTEM_PROMPT", "extract_final_answer"]
+__all__ = ["GAIA_SYSTEM_PROMPT", "gaia_system_prompt", "extract_final_answer"]
