@@ -158,12 +158,22 @@ class LocalToolEvidenceCollector:
             return
         try:
             target_dir = Path(raw_dir) if raw_dir else Path.cwd() / ".magi" / "evidence"
-            target_dir.mkdir(parents=True, exist_ok=True)
+            target_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+            try:
+                target_dir.chmod(0o700)
+            except OSError:
+                pass
             safe_session = "".join(
                 c if c.isalnum() or c in "-_." else "_" for c in session_id
             ) or "session"
             path = target_dir / f"{safe_session}.jsonl"
-            with path.open("a", encoding="utf-8") as handle:
+            flags = _os.O_WRONLY | _os.O_CREAT | _os.O_APPEND
+            fd = _os.open(path, flags, 0o600)
+            try:
+                _os.chmod(path, 0o600)
+            except OSError:
+                pass
+            with _os.fdopen(fd, "a", encoding="utf-8") as handle:
                 for record in records:
                     entry = {
                         "sessionId": session_id,

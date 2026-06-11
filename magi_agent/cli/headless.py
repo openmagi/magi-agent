@@ -643,6 +643,7 @@ async def _project_stream(
     include_partial: bool,
     research_audit: object | None = None,
     governance_mode: str = "audit",
+    defer_assistant_output: bool = False,
 ) -> tuple[str, EngineResult]:
     """Consume the engine generator, emitting projected NDJSON frames live.
 
@@ -669,7 +670,8 @@ async def _project_stream(
                 terminal = item
                 break
             event = item
-            if include_partial:
+            deferred_token = defer_assistant_output and event.type == "token"
+            if include_partial and not deferred_token:
                 partial_payload = _partial_event_payload(event)
                 await writer.write(
                     StreamEvent(
@@ -686,7 +688,8 @@ async def _project_stream(
             if event.type == "token":
                 text = _token_text(event.payload)
                 if text:
-                    token_buf.append(text)
+                    if not defer_assistant_output:
+                        token_buf.append(text)
                     all_text.append(text)
                 continue
             # Non-token: flush the in-flight assistant text first (ordering).
@@ -707,10 +710,16 @@ async def _project_stream(
                 )
         # Stream ended; flush any trailing assistant text.
         await flush_tokens()
+        report = None
         if research_audit is not None:
             report = research_audit.report(  # type: ignore[attr-defined]
                 "".join(all_text), mode=governance_mode
             )
+        if defer_assistant_output and all_text and not _enforce_retry_needed(governance_mode, report):
+            await writer.write(
+                _assistant_text_frame("".join(all_text), session_id=session_id)
+            )
+        if report is not None:
             await writer.write(
                 _system_status_frame(
                     RuntimeEvent(type="status", payload=report),
@@ -971,6 +980,8 @@ async def run_headless(
             include_partial=include_partial,
             research_audit=research_audit,
             governance_mode=governance_mode,
+            defer_assistant_output=governance_mode == "enforce"
+            and research_audit is not None,
         )
         if research_audit is not None:
             first_report = research_audit.report(  # type: ignore[attr-defined]

@@ -9,6 +9,7 @@ never break the tool path.
 from __future__ import annotations
 
 import json
+import stat
 
 from magi_agent.evidence.local_tool_collector import LocalToolEvidenceCollector
 
@@ -32,6 +33,8 @@ def test_default_on_writes_under_workspace_local_dir(tmp_path, monkeypatch) -> N
     path = tmp_path / ".magi" / "evidence" / "sess-1.jsonl"
     assert path.exists()
     assert json.loads(path.read_text().splitlines()[0])["toolName"] == "FileRead"
+    assert stat.S_IMODE(path.parent.stat().st_mode) == 0o700
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
 
 
 def test_off_value_disables_persistence(tmp_path, monkeypatch) -> None:

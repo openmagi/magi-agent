@@ -107,6 +107,28 @@ def test_audit_ignores_non_web_tools_and_no_citations():
     assert report["verdict"] == "pass"
 
 
+def test_audit_does_not_treat_failed_web_tool_url_as_source():
+    from magi_agent.research.live_audit import ResearchLiveAudit
+
+    audit = ResearchLiveAudit()
+    audit.observe_event("tool", _tool_start("t1", "web_fetch"))
+    audit.observe_event(
+        "tool",
+        {
+            "type": "tool_end",
+            "id": "t1",
+            "status": "error",
+            "output_preview": "failed to fetch https://example.com/private",
+        },
+    )
+
+    report = audit.report("The answer cites https://example.com/private.")
+
+    assert report["sourceUrlCount"] == 0
+    assert "https://example.com/private" in report["citedWithoutSource"]
+    assert report["verdict"] == "attention"
+
+
 # ---------------------------------------------------------------------------
 # Live wiring (headless, observe-only)
 # ---------------------------------------------------------------------------
@@ -222,6 +244,7 @@ def test_enforce_runs_one_bounded_retry_stream_json(monkeypatch):
     raw = out.getvalue()
     assert "research_governance_enforce_retry" in raw
     assert "Corrected: no stray citations." in raw
+    assert "Cited:" not in raw
 
 
 def test_audit_mode_never_retries(monkeypatch):

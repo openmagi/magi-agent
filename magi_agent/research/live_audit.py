@@ -32,6 +32,7 @@ _WEB_SOURCE_TOOL_NAMES = frozenset(
 )
 
 _URL_RE = re.compile(r"https?://[^\s\"'<>\\)\]]+")
+_SUCCESS_TOOL_STATUSES = frozenset({"ok", "success", "completed"})
 
 
 def research_governance_mode(env: Mapping[str, str] | None = None) -> str:
@@ -93,6 +94,9 @@ class ResearchLiveAudit:
             return
         name = self._tool_names.get(tool_id, "")
         if name not in _WEB_SOURCE_TOOL_NAMES:
+            return
+        status = str(payload.get("status") or "").strip().lower()
+        if status not in _SUCCESS_TOOL_STATUSES:
             return
         try:
             rendered = json.dumps(payload, default=str)
