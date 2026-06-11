@@ -194,6 +194,48 @@ async def test_selected_scope_exposes_first_party_registry_tools_with_gate5b_rec
     assert bundle.host.counter.receipt_count == 2
 
 
+@pytest.mark.asyncio
+async def test_selected_registry_spawn_agent_disabled_child_runner_is_blocked(
+    tmp_path, monkeypatch
+):
+    monkeypatch.delenv("MAGI_CHILD_RUNNER_LIVE_ENABLED", raising=False)
+    monkeypatch.delenv("MAGI_CHILD_RUNNER_LIVE_KILL_SWITCH", raising=False)
+
+    runtime = _runtime()
+    bundle = build_gate5b_full_toolhost_bundle(
+        config=Gate5BFullToolHostConfig.model_validate(
+            {
+                "enabled": True,
+                "killSwitchEnabled": False,
+                "routeAttachmentEnabled": True,
+                "selectedBotDigest": _sha256("bot-test"),
+                "selectedOwnerDigest": _sha256("user-test"),
+                "environment": "production",
+                "environmentAllowlist": ("production",),
+                "allowedToolNames": GATE5B_FULL_TOOLHOST_TOOL_NAMES,
+                "maxToolCallsPerTurn": 8,
+            }
+        ),
+        scope={
+            "selectedBotDigest": _sha256("bot-test"),
+            "selectedOwnerDigest": _sha256("user-test"),
+            "environment": "production",
+        },
+        workspace_root=tmp_path,
+        tool_registry=runtime.tool_registry,
+    )
+
+    outcome = await bundle.host.dispatch(
+        "SpawnAgent",
+        {"prompt": "assign a helper"},
+        request_digest=_sha256("request-spawn-disabled"),
+        tool_call_id="call-spawn-disabled",
+    )
+
+    assert outcome.status == "blocked"
+    assert outcome.reason == "live_child_runner_disabled"
+
+
 def test_selected_full_toolhost_adk_declarations_are_google_schema_compatible(tmp_path):
     runtime = _runtime()
     bundle = build_gate5b_full_toolhost_bundle(

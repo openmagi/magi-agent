@@ -1519,4 +1519,18 @@ def _parse_json_container(value: str) -> object | None:
 def _is_error_response(response: object) -> bool:
     if not isinstance(response, dict):
         return False
-    return bool(response.get("error") or response.get("isError") or response.get("is_error"))
+    status = response.get("status")
+    if isinstance(status, str) and status.lower() in {
+        "blocked",
+        "error",
+        "failed",
+        "needs_approval",
+    }:
+        return True
+    return bool(
+        response.get("error")
+        or response.get("errorCode")
+        or response.get("errorMessage")
+        or response.get("isError")
+        or response.get("is_error")
+    )
