@@ -1101,10 +1101,12 @@ def build_default_plane(
         parse_error_recovery_env,
         parse_loop_guard_env,
         parse_tool_exception_reflection_env,
+        parse_tool_schema_feedback_env,
     )
     from magi_agent.adk_bridge.context_compaction import build_context_compaction_plugin
     from magi_agent.adk_bridge.edit_retry_reflection import build_edit_retry_reflection_plugin
     from magi_agent.adk_bridge.resilience_plugin import build_resilience_plugin
+    from magi_agent.adk_bridge.schema_feedback import build_schema_feedback_control
     from magi_agent.adk_bridge.tool_exception_reflection import (
         build_tool_exception_reflection_plugin,
     )
@@ -1147,6 +1149,24 @@ def build_default_plane(
     )
     if tool_exception_plugin is not None:
         plane.register(_ToolExceptionReflectionLoopControl(tool_exception_plugin))
+
+    # 3b. Schema-invalid argument feedback (MAGI_TOOL_SCHEMA_FEEDBACK_ENABLED,
+    #     strict default OFF, profile-independent). Registered AFTER the
+    #     edit-retry and resilience controls: ControlPlane._after_tool fan-out
+    #     is first-non-None, so FileEdit/PatchApply schema failures keep going
+    #     to edit-retry first (its _error_reason_from_result matches the
+    #     blocked status and wins — intended) and the loop-detector's ordering
+    #     is unchanged. This control IS the plugin (a BaseLoopControl with a
+    #     native on_after_tool hook, no adapter needed); it exposes
+    #     ``._plugin = self`` so the generic _ExtendedControlPlanePlugin
+    #     after_run_callback sweep clears its per-invocation attempt counters.
+    schema_feedback_env = parse_tool_schema_feedback_env(env)
+    schema_feedback_control = build_schema_feedback_control(
+        enabled=schema_feedback_env.enabled,
+        max_attempts=schema_feedback_env.max_attempts,
+    )
+    if schema_feedback_control is not None:
+        plane.register(schema_feedback_control)
 
     # 4. Context compaction (MAGI_CONTEXT_COMPACTION_ENABLED, default OFF).
     compaction_env = parse_context_compaction_env(env)

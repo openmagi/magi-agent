@@ -227,6 +227,45 @@ def parse_tool_exception_reflection_env(
     return ToolExceptionReflectionEnv(enabled=enabled, max_attempts=max_attempts)
 
 
+# Single source of truth for the schema-invalid argument feedback flags
+# (hermes mechanism 1, returned-result path / R3). When enabled, a dispatcher
+# result with errorCode == "tool_input_schema_invalid" is enriched at the
+# control-plane on_after_tool seam with plain-text missing/unknown argument
+# NAMES (recomputed locally from the tool's declaration — schema vocabulary
+# the model already sees; argument VALUES are never surfaced) plus hermes-style
+# retry guidance, under a per-invocation attempt budget. The redaction layer
+# in magi_agent.tools.schema_validation is untouched.
+#
+# Deliberately a STRICT default-OFF truthy parse (NOT _runtime_feature_enabled,
+# which defaults ON under the unset/full profile): the flag is profile-
+# independent so eval-profile benchmark runs can opt in explicitly.
+TOOL_SCHEMA_FEEDBACK_ENABLED_ENV = "MAGI_TOOL_SCHEMA_FEEDBACK_ENABLED"
+TOOL_SCHEMA_FEEDBACK_MAX_ATTEMPTS_ENV = "MAGI_TOOL_SCHEMA_FEEDBACK_MAX_ATTEMPTS"
+_TOOL_SCHEMA_FEEDBACK_MAX_ATTEMPTS_DEFAULT = 2
+
+
+@dataclass(frozen=True)
+class ToolSchemaFeedbackEnv:
+    enabled: bool = False
+    max_attempts: int = _TOOL_SCHEMA_FEEDBACK_MAX_ATTEMPTS_DEFAULT
+
+
+def parse_tool_schema_feedback_env(
+    env: Mapping[str, str],
+) -> ToolSchemaFeedbackEnv:
+    enabled = _is_true(env.get(TOOL_SCHEMA_FEEDBACK_ENABLED_ENV))
+    max_attempts = _int_env(
+        env,
+        TOOL_SCHEMA_FEEDBACK_MAX_ATTEMPTS_ENV,
+        _TOOL_SCHEMA_FEEDBACK_MAX_ATTEMPTS_DEFAULT,
+    )
+    if max_attempts < 1:
+        raise RuntimeEnvError(
+            f"{TOOL_SCHEMA_FEEDBACK_MAX_ATTEMPTS_ENV} must be >= 1"
+        )
+    return ToolSchemaFeedbackEnv(enabled=enabled, max_attempts=max_attempts)
+
+
 # Single source of truth for the PR12 loop-guard wiring flags.
 # When enabled, the live ADK Runner attaches a MagiResiliencePlugin whose
 # after_tool_callback drives the existing ToolCallLoopDetector: N identical
