@@ -604,20 +604,35 @@ class _InboundReader:
         self._loop = None
 
 
-def _build_research_audit() -> "object | None":
-    """Return a live ResearchLiveAudit when the audit mode is enabled, else None.
+def _research_governance() -> "tuple[str, object | None]":
+    """Return ``(mode, audit)`` for the live research-governance seam.
 
-    Audit-first research governance: observe-only, default OFF, deterministic
-    (no model calls). The lazy import keeps ``import cli.headless`` cold-clean.
+    ``off`` → ``("off", None)`` (turn byte-identical). ``audit`` observes only.
+    ``enforce`` additionally allows ONE bounded corrective re-prompt for the
+    deterministic cited-without-source class — never a silent rewrite. The
+    lazy import keeps ``import cli.headless`` cold-clean.
     """
     from magi_agent.research.live_audit import (  # noqa: PLC0415
         ResearchLiveAudit,
         research_governance_mode,
     )
 
-    if research_governance_mode() != "audit":
-        return None
-    return ResearchLiveAudit()
+    mode = research_governance_mode()
+    if mode == "off":
+        return "off", None
+    return mode, ResearchLiveAudit()
+
+
+def _build_research_audit() -> "object | None":
+    return _research_governance()[1]
+
+
+def _enforce_retry_needed(mode: str, report: "dict[str, object] | None") -> bool:
+    return (
+        mode == "enforce"
+        and report is not None
+        and bool(report.get("citedWithoutSource"))
+    )
 
 
 async def _project_stream(
@@ -627,6 +642,8 @@ async def _project_stream(
     session_id: str,
     include_partial: bool,
     research_audit: object | None = None,
+    governance_mode: str = "audit",
+    defer_assistant_output: bool = False,
 ) -> tuple[str, EngineResult]:
     """Consume the engine generator, emitting projected NDJSON frames live.
 
@@ -653,7 +670,8 @@ async def _project_stream(
                 terminal = item
                 break
             event = item
-            if include_partial:
+            deferred_token = defer_assistant_output and event.type == "token"
+            if include_partial and not deferred_token:
                 partial_payload = _partial_event_payload(event)
                 await writer.write(
                     StreamEvent(
@@ -670,7 +688,8 @@ async def _project_stream(
             if event.type == "token":
                 text = _token_text(event.payload)
                 if text:
-                    token_buf.append(text)
+                    if not defer_assistant_output:
+                        token_buf.append(text)
                     all_text.append(text)
                 continue
             # Non-token: flush the in-flight assistant text first (ordering).
@@ -691,8 +710,16 @@ async def _project_stream(
                 )
         # Stream ended; flush any trailing assistant text.
         await flush_tokens()
+        report = None
         if research_audit is not None:
-            report = research_audit.report("".join(all_text))  # type: ignore[attr-defined]
+            report = research_audit.report(  # type: ignore[attr-defined]
+                "".join(all_text), mode=governance_mode
+            )
+        if defer_assistant_output and all_text and not _enforce_retry_needed(governance_mode, report):
+            await writer.write(
+                _assistant_text_frame("".join(all_text), session_id=session_id)
+            )
+        if report is not None:
             await writer.write(
                 _system_status_frame(
                     RuntimeEvent(type="status", payload=report),
@@ -833,16 +860,42 @@ async def run_headless(
             gen = _tap_session_log(gen, session_log)
         events, terminal = await drain(gen)
         assistant_text = _accumulate_text(events)
-        research_audit = _build_research_audit()
+        governance_mode, research_audit = _research_governance()
         if research_audit is not None:
-            for event in events:
-                research_audit.observe_event(event.type, event.payload)  # type: ignore[attr-defined]
             import json as _json  # noqa: PLC0415
 
-            _log(
-                "research_governance_audit "
-                + _json.dumps(research_audit.report(assistant_text), sort_keys=True)  # type: ignore[attr-defined]
-            )
+            for event in events:
+                research_audit.observe_event(event.type, event.payload)  # type: ignore[attr-defined]
+            report = research_audit.report(assistant_text, mode=governance_mode)  # type: ignore[attr-defined]
+            _log("research_governance_audit " + _json.dumps(report, sort_keys=True))
+            if _enforce_retry_needed(governance_mode, report):
+                from magi_agent.research.live_audit import (  # noqa: PLC0415
+                    ResearchLiveAudit,
+                    enforce_reprompt_message,
+                )
+
+                _log("research_governance_enforce_retry")
+                retry_gen = active_driver.run_turn_stream(
+                    None,
+                    {"prompt": enforce_reprompt_message(report)},
+                    cancel=cancel,
+                    gate=active_gate,
+                )
+                if write_session_log:
+                    assert session_log is not None
+                    retry_gen = _tap_session_log(retry_gen, session_log)
+                events, terminal = await drain(retry_gen)
+                assistant_text = _accumulate_text(events)
+                retry_audit = ResearchLiveAudit()
+                for event in events:
+                    retry_audit.observe_event(event.type, event.payload)
+                _log(
+                    "research_governance_audit "
+                    + _json.dumps(
+                        retry_audit.report(assistant_text, mode=governance_mode),
+                        sort_keys=True,
+                    )
+                )
         result_frame = _build_result_frame(
             session_id=sid, assistant_text=assistant_text, terminal=terminal
         )
@@ -919,13 +972,58 @@ async def run_headless(
         if write_session_log:
             assert session_log is not None
             gen = _tap_session_log(gen, session_log)
+        governance_mode, research_audit = _research_governance()
         assistant_text, terminal = await _project_stream(
             gen,
             writer,
             session_id=sid,
             include_partial=include_partial,
-            research_audit=_build_research_audit(),
+            research_audit=research_audit,
+            governance_mode=governance_mode,
+            defer_assistant_output=governance_mode == "enforce"
+            and research_audit is not None,
         )
+        if research_audit is not None:
+            first_report = research_audit.report(  # type: ignore[attr-defined]
+                assistant_text, mode=governance_mode
+            )
+            if _enforce_retry_needed(governance_mode, first_report):
+                from magi_agent.research.live_audit import (  # noqa: PLC0415
+                    ResearchLiveAudit,
+                    enforce_reprompt_message,
+                )
+
+                await writer.write(
+                    _system_status_frame(
+                        RuntimeEvent(
+                            type="status",
+                            payload={
+                                "type": "research_governance_enforce_retry",
+                                "citedWithoutSource": first_report.get(
+                                    "citedWithoutSource"
+                                ),
+                            },
+                        ),
+                        session_id=sid,
+                    )
+                )
+                retry_gen = active_driver.run_turn_stream(
+                    None,
+                    {"prompt": enforce_reprompt_message(first_report)},
+                    cancel=cancel,
+                    gate=active_gate,
+                )
+                if write_session_log:
+                    assert session_log is not None
+                    retry_gen = _tap_session_log(retry_gen, session_log)
+                assistant_text, terminal = await _project_stream(
+                    retry_gen,
+                    writer,
+                    session_id=sid,
+                    include_partial=include_partial,
+                    research_audit=ResearchLiveAudit(),
+                    governance_mode=governance_mode,
+                )
         result_frame = _build_result_frame(
             session_id=sid, assistant_text=assistant_text, terminal=terminal
         )

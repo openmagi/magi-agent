@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import os
 
 import pytest
 
@@ -11,6 +12,10 @@ def pytest_configure(config: pytest.Config) -> None:
         "markers",
         "asyncio: run an async test function in an asyncio event loop",
     )
+    # The durable evidence ledger is ON by default (writes <cwd>/.magi/evidence)
+    # — keep the suite from littering the repo. Tests exercising the default-ON
+    # behavior delenv this and chdir to a tmp_path.
+    os.environ.setdefault("MAGI_EVIDENCE_LEDGER_DIR", "off")
 
 
 @pytest.hookimpl(tryfirst=True)

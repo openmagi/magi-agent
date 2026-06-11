@@ -18,3 +18,5 @@ apps/web/.next/
 
 # Local runtime observability artifacts (written by magi processes at runtime).
 .openmagi/
+# Local runtime state (durable evidence ledger, session logs)
+.magi/
