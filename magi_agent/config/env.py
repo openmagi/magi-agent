@@ -1730,6 +1730,27 @@ def is_goal_nudge_enabled(env: Mapping[str, str] | None = None) -> bool:
     return _is_true(source.get(MAGI_GOAL_NUDGE_ENABLED_ENV))
 
 
+MAGI_RESEARCH_FACT_GUIDANCE_ENABLED_ENV = "MAGI_RESEARCH_FACT_GUIDANCE_ENABLED"
+
+
+def is_research_fact_guidance_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Single source of truth for the research_fact cross-check guidance flag.
+
+    Default OFF (strict truthy opt-in: "1"/"true"/"yes"/"on"). When OFF, the
+    ``research_fact`` evidence brief and ``build_cli_instruction`` output are
+    byte-identical to the pre-flag baseline. When ON, ``research_fact`` wraps a
+    successful multi-source brief in a consolidation scaffold (question echo +
+    fetched-source count header, deterministic cross-check footer) and — when
+    BRAVE_API_KEY + FIRECRAWL_API_KEY are also present — the system prompt
+    carries one ``<web_research>`` block advertising the tool with a
+    read-and-compare few-shot. Like ``is_goal_nudge_enabled`` this deliberately
+    does NOT follow the runtime-profile default-ON convention — it is an
+    additive, default-disabled seam (A/B evidence gates any default flip).
+    """
+    source = os.environ if env is None else env
+    return _is_true(source.get(MAGI_RESEARCH_FACT_GUIDANCE_ENABLED_ENV))
+
+
 MAGI_USER_HOOKS_ENABLED_ENV = "MAGI_USER_HOOKS_ENABLED"
 
 

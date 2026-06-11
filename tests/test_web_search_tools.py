@@ -1286,3 +1286,218 @@ def test_latency_receipts_off_research_fact_ignores_stray_latency_keys(
 
     assert "latency_ms" not in result
     assert "[1] https://a.example.com\ncontent-x" in result
+
+
+# Item 07: gated brief v2 (header + cross-check footer) + guidance block
+# + never-raises executor-timeout hardening
+# ---------------------------------------------------------------------------
+
+_GUIDANCE_FLAG = "MAGI_RESEARCH_FACT_GUIDANCE_ENABLED"
+
+
+def test_research_fact_default_off_brief_is_byte_identical(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Flag unset → the brief is byte-identical to the baseline bare join.
+
+    This is the default-OFF zero-behavior-change proof for the tool.
+    """
+    from magi_agent.tools.web_search_tools import research_fact
+
+    monkeypatch.delenv(_GUIDANCE_FLAG, raising=False)
+
+    urls = [f"https://s{i}.example.com" for i in range(3)]
+    content_map = {u: f"content-{i}" for i, u in enumerate(urls)}
+
+    result = research_fact(
+        "What is X?",
+        search_fn=_make_search_fn(urls),
+        fetch_fn=_make_fetch_fn(content_map),
+        n=3,
+    )
+
+    expected = "\n\n---\n\n".join(
+        f"[{i + 1}] {u}\n{content_map[u]}" for i, u in enumerate(urls)
+    )
+    assert result == expected
+    assert "research_fact brief" not in result
+    assert "Cross-check:" not in result
+
+
+def test_research_fact_guidance_on_brief_has_header_and_footer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Flag '1' → header (question echo + source count) and cross-check footer."""
+    from magi_agent.tools.web_search_tools import research_fact
+
+    monkeypatch.setenv(_GUIDANCE_FLAG, "1")
+
+    urls = [f"https://s{i}.example.com" for i in range(3)]
+    content_map = {u: f"content-{i}" for i, u in enumerate(urls)}
+
+    result = research_fact(
+        "What is X?",
+        search_fn=_make_search_fn(urls),
+        fetch_fn=_make_fetch_fn(content_map),
+        n=3,
+    )
+
+    assert result.startswith("research_fact brief — question: What is X?")
+    assert "sources: 3/3 fetched" in result
+    assert "(0 failed)" not in result
+    assert "Cross-check:" in result
+    assert result.endswith("A value seen in only one source is a hypothesis, not a fact.")
+    # All source briefs still present, unchanged per-source format
+    for i, u in enumerate(urls):
+        assert f"[{i + 1}] {u}\ncontent-{i}" in result
+
+
+def test_research_fact_guidance_on_partial_failure_counts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """One raising source out of three → header reports 2/3 fetched (1 failed)."""
+    from magi_agent.tools.web_search_tools import research_fact
+
+    monkeypatch.setenv(_GUIDANCE_FLAG, "1")
+
+    urls = [
+        "https://good1.example.com",
+        "https://bad.example.com",
+        "https://good2.example.com",
+    ]
+    content_map = {
+        "https://good1.example.com": "good-content-one",
+        "https://good2.example.com": "good-content-two",
+    }
+
+    result = research_fact(
+        "some question",
+        search_fn=_make_search_fn(urls),
+        fetch_fn=_make_fetch_fn(content_map, raise_for={"https://bad.example.com"}),
+        n=3,
+    )
+
+    assert "sources: 2/3 fetched (1 failed)" in result
+    assert "Cross-check:" in result
+
+
+def test_research_fact_guidance_on_preserves_failure_marker_strings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Flag ON must not touch the byte-frozen fail-soft error prefixes.
+
+    ``research/live_audit.py`` (_WEB_FAILURE_MARKERS) string-matches these
+    prefixes for governance audit; header/footer apply only to the
+    successful-sources branch.
+    """
+    from magi_agent.tools.web_search_tools import research_fact
+
+    monkeypatch.setenv(_GUIDANCE_FLAG, "1")
+
+    # Search raises → "research_fact: search failed"
+    def raising_search(query: str) -> dict[str, object]:
+        raise RuntimeError("boom")
+
+    out = research_fact("q", search_fn=raising_search, fetch_fn=_make_fetch_fn({}))
+    assert out.startswith("research_fact: search failed")
+
+    # Empty search → "research_fact: no results"
+    out = research_fact(
+        "q", search_fn=_make_search_fn([]), fetch_fn=_make_fetch_fn({})
+    )
+    assert out.startswith("research_fact: no results")
+
+    # All fetches fail → snippet fallback keeps its exact prefix, no header/footer
+    def always_raises(url: str) -> dict[str, object]:
+        raise RuntimeError("all fetches fail")
+
+    out = research_fact(
+        "q",
+        search_fn=_make_search_fn(["https://a.example.com"]),
+        fetch_fn=always_raises,
+        n=1,
+    )
+    assert out.startswith("research_fact: all fetches failed")
+    assert "Cross-check:" not in out
+
+    # The audit-side markers must keep matching tool outputs
+    from magi_agent.research.live_audit import _WEB_FAILURE_MARKERS
+
+    assert any(
+        out_prefix in ("research_fact: search failed", "research_fact: no results")
+        for out_prefix in _WEB_FAILURE_MARKERS
+    )
+
+
+def test_research_fact_never_raises_on_executor_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A pathological slow fetch_fn must yield the fallback, not raise.
+
+    Regression test for the latent bug where ``as_completed(...)`` raised
+    ``concurrent.futures.TimeoutError`` outside any try block, violating the
+    documented "Never raises" contract. Also proves the executor is shut down
+    without waiting (returns promptly).
+    """
+    import time
+
+    from magi_agent.tools.web_search_tools import research_fact
+
+    monkeypatch.delenv(_GUIDANCE_FLAG, raising=False)
+
+    urls = [f"https://slow{i}.example.com" for i in range(3)]
+
+    def slow_fetch(url: str) -> dict[str, object]:
+        time.sleep(0.5)
+        return {"data": {"markdown": "too late"}}
+
+    start = time.monotonic()
+    result = research_fact(
+        "slow question",
+        search_fn=_make_search_fn(urls),
+        fetch_fn=slow_fetch,
+        n=3,
+        per_fetch_timeout=0.05,
+    )
+    elapsed = time.monotonic() - start
+
+    assert result.startswith("research_fact: all fetches failed")
+    assert elapsed < 2.0, f"research_fact blocked for {elapsed:.2f}s (no-wait shutdown expected)"
+
+
+def test_web_research_guidance_block_matrix() -> None:
+    """Guidance block: flag ON + both keys → block; otherwise ''."""
+    from magi_agent.tools.web_search_tools import web_research_guidance_block
+
+    # Assemble key-shaped values at runtime (push-protection-safe)
+    brave = "brave-" + "key"
+    firecrawl = "fc-" + "key"
+
+    on_with_keys = {
+        _GUIDANCE_FLAG: "1",
+        "BRAVE_API_KEY": brave,
+        "FIRECRAWL_API_KEY": firecrawl,
+    }
+    block = web_research_guidance_block(on_with_keys)
+    assert block.startswith("<web_research>")
+    assert block.endswith("</web_research>")
+    assert "research_fact" in block
+
+    # Flag ON, missing either key → "" (never advertise an unavailable tool)
+    assert web_research_guidance_block(
+        {_GUIDANCE_FLAG: "1", "BRAVE_API_KEY": brave}
+    ) == ""
+    assert web_research_guidance_block(
+        {_GUIDANCE_FLAG: "1", "FIRECRAWL_API_KEY": firecrawl}
+    ) == ""
+
+    # Flag OFF (unset / falsy / garbage) + keys → ""
+    assert web_research_guidance_block(
+        {"BRAVE_API_KEY": brave, "FIRECRAWL_API_KEY": firecrawl}
+    ) == ""
+    assert web_research_guidance_block(
+        {_GUIDANCE_FLAG: "0", "BRAVE_API_KEY": brave, "FIRECRAWL_API_KEY": firecrawl}
+    ) == ""
+    assert web_research_guidance_block(
+        {_GUIDANCE_FLAG: "garbage", "BRAVE_API_KEY": brave, "FIRECRAWL_API_KEY": firecrawl}
+    ) == ""

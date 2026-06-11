@@ -2172,10 +2172,11 @@ def _apply_patch_tool_swap(
 
 
 def _build_adk_tool(host: Gate5BFullToolHost, name: str) -> FunctionTool:
-    def function_tool(func: Callable[..., object]) -> FunctionTool:
+    def function_tool(func: Callable[..., object], description: str | None = None) -> FunctionTool:
         return _function_tool(
             name,
             func,
+            description=description,
             emits_public_events=host.public_tool_events_enabled,
         )
 
@@ -2268,6 +2269,47 @@ def _build_adk_tool(host: Gate5BFullToolHost, name: str) -> FunctionTool:
 
         return function_tool(invoke_bash)
 
+    if name == "SpawnAgent":
+
+        async def invoke_spawn_agent(
+            prompt: str = "",
+            task: str = "",
+            persona: str = "general",
+            provider: str = "",
+            model: str = "",
+            budgetMs: int = 0,
+            tool_context: object | None = None,
+        ) -> dict[str, object]:
+            """Delegate a bounded readonly subtask to a child Magi Agent.
+
+            Args:
+                prompt: Concrete subtask prompt for the child agent.
+                task: Alias for prompt when the model phrases work as a task.
+                persona: Optional child role, such as researcher or reviewer.
+                provider: Optional explicit child provider route.
+                model: Optional explicit child model route.
+                budgetMs: Optional child runtime budget in milliseconds.
+            """
+            arguments = _registry_adk_arguments(
+                prompt=prompt,
+                task=task,
+                persona=persona,
+                provider=provider,
+                model=model,
+            )
+            if isinstance(budgetMs, int) and budgetMs > 0:
+                arguments["budgetMs"] = budgetMs
+            return await _dispatch_adk_tool(host, "SpawnAgent", arguments, tool_context)
+
+        return function_tool(
+            invoke_spawn_agent,
+            description=(
+                "Delegate a bounded readonly subtask to a child Magi Agent. "
+                "Provide prompt or task; use only when the user asks for parallel "
+                "or delegated work."
+            ),
+        )
+
     tool_name = name
 
     async def invoke_registry_tool(
@@ -2335,10 +2377,11 @@ def _function_tool(
     name: str,
     func: Callable[..., object],
     *,
+    description: str | None = None,
     emits_public_events: bool = False,
 ) -> FunctionTool:
     func.__name__ = name
-    func.__doc__ = f"Gate 5B selected full toolhost {name} tool."
+    func.__doc__ = description or f"Gate 5B selected full toolhost {name} tool."
     if emits_public_events:
         setattr(func, "_magi_gate5b_emits_public_events", True)
     tool = FunctionTool(func, require_confirmation=False)
