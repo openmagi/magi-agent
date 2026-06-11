@@ -15,6 +15,7 @@ from magi_agent.plugins.native_catalog import (
 
 EXPECTED_NATIVE_PLUGIN_IDS = (
     "openmagi.agentmemory",
+    "openmagi.apify",
     "openmagi.artifacts",
     "openmagi.browser",
     "openmagi.coding",
@@ -183,6 +184,16 @@ def test_web_browser_documents_and_missions_expose_expected_native_metadata() ->
     assert documents.services == ("document-worker", "document-converter-worker", "chat-proxy")
     assert _secret_sources(documents)["GATEWAY_TOKEN"] == "platform"
     assert "document_format_compatibility" in documents.harness_rules
+    assert documents.config_schema["properties"]["allowedFormats"]["default"] == (  # type: ignore[index]
+        "md",
+        "txt",
+        "html",
+        "docx",
+        "pdf",
+        "hwpx",
+        "xlsx",
+        "csv",
+    )
 
     missions = manifests["openmagi.missions"]
     expected_mission_tools = ("MissionLedger",)
@@ -466,6 +477,8 @@ def test_native_catalog_resolves_to_enabled_metadata_only_state_and_opt_out_remo
         "TaskWait",
         "WebFetch",
         "WebSearch",
+        "apify_run_actor",
+        "apify_search_actors",
         "knowledge-search",
         "knowledge-write",
         "web-search",
@@ -625,6 +638,19 @@ def test_file_delivery_native_catalog_entries_are_documents_metadata_only() -> N
 
 def test_unknown_native_plugin_id_returns_none() -> None:
     assert native_plugin_by_id("openmagi.missing") is None
+
+
+def test_apify_plugin_manifest_contract() -> None:
+    manifest = native_plugin_by_id("openmagi.apify")
+    assert manifest is not None
+    assert manifest.kind is PluginKind.NATIVE
+    assert manifest.default_installed is True
+    assert manifest.default_enabled is True
+    tool_names = {tool.name for tool in manifest.tools}
+    assert tool_names == {"apify_search_actors", "apify_run_actor"}
+    secret = {s.name: s.source for s in manifest.secrets}
+    assert secret == {"APIFY_TOKEN": "user"}
+    assert set(manifest.permissions) == {"read", "net"}
 
 
 def test_native_catalog_import_boundary_does_not_load_adk_runtime_routes_or_native_modules() -> None:

@@ -30,6 +30,13 @@ _XLSX_READ_SCHEMA: dict[str, object] = {
         "sheetName": {"type": "string"},
         "maxRows": {"type": "integer", "minimum": 1, "maximum": 10000},
         "maxCols": {"type": "integer", "minimum": 1, "maximum": 200},
+        "cellRange": {
+            "type": "string",
+            "description": (
+                "Optional Excel-style range like 'A1:C5' to read a sub-range of the sheet. "
+                "Overrides maxRows/maxCols within the range."
+            ),
+        },
     },
 }
 
@@ -155,6 +162,47 @@ _MUSIC_NOTATION_SCHEMA: dict[str, object] = {
 # ---------------------------------------------------------------------------
 # Manifest declarations
 # ---------------------------------------------------------------------------
+
+_DOCUMENT_SEARCH_SCHEMA: dict[str, object] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["path", "query"],
+    "properties": {
+        "path": {"type": "string"},
+        "query": {
+            "type": "string",
+            "description": (
+                "Search term or phrase to find in the document. "
+                "Case-insensitive. Supports footnote references like 'footnote 397'."
+            ),
+        },
+    },
+}
+
+_ARCHIVE_EXTRACT_SCHEMA: dict[str, object] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["path"],
+    "properties": {
+        "path": {"type": "string"},
+        "readEntry": {
+            "type": "string",
+            "description": (
+                "Inner file path within the archive to read (e.g. 'data.xml'). "
+                "When omitted, only the entry listing is returned."
+            ),
+        },
+    },
+}
+
+_XLSX_INFO_SCHEMA: dict[str, object] = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": ["path"],
+    "properties": {
+        "path": {"type": "string"},
+    },
+}
 
 _FILE_TOOL_MANIFESTS: tuple[ToolManifest, ...] = (
     ToolManifest(
@@ -284,6 +332,72 @@ _FILE_TOOL_MANIFESTS: tuple[ToolManifest, ...] = (
         costClass="medium",
         latencyClass="interactive",
         budget=Budget(max_calls_per_turn=3, max_parallel=1),
+        enabled_by_default=False,
+        opt_out=True,
+    ),
+    # -----------------------------------------------------------------------
+    # File-tools v2 additions
+    # -----------------------------------------------------------------------
+    ToolManifest(
+        name="DocumentSearch",
+        description=(
+            "Search within a PDF document for a term or phrase (case-insensitive). "
+            "Returns matching page numbers and surrounding snippets. "
+            "Useful for finding footnotes, page counts for topics, and in-document references."
+        ),
+        kind="core",
+        source=CORE_TOOL_SOURCE,
+        permission="read",
+        inputSchema=_DOCUMENT_SEARCH_SCHEMA,
+        availableInModes=("plan", "act"),
+        tags=("workspace", "file", "document", "search", "read", "multimodal-file"),
+        parallelSafety="readonly",
+        mutatesWorkspace=False,
+        dangerous=False,
+        timeoutMs=60_000,
+        budget=Budget(max_calls_per_turn=10, max_parallel=2, outputChars=64_000),
+        enabled_by_default=False,
+        opt_out=True,
+    ),
+    ToolManifest(
+        name="ArchiveExtract",
+        description=(
+            "Inspect a .zip archive in the workspace: list its entries and optionally read "
+            "a named inner file (e.g. an XML, CSV, or TXT file inside the zip). "
+            "Path-traversal entry names are rejected."
+        ),
+        kind="core",
+        source=CORE_TOOL_SOURCE,
+        permission="read",
+        inputSchema=_ARCHIVE_EXTRACT_SCHEMA,
+        availableInModes=("plan", "act"),
+        tags=("workspace", "file", "archive", "zip", "read", "multimodal-file"),
+        parallelSafety="readonly",
+        mutatesWorkspace=False,
+        dangerous=False,
+        timeoutMs=30_000,
+        budget=Budget(max_calls_per_turn=5, max_parallel=1, outputChars=64_000),
+        enabled_by_default=False,
+        opt_out=True,
+    ),
+    ToolManifest(
+        name="XLSXInfo",
+        description=(
+            "Return structural metadata about an XLSX workbook: sheet names, row counts, "
+            "column counts, and first-row header previews. Use before XLSXRead to identify "
+            "which sheet and range to query."
+        ),
+        kind="core",
+        source=CORE_TOOL_SOURCE,
+        permission="read",
+        inputSchema=_XLSX_INFO_SCHEMA,
+        availableInModes=("plan", "act"),
+        tags=("workspace", "file", "spreadsheet", "read", "multimodal-file"),
+        parallelSafety="readonly",
+        mutatesWorkspace=False,
+        dangerous=False,
+        timeoutMs=30_000,
+        budget=Budget(max_calls_per_turn=5, max_parallel=1, outputChars=16_000),
         enabled_by_default=False,
         opt_out=True,
     ),

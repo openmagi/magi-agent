@@ -18,6 +18,7 @@ from magi_agent.plugins.native_catalog import native_plugin_manifests
 
 EXPECTED_NATIVE_PLUGIN_IDS = (
     "openmagi.agentmemory",
+    "openmagi.apify",
     "openmagi.artifacts",
     "openmagi.browser",
     "openmagi.coding",
@@ -73,8 +74,8 @@ def test_native_catalog_audit_snapshot_exposes_permissions_and_declared_secret_m
     )
     assert snapshot.summary.opted_out_plugin_count == 0
     assert snapshot.summary.permission_classes == ("execute", "meta", "net", "read", "write")
-    assert snapshot.summary.declared_secret_names == ("FIRECRAWL_API_KEY", "GATEWAY_TOKEN")
-    assert snapshot.summary.declared_secret_sources == ("platform",)
+    assert snapshot.summary.declared_secret_names == ("APIFY_TOKEN", "FIRECRAWL_API_KEY", "GATEWAY_TOKEN")
+    assert snapshot.summary.declared_secret_sources == ("platform", "user")
     assert snapshot.traffic_attached is False
     assert snapshot.execution_attached is False
 
@@ -275,8 +276,8 @@ def test_opted_out_plugin_retains_declared_audit_metadata_while_manager_removes_
     assert snapshot.summary.enabled_plugin_count == len(EXPECTED_NATIVE_PLUGIN_IDS) - 1
     assert snapshot.summary.opted_out_plugin_count == 1
     assert snapshot.summary.permission_classes == ("execute", "meta", "net", "read", "write")
-    assert snapshot.summary.declared_secret_names == ("FIRECRAWL_API_KEY", "GATEWAY_TOKEN")
-    assert snapshot.summary.declared_secret_sources == ("platform",)
+    assert snapshot.summary.declared_secret_names == ("APIFY_TOKEN", "FIRECRAWL_API_KEY", "GATEWAY_TOKEN")
+    assert snapshot.summary.declared_secret_sources == ("platform", "user")
 
 
 def test_audit_model_dumps_use_dashboard_compatible_aliases() -> None:

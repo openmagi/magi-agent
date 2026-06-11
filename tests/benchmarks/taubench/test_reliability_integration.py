@@ -9,9 +9,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from magi_agent.benchmarks.taubench.episode import EpisodeState, run_episode
-from magi_agent.benchmarks.taubench.reliability import ReliabilityConfig, WriteLedger
-from magi_agent.benchmarks.taubench.tau_env import build_env_tool_callables
+from benchmarks.taubench.episode import EpisodeState, run_episode
+from benchmarks.taubench.reliability import ReliabilityConfig, WriteLedger
+from benchmarks.taubench.tau_env import build_env_tool_callables
 
 
 @dataclass

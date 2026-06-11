@@ -161,19 +161,56 @@ def _intent_refs(proj: dict[str, object]) -> tuple[str, str]:
     return str(intent.get("recipePackRef") or ""), str(intent.get("checkpointRef") or "")
 
 
+def _render_status(snap: dict[str, object]) -> str:
+    """Format an app status snapshot into a readable multi-line block."""
+
+    version = snap.get("version") or "?"
+    model = snap.get("model") or "no model"
+    cwd = snap.get("cwd") or "?"
+    mode = snap.get("mode") or "act"
+    session = snap.get("session") or "cli"
+    turns = snap.get("turns", 0)
+    tokens = snap.get("tokens", 0)
+    return "\n".join(
+        [
+            f"Magi v{version}",
+            f"model:   {model}",
+            f"cwd:     {cwd}",
+            f"mode:    {mode}  ·  session: {session}  ·  turns: {turns}"
+            f"  ·  last turn: {tokens} tok",
+        ]
+    )
+
+
 @dataclass
 class StatusCommand(LocalCommand):
-    """``/status`` — summarize the boundary decision as a redaction-safe line.
+    """``/status`` — show the live session status (model, cwd, mode, turns, …).
 
-    Delegates to ``SlashControlBoundary.project`` then renders a concise
+    In the TUI it reads ``ctx.app.status_snapshot()`` for a real status block.
+    Headless (no app) falls back to the slash-control boundary projection
     one-liner from ``decision.public_projection()`` (so nothing private leaks).
     """
 
     async def call(self, args: object, ctx: CommandContext) -> LocalResult:  # type: ignore[override]
+        snapshot = self._app_snapshot(ctx)
+        if snapshot is not None:
+            return Text(text=_render_status(snapshot))
         decision = _project("status", args, ctx)
         proj = decision.public_projection()
         reasons = ", ".join(proj.get("reasonCodes", []) or []) or "-"
         return Text(text=f"status: {proj.get('status')} | reasons: {reasons}")
+
+    @staticmethod
+    def _app_snapshot(ctx: CommandContext) -> dict[str, object] | None:
+        app = getattr(ctx, "app", None)
+        snap = getattr(app, "status_snapshot", None)
+        if not callable(snap):
+            return None
+        try:
+            result = snap()
+        except Exception:
+            return None
+        return result if isinstance(result, dict) else None
 
 
 @dataclass

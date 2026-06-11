@@ -173,38 +173,7 @@ def _read_docx(
 
     try:
         doc = Document(str(resolved.path))
-        parts: list[str] = []
-
-        # Iterate body elements in order (paragraphs + tables interleaved).
-        for element in doc.element.body:
-            tag = element.tag.split("}")[-1] if "}" in element.tag else element.tag
-            if tag == "p":
-                # Paragraph
-                from docx.oxml.ns import qn  # noqa: PLC0415
-
-                text_nodes = element.findall(f".//{qn('w:t')}")
-                para_text = "".join(t.text or "" for t in text_nodes)
-                if para_text.strip():
-                    parts.append(para_text)
-            elif tag == "tbl":
-                # Table — find rows/cells and render as markdown
-                from docx.oxml.ns import qn as _qn  # noqa: PLC0415
-
-                rows: list[list[str]] = []
-                for tr in element.findall(f".//{_qn('w:tr')}"):
-                    row_cells: list[str] = []
-                    for tc in tr.findall(f".//{_qn('w:tc')}"):
-                        cell_texts = tc.findall(f".//{_qn('w:t')}")
-                        row_cells.append("".join(t.text or "" for t in cell_texts))
-                    if row_cells:
-                        rows.append(row_cells)
-                if rows:
-                    # Pad rows to uniform width
-                    width = max(len(r) for r in rows)
-                    padded = [r + [""] * (width - len(r)) for r in rows]
-                    parts.append(_markdown_table(padded))
-
-        raw_text = "\n\n".join(parts)
+        raw_text = extract_docx_text(doc)
     except Exception:  # noqa: BLE001
         return _error_result(tool_name, "docx_read_error")
 
@@ -217,6 +186,45 @@ def _read_docx(
         path_ref=resolved.path_ref,
         content_digest=_digest_path(resolved.path),
     )
+
+
+def extract_docx_text(doc: object) -> str:
+    """Extract paragraph + table text from a ``python-docx`` ``Document``.
+
+    Walks the body elements in order (paragraphs + tables interleaved) and
+    renders tables as markdown — the same logic ``document_read`` uses, factored
+    out so other surfaces (e.g. the DocumentWrite coverage verifier) can extract
+    the rendered text from an in-memory ``Document`` without going through disk.
+
+    The ``docx`` import stays lazy (inside this function) so importing this
+    module never pulls ``docx`` into ``sys.modules``; callers already hold a
+    constructed ``Document`` instance.
+    """
+    from docx.oxml.ns import qn  # noqa: PLC0415
+
+    parts: list[str] = []
+    for element in doc.element.body:
+        tag = element.tag.split("}")[-1] if "}" in element.tag else element.tag
+        if tag == "p":
+            text_nodes = element.findall(f".//{qn('w:t')}")
+            para_text = "".join(t.text or "" for t in text_nodes)
+            if para_text.strip():
+                parts.append(para_text)
+        elif tag == "tbl":
+            rows: list[list[str]] = []
+            for tr in element.findall(f".//{qn('w:tr')}"):
+                row_cells: list[str] = []
+                for tc in tr.findall(f".//{qn('w:tc')}"):
+                    cell_texts = tc.findall(f".//{qn('w:t')}")
+                    row_cells.append("".join(t.text or "" for t in cell_texts))
+                if row_cells:
+                    rows.append(row_cells)
+            if rows:
+                width = max(len(r) for r in rows)
+                padded = [r + [""] * (width - len(r)) for r in rows]
+                parts.append(_markdown_table(padded))
+
+    return "\n\n".join(parts)
 
 
 # ---------------------------------------------------------------------------
@@ -440,4 +448,125 @@ def _digest_path(path: Path) -> str:
     return f"sha256:{digest}"
 
 
-__all__ = ["document_read"]
+# ---------------------------------------------------------------------------
+# document_search — in-document term search (PDF only, page-addressed)
+# ---------------------------------------------------------------------------
+
+_DOCUMENT_SEARCH_SUPPORTED_EXTENSIONS = frozenset({".pdf"})
+_SEARCH_SNIPPET_CONTEXT = 120  # chars on each side of the match
+_MAX_SEARCH_MATCHES = 200
+
+
+def document_search(
+    arguments: Mapping[str, object], context: ToolContext
+) -> ToolResult:
+    """Search a PDF document for a query term, returning page number + snippet
+    for each match.
+
+    Only PDF files are supported (text-layer search via pypdf).  Returns
+    ``status="blocked"`` with ``errorCode="document_search_not_supported_for_format"``
+    for other document types.
+
+    Output fields:
+    - ``matches``: list of ``{page: int, snippet: str}`` (1-based page numbers)
+    - ``matchCount``: total number of matches found
+    - ``totalPages``: total pages in the document
+    """
+    tool_name = "document_search"
+
+    path_text = _str_arg(arguments, "path")
+    if path_text is None:
+        return _blocked_result(tool_name, "path_required")
+
+    query_text = _str_arg(arguments, "query")
+    if query_text is None:
+        return _blocked_result(tool_name, "query_required")
+
+    try:
+        root = _workspace_root(context)
+        resolved = _resolve_workspace_path(root, path_text, must_exist=True)
+    except _SpreadsheetPolicyError as error:
+        return _blocked_result(tool_name, error.reason_code)
+    except OSError:
+        return _error_result(tool_name, "document_search_failed")
+
+    suffix = Path(resolved.relative).suffix.casefold()
+    if suffix not in _DOCUMENT_SEARCH_SUPPORTED_EXTENSIONS:
+        return _blocked_result(
+            tool_name,
+            "document_search_not_supported_for_format",
+            f"document_search supports: {', '.join(sorted(_DOCUMENT_SEARCH_SUPPORTED_EXTENSIONS))}",
+        )
+
+    try:
+        byte_size = resolved.path.stat().st_size
+    except OSError:
+        return _error_result(tool_name, "document_search_failed")
+
+    if byte_size > _MAX_DOCUMENT_BYTES:
+        return _error_result(tool_name, "document_input_too_large")
+
+    try:
+        from pypdf import PdfReader  # noqa: PLC0415
+    except ImportError:
+        return _blocked_result(tool_name, "document_dependency_not_installed")
+
+    try:
+        reader = PdfReader(str(resolved.path))
+        total_pages = len(reader.pages)
+        query_lower = query_text.casefold()
+        matches: list[dict[str, object]] = []
+
+        for page_idx in range(total_pages):
+            page_text = reader.pages[page_idx].extract_text() or ""
+            page_lower = page_text.casefold()
+            pos = 0
+            while True:
+                found = page_lower.find(query_lower, pos)
+                if found == -1:
+                    break
+                start = max(0, found - _SEARCH_SNIPPET_CONTEXT)
+                end = min(len(page_text), found + len(query_text) + _SEARCH_SNIPPET_CONTEXT)
+                snippet = page_text[start:end].replace("\n", " ").strip()
+                matches.append({
+                    "page": page_idx + 1,  # 1-based
+                    "snippet": snippet,
+                })
+                pos = found + len(query_lower)
+                if len(matches) >= _MAX_SEARCH_MATCHES:
+                    break
+            if len(matches) >= _MAX_SEARCH_MATCHES:
+                break
+
+    except Exception:  # noqa: BLE001
+        return _error_result(tool_name, "pdf_read_error")
+
+    output: dict[str, object] = {
+        "matches": matches,
+        "matchCount": len(matches),
+        "totalPages": total_pages,
+        "query": query_text,
+    }
+    content_digest = _digest_path(resolved.path)
+    return ToolResult(
+        status="ok",
+        output=output,
+        llmOutput=output,
+        transcriptOutput={
+            "toolName": tool_name,
+            "matchCount": len(matches),
+            "totalPages": total_pages,
+            "contentDigest": content_digest,
+        },
+        metadata={
+            **_base_metadata(tool_name, permission_class="read", mutates_workspace=False),
+            "contentDigest": content_digest,
+            "byteCount": byte_size,
+            "matchCount": len(matches),
+            "totalPages": total_pages,
+            "pathRef": resolved.path_ref,
+        },
+    )
+
+
+__all__ = ["document_read", "document_search", "extract_docx_text"]

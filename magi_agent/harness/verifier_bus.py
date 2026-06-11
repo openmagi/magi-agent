@@ -6,7 +6,11 @@ from typing import Any, Literal, Self, TypeVar, get_args, get_origin
 from pydantic import Field, field_validator, model_validator
 
 from magi_agent.evidence.ledger import _redact_public_summary_text
-from magi_agent.evidence.types import EvidenceMetadataModel, validate_evidence_type_name
+from magi_agent.evidence.types import (
+    EvidenceFieldMatcher,
+    EvidenceMetadataModel,
+    validate_evidence_type_name,
+)
 
 
 VerifierStage = Literal[
@@ -675,6 +679,38 @@ def build_default_verifier_bus_metadata() -> VerifierBusMetadata:
                 defaultEnabled=False,
                 disabled=True,
             ),
+            # Task C — OPTIONAL BLOCKING document-authoring coverage gate.
+            # Default-OFF (``defaultEnabled=False``/``disabled=True``); activated
+            # only when the ``document-authoring-coverage`` preset is enabled via
+            # ``MAGI_DOCUMENT_AUTHORING_COVERAGE``. Consumes ``DocumentCoverage``
+            # evidence (Task B) and, when active, blocks the final answer/commit on
+            # a failed-coverage record. The block keys off the record's
+            # ``fields["status"]`` (NOT the top-level EvidenceRecord.status, which
+            # follows the tool status of ``"ok"`` through the production
+            # ``evidence_from_tool_result`` path) via an ``EvidenceFieldMatcher``
+            # equals "pass" — see ``execute_pre_final_verifier_bus``. fail_open so a
+            # missing/erroring boundary never wedges a turn; absence of any
+            # DocumentCoverage record ⇒ pass (non-document turns never block).
+            VerifierMetadata(
+                verifierId="document-authoring-coverage",
+                stage="file_artifact_delivery",
+                phase="deterministic",
+                priority=31,
+                description="Document-authoring source-content coverage gate (default-off).",
+                inputDeclarations=(
+                    VerifierInputDeclaration(
+                        evidenceTypes=("DocumentCoverage",),
+                        artifactRefs=("artifact:declared-output",),
+                    ),
+                ),
+                failureRouting=FailureRoutingMetadata(
+                    actions=("audit", "retry"),
+                    retryable=True,
+                    failOpen=True,
+                ),
+                defaultEnabled=False,
+                disabled=True,
+            ),
             VerifierMetadata(
                 verifierId="source-claim-link",
                 stage="source_claim_link",
@@ -796,6 +832,7 @@ def execute_pre_final_verifier_bus(
     required_validators: Sequence[str],
     observed_public_refs: Sequence[str],
     evidence_records: Sequence[object],
+    document_coverage_gate_enabled: bool = False,
 ) -> dict[str, object]:
     """Run the deterministic pre-final evidence verifier over public refs.
 
@@ -803,6 +840,18 @@ def execute_pre_final_verifier_bus(
     runner. It performs a pure read over already-public refs and already-collected
     evidence records; it does not call models, external tools, storage, child
     agents, or production services.
+
+    ``document_coverage_gate_enabled`` (Task C, default OFF) activates the
+    ``document-authoring-coverage`` gate. When OFF this function is behavior-identical
+    to before: ``DocumentCoverage`` evidence (Task B) stays audit-only and never
+    affects the decision. When ON, a ``DocumentCoverage`` record whose
+    ``fields["status"] != "pass"`` (failed coverage) flips the decision to
+    ``"block"`` with a ``document-authoring-coverage`` result. The match keys off
+    the record's ``fields["status"]`` — NOT the top-level ``EvidenceRecord.status``
+    (which follows the tool status of ``"ok"`` through the production
+    ``evidence_from_tool_result`` path) — via an ``EvidenceFieldMatcher``. Absence
+    of any ``DocumentCoverage`` record ⇒ pass, so a non-document turn is never
+    blocked by this gate.
     """
 
     matched_refs = set(_valid_public_refs(observed_public_refs))
@@ -815,7 +864,18 @@ def execute_pre_final_verifier_bus(
     missing_validators = [
         ref for ref in _valid_public_refs(required_validators) if ref not in matched_refs
     ]
-    decision = "block" if missing_evidence or missing_validators else "pass"
+
+    failed_coverage = (
+        _failed_document_coverage_records(evidence_records)
+        if document_coverage_gate_enabled
+        else ()
+    )
+
+    decision = (
+        "block"
+        if (missing_evidence or missing_validators or failed_coverage)
+        else "pass"
+    )
 
     results: list[dict[str, object]] = []
     if missing_evidence:
@@ -834,6 +894,15 @@ def execute_pre_final_verifier_bus(
                 status="missing",
                 public_summary="missing required validator evidence",
                 retry_message="run required validation before final answer",
+            )
+        )
+    if failed_coverage:
+        results.append(
+            _live_verifier_result(
+                verifier_id="document-authoring-coverage",
+                status="failed",
+                public_summary="document coverage failed",
+                retry_message="regenerate the document to cover the missing source content",
             )
         )
     if not results:
@@ -855,6 +924,7 @@ def execute_pre_final_verifier_bus(
         "matchedRefs": sorted(matched_refs),
         "missingEvidence": missing_evidence,
         "missingValidators": missing_validators,
+        "failedDocumentCoverage": len(failed_coverage),
     }
 
 
@@ -878,6 +948,116 @@ def _live_verifier_result(
     payload["executionAttached"] = True
     payload["trafficAttached"] = False
     return payload
+
+
+_DOCUMENT_COVERAGE_EVIDENCE_TYPE = "DocumentCoverage"
+# A coverage record passes only when its coverage verdict field equals "pass".
+# This is built once and reused; the matcher is the canonical field-matching
+# primitive so the gate honors the Task B fields["status"] contract rather than
+# the top-level EvidenceRecord.status (which follows the "ok" tool status).
+_DOCUMENT_COVERAGE_PASS_MATCHER = EvidenceFieldMatcher(equals="pass")
+
+
+def _failed_document_coverage_records(
+    evidence_records: Sequence[object],
+) -> tuple[object, ...]:
+    """Return DocumentCoverage records whose ``fields["status"]`` is not "pass".
+
+    Deterministic and never raises: a record that is not a DocumentCoverage
+    record (or that lacks a readable ``fields["status"]``) is ignored, so a
+    non-document turn yields an empty tuple and never blocks. Field-level
+    matching is performed with the canonical :class:`EvidenceFieldMatcher`
+    (``equals="pass"``) over the record's ``fields`` mapping.
+    """
+    failed: list[object] = []
+    for record in evidence_records:
+        evidence_type, fields = _document_coverage_view(record)
+        if evidence_type != _DOCUMENT_COVERAGE_EVIDENCE_TYPE:
+            continue
+        # Absent status key ⇒ pass (fail_open contract: only a present
+        # fields["status"] != "pass" blocks).
+        if "status" not in fields:
+            continue
+        # fields["status"] != "pass" (failed coverage). _document_field_fails_matcher
+        # returns True when the field does not satisfy the matcher.
+        if _document_field_fails_matcher(fields, "status", _DOCUMENT_COVERAGE_PASS_MATCHER):
+            failed.append(record)
+    return tuple(failed)
+
+
+def _document_coverage_view(record: object) -> tuple[object, Mapping[str, object]]:
+    """Normalize an evidence record to ``(type, fields)`` without raising.
+
+    Accepts ``EvidenceRecord``-like objects (with ``type``/``fields`` attrs), any
+    model exposing ``model_dump``, or plain mappings (camel or snake keys).
+    Returns ``(None, {})`` for anything that is not a readable evidence record.
+
+    Total/never-raising: any exception from ``model_dump`` (including
+    ``ValueError``, ``AttributeError``, ``RuntimeError``, etc.) causes
+    ``dumped`` to be set to ``None``, which then falls through to the
+    attribute-read path so the gate is never wedged by a malformed record.
+    When model_dump raises, we do NOT fall through to attribute reads (which
+    could accidentally surface class-level attributes as coverage data) —
+    instead we treat it as no-readable-record and return ``(None, {})``.
+    """
+    data: Mapping[str, object] | None = None
+    if isinstance(record, Mapping):
+        data = record
+    else:
+        model_dump = getattr(record, "model_dump", None)
+        if callable(model_dump):
+            dumped: object = None
+            try:
+                dumped = model_dump(by_alias=True, mode="python", warnings=False)
+            except Exception:
+                # Any exception (TypeError, ValueError, AttributeError,
+                # RuntimeError, …) from model_dump is caught here.
+                # We try the no-kwargs form as a last resort, but if that
+                # also fails (or yields a non-Mapping), we return no-record
+                # rather than falling through to attribute reads — that path
+                # could pick up class-level attributes that were never meant
+                # as serialized field data.
+                try:
+                    dumped = model_dump()
+                except Exception:
+                    return None, {}
+            if isinstance(dumped, Mapping):
+                data = dumped
+            elif dumped is None:
+                # model_dump() returned None (or both forms failed gracefully)
+                return None, {}
+        if data is None:
+            evidence_type = getattr(record, "type", None)
+            raw_fields = getattr(record, "fields", None)
+            fields = raw_fields if isinstance(raw_fields, Mapping) else {}
+            return evidence_type, fields
+
+    evidence_type = data.get("type")
+    raw_fields = data.get("fields")
+    fields = raw_fields if isinstance(raw_fields, Mapping) else {}
+    return evidence_type, fields
+
+
+def _document_field_fails_matcher(
+    fields: Mapping[str, object],
+    field_name: str,
+    matcher: EvidenceFieldMatcher,
+) -> bool:
+    """Return True iff ``fields[field_name]`` does NOT satisfy ``matcher``.
+
+    Named to make the "fails" sense explicit at call sites: a True return means
+    the field did not pass the matcher (i.e. the record should be counted as
+    failed coverage). Reuses the canonical evidence-contract field matcher so
+    the gate's field-level semantics are identical to ``EvidenceContractEngine``.
+    Imported lazily to keep this module ADK/runtime/route-import-free at module
+    load.
+    """
+    # Intentional cross-module reuse of the canonical field matcher from
+    # evidence/contracts.py — keeps field-matching semantics in one place.
+    # If _match_field is ever renamed, grep for this import site.
+    from magi_agent.evidence.contracts import _match_field
+
+    return _match_field(fields, field_name, matcher) is not None
 
 
 def _valid_public_refs(values: Sequence[str]) -> tuple[str, ...]:
@@ -908,8 +1088,11 @@ def _collect_public_refs(value: object, refs: set[str], depth: int = 0) -> None:
     if callable(model_dump):
         try:
             dumped = model_dump(by_alias=True, mode="python", warnings=False)
-        except TypeError:
-            dumped = model_dump()
+        except Exception:
+            try:
+                dumped = model_dump()
+            except Exception:
+                return
         _collect_public_refs(dumped, refs, depth + 1)
         return
 

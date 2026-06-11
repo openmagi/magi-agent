@@ -415,3 +415,112 @@ def test_review_and_promotion_configs_cannot_enable_live_or_automatic_paths() ->
     assert promotion_config.copy(
         update={"production_mutation_enabled": True}
     ).model_dump(by_alias=True)["productionMutationEnabled"] is False
+
+
+def test_live_promotion_disabled_by_default_stops_at_local_fake() -> None:
+    gate = SelfImprovementPromotionGate(
+        SelfImprovementPromotionConfig(enabled=True, localFakePromotionEnabled=True)
+    )
+
+    result = gate.evaluate(_promotion_request())
+
+    # With the live-promotion gate OFF (default), a fully-passing promotion must
+    # still terminate at the fake status — byte-identical to prior behavior.
+    assert result.status == "promotion_ready_local_fake"
+    assert result.reason_codes == ()
+    assert result.approval_verification_ok is True
+    assert result.execution_default == "denied"
+    assert set(result.authority_flags.model_dump(by_alias=True).values()) == {False}
+
+
+def test_live_promotion_gate_on_advances_passing_promotion_to_live_then_promoted() -> None:
+    gate = SelfImprovementPromotionGate(
+        SelfImprovementPromotionConfig(
+            enabled=True,
+            localFakePromotionEnabled=True,
+            livePromotionEnabled=True,
+        )
+    )
+
+    result = gate.evaluate(_promotion_request())
+
+    # The live gate lets a fully-passing, approved promotion advance past the
+    # fake terminus to a real promoted status.
+    assert result.status == "promoted"
+    assert result.reason_codes == ()
+    assert result.approval_verification_ok is True
+    # Advancing the status must NOT weaken any frozen authority — promotion
+    # remains denied/no-mutation; apply is out of scope (PR3).
+    assert result.execution_default == "denied"
+    assert set(result.authority_flags.model_dump(by_alias=True).values()) == {False}
+
+
+def test_live_promotion_gate_on_with_unmet_gates_blocks_not_promoted() -> None:
+    gate = SelfImprovementPromotionGate(
+        SelfImprovementPromotionConfig(
+            enabled=True,
+            localFakePromotionEnabled=True,
+            livePromotionEnabled=True,
+        )
+    )
+
+    result = gate.evaluate(
+        _promotion_request(
+            evalGateOk=False,
+            evalGateReasonCodes=("unsupported_claim_rate_exceeds_threshold",),
+        )
+    )
+
+    # Live gate ON must never let a failing/regressed candidate become promoted.
+    assert result.status == "blocked"
+    assert "eval_regression_detected" in result.reason_codes
+
+
+def test_live_promotion_requires_local_fake_stage_first() -> None:
+    gate = SelfImprovementPromotionGate(
+        SelfImprovementPromotionConfig(
+            enabled=True,
+            localFakePromotionEnabled=False,
+            livePromotionEnabled=True,
+        )
+    )
+
+    result = gate.evaluate(_promotion_request())
+
+    # The live gate cannot bypass the local-fake stage gate.
+    assert result.status == "blocked"
+    assert result.reason_codes == ("self_improvement_local_fake_promotion_disabled",)
+
+
+def test_promotion_status_literal_includes_live_and_promoted() -> None:
+    from typing import get_args
+
+    from magi_agent.self_improvement.promotion_gate import (
+        SelfImprovementPromotionStatus,
+    )
+
+    statuses = set(get_args(SelfImprovementPromotionStatus))
+    assert {
+        "disabled",
+        "blocked",
+        "promotion_ready_local_fake",
+        "promotion_ready_live",
+        "promoted",
+    } <= statuses
+
+
+def test_live_promotion_does_not_weaken_frozen_authority_flags() -> None:
+    promotion_config = SelfImprovementPromotionConfig.model_construct(
+        enabled=True,
+        localFakePromotionEnabled=True,
+        livePromotionEnabled=True,
+        productionMutationEnabled=True,
+        automaticPromotionEnabled=True,
+    )
+
+    dumped = promotion_config.model_dump(by_alias=True)
+    # The new live-promotion gate must not become a backdoor that flips the
+    # frozen authority flags. Those stay Literal[False].
+    assert dumped["productionMutationEnabled"] is False
+    assert dumped["automaticPromotionEnabled"] is False
+    assert dumped["livePromotionEnabled"] is True

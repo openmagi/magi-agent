@@ -21,11 +21,129 @@ Resolution rules
 
 from __future__ import annotations
 
+import math
 import os
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping
+
+# ---------------------------------------------------------------------------
+# Minimal TOML serializer (tomli_w is not in the project's dependencies; we
+# keep this small and handle the value types that appear in real config.toml:
+# str, bool, int, finite-float, list (of the above), and nested tables (dicts).
+#
+# Anything not faithfully renderable — datetimes, None, sets, inf/nan, nested
+# dicts inside arrays (array-of-tables) — raises ValueError immediately rather
+# than emitting a corrupt/lossy representation.
+# ---------------------------------------------------------------------------
+
+# Control-character escape map for TOML basic strings.
+_TOML_ESCAPES: dict[str, str] = {
+    "\\": "\\\\",
+    '"': '\\"',
+    "\b": "\\b",
+    "\f": "\\f",
+    "\n": "\\n",
+    "\r": "\\r",
+    "\t": "\\t",
+}
+
+
+def _escape_toml_string(s: str) -> str:
+    """Return the content of a TOML basic string (without surrounding quotes)."""
+    parts: list[str] = []
+    for ch in s:
+        if ch in _TOML_ESCAPES:
+            parts.append(_TOML_ESCAPES[ch])
+        elif ord(ch) < 0x20 or ord(ch) == 0x7F:
+            # Other control chars: use \uXXXX escape.
+            parts.append(f"\\u{ord(ch):04X}")
+        else:
+            parts.append(ch)
+    return "".join(parts)
+
+
+def _toml_value(value: object) -> str:
+    """Render a scalar, list, or nested-table value as a TOML literal.
+
+    Raises ``ValueError`` for any type/value that cannot be faithfully
+    represented in TOML by this serializer (e.g. datetimes, None, sets,
+    inf, nan, arrays-of-tables).
+    """
+    if isinstance(value, bool):  # bool BEFORE int (bool is a subclass of int)
+        return "true" if value else "false"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        if math.isnan(value) or math.isinf(value):
+            raise ValueError(
+                f"Cannot serialize float {value!r} to TOML: "
+                "inf and nan are not valid TOML float literals."
+            )
+        return repr(value)
+    if isinstance(value, str):
+        return f'"{_escape_toml_string(value)}"'
+    if isinstance(value, (list, tuple)):
+        # Render as a TOML inline array.  Each element must be a scalar
+        # (dict elements would require array-of-tables syntax which we don't
+        # support here — raise so the round-trip self-check catches it).
+        rendered_elems: list[str] = []
+        for elem in value:
+            if isinstance(elem, dict):
+                raise ValueError(
+                    "Cannot serialize a list containing dicts (array-of-tables) "
+                    "with this minimal TOML writer."
+                )
+            rendered_elems.append(_toml_value(elem))
+        return "[" + ", ".join(rendered_elems) + "]"
+    # Unsupported type (datetime, None, set, …) — raise instead of silently dropping.
+    raise ValueError(
+        f"Cannot serialize value of type {type(value).__name__!r} to TOML: {value!r}. "
+        "Aborting to prevent config data loss."
+    )
+
+
+def _render_toml(data: dict[str, object]) -> str:
+    """Serialize ``data`` to a minimal TOML string (sections + key=value).
+
+    Handles arbitrarily nested tables by emitting ``[a.b.c]`` section headers
+    for nested dict values.  Scalars and arrays at each level are emitted as
+    ``key = val`` lines immediately after the section header.
+
+    Raises ``ValueError`` for any value type that cannot be faithfully rendered.
+    """
+    lines: list[str] = []
+
+    def _emit_section(d: dict[str, object], prefix: str) -> None:
+        """Emit the non-dict keys of ``d`` then recurse into sub-tables."""
+        # Non-table values first (scalars + inline arrays).
+        for key, value in d.items():
+            if not isinstance(value, dict):
+                rendered = _toml_value(value)
+                lines.append(f"{key} = {rendered}")
+        # Sub-tables after (each gets its own [prefix.key] header).
+        for key, value in d.items():
+            if isinstance(value, dict):
+                section_name = f"{prefix}.{key}" if prefix else key
+                lines.append(f"\n[{section_name}]")
+                _emit_section(value, section_name)
+
+    # Top-level non-table values (no section header needed).
+    for key, value in data.items():
+        if not isinstance(value, dict):
+            rendered = _toml_value(value)
+            lines.append(f"{key} = {rendered}")
+    # Top-level tables.
+    for key, value in data.items():
+        if isinstance(value, dict):
+            lines.append(f"\n[{key}]")
+            _emit_section(value, key)
+
+    result = "\n".join(lines)
+    if result and not result.endswith("\n"):
+        result += "\n"
+    return result
 
 from magi_agent.config.env import LOCAL_DEV_MODEL_SENTINEL
 
@@ -191,10 +309,82 @@ def resolve_provider_config(
     return None
 
 
+def model_choices_from_config(current: str | None = None) -> list[str]:
+    """Return candidate model ids with ``current`` first (if known).
+
+    Delegates to :func:`magi_agent.cli.tui.dialogs.model.model_choices` so the
+    list is always in sync with the picker dialog.  This thin wrapper lives in
+    ``providers.py`` so ``control.py`` can import it without pulling in
+    ``textual`` at the top level (the dialog module is imported lazily inside
+    the wrapper function call).
+    """
+
+    from magi_agent.cli.tui.dialogs.model import model_choices  # noqa: PLC0415
+
+    return model_choices(current)
+
+
+def persist_model(model_id: str, *, path: Path | None = None) -> None:
+    """Write ``model_id`` to ``[model].model`` in the magi config file.
+
+    - Reads the existing config (tolerates missing file — starts from empty).
+    - Sets ``[model].model = <model_id>`` WITHOUT clobbering other sections/keys.
+    - Writes back atomically (temp file + replace) and creates ``~/.magi/`` if
+      needed.
+    - ``path`` overrides the default config path for tests so tests NEVER touch
+      the real ``~/.magi/config.toml``.
+    """
+    config_path = path if path is not None else _config_path()
+    # Load existing config so we don't lose other sections/keys.
+    try:
+        with open(config_path, "rb") as fh:
+            raw: dict[str, object] = tomllib.load(fh)
+    except (FileNotFoundError, NotADirectoryError, IsADirectoryError):
+        raw = {}
+    except (OSError, tomllib.TOMLDecodeError):
+        raw = {}
+
+    # Ensure [model] section exists and set .model within it.
+    model_section = raw.get("model")
+    if not isinstance(model_section, dict):
+        model_section = {}
+    model_section = dict(model_section)  # shallow copy — don't mutate original
+    model_section["model"] = model_id
+    raw = dict(raw)  # shallow copy top level
+    raw["model"] = model_section
+
+    # Round-trip self-check: render → re-parse and assert equality BEFORE writing.
+    # If _render_toml raises (unrenderable value) or the round-trip check fails,
+    # we abort here — BEFORE touching the file — so the original is never lost.
+    rendered = _render_toml(raw)  # may raise ValueError for unrenderable types
+    reparsed = tomllib.loads(rendered)
+    if reparsed != raw:
+        raise ValueError(
+            "TOML round-trip self-check failed: the rendered config does not "
+            "re-parse to the intended dict. Aborting to preserve the original file."
+        )
+
+    # Atomic write: temp file in same dir then os.replace.
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = config_path.with_suffix(".toml.tmp")
+    try:
+        tmp_path.write_text(rendered, encoding="utf-8")
+        tmp_path.replace(config_path)
+    finally:
+        # Clean up temp if replace failed.
+        if tmp_path.exists():
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
+
+
 __all__ = [
     "SUPPORTED_PROVIDERS",
     "ProviderConfig",
     "UnknownProviderError",
     "default_model_for",
     "resolve_provider_config",
+    "persist_model",
+    "model_choices_from_config",
 ]

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from magi_agent.benchmarks.gaia.best_of_n import majority_vote
+from benchmarks.gaia.best_of_n import majority_vote
 
 
 def test_majority_picks_most_common() -> None:

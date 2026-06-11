@@ -79,10 +79,8 @@ async def test_fuzzy_edit_flag_on_indentation_mismatch_succeeds(tmp_path, monkey
     """FileEdit with wrong indentation in old_text succeeds when flag is ON."""
     monkeypatch.setenv("MAGI_EDIT_FUZZY_MATCH_ENABLED", "1")
 
-    # We must re-read the module-level flag after monkeypatching the env.
-    # gate5b reads _EDIT_FUZZY_MATCH_ENABLED at import time, so we patch it.
-    import magi_agent.gates.gate5b_full_toolhost as mod
-    monkeypatch.setattr(mod, "_EDIT_FUZZY_MATCH_ENABLED", True)
+    # gate5b now reads the flag from the env at call time.
+    monkeypatch.setenv("MAGI_EDIT_FUZZY_MATCH_ENABLED", "1")
 
     bundle = _ready_bundle(tmp_path)
     assert bundle.status == "ready"
@@ -127,8 +125,7 @@ async def test_fuzzy_edit_flag_on_indentation_mismatch_succeeds(tmp_path, monkey
 @pytest.mark.asyncio
 async def test_fuzzy_edit_flag_on_absent_old_text_returns_not_found(tmp_path, monkeypatch):
     """FileEdit with genuinely absent old_text → error status (old_text_not_found)."""
-    import magi_agent.gates.gate5b_full_toolhost as mod
-    monkeypatch.setattr(mod, "_EDIT_FUZZY_MATCH_ENABLED", True)
+    monkeypatch.setenv("MAGI_EDIT_FUZZY_MATCH_ENABLED", "1")
 
     bundle = _ready_bundle(tmp_path)
     _write_file(tmp_path, "data.py", "x = 1\ny = 2\n")
@@ -160,8 +157,7 @@ async def test_fuzzy_edit_handle_absent_old_text_raises_old_text_not_found(tmp_p
     would produce.  If the wiring were broken (e.g. NoMatchError swallowed
     silently, or mapped to a different code), this test fails.
     """
-    import magi_agent.gates.gate5b_full_toolhost as mod
-    monkeypatch.setattr(mod, "_EDIT_FUZZY_MATCH_ENABLED", True)
+    monkeypatch.setenv("MAGI_EDIT_FUZZY_MATCH_ENABLED", "1")
 
     bundle = _ready_bundle(tmp_path)
     _write_file(tmp_path, "data2.py", "x = 1\ny = 2\n")
@@ -185,8 +181,7 @@ async def test_fuzzy_edit_handle_ambiguous_raises_old_text_not_unique(tmp_path, 
     Complements test (c) — asserts the specific error code, which would fail if
     MultipleMatchesError were mapped to 'old_text_not_found' or silently ignored.
     """
-    import magi_agent.gates.gate5b_full_toolhost as mod
-    monkeypatch.setattr(mod, "_EDIT_FUZZY_MATCH_ENABLED", True)
+    monkeypatch.setenv("MAGI_EDIT_FUZZY_MATCH_ENABLED", "1")
 
     bundle = _ready_bundle(tmp_path)
 
@@ -214,8 +209,7 @@ async def test_fuzzy_edit_handle_ambiguous_raises_old_text_not_unique(tmp_path, 
 @pytest.mark.asyncio
 async def test_fuzzy_edit_flag_on_ambiguous_duplicate_returns_not_unique(tmp_path, monkeypatch):
     """FileEdit with ambiguous duplicate → error status (old_text_not_unique)."""
-    import magi_agent.gates.gate5b_full_toolhost as mod
-    monkeypatch.setattr(mod, "_EDIT_FUZZY_MATCH_ENABLED", True)
+    monkeypatch.setenv("MAGI_EDIT_FUZZY_MATCH_ENABLED", "1")
 
     bundle = _ready_bundle(tmp_path)
 
@@ -251,8 +245,7 @@ async def test_fuzzy_edit_flag_on_ambiguous_duplicate_returns_not_unique(tmp_pat
 @pytest.mark.asyncio
 async def test_fuzzy_edit_flag_off_preserves_exact_only_behavior(tmp_path, monkeypatch):
     """Flag OFF: indentation-mismatched old_text fails as before."""
-    import magi_agent.gates.gate5b_full_toolhost as mod
-    monkeypatch.setattr(mod, "_EDIT_FUZZY_MATCH_ENABLED", False)
+    monkeypatch.setenv("MAGI_EDIT_FUZZY_MATCH_ENABLED", "0")
 
     bundle = _ready_bundle(tmp_path)
     content = "def hello():\n    return 'world'\n"
@@ -287,8 +280,7 @@ async def test_fuzzy_edit_flag_off_preserves_exact_only_behavior(tmp_path, monke
 @pytest.mark.asyncio
 async def test_fuzzy_edit_flag_off_exact_match_still_works(tmp_path, monkeypatch):
     """Flag OFF: exact old_text succeeds (no regression on happy path)."""
-    import magi_agent.gates.gate5b_full_toolhost as mod
-    monkeypatch.setattr(mod, "_EDIT_FUZZY_MATCH_ENABLED", False)
+    monkeypatch.setenv("MAGI_EDIT_FUZZY_MATCH_ENABLED", "0")
 
     bundle = _ready_bundle(tmp_path)
     content = "def hello():\n    return 'world'\n"
@@ -317,8 +309,7 @@ async def test_fuzzy_edit_flag_off_exact_match_still_works(tmp_path, monkeypatch
 @pytest.mark.asyncio
 async def test_fuzzy_edit_attaches_edit_match_receipt(tmp_path, monkeypatch):
     """PR1: A successful fuzzy FileEdit attaches an EditMatchReceiptRecord."""
-    import magi_agent.gates.gate5b_full_toolhost as mod
-    monkeypatch.setattr(mod, "_EDIT_FUZZY_MATCH_ENABLED", True)
+    monkeypatch.setenv("MAGI_EDIT_FUZZY_MATCH_ENABLED", "1")
 
     bundle = _ready_bundle(tmp_path)
     content = (
@@ -359,8 +350,7 @@ async def test_fuzzy_edit_attaches_edit_match_receipt(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_exact_fuzzy_edit_attaches_receipt_with_simple_tier(tmp_path, monkeypatch):
     """PR1: Exact match via simple tier also produces a receipt (tier=simple)."""
-    import magi_agent.gates.gate5b_full_toolhost as mod
-    monkeypatch.setattr(mod, "_EDIT_FUZZY_MATCH_ENABLED", True)
+    monkeypatch.setenv("MAGI_EDIT_FUZZY_MATCH_ENABLED", "1")
 
     bundle = _ready_bundle(tmp_path)
     _write_file(tmp_path, "simple.py", "x = 1\ny = 2\n")
@@ -381,8 +371,7 @@ async def test_exact_fuzzy_edit_attaches_receipt_with_simple_tier(tmp_path, monk
 @pytest.mark.asyncio
 async def test_flag_off_no_edit_match_receipt(tmp_path, monkeypatch):
     """PR1: With flag OFF the edit_match_receipt is None (exact-only path)."""
-    import magi_agent.gates.gate5b_full_toolhost as mod
-    monkeypatch.setattr(mod, "_EDIT_FUZZY_MATCH_ENABLED", False)
+    monkeypatch.setenv("MAGI_EDIT_FUZZY_MATCH_ENABLED", "0")
 
     bundle = _ready_bundle(tmp_path)
     _write_file(tmp_path, "exact.py", "a = 1\n")

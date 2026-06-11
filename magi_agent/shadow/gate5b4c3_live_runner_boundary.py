@@ -325,6 +325,11 @@ class Gate5B4C3LiveRunnerBoundaryResult(BaseModel):
         alias="outputTextInternal",
         exclude=True,
     )
+    usage_internal: dict[str, int] | None = Field(
+        default=None,
+        alias="usageInternal",
+        exclude=True,
+    )
     user_visible_output: str | None = Field(default=None, alias="userVisibleOutput")
     authority: Gate5B4C3ShadowGenerationAuthorityFlags = Field(
         default_factory=Gate5B4C3ShadowGenerationAuthorityFlags,
@@ -381,6 +386,7 @@ class Gate5B4C3LiveRunnerBoundaryResult(BaseModel):
 
 
 AdkPrimitivesLoader: TypeAlias = Callable[[], Gate5B4C3LiveAdkPrimitives]
+Gate5B4C3PublicEventSink: TypeAlias = Callable[[Mapping[str, object]], None]
 
 
 class Gate5B4C3LiveRunnerBoundary:
@@ -391,6 +397,7 @@ class Gate5B4C3LiveRunnerBoundary:
         adk_tools: Sequence[object] = (),
         gate1a_egress_correlation_context: Gate1AEgressCorrelationContext | None = None,
         gate1a_egress_proxy_url: str | None = None,
+        public_event_sink: Gate5B4C3PublicEventSink | None = None,
     ) -> None:
         self._adk_primitives_loader = (
             adk_primitives_loader or load_gate5b4c3_live_adk_primitives
@@ -398,6 +405,7 @@ class Gate5B4C3LiveRunnerBoundary:
         self._adk_tools = tuple(adk_tools)
         self._gate1a_egress_correlation_context = gate1a_egress_correlation_context
         self._gate1a_egress_proxy_url = str(gate1a_egress_proxy_url or "").strip()
+        self._public_event_sink = public_event_sink
 
     def invoke(
         self,
@@ -651,6 +659,7 @@ class Gate5B4C3LiveRunnerBoundary:
         output_chunks: list[str] = []
         manual_continuations = 0
         tool_only_events_seen = False
+        usage_totals = [0, 0, 0]
         try:
             async with asyncio.timeout(request.budgets.python_runner_timeout_ms / 1000):
                 next_message: object = message
@@ -658,6 +667,8 @@ class Gate5B4C3LiveRunnerBoundary:
                     function_calls: list[Mapping[str, object]] = []
                     function_call_keys: set[str] = set()
                     function_responses_seen = False
+                    current_run_output_chunks: list[str] = []
+                    stream_usage: tuple[int, int, int] | None = None
                     current_run_kwargs = {**run_kwargs, "new_message": next_message}
                     async for event in runner.run_async(
                         **_allowlist_kwargs(
@@ -668,7 +679,23 @@ class Gate5B4C3LiveRunnerBoundary:
                         event_count += 1
                         chunk = _event_text(event)
                         if chunk:
-                            output_chunks.append(chunk)
+                            visible_delta = _event_visible_text_delta(
+                                event,
+                                chunk,
+                                current_run_output_chunks,
+                            )
+                            if visible_delta:
+                                current_run_output_chunks.append(visible_delta)
+                                output_chunks.append(visible_delta)
+                                self._emit_public_event(
+                                    {
+                                        "type": "text_delta",
+                                        "delta": visible_delta,
+                                    }
+                                )
+                        event_usage = _event_usage_metadata(event)
+                        if event_usage is not None:
+                            stream_usage = event_usage
                         event_function_calls = _event_function_calls(event)
                         for function_call in event_function_calls:
                             function_call_key = _json_dumps(function_call)
@@ -683,6 +710,10 @@ class Gate5B4C3LiveRunnerBoundary:
                             function_responses_seen = True
                         if event_count >= 64:
                             break
+                    if stream_usage is not None:
+                        usage_totals[0] += stream_usage[0]
+                        usage_totals[1] += stream_usage[1]
+                        usage_totals[2] += stream_usage[2]
                     # Drive pending tool calls to execution even when the model
                     # also emitted preamble text in the same turn. Short-circuiting
                     # on `output_chunks` here discarded the model's unexecuted tool
@@ -748,6 +779,7 @@ class Gate5B4C3LiveRunnerBoundary:
                     gate1a_egress_proxy_url=self._gate1a_egress_proxy_url,
                 ),
                 output_text=_joined_output(output_chunks),
+                usage=_usage_dict(tuple(usage_totals)),
             )
         except Exception as exc:
             if selected_full_toolhost and tool_only_events_seen:
@@ -777,6 +809,7 @@ class Gate5B4C3LiveRunnerBoundary:
                         runner_kwargs_keys=tuple(sorted(runner_kwargs)),
                         run_async_kwargs_keys=tuple(sorted(run_kwargs)),
                         output_text=_joined_output(output_chunks),
+                        usage=_usage_dict(tuple(usage_totals)),
                     )
             stage, reason_code, exception_category = _classify_runner_exception(exc)
             model_attempted = not (
@@ -814,6 +847,7 @@ class Gate5B4C3LiveRunnerBoundary:
                     gate1a_egress_proxy_url=self._gate1a_egress_proxy_url,
                 ),
                 output_text=_joined_output(output_chunks),
+                usage=_usage_dict(tuple(usage_totals)),
             )
 
         output_text = _joined_output(output_chunks)
@@ -906,7 +940,17 @@ class Gate5B4C3LiveRunnerBoundary:
             runner_kwargs_keys=tuple(sorted(runner_kwargs)),
             run_async_kwargs_keys=tuple(sorted(run_kwargs)),
             output_text=output_text,
+            usage=_usage_dict(tuple(usage_totals)),
         )
+
+    def _emit_public_event(self, payload: Mapping[str, object]) -> None:
+        if self._public_event_sink is None:
+            return
+        try:
+            self._public_event_sink(dict(payload))
+        except Exception:
+            # Streaming hints must never change the selected boundary result.
+            return
 
 
 def load_gate5b4c3_live_adk_primitives() -> Gate5B4C3LiveAdkPrimitives:
@@ -977,12 +1021,14 @@ def run_gate5b4c3_live_runner_boundary(
     adk_tools: Sequence[object] = (),
     gate1a_egress_correlation_context: Gate1AEgressCorrelationContext | None = None,
     gate1a_egress_proxy_url: str | None = None,
+    public_event_sink: Gate5B4C3PublicEventSink | None = None,
 ) -> Gate5B4C3LiveRunnerBoundaryResult:
     boundary = Gate5B4C3LiveRunnerBoundary(
         adk_primitives_loader or load_gate5b4c3_live_adk_primitives,
         adk_tools=adk_tools,
         gate1a_egress_correlation_context=gate1a_egress_correlation_context,
         gate1a_egress_proxy_url=gate1a_egress_proxy_url,
+        public_event_sink=public_event_sink,
     )
     return boundary.invoke(request, config=config)
 
@@ -995,12 +1041,14 @@ async def run_gate5b4c3_live_runner_boundary_async(
     adk_tools: Sequence[object] = (),
     gate1a_egress_correlation_context: Gate1AEgressCorrelationContext | None = None,
     gate1a_egress_proxy_url: str | None = None,
+    public_event_sink: Gate5B4C3PublicEventSink | None = None,
 ) -> Gate5B4C3LiveRunnerBoundaryResult:
     boundary = Gate5B4C3LiveRunnerBoundary(
         adk_primitives_loader or load_gate5b4c3_live_adk_primitives,
         adk_tools=adk_tools,
         gate1a_egress_correlation_context=gate1a_egress_correlation_context,
         gate1a_egress_proxy_url=gate1a_egress_proxy_url,
+        public_event_sink=public_event_sink,
     )
     return await boundary.invoke_async(request, config=config)
 
@@ -1300,7 +1348,7 @@ def _runner_error_diagnostic(
             if gate1a_egress_correlation_context is not None
             else None
         ),
-        routeMode=_safe_label(request.mode, "unknown"),
+        routeMode="user_visible_generation",
         gateMode=(
             "gate1a_readonly_tools"
             if tools_policy == "shadow_readonly"
@@ -1358,6 +1406,7 @@ def _result(
     error_preview: str | None = None,
     runner_error_diagnostic: Gate5B4C3LiveRunnerErrorDiagnostic | None = None,
     output_text: str | None = None,
+    usage: dict[str, int] | None = None,
 ) -> Gate5B4C3LiveRunnerBoundaryResult:
     return Gate5B4C3LiveRunnerBoundaryResult(
         diagnostic=diagnostic.model_dump(by_alias=True, mode="python", warnings=False),
@@ -1387,6 +1436,7 @@ def _result(
             else None
         ),
         outputTextInternal=output_text,
+        usageInternal=usage,
     )
 
 
@@ -1437,6 +1487,42 @@ def _event_text(event: object) -> str | None:
     return None
 
 
+def _event_visible_text_delta(
+    event: object,
+    text: str,
+    current_run_output_chunks: Sequence[str],
+) -> str | None:
+    """Return the new user-visible text for an ADK event.
+
+    ADK SSE runs can emit token-level ``partial=True`` events followed by a
+    final non-partial event whose content is the aggregate text for the same
+    model call. The final aggregate is useful for ADK's transcript, but sending
+    it again as a public delta duplicates the answer in hosted chat.
+    """
+
+    if _event_is_partial(event):
+        return text
+    current_text = "".join(current_run_output_chunks)
+    if not current_text:
+        return text
+    if text.startswith(current_text):
+        suffix = text[len(current_text) :]
+        return suffix or None
+    return text
+
+
+def _event_is_partial(event: object) -> bool:
+    value = _mapping_or_attr(event, "partial")
+    if isinstance(value, bool):
+        return value
+    dumped = _safe_model_dump_mapping(event)
+    if dumped is not None:
+        value = _mapping_or_attr(dumped, "partial")
+        if isinstance(value, bool):
+            return value
+    return False
+
+
 def _text_chunks_from_parts(parts: Sequence[object]) -> list[str]:
     chunks: list[str] = []
     for part in parts:
@@ -1482,6 +1568,52 @@ def _event_function_responses(event: object) -> tuple[object, ...]:
             if response is not None:
                 responses.append(response)
     return tuple(responses)
+
+
+def _usage_int(meta: object, *names: str) -> int | None:
+    for name in names:
+        value = _mapping_or_attr(meta, name)
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, int) and value >= 0:
+            return value
+    return None
+
+
+def _event_usage_metadata(event: object, *, depth: int = 0) -> tuple[int, int, int] | None:
+    if depth > 3:
+        return None
+    meta = _mapping_or_attr(event, "usage_metadata") or _mapping_or_attr(
+        event,
+        "usageMetadata",
+    )
+    if meta is not None:
+        prompt = _usage_int(meta, "prompt_token_count", "promptTokenCount")
+        candidates = _usage_int(meta, "candidates_token_count", "candidatesTokenCount")
+        cached = _usage_int(
+            meta,
+            "cached_content_token_count",
+            "cachedContentTokenCount",
+        )
+        if prompt is not None or candidates is not None or cached is not None:
+            return (prompt or 0, candidates or 0, cached or 0)
+    for nested_name in ("llm_response", "response"):
+        nested = _mapping_or_attr(event, nested_name)
+        if nested is not None:
+            found = _event_usage_metadata(nested, depth=depth + 1)
+            if found is not None:
+                return found
+    return None
+
+
+def _usage_dict(totals: tuple[int, int, int]) -> dict[str, int] | None:
+    if not any(totals):
+        return None
+    return {
+        "inputTokens": totals[0],
+        "outputTokens": totals[1],
+        "cacheReadTokens": totals[2],
+    }
 
 
 def _event_parts(
@@ -1676,16 +1808,24 @@ async def _run_manual_tool_calls(
 
 
 async def _invoke_manual_tool(tool: object, args: Mapping[str, object]) -> object:
+    safe_args = _manual_tool_invocation_args(args)
     run_async = getattr(tool, "run_async", None)
     if callable(run_async):
-        return await run_async(args=dict(args), tool_context=object())
+        return await run_async(args=safe_args, tool_context=object())
     func = getattr(tool, "func", None)
     if callable(func):
-        result = func(**dict(args))
+        result = func(**safe_args)
         if hasattr(result, "__await__"):
             return await result
         return result
     raise TypeError("manual tool is not invocable")
+
+
+def _manual_tool_invocation_args(args: Mapping[str, object]) -> dict[str, object]:
+    safe_args = dict(args)
+    if set(safe_args) == {"arguments"} and isinstance(safe_args["arguments"], Mapping):
+        return dict(safe_args["arguments"])
+    return safe_args
 
 
 async def _run_no_tool_finalizer(
@@ -1814,7 +1954,14 @@ def _run_config(*, max_llm_calls: int) -> object | None:
         except Exception:
             return None
     try:
-        return RunConfig(max_llm_calls=max_llm_calls)
+        from google.adk.agents.run_config import StreamingMode
+    except Exception:
+        StreamingMode = None  # type: ignore[assignment]
+    try:
+        kwargs: dict[str, object] = {"max_llm_calls": max_llm_calls}
+        if StreamingMode is not None:
+            kwargs["streaming_mode"] = StreamingMode.SSE
+        return RunConfig(**kwargs)
     except Exception:
         return None
 

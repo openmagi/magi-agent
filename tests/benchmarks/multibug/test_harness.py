@@ -7,8 +7,8 @@ import pytest
 from google.adk.models import BaseLlm, LlmResponse
 from google.genai import types
 
-from magi_agent.benchmarks.multibug.dataset import GoldProblem, MultiProblemInstance
-from magi_agent.benchmarks.multibug.harness import run_multiproblem
+from benchmarks.multibug.dataset import GoldProblem, MultiProblemInstance
+from benchmarks.multibug.harness import run_multiproblem
 from magi_agent.discovery.models import DiscoveryConfig
 
 

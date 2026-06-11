@@ -95,6 +95,17 @@ User-visible projection   <-------- Output projector + audit checkpoint
 
 ## Verify Source Before Claim
 
+> **Status: governance demo (research final gate is audit-only, default-OFF).**
+> This illustrates the evidence-governance model. On a fresh install with one
+> provider key it is not reproducible as a hard block: the research final
+> projection gate runs in audit/observe mode
+> (`magi_agent/research/final_projection_gate.py`,
+> `final_answer_blocking_enabled` is `Literal[False]`), so claims are recorded
+> but it **does not block the final answer**. The gate that does block today is
+> the coding-domain **pre-final** completion/evidence gate
+> (`magi_agent/cli/engine.py`, `pre_final_evidence_gate_blocked`), default-ON
+> for coding turns.
+
 User request: Read the uploaded product spec, market report, and competitor pricing table. Answer the competitive positioning questions. If something is not in the documents, say so clearly.
 
 The runtime routes the turn to a source-verified research workflow, compiles an effective policy snapshot requiring inspected-source evidence, projects only allowed document refs and committed public context, then forces reads through ToolHost or a source-inspection boundary.

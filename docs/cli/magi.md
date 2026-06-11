@@ -170,23 +170,29 @@ Keybindings are resolved by context. The built-in defaults are:
 | `Y` | Allow (`confirmation:allow`) |
 | `N` | Deny (`confirmation:deny`) |
 
-**v1.1 follow-ups:** vim mode, keybindings hot-reload, and **user
-`keybindings.json` loading** are not yet implemented. In v1, the TUI
-ships with built-in defaults only (`load_keybindings(None)`); there is no
-`--keybindings` flag and no config-path auto-load. Custom keymap loading
-is deferred to v1.1.
+**v1.1 follow-ups:** vim mode and keybindings hot-reload remain deferred.
+User `keybindings.json` loading **is** wired (see below).
 
-## Keybindings customization (`keybindings.json`) — v1.1
+## Keybindings customization (`keybindings.json`)
 
-> **v1 status:** The TUI loads built-in defaults only. User-supplied
-> `keybindings.json` files are **not loaded in v1** — there is no
-> `--keybindings` CLI flag and no automatic config-path lookup. The
-> format below is accurate (the loader supports it), but the file will
-> not be read until v1.1 wires up the flag and auto-load path.
+The TUI loads a user keybindings config on startup from
+`<MAGI_CLI_SESSION_DIR or ~/.magi>/keybindings.json` — the same config root
+the session log, history, and theme settings use. When the file is absent the
+TUI uses the built-in defaults only; when present, its bindings are merged over
+the defaults (user overrides win). The loader never raises: a missing,
+malformed, or unknown-action entry is gracefully ignored and degrades to the
+built-in defaults, so the app always has a usable keymap.
 
-To override defaults in v1.1, place a `keybindings.json` file in your
-config directory (path to be passed via a `--keybindings` flag or via
-the default config path, both planned for v1.1).
+When a chord is partially typed (e.g. `Ctrl+X` of `Ctrl+X Ctrl+K`), a
+**which-key overlay** appears showing the candidate continuations for the
+pending chord; it hides when the chord resolves or is cancelled.
+
+There is no `--keybindings` flag; the config path is the fixed
+`keybindings.json` under the config root above. Vim mode and hot-reload of an
+edited file are deferred to v1.1.
+
+To override defaults, place a `keybindings.json` file in your config directory
+(`~/.magi/` by default, or `$MAGI_CLI_SESSION_DIR` when set).
 
 ### Format
 
@@ -254,9 +260,24 @@ violation; it never raises — it degrades to the built-in defaults on error.
 | `default` | Prompts for each tool call that requires approval. |
 | `acceptEdits` | Automatically allows edit-class tools (file writes, patches). |
 | `bypassPermissions` | Allows all tool calls without prompting. |
+| `smartApprove` | Opt-in: auto-approves low-risk tool calls and only prompts for higher-risk ones. Never selected automatically — pass `--permission-mode smartApprove`. |
 
 ```sh
 magi -p "apply the patch" --permission-mode acceptEdits
+magi -p "apply the patch" --permission-mode smartApprove
+```
+
+## Agent mode (`--mode`)
+
+`--mode` selects the agent's working mode:
+
+| Mode | Behavior |
+|------|----------|
+| `act` (default) | Full tool access — the agent reads, writes, and runs commands. |
+| `plan` | Plan-first mode restricted to read-only tools; the agent drafts a plan before acting. |
+
+```sh
+magi --mode plan "refactor the auth module"
 ```
 
 ## `MAGI_CLI_ENABLED`
@@ -282,11 +303,13 @@ Options:
   --output [text|json|stream-json]
                                  Output format for headless mode. [default: text]
   --include-partial-messages     Include partial streaming events in stream-json.
-  --permission-mode [default|acceptEdits|bypassPermissions]
+  --permission-mode [default|acceptEdits|bypassPermissions|smartApprove]
                                  Permission mode.  [default: default]
   --resume TEXT                  Resume a session by id.
   --continue / --no-continue     Continue the most-recent session.
   --model TEXT                   Model to use.
+  --mode [plan|act]              Agent mode: plan (read-only tools) | act (full
+                                 tools).  [default: act]
   -V, --version                  Print the magi version and exit.
   --help                         Show this message and exit.
 ```

@@ -51,11 +51,13 @@ from magi_agent.cli.engine import (
     build_engine_recovery_policy,
     build_output_continuation_config,
 )
+from magi_agent.cli.goal_nudge_wiring import build_goal_nudge_from_env
 from magi_agent.cli.permissions import HeadlessSink, PermissionMode, RulesPermissionGate
 from magi_agent.cli.session_log import SessionLog
 from magi_agent.composio.config import resolve_composio_config
 from magi_agent.composio.mcp import (
     ComposioToolsetBundle,
+    attach_composio_toolsets_through_dispatcher,
     attach_composio_toolsets_to_runner,
     build_composio_toolset_bundle,
 )
@@ -84,6 +86,17 @@ def local_runner_policy_routing_enabled_from_env() -> bool:
     if raw is None:
         return False
     return raw.strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _build_user_hook_bus_for_headless(*, workspace_root: str) -> object | None:
+    from magi_agent.config.env import is_user_hooks_enabled
+
+    if not is_user_hooks_enabled():
+        return None
+
+    from magi_agent.cli.hook_wiring import build_user_hook_bus
+
+    return build_user_hook_bus(workspace_root=workspace_root)
 
 
 @dataclass
@@ -141,6 +154,10 @@ def build_headless_runtime(
     prompt_sink: "PromptSink | None" = None,
     runner_policy_routing_enabled: bool | None = None,
     memory_mode: "MemoryMode | str" = "normal",
+    recall_query: str | None = None,
+    bot_id: str = "local",
+    owner_user_id: str = "local",
+    learning_live_readiness: object | None = None,
 ) -> HeadlessRuntime:
     """Construct the complete headless dependency set.
 
@@ -185,6 +202,11 @@ def build_headless_runtime(
             model=model,
             mode=mode,
             memory_mode=memory_mode,
+            recall_query=recall_query,
+            bot_id=bot_id,
+            owner_user_id=owner_user_id,
+            learning_live_readiness=learning_live_readiness,
+            permission_mode=permission_mode,
         )
     )
     composio_bundle, composio_attached = _build_composio_bundle_for_mode(
@@ -226,6 +248,18 @@ def build_headless_runtime(
         runner_policy_routing_enabled=runner_policy_routing_enabled,
         event_sink=event_sink,
         evidence_collector=evidence_collector if callable(evidence_collector) else None,
+        # PR4 (cluster 03 C4): production goal-nudge wiring. Default OFF
+        # (MAGI_GOAL_NUDGE_ENABLED) → build_goal_nudge_from_env returns None →
+        # engine streaming is byte-identical to pre-PR4. When ON, a clean stop
+        # short of the goal triggers a bounded continuation (default mode "goal").
+        goal_nudge=build_goal_nudge_from_env(),
+        # PR2 (cluster 11): production user-hook wiring. Default OFF
+        # (MAGI_USER_HOOKS_ENABLED) → build_user_hook_bus returns None → engine
+        # never attaches the HookBus tool-callback bridge and streaming is
+        # byte-identical. When ON (self-host / local CLI only), CC-style
+        # ~/.magi/settings.json + <cwd>/.magi/settings.json command hooks are
+        # bridged onto the before/after-tool callbacks.
+        user_hook_bus=_build_user_hook_bus_for_headless(workspace_root=effective_cwd),
     )
 
     # (C) Permission gate — default stays sink-less and therefore fail-safe on
@@ -362,6 +396,11 @@ def _build_default_runner(
     model: str | None = None,
     mode: "RuntimeMode" = "act",
     memory_mode: "MemoryMode | str" = "normal",
+    recall_query: str | None = None,
+    bot_id: str = "local",
+    owner_user_id: str = "local",
+    learning_live_readiness: object | None = None,
+    permission_mode: "PermissionMode" = "default",
 ) -> object:
     """Build the CLI's default runner.
 
@@ -407,11 +446,20 @@ def _build_default_runner(
                 session_id=session_id,
                 mode=mode,
                 memory_mode=memory_mode,
+                permission_mode=permission_mode,
                 general_automation_receipts=general_automation_receipts,
                 local_tool_evidence_collector=local_tool_evidence,
             ),
             workspace_root=workspace_root,
             memory_mode=memory_mode,
+            recall_query=recall_query,
+            # Thread REAL identity + the caller-provided learning-live readiness
+            # config down to prompt assembly (issue 3 end-to-end). owner_user_id
+            # is the bot-owner identity used for the canary digest match (distinct
+            # from the ADK session user).
+            bot_id=bot_id,
+            owner_user_id=owner_user_id,
+            learning_live_readiness=learning_live_readiness,
             general_automation_receipts=general_automation_receipts,
             local_tool_evidence_collector=local_tool_evidence,
         )
@@ -427,6 +475,7 @@ def _build_first_party_adk_tools(
     session_id: str,
     mode: "RuntimeMode" = "act",
     memory_mode: "MemoryMode | str" = "normal",
+    permission_mode: PermissionMode = "default",
     general_automation_receipts: object | None = None,
     local_tool_evidence_collector: object | None = None,
 ) -> list[object]:
@@ -485,6 +534,17 @@ def _build_first_party_adk_tools(
         register_file_tool_manifests(registry)
         bind_file_toolhost_handlers(registry)
 
+    from magi_agent.config.env import browser_tool_enabled  # noqa: PLC0415
+
+    if browser_tool_enabled():
+        from magi_agent.browser.autonomous.tool import (  # noqa: PLC0415
+            bind_browser_toolhost_handler,
+            register_browser_tool_manifest,
+        )
+
+        register_browser_tool_manifest(registry)
+        bind_browser_toolhost_handler(registry)
+
     receipt_store = (
         general_automation_receipts
         if isinstance(general_automation_receipts, GeneralAutomationReceiptLedgerStore)
@@ -494,6 +554,11 @@ def _build_first_party_adk_tools(
         registry,
         general_automation_receipts=receipt_store,
     )
+    # Only advertise tools that actually have an execution handler bound. A
+    # manifest with no handler can never be dispatched, so exposing it would
+    # advertise a capability the runtime cannot deliver. (Handler-less catalog
+    # manifests were removed in doc 12 PR5 — see tools/catalog.py — so this
+    # filter is now a guard rather than a routine drop-list.)
     exposed_tool_names = tuple(
         registration.manifest.name
         for registration in (
@@ -526,11 +591,16 @@ def _build_first_party_adk_tools(
             workspace_ref="local-cli-workspace",
             memory_mode=memory_mode_value,
             channel="cli",
-            permission_scope={
-                "mode": "selected_full_toolhost",
-                "source": "selected_full_toolhost",
-            },
+            permission_scope=_resolve_first_party_permission_scope(
+                tool_name if isinstance(tool_name, str) else None,
+                registry=registry,
+                permission_mode=permission_mode,
+            ),
             execution_contract={"agentRole": "general"},
+            source_ledger=_source_ledger_for_session(
+                local_tool_evidence_collector,
+                session_id,
+            ),
             adk_tool_context=adk_tool_context,
             adk_context=adk_tool_context,
             tool_use_id=tool_use_id if isinstance(tool_use_id, str) else None,
@@ -550,6 +620,88 @@ def _build_first_party_adk_tools(
         collector=local_tool_evidence_collector,
         session_id=session_id,
     )
+
+
+_LEGACY_FULL_TOOLHOST_SCOPE: dict[str, object] = {
+    "mode": "selected_full_toolhost",
+    "source": "selected_full_toolhost",
+}
+
+
+def _resolve_first_party_permission_scope(
+    tool_name: str | None,
+    *,
+    registry: object,
+    permission_mode: "PermissionMode",
+) -> dict[str, object]:
+    """Return the ``permission_scope`` for a first-party CLI tool call.
+
+    When ``MAGI_PERMISSION_SCOPE_FROM_MODE`` is OFF (default) this returns the
+    legacy hardcoded ``selected_full_toolhost`` scope — byte-identical to the
+    pre-PR1 behavior. When ON, the scope is derived from ``permission_mode`` +
+    the called tool's manifest via
+    :class:`~magi_agent.tools.permission_scope.PermissionScopeResolver`. Fail-open:
+    any error collapses back to the legacy scope.
+    """
+    try:
+        from magi_agent.config.env import (  # noqa: PLC0415
+            permission_scope_from_mode_enabled,
+        )
+
+        if not permission_scope_from_mode_enabled():
+            return dict(_LEGACY_FULL_TOOLHOST_SCOPE)
+
+        manifest = None
+        if tool_name:
+            resolve_registration = getattr(registry, "resolve_registration", None)
+            registration = (
+                resolve_registration(tool_name) if callable(resolve_registration) else None
+            )
+            manifest = getattr(registration, "manifest", None) if registration else None
+
+        if manifest is None:
+            if str(permission_mode).strip() == "bypassPermissions":
+                return {"mode": "bypass", "source": "bypass"}
+            return {"mode": "default", "source": "builtin"}
+
+        from magi_agent.tools.permission_scope import (  # noqa: PLC0415
+            PermissionScopeResolver,
+        )
+
+        return PermissionScopeResolver().resolve(
+            permission_mode=permission_mode,
+            manifest=manifest,
+            channel="cli",
+        )
+    except Exception:
+        return dict(_LEGACY_FULL_TOOLHOST_SCOPE)
+
+
+def _source_ledger_for_session(
+    collector: object | None,
+    session_id: str,
+) -> tuple[object, ...]:
+    """Thread the collector's per-turn EvidenceLedgers onto ``source_ledger``.
+
+    Flag-gated + fail-open: when ``MAGI_EVIDENCE_LEDGER_LIFECYCLE_ENABLED`` is
+    off (default) this returns the empty tuple so the ToolContext is
+    byte-identical to today. When on, it returns the collector's
+    ``evidence_ledgers_for_session`` so ``InspectSelfEvidence`` can project the
+    REAL tool calls recorded so far. Any failure collapses to an empty tuple.
+    """
+    try:
+        from magi_agent.config.env import (  # noqa: PLC0415
+            is_evidence_ledger_lifecycle_enabled,
+        )
+
+        if not is_evidence_ledger_lifecycle_enabled():
+            return ()
+        ledgers_for_session = getattr(collector, "evidence_ledgers_for_session", None)
+        if not callable(ledgers_for_session):
+            return ()
+        return tuple(ledgers_for_session(session_id))
+    except Exception:
+        return ()
 
 
 def _local_tool_evidence_collector(runner: object) -> object | None:
@@ -592,6 +744,34 @@ def _build_composio_bundle_for_mode(
 
     composio_config = resolve_composio_config(os.environ)
     composio_bundle = build_composio_toolset_bundle(composio_config)
+
+    from magi_agent.config.env import composio_dispatch_enforced  # noqa: PLC0415
+
+    if composio_dispatch_enforced(os.environ):
+        # Hard-safety enforced path (PR2): route composio MCP calls through the
+        # RuntimePermissionArbiter so secret / sealed / workspace-escape
+        # arguments are blocked before the MCP body runs, AND record a receipt
+        # for every guarded call (the MCP-path analogue of ToolDispatcher
+        # appending receipts for native tools).
+        from magi_agent.composio.mcp import ComposioReceiptLedger  # noqa: PLC0415
+        from magi_agent.tools.context import ToolContext  # noqa: PLC0415
+        from magi_agent.tools.safety import (  # noqa: PLC0415
+            RuntimePermissionArbiter,
+        )
+
+        def _composio_context_factory(**_kwargs: object) -> ToolContext:
+            return ToolContext(botId="composio", channel="composio")
+
+        composio_attached = attach_composio_toolsets_through_dispatcher(
+            runner,
+            composio_bundle,
+            arbiter=RuntimePermissionArbiter(),
+            mode=mode if mode != "plan" else "act",
+            context_factory=_composio_context_factory,
+            receipt_ledger=ComposioReceiptLedger(),
+        )
+        return composio_bundle, composio_attached
+
     composio_attached = attach_composio_toolsets_to_runner(
         runner,
         composio_bundle,

@@ -26,7 +26,7 @@ from textual.containers import VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Static
 
-__all__ = ["HelpDialog", "build_help_sections", "PROMPT_KEYS"]
+__all__ = ["HelpDialog", "build_help_sections", "PROMPT_KEYS", "ENV_HELP"]
 
 
 # Phase-1 prompt-input keys. These live on ``PromptInput`` (its ``_on_key``),
@@ -41,18 +41,35 @@ PROMPT_KEYS: tuple[tuple[str, str], ...] = (
 )
 
 
+# Opt-in environment toggles. These are not keybindings or commands, so they are
+# otherwise invisible (live only in code comments). Surface them here so a user
+# can discover the gated features.
+ENV_HELP: tuple[tuple[str, str], ...] = (
+    (
+        "MAGI_TUI_NOTIFY_BELL=1",
+        "Ring the terminal bell on turn-done / permission when unfocused",
+    ),
+    (
+        "MAGI_STREAM_THINKING=1",
+        "show the agent's reasoning as a dim one-line trace",
+    ),
+)
+
+
 def build_help_sections(
     *,
     bindings: list[tuple[str, str]],
     commands: list[str],
     prompt_keys: list[tuple[str, str]] | None = None,
+    env: list[tuple[str, str]] | None = None,
 ) -> list[tuple[str, list[str]]]:
     """Return ``[(section_title, lines)]`` for the help reference.
 
     Pure formatting — no App, no Textual widgets — so it is unit-testable.
-    Empty sections (no keys / no commands / no prompt keys) are dropped.
+    Empty sections (no keys / no commands / no prompt keys / no env) are dropped.
     ``prompt_keys`` are the Phase-1 ``PromptInput`` keys (not in ``BINDINGS``);
-    they render as a dedicated "Prompt" section.
+    they render as a dedicated "Prompt" section. ``env`` are opt-in environment
+    toggles (not keys/commands); they render as an "Environment" section.
     """
 
     key_lines = [f"  {key:<12} {desc}" for key, desc in bindings if key]
@@ -60,6 +77,7 @@ def build_help_sections(
         f"  {key:<12} {desc}" for key, desc in (prompt_keys or []) if key
     ]
     command_lines = [f"  /{name}" for name in commands if name]
+    env_lines = [f"  {name}\n    {desc}" for name, desc in (env or []) if name]
     sections: list[tuple[str, list[str]]] = []
     if prompt_lines:
         sections.append(("Prompt", prompt_lines))
@@ -67,6 +85,8 @@ def build_help_sections(
         sections.append(("Keybindings", key_lines))
     if command_lines:
         sections.append(("Commands", command_lines))
+    if env_lines:
+        sections.append(("Environment", env_lines))
     return sections
 
 
@@ -106,6 +126,7 @@ class HelpDialog(ModalScreen[None]):
         bindings: list[tuple[str, str]],
         commands: list[str],
         prompt_keys: list[tuple[str, str]] | None = None,
+        env: list[tuple[str, str]] | None = None,
     ) -> None:
         super().__init__()
         self._sections = build_help_sections(
@@ -113,6 +134,7 @@ class HelpDialog(ModalScreen[None]):
             commands=commands,
             prompt_keys=list(prompt_keys) if prompt_keys is not None
             else list(PROMPT_KEYS),
+            env=list(env) if env is not None else list(ENV_HELP),
         )
 
     @classmethod

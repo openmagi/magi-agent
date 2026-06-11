@@ -150,6 +150,10 @@ def build_cli_model_runner(
     session_id: str = "cli-session",
     workspace_root: str | None = None,
     memory_mode: "MemoryMode | str" = "normal",
+    recall_query: str | None = None,
+    bot_id: str = "local",
+    owner_user_id: str = "local",
+    learning_live_readiness: object | None = None,
     task_profile: Mapping[str, object] | None = None,
     general_automation_receipts: object | None = None,
     local_tool_evidence_collector: object | None = None,
@@ -216,6 +220,17 @@ def build_cli_model_runner(
             model=config.litellm_model,
             workspace_root=effective_workspace_root,
             memory_mode=memory_mode,
+            recall_query=recall_query,
+            # Thread REAL identity (issue 3): the learning-live readiness ladder
+            # matches the selected-canary digest against these — the previous
+            # literal "local" default could only ever target the literal "local"
+            # scope, so the live recall/write seam never resolved on the real
+            # serve path. ``owner_user_id`` is the bot-OWNER identity used for the
+            # canary digest (distinct from the ADK session ``user_id`` above); the
+            # serve caller passes runtime.config.bot_id / runtime.config.user_id.
+            bot_id=bot_id,
+            user_id=owner_user_id,
+            learning_live_readiness=learning_live_readiness,
         )
     )
 
@@ -298,6 +313,39 @@ def _model_retry_kwargs(env: Mapping[str, str] | None = None) -> dict[str, int]:
     }
 
 
+def _model_reasoning_kwargs(env: Mapping[str, str] | None = None) -> dict[str, object]:
+    """Optional extended-thinking / reasoning kwargs for the LiteLlm build.
+
+    Published frontier coding-benchmark numbers are measured with adaptive
+    thinking at high effort and thinking blocks preserved across tool turns
+    (the bundled ADK LiteLlm round-trips Anthropic ``thinking_blocks`` with
+    signatures). Without these kwargs the runtime benchmarks the model in a
+    strictly weaker mode.
+
+    * ``MAGI_MODEL_THINKING_BUDGET_TOKENS`` (int > 0) — explicit Anthropic-style
+      ``thinking`` budget; takes precedence.
+    * ``MAGI_MODEL_REASONING_EFFORT`` — litellm's cross-provider
+      ``reasoning_effort`` (``low``/``medium``/``high``); ``off``/``none``
+      disable.
+
+    Unset ⇒ ``{}`` ⇒ build byte-identical to before (default OFF).
+    """
+
+    source = os.environ if env is None else env
+    budget_raw = (source.get("MAGI_MODEL_THINKING_BUDGET_TOKENS") or "").strip()
+    if budget_raw:
+        try:
+            budget = int(budget_raw)
+        except ValueError:
+            budget = 0
+        if budget > 0:
+            return {"thinking": {"type": "enabled", "budget_tokens": budget}}
+    effort = (source.get("MAGI_MODEL_REASONING_EFFORT") or "").strip().lower()
+    if effort and effort not in {"off", "none", "0", "false", "disable", "disabled"}:
+        return {"reasoning_effort": effort}
+    return {}
+
+
 def _model_api_base_kwargs(env: Mapping[str, str] | None = None) -> dict[str, object]:
     """Optional LiteLlm kwargs that route generation through a gateway base URL.
 
@@ -350,6 +398,7 @@ def _build_litellm_model(
         model=config.litellm_model,
         api_key=api_key,
         **_model_retry_kwargs(env),
+        **_model_reasoning_kwargs(env),
         **api_base_kwargs,
     )
 
@@ -420,6 +469,11 @@ def _build_default_runner_policy_assembly(
     live_policy_callback_attached: bool,
     task_profile: Mapping[str, object] | None = None,
 ) -> RunnerPolicyAssembly | None:
+    from magi_agent.config.env import parse_evidence_completion_gate_enabled  # noqa: PLC0415
+
+    if not parse_evidence_completion_gate_enabled(os.environ):
+        return None
+
     try:
         from magi_agent.recipes.compiler import (  # noqa: PLC0415
             AgentRecipeCompiler,

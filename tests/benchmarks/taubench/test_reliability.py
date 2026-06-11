@@ -1,7 +1,7 @@
 # tests/benchmarks/taubench/test_reliability.py
 from __future__ import annotations
 
-from magi_agent.benchmarks.taubench.reliability import ReliabilityConfig, validate_args
+from benchmarks.taubench.reliability import ReliabilityConfig, validate_args
 
 AIRLINE_SPEC = {
     "type": "object",
@@ -58,7 +58,7 @@ def test_validate_args_no_properties_passes() -> None:
     assert validate_args({"type": "object"}, {"x": 1}) is None
 
 
-from magi_agent.benchmarks.taubench.reliability import WriteLedger, looks_like_error
+from benchmarks.taubench.reliability import WriteLedger, looks_like_error
 
 
 def test_is_write_by_prefix() -> None:
@@ -107,7 +107,7 @@ def test_looks_like_error() -> None:
     assert looks_like_error(123) is False
 
 
-from magi_agent.benchmarks.taubench.reliability import verify_final
+from benchmarks.taubench.reliability import verify_final
 
 
 def test_verify_final_nudges_on_success_claim_without_write() -> None:
@@ -133,7 +133,7 @@ def test_verify_final_silent_without_success_language() -> None:
     assert verify_final(led, "Can you confirm your travel dates first?") is None
 
 
-from magi_agent.benchmarks.taubench.reliability import completion_review_nudge, is_conclusion
+from benchmarks.taubench.reliability import completion_review_nudge, is_conclusion
 
 
 def test_config_completion_review_default_and_any_enabled() -> None:

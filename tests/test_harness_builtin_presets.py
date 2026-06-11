@@ -36,6 +36,7 @@ REQUIRED_PRESET_KEYS = {
     "task-board-completion",
     "output-delivery",
     "artifact-delivery",
+    "document-authoring-coverage",
     "response-language",
     "parallel-research",
     "source-authority",

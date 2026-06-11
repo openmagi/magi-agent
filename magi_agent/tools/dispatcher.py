@@ -1,3 +1,11 @@
+"""Live single-call tool dispatch boundary — the hot path every tool call crosses.
+
+``ToolDispatcher.dispatch`` enforces manifest/exposure/schema checks, the GA live
+gate and the permission policy, then runs the registered handler (with optional
+readonly thread offload). Consumed by adk_bridge/tool_adapter (the ADK FunctionTool
+wrapper), cli/tool_runtime, cli/wiring, facades, gates/gate5b_full_toolhost and
+shadow/tool_policy; ConcurrentToolDispatcher wraps it for batch dispatch.
+"""
 from __future__ import annotations
 
 import asyncio
@@ -15,6 +23,7 @@ from magi_agent.harness.general_automation.live_gate import (
 from magi_agent.telemetry.trace_context import get_trace
 
 from .context import ToolContext
+from .dispatch_shared import _available_tool_names
 from .manifest import RuntimeMode, ToolManifest
 from .permission import ToolPermissionPolicy
 from .registry import ToolRegistry
@@ -246,9 +255,10 @@ class ToolDispatcher:
             result = handler(arguments, context)
             if isawaitable(result):
                 result = await result
+        _latency_ms = max(0, (time.monotonic_ns() - _t0) // 1_000_000)
         if trace is not None:
-            _dur = (time.monotonic_ns() - _t0) // 1_000_000
-            trace.record("tool", "ToolDispatcher", "execute", f"name={name}, status={result.status}", duration_ms=_dur)
+            trace.record("tool", "ToolDispatcher", "execute", f"name={name}, status={result.status}", duration_ms=_latency_ms)
+        result = _attach_latency(result, _latency_ms)
         result = self._attach_coding_receipt(name, arguments, result)
         return result
 
@@ -316,6 +326,7 @@ class ToolDispatcher:
             errorCode=result.error_code,
             errorMessage=result.error_message,
             durationMs=result.duration_ms,
+            latencyMs=result.latency_ms,
             artifactRefs=result.artifact_refs,
             fileRefs=result.file_refs,
             deliveryReceipts=result.delivery_receipts,
@@ -323,6 +334,37 @@ class ToolDispatcher:
             metadata=result.metadata,
             codingMutationReceipt=receipt.public_projection(),
         )
+
+
+def _attach_latency(result: ToolResult, latency_ms: int) -> ToolResult:
+    """Return a copy of *result* with ``latency_ms`` set.
+
+    Replaces an existing value if the handler happened to set one (unlikely —
+    handlers should not set the dispatcher-level field), so the dispatcher's
+    wall-clock measurement always wins.
+
+    Uses ``model_construct`` to avoid re-validating fields — the result is
+    already validated upstream, and certain test harnesses deliberately
+    construct results with out-of-spec status values for policy-boundary tests.
+    """
+    if result.latency_ms == latency_ms:
+        return result
+    return ToolResult.model_construct(
+        status=result.status,
+        output=result.output,
+        llm_output=result.llm_output,
+        transcript_output=result.transcript_output,
+        error_code=result.error_code,
+        error_message=result.error_message,
+        duration_ms=result.duration_ms,
+        latency_ms=latency_ms,
+        artifact_refs=result.artifact_refs,
+        file_refs=result.file_refs,
+        delivery_receipts=result.delivery_receipts,
+        retryable=result.retryable,
+        metadata=result.metadata,
+        coding_mutation_receipt=result.coding_mutation_receipt,
+    )
 
 
 def _general_automation_gate_result(
@@ -373,17 +415,6 @@ def _general_automation_gate_result(
     if outcome.decision == "deny":
         return ToolResult(status="blocked", metadata=metadata)
     return ToolResult(status="needs_approval", metadata=metadata)
-
-
-def _available_tool_names(
-    registry: ToolRegistry,
-    exposed_tool_names: tuple[str, ...] | None,
-    *,
-    mode: RuntimeMode,
-) -> tuple[str, ...]:
-    if exposed_tool_names is not None:
-        return tuple(sorted(dict.fromkeys(exposed_tool_names)))
-    return tuple(tool.name for tool in registry.list_available(mode=mode))
 
 
 def _general_automation_arguments(

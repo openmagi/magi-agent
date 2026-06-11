@@ -1,13 +1,12 @@
 """Real ADK-backed engine driver for the Magi headless CLI (PR-A2).
 
 ``MagiEngineDriver`` implements the :class:`EngineDriver` Protocol from
-``cli.contracts``. It drives a single turn through the ADK runner using the same
-adapter + bridge wiring as
-``runtime.runner_session_boundary._collect_runner_events`` (the reference
-implementation), but YIELDS each projected public event incrementally as a
-``RuntimeEvent`` instead of accumulating-then-returning. The terminal
-``EngineResult`` is delivered as the FINAL yielded item, per the consumption
-convention documented in ``cli.contracts``.
+``cli.contracts``. It is the production runner-driving path: it drives a
+single turn through the ADK runner via the adapter + bridge wiring and YIELDS
+each projected public event incrementally as a ``RuntimeEvent`` instead of
+accumulating-then-returning. The terminal ``EngineResult`` is delivered as the
+FINAL yielded item, per the consumption convention documented in
+``cli.contracts``.
 
 Import-cleanliness
 ------------------
@@ -20,7 +19,7 @@ imported lazily inside ``_lazy_engine_deps`` which is only called the first time
 Single-flight
 -------------
 A second concurrent turn for the same session id is rejected. We reuse the real
-``ActiveTurnRegistry`` from ``runner_session_boundary`` (a thread-safe
+``ActiveTurnRegistry`` from ``active_turn_registry`` (a thread-safe
 session-key -> turn-id map). A per-driver default registry is shared across all
 turns of a driver instance; on a concurrent turn we yield a terminal
 ``EngineResult(terminal=Terminal.aborted, error="active_session_turn")`` without
@@ -396,8 +395,8 @@ def build_output_continuation_config(
     )
 
 
-# A sane default cap so a runaway stream can't yield forever. Mirrors the spirit
-# of RunnerSessionBoundaryConfig.max_event_count but headless can tolerate more.
+# A sane default cap so a runaway stream can't yield forever; headless can
+# tolerate a generous bound on ADK events consumed per turn.
 _DEFAULT_MAX_EVENT_COUNT = 4096
 
 
@@ -436,6 +435,33 @@ _ARTIFACT_EVENT_TYPES = frozenset(
     {"source_inspected", "document_draft", "research_artifact_delta", "patch_preview"}
 )
 _ERROR_EVENT_TYPES = frozenset({"error"})
+
+# ---------------------------------------------------------------------------
+# P3 — zero-edit guard (eval mode): track file-mutating tool calls per turn
+# and re-prompt once if a coding turn ends with no file edits.
+# ---------------------------------------------------------------------------
+# Tool names that perform file mutations (writes / edits / patches). When a
+# turn ends and none of these were observed, the guard fires a single "apply
+# it" re-invocation so the agent doesn't get away with just describing a fix.
+_EDIT_CLASS_TOOLS = frozenset({"FileEdit", "FileWrite", "Edit", "Write", "ApplyPatch"})
+
+
+def should_reprompt_for_zero_edits(
+    *, file_edits: int, already_reprompted: bool, enabled: bool
+) -> bool:
+    """Return True iff the zero-edit guard should fire a re-invocation.
+
+    Pure helper — no side effects, fully unit-testable without driving the
+    engine. The engine calls this after the main run loop concludes and before
+    yielding the terminal EngineResult.
+
+    Args:
+        file_edits: number of file-mutating tool calls observed this turn.
+        already_reprompted: True if we already fired the guard once this turn
+            (prevents infinite re-invocation).
+        enabled: value of ``parse_eval_zero_edit_guard_enabled(os.environ)``.
+    """
+    return bool(enabled and not already_reprompted and file_edits == 0)
 
 
 def _is_turn_end_event(event: Mapping[str, object]) -> bool:
@@ -671,6 +697,17 @@ def _coding_repair_loop_enabled() -> bool:
     return coding_repair_loop_enabled()
 
 
+def _document_coverage_blocks(mode: str, failed_count: int) -> bool:
+    """Whether failed document coverage should flip the pre-final decision.
+
+    14-PR3 (C11): the gate is 3-state (``off`` | ``advisory`` | ``block``). Only
+    ``block`` mode lets a failed-coverage count contribute to a ``"block"``
+    decision; ``advisory`` records the count for telemetry but never blocks, and
+    ``off`` is inert.
+    """
+    return mode == "block" and failed_count > 0
+
+
 def _coding_repair_max_attempts(repair_policy: Mapping[str, object]) -> int:
     from magi_agent.coding.repair_loop import repair_max_attempts
 
@@ -737,6 +774,7 @@ def _build_pre_final_verifier_bus_payload(
         "results": results,
         "trafficAttached": False,
         "executionAttached": False,
+        "failedDocumentCoverage": 0,
     }
 
 
@@ -789,16 +827,67 @@ def _lazy_engine_deps() -> dict[str, object]:
 def _active_turn_registry():
     """Lazily build the real ActiveTurnRegistry (no ADK import needed).
 
-    runner_session_boundary imports ADK at *function* scope only, so importing
-    the module itself is import-clean — but we still defer it to keep engine.py's
-    module-load dependency graph minimal.
+    ``active_turn_registry`` is a standalone, ADK-free module, so importing it is
+    import-clean — but we still defer the import to keep engine.py's module-load
+    dependency graph minimal.
     """
 
-    from magi_agent.runtime.runner_session_boundary import (
+    from magi_agent.runtime.active_turn_registry import (
         ActiveTurnRegistry,
     )
 
     return ActiveTurnRegistry()
+
+
+# Role label used when rendering a resumed transcript line whose role is missing
+# or unrecognized. ``user``/``assistant`` are passed through verbatim.
+_RESUME_ROLE_LABELS = {"user": "User", "assistant": "Assistant"}
+
+
+def _render_resume_prefix(initial_messages: object) -> str:
+    """Render reconstructed prior messages as a transcript prefix for the prompt.
+
+    ``initial_messages`` is the ``ResumeContext.initial_messages`` payload — a
+    ``list[{"role","content"}]`` produced by
+    :func:`session_log.reconstruct_messages`. We synthesize a compact, labeled
+    transcript that is PREPENDED to the current user prompt so a resumed turn
+    replays the prior conversation to the model. This is the lightweight
+    JSONL-transcript rehydration path (no runner/ADK dependency).
+
+    Pure + defensive:
+    - Non-list / empty input -> ``""`` (byte-identical no-op for fresh turns).
+    - Each entry must be a mapping with a string ``content``; malformed entries
+      are skipped rather than raising (resume is best-effort).
+    - Returns ``""`` when nothing usable remains, so the caller leaves the prompt
+      untouched.
+    """
+
+    if not isinstance(initial_messages, list) or not initial_messages:
+        return ""
+
+    lines: list[str] = []
+    for entry in initial_messages:
+        if not isinstance(entry, dict):
+            continue
+        content = entry.get("content")
+        if not isinstance(content, str) or not content:
+            continue
+        role = entry.get("role")
+        label = _RESUME_ROLE_LABELS.get(
+            role if isinstance(role, str) else "",
+            str(role) if role else "Message",
+        )
+        lines.append(f"{label}: {content}")
+
+    if not lines:
+        return ""
+
+    transcript = "\n".join(lines)
+    return (
+        "[Resumed conversation — prior turns for context]\n"
+        f"{transcript}\n"
+        "[End of prior conversation]\n\n"
+    )
 
 
 class MagiEngineDriver:
@@ -830,6 +919,7 @@ class MagiEngineDriver:
         goal_nudge: "GoalNudge | None" = None,
         output_continuation: "OutputContinuationConfig | None" = None,
         evidence_collector: Callable[[str], Sequence[object]] | None = None,
+        user_hook_bus: object | None = None,
     ) -> None:
         self._runner = runner
         self._max_event_count = max(1, int(max_event_count))
@@ -865,6 +955,14 @@ class MagiEngineDriver:
         # Shared across all turns of this driver instance: single-flight per
         # session id. Lazily built so construction stays cheap + import-clean.
         self._registry: object | None = None
+        # Cluster doc 11 PR2: CC-style user ``settings.json`` HookBus. ``None``
+        # (default, gate ``MAGI_USER_HOOKS_ENABLED`` OFF) -> no bridge attached
+        # and every turn is byte-identical to today. When set, ``_drive``
+        # bridges its BEFORE_TOOL_USE / AFTER_TOOL_USE hooks onto the runner's
+        # ADK before/after-tool callbacks (command executor only). Built once by
+        # the production wiring via ``cli.hook_wiring.build_user_hook_bus`` and
+        # injected here; local CLI / self-host only (never hosted multi-tenant).
+        self._user_hook_bus: object | None = user_hook_bus
 
     @property
     def runner(self) -> object | None:
@@ -947,6 +1045,48 @@ class MagiEngineDriver:
             initial_messages = []
         return harness_state, initial_messages
 
+    @staticmethod
+    def _turn_images(turn_input: object) -> tuple[dict[str, object], ...]:
+        """Read ``image_blocks`` from a TurnInput dataclass or a bare dict.
+
+        Works the same dict-or-attr pattern as ``_turn_extra``. Returns an
+        empty tuple when the field is absent (e.g. a bare ``{"prompt": "…"}``
+        dict from ``run_headless``), which preserves pre-Task-2 behavior.
+        """
+        if isinstance(turn_input, dict):
+            value = turn_input.get("image_blocks", ())
+        else:
+            value = getattr(turn_input, "image_blocks", ())
+        return tuple(value or ())
+
+    @staticmethod
+    def _build_opening_parts(types: object, prompt: str, image_blocks: tuple) -> list:
+        """Build the ``parts`` list for the opening user message in a turn.
+
+        Always starts with a text part for ``prompt``, then appends one ADK
+        image part per valid block in ``image_blocks`` (base64 blocks only;
+        malformed / unsupported blocks are silently skipped by the gate5b4c3
+        helper).  The text part uses the same ``types.Part(text=...)``
+        constructor form used at all other build sites so that existing
+        fake-types test doubles continue to work without modification.  The
+        image factory (``types.Part.from_bytes``) is only referenced when
+        there are actually image blocks to process, so empty-block callers
+        never touch that attribute.
+        """
+        parts: list = [types.Part(text=prompt)]  # type: ignore[union-attr]
+        if image_blocks:
+            from magi_agent.shadow.gate5b4c3_image_parts import (  # noqa: PLC0415
+                image_blocks_to_parts,
+            )
+
+            parts.extend(
+                image_blocks_to_parts(
+                    list(image_blocks),
+                    part_factory=types.Part.from_bytes,  # type: ignore[union-attr]
+                )
+            )
+        return parts
+
     async def run_turn_stream(
         self,
         runtime: object,
@@ -961,6 +1101,7 @@ class MagiEngineDriver:
         # leaves behavior byte-for-byte identical to pre-F.
         session_id, turn_id, prompt = self._turn_identity(turn_input)
         harness_state, initial_messages = self._turn_extra(turn_input)
+        image_blocks = self._turn_images(turn_input)
 
         registry = self._get_registry()
         acquired = registry.try_acquire(session_key=session_id, turn_id=turn_id)  # type: ignore[attr-defined]
@@ -990,6 +1131,7 @@ class MagiEngineDriver:
             prompt=prompt,
             harness_state=harness_state,
             initial_messages=initial_messages,
+            image_blocks=image_blocks,
             cancel=cancel,
             gate=gate,
             goal_nudge=self._goal_nudge,
@@ -1016,15 +1158,28 @@ class MagiEngineDriver:
         prompt: str,
         harness_state: object | None = None,
         initial_messages: list | None = None,
+        image_blocks: tuple = (),
         cancel: asyncio.Event,
         gate: "PermissionGate | None" = None,
         goal_nudge: "GoalNudge | None" = None,
         output_continuation: "OutputContinuationConfig | None" = None,
     ) -> AsyncGenerator[RuntimeEvent, EngineResult]:
-        # PR3/Stream B: feed initial_messages via SessionContinuityBoundary.
-        # Read here (so the seam is plumbed end-to-end) but NOT yet fed into the
-        # runner — full rehydration lands with Stream B.
-        _ = initial_messages
+        # PR-04-PR2 (resume rehydration): consume ``initial_messages`` by
+        # synthesizing the prior transcript into a prefix on the opening user
+        # prompt, so a ``--resume``/``--continue`` turn replays the prior
+        # conversation to the model. ``ResumeContext.initial_messages`` is the
+        # source (already reconstructed by session_log.reconstruct_messages).
+        #
+        # This is the lightweight JSONL-transcript path. The richer ADK-native
+        # rehydration (importing a committed transcript into a live
+        # SessionContinuityBoundary) is carried on ``ResumeContext`` but wired by
+        # the SQLite-persistence PR; here we keep the no-runner-dependency path.
+        #
+        # No-op / byte-identical invariant: an empty (or non-list) value leaves
+        # ``prompt`` untouched, so a fresh session is unchanged from pre-PR2.
+        resume_prefix = _render_resume_prefix(initial_messages)
+        if resume_prefix:
+            prompt = f"{resume_prefix}{prompt}"
 
         runner = self._resolve_runner(runtime)
         if runner is None:
@@ -1043,6 +1198,17 @@ class MagiEngineDriver:
             prompt=prompt,
             harness_state=harness_state,
         )
+        # Stage 3: emit a phase-reached evidence record for the phase the route
+        # selection resolved. This is the ONLY live seam where a concrete phase
+        # name is known together with (session_id, turn_id) and the evidence
+        # collector. Flag-gated + fail-open inside the collector; a None route
+        # selection (routing OFF / no phase routes) records nothing.
+        if route_selection is not None:
+            self._record_phase_reached(
+                session_id=session_id,
+                turn_id=turn_id,
+                phase=route_selection.get("phase"),
+            )
         policy_payload = self._runner_policy_payload()
         route_decision = (
             self._runner_policy_assembly.phase_route_decision()
@@ -1148,7 +1314,7 @@ class MagiEngineDriver:
             invocationId=turn_id,
             newMessage=types.Content(  # type: ignore[attr-defined]
                 role="user",
-                parts=[types.Part(text=prompt)],  # type: ignore[attr-defined]
+                parts=self._build_opening_parts(types, prompt, image_blocks),
             ),
             # Threaded from the turn_input (TurnInput.harness_state / dict key).
             # A plain dict without the key leaves this None — identical to today.
@@ -1172,6 +1338,14 @@ class MagiEngineDriver:
         # restored in the ``finally`` below, on every exit path.
         gate_attach = self._attach_gate_callback(
             runner=runner, gate=gate, turn_id=turn_id, cancel=cancel
+        )
+        # Cluster doc 11 PR2: bridge user settings.json hooks onto the agent's
+        # before/after-tool callbacks AFTER the gate (so a gate deny still
+        # short-circuits first; conflict-matrix order:
+        # gate -> user hook -> control-plane -> runner_policy_route). No-op when
+        # ``_user_hook_bus`` is None (gate OFF) -> byte-identical to today.
+        hook_attach = self._attach_user_hook_bus(
+            runner=runner, session_id=session_id, turn_id=turn_id
         )
         route_attach = self._attach_runner_policy_route(
             runner=runner,
@@ -1199,6 +1373,10 @@ class MagiEngineDriver:
         # Output-continuation budget: how many times we've resumed a response
         # truncated at the model's per-response output-token cap this turn.
         continuations_used = 0
+        # P3 zero-edit guard: count file-mutating tool calls this turn.
+        # zero_edit_retry_done ensures we fire the guard at most once per turn.
+        file_edit_calls = 0
+        zero_edit_retry_done = False
 
         try:
             while True:
@@ -1260,6 +1438,9 @@ class MagiEngineDriver:
                                 continue
                             self._collect_public_refs(safe, observed_public_refs)
                             self._track_pending_tool(safe, pending_tool_ids)
+                            # P3 zero-edit guard: count file-mutating tool calls.
+                            if safe.get("type") == "tool_start" and safe.get("name") in _EDIT_CLASS_TOOLS:
+                                file_edit_calls += 1
                             # PR4 goal-nudge: reset the goal-mode latch whenever a
                             # tool fires so the next clean stop is eligible for a
                             # nudge again (re-arm).
@@ -1386,6 +1567,7 @@ class MagiEngineDriver:
                 break
         finally:
             self._restore_runner_policy_route(route_attach)
+            self._restore_user_hook_bus(hook_attach)
             self._restore_gate_callback(gate_attach)
 
         if cancelled:
@@ -1432,8 +1614,84 @@ class MagiEngineDriver:
             )
             return
 
+        # P3 zero-edit guard: if the coding turn ended without any file-mutating
+        # tool calls (agent described the fix but didn't apply it), re-invoke
+        # ONCE with an explicit "apply it" message reusing the same re-invocation
+        # seam as goal-nudge / output-continuation.  Gated by the eval flag so
+        # non-eval sessions are byte-identical to pre-P3.
+        import os as _os  # noqa: PLC0415
+        from magi_agent.config.env import parse_eval_zero_edit_guard_enabled  # noqa: PLC0415
+
+        if should_reprompt_for_zero_edits(
+            file_edits=file_edit_calls,
+            already_reprompted=zero_edit_retry_done,
+            enabled=parse_eval_zero_edit_guard_enabled(_os.environ),
+        ):
+            zero_edit_retry_done = True
+            _zero_edit_msg = "Apply the code change you described above by editing the file(s) now."
+            zero_edit_runner_input = runner_turn_input_cls(
+                userId=self._user_id,
+                sessionId=session_id,
+                turnId=turn_id,
+                invocationId=turn_id,
+                newMessage=types.Content(  # type: ignore[attr-defined]
+                    role="user",
+                    parts=[types.Part(text=_zero_edit_msg)],  # type: ignore[attr-defined]
+                ),
+                harnessState=effective_harness_state,
+            )
+            yield RuntimeEvent(
+                type="status",
+                payload={"type": "zero_edit_guard_retry", "turnId": turn_id},
+                turn_id=turn_id,
+            )
+            zero_edit_gate_attach = self._attach_gate_callback(
+                runner=runner, gate=gate, turn_id=turn_id, cancel=cancel
+            )
+            zero_edit_route_attach = self._attach_runner_policy_route(
+                runner=runner,
+                route_selection=route_selection,
+            )
+            zero_edit_iter: AsyncIterator[object] = adapter.run_turn(zero_edit_runner_input).__aiter__()  # type: ignore[union-attr]
+            try:
+                while True:
+                    if cancel.is_set():
+                        cancelled = True
+                        break
+                    _zstep = await self._next_adk_event(zero_edit_iter, cancel)
+                    if _zstep is _CANCELLED:
+                        cancelled = True
+                        break
+                    if _zstep is _EXHAUSTED:
+                        break
+                    _zadk_event = _zstep
+                    _zprojection = bridge.project_adk_event(_zadk_event, turn_id=turn_id)  # type: ignore[union-attr]
+                    for _zraw in _zprojection.agent_events:  # type: ignore[union-attr]
+                        _zsafe = sanitize(dict(_zraw))  # type: ignore[operator]
+                        if _zsafe is None:
+                            continue
+                        self._collect_public_refs(_zsafe, observed_public_refs)
+                        self._track_pending_tool(_zsafe, pending_tool_ids)
+                        yielded_events += 1
+                        self._observe_event(_zsafe, session_id, turn_id)
+                        yield RuntimeEvent(
+                            type=_map_event_kind(_zsafe.get("type")),
+                            payload=_zsafe,
+                            turn_id=turn_id,
+                        )
+            except Exception:  # noqa: BLE001 - fail-open: guard errors don't block the turn
+                pass
+            finally:
+                await self._aclose_iter(zero_edit_iter)
+                self._restore_runner_policy_route(zero_edit_route_attach)
+                self._restore_gate_callback(zero_edit_gate_attach)
+
+            # If cancelled during the guard retry, fall through to the cancel
+            # block below (cancelled flag is already set).
+
         while True:
             pre_final_gate = self._pre_final_gate_payload(
+                session_id=session_id,
                 turn_id=turn_id,
                 prompt=prompt,
                 harness_state=effective_harness_state,
@@ -1509,6 +1767,9 @@ class MagiEngineDriver:
             repair_gate_attach = self._attach_gate_callback(
                 runner=runner, gate=gate, turn_id=turn_id, cancel=cancel
             )
+            repair_hook_attach = self._attach_user_hook_bus(
+                runner=runner, session_id=session_id, turn_id=turn_id
+            )
             repair_route_attach = self._attach_runner_policy_route(
                 runner=runner,
                 route_selection=route_selection,
@@ -1552,6 +1813,7 @@ class MagiEngineDriver:
             finally:
                 await self._aclose_iter(adk_iter)
                 self._restore_runner_policy_route(repair_route_attach)
+                self._restore_user_hook_bus(repair_hook_attach)
                 self._restore_gate_callback(repair_gate_attach)
 
             if cancelled:
@@ -1621,6 +1883,80 @@ class MagiEngineDriver:
         if self._evidence_collector is not None:
             return tuple(self._evidence_collector(turn_id))
         return ()
+
+    def _record_phase_reached(
+        self,
+        *,
+        session_id: str,
+        turn_id: str,
+        phase: object,
+    ) -> None:
+        """Feed the turn's resolved phase to the evidence collector (Stage 3).
+
+        The collector is wired in as its ``collect_for_turn`` bound method (see
+        ``cli/wiring.py``); recover the owning ``LocalToolEvidenceCollector``
+        instance via ``__self__`` and delegate to its ``record_phase_reached``.
+        Flag-gating + fail-open live in the collector, but this seam is also
+        defensive: a missing collector / method / phase records nothing and
+        never breaks the turn (byte-identical when no phase producer exists).
+        """
+        if not isinstance(phase, str) or not phase:
+            return
+        collector = self._evidence_collector
+        if collector is None:
+            return
+        owner = getattr(collector, "__self__", None)
+        record_phase = getattr(owner, "record_phase_reached", None)
+        if not callable(record_phase):
+            return
+        try:
+            record_phase(session_id, turn_id, phase)
+        except Exception:
+            logger.debug("phase-reached evidence record failed", exc_info=True)
+
+    def _record_verifier_verdicts(
+        self,
+        *,
+        session_id: str,
+        turn_id: str,
+        verifier_bus: Mapping[str, object],
+    ) -> None:
+        """Feed the turn's verifier-bus verdicts to the collector (Stage 2).
+
+        The verifier bus (``execute_pre_final_verifier_bus``) returns a
+        ``results`` list whose entries carry ``verifierId`` (the verifier
+        stage/contract id) and ``status`` (pass/failed/missing/...). Each is
+        recorded as a ``custom:VerifierVerdict`` evidence_record in the same
+        per-``(session, turn)`` ledger so ``InspectSelfEvidence`` can project
+        the REAL verdicts. Mirrors ``_record_phase_reached``: the collector is
+        wired as its ``collect_for_turn`` bound method, so the owning
+        ``LocalToolEvidenceCollector`` is recovered via ``__self__``. Flag-gating
+        + fail-open live in the collector; this seam is also defensive (missing
+        collector / method records nothing and never breaks the turn).
+        """
+        collector = self._evidence_collector
+        if collector is None:
+            return
+        owner = getattr(collector, "__self__", None)
+        record_verdict = getattr(owner, "record_verifier_verdict", None)
+        if not callable(record_verdict):
+            return
+        results = verifier_bus.get("results")
+        if not isinstance(results, list):
+            return
+        for result in results:
+            if not isinstance(result, Mapping):
+                continue
+            stage = result.get("verifierId")
+            status = result.get("status")
+            if not isinstance(stage, str) or not stage:
+                continue
+            if not isinstance(status, str) or not status:
+                continue
+            try:
+                record_verdict(session_id, turn_id, stage, status)
+            except Exception:
+                logger.debug("verifier-verdict evidence record failed", exc_info=True)
 
     async def _attempt_run_recovery(
         self,
@@ -1836,7 +2172,10 @@ class MagiEngineDriver:
             phase=phase,
             route=route,
         )
-        return {
+        intent_bindings = compile_intent_bindings(
+            assembly, enabled=_recipe_intent_binding_enabled()
+        )
+        selection: dict[str, object] = {
             "schemaVersion": "openmagi.localRunnerRouteSelection.v1",
             "source": "recipe-materializer.phase-routing",
             "phase": phase,
@@ -1861,6 +2200,9 @@ class MagiEngineDriver:
                 "externalIntegrationAttached": False,
             },
         }
+        if intent_bindings:
+            selection["intentBindings"] = intent_bindings
+        return selection
 
     @staticmethod
     def _runner_policy_route_block_payload(
@@ -1973,6 +2315,7 @@ class MagiEngineDriver:
     def _pre_final_gate_payload(
         self,
         *,
+        session_id: str,
         turn_id: str,
         prompt: str,
         harness_state: object | None,
@@ -1990,6 +2333,17 @@ class MagiEngineDriver:
             return None
         evidence_records: tuple[object, ...] = ()
         verifier_bus: dict[str, object] | None = None
+        # Task C — OPTIONAL BLOCKING document-authoring coverage gate. Default OFF
+        # and env-gated; when off the bus call is behavior-identical to before and
+        # DocumentCoverage evidence stays audit-only. 14-PR3 (C11) makes the gate
+        # 3-state: ``advisory`` still computes the failed-coverage count (for
+        # false-block-rate telemetry) but the engine does not block on it; only
+        # ``block`` flips the pre-final decision.
+        from magi_agent.config.env import resolve_document_authoring_coverage_mode
+
+        document_coverage_mode = resolve_document_authoring_coverage_mode()
+        document_coverage_gate_enabled = document_coverage_mode != "off"
+        failed_document_coverage = 0
         if self._evidence_collector is not None:
             from magi_agent.harness.verifier_bus import execute_pre_final_verifier_bus
 
@@ -1999,17 +2353,33 @@ class MagiEngineDriver:
                 required_validators=assembly.required_validators,
                 observed_public_refs=tuple(sorted(observed_public_refs)),
                 evidence_records=evidence_records,
+                document_coverage_gate_enabled=document_coverage_gate_enabled,
             )
             matched_refs = verifier_bus.get("matchedRefs")
             if isinstance(matched_refs, list):
                 observed_public_refs = {ref for ref in matched_refs if isinstance(ref, str)}
+            raw_failed_coverage = verifier_bus.get("failedDocumentCoverage")
+            if isinstance(raw_failed_coverage, int):
+                failed_document_coverage = raw_failed_coverage
+            self._record_verifier_verdicts(
+                session_id=session_id,
+                turn_id=turn_id,
+                verifier_bus=verifier_bus,
+            )
         missing_evidence = [
             ref for ref in assembly.evidence_requirements if ref not in observed_public_refs
         ]
         missing_validators = [
             ref for ref in assembly.required_validators if ref not in observed_public_refs
         ]
-        decision = "block" if missing_evidence or missing_validators else "pass"
+        document_coverage_blocks = _document_coverage_blocks(
+            document_coverage_mode, failed_document_coverage
+        )
+        decision = (
+            "block"
+            if (missing_evidence or missing_validators or document_coverage_blocks)
+            else "pass"
+        )
 
         # D1: consume the phase route's verifier-escalation decision. When the
         # materialized route requires a bounded stronger verifier for a review
@@ -2063,6 +2433,7 @@ class MagiEngineDriver:
             verifier_bus["decision"] = decision
             verifier_bus["missingEvidence"] = missing_evidence
             verifier_bus["missingValidators"] = missing_validators
+            verifier_bus["failedDocumentCoverage"] = failed_document_coverage
             verifier_bus.setdefault("evidenceRecordCount", len(evidence_records))
         payload["verifierBus"] = verifier_bus
         if decision == "block" and effective_action == "repair_required":
@@ -2141,6 +2512,43 @@ class MagiEngineDriver:
             attachment.agent.before_tool_callback = attachment.original
         except Exception:  # noqa: BLE001 - best-effort restore
             pass
+
+    def _attach_user_hook_bus(
+        self,
+        *,
+        runner: object,
+        session_id: str,
+        turn_id: str,
+    ) -> object | None:
+        """Attach the user (settings.json) HookBus tool-callback bridge.
+
+        No-op (returns ``None``) when ``_user_hook_bus`` is None (gate
+        ``MAGI_USER_HOOKS_ENABLED`` OFF) or the runner has no ``agent`` — so the
+        agentless ``MockRunner`` tests and the gate-OFF path are byte-identical.
+        The bridge is appended AFTER the gate callback (conflict-matrix order).
+        """
+        bus = self._user_hook_bus
+        if bus is None:
+            return None
+        from magi_agent.cli.hook_wiring import attach_hook_bus_tool_callbacks
+        from magi_agent.hooks.context import HookContext
+
+        hook_context = HookContext(
+            bot_id=self._user_id,
+            session_id=session_id,
+            turn_id=turn_id,
+        )
+        return attach_hook_bus_tool_callbacks(
+            runner=runner, bus=bus, hook_context=hook_context
+        )
+
+    @staticmethod
+    def _restore_user_hook_bus(attachment: object | None) -> None:
+        if attachment is None:
+            return
+        from magi_agent.cli.hook_wiring import restore_hook_bus_tool_callbacks
+
+        restore_hook_bus_tool_callbacks(attachment)  # type: ignore[arg-type]
 
     @staticmethod
     def _build_gate_before_tool(
@@ -2271,6 +2679,7 @@ _CANCELLED = _Sentinel("adk_stream_cancelled")
 _MISSING = _Sentinel("missing")
 _RUNNER_POLICY_ROUTING_ENV = "MAGI_RUNNER_POLICY_ROUTING_ENABLED"
 _RUNNER_POLICY_ROUTE_BLOCKING_ENV = "MAGI_RUNNER_POLICY_ROUTE_BLOCKING_ENABLED"
+_RECIPE_INTENT_BINDING_ENV = "MAGI_RECIPE_INTENT_BINDING_ENABLED"
 _CODING_PHASES = frozenset(
     {"code_search", "patch_planning", "patch_generation", "test_interpretation"}
 )
@@ -2359,6 +2768,60 @@ def _runner_policy_route_blocking_enabled() -> bool:
     if raw is None:
         return False
     return raw.strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _recipe_intent_binding_enabled() -> bool:
+    """Whether emit-only recipe intents bind to hint-level runner effects.
+
+    Stage gate for doc 05 PR-3 (A1-G2). The code-level default stays OFF, so the
+    emitted runner-policy route selection is byte-identical to origin/main unless
+    an operator opts in. See ``parse_recipe_intent_binding_enabled``.
+    """
+    import os
+
+    raw = os.environ.get(_RECIPE_INTENT_BINDING_ENV)
+    if raw is None:
+        return False
+    return raw.strip().lower() not in {"0", "false", "no", "off"}
+
+
+def compile_intent_bindings(
+    assembly: RunnerPolicyAssembly,
+    *,
+    enabled: bool,
+) -> dict[str, object]:
+    """Bind the four emit-only recipe intent families to hint-level effects.
+
+    ``provider_intents`` / ``channel_intents`` / ``artifact_intents`` /
+    ``scheduler_intents`` are materialized as public-payload metadata but, unlike
+    ``tool_intents``, have no consumer driving a runner effect. This compiles them
+    into a hint-level binding payload that downstream seams (model selection,
+    channel delivery, pre-final artifact requirements, the 03-always-on
+    scheduler) can read.
+
+    The binding is intentionally *hint* level: it never asserts production-write
+    authority and never hard-forces a model/channel/provider (open-decision §6-2:
+    hint, not force; hard enforcement deferred to 14-controlplane).
+
+    When ``enabled`` is False this returns ``{}`` so the caller's emitted payload
+    stays byte-identical to origin/main.
+    """
+    if not enabled:
+        return {}
+    bindings: dict[str, object] = {
+        "schemaVersion": "magi.recipeIntentBinding.v1",
+        "enforcement": "hint",
+        "productionWriteAllowed": False,
+    }
+    if assembly.provider_intents:
+        bindings["providerPreferenceHints"] = list(assembly.provider_intents)
+    if assembly.channel_intents:
+        bindings["channelDeliveryHints"] = list(assembly.channel_intents)
+    if assembly.artifact_intents:
+        bindings["artifactDeliveryRequirements"] = list(assembly.artifact_intents)
+    if assembly.scheduler_intents:
+        bindings["schedulerReadinessHints"] = list(assembly.scheduler_intents)
+    return bindings
 
 
 def _phase_routes(phase_routing: Mapping[str, object]) -> dict[str, Mapping[str, object]]:

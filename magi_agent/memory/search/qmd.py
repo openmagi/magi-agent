@@ -75,9 +75,20 @@ class QmdBackend:
     the rows belonging to that collection. All methods are fail-soft.
     """
 
-    def __init__(self, *, binary: str = _QMD_BINARY, timeout: int = _TIMEOUT_SECONDS) -> None:
+    def __init__(
+        self,
+        *,
+        binary: str = _QMD_BINARY,
+        timeout: int = _TIMEOUT_SECONDS,
+        auto_register: bool = False,
+    ) -> None:
         self._binary = binary
         self._timeout = timeout
+        #: Instance default for :meth:`reindex`'s ``allow_auto_register`` — set by
+        #: ``select_search_backend`` from ``config.prefer_qmd_auto_register`` so
+        #: callers can invoke the uniform ``reindex(root)`` protocol method and
+        #: still honor the multi-tenant opt-in.
+        self._auto_register = auto_register
         self._memory_dir: Path | None = None
         self._collection: str | None = None
 
@@ -90,7 +101,25 @@ class QmdBackend:
         """True when the ``qmd`` binary is resolvable on PATH."""
         return shutil.which(self._binary) is not None
 
-    def reindex(self, root: Path) -> None:
+    def reindex(self, root: Path, *, allow_auto_register: bool | None = None) -> None:
+        """(Re)index the workspace ``memory/`` tree.
+
+        ``allow_auto_register`` gates the ONLY operation that mutates the user's
+        GLOBAL qmd index — registering a brand-new collection via
+        ``qmd collection add``.  Default False (multi-tenant safe): on a
+        shared/multi-bot host, turning memory on must not silently pollute a
+        global qmd index.  When the collection does NOT already exist and
+        ``allow_auto_register`` is False, this is a no-op and :meth:`search` will
+        simply return ``[]`` (fail-soft).  Refreshing an ALREADY-registered
+        collection via ``update`` is always allowed (it touches only our own
+        collection), regardless of the flag.
+
+        ``allow_auto_register=None`` (the default) falls back to the instance
+        default set at construction (``select_search_backend`` threads
+        ``config.prefer_qmd_auto_register`` there).
+        """
+        if allow_auto_register is None:
+            allow_auto_register = self._auto_register
         memory_dir = root / "memory"
         self._memory_dir = memory_dir
         self._collection = None
@@ -107,14 +136,22 @@ class QmdBackend:
             # filtering can help.
             return
         self._memory_dir = memory_resolved
-        self._collection = collection_name_for(memory_resolved)
-        if self._collection_exists(self._collection):
-            # Best-effort refresh of changed files (slow; off the hot path).
-            self._run([self._binary, "update", self._collection])
+        collection = collection_name_for(memory_resolved)
+        if self._collection_exists(collection):
+            # Already ours: best-effort refresh (slow; off the hot path). Bind
+            # the collection so search() scopes to it.
+            self._collection = collection
+            self._run([self._binary, "update", collection])
             return
-        # First registration also performs the BM25 index (no embed needed).
+        if not allow_auto_register:
+            # Multi-tenant safety: do NOT register a new global collection.
+            # Leave _collection unbound so search() returns [] (fail-soft).
+            return
+        # Explicit opt-in: first registration also performs the BM25 index
+        # (no embed needed). Bind the collection so search() scopes to it.
+        self._collection = collection
         self._run(
-            [self._binary, "collection", "add", str(memory_resolved), "--name", self._collection]
+            [self._binary, "collection", "add", str(memory_resolved), "--name", collection]
         )
 
     def search(self, query: str, *, k: int) -> list[SearchHit]:

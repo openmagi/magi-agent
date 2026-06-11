@@ -550,95 +550,6 @@ class TestSchedulerExecutorHealthProjection:
         assert scheduler["shadowEnabled"] is True
         assert scheduler["status"] == "shadow"
 
-
-# ---------------------------------------------------------------------------
-# 6. Metrics counters
-# ---------------------------------------------------------------------------
-
-class TestSchedulerExecutorMetrics:
-    def test_scheduler_outcome_counter_labels_defined(self) -> None:
-        from magi_agent.ops.scheduler_metrics import SCHEDULER_OUTCOME_COUNTER_LABELS
-
-        assert "fired" in SCHEDULER_OUTCOME_COUNTER_LABELS
-        assert "suppressed_silent" in SCHEDULER_OUTCOME_COUNTER_LABELS
-        assert "skipped" in SCHEDULER_OUTCOME_COUNTER_LABELS
-        assert "timed_out" in SCHEDULER_OUTCOME_COUNTER_LABELS
-        assert "lease_rejected" in SCHEDULER_OUTCOME_COUNTER_LABELS
-
-    def test_build_scheduler_outcome_counters_returns_zero_snapshot(self) -> None:
-        from magi_agent.ops.scheduler_metrics import build_scheduler_outcome_counters
-
-        snapshot = build_scheduler_outcome_counters()
-        assert snapshot["fired"] == 0
-        assert snapshot["suppressed_silent"] == 0
-        assert snapshot["skipped"] == 0
-        assert snapshot["timed_out"] == 0
-        assert snapshot["lease_rejected"] == 0
-
-    def test_increment_counter_updates_value(self) -> None:
-        from magi_agent.ops.scheduler_metrics import (
-            build_scheduler_outcome_counters,
-            increment_scheduler_counter,
-        )
-
-        counts = build_scheduler_outcome_counters()
-        counts = increment_scheduler_counter(counts, "fired", delta=3)
-        assert counts["fired"] == 3
-        assert counts["skipped"] == 0
-
-    def test_increment_counter_unknown_label_raises(self) -> None:
-        from magi_agent.ops.scheduler_metrics import (
-            build_scheduler_outcome_counters,
-            increment_scheduler_counter,
-        )
-
-        counts = build_scheduler_outcome_counters()
-        with pytest.raises((KeyError, ValueError)):
-            increment_scheduler_counter(counts, "unknown_label")
-
-    def test_scheduler_metrics_to_runtime_metric_records_returns_records(self) -> None:
-        from magi_agent.ops.scheduler_metrics import (
-            build_scheduler_outcome_counters,
-            increment_scheduler_counter,
-            scheduler_counts_to_metric_records,
-        )
-
-        _TRACE = "sha256:" + "a" * 64
-        _POLICY = "sha256:" + "b" * 64
-
-        counts = build_scheduler_outcome_counters()
-        counts = increment_scheduler_counter(counts, "fired", delta=2)
-        counts = increment_scheduler_counter(counts, "timed_out", delta=1)
-        records = scheduler_counts_to_metric_records(
-            counts, trace_digest=_TRACE, policy_snapshot_digest=_POLICY
-        )
-        # Should produce a record per non-zero counter.
-        # Metric names use the ops. prefix required by RuntimeMetricRecord's
-        # SAFE_METRIC_RE validator (must match ^ops\.[a-z][a-z0-9_.-]{0,80}$).
-        metric_names = [r.metric_name for r in records]
-        assert "ops.scheduler.outcome.fired" in metric_names
-        assert "ops.scheduler.outcome.timed_out" in metric_names
-
-    def test_scheduler_metrics_unit_is_count(self) -> None:
-        from magi_agent.ops.scheduler_metrics import (
-            build_scheduler_outcome_counters,
-            increment_scheduler_counter,
-            scheduler_counts_to_metric_records,
-        )
-
-        _TRACE = "sha256:" + "a" * 64
-        _POLICY = "sha256:" + "b" * 64
-
-        counts = build_scheduler_outcome_counters()
-        counts = increment_scheduler_counter(counts, "fired")
-        records = scheduler_counts_to_metric_records(
-            counts, trace_digest=_TRACE, policy_snapshot_digest=_POLICY
-        )
-        for rec in records:
-            assert rec.unit == "count"
-
-
-# ---------------------------------------------------------------------------
 # 7. oc-cron transition guard
 # ---------------------------------------------------------------------------
 
@@ -760,28 +671,6 @@ class TestSchedulerExecutorReadinessImportPurity:
             elif isinstance(node, ast.ImportFrom):
                 module = node.module or ""
                 assert not module.startswith("urllib"), (
-                    f"Forbidden import from: {module}"
-                )
-
-    def test_scheduler_metrics_module_does_not_import_network(self) -> None:
-        import ast, pathlib
-
-        src = (
-            pathlib.Path(__file__).parent.parent
-            / "magi_agent"
-            / "ops"
-            / "scheduler_metrics.py"
-        ).read_text()
-        tree = ast.parse(src)
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                for alias in node.names:
-                    assert not alias.name.startswith(("urllib", "socket", "http", "requests")), (
-                        f"Forbidden import: {alias.name}"
-                    )
-            elif isinstance(node, ast.ImportFrom):
-                module = node.module or ""
-                assert not module.startswith(("urllib", "socket", "http", "requests")), (
                     f"Forbidden import from: {module}"
                 )
 

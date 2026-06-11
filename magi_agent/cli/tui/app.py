@@ -50,6 +50,7 @@ from textual.widgets import Button, Input, OptionList, RichLog, Static, TextArea
 from textual.widgets.option_list import Option
 
 from magi_agent.cli.commands.executor import DefaultCommandExecutor
+from magi_agent.cli.render.diff import render_diff
 from magi_agent.cli.contracts import (
     CommandContext,
     CommandExecutor,
@@ -61,6 +62,7 @@ from magi_agent.cli.contracts import (
     PermissionGate,
     PermissionUpdate,
     PromptSink,
+    RenderNode,
     RuntimeEvent,
     Terminal,
     ToolRendererRegistry,
@@ -79,8 +81,10 @@ from magi_agent.cli.tui.autocomplete import (
     Completion,
     CompletionProvider,
 )
+from magi_agent.cli.tui import notify as _notify
 from magi_agent.cli.tui.history import DraftStash, InputHistory
 from magi_agent.cli.tui.input import PromptInput, Submission
+from magi_agent.cli.tui.footer import StatusFooter
 from magi_agent.cli.tui.dialogs.help import HelpDialog
 from magi_agent.cli.tui.dialogs.model import ModelPickerDialog, model_choices
 from magi_agent.cli.tui.dialogs.session import (
@@ -91,14 +95,24 @@ from magi_agent.cli.tui.dialogs.session import (
 from magi_agent.cli.tui.palette import (
     AppActionProvider,
     CommandPaletteProvider,
+    ThemeProvider,
     tui_command_names,
 )
+from magi_agent.cli.tui.theme import (
+    DEFAULT_THEME,
+    MAGI_THEMES,
+    load_saved_theme,
+    register_magi_themes,
+    save_theme,
+)
 from magi_agent.cli.tui.render.markdown import render_markdown
+from magi_agent.cli.tui.sidebar import Sidebar
 from magi_agent.cli.tui.transcript import (
     DEFAULT_FLUSH_INTERVAL,
     TranscriptController,
 )
 from magi_agent.cli.tui.widgets.transcript_view import TranscriptView
+from magi_agent.cli.tui.widgets.whichkey import WhichKeyOverlay, chord_continuations
 
 __all__ = ["MagiTuiApp", "TextualSink", "ToolUseConfirm"]
 
@@ -111,6 +125,31 @@ def _token_text(payload: dict) -> str:
         if isinstance(value, str):
             return value
     return ""
+
+
+def _usage_tokens(usage: object) -> int:
+    """Sum input+output tokens from an EngineResult.usage dict (best-effort).
+
+    ``EngineResult.usage`` is a free-form dict; providers spell token counts
+    differently. We sum the input/output split when present, else fall back to a
+    pre-summed ``tokens`` / ``total_tokens`` field. Missing/non-numeric -> 0 (the
+    footer then shows ``0 tok``, degrading gracefully when usage is unavailable).
+    """
+
+    if not isinstance(usage, dict):
+        return 0
+    split = 0
+    for key in ("input_tokens", "output_tokens"):
+        value = usage.get(key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            split += int(value)
+    if split > 0:
+        return split
+    for key in ("total_tokens", "tokens"):
+        value = usage.get(key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return max(0, int(value))
+    return 0
 
 
 def _stop(event: object) -> None:
@@ -148,6 +187,52 @@ def _tool_input(payload: dict) -> object:
                     return value
             return value
     return {}
+
+
+def _tool_file_path(tool_input: object) -> str | None:
+    """Best-effort file path from a Read/Edit/Write tool input."""
+
+    if isinstance(tool_input, dict):
+        for key in ("path", "file_path", "filePath", "file"):
+            value = tool_input.get(key)
+            if isinstance(value, str) and value:
+                return value
+    return None
+
+
+def _todo_contents(tool_input: object) -> list[str] | None:
+    """Best-effort todo strings from a TodoWrite tool input.
+
+    ``None`` means "not a TodoWrite-style payload"; an empty list is a valid
+    payload and should clear the sidebar's Todo pane.
+    """
+
+    if not isinstance(tool_input, dict):
+        return None
+    todos = tool_input.get("todos")
+    if not isinstance(todos, list):
+        return None
+    out: list[str] = []
+    for item in todos:
+        if isinstance(item, dict):
+            content = item.get("content") or item.get("text")
+            if isinstance(content, str) and content:
+                out.append(content)
+        elif isinstance(item, str) and item:
+            out.append(item)
+    return out
+
+
+# Coarse default context-window budget (tokens) retained as a future sidebar
+# seam. The current sidebar renders an honest bare token count; a future
+# per-model window table can decide when a ratio is accurate enough to surface.
+DEFAULT_CONTEXT_WINDOW = 200_000
+
+
+def _context_limit(_model: str | None) -> int:
+    """Coarse context-window budget for a future per-model context pane ratio."""
+
+    return DEFAULT_CONTEXT_WINDOW
 
 
 def _tool_result(payload: dict) -> object:
@@ -188,6 +273,201 @@ def _status_summary(event: RuntimeEvent) -> str:
     if isinstance(label, str) and label:
         parts.append(str(label))
     return " ".join(parts)
+
+
+# Reasoning/thinking inline display (PR4.2). The runtime surfaces model reasoning
+# to the TUI as a ``status`` event whose inner payload ``type`` is
+# ``thinking_delta`` (engine ``_map_event_kind`` has no ``thinking_delta`` →
+# falls through to ``status``; the engine sanitizer only lets it through under
+# ``MAGI_STREAM_THINKING``). We render it as a DIM one-line ``● thinking <preview>``
+# block — distinct from the teal/blue tool dots and from assistant markdown.
+_THINKING_INNER_TYPES = frozenset({"thinking_delta", "thinking"})
+_THINKING_PREVIEW_MAX_CHARS = 100
+# Dim throughout so the reasoning line reads as quiet annotation, not output.
+_THINKING_DOT_STYLE = "dim #7aa2f7"
+_THINKING_LABEL_STYLE = "dim bold"
+_THINKING_PREVIEW_STYLE = "dim italic"
+
+
+def _is_reasoning_event(event: RuntimeEvent) -> bool:
+    """True for a ``status`` event carrying a reasoning/thinking marker.
+
+    Distinguishes user-relevant reasoning from plumbing ``status`` events
+    (runner_policy_*, phase_route_*, turn_end) that stay hidden by default.
+    """
+
+    if event.type != "status":
+        return False
+    payload = event.payload
+    if not isinstance(payload, dict):
+        return False
+    inner = payload.get("type")
+    if isinstance(inner, str) and inner in _THINKING_INNER_TYPES:
+        return True
+    # Belt-and-suspenders: an explicit label/reasoning marker (forward-compatible
+    # with a future status-marker shape) also counts.
+    if payload.get("reasoning"):
+        return True
+    return payload.get("label") in {"thinking", "reasoning"}
+
+
+def _reasoning_text(payload: dict) -> str:
+    """Extract reasoning text from a ``thinking_delta``-style payload."""
+
+    for key in ("delta", "text", "detail", "thinking", "reasoning"):
+        value = payload.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return ""
+
+
+def _thinking_preview(text: str) -> str:
+    """Collapse multi-line reasoning into a single terse preview line."""
+
+    first = ""
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped:
+            first = stripped
+            break
+    if not first:
+        first = text.strip()
+    if len(first) > _THINKING_PREVIEW_MAX_CHARS:
+        first = first[: _THINKING_PREVIEW_MAX_CHARS - 1].rstrip() + "…"
+    return first
+
+
+def _render_thinking_node(text: str) -> RenderNode:
+    """Build the DIM one-line ``● thinking  <preview>`` reasoning block.
+
+    The committed/search text mirrors the displayed line for search fidelity
+    (what is indexed == what is shown). The whole line is styled dim so it reads
+    as quiet annotation, distinct from the teal/blue tool dots and from the
+    assistant markdown.
+    """
+
+    from rich.text import Text  # noqa: PLC0415
+
+    preview = _thinking_preview(text)
+    rich = Text()
+    rich.append("● ", style=_THINKING_DOT_STYLE)
+    rich.append("thinking", style=_THINKING_LABEL_STYLE)
+    search = "● thinking"
+    if preview:
+        rich.append("  ", style=_THINKING_PREVIEW_STYLE)
+        rich.append(preview, style=_THINKING_PREVIEW_STYLE)
+        search = f"● thinking  {preview}"
+    return RenderNode(rich=rich, text=search)
+
+
+# Subagent / child-run inline display (PR4.3). The runtime surfaces nested
+# subagent (child-run) activity to the TUI as a ``status`` event whose inner
+# payload ``type`` is one of ``child_started`` / ``child_progress`` /
+# ``child_completed`` / ``child_cancelled`` / ``child_failed`` (engine
+# ``_map_event_kind`` has no ``child_*`` member → falls through to ``status``;
+# the SSE sanitizer lets them through UNCONDITIONALLY — not behind a flag like
+# thinking's ``MAGI_STREAM_THINKING`` — as long as ``taskId`` survives). We render
+# them as a DIM INDENTED one-line ``  ⤷ subagent <label>  <status>`` block —
+# visually nested under the parent turn, distinct from the flush-left teal/blue
+# tool dots and assistant markdown. Lifecycle events for the SAME task coalesce
+# into one updating line (started → completed/failed).
+_CHILD_INNER_STATUS = {
+    "child_started": "running",
+    "child_progress": "running",
+    "child_completed": "completed",
+    "child_cancelled": "cancelled",
+    "child_failed": "failed",
+}
+_SUBAGENT_LABEL_MAX_CHARS = 60
+# Dim throughout so the subagent line reads as quiet nested annotation.
+_SUBAGENT_INDENT = "  "
+_SUBAGENT_MARKER_STYLE = "dim #9ece6a"
+_SUBAGENT_LABEL_STYLE = "dim bold"
+_SUBAGENT_STATUS_STYLE = "dim italic"
+
+
+def _is_child_event(event: RuntimeEvent) -> bool:
+    """True for a ``status`` event carrying a child/subagent marker.
+
+    Distinguishes user-relevant subagent activity from plumbing ``status``
+    events (runner_policy_*, phase_route_*, turn_end) that stay hidden by
+    default. Keys off the inner payload ``type`` (a ``child_*`` string),
+    mirroring how ``tool`` events carry an inner ``tool_start``/``tool_end``.
+    """
+
+    if event.type != "status":
+        return False
+    payload = event.payload
+    if not isinstance(payload, dict):
+        return False
+    inner = payload.get("type")
+    return isinstance(inner, str) and inner in _CHILD_INNER_STATUS
+
+
+def _child_task_key(payload: dict) -> str:
+    """The RAW coalescing key for a subagent line: the untruncated ``taskId``.
+
+    Used as the ``_subagent_handles`` dict key (NOT the display label) so two
+    distinct taskIds that share a 59-char prefix don't collide after the label
+    truncates at ``_SUBAGENT_LABEL_MAX_CHARS``. Falls back to the raw ``label``,
+    then to the literal ``"subagent"`` only when no identifying field is present.
+    """
+
+    for key in ("taskId", "label"):
+        value = payload.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return "subagent"
+
+
+def _child_task_label(payload: dict) -> str:
+    """The subagent DISPLAY label: the public ``taskId`` (or a sane fallback),
+    truncated to one line. Use ``_child_task_key`` for the coalescing key."""
+
+    label = _child_task_key(payload)
+    if len(label) > _SUBAGENT_LABEL_MAX_CHARS:
+        label = label[: _SUBAGENT_LABEL_MAX_CHARS - 1].rstrip() + "…"
+    return label
+
+
+def _child_detail(payload: dict) -> str:
+    """Short dim suffix surfacing WHY a child line shows its status.
+
+    ``child_progress`` carries ``detail`` (what the child is doing),
+    ``child_failed`` carries ``errorMessage`` (the failure cause), and
+    ``child_cancelled`` carries ``reason``. Without this they all render
+    identically ("running"/"failed") with no cause. Truncated to the same terse
+    preview cap as thinking so it stays one-line and dim.
+    """
+
+    for key in ("detail", "errorMessage", "reason"):
+        value = payload.get(key)
+        if isinstance(value, str) and value.strip():
+            return _thinking_preview(value)
+    return ""
+
+
+def _render_subagent_node(label: str, status: str, detail: str = "") -> RenderNode:
+    """Build the DIM INDENTED one-line ``  ⤷ subagent <label>  <status>`` block.
+
+    The committed/search text mirrors the displayed line for search fidelity
+    (what is indexed == what is shown). The whole line is styled dim and the
+    text is leading-indented so it reads as quiet activity nested under the
+    parent turn, distinct from flush-left tool/assistant lines. An optional
+    ``detail`` (progress detail / failure reason) is appended as a dim suffix.
+    """
+
+    from rich.text import Text  # noqa: PLC0415
+
+    rich = Text()
+    rich.append(f"{_SUBAGENT_INDENT}⤷ ", style=_SUBAGENT_MARKER_STYLE)
+    rich.append(f"subagent {label}", style=_SUBAGENT_LABEL_STYLE)
+    rich.append(f"  {status}", style=_SUBAGENT_STATUS_STYLE)
+    search = f"{_SUBAGENT_INDENT}⤷ subagent {label}  {status}"
+    if detail:
+        rich.append(f"  {detail}", style=_SUBAGENT_STATUS_STYLE)
+        search = f"{search}  {detail}"
+    return RenderNode(rich=rich, text=search)
 
 
 # ---------------------------------------------------------------------------
@@ -253,6 +533,10 @@ class ToolUseConfirm(ModalScreen[PermissionDecision]):
                 f"Allow tool: {self._req.tool_name}\n{self._req.reason}",
                 id="tool-confirm-msg",
             )
+            # Diff preview (PR3.3): shows what an Edit/Write would change ABOVE
+            # the action buttons so the operator approves an informed diff, not a
+            # bare tool name. Hidden (display:false) for non-edit tools.
+            yield Static("", id="tool-diff-preview", classes="confirm-diff")
             with Vertical(id="confirm-actions"):
                 for index, (choice_id, label) in enumerate(self._CHOICES, start=1):
                     yield Button(f"{index}. {label}", id=choice_id)
@@ -276,8 +560,62 @@ class ToolUseConfirm(ModalScreen[PermissionDecision]):
         # Sub-views start hidden; the action buttons are the default view.
         self.query_one("#edit-view").display = False
         self.query_one("#deny-view").display = False
+        # Render the Edit/Write diff preview (hidden for non-edit tools).
+        self._render_diff_preview()
         # Focus the first action so Enter/Up/Down work without a click.
         self.query_one("#allow", Button).focus()
+
+    def _render_diff_preview(self) -> None:
+        """Render an Edit/Write diff into the preview panel, else hide it."""
+
+        preview = self.query_one("#tool-diff-preview", Static)
+        rendered = self._diff_renderable()
+        if rendered is None:
+            preview.display = False
+            return
+        preview.update(rendered)
+        preview.display = True
+
+    def _diff_renderable(self) -> object | None:
+        """Build a Rich diff for an Edit/Write request, else ``None``.
+
+        Only Edit/Write requests carrying ``old_string``/``new_string``
+        (or an empty old + ``content`` for Write) produce a preview. Reuses
+        ``cli/render/diff.py:render_diff`` (cached, syntax-highlighted). Returns
+        ``None`` for any other tool, partial/missing fields, or a no-op edit, so
+        the modal stays diff-free in those cases. Never raises (a failed render
+        falls back to ``None`` rather than crashing the permission prompt).
+        """
+
+        # MultiEdit carries an ``edits: [{old_string, new_string}, ...]`` array
+        # rather than top-level fields, so it has no single-diff preview here;
+        # rendering that array is a deferred follow-up (intentionally omitted).
+        if self._req.tool_name not in ("Edit", "Write"):
+            return None
+        args = self._req.arguments
+        if not isinstance(args, dict):
+            return None
+        old = args.get("old_string")
+        new = args.get("new_string")
+        if not isinstance(new, str):
+            # Write: empty old -> full content as the "new" (added) side.
+            content = args.get("content")
+            if isinstance(content, str):
+                old, new = "", content
+            else:
+                return None
+        if not isinstance(old, str):
+            old = ""
+        if old == new:
+            return None
+        path = args.get("path") or args.get("file_path") or "file"
+        file = path if isinstance(path, str) else "file"
+        try:
+            # 58 = conservative narrow-terminal-safe floor for the modal's
+            # usable width (modal ``width: 72`` minus padding/borders).
+            return render_diff(old, new, file=file, width=58)
+        except Exception:  # pragma: no cover - never fail the modal on a diff
+            return None
 
     def _arguments_json(self) -> str:
         try:
@@ -410,6 +748,16 @@ class TextualSink(PromptSink):
         self._app = app
 
     async def ask(self, req: ControlRequest) -> PermissionDecision:
+        # Gated focus-aware attention bell (PR3.4): a permission prompt while the
+        # terminal is unfocused (and MAGI_TUI_NOTIFY_BELL on) rings, so an
+        # away-from-keyboard operator notices a turn is blocked on them. No-op
+        # when focused or the gate is off (default). Fired BEFORE the modal so
+        # the cue lands as the prompt appears.
+        _notify.notify_attention(
+            self._app,
+            focused=self._app.app_is_focused,
+            reason=f"Magi: permission needed for {req.tool_name}",
+        )
         # On app teardown the modal can resolve ``None`` (the screen is popped
         # without a decision). The contract is ``-> PermissionDecision``, so fail
         # safe: anything that is not a real decision becomes a deny.
@@ -450,6 +798,13 @@ class MagiTuiApp(App[None]):
         height: auto;
     }
     #prompt:focus { border: round $accent; }
+    #footer {
+        dock: bottom;
+        height: 1;
+        padding: 0 1;
+        background: transparent;
+        color: $text-muted;
+    }
     #completions {
         dock: bottom;
         height: auto;
@@ -458,6 +813,15 @@ class MagiTuiApp(App[None]):
         display: none;
     }
     #completions.visible { display: block; }
+    #sidebar {
+        dock: left;
+        width: 32;
+        padding: 0 1;
+        background: $panel;
+        border-right: solid $primary-darken-2;
+        display: none;
+    }
+    .sidebar-pane { height: auto; padding: 0 0 1 0; }
     ToolUseConfirm { align: center middle; }
     #tool-confirm {
         width: 72;
@@ -468,6 +832,14 @@ class MagiTuiApp(App[None]):
         border: round $primary;
     }
     #tool-confirm-msg { margin-bottom: 1; color: $text; }
+    #tool-diff-preview {
+        height: auto;
+        max-height: 12;
+        margin: 0 0 1 0;
+        padding: 0 1;
+        background: $panel-darken-1;
+    }
+    .confirm-diff { width: 1fr; }
     #confirm-actions { height: auto; }
     #confirm-actions Button {
         width: 100%;
@@ -499,6 +871,16 @@ class MagiTuiApp(App[None]):
         # fires from the prompt and Ctrl+C appears dead.
         Binding("ctrl+c", "cancel_turn", "Cancel", priority=True),
         ("ctrl+y", "copy_selection", "Copy"),
+        # ctrl+t cycles the curated theme set (PR4.1). priority=True so it
+        # preempts any built-in ctrl+t on the focused Input/TextArea; it is NOT
+        # in the keybindings defaults, so on_key resolves it UNBOUND and lets it
+        # bubble to this App BINDING.
+        Binding("ctrl+t", "cycle_theme", "Theme", priority=True),
+        # ctrl+b toggles the left sidebar (PR3.2). priority=True so it preempts
+        # any built-in ctrl+b on the focused Input/TextArea (some widgets map it
+        # to cursor-left); it is NOT in the keybindings defaults (defaults.py),
+        # so on_key resolves it UNBOUND and lets it bubble to this App BINDING.
+        Binding("ctrl+b", "toggle_sidebar", "Sidebar", priority=True),
         # F1 opens the help dialog. F1 is not in the keybindings defaults
         # (defaults.py) and (unlike "?") never collides with typed prompt text,
         # so it is safe to bind globally while the prompt input is focused.
@@ -510,7 +892,7 @@ class MagiTuiApp(App[None]):
     # explicitly (OQ2) so a future Textual default change can't silently move it,
     # and so it documents intent. No collision with BINDINGS (ctrl+c / ctrl+y)
     # or the keybindings defaults.
-    COMMANDS = {CommandPaletteProvider, AppActionProvider}
+    COMMANDS = {CommandPaletteProvider, AppActionProvider, ThemeProvider}
     COMMAND_PALETTE_BINDING = "ctrl+p"
 
     def __init__(
@@ -531,6 +913,7 @@ class MagiTuiApp(App[None]):
         ) = None,
         executor: CommandExecutor | None = None,
         flush_interval: float = DEFAULT_FLUSH_INTERVAL,
+        clipboard_reader: Callable[[], dict | None] | None = None,
     ) -> None:
         super().__init__()
         self._engine = engine
@@ -540,6 +923,12 @@ class MagiTuiApp(App[None]):
         # DefaultCommandExecutor which maps prompt/local/widget kinds onto the
         # app openers without ever starting a second engine loop.
         self._executor: CommandExecutor = executor or DefaultCommandExecutor()
+        # Clipboard image reader (injectable for tests; real default avoids importing
+        # clipboard libs at module level).  ``_pending_attachments`` accumulates
+        # blocks between Ctrl+V presses and is flushed into the TurnInput on submit.
+        from magi_agent.cli.clipboard_image import read_clipboard_image  # noqa: PLC0415
+        self._clipboard_reader: Callable[[], dict | None] = clipboard_reader or read_clipboard_image
+        self._pending_attachments: list[dict] = []
         # Count of /compact (Compact()) acknowledgements; asserted by tests. Real
         # compaction is gated runtime authority (Stream B/E).
         self.compact_requests = 0
@@ -576,11 +965,27 @@ class MagiTuiApp(App[None]):
         # True while an engine turn is in flight; gates Ctrl+C (cancel vs quit).
         self._turn_active = False
         self._active_turn_id: str | None = None
-        # Keybindings: defaults-only (no user keybindings.json wired in v1).
-        # load_keybindings(None) never raises and returns the built-in keymap.
-        # VIM mode + hot-reload are explicitly DEFERRED to v1.1.
-        self._key_bindings: list[ParsedBinding] = load_keybindings(None)[0]
+        # Reasoning/thinking inline display (PR4.2): the in-flight dim thinking
+        # line's update handle + accumulated reasoning text. Reset per turn so
+        # streaming deltas coalesce into ONE updating line, not a new line each.
+        self._thinking_handle: object | None = None
+        self._thinking_accum: str = ""
+        # Subagent/child-run inline display (PR4.3): per-task in-flight handle to
+        # the dim indented line so lifecycle events (started → completed/failed)
+        # for the SAME taskId coalesce into ONE updating line. Reset per turn.
+        self._subagent_handles: dict[str, object] = {}
+        # Keybindings: defaults merged with the user's ``keybindings.json`` if one
+        # exists under the CLI config root (PR4.4). ``load_keybindings`` never
+        # raises — a missing/malformed file or an unknown action degrades to
+        # defaults, so the app always has a usable keymap. VIM mode + hot-reload
+        # remain DEFERRED to v1.1.
+        self._key_bindings: list[ParsedBinding] = load_keybindings(
+            self._keybindings_path()
+        )[0]
         self._pending: tuple[Keystroke, ...] | None = None
+        # which-key chord-hint overlay (PR4.4); mounted in compose, driven by
+        # on_key — shown while a chord is pending, hidden on resolve/cancel.
+        self._whichkey: WhichKeyOverlay | None = None
         # The permission sink the engine's gate can race (Stream C/F wire it in).
         self.sink: TextualSink = TextualSink(self)
         self._router = AutocompleteRouter(
@@ -592,11 +997,27 @@ class MagiTuiApp(App[None]):
         # ``_view`` (new TranscriptView widget list) is populated, selected by
         # ``_legacy_richlog`` (the MAGI_TUI_LEGACY_RICHLOG escape hatch, PR0.3).
         self._topbar: Static | None = None
+        self._footer: StatusFooter | None = None
+        # Left sidebar (PR3.2): mounted hidden, toggled by ctrl+b. Panes are fed
+        # from folded tool/terminal events (todo / recent files / context usage).
+        self._sidebar: Sidebar | None = None
+        # Focus tracking for the gated attention bell (PR3.4). Assume focused at
+        # mount; on_app_blur/on_app_focus keep it current. The bell only fires
+        # while UNFOCUSED (and only when MAGI_TUI_NOTIFY_BELL is on — default OFF).
+        self.app_is_focused: bool = True
+        # monotonic() stamp marking the in-flight turn's start; None when idle.
+        # Used by the footer elapsed clock (set in start_turn, cleared in
+        # _render_terminal).
+        self._turn_started_monotonic: float | None = None
         self._log: RichLog | None = None
         self._view: TranscriptView | None = None
         self._live: Static | None = None
         self._input: PromptInput | None = None
         self._completions: OptionList | None = None
+        # Autocomplete overlay state: the currently-shown ranked completions and
+        # the highlighted index. Tab/Enter accept the highlight, ↑/↓ navigate.
+        self._completion_results: list[Completion] = []
+        self._completion_index: int = 0
         self._controller: TranscriptController | None = None
         # Terminal of the most recent turn (asserted by tests).
         self.last_terminal: EngineResult | None = None
@@ -613,6 +1034,23 @@ class MagiTuiApp(App[None]):
 
         return os.environ.get("MAGI_TUI_LEGACY_RICHLOG", "") == "1"
 
+    @staticmethod
+    def _keybindings_path() -> str | None:
+        """Resolve the user keybindings config path, or ``None`` if absent.
+
+        Lives at ``<session-root>/keybindings.json`` where ``<session-root>`` is
+        ``~/.magi`` by default and overridable via ``MAGI_CLI_SESSION_DIR`` — the
+        SAME root ``session_log.py`` / ``history.py`` / the theme settings use, so
+        a single env isolates the whole CLI config tree in tests. Returns ``None``
+        when no file exists so ``load_keybindings(None)`` short-circuits to the
+        built-in defaults.
+        """
+
+        from magi_agent.cli.session_log import _session_root  # noqa: PLC0415
+
+        path = _session_root() / "keybindings.json"
+        return str(path) if path.exists() else None
+
     # -- composition --------------------------------------------------------
     def compose(self) -> ComposeResult:
         self._topbar = Static(self._topbar_text(), id="topbar")
@@ -628,14 +1066,30 @@ class MagiTuiApp(App[None]):
         self._live = Static("", id="live")
         self._completions = OptionList(id="completions")
         self._input = PromptInput(commands=self._commands, id="prompt")
+        self._footer = StatusFooter(
+            model=self._model, cwd=self._topbar_cwd(), id="footer"
+        )
+        # Left sidebar (PR3.2): a left-docked sibling, hidden by default (the CSS
+        # sets ``display: none``; ctrl+b flips ``display``). Yielded BEFORE the
+        # transcript so the left dock column is reserved first and the transcript
+        # reflows to the right of it (no extra rule needed — #transcript is 1fr).
+        self._sidebar = Sidebar(id="sidebar")
+        # which-key overlay (PR4.4): bottom-docked, hidden until a chord pends.
+        self._whichkey = WhichKeyOverlay(id="whichkey")
         yield self._topbar
+        yield self._sidebar
         yield transcript_widget
         yield self._live
         yield self._completions
+        yield self._whichkey
         yield self._input
+        # The footer is yielded LAST so its ``dock: bottom`` wins the lower slot
+        # over the prompt's (also bottom-docked) — the footer sits BELOW the
+        # prompt.
+        yield self._footer
 
-    def _topbar_text(self) -> str:
-        """The top status bar: app · model · cwd · mode."""
+    def _topbar_cwd(self) -> str:
+        """Home-relative, length-capped cwd (shared by topbar + footer)."""
 
         import os as _os  # noqa: PLC0415
 
@@ -645,16 +1099,27 @@ class MagiTuiApp(App[None]):
             cwd = "~" + cwd[len(home) :]
         if len(cwd) > 48:
             cwd = "…" + cwd[-47:]
+        return cwd
+
+    def _topbar_text(self) -> str:
+        """The top status bar: app · model · cwd · mode (static identity)."""
+
         model = self._model or "no model"
         mode = (self._mode or "act").lower()
-        return f"● Magi   {model}   {cwd}   [{mode}]"
+        return f"● Magi   {model}   {self._topbar_cwd()}   [{mode}]"
 
     def on_mount(self) -> None:
         assert self._live is not None and (
             self._log is not None or self._view is not None
         )
+        # Register the curated theme set (custom magi-dark + Textual built-ins)
+        # and restore the last-chosen theme from disk, falling back to the
+        # historical default. The flat-look CSS pins region backgrounds to
+        # transparent, so a theme only retints accent/text/primary — switching
+        # never repaints the Screen/transcript with a solid colour (PR4.1).
+        register_magi_themes(self)
         try:
-            self.theme = "tokyo-night"
+            self.theme = load_saved_theme() or DEFAULT_THEME
         except Exception:  # pragma: no cover - theme always present in textual 8.x
             pass
         if self._view is not None:
@@ -677,6 +1142,20 @@ class MagiTuiApp(App[None]):
     def _on_flush_tick(self) -> None:
         if self._controller is not None:
             self._controller.flush()
+        # While a turn is in flight, advance the footer elapsed so the live
+        # status reads as a running clock (reuses the existing flush timer — no
+        # separate timer needed). Once _render_terminal clears the start stamp
+        # and flips state off "running", this stops contributing.
+        if (
+            self._turn_started_monotonic is not None
+            and self._footer is not None
+            and self._footer.state == "running"
+        ):
+            # The reactive ``elapsed`` advances every tick (cheap assignment),
+            # but ``StatusFooter.watch_elapsed`` only REPAINTS when the
+            # whole-second value changes — so this 25Hz tick no longer triggers
+            # ~24/25 identical repaints for the 1s-granularity render.
+            self._footer.set_elapsed(self._turn_elapsed())
 
     def _render_welcome(self) -> None:
         """Render the initial TUI state so bare ``magi`` never opens blank."""
@@ -707,6 +1186,8 @@ class MagiTuiApp(App[None]):
         welcome.append(" history · ", style="dim")
         welcome.append("Ctrl+S", style="#7aa2f7")
         welcome.append(" draft · ", style="dim")
+        welcome.append("Ctrl+B", style="#7aa2f7")
+        welcome.append(" sidebar · ", style="dim")
         welcome.append("Ctrl+P", style="#7aa2f7")
         welcome.append(" palette · ", style="dim")
         welcome.append("F1", style="#7aa2f7")
@@ -723,7 +1204,7 @@ class MagiTuiApp(App[None]):
             text=(
                 "Welcome to Magi  "
                 "Keys: Shift+Enter newline · ↑ history · Ctrl+S draft · "
-                "Ctrl+P palette · F1 help  "
+                "Ctrl+B sidebar · Ctrl+P palette · F1 help  "
                 "Copy: drag to select · Ctrl+Y copy (⌥-drag for native terminal copy)  "
                 f"Commands ({len(command_names)}): {command_line}"
             ),
@@ -734,6 +1215,37 @@ class MagiTuiApp(App[None]):
         if self._controller is None:  # pragma: no cover - guarded by on_mount
             raise RuntimeError("controller not ready; app not mounted")
         return self._controller
+
+    # -- clipboard image attach ---------------------------------------------
+    @property
+    def pending_attachments(self) -> list[dict]:
+        """Read-only view of queued image blocks (not yet submitted)."""
+        return list(self._pending_attachments)
+
+    def attach_clipboard_image(self) -> None:
+        """Read a clipboard image and add it to the pending buffer.
+
+        Calls the injected ``_clipboard_reader`` (real default:
+        ``read_clipboard_image``; test default: any callable → dict | None).
+        On success appends the block and shows a toast. On None shows a warning
+        toast and leaves the buffer untouched.
+        """
+        try:
+            block = self._clipboard_reader()
+        except Exception as exc:  # reader shells out (pngpaste/xclip); never crash a turn
+            _notify.warning(self, f"Clipboard read failed: {exc}")
+            return
+        if block is not None:
+            self._pending_attachments.append(block)
+            _notify.info(self, f"📎 image attached ({len(self._pending_attachments)})")
+        else:
+            _notify.warning(self, "No image in clipboard")
+
+    def on_prompt_input_attach_image_requested(
+        self, event: "PromptInput.AttachImageRequested"
+    ) -> None:
+        """Handle the Ctrl+V message posted by PromptInput."""
+        self.attach_clipboard_image()
 
     # -- input / submission -------------------------------------------------
     def on_prompt_input_prompt_submitted(
@@ -839,6 +1351,32 @@ class MagiTuiApp(App[None]):
             self.controller.commit_block(f"[command failed: {exc}]")
 
     # -- app-opener seam (CommandContext.app) ------------------------------
+    def status_snapshot(self) -> dict[str, object]:
+        """Live session status for the ``/status`` command.
+
+        ``StatusCommand`` reads this (via ``ctx.app``) to render a real
+        model/cwd/mode/session/turns/tokens summary instead of the
+        slash-control boundary projection (which is the headless fallback).
+        """
+
+        from magi_agent import __version__  # noqa: PLC0415
+
+        tokens = 0
+        if self._footer is not None:
+            try:
+                tokens = int(getattr(self._footer, "tokens", 0) or 0)
+            except (TypeError, ValueError):
+                tokens = 0
+        return {
+            "version": __version__,
+            "model": self._model or "no model",
+            "cwd": self._cwd,
+            "mode": (self._mode or "act").lower(),
+            "session": self._session_id,
+            "turns": self._turn_seq,
+            "tokens": tokens,
+        }
+
     def commit_text(self, text: str) -> None:
         """Commit a local command's ``Text`` result to the transcript."""
 
@@ -873,25 +1411,42 @@ class MagiTuiApp(App[None]):
         )
         self.push_screen(dialog, self._apply_model)
 
-    def _apply_model(self, model: str | None) -> None:
+    def _apply_model(
+        self, model: str | None, *, _config_path: object = None
+    ) -> None:
         """Apply a model selected in the picker (None on cancel = no-op).
 
-        Updates ``self._model`` and refreshes the topbar — cosmetic only in
-        PR2.3. ``TurnInput`` (contracts.py) carries no model field, so the engine
-        does not yet consume the switch; real consumption (threading the model
-        into the next ``TurnInput`` / provider reconfiguration) is a deferred
-        runtime seam, consistent with ``action_open_model_picker``.
+        Updates ``self._model``, persists the choice to ``~/.magi/config.toml``
+        (best-effort: a write failure shows a "couldn't save" note rather than
+        crashing), and refreshes the topbar.  ``TurnInput`` carries no model
+        field, so the engine does not consume the switch mid-session — it takes
+        effect on the NEXT launch.  ``_config_path`` is a test-only seam so
+        tests never touch the real ``~/.magi/config.toml``.
         """
 
         if not model:
             return
+        # Persist to config (best-effort).
+        try:
+            from magi_agent.cli.providers import persist_model  # noqa: PLC0415
+
+            persist_model(model, path=_config_path)
+            saved = True
+        except Exception:
+            saved = False
         self._model = model
         if self._topbar is not None:
             self._topbar.update(self._topbar_text())
-        # Honest toast: the switch is cosmetic. ``TurnInput`` carries no model
-        # field, so the next turn still runs the old model until the runtime
-        # seam is wired (deferred). Don't imply an immediate runtime effect.
-        self.notify(f"Model set to {model} (applies next session)", timeout=2)
+        if saved:
+            self.notify(
+                f"Model set to {model} — saved to config, applies next session",
+                timeout=2,
+            )
+        else:
+            self.notify(
+                f"Model set to {model} (couldn't save to config — applies next session)",
+                timeout=3,
+            )
 
     # -- session list (PR2.4) ----------------------------------------------
     def action_open_session_list(self) -> None:
@@ -954,9 +1509,50 @@ class MagiTuiApp(App[None]):
 
         self.push_screen(HelpDialog.from_app(self))
 
+    # -- theme cycle + picker (PR4.1) --------------------------------------
+    def action_cycle_theme(self) -> None:
+        """Advance ``App.theme`` to the next curated theme and persist it.
+
+        Bound to ``ctrl+t``. Wraps around ``MAGI_THEMES``; if the current theme
+        is outside the curated set (e.g. a built-in set elsewhere) the cycle
+        restarts at the first curated name. The flat-look regions stay
+        transparent across the switch — only accent/text/primary retint.
+        """
+
+        current = self.theme
+        try:
+            idx = MAGI_THEMES.index(current)
+        except ValueError:
+            idx = -1
+        nxt = MAGI_THEMES[(idx + 1) % len(MAGI_THEMES)]
+        self._set_theme(nxt)
+
+    def select_theme(self, name: str) -> None:
+        """Set + persist a theme by name (the palette ThemeProvider entrypoint).
+
+        Unknown names are ignored so a stale/forged palette entry can never set
+        ``App.theme`` to an unregistered value (which would raise on assignment).
+        """
+
+        if name not in MAGI_THEMES:
+            return
+        self._set_theme(name)
+
+    def _set_theme(self, name: str) -> None:
+        """Apply + persist a curated theme and toast the choice (best-effort)."""
+
+        self.theme = name
+        save_theme(name)
+        try:
+            self.notify(f"Theme: {name}", timeout=2)
+        except Exception:  # pragma: no cover - notify always available when mounted
+            pass
+
     # -- the ONE engine-driven turn loop -----------------------------------
     def start_turn(self, prompt: str) -> None:
         """Kick off a single engine turn for ``prompt`` in an exclusive worker."""
+
+        import time as _time  # noqa: PLC0415
 
         self._turn_seq += 1
         turn_id = f"{self._session_id}-turn-{self._turn_seq}"
@@ -964,6 +1560,17 @@ class MagiTuiApp(App[None]):
         self._cancel = cancel
         self._active_turn_id = turn_id
         self._turn_active = True
+        # Fresh thinking line for this turn (coalesce only within one turn).
+        self._thinking_handle = None
+        self._thinking_accum = ""
+        # Fresh subagent registry for this turn (coalesce only within one turn).
+        self._subagent_handles = {}
+        self._turn_started_monotonic = _time.monotonic()
+        # Clear any dangling chord prefix + which-key overlay: a turn starting
+        # mid-chord (e.g. submit fired) must not leave the hint stuck visible.
+        self._pending = None
+        self._hide_whichkey()
+        self.update_footer(state="running")
         self._echo_user(prompt)
         self._run_turn(prompt, turn_id, cancel)
 
@@ -980,7 +1587,14 @@ class MagiTuiApp(App[None]):
         self._controller.commit_rich(block, text=f"› {prompt}")
 
     def action_copy_selection(self) -> None:
-        """Copy the currently selected transcript text to the clipboard."""
+        """Copy the currently selected transcript text to the clipboard.
+
+        Both the empty-selection and clipboard-failure paths now surface a toast
+        (``_notify.info`` / ``_notify.warning``) instead of returning silently —
+        the operator always gets feedback that Ctrl+Y did something (or why it
+        couldn't). Reading the selection itself stays best-effort (a missing
+        selection API is the expected "nothing selected" case, not an error).
+        """
 
         text = ""
         try:
@@ -990,12 +1604,14 @@ class MagiTuiApp(App[None]):
                 text = self.selected_text or ""  # type: ignore[attr-defined]
             except Exception:
                 text = ""
-        if text:
-            try:
-                self.copy_to_clipboard(text)
-                self.notify("Copied selection", timeout=2)
-            except Exception:
-                pass
+        if not text:
+            _notify.info(self, "Nothing selected to copy")
+            return
+        try:
+            self.copy_to_clipboard(text)
+            _notify.info(self, "Copied selection")
+        except Exception as exc:
+            _notify.warning(self, f"Copy failed: {exc}")
 
     @work(exclusive=True, group="turn")
     async def _run_turn(
@@ -1010,8 +1626,15 @@ class MagiTuiApp(App[None]):
 
         controller = self.controller
         controller.begin_live()
+        # Snapshot and clear the pending image buffer atomically before the turn
+        # starts so any Ctrl+V press that races the submit lands in the NEXT turn.
+        image_blocks = tuple(self._pending_attachments)
+        self._pending_attachments.clear()
         turn_input = TurnInput(
-            prompt=prompt, session_id=self._session_id, turn_id=turn_id
+            prompt=prompt,
+            session_id=self._session_id,
+            turn_id=turn_id,
+            image_blocks=image_blocks,
         )
         gen = self._engine.run_turn_stream(
             self._runtime, turn_input, cancel=cancel, gate=self._gate
@@ -1023,6 +1646,14 @@ class MagiTuiApp(App[None]):
                     terminal = item
                     break
                 await self._fold_event(item)
+        except BaseException:
+            # The engine RAISED instead of yielding a terminal: the normal
+            # ``_render_terminal`` path below never runs, so the footer would
+            # stay on "running" and the elapsed clock would tick forever. Reset
+            # the footer to a terminal-ish state and stop the clock, then
+            # re-raise to preserve the existing error propagation.
+            self._reset_footer_on_error()
+            raise
         finally:
             await gen.aclose()
             if self._active_turn_id == turn_id:
@@ -1037,6 +1668,18 @@ class MagiTuiApp(App[None]):
             terminal = EngineResult(terminal=Terminal.error, error="no_terminal")
         self.last_terminal = terminal
         self._render_terminal(terminal)
+
+    def _reset_footer_on_error(self) -> None:
+        """Stop the running clock + flip the footer off "running" on a raise.
+
+        Used when the engine generator raises (rather than yielding an error
+        terminal): clears the elapsed start stamp so ``_on_flush_tick`` stops
+        advancing the clock, and folds an ``error`` state into the footer so the
+        user sees the turn ended. No-op before mount.
+        """
+
+        self._turn_started_monotonic = None
+        self.update_footer(state=Terminal.error.value)
 
     async def _fold_event(self, event: RuntimeEvent) -> None:
         """Fold one ``RuntimeEvent`` into the transcript regions."""
@@ -1055,6 +1698,20 @@ class MagiTuiApp(App[None]):
         if event.type == "error":
             controller.commit_block(_status_summary(event))
             return
+        # Reasoning/thinking is user-relevant (unlike plumbing noise), so it is
+        # INTERCEPTED here — BEFORE the quiet-by-default ``status`` drop below —
+        # and rendered as a dim one-line block, shown by default. Streaming
+        # deltas coalesce into the single in-flight thinking line.
+        if _is_reasoning_event(event):
+            self._render_thinking(event)
+            return
+        # Subagent/child-run activity is user-relevant (unlike plumbing noise),
+        # so it too is INTERCEPTED here — BEFORE the quiet-by-default ``status``
+        # drop below — and rendered as a dim INDENTED one-line block, shown by
+        # default. Lifecycle events coalesce per taskId into one updating line.
+        if _is_child_event(event):
+            self._render_subagent(event)
+            return
         # status / artifact / control -> internal diagnostics (routing/policy/
         # turn-lifecycle plumbing). These flooded the chat with lines like
         # ``runner_policy_assembly`` / ``phase_route_decision`` / ``turn_end``, so
@@ -1070,6 +1727,10 @@ class MagiTuiApp(App[None]):
         renderer = self._renderers.get(name)
         inner = _inner_type(payload)
         if inner == "tool_start":
+            # Fold this tool_start into the sidebar panes (todo / recent files)
+            # BEFORE rendering the call, so the side panes track activity even
+            # when the sidebar is currently hidden.
+            self._fold_sidebar_tool(name, _tool_input(payload))
             node = renderer.render_call(_tool_input(payload))
         elif inner == "tool_progress":
             node = renderer.render_progress(_tool_result(payload) or payload)
@@ -1113,7 +1774,154 @@ class MagiTuiApp(App[None]):
             return text
         return f"{tool_name}: {text}" if text else tool_name
 
+    def _render_thinking(self, event: RuntimeEvent) -> None:
+        """Render a reasoning event as a dim one-line block (coalesced).
+
+        The first reasoning event in a turn commits a fresh dim ``● thinking``
+        line; subsequent deltas UPDATE that same line in place (the accumulated
+        reasoning's terse preview) rather than spamming one line per delta. The
+        in-flight handle is reset at turn start (``start_turn``).
+        """
+
+        payload = event.payload if isinstance(event.payload, dict) else {}
+        delta = _reasoning_text(payload)
+        # Accumulate so the coalesced preview reflects the latest reasoning.
+        # Gate the join on whether there's ALREADY accumulated text (the
+        # accumulator), not on the widget handle — appending only makes sense
+        # when prior reasoning exists, and this stays correct even if the first
+        # delta is empty (no leading-space artifact to mask).
+        self._thinking_accum = (
+            (self._thinking_accum + " " + delta).strip()
+            if self._thinking_accum
+            else delta.strip()
+        )
+        node = _render_thinking_node(self._thinking_accum)
+        if self._thinking_handle is None:
+            self._thinking_handle = self.controller.commit_coalesced(
+                node.rich, text=node.text
+            )
+        else:
+            # Position-freeze: if a tool/assistant block commits BETWEEN two
+            # thinking deltas, ``update_coalesced`` keeps patching the ORIGINAL
+            # thinking line in place — its text updates while its on-screen
+            # position stays ABOVE the later block. This is intended coalescing
+            # (one thinking line per turn), NOT the index-drift bug.
+            self.controller.update_coalesced(
+                self._thinking_handle, node.rich, text=node.text
+            )
+
+    def _render_subagent(self, event: RuntimeEvent) -> None:
+        """Render a child/subagent event as a dim indented one-line block.
+
+        The first event for a ``taskId`` commits a fresh dim indented
+        ``  ⤷ subagent <label>  <status>`` line; subsequent lifecycle events for
+        the SAME task UPDATE that one line in place (status started → completed/
+        failed) rather than spamming one line per event. Distinct tasks get
+        distinct lines. The per-task handle registry is reset at turn start.
+        Reuses the generic in-place one-line ``commit_coalesced``/
+        ``update_coalesced`` seam (the transcript's coalescing primitive).
+        """
+
+        payload = event.payload if isinstance(event.payload, dict) else {}
+        inner = payload.get("type")
+        # ``_is_child_event`` already proved ``inner`` is a str key in
+        # ``_CHILD_INNER_STATUS`` before routing here, so a direct lookup is safe.
+        status = _CHILD_INNER_STATUS[inner]
+        # Coalesce by the RAW taskId (key) so two distinct taskIds sharing a
+        # 59-char prefix don't collide once the DISPLAY label truncates.
+        key = _child_task_key(payload)
+        label = _child_task_label(payload)
+        node = _render_subagent_node(label, status, _child_detail(payload))
+        handle = self._subagent_handles.get(key)
+        if handle is None:
+            self._subagent_handles[key] = self.controller.commit_coalesced(
+                node.rich, text=node.text
+            )
+        else:
+            self.controller.update_coalesced(handle, node.rich, text=node.text)
+
+    def _fold_sidebar_tool(self, name: str, tool_input: object) -> None:
+        """Route a tool_start into the sidebar panes (todo / recent files).
+
+        TodoWrite replaces the todo pane with the tool's todo list; Read/Edit/
+        Write push the touched file onto the MRU recent-files pane. No-op when
+        the sidebar is not mounted or the input carries nothing usable.
+        """
+
+        if self._sidebar is None:
+            return
+        if name == "TodoWrite":
+            todos = _todo_contents(tool_input)
+            if todos is not None:
+                self._sidebar.set_todos(todos)
+            return
+        if name in ("Read", "Edit", "Write", "MultiEdit"):
+            path = _tool_file_path(tool_input)
+            if path:
+                self._sidebar.add_file(path)
+
+    # -- status footer (PR3.1) ---------------------------------------------
+    def update_footer(
+        self,
+        *,
+        state: str | None = None,
+        tokens: int | None = None,
+        elapsed: float | None = None,
+    ) -> None:
+        """Single seam every fold/turn path uses to refresh the footer.
+
+        No-op before mount (the footer is created in ``compose``); each provided
+        field updates the corresponding reactive on ``StatusFooter`` (which
+        repaints only itself).
+        """
+
+        if self._footer is None:
+            return
+        if state is not None:
+            self._footer.set_state(state)
+        if tokens is not None:
+            self._footer.set_tokens(tokens)
+        if elapsed is not None:
+            self._footer.set_elapsed(elapsed)
+
+    def _turn_elapsed(self) -> float:
+        """Seconds since the in-flight turn started (0.0 when idle)."""
+
+        import time as _time  # noqa: PLC0415
+
+        if self._turn_started_monotonic is None:
+            return 0.0
+        return max(0.0, _time.monotonic() - self._turn_started_monotonic)
+
     def _render_terminal(self, terminal: EngineResult) -> None:
+        # Fold the terminal state + token usage + elapsed into the footer FIRST,
+        # so it updates for completed AND non-completed turns (the early return
+        # below is only for the transcript marker, not the footer).
+        tokens = _usage_tokens(terminal.usage)
+        self.update_footer(
+            state=terminal.terminal.value,
+            tokens=tokens,
+            elapsed=self._turn_elapsed(),
+        )
+        # Mirror the turn's token usage into the sidebar context pane. The limit
+        # is kept as a future per-model seam, but the sidebar currently renders
+        # only a bare token count to avoid a misleading hardcoded ratio.
+        if self._sidebar is not None:
+            self._sidebar.set_context(
+                usage=tokens, limit=_context_limit(self._model)
+            )
+        # Stop the running clock once the turn is terminal (the flush-tick
+        # elapsed advance keys off this being None / state != "running").
+        self._turn_started_monotonic = None
+        # Gated focus-aware attention bell (PR3.4): ring only when the terminal
+        # is unfocused AND MAGI_TUI_NOTIFY_BELL is on (default OFF). Fired here
+        # so it covers completed AND non-completed turns (before the early
+        # return for the completed case). Fail-open — never crashes the turn.
+        _notify.notify_attention(
+            self,
+            focused=self.app_is_focused,
+            reason=f"Magi: turn {terminal.terminal.value}",
+        )
         if terminal.terminal == Terminal.completed:
             return
         suffix = f": {terminal.error}" if terminal.error else ""
@@ -1137,6 +1945,34 @@ class MagiTuiApp(App[None]):
         renderable = render_markdown(text)
         self._last_committed_renderable = renderable
         controller.commit_rich(renderable, text=text)
+
+    # -- sidebar toggle (PR3.2) --------------------------------------------
+    def action_toggle_sidebar(self) -> None:
+        """Show/hide the left sidebar (ctrl+b)."""
+
+        if self._sidebar is None:
+            return
+        self._sidebar.display = not self._sidebar.display
+
+    # -- focus tracking for the attention bell (PR3.4) ---------------------
+    def on_app_blur(self, _event: object) -> None:
+        """Terminal lost focus -> the attention bell may fire on next turn-done.
+
+        Textual posts ``AppBlur`` (handler ``on_app_blur``) when the terminal
+        emulator reports the window/tab lost focus. We only track the flag here;
+        the gated bell keys off it (and ``MAGI_TUI_NOTIFY_BELL``).
+        """
+
+        self.app_is_focused = False
+
+    def on_app_focus(self, _event: object) -> None:
+        """Terminal regained focus -> suppress the attention bell.
+
+        Textual posts ``AppFocus`` (handler ``on_app_focus``) when focus returns;
+        the operator is now looking, so no bell should fire.
+        """
+
+        self.app_is_focused = True
 
     # -- cancellation -------------------------------------------------------
     def action_cancel_turn(self) -> None:
@@ -1179,15 +2015,34 @@ class MagiTuiApp(App[None]):
         )
         if result.kind is ResultKind.MATCH:
             self._pending = None
+            self._hide_whichkey()
             _stop(event)
             self._run_key_action(result.action)
         elif result.kind is ResultKind.CHORD_STARTED:
             self._pending = result.pending
+            self._show_whichkey()
             _stop(event)
         else:
-            # UNBOUND / NONE / CHORD_CANCELLED: clear any pending and let the
-            # event bubble (typing reaches the Input widget).
+            # UNBOUND / NONE / CHORD_CANCELLED: clear any pending, hide the hints
+            # and let the event bubble (typing reaches the Input widget).
             self._pending = None
+            self._hide_whichkey()
+
+    def _show_whichkey(self) -> None:
+        """Render the pending chord's continuations into the overlay."""
+
+        if self._whichkey is None:
+            return
+        hints = chord_continuations(
+            self._pending, self._active_contexts(), self._key_bindings
+        )
+        self._whichkey.show_hints(hints)
+
+    def _hide_whichkey(self) -> None:
+        """Hide the which-key overlay (chord resolved or cancelled)."""
+
+        if self._whichkey is not None:
+            self._whichkey.hide_hints()
 
     def _run_key_action(self, action: str | None) -> None:
         """Map a resolved closed-``Action`` value to a concrete v1 REPL behavior.
@@ -1283,10 +2138,17 @@ class MagiTuiApp(App[None]):
         if not results:
             self._hide_completions()
             return
+        self._completion_results = results
+        self._completion_index = 0
         self._completions.add_options(
             [Option(self._format_option(c), id=str(i)) for i, c in enumerate(results)]
         )
         self._completions.add_class("visible")
+        # Highlight the top candidate so Tab/Enter has a default to accept.
+        try:
+            self._completions.highlighted = 0
+        except Exception:  # pragma: no cover - defensive (textual version skew)
+            pass
 
     @staticmethod
     def _format_option(completion: Completion) -> str:
@@ -1296,7 +2158,65 @@ class MagiTuiApp(App[None]):
         return completion.label
 
     def _hide_completions(self) -> None:
+        self._completion_results = []
+        self._completion_index = 0
         if self._completions is None:
             return
         self._completions.remove_class("visible")
         self._completions.clear_options()
+
+    # -- completion acceptance (driven by PromptInput key handling) ----------
+    def completions_active(self) -> bool:
+        """True when the autocomplete overlay is visible with candidates.
+
+        ``PromptInput._on_key`` consults this so Tab/Enter/↑/↓/Esc drive the
+        overlay (accept/navigate/dismiss) instead of their normal editor roles
+        while completions are showing.
+        """
+
+        return bool(self._completion_results) and self._completions is not None and (
+            self._completions.has_class("visible")
+        )
+
+    def completion_navigate(self, delta: int) -> None:
+        """Move the highlighted completion by ``delta`` (wraps)."""
+
+        if not self._completion_results:
+            return
+        count = len(self._completion_results)
+        self._completion_index = (self._completion_index + delta) % count
+        if self._completions is not None:
+            try:
+                self._completions.highlighted = self._completion_index
+            except Exception:  # pragma: no cover - defensive
+                pass
+
+    def accept_completion(self) -> bool:
+        """Substitute the highlighted completion into the prompt and dismiss."""
+
+        if not self._completion_results:
+            return False
+        index = self._completion_index
+        if not 0 <= index < len(self._completion_results):
+            index = 0
+        value = self._completion_results[index].value
+        if self._input is not None:
+            self._input.apply_completion(value)
+        self._hide_completions()
+        return True
+
+    def cancel_completions(self) -> None:
+        """Dismiss the overlay without substituting (Esc)."""
+
+        self._hide_completions()
+
+    def on_option_list_option_selected(self, event: object) -> None:
+        """Accept a completion clicked with the mouse (Enter goes via the input)."""
+
+        option_list = getattr(event, "option_list", None)
+        if option_list is not self._completions or not self._completion_results:
+            return
+        index = getattr(event, "option_index", None)
+        if isinstance(index, int):
+            self._completion_index = index
+        self.accept_completion()

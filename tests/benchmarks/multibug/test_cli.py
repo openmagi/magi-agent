@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from magi_agent.benchmarks.multibug.cli import (
+from benchmarks.multibug.cli import (
     GateDisabledError,
     ensure_enabled,
     is_enabled,
@@ -29,7 +29,7 @@ def test_is_enabled_truthy_values() -> None:
 def test_run_eval_gates_before_loading(tmp_path) -> None:
     # Even with a missing file, the gate must fire FIRST (no FileNotFoundError).
     with pytest.raises(GateDisabledError):
-        from magi_agent.benchmarks.multibug.cli import run_eval
+        from benchmarks.multibug.cli import run_eval
 
         run_eval(
             str(tmp_path / "nope.jsonl"),

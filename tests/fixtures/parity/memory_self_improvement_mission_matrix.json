@@ -373,19 +373,11 @@
       ],
       "latestMainCoveredRefs": [
         {
-          "path": "magi_agent/harness/mission_runtime_boundary.py",
-          "state": "existing"
-        },
-        {
           "path": "magi_agent/shadow/mission_lifecycle_contract.py",
           "state": "existing"
         },
         {
           "path": "tests/test_mission_lifecycle_contract_golden_fixtures.py",
-          "state": "existing"
-        },
-        {
-          "path": "tests/test_priority_e_mission_runtime_boundary.py",
           "state": "existing"
         },
         {
@@ -501,14 +493,6 @@
       ],
       "latestMainCoveredRefs": [
         {
-          "path": "magi_agent/harness/background_tasks.py",
-          "state": "existing"
-        },
-        {
-          "path": "tests/test_live_background_task_boundary.py",
-          "state": "existing"
-        },
-        {
           "path": "magi_agent/runtime/long_running_activity.py",
           "state": "existing"
         },
@@ -621,7 +605,7 @@
       ],
       "latestMainCoveredRefs": [
         {
-          "path": "magi_agent/evals/regression_gates.py",
+          "path": "evals/regression_gates.py",
           "state": "existing"
         },
         {
@@ -674,14 +658,6 @@
         "hermes_self_improvement_parity"
       ],
       "latestMainCoveredRefs": [
-        {
-          "path": "magi_agent/harness/self_debug.py",
-          "state": "existing"
-        },
-        {
-          "path": "tests/test_self_debug_state_machine_contract.py",
-          "state": "existing"
-        },
         {
           "path": "magi_agent/recipes/first_party/self_improvement.py",
           "state": "existing"
@@ -771,7 +747,7 @@
       ],
       "latestMainCoveredRefs": [
         {
-          "path": "magi_agent/evals/regression_gates.py",
+          "path": "evals/regression_gates.py",
           "state": "existing"
         },
         {

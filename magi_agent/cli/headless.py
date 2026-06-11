@@ -28,7 +28,10 @@ import sys
 import threading
 import uuid as _uuid
 from collections.abc import AsyncGenerator
-from typing import IO, Literal
+from typing import IO, TYPE_CHECKING, Literal
+
+if TYPE_CHECKING:
+    from magi_agent.cli.session_log import SessionLog
 
 from magi_agent.cli.contracts import (
     CommandContext,
@@ -83,6 +86,81 @@ def _log(message: str) -> None:
     """Write a diagnostic line to stderr (never stdout)."""
 
     print(message, file=sys.stderr, flush=True)
+
+
+def _session_log_enabled() -> bool:
+    """Whether the per-turn JSONL transcript write path is active (PR-04-PR1)."""
+
+    from magi_agent.config.env import cli_session_log_enabled
+
+    return cli_session_log_enabled(os.environ)
+
+
+async def _persist_event(session_log: "SessionLog", event: RuntimeEvent) -> None:
+    """Append one event to the session log off the event loop.
+
+    ``SessionLog.append`` issues a blocking ``os.fsync`` on flush, so it runs in
+    a worker thread (``asyncio.to_thread``) to keep the loop non-blocking, per
+    the ``session_log`` module's "Sync IO under an async caller" contract.
+    Best-effort: a transcript write must never break the live turn.
+    """
+
+    try:
+        await asyncio.to_thread(session_log.append, event)
+    except Exception as exc:  # noqa: BLE001 - transcript is best-effort
+        _log(f"session_log append failed (ignored): {exc!r}")
+
+
+async def _persist_user_prompt(session_log: "SessionLog", prompt: str) -> None:
+    """Record the RAW user turn as the first envelope of the transcript.
+
+    The user-message envelope is persisted verbatim (the session-log contract
+    keeps the transcript faithful to disk). Its payload uses the
+    ``{"type": "user_message", "content": ...}`` shape that
+    ``session_log.reconstruct_messages`` reads back as a user message. The
+    carrier ``RuntimeEvent.type`` is a benign ``status`` kind (the reconstruction
+    reads the inner ``payload["type"]``, not the envelope kind).
+    """
+
+    event = RuntimeEvent(
+        type="status",
+        payload={"type": "user_message", "content": prompt},
+        turn_id="user",
+    )
+    await _persist_event(session_log, event)
+
+
+async def _close_session_log(session_log: "SessionLog") -> None:
+    """Flush + release the transcript handle off the event loop (best-effort).
+
+    A one-shot headless run is short-lived; ``SessionLog`` buffers appends and
+    only flushes on its interval or on ``close()``, so an explicit close is what
+    actually lands the transcript on disk for ``--resume`` to read.
+    """
+
+    try:
+        await asyncio.to_thread(session_log.close)
+    except Exception as exc:  # noqa: BLE001 - transcript is best-effort
+        _log(f"session_log close failed (ignored): {exc!r}")
+
+
+async def _tap_session_log(
+    gen: AsyncGenerator[RuntimeEvent, EngineResult],
+    session_log: "SessionLog",
+) -> AsyncGenerator[RuntimeEvent, EngineResult]:
+    """Re-yield every item from ``gen`` while persisting each ``RuntimeEvent``.
+
+    The wrapped generator is transparent: ``EngineResult`` (the terminal) passes
+    through untouched and is NOT persisted as a transcript event. Only the
+    sanitized ``RuntimeEvent`` stream — already projected to the public agent-
+    event shape by the engine — is written, satisfying the session-log
+    sanitization precondition.
+    """
+
+    async for item in gen:
+        if isinstance(item, RuntimeEvent):
+            await _persist_event(session_log, item)
+        yield item  # type: ignore[misc]
 
 
 async def drain(
@@ -624,6 +702,8 @@ async def run_headless(
     model: str | None = None,
     input_stream: IO[str] | None = None,
     mcp_servers: list[str] | tuple[str, ...] | None = None,
+    session_log: "SessionLog | None" = None,
+    initial_messages: list[dict[str, str]] | None = None,
 ) -> int:
     """Run a single headless turn. Returns a process exit code.
 
@@ -632,6 +712,14 @@ async def run_headless(
     background task parses ``control_response`` -> ``sink.deliver(...)`` and
     ``control_cancel_request`` -> cancel. When ``None`` (the one-shot default) no
     blocking reader is started.
+
+    ``session_log`` is the PR-04-PR1 transcript writer. When supplied AND the
+    ``MAGI_CLI_SESSION_LOG_ENABLED`` gate is on, the RAW user prompt plus every
+    sanitized engine ``RuntimeEvent`` is persisted to a JSONL transcript (the
+    on-disk substrate ``--resume``/``--continue`` rehydration reads). The gate is
+    stage-1 default-OFF, so a clean install does not write transcripts until the
+    operator opts in. Local/slash short-circuit turns (no engine turn) are not
+    persisted.
     """
 
     if not _cli_enabled():
@@ -649,6 +737,12 @@ async def run_headless(
     # Slash-command dispatch (before the engine turn).                     #
     # ------------------------------------------------------------------ #
     turn_input: dict[str, object] = {"prompt": prompt}
+    # PR-04-PR2 (resume rehydration): when ``--resume``/``--continue`` produced a
+    # ResumeContext, thread its reconstructed prior messages through the engine's
+    # ``initial_messages`` seam so the turn replays the earlier conversation.
+    # Absent/empty -> the key is omitted, leaving turn behavior byte-identical.
+    if initial_messages:
+        turn_input["initial_messages"] = initial_messages
     local_message: str | None = None
     local_is_error = False
     if prompt.startswith("/") and commands is not None:
@@ -668,6 +762,8 @@ async def run_headless(
                 "prompt": expanded or prompt,
                 "content": blocks,
             }
+            if initial_messages:
+                turn_input["initial_messages"] = initial_messages
         elif kind == "local":
             local_message = message
         else:  # error
@@ -689,12 +785,25 @@ async def run_headless(
         )
 
     # ------------------------------------------------------------------ #
+    # Session-log write path (PR-04-PR1). Active only when a SessionLog was   #
+    # supplied AND the gate is on. Persist the RAW user prompt before the      #
+    # turn; the engine event stream is tapped below via ``_tap_session_log``.  #
+    # ------------------------------------------------------------------ #
+    write_session_log = session_log is not None and _session_log_enabled()
+    if write_session_log:
+        assert session_log is not None  # narrowed for type-checkers
+        await _persist_user_prompt(session_log, prompt)
+
+    # ------------------------------------------------------------------ #
     # text / json: collect-then-write (single final write).                #
     # ------------------------------------------------------------------ #
     if output in ("text", "json"):
         gen = active_driver.run_turn_stream(
             None, turn_input, cancel=cancel, gate=active_gate
         )
+        if write_session_log:
+            assert session_log is not None
+            gen = _tap_session_log(gen, session_log)
         events, terminal = await drain(gen)
         assistant_text = _accumulate_text(events)
         result_frame = _build_result_frame(
@@ -705,6 +814,9 @@ async def run_headless(
         else:
             out.write(ndjson_dumps(result_frame) + "\n")
         out.flush()
+        if write_session_log:
+            assert session_log is not None
+            await _close_session_log(session_log)
         return 1 if result_frame.is_error else 0
 
     # ------------------------------------------------------------------ #
@@ -767,6 +879,9 @@ async def run_headless(
         gen = active_driver.run_turn_stream(
             None, turn_input, cancel=cancel, gate=active_gate
         )
+        if write_session_log:
+            assert session_log is not None
+            gen = _tap_session_log(gen, session_log)
         assistant_text, terminal = await _project_stream(
             gen, writer, session_id=sid, include_partial=include_partial
         )
@@ -775,6 +890,9 @@ async def run_headless(
         )
         await writer.write(result_frame)
     finally:
+        if write_session_log:
+            assert session_log is not None
+            await _close_session_log(session_log)
         if reader is not None:
             # Signal stop + detach the loop. The daemon thread may still be
             # blocked in readline, but as a daemon it will NOT block exit.

@@ -64,6 +64,29 @@ def test_readonly_adapter_reports_capabilities_without_write_or_prompt_projectio
     assert adapter.prompt_projection_enabled is False
 
 
+def test_prefer_local_search_adapter_override_beats_master_follow_resolver(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """PR1 dual-gate: the resolver's prefer_local_search now FOLLOWS the master,
+    but an explicit adapter-config override still wins (precedence preserved)."""
+    monkeypatch.delenv("MAGI_MEMORY_PREFER_LOCAL_SEARCH", raising=False)
+    monkeypatch.setenv("MAGI_MEMORY_ENABLED", "1")
+
+    # No adapter override => defers to the resolver, which (master-on) is now ON.
+    deferring = HipocampusReadOnlyAdapter(
+        HipocampusReadOnlyConfig(workspace_root=tmp_path, enabled=True)
+    )
+    assert deferring._prefer_local_search_enabled() is True
+
+    # Explicit adapter override wins even under master-on.
+    opted_out = HipocampusReadOnlyAdapter(
+        HipocampusReadOnlyConfig(
+            workspace_root=tmp_path, enabled=True, prefer_local_search=False
+        )
+    )
+    assert opted_out._prefer_local_search_enabled() is False
+
+
 def test_readonly_adapter_recalls_root_and_qmd_fixture_records_with_redaction(
     tmp_path: Path,
 ) -> None:
@@ -151,6 +174,14 @@ def test_readonly_adapter_rejects_production_workspace_roots(workspace_root: Pat
         )
 
 
+def test_readonly_adapter_allows_tmp_name_that_merely_contains_pvc() -> None:
+    adapter = HipocampusReadOnlyAdapter(
+        HipocampusReadOnlyConfig(workspace_root=Path("/tmp/tmpvcaosub1"), enabled=True)
+    )
+
+    assert adapter.config.workspace_root == Path("/tmp/tmpvcaosub1")
+
+
 def test_readonly_adapter_rejects_workspace_root_symlink_to_production_path(
     tmp_path: Path,
 ) -> None:
@@ -161,6 +192,17 @@ def test_readonly_adapter_rejects_workspace_root_symlink_to_production_path(
         HipocampusReadOnlyAdapter(
             HipocampusReadOnlyConfig(workspace_root=symlink_root, enabled=True)
         )
+
+
+def test_readonly_adapter_allows_local_checkout_names_with_canary(tmp_path: Path) -> None:
+    checkout_root = tmp_path / "magi-agent-canary-final"
+    checkout_root.mkdir()
+
+    adapter = HipocampusReadOnlyAdapter(
+        HipocampusReadOnlyConfig(workspace_root=checkout_root, enabled=True)
+    )
+
+    assert adapter.workspace_root == checkout_root.resolve()
 
 
 def test_readonly_adapter_ignores_qmd_results_outside_workspace(tmp_path: Path) -> None:

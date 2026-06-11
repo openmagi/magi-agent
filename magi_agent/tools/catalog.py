@@ -74,14 +74,6 @@ def _manifest(
 
 _CORE_TOOL_MANIFESTS: tuple[ToolManifest, ...] = (
     _manifest(
-        "ToolSearch",
-        "Search deferred tool metadata.",
-        permission="meta",
-        modes=("plan", "act"),
-        tags=("tool", "search", "meta"),
-        parallel_safety="readonly",
-    ),
-    _manifest(
         "TodoWrite",
         "Record and update the agent's task list for multi-step work.",
         permission="meta",
@@ -160,32 +152,86 @@ _CORE_TOOL_MANIFESTS: tuple[ToolManifest, ...] = (
     ),
     _manifest(
         "PatchApply",
-        "Apply a Codex-style multi-file envelope patch (add/update/delete/move).",
+        "Apply a multi-file patch. Two shapes: (a) Codex-style envelope patch "
+        "via 'patch' (add/update/delete/move across files in one call), or "
+        "(b) full-content replace via 'path' + 'content' (creates parent "
+        "directories; overwrites the file). Prefer FileEdit for small targeted "
+        "changes; use PatchApply for multi-file or whole-file rewrites.",
         permission="write",
         modes=("act",),
         tags=("workspace", "file", "patch", "edit"),
         mutates_workspace=True,
         parallel_safety="unsafe",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "patch": {
+                    "type": "string",
+                    "description": "Codex-style envelope patch text (add/update/delete/move). Mutually exclusive with path/content.",
+                },
+                "path": {
+                    "type": "string",
+                    "description": "Workspace-relative path for full-content replace mode.",
+                },
+                "content": {
+                    "type": "string",
+                    "description": "Full new file contents for full-content replace mode.",
+                },
+            },
+        },
     ),
     _manifest(
         "Glob",
-        "List workspace paths matching a glob pattern.",
+        "List workspace paths matching a glob pattern (e.g. 'src/**/*.py'). "
+        "Returns up to 100 matching file paths relative to the workspace root.",
         permission="read",
         modes=("plan", "act"),
         tags=("workspace", "search", "read"),
         parallel_safety="readonly",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "pattern": {
+                    "type": "string",
+                    "description": "Glob pattern relative to the workspace root, e.g. '**/*.py' or 'src/**/test_*.py'.",
+                },
+            },
+            "required": ["pattern"],
+        },
     ),
     _manifest(
         "Grep",
-        "Search workspace text with a pattern.",
+        "Search workspace file contents for a pattern, returning matching "
+        "files/lines. Pattern is a regex when the ripgrep backend is active, "
+        "otherwise a plain substring. Narrow the search with 'glob' to keep "
+        "results focused.",
         permission="read",
         modes=("plan", "act"),
         tags=("workspace", "search", "read"),
         parallel_safety="readonly",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "pattern": {
+                    "type": "string",
+                    "description": "Text to search for (regex with ripgrep backend; plain substring otherwise).",
+                },
+                "glob": {
+                    "type": "string",
+                    "description": "Optional glob limiting which files are searched (default '**/*'), e.g. 'src/**/*.py'.",
+                },
+            },
+            "required": ["pattern"],
+        },
     ),
     _manifest(
         "Bash",
-        "Run a shell command in the workspace.",
+        "Run a shell command with the workspace root as the working directory. "
+        "Output is byte-capped keeping head and tail (an elision marker shows "
+        "what was cut); on timeout the partial output captured so far is "
+        "returned. Subject to the configured command timeout — for running "
+        "test suites or other long verification commands use TestRun, which "
+        "has a larger budget.",
         permission="execute",
         modes=("act",),
         tags=("workspace", "command", "execute", "requires-approval"),
@@ -193,10 +239,24 @@ _CORE_TOOL_MANIFESTS: tuple[ToolManifest, ...] = (
         mutates_workspace=True,
         timeout_ms=120_000,
         parallel_safety="unsafe",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "command": {
+                    "type": "string",
+                    "description": "Shell command line to execute from the workspace root.",
+                },
+            },
+            "required": ["command"],
+        },
     ),
     _manifest(
         "TestRun",
-        "Run a project verification command.",
+        "Run a project test/verification command (e.g. pytest, npm test, a "
+        "reproduction script) with a 300s budget — use this instead of Bash "
+        "for test suites and anything that may run long. Same execution "
+        "surface as Bash; output is head+tail capped with partial output on "
+        "timeout.",
         permission="execute",
         modes=("act",),
         tags=("verification", "command", "execute", "requires-approval"),
@@ -204,6 +264,16 @@ _CORE_TOOL_MANIFESTS: tuple[ToolManifest, ...] = (
         mutates_workspace=True,
         timeout_ms=300_000,
         parallel_safety="unsafe",
+        input_schema={
+            "type": "object",
+            "properties": {
+                "command": {
+                    "type": "string",
+                    "description": "Verification command line to execute from the workspace root.",
+                },
+            },
+            "required": ["command"],
+        },
     ),
     _manifest(
         "GitDiff",
@@ -238,30 +308,6 @@ _CORE_TOOL_MANIFESTS: tuple[ToolManifest, ...] = (
         parallel_safety="unsafe",
     ),
     _manifest(
-        "ArtifactCreate",
-        "Create an artifact record for delivery.",
-        permission="write",
-        modes=("act",),
-        tags=("artifact", "delivery", "write"),
-        parallel_safety="unsafe",
-    ),
-    _manifest(
-        "ArtifactRead",
-        "Read artifact metadata or content.",
-        permission="read",
-        modes=("plan", "act"),
-        tags=("artifact", "delivery", "read"),
-        parallel_safety="readonly",
-    ),
-    _manifest(
-        "ArtifactList",
-        "List artifact records available to the turn.",
-        permission="read",
-        modes=("plan", "act"),
-        tags=("artifact", "delivery", "read"),
-        parallel_safety="readonly",
-    ),
-    _manifest(
         "Clock",
         "Read current time metadata.",
         permission="meta",
@@ -275,14 +321,6 @@ _CORE_TOOL_MANIFESTS: tuple[ToolManifest, ...] = (
         permission="meta",
         modes=("plan", "act"),
         tags=("utility", "calculation", "meta"),
-        parallel_safety="readonly",
-    ),
-    _manifest(
-        "HealthStatus",
-        "Read local runtime health metadata.",
-        permission="meta",
-        modes=("plan", "act"),
-        tags=("runtime", "health", "meta"),
         parallel_safety="readonly",
     ),
     _manifest(

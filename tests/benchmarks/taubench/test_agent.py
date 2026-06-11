@@ -5,7 +5,7 @@ import sys
 import types
 from dataclasses import dataclass
 
-from magi_agent.benchmarks.taubench.reliability import ReliabilityConfig
+from benchmarks.taubench.reliability import ReliabilityConfig
 
 
 @dataclass
@@ -43,8 +43,8 @@ def _install_fake_tau_bench(monkeypatch) -> None:
 
 def test_solve_threads_config_and_one_shared_ledger(monkeypatch) -> None:
     _install_fake_tau_bench(monkeypatch)
-    from magi_agent.benchmarks.taubench import agent as agent_mod
-    from magi_agent.benchmarks.taubench.episode import EpisodeResult
+    from benchmarks.taubench import agent as agent_mod
+    from benchmarks.taubench.episode import EpisodeResult
 
     captured: dict[str, object] = {}
 
@@ -82,8 +82,8 @@ def test_solve_threads_config_and_one_shared_ledger(monkeypatch) -> None:
 
 def test_solve_defaults_reliability_off(monkeypatch) -> None:
     _install_fake_tau_bench(monkeypatch)
-    from magi_agent.benchmarks.taubench import agent as agent_mod
-    from magi_agent.benchmarks.taubench.episode import EpisodeResult
+    from benchmarks.taubench import agent as agent_mod
+    from benchmarks.taubench.episode import EpisodeResult
 
     captured: dict[str, object] = {}
 

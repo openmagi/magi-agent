@@ -824,13 +824,9 @@ def test_runtime_code_diff_stays_within_final_review_fix_slice() -> None:
         return
     product_plane_pr2_paths = {
         "magi-agent/magi_agent/ops/__init__.py",
-        "magi-agent/magi_agent/ops/contracts.py",
         "magi-agent/magi_agent/ops/health.py",
         "magi-agent/magi_agent/ops/metrics.py",
-        "magi-agent/magi_agent/ops/recorder.py",
-        "magi-agent/magi_agent/ops/runtime_events.py",
         "magi-agent/magi_agent/ops/safety.py",
-        "magi-agent/magi_agent/ops/traces.py",
         "magi-agent/magi_agent/transport/health.py",
         "magi-agent/tests/fixtures/parity/codex_class_work_agent_product_plane_matrix.json",
         "magi-agent/tests/test_codex_class_work_agent_product_plane_matrix.py",
@@ -1055,7 +1051,6 @@ def test_runtime_code_diff_stays_within_final_review_fix_slice() -> None:
         "magi-agent/tests/test_adk_runner_lifecycle_events.py",
         "magi-agent/tests/test_event_bridge.py",
         "magi-agent/tests/test_memory_self_improvement_mission_parity_matrix.py",
-        "magi-agent/tests/test_priority_a_runner_session_boundary.py",
         "magi-agent/tests/test_sse_writer.py",
     }
     if changed <= live_work_console_pr2_paths:
@@ -1293,6 +1288,23 @@ def test_runtime_code_diff_stays_within_final_review_fix_slice() -> None:
         "memory/daily/2026-05-31.md",
     }
     if changed <= composio_optional_integration_paths:
+        return
+
+    delete_dead_mission_runtime_paths = {
+        "magi-agent/magi_agent/harness/mission_runtime_boundary.py",
+        "magi-agent/magi_agent/harness/background_tasks.py",
+        "magi-agent/tests/test_priority_e_mission_runtime_boundary.py",
+        "magi-agent/tests/test_mission_runtime_heartbeat_boundary.py",
+        "magi-agent/tests/test_live_background_task_boundary.py",
+        "magi-agent/tests/test_memory_mission_final_review_hardening.py",
+        "magi-agent/tests/test_live_ts_surface_default_off_e2e.py",
+        "magi-agent/tests/fixtures/live_ts_surface_parity/full_surface_matrix.json",
+        "magi-agent/tests/fixtures/public_event_parity/frontend_ts_surface_matrix.json",
+        "magi-agent/tests/fixtures/parity/general_automation_safe_queue_matrix.json",
+        "magi-agent/tests/fixtures/parity/memory_self_improvement_mission_matrix.json",
+        "magi-agent/tests/ci_quarantine.txt",
+    }
+    if changed <= delete_dead_mission_runtime_paths:
         return
 
     assert changed <= allowed_paths

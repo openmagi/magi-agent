@@ -560,6 +560,57 @@ class TestAgentDefaultCommand:
         assert os.environ["MAGI_RUNNER_POLICY_ROUTING_ENABLED"] == "1"
         assert os.environ["MAGI_RUNNER_POLICY_ROUTE_BLOCKING_ENABLED"] == "0"
         assert os.environ["MAGI_GA_LIVE_ENABLED"] == "1"
+
+    def test_agent_command_normalizes_eval_runtime_profile(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path,
+    ) -> None:
+        monkeypatch.delenv("MAGI_RUNNER_POLICY_ROUTING_ENABLED", raising=False)
+        monkeypatch.delenv("MAGI_GA_LIVE_ENABLED", raising=False)
+        monkeypatch.setenv("MAGI_RUNTIME_PROFILE", " EVAL ")
+        monkeypatch.setenv("MAGI_CLI_ENABLED", "1")
+        monkeypatch.setenv("MAGI_CLI_SESSION_DIR", str(tmp_path))
+        captured: dict[str, object] = {}
+
+        def fake_build_headless_runtime(**kwargs: object) -> object:
+            captured["build_permission_mode"] = kwargs["permission_mode"]
+            captured["runner_policy_routing_enabled"] = kwargs.get(
+                "runner_policy_routing_enabled"
+            )
+            return SimpleNamespace(
+                gate=object(),
+                commands=object(),
+                engine=StubEngineDriver(text="ok"),
+                session_log=SimpleNamespace(path=tmp_path / "sid-eval"),
+                mcp_servers=(),
+            )
+
+        async def fake_headless(prompt: str, **kwargs: object) -> int:
+            captured["prompt"] = prompt
+            captured["run_permission_mode"] = kwargs["permission_mode"]
+            return 0
+
+        runner = CliRunner()
+        with patch(
+            "magi_agent.cli.app.build_headless_runtime",
+            fake_build_headless_runtime,
+        ), patch("magi_agent.cli.app.run_headless", fake_headless):
+            result = runner.invoke(
+                _make_app(),
+                ["hello"],
+                catch_exceptions=False,
+            )
+
+        assert result.exit_code == 0, result.output
+        assert captured == {
+            "build_permission_mode": "bypassPermissions",
+            "runner_policy_routing_enabled": False,
+            "prompt": "hello",
+            "run_permission_mode": "bypassPermissions",
+        }
+        assert os.environ["MAGI_GA_LIVE_ENABLED"] == "0"
+        assert os.environ["MAGI_RUNNER_POLICY_ROUTING_ENABLED"] == "0"
         assert "MAGI_COMPOSIO_ENABLED" not in os.environ
 
     def test_agent_command_runs_headless_turn(self, monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
@@ -1003,4 +1054,6 @@ def test_local_serve_applies_full_runtime_defaults_without_route_hardblock(
     assert os.environ["MAGI_RUNNER_POLICY_ROUTING_ENABLED"] == "1"
     assert os.environ["MAGI_RUNNER_POLICY_ROUTE_BLOCKING_ENABLED"] == "0"
     assert os.environ["MAGI_GA_LIVE_ENABLED"] == "1"
+    assert os.environ["MAGI_BROWSER_TOOL_ENABLED"] == "1"
+    assert os.environ["MAGI_EVIDENCE_LEDGER_LIFECYCLE_ENABLED"] == "1"
     assert "MAGI_COMPOSIO_ENABLED" not in os.environ

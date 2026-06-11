@@ -26,8 +26,14 @@ from collections.abc import Iterable
 from textual.command import DiscoveryHit, Hit, Hits, Provider
 
 from magi_agent.cli.contracts import CommandRegistry, CommandSurface
+from magi_agent.cli.tui.theme import MAGI_THEMES
 
-__all__ = ["CommandPaletteProvider", "AppActionProvider", "tui_command_names"]
+__all__ = [
+    "CommandPaletteProvider",
+    "AppActionProvider",
+    "ThemeProvider",
+    "tui_command_names",
+]
 
 # The TUI surface mask — palette commands are the interactive set.
 _TUI_SURFACE = CommandSurface(tui=True, headless=False)
@@ -152,3 +158,57 @@ class AppActionProvider(Provider):
                     text=label,
                     help=help_text,
                 )
+
+
+class ThemeProvider(Provider):
+    """Palette provider listing the curated themes; selecting one switches live.
+
+    Each ``MAGI_THEMES`` name becomes a ``Theme: <name>`` palette entry whose
+    callback calls ``app.select_theme(name)`` — the SAME entrypoint ``ctrl+t``'s
+    cycle and any future binding use, so a palette pick and a cycle both set +
+    persist the theme identically (PR4.1). Reads the live app off ``self.app``;
+    a ``_app_ref`` test seam mirrors the other providers for unit drives.
+    """
+
+    _app_ref: object | None = None
+
+    @property
+    def _magi_app(self) -> object:
+        return self._app_ref if self._app_ref is not None else self.app
+
+    async def discover(self) -> Hits:
+        app = self._magi_app
+        for name in MAGI_THEMES:
+            label = f"Theme: {name}"
+            yield DiscoveryHit(
+                label,
+                _select_theme_runner(app, name),
+                text=label,
+                help="switch theme",
+            )
+
+    async def search(self, query: str) -> Hits:
+        app = self._magi_app
+        matcher = self.matcher(query)
+        for name in MAGI_THEMES:
+            label = f"Theme: {name}"
+            score = matcher.match(label)
+            if score > 0:
+                yield Hit(
+                    score,
+                    matcher.highlight(label),
+                    _select_theme_runner(app, name),
+                    text=label,
+                    help="switch theme",
+                )
+
+
+def _select_theme_runner(app: object, name: str):
+    """Bind ``app.select_theme(name)`` as a zero-arg palette callback."""
+
+    def _run() -> None:
+        select = getattr(app, "select_theme", None)
+        if callable(select):
+            select(name)
+
+    return _run

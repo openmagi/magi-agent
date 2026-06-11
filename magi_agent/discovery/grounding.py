@@ -26,10 +26,9 @@ per corpus id, contorting a one-line membership check, so this module
 implements the check directly. It does, however, deliberately ALIGN with that
 module's semantics: the ``grounding_status`` vocabulary mirrors the
 grounded / partial / unverifiable spirit of ``evidence.claim_grounding``'s
-``SupportStatus``, and — like ``EvidenceEnforcementAuthorityFlags``' permanent
-``Literal[False]`` block-authority — ``strict`` drop here is an ORCHESTRATION
-choice (a filter inside the discovery loop), not an enforcement block. No
-authority flag is flipped.
+``SupportStatus``. The ``strict`` drop here is an ORCHESTRATION choice (a
+filter inside the discovery loop), not an enforcement block. No authority flag
+is flipped; the live enforcement path is the engine pre-final gate.
 """
 from __future__ import annotations
 

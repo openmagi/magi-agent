@@ -104,14 +104,46 @@ Concretely, today the adapter:
   URLs. This redaction is a safety feature that survives even when delivery is
   later attached.
 
-### Path to live delivery
+### Live self-host delivery (gated, default-off)
 
-Live send/receive requires authority that the open surface does not grant: the
-`Literal[False]` authority flags above must become attachable, a real
-`TelegramProviderPort` implementation must be bound, and the run must cross the
-channel boundary with `channel_delivery_performed`/`production_channel_write`
-authority. None of that is wired here. **Do not assume a message sent through
-this adapter reaches Telegram** — today it produces a local-fake receipt only.
+The **audit boundary** (`telegram_adapter.py`) stays shadow-only by design — its
+`Literal[False]` authority flags can never be flipped, so it always produces a
+local-fake receipt. Live delivery does **not** route through that boundary;
+instead a self-host operator opts into a separate live path:
+
+- **Concrete provider** — `magi_agent/channels/providers/telegram_httpx.py`
+  (`TelegramHttpxProvider`) is the only module that constructs a real HTTP
+  client. It implements the injected `TelegramLiveProviderPort`
+  (`getUpdates` / `sendMessage` / `deleteWebhook`) and reports
+  `openmagi_local_fake_provider = False` — it never masquerades as the audit
+  fake.
+- **Operator wiring** — `magi_agent/gateway/channel_watchers.py` reads the live
+  gate and bot token from the environment, constructs the provider, and wraps a
+  `poll_once` closure in `build_channel_poll_watcher` for the gateway daemon to
+  supervise. It is **fail-closed**: with the gate off (or no token) it builds no
+  provider and returns `None`.
+- **Receipt** — live sends record an honest receipt in the wiring layer
+  (`provider_called=True`, `channel_delivery_performed=True`), separate from the
+  boundary's locked-`False` flags.
+
+Activation (self-host only):
+
+```
+MAGI_GATEWAY_DAEMON_ENABLED=1 \
+MAGI_CHANNEL_LIVE_TELEGRAM=1 \
+MAGI_TELEGRAM_BOT_TOKEN=<bot-token> \
+magi gateway start
+```
+
+On startup the watcher calls `deleteWebhook` once to clear any stale webhook
+(a set webhook makes `getUpdates` return HTTP 409). The `[SILENT]` contract is
+honored: an outbound message that is exactly `[SILENT]` is suppressed without
+calling the provider.
+
+> **Self-host only — do not dual-run.** A managed service deployment already runs a
+> separate Telegram long-poller; running this daemon channel watcher alongside
+> it causes Telegram 409 conflicts on `getUpdates`. Enable this watcher only on
+> self-host deployments, not on the hosted path.
 
 ## Discord
 
@@ -121,6 +153,41 @@ this adapter reaches Telegram** — today it produces a local-fake receipt only.
 the same default-off manifest invariant (`max_text_chars=2000`), and the same
 record-intent-instead-of-deliver behavior with secret / private-path redaction.
 Treat it as shadow until live delivery authority is attached.
+
+## Dynamic workflows
+
+> **Note — default-off.** Both gates below default to off; channel messages stay
+> a normal single turn until you opt in.
+
+A channel message can branch into a multi-step **workflow** (e.g. a guided
+research run) instead of a single LLM turn. This is double-gated:
+
+| Env flag | Effect |
+|---|---|
+| `MAGI_WORKFLOW_EXECUTOR_ENABLED` | Allows the workflow executor to *run* a confirmed workflow. |
+| `MAGI_CHANNEL_WORKFLOWS_ENABLED` | Allows the channel/serve surface to *engage* workflows at all. |
+
+Both must be truthy (`1`/`true`/`yes`/`on`) for a workflow to execute. With the
+channel gate on but the executor off, an eligible message still asks for
+confirmation but declines to execute.
+
+### Auto-detect vs explicit `/research`
+
+- The explicit `/research <query>` prefix always engages the research workflow
+  (when the channel gate is on), regardless of model configuration.
+- **Auto-detect** (a plain multi-step message being routed to a workflow) needs
+  a *model-backed classifier*. When no provider is configured the default
+  classifier is inert and returns `general` (auto-detect off, `/research` still
+  works). When a provider key is resolvable (via `MAGI_CONFIG` /
+  `~/.magi/config.toml` / provider env vars), the serve surface wires a
+  model-backed classifier automatically — no extra flag.
+- `MAGI_WORKFLOW_CLASSIFIER_MODEL` (optional) points auto-detect at a
+  cheaper/faster model than the main turn (e.g. a Haiku-class model). Each
+  inbound message then incurs one small classification call; classification is
+  fail-open (a classifier error never blocks normal chat).
+
+A managed service deployment may inject its own model-backed classifier; that injected
+classifier takes precedence over the local auto-wiring.
 
 ## See also
 

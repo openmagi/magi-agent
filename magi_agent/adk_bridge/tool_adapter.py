@@ -503,8 +503,8 @@ def build_concurrent_dispatcher(
     ``ToolDispatcher`` when used with ``build_adk_tool_for_manifest`` and
     ``build_adk_function_tools_for_registry`` — single ``dispatch()`` calls
     delegate transparently to the base dispatcher.  The additional
-    ``dispatch_batch()`` method is available for callers (such as a
-    ``RunnerSessionBoundary``) that want to fan-out concurrent-safe tool calls
+    ``dispatch_batch()`` method is available for callers (such as the runner
+    integration) that want to fan-out concurrent-safe tool calls
     in parallel.
 
     ADK native parallel tool execution (measured, ADK 1.33.0)

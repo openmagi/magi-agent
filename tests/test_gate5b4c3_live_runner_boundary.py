@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import subprocess
 import sys
@@ -13,7 +14,11 @@ from magi_agent.shadow.gate5b4c3_live_runner_boundary import (
     Gate5B4C3LiveAdkPrimitives,
     Gate5B4C3LiveRunnerBoundary,
     Gate5B4C3LiveRunnerBoundaryResult,
+    _event_usage_metadata,
+    _invoke_manual_tool,
     _looks_like_incomplete_full_toolhost_output,
+    _selected_full_toolhost_run_config,
+    _usage_dict,
 )
 from magi_agent.shadow.gate5b4c3_shadow_generation_contract import (
     Gate5B4C3ShadowGenerationBudgets,
@@ -39,8 +44,6 @@ MODEL_ATTEMPT_DIGEST = "sha256:" + "5" * 64
 def _payload(**overrides: object) -> dict[str, object]:
     base: dict[str, object] = {
         "schemaVersion": "gate5b4c3.chatProxyShadowGeneration.v1",
-        "mode": "shadow_generation_diagnostic",
-        "responseAuthority": "typescript",
         "shadowGenerationId": "shadow_gen_001",
         "requestIdDigest": REQUEST_DIGEST,
         "traceIdDigest": TRACE_DIGEST,
@@ -582,6 +585,20 @@ class _ModelDumpCandidateContentRunner(_FakeRunner):
         yield self._Event()
 
 
+class _PartialAggregateEvent:
+    def __init__(self, text: str, *, partial: bool) -> None:
+        self.partial = partial
+        self.content = _FakeContent(parts=[_FakePart(text)], role="model")
+
+
+class _PartialAggregateRunner(_FakeRunner):
+    async def run_async(self, **kwargs: object) -> object:
+        type(self).run_kwargs = kwargs
+        yield _PartialAggregateEvent("EX", partial=True)
+        yield _PartialAggregateEvent("ACTLY_ONCE_SENTINEL_9Q4Z", partial=True)
+        yield _PartialAggregateEvent("EXACTLY_ONCE_SENTINEL_9Q4Z", partial=False)
+
+
 class _ModelDumpFunctionCallOnlyEvent:
     @property
     def text(self) -> str:
@@ -827,6 +844,21 @@ def _model_dump_candidate_content_primitives() -> Gate5B4C3LiveAdkPrimitives:
     )
 
 
+def _partial_aggregate_primitives() -> Gate5B4C3LiveAdkPrimitives:
+    _FakeAgent.created_kwargs = {}
+    _PartialAggregateRunner.created_kwargs = {}
+    _PartialAggregateRunner.run_kwargs = {}
+    _FakeGenerateContentConfig.created_kwargs = {}
+    return Gate5B4C3LiveAdkPrimitives(
+        Agent=_FakeAgent,
+        Runner=_PartialAggregateRunner,
+        InMemorySessionService=_FakeSessionService,
+        Content=_FakeContent,
+        Part=_FakePart,
+        GenerateContentConfig=_FakeGenerateContentConfig,
+    )
+
+
 def _loader_that_must_not_run() -> Gate5B4C3LiveAdkPrimitives:
     raise AssertionError("ADK primitives must not load unless generation is accepted")
 
@@ -962,6 +994,91 @@ def test_live_boundary_selected_full_toolhost_uses_request_adk_llm_call_budget()
     assert result.status == "completed"
     run_config = _FakeRunner.run_kwargs["run_config"]
     assert getattr(run_config, "max_llm_calls") == 32
+
+
+def test_live_boundary_selected_full_toolhost_run_config_requests_sse_streaming() -> None:
+    pytest.importorskip("google.adk.agents.run_config")
+    from google.adk.agents.run_config import StreamingMode
+
+    run_config = _selected_full_toolhost_run_config(True, max_llm_calls=32)
+
+    assert run_config is not None
+    assert getattr(run_config, "max_llm_calls") == 32
+    assert getattr(run_config, "streaming_mode") == StreamingMode.SSE
+
+
+def _file_write_adk_tool(tmp_path: Path) -> object:
+    pytest.importorskip("google.adk.tools")
+    from magi_agent.gates.gate5b_full_toolhost import (
+        Gate5BFullToolHostConfig,
+        build_gate5b_full_toolhost_bundle,
+    )
+
+    bundle = build_gate5b_full_toolhost_bundle(
+        config=Gate5BFullToolHostConfig.model_validate(
+            {
+                "enabled": True,
+                "killSwitchEnabled": False,
+                "routeAttachmentEnabled": True,
+                "selectedBotDigest": BOT_DIGEST,
+                "selectedOwnerDigest": OWNER_DIGEST,
+                "environment": "production",
+                "environmentAllowlist": ("production",),
+                "allowedToolNames": ("FileWrite",),
+                "maxToolCallsPerTurn": 1,
+            }
+        ),
+        scope={
+            "selectedBotDigest": BOT_DIGEST,
+            "selectedOwnerDigest": OWNER_DIGEST,
+            "environment": "production",
+        },
+        workspace_root=tmp_path,
+    )
+    return bundle.tools[0]
+
+
+def test_manual_fallback_invokes_real_adk_function_tool_with_direct_args(
+    tmp_path: Path,
+) -> None:
+    tool = _file_write_adk_tool(tmp_path)
+
+    result = asyncio.run(
+        _invoke_manual_tool(
+            tool,
+            {"path": "manual-fallback.txt", "content": "manual fallback wrote"},
+        )
+    )
+
+    assert (tmp_path / "manual-fallback.txt").read_text(encoding="utf-8") == (
+        "manual fallback wrote"
+    )
+    assert isinstance(result, dict)
+    assert result.get("status") == "ok"
+
+
+def test_manual_fallback_unwraps_provider_arguments_object_for_real_adk_tool(
+    tmp_path: Path,
+) -> None:
+    tool = _file_write_adk_tool(tmp_path)
+
+    result = asyncio.run(
+        _invoke_manual_tool(
+            tool,
+            {
+                "arguments": {
+                    "path": "provider-wrapper.txt",
+                    "content": "provider wrapper wrote",
+                }
+            },
+        )
+    )
+
+    assert (tmp_path / "provider-wrapper.txt").read_text(encoding="utf-8") == (
+        "provider wrapper wrote"
+    )
+    assert isinstance(result, dict)
+    assert result.get("status") == "ok"
 
 
 def test_live_boundary_rejects_completed_runner_without_text_output() -> None:
@@ -1196,6 +1313,27 @@ def test_live_boundary_extracts_model_dump_candidate_text_output() -> None:
     assert result.runner_error_diagnostic is None
 
 
+def test_live_boundary_does_not_reemit_final_aggregate_after_partial_deltas() -> None:
+    public_events: list[dict[str, object]] = []
+    readonly_tool = object()
+
+    result = Gate5B4C3LiveRunnerBoundary(
+        _partial_aggregate_primitives,
+        adk_tools=(readonly_tool,),
+        public_event_sink=lambda event: public_events.append(dict(event)),
+    ).invoke(
+        _gate1a_google_request(),
+        config=_gate1a_google_config(),
+    )
+
+    assert result.status == "completed"
+    assert result.output_text_internal == "EXACTLY_ONCE_SENTINEL_9Q4Z"
+    text_deltas = [
+        event["delta"] for event in public_events if event.get("type") == "text_delta"
+    ]
+    assert text_deltas == ["EX", "ACTLY_ONCE_SENTINEL_9Q4Z"]
+
+
 def test_live_boundary_fails_closed_on_tool_policy_mismatch_before_adk_load() -> None:
     readonly_without_tools = Gate5B4C3LiveRunnerBoundary(_loader_that_must_not_run).invoke(
         _readonly_request(),
@@ -1310,6 +1448,100 @@ def test_live_boundary_builds_litellm_model_for_fireworks_route(monkeypatch: pyt
     model = _FakeAgent.created_kwargs["model"]
     assert getattr(model, "openmagi_gate5b_litellm_model") is True
     assert getattr(model, "model") == "fireworks_ai/kimi-k2p6"
+
+
+class _UsageEvent:
+    def __init__(
+        self,
+        text: str,
+        prompt: int,
+        candidates: int,
+        cached: int = 0,
+    ) -> None:
+        self.content = _FakeContent(parts=[_FakePart(text)], role="model")
+
+        class _Usage:
+            prompt_token_count = prompt
+            candidates_token_count = candidates
+            cached_content_token_count = cached
+
+        self.usage_metadata = _Usage()
+
+
+class _UsageRunner(_FakeRunner):
+    async def run_async(self, **kwargs: object) -> object:
+        type(self).run_kwargs = kwargs
+        yield _UsageEvent("local diagnostic event only", prompt=1234, candidates=56)
+
+
+def _usage_primitives() -> Gate5B4C3LiveAdkPrimitives:
+    _FakeAgent.created_kwargs = {}
+    _UsageRunner.created_kwargs = {}
+    _UsageRunner.run_kwargs = {}
+    _UsageRunner.fail = False
+    _FakeGenerateContentConfig.created_kwargs = {}
+    return Gate5B4C3LiveAdkPrimitives(
+        Agent=_FakeAgent,
+        Runner=_UsageRunner,
+        InMemorySessionService=_FakeSessionService,
+        Content=_FakeContent,
+        Part=_FakePart,
+        GenerateContentConfig=_FakeGenerateContentConfig,
+    )
+
+
+def test_event_usage_metadata_reads_object_mapping_and_nested_shapes() -> None:
+    class _Meta:
+        prompt_token_count = 10
+        candidates_token_count = 4
+        cached_content_token_count = 2
+
+    class _Evt:
+        usage_metadata = _Meta()
+
+    assert _event_usage_metadata(_Evt()) == (10, 4, 2)
+    assert _event_usage_metadata(
+        {"usageMetadata": {"promptTokenCount": 7, "candidatesTokenCount": 3}}
+    ) == (7, 3, 0)
+    assert _event_usage_metadata(
+        {"llm_response": {"usage_metadata": {"prompt_token_count": 5}}}
+    ) == (5, 0, 0)
+    assert _event_usage_metadata({"text": "no usage here"}) is None
+
+
+def test_usage_dict_drops_all_zero_totals() -> None:
+    assert _usage_dict((0, 0, 0)) is None
+    assert _usage_dict((9, 1, 0)) == {
+        "inputTokens": 9,
+        "outputTokens": 1,
+        "cacheReadTokens": 0,
+    }
+
+
+def test_live_boundary_captures_usage_internal_on_completed_turn() -> None:
+    result = Gate5B4C3LiveRunnerBoundary(_usage_primitives).invoke(
+        _request(),
+        config=_enabled_config(),
+    )
+
+    assert result.status == "completed"
+    assert result.usage_internal == {
+        "inputTokens": 1234,
+        "outputTokens": 56,
+        "cacheReadTokens": 0,
+    }
+    assert "usageInternal" not in result.model_dump(by_alias=True)
+    assert "usage_internal" not in result.model_dump()
+
+
+def test_live_boundary_usage_internal_none_without_provider_usage() -> None:
+    result = Gate5B4C3LiveRunnerBoundary(_fake_primitives).invoke(
+        _request(),
+        config=_enabled_config(),
+    )
+
+    assert result.status == "completed"
+    assert result.usage_internal is None
 
 
 def test_live_boundary_uses_adapter_resolved_per_turn_output_cap() -> None:

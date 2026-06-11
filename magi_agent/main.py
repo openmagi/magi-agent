@@ -20,10 +20,12 @@ from .evidence.observed_egress import (
     build_gate1a_observed_egress_evidence_provider_from_env,
 )
 from .runtime.openmagi_runtime import OpenMagiRuntime
+from .runtime.hosted_defaults import apply_hosted_runtime_defaults
 from .runtime.local_defaults import (
     LOCAL_FULL_RUNTIME_DEFAULTS_ENABLED_ENV,
     LOCAL_FULL_RUNTIME_ENV_DEFAULTS,
     apply_local_full_runtime_defaults,
+    local_full_runtime_defaults_enabled,
 )
 from .transport.chat import (
     build_gate1a_readonly_tools_config_from_env,
@@ -55,11 +57,32 @@ def main(argv: Sequence[str] | None = None) -> None:
     from .ops.otel_noise import silence_otel_detach_noise
 
     silence_otel_detach_noise()
+    # Install-default-on memory: overlay ~/.magi/config.toml[memory] on the
+    # install defaults ({enabled, prefer_local_search}) and setdefault the
+    # matching MAGI_MEMORY_* env vars so the runtime gates (memory_turn_hook on
+    # the SSE chat path, recall, projection) see them. Runs ONLY from this real
+    # ``magi-agent serve`` entrypoint (never during library/test imports);
+    # the code-level default is unchanged. Fail-soft.
+    #
+    # Gate by runtime profile, mirroring apply_local_full_runtime_defaults below:
+    # the lean/opt-out profiles (safe|minimal|off|conservative|eval) must NOT
+    # inherit install-default-on memory — they leave it at the code default (off)
+    # unless config/env explicitly enables it.
+    if local_full_runtime_defaults_enabled(os.environ):
+        from .cli.memory_bootstrap import apply_memory_config_bootstrap
+
+        apply_memory_config_bootstrap(os.environ)
     port = resolve_server_port(argv)
     config = _parse_runtime_config(os.environ)
     if _local_runtime_defaults_active(config):
         apply_local_full_runtime_defaults(os.environ)
         _print_local_startup_notice(port)
+    else:
+        # Hosted bots (real bot_id/user_id/gateway_token) never inherit the
+        # local-dev full overlay. Apply the explicit hosted control-stage overlay
+        # instead: no-op unless MAGI_DEPLOYMENT=hosted, and byte-identical to
+        # today at the default stage (off). See runtime/hosted_defaults.py.
+        apply_hosted_runtime_defaults(os.environ)
     runtime = OpenMagiRuntime(config=config)
     runtime.gate5b4c3_shadow_generation_route_config = (
         parse_gate5b4c3_shadow_generation_route_env(os.environ)

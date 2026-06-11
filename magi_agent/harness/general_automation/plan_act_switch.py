@@ -49,8 +49,15 @@ from dataclasses import dataclass
 from hashlib import sha256
 import json
 
-from magi_agent.config.env import general_automation_live_enabled
-from magi_agent.harness.plan_gate import PlanGateDecisionSnapshot
+from magi_agent.config.env import (
+    general_automation_live_enabled,
+    plan_act_gate_enabled,
+)
+from magi_agent.harness.plan_gate import (
+    AttachedPlanGateDecisionSnapshot,
+    PlanGateDecisionSnapshot,
+    attach_plan_gate_execution,
+)
 from magi_agent.recipes.first_party.general_automation.preset_projection import (
     GeneralAutomationPresetProjection,
     project_general_automation_preset,
@@ -197,6 +204,80 @@ def resolve_general_automation_plan_act_switch(
     )
 
 
+@dataclass(frozen=True)
+class PlanActSwitchWiringResult:
+    """Result of the runner-facing plan_act wiring seam (cluster 06 PR4 / B9).
+
+    ``outcome`` is the underlying
+    :class:`GeneralAutomationPlanActOutcome` from
+    :func:`resolve_general_automation_plan_act_switch`.
+
+    ``attached_snapshot`` is non-``None`` ONLY when the strict default-OFF
+    ``MAGI_PLAN_ACT_GATE_ENABLED`` gate is ON *and* the resolver fired — in that
+    case the runner has attached execution to a NEW
+    :class:`~magi_agent.harness.plan_gate.AttachedPlanGateDecisionSnapshot`. When
+    the gate is OFF (default) it is ``None`` and behaviour is byte-identical to
+    ``main`` (the resolver still runs but nothing is attached).
+    """
+
+    outcome: GeneralAutomationPlanActOutcome
+    attached_snapshot: AttachedPlanGateDecisionSnapshot | None = None
+
+
+def wire_plan_act_switch_gate(
+    *,
+    snapshot: PlanGateDecisionSnapshot,
+    approved_control: ControlRequestRecord,
+    context: ToolContext,
+    env: Mapping[str, str] | None = None,
+    execution_preset: str = PLAN_ACT_EXECUTION_PRESET,
+    plan_body: str | None = None,
+    session_key_override: str | None = None,
+) -> PlanActSwitchWiringResult:
+    """Runner-facing seam that gates plan_act attachment behind an explicit flag.
+
+    Inventory B9 / cluster 06 PR4: the GA
+    ``plan_gate -> plan_act_switch -> delegation`` chain is self-consistent but
+    *inert* because no runner calls
+    :func:`resolve_general_automation_plan_act_switch`. This seam lets the
+    production turn loop call it at the plan-exit boundary, behind the strict
+    default-OFF ``MAGI_PLAN_ACT_GATE_ENABLED`` gate.
+
+    * Gate OFF (default): the seam is inert — it returns an inactive outcome
+      with no attached snapshot, never flipping the source snapshot's
+      ``Literal[False]`` write/execution-attached flags. Byte-identical to
+      ``main``.
+    * Gate ON: it delegates to
+      :func:`resolve_general_automation_plan_act_switch` (which still enforces
+      ``MAGI_GA_LIVE_ENABLED`` + general role + approved/matching control). When
+      that resolver fires, it projects the source snapshot onto a NEW
+      :class:`~magi_agent.harness.plan_gate.AttachedPlanGateDecisionSnapshot` —
+      recording that execution was attached without mutating the original
+      immutable snapshot.
+    """
+    if not plan_act_gate_enabled(env):
+        return PlanActSwitchWiringResult(outcome=_inert())
+
+    outcome = resolve_general_automation_plan_act_switch(
+        snapshot=snapshot,
+        approved_control=approved_control,
+        context=context,
+        env=env,
+        execution_preset=execution_preset,
+        plan_body=plan_body,
+        session_key_override=session_key_override,
+    )
+
+    if not outcome.active:
+        return PlanActSwitchWiringResult(outcome=outcome)
+
+    attached = attach_plan_gate_execution(
+        snapshot,
+        approved_control_request_id=approved_control.request_id,
+    )
+    return PlanActSwitchWiringResult(outcome=outcome, attached_snapshot=attached)
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -275,5 +356,7 @@ __all__ = [
     "GeneralAutomationPlanActMessage",
     "GeneralAutomationPlanActOutcome",
     "GeneralAutomationPlanActTransition",
+    "PlanActSwitchWiringResult",
     "resolve_general_automation_plan_act_switch",
+    "wire_plan_act_switch_gate",
 ]

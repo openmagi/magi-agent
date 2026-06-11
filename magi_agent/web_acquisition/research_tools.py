@@ -820,6 +820,42 @@ def build_live_research_boundary(
     )
 
 
+def build_native_web_boundary(
+    env: Mapping[str, str] | None = None,
+) -> "LocalWebResearchToolBoundary | None":
+    """Native (CLI/serve) live-web factory with a RELAXED platform precondition.
+
+    Unlike the GAIA harness (``benchmarks/gaia/web_tools.py``) which short-circuits
+    to ``[]`` unless ``MAGI_PLATFORM_BASE_URL``/``MAGI_PLATFORM_API_KEY`` are set,
+    the native WebSearch/WebFetch tools must become live as soon as ANY live
+    provider source is configured — jina-reader or insane-fetch alone is enough,
+    no platform pair required.
+
+    This reuses ``build_live_research_boundary`` (which already assembles
+    jina/insane providers independently of platform) and adds the native policy:
+
+    * Master gate must be active (``live_web_acquisition_active``), else ``None``.
+    * At least one provider must be wired into the router, else ``None``.
+
+    Returning ``None`` (rather than the silent fixture-fallback boundary) lets the
+    native plugin fall back to the frozen ``web_research_not_configured`` honest
+    error (PR #381) when nothing is configured. All live flags stay default-OFF;
+    this only makes the live path reachable when an operator opts in.
+    """
+    resolved_env: Mapping[str, str] = os.environ if env is None else env
+    if not live_web_acquisition_active(env=resolved_env):
+        return None
+
+    boundary = build_live_research_boundary(env=env)
+    router = boundary._provider_router
+    # Require an enabled router with at least one provider. Without the router
+    # gate (CORE_AGENT_PYTHON_WEB_PROVIDER_ROUTER_ENABLED) the boundary would
+    # silently serve the local fixture path, so treat that as not-configured.
+    if router is None or not router.config.enabled or not router.config.providers:
+        return None
+    return boundary
+
+
 __all__ = [
     "INSANE_FETCH_ENABLED_ENV",
     "INSANE_FETCH_PROVIDER_NAME",
@@ -836,6 +872,7 @@ __all__ = [
     "LocalWebResearchToolBoundary",
     "ResearchToolName",
     "build_live_research_boundary",
+    "build_native_web_boundary",
     "live_web_acquisition_active",
     "project_live_web_acquisition_result_to_source_ledger",
     "project_web_acquisition_result_to_source_ledger",

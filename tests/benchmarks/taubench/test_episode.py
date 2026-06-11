@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from magi_agent.benchmarks.taubench.episode import EpisodeState, run_episode
+from benchmarks.taubench.episode import EpisodeState, run_episode
 
 
 # --- fakes (no tau_bench, no ADK) ---
@@ -147,7 +147,7 @@ def test_no_respond_when_tool_finishes_episode() -> None:
     assert [a for a in env.steps if a.name == "respond"] == []  # no extra respond
 
 
-from magi_agent.benchmarks.taubench.reliability import ReliabilityConfig, WriteLedger
+from benchmarks.taubench.reliability import ReliabilityConfig, WriteLedger
 
 
 def _text_of(content) -> str:

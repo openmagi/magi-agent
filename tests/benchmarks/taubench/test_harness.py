@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import pytest
 
-from magi_agent.benchmarks.taubench.episode import EpisodeResult
-from magi_agent.benchmarks.taubench.harness import aggregate, run_subset, run_with_retry
+from benchmarks.taubench.episode import EpisodeResult
+from benchmarks.taubench.harness import aggregate, run_subset, run_with_retry
 
 
 def test_run_subset_aggregates_pass_hat_k() -> None:

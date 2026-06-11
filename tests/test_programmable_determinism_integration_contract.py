@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from magi_agent.evals.regression_gates import (
+from evals.regression_gates import (
     EvalGateThresholds,
     RecipeEvalMetrics,
     evaluate_recipe_promotion_gate,

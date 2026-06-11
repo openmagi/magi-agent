@@ -129,6 +129,43 @@ def build_scheduler_cron_watcher(
     )
 
 
+# Tick interval for the default cron watcher built by ``build_default_watchers``.
+DEFAULT_CRON_TICK_INTERVAL_SECONDS = 60.0
+
+
+def build_default_watchers() -> tuple[GatewayWatcher, ...]:
+    """First-party watcher set for ``magi gateway start`` (each self-gates).
+
+    Always includes the scheduler-cron ticker (gated by
+    ``MAGI_SCHEDULER_EXECUTOR_ENABLED``).  Live channel watchers are appended
+    only when their per-channel live gate is on AND the channel's credential is
+    configured — the channel-watcher builder is fail-closed and returns ``None``
+    otherwise, so with the gates OFF the fleet is byte-identical to cron-only.
+
+    The channel-watcher builders are imported lazily so importing this module
+    never pulls a network client (the concrete providers live behind that seam).
+    """
+    watchers: list[GatewayWatcher] = [
+        build_scheduler_cron_watcher(
+            driver=build_local_scheduler_cron_driver(),
+            interval_seconds=DEFAULT_CRON_TICK_INTERVAL_SECONDS,
+        )
+    ]
+
+    # Live channel watchers (self-host only; fail-closed). Lazy import avoids a
+    # module-level cycle (channel_watchers imports build_channel_poll_watcher
+    # from here) and keeps this module import-clean.
+    from magi_agent.gateway.channel_watchers import (  # noqa: PLC0415
+        build_telegram_channel_watcher,
+    )
+
+    telegram_watcher = build_telegram_channel_watcher()
+    if telegram_watcher is not None:
+        watchers.append(telegram_watcher)
+
+    return tuple(watchers)
+
+
 # ---------------------------------------------------------------------------
 # Channel poll watcher — wraps an injected per-platform poll/read function
 # ---------------------------------------------------------------------------
@@ -175,7 +212,9 @@ def build_channel_poll_watcher(
 
 
 __all__ = [
+    "DEFAULT_CRON_TICK_INTERVAL_SECONDS",
     "build_channel_poll_watcher",
+    "build_default_watchers",
     "build_local_scheduler_cron_driver",
     "build_scheduler_cron_watcher",
     "is_scheduler_executor_enabled",

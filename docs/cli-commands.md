@@ -4,7 +4,8 @@
 
 Inside an interactive `magi` session (and the chat surface) you can type `/`-prefixed
 commands. These are distinct from the `magi <subcommand>` CLI commands documented in
-the [CLI reference](/docs/cli-reference) (`magi doctor`, `magi auth`, etc.).
+the [CLI reference](/docs/cli-reference) — the full `magi`/`magi <subcommand>`
+flag and command surface (source: `docs/cli/magi.md`).
 
 ## Builtin commands
 
@@ -53,5 +54,6 @@ So you can add a project command by dropping a markdown file in
 
 ## See also
 
-- [CLI reference](/docs/cli-reference) — the `magi <subcommand>` surface and flags.
+- [CLI reference](/docs/cli-reference) — the `magi <subcommand>` surface and flags (source: `docs/cli/magi.md`).
+- [Gateway daemon CLI](/docs/cli-gateway) — the `magi gateway` always-on daemon commands.
 - [What works today](/docs/what-works-today) — live vs default-off surfaces.

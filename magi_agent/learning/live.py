@@ -27,9 +27,8 @@ authority.  Live behaviour is its OWN, separately-gated layer:
       ``LearningLiveAuditRecord`` of the authority promotion (what got promoted,
       when, gate/readiness state).
 
-No core files are touched (``runtime/turn_controller``, ``message_builder``,
-``openmagi_runtime``, ``adk_bridge``, ADK runner).  This is the harness/learning
-layer only.
+No core files are touched (``message_builder``, ``openmagi_runtime``,
+``adk_bridge``, ADK runner).  This is the harness/learning layer only.
 """
 from __future__ import annotations
 

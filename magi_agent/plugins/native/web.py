@@ -1,52 +1,92 @@
 from __future__ import annotations
 
+import os
+from collections.abc import Mapping
+
 from magi_agent.tools.context import ToolContext
 from magi_agent.tools.result import ToolResult
-from magi_agent.web_acquisition.provider_boundary import (
-    WebAcquisitionConfig,
-    WebAcquisitionRequest,
-    LocalWebAcquisitionRuntime,
+from magi_agent.web_acquisition.research_tools import (
+    INSANE_FETCH_ENABLED_ENV,
+    JINA_READER_ENABLED_ENV,
+    MAGI_PLATFORM_API_KEY_ENV,
+    MAGI_PLATFORM_BASE_URL_ENV,
+    PROVIDER_ROUTER_ENABLED_ENV,
+    build_native_web_boundary,
+    live_web_acquisition_active,
 )
-from magi_agent.web_acquisition.research_tools import LocalWebResearchToolBoundary
+
+# Frozen contract (PR #381): external callers import these; the live wiring
+# below falls back to them. Keep the code value and result shape stable.
+WEB_RESEARCH_NOT_CONFIGURED_ERROR_CODE = "web_research_not_configured"
+
+_NOT_CONFIGURED_MESSAGE = (
+    "WebSearch/WebFetch is not configured. No live web provider is enabled, so "
+    "the agent cannot search or fetch the web. Enable a live provider: set "
+    "CORE_AGENT_PYTHON_LIVE_WEB_ACQUISITION_ENABLED=1 and "
+    "CORE_AGENT_PYTHON_WEB_PROVIDER_ROUTER_ENABLED=1, plus one of "
+    "CORE_AGENT_PYTHON_JINA_READER_ENABLED (+MAGI_JINA_API_KEY) / "
+    "CORE_AGENT_PYTHON_INSANE_FETCH_ENABLED / "
+    "MAGI_PLATFORM_BASE_URL+MAGI_PLATFORM_API_KEY."
+)
+
+# Duplicated deliberately to match the env-gate truthy convention used by
+# research_tools.py / the harness-canary gates (no shared helper by design).
+_TRUE_VALUES = frozenset({"1", "on", "true", "yes"})
 
 
-class _LocalWebProvider:
-    openmagi_local_fake_provider = True
-
-    def search(self, request: WebAcquisitionRequest) -> dict[str, object]:
-        query = request.query or "local web search"
-        return {
-            "results": (
-                {
-                    "url": f"search://{query}",
-                    "title": f"Local result for {query}",
-                    "snippet": f"Local first-party web search stub for {query}. Configure a provider for live search.",
-                    "metadata": {"provider": "local", "publicSafe": True},
-                },
-            )
-        }
-
-    def fetch(self, request: WebAcquisitionRequest) -> dict[str, object]:
-        url = request.url or "https://example.com/"
-        return {
-            "url": url,
-            "title": "Local fetched source",
-            "content": f"Local first-party fetch stub for {url}. Configure a provider for live fetch.",
-            "metadata": {"provider": "local", "publicSafe": True},
-        }
+def _is_true(value: object) -> bool:
+    return str(value or "").strip().casefold() in _TRUE_VALUES
 
 
-def _boundary() -> LocalWebResearchToolBoundary:
-    runtime = LocalWebAcquisitionRuntime(
-        WebAcquisitionConfig(enabled=True, localFakeProviderEnabled=True),
-        provider=_LocalWebProvider(),
+def _not_configured_result(tool_name: str) -> ToolResult:
+    """Honest not-configured error for native web tools.
+
+    Returned when no live web provider is enabled. This replaces the previous
+    fabricated ``search://`` stub that was projected as a successful result and
+    caused the model to hallucinate "real" web results. The live wiring in
+    ``web_search``/``web_fetch`` falls back to this helper and
+    ``WEB_RESEARCH_NOT_CONFIGURED_ERROR_CODE`` (frozen contract).
+    """
+    return ToolResult(
+        status="error",
+        error_code=WEB_RESEARCH_NOT_CONFIGURED_ERROR_CODE,
+        error_message=_NOT_CONFIGURED_MESSAGE,
+        metadata={"tool": tool_name},
     )
-    return LocalWebResearchToolBoundary(runtime=runtime)
+
+
+def _live_provider_configured(env: Mapping[str, str] | None = None) -> bool:
+    """True when the env-gated live web path can actually reach a provider.
+
+    Mirrors the three activation levels of ``build_live_research_boundary``:
+    master gate (and kill switch) via ``live_web_acquisition_active``, the
+    provider router gate, and at least one provider source (platform endpoint
+    pair / jina-reader / insane-fetch).
+    """
+    resolved: Mapping[str, str] = os.environ if env is None else env
+    if not live_web_acquisition_active(env=resolved):
+        return False
+    if not _is_true(resolved.get(PROVIDER_ROUTER_ENABLED_ENV)):
+        return False
+    has_platform = bool(resolved.get(MAGI_PLATFORM_BASE_URL_ENV, "").strip()) and bool(
+        resolved.get(MAGI_PLATFORM_API_KEY_ENV, "").strip()
+    )
+    return (
+        has_platform
+        or _is_true(resolved.get(JINA_READER_ENABLED_ENV))
+        or _is_true(resolved.get(INSANE_FETCH_ENABLED_ENV))
+    )
 
 
 async def web_search(arguments: dict[str, object], context: ToolContext) -> ToolResult:
-    return await _boundary().execute_tool("WebSearch", arguments, context)
+    boundary = build_native_web_boundary(os.environ)
+    if boundary is None:
+        return _not_configured_result("WebSearch")
+    return await boundary.execute_tool("WebSearch", arguments, context)
 
 
 async def web_fetch(arguments: dict[str, object], context: ToolContext) -> ToolResult:
-    return await _boundary().execute_tool("WebFetch", arguments, context)
+    boundary = build_native_web_boundary(os.environ)
+    if boundary is None:
+        return _not_configured_result("WebFetch")
+    return await boundary.execute_tool("WebFetch", arguments, context)

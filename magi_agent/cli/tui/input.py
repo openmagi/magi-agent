@@ -97,6 +97,9 @@ class PromptInput(TextArea):
             self.submission = submission
             super().__init__()
 
+    class AttachImageRequested(Message):
+        """Posted when the user presses Ctrl+V to attach a clipboard image."""
+
     def __init__(self, *, commands: CommandRegistry, **kwargs: object) -> None:
         super().__init__(**kwargs)  # type: ignore[arg-type]
         self._commands = commands
@@ -139,6 +142,26 @@ class PromptInput(TextArea):
 
         return classify_line(line, self._commands)
 
+    def apply_completion(self, value: str) -> None:
+        """Replace the active pre-cursor token with ``value`` (+ trailing space).
+
+        The active token is the run of non-space chars ending at the caret (the
+        same slice the autocomplete router completes). Everything before the
+        token and any text after the caret are preserved; the caret lands just
+        after the inserted ``value`` and its trailing space so the user can type
+        arguments immediately.
+        """
+
+        from magi_agent.cli.tui.autocomplete import precursor_token  # noqa: PLC0415
+
+        precursor = self.precursor
+        token = precursor_token(precursor)
+        head = precursor[: len(precursor) - len(token)] if token else precursor
+        after = self.text[len(precursor):]
+        new_head = f"{head}{value} "
+        self.text = f"{new_head}{after}"
+        self.cursor_location = (new_head.count("\n"), len(new_head.split("\n")[-1]))
+
     def submit(self) -> None:
         """Classify + emit the current buffer as a submission, then clear.
 
@@ -156,6 +179,24 @@ class PromptInput(TextArea):
         self.text = ""
         self.post_message(self.PromptSubmitted(submission))
 
+    def _completions_active(self) -> bool:
+        """Whether the owning App's autocomplete overlay is currently showing."""
+
+        checker = getattr(self.app, "completions_active", None)
+        if not callable(checker):
+            return False
+        try:
+            return bool(checker())
+        except Exception:
+            return False
+
+    def _call_app(self, method: str, *args: object) -> None:
+        """Invoke an overlay method on the owning App if present (duck-typed)."""
+
+        fn = getattr(self.app, method, None)
+        if callable(fn):
+            fn(*args)
+
     async def _on_key(self, event: events.Key) -> None:
         """Intercept Enter (submit) / Shift+Enter (newline) / ↑↓ (history).
 
@@ -170,6 +211,37 @@ class PromptInput(TextArea):
         normal. With no history attached, ↑/↓ are never hijacked.
         """
 
+        # Autocomplete overlay drives Tab/↑/↓/Esc while it is showing, so Tab
+        # completes the highlighted skill/command instead of inserting a tab and
+        # ↑/↓ navigate the menu instead of recalling history. Enter is left alone
+        # (it still submits) so typing a full command + Enter runs it directly.
+        # Falls through to normal editing when no overlay is open.
+        if self._completions_active():
+            if event.key == "tab":
+                event.stop()
+                event.prevent_default()
+                self._call_app("accept_completion")
+                return
+            if event.key == "down":
+                event.stop()
+                event.prevent_default()
+                self._call_app("completion_navigate", 1)
+                return
+            if event.key == "up":
+                event.stop()
+                event.prevent_default()
+                self._call_app("completion_navigate", -1)
+                return
+            if event.key == "escape":
+                event.stop()
+                event.prevent_default()
+                self._call_app("cancel_completions")
+                return
+        if event.key == "ctrl+v":
+            event.stop()
+            event.prevent_default()
+            self.post_message(self.AttachImageRequested())
+            return
         if event.key == "enter":
             event.stop()
             event.prevent_default()

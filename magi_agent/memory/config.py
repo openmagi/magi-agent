@@ -59,6 +59,14 @@ PROJECTION_ENABLED_ENV_VAR: str = "MAGI_MEMORY_PROJECTION_ENABLED"
 COMPACTION_ENABLED_ENV_VAR: str = "MAGI_MEMORY_COMPACTION_ENABLED"
 SOUL_WRITE_ENABLED_ENV_VAR: str = "MAGI_SOUL_WRITE_ENABLED"
 VECTOR_SEARCH_ENV_VAR: str = "MAGI_MEMORY_VECTOR_SEARCH"
+#: Explicit opt-in (like ``vector_search``): allow the qmd backend to register a
+#: NEW global qmd collection. Default False so a shared/multi-bot host is not
+#: polluted with a global index just by turning memory on.
+PREFER_QMD_AUTO_REGISTER_ENV_VAR: str = "MAGI_MEMORY_PREFER_QMD_AUTO_REGISTER"
+#: Use the LOCAL ``memory/search`` backend (BM25/qmd) as the canonical recall
+#: source for the read adapter's qmd-record path. Default False (the pre-existing
+#: QmdClient HTTP → JSON-file path stays the behaviour).
+PREFER_LOCAL_SEARCH_ENV_VAR: str = "MAGI_MEMORY_PREFER_LOCAL_SEARCH"
 
 #: Tunable env overrides.
 PREFER_QMD_ENV_VAR: str = "MAGI_MEMORY_PREFER_QMD"
@@ -120,6 +128,17 @@ class MemoryRuntimeConfig(BaseModel):
     soul_write_enabled: bool = Field(default=False, alias="soulWriteEnabled")
     #: Opt-in even under master-on — stays False unless explicitly enabled.
     vector_search: bool = Field(default=False, alias="vectorSearch")
+    #: Opt-in even under master-on — stays False unless explicitly enabled.
+    #: When False the qmd backend never registers a NEW global collection.
+    prefer_qmd_auto_register: bool = Field(
+        default=False, alias="preferQmdAutoRegister"
+    )
+    #: Follows the master (master-on => True) so per-turn dynamic recall is not
+    #: silently double-gated off; an explicit env/config override still wins.
+    #: The cost/multi-tenancy opt-ins (``vector_search``,
+    #: ``prefer_qmd_auto_register``) remain explicit-only. When True the read
+    #: adapter uses ``memory/search`` for qmd records.
+    prefer_local_search: bool = Field(default=False, alias="preferLocalSearch")
 
     # Tunables.
     prefer_qmd: bool = Field(default=_DEFAULT_PREFER_QMD, alias="preferQmd")
@@ -204,6 +223,19 @@ def resolve_memory_config(
         vectorSearch=sub_flag(
             VECTOR_SEARCH_ENV_VAR, "vector_search", master_default=False
         ),
+        # Opt-ins: stay False even when the master is on (explicit-only).
+        preferQmdAutoRegister=sub_flag(
+            PREFER_QMD_AUTO_REGISTER_ENV_VAR,
+            "prefer_qmd_auto_register",
+            master_default=False,
+        ),
+        # Follows the master: per-turn dynamic recall (recall_enabled AND
+        # prefer_local_search) must not be silently double-gated off once the
+        # master is on. An explicit override (env/config) still wins, so an
+        # operator can opt out under master-on.
+        preferLocalSearch=sub_flag(
+            PREFER_LOCAL_SEARCH_ENV_VAR, "prefer_local_search", master_default=master
+        ),
         preferQmd=_resolve_bool(
             env, table, env_var=PREFER_QMD_ENV_VAR, config_key="prefer_qmd",
             default=_DEFAULT_PREFER_QMD,
@@ -252,7 +284,7 @@ def _memory_table(config: Mapping[str, object] | None) -> Mapping[str, object]:
     return section if isinstance(section, Mapping) else {}
 
 
-def _coerce_bool(value: object) -> bool | None:
+def coerce_bool(value: object) -> bool | None:
     if isinstance(value, bool):
         return value
     if value is None:
@@ -274,11 +306,11 @@ def _override_bool(
 ) -> bool | None:
     """Return the explicit override (env beats config), or None if neither set."""
     if env_var in env:
-        coerced = _coerce_bool(env.get(env_var))
+        coerced = coerce_bool(env.get(env_var))
         if coerced is not None:
             return coerced
     if config_key in table:
-        coerced = _coerce_bool(table.get(config_key))
+        coerced = coerce_bool(table.get(config_key))
         if coerced is not None:
             return coerced
     return None
@@ -349,8 +381,12 @@ def _resolve_mode(
 
 
 __all__ = [
+    "CONFIG_TABLE",
     "MASTER_ENV_VAR",
+    "PREFER_LOCAL_SEARCH_ENV_VAR",
+    "PREFER_QMD_AUTO_REGISTER_ENV_VAR",
     "MemoryMode",
     "MemoryRuntimeConfig",
+    "coerce_bool",
     "resolve_memory_config",
 ]

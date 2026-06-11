@@ -47,7 +47,7 @@ from magi_agent.cli.wiring import (
 )
 from magi_agent.runtime.local_defaults import apply_local_full_runtime_defaults
 
-__all__ = ["app", "main"]
+__all__ = ["app", "main", "resolve_headless_permission_mode"]
 
 # ---------------------------------------------------------------------------
 # Default-command group
@@ -134,6 +134,49 @@ class AgentMode(str, Enum):
     act = "act"
 
 
+def _normalize_runtime_profile(runtime_profile: str | None) -> str:
+    return (runtime_profile or "").strip().lower()
+
+
+class _ResumeArgs:
+    """Duck-typed args object for ``session_log.prepare_resume`` (PR-04-PR2).
+
+    ``prepare_resume`` reads ``resume`` / ``continue_`` / ``cwd`` attributes; this
+    tiny carrier adapts the typer options without importing argparse.
+    """
+
+    def __init__(
+        self, *, resume: str | None, continue_: bool, cwd: str
+    ) -> None:
+        self.resume = resume
+        self.continue_ = continue_
+        self.cwd = cwd
+
+
+def _resume_enabled() -> bool:
+    """Whether ``--resume``/``--continue`` rehydration is armed (stage-1 OFF)."""
+
+    from magi_agent.config.env import cli_resume_enabled  # noqa: PLC0415
+
+    return cli_resume_enabled(os.environ)
+
+
+def resolve_headless_permission_mode(
+    *, permission_mode: str, flag_is_default: bool, runtime_profile: str | None
+) -> str:
+    """Resolve the headless permission mode.
+
+    Eval runs are unattended batch scoring (no human approver) in ephemeral
+    sandboxes, so when the operator left ``--permission-mode`` at its default the
+    eval profile defaults to ``bypassPermissions`` (otherwise every write/exec
+    tool is denied for lack of an approver and the run produces an empty result).
+    An explicit ``--permission-mode`` always wins.
+    """
+    if flag_is_default and _normalize_runtime_profile(runtime_profile) == "eval":
+        return "bypassPermissions"
+    return permission_mode
+
+
 def _composio_status_line(prefix: str) -> str:
     from magi_agent.composio.config import resolve_composio_config
     from magi_agent.composio.health import composio_health_metadata
@@ -208,11 +251,16 @@ def agent(
     """
 
     # ``agent`` is the default command (routed to by ``DefaultCommandGroup``
-    # when no explicit subcommand is given). ``ctx`` is accepted for parity
-    # with the other commands and possible future use.
-    _ = ctx
+    # when no explicit subcommand is given). ``ctx`` is used for
+    # get_parameter_source in both the headless and TUI branches below.
 
-    apply_local_full_runtime_defaults(os.environ)
+    runtime_profile = _normalize_runtime_profile(os.environ.get("MAGI_RUNTIME_PROFILE"))
+    if runtime_profile == "eval":
+        from magi_agent.runtime.local_defaults import apply_local_eval_runtime_defaults  # noqa: PLC0415
+
+        apply_local_eval_runtime_defaults(os.environ)
+    else:
+        apply_local_full_runtime_defaults(os.environ)
     runner_policy_routing_enabled = local_runner_policy_routing_enabled_from_env()
 
     # ------------------------------------------------------------------ #
@@ -223,18 +271,37 @@ def agent(
     # Normalize output format string.
     output_str = output.value  # e.g. "text", "json", "stream-json"
 
-    # NOTE: --resume / --continue only thread a session id today; true session
-    # rehydration (replaying initial_messages into the engine) is a v1.1 follow-up
-    # — the engine still stubs initial_messages (engine._drive: ``_ = initial_messages``),
-    # so wiring resume here would be hollow.
-    _ = continue_  # accepted; resume rehydration deferred to v1.1
+    # PR-04-PR2: --resume / --continue now rehydrate prior conversation context.
+    # When MAGI_CLI_RESUME_ENABLED is on, resolve a ResumeContext from the
+    # on-disk JSONL transcript (session_log) and thread its reconstructed
+    # ``initial_messages`` into the engine so the model replays the earlier
+    # conversation. Gate OFF (stage-1 default) OR no transcript -> empty context,
+    # so --resume/--continue degrade to the legacy "id only" behavior with no
+    # error (byte-identical for a fresh session).
+    resume_messages: list[dict[str, str]] = []
+    if (resume or continue_) and _resume_enabled():
+        from magi_agent.cli.session_log import prepare_resume  # noqa: PLC0415
+
+        resume_ctx = prepare_resume(
+            _ResumeArgs(resume=resume, continue_=continue_, cwd=os.getcwd())
+        )
+        resume_messages = list(resume_ctx.initial_messages or [])
 
     if is_non_interactive:
         # -------------------------------------------------------------- #
         # Headless branch                                                  #
         # -------------------------------------------------------------- #
+        permission_mode_source = ctx.get_parameter_source("permission_mode")
+        headless_permission_mode = resolve_headless_permission_mode(
+            permission_mode=permission_mode.value,
+            flag_is_default=(
+                permission_mode is PermMode.default
+                and getattr(permission_mode_source, "name", None) == "DEFAULT"
+            ),
+            runtime_profile=runtime_profile,
+        )
         rt = build_headless_runtime(
-            permission_mode=permission_mode.value,  # type: ignore[arg-type]
+            permission_mode=headless_permission_mode,  # type: ignore[arg-type]
             session_id=resume or "cli-session",
             model=model,
             mode=mode.value,  # type: ignore[arg-type]
@@ -262,13 +329,15 @@ def agent(
                 gate=rt.gate,
                 commands=rt.commands,
                 driver=rt.engine,
-                permission_mode=permission_mode.value,  # type: ignore[arg-type]
+                permission_mode=headless_permission_mode,  # type: ignore[arg-type]
                 session_id=rt.session_log.path.stem
                 if hasattr(rt.session_log, "path")
                 else (resume or "cli-session"),
                 stream=None,  # default: sys.stdout
                 input_stream=inbound,  # type: ignore[arg-type]
                 mcp_servers=rt.mcp_servers,
+                session_log=rt.session_log,
+                initial_messages=resume_messages,
             )
         )
         raise typer.Exit(code=exit_code)
@@ -456,17 +525,28 @@ def gateway_status() -> None:
 
 
 @gateway_app.command("start")
-def gateway_start() -> None:
-    """Run the gateway daemon (gated). Gate OFF → prints status and exits.
+def gateway_start(
+    once: bool = typer.Option(
+        False,
+        "--once",
+        help="Run a single scheduler tick and exit (legacy behavior).",
+    ),
+) -> None:
+    """Run the gateway daemon (gated). Default: supervise until SIGINT/SIGTERM.
 
-    With the gate ON, this consumes the local scheduler boundary once when
-    ``MAGI_SCHEDULER_EXECUTOR_ENABLED`` is also ON. Channel watchers still require
-    explicit provider/client wiring and are not constructed by this local CLI.
+    Gate OFF → prints status and exits. With the gate ON, the default mode
+    supervises the first-party watcher set via ``GatewayDaemon.run`` (each
+    watcher still respects its own gate, e.g. the cron watcher's
+    ``MAGI_SCHEDULER_EXECUTOR_ENABLED``). ``--once`` keeps the legacy
+    single-tick behavior. Channel watchers still require explicit
+    provider/client wiring and are not constructed by this local CLI.
     """
-    from magi_agent.gateway.daemon import is_gateway_daemon_enabled  # noqa: PLC0415
-    from magi_agent.gateway.watchers import (  # noqa: PLC0415
-        build_local_scheduler_cron_driver,
-        is_scheduler_executor_enabled,
+    import asyncio  # noqa: PLC0415
+    import contextlib  # noqa: PLC0415
+    import signal  # noqa: PLC0415
+
+    from magi_agent.gateway.daemon import (  # noqa: PLC0415
+        is_gateway_daemon_enabled,
     )
 
     if not is_gateway_daemon_enabled():
@@ -475,6 +555,38 @@ def gateway_start() -> None:
             "MAGI_GATEWAY_DAEMON_ENABLED=1 to start always-on."
         )
         return
+
+    if once:
+        _gateway_run_once()
+        return
+
+    from magi_agent.gateway.daemon import build_default_gateway_daemon  # noqa: PLC0415
+
+    daemon = build_default_gateway_daemon()
+
+    async def _main() -> None:
+        stop_event = asyncio.Event()
+        loop = asyncio.get_running_loop()
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            with contextlib.suppress(NotImplementedError):
+                loop.add_signal_handler(sig, stop_event.set)
+        typer.echo(
+            "gateway daemon: supervising watchers (Ctrl-C or SIGTERM to stop). "
+            "Each watcher still respects its own gate."
+        )
+        await daemon.run(stop_event=stop_event)
+        typer.echo("gateway daemon: stopped.")
+
+    asyncio.run(_main())
+
+
+def _gateway_run_once() -> None:
+    """Legacy single scheduler tick (the pre-daemon `gateway start` body)."""
+    from magi_agent.gateway.watchers import (  # noqa: PLC0415
+        build_local_scheduler_cron_driver,
+        is_scheduler_executor_enabled,
+    )
+
     if not is_scheduler_executor_enabled():
         typer.echo(
             "gateway daemon: enabled. scheduler_cron disabled "
@@ -731,4 +843,24 @@ def main() -> None:
     from magi_agent.ops.otel_noise import silence_otel_detach_noise
 
     silence_otel_detach_noise()
+    # Install-default-on memory: overlay ~/.magi/config.toml[memory] on the
+    # install defaults ({enabled, prefer_local_search}) and setdefault the
+    # matching MAGI_MEMORY_* env vars so the env-reading runtime gates see them.
+    # Runs ONLY from this real CLI entrypoint (never during library/test imports);
+    # the code-level default (resolve_memory_config(env={}) → master False) is
+    # unchanged. Fail-soft. See magi_agent/cli/memory_bootstrap.py.
+    #
+    # Gate by runtime profile, mirroring apply_local_full_runtime_defaults: the
+    # lean/opt-out profiles (safe|minimal|off|conservative|eval) must NOT inherit
+    # install-default-on memory — they leave it at the code default (off) unless
+    # config/env explicitly enables it. This keeps the eval measurement profile
+    # free of per-turn file IO + the <memory-recall> prompt block.
+    from magi_agent.runtime.local_defaults import (  # noqa: PLC0415
+        local_full_runtime_defaults_enabled,
+    )
+
+    if local_full_runtime_defaults_enabled(os.environ):
+        from magi_agent.cli.memory_bootstrap import apply_memory_config_bootstrap
+
+        apply_memory_config_bootstrap(os.environ)
     app()

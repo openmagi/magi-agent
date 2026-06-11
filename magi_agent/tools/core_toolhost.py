@@ -34,7 +34,27 @@ CORE_TOOLHOST_DIRECT_TOOL_NAMES = (
     "FileEdit",
     "PatchApply",
     "Bash",
+    "TestRun",
+    "GitDiff",
 )
+
+
+def _env_int(
+    env: Mapping[str, str],
+    name: str,
+    *,
+    default: int,
+    minimum: int,
+    maximum: int,
+) -> int:
+    raw = (env.get(name) or "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return max(minimum, min(maximum, value))
 
 
 class CoreToolhostHandlerSet:
@@ -50,6 +70,7 @@ class CoreToolhostHandlerSet:
         read_quality_enabled: bool = False,
         read_ledger_enabled: bool = True,
         apply_patch_enabled: bool = True,
+        ripgrep_enabled: bool = False,
     ) -> None:
         self.allowed_tool_names = allowed_tool_names
         self.read_ledger_enabled = read_ledger_enabled
@@ -65,8 +86,51 @@ class CoreToolhostHandlerSet:
             "commandTimeoutMs": command_timeout_ms,
             "readQualityEnabled": read_quality_enabled,
             "applyPatchEnabled": apply_patch_enabled,
+            "ripgrepEnabled": ripgrep_enabled,
         }
         self._hosts: dict[tuple[str, str], Any] = {}
+
+    @classmethod
+    def from_env(cls, env: Mapping[str, str] | None = None) -> "CoreToolhostHandlerSet":
+        """Build a handler set honoring the runtime tool-cap env contract.
+
+        ``MAGI_TOOL_COMMAND_TIMEOUT_MS`` / ``MAGI_TOOL_MAX_OUTPUT_BYTES`` /
+        ``MAGI_TOOL_MAX_CALLS_PER_TURN`` plus the read-quality and ripgrep
+        flags. Previously these envs (set by the eval/full profiles) had no
+        consumer on this path, so every CLI run executed with the hardcoded
+        5s/8KB defaults.
+        """
+        from magi_agent.config.env import (  # noqa: PLC0415
+            is_read_quality_enabled,
+            ripgrep_enabled,
+        )
+
+        source: Mapping[str, str] = os.environ if env is None else env
+        return cls(
+            max_tool_calls_per_turn=_env_int(
+                source,
+                "MAGI_TOOL_MAX_CALLS_PER_TURN",
+                default=64,
+                minimum=1,
+                maximum=4096,
+            ),
+            command_timeout_ms=_env_int(
+                source,
+                "MAGI_TOOL_COMMAND_TIMEOUT_MS",
+                default=5000,
+                minimum=250,
+                maximum=600000,
+            ),
+            max_per_tool_output_bytes=_env_int(
+                source,
+                "MAGI_TOOL_MAX_OUTPUT_BYTES",
+                default=8192,
+                minimum=1,
+                maximum=131072,
+            ),
+            read_quality_enabled=is_read_quality_enabled(source),
+            ripgrep_enabled=ripgrep_enabled(source),
+        )
 
     def bind(self, registry: ToolRegistry) -> tuple[str, ...]:
         bound: list[str] = []
@@ -129,7 +193,7 @@ def bind_core_toolhost_handlers(registry: ToolRegistry) -> tuple[str, ...]:
     when they want the default local Magi Agent toolhost to execute core tools.
     """
 
-    return CoreToolhostHandlerSet().bind(registry)
+    return CoreToolhostHandlerSet.from_env().bind(registry)
 
 
 _MEMORY_WRITE_TOOL_NAMES = frozenset({"FileWrite", "FileEdit", "PatchApply"})

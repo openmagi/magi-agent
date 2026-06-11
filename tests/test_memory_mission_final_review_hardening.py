@@ -5,7 +5,6 @@ from magi_agent.config.models import (
     PythonRuntimeAuthorityConfig,
     PythonToolHostAttachmentConfig,
 )
-from magi_agent.harness.mission_runtime_boundary import MissionChildTaskIntent
 from magi_agent.memory.policy import MemoryPolicy, MemoryPolicyDecision
 from magi_agent.memory.projection import TurnMemorySummaryProjection
 from magi_agent.memory.write_boundary import (
@@ -141,13 +140,6 @@ def test_memory_boundary_false_only_fields_cannot_be_constructed_or_copied_true(
 
 
 def test_mission_child_and_workspace_configs_cannot_construct_live_execution() -> None:
-    child = MissionChildTaskIntent.model_construct(
-        taskId="task:one",
-        goalRef="goal:one",
-        role="implementer",
-        promptPreview="summarize only",
-        executionAllowed=True,
-    )
     workspace = WorkspaceMutationConfig.model_construct(
         enabled=True,
         localFakeApplyEnabled=True,
@@ -155,7 +147,6 @@ def test_mission_child_and_workspace_configs_cannot_construct_live_execution() -
         productionWritesEnabled=True,
     )
 
-    assert child.model_dump(by_alias=True)["executionAllowed"] is False
     assert _dumped_false_values(
         workspace.copy(update={"productionWritesEnabled": True}),
         ("productionWorkspaceMutationEnabled", "productionWritesEnabled"),

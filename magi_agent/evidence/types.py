@@ -77,6 +77,7 @@ BUILTIN_EVIDENCE_TYPES: tuple[str, ...] = (
     "TelegramDeliveryAck",
     "PromptTransform",
     "EditMatch",
+    "DocumentCoverage",
 )
 _EVIDENCE_MODEL_CONFIG = ConfigDict(
     frozen=True,

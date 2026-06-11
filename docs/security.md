@@ -43,5 +43,5 @@ Before enabling additional external authority, review this checklist.
 - Default-off boundaries remain disabled unless you have explicitly reviewed and enabled them.
 - Dangerous tools (Bash, TestRun) require approval before execution.
 - Authority flags and integration scopes stay least-privilege.
-- Evidence enforcement is set to audit mode by default. Switch to block_final_answer only after testing.
-- Memory writes are blocked. Read-only memory adapters are the only supported mode.
+- Evidence enforcement: the coding-domain engine pre-final gate is the only path that blocks output today, and it blocks by default when a coding evidence contract with on_missing="block_final_answer" is unsatisfied. The research final-projection gate is audit-only (final_answer_blocking_enabled is Literal[False]) and never blocks the final answer. Setting a contract's on_missing to block_final_answer therefore enforces only on the coding pre-final gate; test on the coding path before relying on it.
+- Memory writes are off by default: read-only memory adapters are the default mode, and the `MemoryWrite` tool is an opt-in capability gated by `MAGI_MEMORY_WRITE_ENABLED` (default-off). Only declarative facts (stable preferences, user traits) are persisted; task-state is rejected at the boundary. Leave the gate disabled unless you have explicitly reviewed and enabled it.

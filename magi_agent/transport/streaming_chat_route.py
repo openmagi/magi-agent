@@ -45,7 +45,10 @@ from magi_agent.channels.workflow_confirm_store import (
     PendingConfirmationStore,
 )
 from magi_agent.channels.workflow_gate import channel_workflows_enabled
-from magi_agent.channels.taskkind_classifier import FixedClassifier, TaskKindClassifier
+from magi_agent.channels.taskkind_classifier import FixedClassifier
+from magi_agent.channels.workflow_classifier_live import (
+    build_live_classifier_if_configured,
+)
 from magi_agent.channels.workflow_orchestrator import (
     WorkflowOrchestratorResult,
     resolve_confirmation,
@@ -59,8 +62,19 @@ from magi_agent.runtime.memory_mode_context import (
     current_memory_mode,
     memory_mode_request_scope,
 )
+from magi_agent.config.env import is_hosted_streaming_serve_enabled
 from magi_agent.transport.active_turn import ACTIVE_TURNS, ActiveTurn
+# NOTE: the underscore-named helpers below are owned by the decomposed chat
+# modules (chat_shared / chat_routes); they are imported via the
+# ``transport.chat`` re-export shim on purpose so this module does not couple
+# to the in-flight chat_routes decomposition (08-PR2).
 from magi_agent.transport.chat import (
+    _canary_gate_error,
+    _fallback_response,
+    _gate2_sandbox_canary_config,
+    _reason_for_gate_error,
+    _route_config,
+    _run_gate2_sandbox_workspace_canary_chat,
     gate5b_user_visible_chat_gate_active,
     run_gate5b_user_visible_chat_response,
 )
@@ -151,13 +165,113 @@ def _extract_prompt_text(body: object) -> str:
     return "\n".join(part.strip() for part in text_parts if part.strip())
 
 
+def _python_chat_route_on() -> bool:
+    """True when the hosted python chat-route authority gate env flag is on."""
+    return os.environ.get("CORE_AGENT_PYTHON_CHAT_ROUTE", "off").lower() == "on"
+
+
 def _selected_gate5b_stream_active(runtime: object) -> bool:
-    if os.environ.get("CORE_AGENT_PYTHON_CHAT_ROUTE", "off").lower() != "on":
+    if not _python_chat_route_on():
         return False
     try:
         return gate5b_user_visible_chat_gate_active(runtime)
     except Exception:
         return False
+
+
+def _hosted_streaming_serve_active() -> bool:
+    """Return True when the 08-PR3 hosted streaming-serve mode is ON.
+
+    Evaluated per-call (mirrors ``_streaming_chat_enabled``). Default OFF.
+    """
+    return is_hosted_streaming_serve_enabled()
+
+
+def _hosted_serve_chat_route_disabled_response(runtime: object) -> JSONResponse:
+    config = getattr(runtime, "config", None)
+    return JSONResponse(
+        status_code=503,
+        content={
+            "error": "chat_route_disabled",
+            "runtime": getattr(config, "runtime", None),
+            "runtimeEngine": getattr(config, "runtime_engine", None),
+        },
+    )
+
+
+def _hosted_serve_malformed_json_refusal(runtime: object) -> JSONResponse:
+    """Completions-equivalent response for an unparsable hosted request body.
+
+    Mirrors the ``/v1/chat/completions`` ordering: chat-route gate (checked
+    before the body is ever parsed) → gate2 parse branch (400) → canary route
+    gate (503 ``python_disabled``) → 400 ``python_error``/``malformed_json``.
+    """
+    if not _python_chat_route_on():
+        return _hosted_serve_chat_route_disabled_response(runtime)
+    gate2_config = _gate2_sandbox_canary_config(runtime)
+    if not gate2_config.enabled and not _route_config(runtime).enabled:
+        return _fallback_response(
+            status_code=503,
+            status="python_disabled",
+            reason="canary_gate_disabled",
+            runtime=runtime,
+        )
+    return _fallback_response(
+        status_code=400,
+        status="python_error",
+        reason="malformed_json",
+        runtime=runtime,
+    )
+
+
+def _hosted_serve_gate_refusal(
+    runtime: object,
+    body: object,
+    request: Request,
+) -> JSONResponse | None:
+    """Completions-equivalent refusal/dispatch for hosted stream serving.
+
+    Mirrors the ``/v1/chat/completions`` wrapper + ``run_gate5b_user_visible_
+    chat_response`` entry gates so a hosted caller gets the exact same JSON
+    failure surface (status / fallbackStatus / responseAuthority) BEFORE any
+    SSE bytes are sent — chat-proxy uses that shape for typescript-authority
+    fallback. Gate2 sandbox-workspace canary payloads are dispatched to the
+    same gate2 chat boundary as completions (JSON response, not SSE). Returns
+    ``None`` only when the selected gate5b canary gate is fully active. Never
+    falls through to the local headless engine.
+    """
+    if not _python_chat_route_on():
+        return _hosted_serve_chat_route_disabled_response(runtime)
+    gate2_config = _gate2_sandbox_canary_config(runtime)
+    if (
+        gate2_config.enabled
+        and isinstance(body, Mapping)
+        and body.get("gate") == "gate2_sandbox_workspace_canary"
+    ):
+        return _run_gate2_sandbox_workspace_canary_chat(
+            runtime,
+            gate2_config,
+            body,
+            request=request,
+        )
+    route_config = _route_config(runtime)
+    if not route_config.enabled:
+        return _fallback_response(
+            status_code=503,
+            status="python_disabled",
+            reason="canary_gate_disabled",
+            runtime=runtime,
+        )
+    gate_error = _canary_gate_error(runtime, route_config)
+    if gate_error is not None:
+        status_code = 409 if gate_error == "invalid_authority" else 503
+        return _fallback_response(
+            status_code=status_code,
+            status=gate_error,
+            reason=_reason_for_gate_error(gate_error),
+            runtime=runtime,
+        )
+    return None
 
 
 def _json_response_mapping(response: JSONResponse) -> dict[str, object]:
@@ -213,12 +327,51 @@ async def _drive_selected_gate5b_stream(
     turn_id: str,
 ) -> AsyncIterator[bytes]:
     """Adapt the selected Gate5B chat response to the streaming SSE contract."""
-    try:
-        response = await run_gate5b_user_visible_chat_response(
+    live_events: asyncio.Queue[Mapping[str, object]] = asyncio.Queue()
+    emitted_event_keys: set[str] = set()
+    live_text_emitted = False
+
+    def _event_key(payload: Mapping[str, object]) -> str:
+        return json.dumps(dict(payload), sort_keys=True, default=str)
+
+    def _enqueue_public_event(payload: Mapping[str, object]) -> None:
+        nonlocal live_text_emitted
+        event = dict(payload)
+        if event.get("type") == "text_delta":
+            live_text_emitted = True
+        live_events.put_nowait(event)
+
+    async def _run_selected_response() -> object:
+        return await run_gate5b_user_visible_chat_response(
             runtime,
             body,
             request=request,
+            public_event_sink=_enqueue_public_event,
         )
+
+    response_task = asyncio.create_task(_run_selected_response())
+    try:
+        while True:
+            if response_task.done() and live_events.empty():
+                break
+            next_event_task = asyncio.create_task(live_events.get())
+            done, _pending = await asyncio.wait(
+                {response_task, next_event_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if next_event_task in done:
+                public_event = next_event_task.result()
+                emitted_event_keys.add(_event_key(public_event))
+                frame = _runtime_event_frame(public_event, turn_id=turn_id)
+                if frame is not None:
+                    yield frame
+                continue
+            next_event_task.cancel()
+            try:
+                await next_event_task
+            except asyncio.CancelledError:
+                pass
+        response = response_task.result()
         payload = _json_response_mapping(response)
     except Exception:
         reason = "selected_stream_bridge_error"
@@ -235,9 +388,16 @@ async def _drive_selected_gate5b_stream(
                 session_id=session_id,
                 turn_id=turn_id,
             )
-        ):
-            yield chunk
+            ):
+                yield chunk
         return
+    finally:
+        if not response_task.done():
+            response_task.cancel()
+            try:
+                await response_task
+            except (asyncio.CancelledError, Exception):
+                pass
 
     if response.status_code == 200 and payload.get("status") == "python_ready":
         public_events = payload.get("publicEvents")
@@ -245,11 +405,17 @@ async def _drive_selected_gate5b_stream(
             for public_event in public_events:
                 if not isinstance(public_event, Mapping):
                     continue
+                if live_text_emitted and public_event.get("type") == "text_delta":
+                    continue
+                event_key = _event_key(public_event)
+                if event_key in emitted_event_keys:
+                    continue
+                emitted_event_keys.add(event_key)
                 frame = _runtime_event_frame(public_event, turn_id=turn_id)
                 if frame is not None:
                     yield frame
         content = _assistant_content_from_chat_response(payload)
-        if content:
+        if content and not live_text_emitted:
             frame = _runtime_event_frame(
                 {"type": "text_delta", "delta": content},
                 turn_id=turn_id,
@@ -366,10 +532,12 @@ def register_streaming_chat_routes(
         for workflow confirmation state. Defaults to the module-level
         ``_DEFAULT_CONFIRM_STORE`` (in-memory, process-scoped).
     eligibility_classifier:
-        Optional async classifier with ``aclassify(message_text) -> str``. Defaults
-        to :class:`~magi_agent.channels.taskkind_classifier.TaskKindClassifier` with
-        no model factory (auto-detect inert; returns ``"general"`` until a live model
-        is injected). The explicit ``/research`` path works regardless.
+        Optional async classifier with ``aclassify(message_text) -> str``. When
+        omitted the default is built by
+        :func:`~magi_agent.channels.workflow_classifier_live.build_live_classifier_if_configured`:
+        model-backed (auto-detect live) when a provider is configured, otherwise
+        the inert ``TaskKindClassifier`` (returns ``"general"`` — auto-detect off,
+        ``/research`` still works). An injected classifier takes precedence.
     """
 
     def _default_engine_builder(session_id: str, sink: object) -> tuple[object, object]:
@@ -409,10 +577,20 @@ def register_streaming_chat_routes(
     builder = engine_builder if engine_builder is not None else _default_engine_builder
 
     store = confirm_store if confirm_store is not None else _DEFAULT_CONFIRM_STORE
-    # Default classifier has NO model_factory → aclassify() returns "general"
-    # (auto-detect inert until a live model is wired). The explicit "/research"
-    # path works regardless. A hosted deployment injects a model-backed classifier.
-    classifier = eligibility_classifier if eligibility_classifier is not None else TaskKindClassifier()
+    # Classifier resolution (C5):
+    #   1. An explicitly injected ``eligibility_classifier`` always wins (hosted
+    #      deployments / tests inject their own model-backed classifier).
+    #   2. Otherwise build one from the local provider config: when a model is
+    #      configured the default classifier is model-backed (auto-detect goes
+    #      live); when nothing is configured it degrades to the inert
+    #      ``TaskKindClassifier`` (``aclassify`` → "general", the explicit
+    #      "/research" path still works). No new feature flag — the classifier is
+    #      live purely on the presence of a configured model.
+    classifier = (
+        eligibility_classifier
+        if eligibility_classifier is not None
+        else build_live_classifier_if_configured()
+    )
 
     async def _maybe_handle_workflow(
         prompt: str, session_id: str
@@ -476,9 +654,12 @@ def register_streaming_chat_routes(
                 content={"error": "streaming_chat_disabled"},
             )
 
+        hosted_serve = _hosted_streaming_serve_active()
         try:
             body = await request.json()
         except Exception:
+            if hosted_serve:
+                return _hosted_serve_malformed_json_refusal(runtime)
             return JSONResponse(status_code=400, content={"error": "malformed_json"})
 
         session_id = _body_string(
@@ -491,7 +672,24 @@ def register_streaming_chat_routes(
         turn_id = _body_string(body, "turnId", f"{session_id}:turn")
         prompt = _extract_prompt_text(body)
 
-        if _selected_gate5b_stream_active(runtime):
+        if hosted_serve:
+            # Hosted serving mode (08-PR3, default-OFF): the selected gate5b
+            # path is the ONLY serving path. Gate-inactive requests get the
+            # completions-equivalent fallback JSON; they NEVER fall through to
+            # the local headless engine (gate/counter/receipt bypass surface).
+            refusal = _hosted_serve_gate_refusal(runtime, body, request)
+            if refusal is not None:
+                return refusal
+            wf = await _maybe_handle_workflow(prompt, session_id)
+            if wf is not None:
+                return StreamingResponse(
+                    _drive_workflow_result_stream(
+                        wf,
+                        session_id=session_id,
+                        turn_id=turn_id,
+                    ),
+                    media_type="text/event-stream",
+                )
             return StreamingResponse(
                 _drive_selected_gate5b_stream(
                     runtime,
@@ -502,11 +700,24 @@ def register_streaming_chat_routes(
                 ),
                 media_type="text/event-stream",
             )
+
         wf = await _maybe_handle_workflow(prompt, session_id)
         if wf is not None:
             return StreamingResponse(
                 _drive_workflow_result_stream(
                     wf,
+                    session_id=session_id,
+                    turn_id=turn_id,
+                ),
+                media_type="text/event-stream",
+            )
+
+        if _selected_gate5b_stream_active(runtime):
+            return StreamingResponse(
+                _drive_selected_gate5b_stream(
+                    runtime,
+                    body,
+                    request,
                     session_id=session_id,
                     turn_id=turn_id,
                 ),

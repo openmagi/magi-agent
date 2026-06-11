@@ -53,7 +53,7 @@ class EvidenceSource(BaseModel):
 
 ## Builtin evidence types
 
-The evidence system defines 15 builtin evidence types. Each type name must exactly match one of these strings when used without the custom: prefix. Custom types use the custom:PascalCaseName format.
+The evidence system defines 18 builtin evidence types. Each type name must exactly match one of these strings when used without the custom: prefix. Custom types use the custom:PascalCaseName format.
 
 - GitDiff: evidence from git diff output after code changes.
 - TestRun: evidence from test execution, supports commandPattern and exitCode matching.
@@ -70,6 +70,9 @@ The evidence system defines 15 builtin evidence types. Each type name must exact
 - DateRange: evidence establishing a date or time range.
 - Clock: evidence of the current time.
 - TelegramDeliveryAck: evidence that a Telegram message was delivered.
+- PromptTransform: evidence that a prompt was transformed or rewritten.
+- EditMatch: evidence that an edit matched the expected target before being applied.
+- DocumentCoverage: evidence that a generated document covered the required sections.
 
 ## EvidenceContract and verdict
 
@@ -83,12 +86,16 @@ An EvidenceContract declares what evidence must be present and what to do when i
 
 ## Evidence flow
 
-Evidence flows through the system in a pipeline: tool call produces a ToolEvidenceRecord, which is promoted to an EvidenceRecord with source kind tool_trace. Collected EvidenceRecords are matched against EvidenceContract requirements. The contract engine produces an EvidenceContractVerdict. The enforcement boundary consumes the verdict and produces an EvidenceEnforcementDecision with a status and action.
+Evidence flows through the system in a pipeline: tool call produces a ToolEvidenceRecord, which is promoted to an EvidenceRecord with source kind tool_trace. Collected EvidenceRecords are matched against EvidenceContract requirements. The contract engine produces an EvidenceContractVerdict.
 
-The flow is: tool call -> ToolEvidenceRecord -> EvidenceRecord -> contract matching -> EvidenceContractVerdict -> EvidenceEnforcementDecision.
+Live enforcement of that verdict happens in the engine pre-final gate. For coding-domain turns the engine runs the pre-final verifier bus before the final answer; when an evidence contract with on_missing="block_final_answer" is unsatisfied, the gate blocks the turn (Terminal.error, error="pre_final_evidence_gate_blocked") and, with MAGI_CODING_REPAIR_LOOP_ENABLED, drives a repair loop. This coding pre-final gate is the only path that actually blocks output today, and it is on by default for the coding domain.
+
+The research final-projection gate is an audit/diagnostic projection without live blocking authority: its final_answer_blocking_enabled flag is Literal[False], so a verdict in state "block_ready" is recorded as a "block_ready_local_fake" intent rather than blocking the final answer. It does not sit on the live output path. Enforcement converges on the single engine pre-final gate; there is no separate standalone enforcement-boundary module.
+
+The flow is: tool call -> ToolEvidenceRecord -> EvidenceRecord -> contract matching -> EvidenceContractVerdict -> engine pre-final gate (coding domain: live block/repair; research projection: audit-only).
 
 - Step 1: Tool boundary creates ToolEvidenceRecord with kind, status, hashes, and sanitized summaries.
 - Step 2: Record is wrapped as EvidenceRecord with type matching the evidence category (e.g. TestRun, GitDiff).
 - Step 3: Contract engine iterates requirements, matches records by type, checks after-boundary freshness, validates field matchers.
 - Step 4: Verdict summarizes pass/fail with matched evidence and missing requirements.
-- Step 5: Enforcement boundary maps verdict to action: pass, audit, repair, escalate, or block_intent.
+- Step 5: The engine pre-final gate maps the verdict to an action. For coding-domain turns this is live: a "block_ready" verdict blocks the final answer or triggers repair. For research-domain turns the final-projection gate records the same verdict for diagnostics only (block_ready is recorded as "block_ready_local_fake" and does not block output).

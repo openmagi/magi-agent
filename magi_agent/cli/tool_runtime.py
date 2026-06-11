@@ -46,12 +46,20 @@ class CliToolRuntime:
     general_automation_receipts: "GeneralAutomationReceiptLedgerStore"
 
 
+_LEGACY_FULL_TOOLHOST_SCOPE: dict[str, object] = {
+    "mode": "selected_full_toolhost",
+    "source": "selected_full_toolhost",
+}
+
+
 def build_cli_tool_runtime(
     *,
     workspace_root: str,
     session_id: str = "cli-session",
     memory_mode: "MemoryMode | str" = "normal",
+    permission_mode: str = "default",
     general_automation_receipts: "GeneralAutomationReceiptLedgerStore | None" = None,
+    local_tool_evidence_collector: "LocalToolEvidenceCollector | None" = None,
 ) -> CliToolRuntime:
     """Assemble the registry, dispatcher, and tool-context factory.
 
@@ -129,11 +137,16 @@ def build_cli_tool_runtime(
             workspace_ref="local-cli-workspace",
             memory_mode=memory_mode_value,
             channel="cli",
-            permission_scope={
-                "mode": "selected_full_toolhost",
-                "source": "selected_full_toolhost",
-            },
+            permission_scope=_resolve_cli_permission_scope(
+                adk_tool_context,
+                registry=registry,
+                permission_mode=permission_mode,
+            ),
             execution_contract={"agentRole": "general"},
+            source_ledger=_source_ledger_for_session(
+                local_tool_evidence_collector,
+                session_id,
+            ),
             adk_tool_context=adk_tool_context,
             adk_context=adk_tool_context,
         )
@@ -152,6 +165,7 @@ def build_cli_adk_tools(
     session_id: str = "cli-session",
     mode: "RuntimeMode" = "act",
     memory_mode: "MemoryMode | str" = "normal",
+    permission_mode: str = "default",
     general_automation_receipts: "GeneralAutomationReceiptLedgerStore | None" = None,
     local_tool_evidence_collector: "LocalToolEvidenceCollector | None" = None,
 ) -> list[object]:
@@ -165,7 +179,9 @@ def build_cli_adk_tools(
         workspace_root=workspace_root,
         session_id=session_id,
         memory_mode=memory_mode,
+        permission_mode=permission_mode,
         general_automation_receipts=general_automation_receipts,
+        local_tool_evidence_collector=local_tool_evidence_collector,
     )
     tools = build_adk_function_tools_for_registry(
         runtime.registry,
@@ -179,6 +195,72 @@ def build_cli_adk_tools(
         collector=local_tool_evidence_collector,
         session_id=session_id,
     )
+
+
+def _resolve_cli_permission_scope(
+    adk_tool_context: object,
+    *,
+    registry: "ToolRegistry",
+    permission_mode: str,
+) -> dict[str, object]:
+    """Return the ``permission_scope`` for a CLI tool call.
+
+    When ``MAGI_PERMISSION_SCOPE_FROM_MODE`` is OFF (default) this returns the
+    legacy hardcoded ``selected_full_toolhost`` scope — byte-identical to the
+    pre-PR1 behavior, so the regression surface is zero. When ON, the scope is
+    derived from ``permission_mode`` + the called tool's manifest via
+    :class:`~magi_agent.tools.permission_scope.PermissionScopeResolver`:
+    ``default``/``smartApprove`` get no preapproval (arbiter ``ask`` reaches),
+    ``acceptEdits`` preapproves only edit-class tools, ``bypassPermissions`` gets
+    a ``bypass`` scope (hard-safety still enforced).
+
+    Fail-open: any error (gate lookup, manifest resolution) collapses back to the
+    legacy scope so a malformed runtime never breaks tool dispatch.
+    """
+    try:
+        from magi_agent.config.env import (  # noqa: PLC0415
+            permission_scope_from_mode_enabled,
+        )
+
+        if not permission_scope_from_mode_enabled():
+            return dict(_LEGACY_FULL_TOOLHOST_SCOPE)
+
+        manifest = _manifest_for_adk_context(adk_tool_context, registry=registry)
+        if manifest is None:
+            # No manifest in hand -> mode-only resolution: bypass stays bypass,
+            # everything else stays strict (no preapproval) so the arbiter ask
+            # branch can reach.
+            if str(permission_mode).strip() == "bypassPermissions":
+                return {"mode": "bypass", "source": "bypass"}
+            return {"mode": "default", "source": "builtin"}
+
+        from magi_agent.tools.permission_scope import (  # noqa: PLC0415
+            PermissionScopeResolver,
+        )
+
+        return PermissionScopeResolver().resolve(
+            permission_mode=permission_mode,
+            manifest=manifest,
+            channel="cli",
+        )
+    except Exception:
+        return dict(_LEGACY_FULL_TOOLHOST_SCOPE)
+
+
+def _manifest_for_adk_context(
+    adk_tool_context: object,
+    *,
+    registry: "ToolRegistry",
+) -> object | None:
+    """Best-effort resolution of the called tool's manifest from the ADK ctx."""
+    function_call = _context_lookup(adk_tool_context, "function_call")
+    tool_name = _context_lookup(function_call, "name")
+    if not isinstance(tool_name, str) or not tool_name.strip():
+        return None
+    registration = registry.resolve_registration(tool_name.strip())
+    if registration is None:
+        return None
+    return getattr(registration, "manifest", None)
 
 
 def bind_cli_local_full_tool_handlers(
@@ -196,8 +278,21 @@ def bind_cli_local_full_tool_handlers(
     from magi_agent.runtime.memory_write_wiring import (  # noqa: PLC0415
         build_memory_write_host,
     )
+    from magi_agent.tools.ask_user_question_toolhost import (  # noqa: PLC0415
+        bind_ask_user_question_handler,
+    )
+    from magi_agent.tools.plan_mode_toolhost import (  # noqa: PLC0415
+        bind_plan_mode_handlers,
+    )
 
     bind_inspect_self_evidence_handler(registry)
+    # Route the catalog AskUserQuestion / Enter/ExitPlanMode manifests to their
+    # existing General-Automation implementations (doc 12 PR2 / B14). Both
+    # binders read the strict default-OFF MAGI_PLAN_MODE_TOOLS_ENABLED gate: when
+    # OFF the tools are bound-but-disabled (hidden, byte-identical to main); when
+    # ON they are advertised and dispatch to the GA question / plan-act flow.
+    bind_ask_user_question_handler(registry)
+    bind_plan_mode_handlers(registry)
     memory_write_host = build_memory_write_host(
         workspace_root=Path(workspace_root),
         bot_id=bot_id,
@@ -308,12 +403,132 @@ def _context_lookup(value: object, key: str) -> object | None:
     return getattr(value, key, None)
 
 
+def _source_ledger_for_session(
+    collector: "LocalToolEvidenceCollector | None",
+    session_id: str,
+) -> tuple[object, ...]:
+    """Thread the collector's per-turn EvidenceLedgers onto ``source_ledger``.
+
+    Flag-gated + fail-open: when ``MAGI_EVIDENCE_LEDGER_LIFECYCLE_ENABLED`` is
+    off (default) this returns the empty tuple so the ToolContext is
+    byte-identical to today. When on, it returns the collector's
+    ``evidence_ledgers_for_session`` so ``InspectSelfEvidence`` can project the
+    REAL tool calls recorded so far. Any failure collapses to an empty tuple.
+    """
+    try:
+        from magi_agent.config.env import (  # noqa: PLC0415
+            is_evidence_ledger_lifecycle_enabled,
+        )
+
+        if not is_evidence_ledger_lifecycle_enabled():
+            return ()
+        ledgers_for_session = getattr(collector, "evidence_ledgers_for_session", None)
+        if not callable(ledgers_for_session):
+            return ()
+        return tuple(ledgers_for_session(session_id))
+    except Exception:
+        return ()
+
+
+def build_tool_advertisement_block(*, workspace_root: str | None = None) -> str:
+    """Build an ``<available_tools>`` XML block from the currently-enabled tool set.
+
+    Assembles a throw-away local runtime using the same env-gated registration
+    and bind-time policy path as :func:`build_cli_tool_runtime`. This keeps the
+    advertised catalog aligned with tools that become enabled only when their
+    host binds a handler (for example ``BrowserTask`` and
+    ``InspectSelfEvidence``).
+    Each enabled tool is emitted as one line::
+
+        ToolName [permission] — one-line description
+
+    The block is wrapped in ``<available_tools>`` / ``</available_tools>`` tags
+    so the model can identify the catalog section unambiguously.  A newly-
+    registered tool group (file tools, browser tool, …) automatically becomes
+    visible as soon as its env gate is turned on — no manual prompt edits needed.
+
+    Fail-open: any error returns an empty string so prompt assembly never breaks.
+    """
+    try:
+        registry = build_cli_tool_runtime(
+            workspace_root=str(Path(workspace_root or ".").resolve()),
+            session_id="tool-advertisement",
+        ).registry
+
+        lines: list[str] = []
+        for tool_name in sorted(registry._tools):  # noqa: SLF001
+            registration = registry._tools[tool_name]  # noqa: SLF001
+            if not registration.enabled:
+                continue
+            manifest = registration.manifest
+            # Emit: ToolName [permission] — first sentence of description
+            desc = manifest.description.split("\n")[0].rstrip()
+            lines.append(f"  {manifest.name} [{manifest.permission}] — {desc}")
+
+        if not lines:
+            return ""
+
+        tool_list = "\n".join(lines)
+        return (
+            "<available_tools>\n"
+            "The following tools are attached to this session. "
+            "Use the right tool for the task — newly-added tools are listed here "
+            "and may not be mentioned elsewhere in this prompt.\n"
+            f"{tool_list}\n"
+            "</available_tools>"
+        )
+    except Exception:
+        return ""
+
+
+def eval_autonomy_block(env: Mapping[str, str] | None = None) -> str:
+    """Return the eval-mode autonomy + self-verify system-prompt block.
+
+    Returns an empty string when ``MAGI_EVAL_AUTONOMY_ENABLED`` is falsy (or
+    when the env mapping explicitly disables it), so the caller's prompt is
+    byte-identical to the non-eval path when the flag is off.
+
+    Imported lazily inside to keep ``import cli.tool_runtime`` cold-clean.
+    """
+    import os as _os  # noqa: PLC0415
+
+    from magi_agent.config.env import parse_eval_autonomy_enabled  # noqa: PLC0415
+
+    source = env if env is not None else _os.environ
+    if not parse_eval_autonomy_enabled(source):
+        return ""
+    return (
+        "\n\n<autonomous_execution>\n"
+        "You are operating autonomously with write access and no human in the loop.\n"
+        "- Apply every fix by editing/creating files now. Never ask for confirmation "
+        "and never end by only describing the change — make it.\n"
+        "- Workflow: explore the codebase, then write a small reproduction script "
+        "for the reported issue FIRST and confirm it fails; only then edit source. "
+        "Fix the root cause, not the surface symptom, and cover edge cases.\n"
+        "- Before you finish, VERIFY: run the project's existing tests for the code you "
+        "changed and your reproduction. If anything fails, fix it and "
+        "re-run until green. Do not conclude until your change is test-verified.\n"
+        "- Do not modify existing test files or project configuration to make tests "
+        "pass — change the source under test.\n"
+        "- Before concluding, check `git diff`: the change set must contain ONLY the "
+        "intended source edits. Delete reproduction/debug scripts and revert any "
+        "scratch changes so they do not appear in the diff.\n"
+        "- Be thorough: use as many tool calls as you need (dozens are normal); "
+        "do not stop early because the work feels long.\n"
+        "</autonomous_execution>"
+    )
+
+
 def build_cli_instruction(
     *,
     session_id: str,
     model: str = "",
     workspace_root: str | None = None,
     memory_mode: "MemoryMode | str" = "normal",
+    recall_query: str | None = None,
+    bot_id: str = "local",
+    user_id: str = "local",
+    learning_live_readiness: object | None = None,
 ) -> str:
     """Build the real system prompt for the CLI agent (coding-agent path).
 
@@ -352,6 +567,97 @@ def build_cli_instruction(
             memory_mode=memory_mode_value,
         )
 
+    # Append active learnings from the local store (default-OFF gate:
+    # MAGI_LEARNING_INJECTION_ENABLED).  Returns "" when gate is off,
+    # memory_mode is incognito, no db exists, or any error — so the combined
+    # block is byte-identical to pre-wiring when the gate is off.
+    # Scope note: only task_kind="general" learnings surface here today (all
+    # labeler-written items).  A future per-task-kind labeler would need to
+    # thread the current task kind into build_cli_learning_recall_block.
+    from magi_agent.cli.learning_recall import build_cli_learning_recall_block  # noqa: PLC0415
+
+    _learning_block = build_cli_learning_recall_block(
+        workspace_root=workspace_root,
+        memory_mode=memory_mode_value,
+    )
+    if _learning_block:
+        memory_snapshot_block = "\n\n".join(
+            part for part in (memory_snapshot_block, _learning_block) if part
+        )
+
+    # Per-turn query-based recall (PR-E item 3): when recall_enabled AND
+    # prefer_local_search are on, search the workspace memory tree for the
+    # current user message and prepend the top hits as a <memory-recall> block,
+    # ALONGSIDE the static <memory-context> snapshot above.  Returns "" when any
+    # gate is off, memory_mode is incognito, no workspace, no query, no hits, or
+    # any error — so the combined block is byte-identical to pre-wiring when off.
+    if recall_query is not None and workspace_root is not None:
+        from magi_agent.cli.memory_recall_block import (  # noqa: PLC0415
+            build_cli_memory_recall_block,
+        )
+
+        _recall_block = build_cli_memory_recall_block(
+            workspace_root=workspace_root,
+            query=recall_query,
+            memory_mode=memory_mode_value,
+        )
+        if _recall_block:
+            # Lead with the query-relevant recall, then the frozen snapshot.
+            memory_snapshot_block = "\n\n".join(
+                part for part in (_recall_block, memory_snapshot_block) if part
+            )
+
+    # 01-PR4 (C2): consult the gated-live learning-recall + write harnesses on
+    # the SERVE path. This resolves the unified-rag B1 gap where BOTH
+    # build_gated_live_learning_recall_harness AND
+    # build_gated_live_learning_write_harness had ZERO serve consumers. Gated by
+    # the existing learning-live readiness ladder (MAGI_LEARNING_LIVE_ENABLED +
+    # the caller-PROVIDED selected-scope canary readiness config — no net-new
+    # flags) and incognito-aware. The real bot_id/user_id are threaded from the
+    # serve caller so the canary digest match resolves against the genuine
+    # identity, not the literal "local" default. Returns ""/None when the ladder
+    # is off (default: learning_live_readiness is None), in shadow mode, with no
+    # live binding, or on any error — so the combined block is byte-identical to
+    # pre-wiring when off. Appended AFTER the snapshot/recall blocks so it never
+    # reorders them.
+    if (
+        recall_query is not None
+        and workspace_root is not None
+        and learning_live_readiness is not None
+    ):
+        from magi_agent.cli.learning_recall import (  # noqa: PLC0415
+            build_serve_live_learning_recall_block,
+            build_serve_live_learning_write_audit,
+        )
+
+        _live_learning_block = build_serve_live_learning_recall_block(
+            workspace_root=workspace_root,
+            recall_query=recall_query,
+            memory_mode=memory_mode_value,
+            bot_id=bot_id,
+            user_id=user_id,
+            readiness=learning_live_readiness,
+        )
+        # Write symmetry (spec PR4 file-map "write 대칭"): on the live path also
+        # run the gated WRITE harness for a symmetric audit record. The audit is
+        # observe-only here — every Literal[False] authority flag stays frozen —
+        # so it never mutates the prompt; it only proves the write seam is wired
+        # (the builder logs the audit dict at debug). Returns None off the live
+        # path, keeping prompt assembly byte-identical.
+        build_serve_live_learning_write_audit(
+            workspace_root=workspace_root,
+            memory_mode=memory_mode_value,
+            bot_id=bot_id,
+            user_id=user_id,
+            readiness=learning_live_readiness,
+        )
+        if _live_learning_block:
+            memory_snapshot_block = "\n\n".join(
+                part
+                for part in (memory_snapshot_block, _live_learning_block)
+                if part
+            )
+
     prompt = build_system_prompt(
         session_key=session_id,
         turn_id="cli",
@@ -361,29 +667,52 @@ def build_cli_instruction(
         model=model,
         memory_snapshot_block=memory_snapshot_block,
     )
-    return (
-        f"{prompt}\n\n"
-        "<file_tools>\n"
-        "When the task involves an image, document, spreadsheet, or other "
-        "attached file:\n"
-        "- Use ImageUnderstand(path=..., prompt=...) for image files "
-        "(.png/.jpg/.jpeg/.gif/.webp/.bmp).\n"
-        "- Use DocumentRead(path=...) for document files "
-        "(.pdf/.docx/.pptx/.xml/.csv/.txt/.md/.rst).\n"
-        "- Use XLSXRead(path=...) for spreadsheet files (.xlsx/.xls).\n"
-        "- If a tool returns status='blocked' or status='needs_approval', "
-        "attempt an alternative approach: read the file with Bash (e.g. "
-        "`cat`, `python3`) before concluding the file is inaccessible.\n"
-        "- Never conclude 'unable to determine' solely because a tool returned "
-        "an error; try at least one alternative access path first.\n"
-        "</file_tools>\n\n"
+
+    # Registry-driven tool advertisement (Principle P2: "built ≠ used").
+    # Dynamically reflects which tools are attached — file/browser tools only
+    # appear when their env gate is on.  Fail-open: empty string when unavailable.
+    _tool_ad_block = build_tool_advertisement_block(workspace_root=workspace_root)
+
+    # File-tool usage guidance — only injected when file tools are actually
+    # enabled so the model is not directed to use unavailable tools.
+    from magi_agent.config.env import file_tools_enabled  # noqa: PLC0415
+
+    _file_tools_block = ""
+    if file_tools_enabled():
+        _file_tools_block = (
+            "<file_tools>\n"
+            "When the task involves an image, document, spreadsheet, or other "
+            "attached file:\n"
+            "- Use ImageUnderstand(path=..., prompt=...) for image files "
+            "(.png/.jpg/.jpeg/.gif/.webp/.bmp).\n"
+            "- Use DocumentRead(path=...) for document files "
+            "(.pdf/.docx/.pptx/.xml/.csv/.txt/.md/.rst).\n"
+            "- Use XLSXRead(path=...) for spreadsheet files (.xlsx/.xls).\n"
+            "- If a tool returns status='blocked' or status='needs_approval', "
+            "attempt an alternative approach: read the file with Bash (e.g. "
+            "`cat`, `python3`) before concluding the file is inaccessible.\n"
+            "- Never conclude 'unable to determine' solely because a tool returned "
+            "an error; try at least one alternative access path first.\n"
+            "</file_tools>"
+        )
+
+    _skills_block = (
         "<skills>\n"
         "Bundled first-party skills, including superpowers-style workflows, are "
         "available through the SkillLoader tool. Before specialized work such "
         "as debugging, planning, code review, research, writing, or UI work, "
         "load the relevant skill and follow its instructions.\n"
         "</skills>"
+        + eval_autonomy_block()
     )
+
+    parts = [prompt]
+    if _tool_ad_block:
+        parts.append(_tool_ad_block)
+    if _file_tools_block:
+        parts.append(_file_tools_block)
+    parts.append(_skills_block)
+    return "\n\n".join(parts)
 
 
 __all__ = [
@@ -393,6 +722,7 @@ __all__ = [
     "build_cli_adk_tools",
     "build_cli_instruction",
     "build_cli_tool_runtime",
+    "build_tool_advertisement_block",
     "bind_cli_local_full_tool_handlers",
     "wrap_cli_adk_tools_with_evidence_collector",
 ]

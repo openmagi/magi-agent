@@ -59,6 +59,12 @@
       "group": "Operate"
     },
     {
+      "slug": "default-off-gates",
+      "title": "Default-Off Gates",
+      "path": "docs/default-off-gates.md",
+      "group": "Operate"
+    },
+    {
       "slug": "hooks",
       "title": "Hooks",
       "path": "docs/hooks.md",
@@ -350,6 +356,12 @@
       "slug": "cli-commands",
       "title": "In-session Commands",
       "path": "docs/cli-commands.md",
+      "group": "Reference"
+    },
+    {
+      "slug": "cli-gateway",
+      "title": "Gateway Daemon CLI",
+      "path": "docs/cli/gateway.md",
       "group": "Reference"
     },
     {

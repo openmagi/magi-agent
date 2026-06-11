@@ -8,7 +8,6 @@ from magi_agent.tools.manifest import ToolManifest
 
 
 EXPECTED_CORE_TOOL_NAMES = {
-    "ToolSearch",
     "TodoWrite",
     "FileRead",
     "FileWrite",
@@ -22,12 +21,8 @@ EXPECTED_CORE_TOOL_NAMES = {
     "AskUserQuestion",
     "EnterPlanMode",
     "ExitPlanMode",
-    "ArtifactCreate",
-    "ArtifactRead",
-    "ArtifactList",
     "Clock",
     "Calculation",
-    "HealthStatus",
     "TaskList",
     "TaskGet",
     "TaskOutput",
@@ -38,6 +33,8 @@ EXPECTED_CORE_TOOL_NAMES = {
 EXPECTED_NATIVE_TOOL_NAMES = {
     "AgentMemorySearch",
     "AgentMemoryRemember",
+    "apify_search_actors",
+    "apify_run_actor",
     "ArtifactDelete",
     "ArtifactUpdate",
     "BatchRead",
@@ -213,7 +210,6 @@ def test_list_tools_returns_enabled_first_party_catalog_metadata() -> None:
     assert patch_apply["availableInModes"] == ["act"]
 
     for readonly_name in (
-        "HealthStatus",
         "TaskList",
         "TaskGet",
         "TaskOutput",

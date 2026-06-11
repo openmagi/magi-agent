@@ -35,7 +35,7 @@ from magi_agent.research.answer_verifier import (
 def test_answer_verifier_does_not_import_gaia_scorer() -> None:
     """answer_verifier.py must not import from benchmarks.gaia.scorer — structural firewall."""
     mod = importlib.import_module("magi_agent.research.answer_verifier")
-    scorer_name = "magi_agent.benchmarks.gaia.scorer"
+    scorer_name = "benchmarks.gaia.scorer"
 
     # Check module-level attribute references
     imported_names: set[str] = set()

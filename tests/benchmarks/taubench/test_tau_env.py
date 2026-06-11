@@ -4,8 +4,8 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, field
 
-from magi_agent.benchmarks.taubench.episode import EpisodeState
-from magi_agent.benchmarks.taubench.tau_env import build_env_function_tools, build_env_tool_callables
+from benchmarks.taubench.episode import EpisodeState
+from benchmarks.taubench.tau_env import build_env_function_tools, build_env_tool_callables
 
 
 @dataclass
@@ -88,7 +88,7 @@ def test_tool_callable_returns_error_observation_on_env_exception() -> None:
     assert "Error" in str(out)
 
 
-from magi_agent.benchmarks.taubench.reliability import ReliabilityConfig, WriteLedger
+from benchmarks.taubench.reliability import ReliabilityConfig, WriteLedger
 
 
 @dataclass

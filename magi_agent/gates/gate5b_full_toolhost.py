@@ -8,12 +8,14 @@ import logging
 import os
 import posixpath
 import re
+import signal
 import subprocess
+import threading
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Self
 
-from magi_agent.config.env import MAGI_EDIT_FUZZY_MATCH_ENABLED as _EDIT_FUZZY_MATCH_ENABLED
+from magi_agent.config.env import edit_fuzzy_match_enabled as _edit_fuzzy_match_enabled
 
 from google.adk.tools import FunctionTool
 from pydantic import (
@@ -90,8 +92,159 @@ def _build_bash_env(cfg: EgressProxyConfig | None = None) -> dict[str, str]:
     env.update(subprocess_env_overlay(cfg))
     return env
 
+def _decode_capture_bytes(value: bytes) -> str:
+    return value.decode("utf-8", errors="replace")
+
+
+def _bounded_head_tail(text: str, max_bytes: int) -> str:
+    """Cap ``text`` keeping BOTH ends.
+
+    Test runners print failure summaries at the END of their output; a
+    head-only slice hides exactly the part the model needs. Split the budget
+    ~60/40 between head and tail with an explicit elision marker.
+    """
+    if len(text) <= max_bytes:
+        return text
+    head_budget = max(1, (max_bytes * 3) // 5)
+    tail_budget = max(0, max_bytes - head_budget)
+    head = text[:head_budget]
+    tail = text[len(text) - tail_budget :] if tail_budget else ""
+    elided = len(text) - head_budget - tail_budget
+    marker = (
+        f"\n[... {elided} bytes elided - output truncated; re-run with "
+        "head/tail/grep filters to see the elided region ...]\n"
+    )
+    return head + marker + tail
+
+
+class _BoundedPipeCapture:
+    """Bound subprocess pipe capture without buffering unbounded output."""
+
+    def __init__(self, max_bytes: int) -> None:
+        self.max_bytes = max(1, max_bytes)
+        self._raw_digest = hashlib.sha256()
+        self._buffer = bytearray()
+        self._tail = bytearray()
+        self.total_bytes = 0
+
+    @property
+    def _head_budget(self) -> int:
+        return max(1, (self.max_bytes * 3) // 5)
+
+    @property
+    def _tail_budget(self) -> int:
+        return max(0, self.max_bytes - self._head_budget)
+
+    def feed(self, chunk: bytes) -> None:
+        if not chunk:
+            return
+        self.total_bytes += len(chunk)
+        self._raw_digest.update(chunk)
+        remaining = self.max_bytes - len(self._buffer)
+        if remaining > 0:
+            self._buffer.extend(chunk[:remaining])
+        tail_budget = self._tail_budget
+        if tail_budget > 0:
+            self._tail.extend(chunk)
+            overflow = len(self._tail) - tail_budget
+            if overflow > 0:
+                del self._tail[:overflow]
+
+    def text(self) -> str:
+        if self.total_bytes <= self.max_bytes:
+            return _decode_capture_bytes(bytes(self._buffer))
+        head_bytes = bytes(self._buffer[: self._head_budget])
+        tail_budget = self._tail_budget
+        tail_bytes = bytes(self._tail[-tail_budget:]) if tail_budget else b""
+        elided = max(0, self.total_bytes - len(head_bytes) - len(tail_bytes))
+        marker = (
+            f"\n[... {elided} bytes elided - output truncated; re-run with "
+            "head/tail/grep filters to see the elided region ...]\n"
+        )
+        return _decode_capture_bytes(head_bytes) + marker + _decode_capture_bytes(tail_bytes)
+
+    def digest(self) -> str:
+        if self.total_bytes <= self.max_bytes:
+            return _digest(_decode_capture_bytes(bytes(self._buffer)))
+        return "sha256:" + self._raw_digest.hexdigest()
+
+
+def _drain_pipe(pipe: Any, capture: _BoundedPipeCapture) -> None:
+    try:
+        while True:
+            chunk = pipe.read(65536)
+            if not chunk:
+                break
+            capture.feed(chunk)
+    except (OSError, ValueError):
+        return
+    finally:
+        try:
+            pipe.close()
+        except (OSError, ValueError):
+            return
+
+
+def _start_pipe_drain(pipe: Any, capture: _BoundedPipeCapture) -> threading.Thread:
+    thread = threading.Thread(target=_drain_pipe, args=(pipe, capture), daemon=True)
+    thread.start()
+    return thread
+
+
+def _kill_process_group(process: subprocess.Popen[bytes]) -> None:
+    if os.name == "posix":
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+            return
+        except ProcessLookupError:
+            return
+        except OSError:
+            pass
+    process.kill()
+
+
+def _force_stop_process(process: subprocess.Popen[bytes]) -> None:
+    if process.poll() is not None:
+        return
+    _kill_process_group(process)
+    try:
+        process.wait(timeout=1.0)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        try:
+            process.wait(timeout=1.0)
+        except subprocess.TimeoutExpired:
+            return
+
+
+def _close_process_pipes(process: subprocess.Popen[bytes]) -> None:
+    for pipe in (process.stdout, process.stderr):
+        if pipe is None:
+            continue
+        try:
+            pipe.close()
+        except (OSError, ValueError):
+            continue
+
+
+def _join_pipe_drains(
+    process: subprocess.Popen[bytes],
+    threads: Sequence[threading.Thread],
+) -> None:
+    for thread in threads:
+        thread.join(timeout=1.0)
+    if any(thread.is_alive() for thread in threads):
+        _close_process_pipes(process)
+        for thread in threads:
+            thread.join(timeout=1.0)
+
+
 Gate5BFullToolHostStatus = Literal["disabled", "blocked", "ready"]
 Gate5BFullToolOutcomeStatus = Literal["ok", "blocked", "error", "duplicate"]
+
+# TestRun applies the catalog manifest's 300s verification timeout instead of
+# the short Bash command timeout (catalog.py TestRun timeout_ms=300_000).
+_TEST_RUN_TIMEOUT_S = 300.0
 
 _GATE5B_LEGACY_FULL_TOOLHOST_TOOL_NAMES = (
     "Clock",
@@ -400,14 +553,14 @@ class Gate5BFullToolHostConfig(_Gate5BFullModel):
     environment: str = "local"
     environment_allowlist: tuple[str, ...] = Field(default=(), alias="environmentAllowlist")
     allowed_tool_names: tuple[str, ...] = Field(default=(), alias="allowedToolNames")
-    max_tool_calls_per_turn: int = Field(default=0, ge=0, le=64, alias="maxToolCallsPerTurn")
+    max_tool_calls_per_turn: int = Field(default=0, ge=0, le=4096, alias="maxToolCallsPerTurn")
     max_per_tool_output_bytes: int = Field(
         default=8192,
         ge=1,
         le=131072,
         alias="maxPerToolOutputBytes",
     )
-    command_timeout_ms: int = Field(default=5000, ge=250, le=30000, alias="commandTimeoutMs")
+    command_timeout_ms: int = Field(default=5000, ge=250, le=600000, alias="commandTimeoutMs")
     format_on_write_enabled: bool = Field(default=False, alias="formatOnWriteEnabled")
     lsp_diagnostics_enabled: bool = Field(default=False, alias="lspDiagnosticsEnabled")
     lsp_diagnostics_cap: int = Field(default=20, ge=1, le=100, alias="lspDiagnosticsCap")
@@ -994,7 +1147,10 @@ class Gate5BFullToolHost:
             if not old_text:
                 raise ValueError("empty_old_text")
             current = target.read_text(encoding="utf-8", errors="replace")
-            if _EDIT_FUZZY_MATCH_ENABLED:
+            # Call-time read: the import-time constant froze BEFORE profile env
+            # defaults were applied, silently disabling fuzzy edits in eval runs.
+            fuzzy_enabled = _edit_fuzzy_match_enabled()
+            if fuzzy_enabled:
                 from magi_agent.coding.edit_matching import (
                     MultipleMatchesError as _MultipleMatchesError,
                     NoMatchError as _NoMatchError,
@@ -1019,7 +1175,7 @@ class Gate5BFullToolHost:
                 "pathDigest": _digest(target.relative_to(self.workspace_root).as_posix()),
                 "replacements": 1,
             }
-            if _EDIT_FUZZY_MATCH_ENABLED and self._last_edit_match_result is not None:
+            if fuzzy_enabled and self._last_edit_match_result is not None:
                 from magi_agent.coding.edit_matching import EditMatchResult as _EditMatchResult
                 if isinstance(self._last_edit_match_result, _EditMatchResult):
                     edit_result["matchTier"] = self._last_edit_match_result.tier
@@ -1058,29 +1214,110 @@ class Gate5BFullToolHost:
                 return self._apply_envelope_patch(patch_text)
             raise ValueError("unsupported_patch_shape")
         if tool_name == "Bash":
-            command = str(args.get("command", "")).strip()
-            if not command:
-                raise ValueError("empty_command")
-            completed = subprocess.run(
+            return self._run_shell_command(
+                str(args.get("command", "")),
+                timeout_s=self.config.command_timeout_ms / 1000,
+            )
+        if tool_name == "TestRun":
+            # TestRun shares Bash's execution path and approval surface
+            # (safety.py treats {Bash, TestRun} via _shell_decision) but applies
+            # the manifest's 300s verification timeout instead of the short Bash
+            # command timeout.
+            return self._run_shell_command(
+                str(args.get("command", "")),
+                timeout_s=_TEST_RUN_TIMEOUT_S,
+            )
+        if tool_name == "GitDiff":
+            return self._handle_git_diff()
+        return await self._dispatch_registry_tool(tool_name, args, tool_call_id=tool_call_id)
+
+    def _run_shell_command(self, raw_command: str, *, timeout_s: float) -> dict[str, object]:
+        command = raw_command.strip()
+        if not command:
+            raise ValueError("empty_command")
+        cap = self.config.max_per_tool_output_bytes
+        stdout_capture = _BoundedPipeCapture(cap)
+        stderr_capture = _BoundedPipeCapture(cap)
+        timed_out = False
+        returncode: int | None
+        process: subprocess.Popen[bytes] | None = None
+        threads: list[threading.Thread] = []
+        try:
+            process = subprocess.Popen(
                 command,
                 cwd=self.workspace_root,
                 shell=True,
-                capture_output=True,
-                text=True,
-                timeout=self.config.command_timeout_ms / 1000,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 env=_build_bash_env(),
-                check=False,
+                start_new_session=(os.name == "posix"),
             )
-            stdout = _redact(completed.stdout)[0 : self.config.max_per_tool_output_bytes]
-            stderr = _redact(completed.stderr)[0 : self.config.max_per_tool_output_bytes]
+            if process.stdout is not None:
+                threads.append(_start_pipe_drain(process.stdout, stdout_capture))
+            if process.stderr is not None:
+                threads.append(_start_pipe_drain(process.stderr, stderr_capture))
+            try:
+                returncode = process.wait(timeout=timeout_s)
+            except subprocess.TimeoutExpired:
+                timed_out = True
+                returncode = None
+                _force_stop_process(process)
+            finally:
+                _join_pipe_drains(process, threads)
+        except BaseException:
+            if process is not None:
+                _force_stop_process(process)
+                _close_process_pipes(process)
+                _join_pipe_drains(process, threads)
+            raise
+
+        stdout = _redact(stdout_capture.text())
+        stderr = _redact(stderr_capture.text())
+        if timed_out:
             return {
-                "exitCode": completed.returncode,
+                "exitCode": None,
+                "timedOut": True,
+                "timeoutMs": int(timeout_s * 1000),
+                "note": (
+                    f"command timed out after {timeout_s:g}s; "
+                    "partial output captured below"
+                ),
                 "stdout": stdout,
                 "stderr": stderr,
-                "stdoutDigest": _digest(completed.stdout),
-                "stderrDigest": _digest(completed.stderr),
+                "stdoutDigest": stdout_capture.digest(),
+                "stderrDigest": stderr_capture.digest(),
             }
-        return await self._dispatch_registry_tool(tool_name, args, tool_call_id=tool_call_id)
+        return {
+            "exitCode": returncode,
+            "stdout": stdout,
+            "stderr": stderr,
+            "stdoutDigest": stdout_capture.digest(),
+            "stderrDigest": stderr_capture.digest(),
+        }
+
+    def _handle_git_diff(self) -> dict[str, object]:
+        """Return read-only workspace git diff metadata.
+
+        Runs ``git`` with ``shell=False`` in the workspace root. Output is
+        redacted and byte-bounded. When the directory is not a git repository
+        the result is explicit (``isGitRepo: False``) rather than fabricated.
+        """
+
+        if not _is_git_repository(self.workspace_root):
+            return {"isGitRepo": False, "status": [], "numstat": []}
+        status_lines = _git_status_porcelain(
+            self.workspace_root,
+            byte_limit=self.config.max_per_tool_output_bytes,
+        )
+        numstat = _git_diff_numstat(
+            self.workspace_root,
+            byte_limit=self.config.max_per_tool_output_bytes,
+        )
+        return {
+            "isGitRepo": True,
+            "status": status_lines,
+            "numstat": numstat,
+        }
 
     async def _dispatch_registry_tool(
         self,
@@ -2241,17 +2478,35 @@ def _eval_ast(node: object) -> int | float:
     raise ValueError("unsupported calculation expression")
 
 
+def _encoded_size(value: object) -> int:
+    return len(
+        json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            default=repr,
+        ).encode("utf-8")
+    )
+
+
 def _bounded_output(value: object, max_bytes: int) -> object:
     sanitized = _sanitize_output(value)
-    encoded = json.dumps(
-        sanitized,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=True,
-        default=repr,
-    ).encode("utf-8")
-    if len(encoded) <= max_bytes:
+    if _encoded_size(sanitized) <= max_bytes:
         return sanitized
+    # Degrade gracefully before discarding: shrink the large string fields
+    # (stdout/stderr/content/...) head+tail so the model keeps the signal.
+    # Replacing the whole result with a digest gave the model zero recovery
+    # information and silently destroyed large-but-legitimate tool results.
+    if isinstance(sanitized, Mapping):
+        shrunk: dict[str, object] = dict(sanitized)
+        for scale in (2, 4, 10, 40):
+            field_budget = max(200, max_bytes // scale)
+            for key, item in list(shrunk.items()):
+                if isinstance(item, str) and len(item) > field_budget:
+                    shrunk[key] = _bounded_head_tail(item, field_budget)
+            if _encoded_size(shrunk) <= max_bytes:
+                return shrunk
     return {"truncated": True, "digest": _digest(sanitized)}
 
 
@@ -2272,6 +2527,61 @@ def _sanitize_output(value: object) -> object:
 def _redact(value: str) -> str:
     value = _URL_USERINFO_RE.sub(r"\g<scheme>[redacted]@\g<authority>", value)
     return _SENSITIVE_RE.sub("[redacted]", value)
+
+
+_GIT_DIFF_TIMEOUT_S = 10.0
+
+
+def _run_git(workspace_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", *args],
+        cwd=workspace_root,
+        shell=False,
+        capture_output=True,
+        text=True,
+        timeout=_GIT_DIFF_TIMEOUT_S,
+        check=False,
+    )
+
+
+def _is_git_repository(workspace_root: Path) -> bool:
+    try:
+        completed = _run_git(
+            workspace_root, "rev-parse", "--is-inside-work-tree"
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return completed.returncode == 0 and completed.stdout.strip() == "true"
+
+
+def _git_status_porcelain(workspace_root: Path, *, byte_limit: int) -> list[str]:
+    completed = _run_git(workspace_root, "status", "--porcelain")
+    if completed.returncode != 0:
+        return []
+    rendered = _redact(completed.stdout)[0:byte_limit]
+    return [line for line in rendered.splitlines() if line.strip()]
+
+
+def _git_diff_numstat(workspace_root: Path, *, byte_limit: int) -> list[dict[str, object]]:
+    completed = _run_git(workspace_root, "diff", "--numstat")
+    if completed.returncode != 0:
+        return []
+    rendered = _redact(completed.stdout)[0:byte_limit]
+    entries: list[dict[str, object]] = []
+    for line in rendered.splitlines():
+        parts = line.split("\t")
+        if len(parts) < 3:
+            continue
+        added_raw, deleted_raw, path = parts[0], parts[1], parts[2]
+        entries.append(
+            {
+                "path": path,
+                # Binary files report "-" for added/deleted; surface as None.
+                "added": int(added_raw) if added_raw.isdigit() else None,
+                "deleted": int(deleted_raw) if deleted_raw.isdigit() else None,
+            }
+        )
+    return entries
 
 
 def _encoded_len(value: object) -> int:

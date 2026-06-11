@@ -17,7 +17,7 @@ import pytest
 from google.adk.models import BaseLlm, LlmResponse
 from google.genai import types
 
-from magi_agent.benchmarks.gaia.dataset import GaiaQuestion
+from benchmarks.gaia.dataset import GaiaQuestion
 
 
 # ---------------------------------------------------------------------------
@@ -49,7 +49,7 @@ class TestRunGaiaQuestionAttachmentNote:
         """When question.file_name is set, the instruction passed to the runner
         must mention the attachment file name.
         """
-        from magi_agent.benchmarks.gaia import harness as harness_mod
+        from benchmarks.gaia import harness as harness_mod
 
         captured: list[str] = []
         real_build = harness_mod.build_cli_model_runner
@@ -94,7 +94,7 @@ class TestRunGaiaQuestionAttachmentNote:
         self, tmp_path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """When file_name is set, instruction should hint to use file tools."""
-        from magi_agent.benchmarks.gaia import harness as harness_mod
+        from benchmarks.gaia import harness as harness_mod
 
         captured: list[str] = []
         real_build = harness_mod.build_cli_model_runner
@@ -149,7 +149,7 @@ class TestRunGaiaQuestionAttachmentNote:
         self, tmp_path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """When question has no file_name, instruction should not have attachment noise."""
-        from magi_agent.benchmarks.gaia import harness as harness_mod
+        from benchmarks.gaia import harness as harness_mod
 
         captured: list[str] = []
         real_build = harness_mod.build_cli_model_runner

@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import json
 
-from magi_agent.benchmarks.gaia.dataset import GaiaQuestion
-from magi_agent.benchmarks.gaia.run import run_benchmark
+from benchmarks.gaia.dataset import GaiaQuestion
+from benchmarks.gaia.run import run_benchmark
 
 
 def _questions() -> list[GaiaQuestion]:

@@ -2,7 +2,7 @@
 
 These models are intentionally minimal and immutable (``frozen=True``,
 ``extra="forbid"``) to match the repo's existing style (see
-``magi_agent/benchmarks/gaia/dataset.py``).
+``benchmarks/gaia/dataset.py``).
 
 Vocabulary (TIDE paper):
     * a *prediction* is the triple ``(b, D̂, a)`` — a problem *description*, the
