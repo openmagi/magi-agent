@@ -70,6 +70,11 @@ from magi_agent.cli.engine import MagiEngineDriver
 _FALSY = {"0", "false", "no", "off"}
 
 
+class _NoopFrameWriter:
+    async def write(self, frame: object) -> None:
+        del frame
+
+
 def _cli_enabled() -> bool:
     """Return True unless MAGI_CLI_ENABLED is explicitly set to a falsy token.
 
@@ -86,6 +91,28 @@ def _log(message: str) -> None:
     """Write a diagnostic line to stderr (never stdout)."""
 
     print(message, file=sys.stderr, flush=True)
+
+
+def _attach_no_inbound_permission_sink(
+    gate: PermissionGate,
+    *,
+    permission_mode: str,
+) -> None:
+    if permission_mode not in ("acceptEdits", "bypassPermissions"):
+        return
+    gate_sinks = getattr(gate, "sinks", None)
+    if not isinstance(gate_sinks, list) or gate_sinks:
+        return
+
+    from magi_agent.cli.permissions import HeadlessSink  # noqa: PLC0415
+
+    gate_sinks.append(
+        HeadlessSink(
+            _NoopFrameWriter(),
+            permission_mode=permission_mode,  # type: ignore[arg-type]
+            can_prompt=False,
+        )
+    )
 
 
 def _session_log_enabled() -> bool:
@@ -825,6 +852,10 @@ async def run_headless(
     # text / json: collect-then-write (single final write).                #
     # ------------------------------------------------------------------ #
     if output in ("text", "json"):
+        _attach_no_inbound_permission_sink(
+            active_gate,
+            permission_mode=permission_mode,
+        )
         gen = active_driver.run_turn_stream(
             None, turn_input, cancel=cancel, gate=active_gate
         )
@@ -867,8 +898,8 @@ async def run_headless(
     # We attach the sink only when its ``ask`` can actually be resolved:
     #   - an ``input_stream`` is present (a host will answer the control_request,
     #     and on EOF the sink fail-closes — no hang); OR
-    #   - the mode resolves without inbound data (``bypassPermissions`` allows,
-    #     ``acceptEdits`` auto-allows edit-class tools).
+    #   - the mode resolves without inbound data (``bypassPermissions`` allows;
+    #     ``acceptEdits`` allows edit-class tools and denies everything else).
     # In ``default`` mode with NO inbound channel, attaching a sink would let an
     # ``ask`` await a response that can never arrive, so we leave the gate
     # sink-less and it falls back to a safe deny (never an auto-allow).
@@ -886,7 +917,11 @@ async def run_headless(
     ):
         from magi_agent.cli.permissions import HeadlessSink
 
-        headless_sink = HeadlessSink(writer, permission_mode=permission_mode)
+        headless_sink = HeadlessSink(
+            writer,
+            permission_mode=permission_mode,
+            can_prompt=input_stream is not None,
+        )
         gate_sinks.append(headless_sink)
 
     reader: _InboundReader | None = None

@@ -489,9 +489,11 @@ class HeadlessSink(PromptSink):
         writer: FrameWriter,
         *,
         permission_mode: PermissionMode = "default",
+        can_prompt: bool = True,
     ) -> None:
         self._writer = writer
         self.permission_mode: PermissionMode = permission_mode
+        self._can_prompt = can_prompt
         self._pending: dict[str, asyncio.Future[ControlResponse]] = {}
         # Bounded "already terminal" set (request_id -> None), insertion-ordered
         # so the oldest entries are evicted first when the cap is exceeded.
@@ -568,18 +570,22 @@ class HeadlessSink(PromptSink):
         # inbound buffer / a fast host)? That answer is real, so honor it even if
         # the channel has since closed (EOF only means no MORE answers).
         has_early = request_id in self._early
-        if self._closed and not has_early:
-            # Inbound channel closed (EOF) and no stashed answer: no response can
-            # arrive, so do not emit a frame / register a future — fail-safe deny.
-            return PermissionDecision(kind="deny")
         if (
             self.permission_mode == "acceptEdits"
             and req.tool_name in EDIT_CLASS_TOOLS
             and not has_early
         ):
             # Auto-allow edit-class tools without a frame; non-edit tools fall
-            # through to the default prompt below.
+            # through to the prompt/deny path below.
             return PermissionDecision(kind="allow")
+        if self._closed and not has_early:
+            # Inbound channel closed (EOF) and no stashed answer: no response can
+            # arrive, so do not emit a frame / register a future — fail-safe deny.
+            return PermissionDecision(kind="deny")
+        if not self._can_prompt and not has_early:
+            # No inbound approver is available. acceptEdits handled edit tools
+            # above; every remaining ask fails closed instead of hanging forever.
+            return PermissionDecision(kind="deny")
 
         # default (or acceptEdits + non-edit tool): emit exactly ONE frame and
         # await the matching response.
