@@ -50,7 +50,9 @@ _ARTIFACT_REF_LABEL = "artifactRef"
 #: Ledger payload / metadata keys that satisfy the artifact requirement.
 #: Written by the live flow via metadata["localArtifactReceipt"]["artifactRef"]
 #: in the spreadsheet.write tool handler.
-_ARTIFACT_KEYS: frozenset[str] = frozenset({"artifactId", "artifactRef"})
+_ARTIFACT_SCALAR_KEYS: frozenset[str] = frozenset({"artifactId", "artifactRef"})
+_ARTIFACT_COLLECTION_KEYS: frozenset[str] = frozenset({"artifactRefs"})
+_ARTIFACT_KEYS: frozenset[str] = _ARTIFACT_SCALAR_KEYS | _ARTIFACT_COLLECTION_KEYS
 
 # NOTE (A4 promote-or-delete): the snapshot half of this verifier
 # (``ENFORCE_SNAPSHOT_REQUIREMENT`` / ``requires_snapshot_ref`` / snapshot key
@@ -312,12 +314,13 @@ def _collect_entry_keys(entry: object, present: set[str]) -> None:
         _collect_keys(entry, present)
         return
     scanned = False
+    present_before = len(present)
     for attr in ("payload", "metadata"):
         value = getattr(entry, attr, None)
         if isinstance(value, Mapping):
             scanned = True
             _collect_keys(value, present)
-    if scanned:
+    if scanned and len(present) > present_before:
         return
     model_dump = getattr(entry, "model_dump", None)
     if callable(model_dump):
@@ -338,11 +341,22 @@ def _collect_keys(
     if depth > 6:
         return
     for key, value in mapping.items():
-        if key in _ARTIFACT_KEYS:
+        if key in _ARTIFACT_SCALAR_KEYS:
             if isinstance(value, str) and value.strip():
+                present.add(key)
+        elif key in _ARTIFACT_COLLECTION_KEYS:
+            if _contains_nonblank_artifact_ref(value):
                 present.add(key)
         elif isinstance(value, Mapping):
             _collect_keys(value, present, depth + 1)
+
+
+def _contains_nonblank_artifact_ref(value: object) -> bool:
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, Sequence) and not isinstance(value, str | bytes | bytearray):
+        return any(isinstance(item, str) and item.strip() for item in value)
+    return False
 
 
 def _build_repair_message(missing: tuple[str, ...]) -> str:

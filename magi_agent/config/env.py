@@ -2233,7 +2233,9 @@ def parse_ga_deliverable_gate_enabled(env: Mapping[str, str]) -> bool:
     only flips for an explicit truthy value, so flag-OFF behavior stays
     byte-identical to ``main``.
     """
-    return _is_true(env.get("MAGI_GA_DELIVERABLE_GATE_ENABLED"))
+    from .flags import flag_bool
+
+    return flag_bool("MAGI_GA_DELIVERABLE_GATE_ENABLED", env=env)
 
 
 def plan_mode_tools_enabled(env: Mapping[str, str] | None = None) -> bool:

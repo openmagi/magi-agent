@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import time
 from collections.abc import Mapping
 
@@ -10,6 +11,8 @@ from magi_agent.tools.result import ToolResult
 
 
 _PUBLIC_REF_PREFIXES = ("evidence:", "verifier:", "receipt:sha256:", "sha256:")
+_SAFE_ARTIFACT_REF_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]{1,180}$")
+_OUTPUT_ARTIFACT_REF_TOOL_NAMES = frozenset({"documentwrite", "filedeliver"})
 _RECEIPT_METADATA_KEYS = (
     "toolExecutionReceipt",
     "codingMutationReceipt",
@@ -410,6 +413,12 @@ def _local_receipt_projection(
         deliverable_receipt = metadata.get("localArtifactReceipt")
         if deliverable_receipt is not None:
             receipts["localArtifactReceipt"] = _receipt_value(deliverable_receipt)
+        deliverable_artifact_refs = _deliverable_artifact_refs(
+            tool_name=tool_name,
+            result=result,
+        )
+    else:
+        deliverable_artifact_refs = ()
     execution_receipt = receipts.get("toolExecutionReceipt")
     if (
         synthesize_execution_receipt
@@ -435,7 +444,7 @@ def _local_receipt_projection(
     receipt_refs = sorted(
         ref for ref in refs if ref.startswith(("receipt:sha256:", "sha256:"))
     )
-    return {
+    projection: dict[str, object] = {
         "schemaVersion": "openmagi.localToolEvidenceReceipt.v1",
         "sessionId": session_id,
         "turnId": turn_id,
@@ -451,6 +460,9 @@ def _local_receipt_projection(
         "receiptRefs": receipt_refs,
         "receipts": receipts,
     }
+    if deliverable_artifact_refs:
+        projection["artifactRefs"] = deliverable_artifact_refs
+    return projection
 
 
 def _ga_deliverable_gate_enabled() -> bool:
@@ -471,6 +483,53 @@ def _receipt_projections(metadata: Mapping[str, object]) -> dict[str, object]:
             continue
         receipts[key] = _receipt_value(value)
     return receipts
+
+
+def _deliverable_artifact_refs(
+    *,
+    tool_name: str,
+    result: ToolResult,
+) -> tuple[str, ...]:
+    refs: list[str] = []
+    refs.extend(_safe_artifact_refs(result.artifact_refs))
+    if _output_artifact_refs_are_safe_for_tool(tool_name):
+        refs.extend(_safe_artifact_refs(_output_artifact_ref_values(result.output)))
+    return tuple(dict.fromkeys(refs))
+
+
+def _output_artifact_refs_are_safe_for_tool(tool_name: str) -> bool:
+    normalized = "".join(char for char in tool_name.casefold() if char.isalnum())
+    return normalized in _OUTPUT_ARTIFACT_REF_TOOL_NAMES
+
+
+def _output_artifact_ref_values(output: object) -> tuple[object, ...]:
+    if not isinstance(output, Mapping):
+        return ()
+    values: list[object] = []
+    if "artifactRef" in output:
+        values.append(output["artifactRef"])
+    if "artifactRefs" in output:
+        values.append(output["artifactRefs"])
+    return tuple(values)
+
+
+def _safe_artifact_refs(value: object) -> tuple[str, ...]:
+    refs: list[str] = []
+    _collect_safe_artifact_refs(value, refs, depth=0)
+    return tuple(dict.fromkeys(refs))
+
+
+def _collect_safe_artifact_refs(value: object, refs: list[str], *, depth: int) -> None:
+    if depth > 4:
+        return
+    if isinstance(value, str):
+        ref = value.strip()
+        if ref.startswith("artifact:") and _SAFE_ARTIFACT_REF_RE.fullmatch(ref):
+            refs.append(ref)
+        return
+    if isinstance(value, list | tuple | set | frozenset):
+        for item in value:
+            _collect_safe_artifact_refs(item, refs, depth=depth + 1)
 
 
 def _tool_execution_receipt(

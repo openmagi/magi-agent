@@ -110,6 +110,16 @@ def test_satisfied_by_nested_local_artifact_receipt_mapping() -> None:
     assert missing_deliverable_labels(_required_artifact(), (record,)) == ()
 
 
+def test_satisfied_by_tool_result_artifact_refs() -> None:
+    result = ToolResult(
+        status="ok",
+        output={"result": "written"},
+        artifactRefs=("artifact:docx:abc123",),
+    )
+
+    assert missing_deliverable_labels(_required_artifact(), (result,)) == ()
+
+
 def test_satisfied_by_ledger_entry_objects() -> None:
     class _Entry:
         payload = {"kind": "local_csv_artifact"}
@@ -205,6 +215,130 @@ def test_collector_keeps_deliverable_receipt_when_flag_on(monkeypatch) -> None:
         )
         == ()
     )
+
+
+def test_collector_accepts_documentwrite_tool_artifact_refs(monkeypatch) -> None:
+    monkeypatch.setenv("MAGI_GA_DELIVERABLE_GATE_ENABLED", "1")
+    collector = LocalToolEvidenceCollector()
+    collector.record_tool_result(
+        session_id="s1",
+        turn_id="turn-1",
+        tool_call_id="call-1",
+        tool_name="DocumentWrite",
+        result=ToolResult(
+            status="ok",
+            output={"path": "report.docx"},
+            artifactRefs=("artifact:docx:abc123",),
+        ),
+    )
+
+    assert (
+        missing_deliverable_labels(
+            _required_artifact(), collector.collect_for_turn("turn-1")
+        )
+        == ()
+    )
+
+
+def test_collector_accepts_documentwrite_output_artifact_ref(monkeypatch) -> None:
+    monkeypatch.setenv("MAGI_GA_DELIVERABLE_GATE_ENABLED", "1")
+    collector = LocalToolEvidenceCollector()
+    collector.record_tool_result(
+        session_id="s1",
+        turn_id="turn-1",
+        tool_call_id="call-1",
+        tool_name="DocumentWrite",
+        result=ToolResult(
+            status="ok",
+            output={"artifactRef": "artifact:docx:abc123"},
+        ),
+    )
+
+    assert (
+        missing_deliverable_labels(
+            _required_artifact(), collector.collect_for_turn("turn-1")
+        )
+        == ()
+    )
+
+
+def test_collector_accepts_filedeliver_output_artifact_refs(monkeypatch) -> None:
+    monkeypatch.setenv("MAGI_GA_DELIVERABLE_GATE_ENABLED", "1")
+    collector = LocalToolEvidenceCollector()
+    collector.record_tool_result(
+        session_id="s1",
+        turn_id="turn-1",
+        tool_call_id="call-1",
+        tool_name="FileDeliver",
+        result=ToolResult(
+            status="ok",
+            output={"artifactRefs": ["artifact:delivery:abc123"]},
+        ),
+    )
+
+    assert (
+        missing_deliverable_labels(
+            _required_artifact(), collector.collect_for_turn("turn-1")
+        )
+        == ()
+    )
+
+
+def test_collector_accepts_filedeliver_output_artifact_ref(monkeypatch) -> None:
+    monkeypatch.setenv("MAGI_GA_DELIVERABLE_GATE_ENABLED", "1")
+    collector = LocalToolEvidenceCollector()
+    collector.record_tool_result(
+        session_id="s1",
+        turn_id="turn-1",
+        tool_call_id="call-1",
+        tool_name="FileDeliver",
+        result=ToolResult(
+            status="ok",
+            output={"artifactRef": "artifact:delivery:abc123"},
+        ),
+    )
+
+    assert (
+        missing_deliverable_labels(
+            _required_artifact(), collector.collect_for_turn("turn-1")
+        )
+        == ()
+    )
+
+
+def test_collector_ignores_unsafe_output_artifact_ref(monkeypatch) -> None:
+    monkeypatch.setenv("MAGI_GA_DELIVERABLE_GATE_ENABLED", "1")
+    collector = LocalToolEvidenceCollector()
+    collector.record_tool_result(
+        session_id="s1",
+        turn_id="turn-1",
+        tool_call_id="call-1",
+        tool_name="DocumentWrite",
+        result=ToolResult(
+            status="ok",
+            output={"artifactRef": "/Users/kevin/private/report.docx"},
+        ),
+    )
+
+    assert missing_deliverable_labels(
+        _required_artifact(), collector.collect_for_turn("turn-1")
+    ) == ("artifactRef",)
+
+
+def test_collector_still_blocks_when_required_artifact_ref_missing(monkeypatch) -> None:
+    monkeypatch.setenv("MAGI_GA_DELIVERABLE_GATE_ENABLED", "1")
+    collector = LocalToolEvidenceCollector()
+    collector.record_tool_result(
+        session_id="s1",
+        turn_id="turn-1",
+        tool_call_id="call-1",
+        tool_name="DocumentWrite",
+        result=ToolResult(status="ok", output={"path": "report.docx"}),
+    )
+
+    assert missing_deliverable_labels(
+        _required_artifact(), collector.collect_for_turn("turn-1")
+    ) == ("artifactRef",)
 
 
 # ---------------------------------------------------------------------------
@@ -362,7 +496,22 @@ def test_engine_flag_on_satisfied_by_artifact_receipt_record(monkeypatch) -> Non
         },
     }
     gate_event, _terminal = _drive_gate_event(evidence_records=(record,))
-    assert "ga_deliverable:artifactRef" not in gate_event["missingEvidence"]
+    assert gate_event["decision"] == "pass"
+    assert gate_event["missingEvidence"] == []
+
+
+def test_engine_flag_on_satisfied_by_tool_result_artifact_refs(monkeypatch) -> None:
+    monkeypatch.setenv("MAGI_GA_DELIVERABLE_GATE_ENABLED", "1")
+    monkeypatch.setenv("MAGI_CODING_REPAIR_LOOP_ENABLED", "0")
+    monkeypatch.setattr(engine_module, "_lazy_engine_deps", _fake_engine_deps)
+
+    gate_event, _terminal = _drive_gate_event(
+        evidence_records=(
+            ToolResult(status="ok", artifactRefs=("artifact:docx:abc123",)),
+        )
+    )
+    assert gate_event["decision"] == "pass"
+    assert gate_event["missingEvidence"] == []
 
 
 def test_engine_flag_on_inert_without_artifact_label(monkeypatch) -> None:
