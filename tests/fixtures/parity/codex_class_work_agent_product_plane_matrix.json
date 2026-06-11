@@ -965,7 +965,7 @@
           "state": "existing"
         },
         {
-          "path": "tests/test_memory_mission_self_improvement_integration_contract.py",
+          "path": "tests/test_memory_self_improvement_mission_parity_matrix.py",
           "state": "existing"
         },
         {

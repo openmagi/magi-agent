@@ -296,13 +296,11 @@
       "coveredByFiles": [
         "evals/regression_gates.py",
         "evals/release_gates.py",
-        "magi_agent/self_improvement/eval_capture.py",
         "docs/notes/coding-parity/benchmark-v1.json",
         "tests/fixtures/coding_eval/reliability_matrix.json"
       ],
       "coveredByTests": [
         "tests/test_eval_regression_gates_contract.py",
-        "tests/test_self_improvement_eval_capture.py",
         "tests/test_adk_eval_contract_golden_fixtures.py",
         "tests/test_coding_eval_reliability_contracts.py"
       ],
