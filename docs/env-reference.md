@@ -53,6 +53,14 @@ Useful local toggles:
   profile defaults to `readonly`, forwarding non-mutating inspection tools.
   `none` keeps child turns text-only; `full` is reserved for explicitly trusted
   sandbox/permission deployments.
+- `MAGI_ANSWER_POLICY` (`abstain` | `commit`, default `abstain`) — best-effort
+  finalization policy consumed by
+  `magi_agent/runtime/best_effort_answer.py::finalize_answer`. Under `commit`,
+  a bounded run that ends with an empty/abstaining answer synthesizes one
+  best-effort answer from the gathered evidence (labeled with an uncertainty
+  note); the default `abstain` keeps honest "I don't know" behavior and is a
+  byte-identical pass-through. Unset/empty/unknown values fall back to
+  `abstain`. The GAIA benchmark harness opts into `commit`.
 
 <!-- BEGIN GENERATED FLAGS (scripts/generate_env_reference.py) -->
 ## Feature flags (auto-generated)
@@ -98,6 +106,7 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 - `MAGI_MEMORY_WRITE_ENABLED` (default off) — Allow the memory subsystem to persist writes (vs read-only recall).
 - `MAGI_OBSERVABILITY_ENABLED` (default off) — Enable the hook-tap observability module (bot-activity visibility).
 - `MAGI_OUTPUT_CONTINUATION_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Enable automatic continuation of truncated model output (default-ON full profile).
+- `MAGI_RESEARCH_FACT_GUIDANCE_ENABLED` (default off) — Enable research_fact cross-check guidance: consolidated brief header/footer plus the <web_research> system-prompt block (requires BRAVE_API_KEY + FIRECRAWL_API_KEY).
 - `MAGI_RESEARCH_GOVERNANCE_MODE` (default `off`) — Research governance mode. `off` is inert; `audit` records source/citation mismatches without blocking.
 - `MAGI_RIPGREP_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Use ripgrep for fast in-repo search when available (default-ON full profile).
 - `MAGI_RUNTIME_PROFILE` (no default) — Runtime profile selector (safe/off/minimal/conservative/eval). Safe profiles disable default-ON resilience seams.

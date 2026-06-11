@@ -717,6 +717,16 @@ def build_cli_instruction(
             "</file_tools>"
         )
 
+    # Web-research cross-check guidance — gated on
+    # MAGI_RESEARCH_FACT_GUIDANCE_ENABLED AND both provider keys
+    # (BRAVE_API_KEY + FIRECRAWL_API_KEY) so the model is never directed to a
+    # tool that is not registered. Returns "" when off/unavailable/on error,
+    # keeping the default prompt byte-identical (same pattern as
+    # _file_tools_block / build_tool_advertisement_block fail-open).
+    from magi_agent.tools.web_search_tools import web_research_guidance_block  # noqa: PLC0415
+
+    _web_research_block = web_research_guidance_block()
+
     _skills_block = (
         "<skills>\n"
         "Bundled first-party skills, including superpowers-style workflows, are "
@@ -732,6 +742,8 @@ def build_cli_instruction(
         parts.append(_tool_ad_block)
     if _file_tools_block:
         parts.append(_file_tools_block)
+    if _web_research_block:
+        parts.append(_web_research_block)
     parts.append(_skills_block)
     return "\n\n".join(parts)
 
