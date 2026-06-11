@@ -2267,6 +2267,24 @@ def compute_via_code_enabled(env: Mapping[str, str] | None = None) -> bool:
     return _is_true(source.get(MAGI_COMPUTE_VIA_CODE_ENABLED_ENV))
 
 
+def parse_format_adherence_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """MAGI_FORMAT_ADHERENCE_ENABLED — when ON (default OFF), appends a general
+    output-format-adherence guidance block to the CLI system prompt. The block
+    instructs the agent to re-read the question's explicit output requirements
+    (units/scale, rounding precision, requested name/format) before finalizing,
+    and to not add unrequested units or words.
+
+    This is a GENERAL agent capability — the block contains no benchmark-specific
+    text. Default OFF so non-opted-in sessions are byte-identical to origin/main
+    (the ``<output_format_adherence>`` marker is simply absent when the flag is
+    unset). Operators/eval profiles opt in by setting
+    ``MAGI_FORMAT_ADHERENCE_ENABLED=1``."""
+    import os as _os  # noqa: PLC0415
+
+    source = env if env is not None else _os.environ
+    return _is_true(source.get("MAGI_FORMAT_ADHERENCE_ENABLED"))
+
+
 def parse_eval_zero_edit_guard_enabled(env: Mapping[str, str]) -> bool:
     """MAGI_EVAL_ZERO_EDIT_GUARD_ENABLED — when ON (default OFF; enabled by
     the eval profile), the engine turn driver re-prompts once with "Apply the

@@ -204,3 +204,53 @@ def test_build_cli_instruction_is_real_system_prompt(tmp_path) -> None:
     assert "<skills>" in instruction
     assert "SkillLoader" in instruction
     assert "superpowers-style workflows" in instruction
+
+
+# ---------------------------------------------------------------------------
+# Output-format-adherence guidance block — default-OFF general capability.
+# Gated by MAGI_FORMAT_ADHERENCE_ENABLED. When off, prompt assembly must NOT
+# contain the <output_format_adherence> marker; when on, the block (units/scale,
+# rounding precision, canonical name/format, no-unrequested-units clauses) is
+# appended. This is a GENERAL capability — no GAIA-specific text lives here.
+# ---------------------------------------------------------------------------
+
+
+def test_output_format_adherence_block_disabled_by_default() -> None:
+    from magi_agent.cli.tool_runtime import output_format_adherence_block
+
+    assert output_format_adherence_block({}) == ""
+    assert output_format_adherence_block({"MAGI_FORMAT_ADHERENCE_ENABLED": "0"}) == ""
+
+
+def test_output_format_adherence_block_enabled_has_clauses() -> None:
+    from magi_agent.cli.tool_runtime import output_format_adherence_block
+
+    text = output_format_adherence_block({"MAGI_FORMAT_ADHERENCE_ENABLED": "1"})
+    assert "<output_format_adherence>" in text
+    lowered = text.lower()
+    # units / scale clause
+    assert "unit" in lowered and "scale" in lowered
+    # rounding precision clause
+    assert "round" in lowered
+    # canonical name / format clause
+    assert "name" in lowered and "format" in lowered
+    # no-unrequested-units clause
+    assert "do not add" in lowered
+
+
+def test_build_cli_instruction_omits_format_block_when_flag_off() -> None:
+    # Default env (flag unset) -> marker must be ABSENT. Asserting absence of the
+    # substring marker (not full-string equality) because build_system_prompt
+    # reads environment-dependent identity/memory snapshots.
+    instruction = build_cli_instruction(session_id="fa-off", model="claude-sonnet-4-6")
+    assert "<output_format_adherence>" not in instruction
+
+
+def test_build_cli_instruction_includes_format_block_when_flag_on(monkeypatch) -> None:
+    monkeypatch.setenv("MAGI_FORMAT_ADHERENCE_ENABLED", "1")
+    instruction = build_cli_instruction(session_id="fa-on", model="claude-sonnet-4-6")
+    assert "<output_format_adherence>" in instruction
+    lowered = instruction.lower()
+    assert "unit" in lowered and "scale" in lowered
+    assert "round" in lowered
+    assert "do not add" in lowered
