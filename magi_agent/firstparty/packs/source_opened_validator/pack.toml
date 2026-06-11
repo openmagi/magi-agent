@@ -1,0 +1,17 @@
+# Bundled first-party validator pack. Loaded by the SAME loader/format a user
+# pack uses (D1/D3). First-party holds NO privilege: this manifest is
+# discovered, overridable, and removable exactly like ~/.magi/packs/* manifests.
+#
+# Manifest schema = magi_agent/packs/manifest.py (top-level packId/displayName,
+# NOT a [pack] table). Ref uses the live public-ref prefix "verifier:" so it
+# reaches the real cli/engine.py required_validators enforce path.
+
+packId = "openmagi.source-opened"
+displayName = "Source-opened validator"
+version = "1.0.0"
+description = "First-party deterministic validator: a source was opened before a quote."
+
+[[provides]]
+type = "validator"
+ref = "verifier:sourceOpened@1"
+impl = "magi_agent.firstparty.packs.source_opened_validator.impl:source_opened_validator"
