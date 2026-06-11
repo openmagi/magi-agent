@@ -705,7 +705,7 @@ graph LR
 | gate3_readiness.py | — | models | transport/health.py |
 | gate4_readiness.py | — | models | transport/health.py |
 | gate5_readiness.py | — | models | transport/health.py |
-| gate5b_full_toolhost.py | — | code_diagnostics_receipts, coding_tool_receipts, config, context, dispatcher, edit_match_receipts, edit_matching, env, formatter_runner, injection, lsp_client, manifest, memory_mode_guard, patch_apply, permission, public_events, read_format, read_ledger, registry, result, ripgrep, session_identity | tools/core_toolhost.py, transport/chat.py, transport/chat_routes.py, transport/chat_shared.py, transport/egress_critic.py, transport/generation_request.py, transport/health.py |
+| gate5b_full_toolhost.py | — | code_diagnostics_receipts, coding_tool_receipts, config, context, deadline, dispatcher, edit_match_receipts, edit_matching, env, formatter_runner, injection, lsp_client, manifest, memory_mode_guard, patch_apply, permission, public_events, read_format, read_ledger, registry, result, ripgrep, session_identity | tools/core_toolhost.py, transport/chat.py, transport/chat_routes.py, transport/chat_shared.py, transport/egress_critic.py, transport/generation_request.py, transport/health.py |
 | gate7_readiness.py | — | models | transport/health.py |
 | gate8_readiness.py | — | gate1a_egress_correlation, models | transport/chat.py, transport/chat_routes.py, transport/health.py |
 | learning_live_readiness.py | Learning-layer LIVE adapter readiness gate — PR7. | config | harness/memory_recall.py, harness/memory_write.py, learning/live.py, transport/chat_routes.py |
@@ -1174,6 +1174,7 @@ graph LR
 | context_projection.py | — | — | — |
 | control.py | — | tool_preview | adk_bridge/policy_boundary.py, cli/contracts.py, cli/permissions.py, cli/tests/test_streaming_driver.py, cli/tests/test_streaming_sink.py, harness/general_automation/plan_act_switch.py, harness/general_automation/question_tool.py, recipes/opencode_permission_patterns.py, runtime/control_oob.py, runtime/durable_control_store.py, shadow/memory_source_authority_contract.py, shadow/office_automation_contract.py, shadow/patch_file_policy_contract.py, shadow/path_shell_policy_contract.py, shadow/toolhost_contract.py, shadow/ts_parity_replay.py, tools/permission.py |
 | control_oob.py | Out-of-band (OOB) approval resolve for the durable control queue (doc 09 PR-5 / A7). | control, durable_control_store | — |
+| deadline.py | Deadline-awareness nudge for one-shot eval/headless runs. | — | gates/gate5b_full_toolhost.py |
 | deterministic_policy.py | — | — | — |
 | durable_control_store.py | Durable JSONL-backed :class:`ControlRequestStore` (doc 09 PR-4 / A7). | control | cli/permissions.py, runtime/control_oob.py |
 | error_taxonomy.py | — | — | runtime/stream_fallback.py, runtime/stream_withholding.py |
