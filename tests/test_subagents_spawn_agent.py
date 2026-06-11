@@ -364,14 +364,47 @@ def test_spawn_agent_default_toolset_gate_unset_is_none_profile(monkeypatch) -> 
     assert captured["workspace_root"] is None
 
 
-def test_spawn_agent_readonly_toolset_gate_forwards_profile_and_isolates(
+def test_spawn_agent_readonly_toolset_gate_uses_context_workspace_root(
     monkeypatch,
+    tmp_path: Path,
 ) -> None:
     """MAGI_CHILD_RUNNER_TOOLSET=readonly forwards the ``readonly`` profile and
-    constructs the child with an ISOLATED workspace (parent cwd protected)."""
+    uses the caller workspace root. Hosted selected pods run with a read-only
+    root filesystem, so relying on the process default tempdir prevents child
+    runner attachment before the child even starts."""
     monkeypatch.setenv("MAGI_CHILD_RUNNER_LIVE_ENABLED", "1")
     monkeypatch.delenv("MAGI_CHILD_RUNNER_LIVE_KILL_SWITCH", raising=False)
     monkeypatch.setenv("MAGI_CHILD_RUNNER_TOOLSET", "readonly")
+
+    import magi_agent.runtime.child_runner_live as _live_mod
+
+    monkeypatch.setattr(_live_mod, "RealLocalChildRunner", _CapturingProfileRunner)
+
+    from magi_agent.plugins.native.subagents import spawn_agent
+
+    asyncio.run(
+        spawn_agent({"prompt": "review this"}, _context(workspaceRoot=str(tmp_path)))
+    )
+
+    captured = _CapturingProfileRunner.captured
+    assert captured["toolset_profile"] == "readonly"
+    assert captured["workspace_root"] == str(tmp_path)
+
+
+def test_spawn_agent_readonly_toolset_falls_back_to_hosted_workspace_env(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """Hosted Gate5B selected chat sets the workspace root in the deployment
+    environment. SpawnAgent must use that writable workspace instead of the
+    process default tempdir, which is read-only in the production container."""
+    monkeypatch.setenv("MAGI_CHILD_RUNNER_LIVE_ENABLED", "1")
+    monkeypatch.delenv("MAGI_CHILD_RUNNER_LIVE_KILL_SWITCH", raising=False)
+    monkeypatch.setenv("MAGI_CHILD_RUNNER_TOOLSET", "readonly")
+    monkeypatch.setenv(
+        "CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_WORKSPACE_ROOT",
+        str(tmp_path),
+    )
 
     import magi_agent.runtime.child_runner_live as _live_mod
 
@@ -383,9 +416,44 @@ def test_spawn_agent_readonly_toolset_gate_forwards_profile_and_isolates(
 
     captured = _CapturingProfileRunner.captured
     assert captured["toolset_profile"] == "readonly"
-    # Isolated workspace tempdir so the child can never mutate the parent cwd.
-    assert isinstance(captured["workspace_root"], str)
-    assert captured["workspace_root"]
+    assert captured["workspace_root"] == str(tmp_path)
+
+
+def test_spawn_agent_readonly_toolset_reports_workspace_unavailable(
+    monkeypatch,
+) -> None:
+    """If neither context/env workspace nor default tempdir is writable, return
+    a precise blocked reason instead of the generic attach-failed reason."""
+    monkeypatch.setenv("MAGI_CHILD_RUNNER_LIVE_ENABLED", "1")
+    monkeypatch.delenv("MAGI_CHILD_RUNNER_LIVE_KILL_SWITCH", raising=False)
+    monkeypatch.setenv("MAGI_CHILD_RUNNER_TOOLSET", "readonly")
+    monkeypatch.delenv(
+        "CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_WORKSPACE_ROOT",
+        raising=False,
+    )
+    monkeypatch.delenv("MAGI_AGENT_WORKSPACE", raising=False)
+    monkeypatch.delenv("MAGI_WORKSPACE_ROOT", raising=False)
+    monkeypatch.delenv("MAGI_WORKSPACE", raising=False)
+
+    import tempfile
+
+    def _raise_no_tempdir(*args: object, **kwargs: object) -> str:
+        raise FileNotFoundError("no usable temporary directory")
+
+    monkeypatch.setattr(tempfile, "mkdtemp", _raise_no_tempdir)
+
+    import magi_agent.runtime.child_runner_live as _live_mod
+
+    monkeypatch.setattr(_live_mod, "RealLocalChildRunner", _CapturingProfileRunner)
+
+    from magi_agent.plugins.native.subagents import spawn_agent
+
+    result = asyncio.run(spawn_agent({"prompt": "review this"}, _context()))
+
+    assert result.status == "blocked"
+    assert result.error_code == "child_workspace_unavailable"
+    assert result.output["status"] == "blocked"
+    assert result.output["liveChildRunnerAttached"] is False
 
 
 # ---------------------------------------------------------------------------

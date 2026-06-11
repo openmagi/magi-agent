@@ -1,11 +1,22 @@
 from __future__ import annotations
 
+import os
+import tempfile
 import uuid
 from collections.abc import Mapping
+from pathlib import Path
 
 from magi_agent.plugins.native._common import digest, ok_result
 from magi_agent.tools.context import ToolContext
 from magi_agent.tools.result import ToolResult, ToolStatus
+
+_HOSTED_WORKSPACE_ENV_KEYS = (
+    "MAGI_AGENT_WORKSPACE",
+    "MAGI_WORKSPACE_ROOT",
+    "MAGI_WORKSPACE",
+    "CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_WORKSPACE_ROOT",
+    "CORE_AGENT_PYTHON_MEMORY_WORKSPACE_ROOT",
+)
 
 
 def _spawn_agent_result(
@@ -50,6 +61,80 @@ def _child_result_status_and_reason(result: object) -> tuple[ToolStatus, str | N
         return "error", str(boundary_error or "live_child_runner_error"), "error"
     reason = str(boundary_error or summary or "child_runner_blocked")
     return "blocked", reason, "blocked"
+
+
+def _safe_workspace_candidate(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    stripped = value.strip()
+    if not stripped:
+        return None
+    try:
+        path = Path(stripped).expanduser()
+        path.mkdir(parents=True, exist_ok=True)
+        probe = path / f".magi-child-probe-{uuid.uuid4().hex[:12]}"
+        probe.mkdir()
+        probe.rmdir()
+    except Exception:  # noqa: BLE001 — candidate is simply unusable.
+        return None
+    return str(path)
+
+
+def _first_writable_workspace_root(context: ToolContext) -> str | None:
+    for candidate in (context.spawn_workspace, context.workspace_root):
+        workspace = _safe_workspace_candidate(candidate)
+        if workspace is not None:
+            return workspace
+    for key in _HOSTED_WORKSPACE_ENV_KEYS:
+        workspace = _safe_workspace_candidate(os.environ.get(key))
+        if workspace is not None:
+            return workspace
+    return None
+
+
+def _default_temp_child_workspace() -> str | None:
+    try:
+        return tempfile.mkdtemp(prefix="magi-child-")
+    except Exception:  # noqa: BLE001 — hosted read-only roots land here.
+        return None
+
+
+def _isolated_child_workspace_under(workspace_root: str) -> str | None:
+    try:
+        child_root = Path(workspace_root) / ".magi" / "child-workspaces"
+        child_root.mkdir(parents=True, exist_ok=True)
+        return tempfile.mkdtemp(prefix="magi-child-", dir=str(child_root))
+    except Exception:  # noqa: BLE001 — fall back to the default tempdir path.
+        return None
+
+
+def _child_workspace_for_toolset(
+    toolset_profile: str,
+    context: ToolContext,
+) -> tuple[str | None, str | None]:
+    if toolset_profile == "none":
+        return None, None
+
+    workspace_root = _first_writable_workspace_root(context)
+    if toolset_profile == "readonly":
+        if workspace_root is not None:
+            return workspace_root, None
+        fallback = _default_temp_child_workspace()
+        if fallback is not None:
+            return fallback, None
+        return None, "child_workspace_unavailable"
+
+    # ``full`` can mutate, so give it an isolated writable child directory when
+    # a parent workspace is available. This keeps hosted read-only-root pods
+    # working while preserving separation for mutating children.
+    if workspace_root is not None:
+        isolated = _isolated_child_workspace_under(workspace_root)
+        if isolated is not None:
+            return isolated, None
+    fallback = _default_temp_child_workspace()
+    if fallback is not None:
+        return fallback, None
+    return None, "child_workspace_unavailable"
 
 
 async def spawn_agent(arguments: dict[str, object], context: ToolContext) -> ToolResult:
@@ -101,9 +186,9 @@ async def spawn_agent(arguments: dict[str, object], context: ToolContext) -> Too
     # 2. Construct RealLocalChildRunner with a toolset PROFILE resolved from the
     #    MAGI_CHILD_RUNNER_TOOLSET gate (PR1, doc 07). Default (unset / "none")
     #    keeps the historical text-only empty toolset; "readonly" forwards the
-    #    non-mutating inspection tools (FileRead/Glob/Grep/GitDiff); "full" is
-    #    gated upstream by the permission-unification follow-up. The child runs
-    #    in an ISOLATED workspace tempdir so it can never mutate the parent cwd.
+    #    non-mutating inspection tools against the caller workspace; "full" is
+    #    gated upstream by the permission-unification follow-up and receives an
+    #    isolated child workspace under the writable parent workspace.
     # 3. Build ChildRunnerConfig with live gate ON.
     # 4. await boundary.run(request) on the dispatch event loop.
     # 5. Project the sanitised result envelope into the ToolResult output.
@@ -177,17 +262,24 @@ async def spawn_agent(arguments: dict[str, object], context: ToolContext) -> Too
             budgetMs=budget_ms,
         )
 
-        # Resolve the toolset profile from the dedicated env gate. The gate is
-        # the final authority (a caller-supplied "toolsetProfile" argument never
-        # ESCALATES past it); default unset/"none" => empty toolset (text-only).
-        # The child gets an ISOLATED workspace tempdir so a tool-enabled child
-        # can never mutate the parent's working directory.
-        import tempfile  # noqa: PLC0415
-
         toolset_profile = resolve_child_toolset_profile()
-        child_workspace = (
-            tempfile.mkdtemp(prefix="magi-child-") if toolset_profile != "none" else None
+        child_workspace, workspace_error = _child_workspace_for_toolset(
+            toolset_profile,
+            context,
         )
+        if workspace_error is not None:
+            fallback_output = {
+                "status": "blocked",
+                "persona": persona,
+                "promptDigest": digest(prompt),
+                "spawnDepth": context.spawn_depth,
+                "liveChildRunnerAttached": False,
+            }
+            return _spawn_agent_result(
+                "blocked",
+                fallback_output,
+                error_code=workspace_error,
+            )
         runner = RealLocalChildRunner(
             toolset_profile=toolset_profile,
             workspace_root=child_workspace,
