@@ -48,6 +48,11 @@ _STRUCTURED_SCHEMA_TOOL_NAMES = frozenset(
         "FileRead",
         "FileWrite",
         "FileEdit",
+        "PatchApply",
+        "Glob",
+        "Grep",
+        "Bash",
+        "TestRun",
         "MemoryWrite",
         "InspectSelfEvidence",
     }
@@ -110,7 +115,8 @@ def test_core_tool_manifests_returns_defensive_manifest_and_schema_copies() -> N
     fresh_glob = next(manifest for manifest in core_tool_manifests() if manifest.name == "Glob")
 
     assert fresh_glob is not glob
-    assert fresh_glob.input_schema == {"type": "object", "additionalProperties": True}
+    assert "callerMutation" not in fresh_glob.input_schema
+    assert "pattern" in fresh_glob.input_schema["properties"]
     assert fresh_glob.input_schema is not glob.input_schema
 
 
@@ -125,10 +131,10 @@ def test_register_core_tool_manifests_uses_defensive_schema_copies() -> None:
     registered_glob = registry.resolve("Glob")
     assert registered_glob is not None
     assert registered_glob is not mutated_glob
-    assert registered_glob.input_schema == {
-        "type": "object",
-        "additionalProperties": True,
-    }
+    # The registry keeps the pristine catalog schema: caller mutations must
+    # not leak in (Glob now declares a real pattern schema).
+    assert "callerMutation" not in registered_glob.input_schema
+    assert "pattern" in registered_glob.input_schema["properties"]
     assert registered_glob.input_schema is not mutated_glob.input_schema
 
 
@@ -145,10 +151,8 @@ def test_register_core_tool_manifests_returned_manifests_do_not_mutate_registry_
 
     assert registered_glob is not None
     assert registered_glob is not returned_glob
-    assert registered_glob.input_schema == {
-        "type": "object",
-        "additionalProperties": True,
-    }
+    assert "callerMutation" not in registered_glob.input_schema
+    assert "pattern" in registered_glob.input_schema["properties"]
     assert registered_glob.input_schema is not returned_glob.input_schema
 
 

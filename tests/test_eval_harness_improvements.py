@@ -66,6 +66,19 @@ def test_eval_autonomy_block_disabled():
     assert text == ""
 
 
+def test_eval_autonomy_block_carries_workflow_recipe():
+    """The measured prompt ingredients: reproduce-first workflow, root-cause
+    framing, thoroughness, do-not-modify-tests boundary, and diff hygiene."""
+    from magi_agent.cli.tool_runtime import eval_autonomy_block
+
+    text = eval_autonomy_block({"MAGI_EVAL_AUTONOMY_ENABLED": "1"}).lower()
+    assert "reproduc" in text  # write a reproduction script FIRST
+    assert "root cause" in text
+    assert "do not modify" in text and "test" in text  # test-file boundary
+    assert "git diff" in text  # diff hygiene: only intended source files
+    assert "as many tool calls as" in text or "do not stop early" in text
+
+
 # ---------------------------------------------------------------------------
 # Task 3 — P3: engine zero-edit guard
 # ---------------------------------------------------------------------------

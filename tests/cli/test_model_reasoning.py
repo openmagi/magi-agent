@@ -1,0 +1,64 @@
+"""The CLI model build must support extended thinking / reasoning.
+
+Published frontier coding-benchmark numbers are measured with adaptive
+thinking enabled and thinking blocks preserved across tool turns; the CLI's
+LiteLlm build previously set no reasoning parameters at all, benchmarking the
+model in a strictly weaker mode. Default stays OFF (byte-identical build);
+profiles opt in via env.
+"""
+from __future__ import annotations
+
+from magi_agent.cli.providers import ProviderConfig
+from magi_agent.cli.real_runner import _build_litellm_model, _model_reasoning_kwargs
+
+
+def _cfg() -> ProviderConfig:
+    return ProviderConfig(provider="anthropic", model="claude-sonnet-4-5", api_key="x")
+
+
+def test_reasoning_kwargs_default_off():
+    assert _model_reasoning_kwargs({}) == {}
+
+
+def test_reasoning_kwargs_effort():
+    kw = _model_reasoning_kwargs({"MAGI_MODEL_REASONING_EFFORT": "high"})
+    assert kw == {"reasoning_effort": "high"}
+
+
+def test_reasoning_kwargs_explicit_budget_takes_precedence():
+    kw = _model_reasoning_kwargs(
+        {
+            "MAGI_MODEL_REASONING_EFFORT": "high",
+            "MAGI_MODEL_THINKING_BUDGET_TOKENS": "8192",
+        }
+    )
+    assert kw == {"thinking": {"type": "enabled", "budget_tokens": 8192}}
+
+
+def test_reasoning_kwargs_off_values_and_garbage():
+    assert _model_reasoning_kwargs({"MAGI_MODEL_REASONING_EFFORT": "off"}) == {}
+    assert _model_reasoning_kwargs({"MAGI_MODEL_REASONING_EFFORT": "none"}) == {}
+    assert _model_reasoning_kwargs({"MAGI_MODEL_THINKING_BUDGET_TOKENS": "nope"}) == {}
+    assert _model_reasoning_kwargs({"MAGI_MODEL_THINKING_BUDGET_TOKENS": "-5"}) == {}
+
+
+def test_litellm_model_built_with_reasoning_effort(monkeypatch):
+    monkeypatch.setenv("MAGI_MODEL_REASONING_EFFORT", "high")
+    model = _build_litellm_model(_cfg())
+    extra = getattr(model, "_additional_args", {}) or {}
+    assert extra.get("reasoning_effort") == "high"
+
+
+def test_litellm_model_default_has_no_reasoning(monkeypatch):
+    monkeypatch.delenv("MAGI_MODEL_REASONING_EFFORT", raising=False)
+    monkeypatch.delenv("MAGI_MODEL_THINKING_BUDGET_TOKENS", raising=False)
+    model = _build_litellm_model(_cfg())
+    extra = getattr(model, "_additional_args", {}) or {}
+    assert "reasoning_effort" not in extra
+    assert "thinking" not in extra
+
+
+def test_eval_profile_defaults_enable_reasoning():
+    from magi_agent.runtime.local_defaults import EVAL_RUNTIME_ENV_DEFAULTS
+
+    assert EVAL_RUNTIME_ENV_DEFAULTS.get("MAGI_MODEL_REASONING_EFFORT") == "high"

@@ -54,9 +54,12 @@ def test_build_cli_adk_tools_respects_browser_kill_switch(
     assert "BrowserTask" not in {getattr(tool, "name", None) for tool in tools}
 
 
-def test_file_read_tool_performs_real_read(tmp_path) -> None:
+def test_file_read_tool_performs_real_read(tmp_path, monkeypatch) -> None:
     # Non-mocked proof: the FileRead tool runs the REAL core toolhost and reads
-    # an actual file written into the workspace.
+    # an actual file written into the workspace. Pin read-quality OFF: the
+    # raw-content contract is what this test proves (the env-wired binder
+    # otherwise enables line numbering in the full profile).
+    monkeypatch.setenv("MAGI_READ_QUALITY_ENABLED", "0")
     (tmp_path / "note.txt").write_text("real content here\n", encoding="utf-8")
     tools = build_cli_adk_tools(workspace_root=str(tmp_path))
     file_read = _find_tool(tools, "FileRead")
@@ -94,11 +97,12 @@ def test_cli_adk_tools_record_local_tool_receipts_for_engine_collector(tmp_path)
     assert records[0]["receipts"]["toolExecutionReceipt"]["toolName"] == "FileRead"
 
 
-def test_tool_context_factory_carries_workspace_root(tmp_path) -> None:
+def test_tool_context_factory_carries_workspace_root(tmp_path, monkeypatch) -> None:
     # Dispatch a tool and assert the magi ToolContext the toolhost saw carried
     # ``workspace_root == tmp_path``. We prove this through the resolved
     # workspace path embedded in the real toolhost receipt: a read of a file
     # only resolves when the workspace root is correct.
+    monkeypatch.setenv("MAGI_READ_QUALITY_ENABLED", "0")
     (tmp_path / "probe.txt").write_text("probe\n", encoding="utf-8")
     tools = build_cli_adk_tools(workspace_root=str(tmp_path))
     file_read = _find_tool(tools, "FileRead")
