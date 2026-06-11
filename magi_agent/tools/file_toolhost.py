@@ -43,6 +43,17 @@ def bind_file_toolhost_handlers(registry: "ToolRegistry") -> tuple[str, ...]:
         "VideoFrames": video_frames,
         "MusicNotation": music_notation,
     }
+
+    # Strict default-OFF inner gate (MAGI_DOCUMENT_QA_ENABLED). The bind loop
+    # below already skips unregistered names, so this is doubly safe: when the
+    # flag is off the manifest is never registered AND the handler is never
+    # offered for binding.
+    from magi_agent.config.env import document_qa_enabled  # noqa: PLC0415
+
+    if document_qa_enabled():
+        from .document_qa_tools import document_qa  # noqa: PLC0415
+
+        _handlers["DocumentQA"] = document_qa
     bound: list[str] = []
     for name, handler in _handlers.items():
         registration = registry.resolve_registration(name)
