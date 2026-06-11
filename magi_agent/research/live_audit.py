@@ -123,9 +123,34 @@ class ResearchLiveAudit:
         }
 
 
+def persist_audit_report(report: Mapping[str, object], *, session_id: str) -> None:
+    """Append an audit report to the durable evidence dir (A1 measurement).
+
+    Default-ON enforce must be justified with measured false-positive data, not
+    assertion — reports accumulate in ``research_audit.jsonl`` next to the
+    durable tool-evidence ledger, honoring the same ``MAGI_EVIDENCE_LEDGER_DIR``
+    semantics (path override; ``off`` disables; default ``<cwd>/.magi/evidence``).
+    Fail-soft: persistence problems never affect the turn.
+    """
+    from pathlib import Path  # noqa: PLC0415
+
+    raw_dir = (os.environ.get("MAGI_EVIDENCE_LEDGER_DIR") or "").strip()
+    if raw_dir.lower() in ("off", "0", "false", "none", "disable", "disabled"):
+        return
+    try:
+        target_dir = Path(raw_dir) if raw_dir else Path.cwd() / ".magi" / "evidence"
+        target_dir.mkdir(parents=True, exist_ok=True)
+        entry = {"sessionId": session_id, "report": dict(report)}
+        with (target_dir / "research_audit.jsonl").open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(entry, sort_keys=True, default=str) + "\n")
+    except OSError:
+        return
+
+
 __all__ = [
     "RESEARCH_GOVERNANCE_MODE_ENV",
     "ResearchLiveAudit",
     "enforce_reprompt_message",
+    "persist_audit_report",
     "research_governance_mode",
 ]
