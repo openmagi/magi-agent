@@ -907,6 +907,34 @@ class _ResilienceLoopControl(BaseLoopControl):
         )
 
 
+class _ToolSynthesisNudgeLoopControl(BaseLoopControl):
+    """Thin LoopControl adapter delegating to MagiToolSynthesisNudgePlugin.
+
+    Registered LAST in ``build_default_plane`` so edit-retry / resilience
+    overrides win the plane's first-non-None-wins after-tool fan-out; the
+    nudge only rides on results no other control replaced.
+    """
+
+    def __init__(self, plugin: Any) -> None:
+        self._plugin = plugin
+
+    @property
+    def name(self) -> str:  # type: ignore[override]
+        return getattr(self._plugin, "name", "magi_tool_synthesis_nudge_control")
+
+    async def on_after_tool(
+        self,
+        *,
+        tool: Any,
+        args: dict[str, Any],
+        tool_context: Any,
+        result: Any,
+    ) -> dict[str, Any] | None:
+        return await self._plugin.after_tool_callback(
+            tool=tool, tool_args=args, tool_context=tool_context, result=result
+        )
+
+
 class _CompactionLoopControl(BaseLoopControl):
     """Thin LoopControl adapter delegating to MagiContextCompactionPlugin."""
 
@@ -1049,6 +1077,7 @@ def build_default_plane(
     self_review_config: Any | None = None,
     self_review_now: datetime | None = None,
     self_review_scheduler: Callable[[Coroutine[Any, Any, None]], None] | None = None,
+    tool_synthesis_model_label: str | None = None,
 ) -> ControlPlane:
     """Build the default ControlPlane from environment flags.
 
@@ -1071,6 +1100,11 @@ def build_default_plane(
             control. Omitted values preserve the default safe runtime behavior:
             lazy ``ForkRunner`` construction, no-op candidate sink, env-derived
             config/time, and background scheduling on the active event loop.
+        tool_synthesis_model_label: The runner's configured litellm model label
+            (``provider/model``), used ONLY by the default-OFF tool-synthesis
+            reflection nudge (``MAGI_TOOL_SYNTHESIS_NUDGE_ENABLED`` + frontier
+            tier). ``None`` (default — all pre-existing callers) skips the
+            control entirely so the plane stays byte-identical.
 
     Returns:
         A configured ``ControlPlane`` with all enabled controls registered.
@@ -1169,6 +1203,28 @@ def build_default_plane(
             )
         )
 
+    # 7. Tool-synthesis reflection nudge (MAGI_TOOL_SYNTHESIS_NUDGE_ENABLED,
+    # default OFF + frontier-tier model only). Registered LAST so edit-retry /
+    # resilience overrides win the first-non-None-wins after-tool fan-out.
+    # Callers that do not pass a model label (all pre-existing build sites)
+    # skip this branch entirely — byte-identical plane.
+    if tool_synthesis_model_label is not None:
+        from magi_agent.adk_bridge.tool_synthesis_nudge import (  # noqa: PLC0415
+            build_tool_synthesis_nudge_plugin,
+        )
+        from magi_agent.runtime.tool_synthesis import (  # noqa: PLC0415
+            tool_synthesis_nudge_active,
+        )
+
+        nudge_plugin = build_tool_synthesis_nudge_plugin(
+            enabled=tool_synthesis_nudge_active(
+                model_label=tool_synthesis_model_label,
+                env=env,
+            )
+        )
+        if nudge_plugin is not None:
+            plane.register(_ToolSynthesisNudgeLoopControl(nudge_plugin))
+
     return plane
 
 
@@ -1183,6 +1239,7 @@ def build_default_plugin(
     self_review_config: Any | None = None,
     self_review_now: datetime | None = None,
     self_review_scheduler: Callable[[Coroutine[Any, Any, None]], None] | None = None,
+    tool_synthesis_model_label: str | None = None,
 ) -> _ExtendedControlPlanePlugin:
     """Build the single ControlPlanePlugin for runner construction.
 
@@ -1192,7 +1249,9 @@ def build_default_plugin(
 
     Optional ``general_automation_receipts`` / ``contract_required`` enable the GA
     constraint reminder control (see :func:`build_default_plane`). When omitted
-    the plugin is byte-identical to ``main``.
+    the plugin is byte-identical to ``main``. ``tool_synthesis_model_label``
+    feeds the default-OFF tool-synthesis nudge gate (see
+    :func:`build_default_plane`); ``None`` skips it entirely.
     """
     env = os_environ if os_environ is not None else dict(os.environ)
     plane = build_default_plane(
@@ -1205,6 +1264,7 @@ def build_default_plugin(
         self_review_config=self_review_config,
         self_review_now=self_review_now,
         self_review_scheduler=self_review_scheduler,
+        tool_synthesis_model_label=tool_synthesis_model_label,
     )
     return _ExtendedControlPlanePlugin(plane)
 

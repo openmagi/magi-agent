@@ -1773,6 +1773,27 @@ def is_user_hooks_enabled(env: Mapping[str, str] | None = None) -> bool:
     return _is_true(source.get(MAGI_USER_HOOKS_ENABLED_ENV))
 
 
+MAGI_TOOL_SYNTHESIS_NUDGE_ENABLED_ENV = "MAGI_TOOL_SYNTHESIS_NUDGE_ENABLED"
+
+
+def is_tool_synthesis_nudge_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Master gate for the Live-SWE-style tool-synthesis reflection nudge.
+
+    Default OFF (strict truthy opt-in: "1"/"true"/"yes"/"on"). When OFF, the
+    per-step reflection nudge plugin is never registered on the control plane
+    and ``build_cli_instruction`` never appends the "creating your own tools"
+    recipe block — a turn is byte-identical to today. When ON, BOTH surfaces
+    activate ONLY for frontier-tier models (``sota``/``reasoning`` in the
+    ``ModelTierRegistry``; see ``magi_agent.runtime.tool_synthesis``) because
+    the mechanism measurably HURTS weak models (Live-SWE ablation:
+    GPT-5-Nano 44%->14%). Like ``is_goal_nudge_enabled`` this is an additive,
+    default-disabled seam and does NOT follow the runtime-profile default-ON
+    convention.
+    """
+    source = os.environ if env is None else env
+    return _is_true(source.get(MAGI_TOOL_SYNTHESIS_NUDGE_ENABLED_ENV))
+
+
 MAGI_DOCUMENT_AUTHORING_COVERAGE_ENV = "MAGI_DOCUMENT_AUTHORING_COVERAGE"
 
 

@@ -737,6 +737,15 @@ def build_cli_instruction(
         + eval_autonomy_block()
     )
 
+    # Live-SWE-style "creating your own tools" recipe block. Default-OFF
+    # (MAGI_TOOL_SYNTHESIS_NUDGE_ENABLED) and frontier-tier gated; returns ""
+    # when inactive so prompt assembly stays byte-identical.
+    from magi_agent.runtime.tool_synthesis import (  # noqa: PLC0415
+        build_tool_synthesis_instruction_block,
+    )
+
+    _tool_synthesis_block = build_tool_synthesis_instruction_block(model_label=model)
+
     parts = [prompt]
     if _tool_ad_block:
         parts.append(_tool_ad_block)
@@ -745,6 +754,8 @@ def build_cli_instruction(
     if _web_research_block:
         parts.append(_web_research_block)
     parts.append(_skills_block)
+    if _tool_synthesis_block:
+        parts.append(_tool_synthesis_block)
     return "\n\n".join(parts)
 
 
