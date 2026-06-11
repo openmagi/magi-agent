@@ -248,13 +248,7 @@ def _preview_value(value: object, limit: int) -> tuple[object | None, bool]:
 
 
 def _truncate_head_tail(text: str, limit: int) -> str:
-    """Keep head + tail halves with an elision marker, within the char budget.
-
-    The marker reserve uses the digit-count upper bound (elided <= len(text)),
-    so the returned string never exceeds ``limit``. When the budget is too
-    small to fit the marker plus at least one char on each side, degrade to a
-    plain head-only clamp.
-    """
+    """Keep head + tail halves with an elision marker within the char budget."""
     marker_reserve = len(_ELISION_MARKER_TEMPLATE.format(len(text)))
     kept = limit - marker_reserve
     if kept < 2:

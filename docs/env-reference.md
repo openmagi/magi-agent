@@ -90,6 +90,7 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 - `MAGI_FILE_DELIVERY_LIVE_ENABLED` (default off) — Enable the live file-delivery tool (vs receipt-only).
 - `MAGI_GA_DELIVERABLE_GATE_ENABLED` (default off) — Enable the GA artifact-deliverable pre-final gate; strict default-OFF and inert unless explicitly set.
 - `MAGI_GOAL_LOOP_ENABLED` (default off) — Enable the autonomous goal-loop scheduler.
+- `MAGI_HEADTAIL_TRUNCATION_ENABLED` (default off) — Use head+tail (middle-elision) truncation for tool output caps instead of head-only, so document/page tails stay visible.
 - `MAGI_LEARNING_ENABLED` (default off) — Master switch for the learned-skills / self-improvement loop.
 - `MAGI_LEARNING_INJECTION_ENABLED` (default off) — Inject learned skills/refinements into the runtime prompt.
 - `MAGI_LEARNING_LIVE_ENABLED` (default off) — Allow the learning loop to run with live model-backed proposers.
