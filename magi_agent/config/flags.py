@@ -257,6 +257,29 @@ FLAGS: tuple[FlagSpec, ...] = (
         "MAGI_DEFERRED_TOOLS_ENABLED",
         summary="Enable deferred (lazily-loaded) tool schemas.",
     ),
+    # --- Vision sidecar (string overrides) -----------------------------------
+    FlagSpec(
+        name="MAGI_VISION_MODEL",
+        default="",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Vision-sidecar model override for image_understand (bare model id, "
+            "same semantics as MAGI_MODEL); unset keeps the main provider/model."
+        ),
+        kind="str",
+    ),
+    FlagSpec(
+        name="MAGI_VISION_PROVIDER",
+        default="",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Optional provider for MAGI_VISION_MODEL (anthropic|openai|gemini|"
+            "fireworks); unset inherits the main provider's credentials."
+        ),
+        kind="str",
+    ),
     # --- Coding harness -----------------------------------------------------
     # Profile-aware default-ON (env._runtime_feature_enabled): ON in the full
     # runtime profile, OFF under MAGI_RUNTIME_PROFILE=safe|eval.
