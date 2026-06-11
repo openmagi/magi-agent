@@ -200,3 +200,79 @@ class AfterAgentCtx:
         self.session = session
         if capabilities is not None:
             self.capabilities = capabilities
+
+
+@dataclass(frozen=True)
+class ValidatorVerdict:
+    ref: str
+    passed: bool
+    detail: str | None = None
+
+
+class ToolCtx:
+    """What a ``tool`` impl receives: read args + session, a progress sink."""
+
+    capabilities: frozenset[Capability] = frozenset({Capability.READ_SESSION})
+
+    def __init__(self, *, tool_name: str, tool_args: Mapping[str, Any],
+                 session: SessionReadView,
+                 emit_progress: Callable[[str], Any] | None = None,
+                 capabilities: frozenset[Capability] | None = None) -> None:
+        self.tool_name = tool_name
+        self.tool_args: Mapping[str, Any] = _ReadOnlyMapping(tool_args)
+        self.session = session
+        if capabilities is not None:
+            self.capabilities = capabilities
+        self._emit_progress = emit_progress
+
+    def progress(self, message: str) -> None:
+        if self._emit_progress is not None:
+            self._emit_progress(message)
+
+
+class ValidatorCtx:
+    """A ``validator`` impl reads the produced artifact and emits a verdict.
+
+    Phase 3 wires ``verdict()`` into ``cli/engine.py``'s live ``required_validators``
+    enforce path. Phase 2 keeps it self-contained (no verifier_bus coupling)."""
+
+    capabilities: frozenset[Capability] = frozenset(
+        {Capability.READ_SESSION, Capability.EMIT_VALIDATION}
+    )
+
+    def __init__(self, *, ref: str, artifact: Mapping[str, Any],
+                 session: SessionReadView,
+                 capabilities: frozenset[Capability] | None = None) -> None:
+        self.ref = ref
+        self.artifact: Mapping[str, Any] = _ReadOnlyMapping(artifact)
+        self.session = session
+        if capabilities is not None:
+            self.capabilities = capabilities
+        self._verdict: ValidatorVerdict | None = None
+
+    def emit(self, *, passed: bool, detail: str | None = None) -> None:
+        self._verdict = ValidatorVerdict(ref=self.ref, passed=passed, detail=detail)
+
+    def verdict(self) -> ValidatorVerdict | None:
+        return self._verdict
+
+
+class EvidenceProducerCtx:
+    """An ``evidence_producer`` impl reads session and emits evidence records."""
+
+    capabilities: frozenset[Capability] = frozenset(
+        {Capability.READ_SESSION, Capability.EMIT_EVIDENCE}
+    )
+
+    def __init__(self, *, session: SessionReadView,
+                 capabilities: frozenset[Capability] | None = None) -> None:
+        self.session = session
+        if capabilities is not None:
+            self.capabilities = capabilities
+        self._emitted: list[dict[str, Any]] = []
+
+    def emit(self, *, evidence_type: str, payload: Mapping[str, Any]) -> None:
+        self._emitted.append({"evidence_type": evidence_type, "payload": dict(payload)})
+
+    def emitted(self) -> tuple[dict[str, Any], ...]:
+        return tuple(self._emitted)
