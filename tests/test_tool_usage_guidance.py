@@ -56,3 +56,32 @@ def test_apply_is_fail_open(monkeypatch) -> None:
     )
     desc = "original"
     assert mod.apply_usage_guidance("WebSearch", desc, _ON) == desc
+
+
+def _build_named_tool(name: str):
+    from magi_agent.gates.gate5b_full_toolhost import _function_tool
+
+    async def invoke(tool_context: object | None = None) -> dict[str, object]:
+        return {}
+
+    return _function_tool(name, invoke)
+
+
+def test_function_tool_flag_off_docstring_unchanged(monkeypatch) -> None:
+    monkeypatch.delenv("MAGI_TOOL_USAGE_GUIDANCE_ENABLED", raising=False)
+    tool = _build_named_tool("WebSearch")
+    assert tool.func.__doc__ == "Gate 5B selected full toolhost WebSearch tool."
+
+
+def test_function_tool_flag_on_appends_guidance(monkeypatch) -> None:
+    monkeypatch.setenv("MAGI_TOOL_USAGE_GUIDANCE_ENABLED", "1")
+    tool = _build_named_tool("WebSearch")
+    doc = tool.func.__doc__ or ""
+    assert doc.startswith("Gate 5B selected full toolhost WebSearch tool.")
+    assert "Do NOT" in doc
+
+
+def test_function_tool_flag_on_unregistered_unchanged(monkeypatch) -> None:
+    monkeypatch.setenv("MAGI_TOOL_USAGE_GUIDANCE_ENABLED", "1")
+    tool = _build_named_tool("Clock")
+    assert tool.func.__doc__ == "Gate 5B selected full toolhost Clock tool."

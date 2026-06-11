@@ -2388,8 +2388,13 @@ def _function_tool(
     description: str | None = None,
     emits_public_events: bool = False,
 ) -> FunctionTool:
+    from magi_agent.gates.tool_usage_guidance import apply_usage_guidance  # noqa: PLC0415
+
     func.__name__ = name
-    func.__doc__ = description or f"Gate 5B selected full toolhost {name} tool."
+    base_description = description or f"Gate 5B selected full toolhost {name} tool."
+    # Default-OFF usage-guidance append; fail-open inside apply_usage_guidance
+    # so a registry problem can never break tool construction.
+    func.__doc__ = apply_usage_guidance(name, base_description)
     if emits_public_events:
         setattr(func, "_magi_gate5b_emits_public_events", True)
     tool = FunctionTool(func, require_confirmation=False)
