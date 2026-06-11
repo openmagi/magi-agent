@@ -59,3 +59,42 @@ def test_builders_fail_open(monkeypatch) -> None:
     assert action_discipline_examples_block(
         {"MAGI_PROMPT_EXAMPLES_ENABLED": "1"}
     ) == ""
+
+
+def test_cli_instruction_off_by_default(monkeypatch) -> None:
+    for name in (
+        "MAGI_PROMPT_EXAMPLES_ENABLED",
+        "MAGI_PROMPT_SEARCH_RULES_ENABLED",
+        "MAGI_PROMPT_REDFLAGS_ENABLED",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    from magi_agent.cli.tool_runtime import build_cli_instruction
+
+    prompt = build_cli_instruction(session_id="s")
+    assert "<action_discipline_examples>" not in prompt
+    assert "<search_decision>" not in prompt
+    assert "<red_flags>" not in prompt
+
+
+def test_cli_instruction_injects_enabled_blocks(monkeypatch) -> None:
+    monkeypatch.setenv("MAGI_PROMPT_EXAMPLES_ENABLED", "1")
+    monkeypatch.setenv("MAGI_PROMPT_REDFLAGS_ENABLED", "1")
+    monkeypatch.setenv("MAGI_PROMPT_SEARCH_RULES_ENABLED", "1")
+    monkeypatch.setenv("BRAVE_API_KEY", "k1")
+    monkeypatch.setenv("FIRECRAWL_API_KEY", "k2")
+    from magi_agent.cli.tool_runtime import build_cli_instruction
+
+    prompt = build_cli_instruction(session_id="s")
+    assert "<action_discipline_examples>" in prompt
+    assert "<search_decision>" in prompt
+    assert "<red_flags>" in prompt
+
+
+def test_cli_instruction_search_block_needs_keys(monkeypatch) -> None:
+    monkeypatch.setenv("MAGI_PROMPT_SEARCH_RULES_ENABLED", "1")
+    monkeypatch.delenv("BRAVE_API_KEY", raising=False)
+    monkeypatch.delenv("FIRECRAWL_API_KEY", raising=False)
+    from magi_agent.cli.tool_runtime import build_cli_instruction
+
+    prompt = build_cli_instruction(session_id="s")
+    assert "<search_decision>" not in prompt
