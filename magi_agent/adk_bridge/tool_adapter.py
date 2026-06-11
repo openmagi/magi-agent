@@ -84,6 +84,17 @@ def _json_schema_to_genai_schema(schema: dict[str, object]):
     required = schema.get("required")
     if isinstance(required, (list, tuple)):
         kwargs["required"] = [str(item) for item in required]
+    enum = schema.get("enum")
+    if (
+        isinstance(enum, (list, tuple))
+        and enum
+        and all(isinstance(item, str) for item in enum)
+    ):
+        # Dropping enum hides the valid values from the model, which then
+        # guesses formats (live: tau-bench "one way" vs "one_way"). Only
+        # string enums are valid on the typed Schema path; non-string enums
+        # are handled by the provider-repair passthrough.
+        kwargs["enum"] = list(enum)
     items = schema.get("items")
     if isinstance(items, dict):
         kwargs["items"] = _json_schema_to_genai_schema(items)
