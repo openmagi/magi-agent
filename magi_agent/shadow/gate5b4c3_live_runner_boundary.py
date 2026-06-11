@@ -97,7 +97,8 @@ _ALLOWED_RUNNER_KWARGS = ("agent", "app_name", "auto_create_session", "session_s
 _ALLOWED_RUN_ASYNC_KWARGS = ("new_message", "run_config", "session_id", "user_id")
 _MAX_MANUAL_TOOL_CONTINUATIONS = 4
 _MANUAL_TOOL_EVENT_LIMIT = 64
-_SELECTED_FULL_TOOLHOST_TEXT_EVENT_LIMIT = 512
+_DEFAULT_SELECTED_FULL_TOOLHOST_TEXT_EVENT_LIMIT = 2048
+_MAX_SELECTED_FULL_TOOLHOST_TEXT_EVENT_LIMIT = 8192
 _MAX_MANUAL_TOOL_RESULTS_BYTES = 8192
 _ERROR_REDACTION_RE = re.compile(
     r"(?:"
@@ -1684,7 +1685,16 @@ def _output_continuation_config_from_env() -> OutputContinuationConfig | None:
 
 def _stream_event_limit(*, selected_full_toolhost: bool) -> int:
     if selected_full_toolhost:
-        return _SELECTED_FULL_TOOLHOST_TEXT_EVENT_LIMIT
+        raw = os.environ.get("MAGI_SELECTED_FULL_TOOLHOST_TEXT_EVENT_LIMIT", "").strip()
+        if not raw:
+            return _DEFAULT_SELECTED_FULL_TOOLHOST_TEXT_EVENT_LIMIT
+        try:
+            parsed = int(raw)
+        except ValueError:
+            return _DEFAULT_SELECTED_FULL_TOOLHOST_TEXT_EVENT_LIMIT
+        if parsed < _MANUAL_TOOL_EVENT_LIMIT:
+            return _MANUAL_TOOL_EVENT_LIMIT
+        return min(parsed, _MAX_SELECTED_FULL_TOOLHOST_TEXT_EVENT_LIMIT)
     return _MANUAL_TOOL_EVENT_LIMIT
 
 

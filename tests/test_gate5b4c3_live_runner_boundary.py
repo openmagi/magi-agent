@@ -625,9 +625,9 @@ class _OutputContinuationRunner(_FakeRunner):
 class _LongSelectedTextRunner(_FakeRunner):
     async def run_async(self, **kwargs: object) -> object:
         type(self).run_kwargs = kwargs
-        for index in range(70):
-            suffix = " END_LONG_SMOKE" if index == 69 else ""
-            yield _FakeEvent(f"{index:02d}-segment{suffix} ")
+        for index in range(560):
+            suffix = " END_LONG_SMOKE" if index == 559 else ""
+            yield _FakeEvent(f"{index:03d}-segment{suffix} ")
 
 
 class _ModelDumpFunctionCallOnlyEvent:
@@ -1450,13 +1450,13 @@ def test_live_boundary_allows_long_selected_full_toolhost_text_past_tool_cap() -
 
     assert result.status == "completed"
     assert result.reason == "runner_completed"
-    assert result.event_count == 70
+    assert result.event_count == 560
     assert "END_LONG_SMOKE" in (result.output_text_internal or "")
     text_deltas = [
         event["delta"] for event in public_events if event.get("type") == "text_delta"
     ]
-    assert len(text_deltas) == 70
-    assert text_deltas[-1] == "69-segment END_LONG_SMOKE "
+    assert len(text_deltas) == 560
+    assert text_deltas[-1] == "559-segment END_LONG_SMOKE "
 
 
 def test_live_boundary_fails_closed_on_tool_policy_mismatch_before_adk_load() -> None:
