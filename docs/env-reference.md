@@ -53,6 +53,14 @@ Useful local toggles:
   profile defaults to `readonly`, forwarding non-mutating inspection tools.
   `none` keeps child turns text-only; `full` is reserved for explicitly trusted
   sandbox/permission deployments.
+- `MAGI_ANSWER_POLICY` (`abstain` | `commit`, default `abstain`) — best-effort
+  finalization policy consumed by
+  `magi_agent/runtime/best_effort_answer.py::finalize_answer`. Under `commit`,
+  a bounded run that ends with an empty/abstaining answer synthesizes one
+  best-effort answer from the gathered evidence (labeled with an uncertainty
+  note); the default `abstain` keeps honest "I don't know" behavior and is a
+  byte-identical pass-through. Unset/empty/unknown values fall back to
+  `abstain`. The GAIA benchmark harness opts into `commit`.
 
 <!-- BEGIN GENERATED FLAGS (scripts/generate_env_reference.py) -->
 ## Feature flags (auto-generated)
