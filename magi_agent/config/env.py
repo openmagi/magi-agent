@@ -344,6 +344,33 @@ def parse_output_continuation_env(env: Mapping[str, str]) -> OutputContinuationE
     )
 
 
+# Empty-response recovery wiring (R2, hermes mechanism 3). One flag covers two
+# behaviors that together mean "never end a turn with nothing": (a) a bounded
+# corrective re-invocation when tools ran but the model returned no text, and
+# (b) one grace re-invocation ("produce your final answer now") after the
+# per-turn event budget is exhausted. Default OFF with a STRICT truthy opt-in
+# ("1"/"true"/"yes"/"on") — deliberately NOT the runtime-profile default-ON
+# convention, because the corrective messages persist in session history.
+EMPTY_RESPONSE_RECOVERY_ENABLED_ENV = "MAGI_EMPTY_RESPONSE_RECOVERY_ENABLED"
+EMPTY_RESPONSE_MAX_RECOVERIES_ENV = "MAGI_EMPTY_RESPONSE_MAX_RECOVERIES"
+
+
+@dataclass(frozen=True)
+class EmptyResponseRecoveryEnv:
+    enabled: bool = False
+    max_recoveries: int = 1
+
+
+def parse_empty_response_recovery_env(
+    env: Mapping[str, str],
+) -> EmptyResponseRecoveryEnv:
+    enabled = _is_true(env.get(EMPTY_RESPONSE_RECOVERY_ENABLED_ENV))
+    max_recoveries = _int_env(env, EMPTY_RESPONSE_MAX_RECOVERIES_ENV, 1)
+    if max_recoveries < 1:
+        raise RuntimeEnvError(f"{EMPTY_RESPONSE_MAX_RECOVERIES_ENV} must be >= 1")
+    return EmptyResponseRecoveryEnv(enabled=enabled, max_recoveries=max_recoveries)
+
+
 # Single source of truth for the live context-compaction activation flags.
 # PR13: when enabled, an ADK ``before_model_callback`` plugin reduces the
 # outgoing ``llm_request.contents`` to the recent tail (reusing
