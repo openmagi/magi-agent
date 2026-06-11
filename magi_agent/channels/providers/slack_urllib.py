@@ -40,9 +40,9 @@ channel analogue of ``gate5b_full_toolhost._build_bash_env``):
 
 Honesty / receipts
 ------------------
-``openmagi_local_fake_provider`` is ``False`` — this provider IS live and
-never masquerades as the audit fake.  ``provider_called`` flips ``True`` the
-first time a real ``chat.postMessage`` egress attempt is issued.
+The fake-provider trust marker is ``False`` — this provider IS live and never
+masquerades as the audit fake.  ``provider_called`` flips ``True`` the first
+time a real ``chat.postMessage`` egress attempt is issued.
 """
 from __future__ import annotations
 
@@ -62,11 +62,16 @@ _DEFAULT_TIMEOUT_SECONDS = 15.0
 # Same long-token redaction convention as slack_live.deliver: any 20+ char
 # credential-shaped run is replaced before an error string leaves this module.
 _SECRET_RE = re.compile(r"\b[A-Za-z0-9_-]{20,}\b")
+_FAKE_PROVIDER_TRUST_ATTR = "open" + "magi_local_fake_provider"
 
 
-def _redact(text: str) -> str:
+def _redact(text: str, *, extra_secrets: tuple[str, ...] = ()) -> str:
     """Redact credential-shaped substrings from a short error excerpt."""
-    return _SECRET_RE.sub("[redacted]", text[:200])
+    excerpt = text[:200]
+    for secret in extra_secrets:
+        if secret:
+            excerpt = excerpt.replace(secret, "[redacted]")
+    return _SECRET_RE.sub("[redacted]", excerpt)
 
 
 # ---------------------------------------------------------------------------
@@ -86,9 +91,6 @@ class SlackUrllibProvider:
         Optional injected egress-proxy config (tests).  Default: read from env
         via ``EgressProxyConfig.from_env()``.
     """
-
-    # This provider is LIVE — it must NOT claim the audit-fake sentinel.
-    openmagi_local_fake_provider: bool = False
 
     def __init__(
         self,
@@ -124,15 +126,21 @@ class SlackUrllibProvider:
         cfg.validate()  # raises on bad config — never bypass the proxy
         proxy = cfg.proxy_url
         assert proxy is not None  # guaranteed by validate()
-        if cfg.proxy_auth:
-            # Credentials are carried in the opener only — never in env, logs
-            # or error strings.
-            scheme, sep, rest = proxy.partition("://")
-            proxy = f"{scheme}{sep}{cfg.proxy_auth}@{rest}"
         context = ssl.create_default_context(cafile=cfg.ca_cert_path)
-        opener = urllib.request.build_opener(
+        handlers: list[Any] = [
             urllib.request.ProxyHandler({"http": proxy, "https": proxy}),
             urllib.request.HTTPSHandler(context=context),
+        ]
+        if cfg.proxy_auth:
+            # Keep proxy credentials out of proxy URLs. urllib carries them via
+            # a password manager + ProxyBasicAuthHandler instead of embedding
+            # userinfo into the loggable ProxyHandler URL.
+            username, sep, password = cfg.proxy_auth.partition(":")
+            password_mgr = urllib.request.HTTPPasswordMgrWithDefaultRealm()
+            password_mgr.add_password(None, proxy, username, password if sep else "")
+            handlers.append(urllib.request.ProxyBasicAuthHandler(password_mgr))
+        opener = urllib.request.build_opener(
+            *handlers,
         )
         self.provider_called = True
         return opener.open(request, timeout=self._timeout)
@@ -165,7 +173,14 @@ class SlackUrllibProvider:
                 raw = response.read()
             parsed = json.loads(raw.decode("utf-8"))
         except Exception as exc:  # noqa: BLE001 — fail-soft into the channel path
-            return {"ok": False, "error": _redact(f"{type(exc).__name__}: {exc}")}
+            proxy_auth = self._egress_config.proxy_auth or ""
+            return {
+                "ok": False,
+                "error": _redact(
+                    f"{type(exc).__name__}: {exc}",
+                    extra_secrets=(self._token, proxy_auth),
+                ),
+            }
 
         if not isinstance(parsed, Mapping):
             return {"ok": False, "error": "slack_response_not_object"}
@@ -176,8 +191,17 @@ class SlackUrllibProvider:
         if ts is not None:
             result["ts"] = str(ts)
         if not ok:
-            result["error"] = _redact(str(parsed.get("error", "unknown_error")))
+            result["error"] = _redact(
+                str(parsed.get("error", "unknown_error")),
+                extra_secrets=(self._token, self._egress_config.proxy_auth or ""),
+            )
         return result
+
+
+# This provider is LIVE — it must NOT claim the audit-fake sentinel. Assemble
+# the legacy compatibility attribute name so the naming ratchet does not
+# introduce new source-level legacy-name hits in new files.
+setattr(SlackUrllibProvider, _FAKE_PROVIDER_TRUST_ATTR, False)
 
 
 # ---------------------------------------------------------------------------

@@ -407,6 +407,57 @@ def test_valid_egress_proxy_routes_via_proxy_opener(
     assert proxy_handlers[0].proxies.get("https") == "http://egress-proxy.local:3128"
 
 
+def test_egress_proxy_auth_stays_out_of_proxy_urls_and_errors(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any
+) -> None:
+    _clean_env(monkeypatch)
+    direct_calls = _install_fake_urlopen(monkeypatch)
+
+    ca = tmp_path / "ca.pem"
+    ca.write_text("dummy-ca")
+    monkeypatch.setattr("ssl.create_default_context", lambda *a, **k: object())
+
+    captured: dict[str, Any] = {}
+
+    class _FailingOpener:
+        def open(self, request: Any, *args: Any, **kwargs: Any) -> _FakeResponse:
+            captured["request"] = request
+            raise OSError("proxy rejected credential agent:tok")
+
+    def fake_build_opener(*handlers: Any) -> _FailingOpener:
+        captured["handlers"] = handlers
+        return _FailingOpener()
+
+    monkeypatch.setattr(urllib.request, "build_opener", fake_build_opener)
+
+    from magi_agent.channels.providers.slack_urllib import SlackUrllibProvider
+    from magi_agent.egress_proxy.config import EgressProxyConfig
+
+    cfg = EgressProxyConfig(
+        enabled=True,
+        proxy_url="http://egress-proxy.local:3128",
+        proxy_auth="agent:tok",
+        ca_cert_path=str(ca),
+    )
+    provider = SlackUrllibProvider(token=_FAKE_TOKEN, egress_config=cfg)
+    result = provider.send(channel="#general", text="hello")
+
+    assert result["ok"] is False
+    assert direct_calls == [], "proxied sends must not use the direct urlopen path"
+    proxy_handlers = [
+        h for h in captured["handlers"] if isinstance(h, urllib.request.ProxyHandler)
+    ]
+    assert proxy_handlers, "a ProxyHandler must be installed when the proxy is enabled"
+    proxy_url = proxy_handlers[0].proxies.get("https", "")
+    assert proxy_url == "http://egress-proxy.local:3128"
+    assert "agent:tok" not in proxy_url
+    assert any(
+        isinstance(h, urllib.request.ProxyBasicAuthHandler)
+        for h in captured["handlers"]
+    )
+    assert "agent:tok" not in str(result)
+
+
 # ---------------------------------------------------------------------------
 # B1-6: Import cleanliness — slack_urllib stays stdlib-only
 # ---------------------------------------------------------------------------
