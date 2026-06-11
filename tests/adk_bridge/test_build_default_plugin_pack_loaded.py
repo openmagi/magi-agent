@@ -64,3 +64,47 @@ def test_build_default_plugin_no_arg_has_no_constraint_control_via_packs() -> No
     assert not any(
         isinstance(c, GaConstraintReinjectionControl) for c in plugin._p._controls
     )
+
+
+def test_disk_user_control_plane_pack_loads_in_parallel_with_first_party(
+    tmp_path, monkeypatch
+) -> None:
+    """The strongest §1 keystone proof: a real on-disk user ``control_plane`` pack
+    loads through the IDENTICAL loader path as the bundled first-party pack — not
+    via ``extra_controls``, but via discovery — and registers alongside it with no
+    first-party privilege."""
+    from pathlib import Path
+
+    from magi_agent.packs.discovery import _bundled_firstparty_base
+    from magi_agent.packs.registries import build_control_plane_from_packs
+
+    user_root = tmp_path / "packs"
+    pack_dir = user_root / "user_cp"
+    pack_dir.mkdir(parents=True)
+    (pack_dir / "__init__.py").write_text("")
+    (pack_dir / "impl.py").write_text(
+        "from magi_agent.adk_bridge.control_plane import BaseLoopControl\n"
+        "class UserParallelControl(BaseLoopControl):\n"
+        "    name = 'user.parallel.control'\n"
+        "    async def on_before_model(self, *, callback_context, llm_request):\n"
+        "        return None\n"
+        "def provide(ctx):\n"
+        "    ctx.register(UserParallelControl())\n"
+    )
+    (pack_dir / "pack.toml").write_text(
+        'packId = "user.control-plane-extra"\n'
+        'displayName = "user cp extra"\nversion = "0.0.1"\n\n'
+        '[[provides]]\ntype = "control_plane"\n'
+        'ref = "control_plane:user-extra@1"\n'
+        'impl = "user_cp.impl:provide"\ngatePosition = "after"\n'
+    )
+    monkeypatch.syspath_prepend(str(user_root))
+    monkeypatch.setenv("MAGI_CONFIG", str(tmp_path / "config.toml"))
+
+    bases = [_bundled_firstparty_base(), Path(str(user_root))]
+    plane = build_control_plane_from_packs(
+        bases=bases, os_environ={"MAGI_LOOP_GUARD_ENABLED": "1"}
+    )
+    names = _names(plane)
+    assert any("resilience" in n.lower() or "loop" in n.lower() for n in names), names
+    assert "user.parallel.control" in names, names
