@@ -6,6 +6,10 @@ set -uo pipefail
 
 cd /testbed || { echo "no /testbed" >&2; exit 3; }
 
+# One-shot eval profile + deadline visibility (budget enforced by `timeout` below).
+export MAGI_RUNTIME_PROFILE=eval
+export MAGI_EVAL_DEADLINE_SECONDS="${MAGI_TIMEOUT_SECONDS:-1800}"
+
 # Clean any image-baked test edits; pin to base commit. A failure here must not
 # silently run the agent on the wrong tree — log and skip (batch-safe exit 0).
 if ! git reset --hard "${BASE_COMMIT}" >/dev/null 2>&1; then
