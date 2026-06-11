@@ -48,6 +48,7 @@ from magi_agent.cli.contracts import CommandRegistry, PromptSink
 from magi_agent.cli.engine import (
     MagiEngineDriver,
     RunnerPolicyAssembly,
+    build_empty_response_recovery_config,
     build_engine_recovery_policy,
     build_output_continuation_config,
 )
@@ -240,6 +241,10 @@ def build_headless_runtime(
         runner=effective_runner,
         recovery=build_engine_recovery_policy(),
         output_continuation=build_output_continuation_config(),
+        # R2 (hermes mechanism 3): empty-response recovery + budget grace.
+        # Default OFF (MAGI_EMPTY_RESPONSE_RECOVERY_ENABLED, strict truthy
+        # opt-in) → build returns None → engine control flow is byte-identical.
+        empty_response_recovery=build_empty_response_recovery_config(),
         runner_policy_assembly=_build_runner_policy_assembly(
             runner=effective_runner,
             model=model,
