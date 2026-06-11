@@ -1,10 +1,55 @@
 from __future__ import annotations
 
 import uuid
+from collections.abc import Mapping
 
 from magi_agent.plugins.native._common import digest, ok_result
 from magi_agent.tools.context import ToolContext
-from magi_agent.tools.result import ToolResult
+from magi_agent.tools.result import ToolResult, ToolStatus
+
+
+def _spawn_agent_result(
+    status: ToolStatus,
+    output: Mapping[str, object],
+    *,
+    error_code: str | None = None,
+) -> ToolResult:
+    safe_output = dict(output)
+    output_digest = digest(safe_output)
+    metadata: dict[str, object] = {
+        "toolName": "SpawnAgent",
+        "handler": "first_party_native_local",
+        "outputDigest": output_digest,
+    }
+    if error_code:
+        metadata["reason"] = error_code
+    return ToolResult(
+        status=status,
+        output=safe_output,
+        llmOutput=safe_output,
+        transcriptOutput={
+            "toolName": "SpawnAgent",
+            "outputDigest": output_digest,
+        },
+        errorCode=error_code,
+        errorMessage=error_code,
+        metadata=metadata,
+    )
+
+
+def _child_result_status_and_reason(result: object) -> tuple[ToolStatus, str | None, str]:
+    envelope = getattr(result, "envelope", None)
+    envelope_status = str(getattr(envelope, "status", "") or "")
+    boundary_status = str(getattr(result, "status", "") or "blocked")
+    boundary_error = getattr(result, "error_code", None)
+    summary = str(getattr(envelope, "summary", "") or "")
+
+    if boundary_status == "ok" and envelope_status in {"", "completed"}:
+        return "ok", None, "ok"
+    if boundary_status == "error" or envelope_status == "failed":
+        return "error", str(boundary_error or "live_child_runner_error"), "error"
+    reason = str(boundary_error or summary or "child_runner_blocked")
+    return "blocked", reason, "blocked"
 
 
 async def spawn_agent(arguments: dict[str, object], context: ToolContext) -> ToolResult:
@@ -41,7 +86,11 @@ async def spawn_agent(arguments: dict[str, object], context: ToolContext) -> Too
             "spawnDepth": context.spawn_depth,
             "liveChildRunnerAttached": False,
         }
-        return ok_result("SpawnAgent", output)
+        return _spawn_agent_result(
+            "blocked",
+            output,
+            error_code="live_child_runner_disabled",
+        )
 
     # --- LIVE path (gate ON): route through real child runner -----------------
     # All imports of runner/boundary/config types are LAZY (inside this function
@@ -58,7 +107,7 @@ async def spawn_agent(arguments: dict[str, object], context: ToolContext) -> Too
     # 3. Build ChildRunnerConfig with live gate ON.
     # 4. await boundary.run(request) on the dispatch event loop.
     # 5. Project the sanitised result envelope into the ToolResult output.
-    # Any exception on the live path falls back to a blocked/ok result (never
+    # Any exception on the live path falls back to a blocked ToolResult (never
     # raises out of spawn_agent).
     #
     # NOTE (agents-counter): a single spawn_agent call spawns exactly one child,
@@ -164,10 +213,10 @@ async def spawn_agent(arguments: dict[str, object], context: ToolContext) -> Too
         # Project the sanitised envelope into the output payload.
         envelope = result.envelope
         summary = envelope.summary if envelope is not None else ""
-        status = result.status if result.status else "blocked"
+        tool_status, error_code, output_status = _child_result_status_and_reason(result)
 
         output = {
-            "status": status,
+            "status": output_status,
             "persona": persona,
             "promptDigest": digest(prompt),
             "spawnDepth": context.spawn_depth,
@@ -175,7 +224,7 @@ async def spawn_agent(arguments: dict[str, object], context: ToolContext) -> Too
             # Sanitised summary from the envelope (already redacted by boundary).
             "summary": summary,
         }
-        return ok_result("SpawnAgent", output)
+        return _spawn_agent_result(tool_status, output, error_code=error_code)
 
     except Exception:  # noqa: BLE001 — NEVER raise out of spawn_agent
         # Any failure on the live path (missing key, unknown route, event-loop
@@ -189,7 +238,11 @@ async def spawn_agent(arguments: dict[str, object], context: ToolContext) -> Too
             "spawnDepth": context.spawn_depth,
             "liveChildRunnerAttached": False,
         }
-        return ok_result("SpawnAgent", fallback_output)
+        return _spawn_agent_result(
+            "blocked",
+            fallback_output,
+            error_code="live_child_runner_attach_failed",
+        )
 
 
 def spawn_worktree_apply(arguments: dict[str, object], context: ToolContext) -> ToolResult:

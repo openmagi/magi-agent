@@ -769,6 +769,43 @@ def test_event_bridge_marks_error_function_response_as_error() -> None:
     assert projection.transcript_entries[0].is_error is True
 
 
+def test_event_bridge_marks_blocked_tool_result_response_as_error() -> None:
+    bridge = OpenMagiEventBridge()
+    event = Event(
+        id="event-blocked-tool-result",
+        author="tool",
+        content=types.Content(
+            role="tool",
+            parts=[
+                types.Part(
+                    function_response=types.FunctionResponse(
+                        id="tool-blocked",
+                        name="SpawnAgent",
+                        response={
+                            "status": "blocked",
+                            "output": {
+                                "status": "blocked",
+                                "liveChildRunnerAttached": False,
+                                "summary": "child_provider_key_missing",
+                            },
+                            "errorCode": "child_provider_key_missing",
+                            "errorMessage": "child_provider_key_missing",
+                        },
+                    )
+                )
+            ],
+        ),
+        invocation_id="turn-1",
+    )
+
+    projection = bridge.project_adk_event(event, turn_id="turn-1")
+
+    assert projection.agent_events[0]["status"] == "error"
+    assert projection.transcript_entries[0].status == "error"
+    assert projection.transcript_entries[0].is_error is True
+    assert projection.normalized_events[0].type == "tool.call.failed"
+
+
 def test_event_bridge_projects_partial_text_to_agent_and_legacy_deltas() -> None:
     bridge = OpenMagiEventBridge()
 

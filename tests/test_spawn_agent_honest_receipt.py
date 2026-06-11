@@ -10,10 +10,10 @@ though nothing happened:
 
 This PR makes those receipts *honest*:
 
-- gate-OFF ``spawn_agent`` → ``status="not_attached"`` +
-  ``reason="live_child_runner_disabled"`` + an activation hint, while preserving
-  every pre-existing key (``persona``/``promptDigest``/``spawnDepth``/
-  ``liveChildRunnerAttached``).
+- gate-OFF ``spawn_agent`` → top-level ``ToolResult.status="blocked"`` with
+  output ``status="not_attached"`` + ``reason="live_child_runner_disabled"`` +
+  an activation hint, while preserving every pre-existing key
+  (``persona``/``promptDigest``/``spawnDepth``/``liveChildRunnerAttached``).
 - ``spawn_worktree_apply`` → ``status="unimplemented"`` + a ``reason``, while
   preserving ``patchDigest``/``worktreeMutationAttached``.
 
@@ -51,7 +51,8 @@ def test_spawn_agent_gate_off_status_is_honest_not_attached(monkeypatch) -> None
 
     result = asyncio.run(spawn_agent({"prompt": "do it", "persona": "researcher"}, _context()))
 
-    assert result.status == "ok"
+    assert result.status == "blocked"
+    assert result.error_code == "live_child_runner_disabled"
     output = result.output
 
     # Honest status — NOT a success-implying "queued_locally".
@@ -76,6 +77,9 @@ def test_spawn_agent_gate_off_preserves_legacy_keys(monkeypatch) -> None:
     result = asyncio.run(spawn_agent({"prompt": "Hello world", "persona": "tester"}, _context(spawnDepth=2)))
     output = result.output
 
+    assert result.status == "blocked"
+    assert result.error_code == "live_child_runner_disabled"
+
     # Every pre-existing key/value is preserved (only the status *literal* changed
     # and reason/hint were added).
     assert output["persona"] == "tester"
@@ -94,6 +98,8 @@ def test_spawn_agent_kill_switch_also_honest(monkeypatch) -> None:
     result = asyncio.run(spawn_agent({"prompt": "x", "persona": "tester"}, _context()))
     output = result.output
 
+    assert result.status == "blocked"
+    assert result.error_code == "live_child_runner_disabled"
     assert output["status"] == "not_attached"
     assert output["reason"] == "live_child_runner_disabled"
     assert output["liveChildRunnerAttached"] is False
