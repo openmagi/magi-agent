@@ -15,3 +15,6 @@ apps/web/node_modules/
 apps/web/dist/
 apps/web/.next/
 *.tsbuildinfo
+
+# Local runtime observability artifacts (written by magi processes at runtime).
+.openmagi/
