@@ -293,6 +293,14 @@ FLAGS: tuple[FlagSpec, ...] = (
         "MAGI_EGRESS_GATE_ENABLED",
         summary="Run the evidence-grounded critic gate before chat egress.",
     ),
+    _b(
+        "MAGI_GA_DELIVERABLE_GATE_ENABLED",
+        stage="stage2",
+        summary=(
+            "Enable the GA artifact-deliverable pre-final gate; strict "
+            "default-OFF and inert unless explicitly set."
+        ),
+    ),
     _pb(
         "MAGI_SELF_INTROSPECTION_ENABLED",
         summary="Advertise the InspectSelfEvidence tool (default-ON full profile).",

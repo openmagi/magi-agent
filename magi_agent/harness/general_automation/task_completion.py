@@ -20,10 +20,17 @@ The verifier never blocks terminally and never touches the protected
 *repair* (re-enter the loop with a synthetic "you still owe X" user turn),
 bounded by :data:`COMPLETION_REPAIR_LIMIT` attempts before falling through to a
 finalise with an audit event.
+
+A4 promotion: ``handle_stop_reason`` has no production caller (the live turn
+loop is ADK's), so :func:`completion_repair_decision` alone never gated a real
+run. The deliverable check is therefore ALSO consumed by the LIVE pre-final
+evidence gate in ``cli.engine`` via :func:`missing_deliverable_labels` /
+:func:`required_deliverable_evidence_from_labels`, behind the strict
+default-OFF ``MAGI_GA_DELIVERABLE_GATE_ENABLED`` flag.
 """
 from __future__ import annotations
 
-from collections.abc import Mapping, MutableSequence, Sequence
+from collections.abc import Iterable, Mapping, MutableSequence, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol
@@ -39,44 +46,39 @@ COMPLETION_REPAIR_LIMIT = 3
 
 #: Public label for the artifact deliverable requirement.
 _ARTIFACT_REF_LABEL = "artifactRef"
-#: Public label for the snapshot deliverable requirement.
-_SNAPSHOT_REF_LABEL = "snapshotRef"
 
 #: Ledger payload / metadata keys that satisfy the artifact requirement.
 #: Written by the live flow via metadata["localArtifactReceipt"]["artifactRef"]
 #: in the spreadsheet.write tool handler.
-_ARTIFACT_KEYS: frozenset[str] = frozenset({"artifactId", "artifactRef"})
-#: Ledger payload / metadata keys that satisfy the snapshot requirement.
-#: Expected to be written by SpreadsheetWriteEvidence.sourceSnapshotRef once
-#: a production path is wired (no non-test caller exists yet — see
-#: ENFORCE_SNAPSHOT_REQUIREMENT below).
-_SNAPSHOT_KEYS: frozenset[str] = frozenset(
-    {"snapshotRef", "sourceSnapshotRef", "snapshotId"}
-)
+_ARTIFACT_SCALAR_KEYS: frozenset[str] = frozenset({"artifactId", "artifactRef"})
+_ARTIFACT_COLLECTION_KEYS: frozenset[str] = frozenset({"artifactRefs"})
+_ARTIFACT_KEYS: frozenset[str] = _ARTIFACT_SCALAR_KEYS | _ARTIFACT_COLLECTION_KEYS
 
-#: Flip to True once a production path writes a snapshot ref to the
-#: EvidenceLedger (later PR). Until then, requiring it would force every real
-#: write task into repair-exhaustion because SpreadsheetWriteEvidence.sourceSnapshotRef
-#: has no non-test caller.
-ENFORCE_SNAPSHOT_REQUIREMENT = False
+# NOTE (A4 promote-or-delete): the snapshot half of this verifier
+# (``ENFORCE_SNAPSHOT_REQUIREMENT`` / ``requires_snapshot_ref`` / snapshot key
+# scanning) was DELETED, not promoted. No first-party recipe evidence label
+# ever contained "snapshot" and no production path writes a snapshot ref into
+# any ledger this verifier reads (SpreadsheetWriteEvidence.sourceSnapshotRef
+# has no non-test caller), so the branch was unproducible dead plumbing.
+# Re-introduce it together with a real producer if one ever lands.
 
 
 @dataclass(frozen=True)
 class RequiredDeliverableEvidence:
     """The deliverable evidence an active contract requires before finalise.
 
-    Built from a contract's ``requires_artifact_ref`` / ``requires_snapshot_ref``
-    declarations via :func:`required_deliverable_evidence_for_contract`. When
-    both flags are ``False`` the requirement is empty and the completion gate is
-    inert.
+    Built from a contract's ``requires_artifact_ref`` declaration via
+    :func:`required_deliverable_evidence_for_contract` or from a policy
+    assembly's evidence labels via
+    :func:`required_deliverable_evidence_from_labels`. When the flag is
+    ``False`` the requirement is empty and the completion gate is inert.
     """
 
     requires_artifact_ref: bool = False
-    requires_snapshot_ref: bool = False
 
     def is_empty(self) -> bool:
         """Return True when no deliverable evidence is required."""
-        return not (self.requires_artifact_ref or self.requires_snapshot_ref)
+        return not self.requires_artifact_ref
 
 
 @dataclass(frozen=True)
@@ -109,7 +111,6 @@ class TaskCompletionVerdict:
 
 class _ContractWithRequiredEvidence(Protocol):
     requires_artifact_ref: bool
-    requires_snapshot_ref: bool
 
 
 def required_deliverable_evidence_for_contract(
@@ -117,14 +118,55 @@ def required_deliverable_evidence_for_contract(
 ) -> RequiredDeliverableEvidence:
     """Derive the required deliverable evidence set from an active contract.
 
-    Reads the contract's ``requires_artifact_ref`` / ``requires_snapshot_ref``
-    declarations (e.g. ``spreadsheet.write`` sets both). Contracts that declare
-    neither yield an empty requirement, which keeps the completion gate inert.
+    Reads the contract's ``requires_artifact_ref`` declaration (e.g.
+    ``spreadsheet.write`` sets it). Contracts that do not declare it yield an
+    empty requirement, which keeps the completion gate inert. The contract-level
+    ``requires_snapshot_ref`` schema field is intentionally NOT consumed here —
+    snapshot enforcement was deleted because nothing produces a snapshot ref
+    (see module note above).
     """
     return RequiredDeliverableEvidence(
         requires_artifact_ref=bool(getattr(contract, "requires_artifact_ref", False)),
-        requires_snapshot_ref=bool(getattr(contract, "requires_snapshot_ref", False)),
     )
+
+
+def required_deliverable_evidence_from_labels(
+    labels: Iterable[str],
+) -> RequiredDeliverableEvidence:
+    """Map policy-assembly evidence-requirement labels onto the requirement.
+
+    ``labels`` is the public evidence label vocabulary carried by a
+    ``RunnerPolicyAssembly`` (e.g. ``"artifact_delivery_ref"``,
+    ``"office_preview"``, ``"source_ledger"``). Any label mentioning
+    ``"artifact"`` requires an artifact deliverable receipt. Shared by
+    ``cli.real_runner`` (constraint-reminder control) and ``cli.engine``
+    (flag-gated pre-final deliverable gate) so the mapping cannot drift.
+    """
+    return RequiredDeliverableEvidence(
+        requires_artifact_ref=any("artifact" in label for label in labels),
+    )
+
+
+def missing_deliverable_labels(
+    required: RequiredDeliverableEvidence,
+    entries: Iterable[object],
+) -> tuple[str, ...]:
+    """Return the still-owed deliverable labels over generic evidence entries.
+
+    A pure, deterministic read. ``entries`` may be ledger entries (objects with
+    ``payload`` / ``metadata`` mappings), local tool evidence projections
+    (plain mappings), or pydantic records (``model_dump`` fallback). An entry
+    satisfies the artifact requirement when a non-blank ``artifactRef`` /
+    ``artifactId`` value is present anywhere within the bounded nesting depth.
+    """
+    if required.is_empty():
+        return ()
+    present: set[str] = set()
+    for entry in entries:
+        _collect_entry_keys(entry, present)
+    if required.requires_artifact_ref and not (present & _ARTIFACT_KEYS):
+        return (_ARTIFACT_REF_LABEL,)
+    return ()
 
 
 class TaskCompletionVerifier:
@@ -143,20 +185,7 @@ class TaskCompletionVerifier:
         ledger: EvidenceLedger,
         required: RequiredDeliverableEvidence,
     ) -> TaskCompletionVerdict:
-        if required.is_empty():
-            return TaskCompletionVerdict(status="pass")
-
-        present = _present_deliverable_keys(ledger)
-        missing: list[str] = []
-        if required.requires_artifact_ref and not (present & _ARTIFACT_KEYS):
-            missing.append(_ARTIFACT_REF_LABEL)
-        if (
-            ENFORCE_SNAPSHOT_REQUIREMENT
-            and required.requires_snapshot_ref
-            and not (present & _SNAPSHOT_KEYS)
-        ):
-            missing.append(_SNAPSHOT_REF_LABEL)
-
+        missing = missing_deliverable_labels(required, ledger.entries)
         if not missing:
             return TaskCompletionVerdict(status="pass")
 
@@ -280,12 +309,30 @@ def _normalize_role(agent_role: str) -> str:
     return agent_role.strip().casefold().replace("-", "_")
 
 
-def _present_deliverable_keys(ledger: EvidenceLedger) -> frozenset[str]:
-    present: set[str] = set()
-    for entry in ledger.entries:
-        _collect_keys(entry.payload, present)
-        _collect_keys(entry.metadata, present)
-    return frozenset(present)
+def _collect_entry_keys(entry: object, present: set[str]) -> None:
+    if isinstance(entry, Mapping):
+        _collect_keys(entry, present)
+        return
+    scanned = False
+    present_before = len(present)
+    for attr in ("payload", "metadata"):
+        value = getattr(entry, attr, None)
+        if isinstance(value, Mapping):
+            scanned = True
+            _collect_keys(value, present)
+    if scanned and len(present) > present_before:
+        return
+    model_dump = getattr(entry, "model_dump", None)
+    if callable(model_dump):
+        try:
+            dumped = model_dump(by_alias=True, mode="python", warnings=False)
+        except Exception:
+            try:
+                dumped = model_dump()
+            except Exception:
+                return
+        if isinstance(dumped, Mapping):
+            _collect_keys(dumped, present)
 
 
 def _collect_keys(
@@ -294,11 +341,22 @@ def _collect_keys(
     if depth > 6:
         return
     for key, value in mapping.items():
-        if key in _ARTIFACT_KEYS or key in _SNAPSHOT_KEYS:
+        if key in _ARTIFACT_SCALAR_KEYS:
             if isinstance(value, str) and value.strip():
+                present.add(key)
+        elif key in _ARTIFACT_COLLECTION_KEYS:
+            if _contains_nonblank_artifact_ref(value):
                 present.add(key)
         elif isinstance(value, Mapping):
             _collect_keys(value, present, depth + 1)
+
+
+def _contains_nonblank_artifact_ref(value: object) -> bool:
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, Sequence) and not isinstance(value, str | bytes | bytearray):
+        return any(isinstance(item, str) and item.strip() for item in value)
+    return False
 
 
 def _build_repair_message(missing: tuple[str, ...]) -> str:
@@ -312,10 +370,11 @@ def _build_repair_message(missing: tuple[str, ...]) -> str:
 
 __all__ = [
     "COMPLETION_REPAIR_LIMIT",
-    "ENFORCE_SNAPSHOT_REQUIREMENT",
     "RequiredDeliverableEvidence",
     "TaskCompletionVerdict",
     "TaskCompletionVerifier",
     "completion_repair_decision",
+    "missing_deliverable_labels",
     "required_deliverable_evidence_for_contract",
+    "required_deliverable_evidence_from_labels",
 ]
