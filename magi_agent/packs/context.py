@@ -347,6 +347,36 @@ class CallbackProvideContext:
     register: Callable[[Any, Any], None]
 
 
+@dataclass(frozen=True)
+class ControlPlaneProvideContext:
+    """D5 typed context a ``control_plane`` impl receives at registration time.
+
+    A ``control_plane`` provider impl assembles whatever ``LoopControl``s it
+    declares (env-gated, with the runtime collaborators below) and registers each
+    via ``register``. First-party and user ``control_plane`` packs receive the
+    IDENTICAL object — no first-party-only handle (§1 no privilege). The bundled
+    first-party pack delegates to ``build_default_plane`` (the exact legacy
+    env-gated assembly) so the migration is a move, not a rewrite. A user pack can
+    author its own controls and read the same ``env`` to gate them.
+
+    Fields beyond ``register`` are the same collaborators ``build_default_plane``
+    accepts; they are ``None`` unless the live runner injects them (e.g. GA
+    receipts/contract, self-review fork-runner/sink/config). They are read-only
+    inputs the provider may pass through to a control it builds.
+    """
+
+    register: Callable[[Any], None]
+    env: Mapping[str, str] = field(default_factory=dict)
+    general_automation_receipts: Any | None = None
+    contract_required: Any | None = None
+    agent_role: str = "general"
+    self_review_fork_runner: Any | None = None
+    self_review_candidate_sink: Any | None = None
+    self_review_config: Any | None = None
+    self_review_now: Any | None = None
+    self_review_scheduler: Any | None = None
+
+
 # ---------------------------------------------------------------------------
 # Phase 5 (S-0): shared control-plane seam surface.
 #

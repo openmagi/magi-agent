@@ -1365,6 +1365,7 @@ def build_default_plugin(
     self_review_config: Any | None = None,
     self_review_now: datetime | None = None,
     self_review_scheduler: Callable[[Coroutine[Any, Any, None]], None] | None = None,
+    extra_controls: "list[LoopControl] | None" = None,
 ) -> _ExtendedControlPlanePlugin:
     """Build the single ControlPlanePlugin for runner construction.
 
@@ -1372,12 +1373,25 @@ def build_default_plugin(
     extended callbacks (on_tool_error_callback, on_model_error_callback,
     after_run_callback) via generic fan-out over the plane's registered controls.
 
+    De-privileging keystone (Phase 6 / D7): the first-party controls are NOT
+    hand-assembled here. They are discovered+loaded from the bundled
+    ``control_plane`` pack (``magi_agent/firstparty/packs/control_plane_default``)
+    through the SAME pack loader a user ``~/.magi/packs`` control_plane pack uses.
+    That bundled pack's impl delegates to :func:`build_default_plane`, so the
+    controls, their env gates, their order, and their collaborators are
+    byte-identical to the legacy hand-assembly (the Phase-0 golden stays green).
+    ``extra_controls`` is the parallel injection seam: a user-supplied control (or
+    a user control_plane pack projected into a LoopControl) registers AFTER the
+    bundled ones with no first-party privilege.
+
     Optional ``general_automation_receipts`` / ``contract_required`` enable the GA
     constraint reminder control (see :func:`build_default_plane`). When omitted
     the plugin is byte-identical to ``main``.
     """
     env = os_environ if os_environ is not None else dict(os.environ)
-    plane = build_default_plane(
+    from magi_agent.packs.registries import build_control_plane_from_packs  # noqa: PLC0415
+
+    plane = build_control_plane_from_packs(
         os_environ=env,
         general_automation_receipts=general_automation_receipts,
         contract_required=contract_required,
@@ -1387,6 +1401,7 @@ def build_default_plugin(
         self_review_config=self_review_config,
         self_review_now=self_review_now,
         self_review_scheduler=self_review_scheduler,
+        extra_controls=extra_controls,
     )
     return _ExtendedControlPlanePlugin(plane)
 

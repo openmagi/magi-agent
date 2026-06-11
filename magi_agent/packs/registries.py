@@ -319,3 +319,84 @@ def load_into_registries(
     result = load_packs(enabled, sink)
     report = project_into_registries(result.primitives, registries)
     return registries, report
+
+
+def build_control_plane_from_packs(
+    bases: "list[Any] | None" = None,
+    *,
+    os_environ: "dict[str, str] | None" = None,
+    general_automation_receipts: Any | None = None,
+    contract_required: Any | None = None,
+    agent_role: str = "general",
+    self_review_fork_runner: Any | None = None,
+    self_review_candidate_sink: Any | None = None,
+    self_review_config: Any | None = None,
+    self_review_now: Any | None = None,
+    self_review_scheduler: Any | None = None,
+    extra_controls: "list[Any] | None" = None,
+) -> Any:
+    """Assemble a live ``ControlPlane`` from the loaded ``control_plane`` packs (D7
+    keystone). The de-privileging seam: first-party controls flow in from the
+    bundled ``control_plane`` pack through the SAME loader a user
+    ``~/.magi/packs`` control_plane pack uses — no hardcoded ``plane.register``.
+
+    Each loaded ``control_plane`` provider impl is invoked with a typed
+    :class:`ControlPlaneProvideContext` (carrying ``env`` + the same collaborators
+    ``build_default_plane`` accepts) and registers whatever ``LoopControl``s it
+    builds into the shared plane. Provider order is the loader's resolved
+    ``(priority, registration)`` order; last-wins override on a colliding
+    ``(type, ref)`` means a user pack that re-declares ``control_plane:default@1``
+    fully replaces the bundled one (§1 remove/override). ``extra_controls`` are
+    registered after the packs, in parallel, for direct in-process injection.
+
+    Returns a ``ControlPlane`` ready to wrap in ``_ExtendedControlPlanePlugin``.
+    """
+    from magi_agent.adk_bridge.control_plane import ControlPlane
+    from magi_agent.packs.context import ControlPlaneProvideContext
+    from magi_agent.packs.discovery import (
+        default_search_bases,
+        discover_pack_files,
+        load_packs_config,
+        resolve_enabled_packs,
+    )
+    from magi_agent.packs.loader import RecordingSink, load_packs
+
+    import os as _os
+
+    env = os_environ if os_environ is not None else dict(_os.environ)
+    search_bases = list(bases) if bases is not None else default_search_bases()
+
+    discovered = discover_pack_files(search_bases)
+    enabled = resolve_enabled_packs(discovered, load_packs_config())
+    sink = RecordingSink()
+    result = load_packs(enabled, sink)
+
+    # Resolve the registry-ordered control_plane provider impls. The keyed
+    # PrimitiveRegistry applies last-wins override + (priority, registration)
+    # ordering exactly as the runtime fan-out expects — identical to how the
+    # ContextDispatcher resolves control entries.
+    registry = PrimitiveRegistry()
+    sink_adapter = RegistryRegistrationSink(registry)
+    for primitive in result.primitives:
+        if primitive.type == "control_plane":
+            sink_adapter.register(primitive)
+
+    plane = ControlPlane()
+    provide_ctx = ControlPlaneProvideContext(
+        register=plane.register,
+        env=env,
+        general_automation_receipts=general_automation_receipts,
+        contract_required=contract_required,
+        agent_role=agent_role,
+        self_review_fork_runner=self_review_fork_runner,
+        self_review_candidate_sink=self_review_candidate_sink,
+        self_review_config=self_review_config,
+        self_review_now=self_review_now,
+        self_review_scheduler=self_review_scheduler,
+    )
+    for entry in registry.list(ptype=PrimitiveType.CONTROL_PLANE):
+        entry.impl(provide_ctx)
+
+    for control in extra_controls or ():
+        plane.register(control)
+    return plane
