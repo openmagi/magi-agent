@@ -263,6 +263,10 @@ def build_cli_model_runner(
         self_review_config=self_review_config,
         self_review_now=self_review_now,
         self_review_scheduler=self_review_scheduler,
+        # Default-OFF tool-synthesis nudge gate: flag + frontier-tier resolution
+        # happen inside build_default_plane; passing the label alone changes
+        # nothing while MAGI_TOOL_SYNTHESIS_NUDGE_ENABLED is unset.
+        tool_synthesis_model_label=config.litellm_model,
     )
     app = App(name=_app_identifier(app_name), root_agent=agent, plugins=[plane_plugin])
     runner = Runner(
