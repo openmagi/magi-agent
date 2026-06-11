@@ -15,6 +15,7 @@ from collections.abc import Iterator
 from collections.abc import Sequence
 
 from benchmarks.taubench.config import Config, FULL_CAPABILITY_FLAGS
+from benchmarks.taubench.reliability import ReliabilityConfig
 from magi_agent.cli.providers import _DEFAULT_MODEL
 
 _GATE_ENV = "MAGI_TAUBENCH_ENABLED"
@@ -70,7 +71,9 @@ def run_eval(
     trials: int = 4,
     config: Config = "full",
     profile: str | None = None,
+    model: str = DEFAULT_AGENT_MODEL,
     api_key: str | None = None,
+    reliability: ReliabilityConfig | None = None,
 ) -> None:
     """Run the τ-bench harness end-to-end and print a TauReport as JSON.
 
@@ -94,6 +97,8 @@ def run_eval(
         profile: optional task-profile hint forwarded to the runner as
             {"taskType": profile}; omitted uses the runner's default profile.
         api_key: Anthropic API key. Falls back to ANTHROPIC_API_KEY env var.
+        reliability: optional ReliabilityConfig enabling the v2 driver-boundary
+            levers (None = all levers off). Set programmatically, not via CLI.
     """
     ensure_enabled()
 
@@ -133,7 +138,10 @@ def run_eval(
     # runners are built/run, then restored — prevents leakage across run_eval calls.
     with _apply_flags(config):
         # Build the tau-bench env for the domain (user-sim uses gpt-4o).
-        env = get_env(domain, user_strategy="llm", user_model="gpt-4o", task_split="test")
+        # Pass an explicit task_index: tau_bench's env __init__ otherwise selects a
+        # task via random.randint(0, len(tasks)) — which is INCLUSIVE of len and
+        # occasionally IndexErrors. We only need len(tasks) here.
+        env = get_env(domain, user_strategy="llm", user_model="gpt-4o", task_split="test", user_provider="openai", task_index=0)
         task_indices = list(range(len(env.tasks)))
         if max_tasks is not None:
             task_indices = task_indices[:max_tasks]
@@ -147,11 +155,12 @@ def run_eval(
             def _attempt() -> EpisodeResult:
                 # Fresh env + state per (task, trial) — tau-bench envs are stateful.
                 trial_env = get_env(
-                    domain, user_strategy="llm", user_model="gpt-4o", task_split="test"
+                    domain, user_strategy="llm", user_model="gpt-4o",
+                    task_split="test", user_provider="openai", task_index=task_index,
                 )
                 provider_config = ProviderConfig(
                     provider="anthropic",
-                    model=DEFAULT_AGENT_MODEL,
+                    model=model,
                     api_key=effective_api_key,
                 )
                 session_id = f"taubench-{domain}-t{task_index}-r{trial}"
@@ -166,7 +175,9 @@ def run_eval(
                         task_profile=_task_profile_for(profile),
                     )
 
-                agent = build_magi_tau_agent(runner_factory=runner_factory)
+                agent = build_magi_tau_agent(
+                    runner_factory=runner_factory, reliability=reliability
+                )
                 solve_result = agent.solve(trial_env, task_index=task_index, max_num_steps=30)
                 # Reconstruct an EpisodeResult from the SolveResult info dict.
                 info = getattr(solve_result, "info", {}) or {}
@@ -189,6 +200,7 @@ def run_eval(
         "config": config,
         "domain": domain,
         "infra_error_count": infra_error_count,
+        "reliability": reliability.model_dump() if reliability is not None else None,
     }
     print(json.dumps(output, indent=2))
 
@@ -235,6 +247,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 __all__ = [
     "DEFAULT_AGENT_MODEL",
     "GateDisabledError",
+    "ReliabilityConfig",
     "ensure_enabled",
     "main",
     "run_eval",

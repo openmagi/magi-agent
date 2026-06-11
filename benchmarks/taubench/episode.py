@@ -3,12 +3,22 @@
 from __future__ import annotations
 
 import asyncio
+import uuid
 from collections.abc import Callable
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
 from google.genai import types
+
+from benchmarks.taubench.reliability import (
+    ReliabilityConfig,
+    WriteLedger,
+    completion_review_nudge,
+    is_conclusion,
+    open_items_review_prompt,
+    verify_final,
+)
 
 
 class EpisodeState:
@@ -46,19 +56,35 @@ def run_episode(
     max_steps: int,
     instruction: str | None = None,
     tools: list[object] | None = None,
+    session_id: str | None = None,
+    reliability: ReliabilityConfig | None = None,
+    ledger: WriteLedger | None = None,
 ) -> EpisodeResult:
     # `state` is SHARED: the env tools (built by tau_env) record (reward, done) into
     # it on every tool env.step, and this loop records the respond steps. Either can
     # set done. The caller owns it so the tools and the loop see the same object.
     reset = env.reset(task_index)
     obs = reset.observation
-    runner = runner_factory(instruction=instruction or env.wiki, tools=tools)
+    cfg = reliability or ReliabilityConfig()
+    base_instruction = instruction or env.wiki
+    if cfg.open_items_review:
+        base_instruction = f"{base_instruction}\n\n{open_items_review_prompt()}"
+    runner = runner_factory(instruction=base_instruction, tools=tools)
+    # One session_id for the whole episode: ADK's Runner.run_async REQUIRES it
+    # (CliModelRunner forwards kwargs raw, so it must be passed). Unique per episode
+    # so trials stay isolated; constant across this episode's turns so multi-turn
+    # conversation history is preserved.
+    episode_session_id = session_id or f"taubench-{uuid.uuid4().hex}"
+    led = ledger if ledger is not None else WriteLedger()
+    nudged = False
+    reviewed = False
 
     async def _run_turn(message: str) -> str:
         texts: list[str] = []
-        # session_id omitted: the runner's per-trial default (set by the caller) keeps trials independent
         async for event in runner.run_async(
-            user_id="taubench", new_message=_user_content(message)
+            user_id="taubench",
+            session_id=episode_session_id,
+            new_message=_user_content(message),
         ):
             content = getattr(event, "content", None)
             for part in getattr(content, "parts", None) or []:
@@ -80,9 +106,31 @@ def run_episode(
         turns += 1
         if state.done:
             break
+        if cfg.verify_before_final and not nudged:
+            try:
+                nudge = verify_final(led, agent_text)
+            except Exception:
+                nudge = None
+            if nudge:
+                nudged = True
+                obs = nudge
+                continue  # give the agent one grounded turn; skip this respond
+        if cfg.completion_review and not reviewed:
+            try:
+                conclude = is_conclusion(agent_text)
+            except Exception:
+                conclude = False
+            if conclude:
+                reviewed = True
+                obs = completion_review_nudge()
+                continue  # one grounded turn to complete/scope-correct; skip respond
+        # Lever precedence per turn is L2 -> L4. L6 is attached as private
+        # runner instruction when enabled so it never becomes a user-sim turn.
         # the agent's tool calls already hit env.step during the turn (via FunctionTools,
         # which call state.observe). Now route the agent's user-facing text as a respond.
-        resp = env.step(action_factory(respond_action_name, {"content": agent_text}))
+        resp = env.step(
+            action_factory(name=respond_action_name, kwargs={"content": agent_text})
+        )
         state.observe(resp.reward, resp.done)
         obs = resp.observation
     return EpisodeResult(reward=state.reward, done=state.done, turns=turns)

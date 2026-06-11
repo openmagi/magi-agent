@@ -6,19 +6,34 @@ tests inject a deterministic fake solve_one.
 """
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 
 from benchmarks.taubench.episode import EpisodeResult
 from benchmarks.taubench.scorer import TauReport, score
 
 
-def run_with_retry(attempt: Callable[[], EpisodeResult]) -> tuple[bool, bool]:
-    """Run an episode attempt; retry ONCE on infra_error. Returns
-    (success, infra_failed) where infra_failed=True means it infra-errored even
-    after the retry (and should be counted as a non-success + surfaced)."""
+def run_with_retry(
+    attempt: Callable[[], EpisodeResult],
+    *,
+    retries: int = 2,
+    sleep: Callable[[float], None] = time.sleep,
+    base_delay: float = 2.0,
+) -> tuple[bool, bool]:
+    """Run an episode attempt; retry up to `retries` times on infra_error, with a
+    bounded linear backoff (`base_delay * retry_number`, i.e. 2s then 4s with the
+    defaults) between attempts.
+
+    `sleep` is injectable so tests run without real delay. Returns
+    (success, infra_failed) where infra_failed=True means every attempt
+    infra-errored (counted as a non-success and surfaced rather than silently
+    attributed to model failure)."""
     result = attempt()
-    if result.infra_error:
+    tries = 0
+    while result.infra_error and tries < retries:
+        sleep(base_delay * (tries + 1))
         result = attempt()
+        tries += 1
     if result.infra_error:
         return (False, True)
     return (bool(result.done and result.reward >= 1.0), False)
