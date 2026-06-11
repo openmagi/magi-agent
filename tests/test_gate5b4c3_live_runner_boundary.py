@@ -622,6 +622,14 @@ class _OutputContinuationRunner(_FakeRunner):
         yield _FakeEvent(" off and then finishes. END_LONG_SMOKE")
 
 
+class _LongSelectedTextRunner(_FakeRunner):
+    async def run_async(self, **kwargs: object) -> object:
+        type(self).run_kwargs = kwargs
+        for index in range(70):
+            suffix = " END_LONG_SMOKE" if index == 69 else ""
+            yield _FakeEvent(f"{index:02d}-segment{suffix} ")
+
+
 class _ModelDumpFunctionCallOnlyEvent:
     @property
     def text(self) -> str:
@@ -891,6 +899,21 @@ def _output_continuation_primitives() -> Gate5B4C3LiveAdkPrimitives:
     return Gate5B4C3LiveAdkPrimitives(
         Agent=_FakeAgent,
         Runner=_OutputContinuationRunner,
+        InMemorySessionService=_FakeSessionService,
+        Content=_FakeContent,
+        Part=_FakePart,
+        GenerateContentConfig=_FakeGenerateContentConfig,
+    )
+
+
+def _long_selected_text_primitives() -> Gate5B4C3LiveAdkPrimitives:
+    _FakeAgent.created_kwargs = {}
+    _LongSelectedTextRunner.created_kwargs = {}
+    _LongSelectedTextRunner.run_kwargs = {}
+    _FakeGenerateContentConfig.created_kwargs = {}
+    return Gate5B4C3LiveAdkPrimitives(
+        Agent=_FakeAgent,
+        Runner=_LongSelectedTextRunner,
         InMemorySessionService=_FakeSessionService,
         Content=_FakeContent,
         Part=_FakePart,
@@ -1414,6 +1437,26 @@ def test_live_boundary_output_continuation_can_be_disabled(
     assert result.reason == "runner_completed"
     assert result.output_text_internal == "section one is cut"
     assert len(_OutputContinuationRunner.calls) == 1
+
+
+def test_live_boundary_allows_long_selected_full_toolhost_text_past_tool_cap() -> None:
+    public_events: list[dict[str, object]] = []
+
+    result = Gate5B4C3LiveRunnerBoundary(
+        _long_selected_text_primitives,
+        adk_tools=(_ManualCalculationTool,),
+        public_event_sink=lambda event: public_events.append(dict(event)),
+    ).invoke(_selected_full_toolhost_request(), config=_enabled_config())
+
+    assert result.status == "completed"
+    assert result.reason == "runner_completed"
+    assert result.event_count == 70
+    assert "END_LONG_SMOKE" in (result.output_text_internal or "")
+    text_deltas = [
+        event["delta"] for event in public_events if event.get("type") == "text_delta"
+    ]
+    assert len(text_deltas) == 70
+    assert text_deltas[-1] == "69-segment END_LONG_SMOKE "
 
 
 def test_live_boundary_fails_closed_on_tool_policy_mismatch_before_adk_load() -> None:
