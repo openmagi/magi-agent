@@ -1389,7 +1389,7 @@ graph LR
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
 | __init__.py | — | base, catalog, core_toolhost, dispatcher, manifest, permission, registry, result | cli/tool_runtime.py, tools/tests/test_ask_user_question_toolhost.py, tools/tests/test_plan_mode_toolhost.py |
-| archive_tools.py | ArchiveExtract tool — extract and inspect .zip archives in the workspace. | context, result, spreadsheet_tools | tools/file_toolhost.py |
+| archive_tools.py | ArchiveExtract tool — extract and inspect .zip archives in the workspace. | context, result, spreadsheet_tools, truncation | tools/file_toolhost.py |
 | ask_user_question_toolhost.py | Route the catalog ``AskUserQuestion`` tool to the GA blocking-question flow. | context, env, question_tool, registry, result | cli/tool_runtime.py, tools/tests/test_ask_user_question_toolhost.py |
 | audio_tools.py | AudioTranscribe tool — transcribe audio files in the workspace via ASR. | context, result, spreadsheet_tools, video_tools | tools/file_toolhost.py |
 | base.py | — | context, manifest, result | runtime/openmagi_runtime.py, tools/__init__.py, tools/health.py, tools/registry.py |
@@ -1401,7 +1401,7 @@ graph LR
 | deferred.py | DeferredToolRegistry — threshold-based lazy tool loading. | manifest, registry | adk_bridge/tool_adapter.py |
 | dispatch_shared.py | Shared helpers for the two live tool-dispatch kernels. | manifest, registry | tools/dispatcher.py, tools/kernel.py |
 | dispatcher.py | Live single-call tool dispatch boundary — the hot path every tool call crosses. | coding_tool_receipts, context, dispatch_shared, env, live_gate, manifest, permission, registry, result, schema_validation, trace_context | (root)/facades.py, adk_bridge/tool_adapter.py, cli/tool_runtime.py, cli/wiring.py, gates/gate5b_full_toolhost.py, shadow/tool_policy.py, tools/__init__.py |
-| document_tools.py | DocumentRead tool — extract text from documents in the workspace. | context, result, spreadsheet_tools | tools/document_write_tools.py, tools/file_toolhost.py |
+| document_tools.py | DocumentRead tool — extract text from documents in the workspace. | context, result, spreadsheet_tools, truncation | tools/document_write_tools.py, tools/file_toolhost.py |
 | document_write_tools.py | DocumentWrite DOCX backend — render markdown source into a ``.docx`` file. | _common, context, document_coverage, document_tools, model, policy, result | tools/document_write/agentic.py, tools/document_write/canonical.py, tools/document_write/orchestrator.py, tools/document_write/pdf.py |
 | event_projection.py | — | kernel, public_events, tool_boundary, tool_preview | tools/kernel.py |
 | file_tool_manifests.py | Manifest declarations for the optional file & multimodal tool suite. | catalog, manifest, registry | cli/tool_runtime.py, cli/wiring.py |
@@ -1413,7 +1413,7 @@ graph LR
 | manifest.py | — | types | (root)/facades.py, adk_bridge/control_plane.py, adk_bridge/tool_adapter.py, browser/autonomous/tool.py, cli/tool_runtime.py, cli/wiring.py, context/hook.py, gates/gate1a_readonly_tools.py, gates/gate5b_full_toolhost.py, harness/general_automation/constraint_reinjection.py, harness/general_automation/package_manifest.py, harness/general_automation/package_tool_projection.py, harness/general_automation/question_tool.py, harness/general_automation/recipe_disclosure.py, harness/goal_loop_control.py, hooks/builtin/llm_safety_hooks.py, hooks/builtin/prompt_transforms.py, hooks/external_config.py, hooks/manifest.py, plugins/mcp_adapter.py, plugins/tool_projection.py, recipes/best_of_n.py, recipes/cross_verify.py, shadow/office_automation_contract.py, shadow/patch_file_policy_contract.py, shadow/path_shell_policy_contract.py, shadow/tool_policy.py, shadow/toolhost_contract.py, tools/__init__.py, tools/base.py, tools/catalog.py, tools/concurrent_dispatcher.py, tools/deferred.py, tools/dispatch_shared.py, tools/dispatcher.py, tools/file_tool_manifests.py, tools/health.py, tools/kernel.py, tools/output_budget.py, tools/permission.py, tools/permission_scope.py, tools/registry.py, tools/safety.py, tools/scheduler.py, tools/schema_validation.py, tools/tool_search.py, transport/tools.py |
 | memory_mode_guard.py | Tool-level memory-mode hard enforcement. | patch_apply, session_identity | cli/learning_recall.py, cli/memory_recall_block.py, cli/wiring.py, gates/gate5b_full_toolhost.py, tools/core_toolhost.py, tools/local_readonly.py |
 | music_tools.py | MusicNotation tool — read musical notation from an image via vision model. | context, image_tools, result, spreadsheet_tools | tools/file_toolhost.py |
-| output_budget.py | — | manifest, result | artifacts/local_result_store.py, plugins/mcp_adapter.py, tools/kernel.py |
+| output_budget.py | — | manifest, result, truncation | artifacts/local_result_store.py, plugins/mcp_adapter.py, tools/kernel.py |
 | permission.py | — | context, control, manifest, safety | gates/gate5b_full_toolhost.py, tools/__init__.py, tools/dispatcher.py, tools/kernel.py |
 | permission_scope.py | Mode-derived permission scope resolution (cluster 09 PR1). | manifest | cli/tool_runtime.py, cli/wiring.py |
 | plan_mode_toolhost.py | Route the catalog Enter/ExitPlanMode tools to the GA plan-act flow. | context, control_projection, env, registry, result | cli/tool_runtime.py, tools/tests/test_plan_mode_toolhost.py |
@@ -1427,8 +1427,9 @@ graph LR
 | spreadsheet_tools.py | — | context, result | plugins/native/documents.py, tools/archive_tools.py, tools/audio_tools.py, tools/document_tools.py, tools/file_toolhost.py, tools/image_tools.py, tools/music_tools.py, tools/video_tools.py |
 | todo_toolhost.py | — | context, registry, result | runtime/openmagi_runtime.py |
 | tool_search.py | ToolSearchTool — search the tool registry by keyword or exact name. | manifest, registry, schema_projection | — |
+| truncation.py | Shared head+tail ("middle") truncation for tool outputs. | — | tools/archive_tools.py, tools/document_tools.py, tools/output_budget.py, tools/web_search_tools.py |
 | video_tools.py | VideoFrames tool — extract frames from a video at timestamps and describe them. | context, image_tools, result, spreadsheet_tools | tools/audio_tools.py, tools/file_toolhost.py |
-| web_search_tools.py | Fast direct web tools — Brave Search (or opt-in SerpAPI) + Firecrawl fetch. | — | cli/tool_runtime.py |
+| web_search_tools.py | Fast direct web tools — Brave Search (or opt-in SerpAPI) + Firecrawl fetch. | truncation | cli/tool_runtime.py |
 
 ### tools/document_write/
 
