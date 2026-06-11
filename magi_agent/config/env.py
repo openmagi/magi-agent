@@ -1853,6 +1853,40 @@ def is_research_fact_guidance_enabled(env: Mapping[str, str] | None = None) -> b
     return _is_true(source.get(MAGI_RESEARCH_FACT_GUIDANCE_ENABLED_ENV))
 
 
+MAGI_FACTS_REPLAN_ENABLED_ENV = "MAGI_FACTS_REPLAN_ENABLED"
+
+
+def is_facts_replan_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Single source of truth for the facts-survey replanning activation flag.
+
+    Default OFF (strict truthy opt-in: "1"/"true"/"yes"/"on"). When OFF,
+    ``build_default_plane`` never registers the
+    :class:`~magi_agent.adk_bridge.facts_replan_control.FactsReplanControl`, so
+    the live model loop is byte-identical to before. When ON, the control
+    injects a periodic in-context facts survey + plan refresh every
+    ``MAGI_FACTS_REPLAN_INTERVAL`` working steps (capped per turn by
+    ``MAGI_FACTS_REPLAN_MAX_PER_TURN``). Like ``is_goal_nudge_enabled`` this
+    deliberately does NOT follow the runtime-profile default-ON convention — it
+    is an additive, default-disabled seam.
+    """
+    source = os.environ if env is None else env
+    return _is_true(source.get(MAGI_FACTS_REPLAN_ENABLED_ENV))
+
+
+def parse_facts_replan_env(env: Mapping[str, str] | None = None):
+    """Re-export of :func:`magi_agent.runtime.facts_replan.parse_facts_replan_env`.
+
+    Imported lazily because ``runtime.facts_replan`` consumes
+    :func:`is_facts_replan_enabled` from this module (a top-level import here
+    would be circular). Returns a ``FactsReplanConfig | None``.
+    """
+    from magi_agent.runtime.facts_replan import (  # noqa: PLC0415
+        parse_facts_replan_env as _parse_facts_replan_env,
+    )
+
+    return _parse_facts_replan_env(env)
+
+
 MAGI_USER_HOOKS_ENABLED_ENV = "MAGI_USER_HOOKS_ENABLED"
 
 

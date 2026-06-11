@@ -437,6 +437,39 @@ FLAGS: tuple[FlagSpec, ...] = (
         "MAGI_CONTEXT_COMPACTION_ENABLED",
         summary="Compact the working context when the token threshold is hit (default-ON full profile).",
     ),
+    # --- In-context replanning ----------------------------------------------
+    # Strict default-OFF (flat _b, NOT profile-resolved): MAGI_RUNTIME_PROFILE
+    # never auto-enables the facts-survey injection.
+    _b(
+        "MAGI_FACTS_REPLAN_ENABLED",
+        stage="stage2",
+        summary=(
+            "Inject a periodic in-context facts survey (given/learned/look-up/"
+            "derive) + plan refresh into the live model loop every N working steps."
+        ),
+    ),
+    FlagSpec(
+        name="MAGI_FACTS_REPLAN_INTERVAL",
+        default=4,
+        scope="public",
+        stage="stage2",
+        summary=(
+            "Working steps between facts surveys (>= 1; a non-positive value "
+            "disables the control)."
+        ),
+        kind="int",
+    ),
+    FlagSpec(
+        name="MAGI_FACTS_REPLAN_MAX_PER_TURN",
+        default=5,
+        scope="public",
+        stage="stage2",
+        summary=(
+            "Hard cap on facts surveys injected per (session, turn) (>= 1; a "
+            "non-positive value disables the control)."
+        ),
+        kind="int",
+    ),
     # --- Surfaces -----------------------------------------------------------
     # NOTE: flat default-ON, NOT profile-aware. cli/headless.py:_cli_enabled
     # reads MAGI_CLI_ENABLED directly (unset => True regardless of
