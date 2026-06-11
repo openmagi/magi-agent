@@ -83,18 +83,15 @@ graph LR
     evidence --> telemetry
     evidence --> tools
     evidence --> transport
-    gates --> channels
     gates --> coding
     gates --> config
     gates --> egress_proxy
     gates --> evidence
-    gates --> harness
     gates --> learning
     gates --> memory
     gates --> ops
     gates --> runtime
     gates --> shadow
-    gates --> telemetry
     gates --> tools
     gateway --> channels
     gateway --> harness
@@ -341,18 +338,18 @@ graph LR
 | __init__.py | Traffic-free OpenMagi channel contract metadata. | contract | — |
 | contract.py | — | — | artifacts/_file_delivery_fakes.py, artifacts/delivery_boundary.py, artifacts/delivery_receipts.py, artifacts/file_delivery.py, artifacts/file_delivery_live.py, channels/__init__.py, channels/discord_adapter.py, channels/discord_live.py, channels/dispatcher.py, channels/push_delivery.py, channels/runtime_boundary.py, channels/telegram_adapter.py, channels/telegram_live.py, harness/cron_runtime.py, harness/scheduler_runtime.py, plugins/native/documents.py, shadow/artifact_channel_delivery_contract.py |
 | discord_adapter.py | — | contract, dispatcher, provider_execution, provider_receipts | channels/discord_live.py |
-| discord_live.py | E3 — Gated live Discord adapter. | contract, discord_adapter, scheduler_delivery | gates/channel_live_readiness.py |
+| discord_live.py | E3 — Gated live Discord adapter. | contract, discord_adapter, scheduler_delivery | — |
 | dispatcher.py | — | contract, provider_execution, provider_receipts, runtime_boundary, workflow_routing | channels/discord_adapter.py, channels/runtime_boundary.py, channels/telegram_adapter.py, harness/scheduler_runtime.py |
-| email_live.py | E4 — Gated live email adapter. | platform_registry, scheduler_delivery | gates/channel_live_readiness.py |
+| email_live.py | E4 — Gated live email adapter. | platform_registry, scheduler_delivery | — |
 | platform_registry.py | E1 — Platform Registry: self-registration seam for channel platforms. | — | channels/email_live.py, channels/slack_live.py |
 | push_delivery.py | — | contract, provider_execution, provider_receipts, runtime_boundary | — |
 | research_command.py | — | cost_estimate, workflow_recipe | channels/workflow_confirm_store.py, channels/workflow_orchestrator.py |
 | runtime_boundary.py | — | contract, dispatcher | channels/dispatcher.py, channels/push_delivery.py, channels/telegram_adapter.py, harness/scheduler_runtime.py |
-| slack_live.py | E4 — Gated live Slack adapter. | platform_registry, scheduler_delivery | gates/channel_live_readiness.py |
+| slack_live.py | E4 — Gated live Slack adapter. | platform_registry, scheduler_delivery | — |
 | taskkind_classifier.py | — | inference_scaling | channels/workflow_classifier_live.py, transport/streaming_chat_route.py |
 | telegram_adapter.py | — | contract, dispatcher, provider_execution, provider_receipts, runtime_boundary | channels/providers/telegram_httpx.py, channels/telegram_live.py, gateway/channel_watchers.py |
 | telegram_boundary.py | — | — | — |
-| telegram_live.py | E2 — Gated live Telegram polling adapter. | contract, scheduler_delivery, telegram_adapter | gates/channel_live_readiness.py, gateway/channel_watchers.py |
+| telegram_live.py | E2 — Gated live Telegram polling adapter. | contract, scheduler_delivery, telegram_adapter | gateway/channel_watchers.py |
 | workflow_classifier.py | — | inference_scaling | channels/workflow_orchestrator.py |
 | workflow_classifier_live.py | Model-backed channel-workflow classifier seam (C5, doc 03 PR-5). | providers, readonly_classifier, taskkind_classifier | transport/streaming_chat_route.py |
 | workflow_confirm_store.py | — | research_command | channels/workflow_orchestrator.py, transport/streaming_chat_route.py |
@@ -698,8 +695,6 @@ graph LR
 |---|---|---|---|
 | __init__.py | — | — | — |
 | api_canary_ladder.py | — | — | — |
-| channel_live_readiness.py | E5 — Channel-live readiness ladder + platform-routing dispatch. | discord_live, email_live, slack_live, telegram_live | — |
-| ga_live_readiness.py | General-Automation live-execution rollout readiness gate — Track 19 PR4. | logging | — |
 | gate1a_readonly_tools.py | — | catalog, context, manifest, registry | transport/chat.py, transport/chat_routes.py, transport/chat_shared.py, transport/egress_critic.py, transport/generation_request.py |
 | gate2_readiness.py | — | gate2_activation_loop_a, gate2_recipe_profile_resolver, gate2_shadow_tool_policy, models, safety | transport/chat.py, transport/gate2_sandbox_canary.py, transport/health.py |
 | gate3_readiness.py | — | models | transport/health.py |
@@ -708,13 +703,11 @@ graph LR
 | gate5b_full_toolhost.py | — | code_diagnostics_receipts, coding_tool_receipts, config, context, dispatcher, edit_match_receipts, edit_matching, env, formatter_runner, injection, lsp_client, manifest, memory_mode_guard, patch_apply, permission, read_format, read_ledger, registry, result, ripgrep, session_identity | tools/core_toolhost.py, transport/chat.py, transport/chat_routes.py, transport/chat_shared.py, transport/egress_critic.py, transport/generation_request.py, transport/health.py |
 | gate7_readiness.py | — | models | transport/health.py |
 | gate8_readiness.py | — | gate1a_egress_correlation, models | transport/chat.py, transport/chat_routes.py, transport/health.py |
-| goal_loop_readiness.py | Goal-loop rollout readiness gate — Track B, PR B5. | goal_loop | — |
 | learning_live_readiness.py | Learning-layer LIVE adapter readiness gate — PR7. | config | harness/memory_recall.py, harness/memory_write.py, learning/live.py, transport/chat_routes.py |
 | learning_readiness.py | Learning reflection readiness gate — PR2. | config | learning/bootstrap.py |
 | memory_write_readiness.py | Writable-memory rollout readiness gate — Track D, PR D5. | config | runtime/memory_write_wiring.py |
 | pregate8_continuity_canary.py | — | context_packet | config/env.py, config/models.py |
 | scheduler_executor_readiness.py | Scheduler-executor rollout readiness gate — Track A, PR A5. | — | harness/scheduler_job_execution.py |
-| self_review_readiness.py | Self-review stack LIVE readiness gate — Track C, PR C4. | deterministic_events, logging | — |
 | workflow_executor_readiness.py | Workflow-executor rollout readiness gate — Track 17 PR6. | — | harness/workflow_executor.py |
 
 ### gateway/
@@ -743,7 +736,7 @@ graph LR
 | engine.py | — | evidence_scope, manifest, resolved, trace_context | — |
 | evidence_scope.py | — | — | harness/engine.py, harness/resolved.py |
 | goal_judge.py | B2 — GoalJudge: goal-satisfaction judge (parse + fail-open + parse-failure budget, | types | harness/goal_loop_control.py |
-| goal_loop.py | — | — | gates/goal_loop_readiness.py, harness/general_automation/delegation.py, harness/goal_state.py, shadow/mission_lifecycle_contract.py |
+| goal_loop.py | — | — | harness/general_automation/delegation.py, harness/goal_state.py, shadow/mission_lifecycle_contract.py |
 | goal_loop_control.py | B3/B4 — Continuation loop control + after-turn hook (the Ralph loop). | context, goal_judge, goal_state, manifest, result, types | — |
 | goal_state.py | B1 — GoalState: persistent session-scoped goal state layer. | goal_loop, migrations | harness/goal_loop_control.py |
 | guardrail_matrix.py | — | — | — |
@@ -1370,9 +1363,9 @@ graph LR
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
 | __init__.py | — | execution_trace, logging, trace_context | — |
-| deterministic_events.py | — | — | gates/self_review_readiness.py, learning/telemetry.py |
+| deterministic_events.py | — | — | learning/telemetry.py |
 | execution_trace.py | Execution trace recorder for per-turn observability. | — | telemetry/__init__.py, telemetry/trace_context.py |
-| logging.py | — | — | gates/ga_live_readiness.py, gates/self_review_readiness.py, learning/telemetry.py, telemetry/__init__.py |
+| logging.py | — | — | learning/telemetry.py, telemetry/__init__.py |
 | trace_context.py | Async-safe per-turn trace context using contextvars. | execution_trace | evidence/contracts.py, harness/engine.py, hooks/bus.py, telemetry/__init__.py, tools/concurrent_dispatcher.py, tools/dispatcher.py, transport/debug_trace.py |
 
 ### tenancy/
