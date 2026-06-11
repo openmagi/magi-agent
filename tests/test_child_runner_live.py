@@ -517,6 +517,47 @@ def test_run_child_readonly_profile_forwards_readonly_tools_to_builder(
     assert "Bash" not in tool_names
 
 
+def test_run_child_readonly_profile_builds_instruction_without_memory_projection(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """Readonly children may use the parent workspace for file reads, but must
+    not build a memory snapshot from production-mounted workspace paths."""
+
+    captured: dict[str, object] = {}
+
+    class _NamedTool:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
+    def _fake_build_tools(**kwargs):  # noqa: ANN003
+        return [_NamedTool("FileRead")]
+
+    def _fake_build_runner(config, **kwargs):  # noqa: ANN001, ANN003
+        captured.update(kwargs)
+        return _RecordingRunner(text="ANSWER: readonly child ran")
+
+    monkeypatch.setattr(
+        "magi_agent.cli.tool_runtime.build_cli_adk_tools", _fake_build_tools
+    )
+    monkeypatch.setattr(
+        "magi_agent.cli.real_runner.build_cli_model_runner", _fake_build_runner
+    )
+
+    runner = RealLocalChildRunner(
+        provider_config=_provider_config(),
+        toolset_profile="readonly",
+        workspace_root=str(tmp_path),
+    )
+
+    output = asyncio.run(runner.run_child(_request()))
+
+    assert output["status"] == "completed"
+    assert captured["workspace_root"] == str(tmp_path)
+    assert captured["instruction"] is None
+    assert captured["memory_mode"] == "incognito"
+
+
 def test_readonly_child_toolset_does_not_build_full_local_handlers(
     monkeypatch,
     tmp_path: Path,
