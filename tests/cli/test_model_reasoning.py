@@ -58,7 +58,34 @@ def test_litellm_model_default_has_no_reasoning(monkeypatch):
     assert "thinking" not in extra
 
 
-def test_eval_profile_defaults_enable_reasoning():
+def test_eval_profile_defaults_enable_reasoning_at_max():
+    # Published numbers are measured at MAX effort (adaptive models map
+    # reasoning_effort -> thinking={type:adaptive} + output_config.effort).
     from magi_agent.runtime.local_defaults import EVAL_RUNTIME_ENV_DEFAULTS
 
-    assert EVAL_RUNTIME_ENV_DEFAULTS.get("MAGI_MODEL_REASONING_EFFORT") == "high"
+    assert EVAL_RUNTIME_ENV_DEFAULTS.get("MAGI_MODEL_REASONING_EFFORT") == "max"
+
+
+def test_reasoning_kwargs_adaptive_thinking_type():
+    # Adaptive-only models (Opus 4.7/4.8) reject {type:enabled, budget_tokens}
+    # with a 400; MAGI_MODEL_THINKING_TYPE=adaptive sends the adaptive shape
+    # directly and takes precedence over budget/effort.
+    from magi_agent.cli.real_runner import _model_reasoning_kwargs
+
+    kw = _model_reasoning_kwargs({"MAGI_MODEL_THINKING_TYPE": "adaptive"})
+    assert kw == {"thinking": {"type": "adaptive"}}
+
+    kw = _model_reasoning_kwargs(
+        {
+            "MAGI_MODEL_THINKING_TYPE": "adaptive",
+            "MAGI_MODEL_THINKING_BUDGET_TOKENS": "8192",
+            "MAGI_MODEL_REASONING_EFFORT": "high",
+        }
+    )
+    assert kw == {"thinking": {"type": "adaptive"}}
+
+    # Unknown/empty type values fall through to the other knobs.
+    kw = _model_reasoning_kwargs(
+        {"MAGI_MODEL_THINKING_TYPE": "", "MAGI_MODEL_REASONING_EFFORT": "high"}
+    )
+    assert kw == {"reasoning_effort": "high"}
