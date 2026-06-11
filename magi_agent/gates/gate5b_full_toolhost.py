@@ -1366,7 +1366,7 @@ class Gate5BFullToolHost:
         stdout = _redact(stdout_capture.text())
         stderr = _redact(stderr_capture.text())
         if timed_out:
-            return {
+            result: dict[str, object] = {
                 "exitCode": None,
                 "timedOut": True,
                 "timeoutMs": int(timeout_s * 1000),
@@ -1379,13 +1379,21 @@ class Gate5BFullToolHost:
                 "stdoutDigest": stdout_capture.digest(),
                 "stderrDigest": stderr_capture.digest(),
             }
-        return {
+            note = _deadline_note_safe()
+            if note:
+                result["deadlineNote"] = note
+            return result
+        result = {
             "exitCode": returncode,
             "stdout": stdout,
             "stderr": stderr,
             "stdoutDigest": stdout_capture.digest(),
             "stderrDigest": stderr_capture.digest(),
         }
+        note = _deadline_note_safe()
+        if note:
+            result["deadlineNote"] = note
+        return result
 
     def _handle_git_diff(self) -> dict[str, object]:
         """Return read-only workspace git diff metadata.
@@ -2777,6 +2785,15 @@ def _read_ledger_enabled_from_env() -> bool:
     from magi_agent.config.env import is_read_ledger_enabled
 
     return is_read_ledger_enabled(os.environ)
+
+
+def _deadline_note_safe() -> str | None:
+    try:
+        from magi_agent.runtime.deadline import deadline_note  # noqa: PLC0415
+
+        return deadline_note()
+    except Exception:  # noqa: BLE001 - the nudge must never break a tool result
+        return None
 
 
 __all__ = [
