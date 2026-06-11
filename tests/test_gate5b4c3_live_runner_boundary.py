@@ -1203,6 +1203,34 @@ def test_live_boundary_executes_pending_tool_calls_emitted_with_preamble_text() 
     )
 
 
+def test_live_boundary_streams_manual_tool_events_as_they_execute() -> None:
+    public_events: list[dict[str, object]] = []
+    primitives = _function_call_then_final_primitives()
+    _FunctionCallThenFinalRunner.event_factory = _TextAndFunctionCallEvent
+
+    result = Gate5B4C3LiveRunnerBoundary(
+        lambda: primitives,
+        adk_tools=(_ManualCalculationTool,),
+        public_event_sink=lambda event: public_events.append(dict(event)),
+    ).invoke(_selected_full_toolhost_request(), config=_enabled_config())
+
+    assert result.status == "completed"
+    event_types = [event.get("type") for event in public_events]
+    assert event_types == [
+        "text_delta",
+        "tool_start",
+        "tool_end",
+        "text_delta",
+    ]
+    tool_start = public_events[1]
+    tool_end = public_events[2]
+    assert tool_start["name"] == "Calculation"
+    assert str(tool_start["id"]).startswith("tu_")
+    assert tool_end["id"] == tool_start["id"]
+    assert tool_end["status"] == "ok"
+    assert "result:sha256:" in str(tool_end["output_preview"])
+
+
 def test_live_boundary_deduplicates_pending_tool_calls_across_events() -> None:
     result = Gate5B4C3LiveRunnerBoundary(
         _duplicate_text_and_function_call_primitives,

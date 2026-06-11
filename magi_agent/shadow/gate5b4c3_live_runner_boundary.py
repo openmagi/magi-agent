@@ -24,6 +24,7 @@ from magi_agent.runtime.output_continuation import (
     should_continue,
     stop_reason_is_truncated,
 )
+from magi_agent.runtime.public_events import tool_end_event, tool_start_event
 from magi_agent.shadow.gate5b4c3_shadow_generation_contract import (
     Gate5B4C3ModelRoutingSource,
     Gate5B4C3ShadowGenerationAuthorityFlags,
@@ -843,6 +844,7 @@ class Gate5B4C3LiveRunnerBoundary:
                     manual_results = await _run_manual_tool_calls(
                         function_calls,
                         self._adk_tools,
+                        public_event_sink=self._emit_public_event,
                     )
                     if not manual_results:
                         break
@@ -2043,6 +2045,8 @@ def _normalize_function_call(function_call: object) -> Mapping[str, object] | No
 async def _run_manual_tool_calls(
     function_calls: Sequence[Mapping[str, object]],
     tools: Sequence[object],
+    *,
+    public_event_sink: Gate5B4C3PublicEventSink | None = None,
 ) -> list[Mapping[str, object]]:
     tool_by_name = {
         str(getattr(tool, "name", "")): tool
@@ -2050,10 +2054,39 @@ async def _run_manual_tool_calls(
         if _SAFE_TOOL_NAME_RE.match(str(getattr(tool, "name", "")))
     }
     results: list[Mapping[str, object]] = []
-    for call in function_calls:
+    for index, call in enumerate(function_calls):
         name = str(call.get("name", ""))
+        args = call.get("args")
+        safe_args = dict(args) if isinstance(args, Mapping) else {}
+        tool_event_id = _manual_tool_event_id(
+            name=name,
+            args=safe_args,
+            call_id=call.get("id"),
+            index=index,
+        )
+        started = time.monotonic()
+        if public_event_sink is not None:
+            public_event_sink(tool_start_event(tool_id=tool_event_id, name=name))
         tool = tool_by_name.get(name)
         if tool is None:
+            result_digest = _digest(
+                {
+                    "toolName": name,
+                    "status": "blocked",
+                    "reason": "tool_not_registered",
+                }
+            )
+            if public_event_sink is not None:
+                public_event_sink(
+                    tool_end_event(
+                        tool_id=tool_event_id,
+                        status="error",
+                        output_preview=f"result:{result_digest}",
+                        error="tool_not_registered",
+                        receipt_refs=(f"result:{result_digest}",),
+                        duration_ms=_elapsed_ms(started),
+                    )
+                )
             results.append(
                 {
                     "toolName": name,
@@ -2062,21 +2095,49 @@ async def _run_manual_tool_calls(
                 }
             )
             continue
-        args = call.get("args")
-        safe_args = dict(args) if isinstance(args, Mapping) else {}
         try:
             result = await _invoke_manual_tool(tool, safe_args)
         except Exception:
             result = {"status": "error", "reason": "tool_execution_failed"}
+        manual_status = _manual_tool_status(result)
+        result_digest = _digest(result)
+        if public_event_sink is not None:
+            public_event_sink(
+                tool_end_event(
+                    tool_id=tool_event_id,
+                    status="ok" if manual_status == "ok" else "error",
+                    output_preview=f"result:{result_digest}",
+                    error=None if manual_status == "ok" else manual_status,
+                    receipt_refs=(f"result:{result_digest}",),
+                    duration_ms=_elapsed_ms(started),
+                )
+            )
         results.append(
             {
                 "toolName": name,
-                "status": _manual_tool_status(result),
-                "resultDigest": _digest(result),
+                "status": manual_status,
+                "resultDigest": result_digest,
                 "result": _bounded_manual_tool_result(result),
             }
         )
     return results
+
+
+def _manual_tool_event_id(
+    *,
+    name: str,
+    args: Mapping[str, object],
+    call_id: object,
+    index: int,
+) -> str:
+    return "tu_" + _digest(
+        {
+            "name": name,
+            "args": _bounded_json_value(args, max_bytes=512),
+            "id": str(call_id or ""),
+            "index": index,
+        }
+    )[7:19]
 
 
 async def _invoke_manual_tool(tool: object, args: Mapping[str, object]) -> object:
