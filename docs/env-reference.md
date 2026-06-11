@@ -90,6 +90,9 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 - `MAGI_EVIDENCE_COMPLETION_GATE_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Block turn completion when required evidence is missing (default-ON full profile).
 - `MAGI_EVIDENCE_LEDGER_DIR` (no default) — Directory for opt-in durable per-session JSONL evidence ledgers; unset keeps the lean in-memory live view only.
 - `MAGI_EVIDENCE_LEDGER_LIFECYCLE_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Build per-turn EvidenceLedger objects (default-ON full profile).
+- `MAGI_FACTS_REPLAN_ENABLED` (default off) — Inject a periodic in-context facts survey (given/learned/look-up/derive) + plan refresh into the live model loop every N working steps.
+- `MAGI_FACTS_REPLAN_INTERVAL` (default `4`) — Working steps between facts surveys (>= 1; a non-positive value disables the control).
+- `MAGI_FACTS_REPLAN_MAX_PER_TURN` (default `5`) — Hard cap on facts surveys injected per (session, turn) (>= 1; a non-positive value disables the control).
 - `MAGI_FILE_DELIVERY_LIVE_ENABLED` (default off) — Enable the live file-delivery tool (vs receipt-only).
 - `MAGI_GA_DELIVERABLE_GATE_ENABLED` (default off) — Enable the GA artifact-deliverable pre-final gate; strict default-OFF and inert unless explicitly set.
 - `MAGI_GOAL_LOOP_ENABLED` (default off) — Enable the autonomous goal-loop scheduler.
