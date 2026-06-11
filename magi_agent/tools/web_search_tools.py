@@ -396,7 +396,13 @@ def research_fact(
     indexed_urls = list(enumerate(urls))
     fetch_results: list[tuple[int, str, str | None, int | None]] = [None] * len(indexed_urls)  # type: ignore[list-item]
 
-    with ThreadPoolExecutor(max_workers=len(indexed_urls)) as executor:
+    # NOT a `with` block: the context-manager exit blocks on slow threads, and
+    # `as_completed(...)` raises TimeoutError when the overall deadline passes —
+    # previously OUTSIDE any try, violating the "Never raises" contract above.
+    # On timeout we keep whatever already completed; if nothing completed the
+    # search-snippet fallback below fires.
+    executor = ThreadPoolExecutor(max_workers=len(indexed_urls))
+    try:
         futures = {executor.submit(_fetch_one, item): item[0] for item in indexed_urls}
         for future in as_completed(futures, timeout=per_fetch_timeout * len(indexed_urls)):
             try:
@@ -405,6 +411,11 @@ def research_fact(
             except Exception:  # noqa: BLE001
                 orig_idx = futures[future]
                 fetch_results[orig_idx] = (orig_idx, urls[orig_idx], None, None)
+    except Exception:  # noqa: BLE001, S110
+        # Overall as_completed deadline (or any executor pathology) — fail soft.
+        pass
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
 
     # Assemble brief from successful fetches (preserve original order)
     successful = 0
@@ -420,9 +431,28 @@ def research_fact(
             successful += 1
 
     if source_briefs:
-        return "\n\n---\n\n".join(source_briefs)
+        body = "\n\n---\n\n".join(source_briefs)
+        if not _guidance_enabled():
+            return body  # baseline bytes, default path
+        header = (
+            f"research_fact brief — question: {question}\n"
+            f"sources: {len(source_briefs)}/{len(urls)} fetched"
+            + (
+                f" ({len(urls) - len(source_briefs)} failed)"
+                if len(source_briefs) < len(urls)
+                else ""
+            )
+        )
+        footer = (
+            "Cross-check: compare the specific values/claims across the sources above "
+            "BEFORE answering. If sources disagree, state the disagreement and prefer "
+            "the most authoritative/primary source; cite which source number supports "
+            "your value. A value seen in only one source is a hypothesis, not a fact."
+        )
+        return f"{header}\n\n{body}\n\n{footer}"
 
     # All fetches failed — fall back to search snippets
+    # (prefix byte-frozen: research/live_audit.py string-matches it)
     if search_snippets:
         search_latency = (
             search_data.get("latency_ms") if isinstance(search_data, dict) else None
@@ -438,6 +468,63 @@ def research_fact(
         return fallback_header + "\n\n".join(search_snippets)
 
     return f"research_fact: no usable sources found for: {question}"
+
+
+def _guidance_enabled() -> bool:
+    """Strict-truthy read of MAGI_RESEARCH_FACT_GUIDANCE_ENABLED; fail-soft OFF."""
+    try:
+        from magi_agent.config.env import (  # noqa: PLC0415
+            is_research_fact_guidance_enabled,
+        )
+
+        return is_research_fact_guidance_enabled()
+    except Exception:  # noqa: BLE001
+        return False
+
+
+# ---------------------------------------------------------------------------
+# System-prompt guidance block (single source of truth for the text)
+# ---------------------------------------------------------------------------
+
+_WEB_RESEARCH_GUIDANCE = (
+    "<web_research>\n"
+    "For factual lookups (dates, numbers, names, versions, titles), prefer\n"
+    "research_fact(question) over a single web_search + web_fetch: it reads several\n"
+    "sources in one call and returns a per-source evidence brief.\n"
+    "\n"
+    "Cross-check pattern — follow it for every fact you commit:\n"
+    '1. research_fact("When was the Townes Building completed?")\n'
+    '2. The brief shows [1] city-register: "completed 1962" and [2] local-news:\n'
+    '   "opened in 1963" — the sources DISAGREE.\n'
+    "3. Do not silently take the first value. Either web_fetch the most\n"
+    "   authoritative source (official/primary page) to resolve it, or state the\n"
+    "   discrepancy explicitly in your answer with both sources.\n"
+    "Never present a single-source value as settled fact when sources conflict.\n"
+    "</web_research>"
+)
+
+
+def web_research_guidance_block(env: Mapping[str, str] | None = None) -> str:
+    """Gated ``<web_research>`` system-prompt fragment advertising research_fact.
+
+    Returns ``""`` unless ``MAGI_RESEARCH_FACT_GUIDANCE_ENABLED`` is truthy AND
+    both ``BRAVE_API_KEY`` and ``FIRECRAWL_API_KEY`` are set (never advertise an
+    unavailable tool — same rule as the file-tools prompt block). Fail-open:
+    ``""`` on any error so prompt assembly never breaks.
+    """
+    try:
+        from magi_agent.config.env import (  # noqa: PLC0415
+            is_research_fact_guidance_enabled,
+        )
+
+        source: Mapping[str, str] = os.environ if env is None else env
+        if not is_research_fact_guidance_enabled(source):
+            return ""
+        if not source.get("BRAVE_API_KEY") or not source.get("FIRECRAWL_API_KEY"):
+            return ""
+        return _WEB_RESEARCH_GUIDANCE
+    except Exception:  # noqa: BLE001
+        return ""
 
 
 # ---------------------------------------------------------------------------

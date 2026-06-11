@@ -74,3 +74,37 @@ def test_audit_report_persist_off_and_fail_soft(tmp_path, monkeypatch):
     blocker.write_text("x")
     monkeypatch.setenv("MAGI_EVIDENCE_LEDGER_DIR", str(blocker))
     persist_audit_report({"verdict": "pass"}, session_id="s1")  # must not raise
+
+
+# ---------------------------------------------------------------------------
+# Item 07: <web_research> guidance block wiring in build_cli_instruction
+# ---------------------------------------------------------------------------
+
+
+def test_cli_instruction_default_off_has_no_web_research_block(monkeypatch):
+    """Keys set, flag unset → prompt byte-surface has no <web_research> block.
+
+    Default-OFF proof for the prompt surface.
+    """
+    from magi_agent.cli.tool_runtime import build_cli_instruction
+
+    monkeypatch.setenv("BRAVE_API_KEY", "k1")
+    monkeypatch.setenv("FIRECRAWL_API_KEY", "k2")
+    monkeypatch.delenv("MAGI_RESEARCH_FACT_GUIDANCE_ENABLED", raising=False)
+
+    instruction = build_cli_instruction(session_id="test-web-research-off")
+    assert "<web_research>" not in instruction
+
+
+def test_cli_instruction_flag_on_with_keys_has_web_research_block(monkeypatch):
+    """Flag + both keys set → the <web_research> block appears exactly once."""
+    from magi_agent.cli.tool_runtime import build_cli_instruction
+
+    monkeypatch.setenv("BRAVE_API_KEY", "k1")
+    monkeypatch.setenv("FIRECRAWL_API_KEY", "k2")
+    monkeypatch.setenv("MAGI_RESEARCH_FACT_GUIDANCE_ENABLED", "1")
+
+    instruction = build_cli_instruction(session_id="test-web-research-on")
+    assert instruction.count("<web_research>") == 1
+    assert instruction.count("</web_research>") == 1
+    assert "research_fact" in instruction

@@ -242,6 +242,14 @@ FLAGS: tuple[FlagSpec, ...] = (
         kind="str",
     ),
     _b(
+        "MAGI_RESEARCH_FACT_GUIDANCE_ENABLED",
+        summary=(
+            "Enable research_fact cross-check guidance: consolidated brief "
+            "header/footer plus the <web_research> system-prompt block "
+            "(requires BRAVE_API_KEY + FIRECRAWL_API_KEY)."
+        ),
+    ),
+    _b(
         "MAGI_BROWSER_TOOL_ENABLED",
         summary="Expose the browser-use autonomous vision BrowserTask tool.",
     ),
