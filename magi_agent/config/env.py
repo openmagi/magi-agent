@@ -2326,6 +2326,27 @@ def parse_eval_zero_edit_guard_enabled(env: Mapping[str, str]) -> bool:
     return _is_true(env.get("MAGI_EVAL_ZERO_EDIT_GUARD_ENABLED"))
 
 
+def multi_file_join_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """MAGI_MULTI_FILE_JOIN_ENABLED — multi-file cross-reference robustness.
+
+    Strict default-OFF opt-in (only "1"/"true"/"yes"/"on" enable it; like
+    :func:`parse_eval_autonomy_enabled` it deliberately does NOT follow the
+    runtime-profile default-ON convention). When ON, a domain-neutral
+    ``<multi_file_join>`` guidance block is appended to the agent's system
+    instruction: after ``ArchiveExtract``, exhaustively enumerate ALL extracted
+    files, read structured data (XLSX/XML) in full, and perform the cross-file
+    join/dedup PROGRAMMATICALLY via Bash rather than by eye.
+
+    The SAME helper builds the block on both the production CLI/serve path
+    (:func:`magi_agent.cli.tool_runtime.build_cli_instruction`) and the GAIA
+    bench path (:func:`benchmarks.gaia.harness.run_gaia_question`), so the A/B
+    plan measures the lever the flag actually exercises. Default OFF so every
+    path is byte-identical to origin/main when unset.
+    """
+    source = os.environ if env is None else env
+    return _is_true(source.get("MAGI_MULTI_FILE_JOIN_ENABLED"))
+
+
 def parse_recipe_default_packs_expanded(env: Mapping[str, str]) -> bool:
     """MAGI_RECIPE_DEFAULT_PACKS_EXPANDED — stage gate for recipe default-pack
     expansion (doc 05 PR-2 / A1-G1). Default OFF.

@@ -391,6 +391,13 @@ FLAGS: tuple[FlagSpec, ...] = (
             "rounding precision, names, and answer format."
         ),
     ),
+    _b(
+        "MAGI_MULTI_FILE_JOIN_ENABLED",
+        summary=(
+            "Append multi-file cross-reference guidance: enumerate archives, "
+            "read structured files fully, and run joins/dedup programmatically."
+        ),
+    ),
     # --- Evidence / verification gates -------------------------------------
     _b(
         "MAGI_EGRESS_GATE_ENABLED",
