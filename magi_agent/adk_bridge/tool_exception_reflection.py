@@ -43,6 +43,7 @@ are parsed in ``magi_agent.config.env``; callers pass resolved values to
 
 from __future__ import annotations
 
+from collections.abc import MutableMapping
 from typing import Any
 
 from google.adk.plugins.base_plugin import BasePlugin
@@ -50,7 +51,13 @@ from google.adk.plugins.base_plugin import BasePlugin
 # Documented import-time coupling: the specialized edit-retry handler owns
 # these tools (fail-closed at its own budget); the generic plugin must skip
 # them so an exhausted edit-retry budget is never granted extra attempts.
-from magi_agent.adk_bridge.edit_retry_reflection import _EDIT_TOOL_NAMES
+# ``_ScopedScalarView`` is the shared S-C write-through mapping view (one
+# owner of the mutable counters: the runtime-owned PerInvocationState).
+from magi_agent.adk_bridge.edit_retry_reflection import (
+    _EDIT_TOOL_NAMES,
+    _ScopedScalarView,
+)
+from magi_agent.packs.context import PerInvocationState
 
 
 TOOL_EXCEPTION_REFLECTION_PLUGIN_NAME = "magi_tool_exception_reflection_plugin"
@@ -74,10 +81,16 @@ _GUIDANCE_TEMPLATE = (
 class MagiToolExceptionReflectionPlugin(BasePlugin):
     """ADK plugin that converts generic tool raises into corrective results.
 
-    The plugin owns attempt counters keyed by ``(scope_key, tool_name)`` —
-    the scope key is the ADK invocation id — so the budget is enforced per
-    turn and never grows unbounded across turns (swept by
-    :meth:`after_run_callback`).
+    Attempt counters are keyed by ``(scope_key, tool_name)`` — the scope key
+    is the ADK invocation id — so the budget is enforced per turn and never
+    grows unbounded across turns (swept by :meth:`after_run_callback`).
+
+    Phase 5 / S-C: the per-invocation attempt counters live in a runtime-owned
+    :class:`PerInvocationState` (``self._default_state``) rather than a private
+    dict, so a user-authored equivalent control gets the same state struct off
+    the typed context. The legacy ``self._attempts`` mapping is preserved as a
+    live write-through view over that state (the ADK callback below feeds the
+    default state; the typed-context adapter supplies a context-owned state).
     """
 
     def __init__(
@@ -90,8 +103,20 @@ class MagiToolExceptionReflectionPlugin(BasePlugin):
         if max_attempts < 1:
             raise ValueError("max_attempts must be >= 1")
         self.max_attempts = max_attempts
-        # attempt counts keyed by (scope_key, tool_name)
-        self._attempts: dict[tuple[str, str], int] = {}
+        # Runtime-owned per-invocation state (the ONE owner of the mutable
+        # attempt counters). Replaces the old plugin-private ``self._attempts``
+        # dict; the legacy attribute is now a live write-through view.
+        self._default_state = PerInvocationState()
+
+    @property
+    def _attempts(self) -> MutableMapping[tuple[str, str], Any]:
+        """Live ``(scope_key, tool_name) -> attempt`` view over the runtime state.
+
+        Backward-compatible surface: reads, writes, and sweeps behave exactly
+        like the old dict while the storage is the runtime-owned struct (same
+        LRU/sweep semantics as the other S-C migrations).
+        """
+        return _ScopedScalarView(self._default_state)
 
     # -- ADK callbacks ----------------------------------------------------
 
@@ -105,10 +130,41 @@ class MagiToolExceptionReflectionPlugin(BasePlugin):
     ) -> dict[str, Any] | None:
         """A tool *raised*. Return a corrective dict, or None to re-raise.
 
-        Fail-open: any internal failure returns ``None`` so the original
-        raise propagates exactly as today. Only ``Exception`` is caught —
+        ADK-callback path: feed the plugin's runtime-owned default state. The
+        typed-context path supplies a context-owned state instead.
+        """
+        return self.reflect_with_state(
+            state=self._default_state,
+            tool=tool,
+            tool_args=tool_args,
+            tool_context=tool_context,
+            error=error,
+        )
+
+    # -- core (S-C typed-context decision) ---------------------------------
+
+    def reflect_with_state(
+        self,
+        *,
+        state: PerInvocationState,
+        tool: Any,
+        tool_args: dict[str, Any],
+        tool_context: Any,
+        error: Exception,
+    ) -> dict[str, Any] | None:
+        """Pure decision over a runtime-owned :class:`PerInvocationState` (S-C).
+
+        Replaces the instance-private ``self._attempts`` mutation: the caller
+        (the ADK callback above, or the typed-context control adapter) supplies
+        the shared state. The attempt counter is read/incremented on ``state``;
+        everything else (edit-tool hard-skip, budget fail-closed, corrective
+        dict shape) is byte-identical to the pre-migration body.
+
+        Fail-open: any internal failure returns ``None`` so the original raise
+        propagates exactly as today. Only ``Exception`` is caught —
         ``BaseException`` (``asyncio.CancelledError`` etc.) must propagate.
         """
+        _ = tool_args
         try:
             tool_name = getattr(tool, "name", "")
             if not isinstance(tool_name, str) or not tool_name:
@@ -119,8 +175,8 @@ class MagiToolExceptionReflectionPlugin(BasePlugin):
                 return None
 
             scope_key = _scope_key(tool_context)
-            attempt = self._attempts.get((scope_key, tool_name), 0) + 1
-            self._attempts[(scope_key, tool_name)] = attempt
+            attempt = state.get_scoped(scope_key, tool_name, default=0) + 1
+            state.set_scoped(scope_key, tool_name, attempt)
             if attempt > self.max_attempts:
                 # Budget exhausted -> None so ADK re-raises (original abort).
                 return None
@@ -143,11 +199,11 @@ class MagiToolExceptionReflectionPlugin(BasePlugin):
         The plugin instance lives for the whole process, so without this
         cleanup ``_attempts`` would grow unbounded. The invocation id is the
         scope key, so on run completion we drop every counter belonging to
-        that invocation.
+        that invocation via the runtime state's clear-on-turn-complete hook.
         """
         inv = getattr(invocation_context, "invocation_id", None)
         if isinstance(inv, str) and inv:
-            self._attempts = {k: v for k, v in self._attempts.items() if k[0] != inv}
+            self._default_state.clear_invocation(inv)
 
 
 # -- helpers --------------------------------------------------------------

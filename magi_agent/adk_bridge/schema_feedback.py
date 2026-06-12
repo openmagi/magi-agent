@@ -66,10 +66,15 @@ are parsed in ``magi_agent.config.env``; callers pass resolved values to
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, MutableMapping
 from typing import Any
 
 from magi_agent.adk_bridge.control_plane import BaseLoopControl
+
+# Shared S-C write-through mapping view (one owner of the mutable counters:
+# the runtime-owned PerInvocationState) — same view the edit-retry plugin uses.
+from magi_agent.adk_bridge.edit_retry_reflection import _ScopedScalarView
+from magi_agent.packs.context import PerInvocationState
 
 SCHEMA_FEEDBACK_CONTROL_NAME = "magi_schema_feedback_control"
 
@@ -92,6 +97,13 @@ class MagiSchemaFeedbackControl(BaseLoopControl):
     budget is enforced per turn. ``_plugin`` is set to ``self`` so the generic
     ``_ExtendedControlPlanePlugin.after_run_callback`` sweep discovers
     :meth:`after_run_callback` and counters never grow unbounded across turns.
+
+    Phase 5 / S-C: the per-invocation attempt counters live in a runtime-owned
+    :class:`PerInvocationState` (``self._default_state``) rather than a private
+    dict, so a user-authored equivalent control gets the same state struct off
+    the typed context. The legacy ``self._attempts`` mapping is preserved as a
+    live write-through view over that state; :meth:`apply_after_tool` is the
+    typed-context entry point reading ``ctx.per_invocation``.
     """
 
     name = SCHEMA_FEEDBACK_CONTROL_NAME
@@ -100,12 +112,24 @@ class MagiSchemaFeedbackControl(BaseLoopControl):
         if max_attempts < 1:
             raise ValueError("max_attempts must be >= 1")
         self.max_attempts = max_attempts
-        # attempt counts keyed by (scope_key, tool_name)
-        self._attempts: dict[tuple[str, str], int] = {}
+        # Runtime-owned per-invocation state (the ONE owner of the mutable
+        # attempt counters). Replaces the old control-private ``self._attempts``
+        # dict; the legacy attribute is now a live write-through view.
+        self._default_state = PerInvocationState()
         # Expose self to the _ExtendedControlPlanePlugin generic plugin
         # fan-out (after_run_callback sweep), mirroring how the adapter
         # classes expose their wrapped plugins.
         self._plugin = self
+
+    @property
+    def _attempts(self) -> MutableMapping[tuple[str, str], Any]:
+        """Live ``(scope_key, tool_name) -> attempt`` view over the runtime state.
+
+        Backward-compatible surface: reads, writes, and sweeps behave exactly
+        like the old dict while the storage is the runtime-owned struct (same
+        LRU/sweep semantics as the other S-C migrations).
+        """
+        return _ScopedScalarView(self._default_state)
 
     # -- LoopControl hook ---------------------------------------------------
 
@@ -118,6 +142,55 @@ class MagiSchemaFeedbackControl(BaseLoopControl):
         result: Any,
     ) -> dict[str, Any] | None:
         """Return a feedback-enriched superset of ``result``, or ``None``.
+
+        ADK-callback path: feed the control's runtime-owned default state. The
+        typed-context path (:meth:`apply_after_tool`) supplies a context-owned
+        state instead.
+        """
+        return self.feedback_with_state(
+            state=self._default_state,
+            tool=tool,
+            args=args,
+            tool_context=tool_context,
+            result=result,
+        )
+
+    async def apply_after_tool(
+        self,
+        ctx: Any,
+        *,
+        tool: Any,
+        args: dict[str, Any],
+        tool_context: Any,
+        result: Any,
+    ) -> dict[str, Any] | None:
+        """Typed-context entry point (S-C): drive the attempt budget against the
+        runtime-owned ``PerInvocationState`` from the context (falls back to the
+        control's default state when the context carries none). Behavior is
+        byte-identical to ``on_after_tool``."""
+        state = getattr(ctx, "per_invocation", None) or self._default_state
+        return self.feedback_with_state(
+            state=state, tool=tool, args=args, tool_context=tool_context, result=result
+        )
+
+    # -- core (S-C typed-context decision) -----------------------------------
+
+    def feedback_with_state(
+        self,
+        *,
+        state: PerInvocationState,
+        tool: Any,
+        args: dict[str, Any],
+        tool_context: Any,
+        result: Any,
+    ) -> dict[str, Any] | None:
+        """Pure decision over a runtime-owned :class:`PerInvocationState` (S-C).
+
+        Replaces the instance-private ``self._attempts`` mutation: the caller
+        (the ADK hook above, or the typed-context entry) supplies the shared
+        state. The attempt counter is read/incremented on ``state``; everything
+        else (anti-recursion, diagnostics recompute, superset-merge) is
+        byte-identical to the pre-migration body.
 
         Fail-open: any internal failure returns ``None`` so the original
         (redacted) result flows through exactly as today.
@@ -137,8 +210,8 @@ class MagiSchemaFeedbackControl(BaseLoopControl):
                 tool_name = "unknown_tool"
 
             scope_key = _scope_key(tool_context)
-            attempt = self._attempts.get((scope_key, tool_name), 0) + 1
-            self._attempts[(scope_key, tool_name)] = attempt
+            attempt = state.get_scoped(scope_key, tool_name, default=0) + 1
+            state.set_scoped(scope_key, tool_name, attempt)
             if attempt > self.max_attempts:
                 # Budget exhausted -> original redacted result flows through.
                 return None
@@ -196,11 +269,12 @@ class MagiSchemaFeedbackControl(BaseLoopControl):
 
         The control lives for the whole process; the invocation id is the
         scope key, so on run completion we drop every counter belonging to
-        that invocation (same cleanup contract as the reflection plugins).
+        that invocation (same cleanup contract as the reflection plugins),
+        via the runtime state's clear-on-turn-complete hook.
         """
         inv = getattr(invocation_context, "invocation_id", None)
         if isinstance(inv, str) and inv:
-            self._attempts = {k: v for k, v in self._attempts.items() if k[0] != inv}
+            self._default_state.clear_invocation(inv)
 
 
 # -- helpers ----------------------------------------------------------------

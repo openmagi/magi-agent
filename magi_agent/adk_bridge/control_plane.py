@@ -1038,7 +1038,8 @@ class _ToolExceptionReflectionLoopControl(BaseLoopControl):
     The plugin only implements the raise path (``on_tool_error_callback``)
     plus the ``after_run_callback`` sweep — neither is a LoopControl hook;
     both are forwarded at the plugin level by ``_ExtendedControlPlanePlugin``.
-    This adapter exists solely to expose ``._plugin`` to that fan-out.
+    This adapter exposes ``._plugin`` to that fan-out, plus the typed-context
+    entry point ``apply_tool_error`` for the raise path.
     """
 
     def __init__(self, plugin: Any) -> None:
@@ -1047,6 +1048,28 @@ class _ToolExceptionReflectionLoopControl(BaseLoopControl):
     @property
     def name(self) -> str:  # type: ignore[override]
         return getattr(self._plugin, "name", "magi_tool_exception_reflection_control")
+
+    async def apply_tool_error(
+        self,
+        ctx: Any,
+        *,
+        tool: Any,
+        tool_args: dict[str, Any],
+        tool_context: Any,
+        error: Exception,
+    ) -> dict[str, Any] | None:
+        """Typed-context entry point (S-C): drive the attempt budget against the
+        runtime-owned ``PerInvocationState`` from the context (falls back to the
+        plugin default state when the context carries none). Behavior is
+        byte-identical to ``on_tool_error_callback``."""
+        state = getattr(ctx, "per_invocation", None) or self._plugin._default_state
+        return self._plugin.reflect_with_state(
+            state=state,
+            tool=tool,
+            tool_args=tool_args,
+            tool_context=tool_context,
+            error=error,
+        )
 
 
 class _ResilienceLoopControl(BaseLoopControl):
