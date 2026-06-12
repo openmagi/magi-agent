@@ -43,6 +43,8 @@ class MemorySnapshotCache:
         Returns ``""`` when the projection gate is off or memory_mode is
         ``"incognito"``.
         """
+        if memory_mode == "incognito":
+            return ""
         cache_key = f"{session_key}:{memory_mode}"
         if cache_key not in self._cache:
             self._cache[cache_key] = self._compute(memory_mode=memory_mode)

@@ -661,6 +661,94 @@ def test_selected_gate5b_stream_emits_tool_events_before_final_text(
     assert payloads[-1]["terminal"] == "completed"
 
 
+def test_selected_full_toolhost_stream_does_not_replay_posthoc_tool_progress(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
+    monkeypatch.setenv(
+        "CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_WORKSPACE_ROOT",
+        str(tmp_path),
+    )
+
+    class _CalculationFunctionCallPart:
+        function_call = {
+            "name": "Calculation",
+            "args": {"expression": "2 + 2"},
+            "id": "route-live-calculation",
+        }
+
+    class _CalculationFunctionCallEvent:
+        content = SimpleNamespace(
+            parts=[_CalculationFunctionCallPart()],
+            role="model",
+        )
+
+    class _CalculationThenFinalRunner(_FakeRunner):
+        calls: list[dict[str, object]] = []
+
+        async def run_async(self, **kwargs: object) -> object:
+            type(self).run_kwargs = kwargs
+            type(self).calls.append(kwargs)
+            if len(type(self).calls) == 1:
+                yield _CalculationFunctionCallEvent()
+                return
+            yield SimpleNamespace(
+                content=SimpleNamespace(
+                    parts=[SimpleNamespace(text="final answer after live calculation")]
+                )
+            )
+
+    def _calculation_primitives() -> Gate5B4C3LiveAdkPrimitives:
+        _CalculationThenFinalRunner.calls = []
+        return Gate5B4C3LiveAdkPrimitives(
+            Agent=_FakeAgent,
+            Runner=_CalculationThenFinalRunner,
+            InMemorySessionService=_FakeSessionService,
+            Content=_FakeContent,
+            Part=_FakePart,
+            GenerateContentConfig=_FakeGenerateContentConfig,
+        )
+
+    async def _collect() -> list[dict]:
+        frames = _drive_selected_gate5b_stream(
+            _selected_runtime(
+                tmp_path,
+                full_toolhost=True,
+                primitives_loader=_calculation_primitives,
+            ),
+            {"messages": [{"role": "user", "content": "calculate 2 + 2"}]},
+            SimpleNamespace(headers={}),
+            session_id="s-selected-full-toolhost-live",
+            turn_id="t-selected-full-toolhost-live",
+        )
+        return [
+            payload
+            async for frame in frames
+            for payload in _data_lines(frame.decode("utf-8"))
+        ]
+
+    payloads = asyncio.run(_collect())
+
+    tool_events = [
+        payload
+        for payload in payloads
+        if payload.get("type") in {"tool_start", "tool_progress", "tool_end"}
+    ]
+    assert [payload.get("type") for payload in tool_events] == [
+        "tool_start",
+        "tool_progress",
+        "tool_end",
+    ]
+    assert tool_events[0]["id"] == tool_events[1]["id"] == tool_events[2]["id"]
+    assert tool_events[0]["name"] == "Calculation"
+    assert tool_events[1]["status"] == "in_progress"
+    assert tool_events[2]["status"] == "ok"
+    assert "2 + 2" not in json.dumps(tool_events, sort_keys=True)
+    assert payloads[-1]["type"] == "turn_result"
+    assert payloads[-1]["terminal"] == "completed"
+
+
 def test_selected_full_toolhost_stream_starts_work_events_before_response_finishes(
     monkeypatch,
     tmp_path: Path,
