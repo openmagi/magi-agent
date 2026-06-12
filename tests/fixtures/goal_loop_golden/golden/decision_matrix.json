@@ -1,0 +1,112 @@
+[
+  {
+    "continuationDigest": null,
+    "decision": "stop",
+    "failuresAfter": 0,
+    "observeOnly": false,
+    "reason": "disabled",
+    "scenario": "disabled",
+    "statusAfter": "active",
+    "turnsUsed": 0
+  },
+  {
+    "continuationDigest": null,
+    "decision": "stop",
+    "failuresAfter": 0,
+    "observeOnly": false,
+    "reason": "spend_capped",
+    "scenario": "spend_capped",
+    "statusAfter": "active",
+    "turnsUsed": 0
+  },
+  {
+    "continuationDigest": null,
+    "decision": "stop",
+    "failuresAfter": 0,
+    "observeOnly": false,
+    "reason": "cleared",
+    "scenario": "terminal_cleared",
+    "statusAfter": "cleared",
+    "turnsUsed": 0
+  },
+  {
+    "continuationDigest": null,
+    "decision": "stop",
+    "failuresAfter": 0,
+    "observeOnly": false,
+    "reason": "preempted",
+    "scenario": "preempted",
+    "statusAfter": "active",
+    "turnsUsed": 0
+  },
+  {
+    "continuationDigest": null,
+    "decision": "stop",
+    "failuresAfter": 0,
+    "observeOnly": false,
+    "reason": "satisfied",
+    "scenario": "satisfied_gate_off",
+    "statusAfter": "satisfied",
+    "turnsUsed": 0
+  },
+  {
+    "continuationDigest": "sha256:834280c8f44b0fe0",
+    "decision": "continue",
+    "failuresAfter": 0,
+    "observeOnly": false,
+    "reason": "not_satisfied",
+    "scenario": "not_satisfied_continue",
+    "statusAfter": "active",
+    "turnsUsed": 1
+  },
+  {
+    "continuationDigest": null,
+    "decision": "stop",
+    "failuresAfter": 0,
+    "observeOnly": false,
+    "reason": "exhausted",
+    "scenario": "exhausted_on_advance",
+    "statusAfter": "exhausted",
+    "turnsUsed": 1
+  },
+  {
+    "continuationDigest": "sha256:834280c8f44b0fe0",
+    "decision": "continue",
+    "failuresAfter": 1,
+    "observeOnly": false,
+    "reason": "parse_failure_fail_open",
+    "scenario": "parse_failure_fail_open",
+    "statusAfter": "active",
+    "turnsUsed": 1
+  },
+  {
+    "continuationDigest": "sha256:834280c8f44b0fe0",
+    "decision": "continue",
+    "failuresAfter": 1,
+    "observeOnly": false,
+    "reason": "parse_failure_fail_open",
+    "scenario": "judge_raised_fail_open",
+    "statusAfter": "active",
+    "turnsUsed": 1
+  },
+  {
+    "continuationDigest": null,
+    "decision": "stop",
+    "failuresAfter": 3,
+    "observeOnly": false,
+    "reason": "judge_budget",
+    "scenario": "judge_budget",
+    "statusAfter": "active",
+    "turnsUsed": 0
+  },
+  {
+    "continuationDigest": "sha256:834280c8f44b0fe0",
+    "decision": "continue",
+    "failuresAfter": 0,
+    "observeOnly": false,
+    "reason": "evidence_unmet",
+    "scenario": "evidence_unmet",
+    "statusAfter": "active",
+    "turnsUsed": 1
+  }
+]
