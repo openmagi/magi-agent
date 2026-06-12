@@ -62,6 +62,22 @@ EDIT_RETRY_REFLECTION_PLUGIN_NAME = "magi_edit_retry_reflection_plugin"
 # Tools whose failures represent an "edit apply" attempt against file content.
 _EDIT_TOOL_NAMES = frozenset({"FileEdit", "PatchApply"})
 
+# Per-control namespace for the shared PerInvocationState scalar key (S-C). The
+# three S-C reflection controls (edit-retry, schema-feedback, tool-exception) may
+# all receive the SAME runtime-owned PerInvocationState and may all key a counter
+# for the SAME tool in the SAME invocation. Keying by ``(invocation_id,
+# tool_name)`` alone made them collide on that shared state and consume each
+# other's ``max_attempts`` budget (failing closed early). Each control namespaces
+# its scalar ``name`` component with a distinct prefix so their counters are
+# disjoint. The separator is a control char that cannot appear in a tool name.
+_STATE_NS_SEP = "\x1f"
+EDIT_RETRY_STATE_NAMESPACE = "edit_retry"
+
+
+def scoped_state_name(namespace: str, name: str) -> str:
+    """Compose a control-namespaced ``name`` for a shared PerInvocationState key."""
+    return f"{namespace}{_STATE_NS_SEP}{name}"
+
 # Marker placed on the replacement tool response so downstream evidence/telemetry
 # can recognise an injected corrective message and so it is never mistaken for a
 # real tool success. Kept model-visible (it is the corrective guidance) but not
@@ -113,35 +129,59 @@ class _ScopedScalarView(MutableMapping[tuple[str, str], Any]):
     enforced on insert, mirroring the pre-migration behavior.
     """
 
-    def __init__(self, state: PerInvocationState) -> None:
+    def __init__(self, state: PerInvocationState, namespace: str | None = None) -> None:
         self._state = state
+        # When set, every ``(scope, name)`` operation is transparently keyed by the
+        # control-namespaced name in the underlying state, so each control's view
+        # is disjoint from the others sharing the same PerInvocationState. The
+        # un-namespaced 2-tuple surface is preserved for legacy callers/tests.
+        self._namespace = namespace
+
+    def _stored_name(self, name: str) -> str:
+        if self._namespace is None:
+            return name
+        return scoped_state_name(self._namespace, name)
+
+    def _own_prefix(self) -> str | None:
+        if self._namespace is None:
+            return None
+        return f"{self._namespace}{_STATE_NS_SEP}"
 
     def __getitem__(self, key: tuple[str, str]) -> Any:
         scope, name = key
         sentinel = object()
-        value = self._state.get_scoped(scope, name, default=sentinel)
+        value = self._state.get_scoped(scope, self._stored_name(name), default=sentinel)
         if value is sentinel:
             raise KeyError(key)
         return value
 
     def __setitem__(self, key: tuple[str, str], value: Any) -> None:
         scope, name = key
-        self._state.set_scoped(scope, name, value)
+        self._state.set_scoped(scope, self._stored_name(name), value)
 
     def __delitem__(self, key: tuple[str, str]) -> None:
         scope, name = key
         if key not in self:
             raise KeyError(key)
-        self._state.pop_scoped(scope, name)
+        self._state.pop_scoped(scope, self._stored_name(name))
+
+    def _own_items(self) -> Iterator[tuple[str, str]]:
+        prefix = self._own_prefix()
+        for scope, name in dict(self._state._store):
+            if prefix is None:
+                yield (scope, name)
+            elif name.startswith(prefix):
+                # present the un-namespaced tool name for this control's view
+                yield (scope, name[len(prefix):])
 
     def __iter__(self) -> Iterator[tuple[str, str]]:
-        return iter(dict(self._state._store))
+        return self._own_items()
 
     def __len__(self) -> int:
-        return len(self._state._store)
+        return sum(1 for _ in self._own_items())
 
     def __repr__(self) -> str:  # pragma: no cover - debug aid only
-        return f"_ScopedScalarView({dict(self._state._store)!r})"
+        return f"_ScopedScalarView({dict(self.items())!r})"
 
 
 class MagiEditRetryReflectionPlugin(BasePlugin):
@@ -192,8 +232,10 @@ class MagiEditRetryReflectionPlugin(BasePlugin):
         in ``self._default_state`` (a :class:`PerInvocationState`). This view lets
         existing callers/tests read, assign, and sweep counters exactly as they did
         against the old dict, while the actual storage is the runtime-owned struct.
+        The view is namespaced so this control's counters stay disjoint from the
+        other S-C controls' when they share one PerInvocationState.
         """
-        return _ScopedScalarView(self._default_state)
+        return _ScopedScalarView(self._default_state, EDIT_RETRY_STATE_NAMESPACE)
 
     # -- ADK callbacks ----------------------------------------------------
 
@@ -280,8 +322,9 @@ class MagiEditRetryReflectionPlugin(BasePlugin):
             return None
 
         scope_key = _scope_key(tool_context)
-        attempt = state.get_scoped(scope_key, tool_name, default=0) + 1
-        state.set_scoped(scope_key, tool_name, attempt)
+        state_name = scoped_state_name(EDIT_RETRY_STATE_NAMESPACE, tool_name)
+        attempt = state.get_scoped(scope_key, state_name, default=0) + 1
+        state.set_scoped(scope_key, state_name, attempt)
 
         error_code = _classify_edit_error_code(reason, tool_args)
 
@@ -333,7 +376,10 @@ class MagiEditRetryReflectionPlugin(BasePlugin):
         )
 
     def _reset(self, tool_context: Any, tool_name: str) -> None:
-        self._default_state.pop_scoped(_scope_key(tool_context), tool_name)
+        self._default_state.pop_scoped(
+            _scope_key(tool_context),
+            scoped_state_name(EDIT_RETRY_STATE_NAMESPACE, tool_name),
+        )
 
 
 # -- helpers --------------------------------------------------------------
@@ -421,6 +467,8 @@ def build_edit_retry_reflection_plugin(
 __all__ = [
     "EDIT_RETRY_REFLECTION_PLUGIN_NAME",
     "EDIT_RETRY_REFLECTION_RESPONSE_TYPE",
+    "EDIT_RETRY_STATE_NAMESPACE",
     "MagiEditRetryReflectionPlugin",
     "build_edit_retry_reflection_plugin",
+    "scoped_state_name",
 ]

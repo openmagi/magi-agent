@@ -56,11 +56,18 @@ from google.adk.plugins.base_plugin import BasePlugin
 from magi_agent.adk_bridge.edit_retry_reflection import (
     _EDIT_TOOL_NAMES,
     _ScopedScalarView,
+    scoped_state_name,
 )
 from magi_agent.packs.context import PerInvocationState
 
 
 TOOL_EXCEPTION_REFLECTION_PLUGIN_NAME = "magi_tool_exception_reflection_plugin"
+
+# Per-control namespace for the shared PerInvocationState scalar key (S-C), so
+# this control's per-invocation counters never collide with the other S-C
+# controls' counters for the same tool in the same invocation when they share one
+# PerInvocationState.
+TOOL_EXCEPTION_STATE_NAMESPACE = "tool_exception"
 
 # Marker placed on the replacement tool response so downstream
 # evidence/telemetry never mistakes the injected corrective message for a real
@@ -114,9 +121,11 @@ class MagiToolExceptionReflectionPlugin(BasePlugin):
 
         Backward-compatible surface: reads, writes, and sweeps behave exactly
         like the old dict while the storage is the runtime-owned struct (same
-        LRU/sweep semantics as the other S-C migrations).
+        LRU/sweep semantics as the other S-C migrations). Namespaced so this
+        control's counters stay disjoint from the other S-C controls' on a shared
+        PerInvocationState.
         """
-        return _ScopedScalarView(self._default_state)
+        return _ScopedScalarView(self._default_state, TOOL_EXCEPTION_STATE_NAMESPACE)
 
     # -- ADK callbacks ----------------------------------------------------
 
@@ -175,8 +184,9 @@ class MagiToolExceptionReflectionPlugin(BasePlugin):
                 return None
 
             scope_key = _scope_key(tool_context)
-            attempt = state.get_scoped(scope_key, tool_name, default=0) + 1
-            state.set_scoped(scope_key, tool_name, attempt)
+            state_name = scoped_state_name(TOOL_EXCEPTION_STATE_NAMESPACE, tool_name)
+            attempt = state.get_scoped(scope_key, state_name, default=0) + 1
+            state.set_scoped(scope_key, state_name, attempt)
             if attempt > self.max_attempts:
                 # Budget exhausted -> None so ADK re-raises (original abort).
                 return None
@@ -235,6 +245,7 @@ def build_tool_exception_reflection_plugin(
 __all__ = [
     "TOOL_EXCEPTION_REFLECTION_PLUGIN_NAME",
     "TOOL_EXCEPTION_REFLECTION_RESPONSE_TYPE",
+    "TOOL_EXCEPTION_STATE_NAMESPACE",
     "MagiToolExceptionReflectionPlugin",
     "build_tool_exception_reflection_plugin",
 ]

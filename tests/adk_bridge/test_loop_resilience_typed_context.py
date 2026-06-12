@@ -29,15 +29,24 @@ from typing import Any
 from magi_agent.adk_bridge.control_plane import (
     _ToolExceptionReflectionLoopControl,
 )
+from magi_agent.adk_bridge.edit_retry_reflection import scoped_state_name
 from magi_agent.adk_bridge.schema_feedback import (
     SCHEMA_FEEDBACK_RESPONSE_TYPE,
+    SCHEMA_FEEDBACK_STATE_NAMESPACE,
     MagiSchemaFeedbackControl,
 )
 from magi_agent.adk_bridge.tool_exception_reflection import (
     TOOL_EXCEPTION_REFLECTION_RESPONSE_TYPE,
+    TOOL_EXCEPTION_STATE_NAMESPACE,
     MagiToolExceptionReflectionPlugin,
 )
 from magi_agent.packs.context import ControlPlaneContext, PerInvocationState
+
+# The S-C controls namespace their PerInvocationState scalar key by control
+# identity so they never collide on a shared state; these direct-state assertions
+# read the namespaced name.
+_TE = lambda tool: scoped_state_name(TOOL_EXCEPTION_STATE_NAMESPACE, tool)  # noqa: E731
+_SF = lambda tool: scoped_state_name(SCHEMA_FEEDBACK_STATE_NAMESPACE, tool)  # noqa: E731
 
 
 def _run(coro):
@@ -111,8 +120,8 @@ def test_tool_exception_reflect_with_state_uses_supplied_state() -> None:
     assert first["retry_attempt"] == 1
     assert second is None, "budget lives on the SUPPLIED state"
     # the counter lives on the supplied state, not on the plugin default
-    assert shared.get_scoped("inv-1", "Bash", default=0) == 2
-    assert plugin._default_state.get_scoped("inv-1", "Bash", default=0) == 0
+    assert shared.get_scoped("inv-1", _TE("Bash"), default=0) == 2
+    assert plugin._default_state.get_scoped("inv-1", _TE("Bash"), default=0) == 0
 
 
 def test_tool_exception_adapter_apply_tool_error_reads_ctx_per_invocation() -> None:
@@ -133,8 +142,8 @@ def test_tool_exception_adapter_apply_tool_error_reads_ctx_per_invocation() -> N
 
     assert result is not None
     assert result["retry_attempt"] == 1
-    assert shared.get_scoped("inv-apply", "Bash", default=0) == 1
-    assert plugin._default_state.get_scoped("inv-apply", "Bash", default=0) == 0
+    assert shared.get_scoped("inv-apply", _TE("Bash"), default=0) == 1
+    assert plugin._default_state.get_scoped("inv-apply", _TE("Bash"), default=0) == 0
 
 
 def test_tool_exception_adapter_apply_falls_back_to_default_state() -> None:
@@ -152,7 +161,7 @@ def test_tool_exception_adapter_apply_falls_back_to_default_state() -> None:
     )
 
     assert result is not None
-    assert plugin._default_state.get_scoped("inv-fallback", "Bash", default=0) == 1
+    assert plugin._default_state.get_scoped("inv-fallback", _TE("Bash"), default=0) == 1
 
 
 def test_tool_exception_apply_hard_skips_edit_tools() -> None:
@@ -174,7 +183,7 @@ def test_tool_exception_apply_hard_skips_edit_tools() -> None:
             )
             is None
         )
-    assert shared.get_scoped("inv-edit", "FileEdit", default=0) == 0
+    assert shared.get_scoped("inv-edit", _TE("FileEdit"), default=0) == 0
 
 
 def test_tool_exception_legacy_attempts_view_and_sweep() -> None:
@@ -197,7 +206,7 @@ def test_tool_exception_legacy_attempts_view_and_sweep() -> None:
         )
     )
     assert plugin._attempts == {}
-    assert plugin._default_state.get_scoped("inv-sweep", "Bash", default=0) == 0
+    assert plugin._default_state.get_scoped("inv-sweep", _TE("Bash"), default=0) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -228,8 +237,8 @@ def test_schema_feedback_with_state_uses_supplied_state() -> None:
     assert first["response_type"] == SCHEMA_FEEDBACK_RESPONSE_TYPE
     assert first["schemaFeedback"]["missingRequired"] == ["path"]
     assert second is None, "budget lives on the SUPPLIED state"
-    assert shared.get_scoped("inv-s1", "FileEdit", default=0) == 2
-    assert control._default_state.get_scoped("inv-s1", "FileEdit", default=0) == 0
+    assert shared.get_scoped("inv-s1", _SF("FileEdit"), default=0) == 2
+    assert control._default_state.get_scoped("inv-s1", _SF("FileEdit"), default=0) == 0
 
 
 def test_schema_feedback_apply_after_tool_reads_ctx_per_invocation() -> None:
@@ -251,8 +260,8 @@ def test_schema_feedback_apply_after_tool_reads_ctx_per_invocation() -> None:
     assert override["retry_attempt"] == 1
     # merge-not-restructure preserved through the typed-context path
     assert override["errorCode"] == "tool_input_schema_invalid"
-    assert shared.get_scoped("inv-s2", "FileEdit", default=0) == 1
-    assert control._default_state.get_scoped("inv-s2", "FileEdit", default=0) == 0
+    assert shared.get_scoped("inv-s2", _SF("FileEdit"), default=0) == 1
+    assert control._default_state.get_scoped("inv-s2", _SF("FileEdit"), default=0) == 0
 
 
 def test_schema_feedback_apply_falls_back_to_default_state() -> None:
@@ -269,7 +278,7 @@ def test_schema_feedback_apply_falls_back_to_default_state() -> None:
     )
 
     assert override is not None
-    assert control._default_state.get_scoped("inv-s3", "FileEdit", default=0) == 1
+    assert control._default_state.get_scoped("inv-s3", _SF("FileEdit"), default=0) == 1
 
 
 def test_schema_feedback_legacy_attempts_view_and_sweep() -> None:

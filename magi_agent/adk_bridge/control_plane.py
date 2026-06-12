@@ -1005,9 +1005,11 @@ class _EditRetryLoopControl(BaseLoopControl):
 
         from magi_agent.adk_bridge.edit_retry_reflection import (
             EDIT_RETRY_REFLECTION_RESPONSE_TYPE,
+            EDIT_RETRY_STATE_NAMESPACE,
             _error_reason_from_result,
             _scope_key,
             _tool_name,
+            scoped_state_name,
         )
 
         # Never recurse on our own injected response.
@@ -1021,7 +1023,12 @@ class _EditRetryLoopControl(BaseLoopControl):
         reason = _error_reason_from_result(result)
         if reason is None:
             # Successful (or non-error) edit -> reset the per-tool attempt count.
-            state.pop_scoped(_scope_key(tool_context), _tool_name(tool))
+            # Use the SAME control-namespaced scalar name reflect_with_state writes
+            # so the reset actually clears the counter on a shared PerInvocationState.
+            state.pop_scoped(
+                _scope_key(tool_context),
+                scoped_state_name(EDIT_RETRY_STATE_NAMESPACE, _tool_name(tool)),
+            )
             return None
         return self._plugin.reflect_with_state(
             state=state,

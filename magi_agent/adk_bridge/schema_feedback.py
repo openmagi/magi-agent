@@ -73,10 +73,19 @@ from magi_agent.adk_bridge.control_plane import BaseLoopControl
 
 # Shared S-C write-through mapping view (one owner of the mutable counters:
 # the runtime-owned PerInvocationState) — same view the edit-retry plugin uses.
-from magi_agent.adk_bridge.edit_retry_reflection import _ScopedScalarView
+# ``scoped_state_name`` namespaces the scalar key so this control's per-invocation
+# counters never collide with the other S-C controls' counters for the same tool
+# in the same invocation when they share one PerInvocationState.
+from magi_agent.adk_bridge.edit_retry_reflection import (
+    _ScopedScalarView,
+    scoped_state_name,
+)
 from magi_agent.packs.context import PerInvocationState
 
 SCHEMA_FEEDBACK_CONTROL_NAME = "magi_schema_feedback_control"
+
+# Per-control namespace for the shared PerInvocationState scalar key (S-C).
+SCHEMA_FEEDBACK_STATE_NAMESPACE = "schema_feedback"
 
 # Marker placed on the replacement tool response so downstream
 # evidence/telemetry never mistakes the injected feedback for a real tool
@@ -127,9 +136,11 @@ class MagiSchemaFeedbackControl(BaseLoopControl):
 
         Backward-compatible surface: reads, writes, and sweeps behave exactly
         like the old dict while the storage is the runtime-owned struct (same
-        LRU/sweep semantics as the other S-C migrations).
+        LRU/sweep semantics as the other S-C migrations). Namespaced so this
+        control's counters stay disjoint from the other S-C controls' on a shared
+        PerInvocationState.
         """
-        return _ScopedScalarView(self._default_state)
+        return _ScopedScalarView(self._default_state, SCHEMA_FEEDBACK_STATE_NAMESPACE)
 
     # -- LoopControl hook ---------------------------------------------------
 
@@ -210,8 +221,9 @@ class MagiSchemaFeedbackControl(BaseLoopControl):
                 tool_name = "unknown_tool"
 
             scope_key = _scope_key(tool_context)
-            attempt = state.get_scoped(scope_key, tool_name, default=0) + 1
-            state.set_scoped(scope_key, tool_name, attempt)
+            state_name = scoped_state_name(SCHEMA_FEEDBACK_STATE_NAMESPACE, tool_name)
+            attempt = state.get_scoped(scope_key, state_name, default=0) + 1
+            state.set_scoped(scope_key, state_name, attempt)
             if attempt > self.max_attempts:
                 # Budget exhausted -> original redacted result flows through.
                 return None
@@ -306,6 +318,7 @@ def build_schema_feedback_control(
 __all__ = [
     "SCHEMA_FEEDBACK_CONTROL_NAME",
     "SCHEMA_FEEDBACK_RESPONSE_TYPE",
+    "SCHEMA_FEEDBACK_STATE_NAMESPACE",
     "MagiSchemaFeedbackControl",
     "build_schema_feedback_control",
 ]

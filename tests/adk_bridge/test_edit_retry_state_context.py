@@ -22,9 +22,16 @@ import asyncio
 from magi_agent.adk_bridge.control_plane import _EditRetryLoopControl
 from magi_agent.adk_bridge.edit_retry_reflection import (
     EDIT_RETRY_REFLECTION_RESPONSE_TYPE,
+    EDIT_RETRY_STATE_NAMESPACE,
     MagiEditRetryReflectionPlugin,
+    scoped_state_name,
 )
 from magi_agent.packs.context import ControlPlaneContext, PerInvocationState
+
+# Edit-retry namespaces its PerInvocationState scalar key by control identity so
+# it never collides with the other S-C controls on a shared state; these
+# direct-state assertions read the namespaced name.
+_ER = scoped_state_name(EDIT_RETRY_STATE_NAMESPACE, "FileEdit")
 
 
 class _Tool:
@@ -49,10 +56,10 @@ def test_edit_retry_attempts_recorded_in_per_invocation_state() -> None:
     assert out is not None
     assert out["response_type"] == EDIT_RETRY_REFLECTION_RESPONSE_TYPE
     assert out["retry_attempt"] == 1
-    assert state.get_scoped("inv-1", "FileEdit", default=0) == 1
+    assert state.get_scoped("inv-1", _ER, default=0) == 1
     # Clearing the invocation drops the attempt counter (clear-on-turn-complete).
     state.clear_invocation("inv-1")
-    assert state.get_scoped("inv-1", "FileEdit", default=0) == 0
+    assert state.get_scoped("inv-1", _ER, default=0) == 0
 
 
 def test_edit_retry_reflect_with_state_fails_closed_at_budget() -> None:
@@ -75,7 +82,7 @@ def test_edit_retry_reflect_with_state_fails_closed_at_budget() -> None:
     # attempt 1 -> resample (inject); attempt 2 -> abort (fail closed -> None).
     assert first is not None and first["retry_attempt"] == 1
     assert second is None
-    assert state.get_scoped("inv-1", "FileEdit", default=0) == 2
+    assert state.get_scoped("inv-1", _ER, default=0) == 2
 
 
 def test_edit_retry_reflect_with_state_ignores_non_edit_tools() -> None:
@@ -116,8 +123,8 @@ def test_edit_retry_control_apply_after_tool_uses_context_state() -> None:
     assert out["response_type"] == EDIT_RETRY_REFLECTION_RESPONSE_TYPE
     assert out["retry_attempt"] == 1
     # The shared context state owns the counter (not the plugin default state).
-    assert state.get_scoped("inv-1", "FileEdit", default=0) == 1
-    assert plugin._default_state.get_scoped("inv-1", "FileEdit", default=0) == 0
+    assert state.get_scoped("inv-1", _ER, default=0) == 1
+    assert plugin._default_state.get_scoped("inv-1", _ER, default=0) == 0
 
 
 def test_edit_retry_control_apply_after_tool_resets_on_success() -> None:
@@ -125,7 +132,7 @@ def test_edit_retry_control_apply_after_tool_resets_on_success() -> None:
     plugin = MagiEditRetryReflectionPlugin(max_attempts=3)
     ctrl = _EditRetryLoopControl(plugin)
     state = PerInvocationState()
-    state.set_scoped("inv-1", "FileEdit", 2)
+    state.set_scoped("inv-1", _ER, 2)
     ctx = ControlPlaneContext.minimal(per_invocation=state)
     out = asyncio.run(
         ctrl.apply_after_tool(
@@ -137,7 +144,7 @@ def test_edit_retry_control_apply_after_tool_resets_on_success() -> None:
         )
     )
     assert out is None
-    assert state.get_scoped("inv-1", "FileEdit", default=0) == 0
+    assert state.get_scoped("inv-1", _ER, default=0) == 0
 
 
 def test_edit_retry_control_apply_after_tool_falls_back_to_default_state() -> None:
@@ -156,4 +163,4 @@ def test_edit_retry_control_apply_after_tool_falls_back_to_default_state() -> No
         )
     )
     assert out is not None and out["retry_attempt"] == 1
-    assert plugin._default_state.get_scoped("inv-1", "FileEdit", default=0) == 1
+    assert plugin._default_state.get_scoped("inv-1", _ER, default=0) == 1
