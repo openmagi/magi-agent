@@ -1116,9 +1116,11 @@ class _ResilienceLoopControl(BaseLoopControl):
 class _ToolSynthesisNudgeLoopControl(BaseLoopControl):
     """Thin LoopControl adapter delegating to MagiToolSynthesisNudgePlugin.
 
-    Registered LAST in ``build_default_plane`` so edit-retry / resilience
-    overrides win the plane's first-non-None-wins after-tool fan-out; the
-    nudge only rides on results no other control replaced.
+    Registered LAST — ordered by the bundled control_plane pack's manifest
+    ``priority`` field (and at the tail of ``build_default_plane``'s legacy
+    assembly) — so edit-retry / resilience overrides win the plane's
+    first-non-None-wins after-tool fan-out; the nudge only rides on results no
+    other control replaced.
     """
 
     def __init__(self, plugin: Any) -> None:
@@ -1136,6 +1138,24 @@ class _ToolSynthesisNudgeLoopControl(BaseLoopControl):
         tool_context: Any,
         result: Any,
     ) -> dict[str, Any] | None:
+        return await self._plugin.after_tool_callback(
+            tool=tool, tool_args=args, tool_context=tool_context, result=result
+        )
+
+    async def apply_after_tool(
+        self,
+        ctx: Any,
+        *,
+        tool: Any,
+        args: dict[str, Any],
+        tool_context: Any,
+        result: Any,
+    ) -> dict[str, Any] | None:
+        """Typed-context entry point (P5). The wrapped plugin is stateless —
+        there is no per-invocation tracking to move onto ``ctx.per_invocation``
+        (S-C) — so this delegates to the plugin's pure per-call decision.
+        Behavior is byte-identical to ``on_after_tool``."""
+        _ = ctx
         return await self._plugin.after_tool_callback(
             tool=tool, tool_args=args, tool_context=tool_context, result=result
         )
