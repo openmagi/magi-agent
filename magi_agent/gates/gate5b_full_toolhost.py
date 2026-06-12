@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import fnmatch
 import hashlib
+import inspect
 import json
 import logging
 import os
@@ -836,6 +837,9 @@ class Gate5BFullToolHost:
         diagnostics_provider: DiagnosticsProvider | None = None,
         memory_mode: "MemoryMode | str" = "normal",
         public_event_sink: Callable[[Mapping[str, object]], None] | None = None,
+        # C1 seams (dual-load: empty/None preserves legacy behavior exactly).
+        workspace_handlers: Mapping[str, object] | None = None,
+        dispatch_policies: Sequence[object] | None = None,
     ) -> None:
         self.config = config
         self.workspace_root = workspace_root.resolve()
@@ -876,6 +880,10 @@ class Gate5BFullToolHost:
         # provider was injected (tests inject a fake provider for determinism).
         self._diagnostics_provider = diagnostics_provider
         self._owns_lsp_client = False
+        # C1 seams: pack-registered workspace tool handlers (keyed by tool name)
+        # and ctx-callable dispatch policies. Empty => legacy paths, byte-identical.
+        self._workspace_handlers: dict[str, object] = dict(workspace_handlers or {})
+        self._dispatch_policies: tuple[object, ...] = tuple(dispatch_policies or ())
 
     def _resolve_diagnostics_provider(self) -> DiagnosticsProvider | None:
         if not self.config.lsp_diagnostics_enabled:
@@ -1028,10 +1036,9 @@ class Gate5BFullToolHost:
                 # the same protected-memory rules here. Raised inside the try block
                 # so the existing Gate5BFullToolRegistryBlocked handler surfaces it
                 # as a "memory_mode_blocked" blocked outcome.
-                self._enforce_memory_mode(tool_name, args)
-                self._preflight_legacy_tool(tool_name, args, tool_call_id=tool_call_id)
+                self._run_dispatch_policies(tool_name, args, tool_call_id=tool_call_id)
                 output = await self._handle(tool_name, args, tool_call_id=tool_call_id)
-                output = self._filter_memory_mode_output(tool_name, output)
+                output = self._apply_after_dispatch_policies(tool_name, args, output)
                 # The diagnostics collection does blocking stdio reads against the
                 # language server. Run it off the event loop so a slow/hung server
                 # can't stall concurrent requests (mirrors the to_thread pattern in
@@ -1149,6 +1156,82 @@ class Gate5BFullToolHost:
 
         return rg_available()
 
+    def _run_dispatch_policies(
+        self,
+        tool_name: str,
+        args: Mapping[str, object],
+        *,
+        tool_call_id: str,
+    ) -> None:
+        """Pre-handler authz fan-out (C1 policy seam, ctx-callable convention).
+
+        Dual-load: with no injected policies the legacy memory-mode +
+        permission-preflight enforcement runs, byte-identical to before."""
+        if not self._dispatch_policies:
+            # Legacy path until the gates_policy_default pack supplies these.
+            self._enforce_memory_mode(tool_name, args)
+            self._preflight_legacy_tool(tool_name, args, tool_call_id=tool_call_id)
+            return
+        from magi_agent.packs.context import (
+            BeforeToolCtx,
+            EvidenceReadView,
+            SessionReadView,
+        )
+
+        session = SessionReadView(
+            invocation_id=tool_call_id,
+            agent_name="gate5b_full_toolhost",
+            turn_index=0,
+            state={
+                "memoryMode": str(self.memory_mode),
+                "workspaceRoot": str(self.workspace_root),
+            },
+        )
+        for impl in self._dispatch_policies:
+            ctx = BeforeToolCtx(
+                tool_name=tool_name,
+                tool_args=dict(args),
+                session=session,
+                evidence=EvidenceReadView(),
+            )
+            impl(ctx)
+            decision = ctx.decision()
+            if decision.action == "deny":
+                reason = str(
+                    (decision.deny_result or {}).get("error", "dispatch_policy_denied")
+                )
+                raise Gate5BFullToolRegistryBlocked(reason)
+
+    def _apply_after_dispatch_policies(
+        self,
+        tool_name: str,
+        args: Mapping[str, object],
+        output: object,
+    ) -> object:
+        """Post-handler output filter fan-out (C1 policy seam).
+
+        Dual-load: with no injected policies the legacy memory-mode output
+        filter runs, byte-identical to before."""
+        if not self._dispatch_policies:
+            return self._filter_memory_mode_output(tool_name, output)
+        from magi_agent.packs.context import AfterToolCtx, SessionReadView
+
+        session = SessionReadView(
+            invocation_id="gate5b", agent_name="gate5b_full_toolhost", turn_index=0,
+            state={"memoryMode": str(self.memory_mode)},
+        )
+        current = output
+        for impl in self._dispatch_policies:
+            ctx = AfterToolCtx(
+                tool_name=tool_name, tool_args=dict(args),
+                result=current, session=session,
+            )
+            impl(ctx)
+            override = ctx.override_result()
+            if override is not None:
+                current = override
+        return current
+
     async def _handle(
         self,
         tool_name: str,
@@ -1156,6 +1239,14 @@ class Gate5BFullToolHost:
         *,
         tool_call_id: str,
     ) -> object:
+        handler = self._workspace_handlers.get(tool_name)
+        if handler is not None:
+            from magi_agent.packs.context import WorkspaceHostView
+
+            output = handler(args, WorkspaceHostView(host=self))
+            if inspect.isawaitable(output):
+                output = await output
+            return output
         if tool_name == "Clock":
             return {"nowMs": self.now_ms()}
         if tool_name == "Calculation":
@@ -1961,6 +2052,8 @@ def build_gate5b_full_toolhost_bundle(
     diagnostics_provider: DiagnosticsProvider | None = None,
     memory_mode: "MemoryMode | str" = "normal",
     public_event_sink: Callable[[Mapping[str, object]], None] | None = None,
+    workspace_handlers: Mapping[str, object] | None = None,
+    dispatch_policies: Sequence[object] | None = None,
 ) -> Gate5BFullToolBundle:
     safe_config = Gate5BFullToolHostConfig.model_validate(config or {})
     workspace = Path(workspace_root)
@@ -1985,6 +2078,8 @@ def build_gate5b_full_toolhost_bundle(
         diagnostics_provider=diagnostics_provider,
         memory_mode=memory_mode,
         public_event_sink=public_event_sink,
+        workspace_handlers=workspace_handlers,
+        dispatch_policies=dispatch_policies,
     )
     if selected_scope_error is not None:
         return Gate5BFullToolBundle(

@@ -346,6 +346,70 @@ class MemoryStrategyProvideContext:
     register: Callable[[str, Any], None]
 
 
+class WorkspaceHostView:
+    """C1 typed context a gate5b workspace tool handler receives.
+
+    The ONLY handle a tool impl gets (first-party and user packs receive the
+    identical object — §1). Wraps the kernel mechanisms (path safety, read
+    ledger, formatter, bounded shell) without exposing the host. All gate5b
+    imports are lazy so packs.context keeps a gates-free import graph.
+    """
+
+    def __init__(self, *, host: Any) -> None:
+        self._host = host
+
+    # -- read-only host facts -------------------------------------------------
+    @property
+    def workspace_root(self) -> Any:  # pathlib.Path
+        return self._host.workspace_root
+
+    @property
+    def config(self) -> Any:  # frozen Gate5BFullToolHostConfig
+        return self._host.config
+
+    def now_ms(self) -> int:
+        return int(self._host.now_ms())
+
+    def ripgrep_active(self) -> bool:
+        return bool(self._host._ripgrep_active())
+
+    # -- kernel path safety -----------------------------------------------------
+    def resolve_path(self, path_text: str, *, allow_missing: bool = False) -> Any:
+        from magi_agent.gates.gate5b_full_toolhost import _safe_child_path
+
+        return _safe_child_path(
+            self._host.workspace_root, path_text, allow_missing=allow_missing
+        )
+
+    def path_digest(self, target: Any) -> str:
+        from magi_agent.gates.gate5b_full_toolhost import _digest
+
+        return _digest(target.relative_to(self._host.workspace_root).as_posix())
+
+    # -- kernel read-ledger store (policy stays kernel; handlers consume) --------
+    def enforce_read_before_mutation(self, target: Any) -> None:
+        self._host._enforce_read_before_mutation(target)
+
+    def record_full_read(self, target: Any, content: str) -> None:
+        self._host._record_full_read(target, content)
+
+    # -- kernel write-side services -----------------------------------------------
+    def format_after_write(self, target: Any) -> None:
+        self._host._format_after_write(target)
+
+    def content_digest(self, target: Any) -> str | None:
+        return self._host._content_digest(target)
+
+    def store_edit_match_result(self, match: Any) -> None:
+        """Hand the EditMatchResult back so dispatch() builds the EditMatch
+        evidence receipt exactly as the legacy branch did."""
+        self._host._last_edit_match_result = match
+
+    # -- kernel bounded/redacted shell ----------------------------------------------
+    def run_command(self, command: str, *, timeout_s: float) -> dict[str, Any]:
+        return self._host._run_shell_command(command, timeout_s=timeout_s)
+
+
 @dataclass(frozen=True)
 class EvidenceProducerProvideContext:
     """D5 typed context an ``evidence_producer`` impl receives: ``register(ref, spec)``."""
@@ -667,5 +731,5 @@ __all__ = [
     "ToolProvideContext", "EvidenceProducerProvideContext", "RecipeProvideContext",
     "ConnectorProvideContext", "HarnessProvideContext", "CallbackProvideContext",
     "LoopPolicyProvideContext", "SchedulePolicyProvideContext",
-    "MemoryStrategyProvideContext",
+    "MemoryStrategyProvideContext", "WorkspaceHostView",
 ]
