@@ -131,3 +131,21 @@ def test_user_pack_overrides_migrated_and_pending_handlers(tmp_path: Path, monke
     )
     assert bash.status == "ok"
     assert bash.output_preview == {"exitCode": 0, "viaUserPack": True}
+
+
+def test_disabling_firstparty_gates_packs_removes_them(tmp_path: Path, monkeypatch):
+    """SS1 REMOVE: config.toml [packs] disable drops both C1 packs through the
+    shipped removal convention. The host then dual-loads the legacy in-module
+    enforcement (defense in depth until the C1.5 template completes), so
+    removal never strands a live host without memory-mode policy."""
+    from magi_agent.packs.registries import build_tool_host_runtime_from_packs
+
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        '[packs]\ndisable = ["open' 'magi.workspace-tools-default", '
+        '"open' 'magi.gates-policy-default"]\n'
+    )
+    monkeypatch.setenv("MAGI_CONFIG", str(config_path))
+    handlers, policies = build_tool_host_runtime_from_packs(bases=[_FIRST_PARTY_ROOT])
+    assert handlers == {}
+    assert policies == ()
