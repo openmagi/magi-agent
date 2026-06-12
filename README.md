@@ -260,6 +260,36 @@ You can enable these surfaces explicitly for the workflows you want to run.
 Local development can run the contracts and fixture suites without granting live
 tool authority.
 
+## Extending the runtime
+
+The harnesses above are a starting point, not a ceiling. Every primitive seam —
+tool, callback, validator, harness, control_plane, evidence_producer, recipe,
+connector — is authored as a disk pack. First-party ships as bundled packs in the
+same format, loaded through the same path as yours: a user pack can add a new
+primitive, override a first-party ref, or remove a first-party pack entirely.
+Each implementation receives the same narrow typed context first-party receives —
+there is no privileged handle.
+
+Scaffold a pack with the CLI:
+
+```bash
+magi pack new validator my-check
+```
+
+This writes a `pack.toml`, an impl stub, and a generated smoke test under
+`<cwd>/.magi/packs/` and prints their paths. Packs are discovered from
+`~/.magi/packs/` and `<cwd>/.magi/packs/` with no environment setup. Override or
+disable any first-party pack in `~/.magi/config.toml`:
+
+```toml
+[packs]
+disable = ["openmagi.source-opened"]
+```
+
+- [Write your first pack](docs/pack-authoring.md)
+- [Pack manifest reference](docs/pack-manifest-reference.md)
+- [Typed-context API reference](docs/pack-context-reference.md)
+
 ## Local web dashboard
 
 `magi-agent serve` includes a browser dashboard for local work:
