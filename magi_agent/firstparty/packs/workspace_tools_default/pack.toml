@@ -9,8 +9,8 @@
 # Migrated so far (Pack C1 worked examples): Clock, Calculation, FileEdit.
 # The remaining legacy branches (FileRead, Glob, Grep, FileWrite, PatchApply,
 # Bash, TestRun, GitDiff) follow the documented repeating template in
-# docs/pack-c1-gates-decomposition.md and still live in _handle until each is
-# moved here.
+# MIGRATION.md (this directory) and still live in _handle until each is moved
+# here; tests/firstparty/test_gate5b_c1_boundary.py pins the boundary.
 
 packId = "openmagi.workspace-tools-default"
 displayName = "Workspace tool handlers (gate5b)"
