@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
+from magi_agent.cli.contracts import EngineResult, Terminal
 from magi_agent.adk_bridge.primitives import AdkPrimitiveBoundary
 from magi_agent.app import create_app
 from magi_agent.config.models import (
@@ -35,6 +36,7 @@ from magi_agent.transport.shadow_generations import (
     Gate5B4C3ShadowGenerationRouteConfig,
 )
 from magi_agent.transport import chat as chat_module
+from magi_agent.transport import chat_routes as chat_routes_module
 from magi_agent.transport.chat import (
     Gate5BUserVisibleChatRouteConfig,
     build_gate5b_full_toolhost_config_from_env,
@@ -89,6 +91,24 @@ def make_runtime(
     )
 
 
+def install_fake_local_headless(monkeypatch, captured: dict[str, object]) -> None:
+    class FakeEngine:
+        async def run_turn_stream(self, runtime, turn_input, *, cancel, gate):
+            yield EngineResult(
+                terminal=Terminal.completed,
+                session_id=turn_input["session_id"],
+                turn_id=turn_input["turn_id"],
+            )
+
+    def fake_build_headless_runtime(**kwargs: object) -> SimpleNamespace:
+        captured.update(kwargs)
+        return SimpleNamespace(engine=FakeEngine(), gate=None)
+
+    import magi_agent.cli.wiring as wiring
+
+    monkeypatch.setattr(wiring, "build_headless_runtime", fake_build_headless_runtime)
+
+
 def test_user_visible_generation_request_selects_allowlisted_model_from_body() -> None:
     route_config = parse_gate5b4c3_shadow_generation_route_env(
         {
@@ -128,8 +148,90 @@ def test_user_visible_generation_request_selects_allowlisted_model_from_body() -
     assert generation.model_routing.shadow_credential_ref == "platform-proxy-fireworks"
 
 
-def test_chat_completions_route_is_disabled_by_default(monkeypatch) -> None:
+def test_generation_request_envelope_drops_dead_ts_era_metadata(monkeypatch) -> None:
+    """08-PR2 (D5): the generation-request envelope must not carry the dead
+    TS-era ``mode``/``responseAuthority`` metadata (never consumed by the
+    serving path), while the serving wire body keeps ``responseAuthority:
+    "python"`` plus the authority/safety flag blocks chat-proxy validates."""
+    route_config = parse_gate5b4c3_shadow_generation_route_env(
+        {
+            "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_ENABLED": "1",
+            "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_KILL_SWITCH": "0",
+            "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_CAP_STATE_INITIALIZED": "1",
+            "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_PROVIDER_PROJECT_SPEND_CONTROLS_VERIFIED": "1",
+            "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_SELECTED_BOT_DIGEST": _sha256("bot-test"),
+            "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_TRUSTED_OWNER_USER_ID_DIGEST": _sha256("user-test"),
+            "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_ENVIRONMENT": "production",
+            "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_ALLOWED_MODEL_ROUTES": (
+                "google:gemini-3.5-flash"
+            ),
+            "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_PROVIDER_CREDENTIAL_BINDINGS": (
+                "google:gate5b-google-api-key-smoke-v1:GOOGLE_API_KEY:adk"
+            ),
+            "GOOGLE_GENAI_USE_VERTEXAI": "FALSE",
+            "GOOGLE_API_KEY": "sample-fixture-value-must-not-leak",
+        }
+    )
+
+    generation = chat_module._build_user_visible_generation_request(
+        runtime=make_runtime(),
+        route_config=Gate5BUserVisibleChatRouteConfig(environment="production"),
+        generation_config=route_config.generation_config,
+        payload={
+            "model": "google/gemini-3.5-flash",
+            "messages": [{"role": "user", "content": "envelope honesty probe"}],
+        },
+        trace_id="trace-envelope-1",
+    )
+
+    dumped = generation.model_dump(by_alias=True, mode="json")
+    assert "mode" not in dumped
+    assert "responseAuthority" not in dumped
+    assert dumped["schemaVersion"] == "gate5b4c3.chatProxyShadowGeneration.v1"
+
+    # Serving wire contract is unchanged by the envelope cleanup: the body
+    # still declares python authority plus the authority/safety blocks.
+    monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
+    runtime = make_runtime(
+        authority=PythonRuntimeAuthorityConfig(
+            userVisibleOutputAllowed=True,
+            canaryRoutingAllowed=True,
+        )
+    )
+    runtime.gate5b_user_visible_chat_route_config = Gate5BUserVisibleChatRouteConfig(
+        enabled=True,
+        killSwitchEnabled=False,
+        selectedBotDigest=_sha256("bot-test"),
+        selectedOwnerUserIdDigest=_sha256("user-test"),
+        environment="production",
+        environmentAllowlist=("production",),
+        mockedRunner=lambda request: {
+            "content": "mocked user-visible Python canary response",
+            "eventCount": 1,
+        },
+    )
+
+    response = TestClient(create_app(runtime)).post(
+        "/v1/chat/completions",
+        headers={"authorization": "Bearer gateway-token"},
+        json={
+            "messages": [{"role": "user", "content": "synthetic canary prompt"}],
+            "authority": {"userVisibleOutputAllowed": True},
+        },
+    )
+
+    assert response.status_code == 200, response.json()
+    body = response.json()
+    assert body["responseAuthority"] == "python"
+    assert body["authority"]["userVisibleOutputAllowed"] is True
+    assert body["authority"]["canaryRoutingAllowed"] is True
+    assert body["safety"]["toolsActive"] is False
+    assert body["safety"]["productionDbWritesAllowed"] is False
+
+
+def test_chat_completions_route_is_disabled_when_chat_routes_are_off(monkeypatch) -> None:
     monkeypatch.delenv("CORE_AGENT_PYTHON_CHAT_ROUTE", raising=False)
+    monkeypatch.setenv("MAGI_AGENT_LOCAL_CHAT_ROUTE", "off")
     client = TestClient(create_app(make_runtime()))
 
     response = client.post(
@@ -144,6 +246,32 @@ def test_chat_completions_route_is_disabled_by_default(monkeypatch) -> None:
         "runtime": "magi-agent",
         "runtimeEngine": "adk-python",
     }
+
+
+def test_chat_completions_route_uses_local_adk_when_local_route_is_enabled(
+    monkeypatch,
+) -> None:
+    captured: dict[str, object] = {}
+    install_fake_local_headless(monkeypatch, captured)
+    monkeypatch.delenv("CORE_AGENT_PYTHON_CHAT_ROUTE", raising=False)
+    monkeypatch.setenv("MAGI_AGENT_LOCAL_CHAT_ROUTE", "on")
+    client = TestClient(create_app(make_runtime()))
+
+    response = client.post(
+        "/v1/chat/completions",
+        headers={"authorization": "Bearer gateway-token"},
+        json={
+            "sessionId": "local-session",
+            "turnId": "local-turn",
+            "messages": [{"role": "user", "content": "hello"}],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert "data: [DONE]" in response.text
+    assert captured["session_id"] == "local-session"
+    assert captured["recall_query"] == "hello"
 
 
 def test_chat_route_checks_bearer_before_disabled_response(monkeypatch) -> None:
@@ -1566,7 +1694,7 @@ def test_chat_route_gate1a_success_uses_live_egress_proxy_telemetry(
             "2026-05-24T10:00:05.000Z",
         )
     )
-    monkeypatch.setattr(chat_module, "_utc_now_iso", lambda: next(timestamps))
+    monkeypatch.setattr(chat_routes_module, "_utc_now_iso", lambda: next(timestamps))
     runtime = make_runtime(
         authority=PythonRuntimeAuthorityConfig(
             userVisibleOutputAllowed=True,
@@ -1950,7 +2078,7 @@ def test_chat_route_failed_canary_records_explicit_counter_error(
         raise RuntimeError("synthetic runner failure")
 
     monkeypatch.setattr(
-        chat_module,
+        chat_routes_module,
         "run_gate5b4c3_live_runner_boundary_async",
         fail_boundary,
     )

@@ -8,7 +8,7 @@ import os
 
 import pytest
 
-from magi_agent.benchmarks.gaia.answer_verifier_plugin import (
+from benchmarks.gaia.answer_verifier_plugin import (
     apply_answer_verifier,
     build_evidence_payload,
 )

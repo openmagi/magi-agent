@@ -2,13 +2,13 @@
 
 How Magi Agent turns model proposals into governed state transitions via the Python ADK runtime.
 
-The runtime is the engine that governs every agent action. The runtime loop separates model-visible context from runtime-only evidence and claim state. A local run with a configured provider key builds a model-backed ADK runner, then flows through session boundaries, model routing, message building, event streaming, projection validation, and error classification. External delivery and high-authority mutations remain governed by explicit gates.
+The runtime is the engine that governs every agent action. The runtime loop separates model-visible context from runtime-only evidence and claim state. A local run with a configured provider key builds a model-backed ADK runner and drives each turn through the engine driver: provider and model resolution, single-flight session admission, the ADK event stream, and error classification with bounded recovery. External delivery and high-authority mutations remain governed by explicit gates.
 
 ## Runtime loop
 
 The Python ADK runtime entry point is __main__.py, which calls main.py (parse_runtime_env() reads required env vars) and then app.py (create_app() registers FastAPI routes such as /health, /healthz, and /v1/chat/completions).
 
-The runtime container creates RuntimeConfig, RuntimeProfile, AdkPrimitiveBoundary, ToolRegistry, and ResolvedPluginState. The real turn loop is: user message enters RunnerSessionBoundary.run_turn(), which takes a policy snapshot plus harness resolution, then routes through model_routing.py for model selection, message_builder.py for context packet assembly, the ADK runner, event streaming, projection_write_boundary.py for output validation, and error_taxonomy.py for error classification.
+The runtime container creates RuntimeConfig, RuntimeProfile, AdkPrimitiveBoundary, ToolRegistry, and ResolvedPluginState. The real turn loop is driven by the engine: a user message becomes a TurnInput (cli/contracts.py), and MagiEngineDriver (cli/engine.py) drives the turn over a model-backed ADK runner built by cli/real_runner.py, with the provider and model resolved by cli/providers.py. The engine takes a per-session single-flight slot from ActiveTurnRegistry (runtime/active_turn_registry.py), streams ADK events through the adk_bridge adapter, and classifies failures through runtime/error_recovery. The same engine path drives the CLI, the TUI, and the `magi-agent serve` chat surface.
 
 ### Two-plane architecture
 
@@ -39,9 +39,9 @@ Final answer/artifact     <-------- Validators + repair/fallback policy
 User-visible projection   <-------- Output projector + audit checkpoint
 ```
 
-## TurnInput and session boundary
+## TurnInput and session concurrency
 
-Each turn is modeled as a TurnInput (from runtime/turn_controller.py) with fields: user_id, session_id, turn_id, message_text, and harness_state. The RunnerSessionBoundary (runtime/runner_session_boundary.py) manages session concurrency and error classification for each turn.
+Each turn is modeled as a TurnInput (cli/contracts.py) with fields: prompt, session_id, turn_id, initial_messages, harness_state, and image_blocks. Session concurrency is single-flight: the engine registers each turn in ActiveTurnRegistry (runtime/active_turn_registry.py) and rejects a second concurrent turn for the same session id.
 
 The runtime uses two layers: runtime/openmagi_runtime.py is the core container, and the adk_bridge/ directory provides the adapter, callback, plugin, context-compaction, and tool-attachment surfaces used when a live ADK runner is built. Local CLI/dashboard runs can use those surfaces directly; external authority is controlled by deployment policy.
 

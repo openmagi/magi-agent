@@ -439,3 +439,78 @@ def test_plane_raises_path_budget_exhausted_propagates_error() -> None:
     ]
     assert injected == [], "budget=1 must fail closed immediately (no injection)"
     assert raised is True
+
+
+# ---------------------------------------------------------------------------
+# 4. Generic tool-exception reflection through build_default_plugin
+#
+# MAGI_TOOL_EXCEPTION_REFLECTION_ENABLED=1 -> a generic (non-edit) tool raise
+# is converted into a corrective dict; flag unset -> byte-identical fan-out
+# (returns None, the error propagates as today).
+# ---------------------------------------------------------------------------
+
+
+def test_build_default_plugin_flag_on_reflects_generic_tool_raise() -> None:
+    from magi_agent.adk_bridge.control_plane import build_default_plugin
+    from magi_agent.adk_bridge.tool_exception_reflection import (
+        TOOL_EXCEPTION_REFLECTION_RESPONSE_TYPE,
+    )
+
+    plugin = build_default_plugin({"MAGI_TOOL_EXCEPTION_REFLECTION_ENABLED": "1"})
+
+    result = _run(
+        plugin.on_tool_error_callback(
+            tool=_FakeTool("Bash"),
+            tool_args={"command": "ls"},
+            tool_context=_FakeCtx("inv-generic-on"),
+            error=ValueError("command exploded"),
+        )
+    )
+
+    assert result is not None, "flag-on must convert a generic tool raise"
+    assert result["response_type"] == TOOL_EXCEPTION_REFLECTION_RESPONSE_TYPE
+    assert result["status"] == "error"
+    assert result["error_type"] == "ValueError"
+    assert "command exploded" in result["error_message"]
+
+
+def test_build_default_plugin_flag_unset_generic_tool_raise_returns_none() -> None:
+    from magi_agent.adk_bridge.control_plane import build_default_plugin
+
+    plugin = build_default_plugin({})
+
+    result = _run(
+        plugin.on_tool_error_callback(
+            tool=_FakeTool("Bash"),
+            tool_args={"command": "ls"},
+            tool_context=_FakeCtx("inv-generic-off"),
+            error=ValueError("command exploded"),
+        )
+    )
+
+    assert result is None, "flag unset must keep byte-identical fan-out (None)"
+
+
+def test_build_default_plugin_edit_retry_keeps_priority_over_generic() -> None:
+    """When both reflections are on, FileEdit raises keep the specialized
+    edit-retry response (the generic plugin hard-skips edit tools)."""
+    from magi_agent.adk_bridge.control_plane import build_default_plugin
+
+    plugin = build_default_plugin(
+        {
+            "MAGI_EDIT_RETRY_REFLECTION_ENABLED": "1",
+            "MAGI_TOOL_EXCEPTION_REFLECTION_ENABLED": "1",
+        }
+    )
+
+    result = _run(
+        plugin.on_tool_error_callback(
+            tool=_FakeTool("FileEdit"),
+            tool_args={"path": "a.py", "oldText": "old", "newText": "new"},
+            tool_context=_FakeCtx("inv-priority"),
+            error=ValueError("old_text_not_found"),
+        )
+    )
+
+    assert result is not None
+    assert result.get("response_type") == EDIT_RETRY_REFLECTION_RESPONSE_TYPE

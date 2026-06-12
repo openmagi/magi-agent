@@ -1,3 +1,4 @@
+import json
 import os
 from collections.abc import Mapping, Sequence
 
@@ -92,6 +93,54 @@ async def test_selected_scope_exposes_full_workspace_tools_and_receipts(tmp_path
 
 
 @pytest.mark.asyncio
+async def test_full_toolhost_dispatch_emits_live_public_tool_progress_events(tmp_path):
+    public_events: list[dict[str, object]] = []
+    bundle = build_gate5b_full_toolhost_bundle(
+        config=Gate5BFullToolHostConfig.model_validate(
+            {
+                "enabled": True,
+                "killSwitchEnabled": False,
+                "routeAttachmentEnabled": True,
+                "selectedBotDigest": _sha256("bot-test"),
+                "selectedOwnerDigest": _sha256("user-test"),
+                "environment": "production",
+                "environmentAllowlist": ("production",),
+                "allowedToolNames": GATE5B_FULL_TOOLHOST_TOOL_NAMES,
+                "maxToolCallsPerTurn": 8,
+            }
+        ),
+        scope={
+            "selectedBotDigest": _sha256("bot-test"),
+            "selectedOwnerDigest": _sha256("user-test"),
+            "environment": "production",
+        },
+        workspace_root=tmp_path,
+        public_event_sink=lambda event: public_events.append(dict(event)),
+    )
+
+    outcome = await bundle.host.dispatch(
+        "FileWrite",
+        {"path": "notes/live.txt", "content": "live event content\n"},
+        request_digest=_sha256("request-live-events"),
+        tool_call_id="call-live-events",
+    )
+
+    assert outcome.status == "ok"
+    assert [event["type"] for event in public_events] == [
+        "tool_start",
+        "tool_progress",
+        "tool_end",
+    ]
+    assert public_events[0]["name"] == "FileWrite"
+    assert public_events[1]["status"] == "in_progress"
+    assert public_events[2]["status"] == "ok"
+    assert public_events[0]["id"] == public_events[1]["id"] == public_events[2]["id"]
+    serialized = json.dumps(public_events)
+    assert "live event content" not in serialized
+    assert "receipt:sha256:" in serialized
+
+
+@pytest.mark.asyncio
 async def test_selected_scope_exposes_first_party_registry_tools_with_gate5b_receipts(tmp_path):
     runtime = _runtime()
     bundle = build_gate5b_full_toolhost_bundle(
@@ -145,6 +194,48 @@ async def test_selected_scope_exposes_first_party_registry_tools_with_gate5b_rec
     assert bundle.host.counter.receipt_count == 2
 
 
+@pytest.mark.asyncio
+async def test_selected_registry_spawn_agent_disabled_child_runner_is_blocked(
+    tmp_path, monkeypatch
+):
+    monkeypatch.delenv("MAGI_CHILD_RUNNER_LIVE_ENABLED", raising=False)
+    monkeypatch.delenv("MAGI_CHILD_RUNNER_LIVE_KILL_SWITCH", raising=False)
+
+    runtime = _runtime()
+    bundle = build_gate5b_full_toolhost_bundle(
+        config=Gate5BFullToolHostConfig.model_validate(
+            {
+                "enabled": True,
+                "killSwitchEnabled": False,
+                "routeAttachmentEnabled": True,
+                "selectedBotDigest": _sha256("bot-test"),
+                "selectedOwnerDigest": _sha256("user-test"),
+                "environment": "production",
+                "environmentAllowlist": ("production",),
+                "allowedToolNames": GATE5B_FULL_TOOLHOST_TOOL_NAMES,
+                "maxToolCallsPerTurn": 8,
+            }
+        ),
+        scope={
+            "selectedBotDigest": _sha256("bot-test"),
+            "selectedOwnerDigest": _sha256("user-test"),
+            "environment": "production",
+        },
+        workspace_root=tmp_path,
+        tool_registry=runtime.tool_registry,
+    )
+
+    outcome = await bundle.host.dispatch(
+        "SpawnAgent",
+        {"prompt": "assign a helper"},
+        request_digest=_sha256("request-spawn-disabled"),
+        tool_call_id="call-spawn-disabled",
+    )
+
+    assert outcome.status == "blocked"
+    assert outcome.reason == "live_child_runner_disabled"
+
+
 def test_selected_full_toolhost_adk_declarations_are_google_schema_compatible(tmp_path):
     runtime = _runtime()
     bundle = build_gate5b_full_toolhost_bundle(
@@ -180,6 +271,47 @@ def test_selected_full_toolhost_adk_declarations_are_google_schema_compatible(tm
         assert not _contains_key(payload, "additionalProperties")
         assert not _contains_key(payload, "anyOf")
         assert not _contains_key(payload, "any_of")
+
+
+def test_selected_full_toolhost_spawn_agent_declares_delegation_schema(tmp_path):
+    runtime = _runtime()
+    bundle = build_gate5b_full_toolhost_bundle(
+        config=Gate5BFullToolHostConfig.model_validate(
+            {
+                "enabled": True,
+                "killSwitchEnabled": False,
+                "routeAttachmentEnabled": True,
+                "selectedBotDigest": _sha256("bot-test"),
+                "selectedOwnerDigest": _sha256("user-test"),
+                "environment": "production",
+                "environmentAllowlist": ("production",),
+                "allowedToolNames": GATE5B_FULL_TOOLHOST_TOOL_NAMES,
+                "maxToolCallsPerTurn": 8,
+            }
+        ),
+        scope={
+            "selectedBotDigest": _sha256("bot-test"),
+            "selectedOwnerDigest": _sha256("user-test"),
+            "environment": "production",
+        },
+        workspace_root=tmp_path,
+        tool_registry=runtime.tool_registry,
+    )
+
+    spawn = next(tool for tool in bundle.tools if tool.name == "SpawnAgent")
+    declaration = spawn._get_declaration()
+    assert declaration is not None
+    payload = declaration.model_dump(by_alias=True, exclude_none=True, mode="json")
+    properties = payload["parameters"]["properties"]
+
+    assert {"prompt", "task", "persona", "provider", "model", "budgetMs"}.issubset(
+        set(properties)
+    )
+    assert "query" not in properties
+    assert "path" not in properties
+    assert "content" not in properties
+    assert "delegate" in str(payload["description"]).lower()
+    assert "subtask" in str(payload["description"]).lower()
 
 
 def _contains_key(value: object, key: str) -> bool:

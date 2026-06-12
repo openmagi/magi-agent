@@ -171,8 +171,9 @@ class TestDocumentWriteDispatch:
             _context(tmp_path),
         )
         assert result.status == "ok"
-        # Existing markdown path: no ``format`` key, raw text written verbatim.
-        assert "format" not in result.output
+        assert result.output["format"] == "md"
+        assert result.output["mimeType"] == "text/markdown"
+        assert result.output["previewKind"] == "inline-markdown"
         saved = tmp_path / "note.md"
         assert saved.exists()
         assert saved.read_text(encoding="utf-8") == "# Heading\n\nraw body"

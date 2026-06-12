@@ -3,7 +3,7 @@ from __future__ import annotations
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from magi_agent.benchmarks.gaia.dataset import load_gaia_questions
+from benchmarks.gaia.dataset import load_gaia_questions
 
 
 def _write_parquet(path, rows: list[dict]) -> None:

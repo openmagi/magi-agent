@@ -26,12 +26,15 @@ from __future__ import annotations
 
 import os
 import re
+from importlib import resources
+from importlib.resources.abc import Traversable
 from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from magi_agent.plugins.native.skills import _skill_candidates
 from magi_agent.runtime.openmagi_runtime import OpenMagiRuntime
 from magi_agent.transport.tools import _unauthorized_response
 
@@ -54,10 +57,30 @@ _RUNTIME_HOOK_POINTS = ("beforeModelCall", "afterToolCall", "beforeCommit", "aft
 _FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
 _MAX_SEARCH_BYTES = 200_000
 _PREVIEW_CHARS = 240
+_SCRIPT_SUFFIXES = {".sh", ".py", ".js", ".ts"}
 _WORKSPACE_ENV_VARS = (
     "MAGI_AGENT_WORKSPACE",
     "CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_WORKSPACE_ROOT",
     "CORE_AGENT_WORKSPACE_ROOT",
+)
+_HOSTED_LEGACY_WORKSPACE_RELATIVES = (
+    Path("workspace"),
+    Path("open" + "claw-home") / "workspace",
+    Path("agents") / "main" / "workspace",
+)
+_WORKSPACE_FILE_STATE_MARKERS = (
+    "MEMORY.md",
+    "USER.md",
+    "memory",
+    ".magi/memory",
+    "knowledge",
+    ".magi/knowledge",
+)
+_WORKSPACE_STATE_MARKERS = (
+    *_WORKSPACE_FILE_STATE_MARKERS,
+    "skills",
+    ".magi/skills",
+    "docs/superpowers",
 )
 
 
@@ -73,22 +96,104 @@ class _ConfigValidationError(ValueError):
 # Workspace + path safety helpers
 # --------------------------------------------------------------------------- #
 def _workspace_root() -> Path:
+    env_root = _workspace_root_from_env()
+    if env_root is not None:
+        return env_root
+    return Path(os.getcwd()).resolve()
+
+
+def _workspace_root_from_env() -> Path | None:
     for name in _WORKSPACE_ENV_VARS:
         value = os.environ.get(name)
         if value and value.strip():
             return Path(value.strip()).expanduser().resolve()
-    return Path(os.getcwd()).resolve()
+    return None
 
 
-def _resolve_in_workspace(relative: str) -> Path | None:
-    """Resolve ``relative`` under the workspace, blocking traversal escapes."""
-    root = _workspace_root()
+def _path_exists(path: Path) -> bool:
+    try:
+        return path.exists()
+    except OSError:
+        return False
+
+
+def _workspace_root_has_state(root: Path, markers: tuple[str, ...]) -> bool:
+    return any(_path_exists(root / marker) for marker in markers)
+
+
+def _path_has_content(path: Path) -> bool:
+    try:
+        if path.is_file():
+            return True
+        if path.is_dir():
+            return any(path.iterdir())
+    except OSError:
+        return False
+    return False
+
+
+def _workspace_root_has_content(root: Path, markers: tuple[str, ...]) -> bool:
+    return any(_path_has_content(root / marker) for marker in markers)
+
+
+def _workspace_roots() -> list[Path]:
+    """Return primary workspace root plus known hosted legacy fallbacks."""
+    primary = _workspace_root()
+    roots = [primary]
+    if _workspace_root_from_env() is None:
+        return roots
+    seen = {primary}
+    for relative in _HOSTED_LEGACY_WORKSPACE_RELATIVES:
+        candidate = (primary / relative).resolve()
+        if candidate in seen:
+            continue
+        try:
+            candidate.relative_to(primary)
+        except ValueError:
+            continue
+        if not _workspace_root_has_state(candidate, _WORKSPACE_STATE_MARKERS):
+            continue
+        roots.append(candidate)
+        seen.add(candidate)
+    return roots
+
+
+def _workspace_write_root() -> Path:
+    roots = _workspace_roots()
+    for root in roots:
+        if _workspace_root_has_content(root, _WORKSPACE_FILE_STATE_MARKERS):
+            return root
+    for root in roots:
+        if _workspace_root_has_state(root, _WORKSPACE_FILE_STATE_MARKERS):
+            return root
+    return roots[0]
+
+
+def _resolve_in_root(root: Path, relative: str) -> Path | None:
     candidate = (root / relative.lstrip("/")).resolve()
     try:
         candidate.relative_to(root)
     except ValueError:
         return None
     return candidate
+
+
+def _resolve_in_workspace(relative: str) -> Path | None:
+    """Resolve ``relative`` under the workspace, blocking traversal escapes."""
+    fallback: Path | None = None
+    for root in _workspace_roots():
+        candidate = _resolve_in_root(root, relative)
+        if candidate is None:
+            return None
+        if fallback is None:
+            fallback = candidate
+        if _path_exists(candidate):
+            return candidate
+    return fallback
+
+
+def _resolve_in_workspace_for_write(relative: str) -> Path | None:
+    return _resolve_in_root(_workspace_write_root(), relative)
 
 
 def _is_protected(path: Path) -> bool:
@@ -189,46 +294,35 @@ def _parse_frontmatter(text: str) -> dict[str, str]:
 
 
 def _scan_skills() -> dict[str, Any]:
-    root = _workspace_root()
     loaded: list[dict[str, Any]] = []
     issues: list[dict[str, Any]] = []
     seen: set[str] = set()
 
-    bases = [root / "skills", root / ".magi" / "skills", root / "docs" / "superpowers"]
-    for base in bases:
-        if not base.is_dir():
-            continue
-        for skill_md in sorted(base.rglob("SKILL.md"))[:100]:
-            skill_dir = skill_md.parent
-            try:
-                rel = skill_dir.relative_to(root).as_posix()
-            except ValueError:
-                rel = skill_dir.name
-            if rel in seen:
+    for root in _workspace_roots():
+        for relative in _skill_candidates(root):
+            ref = _skill_reference(root, relative)
+            if ref is None or ref["dir"] in seen:
                 continue
-            seen.add(rel)
-            text = _read_text(skill_md, limit=_MAX_SEARCH_BYTES)
+            seen.add(ref["dir"])
+            text = _read_skill_text(ref)
             if text is None:
                 issues.append(
-                    {"dir": rel, "path": skill_md.as_posix(), "reason": "unreadable"}
+                    {"dir": ref["dir"], "path": ref["path"], "reason": "unreadable"}
                 )
                 continue
             front = _parse_frontmatter(text)
-            scripts = [
-                p
-                for p in skill_dir.rglob("*")
-                if p.is_file() and p.suffix in {".sh", ".py", ".js", ".ts"}
-            ]
             tags = [t.strip() for t in front.get("tags", "").split(",") if t.strip()]
+            script_backed = _skill_has_script(ref)
             loaded.append(
                 {
-                    "name": front.get("name") or skill_dir.name,
-                    "dir": rel,
-                    "path": skill_md.as_posix(),
+                    "name": front.get("name") or Path(ref["dir"]).name,
+                    "dir": ref["dir"],
+                    "path": ref["path"],
+                    "source": ref["source"],
                     "description": front.get("description", ""),
                     "tags": tags,
-                    "promptOnly": len(scripts) == 0,
-                    "scriptBacked": len(scripts) > 0,
+                    "promptOnly": not script_backed,
+                    "scriptBacked": script_backed,
                     "runtimeHooks": 0,
                 }
             )
@@ -245,6 +339,89 @@ def _scan_skills() -> dict[str, Any]:
         "runtimeHookCount": len(runtime_hooks),
         "loadedCount": len(loaded),
     }
+
+
+def _skill_reference(root: Path, relative: str) -> dict[str, Any] | None:
+    path_parts = Path(relative).parts
+    if not path_parts or path_parts[-1] != "SKILL.md":
+        return None
+    if relative.startswith("bundled/"):
+        try:
+            resource = resources.files("magi_agent").joinpath("skills", *path_parts)
+        except (FileNotFoundError, ModuleNotFoundError):
+            return None
+        return {
+            "dir": Path(relative).parent.as_posix(),
+            "path": relative,
+            "source": "bundled",
+            "resource": resource,
+            "filesystem_path": None,
+        }
+    legacy_prefix = "legacy-workspace/skills/"
+    if relative.startswith(legacy_prefix):
+        if root.name != "workspace" or root.parent.name != "workspace":
+            return None
+        inner = relative[len(legacy_prefix):]
+        path = root.parent / "skills" / inner
+        return {
+            "dir": Path(relative).parent.as_posix(),
+            "path": path.as_posix(),
+            "source": "legacy_workspace",
+            "resource": None,
+            "filesystem_path": path,
+        }
+    path = root / relative
+    return {
+        "dir": Path(relative).parent.as_posix(),
+        "path": path.as_posix(),
+        "source": "workspace",
+        "resource": None,
+        "filesystem_path": path,
+    }
+
+
+def _read_skill_text(ref: dict[str, Any]) -> str | None:
+    resource = ref.get("resource")
+    if isinstance(resource, Traversable):
+        try:
+            text = resource.read_text(encoding="utf-8")
+        except (FileNotFoundError, UnicodeDecodeError, OSError):
+            return None
+        return text[:_MAX_SEARCH_BYTES]
+    path = ref.get("filesystem_path")
+    if isinstance(path, Path):
+        return _read_text(path, limit=_MAX_SEARCH_BYTES)
+    return None
+
+
+def _skill_has_script(ref: dict[str, Any]) -> bool:
+    path = ref.get("filesystem_path")
+    if isinstance(path, Path):
+        skill_dir = path.parent
+        try:
+            return any(
+                p.is_file() and p.suffix in _SCRIPT_SUFFIXES
+                for p in skill_dir.rglob("*")
+            )
+        except OSError:
+            return False
+    resource = ref.get("resource")
+    if isinstance(resource, Traversable):
+        return _traversable_has_script(resource.parent)
+    return False
+
+
+def _traversable_has_script(node: Traversable) -> bool:
+    try:
+        children = list(node.iterdir())
+    except (FileNotFoundError, OSError):
+        return False
+    for child in children:
+        if child.is_file() and Path(child.name).suffix in _SCRIPT_SUFFIXES:
+            return True
+        if child.is_dir() and _traversable_has_script(child):
+            return True
+    return False
 
 
 # --------------------------------------------------------------------------- #
@@ -346,37 +523,42 @@ def _write_config(payload: dict[str, Any]) -> None:
 # Workspace file domains (memory + knowledge)
 # --------------------------------------------------------------------------- #
 def _list_markdown(rel_dirs: list[str], extra_files: list[str]) -> list[dict[str, Any]]:
-    root = _workspace_root()
     out: list[dict[str, Any]] = []
     seen: set[str] = set()
 
-    def add(path: Path) -> None:
+    def add(root: Path, path: Path) -> None:
         if not path.is_file() or _is_protected(path):
             return
-        rel = path.relative_to(root).as_posix()
+        try:
+            path.resolve().relative_to(root)
+            rel = path.relative_to(root).as_posix()
+        except (OSError, ValueError):
+            return
         if rel in seen:
             return
         seen.add(rel)
         out.append({"path": rel, **_file_stat(path)})
 
-    for name in extra_files:
-        add(root / name)
-    for rel_dir in rel_dirs:
-        base = root / rel_dir
-        if base.is_dir():
-            for path in sorted(base.rglob("*.md")):
-                add(path)
+    for root in _workspace_roots():
+        for name in extra_files:
+            add(root, root / name)
+        for rel_dir in rel_dirs:
+            base = root / rel_dir
+            if base.is_dir():
+                for path in sorted(base.rglob("*.md")):
+                    add(root, path)
     return out
 
 
 def _search_files(files: list[dict[str, Any]], query: str, limit: int) -> list[dict[str, Any]]:
-    root = _workspace_root()
     needle = query.lower()
     results: list[dict[str, Any]] = []
     if not needle:
         return results
     for entry in files:
-        path = root / entry["path"]
+        path = _resolve_in_workspace(str(entry["path"]))
+        if path is None:
+            continue
         text = _read_text(path, limit=_MAX_SEARCH_BYTES)
         if text is None:
             continue
@@ -526,7 +708,7 @@ def register_app_api_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
         content = payload.get("content") if isinstance(payload, dict) else None
         if not isinstance(rel, str) or not isinstance(content, str):
             return JSONResponse(status_code=400, content={"error": "path_and_content_required"})
-        target = _resolve_in_workspace(rel)
+        target = _resolve_in_workspace_for_write(rel)
         if target is None or _is_protected(target):
             return JSONResponse(status_code=403, content={"error": "forbidden_path"})
         try:
@@ -570,7 +752,7 @@ def register_app_api_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
         content = payload.get("content") if isinstance(payload, dict) else None
         if not isinstance(rel, str) or not isinstance(content, str):
             return JSONResponse(status_code=400, content={"error": "path_and_content_required"})
-        target = _resolve_in_workspace(rel)
+        target = _resolve_in_workspace_for_write(rel)
         if target is None or _is_protected(target):
             return JSONResponse(status_code=403, content={"error": "forbidden_path"})
         try:
@@ -605,36 +787,45 @@ def register_app_api_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
 
 def _knowledge_index(collection: str | None) -> dict[str, Any]:
     """Scan workspace knowledge dirs. Empty when no KB store is configured."""
-    root = _workspace_root()
     collections: list[dict[str, Any]] = []
     documents: list[dict[str, Any]] = []
-    for base_name in ("knowledge", ".magi/knowledge"):
-        base = root / base_name
-        if not base.is_dir():
-            continue
-        for coll_dir in sorted(p for p in base.iterdir() if p.is_dir()):
-            if collection is not None and coll_dir.name != collection:
+    seen_documents: set[str] = set()
+    for root in _workspace_roots():
+        for base_name in ("knowledge", ".magi/knowledge"):
+            base = root / base_name
+            if not base.is_dir():
                 continue
-            docs = [p for p in sorted(coll_dir.rglob("*")) if p.is_file() and not _is_protected(p)]
-            size = sum(p.stat().st_size for p in docs)
-            collections.append(
-                {
-                    "name": coll_dir.name,
-                    "path": coll_dir.relative_to(root).as_posix(),
-                    "documentCount": len(docs),
-                    "sizeBytes": size,
-                }
-            )
-            for doc in docs:
-                stat = doc.stat()
-                documents.append(
+            for coll_dir in sorted(p for p in base.iterdir() if p.is_dir()):
+                if collection is not None and coll_dir.name != collection:
+                    continue
+                docs = [
+                    p
+                    for p in sorted(coll_dir.rglob("*"))
+                    if p.is_file() and not _is_protected(p)
+                ]
+                size = sum(p.stat().st_size for p in docs)
+                collections.append(
                     {
-                        "collection": coll_dir.name,
-                        "filename": doc.name,
-                        "title": doc.stem,
-                        "path": doc.relative_to(root).as_posix(),
-                        "sizeBytes": stat.st_size,
-                        "mtimeMs": int(stat.st_mtime * 1000),
+                        "name": coll_dir.name,
+                        "path": coll_dir.relative_to(root).as_posix(),
+                        "documentCount": len(docs),
+                        "sizeBytes": size,
                     }
                 )
+                for doc in docs:
+                    rel = doc.relative_to(root).as_posix()
+                    if rel in seen_documents:
+                        continue
+                    seen_documents.add(rel)
+                    stat = doc.stat()
+                    documents.append(
+                        {
+                            "collection": coll_dir.name,
+                            "filename": doc.name,
+                            "title": doc.stem,
+                            "path": rel,
+                            "sizeBytes": stat.st_size,
+                            "mtimeMs": int(stat.st_mtime * 1000),
+                        }
+                    )
     return {"collections": collections, "documents": documents}

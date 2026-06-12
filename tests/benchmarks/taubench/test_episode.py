@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from magi_agent.benchmarks.taubench.episode import EpisodeState, run_episode
+from benchmarks.taubench.episode import EpisodeState, run_episode
 
 
 # --- fakes (no tau_bench, no ADK) ---
@@ -145,3 +145,313 @@ def test_no_respond_when_tool_finishes_episode() -> None:
     assert result.done is True
     assert result.reward == 1.0
     assert [a for a in env.steps if a.name == "respond"] == []  # no extra respond
+
+
+from benchmarks.taubench.reliability import ReliabilityConfig, WriteLedger
+
+
+def _text_of(content) -> str:
+    parts = getattr(content, "parts", None) or []
+    return "".join(getattr(p, "text", "") or "" for p in parts)
+
+
+def test_l2_injects_one_nudge_on_unsupported_success_claim() -> None:
+    env = FakeEnv(script=[
+        FakeResp("user-reply-after-nudge", 0.0, False),  # respond after the 2nd turn
+        FakeResp("###STOP###", 1.0, True),                # respond after the 3rd turn -> done
+    ])
+    state = EpisodeState()
+    led = WriteLedger()
+    seen: list[str] = []
+    calls = {"n": 0}
+    texts = ["Your reservation is booked! Reservation ID HATHAT", "ok, fixing now", "done"]
+
+    def factory(*, instruction, tools):
+        class _R:
+            async def run_async(self, **kw):
+                seen.append(_text_of(kw["new_message"]))
+                idx = calls["n"]
+                calls["n"] += 1
+                yield _Event(texts[idx])
+        return _R()
+
+    result = run_episode(
+        env, task_index=0, state=state, runner_factory=factory,
+        action_factory=FakeAction, respond_action_name="respond", max_steps=6,
+        reliability=ReliabilityConfig(verify_before_final=True), ledger=led,
+    )
+    respond_contents = [a.kwargs["content"] for a in env.steps if a.name == "respond"]
+    # The unsupported success claim was NOT routed as a respond — the nudge replaced it.
+    assert "Your reservation is booked! Reservation ID HATHAT" not in respond_contents
+    assert respond_contents[0] == "ok, fixing now"
+    # The nudge was delivered to the agent as the next observation.
+    assert any("Re-check the tool results" in m for m in seen)
+    assert result.done is True
+
+
+def test_l2_silent_when_write_succeeded() -> None:
+    env = FakeEnv(script=[FakeResp("###STOP###", 1.0, True)])
+    state = EpisodeState()
+    led = WriteLedger()
+    led.record("book_reservation", {"x": 1}, ok=True)
+    calls = {"n": 0}
+    texts = ["Your reservation is booked. Reservation ID R1."]
+
+    def factory(*, instruction, tools):
+        class _R:
+            async def run_async(self, **kw):
+                idx = calls["n"]
+                calls["n"] += 1
+                yield _Event(texts[idx])
+        return _R()
+
+    result = run_episode(
+        env, task_index=0, state=state, runner_factory=factory,
+        action_factory=FakeAction, respond_action_name="respond", max_steps=5,
+        reliability=ReliabilityConfig(verify_before_final=True), ledger=led,
+    )
+    respond_contents = [a.kwargs["content"] for a in env.steps if a.name == "respond"]
+    assert respond_contents == ["Your reservation is booked. Reservation ID R1."]
+    assert result.done is True
+
+
+def test_l4_injects_completion_review_on_refusal_conclusion() -> None:
+    env = FakeEnv(script=[
+        FakeResp("user-reply", 0.0, False),
+        FakeResp("###STOP###", 1.0, True),
+    ])
+    state = EpisodeState()
+    seen: list[str] = []
+    calls = {"n": 0}
+    texts = ["I'm sorry, I'm unable to provide that compensation.", "ok done", "bye"]
+
+    def factory(*, instruction, tools):
+        class _R:
+            async def run_async(self, **kw):
+                seen.append(_text_of(kw["new_message"]))
+                idx = calls["n"]
+                calls["n"] += 1
+                yield _Event(texts[idx])
+        return _R()
+
+    result = run_episode(
+        env, task_index=0, state=state, runner_factory=factory,
+        action_factory=FakeAction, respond_action_name="respond", max_steps=6,
+        reliability=ReliabilityConfig(completion_review=True),
+    )
+    respond_contents = [a.kwargs["content"] for a in env.steps if a.name == "respond"]
+    assert "I'm sorry, I'm unable to provide that compensation." not in respond_contents
+    assert respond_contents[0] == "ok done"
+    assert any("every concrete action" in m for m in seen)
+    assert result.done is True
+
+
+def test_l4_silent_on_info_question() -> None:
+    env = FakeEnv(script=[FakeResp("###STOP###", 1.0, True)])
+    state = EpisodeState()
+    calls = {"n": 0}
+    texts = ["Can you confirm your travel dates first?"]
+
+    def factory(*, instruction, tools):
+        class _R:
+            async def run_async(self, **kw):
+                idx = calls["n"]
+                calls["n"] += 1
+                yield _Event(texts[idx])
+        return _R()
+
+    result = run_episode(
+        env, task_index=0, state=state, runner_factory=factory,
+        action_factory=FakeAction, respond_action_name="respond", max_steps=5,
+        reliability=ReliabilityConfig(completion_review=True),
+    )
+    respond_contents = [a.kwargs["content"] for a in env.steps if a.name == "respond"]
+    assert respond_contents == ["Can you confirm your travel dates first?"]
+    assert result.done is True
+
+
+def test_l2_and_l4_independent_latches() -> None:
+    env = FakeEnv(script=[
+        FakeResp("user-reply", 0.0, False),
+        FakeResp("###STOP###", 1.0, True),
+    ])
+    state = EpisodeState()
+    led = WriteLedger()  # empty -> L2 fires on the success claim
+    seen: list[str] = []
+    calls = {"n": 0}
+    texts = [
+        "Your reservation is booked! Reservation ID X",   # turn 1 -> L2 nudge
+        "I'm sorry, I am unable to complete the rest.",    # turn 2 -> L4 nudge
+        "ok",                                              # turn 3 -> respond
+        "done",                                            # turn 4 -> respond -> STOP
+    ]
+
+    def factory(*, instruction, tools):
+        class _R:
+            async def run_async(self, **kw):
+                seen.append(_text_of(kw["new_message"]))
+                idx = calls["n"]
+                calls["n"] += 1
+                yield _Event(texts[idx])
+        return _R()
+
+    result = run_episode(
+        env, task_index=0, state=state, runner_factory=factory,
+        action_factory=FakeAction, respond_action_name="respond", max_steps=8,
+        reliability=ReliabilityConfig(verify_before_final=True, completion_review=True),
+        ledger=led,
+    )
+    respond_contents = [a.kwargs["content"] for a in env.steps if a.name == "respond"]
+    assert "Your reservation is booked! Reservation ID X" not in respond_contents
+    assert "I'm sorry, I am unable to complete the rest." not in respond_contents
+    assert respond_contents[0] == "ok"
+    assert any("Re-check the tool results" in m for m in seen)   # L2 nudge delivered
+    assert any("every concrete action" in m for m in seen)       # L4 nudge delivered
+    assert result.done is True
+
+
+def test_l2_takes_precedence_within_a_turn() -> None:
+    # A single text that is BOTH an unsupported success claim (L2) and a
+    # conclusion (L4-eligible): L2 must win that turn; L4 must NOT also fire.
+    env = FakeEnv(script=[FakeResp("###STOP###", 1.0, True)])
+    state = EpisodeState()
+    led = WriteLedger()  # empty -> L2 fires
+    seen: list[str] = []
+    calls = {"n": 0}
+    texts = ["Your reservation is booked! Reservation ID X", "ok"]
+
+    def factory(*, instruction, tools):
+        class _R:
+            async def run_async(self, **kw):
+                seen.append(_text_of(kw["new_message"]))
+                idx = calls["n"]
+                calls["n"] += 1
+                yield _Event(texts[idx])
+        return _R()
+
+    result = run_episode(
+        env, task_index=0, state=state, runner_factory=factory,
+        action_factory=FakeAction, respond_action_name="respond", max_steps=6,
+        reliability=ReliabilityConfig(verify_before_final=True, completion_review=True),
+        ledger=led,
+    )
+    assert any("Re-check the tool results" in m for m in seen)        # L2 won the turn
+    assert not any("every concrete action" in m for m in seen)       # L4 did NOT fire
+    assert result.done is True
+
+
+def test_open_items_review_is_private_instruction_not_user_observation() -> None:
+    env = FakeEnv(script=[FakeResp("###STOP###", 1.0, True)])
+    state = EpisodeState()
+    seen: list[str] = []
+    instructions: list[str] = []
+    calls = {"n": 0}
+    texts = ["I'm sorry, I cannot do that."]
+
+    def factory(*, instruction, tools):
+        instructions.append(instruction)
+
+        class _R:
+            async def run_async(self, **kw):
+                seen.append(_text_of(kw["new_message"]))
+                idx = calls["n"]
+                calls["n"] += 1
+                yield _Event(texts[idx])
+        return _R()
+
+    result = run_episode(
+        env, task_index=0, state=state, runner_factory=factory,
+        action_factory=FakeAction, respond_action_name="respond", max_steps=6,
+        reliability=ReliabilityConfig(open_items_review=True),
+    )
+    respond_contents = [a.kwargs["content"] for a in env.steps if a.name == "respond"]
+    assert respond_contents == ["I'm sorry, I cannot do that."]
+    assert len(seen) == 1
+    assert not any("checklist" in m.lower() for m in seen)
+    assert any("checklist" in i.lower() for i in instructions)
+    assert result.done is True
+
+
+def test_open_items_review_off_no_change() -> None:
+    env = FakeEnv(script=[FakeResp("###STOP###", 1.0, True)])
+    state = EpisodeState()
+    calls = {"n": 0}
+    texts = ["I'm sorry, I cannot do that."]
+
+    def factory(*, instruction, tools):
+        class _R:
+            async def run_async(self, **kw):
+                idx = calls["n"]
+                calls["n"] += 1
+                yield _Event(texts[idx])
+        return _R()
+
+    result = run_episode(
+        env, task_index=0, state=state, runner_factory=factory,
+        action_factory=FakeAction, respond_action_name="respond", max_steps=5,
+    )
+    respond_contents = [a.kwargs["content"] for a in env.steps if a.name == "respond"]
+    assert respond_contents == ["I'm sorry, I cannot do that."]
+    assert result.done is True
+
+
+def test_open_items_review_not_triggered_by_question() -> None:
+    env = FakeEnv(script=[FakeResp("###STOP###", 1.0, True)])
+    state = EpisodeState()
+    seen: list[str] = []
+    calls = {"n": 0}
+    texts = ["Could you give me your user id?"]
+
+    def factory(*, instruction, tools):
+        class _R:
+            async def run_async(self, **kw):
+                seen.append(_text_of(kw["new_message"]))
+                idx = calls["n"]
+                calls["n"] += 1
+                yield _Event(texts[idx])
+        return _R()
+
+    result = run_episode(
+        env, task_index=0, state=state, runner_factory=factory,
+        action_factory=FakeAction, respond_action_name="respond", max_steps=5,
+        reliability=ReliabilityConfig(open_items_review=True),
+    )
+    respond_contents = [a.kwargs["content"] for a in env.steps if a.name == "respond"]
+    assert respond_contents == ["Could you give me your user id?"]
+    assert not any("checklist" in m for m in seen)
+    assert result.done is True
+
+
+def test_l4_runtime_review_composes_with_l6_private_instruction() -> None:
+    env = FakeEnv(script=[FakeResp("###STOP###", 1.0, True)])
+    state = EpisodeState()
+    seen: list[str] = []
+    instructions: list[str] = []
+    calls = {"n": 0}
+    texts = [
+        "I'm sorry, I cannot do that.",       # turn 1 -> L4 nudge
+        "Unfortunately that is not possible.",  # turn 2 -> respond -> STOP
+    ]
+
+    def factory(*, instruction, tools):
+        instructions.append(instruction)
+
+        class _R:
+            async def run_async(self, **kw):
+                seen.append(_text_of(kw["new_message"]))
+                idx = calls["n"]
+                calls["n"] += 1
+                yield _Event(texts[idx])
+        return _R()
+
+    result = run_episode(
+        env, task_index=0, state=state, runner_factory=factory,
+        action_factory=FakeAction, respond_action_name="respond", max_steps=8,
+        reliability=ReliabilityConfig(completion_review=True, open_items_review=True),
+    )
+    respond_contents = [a.kwargs["content"] for a in env.steps if a.name == "respond"]
+    assert respond_contents == ["Unfortunately that is not possible."]
+    assert any("every concrete action" in m for m in seen)  # L4 fired first
+    assert not any("checklist" in m.lower() for m in seen)  # L6 is not user-visible
+    assert any("checklist" in i.lower() for i in instructions)
+    assert result.done is True

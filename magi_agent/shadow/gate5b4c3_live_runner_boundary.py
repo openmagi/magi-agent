@@ -13,9 +13,21 @@ from typing import Any, ClassVar, Literal, Self, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
 
+from magi_agent.config.env import parse_output_continuation_env
 from magi_agent.evidence.gate1a_egress_correlation import (
     Gate1AEgressCorrelationContext,
     build_gate1a_proxy_http_options,
+)
+from magi_agent.runtime.output_continuation import (
+    OutputContinuationConfig,
+    build_continuation_message,
+    should_continue,
+    stop_reason_is_truncated,
+)
+from magi_agent.runtime.public_events import (
+    tool_end_event,
+    tool_start_event,
+    turn_phase_event,
 )
 from magi_agent.shadow.gate5b4c3_shadow_generation_contract import (
     Gate5B4C3ModelRoutingSource,
@@ -29,6 +41,10 @@ from magi_agent.shadow.gate5b4c3_runner_input_adapter import (
     build_gate5b4c3_runner_input,
 )
 from magi_agent.shadow.gate5b4c3_image_parts import image_blocks_to_parts
+from magi_agent.shadow.session_service_registry import (
+    SessionServiceRegistry,
+    default_session_service_registry,
+)
 
 
 Gate5B4C3LiveRunnerStatus: TypeAlias = Literal["skipped", "dropped", "completed", "error"]
@@ -85,6 +101,9 @@ _ALLOWED_AGENT_KWARGS = (
 _ALLOWED_RUNNER_KWARGS = ("agent", "app_name", "auto_create_session", "session_service")
 _ALLOWED_RUN_ASYNC_KWARGS = ("new_message", "run_config", "session_id", "user_id")
 _MAX_MANUAL_TOOL_CONTINUATIONS = 4
+_MANUAL_TOOL_EVENT_LIMIT = 64
+_DEFAULT_SELECTED_FULL_TOOLHOST_TEXT_EVENT_LIMIT = 2048
+_MAX_SELECTED_FULL_TOOLHOST_TEXT_EVENT_LIMIT = 8192
 _MAX_MANUAL_TOOL_RESULTS_BYTES = 8192
 _ERROR_REDACTION_RE = re.compile(
     r"(?:"
@@ -325,6 +344,11 @@ class Gate5B4C3LiveRunnerBoundaryResult(BaseModel):
         alias="outputTextInternal",
         exclude=True,
     )
+    usage_internal: dict[str, int] | None = Field(
+        default=None,
+        alias="usageInternal",
+        exclude=True,
+    )
     user_visible_output: str | None = Field(default=None, alias="userVisibleOutput")
     authority: Gate5B4C3ShadowGenerationAuthorityFlags = Field(
         default_factory=Gate5B4C3ShadowGenerationAuthorityFlags,
@@ -384,6 +408,10 @@ AdkPrimitivesLoader: TypeAlias = Callable[[], Gate5B4C3LiveAdkPrimitives]
 Gate5B4C3PublicEventSink: TypeAlias = Callable[[Mapping[str, object]], None]
 
 
+def _noop() -> None:
+    return None
+
+
 class Gate5B4C3LiveRunnerBoundary:
     def __init__(
         self,
@@ -393,6 +421,7 @@ class Gate5B4C3LiveRunnerBoundary:
         gate1a_egress_correlation_context: Gate1AEgressCorrelationContext | None = None,
         gate1a_egress_proxy_url: str | None = None,
         public_event_sink: Gate5B4C3PublicEventSink | None = None,
+        session_service_registry: SessionServiceRegistry | None = None,
     ) -> None:
         self._adk_primitives_loader = (
             adk_primitives_loader or load_gate5b4c3_live_adk_primitives
@@ -401,6 +430,7 @@ class Gate5B4C3LiveRunnerBoundary:
         self._gate1a_egress_correlation_context = gate1a_egress_correlation_context
         self._gate1a_egress_proxy_url = str(gate1a_egress_proxy_url or "").strip()
         self._public_event_sink = public_event_sink
+        self._session_service_registry = session_service_registry
 
     def invoke(
         self,
@@ -415,6 +445,39 @@ class Gate5B4C3LiveRunnerBoundary:
         request: Gate5B4C3ShadowGenerationRequest,
         *,
         config: Gate5B4C3ShadowGenerationConfig | None = None,
+    ) -> Gate5B4C3LiveRunnerBoundaryResult:
+        """Run one boundary turn, releasing any session-service lease at the end.
+
+        Behind ``MAGI_HOSTED_SESSION_REUSE`` the session registry marks the
+        turn's ``(bot_id_digest, session_id)`` key busy (per-key single-flight)
+        so overlapping same-key turns — ``invoke()`` runs ``asyncio.run`` per
+        call and may execute on multiple worker threads — never mutate one
+        session service concurrently. The busy mark must drop only after the
+        turn fully stops consuming the runner (including the no-tool finalizer
+        rerun), so the release lives here, in a ``finally`` around the whole
+        turn body — covering every return and exception path.
+        """
+        session_lease_releases: list[Callable[[], None]] = []
+        try:
+            return await self._invoke_async_turn(
+                request,
+                config=config,
+                session_lease_releases=session_lease_releases,
+            )
+        finally:
+            for release_session_lease in session_lease_releases:
+                try:
+                    release_session_lease()
+                except Exception:
+                    # Lease release must never change the boundary result.
+                    pass
+
+    async def _invoke_async_turn(
+        self,
+        request: Gate5B4C3ShadowGenerationRequest,
+        *,
+        config: Gate5B4C3ShadowGenerationConfig | None = None,
+        session_lease_releases: list[Callable[[], None]],
     ) -> Gate5B4C3LiveRunnerBoundaryResult:
         started = time.monotonic()
         diagnostic = build_gate5b4c3_shadow_generation_diagnostic(request, config=config)
@@ -552,7 +615,13 @@ class Gate5B4C3LiveRunnerBoundary:
             "generate_content_config": generate_content_config,
         }
         try:
-            session_service = primitives.InMemorySessionService()
+            session_service, session_reused, mark_session_seeded = (
+                self._acquire_session_service(
+                    request,
+                    primitives,
+                    session_lease_releases,
+                )
+            )
         except Exception as exc:
             return _setup_error_result(
                 request,
@@ -617,7 +686,15 @@ class Gate5B4C3LiveRunnerBoundary:
             )
         try:
             message = primitives.Content(
-                parts=_build_user_message_parts(runner_input, primitives=primitives),
+                parts=_build_user_message_parts(
+                    runner_input,
+                    primitives=primitives,
+                    # On a session-registry hit the reused ADK session already
+                    # holds the prior turns; re-ingesting the re-sent sanitized
+                    # history would duplicate context. History stays a
+                    # seed-on-miss (and the flag-OFF path always seeds).
+                    include_history=not session_reused,
+                ),
                 role="user",
             )
         except Exception as exc:
@@ -653,7 +730,12 @@ class Gate5B4C3LiveRunnerBoundary:
         event_count = 0
         output_chunks: list[str] = []
         manual_continuations = 0
+        output_continuations = 0
         tool_only_events_seen = False
+        usage_totals = [0, 0, 0]
+        output_continuation = (
+            _output_continuation_config_from_env() if selected_full_toolhost else None
+        )
         try:
             async with asyncio.timeout(request.budgets.python_runner_timeout_ms / 1000):
                 next_message: object = message
@@ -662,6 +744,8 @@ class Gate5B4C3LiveRunnerBoundary:
                     function_call_keys: set[str] = set()
                     function_responses_seen = False
                     current_run_output_chunks: list[str] = []
+                    stream_usage: tuple[int, int, int] | None = None
+                    current_run_truncated = False
                     current_run_kwargs = {**run_kwargs, "new_message": next_message}
                     async for event in runner.run_async(
                         **_allowlist_kwargs(
@@ -669,6 +753,7 @@ class Gate5B4C3LiveRunnerBoundary:
                             _ALLOWED_RUN_ASYNC_KWARGS,
                         )
                     ):
+                        mark_session_seeded()
                         event_count += 1
                         chunk = _event_text(event)
                         if chunk:
@@ -686,6 +771,11 @@ class Gate5B4C3LiveRunnerBoundary:
                                         "delta": visible_delta,
                                     }
                                 )
+                        event_usage = _event_usage_metadata(event)
+                        if event_usage is not None:
+                            stream_usage = event_usage
+                        if not current_run_truncated:
+                            current_run_truncated = _event_finish_reason_is_truncated(event)
                         event_function_calls = _event_function_calls(event)
                         for function_call in event_function_calls:
                             function_call_key = _json_dumps(function_call)
@@ -698,8 +788,47 @@ class Gate5B4C3LiveRunnerBoundary:
                             tool_only_events_seen = True
                         if event_function_responses:
                             function_responses_seen = True
-                        if event_count >= 64:
+                        if event_count >= _stream_event_limit(
+                            selected_full_toolhost=selected_full_toolhost
+                        ):
                             break
+                    if stream_usage is not None:
+                        usage_totals[0] += stream_usage[0]
+                        usage_totals[1] += stream_usage[1]
+                        usage_totals[2] += stream_usage[2]
+                    if (
+                        selected_full_toolhost
+                        and event_count
+                        < _stream_event_limit(
+                            selected_full_toolhost=selected_full_toolhost
+                        )
+                        and not function_calls
+                        and not function_responses_seen
+                        and _should_continue_truncated_output(
+                            output_continuation,
+                            truncated=current_run_truncated,
+                            output_seen=bool(current_run_output_chunks),
+                            continuations_used=output_continuations,
+                        )
+                    ):
+                        output_continuations += 1
+                        assert output_continuation is not None
+                        self._emit_public_event(
+                            {
+                                "type": "output_continuation",
+                                "continuation": output_continuations,
+                                "max": output_continuation.max_continuations,
+                            }
+                        )
+                        next_message = primitives.Content(
+                            parts=[
+                                primitives.Part.from_text(
+                                    text=_build_output_continuation_message()
+                                )
+                            ],
+                            role="user",
+                        )
+                        continue
                     # Drive pending tool calls to execution even when the model
                     # also emitted preamble text in the same turn. Short-circuiting
                     # on `output_chunks` here discarded the model's unexecuted tool
@@ -716,12 +845,25 @@ class Gate5B4C3LiveRunnerBoundary:
                         break
                     if manual_continuations >= _MAX_MANUAL_TOOL_CONTINUATIONS:
                         break
+                    self._emit_public_event(
+                        turn_phase_event(
+                            turn_id=request.turn.turn_id,
+                            phase="executing",
+                        )
+                    )
                     manual_results = await _run_manual_tool_calls(
                         function_calls,
                         self._adk_tools,
+                        public_event_sink=self._emit_public_event,
                     )
                     if not manual_results:
                         break
+                    self._emit_public_event(
+                        turn_phase_event(
+                            turn_id=request.turn.turn_id,
+                            phase="committing",
+                        )
+                    )
                     manual_continuations += 1
                     next_message = primitives.Content(
                         parts=[
@@ -765,6 +907,7 @@ class Gate5B4C3LiveRunnerBoundary:
                     gate1a_egress_proxy_url=self._gate1a_egress_proxy_url,
                 ),
                 output_text=_joined_output(output_chunks),
+                usage=_usage_dict(tuple(usage_totals)),
             )
         except Exception as exc:
             if selected_full_toolhost and tool_only_events_seen:
@@ -776,6 +919,7 @@ class Gate5B4C3LiveRunnerBoundary:
                     run_kwargs=run_kwargs,
                     agent_kwargs=agent_kwargs,
                     runner_kwargs=runner_kwargs,
+                    public_event_sink=self._emit_public_event,
                 )
                 event_count += finalizer_events
                 if finalizer_output:
@@ -794,6 +938,7 @@ class Gate5B4C3LiveRunnerBoundary:
                         runner_kwargs_keys=tuple(sorted(runner_kwargs)),
                         run_async_kwargs_keys=tuple(sorted(run_kwargs)),
                         output_text=_joined_output(output_chunks),
+                        usage=_usage_dict(tuple(usage_totals)),
                     )
             stage, reason_code, exception_category = _classify_runner_exception(exc)
             model_attempted = not (
@@ -831,6 +976,7 @@ class Gate5B4C3LiveRunnerBoundary:
                     gate1a_egress_proxy_url=self._gate1a_egress_proxy_url,
                 ),
                 output_text=_joined_output(output_chunks),
+                usage=_usage_dict(tuple(usage_totals)),
             )
 
         output_text = _joined_output(output_chunks)
@@ -843,6 +989,7 @@ class Gate5B4C3LiveRunnerBoundary:
                 run_kwargs=run_kwargs,
                 agent_kwargs=agent_kwargs,
                 runner_kwargs=runner_kwargs,
+                public_event_sink=self._emit_public_event,
             )
             event_count += finalizer_events
             output_text = finalizer_output
@@ -923,7 +1070,71 @@ class Gate5B4C3LiveRunnerBoundary:
             runner_kwargs_keys=tuple(sorted(runner_kwargs)),
             run_async_kwargs_keys=tuple(sorted(run_kwargs)),
             output_text=output_text,
+            usage=_usage_dict(tuple(usage_totals)),
         )
+
+    def _acquire_session_service(
+        self,
+        request: Gate5B4C3ShadowGenerationRequest,
+        primitives: Gate5B4C3LiveAdkPrimitives,
+        session_lease_releases: list[Callable[[], None]],
+    ) -> tuple[object, bool, Callable[[], None]]:
+        """Build (or, behind the reuse flag, fetch) the turn's session service.
+
+        Flag OFF (default) preserves the historical fresh-instance-per-turn
+        behavior and performs no registry interaction at all. Flag ON acquires
+        from the process-scope registry keyed by the full
+        ``(bot_id_digest, session_id)`` pair — distinct bots or sessions can
+        never share session state — via :meth:`try_acquire`, which marks the
+        key busy for the duration of the turn; an overlapping same-key turn
+        gets a fresh, unregistered fallback service (single-flight). The
+        matching identity-checked release is appended to
+        ``session_lease_releases`` and runs in :meth:`invoke_async`'s
+        ``finally`` once the turn fully ends. The second element reports
+        whether an existing live session was reused (registry hit).
+
+        Miss-created registry entries are provisional until the boundary sees
+        a runner event, which is the first local proof that ADK consumed and
+        seeded the new message. If setup or early runner execution fails before
+        that, the release discards the exact provisional service and the next
+        same-key turn reseeds sanitized history.
+
+        Requests without a stable ``session_key_digest`` bypass the registry
+        entirely (fresh service, never registered): their session id falls
+        back to the per-request-unique request digest, so a registry entry
+        could never be reused — each one would only churn the LRU and evict
+        this bot's live sessions.
+        """
+        # Lazy import: shadow -> config is a function-level dependency by
+        # convention in this package (avoids import cycles).
+        from magi_agent.config.env import is_hosted_session_reuse_enabled
+
+        if not is_hosted_session_reuse_enabled():
+            return primitives.InMemorySessionService(), False, _noop
+        if not request.selection.session_key_digest:
+            return primitives.InMemorySessionService(), False, _noop
+        registry = self._session_service_registry
+        if registry is None:
+            registry = default_session_service_registry()
+        session_key = (request.selection.bot_id_digest, _shadow_session_id(request))
+        session_service, session_reused = registry.try_acquire(
+            session_key,
+            primitives.InMemorySessionService,
+        )
+        seed_completed = {"value": session_reused}
+
+        def mark_session_seeded() -> None:
+            seed_completed["value"] = True
+
+        bound_registry = registry
+        session_lease_releases.append(
+            lambda: bound_registry.release(
+                session_key,
+                session_service,
+                seeded=seed_completed["value"],
+            )
+        )
+        return session_service, session_reused, mark_session_seeded
 
     def _emit_public_event(self, payload: Mapping[str, object]) -> None:
         if self._public_event_sink is None:
@@ -950,8 +1161,17 @@ def load_gate5b4c3_live_adk_primitives() -> Gate5B4C3LiveAdkPrimitives:
     )
 
 
-def _build_user_message_parts(runner_input: object, *, primitives: object) -> list:
-    parts = [primitives.Part.from_text(text=_runner_message_text(runner_input))]
+def _build_user_message_parts(
+    runner_input: object,
+    *,
+    primitives: object,
+    include_history: bool = True,
+) -> list:
+    parts = [
+        primitives.Part.from_text(
+            text=_runner_message_text(runner_input, include_history=include_history)
+        )
+    ]
     raw_blocks = getattr(runner_input, "sanitized_image_blocks", ()) or ()
     if not raw_blocks:
         return parts
@@ -972,8 +1192,12 @@ def _build_user_message_parts(runner_input: object, *, primitives: object) -> li
     return parts
 
 
-def _runner_message_text(runner_input: object) -> str:
+def _runner_message_text(runner_input: object, *, include_history: bool = True) -> str:
     current = str(getattr(runner_input, "sanitized_user_input", "") or "")
+    if not include_history:
+        # Session-reuse hit: the prior turns already live in the reused ADK
+        # session, so only the current sanitized turn text is sent.
+        return current
     history = getattr(runner_input, "sanitized_recent_history", ())
     if not history:
         return current
@@ -1330,7 +1554,7 @@ def _runner_error_diagnostic(
             if gate1a_egress_correlation_context is not None
             else None
         ),
-        routeMode=_safe_label(request.mode, "unknown"),
+        routeMode="user_visible_generation",
         gateMode=(
             "gate1a_readonly_tools"
             if tools_policy == "shadow_readonly"
@@ -1388,6 +1612,7 @@ def _result(
     error_preview: str | None = None,
     runner_error_diagnostic: Gate5B4C3LiveRunnerErrorDiagnostic | None = None,
     output_text: str | None = None,
+    usage: dict[str, int] | None = None,
 ) -> Gate5B4C3LiveRunnerBoundaryResult:
     return Gate5B4C3LiveRunnerBoundaryResult(
         diagnostic=diagnostic.model_dump(by_alias=True, mode="python", warnings=False),
@@ -1417,6 +1642,7 @@ def _result(
             else None
         ),
         outputTextInternal=output_text,
+        usageInternal=usage,
     )
 
 
@@ -1465,6 +1691,92 @@ def _event_text(event: object) -> str | None:
         if chunks:
             return "".join(chunks)
     return None
+
+
+def _output_continuation_config_from_env() -> OutputContinuationConfig | None:
+    parsed = parse_output_continuation_env(os.environ)
+    if not parsed.enabled:
+        return None
+    return OutputContinuationConfig(
+        enabled=True,
+        max_continuations=parsed.max_continuations,
+    )
+
+
+def _stream_event_limit(*, selected_full_toolhost: bool) -> int:
+    if selected_full_toolhost:
+        raw = os.environ.get("MAGI_SELECTED_FULL_TOOLHOST_TEXT_EVENT_LIMIT", "").strip()
+        if not raw:
+            return _DEFAULT_SELECTED_FULL_TOOLHOST_TEXT_EVENT_LIMIT
+        try:
+            parsed = int(raw)
+        except ValueError:
+            return _DEFAULT_SELECTED_FULL_TOOLHOST_TEXT_EVENT_LIMIT
+        if parsed < _MANUAL_TOOL_EVENT_LIMIT:
+            return _MANUAL_TOOL_EVENT_LIMIT
+        return min(parsed, _MAX_SELECTED_FULL_TOOLHOST_TEXT_EVENT_LIMIT)
+    return _MANUAL_TOOL_EVENT_LIMIT
+
+
+def _build_output_continuation_message() -> str:
+    return build_continuation_message()
+
+
+def _should_continue_truncated_output(
+    config: OutputContinuationConfig | None,
+    *,
+    truncated: bool,
+    output_seen: bool,
+    continuations_used: int,
+) -> bool:
+    return should_continue(
+        config,
+        truncated=truncated,
+        output_seen=output_seen,
+        continuations_used=continuations_used,
+    )
+
+
+def _event_finish_reason_is_truncated(event: object) -> bool:
+    return stop_reason_is_truncated(_event_finish_reason(event))
+
+
+def _event_finish_reason(event: object, *, depth: int = 0) -> str | None:
+    if depth > 3:
+        return None
+    for candidate in (event, _safe_model_dump_mapping(event)):
+        if candidate is None:
+            continue
+        for name in (
+            "finish_reason",
+            "finishReason",
+            "stop_reason",
+            "stopReason",
+            "finish_message",
+            "finishMessage",
+        ):
+            normalized = _normalize_finish_reason(_mapping_or_attr(candidate, name))
+            if normalized is not None:
+                return normalized
+        for nested_name in ("llm_response", "llmResponse", "response"):
+            nested = _mapping_or_attr(candidate, nested_name)
+            if nested is None:
+                continue
+            nested_reason = _event_finish_reason(nested, depth=depth + 1)
+            if nested_reason is not None:
+                return nested_reason
+    return None
+
+
+def _normalize_finish_reason(value: object) -> str | None:
+    if value is None:
+        return None
+    enum_value = getattr(value, "value", None) or getattr(value, "name", None)
+    if isinstance(enum_value, str):
+        return enum_value
+    if isinstance(value, str):
+        return value
+    return str(value)
 
 
 def _event_visible_text_delta(
@@ -1548,6 +1860,52 @@ def _event_function_responses(event: object) -> tuple[object, ...]:
             if response is not None:
                 responses.append(response)
     return tuple(responses)
+
+
+def _usage_int(meta: object, *names: str) -> int | None:
+    for name in names:
+        value = _mapping_or_attr(meta, name)
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, int) and value >= 0:
+            return value
+    return None
+
+
+def _event_usage_metadata(event: object, *, depth: int = 0) -> tuple[int, int, int] | None:
+    if depth > 3:
+        return None
+    meta = _mapping_or_attr(event, "usage_metadata") or _mapping_or_attr(
+        event,
+        "usageMetadata",
+    )
+    if meta is not None:
+        prompt = _usage_int(meta, "prompt_token_count", "promptTokenCount")
+        candidates = _usage_int(meta, "candidates_token_count", "candidatesTokenCount")
+        cached = _usage_int(
+            meta,
+            "cached_content_token_count",
+            "cachedContentTokenCount",
+        )
+        if prompt is not None or candidates is not None or cached is not None:
+            return (prompt or 0, candidates or 0, cached or 0)
+    for nested_name in ("llm_response", "response"):
+        nested = _mapping_or_attr(event, nested_name)
+        if nested is not None:
+            found = _event_usage_metadata(nested, depth=depth + 1)
+            if found is not None:
+                return found
+    return None
+
+
+def _usage_dict(totals: tuple[int, int, int]) -> dict[str, int] | None:
+    if not any(totals):
+        return None
+    return {
+        "inputTokens": totals[0],
+        "outputTokens": totals[1],
+        "cacheReadTokens": totals[2],
+    }
 
 
 def _event_parts(
@@ -1705,6 +2063,8 @@ def _normalize_function_call(function_call: object) -> Mapping[str, object] | No
 async def _run_manual_tool_calls(
     function_calls: Sequence[Mapping[str, object]],
     tools: Sequence[object],
+    *,
+    public_event_sink: Gate5B4C3PublicEventSink | None = None,
 ) -> list[Mapping[str, object]]:
     tool_by_name = {
         str(getattr(tool, "name", "")): tool
@@ -1712,10 +2072,42 @@ async def _run_manual_tool_calls(
         if _SAFE_TOOL_NAME_RE.match(str(getattr(tool, "name", "")))
     }
     results: list[Mapping[str, object]] = []
-    for call in function_calls:
+    for index, call in enumerate(function_calls):
         name = str(call.get("name", ""))
+        args = call.get("args")
+        safe_args = dict(args) if isinstance(args, Mapping) else {}
         tool = tool_by_name.get(name)
+        tool_emits_public_events = (
+            tool is not None and _tool_emits_public_events(tool)
+        )
+        tool_event_id = _manual_tool_event_id(
+            name=name,
+            args=safe_args,
+            call_id=call.get("id"),
+            index=index,
+        )
+        started = time.monotonic()
+        if public_event_sink is not None and not tool_emits_public_events:
+            public_event_sink(tool_start_event(tool_id=tool_event_id, name=name))
         if tool is None:
+            result_digest = _digest(
+                {
+                    "toolName": name,
+                    "status": "blocked",
+                    "reason": "tool_not_registered",
+                }
+            )
+            if public_event_sink is not None and not tool_emits_public_events:
+                public_event_sink(
+                    tool_end_event(
+                        tool_id=tool_event_id,
+                        status="error",
+                        output_preview=f"result:{result_digest}",
+                        error="tool_not_registered",
+                        receipt_refs=(f"result:{result_digest}",),
+                        duration_ms=_elapsed_ms(started),
+                    )
+                )
             results.append(
                 {
                     "toolName": name,
@@ -1724,34 +2116,77 @@ async def _run_manual_tool_calls(
                 }
             )
             continue
-        args = call.get("args")
-        safe_args = dict(args) if isinstance(args, Mapping) else {}
         try:
             result = await _invoke_manual_tool(tool, safe_args)
         except Exception:
             result = {"status": "error", "reason": "tool_execution_failed"}
+        manual_status = _manual_tool_status(result)
+        result_digest = _digest(result)
+        if public_event_sink is not None and not tool_emits_public_events:
+            public_event_sink(
+                tool_end_event(
+                    tool_id=tool_event_id,
+                    status="ok" if manual_status == "ok" else "error",
+                    output_preview=f"result:{result_digest}",
+                    error=None if manual_status == "ok" else manual_status,
+                    receipt_refs=(f"result:{result_digest}",),
+                    duration_ms=_elapsed_ms(started),
+                )
+            )
         results.append(
             {
                 "toolName": name,
-                "status": _manual_tool_status(result),
-                "resultDigest": _digest(result),
+                "status": manual_status,
+                "resultDigest": result_digest,
                 "result": _bounded_manual_tool_result(result),
             }
         )
     return results
 
 
+def _manual_tool_event_id(
+    *,
+    name: str,
+    args: Mapping[str, object],
+    call_id: object,
+    index: int,
+) -> str:
+    return "tu_" + _digest(
+        {
+            "name": name,
+            "args": _bounded_json_value(args, max_bytes=512),
+            "id": str(call_id or ""),
+            "index": index,
+        }
+    )[7:19]
+
+
 async def _invoke_manual_tool(tool: object, args: Mapping[str, object]) -> object:
+    safe_args = _manual_tool_invocation_args(args)
     run_async = getattr(tool, "run_async", None)
     if callable(run_async):
-        return await run_async(args=dict(args), tool_context=object())
+        return await run_async(args=safe_args, tool_context=object())
     func = getattr(tool, "func", None)
     if callable(func):
-        result = func(**dict(args))
+        result = func(**safe_args)
         if hasattr(result, "__await__"):
             return await result
         return result
     raise TypeError("manual tool is not invocable")
+
+
+def _tool_emits_public_events(tool: object) -> bool:
+    if getattr(tool, "_magi_gate5b_emits_public_events", False):
+        return True
+    func = getattr(tool, "func", None)
+    return bool(getattr(func, "_magi_gate5b_emits_public_events", False))
+
+
+def _manual_tool_invocation_args(args: Mapping[str, object]) -> dict[str, object]:
+    safe_args = dict(args)
+    if set(safe_args) == {"arguments"} and isinstance(safe_args["arguments"], Mapping):
+        return dict(safe_args["arguments"])
+    return safe_args
 
 
 async def _run_no_tool_finalizer(
@@ -1763,6 +2198,7 @@ async def _run_no_tool_finalizer(
     run_kwargs: Mapping[str, object],
     agent_kwargs: Mapping[str, object],
     runner_kwargs: Mapping[str, object],
+    public_event_sink: Gate5B4C3PublicEventSink | None = None,
 ) -> tuple[str | None, int]:
     try:
         finalizer_agent_kwargs = {
@@ -1806,7 +2242,20 @@ async def _run_no_tool_finalizer(
             finalizer_events += 1
             chunk = _event_text(event)
             if chunk:
-                finalizer_chunks.append(chunk)
+                visible_delta = _event_visible_text_delta(
+                    event,
+                    chunk,
+                    finalizer_chunks,
+                )
+                if visible_delta:
+                    finalizer_chunks.append(visible_delta)
+                    if public_event_sink is not None:
+                        public_event_sink(
+                            {
+                                "type": "text_delta",
+                                "delta": visible_delta,
+                            }
+                        )
             if finalizer_events >= 8:
                 break
     except Exception:

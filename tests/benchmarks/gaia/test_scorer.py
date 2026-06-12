@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from magi_agent.benchmarks.gaia.scorer import question_scorer
+from benchmarks.gaia.scorer import question_scorer
 
 
 def test_number_with_units_and_commas() -> None:

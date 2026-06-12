@@ -517,6 +517,75 @@ def test_typing_slash_shows_completions_via_textarea_event() -> None:
     asyncio.run(_run())
 
 
+def test_tab_accepts_highlighted_completion() -> None:
+    """Tab substitutes the highlighted completion (+ trailing space) and dismisses
+    the overlay — so a long skill name is completed instead of hand-typed."""
+
+    async def _run() -> None:
+        engine = FakeEngineDriver()
+        registry = FakeRegistry(["compact", "reset", "status"])
+        app = _make_app(engine, commands=registry)
+        async with app.run_test() as pilot:
+            app._input.focus()
+            await pilot.pause()
+            await pilot.press("slash")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert app.completions_active()
+            await pilot.press("tab")
+            await pilot.pause()
+        # Top candidate (lexicographic on empty fragment) is "/compact".
+        assert app._input.text == "/compact "
+        assert not app._completions.has_class("visible")
+
+    asyncio.run(_run())
+
+
+def test_arrow_navigates_then_tab_accepts() -> None:
+    """↓ moves the highlight while the overlay is open; Tab then accepts it."""
+
+    async def _run() -> None:
+        engine = FakeEngineDriver()
+        registry = FakeRegistry(["compact", "reset", "status"])
+        app = _make_app(engine, commands=registry)
+        async with app.run_test() as pilot:
+            app._input.focus()
+            await pilot.pause()
+            await pilot.press("slash")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert app._completion_index == 0
+            await pilot.press("down")
+            await pilot.pause()
+            assert app._completion_index == 1
+            await pilot.press("tab")
+            await pilot.pause()
+        assert app._input.text == "/reset "
+
+    asyncio.run(_run())
+
+
+def test_escape_dismisses_completions_without_substituting() -> None:
+    async def _run() -> None:
+        engine = FakeEngineDriver()
+        registry = FakeRegistry(["compact", "reset", "status"])
+        app = _make_app(engine, commands=registry)
+        async with app.run_test() as pilot:
+            app._input.focus()
+            await pilot.pause()
+            await pilot.press("slash")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert app.completions_active()
+            await pilot.press("escape")
+            await pilot.pause()
+            assert not app._completions.has_class("visible")
+            # Text is untouched (no substitution on Esc).
+            assert app._input.text == "/"
+
+    asyncio.run(_run())
+
+
 # ---------------------------------------------------------------------------
 # 6. Slash command submission routes through the registry lookup
 # ---------------------------------------------------------------------------
@@ -1969,5 +2038,99 @@ def test_app_keybindings_unknown_action_skipped(tmp_path, monkeypatch) -> None:
         }
         assert ("s", True) in bound_keys
         assert ("r", True) not in bound_keys
+
+    asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
+# Tool rendering: tool_end inherits the tool_start name; unknown tools get a
+# named header instead of a bare dot (CC-style detail parity)
+# ---------------------------------------------------------------------------
+def test_tool_end_uses_tool_start_name_for_renderer_dispatch() -> None:
+    async def _run() -> None:
+        from magi_agent.cli.tui.tool_render import build_tool_renderers
+
+        class _ToolEngine(FakeEngineDriver):
+            async def run_turn_stream(self, runtime, turn_input, *, cancel, gate=None):
+                turn_id = getattr(turn_input, "turn_id", "t")
+                yield RuntimeEvent(
+                    type="tool",
+                    payload={
+                        "type": "tool_start",
+                        "id": "call-1",
+                        "name": "Bash",
+                        "input_preview": '{"command": "ls -la"}',
+                    },
+                    turn_id=turn_id,
+                )
+                # tool_end carries NO name (sanitized public payload) — the app
+                # must resolve it from the tool_start id.
+                yield RuntimeEvent(
+                    type="tool",
+                    payload={
+                        "type": "tool_end",
+                        "id": "call-1",
+                        "status": "ok",
+                        "output_preview": '{"output": {"stdout": "total 0"}}',
+                    },
+                    turn_id=turn_id,
+                )
+                yield EngineResult(terminal=Terminal.completed, turn_id=turn_id)
+
+        app = MagiTuiApp(
+            engine=_ToolEngine(),
+            gate=AllowGate(),
+            commands=FakeRegistry(["compact"]),
+            renderers=build_tool_renderers(),
+        )
+        async with app.run_test() as pilot:
+            app.start_turn("run ls")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            blocks = app.controller.committed_blocks_snapshot()
+        joined = "\n".join(blocks)
+        # Call header renders through the real BashRenderer ("$ <command>") and
+        # the result preview resolves through the SAME renderer via the
+        # remembered tool_start name (not the anonymous "tool" fallback).
+        assert "$ ls -la" in joined
+        assert "total 0" in joined
+        assert "tool:" not in joined
+
+    asyncio.run(_run())
+
+
+def test_unknown_tool_renders_named_header_with_arg() -> None:
+    async def _run() -> None:
+        from magi_agent.cli.tui.tool_render import build_tool_renderers
+
+        class _ToolEngine(FakeEngineDriver):
+            async def run_turn_stream(self, runtime, turn_input, *, cancel, gate=None):
+                turn_id = getattr(turn_input, "turn_id", "t")
+                yield RuntimeEvent(
+                    type="tool",
+                    payload={
+                        "type": "tool_start",
+                        "id": "spawn-1",
+                        "name": "SpawnAgent",
+                        "input_preview": '{"prompt": "calc 1+1", "persona": "general"}',
+                    },
+                    turn_id=turn_id,
+                )
+                yield EngineResult(terminal=Terminal.completed, turn_id=turn_id)
+
+        app = MagiTuiApp(
+            engine=_ToolEngine(),
+            gate=AllowGate(),
+            commands=FakeRegistry(["compact"]),
+            renderers=build_tool_renderers(),
+        )
+        async with app.run_test() as pilot:
+            app.start_turn("spawn one")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            blocks = app.controller.committed_blocks_snapshot()
+        joined = "\n".join(blocks)
+        assert "SpawnAgent" in joined
+        assert "calc 1+1" in joined
 
     asyncio.run(_run())

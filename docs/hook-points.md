@@ -2,7 +2,16 @@
 
 Lifecycle hook points with HookRegistry registration and HookBus dispatch.
 
-The HookPoint enum defines 15 lifecycle points. Hooks are registered via HookManifest into the HookRegistry (hooks/registry.py), then dispatched by HookBus (hooks/bus.py) which filters by point + harness scope, executes each enabled hook, catches exceptions (fail_open: log, !fail_open + blocking: block turn), and returns a HookBusRunResult with final_action (continue/block/pending_control_request).
+The HookPoint enum defines 17 lifecycle points. Hooks are registered via HookManifest into the HookRegistry (hooks/registry.py), then dispatched by HookBus (hooks/bus.py) which filters by point + harness scope, executes each enabled hook, catches exceptions (fail_open: log, !fail_open + blocking: block turn), and returns a HookBusRunResult with final_action (continue/block/pending_control_request).
+
+> **Wiring state (default-OFF).** User hooks attached through this lifecycle do
+> nothing until you opt in. The command-executor bridge that binds `settings.json`
+> hooks onto the live turn loop is gated behind `MAGI_USER_HOOKS_ENABLED`
+> (default-OFF); the `http` and `llm` executors are declared in the manifest but
+> are **not yet wired** into the engine. The blocking behavior described below is
+> the dispatch contract once a hook is enabled — it is not, on a default install,
+> the production turn loop's enforcement path. See [hooks](/docs/hooks) for the
+> wiring details.
 
 ## Turn lifecycle hooks
 
@@ -20,14 +29,14 @@ Model hooks fire before and after each LLM API call within a turn. A single turn
 
 ## Tool use hooks
 
-Tool hooks fire around individual tool executions. They are the primary mechanism for tool policy enforcement and evidence collection.
+Tool hooks fire around individual tool executions. When user hooks are enabled (`MAGI_USER_HOOKS_ENABLED`, default-OFF), they are a place to attach tool policy and evidence collection. Tool denial on a default install is enforced by the permission gate ahead of the HookBus, not by these hooks.
 
-- beforeToolUse: fires before a tool is executed. ADK mapping: before_tool_callback. Use for tool approval, input validation, or blocking denied tools. This is where tool denial (denied, not_found, not_exposed) is enforced.
+- beforeToolUse: fires before a tool is executed. ADK mapping: before_tool_callback. Use for tool approval, input validation, or blocking denied tools. An enabled blocking hook here can deny a call (denied, not_found, not_exposed); on a default install the permission gate runs first and short-circuits before the HookBus bridge.
 - afterToolUse: fires after a tool completes execution. ADK mapping: after_tool_callback. Use for result validation, evidence recording, and contract trigger evaluation (EvidenceTrigger afterToolUse).
 
 ## Commit hooks
 
-Commit hooks fire around the turn commit phase. The beforeCommit hook is the primary enforcement point for verifiers and evidence contracts with trigger beforeCommit.
+Commit hooks fire around the turn commit phase. When enabled, the beforeCommit hook is where verifiers and evidence contracts with trigger beforeCommit attach.
 
 - beforeCommit: fires before the turn is committed. Payload includes assistantText, toolCallCount, toolReadHappened, userMessage, retryCount, toolNames, filesChanged. Blocking hooks at this point can reject the turn and trigger a retry.
 - afterCommit: fires after a successful commit. Payload includes assistantText. Use for post-commit audit, notifications, or side effects.
@@ -64,7 +73,7 @@ Hooks are registered into HookRegistry (hooks/registry.py) as HookRegistration r
 ```
 class HookManifest(BaseModel):
     name: str              # unique hook identifier
-    point: HookPoint       # lifecycle point (15 enum values)
+    point: HookPoint       # lifecycle point (17 enum values)
     description: str       # human-readable purpose
     source: ToolSource     # where the hook code lives
     priority: int = 100    # execution order (lower = first)

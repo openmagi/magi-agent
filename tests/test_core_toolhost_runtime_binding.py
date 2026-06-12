@@ -31,7 +31,10 @@ def test_core_toolhost_binds_default_file_and_shell_handlers(tmp_path) -> None:
     assert registry.resolve_registration("PatchApply").handler is not None
 
 
-def test_core_toolhost_read_executes_without_approval(tmp_path) -> None:
+def test_core_toolhost_read_executes_without_approval(tmp_path, monkeypatch) -> None:
+    # Pin read-quality OFF: this test asserts the raw-content contract; the
+    # env-wired binder otherwise enables line numbering in the full profile.
+    monkeypatch.setenv("MAGI_READ_QUALITY_ENABLED", "0")
     (tmp_path / "README.md").write_text("hello runtime\n", encoding="utf-8")
     registry = ToolRegistry()
     register_core_tool_manifests(registry)

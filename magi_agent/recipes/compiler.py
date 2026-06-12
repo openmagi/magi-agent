@@ -1600,7 +1600,13 @@ class ProfileResolver:
     def __init__(self, registry: PackRegistry) -> None:
         self._registry = registry
 
-    def resolve(self, request: ProfileResolutionRequest) -> ResolvedRecipeProfile:
+    def resolve(
+        self,
+        request: ProfileResolutionRequest,
+        *,
+        env: Mapping[str, str] | None = None,
+    ) -> ResolvedRecipeProfile:
+        default_packs_expanded = _default_packs_expanded(env)
         layers = (
             request.user_profile,
             request.workspace_policy,
@@ -1688,7 +1694,13 @@ class ProfileResolver:
             return select(pack_id)
 
         for pack in self._registry.values():
-            if pack.hard_safety or (pack.default_enabled and not malformed_explicit_selection):
+            promote_as_default = pack.default_enabled or (
+                default_packs_expanded
+                and pack.pack_id in SAFE_DEFAULT_PACK_EXPANSION_IDS
+            )
+            if pack.hard_safety or (
+                promote_as_default and not malformed_explicit_selection
+            ):
                 select_if_admitted(pack.pack_id)
 
         default_selected = tuple(selected)
@@ -1790,8 +1802,13 @@ class AgentRecipeCompiler:
         self._registry = registry
         self._resolver = ProfileResolver(registry)
 
-    def compile(self, request: ProfileResolutionRequest) -> RecipeSnapshot:
-        resolved = self._resolver.resolve(request)
+    def compile(
+        self,
+        request: ProfileResolutionRequest,
+        *,
+        env: Mapping[str, str] | None = None,
+    ) -> RecipeSnapshot:
+        resolved = self._resolver.resolve(request, env=env)
         packs = tuple(self._registry.get(pack_id) for pack_id in resolved.selected_pack_ids)
         recipe_selection_fail_closed = _recipe_selection_fails_closed(
             resolved.recipe_selection
@@ -1927,6 +1944,47 @@ def _omission_reasons_require_fail_closed(
         for reasons in omission_reasons.values()
         for reason in reasons
     )
+
+
+# Safe default-pack expansion set (doc 05 PR-2 / A1-G1).
+#
+# Promoted to ``defaultEnabled`` ONLY when ``MAGI_RECIPE_DEFAULT_PACKS_EXPANDED``
+# is truthy (default OFF). Membership is restricted to packs that satisfy every
+# safe criterion (doc 05 §6 open-decision (1)):
+#   (a) NOT ``hardSafety`` (those are already default),
+#   (b) require only read-only / idempotent tools (no mutating tool refs),
+#   (c) carry zero production-authority approval gates (approval metadata is
+#       ``metadata-only``), and
+#   (d) declare no live dependency (no live tool/callback/runner-route refs and
+#       no provider-opt-in / external-source approval gate).
+#
+# ``openmagi.agent-methodology`` and ``openmagi.superpowers-compat`` are pure
+# instruction/validator metadata packs with no tool refs and only
+# ``metadata-only`` approval gates, so promoting them adds methodology guidance
+# without enabling any side-effect/authority. Every other first-party pack
+# carries a write/send/mutation approval gate, a side-effecting tool, or a live
+# provider dependency and therefore stays opt-in (explicit task selector only).
+SAFE_DEFAULT_PACK_EXPANSION_IDS: tuple[str, ...] = (
+    "openmagi.agent-methodology",
+    "openmagi.superpowers-compat",
+)
+
+
+def _default_packs_expanded(env: Mapping[str, str] | None) -> bool:
+    """Whether the ``MAGI_RECIPE_DEFAULT_PACKS_EXPANDED`` stage gate is ON.
+
+    Imported lazily so that ``compiler``'s strict no-live-runtime import
+    boundary is preserved (``config.env`` is pure parsing — it pulls no
+    transport/adk/dispatcher chain).
+    """
+
+    if env is None:
+        import os
+
+        env = os.environ
+    from magi_agent.config.env import parse_recipe_default_packs_expanded
+
+    return parse_recipe_default_packs_expanded(env)
 
 
 def _first_party_packs() -> tuple[RecipePackManifest, ...]:

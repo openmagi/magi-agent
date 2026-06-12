@@ -549,10 +549,6 @@
       "alreadyCovered": true,
       "currentFiles": [
         {
-          "path": "magi_agent/harness/background_tasks.py",
-          "state": "existing"
-        },
-        {
           "path": "magi_agent/evidence/child_runtime_envelope.py",
           "state": "existing"
         },
@@ -568,10 +564,6 @@
       "currentTests": [
         {
           "path": "tests/test_background_task_activity_boundary.py",
-          "state": "existing"
-        },
-        {
-          "path": "tests/test_live_background_task_boundary.py",
           "state": "existing"
         },
         {

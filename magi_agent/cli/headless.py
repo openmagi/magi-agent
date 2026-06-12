@@ -28,7 +28,10 @@ import sys
 import threading
 import uuid as _uuid
 from collections.abc import AsyncGenerator
-from typing import IO, Literal
+from typing import IO, TYPE_CHECKING, Literal
+
+if TYPE_CHECKING:
+    from magi_agent.cli.session_log import SessionLog
 
 from magi_agent.cli.contracts import (
     CommandContext,
@@ -67,6 +70,11 @@ from magi_agent.cli.engine import MagiEngineDriver
 _FALSY = {"0", "false", "no", "off"}
 
 
+class _NoopFrameWriter:
+    async def write(self, frame: object) -> None:
+        del frame
+
+
 def _cli_enabled() -> bool:
     """Return True unless MAGI_CLI_ENABLED is explicitly set to a falsy token.
 
@@ -83,6 +91,103 @@ def _log(message: str) -> None:
     """Write a diagnostic line to stderr (never stdout)."""
 
     print(message, file=sys.stderr, flush=True)
+
+
+def _attach_no_inbound_permission_sink(
+    gate: PermissionGate,
+    *,
+    permission_mode: str,
+) -> None:
+    if permission_mode not in ("acceptEdits", "bypassPermissions"):
+        return
+    gate_sinks = getattr(gate, "sinks", None)
+    if not isinstance(gate_sinks, list) or gate_sinks:
+        return
+
+    from magi_agent.cli.permissions import HeadlessSink  # noqa: PLC0415
+
+    gate_sinks.append(
+        HeadlessSink(
+            _NoopFrameWriter(),
+            permission_mode=permission_mode,  # type: ignore[arg-type]
+            can_prompt=False,
+        )
+    )
+
+
+def _session_log_enabled() -> bool:
+    """Whether the per-turn JSONL transcript write path is active (PR-04-PR1)."""
+
+    from magi_agent.config.env import cli_session_log_enabled
+
+    return cli_session_log_enabled(os.environ)
+
+
+async def _persist_event(session_log: "SessionLog", event: RuntimeEvent) -> None:
+    """Append one event to the session log off the event loop.
+
+    ``SessionLog.append`` issues a blocking ``os.fsync`` on flush, so it runs in
+    a worker thread (``asyncio.to_thread``) to keep the loop non-blocking, per
+    the ``session_log`` module's "Sync IO under an async caller" contract.
+    Best-effort: a transcript write must never break the live turn.
+    """
+
+    try:
+        await asyncio.to_thread(session_log.append, event)
+    except Exception as exc:  # noqa: BLE001 - transcript is best-effort
+        _log(f"session_log append failed (ignored): {exc!r}")
+
+
+async def _persist_user_prompt(session_log: "SessionLog", prompt: str) -> None:
+    """Record the RAW user turn as the first envelope of the transcript.
+
+    The user-message envelope is persisted verbatim (the session-log contract
+    keeps the transcript faithful to disk). Its payload uses the
+    ``{"type": "user_message", "content": ...}`` shape that
+    ``session_log.reconstruct_messages`` reads back as a user message. The
+    carrier ``RuntimeEvent.type`` is a benign ``status`` kind (the reconstruction
+    reads the inner ``payload["type"]``, not the envelope kind).
+    """
+
+    event = RuntimeEvent(
+        type="status",
+        payload={"type": "user_message", "content": prompt},
+        turn_id="user",
+    )
+    await _persist_event(session_log, event)
+
+
+async def _close_session_log(session_log: "SessionLog") -> None:
+    """Flush + release the transcript handle off the event loop (best-effort).
+
+    A one-shot headless run is short-lived; ``SessionLog`` buffers appends and
+    only flushes on its interval or on ``close()``, so an explicit close is what
+    actually lands the transcript on disk for ``--resume`` to read.
+    """
+
+    try:
+        await asyncio.to_thread(session_log.close)
+    except Exception as exc:  # noqa: BLE001 - transcript is best-effort
+        _log(f"session_log close failed (ignored): {exc!r}")
+
+
+async def _tap_session_log(
+    gen: AsyncGenerator[RuntimeEvent, EngineResult],
+    session_log: "SessionLog",
+) -> AsyncGenerator[RuntimeEvent, EngineResult]:
+    """Re-yield every item from ``gen`` while persisting each ``RuntimeEvent``.
+
+    The wrapped generator is transparent: ``EngineResult`` (the terminal) passes
+    through untouched and is NOT persisted as a transcript event. Only the
+    sanitized ``RuntimeEvent`` stream — already projected to the public agent-
+    event shape by the engine — is written, satisfying the session-log
+    sanitization precondition.
+    """
+
+    async for item in gen:
+        if isinstance(item, RuntimeEvent):
+            await _persist_event(session_log, item)
+        yield item  # type: ignore[misc]
 
 
 async def drain(
@@ -526,12 +631,46 @@ class _InboundReader:
         self._loop = None
 
 
+def _research_governance() -> "tuple[str, object | None]":
+    """Return ``(mode, audit)`` for the live research-governance seam.
+
+    ``off`` → ``("off", None)`` (turn byte-identical). ``audit`` observes only.
+    ``enforce`` additionally allows ONE bounded corrective re-prompt for the
+    deterministic cited-without-source class — never a silent rewrite. The
+    lazy import keeps ``import cli.headless`` cold-clean.
+    """
+    from magi_agent.research.live_audit import (  # noqa: PLC0415
+        ResearchLiveAudit,
+        research_governance_mode,
+    )
+
+    mode = research_governance_mode()
+    if mode == "off":
+        return "off", None
+    return mode, ResearchLiveAudit()
+
+
+def _build_research_audit() -> "object | None":
+    return _research_governance()[1]
+
+
+def _enforce_retry_needed(mode: str, report: "dict[str, object] | None") -> bool:
+    return (
+        mode == "enforce"
+        and report is not None
+        and bool(report.get("citedWithoutSource"))
+    )
+
+
 async def _project_stream(
     gen: AsyncGenerator[RuntimeEvent, EngineResult],
     writer: NdjsonWriter,
     *,
     session_id: str,
     include_partial: bool,
+    research_audit: object | None = None,
+    governance_mode: str = "audit",
+    defer_assistant_output: bool = False,
 ) -> tuple[str, EngineResult]:
     """Consume the engine generator, emitting projected NDJSON frames live.
 
@@ -558,7 +697,8 @@ async def _project_stream(
                 terminal = item
                 break
             event = item
-            if include_partial:
+            deferred_token = defer_assistant_output and event.type == "token"
+            if include_partial and not deferred_token:
                 partial_payload = _partial_event_payload(event)
                 await writer.write(
                     StreamEvent(
@@ -570,10 +710,13 @@ async def _project_stream(
                         },
                     )
                 )
+            if research_audit is not None:
+                research_audit.observe_event(event.type, event.payload)  # type: ignore[attr-defined]
             if event.type == "token":
                 text = _token_text(event.payload)
                 if text:
-                    token_buf.append(text)
+                    if not defer_assistant_output:
+                        token_buf.append(text)
                     all_text.append(text)
                 continue
             # Non-token: flush the in-flight assistant text first (ordering).
@@ -594,6 +737,25 @@ async def _project_stream(
                 )
         # Stream ended; flush any trailing assistant text.
         await flush_tokens()
+        report = None
+        if research_audit is not None:
+            report = research_audit.report(  # type: ignore[attr-defined]
+                "".join(all_text), mode=governance_mode
+            )
+            from magi_agent.research.live_audit import persist_audit_report  # noqa: PLC0415
+
+            persist_audit_report(report, session_id=session_id)
+        if defer_assistant_output and all_text and not _enforce_retry_needed(governance_mode, report):
+            await writer.write(
+                _assistant_text_frame("".join(all_text), session_id=session_id)
+            )
+        if report is not None:
+            await writer.write(
+                _system_status_frame(
+                    RuntimeEvent(type="status", payload=report),
+                    session_id=session_id,
+                )
+            )
     finally:
         await gen.aclose()
 
@@ -624,6 +786,8 @@ async def run_headless(
     model: str | None = None,
     input_stream: IO[str] | None = None,
     mcp_servers: list[str] | tuple[str, ...] | None = None,
+    session_log: "SessionLog | None" = None,
+    initial_messages: list[dict[str, str]] | None = None,
 ) -> int:
     """Run a single headless turn. Returns a process exit code.
 
@@ -632,6 +796,14 @@ async def run_headless(
     background task parses ``control_response`` -> ``sink.deliver(...)`` and
     ``control_cancel_request`` -> cancel. When ``None`` (the one-shot default) no
     blocking reader is started.
+
+    ``session_log`` is the PR-04-PR1 transcript writer. When supplied AND the
+    ``MAGI_CLI_SESSION_LOG_ENABLED`` gate is on, the RAW user prompt plus every
+    sanitized engine ``RuntimeEvent`` is persisted to a JSONL transcript (the
+    on-disk substrate ``--resume``/``--continue`` rehydration reads). The gate is
+    stage-1 default-OFF, so a clean install does not write transcripts until the
+    operator opts in. Local/slash short-circuit turns (no engine turn) are not
+    persisted.
     """
 
     if not _cli_enabled():
@@ -649,6 +821,12 @@ async def run_headless(
     # Slash-command dispatch (before the engine turn).                     #
     # ------------------------------------------------------------------ #
     turn_input: dict[str, object] = {"prompt": prompt}
+    # PR-04-PR2 (resume rehydration): when ``--resume``/``--continue`` produced a
+    # ResumeContext, thread its reconstructed prior messages through the engine's
+    # ``initial_messages`` seam so the turn replays the earlier conversation.
+    # Absent/empty -> the key is omitted, leaving turn behavior byte-identical.
+    if initial_messages:
+        turn_input["initial_messages"] = initial_messages
     local_message: str | None = None
     local_is_error = False
     if prompt.startswith("/") and commands is not None:
@@ -668,6 +846,8 @@ async def run_headless(
                 "prompt": expanded or prompt,
                 "content": blocks,
             }
+            if initial_messages:
+                turn_input["initial_messages"] = initial_messages
         elif kind == "local":
             local_message = message
         else:  # error
@@ -689,14 +869,72 @@ async def run_headless(
         )
 
     # ------------------------------------------------------------------ #
+    # Session-log write path (PR-04-PR1). Active only when a SessionLog was   #
+    # supplied AND the gate is on. Persist the RAW user prompt before the      #
+    # turn; the engine event stream is tapped below via ``_tap_session_log``.  #
+    # ------------------------------------------------------------------ #
+    write_session_log = session_log is not None and _session_log_enabled()
+    if write_session_log:
+        assert session_log is not None  # narrowed for type-checkers
+        await _persist_user_prompt(session_log, prompt)
+
+    # ------------------------------------------------------------------ #
     # text / json: collect-then-write (single final write).                #
     # ------------------------------------------------------------------ #
     if output in ("text", "json"):
+        _attach_no_inbound_permission_sink(
+            active_gate,
+            permission_mode=permission_mode,
+        )
         gen = active_driver.run_turn_stream(
             None, turn_input, cancel=cancel, gate=active_gate
         )
+        if write_session_log:
+            assert session_log is not None
+            gen = _tap_session_log(gen, session_log)
         events, terminal = await drain(gen)
         assistant_text = _accumulate_text(events)
+        governance_mode, research_audit = _research_governance()
+        if research_audit is not None:
+            import json as _json  # noqa: PLC0415
+
+            for event in events:
+                research_audit.observe_event(event.type, event.payload)  # type: ignore[attr-defined]
+            report = research_audit.report(assistant_text, mode=governance_mode)  # type: ignore[attr-defined]
+            _log("research_governance_audit " + _json.dumps(report, sort_keys=True))
+            from magi_agent.research.live_audit import (  # noqa: PLC0415
+                persist_audit_report,
+            )
+
+            persist_audit_report(report, session_id=sid)
+            if _enforce_retry_needed(governance_mode, report):
+                from magi_agent.research.live_audit import (  # noqa: PLC0415
+                    ResearchLiveAudit,
+                    enforce_reprompt_message,
+                )
+
+                _log("research_governance_enforce_retry")
+                retry_gen = active_driver.run_turn_stream(
+                    None,
+                    {"prompt": enforce_reprompt_message(report)},
+                    cancel=cancel,
+                    gate=active_gate,
+                )
+                if write_session_log:
+                    assert session_log is not None
+                    retry_gen = _tap_session_log(retry_gen, session_log)
+                events, terminal = await drain(retry_gen)
+                assistant_text = _accumulate_text(events)
+                retry_audit = ResearchLiveAudit()
+                for event in events:
+                    retry_audit.observe_event(event.type, event.payload)
+                _log(
+                    "research_governance_audit "
+                    + _json.dumps(
+                        retry_audit.report(assistant_text, mode=governance_mode),
+                        sort_keys=True,
+                    )
+                )
         result_frame = _build_result_frame(
             session_id=sid, assistant_text=assistant_text, terminal=terminal
         )
@@ -705,6 +943,9 @@ async def run_headless(
         else:
             out.write(ndjson_dumps(result_frame) + "\n")
         out.flush()
+        if write_session_log:
+            assert session_log is not None
+            await _close_session_log(session_log)
         return 1 if result_frame.is_error else 0
 
     # ------------------------------------------------------------------ #
@@ -718,8 +959,8 @@ async def run_headless(
     # We attach the sink only when its ``ask`` can actually be resolved:
     #   - an ``input_stream`` is present (a host will answer the control_request,
     #     and on EOF the sink fail-closes — no hang); OR
-    #   - the mode resolves without inbound data (``bypassPermissions`` allows,
-    #     ``acceptEdits`` auto-allows edit-class tools).
+    #   - the mode resolves without inbound data (``bypassPermissions`` allows;
+    #     ``acceptEdits`` allows edit-class tools and denies everything else).
     # In ``default`` mode with NO inbound channel, attaching a sink would let an
     # ``ask`` await a response that can never arrive, so we leave the gate
     # sink-less and it falls back to a safe deny (never an auto-allow).
@@ -737,7 +978,11 @@ async def run_headless(
     ):
         from magi_agent.cli.permissions import HeadlessSink
 
-        headless_sink = HeadlessSink(writer, permission_mode=permission_mode)
+        headless_sink = HeadlessSink(
+            writer,
+            permission_mode=permission_mode,
+            can_prompt=input_stream is not None,
+        )
         gate_sinks.append(headless_sink)
 
     reader: _InboundReader | None = None
@@ -767,14 +1012,69 @@ async def run_headless(
         gen = active_driver.run_turn_stream(
             None, turn_input, cancel=cancel, gate=active_gate
         )
+        if write_session_log:
+            assert session_log is not None
+            gen = _tap_session_log(gen, session_log)
+        governance_mode, research_audit = _research_governance()
         assistant_text, terminal = await _project_stream(
-            gen, writer, session_id=sid, include_partial=include_partial
+            gen,
+            writer,
+            session_id=sid,
+            include_partial=include_partial,
+            research_audit=research_audit,
+            governance_mode=governance_mode,
+            defer_assistant_output=governance_mode == "enforce"
+            and research_audit is not None,
         )
+        if research_audit is not None:
+            first_report = research_audit.report(  # type: ignore[attr-defined]
+                assistant_text, mode=governance_mode
+            )
+            if _enforce_retry_needed(governance_mode, first_report):
+                from magi_agent.research.live_audit import (  # noqa: PLC0415
+                    ResearchLiveAudit,
+                    enforce_reprompt_message,
+                )
+
+                await writer.write(
+                    _system_status_frame(
+                        RuntimeEvent(
+                            type="status",
+                            payload={
+                                "type": "research_governance_enforce_retry",
+                                "citedWithoutSource": first_report.get(
+                                    "citedWithoutSource"
+                                ),
+                            },
+                        ),
+                        session_id=sid,
+                    )
+                )
+                retry_gen = active_driver.run_turn_stream(
+                    None,
+                    {"prompt": enforce_reprompt_message(first_report)},
+                    cancel=cancel,
+                    gate=active_gate,
+                )
+                if write_session_log:
+                    assert session_log is not None
+                    retry_gen = _tap_session_log(retry_gen, session_log)
+                assistant_text, terminal = await _project_stream(
+                    retry_gen,
+                    writer,
+                    session_id=sid,
+                    include_partial=include_partial,
+                    research_audit=ResearchLiveAudit(),
+                    governance_mode=governance_mode,
+                )
         result_frame = _build_result_frame(
             session_id=sid, assistant_text=assistant_text, terminal=terminal
         )
         await writer.write(result_frame)
     finally:
+        if write_session_log:
+            assert session_log is not None
+            await _close_session_log(session_log)
         if reader is not None:
             # Signal stop + detach the loop. The daemon thread may still be
             # blocked in readline, but as a daemon it will NOT block exit.

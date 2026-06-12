@@ -23,7 +23,7 @@ from magi_agent.packs.discovery import DiscoveredPack
 from magi_agent.packs.manifest import ProvidesType
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
-    from magi_agent.authoring.compiler import CompileRecipePackCatalog
+    from magi_agent.packs.types import CompileRecipePackCatalog
 
 
 def lazy_import_symbol(impl: str) -> Any:

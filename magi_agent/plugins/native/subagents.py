@@ -1,14 +1,145 @@
 from __future__ import annotations
 
-import asyncio
+import os
+import tempfile
 import uuid
+from collections.abc import Mapping
+from pathlib import Path
 
 from magi_agent.plugins.native._common import digest, ok_result
 from magi_agent.tools.context import ToolContext
-from magi_agent.tools.result import ToolResult
+from magi_agent.tools.result import ToolResult, ToolStatus
+
+_LEGACY_RUNTIME_ENV_PREFIX = "CORE" + "_AGENT_"
+
+_HOSTED_WORKSPACE_ENV_KEYS = (
+    "MAGI_AGENT_WORKSPACE",
+    "MAGI_WORKSPACE_ROOT",
+    "MAGI_WORKSPACE",
+    f"{_LEGACY_RUNTIME_ENV_PREFIX}PYTHON_GATE5B_FULL_TOOLHOST_WORKSPACE_ROOT",
+    f"{_LEGACY_RUNTIME_ENV_PREFIX}PYTHON_MEMORY_WORKSPACE_ROOT",
+)
 
 
-def spawn_agent(arguments: dict[str, object], context: ToolContext) -> ToolResult:
+def _spawn_agent_result(
+    status: ToolStatus,
+    output: Mapping[str, object],
+    *,
+    error_code: str | None = None,
+) -> ToolResult:
+    safe_output = dict(output)
+    output_digest = digest(safe_output)
+    metadata: dict[str, object] = {
+        "toolName": "SpawnAgent",
+        "handler": "first_party_native_local",
+        "outputDigest": output_digest,
+    }
+    if error_code:
+        metadata["reason"] = error_code
+    return ToolResult(
+        status=status,
+        output=safe_output,
+        llmOutput=safe_output,
+        transcriptOutput={
+            "toolName": "SpawnAgent",
+            "outputDigest": output_digest,
+        },
+        errorCode=error_code,
+        errorMessage=error_code,
+        metadata=metadata,
+    )
+
+
+def _child_result_status_and_reason(result: object) -> tuple[ToolStatus, str | None, str]:
+    envelope = getattr(result, "envelope", None)
+    envelope_status = str(getattr(envelope, "status", "") or "")
+    boundary_status = str(getattr(result, "status", "") or "blocked")
+    boundary_error = getattr(result, "error_code", None)
+    summary = str(getattr(envelope, "summary", "") or "")
+
+    if boundary_status == "ok" and envelope_status in {"", "completed"}:
+        return "ok", None, "ok"
+    if boundary_status == "error" or envelope_status == "failed":
+        return "error", str(boundary_error or "live_child_runner_error"), "error"
+    reason = str(boundary_error or summary or "child_runner_blocked")
+    return "blocked", reason, "blocked"
+
+
+def _safe_workspace_candidate(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    stripped = value.strip()
+    if not stripped:
+        return None
+    try:
+        path = Path(stripped).expanduser()
+        path.mkdir(parents=True, exist_ok=True)
+        probe = path / f".magi-child-probe-{uuid.uuid4().hex[:12]}"
+        probe.mkdir()
+        probe.rmdir()
+    except Exception:  # noqa: BLE001 — candidate is simply unusable.
+        return None
+    return str(path)
+
+
+def _first_writable_workspace_root(context: ToolContext) -> str | None:
+    for candidate in (context.spawn_workspace, context.workspace_root):
+        workspace = _safe_workspace_candidate(candidate)
+        if workspace is not None:
+            return workspace
+    for key in _HOSTED_WORKSPACE_ENV_KEYS:
+        workspace = _safe_workspace_candidate(os.environ.get(key))
+        if workspace is not None:
+            return workspace
+    return None
+
+
+def _default_temp_child_workspace() -> str | None:
+    try:
+        return tempfile.mkdtemp(prefix="magi-child-")
+    except Exception:  # noqa: BLE001 — hosted read-only roots land here.
+        return None
+
+
+def _isolated_child_workspace_under(workspace_root: str) -> str | None:
+    try:
+        child_root = Path(workspace_root) / ".magi" / "child-workspaces"
+        child_root.mkdir(parents=True, exist_ok=True)
+        return tempfile.mkdtemp(prefix="magi-child-", dir=str(child_root))
+    except Exception:  # noqa: BLE001 — fall back to the default tempdir path.
+        return None
+
+
+def _child_workspace_for_toolset(
+    toolset_profile: str,
+    context: ToolContext,
+) -> tuple[str | None, str | None]:
+    if toolset_profile == "none":
+        return None, None
+
+    workspace_root = _first_writable_workspace_root(context)
+    if toolset_profile == "readonly":
+        if workspace_root is not None:
+            return workspace_root, None
+        fallback = _default_temp_child_workspace()
+        if fallback is not None:
+            return fallback, None
+        return None, "child_workspace_unavailable"
+
+    # ``full`` can mutate, so give it an isolated writable child directory when
+    # a parent workspace is available. This keeps hosted read-only-root pods
+    # working while preserving separation for mutating children.
+    if workspace_root is not None:
+        isolated = _isolated_child_workspace_under(workspace_root)
+        if isolated is not None:
+            return isolated, None
+    fallback = _default_temp_child_workspace()
+    if fallback is not None:
+        return fallback, None
+    return None, "child_workspace_unavailable"
+
+
+async def spawn_agent(arguments: dict[str, object], context: ToolContext) -> ToolResult:
     prompt = str(arguments.get("prompt") or arguments.get("task") or "")
     persona = str(arguments.get("persona") or "general")
 
@@ -25,14 +156,28 @@ def spawn_agent(arguments: dict[str, object], context: ToolContext) -> ToolResul
     )
 
     if not is_live_child_runner_enabled():
+        # HONEST receipt (D4 fix): the previous "queued_locally" literal implied
+        # the task was accepted into a queue, but no child runner is attached or
+        # scheduled — nothing happens.  We surface an explicit not-attached status
+        # plus a machine-readable reason and a human activation hint.  All legacy
+        # keys are preserved so existing consumers keep working.
         output = {
-            "status": "queued_locally",
+            "status": "not_attached",
+            "reason": "live_child_runner_disabled",
+            "hint": (
+                "Live child runner is disabled. Set "
+                "MAGI_CHILD_RUNNER_LIVE_ENABLED=1 to spawn a real subagent."
+            ),
             "persona": persona,
             "promptDigest": digest(prompt),
             "spawnDepth": context.spawn_depth,
             "liveChildRunnerAttached": False,
         }
-        return ok_result("SpawnAgent", output)
+        return _spawn_agent_result(
+            "blocked",
+            output,
+            error_code="live_child_runner_disabled",
+        )
 
     # --- LIVE path (gate ON): route through real child runner -----------------
     # All imports of runner/boundary/config types are LAZY (inside this function
@@ -40,13 +185,16 @@ def spawn_agent(arguments: dict[str, object], context: ToolContext) -> ToolResul
     #
     # Design:
     # 1. Build a ChildTaskRequest from the tool arguments.
-    # 2. Construct RealLocalChildRunner(tools=[]) — HARD-WIRED empty toolset to
-    #    enforce v1 text-only; caller-supplied tools are intentionally NOT
-    #    forwarded (prevents accidental tool escalation).
+    # 2. Construct RealLocalChildRunner with a toolset PROFILE resolved from the
+    #    MAGI_CHILD_RUNNER_TOOLSET gate (PR1, doc 07). Default (unset / "none")
+    #    keeps the historical text-only empty toolset; "readonly" forwards the
+    #    non-mutating inspection tools against the caller workspace; "full" is
+    #    gated upstream by the permission-unification follow-up and receives an
+    #    isolated child workspace under the writable parent workspace.
     # 3. Build ChildRunnerConfig with live gate ON.
-    # 4. Call boundary.run(request) via asyncio.run().
+    # 4. await boundary.run(request) on the dispatch event loop.
     # 5. Project the sanitised result envelope into the ToolResult output.
-    # Any exception on the live path falls back to a blocked/ok result (never
+    # Any exception on the live path falls back to a blocked ToolResult (never
     # raises out of spawn_agent).
     #
     # NOTE (agents-counter): a single spawn_agent call spawns exactly one child,
@@ -62,6 +210,9 @@ def spawn_agent(arguments: dict[str, object], context: ToolContext) -> ToolResul
         )
         from magi_agent.runtime.child_runner_live import (  # noqa: PLC0415
             RealLocalChildRunner,
+        )
+        from magi_agent.runtime.child_toolset import (  # noqa: PLC0415
+            resolve_child_toolset_profile,
         )
 
         # Build the request — use the context's IDs as parent identifiers, or
@@ -113,53 +264,53 @@ def spawn_agent(arguments: dict[str, object], context: ToolContext) -> ToolResul
             budgetMs=budget_ms,
         )
 
-        # HARD-WIRE tools=[] (v1 text-only enforcement — no caller-supplied tools
-        # are forwarded; this prevents accidental tool escalation in child turns).
-        runner = RealLocalChildRunner(tools=[])
+        toolset_profile = resolve_child_toolset_profile()
+        child_workspace, workspace_error = _child_workspace_for_toolset(
+            toolset_profile,
+            context,
+        )
+        if workspace_error is not None:
+            fallback_output = {
+                "status": "blocked",
+                "persona": persona,
+                "promptDigest": digest(prompt),
+                "spawnDepth": context.spawn_depth,
+                "liveChildRunnerAttached": False,
+            }
+            return _spawn_agent_result(
+                "blocked",
+                fallback_output,
+                error_code=workspace_error,
+            )
+        runner = RealLocalChildRunner(
+            toolset_profile=toolset_profile,
+            workspace_root=child_workspace,
+        )
 
         config = ChildRunnerConfig(
             enabled=True,
             liveChildRunnerEnabled=True,
         )
 
-        # Drive the async boundary from this sync tool.  asyncio.run() creates a
-        # new event loop for the coroutine; it raises RuntimeError if called from
-        # inside an already-running loop (e.g. an async test framework or an
-        # awaiting executor).  In that case we close the orphaned coroutine to
-        # suppress "never awaited" warnings and return the safe blocked fallback
-        # INLINE — no re-raise, so the outer except-Exception block is not
-        # triggered by this specific condition.
+        # Drive the async boundary directly on the dispatch event loop. The tool
+        # dispatcher awaits coroutine handlers (and never thread-offloads them),
+        # so awaiting here runs the child without spinning a nested event loop —
+        # the previous asyncio.run() raised RuntimeError on the live loop and
+        # silently degraded every production call to "blocked".
         boundary = LocalChildRunnerBoundary(
             config,
             child_runner=runner,
             agents_spawned_so_far=0,
         )
-        coro = boundary.run(request)
-        try:
-            result = asyncio.run(coro)
-        except RuntimeError:
-            # Called from inside a running event loop — close the orphaned coro
-            # to suppress "never awaited" warnings, then return the safe
-            # blocked payload immediately (degrade, never crash).
-            coro.close()
-            return ok_result(
-                "SpawnAgent",
-                {
-                    "status": "blocked",
-                    "persona": persona,
-                    "promptDigest": digest(prompt),
-                    "spawnDepth": context.spawn_depth,
-                    "liveChildRunnerAttached": False,
-                },
-            )
+        result = await boundary.run(request)
 
         # Project the sanitised envelope into the output payload.
         envelope = result.envelope
         summary = envelope.summary if envelope is not None else ""
-        status = result.status if result.status else "blocked"
+        tool_status, error_code, output_status = _child_result_status_and_reason(result)
 
         output = {
-            "status": status,
+            "status": output_status,
             "persona": persona,
             "promptDigest": digest(prompt),
             "spawnDepth": context.spawn_depth,
@@ -167,7 +318,7 @@ def spawn_agent(arguments: dict[str, object], context: ToolContext) -> ToolResul
             # Sanitised summary from the envelope (already redacted by boundary).
             "summary": summary,
         }
-        return ok_result("SpawnAgent", output)
+        return _spawn_agent_result(tool_status, output, error_code=error_code)
 
     except Exception:  # noqa: BLE001 — NEVER raise out of spawn_agent
         # Any failure on the live path (missing key, unknown route, event-loop
@@ -181,15 +332,24 @@ def spawn_agent(arguments: dict[str, object], context: ToolContext) -> ToolResul
             "spawnDepth": context.spawn_depth,
             "liveChildRunnerAttached": False,
         }
-        return ok_result("SpawnAgent", fallback_output)
+        return _spawn_agent_result(
+            "blocked",
+            fallback_output,
+            error_code="live_child_runner_attach_failed",
+        )
 
 
 def spawn_worktree_apply(arguments: dict[str, object], context: ToolContext) -> ToolResult:
     patch_digest = digest(arguments.get("patch") or arguments.get("diff") or "")
+    # HONEST receipt (D4 fix): the previous "review_required" literal implied a
+    # patch was staged awaiting review, but no worktree mutation is ever
+    # attempted.  Surface an explicit unimplemented status + reason.  Legacy keys
+    # (patchDigest / worktreeMutationAttached) are preserved.
     return ok_result(
         "SpawnWorktreeApply",
         {
-            "status": "review_required",
+            "status": "unimplemented",
+            "reason": "worktree_apply_not_implemented",
             "patchDigest": patch_digest,
             "worktreeMutationAttached": False,
         },

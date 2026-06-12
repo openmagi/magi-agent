@@ -194,6 +194,21 @@ CODING_DISCIPLINE_BLOCK = "\n".join(
     ]
 )
 
+CODING_WORKFLOW_BLOCK = "\n".join(
+    [
+        "<coding-workflow>",
+        "When fixing a bug or changing existing behavior, work reproduce-first:",
+        "",
+        "1. Analyze the relevant files before editing anything.",
+        "2. Write a small script or test that reproduces the issue; run it and confirm it fails.",
+        "3. Edit the source code to fix the issue.",
+        "4. Re-run the reproduction script/test and confirm the fix.",
+        "5. Check edge cases the fix could affect.",
+        "6. Run the repo's focused tests for the files you touched.",
+        "</coding-workflow>",
+    ]
+)
+
 # Per-family semantic coding hints (PR10). Small, distilled blocks — one per
 # provider family magi routes to — encoding that family's known coding failure
 # mode (the gist of OpenCode's per-model prompt swaps, NOT a full prompt copy).
@@ -430,7 +445,7 @@ def _assemble_prompt_sections(
         ACTION_SAFETY_BLOCK,
     ])
     if coding_agent:
-        static_parts.extend([CODING_DISCIPLINE_BLOCK])
+        static_parts.extend([CODING_DISCIPLINE_BLOCK, CODING_WORKFLOW_BLOCK])
         # PR10: semantic per-model coding hint, only when the model-aware flag
         # is on. Lives in the STATIC region (cacheable) alongside the other
         # coding blocks; default family contributes nothing (single body).

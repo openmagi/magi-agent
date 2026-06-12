@@ -2,18 +2,24 @@ from __future__ import annotations
 
 from magi_agent.config.env import (
     apply_patch_enabled,
+    browser_tool_enabled,
     file_tools_enabled,
     general_automation_live_enabled,
+    is_evidence_ledger_lifecycle_enabled,
     is_format_on_write_enabled,
     is_message_cache_enabled,
     is_read_ledger_enabled,
     is_read_quality_enabled,
+    is_self_introspection_enabled,
     model_aware_prompts_enabled,
     parse_lsp_diagnostics_env,
     parse_provider_repair_enabled,
     ripgrep_enabled,
     tool_concurrency_enabled,
 )
+from magi_agent.runtime.child_runner_live import is_live_child_runner_enabled
+from magi_agent.runtime.child_toolset import resolve_child_toolset_profile
+from magi_agent.runtime.local_defaults import apply_local_full_runtime_defaults
 
 
 FULL_PROFILE_FLAGS = {
@@ -28,6 +34,9 @@ FULL_PROFILE_FLAGS = {
     "MAGI_GA_LIVE_ENABLED": general_automation_live_enabled,
     "MAGI_MESSAGE_CACHE_ENABLED": is_message_cache_enabled,
     "MAGI_FILE_TOOLS_ENABLED": file_tools_enabled,
+    "MAGI_BROWSER_TOOL_ENABLED": browser_tool_enabled,
+    "MAGI_SELF_INTROSPECTION_ENABLED": is_self_introspection_enabled,
+    "MAGI_EVIDENCE_LEDGER_LIFECYCLE_ENABLED": is_evidence_ledger_lifecycle_enabled,
 }
 
 
@@ -48,3 +57,34 @@ def test_explicit_flag_off_overrides_full_runtime_profile() -> None:
     for name, parser in FULL_PROFILE_FLAGS.items():
         assert parser({name: "0"}) is False, name
     assert parse_lsp_diagnostics_env({"MAGI_LSP_DIAGNOSTICS_ENABLED": "0"}).enabled is False
+
+
+def test_full_runtime_profile_enables_child_runner_defaults() -> None:
+    env: dict[str, str] = {}
+    apply_local_full_runtime_defaults(env)
+
+    assert env["MAGI_CHILD_RUNNER_LIVE_ENABLED"] == "1"
+    assert env["MAGI_CHILD_RUNNER_TOOLSET"] == "readonly"
+    assert is_live_child_runner_enabled(env) is True
+    assert resolve_child_toolset_profile(env) == "readonly"
+
+
+def test_safe_runtime_profile_does_not_enable_child_runner_defaults() -> None:
+    env = {"MAGI_RUNTIME_PROFILE": "safe"}
+    apply_local_full_runtime_defaults(env)
+
+    assert "MAGI_CHILD_RUNNER_LIVE_ENABLED" not in env
+    assert is_live_child_runner_enabled(env) is False
+
+
+def test_browser_tool_kill_switch_overrides_full_runtime_default() -> None:
+    assert browser_tool_enabled({"MAGI_BROWSER_TOOL_KILL_SWITCH": "1"}) is False
+    assert (
+        browser_tool_enabled(
+            {
+                "MAGI_BROWSER_TOOL_ENABLED": "1",
+                "MAGI_BROWSER_TOOL_KILL_SWITCH": "on",
+            }
+        )
+        is False
+    )

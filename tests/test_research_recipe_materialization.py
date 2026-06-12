@@ -22,7 +22,6 @@ FORBIDDEN_RESEARCH_TOOLS = {
     "FileWrite",
     "FileEdit",
     "GitDiff",
-    "ArtifactCreate",
 }
 SCOUT_FIXTURE_TOOLS = (
     "FixtureRepoClone",
@@ -60,7 +59,7 @@ def enabled_core_registry(*tool_names: str) -> ToolRegistry:
     return registry
 
 
-def test_explore_research_agent_grants_no_mutation_shell_test_git_or_artifact_write_tools() -> None:
+def test_explore_research_agent_grants_no_mutation_shell_test_or_git_tools() -> None:
     from magi_agent.recipes.research_agents import materialize_research_agent
 
     decision = materialize_research_agent(
@@ -77,7 +76,7 @@ def test_explore_research_agent_grants_no_mutation_shell_test_git_or_artifact_wr
     assert all(grant.read_only and not grant.mutates_workspace for grant in decision.spec.tool_grants)
 
 
-def test_plan_research_agent_grants_no_mutation_shell_test_git_or_artifact_write_tools() -> None:
+def test_plan_research_agent_grants_no_mutation_shell_test_or_git_tools() -> None:
     from magi_agent.recipes.research_agents import materialize_research_agent
 
     decision = materialize_research_agent(
@@ -374,8 +373,6 @@ def test_attach_enabled_true_exposes_only_granted_local_readonly_tools() -> None
         "FileWrite",
         "FileEdit",
         "GitDiff",
-        "ArtifactCreate",
-        "ArtifactRead",
     )
 
     decision = materialize_research_agent(

@@ -143,6 +143,8 @@ class RealLocalChildRunner:
         model_factory: Callable[[object], object] | None = None,
         runner: object | None = None,
         tools: list[object] | None = None,
+        toolset_profile: str = "none",
+        evidence_collector: object | None = None,
         workspace_root: str | None = None,
         env: Mapping[str, str] | None = None,
     ) -> None:
@@ -155,10 +157,20 @@ class RealLocalChildRunner:
         #: Test seam: a fully pre-built runner (exposing ``run_async``). When
         #: supplied it is used directly, bypassing ``build_cli_model_runner``.
         self._injected_runner = runner
-        #: v1 scope: TEXT-ONLY — default to an EMPTY toolset (no workspace
-        #: mutation). A caller MAY override, but production wiring keeps this
-        #: empty until tool-enabled children land as a follow-up.
-        self._tools: list[object] = list(tools) if tools is not None else []
+        #: Explicit caller-supplied toolset override. When ``None`` the toolset
+        #: is derived from ``toolset_profile`` (PR1); an EMPTY/``none`` profile
+        #: keeps the historical text-only (``tools=[]``) behaviour byte-for-byte.
+        self._tools: list[object] | None = list(tools) if tools is not None else None
+        #: PR1 (doc 07): the resolved toolset profile — ``"none"`` (default,
+        #: text-only, byte-identical to v1), ``"readonly"`` (FileRead/Glob/Grep/
+        #: GitDiff only), or ``"full"`` (whole core toolset; gated upstream by
+        #: doc 09 permissions). The profile drives toolset construction inside
+        #: ``_collect_turn_text`` ONLY when no toolset/runner is injected.
+        self._toolset_profile = toolset_profile
+        #: PR1: optional tool-call evidence collector. When supplied it is wired
+        #: into the built toolset so each child tool-call records a public
+        #: ``evidence:`` ref that is promoted onto the child's ``evidenceRefs``.
+        self._evidence_collector = evidence_collector
         self._workspace_root = workspace_root
         self._env: Mapping[str, str] = os.environ if env is None else env
 
@@ -196,8 +208,8 @@ class RealLocalChildRunner:
                     reason=_DEGRADE_KEY_MISSING,
                 )
 
-            # --- Drive ONE turn and collect the final text --------------------
-            final_text = await self._drive_one_turn(config, request)
+            # --- Drive ONE turn and collect the final text + evidence ---------
+            final_text, evidence_refs = await self._drive_one_turn(config, request)
         except asyncio.TimeoutError:
             # Hung/slow model exceeded the turn budget — degrade (never raise).
             return self._failed(
@@ -219,8 +231,10 @@ class RealLocalChildRunner:
         return {
             "childExecutionId": child_execution_id,
             "status": "completed",
+            # PR1: tool-call receipts collected during the turn are promoted to
+            # the child's evidenceRefs (empty when text-only / no toolset).
+            "evidenceRefs": evidence_refs,
             "summary": summary,
-            "evidenceRefs": (),
             "artifactRefs": (),
             "auditEventRefs": (),
         }
@@ -324,8 +338,13 @@ class RealLocalChildRunner:
     # Turn drive (mirrors discovery/orchestrator.drive_runner_once)       #
     # ------------------------------------------------------------------ #
 
-    async def _drive_one_turn(self, config: object, request: object) -> str:
-        """Build/reuse a ``CliModelRunner`` and drive ONE turn; return final text.
+    async def _drive_one_turn(
+        self, config: object, request: object
+    ) -> tuple[str, tuple[str, ...]]:
+        """Build/reuse a ``CliModelRunner`` and drive ONE turn.
+
+        Returns ``(final_text, evidence_refs)`` — the collected tool-call
+        receipt refs (``evidence:...``) are empty for a text-only child.
 
         Heavy ADK imports are LOCAL so importing this module never triggers
         them. Mirrors the discovery orchestrator's message construction +
@@ -344,7 +363,9 @@ class RealLocalChildRunner:
             timeout=timeout_s,
         )
 
-    async def _collect_turn_text(self, config: object, request: object) -> str:
+    async def _collect_turn_text(
+        self, config: object, request: object
+    ) -> tuple[str, tuple[str, ...]]:
         import tempfile  # noqa: PLC0415
 
         from google.genai import types  # noqa: PLC0415
@@ -356,18 +377,28 @@ class RealLocalChildRunner:
         # m-2: compute the child session id ONCE and reuse it.
         session_id = self._child_session_id(request)
         runner = self._injected_runner
+        # PR1: resolve the toolset (and tool-call evidence collector) ONCE so the
+        # same collector instance is wired into the builder and queried after.
+        tools, evidence_collector = self._resolve_turn_toolset(session_id)
         if runner is None:
             workspace = self._workspace_root or tempfile.mkdtemp()
             runner = build_cli_model_runner(
                 config,  # type: ignore[arg-type]
-                # v1 TEXT-ONLY: empty toolset → no workspace mutation.
-                tools=list(self._tools),
+                tools=tools,
                 # m-3: a tools=[] child should NOT get the full filesystem-tool
-                # system prompt — give it a minimal delegated-subtask instruction.
-                instruction=_CHILD_INSTRUCTION,
+                # system prompt — give it a minimal delegated-subtask
+                # instruction. A tool-enabled child keeps the default tool
+                # system prompt so it knows how to use the forwarded tools.
+                instruction=_CHILD_INSTRUCTION if not tools else None,
                 model_factory=self._model_factory,
                 workspace_root=workspace,
+                # Child runners may intentionally share the parent workspace for
+                # read-only tool access, but they must not build memory
+                # snapshots from production-mounted workspace paths. The parent
+                # prompt already carries the delegation context.
+                memory_mode="incognito",
                 session_id=session_id,
+                local_tool_evidence_collector=evidence_collector,
             )
 
         prompt = _child_prompt(request)
@@ -383,7 +414,119 @@ class RealLocalChildRunner:
                 text = getattr(part, "text", None)
                 if isinstance(text, str) and text:
                     texts.append(text)
-        return "\n".join(texts)
+        evidence_refs = self._collect_evidence_refs(evidence_collector, session_id)
+        return "\n".join(texts), evidence_refs
+
+    # ------------------------------------------------------------------ #
+    # PR1: toolset resolution + tool-call evidence promotion              #
+    # ------------------------------------------------------------------ #
+
+    def _resolve_turn_toolset(
+        self, session_id: str
+    ) -> tuple[list[object], object | None]:
+        """Resolve the child's toolset + evidence collector for this turn.
+
+        Precedence:
+        1. An explicit caller-supplied ``tools`` override (``self._tools``) wins
+           and is used verbatim (with the supplied/derived collector).
+        2. Otherwise the resolved ``toolset_profile`` decides:
+           * ``none`` → empty toolset (byte-identical text-only v1; NO collector).
+           * ``readonly`` → core toolset filtered to the read-only allowlist.
+           * ``full`` → the whole core toolset (authorisation is upstream's job).
+
+        For tool-enabled profiles a ``LocalToolEvidenceCollector`` is created (or
+        the injected one reused) and threaded into ``build_cli_adk_tools`` so
+        each tool-call records a public ``evidence:`` ref.
+        """
+        from magi_agent.runtime.child_toolset import (  # noqa: PLC0415
+            toolset_allowlist,
+        )
+
+        # Explicit override (tests / advanced callers) — use verbatim.
+        if self._tools is not None:
+            collector = self._evidence_collector if self._tools else None
+            return list(self._tools), collector
+
+        allowlist = toolset_allowlist(self._toolset_profile)  # () | names | None
+        if allowlist == ():
+            # ``none`` profile — historical text-only child (empty toolset). No
+            # collector is built so the no-toolset path stays byte-identical.
+            return [], None
+
+        # A real toolset is requested: build (or reuse) the evidence collector
+        # FIRST so it can be wired into the tools and queried after the turn.
+        collector = self._evidence_collector or self._build_evidence_collector()
+        tools = self._build_core_tools(session_id, collector)
+        if allowlist is None:
+            # ``full`` profile — forward the whole toolset.
+            return list(tools), collector
+        # ``readonly`` profile — filter to the read-only allowlist by tool name.
+        allowed = set(allowlist)
+        filtered = [tool for tool in tools if _tool_name(tool) in allowed]
+        return filtered, collector
+
+    @staticmethod
+    def _build_evidence_collector() -> object | None:
+        try:
+            from magi_agent.evidence.local_tool_collector import (  # noqa: PLC0415
+                LocalToolEvidenceCollector,
+            )
+
+            return LocalToolEvidenceCollector()
+        except Exception:  # noqa: BLE001 — evidence is best-effort, never fatal.
+            return None
+
+    def _build_core_tools(
+        self, session_id: str, collector: object | None
+    ) -> list[object]:
+        import tempfile  # noqa: PLC0415
+
+        from magi_agent.cli.tool_runtime import (  # noqa: PLC0415
+            build_cli_adk_tools,
+        )
+
+        workspace = self._workspace_root or tempfile.mkdtemp()
+        return list(
+            build_cli_adk_tools(
+                workspace_root=workspace,
+                session_id=session_id,
+                local_tool_evidence_collector=collector,
+                include_local_full_handlers=self._toolset_profile != "readonly",
+            )
+        )
+
+    @staticmethod
+    def _collect_evidence_refs(
+        collector: object | None, session_id: str
+    ) -> tuple[str, ...]:
+        """Project the collector's recorded tool-call receipts to public
+        ``evidence:`` refs for the child envelope. Best-effort: any failure
+        yields an empty tuple (never breaks the turn)."""
+        if collector is None:
+            return ()
+        # Preferred lightweight accessor (test fakes implement this directly).
+        accessor = getattr(collector, "evidence_refs_for_session", None)
+        if callable(accessor):
+            try:
+                refs = accessor(session_id)
+            except Exception:  # noqa: BLE001 — evidence is best-effort.
+                return ()
+            return _public_evidence_refs(refs)
+        # Fall back to the real collector's per-session evidence ledgers.
+        ledgers_accessor = getattr(collector, "evidence_ledgers_for_session", None)
+        if not callable(ledgers_accessor):
+            return ()
+        try:
+            ledgers = ledgers_accessor(session_id)
+        except Exception:  # noqa: BLE001
+            return ()
+        refs: list[str] = []
+        for ledger in ledgers or ():
+            for entry in getattr(ledger, "entries", ()) or ():
+                ref = getattr(entry, "evidence_ref", None)
+                if isinstance(ref, str) and ref:
+                    refs.append(ref)
+        return _public_evidence_refs(refs)
 
     def _turn_timeout_s(self, request: object) -> float | None:
         """Resolve the per-turn timeout (seconds) from ``request.budget_ms``.
@@ -471,6 +614,28 @@ def _clean_str(value: Any) -> str | None:
     if isinstance(value, str) and value.strip():
         return value.strip()
     return None
+
+
+def _tool_name(tool: object) -> str | None:
+    """Return an ADK tool's ``name`` attribute, or ``None`` when absent."""
+    name = getattr(tool, "name", None)
+    return name if isinstance(name, str) and name else None
+
+
+def _public_evidence_refs(refs: object) -> tuple[str, ...]:
+    """Filter ``refs`` to deduplicated public ``evidence:`` ref strings.
+
+    The boundary only accepts child output refs in the ``evidence:<token>``
+    namespace; anything else is dropped here so a malformed receipt can never
+    poison the envelope.
+    """
+    if not isinstance(refs, (list, tuple)):
+        return ()
+    out: list[str] = []
+    for ref in refs:
+        if isinstance(ref, str) and ref.startswith("evidence:") and ref not in out:
+            out.append(ref)
+    return tuple(out)
 
 
 __all__ = [

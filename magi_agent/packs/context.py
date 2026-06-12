@@ -375,6 +375,7 @@ class ControlPlaneProvideContext:
     self_review_config: Any | None = None
     self_review_now: Any | None = None
     self_review_scheduler: Any | None = None
+    tool_synthesis_model_label: str | None = None
 
 
 # ---------------------------------------------------------------------------

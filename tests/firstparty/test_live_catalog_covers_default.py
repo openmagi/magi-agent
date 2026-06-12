@@ -16,10 +16,8 @@ every field, still appears in the live manifest-built catalog after the 6.3 flip
 """
 from __future__ import annotations
 
-from magi_agent.authoring.compiler import (
-    CompileRecipePackCatalog,
-    resolve_live_catalog,
-)
+from magi_agent.packs.catalog_build import resolve_live_catalog
+from magi_agent.packs.types import CompileRecipePackCatalog
 
 _REF_FIELDS = (
     "connector_refs",

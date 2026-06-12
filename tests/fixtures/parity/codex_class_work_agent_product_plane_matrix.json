@@ -91,10 +91,6 @@
           "state": "existing"
         },
         {
-          "path": "magi_agent/ops/contracts.py",
-          "state": "existing"
-        },
-        {
           "path": "magi_agent/ops/health.py",
           "state": "existing"
         },
@@ -103,19 +99,7 @@
           "state": "existing"
         },
         {
-          "path": "magi_agent/ops/recorder.py",
-          "state": "existing"
-        },
-        {
-          "path": "magi_agent/ops/runtime_events.py",
-          "state": "existing"
-        },
-        {
           "path": "magi_agent/ops/safety.py",
-          "state": "existing"
-        },
-        {
-          "path": "magi_agent/ops/traces.py",
           "state": "existing"
         },
         {
@@ -725,7 +709,7 @@
       ],
       "latestMainCoveredRefs": [
         {
-          "path": "magi_agent/evals/regression_gates.py",
+          "path": "evals/regression_gates.py",
           "state": "existing"
         },
         {
@@ -741,7 +725,7 @@
           "state": "existing"
         },
         {
-          "path": "magi_agent/evals/release_gates.py",
+          "path": "evals/release_gates.py",
           "state": "existing"
         },
         {
@@ -981,7 +965,7 @@
           "state": "existing"
         },
         {
-          "path": "tests/test_memory_mission_self_improvement_integration_contract.py",
+          "path": "tests/test_memory_self_improvement_mission_parity_matrix.py",
           "state": "existing"
         },
         {

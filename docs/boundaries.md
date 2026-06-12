@@ -4,7 +4,7 @@
 
 Runtime boundaries that govern when model proposals become state, output, or side effects.
 
-Boundaries are control points that prevent the agent from taking action without verification. Seven boundary modules follow the Intent-to-Receipt pattern where every side effect is validated before execution.
+Boundaries are control points that prevent the agent from taking action without verification. Six boundary modules follow the Intent-to-Receipt pattern where every side effect is validated before execution.
 
 > **Boundary enforcement is default-off (shadow) — the agent still executes work.** These boundaries are the governance layer; today they observe and record without blocking or gating. That is independent of the agent's ability to run: with a provider key, the local `magi` CLI executes a real model and first-party tools today (see [What works today](/docs/what-works-today)). "Default-off" / `Literal[False]` here scopes whether enforcement is attached to live decisions, not whether tasks can execute.
 
@@ -51,16 +51,9 @@ class ToolEvidenceRecord(BaseModel):
     duration_ms: int | None
 ```
 
-## Evidence enforcement boundary
+## Evidence enforcement
 
-The evidence enforcement boundary (evidence/enforcement_boundary.py) evaluates an EvidenceContract against collected evidence records and produces an EvidenceEnforcementDecision. It determines whether evidence is sufficient to proceed, requires repair, or should block. Status: implemented, evaluation is default-off (config.enabled=False).
-
-- EvidenceEnforcementStatus: disabled, evaluation_intent, pass, audit_missing, repair_required, escalate_required, block_ready_local_fake.
-- EvidenceEnforcementAction: audit, pass, repair, escalate, block_intent.
-- EvidenceEnforcementDomain: research, coding, completion, general.
-- EvidenceEnforcementConfig gates evaluation: enabled, local_fake_evaluation_enabled, evidence_block_enabled (Literal[False]), final_answer_blocking_enabled (Literal[False]).
-- EvidenceEnforcementAuthorityFlags: all fields Literal[False] including evidence_block_enabled, final_answer_blocked, live_tool_dispatched, shell_git_or_test_executed, production_writes_enabled, route_attached.
-- When the verdict fails with block_ready state: if repair_allowed, status is repair_required; if escalation_allowed, status is escalate_required; otherwise status is block_ready_local_fake with action block_intent.
+Evidence enforcement happens on the live output path in the engine pre-final gate. A turn collects EvidenceRecords from tool calls, matches them against an EvidenceContract, and produces an EvidenceContractVerdict. For coding-domain turns the engine pre-final gate (cli/engine.py) consumes that verdict via the verifier bus (harness/verifier_bus.py) and, when it reaches a block_ready state, blocks the final answer or triggers a repair loop by default. There is a single live enforcement path; there is no separate standalone enforcement-boundary module.
 
 ## Memory write boundary
 
@@ -72,16 +65,6 @@ The memory write boundary (memory/write_boundary.py) governs all memory mutation
 - MemoryMutationReceipt includes receipt_id, status, executed, memory_write_allowed, production_write_enabled, provider_call_attempted, filesystem_mutation_attempted, production_receipt, local_test_only, target (MemoryMutationTarget), authority_flags.
 - MemoryWriteAuthorityFlags: all Literal[False] including memory_write_allowed, memory_redact_allowed, memory_delete_allowed, provider_call_allowed, filesystem_write_allowed, database_write_allowed, network_call_allowed, production_write_enabled.
 - Local test-only receipts use HMAC signature verification (local_test_receipt_marker + local_test_receipt_signature) to distinguish test receipts from production claims.
-
-## Projection write boundary
-
-The projection write boundary (runtime/projection_write_boundary.py) governs writes to output channels: transcript, SSE, control events, and control requests. All projection writes are disabled by default and produce a ProjectionWriteBoundaryResult with allowed=False. Status: implemented, default-off.
-
-- ProjectionWriteTarget: transcript, sse, control_event, control_request.
-- ProjectionWriteIntent includes target, operation, session_key, idempotency_key, payload.
-- ProjectionWriteBoundaryResult: allowed is Literal[False], includes denial (ProjectionWriteDenial with reason_code projection_writes_disabled) and authority_flags.
-- ProjectionWriteAuthorityFlags: all Literal[False] including transcript_write_allowed, sse_write_allowed, control_event_write_allowed, control_request_write_allowed, durable_write_allowed, production_receipt_allowed, storage_backend_attached, filesystem_write_allowed, database_write_allowed, transport_write_allowed.
-- evaluate_projection_write_intent() always returns allowed=False with a denial explaining that storage backend and receipt policy are not attached.
 
 ## Child runner boundary
 

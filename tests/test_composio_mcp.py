@@ -63,7 +63,7 @@ def test_inactive_config_builds_no_toolsets() -> None:
     assert bundle.active is False
     assert bundle.toolsets == ()
     assert bundle.status == "inactive"
-    assert bundle.reason == "disabled_by_config"
+    assert bundle.reason == "not_configured"
 
 
 def test_active_config_creates_session_and_toolset_without_real_network() -> None:

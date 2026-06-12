@@ -403,11 +403,22 @@ class TestModeBranchInteractive:
             runner.invoke(app_module.app, extra_args, catch_exceptions=False)
         return captured.get("permission_mode")
 
-    def test_interactive_default_upgrades_to_accept_edits(
+    def test_interactive_default_upgrades_to_bypass_permissions(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path
     ) -> None:
-        """Bare `magi` (no --permission-mode) launches the TUI in acceptEdits."""
-        assert self._launch_tui(monkeypatch, tmp_path, []) == "acceptEdits"
+        """Bare `magi` (no --permission-mode) launches the TUI in bypassPermissions."""
+        assert self._launch_tui(monkeypatch, tmp_path, []) == "bypassPermissions"
+
+    def test_interactive_explicit_accept_edits_is_honored(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path
+    ) -> None:
+        """An explicit --permission-mode acceptEdits is passed through unchanged."""
+        assert (
+            self._launch_tui(
+                monkeypatch, tmp_path, ["--permission-mode", "acceptEdits"]
+            )
+            == "acceptEdits"
+        )
 
     def test_interactive_explicit_mode_is_honored(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path
@@ -1054,4 +1065,6 @@ def test_local_serve_applies_full_runtime_defaults_without_route_hardblock(
     assert os.environ["MAGI_RUNNER_POLICY_ROUTING_ENABLED"] == "1"
     assert os.environ["MAGI_RUNNER_POLICY_ROUTE_BLOCKING_ENABLED"] == "0"
     assert os.environ["MAGI_GA_LIVE_ENABLED"] == "1"
+    assert os.environ["MAGI_BROWSER_TOOL_ENABLED"] == "1"
+    assert os.environ["MAGI_EVIDENCE_LEDGER_LIFECYCLE_ENABLED"] == "1"
     assert "MAGI_COMPOSIO_ENABLED" not in os.environ

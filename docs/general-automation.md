@@ -2,7 +2,7 @@
 
 Worked example covering approval gates, delivery boundaries, artifact verification, and commit boundaries using openmagi.office-automation and openmagi.spreadsheet-automation packs.
 
-A general automation workflow uses boundary modules (artifacts/delivery_boundary.py, runtime/commit_boundary.py, runtime/projection_write_boundary.py) and evidence types (FileDeliver, ArtifactVerify, CommitCheckpoint) to govern background and scheduled tasks. Relevant first-party packs: openmagi.office-automation, openmagi.spreadsheet-automation.
+A general automation workflow uses boundary modules (artifacts/delivery_boundary.py, runtime/commit_boundary.py) and evidence types (FileDeliver, ArtifactVerify, CommitCheckpoint) to govern background and scheduled tasks. Relevant first-party packs: openmagi.office-automation, openmagi.spreadsheet-automation.
 
 ## Automation scenario
 
@@ -16,12 +16,12 @@ The runtime includes dedicated boundary modules that enforce policy at specific 
 
 - artifacts/delivery_boundary.py -- governs artifact delivery to channels and external targets
 - runtime/commit_boundary.py -- validates state before committing results
-- runtime/projection_write_boundary.py -- controls what enters projected output
 - memory/write_boundary.py -- validates memory writes for safety and policy
 - runtime/child_runner_boundary.py -- governs child agent result imports
 - evidence/tool_boundary.py -- validates tool execution and produces evidence records
-- evidence/enforcement_boundary.py -- enforces evidence contract verdicts
 - runtime/activity_boundary.py -- general activity boundary for tool execution
+
+Evidence contract verdicts are enforced on the live output path by the engine pre-final gate (cli/engine.py) via the verifier bus (harness/verifier_bus.py), not by a separate enforcement-boundary module.
 
 ## Delivery and artifact evidence
 

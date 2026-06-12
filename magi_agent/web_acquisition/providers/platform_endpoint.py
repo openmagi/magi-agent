@@ -210,12 +210,18 @@ class PlatformEndpointProvider:
           401 / 403 → ``{"status": "denied"}``.
           429 → ``{"status": "timeout"}`` (rate limit; retryable).
           Other 4xx / 5xx → ``{"status": "timeout"}`` (transient).
+
+        Fail-soft: if *resp* is not a recognised response object (e.g. a test
+        double that lacks ``.status_code``), returns ``{"status": "timeout"}``
+        rather than raising.
         """
-        import httpx
-
-        assert isinstance(resp, httpx.Response)  # caller always passes httpx.Response
-
-        status_code: int = resp.status_code
+        raw_status = getattr(resp, "status_code", None)
+        if raw_status is None:
+            return {"status": "timeout"}
+        try:
+            status_code: int = int(raw_status)
+        except (TypeError, ValueError):
+            return {"status": "timeout"}
         if status_code in {401, 403}:
             return {"status": "denied"}
         if status_code == 429 or status_code >= 500:

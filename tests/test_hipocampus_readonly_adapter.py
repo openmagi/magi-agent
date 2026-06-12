@@ -174,6 +174,14 @@ def test_readonly_adapter_rejects_production_workspace_roots(workspace_root: Pat
         )
 
 
+def test_readonly_adapter_allows_tmp_name_that_merely_contains_pvc() -> None:
+    adapter = HipocampusReadOnlyAdapter(
+        HipocampusReadOnlyConfig(workspace_root=Path("/tmp/tmpvcaosub1"), enabled=True)
+    )
+
+    assert adapter.config.workspace_root == Path("/tmp/tmpvcaosub1")
+
+
 def test_readonly_adapter_rejects_workspace_root_symlink_to_production_path(
     tmp_path: Path,
 ) -> None:
@@ -184,6 +192,17 @@ def test_readonly_adapter_rejects_workspace_root_symlink_to_production_path(
         HipocampusReadOnlyAdapter(
             HipocampusReadOnlyConfig(workspace_root=symlink_root, enabled=True)
         )
+
+
+def test_readonly_adapter_allows_local_checkout_names_with_canary(tmp_path: Path) -> None:
+    checkout_root = tmp_path / "magi-agent-canary-final"
+    checkout_root.mkdir()
+
+    adapter = HipocampusReadOnlyAdapter(
+        HipocampusReadOnlyConfig(workspace_root=checkout_root, enabled=True)
+    )
+
+    assert adapter.workspace_root == checkout_root.resolve()
 
 
 def test_readonly_adapter_ignores_qmd_results_outside_workspace(tmp_path: Path) -> None:

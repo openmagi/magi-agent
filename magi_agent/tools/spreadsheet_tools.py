@@ -708,17 +708,40 @@ def xlsx_read(arguments: Mapping[str, object], context: ToolContext) -> ToolResu
     max_rows = _bounded_int(arguments.get("maxRows"), default=_DEFAULT_MAX_ROWS, maximum=_MAX_ROWS)
     max_cols = _bounded_int(arguments.get("maxCols"), default=_DEFAULT_MAX_COLS, maximum=_MAX_COLS)
 
+    # Optional cell range filter: "A1:C5" restricts to min/max row+col
+    cell_range_str = _string_arg(arguments, "cellRange")
+    row_min: int | None = None
+    row_max: int | None = None
+    col_min: int | None = None
+    col_max: int | None = None
+    if cell_range_str is not None:
+        range_result = _parse_cell_range(cell_range_str)
+        if range_result is None:
+            wb.close()
+            return _blocked_result(tool_name, "xlsx_invalid_cell_range")
+        row_min, col_min, row_max, col_max = range_result
+
     raw_rows: list[list[str]] = []
     source_row_count = 0
     cell_count = 0
     try:
-        for row in ws.iter_rows(values_only=True):
+        for row_idx, row in enumerate(ws.iter_rows(values_only=True), start=1):
             source_row_count += 1
-            if source_row_count > max_rows:
+            # Apply row range filter
+            if row_min is not None and row_idx < row_min:
                 continue
-            selected = list(row)[:max_cols]
+            if row_max is not None and row_idx > row_max:
+                break
+            if source_row_count > max_rows and row_min is None:
+                continue
+            # Apply column range filter
+            row_list = list(row)
+            if col_min is not None:
+                row_list = row_list[col_min - 1 : (col_max or max_cols)]
+            else:
+                row_list = row_list[:max_cols]
             coerced: list[str] = []
-            for cell_value in selected:
+            for cell_value in row_list:
                 if cell_value is None:
                     coerced.append("")
                 elif isinstance(cell_value, bool):
@@ -772,4 +795,147 @@ def xlsx_read(arguments: Mapping[str, object], context: ToolContext) -> ToolResu
     )
 
 
-__all__ = ["csv_read", "csv_write", "spreadsheet_preview", "xlsx_read"]
+def xlsx_info(arguments: Mapping[str, object], context: ToolContext) -> ToolResult:
+    """Return structural metadata about an XLSX workbook without reading row data.
+
+    Lists all sheets with their row count, column count, and a preview of the
+    first row (header).
+
+    Requires the ``openpyxl`` package (``uv sync --extra files``).  When the
+    package is not installed the handler returns ``status="blocked"``.
+
+    Output fields
+    -------------
+    - ``sheets``: list of ``{name, rowCount, columnCount, headerPreview}``
+    - ``sheetCount``: total number of sheets
+    - ``contentDigest``: sha256 of the file bytes
+    """
+    tool_name = "xlsx_info"
+    path_text = _string_arg(arguments, "path")
+    if path_text is None:
+        return _blocked_result(tool_name, "path_required")
+
+    try:
+        root = _workspace_root(context)
+        resolved = _resolve_workspace_path(root, path_text, must_exist=True)
+    except _SpreadsheetPolicyError as error:
+        return _blocked_result(tool_name, error.reason_code)
+    except OSError:
+        return _error_result(tool_name, "xlsx_read_failed")
+
+    if Path(resolved.relative).suffix.casefold() != ".xlsx":
+        return _blocked_result(tool_name, "xlsx_extension_required")
+
+    try:
+        raw_size = resolved.path.stat().st_size
+    except OSError:
+        return _error_result(tool_name, "xlsx_read_failed")
+
+    if raw_size > _MAX_BYTES:
+        return _error_result(tool_name, "xlsx_input_too_large")
+
+    try:
+        import openpyxl  # noqa: PLC0415
+    except ImportError:
+        return _blocked_result(tool_name, "xlsx_dependency_not_installed")
+
+    try:
+        wb = openpyxl.load_workbook(resolved.path, read_only=True, data_only=True)
+    except Exception:  # noqa: BLE001
+        return _error_result(tool_name, "xlsx_read_failed")
+
+    sheets_info: list[dict[str, object]] = []
+    try:
+        for name in wb.sheetnames:
+            ws = wb[name]
+            row_count = 0
+            col_count = 0
+            header_preview: list[str] = []
+            try:
+                for row_idx, row in enumerate(ws.iter_rows(values_only=True), start=1):
+                    row_list = [c for c in row]
+                    row_count += 1
+                    col_count = max(col_count, len(row_list))
+                    if row_idx == 1:
+                        header_preview = [
+                            str(c) if c is not None else ""
+                            for c in row_list[:_DEFAULT_MAX_COLS]
+                        ]
+                    if row_count >= _MAX_ROWS:
+                        break
+            except Exception:  # noqa: BLE001
+                pass
+            sheets_info.append(
+                {
+                    "name": name,
+                    "rowCount": row_count,
+                    "columnCount": col_count,
+                    "headerPreview": header_preview,
+                }
+            )
+    finally:
+        wb.close()
+
+    content_digest = _digest(resolved.path.read_bytes() if raw_size <= _MAX_BYTES else b"")
+    output: dict[str, object] = {
+        "sheets": sheets_info,
+        "sheetCount": len(sheets_info),
+        "contentDigest": content_digest,
+    }
+    return ToolResult(
+        status="ok",
+        output=output,
+        llmOutput=output,
+        transcriptOutput={
+            "toolName": tool_name,
+            "sheetCount": len(sheets_info),
+            "contentDigest": content_digest,
+        },
+        metadata={
+            **_base_metadata(tool_name, permission_class="read", mutates_workspace=False),
+            "contentDigest": content_digest,
+            "byteCount": raw_size,
+            "sheetCount": len(sheets_info),
+            "pathRef": resolved.path_ref,
+        },
+    )
+
+
+def _parse_cell_range(
+    cell_range_str: str,
+) -> tuple[int, int, int, int] | None:
+    """Parse an Excel-style cell range like ``'A1:C5'``.
+
+    Returns ``(row_min, col_min, row_max, col_max)`` as 1-based integers, or
+    ``None`` when the string cannot be parsed.
+    """
+    import re  # noqa: PLC0415
+
+    pattern = re.compile(
+        r"^([A-Za-z]{1,3})(\d+):([A-Za-z]{1,3})(\d+)$",
+        re.IGNORECASE,
+    )
+    m = pattern.match(cell_range_str.strip())
+    if not m:
+        return None
+    col_min = _col_letter_to_index(m.group(1))
+    row_min = int(m.group(2))
+    col_max = _col_letter_to_index(m.group(3))
+    row_max = int(m.group(4))
+    if col_min < 1 or col_max < col_min or row_min < 1 or row_max < row_min:
+        return None
+    return row_min, col_min, row_max, col_max
+
+
+def _col_letter_to_index(letters: str) -> int:
+    """Convert Excel column letters to a 1-based column index.
+
+    E.g. ``'A'`` → 1, ``'Z'`` → 26, ``'AA'`` → 27.
+    """
+    result = 0
+    for char in letters.upper():
+        result = result * 26 + (ord(char) - ord("A") + 1)
+    return result
+
+
+__all__ = ["csv_read", "csv_write", "spreadsheet_preview", "xlsx_info", "xlsx_read"]

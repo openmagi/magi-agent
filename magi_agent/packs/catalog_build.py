@@ -20,10 +20,10 @@ layered separately and is out of scope).
 """
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 
-from magi_agent.authoring.compiler import CompileRecipePackCatalog
 from magi_agent.packs.loader import LoadedPrimitive
+from magi_agent.packs.types import CompileRecipePackCatalog
 
 # provides type -> the catalog field it contributes to. Order in this dict is the
 # pluginRefs emission order (control_plane before callback) when both share a field.
@@ -67,4 +67,61 @@ def build_catalog(primitives: Iterable[LoadedPrimitive]) -> CompileRecipePackCat
         # OSS local full-trust: no hosted hard-invariant floor.
         hardInvariantRefs=(),
         requiredHardInvariantRefs=(),
+    )
+
+
+def resolve_live_catalog(
+    *,
+    env: Mapping[str, str] | None = None,
+) -> CompileRecipePackCatalog:
+    """Build the live catalog from loaded pack manifests (D4).
+
+    Replaces the hardcoded ``CompileRecipePackCatalog.default()`` on the live
+    ``None``-catalog path: discovers packs (bundled first-party + user dirs),
+    reads their static ``provides`` refs, and folds them into a flat catalog —
+    no first-party-only tier (§1 no privilege). A user pack's refs land in
+    exactly the same fields as first-party's.
+
+    Re-homed from the deleted ``magi_agent/authoring/compiler.py``: the catalog
+    is kernel-owned now, with zero authoring dependence.
+
+    The legacy ``.default()`` reference floor is PRESERVED (unioned in) so that
+    existing recipe-ref validation (and the hosted hard-invariant floor the model
+    validator at ``CompileRecipePackCatalog._validate_required_hard_invariants``
+    requires) keeps passing — this flip adds pack-discovered refs without dropping
+    any reference the live runtime already validated against. Discovery failures
+    fail open to the static default (the runtime stays usable with no packs).
+    """
+    floor = CompileRecipePackCatalog.default()
+    try:
+        from magi_agent.packs.discovery import (  # noqa: PLC0415
+            default_search_bases,
+            discover_pack_files,
+            load_packs_config,
+            resolve_enabled_packs,
+        )
+        from magi_agent.packs.loader import RecordingSink, load_packs  # noqa: PLC0415
+
+        discovered = discover_pack_files(default_search_bases())
+        enabled = resolve_enabled_packs(discovered, load_packs_config())
+        sink = RecordingSink()
+        result = load_packs(enabled, sink)
+        pack_catalog = build_catalog(result.primitives)
+    except Exception:
+        return floor
+
+    return CompileRecipePackCatalog(
+        connectorRefs=_dedup_preserve_order(floor.connector_refs + pack_catalog.connector_refs),
+        toolRefs=_dedup_preserve_order(floor.tool_refs + pack_catalog.tool_refs),
+        pluginRefs=_dedup_preserve_order(floor.plugin_refs + pack_catalog.plugin_refs),
+        validatorRefs=_dedup_preserve_order(floor.validator_refs + pack_catalog.validator_refs),
+        harnessRefs=_dedup_preserve_order(floor.harness_refs + pack_catalog.harness_refs),
+        requiredEvidenceRefs=floor.required_evidence_refs,
+        evidenceProducerRefs=_dedup_preserve_order(
+            floor.evidence_producer_refs + pack_catalog.evidence_producer_refs
+        ),
+        approvalAuthorityRefs=floor.approval_authority_refs,
+        # Preserve the hosted hard-invariant floor (out of scope for pack refs).
+        hardInvariantRefs=floor.hard_invariant_refs,
+        requiredHardInvariantRefs=floor.required_hard_invariant_refs,
     )

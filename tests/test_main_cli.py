@@ -44,7 +44,9 @@ EXPECTED_LOCAL_FULL_RUNTIME_DEFAULTS = {
     "MAGI_GA_LIVE_ENABLED": "1",
     "MAGI_MESSAGE_CACHE_ENABLED": "1",
     "MAGI_FILE_TOOLS_ENABLED": "1",
+    "MAGI_BROWSER_TOOL_ENABLED": "1",
     "MAGI_SELF_INTROSPECTION_ENABLED": "1",
+    "MAGI_EVIDENCE_LEDGER_LIFECYCLE_ENABLED": "1",
     "MAGI_MEMORY_WRITE_READINESS_ENABLED": "1",
     "MAGI_MEMORY_WRITE_ENABLED": "1",
     "MAGI_MEMORY_LOCAL_DEV": "1",
@@ -68,12 +70,34 @@ EXPECTED_LOCAL_FULL_RUNTIME_DEFAULTS = {
 }
 
 
+HOSTED_OVERLAY_TEST_ENV_FLAGS = (
+    "MAGI_EDIT_RETRY_REFLECTION_ENABLED",
+    "MAGI_LOOP_GUARD_ENABLED",
+    "MAGI_ERROR_RECOVERY_ENABLED",
+    "MAGI_MAX_STEPS_BRAKE_ENABLED",
+    "MAGI_CONTEXT_COMPACTION_ENABLED",
+    "MAGI_SELF_REVIEW_ENABLED",
+    "MAGI_SELF_REVIEW_SHADOW",
+    "MAGI_SELF_INTROSPECTION_ENABLED",
+    "MAGI_CODING_REPAIR_LOOP_ENABLED",
+    "MAGI_DOCUMENT_AUTHORING_COVERAGE",
+    "MAGI_MEMORY_WRITE_READINESS_ENABLED",
+    "MAGI_MEMORY_WRITE_ENABLED",
+    "MAGI_MEMORY_LOCAL_DEV",
+)
+
+
 @pytest.fixture(autouse=True)
 def _restore_process_env_after_test():
     original = dict(os.environ)
     yield
     os.environ.clear()
     os.environ.update(original)
+
+
+def _clear_hosted_overlay_test_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    for key in HOSTED_OVERLAY_TEST_ENV_FLAGS:
+        monkeypatch.delenv(key, raising=False)
 
 
 def test_release_version_and_local_health_version_are_aligned() -> None:
@@ -234,3 +258,87 @@ def test_main_can_require_runtime_environment(monkeypatch) -> None:
 
     with pytest.raises(RuntimeEnvError, match="Missing required runtime env"):
         main_module.main(["serve", "--port", "9094"])
+
+
+def _set_hosted_runtime_env(monkeypatch) -> None:
+    """Populate a real (non-local-dev) hosted runtime identity."""
+    monkeypatch.setenv("BOT_ID", "real-bot-123")
+    monkeypatch.setenv("USER_ID", "real-user-456")
+    monkeypatch.setenv("GATEWAY_TOKEN", "real-gateway-token")
+    monkeypatch.setenv("CORE_AGENT_API_PROXY_URL", "http://127.0.0.1:0")
+    monkeypatch.setenv("CORE_AGENT_CHAT_PROXY_URL", "http://127.0.0.1:0")
+    monkeypatch.setenv("CORE_AGENT_REDIS_URL", "redis://127.0.0.1:0/0")
+    monkeypatch.setenv("CORE_AGENT_MODEL", "anthropic/claude-sonnet-4-6")
+
+
+def test_main_hosted_overlay_off_by_default_is_byte_identical(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    captured: dict[str, object] = {}
+    _set_hosted_runtime_env(monkeypatch)
+    monkeypatch.setenv("MAGI_DEPLOYMENT", "hosted")
+    monkeypatch.delenv("MAGI_CONTROL_STAGE", raising=False)
+    monkeypatch.delenv("MAGI_OBSERVABILITY_ENABLED", raising=False)
+    monkeypatch.delenv("MAGI_OBS_HOME", raising=False)
+    _clear_hosted_overlay_test_env(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(main_module.uvicorn, "run", lambda app, **kwargs: captured.update(kwargs))
+    main_module.main(["serve", "--port", "9101"])
+
+    assert captured["port"] == 9101
+    # Stage off (default): hosted overlay sets nothing, and the local-dev full
+    # overlay must NOT leak onto a real hosted identity.
+    assert "MAGI_OBSERVABILITY_ENABLED" not in main_module.os.environ
+    assert "MAGI_OBS_HOME" not in main_module.os.environ
+    assert "MAGI_SELF_INTROSPECTION_ENABLED" not in main_module.os.environ
+
+
+def test_main_hosted_overlay_full_enables_observability_on_pvc(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    captured: dict[str, object] = {}
+    _set_hosted_runtime_env(monkeypatch)
+    monkeypatch.setenv("MAGI_DEPLOYMENT", "hosted")
+    monkeypatch.setenv("MAGI_CONTROL_STAGE", "full")
+    monkeypatch.delenv("MAGI_OBSERVABILITY_ENABLED", raising=False)
+    # The PVC-default path (/workspace/.openmagi) is asserted in the unit test;
+    # here we point MAGI_OBS_HOME at a writable tmp dir so create_app can mount
+    # the observability sink without needing the real read-only /workspace PVC.
+    monkeypatch.setenv("MAGI_OBS_HOME", str(tmp_path / ".openmagi"))
+    _clear_hosted_overlay_test_env(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(main_module.uvicorn, "run", lambda app, **kwargs: captured.update(kwargs))
+    main_module.main(["serve", "--port", "9102"])
+
+    assert captured["port"] == 9102
+    assert main_module.os.environ["MAGI_OBSERVABILITY_ENABLED"] == "1"
+    # PR2 (C3): the full stage flips the six ControlPlane controls. C9 adds
+    # self-inspection; C11 adds coding repair + document coverage.
+    assert main_module.os.environ["MAGI_LOOP_GUARD_ENABLED"] == "1"
+    assert main_module.os.environ["MAGI_CONTEXT_COMPACTION_ENABLED"] == "1"
+    assert main_module.os.environ["MAGI_SELF_REVIEW_ENABLED"] == "1"
+    # self-review stays shadow-first at the full stage (live only at hardgate).
+    assert main_module.os.environ["MAGI_SELF_REVIEW_SHADOW"] == "1"
+    assert main_module.os.environ["MAGI_SELF_INTROSPECTION_ENABLED"] == "1"
+    assert main_module.os.environ["MAGI_CODING_REPAIR_LOOP_ENABLED"] == "1"
+    assert main_module.os.environ["MAGI_DOCUMENT_AUTHORING_COVERAGE"] == "advisory"
+
+
+def test_main_hosted_overlay_noop_without_explicit_marker(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    captured: dict[str, object] = {}
+    _set_hosted_runtime_env(monkeypatch)
+    monkeypatch.delenv("MAGI_DEPLOYMENT", raising=False)
+    monkeypatch.setenv("MAGI_CONTROL_STAGE", "full")
+    monkeypatch.delenv("MAGI_OBSERVABILITY_ENABLED", raising=False)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(main_module.uvicorn, "run", lambda app, **kwargs: captured.update(kwargs))
+    main_module.main(["serve", "--port", "9103"])
+
+    assert captured["port"] == 9103
+    # No MAGI_DEPLOYMENT=hosted marker -> overlay must not fire (no reverse-detect).
+    assert "MAGI_OBSERVABILITY_ENABLED" not in main_module.os.environ

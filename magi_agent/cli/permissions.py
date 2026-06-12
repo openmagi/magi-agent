@@ -105,6 +105,39 @@ from magi_agent.runtime.control import ControlRequestStore
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from magi_agent.cli.readonly_classifier import ReadOnlyClassifier
 
+
+# Default location for the durable control-request JSONL log when the gate is
+# ON but ``MAGI_CONTROL_STORE_PATH`` is unset.
+_DEFAULT_DURABLE_STORE_RELPATH = ".magi/control/requests.jsonl"
+
+
+def _default_control_store() -> ControlRequestStore:
+    """Build the default ControlRequestStore honouring the durable gate (A7).
+
+    Default (gate OFF) returns the volatile in-memory store, byte-identical to
+    the prior ``ControlRequestStore()`` default. When ``MAGI_CONTROL_STORE_DURABLE``
+    is truthy, returns a JSONL-backed durable store so pending approvals survive
+    a process restart. Imports are lazy to preserve this module's light import
+    contract (it must not pull config/env at import time).
+    """
+    from magi_agent.config.env import (
+        control_store_durable_enabled,
+        control_store_durable_path,
+    )
+
+    if not control_store_durable_enabled():
+        return ControlRequestStore()
+
+    from pathlib import Path
+
+    from magi_agent.runtime.durable_control_store import DurableControlRequestStore
+
+    path = control_store_durable_path()
+    if path is None:
+        path = Path.home() / _DEFAULT_DURABLE_STORE_RELPATH
+    return DurableControlRequestStore(path=path)
+
+
 __all__ = [
     "canonical_request_key",
     "RulesEngine",
@@ -241,9 +274,13 @@ class RulesPermissionGate(PermissionGate):
         self.rules: RulesEngine = rules if rules is not None else RulesEngine()
         self.sinks: list[PromptSink] = list(sinks) if sinks is not None else []
         # ``store`` is held for PR-C2 (the resolve-once race uses it); PR-C1
-        # does not exercise it but accepts it so wiring stays stable.
+        # does not exercise it but accepts it so wiring stays stable. When no
+        # store is injected, the backend is chosen by the durable gate (A7):
+        # OFF (default) -> volatile in-memory store, byte-identical to before;
+        # ON -> JSONL-backed durable store so pending approvals survive a
+        # restart. An explicitly injected ``store`` always wins.
         self.store: ControlRequestStore = (
-            store if store is not None else ControlRequestStore()
+            store if store is not None else _default_control_store()
         )
         # SmartApprove classifier (PR3). ``None`` means disabled (DEFAULT).
         # When set, a rule-miss ``ask`` is offered to the classifier BEFORE the
@@ -452,9 +489,11 @@ class HeadlessSink(PromptSink):
         writer: FrameWriter,
         *,
         permission_mode: PermissionMode = "default",
+        can_prompt: bool = True,
     ) -> None:
         self._writer = writer
         self.permission_mode: PermissionMode = permission_mode
+        self._can_prompt = can_prompt
         self._pending: dict[str, asyncio.Future[ControlResponse]] = {}
         # Bounded "already terminal" set (request_id -> None), insertion-ordered
         # so the oldest entries are evicted first when the cap is exceeded.
@@ -531,18 +570,22 @@ class HeadlessSink(PromptSink):
         # inbound buffer / a fast host)? That answer is real, so honor it even if
         # the channel has since closed (EOF only means no MORE answers).
         has_early = request_id in self._early
-        if self._closed and not has_early:
-            # Inbound channel closed (EOF) and no stashed answer: no response can
-            # arrive, so do not emit a frame / register a future — fail-safe deny.
-            return PermissionDecision(kind="deny")
         if (
             self.permission_mode == "acceptEdits"
             and req.tool_name in EDIT_CLASS_TOOLS
             and not has_early
         ):
             # Auto-allow edit-class tools without a frame; non-edit tools fall
-            # through to the default prompt below.
+            # through to the prompt/deny path below.
             return PermissionDecision(kind="allow")
+        if self._closed and not has_early:
+            # Inbound channel closed (EOF) and no stashed answer: no response can
+            # arrive, so do not emit a frame / register a future — fail-safe deny.
+            return PermissionDecision(kind="deny")
+        if not self._can_prompt and not has_early:
+            # No inbound approver is available. acceptEdits handled edit tools
+            # above; every remaining ask fails closed instead of hanging forever.
+            return PermissionDecision(kind="deny")
 
         # default (or acceptEdits + non-edit tool): emit exactly ONE frame and
         # await the matching response.

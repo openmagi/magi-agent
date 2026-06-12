@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import json
+import importlib
 
+import pytest
 from fastapi.testclient import TestClient
 
 from magi_agent.app import create_app
@@ -146,22 +147,41 @@ def test_control_request_endpoints_require_gateway_token() -> None:
     assert _client().get("/v1/control-requests").status_code == 401
 
 
-def test_inline_shell_is_fallback_when_bundle_missing(monkeypatch) -> None:
+def test_bundle_missing_serves_build_instructions_placeholder(monkeypatch) -> None:
     # When the static bundle is absent (source checkout without a web build),
-    # the inline workbench shell is served instead.
+    # /dashboard serves an honest build-instruction placeholder — not a second
+    # inline web frontend.
     monkeypatch.setattr(web_dashboard, "bundle_available", lambda: False)
     response = _client().get("/dashboard")
     assert response.status_code == 200
-    assert 'class="app"' in response.text
-    assert "Open Magi Agent" in response.text
-    assert 'id="chat-form"' in response.text
-    assert 'id="panel-work"' in response.text
-    assert 'id="panel-knowledge"' in response.text
-    assert 'id="panel-settings"' in response.text
-    assert "/v1/chat/stream" in response.text
-    assert "/v1/chat/control-response" in response.text
-    assert "/v1/chat/cancel" in response.text
-    assert "MAGI_STREAMING_CHAT=on" in response.text
+    assert response.headers["content-type"].startswith("text/html")
+    html = response.text
+    assert "dashboard bundle not built" in html
+    assert "scripts/build-web-dashboard.sh" in html
+    assert "Node" in html
+    assert "Homebrew" in html
+    assert "https://github.com/openmagi/magi-agent" in html
+    # The retired inline workbench shell must not come back: assert known
+    # inline-only markers are gone from the served page.
+    assert 'id="chat-form"' not in html
+    assert 'id="panel-work"' not in html
+    assert 'class="app"' not in html
+    assert "/v1/chat/stream" not in html
+    assert "MAGI_STREAMING_CHAT=on" not in html
+
+
+def test_bundle_missing_deep_link_serves_placeholder(monkeypatch) -> None:
+    monkeypatch.setattr(web_dashboard, "bundle_available", lambda: False)
+    response = _client().get("/dashboard/local/chat/general")
+    assert response.status_code == 200
+    assert "dashboard bundle not built" in response.text
+
+
+def test_bundle_missing_root_still_redirects_to_dashboard(monkeypatch) -> None:
+    monkeypatch.setattr(web_dashboard, "bundle_available", lambda: False)
+    response = _client().get("/", follow_redirects=False)
+    assert response.status_code == 307
+    assert response.headers["location"] == "/dashboard"
 
 
 def test_local_dashboard_chat_route_streams_local_adk_events(monkeypatch, tmp_path) -> None:
@@ -189,18 +209,17 @@ def test_local_dashboard_chat_route_streams_local_adk_events(monkeypatch, tmp_pa
     assert "data: [DONE]" in text
 
 
-def test_exposes_digest_safe_runtime_bootstrap_for_inline_shell(monkeypatch) -> None:
+def test_inline_dashboard_module_is_deleted() -> None:
+    # The 2.4K-LOC inline f-string dashboard (transport/dashboard.py) is gone
+    # wholesale; transport/web_dashboard.py is the single dashboard path.
+    with pytest.raises(ModuleNotFoundError):
+        importlib.import_module("magi_agent.transport.dashboard")
+
+
+def test_placeholder_page_has_no_runtime_bootstrap_or_app_logic(monkeypatch) -> None:
+    # The placeholder is a static template: no runtime config, no embedded
+    # bootstrap JSON, no token surface.
     monkeypatch.setattr(web_dashboard, "bundle_available", lambda: False)
-    response = _client().get("/dashboard")
-    marker = '<script type="application/json" id="runtime-bootstrap">'
-    start = response.text.index(marker) + len(marker)
-    end = response.text.index("</script>", start)
-    bootstrap = json.loads(response.text[start:end])
-    assert bootstrap == {
-        "botId": "local-bot",
-        "model": "gpt-5.2",
-        "runtime": "magi-agent",
-        "runtimeEngine": "adk-python",
-        "version": "0.1.0",
-        "gatewayToken": "",
-    }
+    html = _client("super-secret-token").get("/dashboard").text
+    assert 'id="runtime-bootstrap"' not in html
+    assert "super-secret-token" not in html

@@ -22,11 +22,7 @@ import inspect
 from pathlib import Path
 
 import magi_agent
-from magi_agent.authoring.compiler import (
-    CompileRecipePackCatalog,
-    resolve_live_catalog,
-)
-from magi_agent.packs.catalog_build import build_catalog
+from magi_agent.packs.catalog_build import build_catalog, resolve_live_catalog
 from magi_agent.packs.context import (
     CallbackProvideContext,
     ConnectorProvideContext,
@@ -45,6 +41,7 @@ from magi_agent.packs.discovery import (
 from magi_agent.packs.loader import RecordingSink, load_packs
 from magi_agent.packs.manifest import load_manifest_from_toml
 from magi_agent.packs.registries import PrimitiveRegistry, RegistryRegistrationSink
+from magi_agent.packs.types import CompileRecipePackCatalog
 
 _ROOT = Path(magi_agent.__file__).parent
 _FIRSTPARTY_DIR = _ROOT / "firstparty" / "packs"
@@ -84,9 +81,15 @@ def test_no_hardcoded_first_party_registration_on_live_path() -> None:
     plugin_src = cp.split("def build_default_plugin", 1)[1].split("\ndef ", 1)[0]
     assert "plane.register(" not in plugin_src
     assert "build_control_plane_from_packs(" in plugin_src
-    comp = (_ROOT / "authoring" / "compiler.py").read_text()
-    assert "catalog or CompileRecipePackCatalog.default()" not in comp
-    assert "resolve_live_catalog()" in comp
+    # The live catalog entry point is kernel-owned (packs/catalog_build.py —
+    # re-homed when main deleted the authoring plane) and manifest-built: it
+    # folds build_catalog(result.primitives) over discovered packs rather than
+    # returning the static hardcode (which survives only as the preserved
+    # fail-open floor inside resolve_live_catalog).
+    cat = (_ROOT / "packs" / "catalog_build.py").read_text()
+    assert "catalog or CompileRecipePackCatalog.default()" not in cat
+    assert "def resolve_live_catalog(" in cat
+    assert "build_catalog(result.primitives)" in cat
 
 
 # --- Assertion 2: a user pack can add/override/remove every one of the 8 provides ------

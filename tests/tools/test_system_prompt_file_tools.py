@@ -11,7 +11,7 @@ from __future__ import annotations
 
 class TestGaiaSystemPrompt:
     def test_gaia_system_prompt_mentions_image_understand(self) -> None:
-        from magi_agent.benchmarks.gaia.answer import GAIA_SYSTEM_PROMPT
+        from benchmarks.gaia.answer import GAIA_SYSTEM_PROMPT
 
         assert "ImageUnderstand" in GAIA_SYSTEM_PROMPT, (
             "GAIA_SYSTEM_PROMPT must mention ImageUnderstand tool; "
@@ -19,7 +19,7 @@ class TestGaiaSystemPrompt:
         )
 
     def test_gaia_system_prompt_mentions_document_read(self) -> None:
-        from magi_agent.benchmarks.gaia.answer import GAIA_SYSTEM_PROMPT
+        from benchmarks.gaia.answer import GAIA_SYSTEM_PROMPT
 
         assert "DocumentRead" in GAIA_SYSTEM_PROMPT, (
             "GAIA_SYSTEM_PROMPT must mention DocumentRead tool; "
@@ -27,14 +27,14 @@ class TestGaiaSystemPrompt:
         )
 
     def test_gaia_system_prompt_mentions_xlsx_read(self) -> None:
-        from magi_agent.benchmarks.gaia.answer import GAIA_SYSTEM_PROMPT
+        from benchmarks.gaia.answer import GAIA_SYSTEM_PROMPT
 
         assert "XLSXRead" in GAIA_SYSTEM_PROMPT, (
             "GAIA_SYSTEM_PROMPT must mention XLSXRead tool"
         )
 
     def test_gaia_system_prompt_fallback_when_tool_errors(self) -> None:
-        from magi_agent.benchmarks.gaia.answer import GAIA_SYSTEM_PROMPT
+        from benchmarks.gaia.answer import GAIA_SYSTEM_PROMPT
 
         prompt_lower = GAIA_SYSTEM_PROMPT.lower()
         has_fallback = (
@@ -50,7 +50,7 @@ class TestGaiaSystemPrompt:
 
     def test_gaia_system_prompt_final_answer_format_preserved(self) -> None:
         """The FINAL ANSWER: format must still be present after the edit."""
-        from magi_agent.benchmarks.gaia.answer import GAIA_SYSTEM_PROMPT
+        from benchmarks.gaia.answer import GAIA_SYSTEM_PROMPT
 
         assert "FINAL ANSWER:" in GAIA_SYSTEM_PROMPT, (
             "GAIA_SYSTEM_PROMPT must still contain 'FINAL ANSWER:' marker"

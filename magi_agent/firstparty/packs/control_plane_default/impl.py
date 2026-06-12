@@ -32,6 +32,7 @@ def provide_default_controls(context: ControlPlaneProvideContext) -> None:
         self_review_config=context.self_review_config,
         self_review_now=context.self_review_now,
         self_review_scheduler=context.self_review_scheduler,
+        tool_synthesis_model_label=context.tool_synthesis_model_label,
     )
     for control in plane._controls:
         context.register(control)

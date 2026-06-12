@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import subprocess
 import sys
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -13,8 +15,11 @@ from magi_agent.shadow.gate5b4c3_live_runner_boundary import (
     Gate5B4C3LiveAdkPrimitives,
     Gate5B4C3LiveRunnerBoundary,
     Gate5B4C3LiveRunnerBoundaryResult,
+    _event_usage_metadata,
+    _invoke_manual_tool,
     _looks_like_incomplete_full_toolhost_output,
     _selected_full_toolhost_run_config,
+    _usage_dict,
 )
 from magi_agent.shadow.gate5b4c3_shadow_generation_contract import (
     Gate5B4C3ShadowGenerationBudgets,
@@ -22,6 +27,7 @@ from magi_agent.shadow.gate5b4c3_shadow_generation_contract import (
     Gate5B4C3ShadowGenerationProviderCredentialBinding,
     Gate5B4C3ShadowGenerationRequest,
 )
+from magi_agent.shadow.session_service_registry import SessionServiceRegistry
 
 
 BOT_DIGEST = "sha256:" + "a" * 64
@@ -40,8 +46,6 @@ MODEL_ATTEMPT_DIGEST = "sha256:" + "5" * 64
 def _payload(**overrides: object) -> dict[str, object]:
     base: dict[str, object] = {
         "schemaVersion": "gate5b4c3.chatProxyShadowGeneration.v1",
-        "mode": "shadow_generation_diagnostic",
-        "responseAuthority": "typescript",
         "shadowGenerationId": "shadow_gen_001",
         "requestIdDigest": REQUEST_DIGEST,
         "traceIdDigest": TRACE_DIGEST,
@@ -597,6 +601,35 @@ class _PartialAggregateRunner(_FakeRunner):
         yield _PartialAggregateEvent("EXACTLY_ONCE_SENTINEL_9Q4Z", partial=False)
 
 
+class _FinishReasonTextEvent(_FakeEvent):
+    def __init__(self, text: str, finish_reason: str) -> None:
+        super().__init__(text)
+        self.finish_reason = finish_reason
+
+
+class _OutputContinuationRunner(_FakeRunner):
+    calls: list[dict[str, object]] = []
+
+    async def run_async(self, **kwargs: object) -> object:
+        type(self).run_kwargs = kwargs
+        type(self).calls.append(kwargs)
+        if len(type(self).calls) == 1:
+            yield _FinishReasonTextEvent("section one is cut", "length")
+            return
+        message = kwargs["new_message"]
+        assert isinstance(message, _FakeContent)
+        assert "Continue exactly where you left off" in message.parts[0].text
+        yield _FakeEvent(" off and then finishes. END_LONG_SMOKE")
+
+
+class _LongSelectedTextRunner(_FakeRunner):
+    async def run_async(self, **kwargs: object) -> object:
+        type(self).run_kwargs = kwargs
+        for index in range(560):
+            suffix = " END_LONG_SMOKE" if index == 559 else ""
+            yield _FakeEvent(f"{index:03d}-segment{suffix} ")
+
+
 class _ModelDumpFunctionCallOnlyEvent:
     @property
     def text(self) -> str:
@@ -857,6 +890,37 @@ def _partial_aggregate_primitives() -> Gate5B4C3LiveAdkPrimitives:
     )
 
 
+def _output_continuation_primitives() -> Gate5B4C3LiveAdkPrimitives:
+    _FakeAgent.created_kwargs = {}
+    _OutputContinuationRunner.created_kwargs = {}
+    _OutputContinuationRunner.run_kwargs = {}
+    _OutputContinuationRunner.calls = []
+    _FakeGenerateContentConfig.created_kwargs = {}
+    return Gate5B4C3LiveAdkPrimitives(
+        Agent=_FakeAgent,
+        Runner=_OutputContinuationRunner,
+        InMemorySessionService=_FakeSessionService,
+        Content=_FakeContent,
+        Part=_FakePart,
+        GenerateContentConfig=_FakeGenerateContentConfig,
+    )
+
+
+def _long_selected_text_primitives() -> Gate5B4C3LiveAdkPrimitives:
+    _FakeAgent.created_kwargs = {}
+    _LongSelectedTextRunner.created_kwargs = {}
+    _LongSelectedTextRunner.run_kwargs = {}
+    _FakeGenerateContentConfig.created_kwargs = {}
+    return Gate5B4C3LiveAdkPrimitives(
+        Agent=_FakeAgent,
+        Runner=_LongSelectedTextRunner,
+        InMemorySessionService=_FakeSessionService,
+        Content=_FakeContent,
+        Part=_FakePart,
+        GenerateContentConfig=_FakeGenerateContentConfig,
+    )
+
+
 def _loader_that_must_not_run() -> Gate5B4C3LiveAdkPrimitives:
     raise AssertionError("ADK primitives must not load unless generation is accepted")
 
@@ -1005,6 +1069,80 @@ def test_live_boundary_selected_full_toolhost_run_config_requests_sse_streaming(
     assert getattr(run_config, "streaming_mode") == StreamingMode.SSE
 
 
+def _file_write_adk_tool(tmp_path: Path) -> object:
+    pytest.importorskip("google.adk.tools")
+    from magi_agent.gates.gate5b_full_toolhost import (
+        Gate5BFullToolHostConfig,
+        build_gate5b_full_toolhost_bundle,
+    )
+
+    bundle = build_gate5b_full_toolhost_bundle(
+        config=Gate5BFullToolHostConfig.model_validate(
+            {
+                "enabled": True,
+                "killSwitchEnabled": False,
+                "routeAttachmentEnabled": True,
+                "selectedBotDigest": BOT_DIGEST,
+                "selectedOwnerDigest": OWNER_DIGEST,
+                "environment": "production",
+                "environmentAllowlist": ("production",),
+                "allowedToolNames": ("FileWrite",),
+                "maxToolCallsPerTurn": 1,
+            }
+        ),
+        scope={
+            "selectedBotDigest": BOT_DIGEST,
+            "selectedOwnerDigest": OWNER_DIGEST,
+            "environment": "production",
+        },
+        workspace_root=tmp_path,
+    )
+    return bundle.tools[0]
+
+
+def test_manual_fallback_invokes_real_adk_function_tool_with_direct_args(
+    tmp_path: Path,
+) -> None:
+    tool = _file_write_adk_tool(tmp_path)
+
+    result = asyncio.run(
+        _invoke_manual_tool(
+            tool,
+            {"path": "manual-fallback.txt", "content": "manual fallback wrote"},
+        )
+    )
+
+    assert (tmp_path / "manual-fallback.txt").read_text(encoding="utf-8") == (
+        "manual fallback wrote"
+    )
+    assert isinstance(result, dict)
+    assert result.get("status") == "ok"
+
+
+def test_manual_fallback_unwraps_provider_arguments_object_for_real_adk_tool(
+    tmp_path: Path,
+) -> None:
+    tool = _file_write_adk_tool(tmp_path)
+
+    result = asyncio.run(
+        _invoke_manual_tool(
+            tool,
+            {
+                "arguments": {
+                    "path": "provider-wrapper.txt",
+                    "content": "provider wrapper wrote",
+                }
+            },
+        )
+    )
+
+    assert (tmp_path / "provider-wrapper.txt").read_text(encoding="utf-8") == (
+        "provider wrapper wrote"
+    )
+    assert isinstance(result, dict)
+    assert result.get("status") == "ok"
+
+
 def test_live_boundary_rejects_completed_runner_without_text_output() -> None:
     result = Gate5B4C3LiveRunnerBoundary(_function_call_only_primitives).invoke(
         _request(),
@@ -1063,6 +1201,46 @@ def test_live_boundary_executes_pending_tool_calls_emitted_with_preamble_text() 
     assert "final answer after manual tool execution" in (
         result.output_text_internal or ""
     )
+
+
+def test_live_boundary_streams_manual_tool_events_as_they_execute() -> None:
+    public_events: list[dict[str, object]] = []
+    primitives = _function_call_then_final_primitives()
+    _FunctionCallThenFinalRunner.event_factory = _TextAndFunctionCallEvent
+
+    result = Gate5B4C3LiveRunnerBoundary(
+        lambda: primitives,
+        adk_tools=(_ManualCalculationTool,),
+        public_event_sink=lambda event: public_events.append(dict(event)),
+    ).invoke(_selected_full_toolhost_request(), config=_enabled_config())
+
+    assert result.status == "completed"
+    event_types = [event.get("type") for event in public_events]
+    assert event_types == [
+        "text_delta",
+        "turn_phase",
+        "tool_start",
+        "tool_end",
+        "turn_phase",
+        "text_delta",
+    ]
+    assert public_events[1] == {
+        "type": "turn_phase",
+        "turnId": "turn_opaque_001",
+        "phase": "executing",
+    }
+    assert public_events[4] == {
+        "type": "turn_phase",
+        "turnId": "turn_opaque_001",
+        "phase": "committing",
+    }
+    tool_start = public_events[2]
+    tool_end = public_events[3]
+    assert tool_start["name"] == "Calculation"
+    assert str(tool_start["id"]).startswith("tu_")
+    assert tool_end["id"] == tool_start["id"]
+    assert tool_end["status"] == "ok"
+    assert "result:sha256:" in str(tool_end["output_preview"])
 
 
 def test_live_boundary_deduplicates_pending_tool_calls_across_events() -> None:
@@ -1181,6 +1359,23 @@ def test_live_boundary_runs_no_tool_finalizer_after_adk_tool_only_events() -> No
     ]
 
 
+def test_live_boundary_streams_no_tool_finalizer_text_delta() -> None:
+    public_events: list[dict[str, object]] = []
+    primitives = _auto_tool_loop_primitives()
+
+    result = Gate5B4C3LiveRunnerBoundary(
+        lambda: primitives,
+        adk_tools=(_ManualCalculationTool,),
+        public_event_sink=lambda event: public_events.append(dict(event)),
+    ).invoke(_selected_full_toolhost_request(), config=_enabled_config())
+
+    assert result.status == "completed"
+    assert result.output_text_internal == "final answer after no-tool finalizer"
+    assert [
+        event["delta"] for event in public_events if event.get("type") == "text_delta"
+    ] == ["final answer after no-tool finalizer"]
+
+
 def test_live_boundary_rejects_promise_only_full_toolhost_output() -> None:
     result = Gate5B4C3LiveRunnerBoundary(
         _promise_only_primitives,
@@ -1256,6 +1451,69 @@ def test_live_boundary_does_not_reemit_final_aggregate_after_partial_deltas() ->
         event["delta"] for event in public_events if event.get("type") == "text_delta"
     ]
     assert text_deltas == ["EX", "ACTLY_ONCE_SENTINEL_9Q4Z"]
+
+
+def test_live_boundary_continues_selected_full_toolhost_output_truncated_by_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MAGI_OUTPUT_CONTINUATION_ENABLED", "1")
+    monkeypatch.setenv("MAGI_MAX_OUTPUT_CONTINUATIONS", "2")
+    public_events: list[dict[str, object]] = []
+
+    result = Gate5B4C3LiveRunnerBoundary(
+        _output_continuation_primitives,
+        adk_tools=(_ManualCalculationTool,),
+        public_event_sink=lambda event: public_events.append(dict(event)),
+    ).invoke(_selected_full_toolhost_request(), config=_enabled_config())
+
+    assert result.status == "completed"
+    assert result.reason == "runner_completed"
+    assert result.output_text_internal == (
+        "section one is cut off and then finishes. END_LONG_SMOKE"
+    )
+    assert len(_OutputContinuationRunner.calls) == 2
+    assert result.event_count == 2
+    assert public_events == [
+        {"type": "text_delta", "delta": "section one is cut"},
+        {"type": "output_continuation", "continuation": 1, "max": 2},
+        {"type": "text_delta", "delta": " off and then finishes. END_LONG_SMOKE"},
+    ]
+
+
+def test_live_boundary_output_continuation_can_be_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MAGI_OUTPUT_CONTINUATION_ENABLED", "0")
+
+    result = Gate5B4C3LiveRunnerBoundary(
+        _output_continuation_primitives,
+        adk_tools=(_ManualCalculationTool,),
+    ).invoke(_selected_full_toolhost_request(), config=_enabled_config())
+
+    assert result.status == "completed"
+    assert result.reason == "runner_completed"
+    assert result.output_text_internal == "section one is cut"
+    assert len(_OutputContinuationRunner.calls) == 1
+
+
+def test_live_boundary_allows_long_selected_full_toolhost_text_past_tool_cap() -> None:
+    public_events: list[dict[str, object]] = []
+
+    result = Gate5B4C3LiveRunnerBoundary(
+        _long_selected_text_primitives,
+        adk_tools=(_ManualCalculationTool,),
+        public_event_sink=lambda event: public_events.append(dict(event)),
+    ).invoke(_selected_full_toolhost_request(), config=_enabled_config())
+
+    assert result.status == "completed"
+    assert result.reason == "runner_completed"
+    assert result.event_count == 560
+    assert "END_LONG_SMOKE" in (result.output_text_internal or "")
+    text_deltas = [
+        event["delta"] for event in public_events if event.get("type") == "text_delta"
+    ]
+    assert len(text_deltas) == 560
+    assert text_deltas[-1] == "559-segment END_LONG_SMOKE "
 
 
 def test_live_boundary_fails_closed_on_tool_policy_mismatch_before_adk_load() -> None:
@@ -1372,6 +1630,100 @@ def test_live_boundary_builds_litellm_model_for_fireworks_route(monkeypatch: pyt
     model = _FakeAgent.created_kwargs["model"]
     assert getattr(model, "openmagi_gate5b_litellm_model") is True
     assert getattr(model, "model") == "fireworks_ai/kimi-k2p6"
+
+
+class _UsageEvent:
+    def __init__(
+        self,
+        text: str,
+        prompt: int,
+        candidates: int,
+        cached: int = 0,
+    ) -> None:
+        self.content = _FakeContent(parts=[_FakePart(text)], role="model")
+
+        class _Usage:
+            prompt_token_count = prompt
+            candidates_token_count = candidates
+            cached_content_token_count = cached
+
+        self.usage_metadata = _Usage()
+
+
+class _UsageRunner(_FakeRunner):
+    async def run_async(self, **kwargs: object) -> object:
+        type(self).run_kwargs = kwargs
+        yield _UsageEvent("local diagnostic event only", prompt=1234, candidates=56)
+
+
+def _usage_primitives() -> Gate5B4C3LiveAdkPrimitives:
+    _FakeAgent.created_kwargs = {}
+    _UsageRunner.created_kwargs = {}
+    _UsageRunner.run_kwargs = {}
+    _UsageRunner.fail = False
+    _FakeGenerateContentConfig.created_kwargs = {}
+    return Gate5B4C3LiveAdkPrimitives(
+        Agent=_FakeAgent,
+        Runner=_UsageRunner,
+        InMemorySessionService=_FakeSessionService,
+        Content=_FakeContent,
+        Part=_FakePart,
+        GenerateContentConfig=_FakeGenerateContentConfig,
+    )
+
+
+def test_event_usage_metadata_reads_object_mapping_and_nested_shapes() -> None:
+    class _Meta:
+        prompt_token_count = 10
+        candidates_token_count = 4
+        cached_content_token_count = 2
+
+    class _Evt:
+        usage_metadata = _Meta()
+
+    assert _event_usage_metadata(_Evt()) == (10, 4, 2)
+    assert _event_usage_metadata(
+        {"usageMetadata": {"promptTokenCount": 7, "candidatesTokenCount": 3}}
+    ) == (7, 3, 0)
+    assert _event_usage_metadata(
+        {"llm_response": {"usage_metadata": {"prompt_token_count": 5}}}
+    ) == (5, 0, 0)
+    assert _event_usage_metadata({"text": "no usage here"}) is None
+
+
+def test_usage_dict_drops_all_zero_totals() -> None:
+    assert _usage_dict((0, 0, 0)) is None
+    assert _usage_dict((9, 1, 0)) == {
+        "inputTokens": 9,
+        "outputTokens": 1,
+        "cacheReadTokens": 0,
+    }
+
+
+def test_live_boundary_captures_usage_internal_on_completed_turn() -> None:
+    result = Gate5B4C3LiveRunnerBoundary(_usage_primitives).invoke(
+        _request(),
+        config=_enabled_config(),
+    )
+
+    assert result.status == "completed"
+    assert result.usage_internal == {
+        "inputTokens": 1234,
+        "outputTokens": 56,
+        "cacheReadTokens": 0,
+    }
+    assert "usageInternal" not in result.model_dump(by_alias=True)
+    assert "usage_internal" not in result.model_dump()
+
+
+def test_live_boundary_usage_internal_none_without_provider_usage() -> None:
+    result = Gate5B4C3LiveRunnerBoundary(_fake_primitives).invoke(
+        _request(),
+        config=_enabled_config(),
+    )
+
+    assert result.status == "completed"
+    assert result.usage_internal is None
 
 
 def test_live_boundary_uses_adapter_resolved_per_turn_output_cap() -> None:
@@ -1794,3 +2146,423 @@ def test_completion_token_output_is_not_incomplete() -> None:
         )
         is False
     )
+
+
+# ── 08-PR5 hosted session reuse (default-OFF) — isolation/TTL/seed-on-miss ──
+
+
+SESSION_DIGEST_ALT = "sha256:" + "6" * 64
+BOT_DIGEST_ALT = "sha256:" + "9" * 64
+_HISTORY_MARKER = "Recent sanitized conversation:"
+_CURRENT_TURN_TEXT = "Please summarize the approved redacted note."
+
+
+class _MustNotTouchRegistry:
+    """Poisoned registry: any interaction fails the bypass regression tests."""
+
+    _MESSAGE = (
+        "session registry must not be consulted on this turn "
+        "(flag OFF, or no stable session key)"
+    )
+
+    def get_or_create(self, *args: object, **kwargs: object) -> tuple[object, bool]:
+        raise AssertionError(self._MESSAGE)
+
+    def try_acquire(self, *args: object, **kwargs: object) -> tuple[object, bool]:
+        raise AssertionError(self._MESSAGE)
+
+    def release(self, *args: object, **kwargs: object) -> bool:
+        raise AssertionError(self._MESSAGE)
+
+    def evict(self, *args: object, **kwargs: object) -> bool:
+        raise AssertionError(self._MESSAGE)
+
+
+class _SessionReuseManualClock:
+    def __init__(self) -> None:
+        self.now = 1_000.0
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
+
+    def __call__(self) -> float:
+        return self.now
+
+
+def _session_reuse_request(
+    *,
+    bot_digest: str = BOT_DIGEST,
+    session_digest: str | None = SESSION_DIGEST,
+) -> Gate5B4C3ShadowGenerationRequest:
+    return Gate5B4C3ShadowGenerationRequest.model_validate(
+        _payload(
+            selection={
+                **_payload()["selection"],  # type: ignore[arg-type]
+                "botIdDigest": bot_digest,
+                "sessionKeyDigest": session_digest,
+            },
+            turn={
+                **_payload()["turn"],  # type: ignore[arg-type]
+                "sanitizedRecentHistory": (
+                    {
+                        "role": "user",
+                        "sanitizedText": "What did you find last turn?",
+                        "sanitizedTextDigest": "sha256:" + "7" * 64,
+                    },
+                    {
+                        "role": "assistant",
+                        "sanitizedText": "I found a redacted fixture anomaly.",
+                        "sanitizedTextDigest": "sha256:" + "8" * 64,
+                    },
+                ),
+            },
+            modelRouting={
+                **_payload()["modelRouting"],  # type: ignore[arg-type]
+                "providerLabel": "google",
+                "modelLabel": "gemini-3.5-flash",
+                "shadowCredentialRef": "gate5b-google-api-key-smoke-v1",
+            },
+            recipeProfile={
+                **_payload()["recipeProfile"],  # type: ignore[arg-type]
+                "toolsPolicy": "selected_full_toolhost",
+                "sourceAuthority": "bounded_sanitized_recent_history",
+            },
+            policy={
+                **_payload()["policy"],  # type: ignore[arg-type]
+                "toolsDisabled": False,
+                "toolHostDispatchAllowed": True,
+            },
+            budgets={"maxSanitizedHistoryMessages": 2},
+        )
+    )
+
+
+def _session_reuse_config(
+    *,
+    bot_digest: str = BOT_DIGEST,
+) -> Gate5B4C3ShadowGenerationConfig:
+    return _gate1a_google_config().model_copy(update={"selected_bot_digest": bot_digest})
+
+
+def _session_reuse_boundary(registry: object) -> Gate5B4C3LiveRunnerBoundary:
+    return Gate5B4C3LiveRunnerBoundary(
+        _fake_primitives,
+        adk_tools=(_ManualCalculationTool,),
+        session_service_registry=registry,  # type: ignore[arg-type]
+    )
+
+
+def _invoke_session_reuse_turn(
+    boundary: Gate5B4C3LiveRunnerBoundary,
+    *,
+    bot_digest: str = BOT_DIGEST,
+    session_digest: str | None = SESSION_DIGEST,
+) -> tuple[Gate5B4C3LiveRunnerBoundaryResult, object, str]:
+    result = boundary.invoke(
+        _session_reuse_request(bot_digest=bot_digest, session_digest=session_digest),
+        config=_session_reuse_config(bot_digest=bot_digest),
+    )
+    service = _FakeRunner.created_kwargs["session_service"]
+    message = _FakeRunner.run_kwargs["new_message"]
+    assert isinstance(message, _FakeContent)
+    return result, service, message.parts[0].text
+
+
+def test_session_reuse_flag_off_default_builds_fresh_service_and_never_touches_registry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("MAGI_HOSTED_SESSION_REUSE", raising=False)
+    boundary = _session_reuse_boundary(_MustNotTouchRegistry())
+
+    first_result, first_service, first_text = _invoke_session_reuse_turn(boundary)
+    second_result, second_service, second_text = _invoke_session_reuse_turn(boundary)
+
+    assert first_result.status == "completed"
+    assert second_result.status == "completed"
+    assert isinstance(first_service, _FakeSessionService)
+    assert isinstance(second_service, _FakeSessionService)
+    # Flag OFF keeps today's behavior byte-identical: a fresh session service
+    # per turn and the sanitized history re-sent into every turn's message.
+    assert second_service is not first_service
+    for text in (first_text, second_text):
+        assert _HISTORY_MARKER in text
+        assert "user: What did you find last turn?" in text
+        assert _CURRENT_TURN_TEXT in text
+
+
+def test_session_reuse_two_turns_share_session_service_and_seed_history_only_on_miss(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MAGI_HOSTED_SESSION_REUSE", "1")
+    registry = SessionServiceRegistry(max_entries=4, ttl_seconds=60.0)
+    boundary = _session_reuse_boundary(registry)
+
+    first_result, first_service, first_text = _invoke_session_reuse_turn(boundary)
+    first_session_id = _FakeRunner.run_kwargs["session_id"]
+    second_result, second_service, second_text = _invoke_session_reuse_turn(boundary)
+    second_session_id = _FakeRunner.run_kwargs["session_id"]
+
+    assert first_result.status == "completed"
+    assert second_result.status == "completed"
+    assert second_session_id == first_session_id
+    # Registry hit: the second turn reuses the exact same session service.
+    assert second_service is first_service
+    # Miss seeds the re-sent sanitized history exactly as today...
+    assert _HISTORY_MARKER in first_text
+    assert "user: What did you find last turn?" in first_text
+    # ...but a hit must NOT re-ingest it (the session already holds the
+    # context); only the current sanitized turn text is sent.
+    assert _HISTORY_MARKER not in second_text
+    assert "What did you find last turn?" not in second_text
+    assert second_text == _CURRENT_TURN_TEXT
+
+
+def test_session_reuse_pre_seed_failure_reseeds_history_on_next_same_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MAGI_HOSTED_SESSION_REUSE", "1")
+    registry = SessionServiceRegistry(max_entries=4, ttl_seconds=60.0)
+
+    def failing_primitives() -> Gate5B4C3LiveAdkPrimitives:
+        primitives = _fake_primitives()
+        return Gate5B4C3LiveAdkPrimitives(
+            Agent=primitives.Agent,
+            Runner=_ProviderSetupFailRunner,
+            InMemorySessionService=primitives.InMemorySessionService,
+            Content=primitives.Content,
+            Part=primitives.Part,
+            GenerateContentConfig=primitives.GenerateContentConfig,
+        )
+
+    failing_boundary = Gate5B4C3LiveRunnerBoundary(
+        failing_primitives,
+        adk_tools=(_ManualCalculationTool,),
+        session_service_registry=registry,
+    )
+    first_result = failing_boundary.invoke(
+        _session_reuse_request(),
+        config=_session_reuse_config(),
+    )
+    failed_message = _ProviderSetupFailRunner.run_kwargs["new_message"]
+    assert isinstance(failed_message, _FakeContent)
+
+    assert first_result.status == "error"
+    assert first_result.reason == "runner_error"
+    assert first_result.event_count == 0
+    assert _HISTORY_MARKER in failed_message.parts[0].text
+
+    normal_boundary = _session_reuse_boundary(registry)
+    second_result, _second_service, second_text = _invoke_session_reuse_turn(
+        normal_boundary
+    )
+
+    assert second_result.status == "completed"
+    assert _HISTORY_MARKER in second_text
+    assert "user: What did you find last turn?" in second_text
+    assert _CURRENT_TURN_TEXT in second_text
+
+
+def test_session_reuse_isolation_distinct_bot_digests_never_share_session_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MAGI_HOSTED_SESSION_REUSE", "1")
+    registry = SessionServiceRegistry(max_entries=4, ttl_seconds=60.0)
+    boundary = _session_reuse_boundary(registry)
+
+    _result_a, service_a, _text_a = _invoke_session_reuse_turn(
+        boundary,
+        bot_digest=BOT_DIGEST,
+    )
+    # Same session-key digest, different bot: must be a miss with a fresh
+    # service — bot A session state can never leak into bot B's turn.
+    result_b, service_b, text_b = _invoke_session_reuse_turn(
+        boundary,
+        bot_digest=BOT_DIGEST_ALT,
+    )
+
+    assert result_b.status == "completed"
+    assert service_b is not service_a
+    assert _HISTORY_MARKER in text_b
+
+
+def test_session_reuse_isolation_distinct_session_ids_never_share_session_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MAGI_HOSTED_SESSION_REUSE", "1")
+    registry = SessionServiceRegistry(max_entries=4, ttl_seconds=60.0)
+    boundary = _session_reuse_boundary(registry)
+
+    _result_1, service_1, _text_1 = _invoke_session_reuse_turn(
+        boundary,
+        session_digest=SESSION_DIGEST,
+    )
+    result_2, service_2, text_2 = _invoke_session_reuse_turn(
+        boundary,
+        session_digest=SESSION_DIGEST_ALT,
+    )
+
+    assert result_2.status == "completed"
+    assert service_2 is not service_1
+    assert _HISTORY_MARKER in text_2
+
+
+def test_session_reuse_ttl_expiry_rebuilds_session_and_reseeds_history(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MAGI_HOSTED_SESSION_REUSE", "1")
+    clock = _SessionReuseManualClock()
+    registry = SessionServiceRegistry(max_entries=4, ttl_seconds=60.0, clock=clock)
+    boundary = _session_reuse_boundary(registry)
+
+    _result_1, stale_service, _text_1 = _invoke_session_reuse_turn(boundary)
+    clock.advance(61.0)
+    result_2, fresh_service, text_2 = _invoke_session_reuse_turn(boundary)
+
+    assert result_2.status == "completed"
+    # Expired entry is evicted: a fresh service is built and the history is
+    # seeded again instead of resurrecting the stale session.
+    assert fresh_service is not stale_service
+    assert _HISTORY_MARKER in text_2
+
+
+class _OverlapBlockingRunner(_FakeRunner):
+    """Runner that parks mid-consumption so a second turn can overlap it."""
+
+    created_kwargs: dict[str, object] = {}
+    run_kwargs: dict[str, object] = {}
+    entered: threading.Event = threading.Event()
+    unblock: threading.Event = threading.Event()
+
+    def __init__(self, **kwargs: object) -> None:
+        type(self).created_kwargs = kwargs
+
+    async def run_async(self, **kwargs: object) -> object:
+        type(self).run_kwargs = kwargs
+        type(self).entered.set()
+        await asyncio.to_thread(type(self).unblock.wait, 10.0)
+        yield {"text": "overlapping turn finished"}
+
+
+def _overlap_blocking_primitives() -> Gate5B4C3LiveAdkPrimitives:
+    _OverlapBlockingRunner.created_kwargs = {}
+    _OverlapBlockingRunner.run_kwargs = {}
+    return Gate5B4C3LiveAdkPrimitives(
+        Agent=_FakeAgent,
+        Runner=_OverlapBlockingRunner,
+        InMemorySessionService=_FakeSessionService,
+        Content=_FakeContent,
+        Part=_FakePart,
+        GenerateContentConfig=_FakeGenerateContentConfig,
+    )
+
+
+def test_session_reuse_overlapping_same_key_turns_never_share_a_service(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Security finding 1: per-key single-flight with busy-fallback.
+
+    ``invoke()`` runs ``asyncio.run`` per call and may execute on multiple
+    worker threads. Two concurrent turns for the SAME (bot, session) key must
+    never mutate one InMemorySessionService from two threads/loops: the second
+    turn takes a fresh fallback service (seeding history exactly like a miss)
+    and the busy mark drops only when the first turn fully ends.
+    """
+    monkeypatch.setenv("MAGI_HOSTED_SESSION_REUSE", "1")
+    registry = SessionServiceRegistry(max_entries=4, ttl_seconds=60.0)
+    blocking_boundary = Gate5B4C3LiveRunnerBoundary(
+        _overlap_blocking_primitives,
+        adk_tools=(_ManualCalculationTool,),
+        session_service_registry=registry,  # type: ignore[arg-type]
+    )
+    overlap_boundary = _session_reuse_boundary(registry)
+    _OverlapBlockingRunner.entered = threading.Event()
+    _OverlapBlockingRunner.unblock = threading.Event()
+    first_turn: dict[str, object] = {}
+
+    def _run_first_turn() -> None:
+        first_turn["result"] = blocking_boundary.invoke(
+            _session_reuse_request(),
+            config=_session_reuse_config(),
+        )
+
+    first_thread = threading.Thread(target=_run_first_turn)
+    first_thread.start()
+    try:
+        assert _OverlapBlockingRunner.entered.wait(timeout=10.0)
+        first_service = _OverlapBlockingRunner.created_kwargs["session_service"]
+
+        # While the first turn still holds the key, a same-key turn must use a
+        # FRESH fallback service (never the in-flight one) and seed history
+        # exactly like a registry miss.
+        overlap_result, overlap_service, overlap_text = _invoke_session_reuse_turn(
+            overlap_boundary
+        )
+        assert overlap_result.status == "completed"
+        assert overlap_service is not first_service
+        assert _HISTORY_MARKER in overlap_text
+        # The fallback is never registered: the held entry stays the only one.
+        assert len(registry) == 1
+    finally:
+        _OverlapBlockingRunner.unblock.set()
+        first_thread.join(timeout=10.0)
+    assert not first_thread.is_alive()
+    first_result = first_turn["result"]
+    assert isinstance(first_result, Gate5B4C3LiveRunnerBoundaryResult)
+    assert first_result.status == "completed"
+
+    # The busy mark is released when the first turn ends: the next same-key
+    # turn reuses the first turn's registered service without re-seeding.
+    followup_result, followup_service, followup_text = _invoke_session_reuse_turn(
+        overlap_boundary
+    )
+    assert followup_result.status == "completed"
+    assert followup_service is first_service
+    assert _HISTORY_MARKER not in followup_text
+
+
+def test_session_reuse_flag_on_without_session_key_bypasses_registry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Security finding 2: a None session key must not churn the LRU.
+
+    Without a stable session key the session id falls back to the
+    per-request-unique request digest, so with the flag ON every such request
+    would insert a never-reusable registry entry — evicting the bot's own live
+    sessions. The boundary must bypass the registry entirely: fresh service,
+    not reused, no insert.
+    """
+    monkeypatch.setenv("MAGI_HOSTED_SESSION_REUSE", "1")
+    registry = SessionServiceRegistry(max_entries=4, ttl_seconds=60.0)
+    boundary = _session_reuse_boundary(registry)
+
+    first_result, first_service, first_text = _invoke_session_reuse_turn(
+        boundary,
+        session_digest=None,
+    )
+    second_result, second_service, second_text = _invoke_session_reuse_turn(
+        boundary,
+        session_digest=None,
+    )
+
+    assert first_result.status == "completed"
+    assert second_result.status == "completed"
+    # Fresh service per turn, history re-seeded each turn — exactly like a miss.
+    assert second_service is not first_service
+    for text in (first_text, second_text):
+        assert _HISTORY_MARKER in text
+        assert _CURRENT_TURN_TEXT in text
+    # No never-reusable per-request keys were inserted: zero LRU churn.
+    assert len(registry) == 0
+
+
+def test_session_reuse_flag_on_without_session_key_never_touches_registry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MAGI_HOSTED_SESSION_REUSE", "1")
+    boundary = _session_reuse_boundary(_MustNotTouchRegistry())
+
+    result, service, text = _invoke_session_reuse_turn(boundary, session_digest=None)
+
+    assert result.status == "completed"
+    assert isinstance(service, _FakeSessionService)
+    assert _HISTORY_MARKER in text

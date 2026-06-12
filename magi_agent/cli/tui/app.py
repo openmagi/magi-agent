@@ -802,8 +802,8 @@ class MagiTuiApp(App[None]):
         dock: bottom;
         height: 1;
         padding: 0 1;
-        background: $primary-darken-2;
-        color: $text;
+        background: transparent;
+        color: $text-muted;
     }
     #completions {
         dock: bottom;
@@ -915,7 +915,10 @@ class MagiTuiApp(App[None]):
         flush_interval: float = DEFAULT_FLUSH_INTERVAL,
         clipboard_reader: Callable[[], dict | None] | None = None,
     ) -> None:
-        super().__init__()
+        # ansi_color=True renders with the terminal's own default colors; the
+        # flat-look's ``background: transparent`` CSS alone still paints the
+        # App-level theme background (solid #1a1b26) without it.
+        super().__init__(ansi_color=True)
         self._engine = engine
         self._gate = gate
         self._commands = commands
@@ -933,6 +936,10 @@ class MagiTuiApp(App[None]):
         # compaction is gated runtime authority (Stream B/E).
         self.compact_requests = 0
         self._renderers = renderers
+        # tool_use id -> tool name (tool_end payloads carry no name) and the
+        # per-name synthesized card renderers for unregistered tools.
+        self._tool_names_by_id: dict[str, str] = {}
+        self._dynamic_tool_renderers: dict[str, object] = {}
         self._runtime = runtime
         self._session_id = session_id
         # Per-session ↑/↓ input history (persisted JSONL under the session root).
@@ -1014,6 +1021,10 @@ class MagiTuiApp(App[None]):
         self._live: Static | None = None
         self._input: PromptInput | None = None
         self._completions: OptionList | None = None
+        # Autocomplete overlay state: the currently-shown ranked completions and
+        # the highlighted index. Tab/Enter accept the highlight, ↑/↓ navigate.
+        self._completion_results: list[Completion] = []
+        self._completion_index: int = 0
         self._controller: TranscriptController | None = None
         # Terminal of the most recent turn (asserted by tests).
         self.last_terminal: EngineResult | None = None
@@ -1347,6 +1358,32 @@ class MagiTuiApp(App[None]):
             self.controller.commit_block(f"[command failed: {exc}]")
 
     # -- app-opener seam (CommandContext.app) ------------------------------
+    def status_snapshot(self) -> dict[str, object]:
+        """Live session status for the ``/status`` command.
+
+        ``StatusCommand`` reads this (via ``ctx.app``) to render a real
+        model/cwd/mode/session/turns/tokens summary instead of the
+        slash-control boundary projection (which is the headless fallback).
+        """
+
+        from magi_agent import __version__  # noqa: PLC0415
+
+        tokens = 0
+        if self._footer is not None:
+            try:
+                tokens = int(getattr(self._footer, "tokens", 0) or 0)
+            except (TypeError, ValueError):
+                tokens = 0
+        return {
+            "version": __version__,
+            "model": self._model or "no model",
+            "cwd": self._cwd,
+            "mode": (self._mode or "act").lower(),
+            "session": self._session_id,
+            "turns": self._turn_seq,
+            "tokens": tokens,
+        }
+
     def commit_text(self, text: str) -> None:
         """Commit a local command's ``Text`` result to the transcript."""
 
@@ -1540,6 +1577,8 @@ class MagiTuiApp(App[None]):
         # mid-chord (e.g. submit fired) must not leave the hint stuck visible.
         self._pending = None
         self._hide_whichkey()
+        # Fresh id->name tool map per turn (ids are turn-scoped).
+        self._tool_names_by_id = {}
         self.update_footer(state="running")
         self._echo_user(prompt)
         self._run_turn(prompt, turn_id, cancel)
@@ -1694,8 +1733,17 @@ class MagiTuiApp(App[None]):
 
         payload = event.payload
         name = _tool_name(payload)
-        renderer = self._renderers.get(name)
         inner = _inner_type(payload)
+        # The sanitized public tool_end/tool_progress payloads carry NO name —
+        # resolve it from the matching tool_start id so the result preview goes
+        # through the same renderer (instead of the anonymous fallback).
+        tool_id = payload.get("id")
+        if isinstance(tool_id, str) and tool_id:
+            if inner == "tool_start" and name != "tool":
+                self._tool_names_by_id[tool_id] = name
+            elif name == "tool":
+                name = self._tool_names_by_id.get(tool_id, name)
+        renderer = self._lookup_tool_renderer(name)
         if inner == "tool_start":
             # Fold this tool_start into the sidebar panes (todo / recent files)
             # BEFORE rendering the call, so the side panes track activity even
@@ -1713,6 +1761,21 @@ class MagiTuiApp(App[None]):
             self.controller.commit_block(_status_summary(event))
             return
         self._commit_render_node(node, tool_name=name)
+
+    def _lookup_tool_renderer(self, name: str) -> object:
+        """Resolve a renderer for ``name``, synthesizing a named card renderer
+        for tools without a registered one so unknown tools still render a
+        ``● Name(arg)`` header instead of a bare dot."""
+
+        if name and name != "tool" and not self._renderers.is_registered(name):
+            renderer = self._dynamic_tool_renderers.get(name)
+            if renderer is None:
+                from magi_agent.cli.tui.tool_render import ToolCardRenderer  # noqa: PLC0415
+
+                renderer = ToolCardRenderer(name)
+                self._dynamic_tool_renderers[name] = renderer
+            return renderer
+        return self._renderers.get(name)
 
     def _commit_render_node(self, node: object, *, tool_name: str = "") -> None:
         """Commit a ``RenderNode`` as a compact one-line block.
@@ -2108,10 +2171,17 @@ class MagiTuiApp(App[None]):
         if not results:
             self._hide_completions()
             return
+        self._completion_results = results
+        self._completion_index = 0
         self._completions.add_options(
             [Option(self._format_option(c), id=str(i)) for i, c in enumerate(results)]
         )
         self._completions.add_class("visible")
+        # Highlight the top candidate so Tab/Enter has a default to accept.
+        try:
+            self._completions.highlighted = 0
+        except Exception:  # pragma: no cover - defensive (textual version skew)
+            pass
 
     @staticmethod
     def _format_option(completion: Completion) -> str:
@@ -2121,7 +2191,65 @@ class MagiTuiApp(App[None]):
         return completion.label
 
     def _hide_completions(self) -> None:
+        self._completion_results = []
+        self._completion_index = 0
         if self._completions is None:
             return
         self._completions.remove_class("visible")
         self._completions.clear_options()
+
+    # -- completion acceptance (driven by PromptInput key handling) ----------
+    def completions_active(self) -> bool:
+        """True when the autocomplete overlay is visible with candidates.
+
+        ``PromptInput._on_key`` consults this so Tab/Enter/↑/↓/Esc drive the
+        overlay (accept/navigate/dismiss) instead of their normal editor roles
+        while completions are showing.
+        """
+
+        return bool(self._completion_results) and self._completions is not None and (
+            self._completions.has_class("visible")
+        )
+
+    def completion_navigate(self, delta: int) -> None:
+        """Move the highlighted completion by ``delta`` (wraps)."""
+
+        if not self._completion_results:
+            return
+        count = len(self._completion_results)
+        self._completion_index = (self._completion_index + delta) % count
+        if self._completions is not None:
+            try:
+                self._completions.highlighted = self._completion_index
+            except Exception:  # pragma: no cover - defensive
+                pass
+
+    def accept_completion(self) -> bool:
+        """Substitute the highlighted completion into the prompt and dismiss."""
+
+        if not self._completion_results:
+            return False
+        index = self._completion_index
+        if not 0 <= index < len(self._completion_results):
+            index = 0
+        value = self._completion_results[index].value
+        if self._input is not None:
+            self._input.apply_completion(value)
+        self._hide_completions()
+        return True
+
+    def cancel_completions(self) -> None:
+        """Dismiss the overlay without substituting (Esc)."""
+
+        self._hide_completions()
+
+    def on_option_list_option_selected(self, event: object) -> None:
+        """Accept a completion clicked with the mouse (Enter goes via the input)."""
+
+        option_list = getattr(event, "option_list", None)
+        if option_list is not self._completions or not self._completion_results:
+            return
+        index = getattr(event, "option_index", None)
+        if isinstance(index, int):
+            self._completion_index = index
+        self.accept_completion()

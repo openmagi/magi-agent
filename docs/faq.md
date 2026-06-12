@@ -47,17 +47,17 @@ This means the Python runtime structurally cannot perform write operations, deli
 
 ## How do I test a recipe locally?
 
-Use fixture evidence and local_fake_evaluation_enabled. Set EvidenceEnforcementConfig.enabled to True and EvidenceEnforcementConfig.local_fake_evaluation_enabled to True. This enables the EvidenceEnforcementBoundary to evaluate evidence contracts against local fixture evidence records without requiring live tool execution.
+Use fixture evidence with the evidence contract engine directly. Build EvidenceRecords for the contract's requirements and call evaluate_evidence_contract (evidence/contracts.py) to produce an EvidenceContractVerdict without requiring live tool execution. This lets you exercise a recipe's evidence contract against local fixture evidence records.
 
-The boundary produces EvidenceEnforcementDecision with status values like "pass", "audit_missing", "repair_required", or "block_ready_local_fake". The "block_ready_local_fake" status indicates that evidence blocking would fire in production, but since evidence_block_enabled is Literal[False], the decision is recorded as a block intent without actually blocking.
+The verdict reports states like "satisfied", "audit", or "block_ready". A "block_ready" verdict means evidence blocking would fire in production. On the live path the engine pre-final gate consumes that verdict (coding-domain turns block by default); the research final-projection gate records the same verdict for diagnostics only ("block_ready_local_fake") because its final_answer_blocking_enabled flag is Literal[False].
 
 - [Evidence contracts](/docs/evidence-contracts)
 
 ## Why is there no RepairDecision type?
 
-Repair is implicit in enforcement decisions. When an evidence contract evaluation fails and repair_allowed is True in the EvidenceEnforcementRequest, the EvidenceEnforcementBoundary returns an EvidenceEnforcementDecision with status "repair_required" and action "repair". RepairDecision and RepairPlan exist in harness/repair_policy.py for single-contract repair steps (max 5 attempts per plan). Cross-boundary repair orchestration across multiple contracts is not yet integrated.
+Repair is implicit in the enforcement path. When a coding-domain evidence contract is unsatisfied at the engine pre-final gate and MAGI_CODING_REPAIR_LOOP_ENABLED is set, the gate drives a repair loop rather than exposing a standalone RepairDecision return type. RepairDecision and RepairPlan exist in harness/repair_policy.py for single-contract repair steps (max 5 attempts per plan). Cross-boundary repair orchestration across multiple contracts is not yet integrated.
 
-The repair flow is: evidence missing or failed -> boundary checks repair_allowed -> if True, returns repair action -> caller retries the operation -> boundary re-evaluates with new evidence.
+The repair flow is: evidence missing or failed -> engine pre-final gate reaches block_ready -> repair loop retries the operation -> gate re-evaluates with new evidence.
 
 - [Repair and fallback](/docs/repair-fallback)
 
@@ -89,7 +89,7 @@ Custom evidence types work with the same EvidenceRequirement and EvidenceFieldMa
 
 The behavior depends on the on_missing field of the EvidenceContract. When set to "audit", missing evidence is logged to the audit ledger but does not block the run. When set to "block_final_answer", missing evidence prevents the final answer from being projected to the user.
 
-However, because final_answer_blocking_enabled is Literal[False] in EvidenceEnforcementConfig, the block_final_answer enforcement is currently recorded as a "block_ready_local_fake" intent without actually blocking output. This structural safety ensures that evidence contracts can be developed and tested without risk of silently blocking production output.
+On the live path, coding-domain turns enforce this for real: the engine pre-final gate blocks the final answer (Terminal.error, error="pre_final_evidence_gate_blocked") when a block_final_answer contract is unsatisfied, and it is on by default for the coding domain. The research final-projection gate, by contrast, has final_answer_blocking_enabled set to Literal[False], so for research-domain turns block_final_answer is recorded as a "block_ready_local_fake" intent without actually blocking output.
 
 - [Evidence contracts](/docs/evidence-contracts)
 - [Boundaries](/docs/boundaries)

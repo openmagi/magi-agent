@@ -309,8 +309,18 @@ def test_tool_advertised_when_gate_on() -> None:
     assert any(m.name == "InspectSelfEvidence" for m in plan_available)
 
 
-def test_binder_reads_env_flag_default_off(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_binder_reads_env_flag_default_on(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("MAGI_SELF_INTROSPECTION_ENABLED", raising=False)
+    registry = ToolRegistry()
+    register_core_tool_manifests(registry)
+
+    bind_inspect_self_evidence_handler(registry)
+
+    assert registry.is_enabled("InspectSelfEvidence") is True
+
+
+def test_binder_reads_env_flag_explicit_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("MAGI_SELF_INTROSPECTION_ENABLED", "0")
     registry = ToolRegistry()
     register_core_tool_manifests(registry)
 

@@ -31,6 +31,7 @@ from .spreadsheet_tools import (
     _workspace_root,
     _markdown_table,
 )
+from .truncation import cap_text
 
 _MAX_DOCUMENT_BYTES = 20 * 1024 * 1024  # 20 MiB
 _DEFAULT_MAX_CHARS = 40_000
@@ -375,9 +376,7 @@ def _finish_document_result(
     content_digest: str,
 ) -> ToolResult:
     sanitized, redacted = _sanitize_text(raw_text)
-    truncated = len(sanitized) > max_chars
-    if truncated:
-        sanitized = sanitized[:max_chars]
+    sanitized, truncated = cap_text(sanitized, max_chars)
 
     output: dict[str, object] = {
         "text": sanitized,
@@ -448,4 +447,125 @@ def _digest_path(path: Path) -> str:
     return f"sha256:{digest}"
 
 
-__all__ = ["document_read", "extract_docx_text"]
+# ---------------------------------------------------------------------------
+# document_search — in-document term search (PDF only, page-addressed)
+# ---------------------------------------------------------------------------
+
+_DOCUMENT_SEARCH_SUPPORTED_EXTENSIONS = frozenset({".pdf"})
+_SEARCH_SNIPPET_CONTEXT = 120  # chars on each side of the match
+_MAX_SEARCH_MATCHES = 200
+
+
+def document_search(
+    arguments: Mapping[str, object], context: ToolContext
+) -> ToolResult:
+    """Search a PDF document for a query term, returning page number + snippet
+    for each match.
+
+    Only PDF files are supported (text-layer search via pypdf).  Returns
+    ``status="blocked"`` with ``errorCode="document_search_not_supported_for_format"``
+    for other document types.
+
+    Output fields:
+    - ``matches``: list of ``{page: int, snippet: str}`` (1-based page numbers)
+    - ``matchCount``: total number of matches found
+    - ``totalPages``: total pages in the document
+    """
+    tool_name = "document_search"
+
+    path_text = _str_arg(arguments, "path")
+    if path_text is None:
+        return _blocked_result(tool_name, "path_required")
+
+    query_text = _str_arg(arguments, "query")
+    if query_text is None:
+        return _blocked_result(tool_name, "query_required")
+
+    try:
+        root = _workspace_root(context)
+        resolved = _resolve_workspace_path(root, path_text, must_exist=True)
+    except _SpreadsheetPolicyError as error:
+        return _blocked_result(tool_name, error.reason_code)
+    except OSError:
+        return _error_result(tool_name, "document_search_failed")
+
+    suffix = Path(resolved.relative).suffix.casefold()
+    if suffix not in _DOCUMENT_SEARCH_SUPPORTED_EXTENSIONS:
+        return _blocked_result(
+            tool_name,
+            "document_search_not_supported_for_format",
+            f"document_search supports: {', '.join(sorted(_DOCUMENT_SEARCH_SUPPORTED_EXTENSIONS))}",
+        )
+
+    try:
+        byte_size = resolved.path.stat().st_size
+    except OSError:
+        return _error_result(tool_name, "document_search_failed")
+
+    if byte_size > _MAX_DOCUMENT_BYTES:
+        return _error_result(tool_name, "document_input_too_large")
+
+    try:
+        from pypdf import PdfReader  # noqa: PLC0415
+    except ImportError:
+        return _blocked_result(tool_name, "document_dependency_not_installed")
+
+    try:
+        reader = PdfReader(str(resolved.path))
+        total_pages = len(reader.pages)
+        query_lower = query_text.casefold()
+        matches: list[dict[str, object]] = []
+
+        for page_idx in range(total_pages):
+            page_text = reader.pages[page_idx].extract_text() or ""
+            page_lower = page_text.casefold()
+            pos = 0
+            while True:
+                found = page_lower.find(query_lower, pos)
+                if found == -1:
+                    break
+                start = max(0, found - _SEARCH_SNIPPET_CONTEXT)
+                end = min(len(page_text), found + len(query_text) + _SEARCH_SNIPPET_CONTEXT)
+                snippet = page_text[start:end].replace("\n", " ").strip()
+                matches.append({
+                    "page": page_idx + 1,  # 1-based
+                    "snippet": snippet,
+                })
+                pos = found + len(query_lower)
+                if len(matches) >= _MAX_SEARCH_MATCHES:
+                    break
+            if len(matches) >= _MAX_SEARCH_MATCHES:
+                break
+
+    except Exception:  # noqa: BLE001
+        return _error_result(tool_name, "pdf_read_error")
+
+    output: dict[str, object] = {
+        "matches": matches,
+        "matchCount": len(matches),
+        "totalPages": total_pages,
+        "query": query_text,
+    }
+    content_digest = _digest_path(resolved.path)
+    return ToolResult(
+        status="ok",
+        output=output,
+        llmOutput=output,
+        transcriptOutput={
+            "toolName": tool_name,
+            "matchCount": len(matches),
+            "totalPages": total_pages,
+            "contentDigest": content_digest,
+        },
+        metadata={
+            **_base_metadata(tool_name, permission_class="read", mutates_workspace=False),
+            "contentDigest": content_digest,
+            "byteCount": byte_size,
+            "matchCount": len(matches),
+            "totalPages": total_pages,
+            "pathRef": resolved.path_ref,
+        },
+    )
+
+
+__all__ = ["document_read", "document_search", "extract_docx_text"]

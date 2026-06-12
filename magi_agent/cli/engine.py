@@ -1,13 +1,12 @@
 """Real ADK-backed engine driver for the Magi headless CLI (PR-A2).
 
 ``MagiEngineDriver`` implements the :class:`EngineDriver` Protocol from
-``cli.contracts``. It drives a single turn through the ADK runner using the same
-adapter + bridge wiring as
-``runtime.runner_session_boundary._collect_runner_events`` (the reference
-implementation), but YIELDS each projected public event incrementally as a
-``RuntimeEvent`` instead of accumulating-then-returning. The terminal
-``EngineResult`` is delivered as the FINAL yielded item, per the consumption
-convention documented in ``cli.contracts``.
+``cli.contracts``. It is the production runner-driving path: it drives a
+single turn through the ADK runner via the adapter + bridge wiring and YIELDS
+each projected public event incrementally as a ``RuntimeEvent`` instead of
+accumulating-then-returning. The terminal ``EngineResult`` is delivered as the
+FINAL yielded item, per the consumption convention documented in
+``cli.contracts``.
 
 Import-cleanliness
 ------------------
@@ -88,6 +87,9 @@ if TYPE_CHECKING:  # pragma: no cover - typing only, never imported at runtime
         RecoverableError,
         RecoveryAttemptState,
         RecoveryEngine,
+    )
+    from magi_agent.runtime.empty_response_recovery import (
+        EmptyResponseRecoveryConfig,
     )
     from magi_agent.runtime.goal_nudge import GoalNudge
     from magi_agent.runtime.output_continuation import OutputContinuationConfig
@@ -396,8 +398,36 @@ def build_output_continuation_config(
     )
 
 
-# A sane default cap so a runaway stream can't yield forever. Mirrors the spirit
-# of RunnerSessionBoundaryConfig.max_event_count but headless can tolerate more.
+def build_empty_response_recovery_config(
+    env: object = None,
+) -> "EmptyResponseRecoveryConfig | None":
+    """Build the empty-response recovery config from env, or ``None`` when OFF.
+
+    Reuses ``MAGI_EMPTY_RESPONSE_RECOVERY_ENABLED`` /
+    ``MAGI_EMPTY_RESPONSE_MAX_RECOVERIES`` (single source of truth in
+    ``config.env``; strict truthy opt-in, default OFF). ``None`` leaves
+    streaming byte-for-byte identical to the pre-recovery path.
+    """
+
+    import os
+
+    from magi_agent.config.env import parse_empty_response_recovery_env
+    from magi_agent.runtime.empty_response_recovery import (
+        EmptyResponseRecoveryConfig,
+    )
+
+    mapping = env if isinstance(env, dict) else os.environ
+    parsed = parse_empty_response_recovery_env(mapping)
+    if not parsed.enabled:
+        return None
+    return EmptyResponseRecoveryConfig(
+        enabled=True,
+        max_recoveries=parsed.max_recoveries,
+    )
+
+
+# A sane default cap so a runaway stream can't yield forever; headless can
+# tolerate a generous bound on ADK events consumed per turn.
 _DEFAULT_MAX_EVENT_COUNT = 4096
 
 
@@ -436,6 +466,33 @@ _ARTIFACT_EVENT_TYPES = frozenset(
     {"source_inspected", "document_draft", "research_artifact_delta", "patch_preview"}
 )
 _ERROR_EVENT_TYPES = frozenset({"error"})
+
+# ---------------------------------------------------------------------------
+# P3 — zero-edit guard (eval mode): track file-mutating tool calls per turn
+# and re-prompt once if a coding turn ends with no file edits.
+# ---------------------------------------------------------------------------
+# Tool names that perform file mutations (writes / edits / patches). When a
+# turn ends and none of these were observed, the guard fires a single "apply
+# it" re-invocation so the agent doesn't get away with just describing a fix.
+_EDIT_CLASS_TOOLS = frozenset({"FileEdit", "FileWrite", "Edit", "Write", "ApplyPatch"})
+
+
+def should_reprompt_for_zero_edits(
+    *, file_edits: int, already_reprompted: bool, enabled: bool
+) -> bool:
+    """Return True iff the zero-edit guard should fire a re-invocation.
+
+    Pure helper — no side effects, fully unit-testable without driving the
+    engine. The engine calls this after the main run loop concludes and before
+    yielding the terminal EngineResult.
+
+    Args:
+        file_edits: number of file-mutating tool calls observed this turn.
+        already_reprompted: True if we already fired the guard once this turn
+            (prevents infinite re-invocation).
+        enabled: value of ``parse_eval_zero_edit_guard_enabled(os.environ)``.
+    """
+    return bool(enabled and not already_reprompted and file_edits == 0)
 
 
 def _is_turn_end_event(event: Mapping[str, object]) -> bool:
@@ -671,6 +728,17 @@ def _coding_repair_loop_enabled() -> bool:
     return coding_repair_loop_enabled()
 
 
+def _document_coverage_blocks(mode: str, failed_count: int) -> bool:
+    """Whether failed document coverage should flip the pre-final decision.
+
+    14-PR3 (C11): the gate is 3-state (``off`` | ``advisory`` | ``block``). Only
+    ``block`` mode lets a failed-coverage count contribute to a ``"block"``
+    decision; ``advisory`` records the count for telemetry but never blocks, and
+    ``off`` is inert.
+    """
+    return mode == "block" and failed_count > 0
+
+
 def _coding_repair_max_attempts(repair_policy: Mapping[str, object]) -> int:
     from magi_agent.coding.repair_loop import repair_max_attempts
 
@@ -802,6 +870,57 @@ def _active_turn_registry():
     return ActiveTurnRegistry()
 
 
+# Role label used when rendering a resumed transcript line whose role is missing
+# or unrecognized. ``user``/``assistant`` are passed through verbatim.
+_RESUME_ROLE_LABELS = {"user": "User", "assistant": "Assistant"}
+
+
+def _render_resume_prefix(initial_messages: object) -> str:
+    """Render reconstructed prior messages as a transcript prefix for the prompt.
+
+    ``initial_messages`` is the ``ResumeContext.initial_messages`` payload — a
+    ``list[{"role","content"}]`` produced by
+    :func:`session_log.reconstruct_messages`. We synthesize a compact, labeled
+    transcript that is PREPENDED to the current user prompt so a resumed turn
+    replays the prior conversation to the model. This is the lightweight
+    JSONL-transcript rehydration path (no runner/ADK dependency).
+
+    Pure + defensive:
+    - Non-list / empty input -> ``""`` (byte-identical no-op for fresh turns).
+    - Each entry must be a mapping with a string ``content``; malformed entries
+      are skipped rather than raising (resume is best-effort).
+    - Returns ``""`` when nothing usable remains, so the caller leaves the prompt
+      untouched.
+    """
+
+    if not isinstance(initial_messages, list) or not initial_messages:
+        return ""
+
+    lines: list[str] = []
+    for entry in initial_messages:
+        if not isinstance(entry, dict):
+            continue
+        content = entry.get("content")
+        if not isinstance(content, str) or not content:
+            continue
+        role = entry.get("role")
+        label = _RESUME_ROLE_LABELS.get(
+            role if isinstance(role, str) else "",
+            str(role) if role else "Message",
+        )
+        lines.append(f"{label}: {content}")
+
+    if not lines:
+        return ""
+
+    transcript = "\n".join(lines)
+    return (
+        "[Resumed conversation — prior turns for context]\n"
+        f"{transcript}\n"
+        "[End of prior conversation]\n\n"
+    )
+
+
 class MagiEngineDriver:
     """ADK-backed :class:`EngineDriver` for the headless CLI.
 
@@ -830,7 +949,9 @@ class MagiEngineDriver:
         event_sink: object | None = None,
         goal_nudge: "GoalNudge | None" = None,
         output_continuation: "OutputContinuationConfig | None" = None,
+        empty_response_recovery: "EmptyResponseRecoveryConfig | None" = None,
         evidence_collector: Callable[[str], Sequence[object]] | None = None,
+        user_hook_bus: object | None = None,
     ) -> None:
         self._runner = runner
         self._max_event_count = max(1, int(max_event_count))
@@ -854,6 +975,14 @@ class MagiEngineDriver:
         self._output_continuation: "OutputContinuationConfig | None" = (
             output_continuation
         )
+        # R2 empty-response recovery (hermes mechanism 3): bounded corrective
+        # re-invocation on a tools-ran-but-silent stop + one grace re-invocation
+        # after event-budget exhaustion. ``None`` (default, flag
+        # MAGI_EMPTY_RESPONSE_RECOVERY_ENABLED OFF) -> no recovery logic;
+        # ``_drive`` control flow is byte-identical to pre-R2.
+        self._empty_response_recovery: "EmptyResponseRecoveryConfig | None" = (
+            empty_response_recovery
+        )
         # Optional evidence-collector DI seam (PR4 follow-up). When set,
         # _collect_evidence delegates to this callable instead of returning ().
         # The engine driver does NOT own a ledger; the harness layer above wires
@@ -866,6 +995,14 @@ class MagiEngineDriver:
         # Shared across all turns of this driver instance: single-flight per
         # session id. Lazily built so construction stays cheap + import-clean.
         self._registry: object | None = None
+        # Cluster doc 11 PR2: CC-style user ``settings.json`` HookBus. ``None``
+        # (default, gate ``MAGI_USER_HOOKS_ENABLED`` OFF) -> no bridge attached
+        # and every turn is byte-identical to today. When set, ``_drive``
+        # bridges its BEFORE_TOOL_USE / AFTER_TOOL_USE hooks onto the runner's
+        # ADK before/after-tool callbacks (command executor only). Built once by
+        # the production wiring via ``cli.hook_wiring.build_user_hook_bus`` and
+        # injected here; local CLI / self-host only (never hosted multi-tenant).
+        self._user_hook_bus: object | None = user_hook_bus
 
     @property
     def runner(self) -> object | None:
@@ -1039,6 +1176,7 @@ class MagiEngineDriver:
             gate=gate,
             goal_nudge=self._goal_nudge,
             output_continuation=self._output_continuation,
+            empty_response_recovery=self._empty_response_recovery,
         )
         try:
             async for item in driver_gen:
@@ -1066,11 +1204,24 @@ class MagiEngineDriver:
         gate: "PermissionGate | None" = None,
         goal_nudge: "GoalNudge | None" = None,
         output_continuation: "OutputContinuationConfig | None" = None,
+        empty_response_recovery: "EmptyResponseRecoveryConfig | None" = None,
     ) -> AsyncGenerator[RuntimeEvent, EngineResult]:
-        # PR3/Stream B: feed initial_messages via SessionContinuityBoundary.
-        # Read here (so the seam is plumbed end-to-end) but NOT yet fed into the
-        # runner — full rehydration lands with Stream B.
-        _ = initial_messages
+        # PR-04-PR2 (resume rehydration): consume ``initial_messages`` by
+        # synthesizing the prior transcript into a prefix on the opening user
+        # prompt, so a ``--resume``/``--continue`` turn replays the prior
+        # conversation to the model. ``ResumeContext.initial_messages`` is the
+        # source (already reconstructed by session_log.reconstruct_messages).
+        #
+        # This is the lightweight JSONL-transcript path. The richer ADK-native
+        # rehydration (importing a committed transcript into a live
+        # SessionContinuityBoundary) is carried on ``ResumeContext`` but wired by
+        # the SQLite-persistence PR; here we keep the no-runner-dependency path.
+        #
+        # No-op / byte-identical invariant: an empty (or non-list) value leaves
+        # ``prompt`` untouched, so a fresh session is unchanged from pre-PR2.
+        resume_prefix = _render_resume_prefix(initial_messages)
+        if resume_prefix:
+            prompt = f"{resume_prefix}{prompt}"
 
         runner = self._resolve_runner(runtime)
         if runner is None:
@@ -1188,6 +1339,15 @@ class MagiEngineDriver:
             stop_reason_is_truncated,
         )
 
+        # Empty-response recovery helpers (R2, pure, dependency-light). Same
+        # deferred-import pattern as output_continuation above.
+        from magi_agent.runtime.empty_response_recovery import (  # noqa: PLC0415
+            build_empty_response_message,
+            build_grace_message,
+            should_grace,
+            should_recover_empty,
+        )
+
         types = deps["types"]
         adapter = deps["OpenMagiRunnerAdapter"](runner=runner)  # type: ignore[operator]
         bridge = deps["OpenMagiEventBridge"](live_compatible=True)  # type: ignore[operator]
@@ -1230,6 +1390,14 @@ class MagiEngineDriver:
         gate_attach = self._attach_gate_callback(
             runner=runner, gate=gate, turn_id=turn_id, cancel=cancel
         )
+        # Cluster doc 11 PR2: bridge user settings.json hooks onto the agent's
+        # before/after-tool callbacks AFTER the gate (so a gate deny still
+        # short-circuits first; conflict-matrix order:
+        # gate -> user hook -> control-plane -> runner_policy_route). No-op when
+        # ``_user_hook_bus`` is None (gate OFF) -> byte-identical to today.
+        hook_attach = self._attach_user_hook_bus(
+            runner=runner, session_id=session_id, turn_id=turn_id
+        )
         route_attach = self._attach_runner_policy_route(
             runner=runner,
             route_selection=route_selection,
@@ -1256,6 +1424,17 @@ class MagiEngineDriver:
         # Output-continuation budget: how many times we've resumed a response
         # truncated at the model's per-response output-token cap this turn.
         continuations_used = 0
+        # R2 empty-response recovery budgets. When empty_response_recovery is
+        # None/disabled the decision helpers always return False and
+        # grace_event_extra stays 0, so the budget comparison and control flow
+        # below are byte-identical to pre-R2.
+        recoveries_used = 0
+        graces_used = 0
+        grace_event_extra = 0
+        # P3 zero-edit guard: count file-mutating tool calls this turn.
+        # zero_edit_retry_done ensures we fire the guard at most once per turn.
+        file_edit_calls = 0
+        zero_edit_retry_done = False
 
         try:
             while True:
@@ -1271,6 +1450,13 @@ class MagiEngineDriver:
                 # Set when this attempt's final response stopped at the output
                 # token cap (finish_reason length/max_tokens) — resumable.
                 attempt_truncated = False
+                # R2 per-attempt bookkeeping: did a tool run / was any
+                # user-visible output emitted / did this attempt hit the event
+                # budget. Only written when empty_response_recovery is set, so
+                # the OFF path is untouched.
+                attempt_tool_ran = False
+                attempt_text_seen = False
+                budget_exhausted = False
                 try:
                     while True:
                         if cancel.is_set():
@@ -1317,11 +1503,27 @@ class MagiEngineDriver:
                                 continue
                             self._collect_public_refs(safe, observed_public_refs)
                             self._track_pending_tool(safe, pending_tool_ids)
+                            # P3 zero-edit guard: count file-mutating tool calls.
+                            if safe.get("type") == "tool_start" and safe.get("name") in _EDIT_CLASS_TOOLS:
+                                file_edit_calls += 1
                             # PR4 goal-nudge: reset the goal-mode latch whenever a
                             # tool fires so the next clean stop is eligible for a
                             # nudge again (re-arm).
                             if goal_nudge is not None and safe.get("type") == "tool_start":
                                 goal_check_pending = False
+                            # R2: classify this attempt's activity for the
+                            # empty-response decision. Tool events are tracked
+                            # separately; "text seen" reuses the continuation
+                            # output classifier minus the tool family.
+                            if empty_response_recovery is not None:
+                                if safe.get("type") == "tool_start":
+                                    attempt_tool_ran = True
+                                elif safe.get(
+                                    "type"
+                                ) not in _TOOL_EVENT_TYPES and _is_continuation_output_event(
+                                    safe
+                                ):
+                                    attempt_text_seen = True
                             attempt_yielded += 1
                             yielded_events += 1
                             self._observe_event(safe, session_id, turn_id)
@@ -1331,7 +1533,13 @@ class MagiEngineDriver:
                                 turn_id=turn_id,
                             )
 
-                        if event_count >= self._max_event_count:
+                        # R2: grace_event_extra is 0 unless the single grace
+                        # re-invocation fired, so the OFF-path comparison is
+                        # unchanged. event_count is cumulative across attempts;
+                        # the allowance is ADDED to the cap (a reset would
+                        # re-break the grace attempt after one event).
+                        if event_count >= self._max_event_count + grace_event_extra:
+                            budget_exhausted = True
                             break
                 except Exception as exc:  # noqa: BLE001 - surface as terminal error
                     attempt_error = exc
@@ -1377,6 +1585,83 @@ class MagiEngineDriver:
                             turn_id=turn_id,
                         )
                         continue  # re-invoke run_async to resume truncated output
+                    # R2 empty-response recovery (hermes mechanism 3). Grace
+                    # first: budget exhaustion means the attempt was cut off
+                    # mid-task, so "produce your final answer now" outranks the
+                    # narrower tools-ran-but-silent recovery. Both run BEFORE
+                    # goal-nudge deliberately — an empty stop must get its
+                    # specific corrective message, not the generic nudge (which
+                    # would otherwise consume the stop). Config None/disabled →
+                    # both helpers return False → byte-identical control flow.
+                    if should_grace(
+                        empty_response_recovery,
+                        budget_exhausted=budget_exhausted,
+                        text_seen=attempt_text_seen,
+                        graces_used=graces_used,
+                    ):
+                        graces_used += 1
+                        grace_event_extra = (
+                            empty_response_recovery.grace_event_allowance  # type: ignore[union-attr]
+                        )
+                        runner_input = runner_turn_input_cls(
+                            userId=self._user_id,
+                            sessionId=session_id,
+                            turnId=turn_id,
+                            invocationId=turn_id,
+                            newMessage=types.Content(  # type: ignore[attr-defined]
+                                role="user",
+                                parts=[
+                                    types.Part(text=build_grace_message())  # type: ignore[attr-defined]
+                                ],
+                            ),
+                            harnessState=effective_harness_state,
+                        )
+                        yield RuntimeEvent(
+                            type="status",
+                            payload={
+                                "type": "empty_response_grace",
+                                "grace": graces_used,
+                                "max": 1,
+                            },
+                            turn_id=turn_id,
+                        )
+                        continue  # re-invoke run_async (genuine new model call)
+                    # Recovery targets the model returning empty after a CLEAN
+                    # stop. A budget-exhausted attempt was cut by US — only the
+                    # single grace above may answer it; re-invoking against an
+                    # already-exceeded cap would just re-break immediately.
+                    if not budget_exhausted and should_recover_empty(
+                        empty_response_recovery,
+                        tool_ran=attempt_tool_ran,
+                        text_seen=attempt_text_seen,
+                        recoveries_used=recoveries_used,
+                    ):
+                        recoveries_used += 1
+                        runner_input = runner_turn_input_cls(
+                            userId=self._user_id,
+                            sessionId=session_id,
+                            turnId=turn_id,
+                            invocationId=turn_id,
+                            newMessage=types.Content(  # type: ignore[attr-defined]
+                                role="user",
+                                parts=[
+                                    types.Part(  # type: ignore[attr-defined]
+                                        text=build_empty_response_message()
+                                    )
+                                ],
+                            ),
+                            harnessState=effective_harness_state,
+                        )
+                        yield RuntimeEvent(
+                            type="status",
+                            payload={
+                                "type": "empty_response_recovery",
+                                "recovery": recoveries_used,
+                                "max": empty_response_recovery.max_recoveries,  # type: ignore[union-attr]
+                            },
+                            turn_id=turn_id,
+                        )
+                        continue  # re-invoke run_async (genuine new model call)
                     # PR4 goal-nudge: at the clean-break path, check whether a
                     # nudge re-invocation is warranted before breaking.
                     if goal_nudge is not None and nudges_used < goal_nudge.max_nudges:
@@ -1443,6 +1728,7 @@ class MagiEngineDriver:
                 break
         finally:
             self._restore_runner_policy_route(route_attach)
+            self._restore_user_hook_bus(hook_attach)
             self._restore_gate_callback(gate_attach)
 
         if cancelled:
@@ -1489,6 +1775,87 @@ class MagiEngineDriver:
             )
             return
 
+        # P3 zero-edit guard: if the coding turn ended without any file-mutating
+        # tool calls (agent described the fix but didn't apply it), re-invoke
+        # ONCE with an explicit "apply it" message reusing the same re-invocation
+        # seam as goal-nudge / output-continuation.  Gated by the eval flag so
+        # non-eval sessions are byte-identical to pre-P3.
+        import os as _os  # noqa: PLC0415
+        from magi_agent.config.env import parse_eval_zero_edit_guard_enabled  # noqa: PLC0415
+
+        if should_reprompt_for_zero_edits(
+            file_edits=file_edit_calls,
+            already_reprompted=zero_edit_retry_done,
+            enabled=parse_eval_zero_edit_guard_enabled(_os.environ),
+        ):
+            zero_edit_retry_done = True
+            _zero_edit_msg = "Apply the code change you described above by editing the file(s) now."
+            zero_edit_runner_input = runner_turn_input_cls(
+                userId=self._user_id,
+                sessionId=session_id,
+                turnId=turn_id,
+                invocationId=turn_id,
+                newMessage=types.Content(  # type: ignore[attr-defined]
+                    role="user",
+                    parts=[types.Part(text=_zero_edit_msg)],  # type: ignore[attr-defined]
+                ),
+                harnessState=effective_harness_state,
+            )
+            yield RuntimeEvent(
+                type="status",
+                payload={"type": "zero_edit_guard_retry", "turnId": turn_id},
+                turn_id=turn_id,
+            )
+            zero_edit_gate_attach = self._attach_gate_callback(
+                runner=runner, gate=gate, turn_id=turn_id, cancel=cancel
+            )
+            zero_edit_route_attach = self._attach_runner_policy_route(
+                runner=runner,
+                route_selection=route_selection,
+            )
+            zero_edit_iter: AsyncIterator[object] = adapter.run_turn(zero_edit_runner_input).__aiter__()  # type: ignore[union-attr]
+            try:
+                while True:
+                    if cancel.is_set():
+                        cancelled = True
+                        break
+                    _zstep = await self._next_adk_event(zero_edit_iter, cancel)
+                    if _zstep is _CANCELLED:
+                        cancelled = True
+                        break
+                    if _zstep is _EXHAUSTED:
+                        break
+                    _zadk_event = _zstep
+                    _zprojection = bridge.project_adk_event(_zadk_event, turn_id=turn_id)  # type: ignore[union-attr]
+                    for _zraw in _zprojection.agent_events:  # type: ignore[union-attr]
+                        _zsafe = sanitize(dict(_zraw))  # type: ignore[operator]
+                        if _zsafe is None:
+                            continue
+                        self._collect_public_refs(_zsafe, observed_public_refs)
+                        self._track_pending_tool(_zsafe, pending_tool_ids)
+                        yielded_events += 1
+                        self._observe_event(_zsafe, session_id, turn_id)
+                        yield RuntimeEvent(
+                            type=_map_event_kind(_zsafe.get("type")),
+                            payload=_zsafe,
+                            turn_id=turn_id,
+                        )
+            except Exception:  # noqa: BLE001 - fail-open: guard errors don't block the turn
+                pass
+            finally:
+                await self._aclose_iter(zero_edit_iter)
+                self._restore_runner_policy_route(zero_edit_route_attach)
+                self._restore_gate_callback(zero_edit_gate_attach)
+
+            # If cancelled during the guard retry, fall through to the cancel
+            # block below (cancelled flag is already set).
+
+        # Model text produced DURING a bounded repair attempt is held here and
+        # only delivered if that attempt actually un-blocks the gate. A failed
+        # attempt's text is internal repair dialogue (often the model refusing
+        # the synthetic repair continuation) — leaking it concatenated the whole
+        # exchange into the user-visible reply.
+        repair_token_buffer: list[RuntimeEvent] = []
         while True:
             pre_final_gate = self._pre_final_gate_payload(
                 session_id=session_id,
@@ -1502,7 +1869,22 @@ class MagiEngineDriver:
                 break
             yield RuntimeEvent(type="status", payload=pre_final_gate, turn_id=turn_id)
             if pre_final_gate["decision"] != "block":
+                for buffered in repair_token_buffer:
+                    yield buffered
+                repair_token_buffer = []
                 break
+            if repair_token_buffer:
+                yield RuntimeEvent(
+                    type="status",
+                    payload={
+                        "type": "coding_repair_output_suppressed",
+                        "turnId": turn_id,
+                        "attempt": repair_attempts,
+                        "suppressedTokenEvents": len(repair_token_buffer),
+                    },
+                    turn_id=turn_id,
+                )
+                repair_token_buffer = []
 
             repair_decision = pre_final_gate.get("repairDecision")
             repair_policy = pre_final_gate.get("repairPolicy")
@@ -1567,6 +1949,9 @@ class MagiEngineDriver:
             repair_gate_attach = self._attach_gate_callback(
                 runner=runner, gate=gate, turn_id=turn_id, cancel=cancel
             )
+            repair_hook_attach = self._attach_user_hook_bus(
+                runner=runner, session_id=session_id, turn_id=turn_id
+            )
             repair_route_attach = self._attach_runner_policy_route(
                 runner=runner,
                 route_selection=route_selection,
@@ -1597,11 +1982,19 @@ class MagiEngineDriver:
                         self._track_pending_tool(safe, pending_tool_ids)
                         yielded_events += 1
                         self._observe_event(safe, session_id, turn_id)
-                        yield RuntimeEvent(
-                            type=_map_event_kind(safe.get("type")),
+                        event_kind = _map_event_kind(safe.get("type"))
+                        runtime_event = RuntimeEvent(
+                            type=event_kind,
                             payload=safe,
                             turn_id=turn_id,
                         )
+                        if event_kind == "token":
+                            # Held until the gate re-evaluates: delivered on
+                            # pass, suppressed on another block (see the
+                            # repair_token_buffer handling at the loop top).
+                            repair_token_buffer.append(runtime_event)
+                        else:
+                            yield runtime_event
 
                     if event_count >= self._max_event_count:
                         break
@@ -1610,6 +2003,7 @@ class MagiEngineDriver:
             finally:
                 await self._aclose_iter(adk_iter)
                 self._restore_runner_policy_route(repair_route_attach)
+                self._restore_user_hook_bus(repair_hook_attach)
                 self._restore_gate_callback(repair_gate_attach)
 
             if cancelled:
@@ -1968,7 +2362,10 @@ class MagiEngineDriver:
             phase=phase,
             route=route,
         )
-        return {
+        intent_bindings = compile_intent_bindings(
+            assembly, enabled=_recipe_intent_binding_enabled()
+        )
+        selection: dict[str, object] = {
             "schemaVersion": "openmagi.localRunnerRouteSelection.v1",
             "source": "recipe-materializer.phase-routing",
             "phase": phase,
@@ -1993,6 +2390,9 @@ class MagiEngineDriver:
                 "externalIntegrationAttached": False,
             },
         }
+        if intent_bindings:
+            selection["intentBindings"] = intent_bindings
+        return selection
 
     @staticmethod
     def _runner_policy_route_block_payload(
@@ -2124,11 +2524,15 @@ class MagiEngineDriver:
         evidence_records: tuple[object, ...] = ()
         verifier_bus: dict[str, object] | None = None
         # Task C — OPTIONAL BLOCKING document-authoring coverage gate. Default OFF
-        # and strict-truthy env-gated; when off the bus call is behavior-identical
-        # to before and DocumentCoverage evidence stays audit-only.
-        from magi_agent.config.env import is_document_authoring_coverage_enabled
+        # and env-gated; when off the bus call is behavior-identical to before and
+        # DocumentCoverage evidence stays audit-only. 14-PR3 (C11) makes the gate
+        # 3-state: ``advisory`` still computes the failed-coverage count (for
+        # false-block-rate telemetry) but the engine does not block on it; only
+        # ``block`` flips the pre-final decision.
+        from magi_agent.config.env import resolve_document_authoring_coverage_mode
 
-        document_coverage_gate_enabled = is_document_authoring_coverage_enabled()
+        document_coverage_mode = resolve_document_authoring_coverage_mode()
+        document_coverage_gate_enabled = document_coverage_mode != "off"
         failed_document_coverage = 0
         if self._evidence_collector is not None:
             from magi_agent.harness.verifier_bus import execute_pre_final_verifier_bus
@@ -2152,15 +2556,28 @@ class MagiEngineDriver:
                 turn_id=turn_id,
                 verifier_bus=verifier_bus,
             )
+        observed_public_refs.update(
+            self._ga_deliverable_matched_requirement_labels(evidence_records)
+        )
         missing_evidence = [
             ref for ref in assembly.evidence_requirements if ref not in observed_public_refs
         ]
         missing_validators = [
             ref for ref in assembly.required_validators if ref not in observed_public_refs
         ]
+        # A4 — flag-gated GA deliverable completion gate. Promotes the Track 19
+        # PR3 receipt-grounded check (an artifact deliverable receipt must
+        # actually exist for the turn, not just a label match) onto this LIVE
+        # pre-final seam. Default OFF ⇒ empty ⇒ payload byte-identical to main.
+        missing_evidence.extend(
+            self._ga_deliverable_missing_labels(evidence_records)
+        )
+        document_coverage_blocks = _document_coverage_blocks(
+            document_coverage_mode, failed_document_coverage
+        )
         decision = (
             "block"
-            if (missing_evidence or missing_validators or failed_document_coverage)
+            if (missing_evidence or missing_validators or document_coverage_blocks)
             else "pass"
         )
 
@@ -2232,6 +2649,87 @@ class MagiEngineDriver:
             )
         return payload
 
+    def _ga_deliverable_missing_labels(
+        self,
+        evidence_records: Sequence[object],
+    ) -> list[str]:
+        """A4 — still-owed GA deliverable labels for the live pre-final gate.
+
+        Behind strict default-OFF ``MAGI_GA_DELIVERABLE_GATE_ENABLED``. When ON
+        and the assembled policy's evidence labels require an artifact
+        deliverable (any label mentioning ``"artifact"``), the turn's collected
+        evidence records — which include the GA receipt-ledger entries and,
+        with the flag ON, the ``localArtifactReceipt`` projection emitted by
+        the spreadsheet write tool — must contain an actual artifact ref.
+        Missing ⇒ ``["ga_deliverable:artifactRef"]``, a blocked-reason the
+        model can act on (produce the artifact and emit its receipt). Reuses
+        the previously-dormant Track 19 PR3 verifier logic; no new policy is
+        invented here. Default OFF ⇒ ``[]`` ⇒ byte-identical to main.
+        """
+        import os  # noqa: PLC0415
+
+        from magi_agent.config.env import (  # noqa: PLC0415
+            parse_ga_deliverable_gate_enabled,
+        )
+
+        if not parse_ga_deliverable_gate_enabled(os.environ):
+            return []
+        assembly = self._runner_policy_assembly
+        if assembly is None:
+            return []
+        from magi_agent.harness.general_automation.task_completion import (  # noqa: PLC0415
+            missing_deliverable_labels,
+            required_deliverable_evidence_from_labels,
+        )
+
+        required = required_deliverable_evidence_from_labels(
+            tuple(getattr(assembly, "evidence_requirements", ()) or ())
+        )
+        if required.is_empty():
+            return []
+        return [
+            f"ga_deliverable:{label}"
+            for label in missing_deliverable_labels(required, evidence_records)
+        ]
+
+    def _ga_deliverable_matched_requirement_labels(
+        self,
+        evidence_records: Sequence[object],
+    ) -> list[str]:
+        """Evidence-requirement labels satisfied by real GA deliverable refs.
+
+        The pre-final bus treats ``artifact_delivery_ref`` as a policy label,
+        not as a public ``evidence:`` ref. When the strict GA deliverable gate is
+        enabled, real artifact delivery evidence satisfies that label directly;
+        missing evidence still appends the actionable
+        ``ga_deliverable:artifactRef`` reason below.
+        """
+        import os  # noqa: PLC0415
+
+        from magi_agent.config.env import (  # noqa: PLC0415
+            parse_ga_deliverable_gate_enabled,
+        )
+
+        if not parse_ga_deliverable_gate_enabled(os.environ):
+            return []
+        assembly = self._runner_policy_assembly
+        if assembly is None:
+            return []
+        labels = tuple(getattr(assembly, "evidence_requirements", ()) or ())
+        if not labels:
+            return []
+        from magi_agent.harness.general_automation.task_completion import (  # noqa: PLC0415
+            missing_deliverable_labels,
+            required_deliverable_evidence_from_labels,
+        )
+
+        required = required_deliverable_evidence_from_labels(labels)
+        if required.is_empty():
+            return []
+        if missing_deliverable_labels(required, evidence_records):
+            return []
+        return [label for label in labels if "artifact" in label]
+
     @staticmethod
     def _collect_public_refs(value: object, refs: set[str]) -> None:
         if isinstance(value, str):
@@ -2295,6 +2793,43 @@ class MagiEngineDriver:
             attachment.agent.before_tool_callback = attachment.original
         except Exception:  # noqa: BLE001 - best-effort restore
             pass
+
+    def _attach_user_hook_bus(
+        self,
+        *,
+        runner: object,
+        session_id: str,
+        turn_id: str,
+    ) -> object | None:
+        """Attach the user (settings.json) HookBus tool-callback bridge.
+
+        No-op (returns ``None``) when ``_user_hook_bus`` is None (gate
+        ``MAGI_USER_HOOKS_ENABLED`` OFF) or the runner has no ``agent`` — so the
+        agentless ``MockRunner`` tests and the gate-OFF path are byte-identical.
+        The bridge is appended AFTER the gate callback (conflict-matrix order).
+        """
+        bus = self._user_hook_bus
+        if bus is None:
+            return None
+        from magi_agent.cli.hook_wiring import attach_hook_bus_tool_callbacks
+        from magi_agent.hooks.context import HookContext
+
+        hook_context = HookContext(
+            bot_id=self._user_id,
+            session_id=session_id,
+            turn_id=turn_id,
+        )
+        return attach_hook_bus_tool_callbacks(
+            runner=runner, bus=bus, hook_context=hook_context
+        )
+
+    @staticmethod
+    def _restore_user_hook_bus(attachment: object | None) -> None:
+        if attachment is None:
+            return
+        from magi_agent.cli.hook_wiring import restore_hook_bus_tool_callbacks
+
+        restore_hook_bus_tool_callbacks(attachment)  # type: ignore[arg-type]
 
     @staticmethod
     def _build_gate_before_tool(
@@ -2425,6 +2960,7 @@ _CANCELLED = _Sentinel("adk_stream_cancelled")
 _MISSING = _Sentinel("missing")
 _RUNNER_POLICY_ROUTING_ENV = "MAGI_RUNNER_POLICY_ROUTING_ENABLED"
 _RUNNER_POLICY_ROUTE_BLOCKING_ENV = "MAGI_RUNNER_POLICY_ROUTE_BLOCKING_ENABLED"
+_RECIPE_INTENT_BINDING_ENV = "MAGI_RECIPE_INTENT_BINDING_ENABLED"
 _CODING_PHASES = frozenset(
     {"code_search", "patch_planning", "patch_generation", "test_interpretation"}
 )
@@ -2513,6 +3049,60 @@ def _runner_policy_route_blocking_enabled() -> bool:
     if raw is None:
         return False
     return raw.strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _recipe_intent_binding_enabled() -> bool:
+    """Whether emit-only recipe intents bind to hint-level runner effects.
+
+    Stage gate for doc 05 PR-3 (A1-G2). The code-level default stays OFF, so the
+    emitted runner-policy route selection is byte-identical to origin/main unless
+    an operator opts in. See ``parse_recipe_intent_binding_enabled``.
+    """
+    import os
+
+    raw = os.environ.get(_RECIPE_INTENT_BINDING_ENV)
+    if raw is None:
+        return False
+    return raw.strip().lower() not in {"0", "false", "no", "off"}
+
+
+def compile_intent_bindings(
+    assembly: RunnerPolicyAssembly,
+    *,
+    enabled: bool,
+) -> dict[str, object]:
+    """Bind the four emit-only recipe intent families to hint-level effects.
+
+    ``provider_intents`` / ``channel_intents`` / ``artifact_intents`` /
+    ``scheduler_intents`` are materialized as public-payload metadata but, unlike
+    ``tool_intents``, have no consumer driving a runner effect. This compiles them
+    into a hint-level binding payload that downstream seams (model selection,
+    channel delivery, pre-final artifact requirements, the 03-always-on
+    scheduler) can read.
+
+    The binding is intentionally *hint* level: it never asserts production-write
+    authority and never hard-forces a model/channel/provider (open-decision §6-2:
+    hint, not force; hard enforcement deferred to 14-controlplane).
+
+    When ``enabled`` is False this returns ``{}`` so the caller's emitted payload
+    stays byte-identical to origin/main.
+    """
+    if not enabled:
+        return {}
+    bindings: dict[str, object] = {
+        "schemaVersion": "magi.recipeIntentBinding.v1",
+        "enforcement": "hint",
+        "productionWriteAllowed": False,
+    }
+    if assembly.provider_intents:
+        bindings["providerPreferenceHints"] = list(assembly.provider_intents)
+    if assembly.channel_intents:
+        bindings["channelDeliveryHints"] = list(assembly.channel_intents)
+    if assembly.artifact_intents:
+        bindings["artifactDeliveryRequirements"] = list(assembly.artifact_intents)
+    if assembly.scheduler_intents:
+        bindings["schedulerReadinessHints"] = list(assembly.scheduler_intents)
+    return bindings
 
 
 def _phase_routes(phase_routing: Mapping[str, object]) -> dict[str, Mapping[str, object]]:

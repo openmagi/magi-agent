@@ -333,6 +333,7 @@ def build_control_plane_from_packs(
     self_review_config: Any | None = None,
     self_review_now: Any | None = None,
     self_review_scheduler: Any | None = None,
+    tool_synthesis_model_label: str | None = None,
     extra_controls: "list[Any] | None" = None,
 ) -> Any:
     """Assemble a live ``ControlPlane`` from the loaded ``control_plane`` packs (D7
@@ -393,6 +394,7 @@ def build_control_plane_from_packs(
         self_review_config=self_review_config,
         self_review_now=self_review_now,
         self_review_scheduler=self_review_scheduler,
+        tool_synthesis_model_label=tool_synthesis_model_label,
     )
     for entry in registry.list(ptype=PrimitiveType.CONTROL_PLANE):
         entry.impl(provide_ctx)

@@ -12,7 +12,8 @@ Code primitives carry ``impl = "module:symbol"``; declarative recipes carry
 ``priority`` + ``phase``; control_plane additionally carries ``gate_position``
 (default ``"after"`` the permission gate).
 
-Mirrors the frozen/camelCase conventions of ``authoring/compiler.py``.
+Mirrors the frozen/camelCase conventions of ``packs/types.py``
+(the catalog contract re-homed from the deleted authoring plane).
 """
 from __future__ import annotations
 

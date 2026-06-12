@@ -260,9 +260,24 @@ violation; it never raises — it degrades to the built-in defaults on error.
 | `default` | Prompts for each tool call that requires approval. |
 | `acceptEdits` | Automatically allows edit-class tools (file writes, patches). |
 | `bypassPermissions` | Allows all tool calls without prompting. |
+| `smartApprove` | Opt-in: auto-approves low-risk tool calls and only prompts for higher-risk ones. Never selected automatically — pass `--permission-mode smartApprove`. |
 
 ```sh
 magi -p "apply the patch" --permission-mode acceptEdits
+magi -p "apply the patch" --permission-mode smartApprove
+```
+
+## Agent mode (`--mode`)
+
+`--mode` selects the agent's working mode:
+
+| Mode | Behavior |
+|------|----------|
+| `act` (default) | Full tool access — the agent reads, writes, and runs commands. |
+| `plan` | Plan-first mode restricted to read-only tools; the agent drafts a plan before acting. |
+
+```sh
+magi --mode plan "refactor the auth module"
 ```
 
 ## `MAGI_CLI_ENABLED`
@@ -288,11 +303,13 @@ Options:
   --output [text|json|stream-json]
                                  Output format for headless mode. [default: text]
   --include-partial-messages     Include partial streaming events in stream-json.
-  --permission-mode [default|acceptEdits|bypassPermissions]
+  --permission-mode [default|acceptEdits|bypassPermissions|smartApprove]
                                  Permission mode.  [default: default]
   --resume TEXT                  Resume a session by id.
   --continue / --no-continue     Continue the most-recent session.
   --model TEXT                   Model to use.
+  --mode [plan|act]              Agent mode: plan (read-only tools) | act (full
+                                 tools).  [default: act]
   -V, --version                  Print the magi version and exit.
   --help                         Show this message and exit.
 ```

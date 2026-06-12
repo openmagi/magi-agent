@@ -84,6 +84,17 @@ def _json_schema_to_genai_schema(schema: dict[str, object]):
     required = schema.get("required")
     if isinstance(required, (list, tuple)):
         kwargs["required"] = [str(item) for item in required]
+    enum = schema.get("enum")
+    if (
+        isinstance(enum, (list, tuple))
+        and enum
+        and all(isinstance(item, str) for item in enum)
+    ):
+        # Dropping enum hides the valid values from the model, which then
+        # guesses formats (live: tau-bench "one way" vs "one_way"). Only
+        # string enums are valid on the typed Schema path; non-string enums
+        # are handled by the provider-repair passthrough.
+        kwargs["enum"] = list(enum)
     items = schema.get("items")
     if isinstance(items, dict):
         kwargs["items"] = _json_schema_to_genai_schema(items)
@@ -503,8 +514,8 @@ def build_concurrent_dispatcher(
     ``ToolDispatcher`` when used with ``build_adk_tool_for_manifest`` and
     ``build_adk_function_tools_for_registry`` — single ``dispatch()`` calls
     delegate transparently to the base dispatcher.  The additional
-    ``dispatch_batch()`` method is available for callers (such as a
-    ``RunnerSessionBoundary``) that want to fan-out concurrent-safe tool calls
+    ``dispatch_batch()`` method is available for callers (such as the runner
+    integration) that want to fan-out concurrent-safe tool calls
     in parallel.
 
     ADK native parallel tool execution (measured, ADK 1.33.0)

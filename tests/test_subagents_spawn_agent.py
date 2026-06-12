@@ -1,7 +1,7 @@
 """Tests for spawn_agent live-child-runner wiring (Task C).
 
 Coverage:
-- T1: Default (gate OFF) — EXACT byte-identical payload (liveChildRunnerAttached=False).
+- T1: Default (gate OFF) — honest not_attached payload (liveChildRunnerAttached=False).
 - T2: Gate ON + injected fake-backed runner via monkeypatch — liveChildRunnerAttached=True.
 - T3: Gate ON but child degrades (no key) — non-crashing blocked result, never raises.
 - T4: tools=[] enforcement — runner constructed with empty toolset.
@@ -9,6 +9,7 @@ Coverage:
 """
 from __future__ import annotations
 
+import asyncio
 import subprocess
 import sys
 from collections.abc import Mapping
@@ -37,12 +38,13 @@ def _context(**overrides: object) -> ToolContext:
 
 
 # ---------------------------------------------------------------------------
-# T1: Default (gate OFF) — byte-identical to original local-fake payload
+# T1: Default (gate OFF) — legacy local-fake payload with blocked tool status
 # ---------------------------------------------------------------------------
 
 
 def test_spawn_agent_default_gate_off_byte_identical(monkeypatch) -> None:
-    """When is_live_child_runner_enabled() is False the payload is EXACT to today's."""
+    """When is_live_child_runner_enabled() is False the payload is the honest
+    not-attached receipt (07-PR2 D4 fix) while preserving every legacy key."""
     # Ensure the live gate is off (no env var set).
     monkeypatch.delenv("MAGI_CHILD_RUNNER_LIVE_ENABLED", raising=False)
     monkeypatch.delenv("MAGI_CHILD_RUNNER_LIVE_KILL_SWITCH", raising=False)
@@ -53,20 +55,24 @@ def test_spawn_agent_default_gate_off_byte_identical(monkeypatch) -> None:
     arguments: dict[str, object] = {"prompt": "Hello world", "persona": "researcher"}
     ctx = _context(spawnDepth=2)
 
-    result = spawn_agent(arguments, ctx)
+    result = asyncio.run(spawn_agent(arguments, ctx))
 
-    assert result.status == "ok"
+    assert result.status == "blocked"
+    assert result.error_code == "live_child_runner_disabled"
     output = result.output
 
-    # Exact keys and values from the original implementation.
-    assert output["status"] == "queued_locally"
+    # Honest status — no longer a success-implying "queued_locally".
+    assert output["status"] == "not_attached"
+    assert output["reason"] == "live_child_runner_disabled"
     assert output["persona"] == "researcher"
     assert output["promptDigest"] == digest("Hello world")
     assert output["spawnDepth"] == 2
     assert output["liveChildRunnerAttached"] is False
-    # No extra keys added by the live path.
+    # Legacy keys preserved; reason/hint added by the honesty fix.
     assert set(output.keys()) == {
         "status",
+        "reason",
+        "hint",
         "persona",
         "promptDigest",
         "spawnDepth",
@@ -82,9 +88,11 @@ def test_spawn_agent_default_gate_off_empty_prompt(monkeypatch) -> None:
     from magi_agent.plugins.native._common import digest
     from magi_agent.plugins.native.subagents import spawn_agent
 
-    result = spawn_agent({}, _context())
+    result = asyncio.run(spawn_agent({}, _context()))
 
-    assert result.output["status"] == "queued_locally"
+    assert result.status == "blocked"
+    assert result.error_code == "live_child_runner_disabled"
+    assert result.output["status"] == "not_attached"
     assert result.output["persona"] == "general"
     assert result.output["promptDigest"] == digest("")
     assert result.output["spawnDepth"] == 0
@@ -99,8 +107,10 @@ def test_spawn_agent_default_gate_off_uses_task_fallback(monkeypatch) -> None:
     from magi_agent.plugins.native._common import digest
     from magi_agent.plugins.native.subagents import spawn_agent
 
-    result = spawn_agent({"task": "do something"}, _context())
+    result = asyncio.run(spawn_agent({"task": "do something"}, _context()))
 
+    assert result.status == "blocked"
+    assert result.error_code == "live_child_runner_disabled"
     assert result.output["promptDigest"] == digest("do something")
     assert result.output["liveChildRunnerAttached"] is False
 
@@ -148,7 +158,7 @@ def test_spawn_agent_live_gate_on_returns_live_attached(monkeypatch) -> None:
     arguments: dict[str, object] = {"prompt": "Summarise the attached doc"}
     ctx = _context(spawnDepth=1)
 
-    result = spawn_agent(arguments, ctx)
+    result = asyncio.run(spawn_agent(arguments, ctx))
 
     assert result.status == "ok"
     output = result.output
@@ -197,7 +207,7 @@ def test_spawn_agent_live_output_sanitised(monkeypatch) -> None:
 
     from magi_agent.plugins.native.subagents import spawn_agent
 
-    result = spawn_agent({"prompt": "do it"}, _context())
+    result = asyncio.run(spawn_agent({"prompt": "do it"}, _context()))
 
     assert result.status == "ok"
     summary = str(result.output.get("summary", ""))
@@ -214,7 +224,7 @@ def test_spawn_agent_live_output_sanitised(monkeypatch) -> None:
 
 
 def test_spawn_agent_live_gate_on_child_blocked_does_not_raise(monkeypatch) -> None:
-    """If the live runner returns a blocked mapping, spawn_agent returns ok/blocked."""
+    """If the live runner returns a blocked mapping, spawn_agent returns blocked."""
     monkeypatch.setenv("MAGI_CHILD_RUNNER_LIVE_ENABLED", "1")
     monkeypatch.delenv("MAGI_CHILD_RUNNER_LIVE_KILL_SWITCH", raising=False)
 
@@ -242,12 +252,14 @@ def test_spawn_agent_live_gate_on_child_blocked_does_not_raise(monkeypatch) -> N
     from magi_agent.plugins.native.subagents import spawn_agent
 
     # Must NOT raise.
-    result = spawn_agent({"prompt": "do it"}, _context())
+    result = asyncio.run(spawn_agent({"prompt": "do it"}, _context()))
 
-    assert result.status == "ok"
-    # The boundary returns ok-level result with blocked envelope, or a fallback.
+    assert result.status == "blocked"
+    assert result.error_code == "child_provider_key_missing"
     assert result.output is not None
-    assert "status" in result.output
+    assert result.output["status"] == "blocked"
+    assert result.output["summary"] == "child_provider_key_missing"
+    assert result.output["liveChildRunnerAttached"] is True
 
 
 def test_spawn_agent_live_gate_on_runner_raises_falls_back(monkeypatch) -> None:
@@ -280,57 +292,168 @@ def test_spawn_agent_live_gate_on_runner_raises_falls_back(monkeypatch) -> None:
     from magi_agent.plugins.native.subagents import spawn_agent
 
     # Must NOT raise.
-    result = spawn_agent({"prompt": "do it"}, _context())
+    result = asyncio.run(spawn_agent({"prompt": "do it"}, _context()))
 
-    assert result.status == "ok"
+    assert result.status == "error"
+    assert result.error_code == "live_child_runner_error"
     # The boundary catches the runner exception internally and returns status="error";
     # spawn_agent translates that to its output dict.  The output must be valid.
     assert result.output is not None
-    assert "status" in result.output
+    assert result.output["status"] == "error"
     assert "persona" in result.output
     assert "promptDigest" in result.output
     assert "spawnDepth" in result.output
 
 
 # ---------------------------------------------------------------------------
-# T4: tools=[] enforcement — runner is always constructed with empty toolset
+# T4: toolset gate — runner gets the gate-resolved profile, no caller escalation
 # ---------------------------------------------------------------------------
 
 
-def test_spawn_agent_live_runner_constructed_with_empty_tools(monkeypatch) -> None:
-    """RealLocalChildRunner is ALWAYS constructed with tools=[] (v1 text-only)."""
+class _CapturingProfileRunner:
+    """Captures the construction kwargs the live path passes (PR1, doc 07)."""
+
+    captured: dict[str, object] = {}
+    openmagi_live_provider = True
+
+    def __init__(
+        self,
+        *,
+        tools: list[object] | None = None,
+        toolset_profile: str = "none",
+        workspace_root: str | None = None,
+        **kwargs: object,
+    ) -> None:
+        type(self).captured = {
+            "tools": list(tools) if tools is not None else None,
+            "toolset_profile": toolset_profile,
+            "workspace_root": workspace_root,
+        }
+
+    async def run_child(self, request: object) -> Mapping[str, object]:
+        return {
+            "childExecutionId": "child-exec-cap",
+            "status": "completed",
+            "summary": "done",
+            "evidenceRefs": (),
+            "artifactRefs": (),
+            "auditEventRefs": (),
+        }
+
+
+def test_spawn_agent_default_toolset_gate_unset_is_none_profile(monkeypatch) -> None:
+    """With MAGI_CHILD_RUNNER_TOOLSET unset the live runner is constructed with
+    the text-only ``none`` profile (no caller ``tools`` escalation)."""
     monkeypatch.setenv("MAGI_CHILD_RUNNER_LIVE_ENABLED", "1")
     monkeypatch.delenv("MAGI_CHILD_RUNNER_LIVE_KILL_SWITCH", raising=False)
+    monkeypatch.delenv("MAGI_CHILD_RUNNER_TOOLSET", raising=False)
 
     import magi_agent.runtime.child_runner_live as _live_mod
 
-    captured: dict[str, object] = {}
-
-    class _CapturingRunner:
-        openmagi_live_provider = True
-
-        def __init__(self, *, tools: list[object] | None = None, **kwargs: object) -> None:
-            captured["tools"] = list(tools) if tools is not None else []
-
-        async def run_child(self, request: object) -> Mapping[str, object]:
-            return {
-                "childExecutionId": "child-exec-cap",
-                "status": "completed",
-                "summary": "done",
-                "evidenceRefs": (),
-                "artifactRefs": (),
-                "auditEventRefs": (),
-            }
-
-    monkeypatch.setattr(_live_mod, "RealLocalChildRunner", _CapturingRunner)
+    monkeypatch.setattr(_live_mod, "RealLocalChildRunner", _CapturingProfileRunner)
 
     from magi_agent.plugins.native.subagents import spawn_agent
 
-    spawn_agent({"prompt": "test", "tools": ["some_tool"]}, _context())
+    asyncio.run(spawn_agent({"prompt": "test", "tools": ["some_tool"]}, _context()))
 
-    # The runner must have been constructed with an EMPTY toolset regardless of
-    # what arguments were passed to spawn_agent.
-    assert captured.get("tools") == []
+    captured = _CapturingProfileRunner.captured
+    # No caller-supplied tools escalation; default text-only profile.
+    assert captured["toolset_profile"] == "none"
+    assert captured["tools"] is None
+    # ``none`` profile shares the parent cwd (no isolated workspace needed).
+    assert captured["workspace_root"] is None
+
+
+def test_spawn_agent_readonly_toolset_gate_uses_context_workspace_root(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """MAGI_CHILD_RUNNER_TOOLSET=readonly forwards the ``readonly`` profile and
+    uses the caller workspace root. Hosted selected pods run with a read-only
+    root filesystem, so relying on the process default tempdir prevents child
+    runner attachment before the child even starts."""
+    monkeypatch.setenv("MAGI_CHILD_RUNNER_LIVE_ENABLED", "1")
+    monkeypatch.delenv("MAGI_CHILD_RUNNER_LIVE_KILL_SWITCH", raising=False)
+    monkeypatch.setenv("MAGI_CHILD_RUNNER_TOOLSET", "readonly")
+
+    import magi_agent.runtime.child_runner_live as _live_mod
+
+    monkeypatch.setattr(_live_mod, "RealLocalChildRunner", _CapturingProfileRunner)
+
+    from magi_agent.plugins.native.subagents import spawn_agent
+
+    asyncio.run(
+        spawn_agent({"prompt": "review this"}, _context(workspaceRoot=str(tmp_path)))
+    )
+
+    captured = _CapturingProfileRunner.captured
+    assert captured["toolset_profile"] == "readonly"
+    assert captured["workspace_root"] == str(tmp_path)
+
+
+def test_spawn_agent_readonly_toolset_falls_back_to_hosted_workspace_env(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """Hosted Gate5B selected chat sets the workspace root in the deployment
+    environment. SpawnAgent must use that writable workspace instead of the
+    process default tempdir, which is read-only in the production container."""
+    monkeypatch.setenv("MAGI_CHILD_RUNNER_LIVE_ENABLED", "1")
+    monkeypatch.delenv("MAGI_CHILD_RUNNER_LIVE_KILL_SWITCH", raising=False)
+    monkeypatch.setenv("MAGI_CHILD_RUNNER_TOOLSET", "readonly")
+    monkeypatch.setenv(
+        "CORE" + "_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_WORKSPACE_ROOT",
+        str(tmp_path),
+    )
+
+    import magi_agent.runtime.child_runner_live as _live_mod
+
+    monkeypatch.setattr(_live_mod, "RealLocalChildRunner", _CapturingProfileRunner)
+
+    from magi_agent.plugins.native.subagents import spawn_agent
+
+    asyncio.run(spawn_agent({"prompt": "review this"}, _context()))
+
+    captured = _CapturingProfileRunner.captured
+    assert captured["toolset_profile"] == "readonly"
+    assert captured["workspace_root"] == str(tmp_path)
+
+
+def test_spawn_agent_readonly_toolset_reports_workspace_unavailable(
+    monkeypatch,
+) -> None:
+    """If neither context/env workspace nor default tempdir is writable, return
+    a precise blocked reason instead of the generic attach-failed reason."""
+    monkeypatch.setenv("MAGI_CHILD_RUNNER_LIVE_ENABLED", "1")
+    monkeypatch.delenv("MAGI_CHILD_RUNNER_LIVE_KILL_SWITCH", raising=False)
+    monkeypatch.setenv("MAGI_CHILD_RUNNER_TOOLSET", "readonly")
+    monkeypatch.delenv(
+        "CORE" + "_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_WORKSPACE_ROOT",
+        raising=False,
+    )
+    monkeypatch.delenv("MAGI_AGENT_WORKSPACE", raising=False)
+    monkeypatch.delenv("MAGI_WORKSPACE_ROOT", raising=False)
+    monkeypatch.delenv("MAGI_WORKSPACE", raising=False)
+
+    import tempfile
+
+    def _raise_no_tempdir(*args: object, **kwargs: object) -> str:
+        raise FileNotFoundError("no usable temporary directory")
+
+    monkeypatch.setattr(tempfile, "mkdtemp", _raise_no_tempdir)
+
+    import magi_agent.runtime.child_runner_live as _live_mod
+
+    monkeypatch.setattr(_live_mod, "RealLocalChildRunner", _CapturingProfileRunner)
+
+    from magi_agent.plugins.native.subagents import spawn_agent
+
+    result = asyncio.run(spawn_agent({"prompt": "review this"}, _context()))
+
+    assert result.status == "blocked"
+    assert result.error_code == "child_workspace_unavailable"
+    assert result.output["status"] == "blocked"
+    assert result.output["liveChildRunnerAttached"] is False
 
 
 # ---------------------------------------------------------------------------
@@ -379,7 +502,7 @@ if loaded:
 
 
 # ---------------------------------------------------------------------------
-# T6: Kill-switch — ENABLED=1 + KILL_SWITCH=1 → gate-OFF byte-identical payload
+# T6: Kill-switch — ENABLED=1 + KILL_SWITCH=1 → blocked gate-OFF payload
 # ---------------------------------------------------------------------------
 
 
@@ -387,7 +510,8 @@ def test_spawn_agent_kill_switch_overrides_enabled_returns_gate_off_payload(
     monkeypatch,
 ) -> None:
     """MAGI_CHILD_RUNNER_LIVE_ENABLED=1 AND MAGI_CHILD_RUNNER_LIVE_KILL_SWITCH=1
-    → spawn_agent must return the EXACT gate-OFF payload (liveChildRunnerAttached=False).
+    → spawn_agent must return the gate-OFF honest not-attached payload
+    (liveChildRunnerAttached=False).
     """
     monkeypatch.setenv("MAGI_CHILD_RUNNER_LIVE_ENABLED", "1")
     monkeypatch.setenv("MAGI_CHILD_RUNNER_LIVE_KILL_SWITCH", "1")
@@ -398,19 +522,23 @@ def test_spawn_agent_kill_switch_overrides_enabled_returns_gate_off_payload(
     arguments: dict[str, object] = {"prompt": "Hello kill switch", "persona": "tester"}
     ctx = _context(spawnDepth=1)
 
-    result = spawn_agent(arguments, ctx)
+    result = asyncio.run(spawn_agent(arguments, ctx))
 
-    assert result.status == "ok"
+    assert result.status == "blocked"
+    assert result.error_code == "live_child_runner_disabled"
     output = result.output
 
-    # Must be byte-identical to the gate-OFF payload — no live fields.
-    assert output["status"] == "queued_locally"
+    # Kill-switch routes through the gate-OFF branch → honest not-attached payload.
+    assert output["status"] == "not_attached"
+    assert output["reason"] == "live_child_runner_disabled"
     assert output["persona"] == "tester"
     assert output["promptDigest"] == digest("Hello kill switch")
     assert output["spawnDepth"] == 1
     assert output["liveChildRunnerAttached"] is False
     assert set(output.keys()) == {
         "status",
+        "reason",
+        "hint",
         "persona",
         "promptDigest",
         "spawnDepth",
@@ -458,10 +586,11 @@ def test_spawn_agent_live_depth_cap_blocks_without_running_child(monkeypatch) ->
 
     # spawn_depth=2 → child metadata spawnDepth=3 > max_spawn_depth=2 (default)
     ctx = _context(spawnDepth=2)
-    result = spawn_agent({"prompt": "deep nested task"}, ctx)
+    result = asyncio.run(spawn_agent({"prompt": "deep nested task"}, ctx))
 
-    # The result must not raise and must be a valid ok-level ToolResult.
-    assert result.status == "ok"
+    # The result must not raise and must be a valid blocked ToolResult.
+    assert result.status == "blocked"
+    assert result.error_code == "child_spawn_depth_exceeded"
     assert result.output is not None
     # The runner must NOT have been called (boundary blocked it at the depth cap).
     assert runner_called["called"] is False
@@ -514,10 +643,45 @@ def test_spawn_agent_live_string_budget_ms_parsed_correctly(monkeypatch) -> None
         "prompt": "budget string test",
         "budget_ms": "5000",
     }
-    result = spawn_agent(arguments, _context())
+    result = asyncio.run(spawn_agent(arguments, _context()))
 
     # Must not crash.
     assert result.status == "ok"
     assert result.output is not None
     # The request must have received budget_ms=5000, not 0.
     assert captured_request.get("budget_ms") == 5000
+
+
+# ---------------------------------------------------------------------------
+# T9: Running-loop dispatch — the child must actually run when spawn_agent is
+# invoked the way the tool dispatcher invokes it (awaited on the live event
+# loop), NOT degrade to blocked. Regression for the async fix: the prior
+# sync + asyncio.run() implementation raised RuntimeError on the running loop
+# and silently returned liveChildRunnerAttached=False for every production call.
+# ---------------------------------------------------------------------------
+
+
+def test_spawn_agent_runs_child_inside_running_event_loop(monkeypatch) -> None:
+    monkeypatch.setenv("MAGI_CHILD_RUNNER_LIVE_ENABLED", "1")
+    monkeypatch.delenv("MAGI_CHILD_RUNNER_LIVE_KILL_SWITCH", raising=False)
+
+    import magi_agent.runtime.child_runner_live as _live_mod
+
+    monkeypatch.setattr(_live_mod, "RealLocalChildRunner", _FakeLiveChildRunner)
+
+    from magi_agent.plugins.native.subagents import spawn_agent
+
+    async def _dispatch_like_production() -> object:
+        # Mirror the tool dispatcher's normal path: call the handler, then await
+        # it if it returned a coroutine — all on the already-running loop.
+        result = spawn_agent({"prompt": "run inside loop"}, _context(spawnDepth=1))
+        if asyncio.iscoroutine(result):
+            result = await result
+        return result
+
+    result = asyncio.run(_dispatch_like_production())
+
+    assert result.status == "ok"
+    # The child actually ran — NOT the blocked degrade path.
+    assert result.output["liveChildRunnerAttached"] is True
+    assert "Fake child" in str(result.output.get("summary", ""))

@@ -266,6 +266,7 @@ class OpenMagiEventBridge:
         # aggregate that arrives alongside a trailing tool call. See
         # ``_project_content_parts``.
         self._streamed_partial_text = False
+        self._streamed_partial_public_text = ""
 
     def project_runner_start_event(
         self,
@@ -444,14 +445,18 @@ class OpenMagiEventBridge:
             # A response_clear restarts the visible text; any in-flight partial-text
             # run is void, so the next non-partial aggregate is not a duplicate.
             self._streamed_partial_text = False
+            self._streamed_partial_public_text = ""
         partial_run = [self._streamed_partial_text]
+        partial_public_text = [self._streamed_partial_public_text]
         content_projection = _project_content_parts(
             event,
             turn_id=turn_id,
             live_compatible=self.live_compatible,
             partial_run=partial_run,
+            partial_public_text=partial_public_text,
         )
         self._streamed_partial_text = partial_run[0]
+        self._streamed_partial_public_text = partial_public_text[0]
         if (
             content_projection.agent_events
             or content_projection.legacy_deltas
@@ -662,6 +667,7 @@ def _project_content_parts(
     turn_id: str,
     live_compatible: bool,
     partial_run: list[bool],
+    partial_public_text: list[str],
 ) -> EventProjection:
     agent_events: list[dict[str, object]] = []
     legacy_deltas: list[str] = []
@@ -678,8 +684,13 @@ def _project_content_parts(
         final_text_chunks.clear()
         public_text = _public_stream_text(text)
         if is_final_response:
-            # The final reply's text was already streamed as partials; close the run.
+            token_text = _unstreamed_final_text(public_text, partial_public_text[0])
+            if token_text:
+                agent_events.append({"type": "text_delta", "delta": token_text})
+            # The final reply's aggregate has now been reconciled with any
+            # partials streamed earlier in the turn; close the partial run.
             partial_run[0] = False
+            partial_public_text[0] = ""
             transcript_entries.append(
                 AssistantTextEntry(ts=_event_ts(event), turn_id=turn_id, text=public_text)
             )
@@ -709,6 +720,7 @@ def _project_content_parts(
             # single mixed text+tool event with no preceding partials — ``partial_run``
             # is False and the text is emitted normally.
             partial_run[0] = False
+            partial_public_text[0] = ""
             return
         agent_events.append({"type": "text_delta", "delta": public_text})
         normalized_events.append(
@@ -737,6 +749,7 @@ def _project_content_parts(
                 public_text = _public_stream_text(text)
                 agent_events.append({"type": "text_delta", "delta": public_text})
                 partial_run[0] = True
+                partial_public_text[0] += public_text
                 normalized_events.append(
                     NormalizedEvent(
                         type="model.message.delta",
@@ -1098,6 +1111,20 @@ def _public_stream_text(value: str) -> str:
     if _has_private_text_marker(value):
         return "[redacted-private]"
     return _public_text(value)
+
+
+def _unstreamed_final_text(final_text: str, streamed_text: str) -> str:
+    if not streamed_text:
+        return final_text
+    if final_text.startswith(streamed_text):
+        return final_text[len(streamed_text) :]
+    if streamed_text.endswith(final_text):
+        return ""
+    max_overlap = min(len(final_text), len(streamed_text))
+    for size in range(max_overlap, 0, -1):
+        if streamed_text.endswith(final_text[:size]):
+            return final_text[size:]
+    return final_text
 
 
 def _has_private_text_marker(value: str) -> bool:
@@ -1492,4 +1519,18 @@ def _parse_json_container(value: str) -> object | None:
 def _is_error_response(response: object) -> bool:
     if not isinstance(response, dict):
         return False
-    return bool(response.get("error") or response.get("isError") or response.get("is_error"))
+    status = response.get("status")
+    if isinstance(status, str) and status.lower() in {
+        "blocked",
+        "error",
+        "failed",
+        "needs_approval",
+    }:
+        return True
+    return bool(
+        response.get("error")
+        or response.get("errorCode")
+        or response.get("errorMessage")
+        or response.get("isError")
+        or response.get("is_error")
+    )

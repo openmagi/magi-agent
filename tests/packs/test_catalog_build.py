@@ -1,4 +1,4 @@
-from magi_agent.authoring.compiler import CompileRecipePackCatalog
+from magi_agent.packs.types import CompileRecipePackCatalog
 from magi_agent.packs.catalog_build import build_catalog
 from magi_agent.packs.loader import LoadedPrimitive
 

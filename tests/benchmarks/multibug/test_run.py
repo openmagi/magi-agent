@@ -3,8 +3,8 @@ from __future__ import annotations
 import json
 import logging
 
-from magi_agent.benchmarks.multibug.dataset import GoldProblem, MultiProblemInstance
-from magi_agent.benchmarks.multibug.run import run_benchmark
+from benchmarks.multibug.dataset import GoldProblem, MultiProblemInstance
+from benchmarks.multibug.run import run_benchmark
 from magi_agent.discovery.models import DiscoveryPrediction
 
 

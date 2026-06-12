@@ -5,8 +5,8 @@ Architecture:
     the compiled ``RecipeSnapshot.instruction_refs`` tuple.  PR5 adds a single
     NEW instruction ref — ``instruction:learning:usage`` — carried by this
     default-OFF pack.  The recipe COMPILER is the only surface that turns the
-    ref into prompt-bound metadata; there are NO core / message_builder /
-    turn_controller edits and NO raw hooks.
+    ref into prompt-bound metadata; there are NO core / message_builder
+    edits and NO raw hooks.
 
 Default-OFF:
     The pack is NOT ``defaultEnabled`` and NOT ``hardSafety``; it is selected

@@ -151,6 +151,9 @@ def build_cli_model_runner(
     workspace_root: str | None = None,
     memory_mode: "MemoryMode | str" = "normal",
     recall_query: str | None = None,
+    bot_id: str = "local",
+    owner_user_id: str = "local",
+    learning_live_readiness: object | None = None,
     task_profile: Mapping[str, object] | None = None,
     general_automation_receipts: object | None = None,
     local_tool_evidence_collector: object | None = None,
@@ -218,6 +221,16 @@ def build_cli_model_runner(
             workspace_root=effective_workspace_root,
             memory_mode=memory_mode,
             recall_query=recall_query,
+            # Thread REAL identity (issue 3): the learning-live readiness ladder
+            # matches the selected-canary digest against these — the previous
+            # literal "local" default could only ever target the literal "local"
+            # scope, so the live recall/write seam never resolved on the real
+            # serve path. ``owner_user_id`` is the bot-OWNER identity used for the
+            # canary digest (distinct from the ADK session ``user_id`` above); the
+            # serve caller passes runtime.config.bot_id / runtime.config.user_id.
+            bot_id=bot_id,
+            user_id=owner_user_id,
+            learning_live_readiness=learning_live_readiness,
         )
     )
 
@@ -250,6 +263,10 @@ def build_cli_model_runner(
         self_review_config=self_review_config,
         self_review_now=self_review_now,
         self_review_scheduler=self_review_scheduler,
+        # Default-OFF tool-synthesis nudge gate: flag + frontier-tier resolution
+        # happen inside build_default_plane; passing the label alone changes
+        # nothing while MAGI_TOOL_SYNTHESIS_NUDGE_ENABLED is unset.
+        tool_synthesis_model_label=config.litellm_model,
     )
     app = App(name=_app_identifier(app_name), root_agent=agent, plugins=[plane_plugin])
     runner = Runner(
@@ -298,6 +315,50 @@ def _model_retry_kwargs(env: Mapping[str, str] | None = None) -> dict[str, int]:
         "num_retries": _positive_int("MAGI_MODEL_NUM_RETRIES", _DEFAULT_NUM_RETRIES),
         "timeout": _positive_int("MAGI_MODEL_TIMEOUT_S", _DEFAULT_TIMEOUT_S),
     }
+
+
+def _model_reasoning_kwargs(env: Mapping[str, str] | None = None) -> dict[str, object]:
+    """Optional extended-thinking / reasoning kwargs for the LiteLlm build.
+
+    Published frontier coding-benchmark numbers are measured with adaptive
+    thinking at high effort and thinking blocks preserved across tool turns
+    (the bundled ADK LiteLlm round-trips Anthropic ``thinking_blocks`` with
+    signatures). Without these kwargs the runtime benchmarks the model in a
+    strictly weaker mode.
+
+    * ``MAGI_MODEL_THINKING_TYPE=adaptive`` — send ``thinking={"type":
+      "adaptive"}`` directly; highest precedence. Escape hatch for adaptive-only
+      models when bypassing litellm's effort mapping.
+    * ``MAGI_MODEL_THINKING_BUDGET_TOKENS`` (int > 0) — explicit Anthropic-style
+      ``{"type": "enabled", "budget_tokens": N}``. ONLY for models that support
+      budgeted thinking (e.g. Sonnet 4.5). Adaptive-only models (Opus 4.7/4.8)
+      REJECT this shape with a 400 — use ``MAGI_MODEL_REASONING_EFFORT`` (or
+      ``MAGI_MODEL_THINKING_TYPE=adaptive``) for those.
+    * ``MAGI_MODEL_REASONING_EFFORT`` — litellm's cross-provider
+      ``reasoning_effort`` (``minimal``/``low``/``medium``/``high``/``xhigh``/
+      ``max``); ``off``/``none`` disable. RECOMMENDED knob: litellm maps it
+      per-model — adaptive models get ``thinking={"type": "adaptive"}`` plus
+      ``output_config.effort``, budget models get an enabled budget.
+
+    Unset ⇒ ``{}`` ⇒ build byte-identical to before (default OFF).
+    """
+
+    source = os.environ if env is None else env
+    thinking_type = (source.get("MAGI_MODEL_THINKING_TYPE") or "").strip().lower()
+    if thinking_type == "adaptive":
+        return {"thinking": {"type": "adaptive"}}
+    budget_raw = (source.get("MAGI_MODEL_THINKING_BUDGET_TOKENS") or "").strip()
+    if budget_raw:
+        try:
+            budget = int(budget_raw)
+        except ValueError:
+            budget = 0
+        if budget > 0:
+            return {"thinking": {"type": "enabled", "budget_tokens": budget}}
+    effort = (source.get("MAGI_MODEL_REASONING_EFFORT") or "").strip().lower()
+    if effort and effort not in {"off", "none", "0", "false", "disable", "disabled"}:
+        return {"reasoning_effort": effort}
+    return {}
 
 
 def _model_api_base_kwargs(env: Mapping[str, str] | None = None) -> dict[str, object]:
@@ -352,6 +413,7 @@ def _build_litellm_model(
         model=config.litellm_model,
         api_key=api_key,
         **_model_retry_kwargs(env),
+        **_model_reasoning_kwargs(env),
         **api_base_kwargs,
     )
 
@@ -388,16 +450,13 @@ def _required_deliverable_evidence_from_assembly(
 
     ``assembly.evidence_requirements`` is a tuple of public evidence *labels*
     (e.g. ``"artifact_delivery_ref"``, ``"office_preview"``, ``"source_ledger"``),
-    not booleans. The GA completion verifier (task_completion.py) tracks two
-    deliverable kinds — artifact refs and snapshot refs — so we map the label
-    vocabulary onto those booleans:
-
-    * ``requires_artifact_ref`` — any label mentioning ``"artifact"`` (e.g.
-      ``"artifact_delivery_ref"``).
-    * ``requires_snapshot_ref`` — any label mentioning ``"snapshot"``. No current
-      first-party label uses ``"snapshot"`` and snapshot enforcement is disabled
-      in the verifier (``ENFORCE_SNAPSHOT_REQUIREMENT=False``), so this stays
-      ``False`` in practice — kept for forward-compat with the label vocabulary.
+    not booleans. Delegates to
+    :func:`~magi_agent.harness.general_automation.task_completion.required_deliverable_evidence_from_labels`
+    (any label mentioning ``"artifact"`` requires an artifact deliverable
+    receipt) so this runner and the engine's flag-gated pre-final deliverable
+    gate share one mapping. The former forward-compat ``"snapshot"`` label
+    mapping was deleted (A4): no first-party label ever used it and snapshot
+    enforcement was removed from the verifier.
 
     Returns ``None`` when no assembly is available, so the constraint control is
     not registered (byte-identical to ``main``).
@@ -405,14 +464,11 @@ def _required_deliverable_evidence_from_assembly(
     if assembly is None:
         return None
     from magi_agent.harness.general_automation.task_completion import (  # noqa: PLC0415
-        RequiredDeliverableEvidence,
+        required_deliverable_evidence_from_labels,
     )
 
     labels = tuple(getattr(assembly, "evidence_requirements", ()) or ())
-    return RequiredDeliverableEvidence(
-        requires_artifact_ref=any("artifact" in label for label in labels),
-        requires_snapshot_ref=any("snapshot" in label for label in labels),
-    )
+    return required_deliverable_evidence_from_labels(labels)
 
 
 def _merge_pack_validator_refs(

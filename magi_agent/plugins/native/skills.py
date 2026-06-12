@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import os
+from collections.abc import Mapping
 from importlib import resources
 from pathlib import Path
 
+from magi_agent.config.env import _is_true, native_receipts_honest
 from magi_agent.plugins.native._common import (
+    blocked_result,
     digest,
     ok_result,
     protected_workspace_path_reason,
@@ -15,6 +19,20 @@ from magi_agent.tools.result import ToolResult
 _MAX_SKILL_BODY_CHARS = 64_000
 _WORKSPACE_SKILL_BASES = ("skills", ".magi/skills", "docs/superpowers")
 _LEGACY_WORKSPACE_SKILL_PREFIX = "legacy-workspace/skills"
+
+# Backing-system attachment flag. The real hook system (``hooks/bus.py``) is
+# owned by cluster 11 (hook-bus-wiring) and stays unwired until that cluster
+# attaches it, so the honest branch fires. When set, the handler routes past the
+# honest block to the (cluster-owned) live hook-status seam.
+SKILL_RUNTIME_HOOKS_ATTACHED_ENV = "MAGI_SKILL_RUNTIME_HOOKS_ATTACHED"
+
+
+def _env(env: Mapping[str, str] | None = None) -> Mapping[str, str]:
+    return env if env is not None else os.environ
+
+
+def _skill_runtime_hooks_attached(env: Mapping[str, str] | None = None) -> bool:
+    return _is_true(_env(env).get(SKILL_RUNTIME_HOOKS_ATTACHED_ENV))
 
 
 def skill_loader(arguments: dict[str, object], context: ToolContext) -> ToolResult:
@@ -34,6 +52,11 @@ def skill_loader(arguments: dict[str, object], context: ToolContext) -> ToolResu
 
 def skill_runtime_hooks(arguments: dict[str, object], context: ToolContext) -> ToolResult:
     hooks = ("beforeModelCall", "afterToolCall", "beforeCommit", "afterTurnEnd")
+    if native_receipts_honest() and not _skill_runtime_hooks_attached():
+        # The hook bus (cluster 11) is not wired, so these hook points are not
+        # actually registered or invoked. Returning the fixed tuple digest would
+        # let the model mis-report that runtime hooks are wired and running.
+        return blocked_result("SkillRuntimeHooks", "skill_runtime_hooks_not_attached")
     return ok_result("SkillRuntimeHooks", {"hooks": hooks, "hookDigest": digest(hooks)})
 
 

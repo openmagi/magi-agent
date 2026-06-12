@@ -8,12 +8,14 @@ import logging
 import os
 import posixpath
 import re
+import signal
 import subprocess
+import threading
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Self
 
-from magi_agent.config.env import MAGI_EDIT_FUZZY_MATCH_ENABLED as _EDIT_FUZZY_MATCH_ENABLED
+from magi_agent.config.env import edit_fuzzy_match_enabled as _edit_fuzzy_match_enabled
 
 from google.adk.tools import FunctionTool
 from pydantic import (
@@ -45,6 +47,11 @@ from magi_agent.evidence.coding_tool_receipts import (
 from magi_agent.evidence.edit_match_receipts import (
     EditMatchReceiptBoundary,
     EditMatchReceiptRecord,
+)
+from magi_agent.runtime.public_events import (
+    tool_end_event,
+    tool_progress_event,
+    tool_start_event,
 )
 from magi_agent.tools.context import ToolContext
 from magi_agent.tools.dispatcher import ToolDispatcher
@@ -79,19 +86,192 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+# Non-interactive hygiene defaults for the Bash/TestRun subprocess: pagers
+# hang waiting for keypresses and progress bars flood the bounded output
+# capture. Applied via setdefault, so values already present in the env (and
+# inline ``KEY=value`` assignments in the command itself) always win.
+_NONINTERACTIVE_ENV_DEFAULTS: dict[str, str] = {
+    "PAGER": "cat",
+    "MANPAGER": "cat",
+    "GIT_PAGER": "cat",
+    "LESS": "-R",
+    "PIP_PROGRESS_BAR": "off",
+    "TQDM_DISABLE": "1",
+}
+
+
+def _apply_noninteractive_env_defaults(env: dict[str, str]) -> dict[str, str]:
+    """Fill in non-interactive hygiene defaults without overriding existing values."""
+    for key, value in _NONINTERACTIVE_ENV_DEFAULTS.items():
+        env.setdefault(key, value)
+    return env
+
+
 def _build_bash_env(cfg: EgressProxyConfig | None = None) -> dict[str, str]:
     """Build the env for the Bash tool subprocess.
 
     Default-OFF: when the egress proxy is unset, the overlay is empty and the
-    returned env is byte-identical to the legacy ``{"PATH": ...}`` mapping.
+    returned env is the legacy ``{"PATH": ...}`` mapping plus the
+    non-interactive hygiene defaults.
     """
     cfg = EgressProxyConfig.from_env() if cfg is None else cfg
     env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin")}
     env.update(subprocess_env_overlay(cfg))
-    return env
+    return _apply_noninteractive_env_defaults(env)
+
+def _decode_capture_bytes(value: bytes) -> str:
+    return value.decode("utf-8", errors="replace")
+
+
+def _bounded_head_tail(text: str, max_bytes: int) -> str:
+    """Cap ``text`` keeping BOTH ends.
+
+    Test runners print failure summaries at the END of their output; a
+    head-only slice hides exactly the part the model needs. Split the budget
+    ~60/40 between head and tail with an explicit elision marker.
+    """
+    if len(text) <= max_bytes:
+        return text
+    head_budget = max(1, (max_bytes * 3) // 5)
+    tail_budget = max(0, max_bytes - head_budget)
+    head = text[:head_budget]
+    tail = text[len(text) - tail_budget :] if tail_budget else ""
+    elided = len(text) - head_budget - tail_budget
+    marker = (
+        f"\n[... {elided} bytes elided - output truncated; re-run with "
+        "head/tail/grep filters to see the elided region ...]\n"
+    )
+    return head + marker + tail
+
+
+class _BoundedPipeCapture:
+    """Bound subprocess pipe capture without buffering unbounded output."""
+
+    def __init__(self, max_bytes: int) -> None:
+        self.max_bytes = max(1, max_bytes)
+        self._raw_digest = hashlib.sha256()
+        self._buffer = bytearray()
+        self._tail = bytearray()
+        self.total_bytes = 0
+
+    @property
+    def _head_budget(self) -> int:
+        return max(1, (self.max_bytes * 3) // 5)
+
+    @property
+    def _tail_budget(self) -> int:
+        return max(0, self.max_bytes - self._head_budget)
+
+    def feed(self, chunk: bytes) -> None:
+        if not chunk:
+            return
+        self.total_bytes += len(chunk)
+        self._raw_digest.update(chunk)
+        remaining = self.max_bytes - len(self._buffer)
+        if remaining > 0:
+            self._buffer.extend(chunk[:remaining])
+        tail_budget = self._tail_budget
+        if tail_budget > 0:
+            self._tail.extend(chunk)
+            overflow = len(self._tail) - tail_budget
+            if overflow > 0:
+                del self._tail[:overflow]
+
+    def text(self) -> str:
+        if self.total_bytes <= self.max_bytes:
+            return _decode_capture_bytes(bytes(self._buffer))
+        head_bytes = bytes(self._buffer[: self._head_budget])
+        tail_budget = self._tail_budget
+        tail_bytes = bytes(self._tail[-tail_budget:]) if tail_budget else b""
+        elided = max(0, self.total_bytes - len(head_bytes) - len(tail_bytes))
+        marker = (
+            f"\n[... {elided} bytes elided - output truncated; re-run with "
+            "head/tail/grep filters to see the elided region ...]\n"
+        )
+        return _decode_capture_bytes(head_bytes) + marker + _decode_capture_bytes(tail_bytes)
+
+    def digest(self) -> str:
+        if self.total_bytes <= self.max_bytes:
+            return _digest(_decode_capture_bytes(bytes(self._buffer)))
+        return "sha256:" + self._raw_digest.hexdigest()
+
+
+def _drain_pipe(pipe: Any, capture: _BoundedPipeCapture) -> None:
+    try:
+        while True:
+            chunk = pipe.read(65536)
+            if not chunk:
+                break
+            capture.feed(chunk)
+    except (OSError, ValueError):
+        return
+    finally:
+        try:
+            pipe.close()
+        except (OSError, ValueError):
+            return
+
+
+def _start_pipe_drain(pipe: Any, capture: _BoundedPipeCapture) -> threading.Thread:
+    thread = threading.Thread(target=_drain_pipe, args=(pipe, capture), daemon=True)
+    thread.start()
+    return thread
+
+
+def _kill_process_group(process: subprocess.Popen[bytes]) -> None:
+    if os.name == "posix":
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+            return
+        except ProcessLookupError:
+            return
+        except OSError:
+            pass
+    process.kill()
+
+
+def _force_stop_process(process: subprocess.Popen[bytes]) -> None:
+    if process.poll() is not None:
+        return
+    _kill_process_group(process)
+    try:
+        process.wait(timeout=1.0)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        try:
+            process.wait(timeout=1.0)
+        except subprocess.TimeoutExpired:
+            return
+
+
+def _close_process_pipes(process: subprocess.Popen[bytes]) -> None:
+    for pipe in (process.stdout, process.stderr):
+        if pipe is None:
+            continue
+        try:
+            pipe.close()
+        except (OSError, ValueError):
+            continue
+
+
+def _join_pipe_drains(
+    process: subprocess.Popen[bytes],
+    threads: Sequence[threading.Thread],
+) -> None:
+    for thread in threads:
+        thread.join(timeout=1.0)
+    if any(thread.is_alive() for thread in threads):
+        _close_process_pipes(process)
+        for thread in threads:
+            thread.join(timeout=1.0)
+
 
 Gate5BFullToolHostStatus = Literal["disabled", "blocked", "ready"]
 Gate5BFullToolOutcomeStatus = Literal["ok", "blocked", "error", "duplicate"]
+
+# TestRun applies the catalog manifest's 300s verification timeout instead of
+# the short Bash command timeout (catalog.py TestRun timeout_ms=300_000).
+_TEST_RUN_TIMEOUT_S = 300.0
 
 _GATE5B_LEGACY_FULL_TOOLHOST_TOOL_NAMES = (
     "Clock",
@@ -400,14 +580,14 @@ class Gate5BFullToolHostConfig(_Gate5BFullModel):
     environment: str = "local"
     environment_allowlist: tuple[str, ...] = Field(default=(), alias="environmentAllowlist")
     allowed_tool_names: tuple[str, ...] = Field(default=(), alias="allowedToolNames")
-    max_tool_calls_per_turn: int = Field(default=0, ge=0, le=64, alias="maxToolCallsPerTurn")
+    max_tool_calls_per_turn: int = Field(default=0, ge=0, le=4096, alias="maxToolCallsPerTurn")
     max_per_tool_output_bytes: int = Field(
         default=8192,
         ge=1,
         le=131072,
         alias="maxPerToolOutputBytes",
     )
-    command_timeout_ms: int = Field(default=5000, ge=250, le=30000, alias="commandTimeoutMs")
+    command_timeout_ms: int = Field(default=5000, ge=250, le=600000, alias="commandTimeoutMs")
     format_on_write_enabled: bool = Field(default=False, alias="formatOnWriteEnabled")
     lsp_diagnostics_enabled: bool = Field(default=False, alias="lspDiagnosticsEnabled")
     lsp_diagnostics_cap: int = Field(default=20, ge=1, le=100, alias="lspDiagnosticsCap")
@@ -655,6 +835,7 @@ class Gate5BFullToolHost:
         read_ledger_enabled: bool = False,
         diagnostics_provider: DiagnosticsProvider | None = None,
         memory_mode: "MemoryMode | str" = "normal",
+        public_event_sink: Callable[[Mapping[str, object]], None] | None = None,
     ) -> None:
         self.config = config
         self.workspace_root = workspace_root.resolve()
@@ -664,6 +845,7 @@ class Gate5BFullToolHost:
         self.counter = Gate5BFullToolCounter(config)
         self._tool_registry = tool_registry
         self._tool_dispatcher = ToolDispatcher(tool_registry) if tool_registry is not None else None
+        self._public_event_sink = public_event_sink
         self.receipt_boundary = CodingToolReceiptBoundary(
             CodingToolReceiptConfig(enabled=True)
         )
@@ -758,6 +940,51 @@ class Gate5BFullToolHost:
             return output
         return _filter_protected_memory_matches(output)
 
+    @property
+    def public_tool_events_enabled(self) -> bool:
+        return self._public_event_sink is not None
+
+    def _emit_public_event(self, payload: Mapping[str, object]) -> None:
+        if self._public_event_sink is None:
+            return
+        try:
+            self._public_event_sink(dict(payload))
+        except Exception:
+            return
+
+    def _emit_public_tool_start(self, *, tool_event_id: str, tool_name: str) -> None:
+        self._emit_public_event(tool_start_event(tool_id=tool_event_id, name=tool_name))
+        self._emit_public_event(
+            tool_progress_event(
+                tool_id=tool_event_id,
+                label=tool_name,
+                status="in_progress",
+                message="Tool dispatch started",
+            )
+        )
+
+    def _emit_public_tool_end(
+        self,
+        *,
+        tool_event_id: str,
+        outcome: Gate5BFullToolOutcome,
+    ) -> None:
+        receipt = outcome.receipt
+        receipt_ref = f"receipt:{receipt.bounded_output_digest}"
+        status = "ok" if outcome.status == "ok" else "error"
+        self._emit_public_event(
+            tool_end_event(
+                tool_id=tool_event_id,
+                status=status,
+                output_preview=(
+                    f"bytes={receipt.output_byte_count} "
+                    f"result={receipt.bounded_output_digest}"
+                ),
+                error=None if status == "ok" else outcome.reason,
+                receipt_refs=(receipt_ref,),
+            )
+        )
+
     async def dispatch(
         self,
         tool_name: str,
@@ -769,128 +996,146 @@ class Gate5BFullToolHost:
         args = dict(arguments or {})
         tool_call_digest = _digest({"tool": tool_name, "id": tool_call_id})
         argument_digest = _digest(args)
-        preflight = self.counter.before_call(
-            request_digest=request_digest,
-            tool_call_digest=tool_call_digest,
-            argument_digest=argument_digest,
-            tool_name=tool_name,
-        )
-        if preflight is not None:
-            return preflight
-        if tool_name not in self.exposed_tool_names:
-            return self.counter.blocked(
-                request_digest=request_digest,
-                tool_call_digest=tool_call_digest,
-                tool_name=tool_name,
-                reason="tool_not_allowlisted",
-                argument_digest=argument_digest,
-            )
+        tool_event_id = _gate5b_live_tool_event_id(tool_call_digest)
+        outcome: Gate5BFullToolOutcome | None = None
+        self._emit_public_tool_start(tool_event_id=tool_event_id, tool_name=tool_name)
         try:
-            # Clear any stale edit-match result from a previous call before
-            # invoking the handler so dispatch never reads stale state.
-            self._last_edit_match_result = None
-            # Channel memory-mode hard enforcement. The gate5b host executes
-            # FileRead/Grep/FileWrite/FileEdit/PatchApply/Bash directly via
-            # _handle, bypassing the core_toolhost guard, so it must enforce
-            # the same protected-memory rules here. Raised inside the try block
-            # so the existing Gate5BFullToolRegistryBlocked handler surfaces it
-            # as a "memory_mode_blocked" blocked outcome.
-            self._enforce_memory_mode(tool_name, args)
-            self._preflight_legacy_tool(tool_name, args, tool_call_id=tool_call_id)
-            output = await self._handle(tool_name, args, tool_call_id=tool_call_id)
-            output = self._filter_memory_mode_output(tool_name, output)
-            # The diagnostics collection does blocking stdio reads against the
-            # language server. Run it off the event loop so a slow/hung server
-            # can't stall concurrent requests (mirrors the to_thread pattern in
-            # hooks/bus.py and storage/session_store.py). Fail-open downstream.
-            diagnostics_receipt = await asyncio.to_thread(
-                self._after_write_diagnostics, tool_name, args, output
-            )
-            # Build an EditMatch evidence receipt when the fuzzy cascade was used
-            # (i.e. when _handle stored an EditMatchResult in _last_edit_match_result).
-            edit_match_receipt = self._build_edit_match_receipt(output)
-            result = ToolResult(status="ok", output=output)
-            coding_receipt = self.receipt_boundary.extract_receipt(
-                tool_call_id=tool_call_id,
-                tool_name=tool_name,
-                arguments=args,
-                result=result,
-            )
-            return self.counter.finish_call(
+            preflight = self.counter.before_call(
                 request_digest=request_digest,
                 tool_call_digest=tool_call_digest,
                 argument_digest=argument_digest,
                 tool_name=tool_name,
-                status="ok",
-                output_preview=_bounded_output(output, self.config.max_per_tool_output_bytes),
-                output_byte_count=_encoded_len(output),
-                coding_mutation_receipt=coding_receipt,
-                code_diagnostics_receipt=diagnostics_receipt,
-                edit_match_receipt=edit_match_receipt,
             )
-        except Gate5BFullToolRegistryBlocked as error:
-            return self.counter.blocked(
-                request_digest=request_digest,
-                tool_call_digest=tool_call_digest,
-                tool_name=tool_name,
-                reason=error.reason,
-                argument_digest=argument_digest,
-            )
-        except Gate5BFullToolReadLedgerError as ledger_error:
-            # Ledger blocks are recoverable: read the file, then retry the SAME
-            # call. Do not record the block, so the retry is not flagged as a
-            # duplicate/digest conflict.
-            return self.counter.blocked(
-                request_digest=request_digest,
-                tool_call_digest=tool_call_digest,
-                tool_name=tool_name,
-                reason=ledger_error.reason,
-                record=False,
-            )
-        except Gate5BFullToolPathPolicyError:
-            return self.counter.blocked(
-                request_digest=request_digest,
-                tool_call_digest=tool_call_digest,
-                tool_name=tool_name,
-                reason="path_policy_denied",
-                argument_digest=argument_digest,
-            )
-        except subprocess.TimeoutExpired:
-            result = ToolResult(status="error", errorMessage="command_timeout")
-            coding_receipt = self.receipt_boundary.extract_receipt(
-                tool_call_id=tool_call_id,
-                tool_name=tool_name,
-                arguments=args,
-                result=result,
-            )
-            return self.counter.finish_call(
-                request_digest=request_digest,
-                tool_call_digest=tool_call_digest,
-                argument_digest=argument_digest,
-                tool_name=tool_name,
-                status="error",
-                output_preview={"error": "command_timeout"},
-                output_byte_count=0,
-                coding_mutation_receipt=coding_receipt,
-            )
-        except (OSError, ValueError, TypeError):
-            result = ToolResult(status="error", errorMessage="tool_error")
-            coding_receipt = self.receipt_boundary.extract_receipt(
-                tool_call_id=tool_call_id,
-                tool_name=tool_name,
-                arguments=args,
-                result=result,
-            )
-            return self.counter.finish_call(
-                request_digest=request_digest,
-                tool_call_digest=tool_call_digest,
-                argument_digest=argument_digest,
-                tool_name=tool_name,
-                status="error",
-                output_preview={"error": "tool_error"},
-                output_byte_count=0,
-                coding_mutation_receipt=coding_receipt,
-            )
+            if preflight is not None:
+                outcome = preflight
+                return outcome
+            if tool_name not in self.exposed_tool_names:
+                outcome = self.counter.blocked(
+                    request_digest=request_digest,
+                    tool_call_digest=tool_call_digest,
+                    tool_name=tool_name,
+                    reason="tool_not_allowlisted",
+                    argument_digest=argument_digest,
+                )
+                return outcome
+            try:
+                # Clear any stale edit-match result from a previous call before
+                # invoking the handler so dispatch never reads stale state.
+                self._last_edit_match_result = None
+                # Channel memory-mode hard enforcement. The gate5b host executes
+                # FileRead/Grep/FileWrite/FileEdit/PatchApply/Bash directly via
+                # _handle, bypassing the core_toolhost guard, so it must enforce
+                # the same protected-memory rules here. Raised inside the try block
+                # so the existing Gate5BFullToolRegistryBlocked handler surfaces it
+                # as a "memory_mode_blocked" blocked outcome.
+                self._enforce_memory_mode(tool_name, args)
+                self._preflight_legacy_tool(tool_name, args, tool_call_id=tool_call_id)
+                output = await self._handle(tool_name, args, tool_call_id=tool_call_id)
+                output = self._filter_memory_mode_output(tool_name, output)
+                # The diagnostics collection does blocking stdio reads against the
+                # language server. Run it off the event loop so a slow/hung server
+                # can't stall concurrent requests (mirrors the to_thread pattern in
+                # hooks/bus.py and storage/session_store.py). Fail-open downstream.
+                diagnostics_receipt = await asyncio.to_thread(
+                    self._after_write_diagnostics, tool_name, args, output
+                )
+                # Build an EditMatch evidence receipt when the fuzzy cascade was used
+                # (i.e. when _handle stored an EditMatchResult in _last_edit_match_result).
+                edit_match_receipt = self._build_edit_match_receipt(output)
+                result = ToolResult(status="ok", output=output)
+                coding_receipt = self.receipt_boundary.extract_receipt(
+                    tool_call_id=tool_call_id,
+                    tool_name=tool_name,
+                    arguments=args,
+                    result=result,
+                )
+                outcome = self.counter.finish_call(
+                    request_digest=request_digest,
+                    tool_call_digest=tool_call_digest,
+                    argument_digest=argument_digest,
+                    tool_name=tool_name,
+                    status="ok",
+                    output_preview=_bounded_output(output, self.config.max_per_tool_output_bytes),
+                    output_byte_count=_encoded_len(output),
+                    coding_mutation_receipt=coding_receipt,
+                    code_diagnostics_receipt=diagnostics_receipt,
+                    edit_match_receipt=edit_match_receipt,
+                )
+                return outcome
+            except Gate5BFullToolRegistryBlocked as error:
+                outcome = self.counter.blocked(
+                    request_digest=request_digest,
+                    tool_call_digest=tool_call_digest,
+                    tool_name=tool_name,
+                    reason=error.reason,
+                    argument_digest=argument_digest,
+                )
+                return outcome
+            except Gate5BFullToolReadLedgerError as ledger_error:
+                # Ledger blocks are recoverable: read the file, then retry the SAME
+                # call. Do not record the block, so the retry is not flagged as a
+                # duplicate/digest conflict.
+                outcome = self.counter.blocked(
+                    request_digest=request_digest,
+                    tool_call_digest=tool_call_digest,
+                    tool_name=tool_name,
+                    reason=ledger_error.reason,
+                    record=False,
+                )
+                return outcome
+            except Gate5BFullToolPathPolicyError:
+                outcome = self.counter.blocked(
+                    request_digest=request_digest,
+                    tool_call_digest=tool_call_digest,
+                    tool_name=tool_name,
+                    reason="path_policy_denied",
+                    argument_digest=argument_digest,
+                )
+                return outcome
+            except subprocess.TimeoutExpired:
+                result = ToolResult(status="error", errorMessage="command_timeout")
+                coding_receipt = self.receipt_boundary.extract_receipt(
+                    tool_call_id=tool_call_id,
+                    tool_name=tool_name,
+                    arguments=args,
+                    result=result,
+                )
+                outcome = self.counter.finish_call(
+                    request_digest=request_digest,
+                    tool_call_digest=tool_call_digest,
+                    argument_digest=argument_digest,
+                    tool_name=tool_name,
+                    status="error",
+                    output_preview={"error": "command_timeout"},
+                    output_byte_count=0,
+                    coding_mutation_receipt=coding_receipt,
+                )
+                return outcome
+            except (OSError, ValueError, TypeError):
+                result = ToolResult(status="error", errorMessage="tool_error")
+                coding_receipt = self.receipt_boundary.extract_receipt(
+                    tool_call_id=tool_call_id,
+                    tool_name=tool_name,
+                    arguments=args,
+                    result=result,
+                )
+                outcome = self.counter.finish_call(
+                    request_digest=request_digest,
+                    tool_call_digest=tool_call_digest,
+                    argument_digest=argument_digest,
+                    tool_name=tool_name,
+                    status="error",
+                    output_preview={"error": "tool_error"},
+                    output_byte_count=0,
+                    coding_mutation_receipt=coding_receipt,
+                )
+                return outcome
+        finally:
+            if outcome is not None:
+                self._emit_public_tool_end(
+                    tool_event_id=tool_event_id,
+                    outcome=outcome,
+                )
 
     def _ripgrep_active(self) -> bool:
         # NOTE: reads self.config.ripgrep_enabled — frozen at construction time.
@@ -994,7 +1239,10 @@ class Gate5BFullToolHost:
             if not old_text:
                 raise ValueError("empty_old_text")
             current = target.read_text(encoding="utf-8", errors="replace")
-            if _EDIT_FUZZY_MATCH_ENABLED:
+            # Call-time read: the import-time constant froze BEFORE profile env
+            # defaults were applied, silently disabling fuzzy edits in eval runs.
+            fuzzy_enabled = _edit_fuzzy_match_enabled()
+            if fuzzy_enabled:
                 from magi_agent.coding.edit_matching import (
                     MultipleMatchesError as _MultipleMatchesError,
                     NoMatchError as _NoMatchError,
@@ -1019,7 +1267,7 @@ class Gate5BFullToolHost:
                 "pathDigest": _digest(target.relative_to(self.workspace_root).as_posix()),
                 "replacements": 1,
             }
-            if _EDIT_FUZZY_MATCH_ENABLED and self._last_edit_match_result is not None:
+            if fuzzy_enabled and self._last_edit_match_result is not None:
                 from magi_agent.coding.edit_matching import EditMatchResult as _EditMatchResult
                 if isinstance(self._last_edit_match_result, _EditMatchResult):
                     edit_result["matchTier"] = self._last_edit_match_result.tier
@@ -1058,29 +1306,118 @@ class Gate5BFullToolHost:
                 return self._apply_envelope_patch(patch_text)
             raise ValueError("unsupported_patch_shape")
         if tool_name == "Bash":
-            command = str(args.get("command", "")).strip()
-            if not command:
-                raise ValueError("empty_command")
-            completed = subprocess.run(
+            return self._run_shell_command(
+                str(args.get("command", "")),
+                timeout_s=self.config.command_timeout_ms / 1000,
+            )
+        if tool_name == "TestRun":
+            # TestRun shares Bash's execution path and approval surface
+            # (safety.py treats {Bash, TestRun} via _shell_decision) but applies
+            # the manifest's 300s verification timeout instead of the short Bash
+            # command timeout.
+            return self._run_shell_command(
+                str(args.get("command", "")),
+                timeout_s=_TEST_RUN_TIMEOUT_S,
+            )
+        if tool_name == "GitDiff":
+            return self._handle_git_diff()
+        return await self._dispatch_registry_tool(tool_name, args, tool_call_id=tool_call_id)
+
+    def _run_shell_command(self, raw_command: str, *, timeout_s: float) -> dict[str, object]:
+        command = raw_command.strip()
+        if not command:
+            raise ValueError("empty_command")
+        cap = self.config.max_per_tool_output_bytes
+        stdout_capture = _BoundedPipeCapture(cap)
+        stderr_capture = _BoundedPipeCapture(cap)
+        timed_out = False
+        returncode: int | None
+        process: subprocess.Popen[bytes] | None = None
+        threads: list[threading.Thread] = []
+        try:
+            process = subprocess.Popen(
                 command,
                 cwd=self.workspace_root,
                 shell=True,
-                capture_output=True,
-                text=True,
-                timeout=self.config.command_timeout_ms / 1000,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 env=_build_bash_env(),
-                check=False,
+                start_new_session=(os.name == "posix"),
             )
-            stdout = _redact(completed.stdout)[0 : self.config.max_per_tool_output_bytes]
-            stderr = _redact(completed.stderr)[0 : self.config.max_per_tool_output_bytes]
-            return {
-                "exitCode": completed.returncode,
+            if process.stdout is not None:
+                threads.append(_start_pipe_drain(process.stdout, stdout_capture))
+            if process.stderr is not None:
+                threads.append(_start_pipe_drain(process.stderr, stderr_capture))
+            try:
+                returncode = process.wait(timeout=timeout_s)
+            except subprocess.TimeoutExpired:
+                timed_out = True
+                returncode = None
+                _force_stop_process(process)
+            finally:
+                _join_pipe_drains(process, threads)
+        except BaseException:
+            if process is not None:
+                _force_stop_process(process)
+                _close_process_pipes(process)
+                _join_pipe_drains(process, threads)
+            raise
+
+        stdout = _redact(stdout_capture.text())
+        stderr = _redact(stderr_capture.text())
+        if timed_out:
+            result: dict[str, object] = {
+                "exitCode": None,
+                "timedOut": True,
+                "timeoutMs": int(timeout_s * 1000),
+                "note": (
+                    f"command timed out after {timeout_s:g}s; "
+                    "partial output captured below"
+                ),
                 "stdout": stdout,
                 "stderr": stderr,
-                "stdoutDigest": _digest(completed.stdout),
-                "stderrDigest": _digest(completed.stderr),
+                "stdoutDigest": stdout_capture.digest(),
+                "stderrDigest": stderr_capture.digest(),
             }
-        return await self._dispatch_registry_tool(tool_name, args, tool_call_id=tool_call_id)
+            note = _deadline_note_safe()
+            if note:
+                result["deadlineNote"] = note
+            return result
+        result = {
+            "exitCode": returncode,
+            "stdout": stdout,
+            "stderr": stderr,
+            "stdoutDigest": stdout_capture.digest(),
+            "stderrDigest": stderr_capture.digest(),
+        }
+        note = _deadline_note_safe()
+        if note:
+            result["deadlineNote"] = note
+        return result
+
+    def _handle_git_diff(self) -> dict[str, object]:
+        """Return read-only workspace git diff metadata.
+
+        Runs ``git`` with ``shell=False`` in the workspace root. Output is
+        redacted and byte-bounded. When the directory is not a git repository
+        the result is explicit (``isGitRepo: False``) rather than fabricated.
+        """
+
+        if not _is_git_repository(self.workspace_root):
+            return {"isGitRepo": False, "status": [], "numstat": []}
+        status_lines = _git_status_porcelain(
+            self.workspace_root,
+            byte_limit=self.config.max_per_tool_output_bytes,
+        )
+        numstat = _git_diff_numstat(
+            self.workspace_root,
+            byte_limit=self.config.max_per_tool_output_bytes,
+        )
+        return {
+            "isGitRepo": True,
+            "status": status_lines,
+            "numstat": numstat,
+        }
 
     async def _dispatch_registry_tool(
         self,
@@ -1623,6 +1960,7 @@ def build_gate5b_full_toolhost_bundle(
     read_ledger_enabled: bool | None = None,
     diagnostics_provider: DiagnosticsProvider | None = None,
     memory_mode: "MemoryMode | str" = "normal",
+    public_event_sink: Callable[[Mapping[str, object]], None] | None = None,
 ) -> Gate5BFullToolBundle:
     safe_config = Gate5BFullToolHostConfig.model_validate(config or {})
     workspace = Path(workspace_root)
@@ -1646,6 +1984,7 @@ def build_gate5b_full_toolhost_bundle(
         read_ledger_enabled=read_ledger_enabled,
         diagnostics_provider=diagnostics_provider,
         memory_mode=memory_mode,
+        public_event_sink=public_event_sink,
     )
     if selected_scope_error is not None:
         return Gate5BFullToolBundle(
@@ -1841,12 +2180,20 @@ def _apply_patch_tool_swap(
 
 
 def _build_adk_tool(host: Gate5BFullToolHost, name: str) -> FunctionTool:
+    def function_tool(func: Callable[..., object], description: str | None = None) -> FunctionTool:
+        return _function_tool(
+            name,
+            func,
+            description=description,
+            emits_public_events=host.public_tool_events_enabled,
+        )
+
     if name == "Clock":
 
         async def invoke_clock(tool_context: object | None = None) -> dict[str, object]:
             return await _dispatch_adk_tool(host, "Clock", {}, tool_context)
 
-        return _function_tool(name, invoke_clock)
+        return function_tool(invoke_clock)
 
     if name == "Calculation":
 
@@ -1856,21 +2203,21 @@ def _build_adk_tool(host: Gate5BFullToolHost, name: str) -> FunctionTool:
         ) -> dict[str, object]:
             return await _dispatch_adk_tool(host, "Calculation", {"expression": expression}, tool_context)
 
-        return _function_tool(name, invoke_calculation)
+        return function_tool(invoke_calculation)
 
     if name == "FileRead":
 
         async def invoke_file_read(path: str = "", tool_context: object | None = None) -> dict[str, object]:
             return await _dispatch_adk_tool(host, "FileRead", {"path": path}, tool_context)
 
-        return _function_tool(name, invoke_file_read)
+        return function_tool(invoke_file_read)
 
     if name == "Glob":
 
         async def invoke_glob(pattern: str = "*", tool_context: object | None = None) -> dict[str, object]:
             return await _dispatch_adk_tool(host, "Glob", {"pattern": pattern}, tool_context)
 
-        return _function_tool(name, invoke_glob)
+        return function_tool(invoke_glob)
 
     if name == "Grep":
 
@@ -1881,7 +2228,7 @@ def _build_adk_tool(host: Gate5BFullToolHost, name: str) -> FunctionTool:
         ) -> dict[str, object]:
             return await _dispatch_adk_tool(host, "Grep", {"pattern": pattern, "glob": glob}, tool_context)
 
-        return _function_tool(name, invoke_grep)
+        return function_tool(invoke_grep)
 
     if name == "FileWrite":
 
@@ -1892,7 +2239,7 @@ def _build_adk_tool(host: Gate5BFullToolHost, name: str) -> FunctionTool:
         ) -> dict[str, object]:
             return await _dispatch_adk_tool(host, "FileWrite", {"path": path, "content": content}, tool_context)
 
-        return _function_tool(name, invoke_file_write)
+        return function_tool(invoke_file_write)
 
     if name == "FileEdit":
 
@@ -1904,7 +2251,7 @@ def _build_adk_tool(host: Gate5BFullToolHost, name: str) -> FunctionTool:
         ) -> dict[str, object]:
             return await _dispatch_adk_tool(host, "FileEdit", {"path": path, "oldText": oldText, "newText": newText}, tool_context)
 
-        return _function_tool(name, invoke_file_edit)
+        return function_tool(invoke_file_edit)
 
     if name == "PatchApply":
 
@@ -1921,14 +2268,55 @@ def _build_adk_tool(host: Gate5BFullToolHost, name: str) -> FunctionTool:
                 arguments["patch"] = patch
             return await _dispatch_adk_tool(host, "PatchApply", arguments, tool_context)
 
-        return _function_tool(name, invoke_patch_apply)
+        return function_tool(invoke_patch_apply)
 
     if name == "Bash":
 
         async def invoke_bash(command: str = "", tool_context: object | None = None) -> dict[str, object]:
             return await _dispatch_adk_tool(host, "Bash", {"command": command}, tool_context)
 
-        return _function_tool(name, invoke_bash)
+        return function_tool(invoke_bash)
+
+    if name == "SpawnAgent":
+
+        async def invoke_spawn_agent(
+            prompt: str = "",
+            task: str = "",
+            persona: str = "general",
+            provider: str = "",
+            model: str = "",
+            budgetMs: int = 0,
+            tool_context: object | None = None,
+        ) -> dict[str, object]:
+            """Delegate a bounded readonly subtask to a child Magi Agent.
+
+            Args:
+                prompt: Concrete subtask prompt for the child agent.
+                task: Alias for prompt when the model phrases work as a task.
+                persona: Optional child role, such as researcher or reviewer.
+                provider: Optional explicit child provider route.
+                model: Optional explicit child model route.
+                budgetMs: Optional child runtime budget in milliseconds.
+            """
+            arguments = _registry_adk_arguments(
+                prompt=prompt,
+                task=task,
+                persona=persona,
+                provider=provider,
+                model=model,
+            )
+            if isinstance(budgetMs, int) and budgetMs > 0:
+                arguments["budgetMs"] = budgetMs
+            return await _dispatch_adk_tool(host, "SpawnAgent", arguments, tool_context)
+
+        return function_tool(
+            invoke_spawn_agent,
+            description=(
+                "Delegate a bounded readonly subtask to a child Magi Agent. "
+                "Provide prompt or task; use only when the user asks for parallel "
+                "or delegated work."
+            ),
+        )
 
     tool_name = name
 
@@ -1965,7 +2353,7 @@ def _build_adk_tool(host: Gate5BFullToolHost, name: str) -> FunctionTool:
         )
         return await _dispatch_adk_tool(host, tool_name, arguments, tool_context)
 
-    return _function_tool(name, invoke_registry_tool)
+    return function_tool(invoke_registry_tool)
 
 
 def _registry_adk_arguments(**values: str) -> dict[str, object]:
@@ -1993,10 +2381,29 @@ async def _dispatch_adk_tool(
     return outcome.model_dump(by_alias=True, mode="json", warnings=False)
 
 
-def _function_tool(name: str, func: Callable[..., object]) -> FunctionTool:
+def _function_tool(
+    name: str,
+    func: Callable[..., object],
+    *,
+    description: str | None = None,
+    emits_public_events: bool = False,
+) -> FunctionTool:
+    from magi_agent.gates.tool_usage_guidance import apply_usage_guidance  # noqa: PLC0415
+
     func.__name__ = name
-    func.__doc__ = f"Gate 5B selected full toolhost {name} tool."
-    return FunctionTool(func, require_confirmation=False)
+    base_description = description or f"Gate 5B selected full toolhost {name} tool."
+    # Default-OFF usage-guidance append; fail-open inside apply_usage_guidance
+    # so a registry problem can never break tool construction.
+    func.__doc__ = apply_usage_guidance(name, base_description)
+    if emits_public_events:
+        setattr(func, "_magi_gate5b_emits_public_events", True)
+    tool = FunctionTool(func, require_confirmation=False)
+    if emits_public_events:
+        try:
+            setattr(tool, "_magi_gate5b_emits_public_events", True)
+        except Exception:
+            pass
+    return tool
 
 
 def _read_offset(value: object) -> int:
@@ -2241,17 +2648,35 @@ def _eval_ast(node: object) -> int | float:
     raise ValueError("unsupported calculation expression")
 
 
+def _encoded_size(value: object) -> int:
+    return len(
+        json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            default=repr,
+        ).encode("utf-8")
+    )
+
+
 def _bounded_output(value: object, max_bytes: int) -> object:
     sanitized = _sanitize_output(value)
-    encoded = json.dumps(
-        sanitized,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=True,
-        default=repr,
-    ).encode("utf-8")
-    if len(encoded) <= max_bytes:
+    if _encoded_size(sanitized) <= max_bytes:
         return sanitized
+    # Degrade gracefully before discarding: shrink the large string fields
+    # (stdout/stderr/content/...) head+tail so the model keeps the signal.
+    # Replacing the whole result with a digest gave the model zero recovery
+    # information and silently destroyed large-but-legitimate tool results.
+    if isinstance(sanitized, Mapping):
+        shrunk: dict[str, object] = dict(sanitized)
+        for scale in (2, 4, 10, 40):
+            field_budget = max(200, max_bytes // scale)
+            for key, item in list(shrunk.items()):
+                if isinstance(item, str) and len(item) > field_budget:
+                    shrunk[key] = _bounded_head_tail(item, field_budget)
+            if _encoded_size(shrunk) <= max_bytes:
+                return shrunk
     return {"truncated": True, "digest": _digest(sanitized)}
 
 
@@ -2274,6 +2699,61 @@ def _redact(value: str) -> str:
     return _SENSITIVE_RE.sub("[redacted]", value)
 
 
+_GIT_DIFF_TIMEOUT_S = 10.0
+
+
+def _run_git(workspace_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git", *args],
+        cwd=workspace_root,
+        shell=False,
+        capture_output=True,
+        text=True,
+        timeout=_GIT_DIFF_TIMEOUT_S,
+        check=False,
+    )
+
+
+def _is_git_repository(workspace_root: Path) -> bool:
+    try:
+        completed = _run_git(
+            workspace_root, "rev-parse", "--is-inside-work-tree"
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return completed.returncode == 0 and completed.stdout.strip() == "true"
+
+
+def _git_status_porcelain(workspace_root: Path, *, byte_limit: int) -> list[str]:
+    completed = _run_git(workspace_root, "status", "--porcelain")
+    if completed.returncode != 0:
+        return []
+    rendered = _redact(completed.stdout)[0:byte_limit]
+    return [line for line in rendered.splitlines() if line.strip()]
+
+
+def _git_diff_numstat(workspace_root: Path, *, byte_limit: int) -> list[dict[str, object]]:
+    completed = _run_git(workspace_root, "diff", "--numstat")
+    if completed.returncode != 0:
+        return []
+    rendered = _redact(completed.stdout)[0:byte_limit]
+    entries: list[dict[str, object]] = []
+    for line in rendered.splitlines():
+        parts = line.split("\t")
+        if len(parts) < 3:
+            continue
+        added_raw, deleted_raw, path = parts[0], parts[1], parts[2]
+        entries.append(
+            {
+                "path": path,
+                # Binary files report "-" for added/deleted; surface as None.
+                "added": int(added_raw) if added_raw.isdigit() else None,
+                "deleted": int(deleted_raw) if deleted_raw.isdigit() else None,
+            }
+        )
+    return entries
+
+
 def _encoded_len(value: object) -> int:
     return len(
         json.dumps(value, sort_keys=True, separators=(",", ":"), default=repr).encode(
@@ -2285,6 +2765,12 @@ def _encoded_len(value: object) -> int:
 def _digest(value: object) -> str:
     material = json.dumps(value, sort_keys=True, default=repr, separators=(",", ":"))
     return "sha256:" + hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+
+def _gate5b_live_tool_event_id(tool_call_digest: str) -> str:
+    if tool_call_digest.startswith("sha256:") and len(tool_call_digest) >= 19:
+        return f"tu_{tool_call_digest[7:19]}"
+    return "tu_gate5b"
 
 
 def _safe_reason_label(value: str) -> str:
@@ -2304,6 +2790,15 @@ def _read_ledger_enabled_from_env() -> bool:
     from magi_agent.config.env import is_read_ledger_enabled
 
     return is_read_ledger_enabled(os.environ)
+
+
+def _deadline_note_safe() -> str | None:
+    try:
+        from magi_agent.runtime.deadline import deadline_note  # noqa: PLC0415
+
+        return deadline_note()
+    except Exception:  # noqa: BLE001 - the nudge must never break a tool result
+        return None
 
 
 __all__ = [

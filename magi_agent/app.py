@@ -12,9 +12,8 @@ from .runtime.openmagi_runtime import OpenMagiRuntime
 from .transport.chat import register_chat_routes
 from .transport.control_requests import register_control_request_routes
 from .transport.streaming_chat_route import register_streaming_chat_routes
-from .transport.dashboard import register_dashboard_routes
+from .transport.web_dashboard import register_dashboard_routes
 from .transport.health import health_payload, healthz_payload
-from .transport.shadow_generations import register_shadow_generation_routes
 from .transport.plugins import register_plugin_admin_routes
 from .transport.shadow_invocations import register_shadow_invocation_routes
 from .transport.debug_trace import router as debug_trace_router
@@ -104,7 +103,6 @@ def create_app(runtime: OpenMagiRuntime) -> FastAPI:
     register_streaming_chat_routes(app, runtime)
     register_control_request_routes(app, runtime)
     register_shadow_invocation_routes(app, runtime)
-    register_shadow_generation_routes(app, runtime)
     register_tool_admin_routes(app, runtime)
     register_customize_routes(app, runtime)
     # Default-OFF vault seam: routes serve unconditionally, but registration

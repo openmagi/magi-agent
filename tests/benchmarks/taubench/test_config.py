@@ -1,7 +1,7 @@
 # tests/benchmarks/taubench/test_config.py
 from __future__ import annotations
 
-from magi_agent.benchmarks.taubench.config import FULL_CAPABILITY_FLAGS, flags_for
+from benchmarks.taubench.config import FULL_CAPABILITY_FLAGS, flags_for
 
 
 def test_full_sets_the_six_control_plane_flags() -> None:

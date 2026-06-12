@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from magi_agent.authoring.compiler import CompileRecipePackCatalog
+from magi_agent.packs.types import CompileRecipePackCatalog
 from magi_agent.packs.loader import RecordingSink, load_from_bases
 
 _FIXTURE_BASE = Path(__file__).parent / "fixtures"

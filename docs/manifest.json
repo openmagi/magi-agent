@@ -59,6 +59,12 @@
       "group": "Operate"
     },
     {
+      "slug": "default-off-gates",
+      "title": "Default-Off Gates",
+      "path": "docs/default-off-gates.md",
+      "group": "Operate"
+    },
+    {
       "slug": "hooks",
       "title": "Hooks",
       "path": "docs/hooks.md",
@@ -194,6 +200,12 @@
       "slug": "build-a-harness",
       "title": "Build a Harness",
       "path": "docs/build-a-harness.md",
+      "group": "Recipes"
+    },
+    {
+      "slug": "api-stability",
+      "title": "API Stability",
+      "path": "docs/api-stability.md",
       "group": "Recipes"
     },
     {
@@ -350,6 +362,12 @@
       "slug": "cli-commands",
       "title": "In-session Commands",
       "path": "docs/cli-commands.md",
+      "group": "Reference"
+    },
+    {
+      "slug": "cli-gateway",
+      "title": "Gateway Daemon CLI",
+      "path": "docs/cli/gateway.md",
       "group": "Reference"
     },
     {

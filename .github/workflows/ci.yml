@@ -1,0 +1,59 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Install Python
+        run: uv python install ${{ matrix.python-version }}
+      - name: Sync deps (dev + cli extras)
+        run: uv sync --python ${{ matrix.python-version }} --extra dev --extra cli
+      - name: Run tests
+        env:
+          # Hermetic: never read a developer/CI host ~/.magi/config.toml
+          MAGI_CONFIG: ${{ runner.temp }}/magi-ci-config.toml
+        run: uv run --no-sync pytest -q
+
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Naming-leak ratchet gate
+        run: bash scripts/check_naming.sh
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Sync deps (dev extra)
+        run: uv sync --extra dev
+      - name: Ruff (stage-1 fatal subset, blocking)
+        run: uv run --no-sync ruff check .
+      - name: Module map drift gate
+        run: bash scripts/check_module_map.sh
+      - name: env-reference drift gate
+        run: bash scripts/check_env_reference.sh
+      - name: xfail budget ratchet gate
+        run: uv run --no-sync python scripts/check_xfail_budget.py
+      - name: direct flag-read ratchet gate
+        run: uv run --no-sync python scripts/check_flag_reads.py
+      - name: Mypy (advisory, non-blocking)
+        run: uv run --no-sync mypy magi_agent
+        continue-on-error: true

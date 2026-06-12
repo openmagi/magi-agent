@@ -30,6 +30,7 @@ from pathlib import Path
 
 from .context import ToolContext
 from .image_tools import _call_vision_model
+from .media_egress import MediaEgressBlocked, assert_media_url_allowed
 from .result import ToolResult
 from .spreadsheet_tools import (
     _SpreadsheetPolicyError,
@@ -314,6 +315,16 @@ def video_frames(arguments: Mapping[str, object], context: ToolContext) -> ToolR
         download_enabled = _is_video_download_enabled()
         if not download_enabled:
             return _blocked_result(tool_name, "video_download_not_enabled")
+
+        # SSRF preflight: static string-level validation of the user-supplied
+        # URL only (no DNS/redirect resolution). Placed BEFORE the download
+        # try-block so a block maps to status='blocked' rather than the
+        # retryable download-failure handler. fetch_captions is invoked
+        # internally by fetch_video on the SAME url, so one guard suffices.
+        try:
+            assert_media_url_allowed(source)
+        except MediaEgressBlocked as exc:
+            return _blocked_result(tool_name, "media_url_egress_blocked", exc.reason_code)
 
         import tempfile  # noqa: PLC0415
 

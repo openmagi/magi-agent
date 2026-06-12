@@ -27,8 +27,6 @@ BOT_CONFIG_DIGEST = "sha256:" + "4" * 64
 def _payload(**overrides: object) -> dict[str, object]:
     base: dict[str, object] = {
         "schemaVersion": "gate5b4c3.chatProxyShadowGeneration.v1",
-        "mode": "shadow_generation_diagnostic",
-        "responseAuthority": "typescript",
         "shadowGenerationId": "shadow_gen_001",
         "requestIdDigest": REQUEST_DIGEST,
         "traceIdDigest": TRACE_DIGEST,
@@ -269,6 +267,8 @@ def test_runner_input_adapter_full_toolhost_instructs_direct_answers_before_tool
     assert "Every turn must end with a normal text answer" in instruction
     assert "non-text runner events alone are not a valid completion" in instruction
     assert "Do not finish by promising future or background work" in instruction
+    assert "SpawnAgent" in instruction
+    assert "delegated subtask" in normalized_instruction
     assert "selected full toolhost" in normalized_instruction
 
 

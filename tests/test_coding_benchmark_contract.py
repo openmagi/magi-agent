@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from magi_agent.benchmarks.coding_eval import (
+from benchmarks.coding_eval import (
     BENCHMARK_SCHEMA_VERSION,
     EVIDENCE_KINDS,
     SCORING_CATEGORIES,
