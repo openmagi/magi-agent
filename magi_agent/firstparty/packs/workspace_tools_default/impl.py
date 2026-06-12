@@ -33,3 +33,66 @@ def _calculation(args: Mapping[str, object], view: WorkspaceHostView) -> dict[st
 def provide_calculation(context: ToolProvideContext) -> None:
     if context.register_workspace_handler is not None:
         context.register_workspace_handler("Calculation", _calculation)
+
+
+def _file_edit(args: Mapping[str, object], view: WorkspaceHostView) -> dict[str, object]:
+    """The MOVED Gate5BFullToolHost._handle FileEdit branch, re-expressed over
+    WorkspaceHostView. Read-ledger enforcement, the fuzzy-match cascade,
+    format-on-write and the EditMatch receipt hand-back are all kernel
+    mechanisms consumed through the view — error strings and result keys are
+    byte-identical to the legacy branch."""
+    from magi_agent.config.env import edit_fuzzy_match_enabled
+
+    target = view.resolve_path(str(args.get("path") or args.get("filePath") or ""))
+    view.enforce_read_before_mutation(target)
+    old_text = str(args.get("oldText", args.get("old_text", "")))
+    new_text = str(args.get("newText", args.get("new_text", "")))
+    if not old_text:
+        raise ValueError("empty_old_text")
+    current = target.read_text(encoding="utf-8", errors="replace")
+    # Call-time read (NOT import-time): the import-time constant froze before
+    # profile env defaults were applied — same bug class the legacy branch fixed.
+    fuzzy_enabled = edit_fuzzy_match_enabled()
+    match_result: object = None
+    if fuzzy_enabled:
+        from magi_agent.coding.edit_matching import (
+            MultipleMatchesError,
+            NoMatchError,
+            replace as fuzzy_replace,
+        )
+
+        try:
+            match_result = fuzzy_replace(current, old_text, new_text)
+        except NoMatchError:
+            raise ValueError("old_text_not_found")
+        except MultipleMatchesError:
+            raise ValueError("old_text_not_unique")
+        # Hand the structured match back so dispatch() builds the EditMatch
+        # evidence receipt after the handler returns (kernel mechanism).
+        view.store_edit_match_result(match_result)
+        target.write_text(match_result.result, encoding="utf-8")
+    else:
+        if old_text not in current:
+            raise ValueError("old_text_not_found")
+        target.write_text(current.replace(old_text, new_text, 1), encoding="utf-8")
+    view.format_after_write(target)
+    edit_result: dict[str, object] = {
+        "pathDigest": view.path_digest(target),
+        "replacements": 1,
+    }
+    if fuzzy_enabled and match_result is not None:
+        from magi_agent.coding.edit_matching import EditMatchResult
+
+        if isinstance(match_result, EditMatchResult):
+            edit_result["matchTier"] = match_result.tier
+            edit_result["matchConfidence"] = match_result.confidence
+    if view.config.format_on_write_enabled:
+        content_digest = view.content_digest(target)
+        if content_digest is not None:
+            edit_result["contentDigest"] = content_digest
+    return edit_result
+
+
+def provide_file_edit(context: ToolProvideContext) -> None:
+    if context.register_workspace_handler is not None:
+        context.register_workspace_handler("FileEdit", _file_edit)

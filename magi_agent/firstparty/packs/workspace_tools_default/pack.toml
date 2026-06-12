@@ -26,3 +26,8 @@ impl = "magi_agent.firstparty.packs.workspace_tools_default.impl:provide_clock"
 type = "tool"
 ref = "workspace:Calculation@1"
 impl = "magi_agent.firstparty.packs.workspace_tools_default.impl:provide_calculation"
+
+[[provides]]
+type = "tool"
+ref = "workspace:FileEdit@1"
+impl = "magi_agent.firstparty.packs.workspace_tools_default.impl:provide_file_edit"
