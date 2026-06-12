@@ -233,6 +233,12 @@
       "group": "Recipes"
     },
     {
+      "slug": "pack-authoring",
+      "title": "Write Your First Pack",
+      "path": "docs/pack-authoring.md",
+      "group": "Developer"
+    },
+    {
       "slug": "pack-manifest-reference",
       "title": "Pack Manifest Reference",
       "path": "docs/pack-manifest-reference.md",

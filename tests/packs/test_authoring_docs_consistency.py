@@ -52,3 +52,10 @@ def test_context_reference_capability_tokens_match_the_enum() -> None:
         assert f"`{token.value}`" in text, (
             f"pack-context-reference.md missing capability token `{token.value}`"
         )
+
+
+def test_authoring_walkthrough_uses_the_zero_setup_user_cp_shape() -> None:
+    text = (_DOCS / "pack-authoring.md").read_text()
+    assert "user_cp.impl:provide" in text
+    assert "control_plane:user-extra@1" in text
+    assert "magi pack new" in text
