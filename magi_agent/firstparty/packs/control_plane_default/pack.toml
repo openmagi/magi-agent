@@ -1,0 +1,62 @@
+# Bundled first-party control_plane pack (no privilege; same loader/format a user
+# control_plane pack uses, D1/D3). This is the de-privileging keystone: the
+# first-party LoopControls are discovered+loaded from THIS pack.toml instead of
+# being hand-assembled inside build_default_plugin. A user control_plane pack in
+# ~/.magi/packs loads through the identical path and registers in parallel.
+#
+# Schema = magi_agent/packs/manifest.py (top-level packId/displayName). control_plane
+# is an ordered type; gate_position defaults to "after" the permission gate (these
+# controls never decide before_tool, so they are correctly gated after the gate).
+# Each impl delegates to the matching single-source builder in
+# adk_bridge/control_plane.py — the migration is a MOVE, not a rewrite, so
+# behavior is byte-identical (Phase-0 golden stays green).
+#
+# The 3 main-side features (loop-resilience 6b7cd40e, facts-replan #510,
+# tool-synthesis nudge #512) are SEPARATE provides entries so a user pack can
+# override/forbid each individually (§1). `priority` orders them after the core
+# entry; the tool-synthesis nudge carries the highest priority so it registers
+# LAST — edit-retry / resilience overrides win the plane's first-non-None-wins
+# after-tool fan-out.
+
+packId = "openmagi.control-plane-default"
+displayName = "Default control plane"
+version = "1.1.0"
+description = "First-party default LoopControls (edit-retry, resilience, compaction, max-steps, self-review, GA reminder + loop-resilience, facts-replan, tool-synthesis nudge) bundled as a removable pack."
+
+[[provides]]
+type = "control_plane"
+ref = "control_plane:default@1"
+impl = "magi_agent.firstparty.packs.control_plane_default.impl:provide_default_controls"
+priority = 0
+phase = "loop"
+gatePosition = "after"
+
+# Loop-resilience (6b7cd40e): generic tool-exception reflection
+# (MAGI_TOOL_EXCEPTION_REFLECTION_ENABLED) + schema-invalid argument feedback
+# (MAGI_TOOL_SCHEMA_FEEDBACK_ENABLED). Both strict default-OFF.
+[[provides]]
+type = "control_plane"
+ref = "control_plane:loop-resilience@1"
+impl = "magi_agent.firstparty.packs.control_plane_default.impl:provide_loop_resilience_controls"
+priority = 10
+phase = "loop"
+gatePosition = "after"
+
+# Facts-survey replanning (#510): MAGI_FACTS_REPLAN_ENABLED, strict default-OFF.
+[[provides]]
+type = "control_plane"
+ref = "control_plane:facts-replan@1"
+impl = "magi_agent.firstparty.packs.control_plane_default.impl:provide_facts_replan_control"
+priority = 20
+phase = "loop"
+gatePosition = "after"
+
+# Tool-synthesis reflection nudge (#512): MAGI_TOOL_SYNTHESIS_NUDGE_ENABLED +
+# frontier-tier model label, default-OFF. Highest priority = registered LAST.
+[[provides]]
+type = "control_plane"
+ref = "control_plane:tool-synthesis-nudge@1"
+impl = "magi_agent.firstparty.packs.control_plane_default.impl:provide_tool_synthesis_nudge_control"
+priority = 30
+phase = "loop"
+gatePosition = "after"

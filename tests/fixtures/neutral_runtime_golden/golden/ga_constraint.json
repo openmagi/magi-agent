@@ -1,0 +1,13 @@
+[
+  {
+    "kind": "before_model",
+    "mutated": true,
+    "tools_cleared": false
+  },
+  {
+    "kind": "reinject",
+    "role": "user",
+    "source": "ga_constraint",
+    "text_digest": "sha256:ec94062d6fc37c51"
+  }
+]

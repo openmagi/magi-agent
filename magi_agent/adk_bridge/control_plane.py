@@ -455,6 +455,27 @@ class MaxStepsBrakeControl(BaseLoopControl):
         callback_context: Any,
         llm_request: Any,
     ) -> None:
+        # Phase 5: ADK hook is a thin delegate to the typed-context entry point.
+        # This control needs only the outgoing request, so the context carries no
+        # seam fields; behavior is byte-identical to the pre-migration body.
+        from magi_agent.packs.context import ControlPlaneContext
+
+        return await self.apply_before_model(
+            ControlPlaneContext.minimal(), llm_request=llm_request
+        )
+
+    async def apply_before_model(
+        self,
+        ctx: Any,
+        *,
+        llm_request: Any,
+    ) -> None:
+        """Typed-context entry point (the template for the seam migrations).
+
+        ``ctx`` is a :class:`ControlPlaneContext`; this control reads only the
+        outgoing request (the wrap-up brake — it needs no seam capability). A
+        user pack authoring an equivalent brake receives the same context.
+        """
         from magi_agent.runtime.turn_policy import MAX_STEPS_WRAP_UP_MESSAGE
 
         if self.max_iterations <= 0:
@@ -524,11 +545,16 @@ class GaConstraintReinjectionControl(BaseLoopControl):
     def __init__(
         self,
         *,
-        receipts: Any,
-        contract_required: Any,
+        receipts: Any | None = None,
+        contract_required: Any | None = None,
         agent_role: str = "general",
         env: dict[str, str] | None = None,
     ) -> None:
+        # Phase 5 / S-A: ``receipts`` and ``contract_required`` are now OPTIONAL.
+        # The typed-context path (``apply_before_model``) reads an already-resolved
+        # EvidenceLedgerView and needs no store handle at all. The legacy ADK hook
+        # (``on_before_model``) still resolves the view from the store when one was
+        # supplied (dual-load until Phase 6 builds the view in the dispatcher).
         self._receipts = receipts
         self._contract_required = contract_required
         self._agent_role = agent_role
@@ -540,10 +566,28 @@ class GaConstraintReinjectionControl(BaseLoopControl):
         callback_context: Any,
         llm_request: Any,
     ) -> None:
-        from magi_agent.harness.general_automation.constraint_reinjection import (
-            ga_constraint_reinjection,
-        )
+        # Dual-load: resolve the EvidenceLedgerView from the legacy receipt-store
+        # handle, then delegate to the typed-context path. Phase 6 has the
+        # dispatcher build the view and this store branch goes away.
+        from magi_agent.packs.context import ControlPlaneContext
 
+        view = self._resolve_view_from_store(callback_context)
+        ctx = ControlPlaneContext.minimal(evidence=view)
+        return await self.apply_before_model(ctx, llm_request=llm_request)
+
+    def _resolve_view_from_store(self, callback_context: Any) -> Any:
+        """Resolve the active turn's EvidenceLedgerView from the receipt store.
+
+        Reproduces the pre-migration store lookup verbatim — resolve
+        (session_id, turn_id), then ``ledger_for_turn`` / ``open_controls_for_turn``
+        — and packs the result into a read-only :class:`EvidenceLedgerView`. Returns
+        ``None`` (a no-op view) when there is no store/contract or no ledger for the
+        turn, exactly as the legacy body short-circuited.
+        """
+        from magi_agent.packs.context import EvidenceLedgerView
+
+        if self._receipts is None or self._contract_required is None:
+            return None
         session = getattr(callback_context, "session", None)
         session_id = _non_empty_str(getattr(session, "id", None))
         turn_id = _non_empty_str(getattr(callback_context, "invocation_id", None))
@@ -551,21 +595,48 @@ class GaConstraintReinjectionControl(BaseLoopControl):
             turn_id = _latest_event_invocation_id(session)
         if session_id is None or turn_id is None:
             return None
-
         ledger = self._receipts.ledger_for_turn(
             session_id=session_id, turn_id=turn_id
         )
         if ledger is None:
             return None
-        open_controls = self._receipts.open_controls_for_turn(
-            session_id=session_id, turn_id=turn_id
+        open_controls = tuple(
+            self._receipts.open_controls_for_turn(
+                session_id=session_id, turn_id=turn_id
+            )
         )
-
-        reminder = ga_constraint_reinjection(
-            contract_required=self._contract_required,
+        return EvidenceLedgerView(
             ledger=ledger,
             open_controls=open_controls,
+            contract_required=self._contract_required,
             agent_role=self._agent_role,
+        )
+
+    async def apply_before_model(
+        self,
+        ctx: Any,
+        *,
+        llm_request: Any,
+    ) -> None:
+        """Typed-context entry point (S-A): read the resolved EvidenceLedgerView off
+        ``ctx.evidence`` — never a mutable receipt-store object. A user pack
+        authoring an equivalent reminder receives the same view, so it can build the
+        reminder with zero privileged access. Behavior is byte-identical to the
+        pre-migration body.
+        """
+        from magi_agent.harness.general_automation.constraint_reinjection import (
+            ga_constraint_reinjection,
+        )
+
+        view = getattr(ctx, "evidence", None)
+        if view is None or getattr(view, "ledger", None) is None:
+            return None
+
+        reminder = ga_constraint_reinjection(
+            contract_required=view.contract_required,
+            ledger=view.ledger,
+            open_controls=view.open_controls,
+            agent_role=view.agent_role,
             env=self._env if self._env is not None else dict(os.environ),
         )
         if not reminder:
@@ -645,8 +716,15 @@ class SelfReviewAfterTurnControl(BaseLoopControl):
         agent: Any,
         callback_context: Any,
     ) -> None:
+        # Dual-load: extract the turn snapshot the legacy way (privileged
+        # session/event traversal), convert it to the typed ``TurnSnapshot``, and
+        # delegate to the typed-context path supplying this control's own
+        # ForkRunner. Phase 6 has the dispatcher pre-extract the snapshot and
+        # place the ForkRunner on the context, after which this branch is removed.
+        from magi_agent.packs.context import ControlPlaneContext, TurnSnapshot
+
         try:
-            snapshot = _extract_self_review_turn_snapshot(
+            legacy = _extract_self_review_turn_snapshot(
                 agent=agent,
                 callback_context=callback_context,
             )
@@ -656,10 +734,34 @@ class SelfReviewAfterTurnControl(BaseLoopControl):
                 exc_info=True,
             )
             return None
-        if snapshot is None:
+        if legacy is None:
             return None
 
-        self._schedule(self._run_self_review(snapshot))
+        snapshot = TurnSnapshot(
+            session_id=legacy.session_id,
+            turn_id=legacy.turn_id,
+            system_prompt_blocks=tuple(legacy.system_prompt_blocks),
+            parent_assistant_message=dict(legacy.parent_assistant_message),
+        )
+        ctx = ControlPlaneContext.minimal(
+            turn_snapshot=snapshot,
+            fork_runner=self._fork_runner_or_default(),
+        )
+        return await self.apply_after_agent(ctx)
+
+    async def apply_after_agent(self, ctx: Any) -> None:
+        """Typed-context path: schedule the C1 fork from a pre-extracted
+        ``TurnSnapshot`` using the ForkRunner exposed on the context (a public,
+        full-trust local capability per the neutral-runtime blueprint).
+
+        Observational: returns ``None`` immediately and only schedules the fork,
+        so the ADK post-turn callback can never alter the parent turn.
+        """
+        snapshot = getattr(ctx, "turn_snapshot", None)
+        if snapshot is None:
+            return None
+        fork_runner = getattr(ctx, "fork_runner", None) or self._fork_runner_or_default()
+        self._schedule(self._run_self_review_with(snapshot, fork_runner))
         return None
 
     def _schedule(self, coro: Coroutine[Any, Any, None]) -> None:
@@ -692,15 +794,15 @@ class SelfReviewAfterTurnControl(BaseLoopControl):
         except Exception:
             logger.debug("self-review after-turn background task failed", exc_info=True)
 
-    async def _run_self_review(self, snapshot: _SelfReviewTurnSnapshot) -> None:
+    async def _run_self_review_with(self, snapshot: Any, fork_runner: Any) -> None:
         from magi_agent.harness.self_review import run_self_review_hook
 
         await run_self_review_hook(
             session_id=snapshot.session_id,
             turn_id=snapshot.turn_id,
-            system_prompt_blocks=snapshot.system_prompt_blocks,
-            parent_assistant_message=snapshot.parent_assistant_message,
-            fork_runner=self._fork_runner_or_default(),
+            system_prompt_blocks=list(snapshot.system_prompt_blocks),
+            parent_assistant_message=dict(snapshot.parent_assistant_message),
+            fork_runner=fork_runner,
             candidate_sink=self._candidate_sink,
             config=self._config,
             now=self._now,
@@ -883,6 +985,59 @@ class _EditRetryLoopControl(BaseLoopControl):
             tool=tool, tool_args=args, tool_context=tool_context, result=result
         )
 
+    async def apply_after_tool(
+        self,
+        ctx: Any,
+        *,
+        tool: Any,
+        args: dict[str, Any],
+        tool_context: Any,
+        result: Any,
+    ) -> dict[str, Any] | None:
+        """Typed-context entry point (S-C): mutate the runtime-owned
+        ``PerInvocationState`` from the context instead of plugin-private state.
+
+        Behavior is byte-identical to ``after_tool_callback``: skip our own
+        injected response, reset the counter on a non-error result, else run the
+        reflection decision against the shared state. Falls back to the plugin's
+        default state when the context carries none (pre-dispatcher call sites)."""
+        from collections.abc import Mapping
+
+        from magi_agent.adk_bridge.edit_retry_reflection import (
+            EDIT_RETRY_REFLECTION_RESPONSE_TYPE,
+            EDIT_RETRY_STATE_NAMESPACE,
+            _error_reason_from_result,
+            _scope_key,
+            _tool_name,
+            scoped_state_name,
+        )
+
+        # Never recurse on our own injected response.
+        if (
+            isinstance(result, Mapping)
+            and result.get("response_type") == EDIT_RETRY_REFLECTION_RESPONSE_TYPE
+        ):
+            return None
+
+        state = getattr(ctx, "per_invocation", None) or self._plugin._default_state
+        reason = _error_reason_from_result(result)
+        if reason is None:
+            # Successful (or non-error) edit -> reset the per-tool attempt count.
+            # Use the SAME control-namespaced scalar name reflect_with_state writes
+            # so the reset actually clears the counter on a shared PerInvocationState.
+            state.pop_scoped(
+                _scope_key(tool_context),
+                scoped_state_name(EDIT_RETRY_STATE_NAMESPACE, _tool_name(tool)),
+            )
+            return None
+        return self._plugin.reflect_with_state(
+            state=state,
+            tool=tool,
+            tool_args=args,
+            tool_context=tool_context,
+            reason=reason,
+        )
+
 
 class _ToolExceptionReflectionLoopControl(BaseLoopControl):
     """Thin LoopControl adapter exposing MagiToolExceptionReflectionPlugin.
@@ -890,7 +1045,8 @@ class _ToolExceptionReflectionLoopControl(BaseLoopControl):
     The plugin only implements the raise path (``on_tool_error_callback``)
     plus the ``after_run_callback`` sweep — neither is a LoopControl hook;
     both are forwarded at the plugin level by ``_ExtendedControlPlanePlugin``.
-    This adapter exists solely to expose ``._plugin`` to that fan-out.
+    This adapter exposes ``._plugin`` to that fan-out, plus the typed-context
+    entry point ``apply_tool_error`` for the raise path.
     """
 
     def __init__(self, plugin: Any) -> None:
@@ -899,6 +1055,28 @@ class _ToolExceptionReflectionLoopControl(BaseLoopControl):
     @property
     def name(self) -> str:  # type: ignore[override]
         return getattr(self._plugin, "name", "magi_tool_exception_reflection_control")
+
+    async def apply_tool_error(
+        self,
+        ctx: Any,
+        *,
+        tool: Any,
+        tool_args: dict[str, Any],
+        tool_context: Any,
+        error: Exception,
+    ) -> dict[str, Any] | None:
+        """Typed-context entry point (S-C): drive the attempt budget against the
+        runtime-owned ``PerInvocationState`` from the context (falls back to the
+        plugin default state when the context carries none). Behavior is
+        byte-identical to ``on_tool_error_callback``."""
+        state = getattr(ctx, "per_invocation", None) or self._plugin._default_state
+        return self._plugin.reflect_with_state(
+            state=state,
+            tool=tool,
+            tool_args=tool_args,
+            tool_context=tool_context,
+            error=error,
+        )
 
 
 class _ResilienceLoopControl(BaseLoopControl):
@@ -923,13 +1101,33 @@ class _ResilienceLoopControl(BaseLoopControl):
             tool=tool, tool_args=args, tool_context=tool_context, result=result
         )
 
+    async def apply_after_tool(
+        self,
+        ctx: Any,
+        *,
+        tool: Any,
+        args: dict[str, Any],
+        tool_context: Any,
+        result: Any,
+    ) -> dict[str, Any] | None:
+        """Typed-context entry point (S-C): drive the loop guard against the
+        runtime-owned ``PerInvocationState`` from the context (falls back to the
+        plugin default state when the context carries none). Behavior is
+        byte-identical to ``after_tool_callback``."""
+        state = getattr(ctx, "per_invocation", None) or self._plugin._default_state
+        return self._plugin.guard_with_state(
+            state=state, tool=tool, tool_args=args, tool_context=tool_context, result=result
+        )
+
 
 class _ToolSynthesisNudgeLoopControl(BaseLoopControl):
     """Thin LoopControl adapter delegating to MagiToolSynthesisNudgePlugin.
 
-    Registered LAST in ``build_default_plane`` so edit-retry / resilience
-    overrides win the plane's first-non-None-wins after-tool fan-out; the
-    nudge only rides on results no other control replaced.
+    Registered LAST — ordered by the bundled control_plane pack's manifest
+    ``priority`` field (and at the tail of ``build_default_plane``'s legacy
+    assembly) — so edit-retry / resilience overrides win the plane's
+    first-non-None-wins after-tool fan-out; the nudge only rides on results no
+    other control replaced.
     """
 
     def __init__(self, plugin: Any) -> None:
@@ -947,6 +1145,24 @@ class _ToolSynthesisNudgeLoopControl(BaseLoopControl):
         tool_context: Any,
         result: Any,
     ) -> dict[str, Any] | None:
+        return await self._plugin.after_tool_callback(
+            tool=tool, tool_args=args, tool_context=tool_context, result=result
+        )
+
+    async def apply_after_tool(
+        self,
+        ctx: Any,
+        *,
+        tool: Any,
+        args: dict[str, Any],
+        tool_context: Any,
+        result: Any,
+    ) -> dict[str, Any] | None:
+        """Typed-context entry point (P5). The wrapped plugin is stateless —
+        there is no per-invocation tracking to move onto ``ctx.per_invocation``
+        (S-C) — so this delegates to the plugin's pure per-call decision.
+        Behavior is byte-identical to ``on_after_tool``."""
+        _ = ctx
         return await self._plugin.after_tool_callback(
             tool=tool, tool_args=args, tool_context=tool_context, result=result
         )
@@ -971,6 +1187,22 @@ class _CompactionLoopControl(BaseLoopControl):
         await self._plugin.before_model_callback(
             callback_context=callback_context, llm_request=llm_request
         )
+        return None
+
+    async def apply_before_model(
+        self,
+        ctx: Any,
+        *,
+        llm_request: Any,
+    ) -> None:
+        """Typed-context entry point (S-D): apply the compaction decision exposed
+        on ``ctx.compaction``. Delegates to the plugin's own ``apply_before_model``,
+        which reads the :class:`CompactionCapability` off the context (falling back
+        to the plugin's own capability when none is supplied). The boundary +
+        session services stay encapsulated behind the capability; a user pack can
+        author an equivalent compaction control with the same narrow handle.
+        Behavior is byte-identical to ``on_before_model``."""
+        await self._plugin.apply_before_model(ctx, llm_request=llm_request)
         return None
 
 
@@ -1083,7 +1315,7 @@ class _ExtendedControlPlanePlugin(ControlPlanePlugin):
 # ---------------------------------------------------------------------------
 
 
-def build_default_plane(
+def build_core_default_plane(
     os_environ: dict[str, str] | None = None,
     *,
     general_automation_receipts: Any | None = None,
@@ -1094,37 +1326,18 @@ def build_default_plane(
     self_review_config: Any | None = None,
     self_review_now: datetime | None = None,
     self_review_scheduler: Callable[[Coroutine[Any, Any, None]], None] | None = None,
-    tool_synthesis_model_label: str | None = None,
 ) -> ControlPlane:
-    """Build the default ControlPlane from environment flags.
+    """Build the CORE default ControlPlane (the 6 long-standing controls).
 
-    Used by BOTH ``local_runner.py`` and ``real_runner.py`` so they cannot
-    drift. Each flag-gated control uses the same env var as before, preserving
+    This is the assembly the bundled ``control_plane:default@1`` pack entry
+    delegates to. The 3 later main-side features (loop-resilience, facts-replan,
+    tool-synthesis nudge) are NOT registered here — each is its own bundled pack
+    ``provides`` entry backed by the matching ``build_*_controls`` single-source
+    builder below, so a user pack can override/forbid them individually (§1).
+    ``build_default_plane`` composes core + those builders for legacy callers.
+
+    Each flag-gated control uses the same env var as before, preserving
     default-OFF behavior for all existing controls.
-
-    Args:
-        os_environ: Environment mapping (defaults to ``os.environ``). Injectable
-            for tests.
-        general_automation_receipts: Optional per-turn GA receipt/control store.
-            Together with ``contract_required`` this enables the GA constraint
-            reminder control. When either is ``None`` the control is NOT
-            registered, so no-arg callers stay byte-identical to ``main``.
-        contract_required: Optional ``RequiredDeliverableEvidence`` describing the
-            active GA contract's owed deliverables. See above.
-        agent_role: Agent role passed to the reminder gate (default ``"general"``;
-            the reminder is inert for any non-general role).
-        self_review_*: Optional collaborators for the self-review after-turn
-            control. Omitted values preserve the default safe runtime behavior:
-            lazy ``ForkRunner`` construction, no-op candidate sink, env-derived
-            config/time, and background scheduling on the active event loop.
-        tool_synthesis_model_label: The runner's configured litellm model label
-            (``provider/model``), used ONLY by the default-OFF tool-synthesis
-            reflection nudge (``MAGI_TOOL_SYNTHESIS_NUDGE_ENABLED`` + frontier
-            tier). ``None`` (default — all pre-existing callers) skips the
-            control entirely so the plane stays byte-identical.
-
-    Returns:
-        A configured ``ControlPlane`` with all enabled controls registered.
     """
     env = os_environ if os_environ is not None else dict(os.environ)
 
@@ -1134,16 +1347,10 @@ def build_default_plane(
         parse_edit_retry_reflection_env,
         parse_error_recovery_env,
         parse_loop_guard_env,
-        parse_tool_exception_reflection_env,
-        parse_tool_schema_feedback_env,
     )
     from magi_agent.adk_bridge.context_compaction import build_context_compaction_plugin
     from magi_agent.adk_bridge.edit_retry_reflection import build_edit_retry_reflection_plugin
     from magi_agent.adk_bridge.resilience_plugin import build_resilience_plugin
-    from magi_agent.adk_bridge.schema_feedback import build_schema_feedback_control
-    from magi_agent.adk_bridge.tool_exception_reflection import (
-        build_tool_exception_reflection_plugin,
-    )
 
     plane = ControlPlane()
 
@@ -1171,38 +1378,7 @@ def build_default_plane(
     if resilience_plugin is not None:
         plane.register(_ResilienceLoopControl(resilience_plugin))
 
-    # 3. Generic tool-exception reflection (MAGI_TOOL_EXCEPTION_REFLECTION_ENABLED,
-    #    strict default OFF, profile-independent). Registered AFTER the edit-retry
-    #    control so edit-retry keeps fan-out priority (first non-None wins) for
-    #    FileEdit/PatchApply when both are on; the generic plugin additionally
-    #    hard-skips those tools.
-    tool_exception_env = parse_tool_exception_reflection_env(env)
-    tool_exception_plugin = build_tool_exception_reflection_plugin(
-        enabled=tool_exception_env.enabled,
-        max_attempts=tool_exception_env.max_attempts,
-    )
-    if tool_exception_plugin is not None:
-        plane.register(_ToolExceptionReflectionLoopControl(tool_exception_plugin))
-
-    # 3b. Schema-invalid argument feedback (MAGI_TOOL_SCHEMA_FEEDBACK_ENABLED,
-    #     strict default OFF, profile-independent). Registered AFTER the
-    #     edit-retry and resilience controls: ControlPlane._after_tool fan-out
-    #     is first-non-None, so FileEdit/PatchApply schema failures keep going
-    #     to edit-retry first (its _error_reason_from_result matches the
-    #     blocked status and wins — intended) and the loop-detector's ordering
-    #     is unchanged. This control IS the plugin (a BaseLoopControl with a
-    #     native on_after_tool hook, no adapter needed); it exposes
-    #     ``._plugin = self`` so the generic _ExtendedControlPlanePlugin
-    #     after_run_callback sweep clears its per-invocation attempt counters.
-    schema_feedback_env = parse_tool_schema_feedback_env(env)
-    schema_feedback_control = build_schema_feedback_control(
-        enabled=schema_feedback_env.enabled,
-        max_attempts=schema_feedback_env.max_attempts,
-    )
-    if schema_feedback_control is not None:
-        plane.register(schema_feedback_control)
-
-    # 4. Context compaction (MAGI_CONTEXT_COMPACTION_ENABLED, default OFF).
+    # 3. Context compaction (MAGI_CONTEXT_COMPACTION_ENABLED, default OFF).
     compaction_env = parse_context_compaction_env(env)
     compaction_plugin = build_context_compaction_plugin(
         enabled=compaction_env.enabled,
@@ -1212,7 +1388,7 @@ def build_default_plane(
     if compaction_plugin is not None:
         plane.register(_CompactionLoopControl(compaction_plugin))
 
-    # 5. MaxStepsBrake (MAGI_MAX_STEPS_BRAKE_ENABLED, default OFF — new seam).
+    # 4. MaxStepsBrake (MAGI_MAX_STEPS_BRAKE_ENABLED, default OFF — new seam).
     if _is_true(env.get(MAX_STEPS_BRAKE_ENABLED_ENV, "")):
         # Iteration tracking is per-invocation; default max_iterations is 0 (no-op)
         # until a runner sets a real budget. The control wires the seam; the runner
@@ -1224,7 +1400,7 @@ def build_default_plane(
         # an engine.py concern (PR4 scope); here we only prove the seam is wired.
         plane.register(MaxStepsBrakeControl(max_iterations=0, iteration=0))
 
-    # 6. Self-review C1 (MAGI_SELF_REVIEW_ENABLED, default OFF).
+    # 5. Self-review C1 (MAGI_SELF_REVIEW_ENABLED, default OFF).
     if _is_true(env.get(SELF_REVIEW_ENABLED_ENV, "")):
         plane.register(
             SelfReviewAfterTurnControl(
@@ -1236,7 +1412,7 @@ def build_default_plane(
             )
         )
 
-    # 7. GA constraint reminder (MAGI_GA_LIVE_ENABLED + general role).
+    # 6. GA constraint reminder (MAGI_GA_LIVE_ENABLED + general role).
     # Registered ONLY when BOTH a receipts store and a contract requirement are
     # provided and the runtime profile enables GA live controls. Full local
     # profile defaults ON; safe/minimal profiles or explicit false values keep
@@ -1257,38 +1433,195 @@ def build_default_plane(
             )
         )
 
-    # 7. Facts-survey replanning (MAGI_FACTS_REPLAN_ENABLED, default OFF).
-    # Imported here (like the other adk_bridge builders above) to avoid a
-    # circular import: facts_replan_control imports BaseLoopControl from this
-    # module.
-    from magi_agent.adk_bridge.facts_replan_control import build_facts_replan_control
+    return plane
 
-    facts_replan = build_facts_replan_control(env)
-    if facts_replan is not None:
-        plane.register(facts_replan)
 
-    # 8. Tool-synthesis reflection nudge (MAGI_TOOL_SYNTHESIS_NUDGE_ENABLED,
-    # default OFF + frontier-tier model only). Registered LAST so edit-retry /
-    # resilience overrides win the first-non-None-wins after-tool fan-out.
-    # Callers that do not pass a model label (all pre-existing build sites)
-    # skip this branch entirely — byte-identical plane.
-    if tool_synthesis_model_label is not None:
-        from magi_agent.adk_bridge.tool_synthesis_nudge import (  # noqa: PLC0415
-            build_tool_synthesis_nudge_plugin,
+# ---------------------------------------------------------------------------
+# Pack-provided feature builders (single source for the bundled manifest
+# entries AND build_default_plane's legacy composition)
+# ---------------------------------------------------------------------------
+
+
+def build_loop_resilience_controls(
+    os_environ: dict[str, str] | None = None,
+) -> "list[LoopControl]":
+    """Loop-resilience controls (6b7cd40e), env-gated, strict default-OFF.
+
+    * Generic tool-exception reflection (``MAGI_TOOL_EXCEPTION_REFLECTION_ENABLED``,
+      profile-independent). Ordered AFTER the edit-retry control so edit-retry
+      keeps fan-out priority (first non-None wins) for FileEdit/PatchApply when
+      both are on; the generic plugin additionally hard-skips those tools.
+    * Schema-invalid argument feedback (``MAGI_TOOL_SCHEMA_FEEDBACK_ENABLED``,
+      profile-independent). Ordered AFTER the edit-retry and resilience
+      controls: ControlPlane._after_tool fan-out is first-non-None, so
+      FileEdit/PatchApply schema failures keep going to edit-retry first (its
+      _error_reason_from_result matches the blocked status and wins — intended)
+      and the loop-detector's ordering is unchanged. This control IS the plugin
+      (a BaseLoopControl with a native on_after_tool hook, no adapter needed);
+      it exposes ``._plugin = self`` so the generic _ExtendedControlPlanePlugin
+      after_run_callback sweep clears its per-invocation attempt counters.
+
+    Single source for the bundled ``control_plane:loop-resilience@1`` pack
+    entry; both controls touch only ``after_tool``/``tool_error``/``after_run``
+    seams, so registering them after the core plane preserves every fan-out
+    ordering above.
+    """
+    env = os_environ if os_environ is not None else dict(os.environ)
+    from magi_agent.config.env import (  # noqa: PLC0415 — avoid circular import
+        parse_tool_exception_reflection_env,
+        parse_tool_schema_feedback_env,
+    )
+    from magi_agent.adk_bridge.schema_feedback import (  # noqa: PLC0415
+        build_schema_feedback_control,
+    )
+    from magi_agent.adk_bridge.tool_exception_reflection import (  # noqa: PLC0415
+        build_tool_exception_reflection_plugin,
+    )
+
+    controls: list[LoopControl] = []
+    tool_exception_env = parse_tool_exception_reflection_env(env)
+    tool_exception_plugin = build_tool_exception_reflection_plugin(
+        enabled=tool_exception_env.enabled,
+        max_attempts=tool_exception_env.max_attempts,
+    )
+    if tool_exception_plugin is not None:
+        controls.append(_ToolExceptionReflectionLoopControl(tool_exception_plugin))
+
+    schema_feedback_env = parse_tool_schema_feedback_env(env)
+    schema_feedback_control = build_schema_feedback_control(
+        enabled=schema_feedback_env.enabled,
+        max_attempts=schema_feedback_env.max_attempts,
+    )
+    if schema_feedback_control is not None:
+        controls.append(schema_feedback_control)
+    return controls
+
+
+def build_facts_replan_controls(
+    os_environ: dict[str, str] | None = None,
+) -> "list[LoopControl]":
+    """Facts-survey replanning control (#510), ``MAGI_FACTS_REPLAN_ENABLED``,
+    strict default-OFF. Single source for the bundled
+    ``control_plane:facts-replan@1`` pack entry. ``on_before_model``-only, so
+    its position relative to the after-tool controls is behavior-neutral; among
+    the before-model controls it keeps its legacy place after the GA reminder.
+    """
+    env = os_environ if os_environ is not None else dict(os.environ)
+    # Imported here (like the other adk_bridge builders) to avoid a circular
+    # import: facts_replan_control imports BaseLoopControl from this module.
+    from magi_agent.adk_bridge.facts_replan_control import (  # noqa: PLC0415
+        build_facts_replan_control,
+    )
+
+    control = build_facts_replan_control(env)
+    return [] if control is None else [control]
+
+
+def build_tool_synthesis_nudge_controls(
+    os_environ: dict[str, str] | None = None,
+    *,
+    tool_synthesis_model_label: str | None = None,
+) -> "list[LoopControl]":
+    """Tool-synthesis reflection nudge (#512), ``MAGI_TOOL_SYNTHESIS_NUDGE_ENABLED``,
+    default-OFF + frontier-tier model only. Single source for the bundled
+    ``control_plane:tool-synthesis-nudge@1`` pack entry — whose manifest
+    ``priority`` orders it LAST so edit-retry / resilience overrides win the
+    first-non-None-wins after-tool fan-out. Callers that do not pass a model
+    label (all pre-existing build sites) get an empty list — byte-identical
+    plane.
+    """
+    env = os_environ if os_environ is not None else dict(os.environ)
+    if tool_synthesis_model_label is None:
+        return []
+    from magi_agent.adk_bridge.tool_synthesis_nudge import (  # noqa: PLC0415
+        build_tool_synthesis_nudge_plugin,
+    )
+    from magi_agent.runtime.tool_synthesis import (  # noqa: PLC0415
+        tool_synthesis_nudge_active,
+    )
+
+    nudge_plugin = build_tool_synthesis_nudge_plugin(
+        enabled=tool_synthesis_nudge_active(
+            model_label=tool_synthesis_model_label,
+            env=env,
         )
-        from magi_agent.runtime.tool_synthesis import (  # noqa: PLC0415
-            tool_synthesis_nudge_active,
-        )
+    )
+    if nudge_plugin is None:
+        return []
+    return [_ToolSynthesisNudgeLoopControl(nudge_plugin)]
 
-        nudge_plugin = build_tool_synthesis_nudge_plugin(
-            enabled=tool_synthesis_nudge_active(
-                model_label=tool_synthesis_model_label,
-                env=env,
-            )
-        )
-        if nudge_plugin is not None:
-            plane.register(_ToolSynthesisNudgeLoopControl(nudge_plugin))
 
+def build_default_plane(
+    os_environ: dict[str, str] | None = None,
+    *,
+    general_automation_receipts: Any | None = None,
+    contract_required: Any | None = None,
+    agent_role: str = "general",
+    self_review_fork_runner: Any | None = None,
+    self_review_candidate_sink: Any | None = None,
+    self_review_config: Any | None = None,
+    self_review_now: datetime | None = None,
+    self_review_scheduler: Callable[[Coroutine[Any, Any, None]], None] | None = None,
+    tool_synthesis_model_label: str | None = None,
+) -> ControlPlane:
+    """Build the FULL default ControlPlane from environment flags (legacy/compat
+    surface; the live runner path is pack-loaded via ``build_default_plugin``).
+
+    Composes :func:`build_core_default_plane` plus the three pack-provided
+    feature builders — the IDENTICAL single-source assemblies the bundled
+    control_plane pack's manifest entries point at, in the identical
+    ``priority`` order — so this function and the pack loader cannot drift.
+    The feature controls register after the core ones; that grouping is
+    hook-behavior-identical to the historical interleaved order because the
+    relative order WITHIN each fan-out (after_tool: edit-retry → resilience →
+    schema-feedback → nudge; before_model: compaction → brake → GA →
+    facts-replan; tool_error: edit-retry → tool-exception) is unchanged.
+
+    Args:
+        os_environ: Environment mapping (defaults to ``os.environ``). Injectable
+            for tests.
+        general_automation_receipts: Optional per-turn GA receipt/control store.
+            Together with ``contract_required`` this enables the GA constraint
+            reminder control. When either is ``None`` the control is NOT
+            registered, so no-arg callers stay byte-identical to ``main``.
+        contract_required: Optional ``RequiredDeliverableEvidence`` describing the
+            active GA contract's owed deliverables. See above.
+        agent_role: Agent role passed to the reminder gate (default ``"general"``;
+            the reminder is inert for any non-general role).
+        self_review_*: Optional collaborators for the self-review after-turn
+            control. Omitted values preserve the default safe runtime behavior:
+            lazy ``ForkRunner`` construction, no-op candidate sink, env-derived
+            config/time, and background scheduling on the active event loop.
+        tool_synthesis_model_label: The runner's configured litellm model label
+            (``provider/model``), used ONLY by the default-OFF tool-synthesis
+            reflection nudge (``MAGI_TOOL_SYNTHESIS_NUDGE_ENABLED`` + frontier
+            tier). ``None`` (default — all pre-existing callers) skips the
+            control entirely so the plane stays byte-identical.
+
+    Returns:
+        A configured ``ControlPlane`` with all enabled controls registered.
+    """
+    env = os_environ if os_environ is not None else dict(os.environ)
+
+    plane = build_core_default_plane(
+        env,
+        general_automation_receipts=general_automation_receipts,
+        contract_required=contract_required,
+        agent_role=agent_role,
+        self_review_fork_runner=self_review_fork_runner,
+        self_review_candidate_sink=self_review_candidate_sink,
+        self_review_config=self_review_config,
+        self_review_now=self_review_now,
+        self_review_scheduler=self_review_scheduler,
+    )
+    for control in build_loop_resilience_controls(env):
+        plane.register(control)
+    for control in build_facts_replan_controls(env):
+        plane.register(control)
+    for control in build_tool_synthesis_nudge_controls(
+        env, tool_synthesis_model_label=tool_synthesis_model_label
+    ):
+        plane.register(control)
     return plane
 
 
@@ -1303,6 +1636,7 @@ def build_default_plugin(
     self_review_config: Any | None = None,
     self_review_now: datetime | None = None,
     self_review_scheduler: Callable[[Coroutine[Any, Any, None]], None] | None = None,
+    extra_controls: "list[LoopControl] | None" = None,
     tool_synthesis_model_label: str | None = None,
 ) -> _ExtendedControlPlanePlugin:
     """Build the single ControlPlanePlugin for runner construction.
@@ -1311,6 +1645,17 @@ def build_default_plugin(
     extended callbacks (on_tool_error_callback, on_model_error_callback,
     after_run_callback) via generic fan-out over the plane's registered controls.
 
+    De-privileging keystone (Phase 6 / D7): the first-party controls are NOT
+    hand-assembled here. They are discovered+loaded from the bundled
+    ``control_plane`` pack (``magi_agent/firstparty/packs/control_plane_default``)
+    through the SAME pack loader a user ``~/.magi/packs`` control_plane pack uses.
+    That bundled pack's impl delegates to :func:`build_default_plane`, so the
+    controls, their env gates, their order, and their collaborators are
+    byte-identical to the legacy hand-assembly (the Phase-0 golden stays green).
+    ``extra_controls`` is the parallel injection seam: a user-supplied control (or
+    a user control_plane pack projected into a LoopControl) registers AFTER the
+    bundled ones with no first-party privilege.
+
     Optional ``general_automation_receipts`` / ``contract_required`` enable the GA
     constraint reminder control (see :func:`build_default_plane`). When omitted
     the plugin is byte-identical to ``main``. ``tool_synthesis_model_label``
@@ -1318,7 +1663,9 @@ def build_default_plugin(
     :func:`build_default_plane`); ``None`` skips it entirely.
     """
     env = os_environ if os_environ is not None else dict(os.environ)
-    plane = build_default_plane(
+    from magi_agent.packs.registries import build_control_plane_from_packs  # noqa: PLC0415
+
+    plane = build_control_plane_from_packs(
         os_environ=env,
         general_automation_receipts=general_automation_receipts,
         contract_required=contract_required,
@@ -1328,6 +1675,7 @@ def build_default_plugin(
         self_review_config=self_review_config,
         self_review_now=self_review_now,
         self_review_scheduler=self_review_scheduler,
+        extra_controls=extra_controls,
         tool_synthesis_model_label=tool_synthesis_model_label,
     )
     return _ExtendedControlPlanePlugin(plane)
@@ -1352,6 +1700,10 @@ __all__ = [
     "SELF_REVIEW_ENABLED_ENV",
     "SelfReviewAfterTurnControl",
     "ToolDecision",
+    "build_core_default_plane",
     "build_default_plane",
     "build_default_plugin",
+    "build_facts_replan_controls",
+    "build_loop_resilience_controls",
+    "build_tool_synthesis_nudge_controls",
 ]

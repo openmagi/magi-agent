@@ -471,6 +471,86 @@ def _required_deliverable_evidence_from_assembly(
     return required_deliverable_evidence_from_labels(labels)
 
 
+def _merge_pack_validator_refs(
+    base: tuple[str, ...],
+    pack_validator_refs: tuple[str, ...],
+) -> tuple[str, ...]:
+    """Append pack-discovered validator refs to the gate's required set (D7 confirm/route).
+
+    Order-stable, dedup-on-merge. ``base`` (recipe-final-gate validators) keeps its
+    position; pack refs are appended. This is the ONLY wiring the live gate needs:
+    the comparison in ``cli/engine.py`` already enforces ``required_validators``.
+    """
+    return tuple(dict.fromkeys((*base, *pack_validator_refs)))
+
+
+def _loaded_pack_validator_refs() -> tuple[str, ...]:
+    """Validator refs from disk-discovered packs (first-party + user).
+
+    Validator refs are STATIC manifest data (``provides`` entries of type
+    ``validator``), so they are read directly from the parsed manifests — NO impl
+    import. This matters for a safety gate: the previous implementation called
+    ``load_packs`` (which lazily imports EVERY enabled pack's impl) and swallowed
+    any failure with ``except Exception: return ()``, so a single unrelated pack
+    with an import-time error (e.g. a tool pack importing a missing package)
+    silently dropped ALL pack validator refs and fail-OPENed the enforcement gate.
+
+    Only manifest discovery/parse is wrapped in a narrow guard so a genuinely
+    missing/empty packs tree returns () (byte-identical to pre-Phase-3 behavior);
+    an unrelated pack's *import* error can no longer reach here at all.
+    """
+    try:
+        from magi_agent.packs.discovery import (  # noqa: PLC0415
+            default_search_bases,
+            discover_pack_files,
+            load_packs_config,
+            resolve_enabled_packs,
+        )
+    except Exception:
+        return ()
+    try:
+        discovered = discover_pack_files(default_search_bases())
+        enabled = resolve_enabled_packs(discovered, load_packs_config())
+    except Exception:
+        return ()
+    refs: list[str] = []
+    seen: set[str] = set()
+    for disc in enabled:
+        for entry in disc.manifest.provides:
+            if entry.type == "validator" and entry.ref not in seen:
+                seen.add(entry.ref)
+                refs.append(entry.ref)
+    return tuple(refs)
+
+
+def _local_trust_missing_evidence_action(
+    materialized_action: str,
+    *,
+    env: Mapping[str, str] | None = None,
+) -> str:
+    """Local full-trust enforces authored rules by default (drop hosted staging).
+
+    Hosted runs stage authority — a missing authored evidence requirement only
+    *audits*. For OSS local full-trust the author IS the operator, so a missing
+    requirement should enforce (``repair_required``) by default. Safe/eval/minimal
+    profiles (the same set that gates every other full-runtime feature via
+    ``_runtime_profile_default_enabled``) keep the conservative hosted ``audit``
+    posture. An explicit ``repair_required`` is never downgraded; any non-``audit``
+    materialized action is passed through unchanged (only the conservative hosted
+    ``audit`` default is flipped).
+    """
+    from magi_agent.config.env import (  # noqa: PLC0415
+        _runtime_profile_default_enabled,
+    )
+
+    source = os.environ if env is None else env
+    if materialized_action == "repair_required":
+        return "repair_required"
+    if materialized_action == "audit" and _runtime_profile_default_enabled(source):
+        return "repair_required"
+    return materialized_action
+
+
 def _build_default_runner_policy_assembly(
     *,
     model_provider: str,
@@ -517,7 +597,19 @@ def _build_default_runner_policy_assembly(
     required_validators = list(plan.final_gate_policy.required_validators)
     if "openmagi.dev-coding" in plan.selected_pack_ids:
         required_validators.append("verifier:dev-coding:test-evidence")
-    missing_action = plan.final_gate_policy.missing_evidence_action
+    # D7 confirm/route: a validator authored in any loaded disk pack (first-party
+    # bundled or user ~/.magi/packs) reaches the existing required_validators gate
+    # the same way the recipe final-gate validators do. Fail-open to () keeps the
+    # no-packs path byte-identical to pre-Phase-3 behavior.
+    required_validators = list(
+        _merge_pack_validator_refs(
+            tuple(required_validators),
+            _loaded_pack_validator_refs(),
+        )
+    )
+    missing_action = _local_trust_missing_evidence_action(
+        plan.final_gate_policy.missing_evidence_action
+    )
     attachment_flags = dict(plan.attachment_flags)
     attachment_flags["livePolicyCallbackAttached"] = live_policy_callback_attached
     return RunnerPolicyAssembly(

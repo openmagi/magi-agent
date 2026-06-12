@@ -1,0 +1,12 @@
+[
+  {
+    "kind": "before_model",
+    "mutated": true,
+    "tools_cleared": false
+  },
+  {
+    "fired": true,
+    "kept_tail": 16,
+    "kind": "compaction"
+  }
+]

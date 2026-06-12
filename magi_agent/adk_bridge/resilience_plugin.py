@@ -72,12 +72,13 @@ prompt that is simply too long.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Iterator, Mapping, MutableMapping
 from typing import Any
 
 from google.adk.models import LlmResponse
 from google.adk.plugins.base_plugin import BasePlugin
 
+from magi_agent.packs.context import PerInvocationState
 from magi_agent.runtime.error_recovery import (
     ErrorClassifier,
     ErrorKind,
@@ -128,6 +129,66 @@ ContextOverflowHook = Callable[
 ]
 
 
+class _ScopedObjectView(MutableMapping[str, Any]):
+    """Live write-through ``scope -> object`` view over a PerInvocationState bucket.
+
+    Phase 5 / S-C moves the resilience per-invocation objects (the loop detector
+    and the recovery-attempt state) out of plugin-private dicts and into the
+    runtime-owned :class:`PerInvocationState` opaque-object store. Each underlying
+    object is keyed ``(scope, name)`` within that store; this view fixes ``name``
+    and exposes the SAME ``scope -> object`` mapping surface the legacy
+    ``self._detectors`` / ``self._recovery_state`` dicts had — item assignment,
+    membership, iteration, pop — so existing callers/tests operate unchanged while
+    there is exactly one owner of the mutable state. Writes route through
+    ``set_object`` so the LRU bound is enforced on insert.
+    """
+
+    def __init__(self, state: PerInvocationState, name: str) -> None:
+        self._state = state
+        self._name = name
+
+    def __getitem__(self, scope: str) -> Any:
+        sentinel = object()
+        value = self._state.peek_object(scope, self._name, default=sentinel)
+        if value is sentinel:
+            raise KeyError(scope)
+        return value
+
+    def __setitem__(self, scope: str, value: Any) -> None:
+        self._state.set_object(scope, self._name, value)
+
+    def __delitem__(self, scope: str) -> None:
+        if scope not in self:
+            raise KeyError(scope)
+        bucket = self._state._objects.get(scope)
+        if bucket is not None:
+            bucket.pop(self._name, None)
+            if not bucket:
+                self._state._objects.pop(scope, None)
+
+    def __contains__(self, scope: object) -> bool:
+        if not isinstance(scope, str):
+            return False
+        return self._state.peek_object(scope, self._name) is not None
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(
+            [
+                scope
+                for scope, bucket in dict(self._state._objects).items()
+                if self._name in bucket
+            ]
+        )
+
+    def __len__(self) -> int:
+        return sum(
+            1 for bucket in self._state._objects.values() if self._name in bucket
+        )
+
+    def __repr__(self) -> str:  # pragma: no cover - debug aid only
+        return f"_ScopedObjectView({dict(self)!r})"
+
+
 class MagiResiliencePlugin(BasePlugin):
     """ADK plugin activating loop guard + error recovery on the live runner.
 
@@ -135,6 +196,14 @@ class MagiResiliencePlugin(BasePlugin):
     ``loop_detector_factory=None`` disables the loop guard, ``recovery_engine=
     None`` disables recovery. When both are ``None`` the plugin is inert and the
     builder returns ``None`` instead of attaching it (zero regression).
+
+    Phase 5 / S-C: the per-invocation loop detectors and recovery-attempt state
+    live in a runtime-owned :class:`PerInvocationState` (``self._default_state``)
+    rather than private dicts, so a user-authored equivalent loop guard gets the
+    same state struct off the typed context. The legacy ``self._detectors`` /
+    ``self._recovery_state`` mappings are preserved as live write-through views
+    over that state. The ADK callbacks below feed the default state; the
+    dispatcher supplies a context-owned state in Phase 6.
     """
 
     def __init__(
@@ -151,17 +220,25 @@ class MagiResiliencePlugin(BasePlugin):
         self._recovery_engine = recovery_engine
         self._recovery_max_attempts = recovery_max_attempts
         self._context_overflow_hook = context_overflow_hook
-        # One detector per invocation id (the turn scope). Detectors are stateful
-        # (consecutive count) so they must not be shared across turns.
-        # dict preserves insertion order, so we evict the OLDEST entry (LRU-ish)
-        # when the cap is hit — the sweep in ``after_run_callback`` is the normal
-        # path, but it does NOT fire if a turn RAISES, so the cap is the
-        # backstop that prevents an unbounded leak across many failing turns.
-        self._detectors: dict[str, ToolCallLoopDetector] = {}
-        # Recovery attempt state keyed by invocation id (telemetry/classification
-        # only — recovery itself lives at the run-invocation seam). Same cap +
-        # sweep discipline so this never grows unbounded across failing turns.
-        self._recovery_state: dict[str, RecoveryAttemptState] = {}
+        # Runtime-owned per-invocation state (the ONE owner of the mutable loop
+        # detectors + recovery-attempt state). Replaces the old plugin-private
+        # ``self._detectors`` / ``self._recovery_state`` dicts; the legacy
+        # attributes are now live write-through views over this struct. The LRU
+        # bound (max_scopes) preserves the old ``_MAX_TRACKED_SCOPES`` backstop:
+        # the sweep in ``after_run_callback`` is the normal path, but it does NOT
+        # fire if a turn RAISES, so the bound prevents an unbounded leak across
+        # many failing turns.
+        self._default_state = PerInvocationState(max_scopes=_MAX_TRACKED_SCOPES)
+
+    @property
+    def _detectors(self) -> MutableMapping[str, ToolCallLoopDetector]:
+        """Live ``scope -> ToolCallLoopDetector`` view over the runtime state."""
+        return _ScopedObjectView(self._default_state, "loop_detector")
+
+    @property
+    def _recovery_state(self) -> MutableMapping[str, RecoveryAttemptState]:
+        """Live ``scope -> RecoveryAttemptState`` view over the runtime state."""
+        return _ScopedObjectView(self._default_state, "recovery_state")
 
     # -- loop guard (after_tool) -----------------------------------------
 
@@ -173,6 +250,32 @@ class MagiResiliencePlugin(BasePlugin):
         tool_context: Any,
         result: Any,
     ) -> dict[str, Any] | None:
+        # ADK-callback path: drive the loop guard against the plugin's runtime-
+        # owned default state. The typed-context path supplies a context-owned
+        # state instead (Phase 6).
+        return self.guard_with_state(
+            state=self._default_state,
+            tool=tool,
+            tool_args=tool_args,
+            tool_context=tool_context,
+            result=result,
+        )
+
+    def guard_with_state(
+        self,
+        *,
+        state: PerInvocationState,
+        tool: Any,
+        tool_args: dict[str, Any],
+        tool_context: Any,
+        result: Any,
+    ) -> dict[str, Any] | None:
+        """Pure loop-guard decision over a runtime-owned :class:`PerInvocationState`.
+
+        Replaces the instance-private ``self._detectors`` mutation: the per-turn
+        ``ToolCallLoopDetector`` is stored as an opaque object on ``state`` (keyed
+        by the invocation scope), created lazily via the factory. Escalation is
+        byte-identical to the pre-migration ``after_tool_callback``."""
         if self._loop_detector_factory is None:
             return None
         # Never recurse on our own injected hard-stop response.
@@ -183,11 +286,7 @@ class MagiResiliencePlugin(BasePlugin):
             return None
 
         scope = _scope_key(tool_context)
-        detector = self._detectors.get(scope)
-        if detector is None:
-            detector = self._loop_detector_factory()
-            self._detectors[scope] = detector
-            self._bound_state_dicts()
+        detector = state.get_object(scope, "loop_detector", self._loop_detector_factory)
 
         check = detector.check(_tool_name(tool), tool_args)
         if check.action == "ok":
@@ -245,16 +344,16 @@ class MagiResiliencePlugin(BasePlugin):
     def _note_recovery_classification(self, scope: str, kind: ErrorKind) -> None:
         """Record that ``scope`` saw a retryable model error (telemetry only).
 
-        No recovery is performed here (see ``on_model_error_callback``). We keep
-        a per-scope RecoveryAttemptState so the keyed dict stays bounded (the
-        sweep in ``_sweep_invocation_state`` / the LRU cap evicts it).
+        No recovery is performed here (see ``on_model_error_callback``). We keep a
+        per-scope RecoveryAttemptState as an opaque object on the runtime-owned
+        state so it stays bounded (the sweep in ``after_run_callback`` / the
+        PerInvocationState LRU cap evicts it).
         """
-        state = self._recovery_state.get(scope)
-        new_state = (state or RecoveryAttemptState()).model_copy(
-            update={"attempt_number": (state.attempt_number if state else 0) + 1}
+        prev = self._default_state.peek_object(scope, "recovery_state")
+        new_state = (prev or RecoveryAttemptState()).model_copy(
+            update={"attempt_number": (prev.attempt_number if prev else 0) + 1}
         )
-        self._recovery_state[scope] = new_state
-        self._bound_state_dicts()
+        self._default_state.set_object(scope, "recovery_state", new_state)
 
     async def _handle_context_overflow(
         self,
@@ -273,25 +372,13 @@ class MagiResiliencePlugin(BasePlugin):
     async def after_run_callback(self, *, invocation_context: Any) -> None:
         # Normal-path sweep. NOTE: this callback does NOT fire if the turn
         # RAISES (the flow propagates the exception before after_run), so it
-        # cannot be the only defense against state leak — the size cap enforced
-        # by ``_bound_state_dicts`` (called on every insert) is the backstop.
+        # cannot be the only defense against state leak — the LRU bound enforced
+        # by ``PerInvocationState`` (on every insert) is the backstop. Clearing
+        # the invocation drops BOTH the loop detector and the recovery state for
+        # that scope, equivalent to the old paired ``pop`` of both dicts.
         inv = getattr(invocation_context, "invocation_id", None)
         if isinstance(inv, str) and inv:
-            self._detectors.pop(inv, None)
-            self._recovery_state.pop(inv, None)
-
-    def _bound_state_dicts(self) -> None:
-        """Evict oldest entries so per-turn state never leaks unbounded.
-
-        ``after_run_callback`` is the normal sweep but it does not fire on a
-        turn that raises; this hard cap (called on every insert) guarantees the
-        dicts stay bounded even across many failing turns. dicts preserve
-        insertion order, so popping the first key is the oldest (LRU-ish).
-        """
-        while len(self._detectors) > _MAX_TRACKED_SCOPES:
-            self._detectors.pop(next(iter(self._detectors)), None)
-        while len(self._recovery_state) > _MAX_TRACKED_SCOPES:
-            self._recovery_state.pop(next(iter(self._recovery_state)), None)
+            self._default_state.clear_invocation(inv)
 
 
 # -- helpers --------------------------------------------------------------

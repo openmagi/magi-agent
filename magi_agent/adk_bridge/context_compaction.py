@@ -144,6 +144,37 @@ class MagiContextCompactionPlugin(BasePlugin):
         reduced) request proceeds to the model. Never raises into the model loop:
         any unexpected failure leaves the contents untouched (fail-open, no
         regression vs. the no-plugin path).
+
+        Legacy ADK seam (S-D): builds a typed context carrying this plugin's own
+        :class:`CompactionCapability` and delegates to ``apply_before_model`` so
+        every path (ADK callback, typed-context dispatcher, user pack) flows
+        through the one shared decision body. Behavior is byte-identical to the
+        pre-migration callback.
+        """
+        from magi_agent.packs.context import ControlPlaneContext
+
+        ctx = ControlPlaneContext.minimal(compaction=CompactionCapability(self))
+        return await self.apply_before_model(ctx, llm_request=llm_request)
+
+    async def apply_before_model(self, ctx: Any, *, llm_request: Any) -> None:
+        """Typed-context entry point (S-D): apply the compaction decision exposed
+        on ``ctx.compaction`` (a :class:`CompactionCapability`). Falls back to this
+        plugin's own capability when the context carries none (pre-dispatcher call
+        sites). The control receives only this narrow capability — the
+        ``ContextLifecycleBoundary`` + ``WorkspaceSessionService`` stay encapsulated
+        behind it, so a user pack can supply an equivalent decision with no
+        privileged service plumbing.
+        """
+        cap = getattr(ctx, "compaction", None) or CompactionCapability(self)
+        await cap.trim(llm_request)
+        return None
+
+    async def _trim_request(self, llm_request: Any) -> None:
+        """Decision + tail-trim body, lifted verbatim from the pre-migration
+        ``before_model_callback`` (contents-build -> ``compact_if_needed`` ->
+        orphan-adjusted tail-trim -> fail-open). Encapsulated here so the boundary
+        and session services never leak to the control; :class:`CompactionCapability`
+        is the only handle exposed on the context.
         """
         try:
             contents = list(getattr(llm_request, "contents", None) or [])
@@ -235,6 +266,26 @@ class MagiContextCompactionPlugin(BasePlugin):
         if isinstance(events, list):
             events.clear()
         return service, session, state
+
+
+class CompactionCapability:
+    """Narrow context capability wrapping the boundary-backed compaction decision.
+
+    This is the ONLY handle a ``control_plane`` impl needs for compaction (the
+    S-D seam). First-party wraps :class:`MagiContextCompactionPlugin`; a user pack
+    can supply any object exposing the same ``async def trim(llm_request)`` method
+    and author an equivalent compaction control with no privileged access. The
+    ``ContextLifecycleBoundary`` + ``WorkspaceSessionService`` + ``QueryState``
+    plumbing stays fully encapsulated behind this wrapper — they never reach the
+    control. ``trim`` mutates ``llm_request.contents`` in place (the idiomatic ADK
+    before-model seam) and is fail-open, identical to the legacy callback.
+    """
+
+    def __init__(self, plugin: "MagiContextCompactionPlugin") -> None:
+        self._plugin = plugin
+
+    async def trim(self, llm_request: Any) -> None:
+        await self._plugin._trim_request(llm_request)
 
 
 def _content_event_ref(index: int) -> str:
@@ -343,6 +394,7 @@ def build_context_compaction_plugin(
 
 __all__ = [
     "CONTEXT_COMPACTION_PLUGIN_NAME",
+    "CompactionCapability",
     "MagiContextCompactionPlugin",
     "build_context_compaction_plugin",
 ]
