@@ -86,6 +86,7 @@ graph LR
     evidence --> tools
     evidence --> transport
     firstparty --> adk_bridge
+    firstparty --> gates
     firstparty --> harness
     firstparty --> hooks
     firstparty --> packs
@@ -97,6 +98,7 @@ graph LR
     gates --> learning
     gates --> memory
     gates --> ops
+    gates --> packs
     gates --> runtime
     gates --> shadow
     gates --> tools
@@ -146,6 +148,7 @@ graph LR
     ops --> harness
     packs --> adk_bridge
     packs --> config
+    packs --> gates
     packs --> harness
     packs --> hooks
     packs --> recipes
@@ -776,6 +779,13 @@ graph LR
 | __init__.py | — | — | — |
 | impl.py | First-party Clock tool provider (no privilege, typed-ctx only). | catalog, context, manifest | — |
 
+### firstparty/packs/workspace_tools_default/
+
+| Module | Purpose | Depends On | Depended By |
+|---|---|---|---|
+| __init__.py | — | — | — |
+| impl.py | First-party gate5b workspace tool handlers (no privilege, typed-view only). | context, gate5b_full_toolhost | — |
+
 ### gates/
 
 | Module | Purpose | Depends On | Depended By |
@@ -787,7 +797,7 @@ graph LR
 | gate3_readiness.py | — | models | transport/health.py |
 | gate4_readiness.py | — | models | transport/health.py |
 | gate5_readiness.py | — | models | transport/health.py |
-| gate5b_full_toolhost.py | — | code_diagnostics_receipts, coding_tool_receipts, config, context, deadline, dispatcher, edit_match_receipts, edit_matching, env, formatter_runner, injection, lsp_client, manifest, memory_mode_guard, patch_apply, permission, public_events, read_format, read_ledger, registry, result, ripgrep, session_identity, tool_usage_guidance | tools/core_toolhost.py, transport/chat.py, transport/chat_routes.py, transport/chat_shared.py, transport/egress_critic.py, transport/generation_request.py, transport/health.py, transport/streaming_chat_route.py |
+| gate5b_full_toolhost.py | — | code_diagnostics_receipts, coding_tool_receipts, config, context, deadline, dispatcher, edit_match_receipts, edit_matching, env, formatter_runner, injection, lsp_client, manifest, memory_mode_guard, patch_apply, permission, public_events, read_format, read_ledger, registry, result, ripgrep, session_identity, tool_usage_guidance | firstparty/packs/workspace_tools_default/impl.py, packs/context.py, tools/core_toolhost.py, transport/chat.py, transport/chat_routes.py, transport/chat_shared.py, transport/egress_critic.py, transport/generation_request.py, transport/health.py, transport/streaming_chat_route.py |
 | gate7_readiness.py | — | models | transport/health.py |
 | gate8_readiness.py | — | gate1a_egress_correlation, models | transport/chat.py, transport/chat_routes.py, transport/health.py |
 | learning_live_readiness.py | Learning-layer LIVE adapter readiness gate — PR7. | config | harness/memory_recall.py, harness/memory_write.py, learning/live.py, transport/chat_routes.py |
@@ -1065,7 +1075,7 @@ graph LR
 | __init__.py | Neutral OSS pack kernel: manifest, discovery, loader, catalog build. | — | packs/registries.py |
 | catalog_build.py | Build the live ``CompileRecipePackCatalog`` from loaded pack primitives (D4). | discovery, loader, types | packs/loader.py |
 | connector_projection.py | Project loaded connector specs' ToolManifests into the live tool registry. | registries | — |
-| context.py | D5 typed-context ABI + dispatcher for the neutral microkernel. | control_plane | adk_bridge/context_compaction.py, adk_bridge/control_plane.py, adk_bridge/edit_retry_reflection.py, adk_bridge/facts_replan_control.py, adk_bridge/resilience_plugin.py, adk_bridge/schema_feedback.py, adk_bridge/tool_exception_reflection.py, firstparty/packs/callback_turn_audit/impl.py, firstparty/packs/connector_local_readonly/impl.py, firstparty/packs/control_plane_default/impl.py, firstparty/packs/evidence_gitdiff/impl.py, firstparty/packs/harness_coding_lean/impl.py, firstparty/packs/source_opened_validator/impl.py, firstparty/packs/tools_clock/impl.py, packs/registries.py |
+| context.py | D5 typed-context ABI + dispatcher for the neutral microkernel. | control_plane, gate5b_full_toolhost | adk_bridge/context_compaction.py, adk_bridge/control_plane.py, adk_bridge/edit_retry_reflection.py, adk_bridge/facts_replan_control.py, adk_bridge/resilience_plugin.py, adk_bridge/schema_feedback.py, adk_bridge/tool_exception_reflection.py, firstparty/packs/callback_turn_audit/impl.py, firstparty/packs/connector_local_readonly/impl.py, firstparty/packs/control_plane_default/impl.py, firstparty/packs/evidence_gitdiff/impl.py, firstparty/packs/harness_coding_lean/impl.py, firstparty/packs/source_opened_validator/impl.py, firstparty/packs/tools_clock/impl.py, firstparty/packs/workspace_tools_default/impl.py, gates/gate5b_full_toolhost.py, packs/registries.py |
 | discovery.py | Pack discovery (D1): resolve search-path bases and rglob ``pack.toml``. | flags, manifest | cli/real_runner.py, packs/catalog_build.py, packs/loader.py, packs/registries.py |
 | harness_projection.py | Inject a pack-provided harness into the live resolved preset state. | resolved | — |
 | hook_projection.py | Expose the previously-unexposed ``HookRegistry`` discovery into the live | bus, registries | — |
