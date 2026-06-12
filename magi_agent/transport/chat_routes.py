@@ -1507,7 +1507,11 @@ async def _run_live_chat_runner(
         gate1a_bundle=gate1a_bundle,
         model_attempt_digest=model_attempt_digest,
         observed_egress_evidence=observed_egress_evidence,
-        public_events=_gate5b_full_toolhost_public_events(gate1a_bundle),
+        public_events=(
+            ()
+            if public_event_sink is not None
+            else _gate5b_full_toolhost_public_events(gate1a_bundle)
+        ),
         first_party_harness_metadata=_first_party_harness_metadata(
             payload=payload,
             gate1a_bundle=gate1a_bundle,

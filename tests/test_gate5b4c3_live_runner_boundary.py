@@ -5,6 +5,7 @@ import json
 import subprocess
 import sys
 import threading
+from collections.abc import Mapping
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -18,6 +19,7 @@ from magi_agent.shadow.gate5b4c3_live_runner_boundary import (
     _event_usage_metadata,
     _invoke_manual_tool,
     _looks_like_incomplete_full_toolhost_output,
+    _run_manual_tool_calls,
     _selected_full_toolhost_run_config,
     _usage_dict,
 )
@@ -1220,6 +1222,7 @@ def test_live_boundary_streams_manual_tool_events_as_they_execute() -> None:
         "text_delta",
         "turn_phase",
         "tool_start",
+        "tool_progress",
         "tool_end",
         "turn_phase",
         "text_delta",
@@ -1229,18 +1232,51 @@ def test_live_boundary_streams_manual_tool_events_as_they_execute() -> None:
         "turnId": "turn_opaque_001",
         "phase": "executing",
     }
-    assert public_events[4] == {
+    assert public_events[5] == {
         "type": "turn_phase",
         "turnId": "turn_opaque_001",
         "phase": "committing",
     }
     tool_start = public_events[2]
-    tool_end = public_events[3]
+    tool_progress = public_events[3]
+    tool_end = public_events[4]
     assert tool_start["name"] == "Calculation"
     assert str(tool_start["id"]).startswith("tu_")
+    assert tool_progress["id"] == tool_start["id"]
+    assert tool_progress["status"] == "in_progress"
     assert tool_end["id"] == tool_start["id"]
     assert tool_end["status"] == "ok"
     assert "result:sha256:" in str(tool_end["output_preview"])
+    serialized = json.dumps(public_events, sort_keys=True)
+    assert "1 + 1" not in serialized
+    assert "outputPreview" not in serialized
+    assert '"value": 2' not in serialized
+
+
+def test_run_manual_tool_calls_fail_open_when_public_event_sink_raises() -> None:
+    _ManualCalculationTool.calls = []
+
+    def raising_sink(event: Mapping[str, object]) -> None:
+        assert event["type"] in {"tool_start", "tool_progress", "tool_end"}
+        raise RuntimeError("sink unavailable")
+
+    results = asyncio.run(
+        _run_manual_tool_calls(
+            (
+                {
+                    "name": "Calculation",
+                    "args": {"expression": "1 + 1"},
+                    "id": "call-raises",
+                },
+            ),
+            (_ManualCalculationTool,),
+            public_event_sink=raising_sink,
+        )
+    )
+
+    assert _ManualCalculationTool.calls == [{"expression": "1 + 1"}]
+    assert results[0]["toolName"] == "Calculation"
+    assert results[0]["status"] == "ok"
 
 
 def test_live_boundary_deduplicates_pending_tool_calls_across_events() -> None:

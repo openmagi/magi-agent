@@ -26,6 +26,7 @@ from magi_agent.runtime.output_continuation import (
 )
 from magi_agent.runtime.public_events import (
     tool_end_event,
+    tool_progress_event,
     tool_start_event,
     turn_phase_event,
 )
@@ -2088,7 +2089,19 @@ async def _run_manual_tool_calls(
         )
         started = time.monotonic()
         if public_event_sink is not None and not tool_emits_public_events:
-            public_event_sink(tool_start_event(tool_id=tool_event_id, name=name))
+            _emit_manual_tool_public_event(
+                public_event_sink,
+                lambda: tool_start_event(tool_id=tool_event_id, name=name),
+            )
+            _emit_manual_tool_public_event(
+                public_event_sink,
+                lambda: tool_progress_event(
+                    tool_id=tool_event_id,
+                    label=name,
+                    status="in_progress",
+                    message="Tool execution started",
+                ),
+            )
         if tool is None:
             result_digest = _digest(
                 {
@@ -2098,8 +2111,9 @@ async def _run_manual_tool_calls(
                 }
             )
             if public_event_sink is not None and not tool_emits_public_events:
-                public_event_sink(
-                    tool_end_event(
+                _emit_manual_tool_public_event(
+                    public_event_sink,
+                    lambda: tool_end_event(
                         tool_id=tool_event_id,
                         status="error",
                         output_preview=f"result:{result_digest}",
@@ -2123,8 +2137,9 @@ async def _run_manual_tool_calls(
         manual_status = _manual_tool_status(result)
         result_digest = _digest(result)
         if public_event_sink is not None and not tool_emits_public_events:
-            public_event_sink(
-                tool_end_event(
+            _emit_manual_tool_public_event(
+                public_event_sink,
+                lambda: tool_end_event(
                     tool_id=tool_event_id,
                     status="ok" if manual_status == "ok" else "error",
                     output_preview=f"result:{result_digest}",
@@ -2142,6 +2157,18 @@ async def _run_manual_tool_calls(
             }
         )
     return results
+
+
+def _emit_manual_tool_public_event(
+    public_event_sink: Gate5B4C3PublicEventSink | None,
+    event_factory: Callable[[], Mapping[str, object]],
+) -> None:
+    if public_event_sink is None:
+        return
+    try:
+        public_event_sink(dict(event_factory()))
+    except Exception:
+        return
 
 
 def _manual_tool_event_id(
