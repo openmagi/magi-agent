@@ -366,7 +366,11 @@ class _FakeEvent:
 
 
 class _FunctionCallOnlyPart:
-    function_call = {"name": "Calculation", "args": {"expression": "1 + 1"}}
+    function_call = {
+        "name": "Calculation",
+        "args": {"expression": "1 + 1"},
+        "id": "calculation-call-001",
+    }
 
 
 class _FunctionCallOnlyEvent:
@@ -477,7 +481,11 @@ class _EventCapTextAndFunctionCallRunner(_FakeRunner):
 
 
 class _FunctionResponseOnlyPart:
-    function_response = {"name": "Calculation", "response": {"status": "ok"}}
+    function_response = {
+        "name": "Calculation",
+        "id": "calculation-call-001",
+        "response": {"status": "ok"},
+    }
 
 
 class _FunctionResponseOnlyEvent:
@@ -497,6 +505,7 @@ class _AutoToolLoopAgent:
 
 class _AutoToolLoopRunner(_FakeRunner):
     calls: list[dict[str, object]] = []
+    after_function_call_observer: object = None
 
     def __init__(self, **kwargs: object) -> None:
         self.agent = kwargs["agent"]
@@ -513,6 +522,8 @@ class _AutoToolLoopRunner(_FakeRunner):
         )
         if getattr(self.agent, "tools", ()):
             yield _FunctionCallOnlyEvent()
+            if callable(type(self).after_function_call_observer):
+                type(self).after_function_call_observer()
             yield _FunctionResponseOnlyEvent()
             return
         yield _FakeEvent("final answer after no-tool finalizer")
@@ -805,6 +816,7 @@ def _auto_tool_loop_primitives() -> Gate5B4C3LiveAdkPrimitives:
     _AutoToolLoopRunner.created_kwargs = {}
     _AutoToolLoopRunner.run_kwargs = {}
     _AutoToolLoopRunner.calls = []
+    _AutoToolLoopRunner.after_function_call_observer = None
     _ManualCalculationTool.calls = []
     _FakeGenerateContentConfig.created_kwargs = {}
     return Gate5B4C3LiveAdkPrimitives(
@@ -1220,14 +1232,14 @@ def test_live_boundary_streams_manual_tool_events_as_they_execute() -> None:
     event_types = [event.get("type") for event in public_events]
     assert event_types == [
         "text_delta",
-        "turn_phase",
         "tool_start",
         "tool_progress",
+        "turn_phase",
         "tool_end",
         "turn_phase",
         "text_delta",
     ]
-    assert public_events[1] == {
+    assert public_events[3] == {
         "type": "turn_phase",
         "turnId": "turn_opaque_001",
         "phase": "executing",
@@ -1237,8 +1249,8 @@ def test_live_boundary_streams_manual_tool_events_as_they_execute() -> None:
         "turnId": "turn_opaque_001",
         "phase": "committing",
     }
-    tool_start = public_events[2]
-    tool_progress = public_events[3]
+    tool_start = public_events[1]
+    tool_progress = public_events[2]
     tool_end = public_events[4]
     assert tool_start["name"] == "Calculation"
     assert str(tool_start["id"]).startswith("tu_")
@@ -1251,6 +1263,54 @@ def test_live_boundary_streams_manual_tool_events_as_they_execute() -> None:
     assert "1 + 1" not in serialized
     assert "outputPreview" not in serialized
     assert '"value": 2' not in serialized
+
+
+def test_live_boundary_streams_adk_tool_start_before_function_response_completion() -> None:
+    public_events: list[dict[str, object]] = []
+    snapshots_after_function_call: list[list[object]] = []
+    primitives = _auto_tool_loop_primitives()
+
+    def observe_after_function_call() -> None:
+        snapshots_after_function_call.append(
+            [event.get("type") for event in public_events]
+        )
+
+    _AutoToolLoopRunner.after_function_call_observer = observe_after_function_call
+
+    result = Gate5B4C3LiveRunnerBoundary(
+        lambda: primitives,
+        adk_tools=(_ManualCalculationTool,),
+        public_event_sink=lambda event: public_events.append(dict(event)),
+    ).invoke(_selected_full_toolhost_request(), config=_enabled_config())
+
+    assert result.status == "completed"
+    assert snapshots_after_function_call == [["tool_start", "tool_progress"]]
+    event_types = [event.get("type") for event in public_events]
+    assert event_types == ["tool_start", "tool_progress", "tool_end", "text_delta"]
+    assert event_types.index("tool_start") < event_types.index("tool_end")
+
+
+def test_live_boundary_does_not_duplicate_live_adk_tool_events_in_final_replay() -> None:
+    public_events: list[dict[str, object]] = []
+    primitives = _auto_tool_loop_primitives()
+
+    result = Gate5B4C3LiveRunnerBoundary(
+        lambda: primitives,
+        adk_tools=(_ManualCalculationTool,),
+        public_event_sink=lambda event: public_events.append(dict(event)),
+    ).invoke(_selected_full_toolhost_request(), config=_enabled_config())
+
+    assert result.status == "completed"
+    tool_events = [
+        event for event in public_events if str(event.get("type", "")).startswith("tool_")
+    ]
+    assert [event["type"] for event in tool_events] == [
+        "tool_start",
+        "tool_progress",
+        "tool_end",
+    ]
+    tool_ids = {event["id"] for event in tool_events}
+    assert len(tool_ids) == 1
 
 
 def test_run_manual_tool_calls_fail_open_when_public_event_sink_raises() -> None:
