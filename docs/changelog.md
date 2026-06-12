@@ -15,6 +15,38 @@ Versions follow the tags published on GitHub Releases.
 
 ### Fixed
 
+## 0.1.30
+
+### Added
+- User-authored runtime packs can now be discovered with zero setup, scaffolded
+  with `magi pack new`, and loaded alongside bundled first-party packs.
+- Gates, goal-loop, scheduler, and memory policy surfaces are now represented as
+  neutral first-party policy packs, widening the programmable runtime surface
+  without giving bundled packs special privileges.
+- Full-profile installs include the live child-runner defaults needed for
+  subagent execution when the full-profile runtime enables that profile.
+
+### Changed
+- First-party recipes, tools, hooks, control-plane surfaces, evidence producers,
+  and policy gates continue to resolve through the same pack machinery exposed
+  to user-authored packs.
+- Local and packaged runtime installs now exercise installed-wheel pack
+  discovery instead of relying only on source-checkout behavior.
+
+### Fixed
+- Bundled first-party `pack.toml` manifests are included in wheels and source
+  distributions. This fixes installed environments that previously discovered
+  zero packs while source checkouts appeared healthy.
+- Pack discovery skips unreadable user pack directories so health checks
+  continue through restricted home-directory permissions.
+- Headless output now surfaces final-only ADK model text for providers that do
+  not emit partial deltas, while avoiding duplicate output when partial tokens
+  are present.
+- Reset-boundary chat history now preserves post-reset user turns for web
+  requests instead of sending only the reset marker and latest prompt.
+- Canary/runtime direct usage receipts and selected runtime metering can be
+  emitted through the api-proxy path when enabled.
+
 ## 0.1.29
 
 ### Added
