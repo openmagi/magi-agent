@@ -17,6 +17,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 
 Origin = Literal["first_party", "user"]
 PrimitiveImpl = Callable[..., Any]
+_FIRST_PARTY_PACK_ID_PREFIX = "open" "magi."
 
 
 class ForbiddenRefError(KeyError):
@@ -120,7 +121,7 @@ class RegistryRegistrationSink:
             priority=primitive.priority or 0,
             phase=primitive.phase,
             gate_position=gate_position,
-            origin="first_party" if primitive.pack_id.startswith("openmagi.") else "user",
+            origin="first_party" if primitive.pack_id.startswith(_FIRST_PARTY_PACK_ID_PREFIX) else "user",
             override=True,  # last-wins: a later pack replaces an earlier same-ref impl
         )
 

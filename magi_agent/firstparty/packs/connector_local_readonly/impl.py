@@ -11,7 +11,7 @@ from magi_agent.packs.context import ConnectorProvideContext, ConnectorSpec
 from magi_agent.tools.catalog import CORE_TOOL_INPUT_SCHEMA
 from magi_agent.tools.manifest import Budget, ToolManifest, ToolSource
 
-_CONNECTOR_SOURCE = ToolSource(kind="external", package="openmagi.connector-local-readonly")
+_CONNECTOR_SOURCE = ToolSource(kind="external", package="magi.connector-local-readonly")
 
 
 def provide_connector(context: ConnectorProvideContext) -> None:
