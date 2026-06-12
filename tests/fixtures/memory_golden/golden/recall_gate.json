@@ -1,0 +1,76 @@
+[
+  {
+    "adapterCalls": 0,
+    "decisionCounts": {
+      "allowed": 0,
+      "background_only": 0,
+      "blocked": 0
+    },
+    "reasonCodes": [
+      "memory_recall_recipe_disabled"
+    ],
+    "references": 0,
+    "scenario": "disabled_with_policies",
+    "status": "disabled"
+  },
+  {
+    "adapterCalls": 0,
+    "decisionCounts": {
+      "allowed": 0,
+      "background_only": 0,
+      "blocked": 0
+    },
+    "reasonCodes": [
+      "memory_recall_recipe_disabled",
+      "missing_memory_namespace_policy",
+      "missing_memory_projection_policy"
+    ],
+    "references": 0,
+    "scenario": "disabled_missing_policies",
+    "status": "disabled"
+  },
+  {
+    "adapterCalls": 0,
+    "decisionCounts": {
+      "allowed": 0,
+      "background_only": 0,
+      "blocked": 0
+    },
+    "reasonCodes": [
+      "missing_memory_namespace_policy"
+    ],
+    "references": 0,
+    "scenario": "missing_namespace",
+    "status": "blocked"
+  },
+  {
+    "adapterCalls": 0,
+    "decisionCounts": {
+      "allowed": 0,
+      "background_only": 0,
+      "blocked": 0
+    },
+    "reasonCodes": [
+      "missing_memory_projection_policy"
+    ],
+    "references": 0,
+    "scenario": "missing_projection",
+    "status": "blocked"
+  },
+  {
+    "adapterCalls": 1,
+    "decisionCounts": {
+      "allowed": 1,
+      "background_only": 0,
+      "blocked": 0
+    },
+    "reasonCodes": [
+      "local_fake_memory_fixture",
+      "prompt_projection_disabled",
+      "long_term_memory_reference_allowed"
+    ],
+    "references": 1,
+    "scenario": "allowed_local_fake",
+    "status": "allowed"
+  }
+]

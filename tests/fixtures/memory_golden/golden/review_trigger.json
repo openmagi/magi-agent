@@ -1,0 +1,86 @@
+[
+  {
+    "fires": false,
+    "kind": "trigger",
+    "scenario": "disabled"
+  },
+  {
+    "fires": false,
+    "kind": "trigger",
+    "scenario": "zero_turns"
+  },
+  {
+    "fires": true,
+    "kind": "trigger",
+    "scenario": "on_boundary"
+  },
+  {
+    "fires": false,
+    "kind": "trigger",
+    "scenario": "off_boundary"
+  },
+  {
+    "fires": true,
+    "kind": "trigger",
+    "scenario": "interval_one_every_turn"
+  },
+  {
+    "fires": true,
+    "kind": "trigger",
+    "scenario": "double_boundary"
+  },
+  {
+    "attemptedWrites": 0,
+    "blocked": 0,
+    "candidates": 0,
+    "droppedDeclarative": 0,
+    "kind": "review",
+    "reasonCodes": [
+      "review_config_disabled"
+    ],
+    "scenario": "config_disabled",
+    "simulated": 0,
+    "status": "disabled",
+    "writeReceipts": [],
+    "written": 0
+  },
+  {
+    "attemptedWrites": 0,
+    "blocked": 0,
+    "candidates": 0,
+    "droppedDeclarative": 0,
+    "kind": "review",
+    "reasonCodes": [
+      "review_env_gate_disabled"
+    ],
+    "scenario": "env_gate_disabled",
+    "simulated": 0,
+    "status": "disabled",
+    "writeReceipts": [],
+    "written": 0
+  },
+  {
+    "attemptedWrites": 1,
+    "blocked": 0,
+    "candidates": 2,
+    "droppedDeclarative": 1,
+    "kind": "review",
+    "reasonCodes": [
+      "review_completed"
+    ],
+    "scenario": "reviewed_mixed_batch",
+    "simulated": 1,
+    "status": "reviewed",
+    "writeReceipts": [
+      {
+        "factPreview": "sha256:1b94c5d29d8b6fd448c44525a09b1b8b068338c8b5e44d0778efa0be686950e9",
+        "realWrite": false,
+        "reasonCodes": [
+          "memory_write_simulated"
+        ],
+        "status": "simulated"
+      }
+    ],
+    "written": 0
+  }
+]
