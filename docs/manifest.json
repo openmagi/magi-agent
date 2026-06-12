@@ -233,6 +233,12 @@
       "group": "Recipes"
     },
     {
+      "slug": "pack-manifest-reference",
+      "title": "Pack Manifest Reference",
+      "path": "docs/pack-manifest-reference.md",
+      "group": "Developer"
+    },
+    {
       "slug": "multi-recipe-composition",
       "title": "Multi-Recipe Composition",
       "path": "docs/multi-recipe-composition.md",
