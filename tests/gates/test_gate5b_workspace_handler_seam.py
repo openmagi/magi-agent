@@ -83,3 +83,42 @@ def test_dispatch_policy_can_override_output(tmp_path: Path):
     )
     assert outcome.status == "ok"
     assert outcome.output_preview == {"nowMs": 0, "filtered": True}
+
+
+def test_bundle_builder_defaults_to_pack_loaded_runtime(tmp_path: Path):
+    """C1 default-ON flip: the LIVE path (transport health/chat_routes call this
+    builder) consumes the bundled packs when neither kwarg is supplied — same
+    precedent as build_default_plugin's pack-loaded control plane."""
+    from magi_agent.gates.gate5b_full_toolhost import build_gate5b_full_toolhost_bundle
+
+    bundle = build_gate5b_full_toolhost_bundle(
+        config={"enabled": True, "killSwitchEnabled": False,
+                "routeAttachmentEnabled": True, "environment": "local",
+                "environmentAllowlist": ["local"], "maxToolCallsPerTurn": 8,
+                "allowedToolNames": ["Clock"]},
+        scope={"selectedBotDigest": "", "selectedOwnerDigest": "", "environment": "local"},
+        workspace_root=tmp_path,
+    )
+    assert bundle.status == "ready"
+    assert bundle.host._workspace_handlers.get("Clock") is not None
+    assert len(bundle.host._dispatch_policies) >= 2
+
+
+def test_bundle_builder_explicit_empty_keeps_legacy_runtime(tmp_path: Path):
+    """Dual-load escape hatch: explicitly-empty kwargs keep the legacy
+    in-module enforcement (no pack loading)."""
+    from magi_agent.gates.gate5b_full_toolhost import build_gate5b_full_toolhost_bundle
+
+    bundle = build_gate5b_full_toolhost_bundle(
+        config={"enabled": True, "killSwitchEnabled": False,
+                "routeAttachmentEnabled": True, "environment": "local",
+                "environmentAllowlist": ["local"], "maxToolCallsPerTurn": 8,
+                "allowedToolNames": ["Clock"]},
+        scope={"selectedBotDigest": "", "selectedOwnerDigest": "", "environment": "local"},
+        workspace_root=tmp_path,
+        workspace_handlers={},
+        dispatch_policies=(),
+    )
+    assert bundle.status == "ready"
+    assert bundle.host._workspace_handlers == {}
+    assert bundle.host._dispatch_policies == ()

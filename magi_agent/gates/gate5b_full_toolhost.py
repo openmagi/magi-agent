@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import fnmatch
+import functools
 import hashlib
 import inspect
 import json
@@ -2041,6 +2042,15 @@ class _WorkspaceFilesystem:
             target.unlink()
 
 
+@functools.lru_cache(maxsize=1)
+def _pack_loaded_workspace_runtime() -> tuple[Mapping[str, object], tuple[object, ...]]:
+    """Memoized pack-loaded gate5b runtime (pack discovery walks disk; once per
+    process). Returns ``(workspace_handlers, dispatch_policies)``."""
+    from magi_agent.packs.registries import build_tool_host_runtime_from_packs
+
+    return build_tool_host_runtime_from_packs()
+
+
 def build_gate5b_full_toolhost_bundle(
     *,
     config: Gate5BFullToolHostConfig | Mapping[str, object] | None = None,
@@ -2055,6 +2065,13 @@ def build_gate5b_full_toolhost_bundle(
     workspace_handlers: Mapping[str, object] | None = None,
     dispatch_policies: Sequence[object] | None = None,
 ) -> Gate5BFullToolBundle:
+    # C1 default-ON flip: when the caller supplies NEITHER seam kwarg, the live
+    # path consumes the bundled packs (workspace tool handlers + tool_host
+    # dispatch policies) — the same precedent as build_default_plugin's
+    # pack-loaded control plane. Explicitly-empty kwargs keep the legacy
+    # in-module paths (dual-load escape hatch for isolation tests).
+    if workspace_handlers is None and dispatch_policies is None:
+        workspace_handlers, dispatch_policies = _pack_loaded_workspace_runtime()
     safe_config = Gate5BFullToolHostConfig.model_validate(config or {})
     workspace = Path(workspace_root)
     selected_scope_error = _selected_scope_error(safe_config, scope or {}, workspace)
