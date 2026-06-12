@@ -1,0 +1,26 @@
+# Bundled first-party memory strategies (compaction denial / recall projection
+# / review trigger). Mirrors the evidence-ledger split: the memory STORES and
+# receipt envelopes are kernel; the opinionated recall/compaction/review
+# decisions load from this removable pack. Same loader/format as a user pack;
+# override/forbid by re-declaring or disabling a ref (§1 no privilege).
+# Schema = magi_agent/packs/manifest.py (top-level packId/displayName).
+
+packId = "openmagi.memory-strategies-default"
+displayName = "Memory strategies"
+version = "1.0.0"
+description = "First-party recall projection, compaction denial, and review trigger strategies."
+
+[[provides]]
+type = "memory_strategy"
+ref = "memory_strategy:compaction-denial@1"
+impl = "magi_agent.firstparty.packs.memory_strategies_default.impl:provide_compaction_denial"
+
+[[provides]]
+type = "memory_strategy"
+ref = "memory_strategy:recall-projection@1"
+impl = "magi_agent.firstparty.packs.memory_strategies_default.impl:provide_recall_projection"
+
+[[provides]]
+type = "memory_strategy"
+ref = "memory_strategy:review-trigger@1"
+impl = "magi_agent.firstparty.packs.memory_strategies_default.impl:provide_review_trigger"

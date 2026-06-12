@@ -48,3 +48,14 @@ class _CronOverridePolicy:
 
 def provide_cron_override(context: Any) -> None:
     context.register("schedule_policy:cron@1", _CronOverridePolicy())
+
+
+def _compaction_denial_override(request: Any, policy: Any) -> Any:
+    _ = request, policy
+    return "blocked", ("user_denial_override",)
+
+
+def provide_compaction_denial_override(context: Any) -> None:
+    context.register(
+        "memory_strategy:compaction-denial@1", _compaction_denial_override
+    )

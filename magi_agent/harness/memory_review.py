@@ -162,6 +162,12 @@ class MemoryReviewReceipt(BaseModel):
     reason_codes: tuple[str, ...] = Field(default=(), alias="reasonCodes")
 
 
+#: The bundled first-party ``memory_strategy`` ref for the N-turn review
+#: trigger (magi_agent/firstparty/packs/memory_strategies_default). A user
+#: pack re-declaring this ref overrides the trigger.
+DEFAULT_REVIEW_TRIGGER_STRATEGY_REF = "memory_strategy:review-trigger@1"
+
+
 def should_run_review(turn_count: int, *, interval_turns: int, enabled: bool) -> bool:
     """Pure N-turn trigger (Task 5.2).
 
@@ -195,8 +201,18 @@ class MemoryReviewHarness:
         trigger: object | None = None,
     ) -> None:
         self.config = config
-        # C4 dual-load seam: None -> the exact legacy in-module trigger.
-        self._trigger = trigger if trigger is not None else should_run_review
+        if trigger is None:
+            # C4 dual-load seam: explicit injection wins; otherwise resolve the
+            # bundled first-party trigger from packs (fail-open to the exact
+            # legacy in-module trigger — same function either way). Lazy import:
+            # the shared resolver lives in memory_compaction and must not enter
+            # this module's top-level import graph.
+            from magi_agent.harness.memory_compaction import resolve_memory_strategy
+
+            trigger = resolve_memory_strategy(
+                DEFAULT_REVIEW_TRIGGER_STRATEGY_REF, default=should_run_review
+            )
+        self._trigger = trigger
 
     def should_run(self, *, turn_count: int) -> bool:
         """N-turn trigger via the injected strategy (default: should_run_review)."""
@@ -336,6 +352,7 @@ def _fact_preview(fact: str) -> str:
 
 
 __all__ = [
+    "DEFAULT_REVIEW_TRIGGER_STRATEGY_REF",
     "MAGI_MEMORY_REVIEW_ENABLED_ENV",
     "MemoryReviewConfig",
     "MemoryReviewHarness",
