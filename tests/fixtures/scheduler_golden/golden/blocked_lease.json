@@ -1,0 +1,20 @@
+[
+  {
+    "authorityFlags": {
+      "agentSpawned": false,
+      "backgroundTaskStarted": false,
+      "channelDeliveryPerformed": false,
+      "databaseMutationAllowed": false,
+      "filesystemMutationAllowed": false,
+      "liveToolExecution": false,
+      "networkCallAllowed": false,
+      "productionChannelWrite": false
+    },
+    "evidenceDigest": "sha256:8fe1b03e68b648fd5b192bb1e39fa7c16b67960453c49c7abafcdf9b4135e64b",
+    "firedJobIds": [],
+    "leaseState": "missing",
+    "scenario": "lease_missing",
+    "skippedJobIds": [],
+    "status": "tick_blocked_lease"
+  }
+]

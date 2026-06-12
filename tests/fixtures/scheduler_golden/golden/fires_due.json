@@ -1,0 +1,45 @@
+[
+  {
+    "authorityFlags": {
+      "agentSpawned": false,
+      "backgroundTaskStarted": false,
+      "channelDeliveryPerformed": false,
+      "databaseMutationAllowed": false,
+      "filesystemMutationAllowed": false,
+      "liveToolExecution": false,
+      "networkCallAllowed": false,
+      "productionChannelWrite": false
+    },
+    "evidenceDigest": "sha256:e45ffc0deb786884e63a68977a0ec2f89da12372d0241903e27f0f79cac7e59a",
+    "firedJobIds": [
+      "job-due"
+    ],
+    "leaseState": "valid",
+    "scenario": "first_tick",
+    "skippedJobIds": [
+      "job-later"
+    ],
+    "status": "tick_completed"
+  },
+  {
+    "authorityFlags": {
+      "agentSpawned": false,
+      "backgroundTaskStarted": false,
+      "channelDeliveryPerformed": false,
+      "databaseMutationAllowed": false,
+      "filesystemMutationAllowed": false,
+      "liveToolExecution": false,
+      "networkCallAllowed": false,
+      "productionChannelWrite": false
+    },
+    "evidenceDigest": "sha256:d25e4dedc763fb74bcab2a54e91efe04f4f18a6fc6281081c6076b3dd50f00c1",
+    "firedJobIds": [],
+    "leaseState": "valid",
+    "scenario": "second_tick_no_refire",
+    "skippedJobIds": [
+      "job-due",
+      "job-later"
+    ],
+    "status": "tick_completed"
+  }
+]
