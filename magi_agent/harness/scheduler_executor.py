@@ -327,6 +327,37 @@ class CronSchedulePolicy:
         return job.compute_next_run(now=now)
 
 
+#: The bundled first-party ``schedule_policy`` ref (magi_agent/firstparty/packs/
+#: scheduler_default). A user pack re-declaring this ref overrides the policy.
+DEFAULT_SCHEDULE_POLICY_REF = "schedule_policy:cron@1"
+
+
+def resolve_schedule_policy(
+    *,
+    ref: str = DEFAULT_SCHEDULE_POLICY_REF,
+    bases: "list[object] | None" = None,
+) -> SchedulePolicy:
+    """Resolve the schedule policy from loaded packs; fall back to the in-module
+    first-party policy when packs are unavailable (fail-open: the tick must
+    never break because pack discovery failed).
+
+    Lazy imports keep this module's forbidden-import contract — no adk/network
+    modules enter the top-level import graph.
+    """
+    try:
+        from magi_agent.packs.discovery import default_search_bases
+        from magi_agent.packs.registries import load_into_registries
+
+        search = list(bases) if bases is not None else list(default_search_bases())
+        registries, _ = load_into_registries(search)
+        policy = registries.schedule_policies.resolve(ref)
+        if isinstance(policy, SchedulePolicy):
+            return policy
+    except Exception:  # noqa: BLE001 — fail-open to the bundled default
+        pass
+    return CronSchedulePolicy()
+
+
 # ---------------------------------------------------------------------------
 # In-memory fake implementation (for tests and local-fake mode)
 # ---------------------------------------------------------------------------
@@ -495,8 +526,11 @@ def tick(
     It receives ``(job_id, receipt_dict)`` and is not part of the public API.
     """
     _validate_local_fake_source(source)
+    # C3 flip: the default is resolved from the loaded schedule_policy packs
+    # (the bundled scheduler_default pack registers CronSchedulePolicy, so a
+    # pack-less or disabled-pack environment is byte-identical via fail-open).
     resolved_policy: SchedulePolicy = (
-        policy if policy is not None else CronSchedulePolicy()
+        policy if policy is not None else resolve_schedule_policy()
     )
     try:
         with acquire_tick_lock(lock_dir=lock_dir):
@@ -648,6 +682,7 @@ def _tick_inside_lock(
 
 __all__ = [
     "CronSchedulePolicy",
+    "DEFAULT_SCHEDULE_POLICY_REF",
     "InMemoryJobSource",
     "LeaseState",
     "ScheduledJobRecord",
@@ -657,6 +692,7 @@ __all__ = [
     "SchedulerTickResult",
     "TickStatus",
     "acquire_tick_lock",
+    "resolve_schedule_policy",
     "tick",
 ]
 # SchedulerLease is imported for internal use (validate_scheduler_lease) and
