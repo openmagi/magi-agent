@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Literal, Self, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator, model_validator
@@ -23,6 +23,13 @@ MemoryCompactionStatus: TypeAlias = Literal[
     "blocked",
     "approval_required",
     "success",
+]
+
+#: C4 strategy seam: (request, policy) -> (denial_status | None, reason_codes).
+#: First-party default = _compaction_denial_reasons (the exact legacy decision).
+CompactionDenialStrategy: TypeAlias = Callable[
+    ["MemoryCompactionRequest", "MemoryCompactionPolicy | None"],
+    "tuple[MemoryCompactionStatus | None, tuple[str, ...]]",
 ]
 
 _MODEL_CONFIG = ConfigDict(
@@ -356,6 +363,7 @@ class MemoryCompactionHarness:
         config: MemoryCompactionHarnessConfig | Mapping[str, object] | None = None,
         *,
         adapter: object | None = None,
+        denial_strategy: CompactionDenialStrategy | None = None,
     ) -> None:
         self.config = (
             config
@@ -363,6 +371,8 @@ class MemoryCompactionHarness:
             else MemoryCompactionHarnessConfig.model_validate(config or {})
         )
         self.adapter = adapter
+        # C4 dual-load seam: None -> the exact legacy in-module decision.
+        self._denial_strategy = denial_strategy
 
     async def compact(
         self,
@@ -389,7 +399,8 @@ class MemoryCompactionHarness:
                 executed=False,
                 local_test_only=False,
             )
-        denial_status, denial_reasons = _compaction_denial_reasons(safe_request, safe_policy)
+        denial = self._denial_strategy or _compaction_denial_reasons
+        denial_status, denial_reasons = denial(safe_request, safe_policy)
         if denial_status is not None:
             return _result(
                 status=denial_status,
@@ -525,6 +536,7 @@ def _string_tuple(value: object) -> tuple[str, ...]:
 
 
 __all__ = [
+    "CompactionDenialStrategy",
     "MemoryCompactionHarness",
     "MemoryCompactionHarnessConfig",
     "MemoryCompactionPolicy",

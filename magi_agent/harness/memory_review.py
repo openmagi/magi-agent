@@ -188,8 +188,25 @@ class MemoryReviewHarness:
     host's own gate (disabled / shadow / live).
     """
 
-    def __init__(self, config: MemoryReviewConfig) -> None:
+    def __init__(
+        self,
+        config: MemoryReviewConfig,
+        *,
+        trigger: object | None = None,
+    ) -> None:
         self.config = config
+        # C4 dual-load seam: None -> the exact legacy in-module trigger.
+        self._trigger = trigger if trigger is not None else should_run_review
+
+    def should_run(self, *, turn_count: int) -> bool:
+        """N-turn trigger via the injected strategy (default: should_run_review)."""
+        return bool(
+            self._trigger(
+                turn_count,
+                interval_turns=self.config.interval_turns,
+                enabled=self.config.enabled,
+            )
+        )
 
     async def review(
         self,
