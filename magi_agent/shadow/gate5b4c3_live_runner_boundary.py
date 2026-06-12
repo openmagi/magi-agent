@@ -733,6 +733,11 @@ class Gate5B4C3LiveRunnerBoundary:
         manual_continuations = 0
         output_continuations = 0
         tool_only_events_seen = False
+        prestarted_tool_event_ids: set[str] = set()
+        completed_tool_event_ids: set[str] = set()
+        live_tool_event_ids_by_adk_id: dict[str, str] = {}
+        pending_live_tool_event_ids_by_name: dict[str, list[str]] = {}
+        live_tool_started_at_by_id: dict[str, float] = {}
         usage_totals = [0, 0, 0]
         output_continuation = (
             _output_continuation_config_from_env() if selected_full_toolhost else None
@@ -782,9 +787,80 @@ class Gate5B4C3LiveRunnerBoundary:
                             function_call_key = _json_dumps(function_call)
                             if function_call_key in function_call_keys:
                                 continue
+                            function_call_index = len(function_calls)
                             function_call_keys.add(function_call_key)
                             function_calls.append(function_call)
+                            tool_event_id = _live_tool_event_id_for_function_call(
+                                function_call,
+                                index=function_call_index,
+                            )
+                            _remember_live_tool_event_id(
+                                function_call,
+                                tool_event_id=tool_event_id,
+                                ids_by_adk_id=live_tool_event_ids_by_adk_id,
+                                pending_ids_by_name=pending_live_tool_event_ids_by_name,
+                            )
+                            if not _function_call_tool_emits_public_events(
+                                function_call,
+                                self._adk_tools,
+                            ):
+                                if tool_event_id not in prestarted_tool_event_ids:
+                                    prestarted_tool_event_ids.add(tool_event_id)
+                                    live_tool_started_at_by_id[tool_event_id] = (
+                                        time.monotonic()
+                                    )
+                                    self._emit_public_event(
+                                        tool_start_event(
+                                            tool_id=tool_event_id,
+                                            name=str(function_call.get("name", "")),
+                                        )
+                                    )
+                                    self._emit_public_event(
+                                        tool_progress_event(
+                                            tool_id=tool_event_id,
+                                            label=str(function_call.get("name", "")),
+                                            status="in_progress",
+                                            message="Tool execution started",
+                                        )
+                                    )
                         event_function_responses = _event_function_responses(event)
+                        for function_response in event_function_responses:
+                            normalized_response = _normalize_function_response(
+                                function_response
+                            )
+                            if normalized_response is None:
+                                continue
+                            if _function_response_tool_emits_public_events(
+                                normalized_response,
+                                self._adk_tools,
+                            ):
+                                continue
+                            tool_event_id = _live_tool_event_id_for_function_response(
+                                normalized_response,
+                                ids_by_adk_id=live_tool_event_ids_by_adk_id,
+                                pending_ids_by_name=pending_live_tool_event_ids_by_name,
+                            )
+                            if tool_event_id in completed_tool_event_ids:
+                                continue
+                            completed_tool_event_ids.add(tool_event_id)
+                            response_payload = normalized_response.get("response")
+                            result_digest = _digest(response_payload)
+                            status = _manual_tool_status(response_payload)
+                            self._emit_public_event(
+                                tool_end_event(
+                                    tool_id=tool_event_id,
+                                    status="ok" if status == "ok" else "error",
+                                    output_preview=f"result:{result_digest}",
+                                    error=None if status == "ok" else status,
+                                    receipt_refs=(f"result:{result_digest}",),
+                                    duration_ms=_elapsed_ms(
+                                        live_tool_started_at_by_id.get(
+                                            tool_event_id,
+                                            time.monotonic(),
+                                        )
+                                    ),
+                                )
+                            )
                         if event_function_calls or event_function_responses:
                             tool_only_events_seen = True
                         if event_function_responses:
@@ -856,6 +932,7 @@ class Gate5B4C3LiveRunnerBoundary:
                         function_calls,
                         self._adk_tools,
                         public_event_sink=self._emit_public_event,
+                        prestarted_tool_event_ids=prestarted_tool_event_ids,
                     )
                     if not manual_results:
                         break
@@ -2061,11 +2138,122 @@ def _normalize_function_call(function_call: object) -> Mapping[str, object] | No
     return {"name": name, "args": safe_args, "id": safe_call_id}
 
 
+def _normalize_function_response(function_response: object) -> Mapping[str, object] | None:
+    if function_response is None:
+        return None
+    if isinstance(function_response, Mapping):
+        name = function_response.get("name")
+        response = function_response.get("response")
+        response_id = function_response.get("id")
+    else:
+        model_dump = getattr(function_response, "model_dump", None)
+        if callable(model_dump):
+            try:
+                dumped = model_dump(by_alias=True)
+            except Exception:
+                dumped = None
+            if isinstance(dumped, Mapping):
+                return _normalize_function_response(dumped)
+        name = getattr(function_response, "name", None)
+        response = getattr(function_response, "response", None)
+        response_id = getattr(function_response, "id", None)
+    if not isinstance(name, str) or not _SAFE_TOOL_NAME_RE.match(name):
+        return None
+    return {
+        "name": name,
+        "response": response if response is not None else {},
+        "id": str(response_id or ""),
+    }
+
+
+def _live_tool_event_id_for_function_call(
+    function_call: Mapping[str, object],
+    *,
+    index: int,
+) -> str:
+    args = function_call.get("args")
+    return _manual_tool_event_id(
+        name=str(function_call.get("name", "")),
+        args=dict(args) if isinstance(args, Mapping) else {},
+        call_id=function_call.get("id"),
+        index=index,
+    )
+
+
+def _remember_live_tool_event_id(
+    function_call: Mapping[str, object],
+    *,
+    tool_event_id: str,
+    ids_by_adk_id: dict[str, str],
+    pending_ids_by_name: dict[str, list[str]],
+) -> None:
+    call_id = str(function_call.get("id") or "")
+    if call_id:
+        ids_by_adk_id.setdefault(call_id, tool_event_id)
+    name = str(function_call.get("name", ""))
+    if name:
+        pending_ids_by_name.setdefault(name, []).append(tool_event_id)
+
+
+def _live_tool_event_id_for_function_response(
+    function_response: Mapping[str, object],
+    *,
+    ids_by_adk_id: Mapping[str, str],
+    pending_ids_by_name: dict[str, list[str]],
+) -> str:
+    response_id = str(function_response.get("id") or "")
+    name = str(function_response.get("name", ""))
+    if response_id:
+        matched = ids_by_adk_id.get(response_id)
+        if matched:
+            pending_ids = pending_ids_by_name.get(name)
+            if pending_ids and matched in pending_ids:
+                pending_ids.remove(matched)
+            return matched
+    pending_ids = pending_ids_by_name.get(name)
+    if pending_ids:
+        return pending_ids.pop(0)
+    return "tu_" + _digest(
+        {
+            "name": name,
+            "id": response_id,
+            "response": _bounded_json_value(
+                function_response.get("response"),
+                max_bytes=512,
+            ),
+        }
+    )
+
+
+def _function_call_tool_emits_public_events(
+    function_call: Mapping[str, object],
+    tools: Sequence[object],
+) -> bool:
+    return _tool_name_emits_public_events(str(function_call.get("name", "")), tools)
+
+
+def _function_response_tool_emits_public_events(
+    function_response: Mapping[str, object],
+    tools: Sequence[object],
+) -> bool:
+    return _tool_name_emits_public_events(str(function_response.get("name", "")), tools)
+
+
+def _tool_name_emits_public_events(name: str, tools: Sequence[object]) -> bool:
+    if not _SAFE_TOOL_NAME_RE.match(name):
+        return False
+    for tool in tools:
+        if str(getattr(tool, "name", "")) == name and _tool_emits_public_events(tool):
+            return True
+    return False
+
+
 async def _run_manual_tool_calls(
     function_calls: Sequence[Mapping[str, object]],
     tools: Sequence[object],
     *,
     public_event_sink: Gate5B4C3PublicEventSink | None = None,
+    prestarted_tool_event_ids: set[str] | frozenset[str] = frozenset(),
 ) -> list[Mapping[str, object]]:
     tool_by_name = {
         str(getattr(tool, "name", "")): tool
@@ -2088,7 +2276,12 @@ async def _run_manual_tool_calls(
             index=index,
         )
         started = time.monotonic()
-        if public_event_sink is not None and not tool_emits_public_events:
+        should_emit_start = tool_event_id not in prestarted_tool_event_ids
+        if (
+            public_event_sink is not None
+            and not tool_emits_public_events
+            and should_emit_start
+        ):
             _emit_manual_tool_public_event(
                 public_event_sink,
                 lambda: tool_start_event(tool_id=tool_event_id, name=name),
