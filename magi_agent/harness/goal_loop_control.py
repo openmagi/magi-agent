@@ -649,18 +649,26 @@ LoopControlInputProvider = Callable[[HookContext], "LoopControlInput | None"]
 #: act on a ``continue`` (re-inject ``continuation_prompt`` as the next turn).
 LoopControlDecisionSink = Callable[["LoopControlResult"], None]
 
+#: C2 policy seam: the continue/stop decision as a swappable callable. The
+#: first-party policy is ``decide_loop_continuation``; a ``loop_policy`` pack
+#: registers an alternative with the SAME signature (LoopControlInput in,
+#: LoopControlResult out — the typed context IS LoopControlInput).
+LoopContinuationPolicy = Callable[["LoopControlInput"], "LoopControlResult"]
+
 
 def build_after_turn_goal_loop_hook(
     *,
     input_provider: LoopControlInputProvider,
     decision_sink: LoopControlDecisionSink | None = None,
+    policy: "LoopContinuationPolicy | None" = None,
 ) -> tuple[HookManifest, Callable[[HookContext], HookResult]]:
     """Build the AFTER_TURN_END hook that drives the Ralph loop.
 
     Returns ``(manifest, handler)``.  The handler:
       - asks ``input_provider`` for this session's LoopControlInput (None → no
         active goal loop → ``continue`` no-op),
-      - computes the decision via ``decide_loop_continuation``,
+      - computes the decision via the injected ``policy`` (C2 seam; ``None``
+        defaults to the first-party ``decide_loop_continuation``),
       - records it via ``decision_sink`` (the driver re-injects the
         continuation prompt — the hook bus itself carries no such payload, so
         the loop is driven through the sink, mirroring the scheduler returning a
@@ -671,6 +679,7 @@ def build_after_turn_goal_loop_hook(
     The hook is non-blocking and fail-open: any provider/decision error is
     swallowed so a goal-loop bug can never break a normal turn.
     """
+    decide = policy if policy is not None else decide_loop_continuation
 
     def _handler(context: HookContext) -> HookResult:
         try:
@@ -680,7 +689,7 @@ def build_after_turn_goal_loop_hook(
         if loop_input is None:
             return HookResult(action="continue", reason="no_active_goal_loop")
         try:
-            result = decide_loop_continuation(loop_input)
+            result = decide(loop_input)
         except Exception:  # noqa: BLE001 — fail-open
             return HookResult(action="continue", reason="goal_loop_decision_error")
         if decision_sink is not None:
@@ -727,6 +736,7 @@ __all__ = [
     "LoopControlInput",
     "LoopControlInputProvider",
     "LoopControlResult",
+    "LoopContinuationPolicy",
     "LoopContinueReason",
     "LoopDecision",
     "LoopReason",
