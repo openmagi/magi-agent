@@ -15,6 +15,7 @@ pack dir and are registered WITHOUT importing anything.
 from __future__ import annotations
 
 import importlib
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
@@ -26,19 +27,47 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from magi_agent.packs.types import CompileRecipePackCatalog
 
 
-def lazy_import_symbol(impl: str) -> Any:
+def lazy_import_symbol(impl: str, *, search_root: Path | None = None) -> Any:
     """Resolve a ``"module.path:symbol"`` string to the live object.
 
     Imports the module (lazily, at call time) and returns the attribute. Raises
     ``ValueError`` for a malformed ref and ``ImportError`` if the module or
     symbol cannot be resolved.
+
+    ``search_root`` (B0, zero-setup disk packs): when the top-level module is
+    not importable AND a matching package/module exists directly under
+    ``search_root`` (the discovered pack's parent dir), the root is APPENDED to
+    ``sys.path`` (append, not prepend — installed packages keep winning on a
+    name collision) and the import retried once. ``importlib.invalidate_caches``
+    is required because pack dirs are typically created after interpreter start.
+    The appended entry is left in place (other entries of the same pack resolve
+    through it); pack directory names should be unique across pack roots —
+    ``sys.modules`` is keyed by top-level name, so the first pack imported under
+    a given dir name wins.
     """
     if impl.count(":") != 1:
         raise ValueError(f"impl must be 'module.path:symbol', got {impl!r}")
     module_path, _, symbol = impl.partition(":")
     if not module_path or not symbol:
         raise ValueError(f"impl must be 'module.path:symbol', got {impl!r}")
-    module = importlib.import_module(module_path)
+    try:
+        module = importlib.import_module(module_path)
+    except ModuleNotFoundError as exc:
+        top = module_path.split(".", 1)[0]
+        if (
+            search_root is None
+            or exc.name != top
+            or not (
+                (search_root / top).is_dir()
+                or (search_root / f"{top}.py").is_file()
+            )
+        ):
+            raise
+        root = str(search_root)
+        if root not in sys.path:
+            sys.path.append(root)
+        importlib.invalidate_caches()
+        module = importlib.import_module(module_path)
     try:
         return getattr(module, symbol)
     except AttributeError as exc:
@@ -136,7 +165,7 @@ def load_packs(
                     type=entry.type,
                     ref=entry.ref,
                     pack_id=pack_id,
-                    impl=lazy_import_symbol(entry.impl),
+                    impl=lazy_import_symbol(entry.impl, search_root=disc.pack_dir.parent),
                     priority=entry.priority,
                     phase=entry.phase,
                     gate_position=entry.gate_position,
