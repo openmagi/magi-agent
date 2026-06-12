@@ -113,6 +113,43 @@ def _turn_input(session_id: str, turn_id: str = "turn-1", prompt: str = "go") ->
     return {"prompt": prompt, "session_id": session_id, "turn_id": turn_id}
 
 
+def _install_transcript_only_text_bridge(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Simulate providers whose final aggregate text only lands in transcript entries."""
+
+    import magi_agent.cli.engine as engine_mod
+
+    real_deps = engine_mod._lazy_engine_deps()
+    bridge_key = next(key for key in real_deps if key.endswith("EventBridge"))
+
+    class _BridgeWithTranscriptOnlyText:
+        def __init__(self, **kwargs: object) -> None:
+            self._real = real_deps[bridge_key](**kwargs)  # type: ignore[operator]
+
+        def project_adk_event(self, event: object, *, turn_id: str):
+            projection = self._real.project_adk_event(event, turn_id=turn_id)
+            if any(
+                getattr(entry, "kind", None) == "assistant_text"
+                for entry in projection.transcript_entries
+            ):
+                object.__setattr__(
+                    projection,
+                    "agent_events",
+                    [
+                        agent_event
+                        for agent_event in projection.agent_events
+                        if agent_event.get("type") != "text_delta"
+                    ],
+                )
+            return projection
+
+    def _fake_deps() -> dict:
+        deps = dict(real_deps)
+        deps[bridge_key] = _BridgeWithTranscriptOnlyText
+        return deps
+
+    monkeypatch.setattr(engine_mod, "_lazy_engine_deps", _fake_deps)
+
+
 # ---------------------------------------------------------------------------
 # 1. Turn drains to a terminal result
 # ---------------------------------------------------------------------------
@@ -142,6 +179,79 @@ def test_turn_drains_to_completed_terminal() -> None:
     assert ("token", "text_delta") in kinds
     assert ("tool", "tool_start") in kinds
     assert ("tool", "tool_end") in kinds
+
+
+def test_headless_text_uses_transcript_only_final_aggregate_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MAGI_CLI_ENABLED", "1")
+    _install_transcript_only_text_bridge(monkeypatch)
+
+    driver = MagiEngineDriver(
+        runner=MockRunner(
+            [_text_event("aggregate-only final", partial=False, turn_complete=True)]
+        )
+    )
+    buffer = io.StringIO()
+
+    code = asyncio.run(
+        run_headless("hi", output="text", driver=driver, stream=buffer)
+    )
+
+    assert code == 0
+    assert buffer.getvalue() == "aggregate-only final\n"
+
+
+def test_headless_json_transcript_aggregate_after_partial_does_not_duplicate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MAGI_CLI_ENABLED", "1")
+    _install_transcript_only_text_bridge(monkeypatch)
+
+    driver = MagiEngineDriver(
+        runner=MockRunner(
+            [
+                _text_event("Hello ", partial=True),
+                _text_event("Hello world.", partial=False, turn_complete=True),
+            ]
+        )
+    )
+    buffer = io.StringIO()
+
+    code = asyncio.run(
+        run_headless("hi", output="json", driver=driver, stream=buffer)
+    )
+
+    result = json.loads(buffer.getvalue())
+    assert code == 0
+    assert result["result"] == "Hello world."
+
+
+def test_stream_json_transcript_only_final_emits_assistant_frame(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MAGI_CLI_ENABLED", "1")
+    _install_transcript_only_text_bridge(monkeypatch)
+
+    driver = MagiEngineDriver(
+        runner=MockRunner(
+            [_text_event("stream aggregate", partial=False, turn_complete=True)]
+        )
+    )
+    buffer = io.StringIO()
+
+    code = asyncio.run(
+        run_headless("hi", output="stream-json", driver=driver, stream=buffer)
+    )
+
+    frames = [json.loads(line) for line in buffer.getvalue().splitlines() if line]
+    assistant_frames = [frame for frame in frames if frame["type"] == "assistant"]
+    result_frames = [frame for frame in frames if frame["type"] == "result"]
+    assert code == 0
+    assert [frame["message"]["content"] for frame in assistant_frames] == [
+        "stream aggregate"
+    ]
+    assert result_frames[-1]["result"] == "stream aggregate"
 
 
 # ---------------------------------------------------------------------------

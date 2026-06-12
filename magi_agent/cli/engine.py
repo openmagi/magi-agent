@@ -510,6 +510,69 @@ def _is_continuation_output_event(event: Mapping[str, object]) -> bool:
     return False
 
 
+def _unstreamed_text_delta(aggregate_text: str, emitted_text: str) -> str:
+    if not emitted_text:
+        return aggregate_text
+    if aggregate_text.startswith(emitted_text):
+        return aggregate_text[len(emitted_text) :]
+    if emitted_text.endswith(aggregate_text):
+        return ""
+    max_overlap = min(len(aggregate_text), len(emitted_text))
+    for size in range(max_overlap, 0, -1):
+        if emitted_text.endswith(aggregate_text[:size]):
+            return aggregate_text[size:]
+    return aggregate_text
+
+
+def _projected_events_with_transcript_text_fallback(
+    projection: object,
+    *,
+    emitted_text: str,
+) -> list[Mapping[str, object]]:
+    agent_events = [
+        event
+        for event in getattr(projection, "agent_events", ())
+        if isinstance(event, Mapping)
+    ]
+    if any(
+        event.get("type") == "text_delta"
+        and isinstance(event.get("delta"), str)
+        and bool(event.get("delta"))
+        for event in agent_events
+    ):
+        return agent_events
+
+    fallback_events: list[Mapping[str, object]] = []
+    seen_text = emitted_text
+    for entry in getattr(projection, "transcript_entries", ()):
+        if getattr(entry, "kind", None) != "assistant_text":
+            continue
+        text = getattr(entry, "text", None)
+        if not isinstance(text, str) or not text:
+            continue
+        delta = _unstreamed_text_delta(text, seen_text)
+        if not delta:
+            continue
+        fallback_events.append({"type": "text_delta", "delta": delta})
+        seen_text += delta
+    if not fallback_events:
+        return agent_events
+
+    insert_at = next(
+        (
+            index
+            for index, event in enumerate(agent_events)
+            if event.get("type") == "turn_end"
+        ),
+        len(agent_events),
+    )
+    return [
+        *agent_events[:insert_at],
+        *fallback_events,
+        *agent_events[insert_at:],
+    ]
+
+
 def _map_event_kind(event_type: object) -> str:
     if event_type in _TOKEN_EVENT_TYPES:
         return "token"
@@ -1378,6 +1441,7 @@ class MagiEngineDriver:
         event_count = 0
         usage: dict[str, object] = {}
         observed_public_refs: set[str] = set()
+        emitted_text = ""
 
         # Permission interception (Stream F): attach a before_tool_callback to
         # the runner's agent so the gate intercepts every tool BEFORE it runs.
@@ -1483,7 +1547,10 @@ class MagiEngineDriver:
                                 attempt_truncated = True
                         projection = bridge.project_adk_event(adk_event, turn_id=turn_id)  # type: ignore[union-attr]
                         projected_events: list[Mapping[str, object]] = []
-                        for raw_event in projection.agent_events:  # type: ignore[union-attr]
+                        for raw_event in _projected_events_with_transcript_text_fallback(
+                            projection,
+                            emitted_text=emitted_text,
+                        ):
                             safe = sanitize(dict(raw_event))  # type: ignore[operator]
                             if safe is None:
                                 continue
@@ -1506,6 +1573,12 @@ class MagiEngineDriver:
                             # P3 zero-edit guard: count file-mutating tool calls.
                             if safe.get("type") == "tool_start" and safe.get("name") in _EDIT_CLASS_TOOLS:
                                 file_edit_calls += 1
+                            if safe.get("type") == "response_clear":
+                                emitted_text = ""
+                            elif safe.get("type") == "text_delta":
+                                delta = safe.get("delta")
+                                if isinstance(delta, str):
+                                    emitted_text += delta
                             # PR4 goal-nudge: reset the goal-mode latch whenever a
                             # tool fires so the next clean stop is eligible for a
                             # nudge again (re-arm).
@@ -1974,12 +2047,21 @@ class MagiEngineDriver:
                     adk_event = step
                     event_count += 1
                     projection = bridge.project_adk_event(adk_event, turn_id=turn_id)  # type: ignore[union-attr]
-                    for raw_event in projection.agent_events:  # type: ignore[union-attr]
+                    for raw_event in _projected_events_with_transcript_text_fallback(
+                        projection,
+                        emitted_text=emitted_text,
+                    ):
                         safe = sanitize(dict(raw_event))  # type: ignore[operator]
                         if safe is None:
                             continue
                         self._collect_public_refs(safe, observed_public_refs)
                         self._track_pending_tool(safe, pending_tool_ids)
+                        if safe.get("type") == "response_clear":
+                            emitted_text = ""
+                        elif safe.get("type") == "text_delta":
+                            delta = safe.get("delta")
+                            if isinstance(delta, str):
+                                emitted_text += delta
                         yielded_events += 1
                         self._observe_event(safe, session_id, turn_id)
                         event_kind = _map_event_kind(safe.get("type"))
