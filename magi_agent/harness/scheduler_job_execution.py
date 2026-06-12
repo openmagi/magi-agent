@@ -90,6 +90,7 @@ from magi_agent.evidence.types import EvidenceRecord, EvidenceSource
 from magi_agent.harness.scheduler_executor import (
     ScheduledJobRecord,
     ScheduledJobSource,
+    SchedulePolicy,
     SchedulerTickResult,
     tick,
 )
@@ -445,6 +446,7 @@ def execute_due_jobs(
     lock_dir: Path | None = None,
     last_active_session: "object | None" = None,
     readiness_execution_mode: Literal["disabled", "shadow", "live"] | None = None,
+    policy: SchedulePolicy | None = None,
 ) -> JobExecutionResult:
     """Run one scheduler tick, then (if gated on) execute each fired due job.
 
@@ -552,6 +554,7 @@ def execute_due_jobs(
         lease=lease,
         lock_dir=lock_dir,
         owner_digest=owner_digest,
+        policy=policy,
         _on_receipt=_capture if resolved_config.executor_enabled else None,
     )
 

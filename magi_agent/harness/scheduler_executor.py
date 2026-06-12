@@ -290,6 +290,44 @@ class ScheduledJobSource(Protocol):
 
 
 # ---------------------------------------------------------------------------
+# Schedule policy Protocol (C3 policy/mechanism split)
+# ---------------------------------------------------------------------------
+
+@runtime_checkable
+class SchedulePolicy(Protocol):
+    """C3 policy seam: 'which job / when'. The kernel mechanism (lock, lease,
+    at-most-once advance-before-receipt) is policy-agnostic."""
+
+    def select_due(
+        self, due: Sequence[ScheduledJobRecord], *, now: datetime
+    ) -> Sequence[ScheduledJobRecord]:
+        """Filter/order the records that actually fire this tick."""
+        ...
+
+    def next_run_after_fire(
+        self, job: ScheduledJobRecord, *, now: datetime
+    ) -> datetime | None:
+        """Next run after firing at *now*; None = no future run (kernel applies
+        the once-exhausted sentinel)."""
+        ...
+
+
+class CronSchedulePolicy:
+    """First-party policy: fire everything due, advance by the schedule grammar
+    (the exact legacy behavior — select_due is the identity)."""
+
+    def select_due(
+        self, due: Sequence[ScheduledJobRecord], *, now: datetime
+    ) -> Sequence[ScheduledJobRecord]:
+        return list(due)
+
+    def next_run_after_fire(
+        self, job: ScheduledJobRecord, *, now: datetime
+    ) -> datetime | None:
+        return job.compute_next_run(now=now)
+
+
+# ---------------------------------------------------------------------------
 # In-memory fake implementation (for tests and local-fake mode)
 # ---------------------------------------------------------------------------
 
@@ -427,6 +465,7 @@ def tick(
     lease: SchedulerLease | None,
     lock_dir: Path | None = None,
     owner_digest: str,
+    policy: SchedulePolicy | None = None,
     _on_receipt: Callable[[str, dict[str, object]], None] | None = None,
 ) -> SchedulerTickResult:
     """Execute one scheduler tick with at-most-once semantics.
@@ -447,11 +486,18 @@ def tick(
     lock is still released normally.  At-most-once is guaranteed per individual job,
     not across the whole batch atomically.
 
+    ``policy`` is the C3 'which job / when' seam (select_due + next_run_after_fire).
+    ``None`` resolves to the first-party cron policy — byte-identical to the
+    legacy hardcoded behavior.
+
     ``_on_receipt`` is an internal test-seam callback invoked immediately after each
     local_fake receipt is built (after record_advance, before the result is returned).
     It receives ``(job_id, receipt_dict)`` and is not part of the public API.
     """
     _validate_local_fake_source(source)
+    resolved_policy: SchedulePolicy = (
+        policy if policy is not None else CronSchedulePolicy()
+    )
     try:
         with acquire_tick_lock(lock_dir=lock_dir):
             return _tick_inside_lock(
@@ -459,6 +505,7 @@ def tick(
                 source=source,
                 lease=lease,
                 owner_digest=owner_digest,
+                policy=resolved_policy,
                 _on_receipt=_on_receipt,
             )
     except _LockHeld:
@@ -497,6 +544,7 @@ def _tick_inside_lock(
     source: ScheduledJobSource,
     lease: SchedulerLease | None,
     owner_digest: str,
+    policy: SchedulePolicy,
     _on_receipt: Callable[[str, dict[str, object]], None] | None = None,
 ) -> SchedulerTickResult:
     """Core tick logic, called while the file lock is held."""
@@ -525,7 +573,12 @@ def _tick_inside_lock(
     # due_jobs() contract: returns only jobs with next_run <= now (no re-filter needed)
     due = list(source.due_jobs(now))
 
-    # Compute skipped_job_ids: all known jobs that were not due this tick.
+    # C3 policy decision: which of the due records actually fire this tick.
+    # The first-party CronSchedulePolicy is the identity (legacy behavior).
+    due = list(policy.select_due(due, now=now))
+
+    # Compute skipped_job_ids: all known jobs that did not fire this tick
+    # (not due, or suppressed by the policy's selection).
     # Use list_all() from the Protocol (not the far-future due_jobs hack) to avoid
     # Protocol violations and ensure non-due jobs are correctly enumerated.
     fired_id_set = {j.job_id for j in due}
@@ -537,8 +590,8 @@ def _tick_inside_lock(
     local_fake_receipts: list[dict[str, object]] = []
 
     for job in due:
-        # 1. Compute new next_run
-        new_next_run = job.compute_next_run(now=now)
+        # 1. Compute new next_run (policy decision; sentinel stays kernel)
+        new_next_run = policy.next_run_after_fire(job, now=now)
         if new_next_run is None:
             # 'once' schedule has no future run — use exhausted sentinel to prevent re-fire
             new_next_run = _ONCE_EXHAUSTED_NEXT_RUN
@@ -594,10 +647,12 @@ def _tick_inside_lock(
 # ---------------------------------------------------------------------------
 
 __all__ = [
+    "CronSchedulePolicy",
     "InMemoryJobSource",
     "LeaseState",
     "ScheduledJobRecord",
     "ScheduledJobSource",
+    "SchedulePolicy",
     "SchedulerExecutorAuthorityFlags",
     "SchedulerTickResult",
     "TickStatus",
