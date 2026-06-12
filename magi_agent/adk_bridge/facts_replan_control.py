@@ -76,15 +76,62 @@ class FactsReplanControl(BaseLoopControl):
         callback_context: Any,
         llm_request: Any,
     ) -> None:
+        # P5 pattern: the ADK hook does only the privileged part — resolving
+        # the active (session_id, turn_id) from the callback context's
+        # session/event tree — then delegates the decision body to the
+        # typed-context entry point with the pre-resolved identity. Fail-soft
+        # is preserved on both halves: a resolution failure skips the survey,
+        # never the turn.
+        from magi_agent.packs.context import ControlPlaneContext  # noqa: PLC0415
+
         try:
             session = getattr(callback_context, "session", None)
             session_id = _non_empty_str(getattr(session, "id", None))
             turn_id = _non_empty_str(getattr(callback_context, "invocation_id", None))
             if turn_id is None:
                 turn_id = _latest_event_invocation_id(session)
-            if session_id is None or turn_id is None:
-                return None
+        except Exception:
+            logger.debug(
+                "facts-replan on_before_model failed; skipping survey injection",
+                exc_info=True,
+            )
+            return None
+        if session_id is None or turn_id is None:
+            return None
 
+        return await self.apply_before_model(
+            ControlPlaneContext.minimal(),
+            llm_request=llm_request,
+            session_id=session_id,
+            turn_id=turn_id,
+        )
+
+    async def apply_before_model(
+        self,
+        ctx: Any,
+        *,
+        llm_request: Any,
+        session_id: str,
+        turn_id: str,
+    ) -> None:
+        """Typed-context entry point (P5; template: MaxStepsBrakeControl).
+
+        ``ctx`` is a :class:`ControlPlaneContext`; like the max-steps brake this
+        control needs no seam capability off it — the decision reads only the
+        outgoing request plus the pre-resolved turn identity the runtime
+        supplies (so the control never traverses ``session.events`` itself). A
+        user pack authoring an equivalent survey control receives the same
+        context and identity. Behavior is byte-identical to the pre-migration
+        body, including the fail-soft contract.
+
+        The per-(session, turn) counters intentionally stay on the control
+        (NOT ``ctx.per_invocation``): their lifecycle is per *logical turn*
+        with the config-bounded FIFO — a clear-on-after_run sweep would reset
+        the consolidation budget across goal-nudge/continuation/recovery
+        re-invocations that reuse the same turn_id.
+        """
+        _ = ctx
+        try:
             state = self._state_for(session_id, turn_id)
             state.model_calls += 1
 
