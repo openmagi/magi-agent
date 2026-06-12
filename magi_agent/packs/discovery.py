@@ -48,9 +48,15 @@ def default_search_bases() -> list[Path]:
 def discover_pack_files(bases: list[Path]) -> list[DiscoveredPack]:
     """rglob each base for ``pack.toml`` and parse it. Missing bases are skipped.
 
-    Results are sorted by ``pack_id`` for deterministic ordering. Duplicate
-    ``pack_id`` across bases is NOT resolved here (that is config-aware override
-    territory — handled in Task 1.4).
+    Ordering is **base precedence**: bases are walked in the order given (the
+    precedence order — bundled first-party, then user, then cwd) and within each
+    base the ``pack.toml`` files are ``sorted`` for determinism. The cross-base
+    order is therefore preserved, NOT collapsed by a global ``pack_id`` sort: a
+    later base wins downstream last-wins registration even when its ``pack_id``
+    sorts alphabetically before an earlier base's (the override contract). A
+    global re-sort here would let an earlier (lower-precedence) pack load last and
+    overwrite the intended override. Duplicate ``pack_id`` across bases is NOT
+    resolved here (that is config-aware override territory — handled in Task 1.4).
     """
     discovered: list[DiscoveredPack] = []
     for base in bases:
@@ -65,7 +71,6 @@ def discover_pack_files(bases: list[Path]) -> list[DiscoveredPack]:
                     manifest=manifest,
                 )
             )
-    discovered.sort(key=lambda d: d.manifest.pack_id)
     return discovered
 
 
@@ -125,7 +130,12 @@ def resolve_enabled_packs(
     2. drop packs whose manifest ``default_enabled`` is False (unless re-enabled
        by appearing in ``config.order`` — an explicit order entry is an opt-in);
     3. order: pins in ``config.order`` first (in listed order), then the rest in
-       ``pack_id`` sort order.
+       **discovered (base-precedence) order** — the order ``discover_pack_files``
+       produced (bundled first-party, then user, then cwd). The rest is NOT
+       re-sorted by ``pack_id``: that would collapse base precedence and let a
+       lower-precedence pack load last and overwrite the intended override (a
+       later base must win downstream last-wins even when its ``pack_id`` sorts
+       alphabetically before an earlier base's).
 
     Override-by-ref collision is resolved downstream in ``catalog_build`` /
     loader (last pack in this returned order wins on a colliding provides ref);
@@ -135,7 +145,12 @@ def resolve_enabled_packs(
     ordered_ids = list(config.order)
     order_set = set(ordered_ids)
 
-    by_id = {d.manifest.pack_id: d for d in discovered}
+    # Preserve discovered/base order (dict insertion order). On a same-``pack_id``
+    # collision across bases the later base's pack replaces the earlier value,
+    # which is the intended last-wins-for-same-id behavior.
+    by_id: dict[str, DiscoveredPack] = {}
+    for disc in discovered:
+        by_id[disc.manifest.pack_id] = disc
     kept: dict[str, DiscoveredPack] = {}
     for pack_id, disc in by_id.items():
         if pack_id in disabled:
@@ -145,8 +160,5 @@ def resolve_enabled_packs(
         kept[pack_id] = disc
 
     pinned = [kept[p] for p in ordered_ids if p in kept]
-    rest = sorted(
-        (d for pid, d in kept.items() if pid not in order_set),
-        key=lambda d: d.manifest.pack_id,
-    )
+    rest = [d for pid, d in kept.items() if pid not in order_set]
     return pinned + rest
