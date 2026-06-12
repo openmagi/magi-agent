@@ -54,10 +54,16 @@ def test_core_modules_do_not_hardcode_first_party_primitives() -> None:
         )
 
 
-def test_live_compiler_path_does_not_call_hardcoded_default_catalog() -> None:
-    src = (_ROOT / "authoring" / "compiler.py").read_text()
-    # the live default path must go through resolve_live_catalog, not .default()
-    assert "resolve_live_catalog()" in src
+def test_live_catalog_path_does_not_call_hardcoded_default_catalog() -> None:
+    # Re-homed from the deleted authoring plane: the live catalog entry point is
+    # kernel-owned (packs/catalog_build.py). It must be manifest-built — folding
+    # build_catalog(result.primitives) over discovered packs — and never the
+    # legacy `catalog or CompileRecipePackCatalog.default()` hardcode shape
+    # (.default() survives only as the preserved fail-open floor inside
+    # resolve_live_catalog).
+    src = (_ROOT / "packs" / "catalog_build.py").read_text()
+    assert "def resolve_live_catalog(" in src
+    assert "build_catalog(result.primitives)" in src
     assert "catalog or CompileRecipePackCatalog.default()" not in src
 
 
