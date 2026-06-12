@@ -485,29 +485,42 @@ def _merge_pack_validator_refs(
 
 
 def _loaded_pack_validator_refs() -> tuple[str, ...]:
-    """Validator refs from disk-discovered packs (first-party + user), via the
-    Phase-1 loader. Fail-open to () so a missing/empty pack tree leaves the
-    assembly byte-identical to pre-Phase-3 behavior.
+    """Validator refs from disk-discovered packs (first-party + user).
+
+    Validator refs are STATIC manifest data (``provides`` entries of type
+    ``validator``), so they are read directly from the parsed manifests — NO impl
+    import. This matters for a safety gate: the previous implementation called
+    ``load_packs`` (which lazily imports EVERY enabled pack's impl) and swallowed
+    any failure with ``except Exception: return ()``, so a single unrelated pack
+    with an import-time error (e.g. a tool pack importing a missing package)
+    silently dropped ALL pack validator refs and fail-OPENed the enforcement gate.
+
+    Only manifest discovery/parse is wrapped in a narrow guard so a genuinely
+    missing/empty packs tree returns () (byte-identical to pre-Phase-3 behavior);
+    an unrelated pack's *import* error can no longer reach here at all.
     """
     try:
-        from magi_agent.packs.catalog_build import build_catalog  # noqa: PLC0415
         from magi_agent.packs.discovery import (  # noqa: PLC0415
             default_search_bases,
             discover_pack_files,
             load_packs_config,
             resolve_enabled_packs,
         )
-        from magi_agent.packs.loader import RecordingSink, load_packs  # noqa: PLC0415
     except Exception:
         return ()
     try:
         discovered = discover_pack_files(default_search_bases())
         enabled = resolve_enabled_packs(discovered, load_packs_config())
-        result = load_packs(enabled, RecordingSink())
-        catalog = build_catalog(result.primitives)
-        return tuple(catalog.validator_refs)
     except Exception:
         return ()
+    refs: list[str] = []
+    seen: set[str] = set()
+    for disc in enabled:
+        for entry in disc.manifest.provides:
+            if entry.type == "validator" and entry.ref not in seen:
+                seen.add(entry.ref)
+                refs.append(entry.ref)
+    return tuple(refs)
 
 
 def _local_trust_missing_evidence_action(
