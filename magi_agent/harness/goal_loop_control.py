@@ -649,18 +649,56 @@ LoopControlInputProvider = Callable[[HookContext], "LoopControlInput | None"]
 #: act on a ``continue`` (re-inject ``continuation_prompt`` as the next turn).
 LoopControlDecisionSink = Callable[["LoopControlResult"], None]
 
+#: C2 policy seam: the continue/stop decision as a swappable callable. The
+#: first-party policy is ``decide_loop_continuation``; a ``loop_policy`` pack
+#: registers an alternative with the SAME signature (LoopControlInput in,
+#: LoopControlResult out — the typed context IS LoopControlInput).
+LoopContinuationPolicy = Callable[["LoopControlInput"], "LoopControlResult"]
+
+#: The bundled first-party ``loop_policy`` ref (magi_agent/firstparty/packs/
+#: goal_loop_default). A user pack re-declaring this ref overrides the policy.
+DEFAULT_LOOP_POLICY_REF = "loop_policy:ralph@1"
+
+
+def resolve_loop_policy(
+    *,
+    ref: str = DEFAULT_LOOP_POLICY_REF,
+    bases: "list[object] | None" = None,
+) -> "LoopContinuationPolicy":
+    """Resolve the loop policy from loaded packs; fall back to the in-module
+    first-party policy when packs are unavailable (fail-open: the loop must
+    never break because pack discovery failed).
+
+    Lazy imports keep this module's forbidden-import contract — no adk/network
+    modules enter the top-level import graph.
+    """
+    try:
+        from magi_agent.packs.discovery import default_search_bases
+        from magi_agent.packs.registries import load_into_registries
+
+        search = list(bases) if bases is not None else list(default_search_bases())
+        registries, _ = load_into_registries(search)
+        policy = registries.loop_policies.resolve(ref)
+        if callable(policy):
+            return policy
+    except Exception:  # noqa: BLE001 — fail-open to the bundled default
+        pass
+    return decide_loop_continuation
+
 
 def build_after_turn_goal_loop_hook(
     *,
     input_provider: LoopControlInputProvider,
     decision_sink: LoopControlDecisionSink | None = None,
+    policy: "LoopContinuationPolicy | None" = None,
 ) -> tuple[HookManifest, Callable[[HookContext], HookResult]]:
     """Build the AFTER_TURN_END hook that drives the Ralph loop.
 
     Returns ``(manifest, handler)``.  The handler:
       - asks ``input_provider`` for this session's LoopControlInput (None → no
         active goal loop → ``continue`` no-op),
-      - computes the decision via ``decide_loop_continuation``,
+      - computes the decision via the injected ``policy`` (C2 seam; ``None``
+        defaults to the first-party ``decide_loop_continuation``),
       - records it via ``decision_sink`` (the driver re-injects the
         continuation prompt — the hook bus itself carries no such payload, so
         the loop is driven through the sink, mirroring the scheduler returning a
@@ -671,6 +709,10 @@ def build_after_turn_goal_loop_hook(
     The hook is non-blocking and fail-open: any provider/decision error is
     swallowed so a goal-loop bug can never break a normal turn.
     """
+    # C2 flip: the default is resolved from the loaded loop_policy packs (the
+    # bundled goal_loop_default pack registers decide_loop_continuation, so a
+    # pack-less or disabled-pack environment is byte-identical via fail-open).
+    decide = policy if policy is not None else resolve_loop_policy()
 
     def _handler(context: HookContext) -> HookResult:
         try:
@@ -680,7 +722,7 @@ def build_after_turn_goal_loop_hook(
         if loop_input is None:
             return HookResult(action="continue", reason="no_active_goal_loop")
         try:
-            result = decide_loop_continuation(loop_input)
+            result = decide(loop_input)
         except Exception:  # noqa: BLE001 — fail-open
             return HookResult(action="continue", reason="goal_loop_decision_error")
         if decision_sink is not None:
@@ -719,6 +761,7 @@ def build_after_turn_goal_loop_hook(
 
 __all__ = [
     "CONTINUATION_PROMPT_TEMPLATE",
+    "DEFAULT_LOOP_POLICY_REF",
     "EVIDENCE_GATE_ENV_VAR",
     "GOAL_LOOP_ENABLED_ENV_VAR",
     "EvidenceGate",
@@ -727,6 +770,7 @@ __all__ = [
     "LoopControlInput",
     "LoopControlInputProvider",
     "LoopControlResult",
+    "LoopContinuationPolicy",
     "LoopContinueReason",
     "LoopDecision",
     "LoopReason",
@@ -735,4 +779,5 @@ __all__ = [
     "build_after_turn_goal_loop_hook",
     "build_continuation_prompt",
     "decide_loop_continuation",
+    "resolve_loop_policy",
 ]

@@ -1,0 +1,50 @@
+[
+  {
+    "args_digest": "sha256:c46959ad8e4b9609",
+    "kind": "dispatch",
+    "output_digest": null,
+    "reason": "tool_not_allowlisted",
+    "status": "blocked",
+    "tool": "Bash"
+  },
+  {
+    "args_digest": "sha256:7c9736023aacfeb8",
+    "kind": "dispatch",
+    "output_digest": null,
+    "reason": "path_escapes_workspace",
+    "status": "blocked",
+    "tool": "FileRead"
+  },
+  {
+    "args_digest": "sha256:d594f22909c0ac39",
+    "kind": "dispatch",
+    "output_digest": null,
+    "reason": "memory_mode_blocked",
+    "status": "blocked",
+    "tool": "FileRead"
+  },
+  {
+    "args_digest": "sha256:be5fd8771d8b2e90",
+    "kind": "dispatch",
+    "output_digest": null,
+    "reason": "read_ledger_no_prior_read",
+    "status": "blocked",
+    "tool": "FileEdit"
+  },
+  {
+    "args_digest": "sha256:44136fa355b3678a",
+    "kind": "dispatch",
+    "output_digest": "sha256:694af970b0682ff23623a9baacd833bfe42e28f88b7c4f9dad492dceae2a652f",
+    "reason": "tool_completed",
+    "status": "ok",
+    "tool": "Clock"
+  },
+  {
+    "args_digest": "sha256:44136fa355b3678a",
+    "kind": "dispatch",
+    "output_digest": null,
+    "reason": "max_tool_calls_exhausted",
+    "status": "blocked",
+    "tool": "Clock"
+  }
+]

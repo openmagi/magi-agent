@@ -1,0 +1,28 @@
+# Gate5b dispatch policies as control_plane entries with phase="tool_host".
+# These are ctx-callables in the ContextDispatcher convention (impl(ctx)), NOT
+# ControlPlaneProvideContext providers — build_control_plane_from_packs skips
+# phase="tool_host"; the gate5b host loads them via
+# build_tool_host_runtime_from_packs. gatePosition="before" is the explicit
+# opt-in required for a deciding before_tool impl (the shipped
+# GatePositionViolation guard semantics).
+
+packId = "openmagi.gates-policy-default"
+displayName = "Gate5b dispatch policies"
+version = "1.0.0"
+description = "First-party gate5b authz policies (memory mode, permission preflight) as removable packs."
+
+[[provides]]
+type = "control_plane"
+ref = "gate5b:memory-mode@1"
+impl = "magi_agent.firstparty.packs.gates_policy_default.impl:memory_mode_policy"
+priority = 0
+phase = "tool_host"
+gatePosition = "before"
+
+[[provides]]
+type = "control_plane"
+ref = "gate5b:permission-preflight@1"
+impl = "magi_agent.firstparty.packs.gates_policy_default.impl:permission_preflight_policy"
+priority = 10
+phase = "tool_host"
+gatePosition = "before"

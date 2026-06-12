@@ -1,0 +1,15 @@
+# Bundled first-party goal-loop continuation policy (the Ralph-loop state
+# machine). Same loader/format as a user pack; override/forbid by re-declaring
+# or disabling this ref (§1). Mechanism (after-turn hook, fail-open plumbing,
+# USER-role continuation re-injection contract) stays kernel.
+# Schema = magi_agent/packs/manifest.py (top-level packId/displayName).
+
+packId = "openmagi.goal-loop-default"
+displayName = "Goal loop policy (Ralph)"
+version = "1.0.0"
+description = "First-party continue/stop loop policy bundled as a removable pack."
+
+[[provides]]
+type = "loop_policy"
+ref = "loop_policy:ralph@1"
+impl = "magi_agent.firstparty.packs.goal_loop_default.impl:provide_ralph_policy"

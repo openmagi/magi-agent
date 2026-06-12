@@ -70,6 +70,8 @@ class MemoryRecallHarness:
         config: MemoryRecallHarnessConfig | Mapping[str, object] | None = None,
         *,
         adapter: object | None = None,
+        default_namespace_policy: object | None = None,
+        default_projection_policy: object | None = None,
     ) -> None:
         self.config = (
             config
@@ -77,6 +79,12 @@ class MemoryRecallHarness:
             else MemoryRecallHarnessConfig.model_validate(config or {})
         )
         self.adapter = adapter
+        # C4 dual-load seams: used ONLY when a recall() caller passes None for
+        # the corresponding policy. The shipped defaults stay None, so existing
+        # per-call policy construction (and the missing-policy denials) are
+        # byte-identical.
+        self._default_namespace_policy = default_namespace_policy
+        self._default_projection_policy = default_projection_policy
 
     async def recall(
         self,
@@ -87,8 +95,16 @@ class MemoryRecallHarness:
     ) -> MemoryRecallRecipeResult:
         return await execute_readonly_memory_recall(
             request=request,
-            namespace_policy=namespace_policy,
-            projection_policy=projection_policy,
+            namespace_policy=(
+                namespace_policy
+                if namespace_policy is not None
+                else self._default_namespace_policy
+            ),
+            projection_policy=(
+                projection_policy
+                if projection_policy is not None
+                else self._default_projection_policy
+            ),
             adapter=self.adapter,
             enabled=self.config.enabled,
             local_fake_adapter_enabled=self.config.local_fake_adapter_enabled,

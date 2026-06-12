@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Literal, Self, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator, model_validator
@@ -23,6 +23,13 @@ MemoryCompactionStatus: TypeAlias = Literal[
     "blocked",
     "approval_required",
     "success",
+]
+
+#: C4 strategy seam: (request, policy) -> (denial_status | None, reason_codes).
+#: First-party default = _compaction_denial_reasons (the exact legacy decision).
+CompactionDenialStrategy: TypeAlias = Callable[
+    ["MemoryCompactionRequest", "MemoryCompactionPolicy | None"],
+    "tuple[MemoryCompactionStatus | None, tuple[str, ...]]",
 ]
 
 _MODEL_CONFIG = ConfigDict(
@@ -348,6 +355,40 @@ class MemoryCompactionResult(BaseModel):
         }
 
 
+#: The bundled first-party ``memory_strategy`` ref for the compaction denial
+#: decision (magi_agent/firstparty/packs/memory_strategies_default). A user
+#: pack re-declaring this ref overrides the strategy.
+DEFAULT_COMPACTION_DENIAL_STRATEGY_REF = "memory_strategy:compaction-denial@1"
+
+
+def resolve_memory_strategy(
+    ref: str,
+    *,
+    default: object,
+    bases: "list[object] | None" = None,
+) -> object:
+    """Resolve a memory strategy from loaded packs; fall back to *default*
+    when packs are unavailable (fail-open: the memory boundaries must never
+    break because pack discovery failed).
+
+    Shared by the three memory harnesses (compaction denial, recall projection,
+    review trigger). Lazy imports keep this module's import graph thin — no
+    pack/kernel modules enter the top-level import path.
+    """
+    try:
+        from magi_agent.packs.discovery import default_search_bases
+        from magi_agent.packs.registries import load_into_registries
+
+        search = list(bases) if bases is not None else list(default_search_bases())
+        registries, _ = load_into_registries(search)
+        strategy = registries.memory_strategies.resolve(ref)
+        if callable(strategy):
+            return strategy
+    except Exception:  # noqa: BLE001 — fail-open to the in-module default
+        pass
+    return default
+
+
 class MemoryCompactionHarness:
     """Digest-only compaction receipt boundary for future ADK MemoryService writes."""
 
@@ -356,6 +397,7 @@ class MemoryCompactionHarness:
         config: MemoryCompactionHarnessConfig | Mapping[str, object] | None = None,
         *,
         adapter: object | None = None,
+        denial_strategy: CompactionDenialStrategy | None = None,
     ) -> None:
         self.config = (
             config
@@ -363,6 +405,17 @@ class MemoryCompactionHarness:
             else MemoryCompactionHarnessConfig.model_validate(config or {})
         )
         self.adapter = adapter
+        # C4 dual-load seam: explicit injection wins; otherwise resolve the
+        # bundled first-party strategy from packs (fail-open to the exact
+        # legacy in-module decision — same function either way).
+        self._denial_strategy = (
+            denial_strategy
+            if denial_strategy is not None
+            else resolve_memory_strategy(
+                DEFAULT_COMPACTION_DENIAL_STRATEGY_REF,
+                default=_compaction_denial_reasons,
+            )
+        )
 
     async def compact(
         self,
@@ -389,7 +442,7 @@ class MemoryCompactionHarness:
                 executed=False,
                 local_test_only=False,
             )
-        denial_status, denial_reasons = _compaction_denial_reasons(safe_request, safe_policy)
+        denial_status, denial_reasons = self._denial_strategy(safe_request, safe_policy)
         if denial_status is not None:
             return _result(
                 status=denial_status,
@@ -525,6 +578,8 @@ def _string_tuple(value: object) -> tuple[str, ...]:
 
 
 __all__ = [
+    "CompactionDenialStrategy",
+    "DEFAULT_COMPACTION_DENIAL_STRATEGY_REF",
     "MemoryCompactionHarness",
     "MemoryCompactionHarnessConfig",
     "MemoryCompactionPolicy",
@@ -532,4 +587,5 @@ __all__ = [
     "MemoryCompactionRequest",
     "MemoryCompactionResult",
     "MemoryCompactionStatus",
+    "resolve_memory_strategy",
 ]

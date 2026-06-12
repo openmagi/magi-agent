@@ -1,0 +1,20 @@
+[
+  {
+    "authorityFlags": {
+      "agentSpawned": false,
+      "backgroundTaskStarted": false,
+      "channelDeliveryPerformed": false,
+      "databaseMutationAllowed": false,
+      "filesystemMutationAllowed": false,
+      "liveToolExecution": false,
+      "networkCallAllowed": false,
+      "productionChannelWrite": false
+    },
+    "evidenceDigest": "sha256:f4d2ac319a1361ee385848d3a0b769dfb41abeb03121ef87bb80a977cfdafa45",
+    "firedJobIds": [],
+    "leaseState": "missing",
+    "scenario": "lock_held",
+    "skippedJobIds": [],
+    "status": "tick_skipped_lock_held"
+  }
+]

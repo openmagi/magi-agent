@@ -1,0 +1,171 @@
+[
+  {
+    "executed": false,
+    "localTestOnly": false,
+    "outputDigest": "sha256:135619d87ebcda4afdd5e46568e32c6dcdcc2ce599082ba9588fde116ba7b863",
+    "policySnapshotDigest": "sha256:4817e10ccd82bbca063b631d392a65e9bf2a85e22c08735c6bdedcfc8262978a",
+    "reasonCodes": [
+      "memory_compaction_boundary_disabled"
+    ],
+    "receiptId": "memory-compaction:2f567a9b591a93053b84583bc537867d7a696edc94633867f0231473994089c9",
+    "redactionStatus": "verified",
+    "scenario": "disabled_harness",
+    "status": "disabled"
+  },
+  {
+    "executed": false,
+    "localTestOnly": false,
+    "outputDigest": "sha256:135619d87ebcda4afdd5e46568e32c6dcdcc2ce599082ba9588fde116ba7b863",
+    "policySnapshotDigest": "sha256:d52c216ebe5bc9fa9afb56c364d6619f2250d0d0197292d9659907718ea18e13",
+    "reasonCodes": [
+      "missing_memory_compaction_policy"
+    ],
+    "receiptId": "memory-compaction:fa9d14811569bd3b7758356c9c8c10d897f23eab1f083fe6e6044e601ad0025f",
+    "redactionStatus": "unverified",
+    "scenario": "missing_policy",
+    "status": "blocked"
+  },
+  {
+    "executed": false,
+    "localTestOnly": false,
+    "outputDigest": "sha256:135619d87ebcda4afdd5e46568e32c6dcdcc2ce599082ba9588fde116ba7b863",
+    "policySnapshotDigest": "sha256:4817e10ccd82bbca063b631d392a65e9bf2a85e22c08735c6bdedcfc8262978a",
+    "reasonCodes": [
+      "missing_memory_compaction_evidence"
+    ],
+    "receiptId": "memory-compaction:fa9d14811569bd3b7758356c9c8c10d897f23eab1f083fe6e6044e601ad0025f",
+    "redactionStatus": "verified",
+    "scenario": "missing_evidence",
+    "status": "blocked"
+  },
+  {
+    "executed": false,
+    "localTestOnly": false,
+    "outputDigest": "sha256:135619d87ebcda4afdd5e46568e32c6dcdcc2ce599082ba9588fde116ba7b863",
+    "policySnapshotDigest": "sha256:0d822c79e82c5beda3439d38d5a2ecaf85cf1a8f09a3014aa2d708b0dca08d2c",
+    "reasonCodes": [
+      "missing_memory_compaction_approval"
+    ],
+    "receiptId": "memory-compaction:990a84d58d857d1c40f5e06cc8dc9db43f80173e8eccb758de5b3ea3d28dfee5",
+    "redactionStatus": "verified",
+    "scenario": "approval_required",
+    "status": "approval_required"
+  },
+  {
+    "executed": false,
+    "localTestOnly": false,
+    "outputDigest": "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "policySnapshotDigest": "sha256:4817e10ccd82bbca063b631d392a65e9bf2a85e22c08735c6bdedcfc8262978a",
+    "reasonCodes": [
+      "missing_memory_compaction_sources"
+    ],
+    "receiptId": "memory-compaction:e7ab50445170f0ae965ca4ad816740b966c95795b7ee484a7bf6db23b0002d73",
+    "redactionStatus": "verified",
+    "scenario": "missing_sources",
+    "status": "blocked"
+  },
+  {
+    "executed": false,
+    "localTestOnly": false,
+    "outputDigest": "sha256:135619d87ebcda4afdd5e46568e32c6dcdcc2ce599082ba9588fde116ba7b863",
+    "policySnapshotDigest": "sha256:1948007fe824a2486ca2198cf6f89195bc71f275da8c899743f204adeb0caaa2",
+    "reasonCodes": [
+      "memory_compaction_redaction_not_verified"
+    ],
+    "receiptId": "memory-compaction:fa9d14811569bd3b7758356c9c8c10d897f23eab1f083fe6e6044e601ad0025f",
+    "redactionStatus": "unverified",
+    "scenario": "redaction_unverified",
+    "status": "blocked"
+  },
+  {
+    "executed": false,
+    "localTestOnly": false,
+    "outputDigest": "sha256:135619d87ebcda4afdd5e46568e32c6dcdcc2ce599082ba9588fde116ba7b863",
+    "policySnapshotDigest": "sha256:a0bda0a6babedbae42e863ce75a8a35e5a3d401ae8cf1cc6e7cd85ecc94da198",
+    "reasonCodes": [
+      "memory_compaction_retention_expired_denied"
+    ],
+    "receiptId": "memory-compaction:fa9d14811569bd3b7758356c9c8c10d897f23eab1f083fe6e6044e601ad0025f",
+    "redactionStatus": "verified",
+    "scenario": "retention_expired",
+    "status": "blocked"
+  },
+  {
+    "executed": false,
+    "localTestOnly": false,
+    "outputDigest": "sha256:135619d87ebcda4afdd5e46568e32c6dcdcc2ce599082ba9588fde116ba7b863",
+    "policySnapshotDigest": "sha256:9b60d0618311799628641234ce202294e011413d855ebbc9acf79fa116115f1c",
+    "reasonCodes": [
+      "memory_compaction_erase_state_denied"
+    ],
+    "receiptId": "memory-compaction:fa9d14811569bd3b7758356c9c8c10d897f23eab1f083fe6e6044e601ad0025f",
+    "redactionStatus": "verified",
+    "scenario": "erase_tombstoned",
+    "status": "blocked"
+  },
+  {
+    "executed": false,
+    "localTestOnly": false,
+    "outputDigest": "sha256:135619d87ebcda4afdd5e46568e32c6dcdcc2ce599082ba9588fde116ba7b863",
+    "policySnapshotDigest": "sha256:4817e10ccd82bbca063b631d392a65e9bf2a85e22c08735c6bdedcfc8262978a",
+    "reasonCodes": [
+      "private_memory_payload_denied"
+    ],
+    "receiptId": "memory-compaction:fa9d14811569bd3b7758356c9c8c10d897f23eab1f083fe6e6044e601ad0025f",
+    "redactionStatus": "verified",
+    "scenario": "private_payload",
+    "status": "blocked"
+  },
+  {
+    "executed": false,
+    "localTestOnly": false,
+    "outputDigest": "sha256:135619d87ebcda4afdd5e46568e32c6dcdcc2ce599082ba9588fde116ba7b863",
+    "policySnapshotDigest": "sha256:4817e10ccd82bbca063b631d392a65e9bf2a85e22c08735c6bdedcfc8262978a",
+    "reasonCodes": [
+      "child_memory_scope_isolated"
+    ],
+    "receiptId": "memory-compaction:fa9d14811569bd3b7758356c9c8c10d897f23eab1f083fe6e6044e601ad0025f",
+    "redactionStatus": "verified",
+    "scenario": "child_isolated",
+    "status": "blocked"
+  },
+  {
+    "executed": false,
+    "localTestOnly": false,
+    "outputDigest": "sha256:135619d87ebcda4afdd5e46568e32c6dcdcc2ce599082ba9588fde116ba7b863",
+    "policySnapshotDigest": "sha256:4817e10ccd82bbca063b631d392a65e9bf2a85e22c08735c6bdedcfc8262978a",
+    "reasonCodes": [
+      "local_fake_memory_compaction_disabled"
+    ],
+    "receiptId": "memory-compaction:fa9d14811569bd3b7758356c9c8c10d897f23eab1f083fe6e6044e601ad0025f",
+    "redactionStatus": "verified",
+    "scenario": "adapter_gate_off",
+    "status": "blocked"
+  },
+  {
+    "executed": false,
+    "localTestOnly": false,
+    "outputDigest": "sha256:135619d87ebcda4afdd5e46568e32c6dcdcc2ce599082ba9588fde116ba7b863",
+    "policySnapshotDigest": "sha256:ebc8a1bd17e8c9e0bea1a9af4732bd596463deadf399e4f8d44ec7b539243d30",
+    "reasonCodes": [
+      "local_fake_memory_compaction_disabled"
+    ],
+    "receiptId": "memory-compaction:fa9d14811569bd3b7758356c9c8c10d897f23eab1f083fe6e6044e601ad0025f",
+    "redactionStatus": "verified",
+    "scenario": "policy_fake_not_allowed",
+    "status": "blocked"
+  },
+  {
+    "executed": true,
+    "localTestOnly": true,
+    "outputDigest": "sha256:135619d87ebcda4afdd5e46568e32c6dcdcc2ce599082ba9588fde116ba7b863",
+    "policySnapshotDigest": "sha256:4817e10ccd82bbca063b631d392a65e9bf2a85e22c08735c6bdedcfc8262978a",
+    "reasonCodes": [
+      "local_fake_memory_compaction_receipt"
+    ],
+    "receiptId": "memory-compaction:541b8ec7e1ea429bfd5dcb500aac7d2a6ca17bf42b6f95894c2646e8f4b829c4",
+    "redactionStatus": "verified",
+    "scenario": "success_local_fake",
+    "status": "success"
+  }
+]

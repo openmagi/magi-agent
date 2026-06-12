@@ -34,6 +34,10 @@ ProvidesType = Literal[
     "evidence_producer",
     "recipe",
     "connector",
+    # Pack C policy types (decomposed-subsystem policies; same loader, no privilege)
+    "loop_policy",
+    "schedule_policy",
+    "memory_strategy",
 ]
 
 # Types whose impl is a declarative spec file (relpath) rather than code.

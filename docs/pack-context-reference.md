@@ -21,6 +21,9 @@ load time with the matching provide context:
 | `connector` | `ConnectorProvideContext` | `register(ref, spec)` — a `ConnectorSpec(server_ref, tool_manifests, readonly)`. |
 | `harness` | `HarnessProvideContext` | `register(ref, pack)` — a `magi_agent.harness.resolved.ResolvedHarnessPack`. |
 | `control_plane` | `ControlPlaneProvideContext` | `register(loop_control)` per control you build. Also carries read-only collaborators: `env` (mapping for your own gating), `general_automation_receipts`, `contract_required`, `agent_role`, `self_review_fork_runner`, `self_review_candidate_sink`, `self_review_config`, `self_review_now`, `self_review_scheduler`, `tool_synthesis_model_label`. First-party's bundled controls receive the IDENTICAL object. |
+| `loop_policy` | `LoopPolicyProvideContext` | `register(ref, policy)` — a loop continuation policy callable. The bundled Ralph policy uses this path; user packs receive the same typed context. |
+| `schedule_policy` | `SchedulePolicyProvideContext` | `register(ref, policy)` — a scheduler policy satisfying the scheduler executor contract. The bundled cron policy uses this path. |
+| `memory_strategy` | `MemoryStrategyProvideContext` | `register(ref, strategy)` — a memory strategy consumed by compaction, recall, and review seams. The bundled strategies use this path. |
 | `validator` | — | validators register declaratively; the impl itself is the invoke-time callable below (one positional `ValidatorCtx` parameter). |
 
 ## Invoke-time contexts
