@@ -253,6 +253,13 @@ FLAGS: tuple[FlagSpec, ...] = (
         "MAGI_CODE_ACTION_ENABLED",
         summary="Expose the persistent PythonExec code-execution tool.",
     ),
+    _b(
+        "MAGI_PERSISTENT_PYTHON_ENABLED",
+        summary=(
+            "Register + bind the neutral tools-persistent-python pack's "
+            "PersistentPython tool (CodeAct: persistent interpreter namespace)."
+        ),
+    ),
     FlagSpec(
         name="MAGI_CODE_ACTION_TIMEOUT_MS",
         default=30_000,

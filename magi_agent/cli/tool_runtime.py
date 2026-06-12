@@ -133,6 +133,22 @@ def build_cli_tool_runtime(
         register_python_exec_manifest(registry)
         bind_python_exec_handler(registry)
 
+    # Optional persistent-namespace Python tool from the neutral
+    # ``tools_persistent_python`` pack (MAGI_PERSISTENT_PYTHON_ENABLED=true).
+    # Additive + removable: default-OFF so the registry is byte-identical when
+    # the gate is unset. The manifest is sourced from the PACK provider (no
+    # hardcode) and the additive first-party binder attaches its handler.
+    from magi_agent.config.env import persistent_python_enabled  # noqa: PLC0415
+
+    if persistent_python_enabled():
+        from magi_agent.tools.persistent_python_toolhost import (  # noqa: PLC0415
+            bind_persistent_python_handler,
+            register_persistent_python_manifest,
+        )
+
+        register_persistent_python_manifest(registry)
+        bind_persistent_python_handler(registry)
+
     receipt_store = general_automation_receipts or GeneralAutomationReceiptLedgerStore()
     # First-party activity capture: pass the bundled producer pack's static refs
     # (computed ONCE here at construction, never per-dispatch) plus the runtime's

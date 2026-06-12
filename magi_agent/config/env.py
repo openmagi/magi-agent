@@ -2739,6 +2739,29 @@ def code_action_enabled(env: Mapping[str, str] | None = None) -> bool:
     return flag_bool(MAGI_CODE_ACTION_ENABLED_ENV, env=source)
 
 
+MAGI_PERSISTENT_PYTHON_ENABLED_ENV = "MAGI_PERSISTENT_PYTHON_ENABLED"
+
+
+def persistent_python_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Single source of truth for the ``PersistentPython`` pack runtime gate.
+
+    Default OFF (strict truthy opt-in: "1"/"true"/"yes"/"on"). When OFF the
+    ``tools_persistent_python`` pack's manifest is NOT registered into the CLI
+    runtime registry and its additive first-party handler binder is never
+    invoked — byte-identical to before. When ON, the pack manifest is registered
+    and ``bind_persistent_python_handler`` attaches the persistent-namespace
+    Python handler (CodeAct: variables/imports survive across steps within a
+    turn). The pack remains independently removable via ``config.toml [packs]
+    disable``; this gate only governs the runtime build-path wiring. Like
+    ``code_action_enabled`` this is an additive, default-disabled seam and
+    deliberately does NOT follow the runtime-profile default-ON convention.
+    """
+    from .flags import flag_bool
+
+    source = os.environ if env is None else env
+    return flag_bool(MAGI_PERSISTENT_PYTHON_ENABLED_ENV, env=source)
+
+
 MAGI_PERMISSION_SCOPE_FROM_MODE_ENV = "MAGI_PERMISSION_SCOPE_FROM_MODE"
 
 

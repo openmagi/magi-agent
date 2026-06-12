@@ -244,6 +244,7 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 - `MAGI_MULTI_FILE_JOIN_ENABLED` (default off) — Append multi-file cross-reference guidance: enumerate archives, read structured files fully, and run joins/dedup programmatically.
 - `MAGI_OBSERVABILITY_ENABLED` (default off) — Enable the hook-tap observability module (bot-activity visibility).
 - `MAGI_OUTPUT_CONTINUATION_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Enable automatic continuation of truncated model output (default-ON full profile).
+- `MAGI_PERSISTENT_PYTHON_ENABLED` (default off) — Register + bind the neutral tools-persistent-python pack's PersistentPython tool (CodeAct: persistent interpreter namespace).
 - `MAGI_RESEARCH_FACT_GUIDANCE_ENABLED` (default off) — Enable research_fact cross-check guidance: consolidated brief header/footer plus the <web_research> system-prompt block (requires BRAVE_API_KEY + FIRECRAWL_API_KEY).
 - `MAGI_RESEARCH_GOVERNANCE_MODE` (default `off`) — Research governance mode. `off` is inert; `audit` records source/citation mismatches without blocking.
 - `MAGI_RIPGREP_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Use ripgrep for fast in-repo search when available (default-ON full profile).
