@@ -18,7 +18,7 @@ from magi_agent.adk_bridge.control_plane import ToolDecision
 
 
 class PrimitiveType(str, Enum):
-    """The 8 unified ``provides`` types (D2)."""
+    """The 8 unified ``provides`` types (D2) + the 3 Pack-C policy types."""
 
     TOOL = "tool"
     CALLBACK = "callback"
@@ -28,6 +28,10 @@ class PrimitiveType(str, Enum):
     EVIDENCE_PRODUCER = "evidence_producer"
     RECIPE = "recipe"
     CONNECTOR = "connector"
+    # Pack C policy types (decomposed-subsystem policies; same loader, no privilege)
+    LOOP_POLICY = "loop_policy"
+    SCHEDULE_POLICY = "schedule_policy"
+    MEMORY_STRATEGY = "memory_strategy"
 
 
 class Capability(str, Enum):
@@ -306,10 +310,40 @@ class ConnectorSpec:
 
 @dataclass(frozen=True)
 class ToolProvideContext:
-    """D5 typed context a ``tool`` impl receives: a single ``register`` capability
-    that accepts a ``ToolManifest``. No god-object, no first-party-only kwarg."""
+    """D5 typed context a ``tool`` impl receives.
+
+    ``register`` accepts a ``ToolManifest`` (unchanged from Phase 4).
+    ``register_workspace_handler`` (Pack C1) additionally lets a tool pack bind a
+    WORKSPACE handler ``(args, WorkspaceHostView) -> output`` keyed by tool name —
+    the gate5b toolhost executes it inside its unchanged dispatch envelope.
+    ``None`` when the projector predates C1 (backward compatible). No god-object,
+    no first-party-only kwarg."""
 
     register: Callable[[Any], None]
+    register_workspace_handler: Callable[[str, Any], None] | None = None
+
+
+@dataclass(frozen=True)
+class LoopPolicyProvideContext:
+    """D5 typed context a ``loop_policy`` impl receives: ``register(ref, policy)``
+    where ``policy`` is ``Callable[[LoopControlInput], LoopControlResult]``."""
+
+    register: Callable[[str, Any], None]
+
+
+@dataclass(frozen=True)
+class SchedulePolicyProvideContext:
+    """D5 typed context a ``schedule_policy`` impl receives: ``register(ref, policy)``
+    where ``policy`` satisfies the scheduler-executor schedule-policy contract."""
+
+    register: Callable[[str, Any], None]
+
+
+@dataclass(frozen=True)
+class MemoryStrategyProvideContext:
+    """D5 typed context a ``memory_strategy`` impl receives: ``register(ref, strategy)``."""
+
+    register: Callable[[str, Any], None]
 
 
 @dataclass(frozen=True)
@@ -632,4 +666,6 @@ __all__ = [
     "ProducerSpec", "ConnectorSpec",
     "ToolProvideContext", "EvidenceProducerProvideContext", "RecipeProvideContext",
     "ConnectorProvideContext", "HarnessProvideContext", "CallbackProvideContext",
+    "LoopPolicyProvideContext", "SchedulePolicyProvideContext",
+    "MemoryStrategyProvideContext",
 ]

@@ -180,6 +180,12 @@ class PackRegistries:
         self.recipes = KeyedRefRegistry()
         self.connectors = KeyedRefRegistry()
         self.harnesses = KeyedRefRegistry()
+        # Pack C policy registries (same KeyedRefRegistry shape as harnesses).
+        self.loop_policies = KeyedRefRegistry()
+        self.schedule_policies = KeyedRefRegistry()
+        self.memory_strategies = KeyedRefRegistry()
+        # C1: gate5b workspace tool handlers, keyed by TOOL NAME (not provides ref).
+        self.workspace_tool_handlers = KeyedRefRegistry()
         self._hook_handlers: dict[str, Any] = {}
 
     @classmethod
@@ -233,6 +239,18 @@ def _provide_callback(registries: PackRegistries) -> Callable[..., None]:
     return register
 
 
+def _provide_keyed(registry: KeyedRefRegistry) -> Callable[..., None]:
+    def register(ref: str, value: Any) -> None:
+        registry.replace(ref, value)
+    return register
+
+
+def _provide_workspace_handler(registries: PackRegistries) -> Callable[[str, Any], None]:
+    def register(tool_name: str, handler: Any) -> None:
+        registries.workspace_tool_handlers.replace(tool_name, handler)
+    return register
+
+
 def project_into_registries(
     primitives: "tuple[LoadedPrimitive, ...] | list[LoadedPrimitive]",
     registries: PackRegistries,
@@ -275,7 +293,10 @@ def project_into_registries(
                 registered.append(ref)
             continue
         if ptype == "tool":
-            impl(_ctx.ToolProvideContext(register=_provide_tool(registries, ref)))
+            impl(_ctx.ToolProvideContext(
+                register=_provide_tool(registries, ref),
+                register_workspace_handler=_provide_workspace_handler(registries),
+            ))
             registered.append(ref)
         elif ptype == "evidence_producer":
             impl(_ctx.EvidenceProducerProvideContext(register=_provide_evidence(registries)))
@@ -291,6 +312,18 @@ def project_into_registries(
             registered.append(ref)
         elif ptype == "callback":
             impl(_ctx.CallbackProvideContext(register=_provide_callback(registries)))
+            registered.append(ref)
+        elif ptype == "loop_policy":
+            impl(_ctx.LoopPolicyProvideContext(
+                register=_provide_keyed(registries.loop_policies)))
+            registered.append(ref)
+        elif ptype == "schedule_policy":
+            impl(_ctx.SchedulePolicyProvideContext(
+                register=_provide_keyed(registries.schedule_policies)))
+            registered.append(ref)
+        elif ptype == "memory_strategy":
+            impl(_ctx.MemoryStrategyProvideContext(
+                register=_provide_keyed(registries.memory_strategies)))
             registered.append(ref)
     return LoadReport(registered=tuple(registered), removed=tuple(removed))
 

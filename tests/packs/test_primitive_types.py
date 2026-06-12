@@ -2,6 +2,7 @@ from magi_agent.packs.context import PrimitiveType, Capability
 
 
 def test_eight_provides_types_present():
+    # The 8 unified D2 types + the 3 Pack-C policy types (loop/schedule/memory).
     values = {t.value for t in PrimitiveType}
     assert values == {
         "tool",
@@ -12,6 +13,9 @@ def test_eight_provides_types_present():
         "evidence_producer",
         "recipe",
         "connector",
+        "loop_policy",
+        "schedule_policy",
+        "memory_strategy",
     }
 
 
