@@ -594,6 +594,93 @@ def test_headless_text_mode_with_final_only_adk_text_surfaces_text(
     assert buffer.getvalue() == "final-only text\n"
 
 
+def test_headless_text_mode_with_fireworks_kimi_final_aggregate_surfaces_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MAGI_CLI_ENABLED", "1")
+    runner = MockRunner(
+        [_text_event("kimi aggregate text", partial=False, turn_complete=False)]
+    )
+    buffer = io.StringIO()
+
+    code = asyncio.run(
+        run_headless(
+            "hi",
+            output="text",
+            driver=MagiEngineDriver(runner=runner),
+            stream=buffer,
+        )
+    )
+
+    assert code == 0
+    assert buffer.getvalue() == "kimi aggregate text\n"
+
+
+def test_headless_text_mode_dedupes_partials_plus_fireworks_kimi_aggregate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MAGI_CLI_ENABLED", "1")
+    runner = MockRunner(
+        [
+            _text_event("streamed ", partial=True),
+            _text_event("answer", partial=True),
+            _text_event(
+                "streamed answer",
+                partial=False,
+                turn_complete=False,
+            ),
+        ]
+    )
+    buffer = io.StringIO()
+
+    code = asyncio.run(
+        run_headless(
+            "hi",
+            output="text",
+            driver=MagiEngineDriver(runner=runner),
+            stream=buffer,
+        )
+    )
+
+    assert code == 0
+    assert buffer.getvalue() == "streamed answer\n"
+
+
+def test_headless_stream_json_with_fireworks_kimi_final_aggregate_emits_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MAGI_CLI_ENABLED", "1")
+    runner = MockRunner(
+        [_text_event("kimi stream aggregate", partial=False, turn_complete=False)]
+    )
+    buffer = io.StringIO()
+
+    code = asyncio.run(
+        run_headless(
+            "hi",
+            output="stream-json",
+            include_partial=True,
+            driver=MagiEngineDriver(runner=runner),
+            stream=buffer,
+        )
+    )
+
+    assert code == 0
+    objs = [json.loads(line) for line in buffer.getvalue().splitlines() if line]
+    assistant = [obj for obj in objs if obj.get("type") == "assistant"]
+    token_events = [
+        obj
+        for obj in objs
+        if obj.get("type") == "stream_event"
+        and obj.get("event", {}).get("type") == "token"
+    ]
+    result = next(obj for obj in objs if obj.get("type") == "result")
+
+    assert assistant
+    assert token_events
+    assert result["result"] == "kimi stream aggregate"
+
+
 class _RaisingRunner:
     """Yields a tool_start, then raises mid-turn (a pending tool is orphaned)."""
 
