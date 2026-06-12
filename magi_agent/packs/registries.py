@@ -425,7 +425,9 @@ def build_control_plane_from_packs(
     registry = PrimitiveRegistry()
     sink_adapter = RegistryRegistrationSink(registry)
     for primitive in result.primitives:
-        if primitive.type == "control_plane":
+        # phase="tool_host" entries are gate5b dispatch ctx-callables, not
+        # LoopControl providers — they load via build_tool_host_runtime_from_packs.
+        if primitive.type == "control_plane" and primitive.phase != "tool_host":
             sink_adapter.register(primitive)
 
     plane = ControlPlane()
@@ -448,3 +450,59 @@ def build_control_plane_from_packs(
     for control in extra_controls or ():
         plane.register(control)
     return plane
+
+
+def build_tool_host_runtime_from_packs(
+    bases: "list[Any] | None" = None,
+) -> "tuple[dict[str, Any], tuple[Any, ...]]":
+    """Load the gate5b workspace runtime from packs (C1 keystone).
+
+    Returns ``(workspace_handlers_by_tool_name, dispatch_policy_impls)``:
+    - handlers from every loaded ``tool`` entry that bound a workspace handler;
+    - ``control_plane`` entries with ``phase == "tool_host"`` as ctx-callables,
+      ordered by ``(priority, registration)`` via the keyed PrimitiveRegistry
+      (last-wins override — a user pack replaces a first-party ref, §1).
+
+    Mirrors ``build_control_plane_from_packs``: only packs that statically
+    declare a relevant entry are impl-imported, so a broken unrelated user pack
+    cannot break the tool host.
+    """
+    from magi_agent.packs.discovery import (
+        default_search_bases,
+        discover_pack_files,
+        load_packs_config,
+        resolve_enabled_packs,
+    )
+    from magi_agent.packs.loader import RecordingSink, load_packs
+
+    search_bases = list(bases) if bases is not None else default_search_bases()
+    discovered = discover_pack_files(search_bases)
+    enabled = resolve_enabled_packs(discovered, load_packs_config())
+    relevant = [
+        disc
+        for disc in enabled
+        if any(
+            p.type == "tool" or (p.type == "control_plane" and p.phase == "tool_host")
+            for p in disc.manifest.provides
+        )
+    ]
+    sink = RecordingSink()
+    result = load_packs(relevant, sink)
+
+    registries = PackRegistries()
+    tool_primitives = [p for p in result.primitives if p.type == "tool"]
+    project_into_registries(tool_primitives, registries)
+    handlers = {
+        name: registries.workspace_tool_handlers.resolve(name)
+        for name in registries.workspace_tool_handlers.list_refs()
+    }
+
+    registry = PrimitiveRegistry()
+    adapter = RegistryRegistrationSink(registry)
+    for primitive in result.primitives:
+        if primitive.type == "control_plane" and primitive.phase == "tool_host":
+            adapter.register(primitive)
+    policies = tuple(
+        entry.impl for entry in registry.list(ptype=PrimitiveType.CONTROL_PLANE)
+    )
+    return handlers, policies
