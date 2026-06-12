@@ -119,10 +119,11 @@ def _install_transcript_only_text_bridge(monkeypatch: pytest.MonkeyPatch) -> Non
     import magi_agent.cli.engine as engine_mod
 
     real_deps = engine_mod._lazy_engine_deps()
+    bridge_key = next(key for key in real_deps if key.endswith("EventBridge"))
 
     class _BridgeWithTranscriptOnlyText:
         def __init__(self, **kwargs: object) -> None:
-            self._real = real_deps["OpenMagiEventBridge"](**kwargs)  # type: ignore[operator]
+            self._real = real_deps[bridge_key](**kwargs)  # type: ignore[operator]
 
         def project_adk_event(self, event: object, *, turn_id: str):
             projection = self._real.project_adk_event(event, turn_id=turn_id)
@@ -143,7 +144,7 @@ def _install_transcript_only_text_bridge(monkeypatch: pytest.MonkeyPatch) -> Non
 
     def _fake_deps() -> dict:
         deps = dict(real_deps)
-        deps["OpenMagiEventBridge"] = _BridgeWithTranscriptOnlyText
+        deps[bridge_key] = _BridgeWithTranscriptOnlyText
         return deps
 
     monkeypatch.setattr(engine_mod, "_lazy_engine_deps", _fake_deps)
