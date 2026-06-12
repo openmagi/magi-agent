@@ -369,8 +369,20 @@ def build_control_plane_from_packs(
 
     discovered = discover_pack_files(search_bases)
     enabled = resolve_enabled_packs(discovered, load_packs_config())
+    # Filter to packs that statically declare a control_plane provides entry
+    # BEFORE load_packs. load_packs lazily imports EVERY enabled pack's impl, so a
+    # broken/missing-dependency NON-control pack (e.g. a tool pack a user installed
+    # whose impl imports a package they lack) would raise here and break the whole
+    # control-plane assembly — even though it contributes no controls. The filter
+    # is manifest-level (no impl import for non-control packs); base/last-wins
+    # order is preserved since resolve_enabled_packs already ordered ``enabled``.
+    control_enabled = [
+        disc
+        for disc in enabled
+        if any(p.type == "control_plane" for p in disc.manifest.provides)
+    ]
     sink = RecordingSink()
-    result = load_packs(enabled, sink)
+    result = load_packs(control_enabled, sink)
 
     # Resolve the registry-ordered control_plane provider impls. The keyed
     # PrimitiveRegistry applies last-wins override + (priority, registration)
