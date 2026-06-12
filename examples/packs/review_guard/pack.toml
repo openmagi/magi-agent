@@ -1,0 +1,21 @@
+# Example third-party pack — the shape a stranger ships. External: NOT under
+# magi_agent.*; the impl module path is relative to this pack's directory and
+# resolves with ZERO env setup (the loader auto-injects the pack root).
+# Manifest schema = magi_agent/packs/manifest.py (top-level packId/displayName).
+
+packId = "examples.review-guard"
+displayName = "Review guard (example third-party pack)"
+version = "0.1.0"
+description = "External-shaped example: a custom validator + a custom callback."
+
+[[provides]]
+type = "validator"
+ref = "verifier:noTodoLeft@1"
+impl = "review_guard.impl:no_todo_validator"
+
+[[provides]]
+type = "callback"
+ref = "review-guard-audit"
+impl = "review_guard.impl:provide_audit_callback"
+priority = 100
+phase = "beforeTurnStart"

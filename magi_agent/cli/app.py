@@ -494,6 +494,69 @@ app.add_typer(auth_app, name="auth")
 
 
 # ---------------------------------------------------------------------------
+# `magi pack` — pack authoring (Pack B1)
+# ---------------------------------------------------------------------------
+
+pack_app = typer.Typer(
+    name="pack",
+    help="Author and manage user packs.",
+    invoke_without_command=True,
+    no_args_is_help=False,
+)
+
+
+@pack_app.callback(invoke_without_command=True)
+def pack_root(ctx: typer.Context) -> None:
+    """Author and manage user packs."""
+    if ctx.invoked_subcommand is None:
+        typer.echo("magi pack: use `magi pack new <type> <name>`.", err=False)
+
+
+@pack_app.command("new")
+def pack_new(
+    ptype: str = typer.Argument(
+        ...,
+        metavar="TYPE",
+        help=(
+            "One of: tool, callback, validator, harness, control_plane, "
+            "evidence_producer, recipe, connector."
+        ),
+    ),
+    name: str = typer.Argument(..., help="Human name for the primitive (e.g. my-check)."),
+    dest: Optional[Path] = typer.Option(
+        None,
+        "--dest",
+        help="Packs root to scaffold into. Default: <cwd>/.magi/packs.",
+    ),
+) -> None:
+    """Scaffold a ready-to-load user pack (pack.toml + impl stub + smoke test)."""
+    from magi_agent.packs.scaffold import scaffold_pack  # noqa: PLC0415
+
+    dest_root = dest if dest is not None else Path.cwd() / ".magi" / "packs"
+    try:
+        result = scaffold_pack(ptype, name, dest_root)
+    except ValueError as exc:
+        typer.echo(f"magi pack new: {exc}", err=True)
+        raise typer.Exit(code=2)
+    typer.echo(f"pack created: {result.pack_dir}")
+    typer.echo(f"  ref:        {result.ref}")
+    typer.echo(f"  manifest:   {result.pack_toml}")
+    if result.impl_path is not None:
+        typer.echo(f"  impl:       {result.impl_path}")
+    if result.spec_path is not None:
+        typer.echo(f"  spec:       {result.spec_path}")
+    typer.echo(f"  smoke test: {result.test_path}")
+    typer.echo(
+        "next: edit the impl, then verify it loads with "
+        f"`pytest {result.test_path}` — packs under <cwd>/.magi/packs are "
+        "discovered automatically (no PYTHONPATH needed)."
+    )
+
+
+app.add_typer(pack_app, name="pack")
+
+
+# ---------------------------------------------------------------------------
 # `magi gateway` — always-on daemon (Track F)
 # ---------------------------------------------------------------------------
 
