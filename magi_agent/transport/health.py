@@ -12,6 +12,11 @@ from magi_agent.gates.gate5b_full_toolhost import (
     build_gate5b_full_toolhost_bundle,
 )
 from magi_agent.runtime.openmagi_runtime import OpenMagiRuntime
+from magi_agent.runtime.child_runner_live import (
+    LIVE_CHILD_RUNNER_KILL_SWITCH_ENV,
+    is_live_child_runner_enabled,
+)
+from magi_agent.runtime.child_toolset import resolve_child_toolset_profile
 from magi_agent.transport.chat import (
     build_gate2_sandbox_workspace_canary_config_from_env,
     gate5b_user_visible_chat_gate_active,
@@ -70,6 +75,17 @@ def healthz_payload(runtime: OpenMagiRuntime) -> dict[str, object]:
         get_observed_egress_evidence_provider(runtime)
     )
     gate2_sandbox_root_readiness = _gate2_sandbox_root_readiness(runtime)
+    gate5b_full_toolhost_bundle = (
+        _healthz_gate5b_full_toolhost_bundle(runtime)
+        if user_visible_output_allowed and canary_routing_allowed
+        else None
+    )
+    child_runner_tool_names: list[str] = []
+    if (
+        gate5b_full_toolhost_bundle is not None
+        and gate5b_full_toolhost_bundle.status == "ready"
+    ):
+        child_runner_tool_names = list(gate5b_full_toolhost_bundle.exposed_tool_names)
     composio_config = resolve_composio_config(
         {
             **os.environ,
@@ -90,6 +106,10 @@ def healthz_payload(runtime: OpenMagiRuntime) -> dict[str, object]:
         "dbWritesAllowed": authority.db_write_allowed,
         "workspaceMutationAllowed": authority.workspace_mutation_allowed,
         "childExecutionAllowed": authority.child_execution_allowed,
+        "childRunner": _child_runner_health_metadata(
+            legacy_child_execution_allowed=authority.child_execution_allowed,
+            allowed_tool_names=child_runner_tool_names,
+        ),
         "missionRuntimeAllowed": authority.mission_runtime_allowed,
         "evidenceBlockModeAllowed": authority.evidence_block_mode_allowed,
         "contextContinuity": context_continuity.health_metadata,
@@ -154,14 +174,22 @@ def healthz_payload(runtime: OpenMagiRuntime) -> dict[str, object]:
         },
     }
     if user_visible_output_allowed and canary_routing_allowed:
-        body.update(_user_visible_canary_ready_envelope(runtime))
+        body.update(
+            _user_visible_canary_ready_envelope(
+                runtime,
+                bundle=gate5b_full_toolhost_bundle,
+            )
+        )
     return body
 
 
 def _user_visible_canary_ready_envelope(
     runtime: OpenMagiRuntime,
+    *,
+    bundle: Gate5BFullToolBundle | None = None,
 ) -> dict[str, object]:
-    bundle = _healthz_gate5b_full_toolhost_bundle(runtime)
+    if bundle is None:
+        bundle = _healthz_gate5b_full_toolhost_bundle(runtime)
     envelope: dict[str, object] = {
         "status": "python_ready",
         "fallbackStatus": "none",
@@ -231,6 +259,10 @@ def _user_visible_canary_ready_envelope(
             "mode": "selected_full_toolhost",
             "toolsPolicy": "selected_full_toolhost",
             "allowedToolNames": allowed_tool_names,
+            "childRunner": _child_runner_health_metadata(
+                legacy_child_execution_allowed=False,
+                allowed_tool_names=allowed_tool_names,
+            ),
             "forbiddenToolsExposed": forbidden,
             "receiptCount": bundle.host.counter.receipt_count,
             "routeAttached": attachment_flags["routeAttached"],
@@ -244,6 +276,29 @@ def _user_visible_canary_ready_envelope(
             },
         }
     return envelope
+
+
+def _child_runner_health_metadata(
+    *,
+    legacy_child_execution_allowed: bool,
+    allowed_tool_names: list[str] | tuple[str, ...] = (),
+) -> dict[str, object]:
+    live_enabled = is_live_child_runner_enabled(os.environ)
+    spawn_agent_exposed = "SpawnAgent" in set(allowed_tool_names)
+    return {
+        "legacyChildExecutionAllowed": bool(legacy_child_execution_allowed),
+        "liveChildRunnerEnabled": live_enabled,
+        "liveChildRunnerKillSwitchEnabled": _env_truthy(
+            os.environ.get(LIVE_CHILD_RUNNER_KILL_SWITCH_ENV, "")
+        ),
+        "childRunnerToolset": resolve_child_toolset_profile(os.environ),
+        "spawnAgentExposed": spawn_agent_exposed,
+        "liveChildRunnerAttached": live_enabled and spawn_agent_exposed,
+    }
+
+
+def _env_truthy(value: object) -> bool:
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _healthz_gate5b_full_toolhost_bundle(

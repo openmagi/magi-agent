@@ -1264,8 +1264,8 @@ graph LR
 | checkpointing.py | — | — | — |
 | child_event_projection.py | — | child_runner_boundary, child_runtime_envelope, tool_preview | — |
 | child_runner_boundary.py | — | adk_turn_runner, child_acceptance, child_runtime_envelope, model_tiers, runtime_issuance, subagent | harness/workflow_executor.py, plugins/native/subagents.py, runtime/child_event_projection.py |
-| child_runner_live.py | A REAL, model-backed local child runner for the Child Runner boundary. | child_toolset, local_tool_collector, model_tiers, providers, real_runner, tool_runtime | harness/workflow_executor.py, plugins/native/subagents.py |
-| child_toolset.py | Child-runner toolset profile resolution (PR1, doc 07). | local_readonly | harness/workflow_executor.py, plugins/native/subagents.py, runtime/child_runner_live.py |
+| child_runner_live.py | A REAL, model-backed local child runner for the Child Runner boundary. | child_toolset, local_tool_collector, model_tiers, providers, real_runner, tool_runtime | harness/workflow_executor.py, plugins/native/subagents.py, transport/health.py |
+| child_toolset.py | Child-runner toolset profile resolution (PR1, doc 07). | local_readonly | harness/workflow_executor.py, plugins/native/subagents.py, runtime/child_runner_live.py, transport/health.py |
 | commit_boundary.py | — | turn_utilities | — |
 | content_replacement.py | — | query_state | — |
 | context_attachments.py | — | context_packet, message_builder | — |
@@ -1606,7 +1606,7 @@ graph LR
 | egress_critic.py | Egress critic gate and live evidence projection for the chat serving path. | egress_gate, gate1a_readonly_tools, gate5b_full_toolhost, generation_request, mapping, projection, providers, readonly_classifier, reason_safety, user_visible_model_routing | transport/chat.py, transport/chat_routes.py |
 | gate2_sandbox_canary.py | Gate2 sandbox workspace canary chat + delivery-receipt logic. | chat_shared, gate2_activation_loop_a, gate2_durable_evidence, gate2_readiness, openmagi_runtime, user_visible_model_routing | transport/chat.py, transport/chat_routes.py |
 | generation_request.py | User-visible generation request, identity, and history contract builders. | chat_shared, gate1a_readonly_tools, gate5b4c3_shadow_generation_contract, gate5b_full_toolhost, message_builder, openmagi_runtime, user_visible_model_routing | transport/chat.py, transport/chat_routes.py, transport/egress_critic.py |
-| health.py | — | chat, config, gate2_activation_loop_a, gate2_readiness, gate3_readiness, gate4_readiness, gate5_readiness, gate5b_full_toolhost, gate7_readiness, gate8_readiness, health, observed_egress, openmagi_runtime, ops, readiness | (root)/app.py, observability/api.py, transport/__init__.py |
+| health.py | — | chat, child_runner_live, child_toolset, config, gate2_activation_loop_a, gate2_readiness, gate3_readiness, gate4_readiness, gate5_readiness, gate5b_full_toolhost, gate7_readiness, gate8_readiness, health, observed_egress, openmagi_runtime, ops, readiness | (root)/app.py, observability/api.py, transport/__init__.py |
 | learning_dashboard.py | Learning governance dashboard API — FastAPI router. | api, config, models, openmagi_runtime, store | (root)/app.py |
 | plugins.py | — | audit, manager, openmagi_runtime | (root)/app.py |
 | product_admin.py | — | openmagi_runtime, ops, safety | — |

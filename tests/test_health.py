@@ -15,6 +15,11 @@ from magi_agent.evidence.observed_egress import (
     LocalObservedEgressEvidenceProvider,
     ObservedEgressEvidence,
 )
+from magi_agent.runtime.child_runner_live import (
+    LIVE_CHILD_RUNNER_ENABLED_ENV,
+    LIVE_CHILD_RUNNER_KILL_SWITCH_ENV,
+)
+from magi_agent.runtime.child_toolset import CHILD_TOOLSET_ENV
 from magi_agent.runtime.openmagi_runtime import OpenMagiRuntime
 from magi_agent.transport.chat import Gate5BUserVisibleChatRouteConfig
 from magi_agent.gates.gate5b_full_toolhost import (
@@ -67,7 +72,10 @@ def test_healthz_adds_runtime_engine_without_changing_runtime_identity() -> None
     assert body["adk"]["invoked"] is False
 
 
-def test_healthz_exposes_explicit_false_authority_fields() -> None:
+def test_healthz_exposes_explicit_false_authority_fields(monkeypatch) -> None:
+    monkeypatch.setenv(LIVE_CHILD_RUNNER_ENABLED_ENV, "0")
+    monkeypatch.delenv(LIVE_CHILD_RUNNER_KILL_SWITCH_ENV, raising=False)
+    monkeypatch.setenv(CHILD_TOOLSET_ENV, "none")
     client = TestClient(create_app(make_runtime()))
 
     response = client.get("/healthz")
@@ -94,6 +102,93 @@ def test_healthz_exposes_explicit_false_authority_fields() -> None:
         body["gate8Readiness"]["reasonCode"]
         == "pre_gate8_continuity_canary_missing"
     )
+    assert body["childRunner"] == {
+        "legacyChildExecutionAllowed": False,
+        "liveChildRunnerEnabled": False,
+        "liveChildRunnerKillSwitchEnabled": False,
+        "childRunnerToolset": "none",
+        "spawnAgentExposed": False,
+        "liveChildRunnerAttached": False,
+    }
+
+
+def test_healthz_reports_live_child_runner_status_separately_from_legacy_authority(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("MAGI_CHILD_RUNNER_LIVE_ENABLED", "1")
+    monkeypatch.setenv("MAGI_CHILD_RUNNER_LIVE_KILL_SWITCH", "0")
+    monkeypatch.setenv("MAGI_CHILD_RUNNER_TOOLSET", "readonly")
+    config = RuntimeConfig(
+        bot_id="bot-test",
+        user_id="user-test",
+        gateway_token="gateway-token",
+        api_proxy_url="http://api-proxy.local",
+        chat_proxy_url="http://chat-proxy.local",
+        redis_url="redis://redis.local:6379/0",
+        model="gpt-5.2",
+        build=BuildInfo(version="0.1.0-adk-scaffold", build_sha="sha-test"),
+        authority=PythonRuntimeAuthorityConfig(
+            userVisibleOutputAllowed=True,
+            canaryRoutingAllowed=True,
+        ),
+    )
+    runtime = OpenMagiRuntime(config=config)
+    runtime.gate5b_user_visible_chat_route_config = Gate5BUserVisibleChatRouteConfig(
+        enabled=True,
+        killSwitchEnabled=False,
+        selectedBotDigest="sha256:82e4e56db648bc081311887c362e565c68f74411ce44855aba61af697e57bd86",
+        selectedOwnerUserIdDigest="sha256:d59c3eb10fe2b0cacea2b080885863e3286d9a6d352269b822fd5ebef3d22e15",
+        environment="production",
+        environmentAllowlist=("production",),
+    )
+    runtime.gate5b_full_toolhost_config = Gate5BFullToolHostConfig.model_validate(
+        {
+            "enabled": True,
+            "killSwitchEnabled": False,
+            "routeAttachmentEnabled": True,
+            "selectedBotDigest": "sha256:82e4e56db648bc081311887c362e565c68f74411ce44855aba61af697e57bd86",
+            "selectedOwnerDigest": "sha256:d59c3eb10fe2b0cacea2b080885863e3286d9a6d352269b822fd5ebef3d22e15",
+            "environment": "production",
+            "environmentAllowlist": ("production",),
+            "allowedToolNames": GATE5B_FULL_TOOLHOST_TOOL_NAMES,
+            "maxToolCallsPerTurn": 8,
+        }
+    )
+
+    response = TestClient(create_app(runtime)).get("/healthz")
+
+    assert response.status_code == 200
+    body = response.json()
+    expected = {
+        "legacyChildExecutionAllowed": False,
+        "liveChildRunnerEnabled": True,
+        "liveChildRunnerKillSwitchEnabled": False,
+        "childRunnerToolset": "readonly",
+        "spawnAgentExposed": True,
+        "liveChildRunnerAttached": True,
+    }
+    assert body["childExecutionAllowed"] is False
+    assert body["childRunner"] == expected
+    assert body["tooling"]["childRunner"] == expected
+
+
+def test_healthz_reports_live_child_runner_kill_switch_as_detached(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("MAGI_CHILD_RUNNER_LIVE_ENABLED", "1")
+    monkeypatch.setenv("MAGI_CHILD_RUNNER_LIVE_KILL_SWITCH", "1")
+    monkeypatch.setenv("MAGI_CHILD_RUNNER_TOOLSET", "readonly")
+    client = TestClient(create_app(make_runtime()))
+
+    response = client.get("/healthz")
+
+    assert response.status_code == 200
+    child_runner = response.json()["childRunner"]
+    assert child_runner["liveChildRunnerEnabled"] is False
+    assert child_runner["liveChildRunnerKillSwitchEnabled"] is True
+    assert child_runner["childRunnerToolset"] == "readonly"
+    assert child_runner["spawnAgentExposed"] is False
+    assert child_runner["liveChildRunnerAttached"] is False
 
 
 def test_healthz_keeps_user_visible_authority_false_without_active_chat_gate() -> None:
