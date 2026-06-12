@@ -355,14 +355,17 @@ class ControlPlaneProvideContext:
     declares (env-gated, with the runtime collaborators below) and registers each
     via ``register``. First-party and user ``control_plane`` packs receive the
     IDENTICAL object — no first-party-only handle (§1 no privilege). The bundled
-    first-party pack delegates to ``build_default_plane`` (the exact legacy
-    env-gated assembly) so the migration is a move, not a rewrite. A user pack can
-    author its own controls and read the same ``env`` to gate them.
+    first-party entries delegate to the single-source builders in
+    ``adk_bridge/control_plane.py`` (``build_core_default_plane`` plus the
+    per-feature ``build_*_controls`` — the exact legacy env-gated assemblies) so
+    the migration is a move, not a rewrite. A user pack can author its own
+    controls and read the same ``env`` to gate them.
 
     Fields beyond ``register`` are the same collaborators ``build_default_plane``
     accepts; they are ``None`` unless the live runner injects them (e.g. GA
-    receipts/contract, self-review fork-runner/sink/config). They are read-only
-    inputs the provider may pass through to a control it builds.
+    receipts/contract, self-review fork-runner/sink/config,
+    ``tool_synthesis_model_label``). They are read-only inputs the provider may
+    pass through to a control it builds.
     """
 
     register: Callable[[Any], None]
