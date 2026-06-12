@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import inspect
 import os
+import re
 import tempfile
 import uuid
 from collections.abc import Mapping
@@ -19,6 +21,110 @@ _HOSTED_WORKSPACE_ENV_KEYS = (
     f"{_LEGACY_RUNTIME_ENV_PREFIX}PYTHON_GATE5B_FULL_TOOLHOST_WORKSPACE_ROOT",
     f"{_LEGACY_RUNTIME_ENV_PREFIX}PYTHON_MEMORY_WORKSPACE_ROOT",
 )
+_PUBLIC_CHILD_TASK_ID_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]{1,120}$")
+
+
+def _public_child_task_id(value: object, *, fallback: str) -> str:
+    for candidate in (value, fallback):
+        if not isinstance(candidate, str):
+            continue
+        text = candidate.strip()
+        if not text:
+            continue
+        if _PUBLIC_CHILD_TASK_ID_RE.fullmatch(text):
+            return text
+        return f"child-{digest(text)[7:23]}"
+    return f"child-{uuid.uuid4().hex[:12]}"
+
+
+def _child_event_receipt_ref(*, parent_execution_id: str, task_id: str) -> str:
+    return "receipt:" + digest(
+        {
+            "parentExecutionId": parent_execution_id,
+            "surface": "spawn_agent_child_lifecycle",
+            "taskId": task_id,
+        }
+    )
+
+
+async def _emit_agent_event(context: ToolContext, event: Mapping[str, object]) -> None:
+    emitter = context.emit_agent_event
+    if not callable(emitter):
+        return
+    try:
+        result = emitter(dict(event))
+        if inspect.isawaitable(result):
+            await result
+    except Exception:  # noqa: BLE001 — progress events must not affect tool execution.
+        return
+
+
+async def _emit_child_started(
+    context: ToolContext,
+    *,
+    task_id: str,
+    parent_turn_id: str,
+    child_receipt_ref: str,
+) -> None:
+    await _emit_agent_event(
+        context,
+        {
+            "type": "child_started",
+            "taskId": task_id,
+            "parentTurnId": parent_turn_id,
+            "detail": "Delegated child started",
+            "childReceiptRef": child_receipt_ref,
+        },
+    )
+    await _emit_agent_event(
+        context,
+        {
+            "type": "child_progress",
+            "taskId": task_id,
+            "detail": "Running delegated child",
+            "childReceiptRef": child_receipt_ref,
+        },
+    )
+
+
+async def _emit_child_finished(
+    context: ToolContext,
+    *,
+    task_id: str,
+    child_receipt_ref: str,
+    status: ToolStatus,
+    error_code: str | None,
+) -> None:
+    if status == "ok":
+        await _emit_agent_event(
+            context,
+            {
+                "type": "child_completed",
+                "taskId": task_id,
+                "childReceiptRef": child_receipt_ref,
+            },
+        )
+        return
+    if status == "error":
+        await _emit_agent_event(
+            context,
+            {
+                "type": "child_failed",
+                "taskId": task_id,
+                "errorMessage": error_code or "child_runner_error",
+                "childReceiptRef": child_receipt_ref,
+            },
+        )
+        return
+    await _emit_agent_event(
+        context,
+        {
+            "type": "child_cancelled",
+            "taskId": task_id,
+            "reason": error_code or "child_runner_blocked",
+            "childReceiptRef": child_receipt_ref,
+        },
+    )
 
 
 def _spawn_agent_result(
@@ -223,7 +329,14 @@ async def spawn_agent(arguments: dict[str, object], context: ToolContext) -> Too
             or f"spawn-parent-{uuid.uuid4().hex[:12]}"
         )
         turn_id = context.turn_id or f"spawn-turn-{uuid.uuid4().hex[:12]}"
-        task_id = f"spawn-task-{uuid.uuid4().hex[:12]}"
+        task_id = _public_child_task_id(
+            context.tool_use_id,
+            fallback=f"spawn-task-{uuid.uuid4().hex[:12]}",
+        )
+        child_receipt_ref = _child_event_receipt_ref(
+            parent_execution_id=parent_exec_id,
+            task_id=task_id,
+        )
 
         # Provider/model from arguments (optional per-task override), else the
         # ChildRunnerConfig defaults will be used by the runner's route resolver.
@@ -302,12 +415,25 @@ async def spawn_agent(arguments: dict[str, object], context: ToolContext) -> Too
             child_runner=runner,
             agents_spawned_so_far=0,
         )
+        await _emit_child_started(
+            context,
+            task_id=task_id,
+            parent_turn_id=turn_id,
+            child_receipt_ref=child_receipt_ref,
+        )
         result = await boundary.run(request)
 
         # Project the sanitised envelope into the output payload.
         envelope = result.envelope
         summary = envelope.summary if envelope is not None else ""
         tool_status, error_code, output_status = _child_result_status_and_reason(result)
+        await _emit_child_finished(
+            context,
+            task_id=task_id,
+            child_receipt_ref=child_receipt_ref,
+            status=tool_status,
+            error_code=error_code,
+        )
 
         output = {
             "status": output_status,
