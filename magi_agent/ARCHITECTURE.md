@@ -92,6 +92,7 @@ graph LR
     firstparty --> harness
     firstparty --> hooks
     firstparty --> packs
+    firstparty --> recipes
     firstparty --> tools
     gates --> coding
     gates --> config
@@ -116,6 +117,7 @@ graph LR
     harness --> learning
     harness --> memory
     harness --> missions
+    harness --> packs
     harness --> permissions
     harness --> recipes
     harness --> runtime
@@ -761,6 +763,13 @@ graph LR
 | __init__.py | — | — | — |
 | impl.py | Gate5b dispatch policies (no privilege; BeforeToolCtx/AfterToolCtx only). | context, gate5b_full_toolhost, memory_mode_guard, permission | — |
 
+### firstparty/packs/goal_loop_default/
+
+| Module | Purpose | Depends On | Depended By |
+|---|---|---|---|
+| __init__.py | — | — | — |
+| impl.py | First-party loop policy provider (no privilege, typed-ctx only). | context, goal_loop_control | — |
+
 ### firstparty/packs/harness_coding_lean/
 
 | Module | Purpose | Depends On | Depended By |
@@ -768,11 +777,25 @@ graph LR
 | __init__.py | — | — | — |
 | impl.py | First-party lean coding harness provider (no privilege, typed-ctx only). | context, resolved | — |
 
+### firstparty/packs/memory_strategies_default/
+
+| Module | Purpose | Depends On | Depended By |
+|---|---|---|---|
+| __init__.py | — | — | — |
+| impl.py | First-party memory strategy providers (no privilege, typed-ctx only). | context, memory_compaction, memory_recall, memory_review | — |
+
 ### firstparty/packs/recipe_authoring_static/
 
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
 | __init__.py | — | — | — |
+
+### firstparty/packs/scheduler_default/
+
+| Module | Purpose | Depends On | Depended By |
+|---|---|---|---|
+| __init__.py | — | — | — |
+| impl.py | First-party schedule policy provider (no privilege, typed-ctx only). | context, scheduler_executor | — |
 
 ### firstparty/packs/source_opened_validator/
 
@@ -806,7 +829,7 @@ graph LR
 | gate3_readiness.py | — | models | transport/health.py |
 | gate4_readiness.py | — | models | transport/health.py |
 | gate5_readiness.py | — | models | transport/health.py |
-| gate5b_full_toolhost.py | — | code_diagnostics_receipts, coding_tool_receipts, config, context, deadline, dispatcher, edit_match_receipts, edit_matching, env, formatter_runner, injection, lsp_client, manifest, memory_mode_guard, patch_apply, permission, public_events, read_format, read_ledger, registry, result, ripgrep, session_identity, tool_usage_guidance | firstparty/packs/gates_policy_default/impl.py, firstparty/packs/workspace_tools_default/impl.py, packs/context.py, tools/core_toolhost.py, transport/chat.py, transport/chat_routes.py, transport/chat_shared.py, transport/egress_critic.py, transport/generation_request.py, transport/health.py, transport/streaming_chat_route.py |
+| gate5b_full_toolhost.py | — | code_diagnostics_receipts, coding_tool_receipts, config, context, deadline, dispatcher, edit_match_receipts, edit_matching, env, formatter_runner, injection, lsp_client, manifest, memory_mode_guard, patch_apply, permission, public_events, read_format, read_ledger, registries, registry, result, ripgrep, session_identity, tool_usage_guidance | firstparty/packs/gates_policy_default/impl.py, firstparty/packs/workspace_tools_default/impl.py, packs/context.py, tools/core_toolhost.py, transport/chat.py, transport/chat_routes.py, transport/chat_shared.py, transport/egress_critic.py, transport/generation_request.py, transport/health.py, transport/streaming_chat_route.py |
 | gate7_readiness.py | — | models | transport/health.py |
 | gate8_readiness.py | — | gate1a_egress_correlation, models | transport/chat.py, transport/chat_routes.py, transport/health.py |
 | learning_live_readiness.py | Learning-layer LIVE adapter readiness gate — PR7. | config | harness/memory_recall.py, harness/memory_write.py, learning/live.py, transport/chat_routes.py |
@@ -844,15 +867,15 @@ graph LR
 | evidence_scope.py | — | — | harness/engine.py, harness/resolved.py |
 | goal_judge.py | B2 — GoalJudge: goal-satisfaction judge (parse + fail-open + parse-failure budget, | types | harness/goal_loop_control.py |
 | goal_loop.py | — | — | harness/general_automation/delegation.py, harness/goal_state.py, shadow/mission_lifecycle_contract.py |
-| goal_loop_control.py | B3/B4 — Continuation loop control + after-turn hook (the Ralph loop). | context, goal_judge, goal_state, manifest, result, types | — |
+| goal_loop_control.py | B3/B4 — Continuation loop control + after-turn hook (the Ralph loop). | context, discovery, goal_judge, goal_state, manifest, registries, result, types | firstparty/packs/goal_loop_default/impl.py |
 | goal_state.py | B1 — GoalState: persistent session-scoped goal state layer. | goal_loop, migrations | harness/goal_loop_control.py |
 | guardrail_matrix.py | — | — | — |
 | inference_scaling.py | — | — | channels/taskkind_classifier.py, channels/workflow_classifier.py, harness/cross_review.py |
 | learning_executor.py | Learning reflection executor — PR3 (real signal extraction + labeling). | candidates, config, eval_gate, labeler, store | harness/cron_runtime.py, learning/bootstrap.py |
 | long_context_eval.py | — | context_budget, final_output_gate, model_tiers, request_shape | — |
-| memory_compaction.py | — | memory_write, write_boundary | — |
+| memory_compaction.py | — | discovery, memory_write, registries, write_boundary | firstparty/packs/memory_strategies_default/impl.py, harness/memory_review.py |
 | memory_recall.py | — | contracts, injection, learning_live_readiness, memory_recall, namespaces | cli/learning_recall.py, learning/live.py |
-| memory_review.py | Gated background memory-review harness (A1, PR5). | context, declarative_filter | — |
+| memory_review.py | Gated background memory-review harness (A1, PR5). | context, declarative_filter, memory_compaction | firstparty/packs/memory_strategies_default/impl.py |
 | memory_write.py | — | contracts, declarative_filter, learning_live_readiness, local_file_writable, write_boundary | cli/learning_recall.py, harness/memory_compaction.py, harness/memory_write_tool.py, learning/live.py |
 | memory_write_tool.py | MemoryWriteToolHost — agent-callable tool surface for declarative memory writes (D2). | context, memory_write, registry, result | runtime/memory_write_wiring.py |
 | parallel_execution.py | — | — | harness/workflow_executor.py |
@@ -864,7 +887,7 @@ graph LR
 | research_routing.py | — | research_agents | — |
 | resolved.py | — | constraint_reinjection, evidence_scope, manifest, question_tool, recipe_disclosure, rollout, scope, types | (root)/facades.py, adk_bridge/callback_adapter.py, cli/hook_wiring.py, firstparty/packs/harness_coding_lean/impl.py, harness/cron_turn_runner_adapter.py, harness/engine.py, hooks/bus.py, packs/harness_projection.py, runtime/message_builder.py |
 | scheduler_delivery.py | A4 — Delivery boundary for cron turn output. | types | channels/discord_live.py, channels/email_live.py, channels/slack_live.py, channels/telegram_live.py, gateway/channel_watchers.py, harness/scheduler_job_execution.py |
-| scheduler_executor.py | A2 — SchedulerExecutor: file-lock lease holder + at-most-once tick. | schedule_grammar, scheduler_runtime | harness/scheduler_job_execution.py, harness/scheduler_job_store.py, harness/scheduler_loop_driver.py |
+| scheduler_executor.py | A2 — SchedulerExecutor: file-lock lease holder + at-most-once tick. | discovery, registries, schedule_grammar, scheduler_runtime | firstparty/packs/scheduler_default/impl.py, harness/scheduler_job_execution.py, harness/scheduler_job_store.py, harness/scheduler_loop_driver.py |
 | scheduler_job_execution.py | A3 — Gated ADK turn execution for due scheduler jobs (shadow-first, default off). | auto_control, scheduler_delivery, scheduler_executor, scheduler_executor_readiness, scheduler_runtime, types | gateway/watchers.py, harness/cron_turn_runner_adapter.py, harness/scheduler_loop_driver.py, ops/health.py |
 | scheduler_job_store.py | A-driver — persistent SQLite-backed ScheduledJobSource. | migrations, scheduler_executor | gateway/watchers.py |
 | scheduler_loop_driver.py | A-driver — SchedulerLoopDriver: the periodic loop that fires due jobs. | scheduler_executor, scheduler_job_execution, scheduler_runtime | gateway/watchers.py |
@@ -1084,13 +1107,13 @@ graph LR
 | __init__.py | Neutral OSS pack kernel: manifest, discovery, loader, catalog build. | — | packs/registries.py |
 | catalog_build.py | Build the live ``CompileRecipePackCatalog`` from loaded pack primitives (D4). | discovery, loader, types | packs/loader.py |
 | connector_projection.py | Project loaded connector specs' ToolManifests into the live tool registry. | registries | — |
-| context.py | D5 typed-context ABI + dispatcher for the neutral microkernel. | control_plane, gate5b_full_toolhost | adk_bridge/context_compaction.py, adk_bridge/control_plane.py, adk_bridge/edit_retry_reflection.py, adk_bridge/facts_replan_control.py, adk_bridge/resilience_plugin.py, adk_bridge/schema_feedback.py, adk_bridge/tool_exception_reflection.py, firstparty/packs/callback_turn_audit/impl.py, firstparty/packs/connector_local_readonly/impl.py, firstparty/packs/control_plane_default/impl.py, firstparty/packs/evidence_gitdiff/impl.py, firstparty/packs/harness_coding_lean/impl.py, firstparty/packs/source_opened_validator/impl.py, firstparty/packs/tools_clock/impl.py, firstparty/packs/workspace_tools_default/impl.py, gates/gate5b_full_toolhost.py, packs/registries.py |
-| discovery.py | Pack discovery (D1): resolve search-path bases and rglob ``pack.toml``. | flags, manifest | cli/real_runner.py, packs/catalog_build.py, packs/loader.py, packs/registries.py |
+| context.py | D5 typed-context ABI + dispatcher for the neutral microkernel. | control_plane, gate5b_full_toolhost | adk_bridge/context_compaction.py, adk_bridge/control_plane.py, adk_bridge/edit_retry_reflection.py, adk_bridge/facts_replan_control.py, adk_bridge/resilience_plugin.py, adk_bridge/schema_feedback.py, adk_bridge/tool_exception_reflection.py, firstparty/packs/callback_turn_audit/impl.py, firstparty/packs/connector_local_readonly/impl.py, firstparty/packs/control_plane_default/impl.py, firstparty/packs/evidence_gitdiff/impl.py, firstparty/packs/goal_loop_default/impl.py, firstparty/packs/harness_coding_lean/impl.py, firstparty/packs/memory_strategies_default/impl.py, firstparty/packs/scheduler_default/impl.py, firstparty/packs/source_opened_validator/impl.py, firstparty/packs/tools_clock/impl.py, firstparty/packs/workspace_tools_default/impl.py, gates/gate5b_full_toolhost.py, packs/registries.py |
+| discovery.py | Pack discovery (D1): resolve search-path bases and rglob ``pack.toml``. | flags, manifest | cli/real_runner.py, harness/goal_loop_control.py, harness/memory_compaction.py, harness/scheduler_executor.py, packs/catalog_build.py, packs/loader.py, packs/registries.py |
 | harness_projection.py | Inject a pack-provided harness into the live resolved preset state. | resolved | — |
 | hook_projection.py | Expose the previously-unexposed ``HookRegistry`` discovery into the live | bus, registries | — |
 | loader.py | Pack loader (D3/D6): discovery -> lazy impl import -> registry registration. | catalog_build, discovery, manifest, types | packs/catalog_build.py, packs/registries.py |
 | manifest.py | Static pack manifest schema (D2/D3). | — | packs/discovery.py, packs/loader.py, packs/scaffold.py |
-| registries.py | Typed primitive registries (D3/D4). One keyed registry for all 8 provides types. | compiler, context, control_plane, discovery, loader, packs, registry | adk_bridge/control_plane.py, packs/connector_projection.py, packs/hook_projection.py |
+| registries.py | Typed primitive registries (D3/D4). One keyed registry for all 8 provides types. | compiler, context, control_plane, discovery, loader, packs, registry | adk_bridge/control_plane.py, gates/gate5b_full_toolhost.py, harness/goal_loop_control.py, harness/memory_compaction.py, harness/scheduler_executor.py, packs/connector_projection.py, packs/hook_projection.py |
 | scaffold.py | `magi pack new` scaffolding engine (Pack B1). | manifest | cli/app.py |
 | types.py | Kernel-owned catalog contract (D4) — re-homed from the deleted authoring plane. | — | packs/catalog_build.py, packs/loader.py |
 
@@ -1203,7 +1226,7 @@ graph LR
 | __init__.py | — | — | — |
 | discovery.py | Discovery first-party recipe pack — metadata-only, default-OFF. | compiler | recipes/compiler.py |
 | learning_usage.py | Learning-usage first-party recipe pack — PR5 static injection. | compiler | recipes/compiler.py |
-| memory_recall.py | — | contracts, namespaces, policy, projection | cli/learning_recall.py, harness/memory_recall.py |
+| memory_recall.py | — | contracts, namespaces, policy, projection | cli/learning_recall.py, firstparty/packs/memory_strategies_default/impl.py, harness/memory_recall.py |
 | self_improvement.py | — | — | — |
 
 ### recipes/first_party/coding/
