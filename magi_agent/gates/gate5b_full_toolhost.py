@@ -1532,12 +1532,18 @@ class Gate5BFullToolHost:
             ToolContext(
                 botId="gate5b-selected-full-toolhost",
                 turnId=f"gate5b-full-toolhost:{tool_call_id}",
+                toolUseId=tool_call_id,
                 workspaceRoot=str(self.workspace_root),
                 memoryMode=self.memory_mode,
                 permissionScope={
                     "mode": "selected_full_toolhost",
                     "source": "selected_full_toolhost",
                 },
+                emitAgentEvent=(
+                    self._emit_public_event
+                    if self._public_event_sink is not None
+                    else None
+                ),
             ),
             mode=mode,
             exposed_tool_names=self.exposed_tool_names,

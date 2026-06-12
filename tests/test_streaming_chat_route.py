@@ -749,6 +749,121 @@ def test_selected_full_toolhost_stream_does_not_replay_posthoc_tool_progress(
     assert payloads[-1]["terminal"] == "completed"
 
 
+def test_selected_full_toolhost_stream_emits_live_child_events_before_final(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
+    monkeypatch.setenv("MAGI_CHILD_RUNNER_LIVE_ENABLED", "1")
+    monkeypatch.delenv("MAGI_CHILD_RUNNER_LIVE_KILL_SWITCH", raising=False)
+    monkeypatch.setenv(
+        "CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_WORKSPACE_ROOT",
+        str(tmp_path),
+    )
+
+    import magi_agent.runtime.child_runner_live as _live_mod
+
+    class _FakeLiveChildRunner:
+        openmagi_live_provider = True
+
+        def __init__(self, **kwargs: object) -> None:
+            pass
+
+        async def run_child(self, request: object) -> dict[str, object]:
+            return {
+                "childExecutionId": "child-exec-stream-live",
+                "status": "completed",
+                "summary": "Delegated child completed.",
+                "evidenceRefs": (),
+                "artifactRefs": (),
+                "auditEventRefs": (),
+            }
+
+    monkeypatch.setattr(_live_mod, "RealLocalChildRunner", _FakeLiveChildRunner)
+
+    class _SpawnAgentFunctionCallPart:
+        function_call = {
+            "name": "SpawnAgent",
+            "args": {"prompt": "assign helper"},
+            "id": "route-live-spawn",
+        }
+
+    class _SpawnAgentFunctionCallEvent:
+        content = SimpleNamespace(
+            parts=[_SpawnAgentFunctionCallPart()],
+            role="model",
+        )
+
+    class _SpawnThenFinalRunner(_FakeRunner):
+        calls: list[dict[str, object]] = []
+
+        async def run_async(self, **kwargs: object) -> object:
+            type(self).run_kwargs = kwargs
+            type(self).calls.append(kwargs)
+            if len(type(self).calls) == 1:
+                yield _SpawnAgentFunctionCallEvent()
+                return
+            yield SimpleNamespace(
+                content=SimpleNamespace(
+                    parts=[SimpleNamespace(text="final answer after delegated child")]
+                )
+            )
+
+    def _spawn_primitives() -> Gate5B4C3LiveAdkPrimitives:
+        _SpawnThenFinalRunner.calls = []
+        return Gate5B4C3LiveAdkPrimitives(
+            Agent=_FakeAgent,
+            Runner=_SpawnThenFinalRunner,
+            InMemorySessionService=_FakeSessionService,
+            Content=_FakeContent,
+            Part=_FakePart,
+            GenerateContentConfig=_FakeGenerateContentConfig,
+        )
+
+    async def _collect() -> list[dict]:
+        frames = _drive_selected_gate5b_stream(
+            _selected_runtime(
+                tmp_path,
+                full_toolhost=True,
+                primitives_loader=_spawn_primitives,
+            ),
+            {"messages": [{"role": "user", "content": "delegate a child"}]},
+            SimpleNamespace(headers={}),
+            session_id="s-selected-child-live",
+            turn_id="t-selected-child-live",
+        )
+        return [
+            payload
+            async for frame in frames
+            for payload in _data_lines(frame.decode("utf-8"))
+        ]
+
+    payloads = asyncio.run(_collect())
+
+    event_types = [payload.get("type") for payload in payloads]
+    child_events = [
+        payload
+        for payload in payloads
+        if str(payload.get("type", "")).startswith("child_")
+    ]
+    assert [payload["type"] for payload in child_events] == [
+        "child_started",
+        "child_progress",
+        "child_completed",
+    ]
+    assert all(
+        str(payload["childReceiptRef"]).startswith("receipt:sha256:")
+        for payload in child_events
+    )
+    assert event_types.index("child_started") < event_types.index("text_delta")
+    assert event_types.index("child_completed") < event_types.index("turn_result")
+    serialized = json.dumps(child_events, sort_keys=True)
+    assert "assign helper" not in serialized
+    assert "Delegated child completed" not in serialized
+    assert payloads[-1]["type"] == "turn_result"
+    assert payloads[-1]["terminal"] == "completed"
+
+
 def test_selected_full_toolhost_stream_starts_work_events_before_response_finishes(
     monkeypatch,
     tmp_path: Path,
