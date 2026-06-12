@@ -105,6 +105,22 @@ def test_incognito_mode_returns_empty_string(
     assert result == ""
 
 
+def test_incognito_mode_does_not_compute_snapshot(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Incognito must bypass projection before workspace path validation."""
+    monkeypatch.setenv(MEMORY_PROJECTION_ENV, "1")
+
+    cache = MemorySnapshotCache(workspace_root=tmp_path)
+
+    def fail_compute(*, memory_mode: str = "normal") -> str:
+        raise AssertionError("incognito mode should not compute memory snapshots")
+
+    cache._compute = fail_compute  # type: ignore[method-assign]
+
+    assert cache.get("session-abc", memory_mode="incognito") == ""
+
+
 # ---------------------------------------------------------------------------
 # (d) After invalidate, changed MEMORY.md is picked up
 # ---------------------------------------------------------------------------
