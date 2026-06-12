@@ -10,13 +10,13 @@ Mirrors the disk-discovery pattern in ``magi_agent/plugins/native/skills.py``
 """
 from __future__ import annotations
 
-import os
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict
 
+from magi_agent.config.flags import flag_str
 from magi_agent.packs.manifest import PackManifest, load_manifest_from_toml
 
 _PACK_FILENAME = "pack.toml"
@@ -92,7 +92,7 @@ class PacksConfig(BaseModel):
 
 
 def _config_path() -> Path:
-    override = os.environ.get("MAGI_CONFIG")
+    override = flag_str("MAGI_CONFIG")
     if override and override.strip():
         return Path(override).expanduser()
     return Path.home() / ".magi" / "config.toml"

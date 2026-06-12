@@ -76,6 +76,7 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 - `MAGI_CODE_ACTION_TIMEOUT_MS` (default `30000`) — Per-call wall-clock timeout (ms) for the PythonExec tool; clamped to 1000-120000.
 - `MAGI_CODING_REPAIR_LOOP_ENABLED` (default off) — Enable the iterative coding repair loop on failing edits.
 - `MAGI_COMPUTE_VIA_CODE_ENABLED` (default off) — Append a general prompt directive to compute arithmetic, conversions, statistics, and checksums by running code instead of mental math.
+- `MAGI_CONFIG` (no default) — Path to the Magi config.toml file; empty uses ~/.magi/config.toml.
 - `MAGI_CONTEXT_COMPACTION_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Compact the working context when the token threshold is hit (default-ON full profile).
 - `MAGI_CROSS_VERIFY_ENABLED` (default off) — Enable the cross-verification gate over spawned-agent results.
 - `MAGI_DEEP_WEB_RESEARCH_ENABLED` (default off) — Enable the live deep web-research harness (search + fetch + verify).

@@ -553,6 +553,14 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
         kind="str",
     ),
+    FlagSpec(
+        name="MAGI_CONFIG",
+        default="",
+        scope="public",
+        stage="stage2",
+        summary="Path to the Magi config.toml file; empty uses ~/.magi/config.toml.",
+        kind="str",
+    ),
 )
 
 

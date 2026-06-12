@@ -145,6 +145,7 @@ graph LR
     ops --> gateway
     ops --> harness
     packs --> adk_bridge
+    packs --> config
     packs --> harness
     packs --> hooks
     packs --> recipes
@@ -595,7 +596,7 @@ graph LR
 |---|---|---|---|
 | __init__.py | — | env, models | config/tests/test_flags.py |
 | env.py | — | facts_replan, flags, gate3a_replay, gate5b4c3_shadow_counter_store, gate5b4c3_shadow_generation_contract, hosted_defaults, models, pregate8_continuity_canary, shadow_generations | (root)/main.py, adk_bridge/anthropic_cache_model.py, adk_bridge/control_plane.py, adk_bridge/tool_adapter.py, browser/autonomous/config.py, cli/app.py, cli/engine.py, cli/goal_nudge_wiring.py, cli/headless.py, cli/hook_wiring.py, cli/permissions.py, cli/providers.py, cli/real_runner.py, cli/tests/test_app.py, cli/tool_runtime.py, cli/wiring.py, config/__init__.py, config/flags.py, evidence/local_tool_collector.py, gates/gate5b_full_toolhost.py, gates/tool_usage_guidance.py, harness/general_automation/constraint_reinjection.py, harness/general_automation/delegation.py, harness/general_automation/live_gate.py, harness/general_automation/plan_act_switch.py, harness/general_automation/question_tool.py, harness/general_automation/recipe_disclosure.py, harness/general_automation/task_completion.py, introspection/tool.py, plugins/native/missions.py, plugins/native/scheduled_work.py, plugins/native/skills.py, plugins/native/taskboard.py, recipes/coding_mutation.py, recipes/compiler.py, runtime/facts_replan.py, runtime/prompt_guidance.py, runtime/tool_synthesis.py, shadow/gate5b4c3_live_runner_boundary.py, shadow/gate5b4c3_runner_input_adapter.py, shadow/session_service_registry.py, tools/ask_user_question_toolhost.py, tools/core_toolhost.py, tools/dispatcher.py, tools/file_tool_manifests.py, tools/file_toolhost.py, tools/image_tools.py, tools/local_readonly.py, tools/plan_mode_toolhost.py, tools/safety.py, tools/web_search_tools.py, transport/chat.py, transport/chat_routes.py, transport/chat_shared.py, transport/streaming_chat_route.py |
-| flags.py | Canonical feature-flag registry + typed reader (single source of truth). | env | config/env.py, config/tests/test_flags.py, tools/document_qa_tools.py, tools/image_tools.py, tools/python_exec.py |
+| flags.py | Canonical feature-flag registry + typed reader (single source of truth). | env | config/env.py, config/tests/test_flags.py, packs/discovery.py, tools/document_qa_tools.py, tools/image_tools.py, tools/python_exec.py |
 | models.py | — | pregate8_continuity_canary | (root)/main.py, config/__init__.py, config/env.py, gates/gate2_readiness.py, gates/gate3_readiness.py, gates/gate4_readiness.py, gates/gate5_readiness.py, gates/gate7_readiness.py, gates/gate8_readiness.py, runtime/openmagi_runtime.py |
 
 ### config/tests/
@@ -1065,7 +1066,7 @@ graph LR
 | catalog_build.py | Build the live ``CompileRecipePackCatalog`` from loaded pack primitives (D4). | discovery, loader, types | packs/loader.py |
 | connector_projection.py | Project loaded connector specs' ToolManifests into the live tool registry. | registries | — |
 | context.py | D5 typed-context ABI + dispatcher for the neutral microkernel. | control_plane | adk_bridge/context_compaction.py, adk_bridge/control_plane.py, adk_bridge/edit_retry_reflection.py, adk_bridge/facts_replan_control.py, adk_bridge/resilience_plugin.py, adk_bridge/schema_feedback.py, adk_bridge/tool_exception_reflection.py, firstparty/packs/callback_turn_audit/impl.py, firstparty/packs/connector_local_readonly/impl.py, firstparty/packs/control_plane_default/impl.py, firstparty/packs/evidence_gitdiff/impl.py, firstparty/packs/harness_coding_lean/impl.py, firstparty/packs/source_opened_validator/impl.py, firstparty/packs/tools_clock/impl.py, packs/registries.py |
-| discovery.py | Pack discovery (D1): resolve search-path bases and rglob ``pack.toml``. | manifest | cli/real_runner.py, packs/catalog_build.py, packs/loader.py, packs/registries.py |
+| discovery.py | Pack discovery (D1): resolve search-path bases and rglob ``pack.toml``. | flags, manifest | cli/real_runner.py, packs/catalog_build.py, packs/loader.py, packs/registries.py |
 | harness_projection.py | Inject a pack-provided harness into the live resolved preset state. | resolved | — |
 | hook_projection.py | Expose the previously-unexposed ``HookRegistry`` discovery into the live | bus, registries | — |
 | loader.py | Pack loader (D3/D6): discovery -> lazy impl import -> registry registration. | catalog_build, discovery, manifest, types | packs/catalog_build.py, packs/registries.py |
