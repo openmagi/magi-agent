@@ -9,6 +9,8 @@ once projected into a LoopControl), with no first-party privilege.
 """
 from __future__ import annotations
 
+import sys
+
 from magi_agent.adk_bridge.control_plane import (
     BaseLoopControl,
     GaConstraintReinjectionControl,
@@ -98,7 +100,8 @@ def test_disk_user_control_plane_pack_loads_in_parallel_with_first_party(
         'ref = "control_plane:user-extra@1"\n'
         'impl = "user_cp.impl:provide"\ngatePosition = "after"\n'
     )
-    monkeypatch.syspath_prepend(str(user_root))
+    # B0: NO syspath_prepend — the loader auto-injects the pack root (zero env setup).
+    monkeypatch.setattr(sys, "path", [*sys.path])
     monkeypatch.setenv("MAGI_CONFIG", str(tmp_path / "config.toml"))
 
     bases = [_bundled_firstparty_base(), Path(str(user_root))]
