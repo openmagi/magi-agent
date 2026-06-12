@@ -1,0 +1,435 @@
+"""`magi pack new` scaffolding engine (Pack B1).
+
+Generates a ready-to-load user pack for any of the 8 provides types (D2): a
+``pack.toml`` manifest (schema = :mod:`magi_agent.packs.manifest`), an impl stub
+that receives ONLY its D5 typed context (capability parity with first-party —
+each stub is a copy-shape of the matching bundled first-party impl), and a
+pytest smoke test that loads the pack through the REAL loader.
+
+The generated impl module path is ``"<dir_name>.impl:provide"`` — importable
+with ZERO env setup because the loader auto-injects the pack's parent dir into
+``sys.path`` on demand (B0, ``loader.lazy_import_symbol`` search_root fallback).
+Pack directory names must be unique across your pack roots (``sys.modules`` is
+keyed by top-level name).
+"""
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass
+from pathlib import Path
+
+from magi_agent.packs.manifest import load_manifest_from_toml
+
+PACK_TYPES: tuple[str, ...] = (
+    "tool",
+    "callback",
+    "validator",
+    "harness",
+    "control_plane",
+    "evidence_producer",
+    "recipe",
+    "connector",
+)
+
+
+@dataclass(frozen=True)
+class ScaffoldResult:
+    """Where everything was written, plus the ref the pack contributes."""
+
+    pack_dir: Path
+    ref: str
+    pack_toml: Path
+    impl_path: Path | None  # None for declarative recipe packs
+    spec_path: Path | None  # set only for recipe packs
+    test_path: Path
+
+
+def _module_name(name: str) -> str:
+    mod = re.sub(r"[^0-9a-zA-Z_]+", "_", name).strip("_").lower()
+    if not mod or mod[0].isdigit():
+        raise ValueError(f"cannot derive a python module name from {name!r}")
+    return mod
+
+
+def _camel(name: str) -> str:
+    parts = [p for p in re.split(r"[^0-9a-zA-Z]+", name) if p]
+    if not parts:
+        raise ValueError(f"cannot derive a ref from {name!r}")
+    return parts[0].lower() + "".join(p.title() for p in parts[1:])
+
+
+def default_ref(ptype: str, name: str) -> str:
+    """Per-type ref conventions, grounded in the bundled first-party shapes."""
+    camel = _camel(name)
+    pascal = camel[:1].upper() + camel[1:]
+    kebab = _module_name(name).replace("_", "-")
+    refs = {
+        "tool": pascal,  # tools are reffed by ToolManifest.name (e.g. "Clock")
+        "callback": kebab,  # hook name (e.g. "turn-audit")
+        "validator": f"verifier:{camel}@1",  # live enforce-path public prefix
+        "harness": f"harness:{kebab}@1",
+        "control_plane": f"control_plane:{kebab}@1",
+        "evidence_producer": f"evidence:{camel}@1",
+        "recipe": f"recipe:{kebab}@1",
+        "connector": f"connector:{kebab}@1",
+    }
+    return refs[ptype]
+
+
+# --------------------------------------------------------------------------- #
+# Templates. Token substitution (__TOKEN__ + .replace) — NOT str.format —      #
+# because the generated python contains literal braces.                        #
+# --------------------------------------------------------------------------- #
+
+_IMPL_TEMPLATES: dict[str, str] = {
+    "validator": '''\
+"""User validator — receives ONLY the typed ValidatorCtx (capability parity)."""
+from __future__ import annotations
+
+from magi_agent.packs.context import ValidatorCtx, ValidatorVerdict
+
+
+def provide(ctx: ValidatorCtx) -> ValidatorVerdict | None:
+    """Pass iff the runtime observed this validator's public ref this turn.
+
+    Replace the body with your own deterministic check over ``ctx.artifact``.
+    """
+    observed = tuple(ctx.artifact.get("observedRefs") or ())
+    passed = ctx.ref in observed
+    ctx.emit(passed=passed, detail=None if passed else "ref not observed this turn")
+    return ctx.verdict()
+''',
+    "tool": '''\
+"""User tool provider — registers a ToolManifest via the typed provide context."""
+from __future__ import annotations
+
+from magi_agent.packs.context import ToolProvideContext
+from magi_agent.tools.catalog import CORE_TOOL_INPUT_SCHEMA
+from magi_agent.tools.manifest import Budget, ToolManifest, ToolSource
+
+
+def provide(context: ToolProvideContext) -> None:
+    context.register(
+        ToolManifest(
+            name=__REF__,
+            description="Describe what this tool does.",
+            kind="external",
+            source=ToolSource(kind="external", package=__PACK_ID__),
+            permission="read",
+            input_schema=CORE_TOOL_INPUT_SCHEMA,
+            timeout_ms=30_000,
+            budget=Budget(max_calls_per_turn=10, max_parallel=1),
+            dangerous=False,
+            is_concurrency_safe=True,
+            mutates_workspace=False,
+            parallel_safety="readonly",
+            available_in_modes=("plan", "act"),
+            tags=("user",),
+            enabled_by_default=True,
+            opt_out=True,
+        )
+    )
+''',
+    "callback": '''\
+"""User callback provider — registers a HookManifest + handler (non-blocking)."""
+from __future__ import annotations
+
+from magi_agent.hooks.context import HookContext
+from magi_agent.hooks.manifest import HookManifest, HookPoint
+from magi_agent.hooks.result import HookResult
+from magi_agent.packs.context import CallbackProvideContext
+from magi_agent.tools.manifest import ToolSource
+
+
+def handler(context: HookContext) -> HookResult:
+    return HookResult(action="continue", reason="user callback observed")
+
+
+def provide(context: CallbackProvideContext) -> None:
+    context.register(
+        HookManifest(
+            name=__REF__,
+            point=HookPoint.BEFORE_TURN_START,
+            description="Describe what this callback audits.",
+            source=ToolSource(kind="custom-plugin", package=__PACK_ID__),
+            priority=100,
+            blocking=False,
+            opt_out=True,
+        ),
+        handler,
+    )
+''',
+    "harness": '''\
+"""User harness provider — registers a ResolvedHarnessPack."""
+from __future__ import annotations
+
+from magi_agent.harness.resolved import ResolvedHarnessPack
+from magi_agent.packs.context import HarnessProvideContext
+
+
+def provide(context: HarnessProvideContext) -> None:
+    context.register(
+        __REF__,
+        ResolvedHarnessPack(
+            enabled=True,
+            source="custom-plugin",
+            components={
+                "tools": ("FileRead",),
+                "hooks": (),
+                "childAgent": (),
+                "permissionDefaults": (),
+            },
+            opt_out_allowed=(),
+        ),
+    )
+''',
+    "control_plane": '''\
+"""User control_plane provider — registers LoopControls via the typed context.
+
+Receives the IDENTICAL ControlPlaneProvideContext first-party gets (no
+privilege): ``context.env`` for env-gating plus the same runtime collaborators.
+"""
+from __future__ import annotations
+
+from magi_agent.adk_bridge.control_plane import BaseLoopControl
+from magi_agent.packs.context import ControlPlaneProvideContext
+
+
+class UserControl(BaseLoopControl):
+    name = __CONTROL_NAME__
+
+    async def on_before_model(self, *, callback_context, llm_request):
+        return None
+
+
+def provide(context: ControlPlaneProvideContext) -> None:
+    context.register(UserControl())
+''',
+    "evidence_producer": '''\
+"""User evidence producer — registers a ProducerSpec (public_ref needs a
+recognized prefix: evidence:/verifier:/receipt:sha256:/sha256:)."""
+from __future__ import annotations
+
+from magi_agent.packs.context import EvidenceProducerProvideContext, ProducerSpec
+
+
+def provide(context: EvidenceProducerProvideContext) -> None:
+    context.register(
+        __REF__,
+        ProducerSpec(
+            evidence_type=__EVIDENCE_TYPE__,
+            public_ref=__REF__,
+            producer_surfaces=("tool_host",),
+        ),
+    )
+''',
+    "connector": '''\
+"""User connector provider — registers a ConnectorSpec projecting ToolManifests."""
+from __future__ import annotations
+
+from magi_agent.packs.context import ConnectorProvideContext, ConnectorSpec
+from magi_agent.tools.catalog import CORE_TOOL_INPUT_SCHEMA
+from magi_agent.tools.manifest import Budget, ToolManifest, ToolSource
+
+
+def provide(context: ConnectorProvideContext) -> None:
+    context.register(
+        __REF__,
+        ConnectorSpec(
+            server_ref=__SERVER_REF__,
+            readonly=True,
+            tool_manifests=(
+                ToolManifest(
+                    name=__TOOL_NAME__,
+                    description="Describe what this connector tool does.",
+                    kind="external",
+                    source=ToolSource(kind="external", package=__PACK_ID__),
+                    permission="read",
+                    input_schema=CORE_TOOL_INPUT_SCHEMA,
+                    timeout_ms=30_000,
+                    budget=Budget(max_calls_per_turn=10, max_parallel=1),
+                    dangerous=False,
+                    is_concurrency_safe=True,
+                    mutates_workspace=False,
+                    parallel_safety="readonly",
+                    available_in_modes=("plan", "act"),
+                    tags=("connector", "user"),
+                    enabled_by_default=True,
+                    opt_out=True,
+                ),
+            ),
+        ),
+    )
+''',
+}
+
+# Declarative recipe spec (camelCase aliases match recipes/compiler.py
+# RecipePackManifest; ``description`` is REQUIRED — no model default).
+_RECIPE_SPEC_TEMPLATE = '''\
+# Declarative RecipePackManifest spec. Read + validated by the pack projector
+# (magi_agent/packs/registries.py project_into_registries) into the live
+# recipe registry.
+
+packId = __PACK_ID__
+version = "1"
+displayName = __DISPLAY__
+description = "User-authored declarative recipe."
+defaultEnabled = true
+toolRefs = ["FileRead"]
+'''
+
+_SMOKE_HEADER = '''\
+"""Smoke test scaffolded by `magi pack new` — verifies this pack loads through
+the REAL pack loader with zero sys.path setup. Run: pytest <this file>."""
+from __future__ import annotations
+
+from pathlib import Path
+
+from magi_agent.packs.loader import RecordingSink, load_from_bases
+
+PACKS_BASE = Path(__file__).resolve().parent.parent
+PTYPE = __PTYPE__
+REF = __REF__
+
+
+def test_pack_loads_through_the_real_loader() -> None:
+    result, _catalog = load_from_bases([PACKS_BASE], RecordingSink())
+    primitives = {(p.type, p.ref): p for p in result.primitives}
+    assert (PTYPE, REF) in primitives, sorted(primitives)
+'''
+
+_SMOKE_PROJECTION = '''\
+
+
+def test_pack_projects_into_the_live_registries() -> None:
+    from magi_agent.packs.registries import PackRegistries, project_into_registries
+
+    result, _catalog = load_from_bases([PACKS_BASE], RecordingSink())
+    report = project_into_registries(result.primitives, PackRegistries())
+    assert REF in report.registered
+'''
+
+_SMOKE_VALIDATOR = '''\
+
+
+def test_validator_emits_a_verdict() -> None:
+    from magi_agent.packs.context import SessionReadView, ValidatorCtx
+
+    result, _catalog = load_from_bases([PACKS_BASE], RecordingSink())
+    impl = next(p.impl for p in result.primitives if p.ref == REF)
+    session = SessionReadView(invocation_id="i", agent_name="a", turn_index=0)
+    ctx = ValidatorCtx(ref=REF, artifact={"observedRefs": [REF]}, session=session)
+    verdict = impl(ctx)
+    assert verdict is not None and verdict.passed is True
+'''
+
+_SMOKE_CONTROL_PLANE = '''\
+
+
+def test_provider_registers_at_least_one_control() -> None:
+    from magi_agent.packs.context import ControlPlaneProvideContext
+
+    result, _catalog = load_from_bases([PACKS_BASE], RecordingSink())
+    impl = next(p.impl for p in result.primitives if p.ref == REF)
+    registered: list = []
+    impl(ControlPlaneProvideContext(register=registered.append))
+    assert registered, "provider registered no LoopControl"
+'''
+
+# Types whose generated smoke test exercises project_into_registries.
+_PROJECTION_TYPES: frozenset[str] = frozenset(
+    {"tool", "callback", "evidence_producer", "recipe", "connector", "harness"}
+)
+
+
+def _manifest_toml(ptype: str, ref: str, pack_id: str, display: str, mod: str) -> str:
+    lines = [
+        f'packId = "{pack_id}"',
+        f'displayName = "{display}"',
+        'version = "0.1.0"',
+        f'description = "User-authored {ptype} pack scaffolded by magi pack new."',
+        "",
+        "[[provides]]",
+        f'type = "{ptype}"',
+        f'ref = "{ref}"',
+    ]
+    if ptype == "recipe":
+        lines.append('spec = "recipe.toml"')
+    else:
+        lines.append(f'impl = "{mod}.impl:provide"')
+    if ptype == "control_plane":
+        lines += ["priority = 100", 'phase = "loop"', 'gatePosition = "after"']
+    elif ptype == "callback":
+        lines += ["priority = 100", 'phase = "beforeTurnStart"']
+    return "\n".join(lines) + "\n"
+
+
+def _render(template: str, **tokens: str) -> str:
+    out = template
+    for key, value in tokens.items():
+        out = out.replace(f"__{key}__", value)
+    return out
+
+
+def scaffold_pack(ptype: str, name: str, dest_root: Path) -> ScaffoldResult:
+    """Write a loadable user pack for ``ptype`` under ``dest_root/<module_name>``."""
+    if ptype not in PACK_TYPES:
+        raise ValueError(
+            f"unknown pack type {ptype!r}; expected one of: {', '.join(PACK_TYPES)}"
+        )
+    mod = _module_name(name)
+    pack_dir = dest_root / mod
+    if pack_dir.exists():
+        raise ValueError(f"pack dir already exists: {pack_dir}")
+    ref = default_ref(ptype, name)
+    pack_id = f"user.{mod.replace('_', '-')}"
+    camel = _camel(name)
+    pascal = camel[:1].upper() + camel[1:]
+
+    pack_dir.mkdir(parents=True)
+    (pack_dir / "__init__.py").write_text("")
+    pack_toml = pack_dir / "pack.toml"
+    pack_toml.write_text(_manifest_toml(ptype, ref, pack_id, name, mod))
+
+    impl_path: Path | None = None
+    spec_path: Path | None = None
+    if ptype == "recipe":
+        spec_path = pack_dir / "recipe.toml"
+        spec_path.write_text(
+            _render(_RECIPE_SPEC_TEMPLATE, PACK_ID=repr(pack_id), DISPLAY=repr(name))
+        )
+    else:
+        impl_path = pack_dir / "impl.py"
+        impl_path.write_text(
+            _render(
+                _IMPL_TEMPLATES[ptype],
+                REF=repr(ref),
+                PACK_ID=repr(pack_id),
+                CONTROL_NAME=repr(f"user.{mod}"),
+                EVIDENCE_TYPE=repr(pascal),
+                SERVER_REF=repr(mod.replace("_", "-")),
+                TOOL_NAME=repr(f"{pascal}Open"),
+            )
+        )
+
+    smoke = _render(_SMOKE_HEADER, PTYPE=repr(ptype), REF=repr(ref))
+    if ptype in _PROJECTION_TYPES:
+        smoke += _SMOKE_PROJECTION
+    elif ptype == "validator":
+        smoke += _SMOKE_VALIDATOR
+    elif ptype == "control_plane":
+        smoke += _SMOKE_CONTROL_PLANE
+    test_path = pack_dir / f"test_{mod}_pack.py"
+    test_path.write_text(smoke)
+
+    # Self-check: the generated manifest must parse against the REAL schema.
+    load_manifest_from_toml(pack_toml)
+
+    return ScaffoldResult(
+        pack_dir=pack_dir,
+        ref=ref,
+        pack_toml=pack_toml,
+        impl_path=impl_path,
+        spec_path=spec_path,
+        test_path=test_path,
+    )

@@ -1070,8 +1070,9 @@ graph LR
 | harness_projection.py | Inject a pack-provided harness into the live resolved preset state. | resolved | — |
 | hook_projection.py | Expose the previously-unexposed ``HookRegistry`` discovery into the live | bus, registries | — |
 | loader.py | Pack loader (D3/D6): discovery -> lazy impl import -> registry registration. | catalog_build, discovery, manifest, types | packs/catalog_build.py, packs/registries.py |
-| manifest.py | Static pack manifest schema (D2/D3). | — | packs/discovery.py, packs/loader.py |
+| manifest.py | Static pack manifest schema (D2/D3). | — | packs/discovery.py, packs/loader.py, packs/scaffold.py |
 | registries.py | Typed primitive registries (D3/D4). One keyed registry for all 8 provides types. | compiler, context, control_plane, discovery, loader, packs, registry | adk_bridge/control_plane.py, packs/connector_projection.py, packs/hook_projection.py |
+| scaffold.py | `magi pack new` scaffolding engine (Pack B1). | manifest | — |
 | types.py | Kernel-owned catalog contract (D4) — re-homed from the deleted authoring plane. | — | packs/catalog_build.py, packs/loader.py |
 
 ### permissions/
