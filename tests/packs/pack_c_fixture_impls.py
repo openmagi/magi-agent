@@ -25,3 +25,11 @@ def provide_workspace_handler(context: Any) -> None:
         context.register_workspace_handler(
             "FakeTool", lambda args, view: {"echo": dict(args)}
         )
+
+
+def _ralph_override(loop_input: Any) -> Any:
+    raise AssertionError("override marker — never executed in this test")
+
+
+def provide_ralph_override(context: Any) -> None:
+    context.register("loop_policy:ralph@1", _ralph_override)

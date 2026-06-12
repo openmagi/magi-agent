@@ -29,7 +29,10 @@ from magi_agent.packs.context import (
     ControlPlaneProvideContext,
     EvidenceProducerProvideContext,
     HarnessProvideContext,
+    LoopPolicyProvideContext,
+    MemoryStrategyProvideContext,
     PrimitiveType,
+    SchedulePolicyProvideContext,
     ToolProvideContext,
     ValidatorCtx,
 )
@@ -46,11 +49,16 @@ from magi_agent.packs.types import CompileRecipePackCatalog
 _ROOT = Path(magi_agent.__file__).parent
 _FIRSTPARTY_DIR = _ROOT / "firstparty" / "packs"
 
-# The 8 provides types -> the real typed-context class each impl receives (D5).
+# The public provides types -> the real typed-context class each impl receives
+# (D5). The 8 D2 types plus the 3 Pack-C policy types (loop_policy /
+# schedule_policy / memory_strategy) added by the C0 schema widening — all are
+# user-declarable through the same loader (tests/packs/test_pack_c_provides_types.py
+# proves a user-shaped pack loads each one end-to-end), so none is privileged.
 # ``recipe`` is declarative (a ``spec`` file, no impl, so no context).
 _PROVIDES_TYPES = (
     "tool", "callback", "validator", "harness",
     "control_plane", "evidence_producer", "recipe", "connector",
+    "loop_policy", "schedule_policy", "memory_strategy",
 )
 _TYPE_TO_CTX = {
     "tool": ToolProvideContext,
@@ -60,6 +68,9 @@ _TYPE_TO_CTX = {
     "control_plane": ControlPlaneProvideContext,
     "evidence_producer": EvidenceProducerProvideContext,
     "connector": ConnectorProvideContext,
+    "loop_policy": LoopPolicyProvideContext,
+    "schedule_policy": SchedulePolicyProvideContext,
+    "memory_strategy": MemoryStrategyProvideContext,
     # recipe: declarative spec, no impl parameter to check.
 }
 

@@ -655,6 +655,36 @@ LoopControlDecisionSink = Callable[["LoopControlResult"], None]
 #: LoopControlResult out — the typed context IS LoopControlInput).
 LoopContinuationPolicy = Callable[["LoopControlInput"], "LoopControlResult"]
 
+#: The bundled first-party ``loop_policy`` ref (magi_agent/firstparty/packs/
+#: goal_loop_default). A user pack re-declaring this ref overrides the policy.
+DEFAULT_LOOP_POLICY_REF = "loop_policy:ralph@1"
+
+
+def resolve_loop_policy(
+    *,
+    ref: str = DEFAULT_LOOP_POLICY_REF,
+    bases: "list[object] | None" = None,
+) -> "LoopContinuationPolicy":
+    """Resolve the loop policy from loaded packs; fall back to the in-module
+    first-party policy when packs are unavailable (fail-open: the loop must
+    never break because pack discovery failed).
+
+    Lazy imports keep this module's forbidden-import contract — no adk/network
+    modules enter the top-level import graph.
+    """
+    try:
+        from magi_agent.packs.discovery import default_search_bases
+        from magi_agent.packs.registries import load_into_registries
+
+        search = list(bases) if bases is not None else list(default_search_bases())
+        registries, _ = load_into_registries(search)
+        policy = registries.loop_policies.resolve(ref)
+        if callable(policy):
+            return policy
+    except Exception:  # noqa: BLE001 — fail-open to the bundled default
+        pass
+    return decide_loop_continuation
+
 
 def build_after_turn_goal_loop_hook(
     *,
@@ -679,7 +709,10 @@ def build_after_turn_goal_loop_hook(
     The hook is non-blocking and fail-open: any provider/decision error is
     swallowed so a goal-loop bug can never break a normal turn.
     """
-    decide = policy if policy is not None else decide_loop_continuation
+    # C2 flip: the default is resolved from the loaded loop_policy packs (the
+    # bundled goal_loop_default pack registers decide_loop_continuation, so a
+    # pack-less or disabled-pack environment is byte-identical via fail-open).
+    decide = policy if policy is not None else resolve_loop_policy()
 
     def _handler(context: HookContext) -> HookResult:
         try:
@@ -728,6 +761,7 @@ def build_after_turn_goal_loop_hook(
 
 __all__ = [
     "CONTINUATION_PROMPT_TEMPLATE",
+    "DEFAULT_LOOP_POLICY_REF",
     "EVIDENCE_GATE_ENV_VAR",
     "GOAL_LOOP_ENABLED_ENV_VAR",
     "EvidenceGate",
@@ -745,4 +779,5 @@ __all__ = [
     "build_after_turn_goal_loop_hook",
     "build_continuation_prompt",
     "decide_loop_continuation",
+    "resolve_loop_policy",
 ]
