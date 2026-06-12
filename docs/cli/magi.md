@@ -322,6 +322,22 @@ version and exits 0.
 rehydration (replaying prior turn history into the engine) is a v1.1 follow-up —
 engine rehydration is not yet implemented.
 
+## `magi pack`
+
+`magi pack new <type> <name>` scaffolds a ready-to-load user pack into
+`<cwd>/.magi/packs/` (override with `--dest`): a validated `pack.toml`, an impl
+stub receiving only its typed context, and a pytest smoke test. `<type>` is one
+of `tool`, `callback`, `validator`, `harness`, `control_plane`,
+`evidence_producer`, `recipe`, `connector`.
+
+```bash
+magi pack new validator my-check
+pytest .magi/packs/my_check/test_my_check_pack.py
+```
+
+Exit code 2 on an unknown type or an already-existing pack directory. See the
+Write Your First Pack guide for the full authoring path.
+
 ## `magi doctor`
 
 `magi doctor` runs local environment diagnostics so a first-time user can see

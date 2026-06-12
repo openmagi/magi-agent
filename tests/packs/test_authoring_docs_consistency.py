@@ -59,3 +59,31 @@ def test_authoring_walkthrough_uses_the_zero_setup_user_cp_shape() -> None:
     assert "user_cp.impl:provide" in text
     assert "control_plane:user-extra@1" in text
     assert "magi pack new" in text
+
+
+def test_docs_manifest_registers_the_three_authoring_pages() -> None:
+    import json
+
+    manifest = json.loads((_DOCS / "manifest.json").read_text())
+    slugs = {page["slug"] for page in manifest["pages"]}
+    for slug in ("pack-authoring", "pack-manifest-reference", "pack-context-reference"):
+        assert slug in slugs, f"docs/manifest.json missing page slug {slug!r}"
+    assert len(slugs) == len(manifest["pages"]), "duplicate slug in docs/manifest.json"
+
+
+def test_llms_index_lists_the_three_authoring_pages() -> None:
+    text = (_DOCS / "llms.txt").read_text()
+    for slug in ("pack-authoring", "pack-manifest-reference", "pack-context-reference"):
+        assert f"https://openmagi.ai/docs/{slug}" in text, (
+            f"docs/llms.txt missing the {slug} page"
+        )
+
+
+def test_cli_reference_documents_magi_pack_new() -> None:
+    from magi_agent.packs.scaffold import PACK_TYPES
+
+    text = (_DOCS / "cli" / "magi.md").read_text()
+    assert "## `magi pack`" in text
+    assert "magi pack new" in text
+    for ptype in PACK_TYPES:
+        assert f"`{ptype}`" in text, f"docs/cli/magi.md missing pack type `{ptype}`"

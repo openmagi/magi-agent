@@ -75,6 +75,9 @@ The source checkout is for contributors developing the runtime. Normal users ins
 - Coding Verification: https://openmagi.ai/docs/coding-verification - Worked example of a coding recipe requiring GitDiff, TestRun, and CodeDiagnostics evidence.
 - General Automation: https://openmagi.ai/docs/general-automation - Worked example covering approval gates, delivery boundaries, artifact verification, and commit boundaries using openmagi.office-automation and openmagi.spreadsheet-automation packs.
 - First-party Packs: https://openmagi.ai/docs/first-party-packs - First-party packs are Magi-owned recipe, harness, plugin, and tool surfaces for
+- Write Your First Pack: https://openmagi.ai/docs/pack-authoring - Author any of the 8 primitive types as a disk pack with zero env setup; the same loader/format first-party uses (no privilege).
+- Pack Manifest Reference: https://openmagi.ai/docs/pack-manifest-reference - Complete pack.toml schema (PackManifest/ProvidesEntry): packId, displayName, defaultEnabled, [[provides]] type/ref/impl/spec/priority/phase/gatePosition.
+- Typed-Context API Reference: https://openmagi.ai/docs/pack-context-reference - The capability ceiling per primitive type: provide contexts, ValidatorCtx, control-plane hook contexts, ControlPlaneContext seams, Capability tokens.
 - Multi-Recipe Composition: https://openmagi.ai/docs/multi-recipe-composition - How multiple recipe packs compose via profile resolution, and how harness scoping selects evidence contracts by role.
 - Runtime Interfaces: https://openmagi.ai/docs/runtime-interfaces - Python interfaces exposed by the Magi Agent runtime for extension.
 - Hook Points: https://openmagi.ai/docs/hook-points - Lifecycle hook points with HookRegistry registration and HookBus dispatch.
