@@ -27,6 +27,27 @@ def test_discover_skips_missing_bases(tmp_path):
     assert found == []
 
 
+def test_discover_skips_unreadable_bases(tmp_path, monkeypatch):
+    unreadable = tmp_path / "home" / ".magi" / "packs"
+    readable = tmp_path / "project" / ".magi" / "packs"
+    unreadable.mkdir(parents=True)
+    (readable / "ok").mkdir(parents=True)
+    (readable / "ok" / "pack.toml").write_text('packId="ok"\ndisplayName="ok"\n')
+
+    original_is_dir = Path.is_dir
+
+    def is_dir_or_permission_denied(path: Path) -> bool:
+        if path == unreadable:
+            raise PermissionError("permission denied")
+        return original_is_dir(path)
+
+    monkeypatch.setattr(Path, "is_dir", is_dir_or_permission_denied)
+
+    found = discover_pack_files([unreadable, readable])
+
+    assert [d.manifest.pack_id for d in found] == ["ok"]
+
+
 def test_discover_finds_pack_toml_rglob(tmp_path):
     base = tmp_path / "packs"
     (base / "alpha").mkdir(parents=True)

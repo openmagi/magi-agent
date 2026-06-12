@@ -60,9 +60,17 @@ def discover_pack_files(bases: list[Path]) -> list[DiscoveredPack]:
     """
     discovered: list[DiscoveredPack] = []
     for base in bases:
-        if not base.is_dir():
+        try:
+            is_dir = base.is_dir()
+        except OSError:
             continue
-        for pack_file in sorted(base.rglob(_PACK_FILENAME)):
+        if not is_dir:
+            continue
+        try:
+            pack_files = sorted(base.rglob(_PACK_FILENAME))
+        except OSError:
+            continue
+        for pack_file in pack_files:
             manifest = load_manifest_from_toml(pack_file)
             discovered.append(
                 DiscoveredPack(
