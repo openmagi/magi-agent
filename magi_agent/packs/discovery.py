@@ -8,13 +8,14 @@ Search path (in priority order):
 Mirrors the disk-discovery pattern in ``magi_agent/plugins/native/skills.py``
 (rglob a sentinel filename across base dirs; tolerate missing bases).
 """
+
 from __future__ import annotations
 
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from magi_agent.config.flags import flag_str
 from magi_agent.packs.manifest import PackManifest, load_manifest_from_toml
@@ -26,8 +27,8 @@ _PACK_FILENAME = "pack.toml"
 class DiscoveredPack:
     """A parsed manifest plus where it came from (for relpath resolution)."""
 
-    path: Path          # the pack.toml file
-    pack_dir: Path      # directory containing pack.toml (base for spec relpaths)
+    path: Path  # the pack.toml file
+    pack_dir: Path  # directory containing pack.toml (base for spec relpaths)
     manifest: PackManifest
 
 
@@ -71,7 +72,13 @@ def discover_pack_files(bases: list[Path]) -> list[DiscoveredPack]:
         except OSError:
             continue
         for pack_file in pack_files:
-            manifest = load_manifest_from_toml(pack_file)
+            # skip-and-continue mirrors the existing unreadable-base skipping;
+            # one broken pack must not poison discovery for every gate that reads
+            # static manifests.
+            try:
+                manifest = load_manifest_from_toml(pack_file)
+            except (ValueError, ValidationError):
+                continue
             discovered.append(
                 DiscoveredPack(
                     path=pack_file,

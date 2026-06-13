@@ -71,6 +71,16 @@ def test_missing_bases_and_bad_manifest_fail_open(tmp_path, monkeypatch) -> None
     assert enabled_first_party_activity_refs(bases=[broken.parent]) == ()
 
 
+def test_broken_pack_does_not_poison_healthy_packs(tmp_path, monkeypatch) -> None:
+    _write_pack(tmp_path)  # healthy pack with 2 refs
+    broken = tmp_path / "broken"
+    broken.mkdir()
+    (broken / "pack.toml").write_text("not = [valid", encoding="utf-8")
+    monkeypatch.setenv("MAGI_CONFIG", str(tmp_path / "config.toml"))
+    refs = enabled_first_party_activity_refs(bases=[tmp_path])
+    assert refs == ("evidence:toolCall@1", "evidence:skillLoad@1")
+
+
 def test_bundled_pack_enabled_by_default(monkeypatch, tmp_path) -> None:
     # default search bases include magi_agent/firstparty/packs — once Task 5
     # lands, the bundled activity pack's refs appear with no config at all.
