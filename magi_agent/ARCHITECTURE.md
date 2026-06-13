@@ -1363,7 +1363,7 @@ graph LR
 | session_continuity.py | — | session_continuity_projection, session_continuity_proof | cli/session_log.py |
 | session_continuity_projection.py | — | transcript | runtime/context_packet.py, runtime/session_continuity.py |
 | session_continuity_proof.py | — | — | runtime/context_packet.py, runtime/session_continuity.py |
-| session_identity.py | — | — | cli/real_runner.py, cli/tool_runtime.py, cli/wiring.py, gates/gate5b_full_toolhost.py, runtime/memory_mode_context.py, tools/context.py, tools/memory_mode_guard.py, transport/chat.py, transport/chat_routes.py |
+| session_identity.py | — | — | cli/real_runner.py, cli/tool_runtime.py, cli/wiring.py, gates/gate5b_full_toolhost.py, runtime/memory_mode_context.py, tools/context.py, tools/memory_mode_guard.py, transport/chat.py, transport/chat_routes.py, transport/generation_request.py |
 | slash_control_boundary.py | — | — | cli/commands/builtins.py |
 | stale_run_detector.py | — | heartbeat_contract, heartbeat_store | — |
 | stream_fallback.py | — | error_taxonomy, sse, sse_buffer, stream_withholding | — |
@@ -1647,7 +1647,7 @@ graph LR
 | debug_trace.py | Debug endpoint exposing the current turn's execution trace. | trace_context | (root)/app.py |
 | egress_critic.py | Egress critic gate and live evidence projection for the chat serving path. | egress_gate, gate1a_readonly_tools, gate5b_full_toolhost, generation_request, mapping, projection, providers, readonly_classifier, reason_safety, user_visible_model_routing | transport/chat.py, transport/chat_routes.py |
 | gate2_sandbox_canary.py | Gate2 sandbox workspace canary chat + delivery-receipt logic. | chat_shared, gate2_activation_loop_a, gate2_durable_evidence, gate2_readiness, openmagi_runtime, user_visible_model_routing | transport/chat.py, transport/chat_routes.py |
-| generation_request.py | User-visible generation request, identity, and history contract builders. | chat_shared, gate1a_readonly_tools, gate5b4c3_shadow_generation_contract, gate5b_full_toolhost, message_builder, openmagi_runtime, user_visible_model_routing | transport/chat.py, transport/chat_routes.py, transport/egress_critic.py |
+| generation_request.py | User-visible generation request, identity, and history contract builders. | chat_shared, gate1a_readonly_tools, gate5b4c3_shadow_generation_contract, gate5b_full_toolhost, message_builder, openmagi_runtime, session_identity, user_visible_model_routing | transport/chat.py, transport/chat_routes.py, transport/egress_critic.py |
 | health.py | — | chat, child_runner_live, child_toolset, config, gate2_activation_loop_a, gate2_readiness, gate3_readiness, gate4_readiness, gate5_readiness, gate5b_full_toolhost, gate7_readiness, gate8_readiness, health, observed_egress, openmagi_runtime, ops, readiness | (root)/app.py, observability/api.py, transport/__init__.py |
 | learning_dashboard.py | Learning governance dashboard API — FastAPI router. | api, config, models, openmagi_runtime, store | (root)/app.py |
 | plugins.py | — | audit, manager, openmagi_runtime | (root)/app.py |
