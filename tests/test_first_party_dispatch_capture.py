@@ -416,3 +416,118 @@ def test_concurrent_dispatch_produces_distinct_record_ids(tmp_path, monkeypatch)
     assert len(all_records) == 5, f"expected 5 ToolCall records, got {len(all_records)}"
     record_ids = [str(getattr(r, "fields", {}).get("recordId", "")) for r in all_records]
     assert len(set(record_ids)) == 5, f"recordIds must be distinct, got: {record_ids}"
+
+
+# ---------------------------------------------------------------------------
+# Task 6 wiring tests: the live construction sites must carry the bundled-pack
+# refs so first-party capture is actually ON across surfaces.
+# ---------------------------------------------------------------------------
+
+
+def test_cli_runtime_dispatcher_has_first_party_refs(monkeypatch, tmp_path) -> None:
+    """Site 1 — ``cli/tool_runtime.build_cli_tool_runtime`` (the real CLI factory
+    used by ``build_cli_adk_tools`` / child-runner) must construct its dispatcher
+    with the bundled pack's refs AND share the runtime's collector."""
+    monkeypatch.setenv("MAGI_EVIDENCE_LEDGER_DIR", str(tmp_path))
+    monkeypatch.setenv("MAGI_CONFIG", str(tmp_path / "config.toml"))
+
+    from magi_agent.cli.tool_runtime import build_cli_tool_runtime
+
+    collector = LocalToolEvidenceCollector()
+    runtime = build_cli_tool_runtime(
+        workspace_root=str(tmp_path),
+        local_tool_evidence_collector=collector,
+    )
+    assert runtime.dispatcher._fp_refs  # bundled pack refs reached the dispatcher
+    # CLI shares ITS collector (the prune fix makes one shared collector safe).
+    assert runtime.dispatcher._fp_collector is collector
+
+
+def test_local_dashboard_dispatcher_has_first_party_refs(monkeypatch, tmp_path) -> None:
+    """Site 2 — ``cli/wiring._build_first_party_adk_tools`` (the active tool path
+    behind ``_build_default_runner`` for TUI + headless) must pass the bundled
+    pack's refs and the function's ``local_tool_evidence`` collector into the
+    ToolDispatcher it builds. The dispatcher is internal (closed over by the ADK
+    tool callables), so we capture the constructor kwargs to prove the wiring."""
+    monkeypatch.setenv("MAGI_EVIDENCE_LEDGER_DIR", str(tmp_path))
+    monkeypatch.setenv("MAGI_CONFIG", str(tmp_path / "config.toml"))
+
+    import magi_agent.tools.dispatcher as dispatcher_mod
+
+    captured: dict[str, object] = {}
+    real_dispatcher = dispatcher_mod.ToolDispatcher
+
+    def _spy(registry, **kwargs):  # type: ignore[no-untyped-def]
+        captured["fp_refs"] = kwargs.get("first_party_evidence_refs")
+        captured["fp_collector"] = kwargs.get("first_party_activity_collector")
+        return real_dispatcher(registry, **kwargs)
+
+    monkeypatch.setattr(dispatcher_mod, "ToolDispatcher", _spy)
+
+    from magi_agent.cli.wiring import _build_first_party_adk_tools
+
+    sentinel_collector = LocalToolEvidenceCollector()
+    _build_first_party_adk_tools(
+        cwd=str(tmp_path),
+        session_id="s-wiring",
+        local_tool_evidence_collector=sentinel_collector,
+    )
+    assert captured.get("fp_refs")  # bundled pack refs reached the dispatcher
+    assert captured.get("fp_collector") is sentinel_collector
+
+
+def test_gate5b_dispatcher_has_first_party_refs_and_process_default(monkeypatch, tmp_path) -> None:
+    """Site 3 — ``gates/gate5b_full_toolhost.Gate5BFullToolHost`` must construct
+    its ToolDispatcher with the bundled pack's refs and NO collector (so the
+    process-default collector engages on the hosted serve path)."""
+    monkeypatch.setenv("MAGI_EVIDENCE_LEDGER_DIR", str(tmp_path))
+    monkeypatch.setenv("MAGI_CONFIG", str(tmp_path / "config.toml"))
+
+    from magi_agent.gates.gate5b_full_toolhost import (
+        Gate5BFullToolHost,
+        Gate5BFullToolHostConfig,
+    )
+
+    host = Gate5BFullToolHost(
+        config=Gate5BFullToolHostConfig.model_validate(
+            {"enabled": True, "killSwitchEnabled": False}
+        ),
+        workspace_root=tmp_path,
+        exposed_tool_names=("EchoTool",),
+        now_ms=lambda: 0,
+        tool_registry=_echo_registry(),
+    )
+    assert host._tool_dispatcher is not None
+    assert host._tool_dispatcher._fp_refs  # bundled pack refs reached the dispatcher
+    # No collector passed -> the process-default engages at capture time.
+    assert host._tool_dispatcher._fp_collector is None
+
+
+# ---------------------------------------------------------------------------
+# Task 6 removability contract: disabling the producer pack via config.toml
+# turns capture fully off end-to-end (no env flag involved).
+# ---------------------------------------------------------------------------
+
+
+def test_packs_disable_turns_capture_off_end_to_end(monkeypatch, tmp_path) -> None:
+    config = tmp_path / "config.toml"
+    config.write_text(
+        '[packs]\ndisable = ["openmagi.evidence-firstparty-activity"]\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("MAGI_CONFIG", str(config))
+    monkeypatch.setenv("MAGI_EVIDENCE_LEDGER_DIR", str(tmp_path))
+    from magi_agent.evidence.first_party_gate import enabled_first_party_activity_refs
+
+    collector = LocalToolEvidenceCollector()
+    dispatcher = ToolDispatcher(
+        _echo_registry(),
+        first_party_activity_collector=collector,
+        first_party_evidence_refs=enabled_first_party_activity_refs(),
+    )
+    _dispatch(dispatcher)
+    assert [
+        r
+        for r in collector.collect_for_turn("t-d")
+        if str(getattr(r, "type", "")).startswith("custom:FirstParty")
+    ] == []

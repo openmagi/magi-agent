@@ -555,9 +555,20 @@ def _build_first_party_adk_tools(
         if isinstance(general_automation_receipts, GeneralAutomationReceiptLedgerStore)
         else GeneralAutomationReceiptLedgerStore()
     )
+    # First-party activity capture: thread the bundled producer pack's static
+    # refs (computed ONCE here, never per-dispatch) plus the caller-provided
+    # ``local_tool_evidence`` collector so this local-dashboard/TUI dispatcher
+    # shares the SAME collector the runner built. Returns () when no producer
+    # pack is enabled or it is [packs]-disabled, leaving capture inert.
+    from magi_agent.evidence.first_party_gate import (  # noqa: PLC0415
+        enabled_first_party_activity_refs,
+    )
+
     dispatcher = ToolDispatcher(
         registry,
         general_automation_receipts=receipt_store,
+        first_party_activity_collector=local_tool_evidence_collector,
+        first_party_evidence_refs=enabled_first_party_activity_refs(),
     )
     # Only advertise tools that actually have an execution handler bound. A
     # manifest with no handler can never be dispatched, so exposing it would

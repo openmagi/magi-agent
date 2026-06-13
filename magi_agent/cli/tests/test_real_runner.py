@@ -589,6 +589,12 @@ def test_headless_default_runner_records_ga_dispatch_receipts(
     monkeypatch.setattr(real_runner, "_build_litellm_model", _fake_model_factory)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-x")
     monkeypatch.setenv("MAGI_GA_LIVE_ENABLED", "1")
+    # This test asserts the GA-receipt evidence collection in isolation (it
+    # pre-dates first-party activity capture). The kill-switch keeps the live
+    # dispatcher's first-party ToolCall record out of the shared collector so
+    # ``_collect_evidence`` returns only the GA receipt — scoping the assertion
+    # to what the test verifies without weakening the production default.
+    monkeypatch.setenv("MAGI_FP_EVIDENCE_DISABLED", "1")
 
     runtime = build_headless_runtime(cwd=tmp_path, session_id="sid-ga-headless")
     runner = runtime.engine.runner
