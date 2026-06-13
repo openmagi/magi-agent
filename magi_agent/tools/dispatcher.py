@@ -6,6 +6,7 @@ readonly thread offload). Consumed by adk_bridge/tool_adapter (the ADK FunctionT
 wrapper), cli/tool_runtime, cli/wiring, facades, gates/gate5b_full_toolhost and
 shadow/tool_policy; ConcurrentToolDispatcher wraps it for batch dispatch.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -30,6 +31,23 @@ from .registry import ToolRegistry
 from .result import ToolResult
 from .schema_validation import validate_tool_arguments
 
+_DEFAULT_FP_COLLECTOR = None
+
+
+def _default_fp_collector() -> object:
+    """Process-shared collector for surfaces that inject refs but no collector
+    (e.g. gate5b). Lazy so bare dispatchers never touch evidence machinery.
+    Check-then-set is safe on a single event loop; concurrent loops would at
+    worst build two collectors that share the same JSONL sink (append-only)."""
+    global _DEFAULT_FP_COLLECTOR
+    if _DEFAULT_FP_COLLECTOR is None:
+        from magi_agent.evidence.local_tool_collector import (  # noqa: PLC0415
+            LocalToolEvidenceCollector,
+        )
+
+        _DEFAULT_FP_COLLECTOR = LocalToolEvidenceCollector()
+    return _DEFAULT_FP_COLLECTOR
+
 
 class ToolDispatcher:
     def __init__(
@@ -42,6 +60,8 @@ class ToolDispatcher:
         general_automation_receipts: GeneralAutomationReceiptLedgerStore | None = None,
         readonly_offload_enabled: bool | None = None,
         max_offload_concurrency: int | None = None,
+        first_party_activity_collector: object | None = None,
+        first_party_evidence_refs: tuple[str, ...] | None = None,
     ) -> None:
         self.registry = registry
         self.permission_policy = permission_policy or ToolPermissionPolicy()
@@ -91,8 +111,70 @@ class ToolDispatcher:
         # this is sufficient; do not share one dispatcher across concurrent loops.
         self._offload_semaphore: asyncio.Semaphore | None = None
         self._offload_semaphore_loop: asyncio.AbstractEventLoop | None = None
+        # First-party activity capture (inert for bare constructions; live
+        # wiring sites pass refs from enabled packs' static manifests).
+        self._fp_collector = first_party_activity_collector
+        self._fp_refs: tuple[str, ...] = tuple(first_party_evidence_refs or ())
 
     async def dispatch(
+        self,
+        name: str,
+        arguments: dict[str, object],
+        context: ToolContext,
+        *,
+        mode: RuntimeMode,
+        exposed_tool_names: tuple[str, ...] | None = None,
+    ) -> ToolResult:
+        result = await self._dispatch_inner(
+            name, arguments, context, mode=mode, exposed_tool_names=exposed_tool_names
+        )
+        self._record_first_party_activity(
+            name=name, arguments=arguments, context=context, result=result
+        )
+        return result
+
+    def _record_first_party_activity(
+        self,
+        *,
+        name: str,
+        arguments: dict[str, object],
+        context: ToolContext,
+        result: ToolResult,
+    ) -> None:
+        """One dispatch entry ⇒ at most one capture pass. Strictly fail-open:
+        any error is swallowed (capture must never affect the tool path). The
+        collector's return value is deliberately ignored (False covers both
+        dedup-skips and failures)."""
+        if not self._fp_refs:
+            return
+        try:
+            from magi_agent.evidence.first_party_activity import (  # noqa: PLC0415
+                build_first_party_activities,
+            )
+            from magi_agent.evidence.first_party_gate import (  # noqa: PLC0415
+                first_party_evidence_disabled,
+            )
+
+            if first_party_evidence_disabled():
+                return
+            session_id = context.session_id or "local"
+            turn_id = context.turn_id or "local-turn"
+            collector = self._fp_collector or _default_fp_collector()
+            record = getattr(collector, "record_first_party_activity", None)
+            if not callable(record):
+                return
+            for activity in build_first_party_activities(
+                tool_name=name,
+                arguments=arguments,
+                context=context,
+                result=result,
+                enabled_refs=self._fp_refs,
+            ):
+                record(session_id=session_id, turn_id=turn_id, activity=activity)
+        except Exception:  # noqa: BLE001 — capture is strictly fail-open
+            return
+
+    async def _dispatch_inner(
         self,
         name: str,
         arguments: dict[str, object],
@@ -104,7 +186,12 @@ class ToolDispatcher:
         registration = self.registry.resolve_registration(name)
         trace = get_trace()
         if trace is not None:
-            trace.record("tool", "ToolDispatcher", "resolve", f"name={name}, found={registration is not None}")
+            trace.record(
+                "tool",
+                "ToolDispatcher",
+                "resolve",
+                f"name={name}, found={registration is not None}",
+            )
         available_tools = _available_tool_names(self.registry, exposed_tool_names, mode=mode)
         if registration is None:
             return ToolResult(
@@ -208,9 +295,7 @@ class ToolDispatcher:
             # granted. Guarded by getattr so older stores without the accumulator
             # remain inert rather than erroring.
             if ga_outcome.control_projection is not None:
-                append_control = getattr(
-                    self.general_automation_receipts, "append_control", None
-                )
+                append_control = getattr(self.general_automation_receipts, "append_control", None)
                 if callable(append_control):
                     append_control(context, ga_outcome.control_projection)
             ga_result = _general_automation_gate_result(
@@ -230,7 +315,12 @@ class ToolDispatcher:
 
         decision = self.permission_policy.decide(manifest, arguments, context, mode=mode)
         if trace is not None:
-            trace.record("tool", "ToolDispatcher", "permission_check", f"name={name}, decision={decision.action}")
+            trace.record(
+                "tool",
+                "ToolDispatcher",
+                "permission_check",
+                f"name={name}, decision={decision.action}",
+            )
         if decision.action == "deny":
             return ToolResult(status="blocked", metadata=decision.metadata)
         if decision.action == "ask":
@@ -257,7 +347,13 @@ class ToolDispatcher:
                 result = await result
         _latency_ms = max(0, (time.monotonic_ns() - _t0) // 1_000_000)
         if trace is not None:
-            trace.record("tool", "ToolDispatcher", "execute", f"name={name}, status={result.status}", duration_ms=_latency_ms)
+            trace.record(
+                "tool",
+                "ToolDispatcher",
+                "execute",
+                f"name={name}, status={result.status}",
+                duration_ms=_latency_ms,
+            )
         result = _attach_latency(result, _latency_ms)
         result = self._attach_coding_receipt(name, arguments, result)
         return result
@@ -424,8 +520,7 @@ def _general_automation_arguments(
     if "operationClass" in arguments or "operation_class" in arguments:
         return arguments
     if not any(
-        key in arguments
-        for key in ("path", "file_path", "filePath", "target_path", "targetPath")
+        key in arguments for key in ("path", "file_path", "filePath", "target_path", "targetPath")
     ):
         return arguments
     operation_class = _general_automation_operation_class(manifest)
