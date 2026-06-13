@@ -7,6 +7,7 @@ Coverage:
 - T4: tools=[] enforcement — runner constructed with empty toolset.
 - T5: Import-boundary — importing subagents does NOT pull litellm/google.adk/child_runner_live.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -172,6 +173,71 @@ def test_spawn_agent_live_gate_on_returns_live_attached(monkeypatch) -> None:
     assert "summary" in output
     # The summary from our fake runner should be visible (sanitised but not redacted).
     assert "Fake child" in str(output.get("summary", ""))
+
+
+def test_spawn_agent_forwards_child_runner_progress_events(monkeypatch) -> None:
+    monkeypatch.setenv("MAGI_CHILD_RUNNER_LIVE_ENABLED", "1")
+    monkeypatch.delenv("MAGI_CHILD_RUNNER_LIVE_KILL_SWITCH", raising=False)
+
+    import magi_agent.runtime.child_runner_live as _live_mod
+
+    class _ProgressRunner:
+        openmagi_live_provider = True
+
+        def __init__(self, **kwargs: object) -> None:
+            self._progress_sink = kwargs.get("progress_sink")
+
+        async def run_child(self, request: object) -> Mapping[str, object]:
+            if callable(self._progress_sink):
+                result = self._progress_sink(
+                    {
+                        "type": "child_progress",
+                        "detail": "Child model streamed output chunk (12 chars)",
+                    }
+                )
+                if hasattr(result, "__await__"):
+                    await result
+            return {
+                "childExecutionId": "child-exec-progress",
+                "status": "completed",
+                "summary": "Fake child completed the subtask.",
+                "evidenceRefs": (),
+                "artifactRefs": (),
+                "auditEventRefs": (),
+            }
+
+    monkeypatch.setattr(_live_mod, "RealLocalChildRunner", _ProgressRunner)
+
+    from magi_agent.plugins.native.subagents import spawn_agent
+
+    events: list[dict[str, object]] = []
+    result = asyncio.run(
+        spawn_agent(
+            {"prompt": "Summarise the attached doc"},
+            _context(
+                toolUseId="call-spawn-progress",
+                emitAgentEvent=lambda event: events.append(dict(event)),
+            ),
+        )
+    )
+
+    assert result.status == "ok"
+    progress = [event for event in events if event.get("type") == "child_progress"]
+    assert progress == [
+        {
+            "type": "child_progress",
+            "taskId": "call-spawn-progress",
+            "detail": "Running delegated child",
+            "childReceiptRef": progress[0]["childReceiptRef"],
+        },
+        {
+            "type": "child_progress",
+            "taskId": "call-spawn-progress",
+            "detail": "Child model streamed output chunk (12 chars)",
+            "childReceiptRef": progress[0]["childReceiptRef"],
+        },
+    ]
+    assert str(progress[0]["childReceiptRef"]).startswith("receipt:sha256:")
 
 
 def test_spawn_agent_live_output_sanitised(monkeypatch) -> None:
@@ -382,9 +448,7 @@ def test_spawn_agent_readonly_toolset_gate_uses_context_workspace_root(
 
     from magi_agent.plugins.native.subagents import spawn_agent
 
-    asyncio.run(
-        spawn_agent({"prompt": "review this"}, _context(workspaceRoot=str(tmp_path)))
-    )
+    asyncio.run(spawn_agent({"prompt": "review this"}, _context(workspaceRoot=str(tmp_path))))
 
     captured = _CapturingProfileRunner.captured
     assert captured["toolset_profile"] == "readonly"

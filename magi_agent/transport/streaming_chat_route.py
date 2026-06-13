@@ -66,6 +66,7 @@ from magi_agent.runtime.memory_mode_context import (
 from magi_agent.config.env import is_hosted_streaming_serve_enabled
 from magi_agent.gates.gate5b_full_toolhost import Gate5BFullToolHostConfig
 from magi_agent.transport.active_turn import ACTIVE_TURNS, ActiveTurn
+
 # NOTE: the underscore-named helpers below are owned by the decomposed chat
 # modules (chat_shared / chat_routes); they are imported via the
 # ``transport.chat`` re-export shim on purpose so this module does not couple
@@ -103,11 +104,25 @@ _DEFAULT_CONFIRM_STORE: PendingConfirmationStore = InMemoryPendingConfirmationSt
 # Maximum allowed size (bytes) of the JSON-serialised ``response`` dict in
 # a control-response request.  Protects against oversized payloads.
 _MAX_CONTROL_RESPONSE_BYTES = 8192
+_SSE_HEADERS = {
+    "Cache-Control": "no-cache, no-transform",
+    "X-Accel-Buffering": "no",
+    "Connection": "keep-alive",
+}
+
+
+def _streaming_response(content: AsyncIterator[bytes]) -> StreamingResponse:
+    return StreamingResponse(
+        content,
+        media_type="text/event-stream",
+        headers=_SSE_HEADERS,
+    )
 
 
 # ---------------------------------------------------------------------------
 # Feature gate
 # ---------------------------------------------------------------------------
+
 
 def _streaming_chat_enabled() -> bool:
     """Return True when ``MAGI_STREAMING_CHAT`` is truthy. Evaluated per-call."""
@@ -132,6 +147,7 @@ def _local_full_access(runtime: object) -> bool:
 # ---------------------------------------------------------------------------
 # Local helpers (mirroring chat.py style; NOT imported from there)
 # ---------------------------------------------------------------------------
+
 
 def _body_string(body: object, key: str, default: str) -> str:
     """Extract a non-empty string field from a mapping body, or return *default*."""
@@ -514,8 +530,8 @@ async def _drive_selected_gate5b_stream(
                 session_id=session_id,
                 turn_id=turn_id,
             )
-            ):
-                yield chunk
+        ):
+            yield chunk
         return
     finally:
         if not response_task.done():
@@ -637,6 +653,7 @@ async def _drive_workflow_result_stream(
 # Registration
 # ---------------------------------------------------------------------------
 
+
 def register_streaming_chat_routes(
     app: FastAPI,
     runtime: object,
@@ -691,9 +708,7 @@ def register_streaming_chat_routes(
         local_full_access = _local_full_access(runtime)
         permission_mode = "bypassPermissions" if local_full_access else "default"
         runner_policy_routing_enabled = (
-            local_runner_policy_routing_enabled_from_env()
-            if local_full_access
-            else None
+            local_runner_policy_routing_enabled_from_env() if local_full_access else None
         )
         rt = build_headless_runtime(
             cwd=cwd,
@@ -749,7 +764,7 @@ def register_streaming_chat_routes(
             )
             stripped = prompt.strip()
             if stripped.startswith("/research"):
-                query = stripped[len("/research"):].strip() or stripped
+                query = stripped[len("/research") :].strip() or stripped
                 out = start_research(query, session_id=session_id, store=store, **rates)
             else:
                 label = await classifier.aclassify(prompt)
@@ -814,46 +829,42 @@ def register_streaming_chat_routes(
                 return refusal
             wf = await _maybe_handle_workflow(prompt, session_id)
             if wf is not None:
-                return StreamingResponse(
+                return _streaming_response(
                     _drive_workflow_result_stream(
                         wf,
                         session_id=session_id,
                         turn_id=turn_id,
-                    ),
-                    media_type="text/event-stream",
+                    )
                 )
-            return StreamingResponse(
+            return _streaming_response(
                 _drive_selected_gate5b_stream(
                     runtime,
                     body,
                     request,
                     session_id=session_id,
                     turn_id=turn_id,
-                ),
-                media_type="text/event-stream",
+                )
             )
 
         wf = await _maybe_handle_workflow(prompt, session_id)
         if wf is not None:
-            return StreamingResponse(
+            return _streaming_response(
                 _drive_workflow_result_stream(
                     wf,
                     session_id=session_id,
                     turn_id=turn_id,
-                ),
-                media_type="text/event-stream",
+                )
             )
 
         if _selected_gate5b_stream_active(runtime):
-            return StreamingResponse(
+            return _streaming_response(
                 _drive_selected_gate5b_stream(
                     runtime,
                     body,
                     request,
                     session_id=session_id,
                     turn_id=turn_id,
-                ),
-                media_type="text/event-stream",
+                )
             )
 
         queue: asyncio.Queue[object] = asyncio.Queue()
@@ -869,7 +880,7 @@ def register_streaming_chat_routes(
             return JSONResponse(status_code=500, content={"error": "engine_build_failed"})
         cancel = asyncio.Event()
 
-        return StreamingResponse(
+        return _streaming_response(
             drive_streaming_chat(
                 engine,
                 gate,
@@ -880,8 +891,7 @@ def register_streaming_chat_routes(
                 registry=ACTIVE_TURNS,
                 session_id=session_id,
                 turn_id=turn_id,
-            ),
-            media_type="text/event-stream",
+            )
         )
 
     # ------------------------------------------------------------------
@@ -924,9 +934,7 @@ def register_streaming_chat_routes(
                 content={"error": "no_active_turn"},
             )
 
-        turn.sink.deliver(
-            ControlResponse(request_id=request_id, response=dict(response_dict))
-        )
+        turn.sink.deliver(ControlResponse(request_id=request_id, response=dict(response_dict)))
         return JSONResponse(
             status_code=200,
             content={"status": "delivered", "request_id": request_id},

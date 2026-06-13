@@ -103,9 +103,7 @@ class _RaisingRunner:
 def _provider_config(api_key: str = "sk-test") -> object:
     from magi_agent.cli.providers import ProviderConfig
 
-    return ProviderConfig(
-        provider="anthropic", model="claude-sonnet-4-6", api_key=api_key
-    )
+    return ProviderConfig(provider="anthropic", model="claude-sonnet-4-6", api_key=api_key)
 
 
 class _SlowRunner:
@@ -144,14 +142,8 @@ def test_is_live_child_runner_enabled_off_by_default() -> None:
 
 
 def test_is_live_child_runner_enabled_on_when_enabled_no_kill_switch() -> None:
-    assert (
-        is_live_child_runner_enabled(env={LIVE_CHILD_RUNNER_ENABLED_ENV: "1"})
-        is True
-    )
-    assert (
-        is_live_child_runner_enabled(env={LIVE_CHILD_RUNNER_ENABLED_ENV: "TRUE"})
-        is True
-    )
+    assert is_live_child_runner_enabled(env={LIVE_CHILD_RUNNER_ENABLED_ENV: "1"}) is True
+    assert is_live_child_runner_enabled(env={LIVE_CHILD_RUNNER_ENABLED_ENV: "TRUE"}) is True
 
 
 def test_is_live_child_runner_enabled_off_when_kill_switch_set() -> None:
@@ -167,10 +159,7 @@ def test_is_live_child_runner_enabled_off_when_kill_switch_set() -> None:
 
 
 def test_is_live_child_runner_enabled_ignores_garbage_values() -> None:
-    assert (
-        is_live_child_runner_enabled(env={LIVE_CHILD_RUNNER_ENABLED_ENV: "maybe"})
-        is False
-    )
+    assert is_live_child_runner_enabled(env={LIVE_CHILD_RUNNER_ENABLED_ENV: "maybe"}) is False
 
 
 # --------------------------------------------------------------------------- #
@@ -202,6 +191,34 @@ def test_run_child_completes_with_final_text_from_injected_runner() -> None:
     assert output["artifactRefs"] == ()
     assert output["auditEventRefs"] == ()
     assert str(output["childExecutionId"]).startswith("child-exec-")
+
+
+def test_run_child_emits_progress_for_streamed_child_chunks() -> None:
+    class _ChunkRunner:
+        async def run_async(self, **kwargs: object) -> AsyncGenerator[object, None]:
+            yield _FakeEvent("first child chunk")
+            yield _FakeEvent("second child chunk")
+
+    progress_events: list[dict[str, object]] = []
+    runner = RealLocalChildRunner(
+        provider_config=_provider_config(),
+        runner=_ChunkRunner(),
+        progress_sink=lambda event: progress_events.append(dict(event)),
+    )
+
+    output = asyncio.run(runner.run_child(_request()))
+
+    assert output["status"] == "completed"
+    assert [event["type"] for event in progress_events] == [
+        "child_progress",
+        "child_progress",
+    ]
+    assert [event["detail"] for event in progress_events] == [
+        "Child model streamed output chunk (17 chars)",
+        "Child model streamed output chunk (18 chars)",
+    ]
+    assert "first child chunk" not in repr(progress_events)
+    assert "second child chunk" not in repr(progress_events)
 
 
 def test_run_child_uses_model_factory_seam_with_build_cli_model_runner() -> None:
@@ -353,9 +370,7 @@ def test_run_child_resolves_google_provider_via_gemini_alias(monkeypatch) -> Non
     fake = _FakeRunner(text="ANSWER: gemini child ran")
     runner = RealLocalChildRunner(runner=fake)  # no injected provider_config
 
-    output = asyncio.run(
-        runner.run_child(_request(provider="google", model="gemini-3.5-flash"))
-    )
+    output = asyncio.run(runner.run_child(_request(provider="google", model="gemini-3.5-flash")))
 
     assert output["status"] == "completed"
     assert output["summary"] != _DEGRADE_KEY_MISSING
@@ -372,9 +387,7 @@ def test_run_child_default_google_route_resolves_with_gemini_key(monkeypatch) ->
     # ChildRunnerConfig.child_provider="google", child_model="gemini-3.5-flash").
     runner = RealLocalChildRunner(runner=fake)
 
-    output = asyncio.run(
-        runner.run_child(_request(provider="google", model="gemini-3.5-flash"))
-    )
+    output = asyncio.run(runner.run_child(_request(provider="google", model="gemini-3.5-flash")))
 
     assert output["status"] == "completed"
     assert output["summary"] != _DEGRADE_KEY_MISSING
@@ -400,9 +413,7 @@ def test_run_child_uses_canonical_lowercase_litellm_route(monkeypatch) -> None:
 
     # Patch build_cli_model_runner so no real model/network is built; capture
     # the ProviderConfig the runner re-pinned from the validated route.
-    monkeypatch.setattr(
-        "magi_agent.cli.real_runner.build_cli_model_runner", _fake_build
-    )
+    monkeypatch.setattr("magi_agent.cli.real_runner.build_cli_model_runner", _fake_build)
 
     runner = RealLocalChildRunner()  # no injected runner → goes through build
     output = asyncio.run(
@@ -457,9 +468,7 @@ def test_run_child_propagates_cancellation() -> None:
             yield  # pragma: no cover - async generator marker
 
     cancelling = _CancellingRunner()
-    runner = RealLocalChildRunner(
-        provider_config=_provider_config(), runner=cancelling
-    )
+    runner = RealLocalChildRunner(provider_config=_provider_config(), runner=cancelling)
 
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(runner.run_child(_request()))
@@ -494,16 +503,10 @@ def test_run_child_readonly_profile_forwards_readonly_tools_to_builder(
         captured["tools"] = kwargs.get("tools")
         return _RecordingRunner(text="ANSWER: readonly child ran")
 
-    monkeypatch.setattr(
-        "magi_agent.cli.tool_runtime.build_cli_adk_tools", _fake_build_tools
-    )
-    monkeypatch.setattr(
-        "magi_agent.cli.real_runner.build_cli_model_runner", _fake_build_runner
-    )
+    monkeypatch.setattr("magi_agent.cli.tool_runtime.build_cli_adk_tools", _fake_build_tools)
+    monkeypatch.setattr("magi_agent.cli.real_runner.build_cli_model_runner", _fake_build_runner)
 
-    runner = RealLocalChildRunner(
-        provider_config=_provider_config(), toolset_profile="readonly"
-    )
+    runner = RealLocalChildRunner(provider_config=_provider_config(), toolset_profile="readonly")
     output = asyncio.run(runner.run_child(_request()))
 
     assert output["status"] == "completed"
@@ -537,12 +540,8 @@ def test_run_child_readonly_profile_builds_instruction_without_memory_projection
         captured.update(kwargs)
         return _RecordingRunner(text="ANSWER: readonly child ran")
 
-    monkeypatch.setattr(
-        "magi_agent.cli.tool_runtime.build_cli_adk_tools", _fake_build_tools
-    )
-    monkeypatch.setattr(
-        "magi_agent.cli.real_runner.build_cli_model_runner", _fake_build_runner
-    )
+    monkeypatch.setattr("magi_agent.cli.tool_runtime.build_cli_adk_tools", _fake_build_tools)
+    monkeypatch.setattr("magi_agent.cli.real_runner.build_cli_model_runner", _fake_build_runner)
 
     runner = RealLocalChildRunner(
         provider_config=_provider_config(),
@@ -681,9 +680,7 @@ def test_run_child_none_profile_forwards_empty_toolset_to_builder(
         captured["tools"] = kwargs.get("tools")
         return _RecordingRunner(text="ANSWER: none profile")
 
-    monkeypatch.setattr(
-        "magi_agent.cli.real_runner.build_cli_model_runner", _fake_build_runner
-    )
+    monkeypatch.setattr("magi_agent.cli.real_runner.build_cli_model_runner", _fake_build_runner)
 
     runner = RealLocalChildRunner(provider_config=_provider_config())  # default none
     output = asyncio.run(runner.run_child(_request()))
