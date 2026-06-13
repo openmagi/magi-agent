@@ -1,11 +1,11 @@
 """First-party activity evidence — versioned payloads + dispatch-seam builders.
 
 Kernel capture mechanics (D6) for the dispatcher seam. WHAT counts as evidence
-is declared by ``evidence_producer`` packs (the bundled
-``openmagi.evidence-firstparty-activity`` pack registers the refs below); the
-builders return nothing for refs that are not enabled, so removing/disabling
-the pack genuinely disables capture. Fail-open by construction: builders never
-raise on malformed outputs (defensive ``.get`` everywhere).
+is declared by ``evidence_producer`` packs (the bundled first-party activity
+pack registers the refs below); the builders return nothing for refs that are
+not enabled, so removing/disabling the pack genuinely disables capture.
+Fail-open by construction: builders never raise on malformed outputs
+(defensive ``.get`` everywhere).
 """
 
 from __future__ import annotations
