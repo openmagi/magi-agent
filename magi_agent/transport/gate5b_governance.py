@@ -113,22 +113,37 @@ def build_gate5b_control_plane_plugins(
     return [plugin]
 
 
+# Public-event types that carry TOOL/EVIDENCE content (the corpus the agent
+# collected) — as opposed to the model's OWN answer text (``text_delta``), which
+# is the thing being grounded and must NOT count as its own supporting evidence.
+_TOOL_EVIDENCE_EVENT_TYPES = frozenset(
+    {"tool_start", "tool_progress", "tool_end", "source_inspected", "research_artifact_delta"}
+)
+
+
 def corpus_from_public_events(events: Sequence[Mapping[str, object]]) -> tuple[str, ...]:
     """Harvest the grounding corpus from the gate5b turn's public events.
 
     The gate5b toolhost retains only output DIGESTS on its receipts (no preview
     text), so the reachable "tool/evidence corpus the agent actually collected"
     at this serving seam is the bounded public-event stream emitted during the
-    turn: ``text_delta`` deltas plus tool ``output_preview`` / progress
-    ``message`` strings. This mirrors how ``claim_grounding.corpus_from_evidence_records``
-    harvests readable strings, but over public events rather than EvidenceLedger
-    records. Pure / never raises.
+    turn — specifically the TOOL-evidence events (``tool_*`` / ``source_inspected``
+    / ``research_artifact_delta``): their ``output_preview`` / progress ``message``
+    / ``label`` / ``detail`` strings plus any ``receipt_refs``.
+
+    The model's OWN answer ``text_delta`` is deliberately EXCLUDED: it is the text
+    being grounded, so counting it as corpus would let any answer trivially ground
+    itself. This mirrors how the cli/engine fact-grounding satisfier grounds the
+    ``final_text`` against the COLLECTED evidence records (not against the answer
+    itself). Pure / never raises.
     """
     corpus: list[str] = []
     for event in events:
         if not isinstance(event, Mapping):
             continue
-        for key in ("delta", "output_preview", "outputPreview", "message", "detail", "label"):
+        if event.get("type") not in _TOOL_EVIDENCE_EVENT_TYPES:
+            continue
+        for key in ("output_preview", "outputPreview", "message", "detail", "label"):
             value = event.get(key)
             if isinstance(value, str) and value.strip():
                 corpus.append(value)
