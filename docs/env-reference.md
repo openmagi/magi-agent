@@ -69,7 +69,6 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 
 - `MAGI_APPLY_PATCH_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Enable the apply-patch tool for multi-file edits (default-ON full profile).
 - `MAGI_BROWSER_TOOL_ENABLED` (default off) — Expose the browser-use autonomous vision BrowserTask tool.
-- `MAGI_CHANNEL_WORKFLOWS_ENABLED` (default off) — Enable bot-user dynamic channel workflows (classifier-driven).
 - `MAGI_CLI_ENABLED` (default on) — Enable the magi CLI surface (headless NDJSON + Textual TUI); flat default-ON.
 - `MAGI_CODE_ACTION_ENABLED` (default off) — Expose the persistent PythonExec code-execution tool.
 - `MAGI_CODE_ACTION_MAX_OUTPUT_BYTES` (default `8192`) — Head+tail output cap per stream (bytes) for PythonExec results; clamped to 1024-65536.

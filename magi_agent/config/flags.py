@@ -214,10 +214,6 @@ FLAGS: tuple[FlagSpec, ...] = (
     ),
     # --- Channels / always-on ----------------------------------------------
     _b(
-        "MAGI_CHANNEL_WORKFLOWS_ENABLED",
-        summary="Enable bot-user dynamic channel workflows (classifier-driven).",
-    ),
-    _b(
         "MAGI_GOAL_LOOP_ENABLED",
         summary="Enable the autonomous goal-loop scheduler.",
     ),
