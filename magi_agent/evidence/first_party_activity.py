@@ -101,17 +101,33 @@ def _redact_long_values(value: object) -> object:
 
 
 def _summary(value: object) -> str:
-    # Use _sanitize_public_summary_value for Mapping inputs so that key-based
-    # secret detection and string truncation run before the JSON encoding step,
-    # preventing long secrets from surviving the raw-JSON cap.
-    sanitized = _sanitize_public_summary_value(value)
-    # Redact any remaining long string values (e.g. tokens under keys not in
-    # _SECRET_FIELD_FRAGMENTS such as "auth").  Truncation is not redaction.
-    sanitized = _redact_long_values(sanitized)
+    # Ordering is load-bearing for both ReDoS safety and credential redaction;
+    # the sha256 digest fields preserve full-content identity, so a bounded
+    # preview is correct here.
+    #
+    # 1. Cheap, regex-free structural redaction FIRST.  Any string >= 64 chars
+    #    is replaced with a short placeholder via a length check — this kills
+    #    the long, delimiter-free inputs (minified JS, base64, hex dumps,
+    #    single-line logs) that make the ledger's _UNQUOTED_*_SECRET_RE
+    #    patterns backtrack catastrophically, BEFORE any regex ever sees them.
+    sanitized = _redact_long_values(value)
+    # 2. Key-aware credential sanitizer on the now-bounded structure.  Pass
+    #    include_public_credential_keys=True so values under hyphenated
+    #    credential keys (e.g. "set-cookie") are redacted to the durable disk
+    #    sink, matching every other durable-sink caller in ledger.py.
+    sanitized = _sanitize_public_summary_value(
+        sanitized,
+        include_public_credential_keys=True,
+    )
+    # 3. Serialize, then HARD-CAP the serialized text before the text-regex
+    #    pass so _redact_public_summary_text only ever runs over a bounded
+    #    prefix (length-independent of how many short fields a mapping carries).
     try:
         text = json.dumps(sanitized, sort_keys=True, default=str)
     except (TypeError, ValueError):
         text = str(sanitized)
+    text = text[: 2 * _SUMMARY_MAX_CHARS]
+    # 4. Credential text-regex on the bounded prefix, then final cap.
     return _redact_public_summary_text(text)[:_SUMMARY_MAX_CHARS]
 
 

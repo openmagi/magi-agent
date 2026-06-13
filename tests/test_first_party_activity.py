@@ -189,6 +189,49 @@ def test_long_bytes_and_bytearray_redacted_in_result_summary() -> None:
     assert detail_json_ba.count("[redacted:long-value]") >= 1
 
 
+def test_summary_build_is_fast_on_long_delimiterless_output() -> None:
+    """Regression: ReDoS / catastrophic backtracking on the default-ON hot path.
+
+    The ledger ``_UNQUOTED_*_SECRET_RE`` patterns backtrack quadratically on long
+    delimiter-free strings (minified JS, base64, hex dumps, single-line logs).
+    Before the FIX, an 8KB unbroken output ran the regex sanitizers over the FULL
+    value and took ~12.5s, freezing the asyncio event loop. The build must now
+    redact long values structurally (cheap length check) BEFORE any regex sees
+    them, so the build completes near-instantly. Generous 1.0s bound catches a
+    regression without being flaky.
+    """
+    import time
+
+    big = "A" * 8192  # 8KB unbroken, no delimiters — triggers backtracking pre-fix
+    result = ToolResult(status="ok", output={"stdout": big})
+    start = time.perf_counter()
+    (activity,) = _build("Bash", result, arguments={"cmd": big})
+    elapsed = time.perf_counter() - start
+    assert elapsed < 1.0, f"build took {elapsed:.3f}s — ReDoS regression"
+    # The long opaque value must not survive into the bounded preview.
+    detail_json = json.dumps(dict(activity.detail))
+    assert big not in detail_json
+    assert "[redacted:long-value]" in detail_json
+
+
+def test_hyphenated_credential_key_short_value_redacted_to_disk() -> None:
+    """Regression: credential-key value leak to the default-ON JSONL disk sink.
+
+    A short (8-63 char) value with no recognizable token format, nested under a
+    hyphenated credential key such as ``set-cookie``, used to survive into
+    ``argsSummary``/``resultSummary`` because ``_summary`` did not pass
+    ``include_public_credential_keys=True``. It must now be redacted.
+    The secret is assembled at runtime (never a literal) for GH push protection.
+    """
+    cred_key = "set-" + "cookie"
+    secret = "session" + "id=abc123def456ghi"  # short, hyphenated key, no token shape
+    result = ToolResult(status="ok", output={"headers": {cred_key: secret}})
+    (activity,) = _build("web_search", result, arguments={"nested": {cred_key: secret}})
+    detail_json = json.dumps(dict(activity.detail))
+    assert "abc123def456ghi" not in detail_json
+    assert "[redacted]" in detail_json
+
+
 def test_partial_ref_only_tool_call_excludes_skill_loader_and_spawn_agent() -> None:
     # Case (a): only TOOL_CALL_REF enabled — SkillLoader and SpawnAgent yield ZERO activities.
     only_tool_call = (TOOL_CALL_REF,)
