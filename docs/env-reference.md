@@ -63,6 +63,132 @@ Useful local toggles:
   byte-identical pass-through. Unset/empty/unknown values fall back to
   `abstain`. The GAIA benchmark harness opts into `commit`.
 
+## Full-ON "dogfood" profile (`scripts/dogfood-full-on.env`)
+
+For the single-operator dogfood case where you want **every** intended
+governance / harness module to actually RUN — on BOTH the local CLI
+(`magi agent`, the `cli/engine` path) AND the canary/hosted serve (the `gate5b`
+path) — source the committed profile:
+
+```sh
+set -a; source scripts/dogfood-full-on.env; set +a   # local CLI / serve
+# canary/hosted: inject the same vars as the pod/container env
+```
+
+This is **CONFIG, not a code-default change**: it flips no repo `*.py` default.
+With the file not sourced (a fresh shell) every flag below reverts to its
+default-OFF value, so the default-OFF-presuming test suite stays green
+(`tests/test_dogfood_full_on_profile.py` asserts both directions).
+
+**Two "on" shapes.** *Profile-aware* flags (`kind="profile_bool"`) are ON
+whenever `MAGI_RUNTIME_PROFILE` is not a safe profile; `=full` turns them on and
+the file reaffirms each explicitly. *Strict opt-in* flags (`kind="bool"`,
+default-OFF) are **never** auto-enabled by the profile and must be listed
+explicitly — that is the real payload.
+
+**Execution path legend.**
+
+- **BOTH** — runs on the local CLI and (because the runtime itself runs on both
+  surfaces) on the gate5b serve regardless of `MAGI_GATE5B_GOVERNANCE_ENABLED`.
+- **BOTH (gate5b needs G1)** — a `cli/engine` control-plane / pre-final gate that
+  reaches the gate5b serve **only** when `MAGI_GATE5B_GOVERNANCE_ENABLED=1`
+  (it attaches the same control-plane plugin + grounding check to the gate5b
+  runner). Without G1 it is cli-engine-only.
+- **gate5b-only** — the master switch that wires governance onto the gate5b path.
+
+> Risky settings are flagged ⚠ — they can BLOCK a turn or add model-pass cost.
+> They are ON here per the operator's explicit "turn everything on"; downgrade
+> `MAGI_DOCUMENT_AUTHORING_COVERAGE` to `advisory` and `MAGI_RESEARCH_GOVERNANCE_MODE`
+> to `audit` if you want to measure false-block / false-positive rate first.
+
+### Governance / verification gates (strict opt-in)
+
+| Flag | Value | Enables | Path |
+|------|-------|---------|------|
+| `MAGI_GATE5B_GOVERNANCE_ENABLED` | `1` | Attaches the cli/engine control-plane plugin + a pre-final fact-grounding check to the gate5b runner. The switch that makes governance reach the canary/hosted serve. | gate5b-only |
+| `MAGI_FACT_GROUNDING_VERIFICATION_ENABLED` ⚠ | `1` | Blocks an answer asserting a specific numeric/identifier value absent from the opened-source corpus. | BOTH (gate5b needs G1) |
+| `MAGI_GA_DELIVERABLE_GATE_ENABLED` ⚠ | `1` | Requires an artifact receipt before finalise. | BOTH (gate5b needs G1) |
+| `MAGI_EGRESS_GATE_ENABLED` ⚠ | `1` | Evidence-grounded critic gate before chat egress. | BOTH (gate5b needs G1) |
+| `MAGI_FACTS_REPLAN_ENABLED` | `1` (interval 4, max/turn 5) | Periodic in-context facts survey + plan refresh in the live loop. | BOTH (gate5b needs G1) |
+| `MAGI_TOOL_SYNTHESIS_NUDGE_ENABLED` | `1` | Per-step "create your own tools" reflection nudge (frontier models). | BOTH (gate5b needs G1) |
+| `MAGI_DOCUMENT_AUTHORING_COVERAGE` ⚠ | `block` | Hard-blocks a document turn whose `DocumentCoverage` is not `pass` (highest false-block risk; `advisory` to measure first). | BOTH (gate5b needs G1) |
+| `MAGI_RESEARCH_GOVERNANCE_MODE` ⚠ | `enforce` | One bounded corrective re-prompt on the deterministic cited-without-source class (near-zero FP). | BOTH |
+| `MAGI_RESEARCH_FACT_GUIDANCE_ENABLED` | `1` | research_fact cross-check brief + `<web_research>` block (needs `BRAVE_API_KEY` + `FIRECRAWL_API_KEY`). | BOTH |
+| `MAGI_CROSS_VERIFY_ENABLED` | `1` | Cross-verification gate over spawned-agent results. | BOTH |
+| `MAGI_STEP_DECOMPOSITION_ENABLED` | `1` | First-pass sub-step enumeration nudge. | BOTH |
+| `MAGI_EVIDENCE_LEDGER_DIR` | `.openmagi/evidence-ledgers` | Durable per-session JSONL evidence ledgers (else lean in-memory). | BOTH |
+
+### Self-review + brakes
+
+| Flag | Value | Enables | Path |
+|------|-------|---------|------|
+| `MAGI_SELF_REVIEW_ENABLED` (+`_PIPELINE`/`_LIVE`/`_TELEMETRY`, `_SHADOW=0`) ⚠ | `1` | Post-turn self-review (extra model pass — latency + token cost). | BOTH (gate5b needs G1) |
+| `MAGI_MAX_STEPS_BRAKE_ENABLED` | `1` | Max-steps brake control-plane seam. | BOTH (gate5b needs G1) |
+| `MAGI_LOOP_GUARD_ENABLED` / `MAGI_ERROR_RECOVERY_ENABLED` / `MAGI_OUTPUT_CONTINUATION_ENABLED` / `MAGI_CONTEXT_COMPACTION_ENABLED` | `1` | Resilience controls (profile-default-ON; reaffirmed). | BOTH (gate5b needs G1) |
+
+### Memory subsystem (master is strict default-OFF and **not** profile-aware)
+
+The `MAGI_MEMORY_ENABLED` master defaults OFF in code and the full profile does
+**not** auto-enable it, so it must be set explicitly. Sub-flags follow the
+master; the cost/multi-tenancy opt-ins (`vector_search`, `prefer_local_search`)
+stay OFF under master-on unless set, so they are set explicitly here.
+
+| Flag | Value | Enables | Path |
+|------|-------|---------|------|
+| `MAGI_MEMORY_ENABLED` | `1` | Master switch for the 3-tier memory + compaction subsystem. | BOTH |
+| `MAGI_MEMORY_WRITE_ENABLED` / `_RECALL_ENABLED` / `_COMPACTION_ENABLED` / `_PROJECTION_ENABLED` / `_WRITE_READINESS_ENABLED` | `1` | Memory write / recall / compaction-tree / serve-prompt projection / write-readiness. | BOTH |
+| `MAGI_MEMORY_QMD_LIVE_ENABLED` / `_MODE_ROUTING_ENABLED` | `1` | Live qmd recall backend; per-channel memory-mode header honoured. | BOTH |
+| `MAGI_MEMORY_VECTOR_SEARCH` / `_PREFER_LOCAL_SEARCH` / `MAGI_MEMORY_LOCAL_DEV` | `1` | Master-on opt-ins (semantic vector recall; local search backend; local-dev paths). | BOTH |
+
+### Coding harness (profile-default-ON; reaffirmed explicit)
+
+`MAGI_EDIT_FUZZY_MATCH_ENABLED`, `MAGI_EDIT_FORMAT_ON_WRITE_ENABLED`,
+`MAGI_EDIT_RETRY_REFLECTION_ENABLED`, `MAGI_CODING_REPAIR_LOOP_ENABLED`,
+`MAGI_LSP_DIAGNOSTICS_ENABLED`, `MAGI_RIPGREP_ENABLED`,
+`MAGI_APPLY_PATCH_ENABLED`, `MAGI_SELF_INTROSPECTION_ENABLED`,
+`MAGI_EVIDENCE_LEDGER_LIFECYCLE_ENABLED`,
+`MAGI_EVIDENCE_COMPLETION_GATE_ENABLED`, `MAGI_PROVIDER_REPAIR_ENABLED`,
+`MAGI_MODEL_AWARE_PROMPTS_ENABLED`, `MAGI_TRUSTED_LOCAL_SHELL_ENABLED` — all `1`.
+Path: **BOTH** (the edit-retry / repair / self-introspection control-plane parts
+need G1 to also fire on gate5b; the file-edit/read tooling runs on both surfaces
+inherently).
+
+### GA live + workflows + child runner + scheduler + observability
+
+`MAGI_GA_LIVE_ENABLED`, `MAGI_WORKFLOW_EXECUTOR_ENABLED`,
+`MAGI_CHILD_RUNNER_LIVE_ENABLED` (`MAGI_CHILD_RUNNER_TOOLSET=readonly` ⚠ real
+sub-agents = cost), `MAGI_SCHEDULER_EXECUTOR_ENABLED`
+(`MAGI_SCHEDULER_SHADOW=0`), `MAGI_GOAL_LOOP_ENABLED`,
+`MAGI_OBSERVABILITY_ENABLED` (`MAGI_OBS_HOME=.openmagi`),
+`MAGI_SESSION_PERSISTENCE_ENABLED` — all `1`. Path: **BOTH**.
+
+### Tools / web / packs / prompt directives
+
+`MAGI_FIRST_PARTY_TOOLS_ENABLED`, `MAGI_FILE_TOOLS_ENABLED`,
+`MAGI_FILE_DELIVERY_LIVE_ENABLED`, `MAGI_DOCUMENT_QA_ENABLED`,
+`MAGI_BROWSER_TOOL_ENABLED`, `MAGI_CODE_ACTION_ENABLED`,
+`MAGI_DEFERRED_TOOLS_ENABLED`, `MAGI_HEADTAIL_TRUNCATION_ENABLED`,
+`MAGI_DEEP_WEB_RESEARCH_ENABLED` (+`_CROSS_VERIFY=1`),
+`MAGI_TOOL_CONCURRENCY_ENABLED` (`MAGI_MAX_TOOL_CONCURRENCY=8`),
+`MAGI_MESSAGE_CACHE_ENABLED`, `MAGI_PROMPT_TRANSFORM_HOOKS_ENABLED`,
+`MAGI_COMPUTE_VIA_CODE_ENABLED`, `MAGI_FORMAT_ADHERENCE_ENABLED`,
+`MAGI_MULTI_FILE_JOIN_ENABLED`, `MAGI_RECIPE_DEFAULT_PACKS_EXPANDED` — all `1`.
+Path: **BOTH**. `MAGI_WEB_SEARCH_PROVIDER` is left unset (defaults to brave;
+needs `BRAVE_API_KEY`) so the profile never forces a provider you have no key
+for — set `=serpapi` + `SERPAPI_API_KEY` to switch.
+
+### Learning / self-improvement + surfaces
+
+`MAGI_LEARNING_ENABLED=true`, `MAGI_LEARNING_LIVE_ENABLED`,
+`MAGI_LEARNING_INJECTION_ENABLED`, `MAGI_LEARNING_REFLECTION_ENABLED`,
+`MAGI_LEARNING_DASHBOARD_ENABLED`, `MAGI_LEARNING_TELEMETRY_ENABLED`,
+`MAGI_SKILL_CURATOR_ENABLED` (`MAGI_SKILL_CURATOR_SHADOW=0`), plus surfaces
+`MAGI_CLI_ENABLED`, `MAGI_AUTOPILOT`, `MAGI_AGENT_LOCAL_CHAT_ROUTE=on`,
+`MAGI_STREAMING_CHAT=on`, `MAGI_RUNNER_POLICY_ROUTING_ENABLED=1`
+(`MAGI_RUNNER_POLICY_ROUTE_BLOCKING_ENABLED=0` — route denial is audit metadata;
+hard-blocking wedges live turns on a conservative budget estimate). Path:
+**BOTH**.
+
 <!-- BEGIN GENERATED FLAGS (scripts/generate_env_reference.py) -->
 ## Feature flags (auto-generated)
 
