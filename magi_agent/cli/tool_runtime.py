@@ -355,6 +355,12 @@ def wrap_cli_adk_tools_with_evidence_collector(
         original = getattr(tool, "func", None)
         if not callable(original) or getattr(tool, "_magi_evidence_collector_wrapped", False):
             continue
+        try:
+            original_signature = signature(original)
+        except (TypeError, ValueError):
+            continue
+        if not {"arguments", "tool_context"}.issubset(original_signature.parameters):
+            continue
 
         async def _wrapped_func(
             arguments: dict[str, object],
@@ -381,10 +387,7 @@ def wrap_cli_adk_tools_with_evidence_collector(
 
         _wrapped_func.__name__ = getattr(original, "__name__", "invoke_openmagi_tool")
         _wrapped_func.__doc__ = getattr(original, "__doc__", None)
-        try:
-            setattr(_wrapped_func, "__signature__", signature(original))
-        except (TypeError, ValueError):
-            pass
+        setattr(_wrapped_func, "__signature__", original_signature)
         try:
             setattr(tool, "func", _wrapped_func)
             setattr(tool, "_magi_evidence_collector_wrapped", True)
@@ -492,6 +495,7 @@ def build_tool_advertisement_block(*, workspace_root: str | None = None) -> str:
         ).registry
 
         lines: list[str] = []
+        seen_names: set[str] = set()
         for tool_name in sorted(registry._tools):  # noqa: SLF001
             registration = registry._tools[tool_name]  # noqa: SLF001
             if not registration.enabled:
@@ -500,6 +504,19 @@ def build_tool_advertisement_block(*, workspace_root: str | None = None) -> str:
             # Emit: ToolName [permission] — first sentence of description
             desc = manifest.description.split("\n")[0].rstrip()
             lines.append(f"  {manifest.name} [{manifest.permission}] — {desc}")
+            seen_names.add(manifest.name)
+
+        from magi_agent.tools.web_search_tools import build_web_search_tools  # noqa: PLC0415
+
+        for tool in build_web_search_tools():
+            name = getattr(tool, "name", None)
+            if not isinstance(name, str) or not name or name in seen_names:
+                continue
+            func = getattr(tool, "func", None)
+            raw_doc = getattr(func, "__doc__", None)
+            desc = str(raw_doc or "Direct web research tool.").strip().split("\n")[0].rstrip()
+            lines.append(f"  {name} [net] — {desc}")
+            seen_names.add(name)
 
         if not lines:
             return ""
