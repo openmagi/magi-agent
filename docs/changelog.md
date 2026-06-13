@@ -15,6 +15,14 @@ Versions follow the tags published on GitHub Releases.
 
 ### Fixed
 
+## 0.1.35
+
+### Fixed
+- Runtime Docker images now install the first-party browser, WAF fetch,
+  provider, Composio, and CLI extras, plus Playwright Chromium OS dependencies,
+  so packaged deployments expose the same BrowserTask, robust web fetch, and
+  first-party tool surfaces as source installs.
+
 ## 0.1.34
 
 ### Fixed
