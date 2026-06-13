@@ -15,6 +15,26 @@ Versions follow the tags published on GitHub Releases.
 
 ### Fixed
 
+## 0.1.33
+
+### Added
+- OpenRouter is now a first-class LiteLLM provider. Set
+  `OPENROUTER_API_KEY` and use `openrouter/<vendor>/<model>` model slugs, or
+  let provider auto-detection pick OpenRouter after direct provider keys.
+
+### Changed
+- Removed the channel workflow confirmation gate so workflow routing no longer
+  depends on the retired confirmation store.
+
+### Fixed
+- Hosted selected Gate5B requests can project a digest-only session identity
+  from hosted chat requests, allowing `MAGI_HOSTED_SESSION_REUSE=1` canaries to
+  reuse ADK sessions across turns without opening context-continuity write
+  authorities.
+- Workspace skill discovery now includes bot-generated skills in
+  `skills-learned/`, restoring migrated hosted custom skills without copying or
+  rewriting PVC state.
+
 ## 0.1.32
 
 ### Added

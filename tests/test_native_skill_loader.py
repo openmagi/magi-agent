@@ -76,6 +76,27 @@ def test_skill_loader_loads_installed_workspace_skill_bodies(tmp_path: Path) -> 
     assert user["bodyDigest"].startswith("sha256:")
 
 
+def test_skill_loader_loads_bot_generated_skills_learned_bodies(
+    tmp_path: Path,
+) -> None:
+    _write_skill(
+        tmp_path,
+        "skills-learned/stock-multibagger-screening",
+        "stock-multibagger-screening",
+        "Bot-generated screening skill instructions are durable.",
+    )
+
+    result = skill_loader({}, _context(tmp_path))
+
+    assert result.status == "ok"
+    assert result.output is not None
+    loaded = {skill["path"]: skill for skill in result.output["loadedSkills"]}
+    learned = loaded["skills-learned/stock-multibagger-screening/SKILL.md"]
+    assert learned["source"] == "workspace"
+    assert "Bot-generated screening skill instructions" in learned["body"]
+    assert learned["bodyDigest"].startswith("sha256:")
+
+
 def test_skill_loader_discovers_legacy_workspace_sibling_skills(
     tmp_path: Path,
 ) -> None:
