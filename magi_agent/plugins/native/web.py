@@ -24,8 +24,7 @@ _WEBSEARCH_NOT_CONFIGURED_MESSAGE = (
     "agent cannot search the web. For the local CLI direct web toolset, set "
     "BRAVE_API_KEY and FIRECRAWL_API_KEY, or set MAGI_WEB_SEARCH_PROVIDER=serpapi "
     "with SERPAPI_API_KEY and FIRECRAWL_API_KEY. For the native WebSearch "
-    "provider router, set CORE_AGENT_PYTHON_LIVE_WEB_ACQUISITION_ENABLED=1, "
-    "CORE_AGENT_PYTHON_WEB_PROVIDER_ROUTER_ENABLED=1, and "
+    "provider router, enable live web acquisition plus the web provider router, and set "
     "MAGI_PLATFORM_BASE_URL+MAGI_PLATFORM_API_KEY."
 )
 
@@ -33,11 +32,9 @@ _WEBFETCH_NOT_CONFIGURED_MESSAGE = (
     "WebFetch is not configured. No live fetch provider is enabled, so the "
     "agent cannot fetch web pages through the native provider router. For the "
     "local CLI direct web toolset, set BRAVE_API_KEY and FIRECRAWL_API_KEY. "
-    "For the native WebFetch provider router, set "
-    "CORE_AGENT_PYTHON_LIVE_WEB_ACQUISITION_ENABLED=1 and "
-    "CORE_AGENT_PYTHON_WEB_PROVIDER_ROUTER_ENABLED=1, plus "
-    "MAGI_PLATFORM_BASE_URL+MAGI_PLATFORM_API_KEY or "
-    "CORE_AGENT_PYTHON_INSANE_FETCH_ENABLED=1."
+    "For the native WebFetch provider router, enable live web acquisition plus "
+    "the web provider router, then set MAGI_PLATFORM_BASE_URL+MAGI_PLATFORM_API_KEY "
+    "or enable the advanced fetch provider gate."
 )
 
 # Duplicated deliberately to match the env-gate truthy convention used by

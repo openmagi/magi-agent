@@ -32,6 +32,12 @@ from magi_agent.harness.self_review import (
     ReviewCandidate,
 )
 from magi_agent.runtime.fork_runner import ChildResult, ForkCacheShareEvidence
+from magi_agent.web_acquisition.research_tools import (
+    INSANE_FETCH_ENABLED_ENV,
+    JINA_READER_ENABLED_ENV,
+    LIVE_WEB_ACQUISITION_ENABLED_ENV,
+    PROVIDER_ROUTER_ENABLED_ENV,
+)
 
 _PROVIDER_ENV = (
     "ANTHROPIC_API_KEY",
@@ -317,10 +323,10 @@ def test_first_party_adk_tools_prefer_direct_web_tools_when_provider_keys_presen
     monkeypatch.setenv("BRAVE_API_KEY", "brave-test")
     monkeypatch.setenv("FIRECRAWL_API_KEY", "firecrawl-test")
     for name in (
-        "CORE_AGENT_PYTHON_LIVE_WEB_ACQUISITION_ENABLED",
-        "CORE_AGENT_PYTHON_WEB_PROVIDER_ROUTER_ENABLED",
-        "CORE_AGENT_PYTHON_JINA_READER_ENABLED",
-        "CORE_AGENT_PYTHON_INSANE_FETCH_ENABLED",
+        LIVE_WEB_ACQUISITION_ENABLED_ENV,
+        PROVIDER_ROUTER_ENABLED_ENV,
+        JINA_READER_ENABLED_ENV,
+        INSANE_FETCH_ENABLED_ENV,
         "MAGI_PLATFORM_BASE_URL",
         "MAGI_PLATFORM_API_KEY",
     ):
