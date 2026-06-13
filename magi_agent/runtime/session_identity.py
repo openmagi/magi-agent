@@ -35,10 +35,8 @@ def parse_session_identity(
     reset_counter: int = 0,
 ) -> SessionIdentity:
     normalized = {_normalize_header_name(k): v for k, v in headers.items()}
-    session_key = (
-        _first_header(normalized, "x-core-agent-session-key")
-        or _first_header(normalized, "x-openclaw-session-key")
-        or f"agent:main:app:default:{bot_id[:8]}"
+    session_key = _session_key_from_normalized_headers(normalized) or (
+        f"agent:main:app:default:{bot_id[:8]}"
     )
     channel = _channel_from_session_key(session_key)
     effective_session_key = (
@@ -54,8 +52,20 @@ def parse_session_identity(
     )
 
 
+def session_key_from_headers(headers: Mapping[str, object]) -> str | None:
+    normalized = {_normalize_header_name(k): v for k, v in headers.items()}
+    return _session_key_from_normalized_headers(normalized)
+
+
 def _normalize_header_name(value: str) -> str:
     return value.strip().lower()
+
+
+def _session_key_from_normalized_headers(headers: Mapping[str, object]) -> str | None:
+    return _first_header(headers, "x-core-agent-session-key") or _first_header(
+        headers,
+        "x-openclaw-session-key",
+    )
 
 
 def _first_header(headers: Mapping[str, object], name: str) -> str | None:
