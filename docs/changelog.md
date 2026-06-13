@@ -15,6 +15,16 @@ Versions follow the tags published on GitHub Releases.
 
 ### Fixed
 
+## 0.1.32
+
+### Added
+- First-party activity evidence now records bundled pack, tool, and recipe
+  execution, with a packaged evidence pack for installed-runtime checks.
+
+### Changed
+- Tool dispatch capture and Gate5B/full-toolhost gating now surface
+  first-party activity evidence consistently across source and packaged installs.
+
 ## 0.1.31
 
 ### Fixed
