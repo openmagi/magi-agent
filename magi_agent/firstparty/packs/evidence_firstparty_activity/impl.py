@@ -4,7 +4,14 @@ Each provider receives ONLY the narrow ``EvidenceProducerProvideContext`` (D5)
 and registers one ``ProducerSpec``. ``public_ref`` carries the ``evidence:``
 prefix so the refs reach the live ``harness/verifier_bus`` required-evidence
 vocabulary; ``producer_surfaces=("tool_dispatch",)`` names the kernel seam that
-emits the records (``ToolDispatcher.dispatch``)."""
+emits the records (``ToolDispatcher.dispatch``).
+
+``ref`` and ``public_ref`` are intentionally identical for all three producers
+here: the first-party gate reads ``entry.ref`` from the manifest while emitted
+activity records carry ``public_ref``; keeping them equal ensures gate resolution
+and the verifier-bus ``evidence:`` prefix check align without a translation step.
+This differs from the ``evidence_gitdiff`` pack, which intentionally splits
+``ref="evidence:gitdiff@1"`` vs ``public_ref="evidence:gitDiff@1"``."""
 
 from __future__ import annotations
 
