@@ -17,7 +17,12 @@ from magi_agent.tools.context import ToolContext
 from magi_agent.tools.result import ToolResult
 
 _MAX_SKILL_BODY_CHARS = 64_000
-_WORKSPACE_SKILL_BASES = ("skills", ".magi/skills", "docs/superpowers")
+_WORKSPACE_SKILL_BASES = (
+    "skills",
+    "skills-learned",
+    ".magi/skills",
+    "docs/superpowers",
+)
 _LEGACY_WORKSPACE_SKILL_PREFIX = "legacy-workspace/skills"
 
 # Backing-system attachment flag. The real hook system (``hooks/bus.py``) is
