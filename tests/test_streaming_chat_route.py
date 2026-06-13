@@ -60,6 +60,7 @@ from magi_agent.transport.streaming_sink import build_streaming_prompt_sink
 # Fixtures / helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_runtime(
     *,
     gateway_token: str = "test-token",
@@ -115,7 +116,7 @@ def _data_lines(text: str) -> list[dict]:
     out: list[dict] = []
     for line in text.splitlines():
         if line.startswith("data:"):
-            body = line[len("data:"):].strip()
+            body = line[len("data:") :].strip()
             if body == "[DONE]":
                 continue
             out.append(json.loads(body))
@@ -224,30 +225,28 @@ def _selected_runtime(
                 "maxToolCallsPerTurn": 8,
             }
         )
-    runtime.gate5b4c3_shadow_generation_route_config = (
-        Gate5B4C3ShadowGenerationRouteConfig(
-            liveRunnerBoundaryEnabled=True,
-            counterStore=Gate5B4C3ShadowCounterStore(tmp_path / "counters.json"),
-            generationConfig=Gate5B4C3ShadowGenerationConfig(
-                enabled=True,
-                killSwitchActive=False,
-                capStateInitialized=True,
-                providerProjectSpendControlsVerified=True,
-                selectedBotDigest=_sha256("bot-stream-test"),
-                trustedOwnerUserIdDigest=_sha256("user-stream-test"),
-                environment="production",
-                allowedProviderLabels=("google",),
-                allowedModelLabels=("gemini-3.5-flash",),
-                allowedModelRoutes=("google:gemini-3.5-flash",),
-                allowedShadowCredentialRefs=("gate5b-google-api-key-smoke-v1",),
-                providerCredentialBindingRequired=False,
-                approvedBudgets={
-                    "maxDailyGenerationRuns": 4,
-                    "maxDailyGenerationCostUsd": 0.05,
-                    "maxCostUsd": 0.05,
-                },
-            ),
-        )
+    runtime.gate5b4c3_shadow_generation_route_config = Gate5B4C3ShadowGenerationRouteConfig(
+        liveRunnerBoundaryEnabled=True,
+        counterStore=Gate5B4C3ShadowCounterStore(tmp_path / "counters.json"),
+        generationConfig=Gate5B4C3ShadowGenerationConfig(
+            enabled=True,
+            killSwitchActive=False,
+            capStateInitialized=True,
+            providerProjectSpendControlsVerified=True,
+            selectedBotDigest=_sha256("bot-stream-test"),
+            trustedOwnerUserIdDigest=_sha256("user-stream-test"),
+            environment="production",
+            allowedProviderLabels=("google",),
+            allowedModelLabels=("gemini-3.5-flash",),
+            allowedModelRoutes=("google:gemini-3.5-flash",),
+            allowedShadowCredentialRefs=("gate5b-google-api-key-smoke-v1",),
+            providerCredentialBindingRequired=False,
+            approvedBudgets={
+                "maxDailyGenerationRuns": 4,
+                "maxDailyGenerationCostUsd": 0.05,
+                "maxCostUsd": 0.05,
+            },
+        ),
     )
     return runtime
 
@@ -387,6 +386,39 @@ def test_stream_returns_event_stream_and_done(monkeypatch) -> None:
     assert turn_result["terminal"] == "completed"
 
 
+def test_stream_response_sets_sse_antibuffering_headers(monkeypatch) -> None:
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
+
+    class FakeEngine:
+        async def run_turn_stream(self, runtime, turn_input, *, cancel, gate):
+            yield _ev("text_delta", delta="streamed text")
+            yield EngineResult(
+                terminal=Terminal.completed,
+                session_id="s-headers",
+                turn_id="t-headers",
+            )
+
+    def fake_builder(session_id: str, sink: object) -> tuple[object, object]:
+        return FakeEngine(), None
+
+    client = TestClient(_make_app(engine_builder=fake_builder))
+
+    response = client.post(
+        "/v1/chat/stream",
+        headers=_auth_headers(),
+        json={
+            "sessionId": "s-headers",
+            "turnId": "t-headers",
+            "messages": [{"role": "user", "content": "hello streaming"}],
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-cache, no-transform"
+    assert response.headers["x-accel-buffering"] == "no"
+    assert response.headers["connection"] == "keep-alive"
+
+
 def test_selected_full_toolhost_stream_uses_selected_canary_path(
     monkeypatch,
     tmp_path: Path,
@@ -465,8 +497,7 @@ def test_selected_full_toolhost_stream_prioritizes_workflow_confirmation(
     assert "selected full-toolhost ADK stream answer" not in response.text
     payloads = _data_lines(response.text)
     assert any(
-        payload.get("type") == "turn_phase"
-        and payload.get("status") == "awaiting_confirmation"
+        payload.get("type") == "turn_phase" and payload.get("status") == "awaiting_confirmation"
         for payload in payloads
     )
     assert payloads[-1]["type"] == "turn_result"
@@ -496,8 +527,7 @@ def test_selected_full_toolhost_duplicate_replay_surfaces_status_not_none(
     assert second.status_code == 200, second.text
     second_payloads = _data_lines(second.text)
     assert any(
-        payload.get("type") == "error"
-        and payload.get("code") == "counter_duplicate_replay"
+        payload.get("type") == "error" and payload.get("code") == "counter_duplicate_replay"
         for payload in second_payloads
     )
     assert second_payloads[-1]["terminal"] == "error"
@@ -556,9 +586,7 @@ def test_selected_gate5b_stream_emits_live_sink_events_before_completion(
         release_response.set()
         remaining_frames = [frame async for frame in frames]
         remaining_payloads = [
-            payload
-            for frame in remaining_frames
-            for payload in _data_lines(frame.decode("utf-8"))
+            payload for frame in remaining_frames for payload in _data_lines(frame.decode("utf-8"))
         ]
         return first_payloads + remaining_payloads
 
@@ -592,9 +620,7 @@ def test_selected_gate5b_stream_emits_tool_events_before_final_text(
                 "phase": "executing",
             }
         )
-        public_event_sink(
-            {"type": "tool_start", "id": "tool-selected-1", "name": "Calculation"}
-        )
+        public_event_sink({"type": "tool_start", "id": "tool-selected-1", "name": "Calculation"})
         public_event_sink(
             {
                 "type": "tool_end",
@@ -640,9 +666,7 @@ def test_selected_gate5b_stream_emits_tool_events_before_final_text(
         release_response.set()
         remaining_frames = [frame async for frame in frames]
         remaining_payloads = [
-            payload
-            for frame in remaining_frames
-            for payload in _data_lines(frame.decode("utf-8"))
+            payload for frame in remaining_frames for payload in _data_lines(frame.decode("utf-8"))
         ]
         return live_payloads + remaining_payloads
 
@@ -722,11 +746,7 @@ def test_selected_full_toolhost_stream_does_not_replay_posthoc_tool_progress(
             session_id="s-selected-full-toolhost-live",
             turn_id="t-selected-full-toolhost-live",
         )
-        return [
-            payload
-            async for frame in frames
-            for payload in _data_lines(frame.decode("utf-8"))
-        ]
+        return [payload async for frame in frames for payload in _data_lines(frame.decode("utf-8"))]
 
     payloads = asyncio.run(_collect())
 
@@ -832,19 +852,13 @@ def test_selected_full_toolhost_stream_emits_live_child_events_before_final(
             session_id="s-selected-child-live",
             turn_id="t-selected-child-live",
         )
-        return [
-            payload
-            async for frame in frames
-            for payload in _data_lines(frame.decode("utf-8"))
-        ]
+        return [payload async for frame in frames for payload in _data_lines(frame.decode("utf-8"))]
 
     payloads = asyncio.run(_collect())
 
     event_types = [payload.get("type") for payload in payloads]
     child_events = [
-        payload
-        for payload in payloads
-        if str(payload.get("type", "")).startswith("child_")
+        payload for payload in payloads if str(payload.get("type", "")).startswith("child_")
     ]
     assert [payload["type"] for payload in child_events] == [
         "child_started",
@@ -852,8 +866,7 @@ def test_selected_full_toolhost_stream_emits_live_child_events_before_final(
         "child_completed",
     ]
     assert all(
-        str(payload["childReceiptRef"]).startswith("receipt:sha256:")
-        for payload in child_events
+        str(payload["childReceiptRef"]).startswith("receipt:sha256:") for payload in child_events
     )
     assert event_types.index("child_started") < event_types.index("text_delta")
     assert event_types.index("child_completed") < event_types.index("turn_result")
@@ -936,9 +949,7 @@ def test_selected_full_toolhost_stream_starts_work_events_before_response_finish
         release_response.set()
         remaining_frames = [frame async for frame in frames]
         remaining_payloads = [
-            payload
-            for frame in remaining_frames
-            for payload in _data_lines(frame.decode("utf-8"))
+            payload for frame in remaining_frames for payload in _data_lines(frame.decode("utf-8"))
         ]
         return first_payloads + second_payloads + remaining_payloads
 
@@ -959,9 +970,7 @@ def test_selected_full_toolhost_stream_starts_work_events_before_response_finish
         "turn_id": "t-selected-start-events",
     }
     assert [
-        payload
-        for payload in payloads
-        if payload.get("type") in {"turn_phase", "llm_progress"}
+        payload for payload in payloads if payload.get("type") in {"turn_phase", "llm_progress"}
     ] == payloads[:2]
     assert payloads[-1]["type"] == "turn_result"
     assert payloads[-1]["terminal"] == "completed"
@@ -1057,12 +1066,7 @@ def test_selected_full_toolhost_stream_ticks_progress_while_response_pending(
                 for frame in remaining_frames
                 for payload in _data_lines(frame.decode("utf-8"))
             ]
-            return (
-                first_payloads
-                + second_payloads
-                + pending_payloads
-                + remaining_payloads
-            )
+            return first_payloads + second_payloads + pending_payloads + remaining_payloads
         finally:
             release_response.set()
             await frames.aclose()
@@ -1085,8 +1089,7 @@ def test_selected_full_toolhost_stream_ticks_progress_while_response_pending(
     }
     pending_payloads = payloads[2:4]
     assert any(
-        payload.get("type") == "heartbeat"
-        and payload.get("turnId") == "t-selected-pending-ticker"
+        payload.get("type") == "heartbeat" and payload.get("turnId") == "t-selected-pending-ticker"
         for payload in pending_payloads
     )
     assert any(
@@ -1100,12 +1103,8 @@ def test_selected_full_toolhost_stream_ticks_progress_while_response_pending(
         for payload in payloads
         if payload.get("type") in {"heartbeat", "llm_progress", "turn_phase"}
     )
-    text_payloads = [
-        payload for payload in payloads if payload.get("type") == "text_delta"
-    ]
-    assert [payload["delta"] for payload in text_payloads] == [
-        "delayed full-toolhost answer"
-    ]
+    text_payloads = [payload for payload in payloads if payload.get("type") == "text_delta"]
+    assert [payload["delta"] for payload in text_payloads] == ["delayed full-toolhost answer"]
     assert payloads[-1]["type"] == "turn_result"
     assert payloads[-1]["terminal"] == "completed"
 
@@ -1157,17 +1156,11 @@ def test_selected_gate5b_stream_skips_posthoc_text_after_live_text(
             session_id="s-selected-posthoc-text",
             turn_id="t-selected-posthoc-text",
         )
-        return [
-            payload
-            async for frame in frames
-            for payload in _data_lines(frame.decode("utf-8"))
-        ]
+        return [payload async for frame in frames for payload in _data_lines(frame.decode("utf-8"))]
 
     payloads = asyncio.run(_collect())
 
-    text_payloads = [
-        payload for payload in payloads if payload.get("type") == "text_delta"
-    ]
+    text_payloads = [payload for payload in payloads if payload.get("type") == "text_delta"]
     assert [payload["delta"] for payload in text_payloads] == ["live chunk"]
     assert any(
         payload.get("type") == "turn_phase" and payload.get("phase") == "planning"
@@ -1312,6 +1305,7 @@ def test_stream_selected_gate_off_uses_headless_engine(monkeypatch) -> None:
 # With the flag OFF behavior is byte-identical to before (local fallthrough).
 # ---------------------------------------------------------------------------
 
+
 class _BypassCanaryEngine:
     """Headless engine that must never serve under hosted streaming serve."""
 
@@ -1380,9 +1374,7 @@ def test_hosted_serve_invalid_authority_returns_409(monkeypatch, tmp_path: Path)
         tmp_path,
         authority=PythonRuntimeAuthorityConfig(),
     )
-    client = TestClient(
-        _make_app(runtime=runtime, engine_builder=_bypass_canary_builder)
-    )
+    client = TestClient(_make_app(runtime=runtime, engine_builder=_bypass_canary_builder))
 
     response = client.post(
         "/v1/chat/stream",
@@ -1460,8 +1452,7 @@ def test_hosted_serve_selected_active_prioritizes_workflow_confirmation(
     assert "selected full-toolhost ADK stream answer" not in response.text
     payloads = _data_lines(response.text)
     assert any(
-        payload.get("type") == "turn_phase"
-        and payload.get("status") == "awaiting_confirmation"
+        payload.get("type") == "turn_phase" and payload.get("status") == "awaiting_confirmation"
         for payload in payloads
     )
     assert payloads[-1]["type"] == "turn_result"
@@ -1482,9 +1473,7 @@ def test_hosted_serve_gate2_canary_payload_dispatches_to_gate2_chat(
     )
 
     runtime = _selected_runtime(tmp_path)
-    runtime.gate2_sandbox_workspace_canary_config = Gate2SandboxWorkspaceCanaryConfig(
-        enabled=True
-    )
+    runtime.gate2_sandbox_workspace_canary_config = Gate2SandboxWorkspaceCanaryConfig(enabled=True)
     seen: dict[str, object] = {}
 
     def fake_gate2_chat(rt, config, payload, *, request):
@@ -1497,9 +1486,7 @@ def test_hosted_serve_gate2_canary_payload_dispatches_to_gate2_chat(
         "_run_gate2_sandbox_workspace_canary_chat",
         fake_gate2_chat,
     )
-    client = TestClient(
-        _make_app(runtime=runtime, engine_builder=_bypass_canary_builder)
-    )
+    client = TestClient(_make_app(runtime=runtime, engine_builder=_bypass_canary_builder))
 
     response = client.post(
         "/v1/chat/stream",
@@ -1651,6 +1638,7 @@ def test_malformed_json_flag_off_keeps_legacy_shape(monkeypatch) -> None:
 # critic invocation for the same request body.
 # ---------------------------------------------------------------------------
 
+
 class _UsageFakeRunner(_FakeRunner):
     """Fake ADK runner whose final event carries usage metadata."""
 
@@ -1737,9 +1725,7 @@ def test_hosted_stream_counter_receipt_critic_equivalence_with_completions(
         fake_schedule_receipt,
     )
     monkeypatch.setattr(chat_routes_module, "is_egress_gate_enabled", lambda: True)
-    monkeypatch.setattr(
-        chat_routes_module, "_maybe_run_egress_critic_gate", fake_critic_gate
-    )
+    monkeypatch.setattr(chat_routes_module, "_maybe_run_egress_critic_gate", fake_critic_gate)
 
     body = {
         "sessionId": "s-equivalence",
@@ -1749,9 +1735,7 @@ def test_hosted_stream_counter_receipt_critic_equivalence_with_completions(
 
     def _serve(path: str, store_dir: Path):
         store_dir.mkdir(parents=True, exist_ok=True)
-        monkeypatch.setenv(
-            "CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_WORKSPACE_ROOT", str(store_dir)
-        )
+        monkeypatch.setenv("CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_WORKSPACE_ROOT", str(store_dir))
         runtime = _selected_runtime(
             store_dir,
             full_toolhost=True,
@@ -1805,9 +1789,7 @@ class _MultiChunkFakeRunner(_FakeRunner):
     async def run_async(self, **kwargs: object) -> object:
         type(self).run_kwargs = kwargs
         for index, chunk in enumerate(self.chunks):
-            event = SimpleNamespace(
-                content=SimpleNamespace(parts=[SimpleNamespace(text=chunk)])
-            )
+            event = SimpleNamespace(content=SimpleNamespace(parts=[SimpleNamespace(text=chunk)]))
             if index == len(self.chunks) - 1:
                 event.usage_metadata = SimpleNamespace(
                     prompt_token_count=11,
@@ -1865,9 +1847,7 @@ def test_hosted_stream_emits_one_text_delta_frame_per_chunk(
 
     assert response.status_code == 200, response.text
     payloads = _data_lines(response.text)
-    text_deltas = [
-        payload["delta"] for payload in payloads if payload.get("type") == "text_delta"
-    ]
+    text_deltas = [payload["delta"] for payload in payloads if payload.get("type") == "text_delta"]
     assert text_deltas == list(_MultiChunkFakeRunner.chunks)
     # The aggregated final answer must NOT be re-emitted as one extra frame.
     aggregated = "".join(_MultiChunkFakeRunner.chunks)

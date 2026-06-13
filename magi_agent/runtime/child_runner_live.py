@@ -40,10 +40,12 @@ No module-top imports of ``litellm`` / ``google.adk`` / heavy runner internals.
 INSIDE the methods so importing this module stays light and the Task C tool
 wiring (``subagents.py``) keeps an import-clean surface.
 """
+
 from __future__ import annotations
 
 import asyncio
 import hashlib
+import inspect
 import os
 from collections.abc import Callable, Mapping
 from typing import Any
@@ -103,9 +105,7 @@ _PROVIDER_ALIAS: dict[str, str] = {"google": "gemini"}
 #: Minimal child instruction so a TEXT-ONLY (tools=[]) child is NOT handed the
 #: full filesystem-tool system prompt that ``build_cli_model_runner`` would
 #: otherwise synthesise for a tool-enabled agent.
-_CHILD_INSTRUCTION = (
-    "Complete the following delegated subtask. Respond with the answer only."
-)
+_CHILD_INSTRUCTION = "Complete the following delegated subtask. Respond with the answer only."
 
 # Degrade-reason tokens (fixed, non-leaking). Used by the degrade returns below
 # and referenced by tests, so they live as module constants in ONE place.
@@ -146,6 +146,7 @@ class RealLocalChildRunner:
         toolset_profile: str = "none",
         evidence_collector: object | None = None,
         workspace_root: str | None = None,
+        progress_sink: Callable[[Mapping[str, object]], object] | None = None,
         env: Mapping[str, str] | None = None,
     ) -> None:
         #: Optional pre-resolved provider config (a ``ProviderConfig``). When
@@ -172,6 +173,7 @@ class RealLocalChildRunner:
         #: ``evidence:`` ref that is promoted onto the child's ``evidenceRefs``.
         self._evidence_collector = evidence_collector
         self._workspace_root = workspace_root
+        self._progress_sink = progress_sink
         self._env: Mapping[str, str] = os.environ if env is None else env
 
     async def run_child(self, request: object) -> Mapping[str, object]:
@@ -338,9 +340,7 @@ class RealLocalChildRunner:
     # Turn drive (mirrors discovery/orchestrator.drive_runner_once)       #
     # ------------------------------------------------------------------ #
 
-    async def _drive_one_turn(
-        self, config: object, request: object
-    ) -> tuple[str, tuple[str, ...]]:
+    async def _drive_one_turn(self, config: object, request: object) -> tuple[str, tuple[str, ...]]:
         """Build/reuse a ``CliModelRunner`` and drive ONE turn.
 
         Returns ``(final_text, evidence_refs)`` — the collected tool-call
@@ -410,20 +410,37 @@ class RealLocalChildRunner:
             new_message=new_message,
         ):
             content = getattr(event, "content", None)
+            event_texts: list[str] = []
             for part in getattr(content, "parts", None) or []:
                 text = getattr(part, "text", None)
                 if isinstance(text, str) and text:
                     texts.append(text)
+                    event_texts.append(text)
+            if event_texts:
+                await self._emit_progress(
+                    {
+                        "type": "child_progress",
+                        "detail": _child_stream_progress_detail("".join(event_texts)),
+                    }
+                )
         evidence_refs = self._collect_evidence_refs(evidence_collector, session_id)
         return "\n".join(texts), evidence_refs
+
+    async def _emit_progress(self, event: Mapping[str, object]) -> None:
+        if self._progress_sink is None:
+            return
+        try:
+            result = self._progress_sink(dict(event))
+            if inspect.isawaitable(result):
+                await result
+        except Exception:
+            return
 
     # ------------------------------------------------------------------ #
     # PR1: toolset resolution + tool-call evidence promotion              #
     # ------------------------------------------------------------------ #
 
-    def _resolve_turn_toolset(
-        self, session_id: str
-    ) -> tuple[list[object], object | None]:
+    def _resolve_turn_toolset(self, session_id: str) -> tuple[list[object], object | None]:
         """Resolve the child's toolset + evidence collector for this turn.
 
         Precedence:
@@ -476,9 +493,7 @@ class RealLocalChildRunner:
         except Exception:  # noqa: BLE001 — evidence is best-effort, never fatal.
             return None
 
-    def _build_core_tools(
-        self, session_id: str, collector: object | None
-    ) -> list[object]:
+    def _build_core_tools(self, session_id: str, collector: object | None) -> list[object]:
         import tempfile  # noqa: PLC0415
 
         from magi_agent.cli.tool_runtime import (  # noqa: PLC0415
@@ -496,9 +511,7 @@ class RealLocalChildRunner:
         )
 
     @staticmethod
-    def _collect_evidence_refs(
-        collector: object | None, session_id: str
-    ) -> tuple[str, ...]:
+    def _collect_evidence_refs(collector: object | None, session_id: str) -> tuple[str, ...]:
         """Project the collector's recorded tool-call receipts to public
         ``evidence:`` refs for the child envelope. Best-effort: any failure
         yields an empty tuple (never breaks the turn)."""
@@ -562,9 +575,7 @@ class RealLocalChildRunner:
         return self._degraded(child_execution_id, status="failed", reason=reason)
 
     @staticmethod
-    def _degraded(
-        child_execution_id: str, *, status: str, reason: str
-    ) -> dict[str, object]:
+    def _degraded(child_execution_id: str, *, status: str, reason: str) -> dict[str, object]:
         return {
             "childExecutionId": child_execution_id,
             "status": status,
@@ -614,6 +625,10 @@ def _clean_str(value: Any) -> str | None:
     if isinstance(value, str) and value.strip():
         return value.strip()
     return None
+
+
+def _child_stream_progress_detail(text: str) -> str:
+    return f"Child model streamed output chunk ({len(text)} chars)"
 
 
 def _tool_name(tool: object) -> str | None:

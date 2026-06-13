@@ -9,6 +9,7 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from magi_agent.plugins.native._common import digest, ok_result
+from magi_agent.runtime.public_events import child_progress_event
 from magi_agent.tools.context import ToolContext
 from magi_agent.tools.result import ToolResult, ToolStatus
 
@@ -324,9 +325,7 @@ async def spawn_agent(arguments: dict[str, object], context: ToolContext) -> Too
         # Build the request — use the context's IDs as parent identifiers, or
         # fall back to stable generated values so the request is always valid.
         parent_exec_id = (
-            context.session_id
-            or context.turn_id
-            or f"spawn-parent-{uuid.uuid4().hex[:12]}"
+            context.session_id or context.turn_id or f"spawn-parent-{uuid.uuid4().hex[:12]}"
         )
         turn_id = context.turn_id or f"spawn-turn-{uuid.uuid4().hex[:12]}"
         task_id = _public_child_task_id(
@@ -340,12 +339,8 @@ async def spawn_agent(arguments: dict[str, object], context: ToolContext) -> Too
 
         # Provider/model from arguments (optional per-task override), else the
         # ChildRunnerConfig defaults will be used by the runner's route resolver.
-        req_provider: str | None = (
-            str(arguments["provider"]) if arguments.get("provider") else None
-        )
-        req_model: str | None = (
-            str(arguments["model"]) if arguments.get("model") else None
-        )
+        req_provider: str | None = str(arguments["provider"]) if arguments.get("provider") else None
+        req_model: str | None = str(arguments["model"]) if arguments.get("model") else None
 
         # budget_ms from arguments (optional).
         # LLM tool calls often encode numbers as strings; accept int/float OR a
@@ -395,9 +390,19 @@ async def spawn_agent(arguments: dict[str, object], context: ToolContext) -> Too
                 fallback_output,
                 error_code=workspace_error,
             )
+
+        async def _emit_live_child_progress(event: Mapping[str, object]) -> None:
+            detail = event.get("detail")
+            if not isinstance(detail, str) or not detail.strip():
+                return
+            payload = child_progress_event(task_id=task_id, detail=detail)
+            payload["childReceiptRef"] = child_receipt_ref
+            await _emit_agent_event(context, payload)
+
         runner = RealLocalChildRunner(
             toolset_profile=toolset_profile,
             workspace_root=child_workspace,
+            progress_sink=_emit_live_child_progress,
         )
 
         config = ChildRunnerConfig(

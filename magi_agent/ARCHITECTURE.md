@@ -1170,7 +1170,7 @@ graph LR
 | scheduled_work.py | — | _common, context, env, policy, result | — |
 | skills.py | — | _common, context, env, result | cli/commands/builtins.py, transport/app_api.py |
 | source_ledger.py | — | _common, context, result | — |
-| subagents.py | — | _common, child_runner_boundary, child_runner_live, child_toolset, context, result | — |
+| subagents.py | — | _common, child_runner_boundary, child_runner_live, child_toolset, context, public_events, result | — |
 | taskboard.py | — | _common, context, env, result | — |
 | web.py | — | context, research_tools, result | — |
 
@@ -1352,7 +1352,7 @@ graph LR
 | prompt_snapshot.py | — | — | harness/self_review.py, runtime/fork_runner.py |
 | provider_execution.py | — | provider_receipts | browser/live_provider_pack.py, browser/provider_boundary.py, channels/discord_adapter.py, channels/dispatcher.py, channels/push_delivery.py, channels/telegram_adapter.py, web_acquisition/live_provider_pack.py |
 | provider_receipts.py | — | — | artifacts/file_delivery.py, browser/live_provider_pack.py, browser/provider_boundary.py, channels/discord_adapter.py, channels/dispatcher.py, channels/push_delivery.py, channels/telegram_adapter.py, harness/cron_runtime.py, harness/scheduler_runtime.py, plugins/mcp_adapter.py, runtime/provider_execution.py, web_acquisition/live_provider_pack.py, web_acquisition/provider_router.py |
-| public_events.py | — | — | evidence/event_projection.py, gates/gate5b_full_toolhost.py, harness/cross_review.py, harness/workflow_executor.py, meta_orchestration/event_projection.py, research/event_projection.py, research/research_first_canary.py, runtime/events.py, runtime/work_console_snapshot.py, shadow/gate5b4c3_live_runner_boundary.py, tools/event_projection.py, transport/chat.py, transport/chat_routes.py, transport/sse.py, transport/streaming_chat_route.py |
+| public_events.py | — | — | evidence/event_projection.py, gates/gate5b_full_toolhost.py, harness/cross_review.py, harness/workflow_executor.py, meta_orchestration/event_projection.py, plugins/native/subagents.py, research/event_projection.py, research/research_first_canary.py, runtime/events.py, runtime/work_console_snapshot.py, shadow/gate5b4c3_live_runner_boundary.py, tools/event_projection.py, transport/chat.py, transport/chat_routes.py, transport/sse.py, transport/streaming_chat_route.py |
 | query_state.py | — | — | adk_bridge/context_compaction.py, runtime/cache_safe_params.py, runtime/content_replacement.py, runtime/context_lifecycle.py |
 | readiness.py | — | — | transport/health.py |
 | receipt_utils.py | — | — | missions/background_tasks.py, runtime/long_running_activity.py |
