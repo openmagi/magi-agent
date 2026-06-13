@@ -98,6 +98,7 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 - `MAGI_FACT_GROUNDING_VERIFICATION_ENABLED` (default off) — Run semantic grounding verification on the live evidence gate: a research answer asserting a specific numeric/identifier value not present in the opened-source corpus stays ungrounded and blocks. Strict default-OFF and inert unless explicitly set.
 - `MAGI_FILE_DELIVERY_LIVE_ENABLED` (default off) — Enable the live file-delivery tool (vs receipt-only).
 - `MAGI_FORMAT_ADHERENCE_ENABLED` (default off) — Append a general prompt self-check for exact requested units, scale, rounding precision, names, and answer format.
+- `MAGI_GATE5B_GOVERNANCE_ENABLED` (default off) — Run cli/engine-parity governance on the gate5b serving path: attach the control-plane plugin (loop-guard / compaction / edit-retry / self-review / max-steps / tool-synthesis etc., each behind its own existing flag) to the gate5b runner AND run a pre-final evidence/fact-grounding check over the turn's tool evidence before emitting the user-visible response. Strict default-OFF: when unset the gate5b path is byte-identical to today.
 - `MAGI_GA_DELIVERABLE_GATE_ENABLED` (default off) — Enable the GA artifact-deliverable pre-final gate; strict default-OFF and inert unless explicitly set.
 - `MAGI_GOAL_LOOP_ENABLED` (default off) — Enable the autonomous goal-loop scheduler.
 - `MAGI_HEADTAIL_TRUNCATION_ENABLED` (default off) — Use head+tail (middle-elision) truncation for tool output caps instead of head-only, so document/page tails stay visible.
