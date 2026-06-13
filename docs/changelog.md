@@ -15,6 +15,16 @@ Versions follow the tags published on GitHub Releases.
 
 ### Fixed
 
+## 0.1.34
+
+### Fixed
+- Interactive TUI bypass permission mode no longer routes tool calls through the
+  modal approval sink, so trusted local runs can stay non-interactive.
+- CLI and local dashboard runs now prefer configured direct first-party web
+  tools before falling back to platform-routed web surfaces, restoring local
+  WebSearch/WebFetch availability for key-configured installs and replacing
+  internal provider hints with user-facing setup guidance.
+
 ## 0.1.33
 
 ### Added
