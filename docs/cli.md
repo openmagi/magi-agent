@@ -38,7 +38,8 @@ magi doctor
 ```
 
 To use a real model, set a single provider key (`ANTHROPIC_API_KEY`,
-`OPENAI_API_KEY`, `GEMINI_API_KEY` / `GOOGLE_API_KEY`, or `FIREWORKS_API_KEY`) or
+`OPENAI_API_KEY`, `GEMINI_API_KEY` / `GOOGLE_API_KEY`, `FIREWORKS_API_KEY`, or
+`OPENROUTER_API_KEY`) or
 a `~/.magi/config.toml`. See [Configuration](/docs/configuration) and the
 [environment variable reference](/docs/env-reference). With no provider
 configured, `magi` still launches but uses a model-free stub.

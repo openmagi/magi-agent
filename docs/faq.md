@@ -6,7 +6,7 @@ Answers to the most common questions about Magi Agent architecture, recipe and h
 
 ## Can Magi actually run tasks locally today?
 
-Yes. With a provider key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY` / `GOOGLE_API_KEY`, or `FIREWORKS_API_KEY`) or a `~/.magi/config.toml`, the local `magi` CLI runs a real model (via LiteLlm) and first-party local tools — file read/write/edit, patch apply, and Bash — behind permission prompts (`default` / `acceptEdits` / `bypassPermissions`). With no key it still launches against a model-free stub.
+Yes. With a provider key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY` / `GOOGLE_API_KEY`, `FIREWORKS_API_KEY`, or `OPENROUTER_API_KEY`) or a `~/.magi/config.toml`, the local `magi` CLI runs a real model (via LiteLlm) and first-party local tools — file read/write/edit, patch apply, and Bash — behind permission prompts (`default` / `acceptEdits` / `bypassPermissions`). With no key it still launches against a model-free stub.
 
 What's default-off is the **enforcement/governance layer** (the boundary modules that can block or gate behavior) plus **external delivery and integrations** (Telegram/Discord live send, Composio) — not the agent's ability to do work. See [What works today](/docs/what-works-today).
 

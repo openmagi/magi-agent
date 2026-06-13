@@ -12,7 +12,7 @@ The intended Magi Agent user is a local-agent user, not a repo contributor. Inst
 
 Use the source checkout only when developing the runtime itself.
 
-- To configure a provider today, set ONE provider env key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY` / `GOOGLE_API_KEY`, or `FIREWORKS_API_KEY`), or create `~/.magi/config.toml` (override the path with `MAGI_CONFIG`). Either one builds a real model-backed runner; with neither, the CLI falls back to a model-free stub.
+- To configure a provider today, set ONE provider env key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY` / `GOOGLE_API_KEY`, `FIREWORKS_API_KEY`, or `OPENROUTER_API_KEY`), or create `~/.magi/config.toml` (override the path with `MAGI_CONFIG`). Either one builds a real model-backed runner; with neither, the CLI falls back to a model-free stub.
 - The installed commands are `magi` for CLI work and `magi-agent` for serving the local HTTP API/dashboard.
 - A local install does not require a cloud account.
 
@@ -27,7 +27,7 @@ open http://localhost:8080/dashboard
 Then set one provider key and run your first task:
 
 ```
-export ANTHROPIC_API_KEY=...   # or OPENAI_API_KEY / GEMINI_API_KEY / GOOGLE_API_KEY / FIREWORKS_API_KEY
+export ANTHROPIC_API_KEY=...   # or OPENAI_API_KEY / GEMINI_API_KEY / GOOGLE_API_KEY / FIREWORKS_API_KEY / OPENROUTER_API_KEY
 magi -p "What is 2+2?"
 ```
 

@@ -11,7 +11,7 @@ The canonical flow is Homebrew, one provider key, then `magi -p`:
 brew install --force-bottle openmagi/tap/magi-agent
 
 # 2. Set ONE provider key
-export ANTHROPIC_API_KEY=...   # or OPENAI_API_KEY / GEMINI_API_KEY / GOOGLE_API_KEY / FIREWORKS_API_KEY
+export ANTHROPIC_API_KEY=...   # or OPENAI_API_KEY / GEMINI_API_KEY / GOOGLE_API_KEY / FIREWORKS_API_KEY / OPENROUTER_API_KEY
 
 # 3. Ask a no-tools question — the real model answers
 magi -p "What is 2+2?"
