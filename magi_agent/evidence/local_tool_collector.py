@@ -146,8 +146,9 @@ class LocalToolEvidenceCollector:
         collection), ``_maybe_persist_records`` (default-ON JSONL), and — when
         the lifecycle flag is on — ``_append_turn_record`` (per-turn ledger for
         ``InspectSelfEvidence``). SkillLoad records are deduped per
-        ``(session, turn, skillPath, bodyDigest)``. Fail-open: returns False
-        instead of raising, mirroring this file's ``except Exception`` convention.
+        ``(session, turn, skillPath, bodyDigest)`` — the dedup key is added AFTER
+        the successful append so a projection error cannot permanently poison the
+        dedup set. False covers both dedup-skips and failures.
         """
         try:
             from magi_agent.evidence.first_party_activity import (  # noqa: PLC0415
@@ -159,18 +160,24 @@ class LocalToolEvidenceCollector:
                 return False
             if not session_id or not turn_id:
                 return False
+            skill_key: tuple[str, str, str, str] | None = None
             if activity.evidence_type == "SkillLoad":
-                key = (
+                skill_key = (
                     session_id,
                     turn_id,
                     str(activity.detail.get("skillPath", "")),
                     str(activity.detail.get("bodyDigest", "")),
                 )
-                if key in self._first_party_skill_seen:
+                if skill_key in self._first_party_skill_seen:
                     return False
-                self._first_party_skill_seen.add(key)
             record = to_evidence_record(activity)
             self._records.setdefault((session_id, turn_id), []).append(record)
+            # Dedup key is added AFTER the successful append so that a raising
+            # projection (to_evidence_record) does not permanently exclude the
+            # skill on subsequent calls.
+            if skill_key is not None:
+                self._first_party_skill_seen.add(skill_key)
+            self._prune_first_party_state(session_id)
             self._maybe_persist_records(
                 session_id=session_id,
                 turn_id=turn_id,
@@ -192,6 +199,25 @@ class LocalToolEvidenceCollector:
             return True
         except Exception:
             return False
+
+    def _prune_first_party_state(self, session_id: str) -> None:
+        """Cap per-session first-party state to the most recent ``_MAX_SESSION_LEDGERS`` turns.
+
+        Mirrors ``_prune_session_ledgers``: drop the oldest (session, turn) keys
+        from ``_records`` beyond the cap and remove any ``_first_party_skill_seen``
+        entries whose (session, turn) no longer survives in ``_records``.
+        """
+        session_keys = [key for key in self._records if key[0] == session_id]
+        removed_keys: set[tuple[str, str]] = set()
+        for key in session_keys[:-_MAX_SESSION_LEDGERS]:
+            self._records.pop(key, None)
+            removed_keys.add(key)
+        if removed_keys:
+            self._first_party_skill_seen = {
+                fp_key
+                for fp_key in self._first_party_skill_seen
+                if (fp_key[0], fp_key[1]) not in removed_keys
+            }
 
     @staticmethod
     def _maybe_persist_records(

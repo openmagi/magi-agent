@@ -212,3 +212,43 @@ def test_first_party_activity_ledger_gated_by_lifecycle_flag(tmp_path, monkeypat
     collector.record_first_party_activity(session_id="s2", turn_id="t2", activity=_fp_activity())
     ledgers = collector.evidence_ledgers_for_session("s2")
     assert len(ledgers) == 1
+
+
+def test_first_party_state_pruned_after_30_turns(tmp_path, monkeypatch) -> None:
+    """Pre-step pruning: recording 30 turns keeps ≤25 turn keys and dedup set stays in sync."""
+    monkeypatch.setenv("MAGI_EVIDENCE_LEDGER_DIR", str(tmp_path))
+    collector = LocalToolEvidenceCollector()
+    session = "s-prune"
+    # Record 30 distinct turns for one session using a SkillLoad activity so the
+    # dedup set is also populated.
+    for i in range(30):
+        turn = f"t-prune-{i:02d}"
+        skill = FirstPartyActivity.model_validate(
+            {
+                "recordId": f"evd_{i:04d}",
+                "evidenceType": "SkillLoad",
+                "publicRef": "evidence:skillLoad@1",
+                "name": "SkillLoader",
+                "status": "ok",
+                "actor": "main",
+                "detail": {
+                    "skillPath": f"bundled/skill-{i}",
+                    "skillSource": "bundled",
+                    "bodyDigest": f"d{i}",
+                },
+            }
+        )
+        result = collector.record_first_party_activity(
+            session_id=session, turn_id=turn, activity=skill
+        )
+        assert result is True, f"turn {i} failed"
+
+    # After 30 inserts, ≤25 turn keys must survive for this session in _records
+    surviving_keys = [key for key in collector._records if key[0] == session]
+    assert len(surviving_keys) <= 25, f"expected ≤25 surviving turn keys, got {len(surviving_keys)}"
+
+    # The dedup set must only reference (session, turn) pairs that still exist
+    surviving_turns = {key[1] for key in surviving_keys}
+    for fp_key in collector._first_party_skill_seen:
+        if fp_key[0] == session:
+            assert fp_key[1] in surviving_turns, f"dedup key references pruned turn {fp_key[1]}"

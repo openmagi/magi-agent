@@ -45,7 +45,7 @@ _STATUS_TO_EVIDENCE_STATUS: Mapping[str, str] = {"ok": "ok", "error": "failed"}
 
 
 class FirstPartyActivity(BaseModel):
-    model_config = ConfigDict(frozen=True, populate_by_name=True)
+    model_config = ConfigDict(frozen=True, populate_by_name=True, validate_default=True)
 
     v: int = 1
     record_id: str = Field(alias="recordId")

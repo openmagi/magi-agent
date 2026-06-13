@@ -253,3 +253,32 @@ def test_detail_is_frozen_and_model_dump_still_works() -> None:
     assert isinstance(dumped["detail"], dict)
     # The serialized detail carries the expected keys
     assert "argsSha256" in dumped["detail"]
+
+
+def test_default_constructed_detail_is_frozen() -> None:
+    """Pre-step A: a default-constructed detail (empty dict) must also be a frozen MappingProxyType.
+
+    Without ``validate_default=True`` on ``model_config``, pydantic skips the
+    ``_freeze_detail`` validator for the default value, leaving a mutable plain
+    dict that bypasses the immutability guarantee for the span between
+    construction and first use.
+    """
+    import pytest
+    from types import MappingProxyType
+
+    activity = FirstPartyActivity.model_validate(
+        {
+            "recordId": "evd_abc",
+            "evidenceType": "ToolCall",
+            "publicRef": TOOL_CALL_REF,
+            "name": "web_search",
+            "status": "ok",
+            "actor": "main",
+            # deliberately omit "detail" to trigger default
+        }
+    )
+    assert isinstance(activity.detail, MappingProxyType), (
+        f"Expected MappingProxyType, got {type(activity.detail)}"
+    )
+    with pytest.raises(TypeError):
+        activity.detail["injected"] = "bad"  # type: ignore[index]
