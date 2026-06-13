@@ -168,6 +168,59 @@ def test_summaries_are_redacted_and_capped() -> None:
     assert len(str(activity.detail["resultSummary"])) <= 400
 
 
+def test_long_bytes_and_bytearray_redacted_in_result_summary() -> None:
+    # Assemble a secret at runtime so GH push protection cannot flag the literal.
+    prefix = "xoxb-"
+    padding = "a" * 60  # prefix(5) + padding(60) = 65 bytes >= threshold of 64
+    secret_bytes = (prefix + padding).encode("utf-8")
+    secret_bytearray = bytearray(secret_bytes)
+    # bytes secret under a non-secret key
+    result_bytes = ToolResult(status="ok", output={"blob": secret_bytes})
+    (activity_bytes,) = _build("web_search", result_bytes)
+    detail_json_bytes = json.dumps(dict(activity_bytes.detail))
+    # The raw secret must not appear in resultSummary
+    assert (prefix + padding) not in detail_json_bytes
+    assert detail_json_bytes.count("[redacted:long-value]") >= 1
+    # bytearray secret under a non-secret key
+    result_ba = ToolResult(status="ok", output={"blob": secret_bytearray})
+    (activity_ba,) = _build("web_search", result_ba)
+    detail_json_ba = json.dumps(dict(activity_ba.detail))
+    assert (prefix + padding) not in detail_json_ba
+    assert detail_json_ba.count("[redacted:long-value]") >= 1
+
+
+def test_partial_ref_only_tool_call_excludes_skill_loader_and_spawn_agent() -> None:
+    # Case (a): only TOOL_CALL_REF enabled — SkillLoader and SpawnAgent yield ZERO activities.
+    only_tool_call = (TOOL_CALL_REF,)
+    skill_result = ToolResult(
+        status="ok",
+        output={
+            "loadedSkills": [
+                {"path": "bundled/web-research", "source": "bundled", "bodyDigest": "d1"}
+            ]
+        },
+    )
+    assert _build("SkillLoader", skill_result, refs=only_tool_call) == ()
+    spawn_result = ToolResult(
+        status="ok",
+        output={
+            "status": "ok",
+            "persona": "general",
+            "promptDigest": "abc",
+            "liveChildRunnerAttached": True,
+        },
+    )
+    assert _build("SpawnAgent", spawn_result, refs=only_tool_call) == ()
+
+
+def test_partial_ref_only_skill_load_no_loaded_skills_yields_nothing() -> None:
+    # Case (b): only SKILL_LOAD_REF enabled, SkillLoader call returned no loadedSkills
+    # — ZERO activities because ToolCall fallback requires TOOL_CALL_REF.
+    only_skill_load = (SKILL_LOAD_REF,)
+    result = ToolResult(status="error", errorCode="skill_not_found")
+    assert _build("SkillLoader", result, refs=only_skill_load) == ()
+
+
 def test_to_evidence_record_projection() -> None:
     result = ToolResult(status="ok", output={}, latencyMs=3)
     (activity,) = _build("web_search", result)

@@ -78,9 +78,11 @@ def _redact_long_values(value: object) -> object:
     """
     if isinstance(value, Mapping):
         return {k: _redact_long_values(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple, Sequence)) and not isinstance(value, (str, bytes)):
+    if isinstance(value, (list, tuple, Sequence)) and not isinstance(
+        value, (str, bytes, bytearray)
+    ):
         return [_redact_long_values(item) for item in value]
-    if isinstance(value, str) and len(value) >= _LONG_VALUE_THRESHOLD:
+    if isinstance(value, (str, bytes, bytearray)) and len(value) >= _LONG_VALUE_THRESHOLD:
         return _LONG_VALUE_REDACTED
     return value
 
@@ -149,7 +151,9 @@ def _tool_call_activity(
         detail["resultSha256"] = _sha256(result.output)
         detail["resultSummary"] = _summary(result.output)
         try:
-            detail["resultBytes"] = len(json.dumps(result.output, sort_keys=True, default=str))
+            detail["resultBytes"] = len(
+                json.dumps(result.output, sort_keys=True, default=str).encode("utf-8")
+            )
         except (TypeError, ValueError):
             detail["resultBytes"] = 0
     return FirstPartyActivity.model_validate(
@@ -239,6 +243,14 @@ def build_first_party_activities(
     ``SpawnAgent`` → 1 SubagentSpawn; everything else → 1 ToolCall. A promoted
     tool whose call failed (no usable output) falls back to a ToolCall record
     so blocked/failed attempts remain evidenced. Refs not enabled ⇒ ().
+
+    Partial-ref semantics (pinned): (a) if only ``TOOL_CALL_REF`` is enabled,
+    ``SkillLoader`` and ``SpawnAgent`` dispatches produce ZERO activities because
+    their promotion paths require ``SKILL_LOAD_REF``/``SUBAGENT_SPAWN_REF``
+    respectively, and the generic ToolCall branch explicitly excludes those two
+    tool names; (b) if only ``SKILL_LOAD_REF`` is enabled and the SkillLoader
+    call produced no ``loadedSkills``, ZERO activities are returned because the
+    ToolCall fallback requires ``TOOL_CALL_REF``.
     """
     refs = frozenset(enabled_refs)
     if tool_name == _SKILL_LOADER_TOOL and SKILL_LOAD_REF in refs:
