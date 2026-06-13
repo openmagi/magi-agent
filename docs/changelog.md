@@ -15,6 +15,15 @@ Versions follow the tags published on GitHub Releases.
 
 ### Fixed
 
+## 0.1.36
+
+### Added
+- Added a strict opt-in fact-grounding verification gate for final answers.
+- Added opt-in Gate5B governance wiring so selected runtime runs can exercise
+  the control-plane and pre-final grounding paths.
+- Added `scripts/dogfood-full-on.env` as a sourceable full-runtime dogfood
+  profile without changing code defaults.
+
 ## 0.1.35
 
 ### Fixed
