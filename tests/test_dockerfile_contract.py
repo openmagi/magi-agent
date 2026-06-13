@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 
@@ -8,7 +9,11 @@ DOCKERFILE = ROOT / "Dockerfile"
 def test_runtime_image_installs_runtime_extras() -> None:
     dockerfile = DOCKERFILE.read_text(encoding="utf-8")
 
-    assert 'python -m pip install --no-cache-dir ".[cli,composio,providers]"' in dockerfile
+    match = re.search(r'pip install --no-cache-dir "\.\[([^\]]+)\]"', dockerfile)
+    assert match is not None, "runtime image must install magi-agent with extras"
+
+    extras = {extra.strip() for extra in match.group(1).split(",")}
+    assert {"browser", "cli", "composio", "providers", "waf"}.issubset(extras)
     assert '".[cli]"' not in dockerfile
     assert '".[cli,composio]"' not in dockerfile
 
