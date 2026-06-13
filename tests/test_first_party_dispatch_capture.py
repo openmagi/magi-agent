@@ -28,6 +28,25 @@ from magi_agent.tools.result import ToolResult
 
 
 # ---------------------------------------------------------------------------
+# Module-scoped reset: ensure the process-default collector global never leaks
+# across tests in this module.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _reset_default_fp_collector(monkeypatch: pytest.MonkeyPatch) -> None:  # type: ignore[return]
+    """Reset ``magi_agent.tools.dispatcher._DEFAULT_FP_COLLECTOR`` before and
+    after each test so the process-global collector cannot leak state between
+    tests in this module.
+    """
+    import magi_agent.tools.dispatcher as _dispatcher_mod
+
+    monkeypatch.setattr(_dispatcher_mod, "_DEFAULT_FP_COLLECTOR", None)
+    yield  # type: ignore[misc]
+    monkeypatch.setattr(_dispatcher_mod, "_DEFAULT_FP_COLLECTOR", None)
+
+
+# ---------------------------------------------------------------------------
 # Helpers — copied from test_tool_latency_instrumentation.py (authoritative)
 # ---------------------------------------------------------------------------
 

@@ -63,6 +63,12 @@ class LocalToolEvidenceCollector:
     """
 
     def __init__(self, *, general_automation_receipts: object | None = None) -> None:
+        # Keyed by (session_id, turn_id).  Contains BOTH tool-receipt records
+        # (appended by ``record_tool_result``) and first-party-origin records
+        # (appended by ``record_first_party_activity``).  The first-party prune
+        # path (_prune_first_party_state) NEVER evicts non-first-party records —
+        # it filters selectively by type prefix; only ``_prune_session_ledgers``
+        # caps ``_ledgers``.
         self._records: dict[tuple[str, str], list[object]] = {}
         self._general_automation_receipts = general_automation_receipts
         # Per-(session_id, turn_id) immutable EvidenceLedgers, built lazily on
@@ -73,6 +79,11 @@ class LocalToolEvidenceCollector:
         self._ledgers: dict[tuple[str, str], EvidenceLedger] = {}
         # First-party activity dedup: (session_id, turn_id, skillPath, bodyDigest)
         self._first_party_skill_seen: set[tuple[str, str, str, str]] = set()
+        # Insertion-ordered set of (session_id, turn_id) keys that have at least
+        # one first-party record.  Used by ``_prune_first_party_state`` to bound
+        # the first-party turn count WITHOUT touching non-first-party (tool
+        # receipt) records that share the same (session, turn) key.
+        self._first_party_turns: dict[tuple[str, str], None] = {}
 
     def record_tool_result(
         self,
@@ -177,6 +188,10 @@ class LocalToolEvidenceCollector:
             # skill on subsequent calls.
             if skill_key is not None:
                 self._first_party_skill_seen.add(skill_key)
+            # Register this (session, turn) as having a first-party record so
+            # the prune helper can bound first-party turns without touching
+            # non-first-party (tool receipt) records at the same key.
+            self._first_party_turns[(session_id, turn_id)] = None
             self._prune_first_party_state(session_id)
             self._maybe_persist_records(
                 session_id=session_id,
@@ -201,22 +216,53 @@ class LocalToolEvidenceCollector:
             return False
 
     def _prune_first_party_state(self, session_id: str) -> None:
-        """Cap per-session first-party state to the most recent ``_MAX_SESSION_LEDGERS`` turns.
+        """Cap per-session first-party turns to the most recent ``_MAX_SESSION_LEDGERS``.
 
-        Mirrors ``_prune_session_ledgers``: drop the oldest (session, turn) keys
-        from ``_records`` beyond the cap and remove any ``_first_party_skill_seen``
-        entries whose (session, turn) no longer survives in ``_records``.
+        Only evicts ``custom:FirstParty*``-typed records from ``_records``.
+        Non-first-party records (e.g. tool receipts appended by
+        ``record_tool_result``) that share the same ``(session, turn)`` key are
+        NEVER removed: the first-party prune path must not silently clear tool
+        receipts that ``collect_for_turn`` / ``InspectSelfEvidence`` depends on.
+        ``_ledgers`` is left entirely untouched here — ``_prune_session_ledgers``
+        handles it independently.
+
+        Algorithm:
+        1. Collect all ``(session_id, turn_id)`` keys in ``_first_party_turns``
+           that belong to ``session_id``, in insertion order.
+        2. If the count exceeds ``_MAX_SESSION_LEDGERS``, evict the oldest surplus
+           keys one by one:
+           a. Filter ``custom:FirstParty*`` records OUT of ``_records[key]``
+              (keep non-first-party records).
+           b. If the filtered list is now empty, pop the key from ``_records``.
+           c. Drop the key from ``_first_party_turns``.
+           d. Purge matching entries from ``_first_party_skill_seen``.
         """
-        session_keys = [key for key in self._records if key[0] == session_id]
-        removed_keys: set[tuple[str, str]] = set()
-        for key in session_keys[:-_MAX_SESSION_LEDGERS]:
-            self._records.pop(key, None)
-            removed_keys.add(key)
-        if removed_keys:
+        # Gather this session's first-party turns in insertion order.
+        session_fp_keys = [key for key in self._first_party_turns if key[0] == session_id]
+        surplus = len(session_fp_keys) - _MAX_SESSION_LEDGERS
+        if surplus <= 0:
+            return
+        evicted: set[tuple[str, str]] = set()
+        for key in session_fp_keys[:surplus]:
+            existing = self._records.get(key)
+            if existing is not None:
+                # Keep only non-first-party records (tool receipts etc.)
+                kept = [
+                    r
+                    for r in existing
+                    if not str(getattr(r, "type", "")).startswith("custom:FirstParty")
+                ]
+                if kept:
+                    self._records[key] = kept
+                else:
+                    self._records.pop(key, None)
+            self._first_party_turns.pop(key, None)
+            evicted.add(key)
+        if evicted:
             self._first_party_skill_seen = {
                 fp_key
                 for fp_key in self._first_party_skill_seen
-                if (fp_key[0], fp_key[1]) not in removed_keys
+                if (fp_key[0], fp_key[1]) not in evicted
             }
 
     @staticmethod
