@@ -31,12 +31,9 @@ graph LR
     browser --> runtime
     browser --> tools
     browser --> web_acquisition
-    channels --> cli
     channels --> egress_proxy
     channels --> harness
-    channels --> recipes
     channels --> runtime
-    channels --> workflows
     cli --> adk_bridge
     cli --> benchmarks
     cli --> browser
@@ -231,7 +228,6 @@ graph LR
     tools --> transport
     tools --> web_acquisition
     transport --> adk_bridge
-    transport --> channels
     transport --> cli
     transport --> composio
     transport --> config
@@ -370,19 +366,13 @@ graph LR
 | email_live.py | E4 — Gated live email adapter. | platform_registry, scheduler_delivery | — |
 | platform_registry.py | E1 — Platform Registry: self-registration seam for channel platforms. | — | channels/email_live.py, channels/slack_live.py |
 | push_delivery.py | — | contract, provider_execution, provider_receipts, runtime_boundary | — |
-| research_command.py | — | cost_estimate, workflow_recipe | channels/workflow_confirm_store.py, channels/workflow_orchestrator.py |
 | runtime_boundary.py | — | contract, dispatcher | channels/dispatcher.py, channels/push_delivery.py, channels/telegram_adapter.py, harness/scheduler_runtime.py |
 | slack_live.py | E4 — Gated live Slack adapter. | platform_registry, scheduler_delivery, slack_urllib | channels/providers/slack_urllib.py |
-| taskkind_classifier.py | — | inference_scaling | channels/workflow_classifier_live.py, transport/streaming_chat_route.py |
+| taskkind_classifier.py | — | inference_scaling | — |
 | telegram_adapter.py | — | contract, dispatcher, provider_execution, provider_receipts, runtime_boundary | channels/providers/telegram_httpx.py, channels/telegram_live.py, gateway/channel_watchers.py |
 | telegram_boundary.py | — | — | — |
 | telegram_live.py | E2 — Gated live Telegram polling adapter. | contract, scheduler_delivery, telegram_adapter | gateway/channel_watchers.py |
-| workflow_classifier.py | — | inference_scaling | channels/workflow_orchestrator.py |
-| workflow_classifier_live.py | Model-backed channel-workflow classifier seam (C5, doc 03 PR-5). | providers, readonly_classifier, taskkind_classifier | transport/streaming_chat_route.py |
-| workflow_confirm_store.py | — | research_command | channels/workflow_orchestrator.py, transport/streaming_chat_route.py |
-| workflow_gate.py | — | — | channels/workflow_orchestrator.py, transport/streaming_chat_route.py |
-| workflow_orchestrator.py | — | research_command, workflow_classifier, workflow_confirm_store, workflow_executor, workflow_gate, workflow_routing | transport/streaming_chat_route.py |
-| workflow_routing.py | — | — | channels/dispatcher.py, channels/workflow_orchestrator.py |
+| workflow_routing.py | — | — | channels/dispatcher.py |
 
 ### channels/providers/
 
@@ -413,8 +403,8 @@ graph LR
 | ndjson.py | Single-writer NDJSON output for the headless CLI. | protocol | cli/headless.py, cli/tests/test_ndjson.py |
 | permissions.py | Permission rules engine + gate skeleton for the Magi headless CLI. | contracts, control, durable_control_store, env, protocol, readonly_classifier | cli/engine.py, cli/headless.py, cli/tests/test_app.py, cli/tests/test_coldstart.py, cli/tests/test_engine_gate.py, cli/tests/test_headless_approval.py, cli/tests/test_headless_projection.py, cli/tests/test_permissions.py, cli/tests/test_streaming_driver.py, cli/wiring.py, transport/active_turn.py, transport/streaming_driver.py, transport/streaming_sink.py |
 | protocol.py | Pydantic models for the Magi headless CLI wire protocol. | — | cli/headless.py, cli/ndjson.py, cli/permissions.py, cli/tests/test_ndjson.py, cli/tests/test_permissions.py, cli/tests/test_protocol.py, cli/tests/test_streaming_driver.py, cli/tests/test_streaming_sink.py, transport/streaming_chat_route.py |
-| providers.py | Provider/key resolution for the local ``magi`` CLI. | env, model | (root)/main.py, channels/workflow_classifier_live.py, cli/app.py, cli/commands/control.py, cli/memory_bootstrap.py, cli/real_runner.py, cli/tests/test_model_picker_wire.py, cli/tests/test_providers.py, cli/tests/test_real_runner.py, cli/tests/test_runtime_policy_wiring.py, cli/tests/test_tui_dialog_model.py, cli/tui/app.py, cli/tui/dialogs/model.py, cli/wiring.py, discovery/orchestrator.py, runtime/child_runner_live.py, tools/document_qa_tools.py, tools/image_tools.py, transport/egress_critic.py |
-| readonly_classifier.py | SmartApprove read-only classifier for the Magi permission gate (PR3). | contracts, real_runner, registry | channels/workflow_classifier_live.py, cli/engine.py, cli/permissions.py, cli/wiring.py, transport/egress_critic.py |
+| providers.py | Provider/key resolution for the local ``magi`` CLI. | env, model | (root)/main.py, cli/app.py, cli/commands/control.py, cli/memory_bootstrap.py, cli/real_runner.py, cli/tests/test_model_picker_wire.py, cli/tests/test_providers.py, cli/tests/test_real_runner.py, cli/tests/test_runtime_policy_wiring.py, cli/tests/test_tui_dialog_model.py, cli/tui/app.py, cli/tui/dialogs/model.py, cli/wiring.py, discovery/orchestrator.py, runtime/child_runner_live.py, tools/document_qa_tools.py, tools/image_tools.py, transport/egress_critic.py |
+| readonly_classifier.py | SmartApprove read-only classifier for the Magi permission gate (PR3). | contracts, real_runner, registry | cli/engine.py, cli/permissions.py, cli/wiring.py, transport/egress_critic.py |
 | real_runner.py | A real, model-backed runner for the local ``magi`` CLI. | compiler, control_plane, discovery, engine, env, live_gate, local_tool_collector, materializer, providers, session_identity, session_service, task_completion, tool_runtime | cli/readonly_classifier.py, cli/tests/test_app.py, cli/tests/test_real_runner.py, cli/tests/test_runtime_policy_wiring.py, cli/wiring.py, discovery/orchestrator.py, runtime/child_runner_live.py |
 | session_log.py | Append-only JSONL session log for the Magi CLI (Stream B, PR-B1). | contracts, session_continuity, session_service, transcript | cli/app.py, cli/headless.py, cli/tests/test_app.py, cli/tests/test_coldstart.py, cli/tests/test_session_log.py, cli/tui/app.py, cli/tui/history.py, cli/tui/theme.py, cli/wiring.py |
 | tool_runtime.py | Real tool runtime for the local ``magi`` CLI agent. | ask_user_question_toolhost, context, core_toolhost, dispatcher, env, file_tool_manifests, file_toolhost, first_party_gate, identity, learning_recall, live_gate, local_tool_collector, manifest, memory_recall_block, memory_snapshot_cache, memory_write_wiring, message_builder, permission_scope, plan_mode_toolhost, prompt_guidance, python_exec, registry, session_identity, tool, tool_adapter, tool_synthesis, tools, web_search_tools | cli/real_runner.py, cli/tests/test_identity.py, cli/tests/test_local_tool_evidence_wiring.py, cli/tests/test_plan_mode.py, cli/tests/test_plan_mode_tools_exposed.py, cli/tests/test_tool_runtime.py, cli/wiring.py, runtime/child_runner_live.py |
@@ -880,7 +870,7 @@ graph LR
 | goal_loop_control.py | B3/B4 — Continuation loop control + after-turn hook (the Ralph loop). | context, discovery, goal_judge, goal_state, manifest, registries, result, types | firstparty/packs/goal_loop_default/impl.py |
 | goal_state.py | B1 — GoalState: persistent session-scoped goal state layer. | goal_loop, migrations | harness/goal_loop_control.py |
 | guardrail_matrix.py | — | — | — |
-| inference_scaling.py | — | — | channels/taskkind_classifier.py, channels/workflow_classifier.py, harness/cross_review.py |
+| inference_scaling.py | — | — | channels/taskkind_classifier.py, harness/cross_review.py |
 | learning_executor.py | Learning reflection executor — PR3 (real signal extraction + labeling). | candidates, config, eval_gate, labeler, store | harness/cron_runtime.py, learning/bootstrap.py |
 | long_context_eval.py | — | context_budget, final_output_gate, model_tiers, request_shape | — |
 | memory_compaction.py | — | discovery, memory_write, registries, write_boundary | firstparty/packs/memory_strategies_default/impl.py, harness/memory_review.py |
@@ -906,7 +896,7 @@ graph LR
 | self_review_pipeline.py | C2 — LearningPipelineSink: routes self-review candidates through the learning eval-gate. | candidates, eval_gate, models, self_review, store, types | — |
 | skill_curator.py | C3 — SkillCurator: inactivity-triggered janitor for agent-authored learned items. | store, types | — |
 | verifier_bus.py | — | contracts, ledger, types | cli/engine.py, cli/tests/test_local_tool_evidence_wiring.py, evidence/coding_verification.py, evidence/event_projection.py, harness/cross_review.py, meta_orchestration/commit_adapter.py |
-| workflow_executor.py | Bounded workflow-executor — PR1 (skeleton) + PR3 (resumability). | child_runner_boundary, child_runner_live, child_toolset, compiler, cross_review, dry_run, parallel_execution, public_events, research_child_runner, runtime, workflow_executor_readiness, workflow_result_cache | channels/workflow_orchestrator.py, recipes/workflow_recipe.py |
+| workflow_executor.py | Bounded workflow-executor — PR1 (skeleton) + PR3 (resumability). | child_runner_boundary, child_runner_live, child_toolset, compiler, cross_review, dry_run, parallel_execution, public_events, research_child_runner, runtime, workflow_executor_readiness, workflow_result_cache | recipes/workflow_recipe.py |
 | workflow_result_cache.py | Within-run result cache for the workflow executor — PR3. | — | harness/workflow_executor.py |
 
 ### harness/coding/
@@ -1227,7 +1217,7 @@ graph LR
 | research_child_runner.py | — | runtime | harness/workflow_executor.py |
 | retry_repair_policies.py | — | turn_utilities | adk_bridge/edit_retry_reflection.py |
 | selector_validation.py | — | — | recipes/__init__.py |
-| workflow_recipe.py | Track 17 PR5 — Workflow-as-recipe + reuse ("save as command"). | child_acceptance, compiler, cross_review, final_assembly, inspection_loop, materializer, registry, workflow_executor | channels/research_command.py |
+| workflow_recipe.py | Track 17 PR5 — Workflow-as-recipe + reuse ("save as command"). | child_acceptance, compiler, cross_review, final_assembly, inspection_loop, materializer, registry, workflow_executor | — |
 
 ### recipes/first_party/
 
@@ -1668,7 +1658,7 @@ graph LR
 | sse.py | — | events, health, public_events, redaction, transport | cli/engine.py, runtime/stream_fallback.py, shadow/fixture_runner.py, shadow/gate5b4d_stream_fixture_audit.py, shadow/ts_parity_replay.py, transport/public_event_parity.py, transport/sse_buffer.py, transport/streaming_chat.py |
 | sse_buffer.py | — | event_adapter, sse | runtime/stream_fallback.py, runtime/stream_withholding.py |
 | streaming_chat.py | SSE frame serializer for a stream of RuntimeEvents + a terminal EngineResult. | contracts, events, sse | cli/tests/test_streaming_chat.py, transport/streaming_chat_route.py, transport/streaming_driver.py |
-| streaming_chat_route.py | Hosted-grade SSE streaming-chat HTTP surface. | active_turn, chat, contracts, env, events, gate5b_full_toolhost, health, memory_mode_context, protocol, public_events, streaming_chat, streaming_driver, streaming_sink, taskkind_classifier, wiring, workflow_classifier_live, workflow_confirm_store, workflow_gate, workflow_orchestrator | (root)/app.py |
+| streaming_chat_route.py | Hosted-grade SSE streaming-chat HTTP surface. | active_turn, chat, contracts, env, events, gate5b_full_toolhost, health, memory_mode_context, protocol, public_events, streaming_chat, streaming_driver, streaming_sink, wiring | (root)/app.py |
 | streaming_driver.py | Async driver that turns one agent turn into a live SSE byte stream. | active_turn, contracts, events, permissions, streaming_chat | cli/tests/test_streaming_driver.py, transport/streaming_chat_route.py |
 | streaming_sink.py | SSE streaming-chat seam for tool-permission approval requests. | events, permissions | cli/tests/test_streaming_driver.py, cli/tests/test_streaming_sink.py, transport/streaming_chat_route.py |
 | tool_preview.py | — | — | evidence/child_runtime_envelope.py, evidence/reports.py, evidence/tool_boundary.py, harness/general_automation/plan_act_switch.py, harness/general_automation/question_tool.py, harness/plan_gate.py, memory/adapters/local_file_writable.py, memory/projection.py, memory/prompt_projection.py, runtime/child_event_projection.py, runtime/control.py, runtime/events.py, runtime/work_console_snapshot.py, shadow/artifact_channel_delivery_contract.py, shadow/coding_child_conflict_resolution_contract.py, shadow/coding_verification_evidence_contract.py, shadow/delegated_workflow_evidence_contract.py, shadow/gate4c1_runner_shadow_invoker.py, shadow/memory_source_authority_contract.py, shadow/mission_lifecycle_contract.py, shadow/office_automation_contract.py, shadow/patch_file_policy_contract.py, shadow/path_shell_policy_contract.py, shadow/research_source_evidence_contract.py, shadow/toolhost_contract.py, shadow/web_acquisition_browser_provider_contract.py, shadow/workspace_adoption_preflight_contract.py, tools/event_projection.py |
@@ -1725,8 +1715,7 @@ graph LR
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
 | __init__.py | — | compiler, dry_run, registry | — |
-| compiler.py | — | registry | harness/workflow_executor.py, recipes/workflow_recipe.py, workflows/__init__.py, workflows/cost_estimate.py, workflows/dry_run.py |
-| cost_estimate.py | — | compiler | channels/research_command.py |
+| compiler.py | — | registry | harness/workflow_executor.py, recipes/workflow_recipe.py, workflows/__init__.py, workflows/dry_run.py |
 | dry_run.py | — | compiler | harness/workflow_executor.py, workflows/__init__.py |
 | registry.py | — | — | recipes/workflow_recipe.py, workflows/__init__.py, workflows/compiler.py |
 
