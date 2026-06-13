@@ -2598,6 +2598,30 @@ def parse_fact_grounding_verification_enabled(env: Mapping[str, str]) -> bool:
     return flag_bool("MAGI_FACT_GROUNDING_VERIFICATION_ENABLED", env=env)
 
 
+MAGI_GATE5B_GOVERNANCE_ENABLED_ENV = "MAGI_GATE5B_GOVERNANCE_ENABLED"
+
+
+def is_gate5b_governance_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Single source of truth for the gate5b-governance enablement flag.
+
+    Default OFF (strict truthy opt-in: "1"/"true"/"yes"/"on"). When OFF the
+    gate5b user-visible serving path is byte-identical to today: the live runner
+    boundary builds its Agent/Runner with NO control-plane plugin and the
+    serving boundary runs NO pre-final evidence/fact-grounding gate. When ON it
+    activates the cli/engine-parity wiring on the gate5b path — the control-plane
+    plugin (each control still behind its OWN existing flag) is attached to the
+    gate5b runner, and a pre-final fact-grounding/evidence check runs over the
+    turn's collected tool evidence before the user-visible response is emitted.
+    Like ``is_egress_gate_enabled`` this deliberately does NOT follow the
+    runtime-profile default-ON convention — it is an additive, default-disabled
+    master switch for the gate5b governance wiring.
+    """
+    from .flags import flag_bool
+
+    source = os.environ if env is None else env
+    return flag_bool(MAGI_GATE5B_GOVERNANCE_ENABLED_ENV, env=source)
+
+
 def plan_mode_tools_enabled(env: Mapping[str, str] | None = None) -> bool:
     """Return True when the manifest-routed plan-mode tools are explicitly enabled.
 
