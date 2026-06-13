@@ -310,6 +310,107 @@ def test_first_party_adk_tools_attach_file_tools_when_gated(
     assert image_result["errorCode"] == "path_not_found"
 
 
+def test_first_party_adk_tools_prefer_direct_web_tools_when_provider_keys_present(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setenv("BRAVE_API_KEY", "brave-test")
+    monkeypatch.setenv("FIRECRAWL_API_KEY", "firecrawl-test")
+    for name in (
+        "CORE_AGENT_PYTHON_LIVE_WEB_ACQUISITION_ENABLED",
+        "CORE_AGENT_PYTHON_WEB_PROVIDER_ROUTER_ENABLED",
+        "CORE_AGENT_PYTHON_JINA_READER_ENABLED",
+        "CORE_AGENT_PYTHON_INSANE_FETCH_ENABLED",
+        "MAGI_PLATFORM_BASE_URL",
+        "MAGI_PLATFORM_API_KEY",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    from magi_agent.tools import web_search_tools
+
+    monkeypatch.setattr(
+        web_search_tools,
+        "web_search_raw",
+        lambda query: {
+            "web": {
+                "results": [
+                    {
+                        "title": f"direct result for {query}",
+                        "url": "https://example.com/direct",
+                        "description": "direct web path used",
+                    }
+                ]
+            }
+        },
+    )
+
+    tools = _build_first_party_adk_tools(
+        cwd=tmp_path,
+        session_id="sid-direct-web",
+        mode="act",
+    )
+
+    names = {getattr(tool, "name", None) for tool in tools}
+    assert {"web_search", "web_fetch", "research_fact"}.issubset(names)
+    assert {"WebSearch", "WebFetch", "web-search"}.isdisjoint(names)
+
+    result = _tool_by_name(tools, "web_search").func("Tesla 10-K")
+
+    assert "direct result for Tesla 10-K" in result
+    assert "web_research_not_configured" not in result
+
+
+def test_first_party_direct_web_tools_keep_adk_signature_with_evidence_collector(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setenv("BRAVE_API_KEY", "brave-test")
+    monkeypatch.setenv("FIRECRAWL_API_KEY", "firecrawl-test")
+
+    from magi_agent.evidence.local_tool_collector import LocalToolEvidenceCollector
+    from magi_agent.harness.general_automation.live_gate import (
+        GeneralAutomationReceiptLedgerStore,
+    )
+    from magi_agent.tools import web_search_tools
+
+    monkeypatch.setattr(
+        web_search_tools,
+        "web_search_raw",
+        lambda query: {
+            "web": {
+                "results": [
+                    {
+                        "title": f"direct result for {query}",
+                        "url": "https://example.com/direct",
+                        "description": "direct web path used",
+                    }
+                ]
+            }
+        },
+    )
+
+    tools = _build_first_party_adk_tools(
+        cwd=tmp_path,
+        session_id="sid-direct-web",
+        mode="act",
+        general_automation_receipts=GeneralAutomationReceiptLedgerStore(),
+        local_tool_evidence_collector=LocalToolEvidenceCollector(),
+    )
+
+    result = asyncio.run(
+        _tool_by_name(tools, "web_search").run_async(
+            args={"query": "Tesla 10-K"},
+            tool_context=_FakeAdkToolContext(
+                invocation_id="turn-direct-web",
+                tool_name="web_search",
+                call_id="call-direct-web",
+            ),
+        )
+    )
+
+    assert "direct result for Tesla 10-K" in result
+
+
 def test_first_party_adk_tools_attach_browser_task_by_default(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,

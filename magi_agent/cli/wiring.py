@@ -563,6 +563,7 @@ def _build_first_party_adk_tools(
     from magi_agent.evidence.first_party_gate import (  # noqa: PLC0415
         enabled_first_party_activity_refs,
     )
+    from magi_agent.tools.web_search_tools import build_web_search_tools  # noqa: PLC0415
 
     dispatcher = ToolDispatcher(
         registry,
@@ -570,6 +571,12 @@ def _build_first_party_adk_tools(
         first_party_activity_collector=local_tool_evidence_collector,
         first_party_evidence_refs=enabled_first_party_activity_refs(),
     )
+    try:
+        direct_web_tools = build_web_search_tools()
+    except Exception:
+        direct_web_tools = []
+    direct_web_replaces_native = bool(direct_web_tools)
+    native_web_tool_names = frozenset({"WebSearch", "WebFetch", "web-search", "web_search"})
     # Only advertise tools that actually have an execution handler bound. A
     # manifest with no handler can never be dispatched, so exposing it would
     # advertise a capability the runtime cannot deliver. (Handler-less catalog
@@ -585,6 +592,10 @@ def _build_first_party_adk_tools(
             registration is not None
             and registration.handler is not None
             and _cli_tool_allowed_for_mode(registration.manifest, mode=mode)
+            and not (
+                direct_web_replaces_native
+                and registration.manifest.name in native_web_tool_names
+            )
         )
     )
 
@@ -631,6 +642,8 @@ def _build_first_party_adk_tools(
         attach_enabled=True,
         exposed_tool_names=exposed_tool_names,
     )
+    if direct_web_tools:
+        tools = [*tools, *direct_web_tools]
     return wrap_cli_adk_tools_with_evidence_collector(
         tools,
         collector=local_tool_evidence_collector,

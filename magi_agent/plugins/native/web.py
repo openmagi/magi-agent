@@ -19,14 +19,25 @@ from magi_agent.web_acquisition.research_tools import (
 # below falls back to them. Keep the code value and result shape stable.
 WEB_RESEARCH_NOT_CONFIGURED_ERROR_CODE = "web_research_not_configured"
 
-_NOT_CONFIGURED_MESSAGE = (
-    "WebSearch/WebFetch is not configured. No live web provider is enabled, so "
-    "the agent cannot search or fetch the web. Enable a live provider: set "
-    "CORE_AGENT_PYTHON_LIVE_WEB_ACQUISITION_ENABLED=1 and "
-    "CORE_AGENT_PYTHON_WEB_PROVIDER_ROUTER_ENABLED=1, plus one of "
-    "CORE_AGENT_PYTHON_JINA_READER_ENABLED (+MAGI_JINA_API_KEY) / "
-    "CORE_AGENT_PYTHON_INSANE_FETCH_ENABLED / "
+_WEBSEARCH_NOT_CONFIGURED_MESSAGE = (
+    "WebSearch is not configured. No live search provider is enabled, so the "
+    "agent cannot search the web. For the local CLI direct web toolset, set "
+    "BRAVE_API_KEY and FIRECRAWL_API_KEY, or set MAGI_WEB_SEARCH_PROVIDER=serpapi "
+    "with SERPAPI_API_KEY and FIRECRAWL_API_KEY. For the native WebSearch "
+    "provider router, set CORE_AGENT_PYTHON_LIVE_WEB_ACQUISITION_ENABLED=1, "
+    "CORE_AGENT_PYTHON_WEB_PROVIDER_ROUTER_ENABLED=1, and "
     "MAGI_PLATFORM_BASE_URL+MAGI_PLATFORM_API_KEY."
+)
+
+_WEBFETCH_NOT_CONFIGURED_MESSAGE = (
+    "WebFetch is not configured. No live fetch provider is enabled, so the "
+    "agent cannot fetch web pages through the native provider router. For the "
+    "local CLI direct web toolset, set BRAVE_API_KEY and FIRECRAWL_API_KEY. "
+    "For the native WebFetch provider router, set "
+    "CORE_AGENT_PYTHON_LIVE_WEB_ACQUISITION_ENABLED=1 and "
+    "CORE_AGENT_PYTHON_WEB_PROVIDER_ROUTER_ENABLED=1, plus "
+    "MAGI_PLATFORM_BASE_URL+MAGI_PLATFORM_API_KEY or "
+    "CORE_AGENT_PYTHON_INSANE_FETCH_ENABLED=1."
 )
 
 # Duplicated deliberately to match the env-gate truthy convention used by
@@ -50,7 +61,11 @@ def _not_configured_result(tool_name: str) -> ToolResult:
     return ToolResult(
         status="error",
         error_code=WEB_RESEARCH_NOT_CONFIGURED_ERROR_CODE,
-        error_message=_NOT_CONFIGURED_MESSAGE,
+        error_message=(
+            _WEBSEARCH_NOT_CONFIGURED_MESSAGE
+            if tool_name == "WebSearch"
+            else _WEBFETCH_NOT_CONFIGURED_MESSAGE
+        ),
         metadata={"tool": tool_name},
     )
 
