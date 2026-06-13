@@ -919,13 +919,11 @@ def build_tui_app(
         cwd=str(cwd) if cwd is not None else None,
     )
 
-    # FIX 2 (global review): attach the app's TextualSink to the gate so the
-    # gate races the TUI sink. build_headless_runtime constructs the gate with
-    # an EMPTY ``sinks`` list; without this wiring any tool needing an ``ask``
-    # verdict resolves to safe-deny and the ToolUseConfirm modal never appears.
-    # Defensive: only when the gate exposes a ``sinks`` list.
+    # Attach the app's TextualSink to the gate so non-bypass modes can prompt.
+    # bypassPermissions already installs a no-frame HeadlessSink; racing the TUI
+    # sink there can still push ToolUseConfirm before cancellation reaches it.
     gate_sinks = getattr(rt.gate, "sinks", None)
-    if isinstance(gate_sinks, list):
+    if permission_mode != "bypassPermissions" and isinstance(gate_sinks, list):
         gate_sinks.append(app.sink)
 
     return app
