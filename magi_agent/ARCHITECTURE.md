@@ -79,6 +79,7 @@ graph LR
     evidence --> config
     evidence --> harness
     evidence --> packs
+    evidence --> research
     evidence --> runtime
     evidence --> telemetry
     evidence --> tools
@@ -679,7 +680,7 @@ graph LR
 | calculation_policy.py | — | — | evidence/final_output_gate.py |
 | child_runtime_envelope.py | — | runtime_issuance, subagent, tool_preview, types | harness/general_automation/delegation.py, meta_orchestration/child_acceptance.py, recipes/opencode_child_lifecycle.py, research/child_roles.py, research/evidence_graph.py, runtime/child_event_projection.py, runtime/child_runner_boundary.py |
 | citation_audit.py | — | reports, source_ledger, types | evidence/research_final_gate.py, research/event_projection.py |
-| claim_grounding.py | — | — | — |
+| claim_grounding.py | — | grounded_answer_guard | — |
 | code_diagnostics_receipts.py | PR5 — CodeDiagnostics evidence boundary for after-edit LSP diagnostics. | — | gates/gate5b_full_toolhost.py |
 | coding_tool_receipts.py | PR3 — ToolHost Coding Mutation Receipt Boundary. | result | gates/gate5b_full_toolhost.py, tools/dispatcher.py |
 | coding_verification.py | — | contracts, edit_matching, reports, types, verifier_bus | recipes/coding_evidence_gate.py |
@@ -1275,7 +1276,7 @@ graph LR
 | event_projection.py | — | citation_audit, public_events, runtime_issuance, source_proof | research/research_first_canary.py |
 | evidence_graph.py | — | acceptance_criteria, action_claims, child_runtime_envelope, claim_graph, source_proof | research/boundary_enforcement.py, research/final_projection_gate.py, research/repair.py |
 | final_projection_gate.py | — | action_claims, boundary_enforcement, evidence_graph | — |
-| grounded_answer_guard.py | General grounded-answer guard (anti-fabrication lever). | — | — |
+| grounded_answer_guard.py | General grounded-answer guard (anti-fabrication lever). | — | evidence/claim_grounding.py |
 | live_audit.py | Live, observe-only research-governance audit (audit-first). | — | cli/headless.py |
 | meta_adapter.py | — | child_acceptance, child_roles, task_plan | — |
 | output_contract_gate.py | Output-Contract Adherence Gate — general format-discipline gate for final answers. | — | — |

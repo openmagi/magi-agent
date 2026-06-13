@@ -2580,6 +2580,24 @@ def parse_ga_deliverable_gate_enabled(env: Mapping[str, str]) -> bool:
     return flag_bool("MAGI_GA_DELIVERABLE_GATE_ENABLED", env=env)
 
 
+def parse_fact_grounding_verification_enabled(env: Mapping[str, str]) -> bool:
+    """MAGI_FACT_GROUNDING_VERIFICATION_ENABLED — semantic grounding gate.
+
+    Wires the deterministic ``evaluate_answer_grounding`` detector into the live
+    pre-final evidence gate in ``cli.engine``: when ON, a research answer that
+    asserts a specific numeric/identifier value NOT present in the opened-source
+    corpus stays ungrounded and the bare ``fact_grounding`` required-validator is
+    left unsatisfied, so the gate blocks. This is a **strict default-OFF** gate:
+    it never defaults ON in any runtime profile and only flips for an explicit
+    truthy value, so flag-OFF behavior stays byte-identical to ``main`` (the
+    satisfier is inert and the existing ``fact_grounding`` label behaves exactly
+    as it does today).
+    """
+    from .flags import flag_bool
+
+    return flag_bool("MAGI_FACT_GROUNDING_VERIFICATION_ENABLED", env=env)
+
+
 def plan_mode_tools_enabled(env: Mapping[str, str] | None = None) -> bool:
     """Return True when the manifest-routed plan-mode tools are explicitly enabled.
 

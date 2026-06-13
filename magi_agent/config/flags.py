@@ -415,6 +415,16 @@ FLAGS: tuple[FlagSpec, ...] = (
             "default-OFF and inert unless explicitly set."
         ),
     ),
+    _b(
+        "MAGI_FACT_GROUNDING_VERIFICATION_ENABLED",
+        stage="stage2",
+        summary=(
+            "Run semantic grounding verification on the live evidence gate: a "
+            "research answer asserting a specific numeric/identifier value not "
+            "present in the opened-source corpus stays ungrounded and blocks. "
+            "Strict default-OFF and inert unless explicitly set."
+        ),
+    ),
     _pb(
         "MAGI_SELF_INTROSPECTION_ENABLED",
         summary="Advertise the InspectSelfEvidence tool (default-ON full profile).",

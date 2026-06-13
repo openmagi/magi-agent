@@ -95,6 +95,7 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 - `MAGI_FACTS_REPLAN_ENABLED` (default off) — Inject a periodic in-context facts survey (given/learned/look-up/derive) + plan refresh into the live model loop every N working steps.
 - `MAGI_FACTS_REPLAN_INTERVAL` (default `4`) — Working steps between facts surveys (>= 1; a non-positive value disables the control).
 - `MAGI_FACTS_REPLAN_MAX_PER_TURN` (default `5`) — Hard cap on facts surveys injected per (session, turn) (>= 1; a non-positive value disables the control).
+- `MAGI_FACT_GROUNDING_VERIFICATION_ENABLED` (default off) — Run semantic grounding verification on the live evidence gate: a research answer asserting a specific numeric/identifier value not present in the opened-source corpus stays ungrounded and blocks. Strict default-OFF and inert unless explicitly set.
 - `MAGI_FILE_DELIVERY_LIVE_ENABLED` (default off) — Enable the live file-delivery tool (vs receipt-only).
 - `MAGI_FORMAT_ADHERENCE_ENABLED` (default off) — Append a general prompt self-check for exact requested units, scale, rounding precision, names, and answer format.
 - `MAGI_GA_DELIVERABLE_GATE_ENABLED` (default off) — Enable the GA artifact-deliverable pre-final gate; strict default-OFF and inert unless explicitly set.
