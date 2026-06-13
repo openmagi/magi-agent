@@ -299,6 +299,68 @@ def test_custom_verdict_tool_and_phase_records_coexist() -> None:
     ]
 
 
+def _first_party_tool_call_record(
+    *,
+    name: str,
+    status: str = "ok",
+    observed_at: int = 1_779_000_005,
+) -> EvidenceRecord:
+    # Mirrors the real first-party producer (evidence/first_party_activity.py
+    # ``to_evidence_record``): a ``custom:FirstParty*`` type that DOES carry
+    # ``source.toolName`` (unlike phase/verdict markers).
+    return EvidenceRecord.model_validate(
+        {
+            "type": "custom:FirstPartyToolCall",
+            "status": status,
+            "observedAt": observed_at,
+            "source": {
+                "kind": "tool_trace",
+                "toolName": name,
+                "toolCallId": "fp-call-1",
+            },
+            "fields": {"name": name, "status": status},
+        }
+    )
+
+
+def test_first_party_record_does_not_double_count_tool_call() -> None:
+    # REGRESSION PIN: one dispatch produces BOTH a tool-trace record (the
+    # pre-existing tool-call source) AND an additive ``custom:FirstPartyToolCall``
+    # record. Because the first-party record carries ``source.toolName``, without
+    # the projection's first-party type short-circuit it would be normalized into
+    # a SECOND ToolCallView — double-counting the dispatch. The view must surface
+    # the dispatch EXACTLY ONCE, identical to pre-feature behaviour.
+    ledger = _base_ledger().append_evidence_record(
+        _tool_call_record(name="Bash", status="ok")
+    )
+    ledger = ledger.append_evidence_record(
+        _first_party_tool_call_record(name="Bash", status="ok")
+    )
+
+    view = project_session_evidence(ledger)
+
+    assert [t.name for t in view.tool_calls] == ["Bash"]
+    assert len(view.tool_calls) == 1
+    # Phases / verdicts are unaffected by the additive first-party record.
+    assert view.phases == ()
+    assert view.verdicts == ()
+
+
+def test_first_party_record_alone_is_not_a_tool_call() -> None:
+    # A ledger carrying ONLY a first-party record (no tool-trace counterpart)
+    # projects an empty ``tool_calls``: first-party activity is an additive audit
+    # family, never itself a tool-call source. (Acceptable per design — SkillLoad
+    # / SubagentSpawn records likewise have no ToolTrace counterpart and remain in
+    # the durable JSONL sink only.)
+    ledger = _base_ledger().append_evidence_record(
+        _first_party_tool_call_record(name="SkillLoader", status="ok")
+    )
+
+    view = project_session_evidence(ledger)
+
+    assert view.tool_calls == ()
+
+
 def test_turn_filter_restricts_to_one_turn() -> None:
     # EvidenceLedger entries all belong to one turn, so multi-turn coverage is
     # expressed by projecting across distinct read-ledger entries.

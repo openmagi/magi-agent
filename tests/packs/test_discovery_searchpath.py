@@ -51,13 +51,9 @@ def test_discover_skips_unreadable_bases(tmp_path, monkeypatch):
 def test_discover_finds_pack_toml_rglob(tmp_path):
     base = tmp_path / "packs"
     (base / "alpha").mkdir(parents=True)
-    (base / "alpha" / "pack.toml").write_text(
-        'packId="a"\ndisplayName="a"\n'
-    )
+    (base / "alpha" / "pack.toml").write_text('packId="a"\ndisplayName="a"\n')
     (base / "nested" / "beta").mkdir(parents=True)
-    (base / "nested" / "beta" / "pack.toml").write_text(
-        'packId="b"\ndisplayName="b"\n'
-    )
+    (base / "nested" / "beta" / "pack.toml").write_text('packId="b"\ndisplayName="b"\n')
     found = discover_pack_files([base])
     refs = sorted(d.manifest.pack_id for d in found)
     assert refs == ["a", "b"]
@@ -74,3 +70,23 @@ def test_discover_is_deterministic_sorted(tmp_path):
         (base / name / "pack.toml").write_text(f'packId="{name}"\ndisplayName="{name}"\n')
     found = discover_pack_files([base])
     assert [d.manifest.pack_id for d in found] == ["a", "b", "c"]
+
+
+def test_discover_skips_malformed_and_dir_shaped_pack_toml(tmp_path):
+    """One healthy pack + malformed pack.toml + dir named pack.toml → only healthy returned."""
+    base = tmp_path / "packs"
+
+    # healthy pack
+    (base / "good").mkdir(parents=True)
+    (base / "good" / "pack.toml").write_text('packId="good"\ndisplayName="good"\n')
+
+    # malformed pack.toml (TOML parse error)
+    (base / "broken").mkdir(parents=True)
+    (base / "broken" / "pack.toml").write_text("not = [valid toml", encoding="utf-8")
+
+    # a DIRECTORY named pack.toml — rglob will match it, open() raises IsADirectoryError
+    dir_as_pack = base / "dir_pack" / "pack.toml"
+    dir_as_pack.mkdir(parents=True)
+
+    found = discover_pack_files([base])
+    assert [d.manifest.pack_id for d in found] == ["good"]

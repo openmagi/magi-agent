@@ -134,9 +134,20 @@ def build_cli_tool_runtime(
         bind_python_exec_handler(registry)
 
     receipt_store = general_automation_receipts or GeneralAutomationReceiptLedgerStore()
+    # First-party activity capture: pass the bundled producer pack's static refs
+    # (computed ONCE here at construction, never per-dispatch) plus the runtime's
+    # own evidence collector so the CLI shares a SINGLE collector (the prune fix
+    # makes that safe). Returns () when no producer pack is enabled or the pack is
+    # [packs]-disabled, leaving capture inert.
+    from magi_agent.evidence.first_party_gate import (  # noqa: PLC0415
+        enabled_first_party_activity_refs,
+    )
+
     dispatcher = ToolDispatcher(
         registry,
         general_automation_receipts=receipt_store,
+        first_party_activity_collector=local_tool_evidence_collector,
+        first_party_evidence_refs=enabled_first_party_activity_refs(),
     )
     memory_mode_value = (
         memory_mode.value if isinstance(memory_mode, MemoryMode) else str(memory_mode)

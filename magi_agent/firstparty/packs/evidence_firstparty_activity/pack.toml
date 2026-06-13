@@ -1,0 +1,25 @@
+# Bundled first-party evidence_producer pack (no privilege; same loader/format).
+# Declares the first-party ACTIVITY evidence vocabulary: ToolCall / SkillLoad /
+# SubagentSpawn, captured at the tool-dispatch seam. Disable this pack
+# (config.toml [packs] disable = ["openmagi.evidence-firstparty-activity"]) or
+# delete this directory to turn first-party activity capture off.
+
+packId = "openmagi.evidence-firstparty-activity"
+displayName = "First-party activity evidence producer"
+version = "1.0.0"
+description = "Declares ToolCall/SkillLoad/SubagentSpawn evidence captured at tool dispatch."
+
+[[provides]]
+type = "evidence_producer"
+ref = "evidence:toolCall@1"
+impl = "magi_agent.firstparty.packs.evidence_firstparty_activity.impl:provide_tool_call_producer"
+
+[[provides]]
+type = "evidence_producer"
+ref = "evidence:skillLoad@1"
+impl = "magi_agent.firstparty.packs.evidence_firstparty_activity.impl:provide_skill_load_producer"
+
+[[provides]]
+type = "evidence_producer"
+ref = "evidence:subagentSpawn@1"
+impl = "magi_agent.firstparty.packs.evidence_firstparty_activity.impl:provide_subagent_spawn_producer"

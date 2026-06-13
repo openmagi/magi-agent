@@ -48,6 +48,16 @@ import sys
 import pytest
 
 
+def pytest_configure(config: pytest.Config) -> None:
+    # Mirror tests/conftest.py: the durable evidence ledger is ON by default
+    # (writes <cwd>/.magi/evidence). Now that first-party activity capture is
+    # wired into the live CLI dispatcher, CLI tests that dispatch real tools
+    # would litter the repo. Default the sink OFF here; tests exercising the
+    # durable behavior opt in via monkeypatch.setenv to a tmp dir.
+    _ = config
+    os.environ.setdefault("MAGI_EVIDENCE_LEDGER_DIR", "off")
+
+
 @pytest.fixture(autouse=True)
 def restore_process_state():
     """Snapshot and restore env, textual sys.modules entries, and event loop."""

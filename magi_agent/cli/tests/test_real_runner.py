@@ -614,8 +614,18 @@ def test_headless_default_runner_records_ga_dispatch_receipts(
     assert ledger is not None
     assert ledger.entries[0].metadata["generalAutomationReceipt"]["status"] == "blocked"
     collected = runtime.engine._collect_evidence("turn-ga")
-    assert len(collected) == 1
-    assert collected[0].metadata["generalAutomationReceipt"]["status"] == "blocked"
+    # The GA receipt is collected exactly once. First-party activity capture is
+    # default-ON, so a separate ``custom:FirstPartyToolCall`` record (a distinct,
+    # additive audit family — not a GA receipt) also lands in the shared
+    # collector; it must NOT inflate the GA-receipt count, so assert single
+    # GA-receipt counting by family rather than total bag size.
+    ga_receipts = [
+        entry
+        for entry in collected
+        if getattr(entry, "metadata", {}).get("generalAutomationReceipt") is not None
+    ]
+    assert len(ga_receipts) == 1
+    assert ga_receipts[0].metadata["generalAutomationReceipt"]["status"] == "blocked"
     assert runtime.general_automation_receipts is runner.general_automation_receipts
     assert TaskCompletionVerifier().evaluate(
         ledger,

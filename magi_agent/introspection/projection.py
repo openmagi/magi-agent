@@ -162,6 +162,17 @@ _PHASE_REACHED_RECORD_TYPE = "custom:PhaseReached"
 # below for any real verifier_verdict entries.
 _VERIFIER_VERDICT_RECORD_TYPE = "custom:VerifierVerdict"
 
+# First-party activity records (``custom:FirstPartyToolCall`` /
+# ``custom:FirstPartySkillLoad`` / ``custom:FirstPartySubagentSpawn``) are an
+# ADDITIVE audit family: the dispatch they describe is ALREADY surfaced as a
+# tool call via the pre-existing ``custom:ToolTrace`` record. Unlike phase /
+# verdict markers, these records DO carry ``source.toolName``, so without an
+# explicit type short-circuit the tool-call normalizer would re-count each
+# dispatch a second time. Tool-call counts must stay sourced from ``ToolTrace``
+# only; the first-party records remain in the durable JSONL sink and the
+# collector's ``_records`` for other consumers, but never re-enter ``tool_calls``.
+_FIRST_PARTY_RECORD_TYPE_PREFIX = "custom:FirstParty"
+
 
 def _categorize_ledger_entry(
     entry: EvidenceLedgerEntry,
@@ -197,6 +208,14 @@ def _categorize_ledger_entry(
         verdict_view = _verdict_view_from_record(record, entry.turn_id)
         if verdict_view is not None:
             verdicts.append(verdict_view)
+        return
+
+    # First-party activity records are an additive audit family; the same
+    # dispatch is already counted via its ``custom:ToolTrace`` record. They DO
+    # carry ``source.toolName``, so short-circuit by type BEFORE the tool-call
+    # normalizer to avoid double-counting each dispatch in ``tool_calls``.
+    record_type = record.get("type")
+    if isinstance(record_type, str) and record_type.startswith(_FIRST_PARTY_RECORD_TYPE_PREFIX):
         return
 
     # Tool-call projection is delegated to the SHARED normalization helper

@@ -63,6 +63,12 @@ class LocalToolEvidenceCollector:
     """
 
     def __init__(self, *, general_automation_receipts: object | None = None) -> None:
+        # Keyed by (session_id, turn_id).  Contains BOTH tool-receipt records
+        # (appended by ``record_tool_result``) and first-party-origin records
+        # (appended by ``record_first_party_activity``).  The first-party prune
+        # path (_prune_first_party_state) NEVER evicts non-first-party records —
+        # it filters selectively by type prefix; only ``_prune_session_ledgers``
+        # caps ``_ledgers``.
         self._records: dict[tuple[str, str], list[object]] = {}
         self._general_automation_receipts = general_automation_receipts
         # Per-(session_id, turn_id) immutable EvidenceLedgers, built lazily on
@@ -71,6 +77,13 @@ class LocalToolEvidenceCollector:
         # ``ToolContext.source_ledger`` so ``InspectSelfEvidence`` projects REAL
         # tool calls. Empty (and never built) when the flag is off.
         self._ledgers: dict[tuple[str, str], EvidenceLedger] = {}
+        # First-party activity dedup: (session_id, turn_id, skillPath, bodyDigest)
+        self._first_party_skill_seen: set[tuple[str, str, str, str]] = set()
+        # Insertion-ordered set of (session_id, turn_id) keys that have at least
+        # one first-party record.  Used by ``_prune_first_party_state`` to bound
+        # the first-party turn count WITHOUT touching non-first-party (tool
+        # receipt) records that share the same (session, turn) key.
+        self._first_party_turns: dict[tuple[str, str], None] = {}
 
     def record_tool_result(
         self,
@@ -83,9 +96,7 @@ class LocalToolEvidenceCollector:
         arguments: Mapping[str, object] | None = None,
     ) -> tuple[object, ...]:
         tool_result = (
-            result
-            if isinstance(result, ToolResult)
-            else ToolResult.model_validate(result)
+            result if isinstance(result, ToolResult) else ToolResult.model_validate(result)
         )
         records: list[object] = []
 
@@ -133,6 +144,127 @@ class LocalToolEvidenceCollector:
         )
         return tuple(records)
 
+    def record_first_party_activity(
+        self,
+        *,
+        session_id: str,
+        turn_id: str,
+        activity: object,
+    ) -> bool:
+        """Append one first-party activity (ToolCall/SkillLoad/SubagentSpawn).
+
+        Flows through the SAME machinery as tool receipts: ``_records`` (turn
+        collection), ``_maybe_persist_records`` (default-ON JSONL), and — when
+        the lifecycle flag is on — ``_append_turn_record`` (per-turn ledger for
+        ``InspectSelfEvidence``). SkillLoad records are deduped per
+        ``(session, turn, skillPath, bodyDigest)`` — the dedup key is added AFTER
+        the successful append so a projection error cannot permanently poison the
+        dedup set. False covers both dedup-skips and failures.
+        """
+        try:
+            from magi_agent.evidence.first_party_activity import (  # noqa: PLC0415
+                FirstPartyActivity,
+                to_evidence_record,
+            )
+
+            if not isinstance(activity, FirstPartyActivity):
+                return False
+            if not session_id or not turn_id:
+                return False
+            skill_key: tuple[str, str, str, str] | None = None
+            if activity.evidence_type == "SkillLoad":
+                skill_key = (
+                    session_id,
+                    turn_id,
+                    str(activity.detail.get("skillPath", "")),
+                    str(activity.detail.get("bodyDigest", "")),
+                )
+                if skill_key in self._first_party_skill_seen:
+                    return False
+            record = to_evidence_record(activity)
+            self._records.setdefault((session_id, turn_id), []).append(record)
+            # Dedup key is added AFTER the successful append so that a raising
+            # projection (to_evidence_record) does not permanently exclude the
+            # skill on subsequent calls.
+            if skill_key is not None:
+                self._first_party_skill_seen.add(skill_key)
+            # Register this (session, turn) as having a first-party record so
+            # the prune helper can bound first-party turns without touching
+            # non-first-party (tool receipt) records at the same key.
+            self._first_party_turns[(session_id, turn_id)] = None
+            self._prune_first_party_state(session_id)
+            self._maybe_persist_records(
+                session_id=session_id,
+                turn_id=turn_id,
+                tool_call_id=activity.record_id,
+                tool_name=activity.name,
+                status=activity.status,
+                records=[record],
+            )
+            from magi_agent.config.env import (  # noqa: PLC0415
+                is_evidence_ledger_lifecycle_enabled,
+            )
+
+            if is_evidence_ledger_lifecycle_enabled():
+                self._append_turn_record(
+                    session_id=session_id,
+                    turn_id=turn_id,
+                    record=record,
+                )
+            return True
+        except Exception:
+            return False
+
+    def _prune_first_party_state(self, session_id: str) -> None:
+        """Cap per-session first-party turns to the most recent ``_MAX_SESSION_LEDGERS``.
+
+        Only evicts ``custom:FirstParty*``-typed records from ``_records``.
+        Non-first-party records (e.g. tool receipts appended by
+        ``record_tool_result``) that share the same ``(session, turn)`` key are
+        NEVER removed: the first-party prune path must not silently clear tool
+        receipts that ``collect_for_turn`` / ``InspectSelfEvidence`` depends on.
+        ``_ledgers`` is left entirely untouched here — ``_prune_session_ledgers``
+        handles it independently.
+
+        Algorithm:
+        1. Collect all ``(session_id, turn_id)`` keys in ``_first_party_turns``
+           that belong to ``session_id``, in insertion order.
+        2. If the count exceeds ``_MAX_SESSION_LEDGERS``, evict the oldest surplus
+           keys one by one:
+           a. Filter ``custom:FirstParty*`` records OUT of ``_records[key]``
+              (keep non-first-party records).
+           b. If the filtered list is now empty, pop the key from ``_records``.
+           c. Drop the key from ``_first_party_turns``.
+           d. Purge matching entries from ``_first_party_skill_seen``.
+        """
+        # Gather this session's first-party turns in insertion order.
+        session_fp_keys = [key for key in self._first_party_turns if key[0] == session_id]
+        surplus = len(session_fp_keys) - _MAX_SESSION_LEDGERS
+        if surplus <= 0:
+            return
+        evicted: set[tuple[str, str]] = set()
+        for key in session_fp_keys[:surplus]:
+            existing = self._records.get(key)
+            if existing is not None:
+                # Keep only non-first-party records (tool receipts etc.)
+                kept = [
+                    r
+                    for r in existing
+                    if not str(getattr(r, "type", "")).startswith("custom:FirstParty")
+                ]
+                if kept:
+                    self._records[key] = kept
+                else:
+                    self._records.pop(key, None)
+            self._first_party_turns.pop(key, None)
+            evicted.add(key)
+        if evicted:
+            self._first_party_skill_seen = {
+                fp_key
+                for fp_key in self._first_party_skill_seen
+                if (fp_key[0], fp_key[1]) not in evicted
+            }
+
     @staticmethod
     def _maybe_persist_records(
         *,
@@ -166,9 +298,9 @@ class LocalToolEvidenceCollector:
                 target_dir.chmod(0o700)
             except OSError:
                 pass
-            safe_session = "".join(
-                c if c.isalnum() or c in "-_." else "_" for c in session_id
-            ) or "session"
+            safe_session = (
+                "".join(c if c.isalnum() or c in "-_." else "_" for c in session_id) or "session"
+            )
             path = target_dir / f"{safe_session}.jsonl"
             flags = _os.O_WRONLY | _os.O_CREAT | _os.O_APPEND
             fd = _os.open(path, flags, 0o600)
@@ -351,9 +483,7 @@ class LocalToolEvidenceCollector:
         self._prune_session_ledgers(session_id)
 
     def _prune_session_ledgers(self, session_id: str) -> None:
-        session_keys = [
-            key for key in self._ledgers if key[0] == session_id
-        ]
+        session_keys = [key for key in self._ledgers if key[0] == session_id]
         for key in session_keys[:-_MAX_SESSION_LEDGERS]:
             self._ledgers.pop(key, None)
 
@@ -431,9 +561,8 @@ def _local_receipt_projection(
     else:
         deliverable_artifact_refs = ()
     execution_receipt = receipts.get("toolExecutionReceipt")
-    if (
-        synthesize_execution_receipt
-        and (not isinstance(execution_receipt, Mapping) or not execution_receipt)
+    if synthesize_execution_receipt and (
+        not isinstance(execution_receipt, Mapping) or not execution_receipt
     ):
         receipts["toolExecutionReceipt"] = _tool_execution_receipt(
             tool_call_id=tool_call_id,
@@ -452,9 +581,7 @@ def _local_receipt_projection(
 
     evidence_refs = sorted(ref for ref in refs if ref.startswith("evidence:"))
     validator_refs = sorted(ref for ref in refs if ref.startswith("verifier:"))
-    receipt_refs = sorted(
-        ref for ref in refs if ref.startswith(("receipt:sha256:", "sha256:"))
-    )
+    receipt_refs = sorted(ref for ref in refs if ref.startswith(("receipt:sha256:", "sha256:")))
     projection: dict[str, object] = {
         "schemaVersion": "openmagi.localToolEvidenceReceipt.v1",
         "sessionId": session_id,
@@ -555,9 +682,7 @@ def _tool_execution_receipt(
         "toolCallId": tool_call_id,
         "toolName": tool_name,
         "status": result.status,
-        "argumentKeys": sorted(
-            str(key) for key in arguments if _public_receipt_key(str(key))
-        ),
+        "argumentKeys": sorted(str(key) for key in arguments if _public_receipt_key(str(key))),
     }
 
 

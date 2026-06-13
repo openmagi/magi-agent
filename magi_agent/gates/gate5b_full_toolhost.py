@@ -50,6 +50,7 @@ from magi_agent.evidence.edit_match_receipts import (
     EditMatchReceiptBoundary,
     EditMatchReceiptRecord,
 )
+from magi_agent.evidence.first_party_gate import enabled_first_party_activity_refs
 from magi_agent.runtime.public_events import (
     tool_end_event,
     tool_progress_event,
@@ -849,7 +850,19 @@ class Gate5BFullToolHost:
         self.memory_mode = normalize_memory_mode(memory_mode)
         self.counter = Gate5BFullToolCounter(config)
         self._tool_registry = tool_registry
-        self._tool_dispatcher = ToolDispatcher(tool_registry) if tool_registry is not None else None
+        # First-party activity capture: pass ONLY the bundled producer pack's
+        # static refs (computed ONCE here, never per-dispatch). No collector is
+        # passed, so the dispatcher's process-default collector engages and the
+        # hosted serve path writes JSONL to its own <cwd>/.magi/evidence/.
+        # Returns () when no producer pack is enabled or it is [packs]-disabled.
+        self._tool_dispatcher = (
+            ToolDispatcher(
+                tool_registry,
+                first_party_evidence_refs=enabled_first_party_activity_refs(),
+            )
+            if tool_registry is not None
+            else None
+        )
         self._public_event_sink = public_event_sink
         self.receipt_boundary = CodingToolReceiptBoundary(
             CodingToolReceiptConfig(enabled=True)
