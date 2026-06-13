@@ -235,3 +235,21 @@ def test_to_evidence_record_projection() -> None:
     assert blocked.status == "unknown"
     failed = to_evidence_record(_build("Bash", ToolResult(status="error"))[0])
     assert failed.status == "failed"
+
+
+def test_detail_is_frozen_and_model_dump_still_works() -> None:
+    """Item B: detail must be a MappingProxyType (immutable); model_dump must still work."""
+    import pytest
+    from types import MappingProxyType
+
+    result = ToolResult(status="ok", output={"r": 1})
+    (activity,) = _build("web_search", result, arguments={"q": "hello"})
+    # detail is a frozen MappingProxyType — mutation raises TypeError
+    with pytest.raises(TypeError):
+        activity.detail["tampered"] = "INJECTED"  # type: ignore[index]
+    assert isinstance(activity.detail, MappingProxyType)
+    # model_dump(mode="json") must succeed and return a plain dict
+    dumped = activity.model_dump(mode="json", by_alias=True)
+    assert isinstance(dumped["detail"], dict)
+    # The serialized detail carries the expected keys
+    assert "argsSha256" in dumped["detail"]

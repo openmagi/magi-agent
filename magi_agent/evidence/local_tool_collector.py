@@ -71,6 +71,8 @@ class LocalToolEvidenceCollector:
         # ``ToolContext.source_ledger`` so ``InspectSelfEvidence`` projects REAL
         # tool calls. Empty (and never built) when the flag is off.
         self._ledgers: dict[tuple[str, str], EvidenceLedger] = {}
+        # First-party activity dedup: (session_id, turn_id, skillPath, bodyDigest)
+        self._first_party_skill_seen: set[tuple[str, str, str, str]] = set()
 
     def record_tool_result(
         self,
@@ -83,9 +85,7 @@ class LocalToolEvidenceCollector:
         arguments: Mapping[str, object] | None = None,
     ) -> tuple[object, ...]:
         tool_result = (
-            result
-            if isinstance(result, ToolResult)
-            else ToolResult.model_validate(result)
+            result if isinstance(result, ToolResult) else ToolResult.model_validate(result)
         )
         records: list[object] = []
 
@@ -133,6 +133,66 @@ class LocalToolEvidenceCollector:
         )
         return tuple(records)
 
+    def record_first_party_activity(
+        self,
+        *,
+        session_id: str,
+        turn_id: str,
+        activity: object,
+    ) -> bool:
+        """Append one first-party activity (ToolCall/SkillLoad/SubagentSpawn).
+
+        Flows through the SAME machinery as tool receipts: ``_records`` (turn
+        collection), ``_maybe_persist_records`` (default-ON JSONL), and — when
+        the lifecycle flag is on — ``_append_turn_record`` (per-turn ledger for
+        ``InspectSelfEvidence``). SkillLoad records are deduped per
+        ``(session, turn, skillPath, bodyDigest)``. Fail-open: returns False
+        instead of raising, mirroring this file's ``except Exception`` convention.
+        """
+        try:
+            from magi_agent.evidence.first_party_activity import (  # noqa: PLC0415
+                FirstPartyActivity,
+                to_evidence_record,
+            )
+
+            if not isinstance(activity, FirstPartyActivity):
+                return False
+            if not session_id or not turn_id:
+                return False
+            if activity.evidence_type == "SkillLoad":
+                key = (
+                    session_id,
+                    turn_id,
+                    str(activity.detail.get("skillPath", "")),
+                    str(activity.detail.get("bodyDigest", "")),
+                )
+                if key in self._first_party_skill_seen:
+                    return False
+                self._first_party_skill_seen.add(key)
+            record = to_evidence_record(activity)
+            self._records.setdefault((session_id, turn_id), []).append(record)
+            self._maybe_persist_records(
+                session_id=session_id,
+                turn_id=turn_id,
+                tool_call_id=activity.record_id,
+                tool_name=activity.name,
+                status=activity.status,
+                records=[record],
+            )
+            from magi_agent.config.env import (  # noqa: PLC0415
+                is_evidence_ledger_lifecycle_enabled,
+            )
+
+            if is_evidence_ledger_lifecycle_enabled():
+                self._append_turn_record(
+                    session_id=session_id,
+                    turn_id=turn_id,
+                    record=record,
+                )
+            return True
+        except Exception:
+            return False
+
     @staticmethod
     def _maybe_persist_records(
         *,
@@ -166,9 +226,9 @@ class LocalToolEvidenceCollector:
                 target_dir.chmod(0o700)
             except OSError:
                 pass
-            safe_session = "".join(
-                c if c.isalnum() or c in "-_." else "_" for c in session_id
-            ) or "session"
+            safe_session = (
+                "".join(c if c.isalnum() or c in "-_." else "_" for c in session_id) or "session"
+            )
             path = target_dir / f"{safe_session}.jsonl"
             flags = _os.O_WRONLY | _os.O_CREAT | _os.O_APPEND
             fd = _os.open(path, flags, 0o600)
@@ -351,9 +411,7 @@ class LocalToolEvidenceCollector:
         self._prune_session_ledgers(session_id)
 
     def _prune_session_ledgers(self, session_id: str) -> None:
-        session_keys = [
-            key for key in self._ledgers if key[0] == session_id
-        ]
+        session_keys = [key for key in self._ledgers if key[0] == session_id]
         for key in session_keys[:-_MAX_SESSION_LEDGERS]:
             self._ledgers.pop(key, None)
 
@@ -431,9 +489,8 @@ def _local_receipt_projection(
     else:
         deliverable_artifact_refs = ()
     execution_receipt = receipts.get("toolExecutionReceipt")
-    if (
-        synthesize_execution_receipt
-        and (not isinstance(execution_receipt, Mapping) or not execution_receipt)
+    if synthesize_execution_receipt and (
+        not isinstance(execution_receipt, Mapping) or not execution_receipt
     ):
         receipts["toolExecutionReceipt"] = _tool_execution_receipt(
             tool_call_id=tool_call_id,
@@ -452,9 +509,7 @@ def _local_receipt_projection(
 
     evidence_refs = sorted(ref for ref in refs if ref.startswith("evidence:"))
     validator_refs = sorted(ref for ref in refs if ref.startswith("verifier:"))
-    receipt_refs = sorted(
-        ref for ref in refs if ref.startswith(("receipt:sha256:", "sha256:"))
-    )
+    receipt_refs = sorted(ref for ref in refs if ref.startswith(("receipt:sha256:", "sha256:")))
     projection: dict[str, object] = {
         "schemaVersion": "openmagi.localToolEvidenceReceipt.v1",
         "sessionId": session_id,
@@ -555,9 +610,7 @@ def _tool_execution_receipt(
         "toolCallId": tool_call_id,
         "toolName": tool_name,
         "status": result.status,
-        "argumentKeys": sorted(
-            str(key) for key in arguments if _public_receipt_key(str(key))
-        ),
+        "argumentKeys": sorted(str(key) for key in arguments if _public_receipt_key(str(key))),
     }
 
 

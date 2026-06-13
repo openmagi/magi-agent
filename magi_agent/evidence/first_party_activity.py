@@ -15,13 +15,17 @@ import json
 import time
 from collections.abc import Mapping, Sequence
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
 
 from magi_agent.evidence.ledger import (
     _redact_public_summary_text,
     _sanitize_public_summary_value,
 )
-from magi_agent.evidence.types import EvidenceRecord
+from magi_agent.evidence.types import (
+    EvidenceRecord,
+    _freeze_mapping,
+    _serialize_mapping,
+)
 from magi_agent.tools.context import ToolContext
 from magi_agent.tools.result import ToolResult
 
@@ -55,6 +59,15 @@ class FirstPartyActivity(BaseModel):
     error_code: str | None = Field(default=None, alias="errorCode")
     reason: str | None = None
     detail: Mapping[str, object] = Field(default_factory=dict)
+
+    @field_validator("detail")
+    @classmethod
+    def _freeze_detail(cls, value: Mapping[str, object]) -> Mapping[str, object]:
+        return _freeze_mapping(value, "detail")
+
+    @field_serializer("detail")
+    def _serialize_detail(self, value: Mapping[str, object]) -> dict[str, object]:
+        return _serialize_mapping(value) or {}
 
 
 def _sha256(value: object) -> str:
