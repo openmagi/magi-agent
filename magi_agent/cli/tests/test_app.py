@@ -193,6 +193,42 @@ class TestBuildTuiApp:
         assert hasattr(tui._gate, "sinks")
         assert tui.sink in tui._gate.sinks
 
+    def test_bypass_permission_mode_does_not_attach_tui_modal_sink(self) -> None:
+        """bypassPermissions must not race the TUI modal sink.
+
+        The bypass sink resolves asks without a frame; adding the Textual sink as a
+        loser can still push ToolUseConfirm before cancellation reaches it.
+        """
+        from magi_agent.cli.contracts import ControlRequest
+        from magi_agent.cli.permissions import HeadlessSink
+        from magi_agent.cli.wiring import build_tui_app
+
+        tui = build_tui_app(
+            cwd="/tmp",
+            session_id="tui-bypass-sink-check",
+            permission_mode="bypassPermissions",
+        )
+
+        assert hasattr(tui._gate, "sinks")
+        assert tui.sink not in tui._gate.sinks
+        assert any(
+            isinstance(sink, HeadlessSink)
+            and sink.permission_mode == "bypassPermissions"
+            for sink in tui._gate.sinks
+        )
+        decision = asyncio.run(
+            tui._gate.check(
+                ControlRequest(
+                    requestId="req-browser",
+                    turnId="turn-browser",
+                    toolName="BrowserTask",
+                    arguments={"task": "open example.com"},
+                    reason="tool_use",
+                )
+            )
+        )
+        assert decision.kind == "allow"
+
     def test_runtime_runner_receives_composio_toolsets_without_explicit_runner(
         self,
         monkeypatch: pytest.MonkeyPatch,

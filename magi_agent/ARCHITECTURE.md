@@ -58,6 +58,7 @@ graph LR
     cli --> shadow
     cli --> tools
     cli --> transport
+    cli --> web_acquisition
     coding --> meta_orchestration
     config --> gates
     config --> runtime
@@ -409,7 +410,7 @@ graph LR
 | real_runner.py | A real, model-backed runner for the local ``magi`` CLI. | compiler, control_plane, discovery, engine, env, live_gate, local_tool_collector, materializer, providers, session_identity, session_service, task_completion, tool_runtime | cli/readonly_classifier.py, cli/tests/test_app.py, cli/tests/test_real_runner.py, cli/tests/test_runtime_policy_wiring.py, cli/wiring.py, discovery/orchestrator.py, runtime/child_runner_live.py |
 | session_log.py | Append-only JSONL session log for the Magi CLI (Stream B, PR-B1). | contracts, session_continuity, session_service, transcript | cli/app.py, cli/headless.py, cli/tests/test_app.py, cli/tests/test_coldstart.py, cli/tests/test_session_log.py, cli/tui/app.py, cli/tui/history.py, cli/tui/theme.py, cli/wiring.py |
 | tool_runtime.py | Real tool runtime for the local ``magi`` CLI agent. | ask_user_question_toolhost, context, core_toolhost, dispatcher, env, file_tool_manifests, file_toolhost, first_party_gate, identity, learning_recall, live_gate, local_tool_collector, manifest, memory_recall_block, memory_snapshot_cache, memory_write_wiring, message_builder, permission_scope, plan_mode_toolhost, prompt_guidance, python_exec, registry, session_identity, tool, tool_adapter, tool_synthesis, tools, web_search_tools | cli/real_runner.py, cli/tests/test_identity.py, cli/tests/test_local_tool_evidence_wiring.py, cli/tests/test_plan_mode.py, cli/tests/test_plan_mode_tools_exposed.py, cli/tests/test_tool_runtime.py, cli/wiring.py, runtime/child_runner_live.py |
-| wiring.py | Composition root for the Magi CLI (PR-F1, Stream F). | app, commands, config, context, contracts, dispatcher, engine, env, file_tool_manifests, file_toolhost, first_party_gate, goal_nudge_wiring, hook_wiring, live_gate, local_runner, local_tool_collector, manifest, mcp, memory_mode_guard, openmagi_runtime, permission_scope, permissions, providers, readonly_classifier, real_runner, registry, runtime_sink, safety, session_identity, session_log, tool, tool_adapter, tool_render, tool_runtime | cli/app.py, cli/tests/test_app.py, cli/tests/test_coldstart.py, cli/tests/test_plan_mode.py, cli/tests/test_real_runner.py, cli/tests/test_runtime_policy_wiring.py, cli/tests/test_streaming_sink.py, transport/chat_routes.py, transport/streaming_chat_route.py |
+| wiring.py | Composition root for the Magi CLI (PR-F1, Stream F). | app, commands, config, context, contracts, dispatcher, engine, env, file_tool_manifests, file_toolhost, first_party_gate, goal_nudge_wiring, hook_wiring, live_gate, local_runner, local_tool_collector, manifest, mcp, memory_mode_guard, openmagi_runtime, permission_scope, permissions, providers, readonly_classifier, real_runner, registry, runtime_sink, safety, session_identity, session_log, tool, tool_adapter, tool_render, tool_runtime, web_search_tools | cli/app.py, cli/tests/test_app.py, cli/tests/test_coldstart.py, cli/tests/test_plan_mode.py, cli/tests/test_real_runner.py, cli/tests/test_runtime_policy_wiring.py, cli/tests/test_streaming_sink.py, transport/chat_routes.py, transport/streaming_chat_route.py |
 
 ### cli/commands/
 
@@ -484,7 +485,7 @@ graph LR
 | test_plan_mode_tools_exposed.py | CLI exposure of the manifest-routed plan-mode tools (doc 12 PR2). | tool_runtime | — |
 | test_protocol.py | — | protocol | — |
 | test_providers.py | — | providers | — |
-| test_real_runner.py | — | control_plane, fork_runner, local_runner, providers, real_runner, self_review, task_completion, wiring | — |
+| test_real_runner.py | — | control_plane, fork_runner, live_gate, local_runner, local_tool_collector, providers, real_runner, research_tools, self_review, task_completion, tools, wiring | — |
 | test_render_diff.py | Tests for the PR-E3 diff engine (``cli/render/diff.py``). | render | — |
 | test_runtime_policy_wiring.py | — | contracts, engine, events, providers, real_runner, wiring | — |
 | test_session_log.py | — | contracts, session_log | — |
@@ -698,7 +699,7 @@ graph LR
 | gate2_durable_evidence.py | Durable evidence store for Gate 2 selected sandbox canary. | — | transport/chat.py, transport/gate2_sandbox_canary.py |
 | ledger.py | — | builtin, types | evidence/__init__.py, evidence/first_party_activity.py, evidence/local_tool_collector.py, harness/general_automation/constraint_reinjection.py, harness/general_automation/live_gate.py, harness/general_automation/task_completion.py, harness/verifier_bus.py, introspection/projection.py, introspection/tool.py, shadow/audit_reporter.py |
 | ledger_semantics.py | — | — | — |
-| local_tool_collector.py | — | env, extraction, first_party_activity, ledger, result, types | cli/real_runner.py, cli/tests/test_local_tool_evidence_wiring.py, cli/tests/test_tool_runtime.py, cli/tool_runtime.py, cli/wiring.py, runtime/child_runner_live.py, tools/dispatcher.py |
+| local_tool_collector.py | — | env, extraction, first_party_activity, ledger, result, types | cli/real_runner.py, cli/tests/test_local_tool_evidence_wiring.py, cli/tests/test_real_runner.py, cli/tests/test_tool_runtime.py, cli/tool_runtime.py, cli/wiring.py, runtime/child_runner_live.py, tools/dispatcher.py |
 | observed_egress.py | — | gate1a_egress_correlation | (root)/main.py, transport/chat.py, transport/chat_routes.py, transport/health.py |
 | reports.py | — | tool_preview, types | evidence/citation_audit.py, evidence/coding_verification.py, evidence/event_projection.py, evidence/source_ledger.py, evidence/subagent.py, shadow/audit_reporter.py, shadow/coding_verification_evidence_contract.py, shadow/research_source_evidence_contract.py |
 | research_final_gate.py | — | citation_audit, source_ledger, types | research/research_first_canary.py |
@@ -923,7 +924,7 @@ graph LR
 | event_projection.py | — | — | — |
 | external_directory_receipts.py | — | path_policy | harness/general_automation/live_gate.py |
 | followup_refs.py | — | — | harness/general_automation/output_budget_policy.py |
-| live_gate.py | Track 19 PR2 — General-Automation live allow/ask/deny gate (flag-gated). | bus, context, control_projection, env, external_directory_receipts, ledger, path_policy, shell_policy, shell_receipts | adk_bridge/local_runner.py, cli/real_runner.py, cli/tool_runtime.py, cli/wiring.py, tools/dispatcher.py |
+| live_gate.py | Track 19 PR2 — General-Automation live allow/ask/deny gate (flag-gated). | bus, context, control_projection, env, external_directory_receipts, ledger, path_policy, shell_policy, shell_receipts | adk_bridge/local_runner.py, cli/real_runner.py, cli/tests/test_real_runner.py, cli/tool_runtime.py, cli/wiring.py, tools/dispatcher.py |
 | output_budget_policy.py | — | followup_refs, text_scrub | — |
 | package_boundary.py | — | package_manifest | harness/general_automation/package_tool_projection.py |
 | package_manifest.py | — | manifest | harness/general_automation/package_boundary.py, harness/general_automation/package_tool_projection.py |
@@ -1365,7 +1366,7 @@ graph LR
 | session_continuity.py | — | session_continuity_projection, session_continuity_proof | cli/session_log.py |
 | session_continuity_projection.py | — | transcript | runtime/context_packet.py, runtime/session_continuity.py |
 | session_continuity_proof.py | — | — | runtime/context_packet.py, runtime/session_continuity.py |
-| session_identity.py | — | — | cli/real_runner.py, cli/tool_runtime.py, cli/wiring.py, gates/gate5b_full_toolhost.py, runtime/memory_mode_context.py, tools/context.py, tools/memory_mode_guard.py, transport/chat.py, transport/chat_routes.py |
+| session_identity.py | — | — | cli/real_runner.py, cli/tool_runtime.py, cli/wiring.py, gates/gate5b_full_toolhost.py, runtime/memory_mode_context.py, tools/context.py, tools/memory_mode_guard.py, transport/chat.py, transport/chat_routes.py, transport/generation_request.py |
 | slash_control_boundary.py | — | — | cli/commands/builtins.py |
 | stale_run_detector.py | — | heartbeat_contract, heartbeat_store | — |
 | stream_fallback.py | — | error_taxonomy, sse, sse_buffer, stream_withholding | — |
@@ -1542,7 +1543,7 @@ graph LR
 
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
-| __init__.py | — | base, catalog, core_toolhost, dispatcher, manifest, permission, registry, result | cli/tool_runtime.py, tools/tests/test_ask_user_question_toolhost.py, tools/tests/test_plan_mode_toolhost.py |
+| __init__.py | — | base, catalog, core_toolhost, dispatcher, manifest, permission, registry, result | cli/tests/test_real_runner.py, cli/tool_runtime.py, tools/tests/test_ask_user_question_toolhost.py, tools/tests/test_plan_mode_toolhost.py |
 | archive_tools.py | ArchiveExtract tool — extract and inspect .zip archives in the workspace. | context, result, spreadsheet_tools, truncation | tools/file_markdown.py, tools/file_toolhost.py |
 | ask_user_question_toolhost.py | Route the catalog ``AskUserQuestion`` tool to the GA blocking-question flow. | context, env, question_tool, registry, result | cli/tool_runtime.py, tools/tests/test_ask_user_question_toolhost.py |
 | audio_tools.py | AudioTranscribe tool — transcribe audio files in the workspace via ASR. | context, media_egress, result, spreadsheet_tools, video_tools | tools/file_toolhost.py |
@@ -1588,7 +1589,7 @@ graph LR
 | tool_search.py | ToolSearchTool — search the tool registry by keyword or exact name. | manifest, registry, schema_projection | — |
 | truncation.py | Shared head+tail ("middle") truncation for tool outputs. | — | tools/archive_tools.py, tools/document_tools.py, tools/web_search_tools.py |
 | video_tools.py | VideoFrames tool — extract frames from a video at timestamps and describe them. | context, image_tools, media_egress, result, spreadsheet_tools | tools/audio_tools.py, tools/file_toolhost.py |
-| web_search_tools.py | Fast direct web tools — Brave Search (or opt-in SerpAPI) + Firecrawl fetch. | env, truncation | cli/tool_runtime.py |
+| web_search_tools.py | Fast direct web tools — Brave Search (or opt-in SerpAPI) + Firecrawl fetch. | env, truncation | cli/tool_runtime.py, cli/wiring.py |
 
 ### tools/document_write/
 
@@ -1649,8 +1650,12 @@ graph LR
 | debug_trace.py | Debug endpoint exposing the current turn's execution trace. | trace_context | (root)/app.py |
 | egress_critic.py | Egress critic gate and live evidence projection for the chat serving path. | egress_gate, gate1a_readonly_tools, gate5b_full_toolhost, generation_request, mapping, projection, providers, readonly_classifier, reason_safety, user_visible_model_routing | transport/chat.py, transport/chat_routes.py |
 | gate2_sandbox_canary.py | Gate2 sandbox workspace canary chat + delivery-receipt logic. | chat_shared, gate2_activation_loop_a, gate2_durable_evidence, gate2_readiness, openmagi_runtime, user_visible_model_routing | transport/chat.py, transport/chat_routes.py |
+<<<<<<< HEAD
 | gate5b_governance.py | Gate5B serving-path governance wiring (cli/engine parity). | control_plane, env, grounded_answer_guard | transport/chat_routes.py |
 | generation_request.py | User-visible generation request, identity, and history contract builders. | chat_shared, gate1a_readonly_tools, gate5b4c3_shadow_generation_contract, gate5b_full_toolhost, message_builder, openmagi_runtime, user_visible_model_routing | transport/chat.py, transport/chat_routes.py, transport/egress_critic.py |
+=======
+| generation_request.py | User-visible generation request, identity, and history contract builders. | chat_shared, gate1a_readonly_tools, gate5b4c3_shadow_generation_contract, gate5b_full_toolhost, message_builder, openmagi_runtime, session_identity, user_visible_model_routing | transport/chat.py, transport/chat_routes.py, transport/egress_critic.py |
+>>>>>>> origin/main
 | health.py | — | chat, child_runner_live, child_toolset, config, gate2_activation_loop_a, gate2_readiness, gate3_readiness, gate4_readiness, gate5_readiness, gate5b_full_toolhost, gate7_readiness, gate8_readiness, health, observed_egress, openmagi_runtime, ops, readiness | (root)/app.py, observability/api.py, transport/__init__.py |
 | learning_dashboard.py | Learning governance dashboard API — FastAPI router. | api, config, models, openmagi_runtime, store | (root)/app.py |
 | plugins.py | — | audit, manager, openmagi_runtime | (root)/app.py |
@@ -1688,7 +1693,7 @@ graph LR
 | query_planner.py | Rule-based query planner for deep web research. | deep_research_config | web_acquisition/deep_research.py, web_acquisition/tests/test_query_planner.py |
 | reference_research_tools.py | — | catalog, context, kernel, local_readonly, read_ledger, registry | — |
 | repo_research_tools.py | — | policy, result, source_ledger, source_proof | — |
-| research_tools.py | — | insane_fetch, jina_reader, live_provider_pack, platform_endpoint, policy, provider_boundary, provider_router, result, source_ledger | plugins/native/web.py, web_acquisition/deep_research.py, web_acquisition/opencode_provider_router.py, web_acquisition/tests/test_deep_research_orchestrator.py, web_acquisition/tests/test_gaia_web_tools_deep_research.py |
+| research_tools.py | — | insane_fetch, jina_reader, live_provider_pack, platform_endpoint, policy, provider_boundary, provider_router, result, source_ledger | cli/tests/test_real_runner.py, plugins/native/web.py, web_acquisition/deep_research.py, web_acquisition/opencode_provider_router.py, web_acquisition/tests/test_deep_research_orchestrator.py, web_acquisition/tests/test_gaia_web_tools_deep_research.py |
 
 ### web_acquisition/providers/
 

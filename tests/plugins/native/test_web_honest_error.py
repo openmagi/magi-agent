@@ -74,8 +74,13 @@ def test_error_message_names_activation_flags(fresh_env: None) -> None:
     result = asyncio.run(web_search({"query": "x"}, _context()))
 
     message = result.error_message or ""
-    assert "CORE_AGENT_PYTHON_LIVE_WEB_ACQUISITION_ENABLED" in message
-    assert "CORE_AGENT_PYTHON_JINA_READER_ENABLED" in message
+    assert "BRAVE_API_KEY" in message
+    assert "FIRECRAWL_API_KEY" in message
+    assert "MAGI_PLATFORM_BASE_URL" in message
+    assert "MAGI_PLATFORM_API_KEY" in message
+    assert "live web acquisition" in message
+    assert "web provider router" in message
+    assert "CORE_AGENT_" not in message
 
 
 def test_not_configured_result_helper_contract() -> None:

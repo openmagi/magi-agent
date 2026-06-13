@@ -6,6 +6,7 @@ from magi_agent.cli.tool_runtime import (
     build_cli_adk_tools,
     build_cli_instruction,
     build_cli_tool_runtime,
+    build_tool_advertisement_block,
 )
 from magi_agent.adk_bridge.tool_adapter import build_adk_function_tools_for_registry
 from magi_agent.evidence.local_tool_collector import LocalToolEvidenceCollector
@@ -52,6 +53,20 @@ def test_build_cli_adk_tools_respects_browser_kill_switch(
     tools = build_cli_adk_tools(workspace_root=str(tmp_path))
 
     assert "BrowserTask" not in {getattr(tool, "name", None) for tool in tools}
+
+
+def test_tool_advertisement_lists_direct_web_tools_when_provider_keys_present(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    monkeypatch.setenv("BRAVE_API_KEY", "brave-test")
+    monkeypatch.setenv("FIRECRAWL_API_KEY", "firecrawl-test")
+
+    block = build_tool_advertisement_block(workspace_root=str(tmp_path))
+
+    assert "web_search [net]" in block
+    assert "web_fetch [net]" in block
+    assert "research_fact [net]" in block
 
 
 def test_file_read_tool_performs_real_read(tmp_path, monkeypatch) -> None:

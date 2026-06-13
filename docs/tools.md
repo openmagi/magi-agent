@@ -59,14 +59,18 @@ network egress), distinct from the local read/write/execute/meta tools:
 
 They have **no fabricated fallback**: on a default install with
 no live web provider configured they return an honest
-`web_research_not_configured` error instead of simulated results. To activate
-live search/fetch, set `CORE_AGENT_PYTHON_LIVE_WEB_ACQUISITION_ENABLED=1` and
-`CORE_AGENT_PYTHON_WEB_PROVIDER_ROUTER_ENABLED=1`, then enable at least one
-provider: `CORE_AGENT_PYTHON_JINA_READER_ENABLED=1` (optionally with
-`MAGI_JINA_API_KEY`), `CORE_AGENT_PYTHON_INSANE_FETCH_ENABLED=1`, or
-`MAGI_PLATFORM_BASE_URL` + `MAGI_PLATFORM_API_KEY`. With those set, the
-handlers delegate to the live provider router
-(`magi_agent/web_acquisition/research_tools.py`).
+`web_research_not_configured` error instead of simulated results. Local CLI
+search uses the direct web toolset when `BRAVE_API_KEY` and `FIRECRAWL_API_KEY`
+are set, or when `MAGI_WEB_SEARCH_PROVIDER=serpapi`, `SERPAPI_API_KEY`, and
+`FIRECRAWL_API_KEY` are set. To activate the native provider-router path, set
+`CORE_AGENT_PYTHON_LIVE_WEB_ACQUISITION_ENABLED=1` and
+`CORE_AGENT_PYTHON_WEB_PROVIDER_ROUTER_ENABLED=1`, then configure
+`MAGI_PLATFORM_BASE_URL` + `MAGI_PLATFORM_API_KEY`. Jina Reader
+(`CORE_AGENT_PYTHON_JINA_READER_ENABLED=1`, optionally with
+`MAGI_JINA_API_KEY`) and InsaneFetch
+(`CORE_AGENT_PYTHON_INSANE_FETCH_ENABLED=1`) are fetch/reader-style providers;
+they do not by themselves provide live search. With router providers set, the
+handlers delegate to `magi_agent/web_acquisition/research_tools.py`.
 
 `WebReader` is **not exposed** by the native plugin — the catalog registers only
 `WebSearch` and `WebFetch`. The live provider router has a jina-reader path, but

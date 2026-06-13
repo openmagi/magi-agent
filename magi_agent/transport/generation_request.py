@@ -20,6 +20,7 @@ from magi_agent.gates.gate5b_full_toolhost import Gate5BFullToolBundle
 # reuse the established image sanitizer; message_builder exposes no public image API
 from magi_agent.runtime.message_builder import _collect_image_blocks
 from magi_agent.runtime.openmagi_runtime import OpenMagiRuntime
+from magi_agent.runtime.session_identity import session_key_from_headers
 from magi_agent.runtime.user_visible_model_routing import (
     _select_user_visible_model_route,
 )
@@ -130,6 +131,10 @@ def _build_user_visible_generation_request(
     )
     router_digest = _sha256_digest(f"{provider_label}:{model_label}:{request_digest}")
     profile_digest = _sha256_digest("gate5b-user-visible-canary-profile-v1")
+    session_key_digest = _session_key_digest_from_request(
+        payload,
+        request_headers=request_headers,
+    )
     tools_policy = (
         "selected_full_toolhost"
         if full_toolhost_ready
@@ -172,6 +177,11 @@ def _build_user_visible_generation_request(
                 "ownerUserIdDigest": _sha256_digest(runtime.config.user_id),
                 "environment": route_config.environment,
                 "selectedTarget": "gate5b_selected_bot",
+                **(
+                    {"sessionKeyDigest": session_key_digest}
+                    if session_key_digest is not None
+                    else {}
+                ),
             },
             "turn": turn_payload,
             "modelRouting": {
@@ -228,6 +238,20 @@ def _build_user_visible_generation_request(
             },
         }
     )
+
+
+def _session_key_digest_from_request(
+    payload: Mapping[str, object],
+    *,
+    request_headers: Mapping[str, str] | None = None,
+) -> str | None:
+    for candidate in (
+        payload.get("sessionId"),
+        session_key_from_headers(request_headers) if request_headers is not None else None,
+    ):
+        if isinstance(candidate, str) and candidate.strip():
+            return _sha256_digest(candidate.strip())
+    return None
 
 
 def _extract_last_user_text(payload: Mapping[str, object]) -> str:
