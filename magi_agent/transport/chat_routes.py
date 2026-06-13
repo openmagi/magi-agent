@@ -103,6 +103,11 @@ from magi_agent.transport.chat_shared import (
     _shadow_generation_route_config,
 )
 from magi_agent.transport.egress_critic import _maybe_run_egress_critic_gate
+from magi_agent.transport.gate5b_governance import (
+    build_gate5b_control_plane_plugins,
+    gate5b_governance_enabled,
+    gate5b_pre_final_grounding_status,
+)
 from magi_agent.transport.gate2_sandbox_canary import (
     Gate1ASelectedAttemptPreflightPayload,
     Gate5BUserVisibleDeliveryReceiptPayload,
@@ -1188,6 +1193,32 @@ def _schedule_runtime_direct_usage_receipt(
     task.add_done_callback(_swallow_task_result)
 
 
+def _gate5b_governance_event_sink(
+    original_sink: Callable[[Mapping[str, object]], None] | None,
+    captured: list[Mapping[str, object]],
+) -> Callable[[Mapping[str, object]], None]:
+    """Wrap the public-event sink to capture the turn's events for grounding.
+
+    Every event is appended to ``captured`` (so the pre-final fact-grounding gate
+    can harvest the turn's tool-evidence corpus) and then forwarded to the
+    caller's original sink, preserving the streaming contract. Capture itself
+    never raises into the boundary: an append failure is swallowed and the
+    original sink is still invoked. When governance is OFF the caller still
+    passes this wrapper, but ``captured`` is simply never read, so behavior is
+    unchanged (the forward keeps the original sink's semantics intact).
+    """
+
+    def _sink(event: Mapping[str, object]) -> None:
+        try:
+            captured.append(dict(event))
+        except Exception:
+            pass
+        if original_sink is not None:
+            original_sink(event)
+
+    return _sink
+
+
 async def _run_live_chat_runner(
     runtime: OpenMagiRuntime,
     route_config: Gate5BUserVisibleChatRouteConfig,
@@ -1286,6 +1317,25 @@ async def _run_live_chat_runner(
             gate8_ready=gate8_ready,
         )
     )
+    # MAGI_GATE5B_GOVERNANCE (default-OFF): build the control-plane plugin and
+    # set up a public-event capture sink so the SAME governance the cli/engine
+    # runner gets reaches this serving runner. When the flag is OFF
+    # ``control_plane_plugins`` is ``[]``, the capture wrapper is NOT installed
+    # (the boundary gets the caller's exact ``public_event_sink``), and the
+    # boundary call is byte-identical to today.
+    governance_enabled = gate5b_governance_enabled()
+    control_plane_plugins = build_gate5b_control_plane_plugins(
+        general_automation_receipts=getattr(
+            gate1a_bundle.host, "general_automation_receipts", None
+        ),
+        tool_synthesis_model_label=generation.model_routing.model_label,
+    )
+    captured_governance_events: list[Mapping[str, object]] = []
+    governance_event_sink = (
+        _gate5b_governance_event_sink(public_event_sink, captured_governance_events)
+        if governance_enabled
+        else public_event_sink
+    )
     model_call_window_start = _utc_now_iso()
     try:
         boundary_result = await run_gate5b4c3_live_runner_boundary_async(
@@ -1295,7 +1345,8 @@ async def _run_live_chat_runner(
             adk_tools=gate1a_bundle.tools if gate1a_bundle.status == "ready" else (),
             gate1a_egress_correlation_context=gate1a_egress_context,
             gate1a_egress_proxy_url=gate1a_egress_proxy_url,
-            public_event_sink=public_event_sink,
+            public_event_sink=governance_event_sink,
+            control_plane_plugins=control_plane_plugins,
         )
         model_call_window_end = _utc_now_iso()
         report_digest = _sha256_digest(
@@ -1483,6 +1534,32 @@ async def _run_live_chat_runner(
             payload=payload,
             draft_text=boundary_result.output_text_internal or "",
             gate1a_bundle=gate1a_bundle,
+        )
+    # MAGI_GATE5B_GOVERNANCE (default-OFF): pre-final fact-grounding gate over the
+    # turn's collected tool-evidence corpus (captured public events). Reuses the
+    # SAME deterministic grounding detector the cli/engine pre-final gate uses. An
+    # ungrounded guess (a specific numeric/identifier value with no corroborating
+    # evidence in the corpus) BLOCKS the user-visible response — exactly as
+    # cli/engine blocks an ungrounded ``fact_grounding`` requirement. When the
+    # flag is OFF this returns ``None`` and the response is byte-identical.
+    # The reservation was already finished above (``runner_completed``); the
+    # grounding gate is a pre-EGRESS block, so it does NOT re-finish the counter
+    # (that would double-finish a closed reservation). It reuses the existing
+    # ``counter_state`` and returns the TypeScript fallback so the ungrounded
+    # draft is never emitted as a python-authority answer.
+    grounding_status = gate5b_pre_final_grounding_status(
+        final_text=boundary_result.output_text_internal or "",
+        public_events=captured_governance_events,
+    )
+    if grounding_status == "ungrounded_guess":
+        return _fallback_response(
+            status_code=422,
+            status="python_error",
+            reason="gate5b_governance_ungrounded_answer",
+            runtime=runtime,
+            counter_state=counter_state,
+            counter_status=counter_status,
+            adk_invoked=boundary_result.adk_invoked,
         )
     _schedule_runtime_direct_usage_receipt(
         runtime=runtime,
