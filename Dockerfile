@@ -10,8 +10,13 @@ WORKDIR /app
 COPY pyproject.toml README.md ./
 COPY magi_agent/ ./magi_agent/
 
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+
 RUN python -m pip install --no-cache-dir --upgrade pip \
-  && python -m pip install --no-cache-dir ".[cli,composio,providers]"
+  && python -m pip install --no-cache-dir ".[browser,cli,composio,providers,waf]" \
+  && python -m playwright install --with-deps chromium \
+  && chmod -R a+rX "${PLAYWRIGHT_BROWSERS_PATH}" \
+  && rm -rf /var/lib/apt/lists/*
 
 # Dedicated non-root runtime user. /app stays root-owned read-only (the
 # runtime never writes it; hosted pods run readOnlyRootFilesystem with the
