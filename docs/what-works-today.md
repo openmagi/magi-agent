@@ -8,7 +8,7 @@ A scannable map of what the local `magi` CLI can actually do right now, what shi
 
 | ✅ Works today (local CLI + provider key) | 🚧 Default-off / shadow today | ❌ Planned |
 |---|---|---|
-| Real model calls — 4 providers (Anthropic / OpenAI / Gemini / Fireworks) via LiteLlm [^1] | Rollout enforcement boundaries (observe-only / local-fake) [^3] | Live enforcement authority attached to traffic (Stage 3) [^3] |
+| Real model calls — 5 providers (Anthropic / OpenAI / Gemini / Fireworks / OpenRouter) via LiteLlm [^1] | Rollout enforcement boundaries (observe-only / local-fake) [^3] | Live enforcement authority attached to traffic (Stage 3) [^3] |
 | Pre-final completion/evidence gate — default-ON, blocks coding-turn output [^4] | | |
 | First-party local tools: file read/write/edit, patch apply, Bash — on by default [^2] | External channel delivery (Telegram / Discord live send) | Cross-boundary repair orchestration across multiple contracts |
 | Permission prompts gating tools (`default` / `acceptEdits` / `bypassPermissions`) [^2] | External integrations (Composio) | Additional external authority for managed systems |
@@ -18,7 +18,7 @@ A scannable map of what the local `magi` CLI can actually do right now, what shi
 
 ### ✅ Works today
 
-- **Real model calls** across four providers (Anthropic, OpenAI, Gemini/Google, Fireworks) through LiteLlm, once a provider key (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GEMINI_API_KEY` | `GOOGLE_API_KEY` / `FIREWORKS_API_KEY`) or `~/.magi/config.toml` is present. With no key, the CLI still launches against a model-free stub. [^1]
+- **Real model calls** across five providers (Anthropic, OpenAI, Gemini/Google, Fireworks, OpenRouter) through LiteLlm, once a provider key (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GEMINI_API_KEY` | `GOOGLE_API_KEY` / `FIREWORKS_API_KEY` / `OPENROUTER_API_KEY`) or `~/.magi/config.toml` is present. With no key, the CLI still launches against a model-free stub. [^1]
 - **First-party local tools** (file read/write/edit, patch apply, Bash) are exposed by default on the real-runner path. [^2]
 - **Permission gating** in Claude-Code style: `default`, `acceptEdits`, and `bypassPermissions` modes decide when a tool may run. [^2] Note: a headless one-shot `magi -p` in `default` mode with `--output text` has no surface to answer approvals, so tool calls are denied — use the interactive TUI, `--permission-mode acceptEdits`/`bypassPermissions`, or a `stream-json` responder to let tools run. [^2]
 - **Sessions** plus both the **headless** NDJSON surface and the **interactive TUI** (with `/` [slash commands](/docs/cli-commands)).

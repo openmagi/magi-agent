@@ -6,8 +6,9 @@ so ``magi`` launches without any configuration. This module is the bridge to a
 API key to use, from either a config file (``~/.magi/config.toml``, overridable
 via ``MAGI_CONFIG``) or environment variables.
 
-Four providers are supported, all routed through ADK's ``LiteLlm``:
-``openai``, ``anthropic``, ``gemini`` and ``fireworks``.
+Five providers are supported, all routed through ADK's ``LiteLlm``:
+``openai``, ``anthropic``, ``gemini``, ``fireworks`` and ``openrouter`` (a
+meta-router whose model id is itself a ``<vendor>/<model>`` slug).
 
 Resolution rules
 ----------------
@@ -148,8 +149,17 @@ def _render_toml(data: dict[str, object]) -> str:
 from magi_agent.config.env import LOCAL_DEV_MODEL_SENTINEL
 
 # Auto-detect order. Anthropic first (magi's primary deployment posture), then
-# the rest. Also the set of accepted ``provider`` values.
-SUPPORTED_PROVIDERS: tuple[str, ...] = ("anthropic", "openai", "gemini", "fireworks")
+# the rest. Also the set of accepted ``provider`` values. OpenRouter is last: it
+# is a meta-router (one key fronting many upstream models), so a direct provider
+# key wins auto-detect and OpenRouter is opted into explicitly (``MAGI_PROVIDER=
+# openrouter`` / ``[model].provider``).
+SUPPORTED_PROVIDERS: tuple[str, ...] = (
+    "anthropic",
+    "openai",
+    "gemini",
+    "fireworks",
+    "openrouter",
+)
 
 # Env var(s) carrying the API key for each provider, in lookup order.
 _PROVIDER_ENV_KEYS: dict[str, tuple[str, ...]] = {
@@ -157,16 +167,20 @@ _PROVIDER_ENV_KEYS: dict[str, tuple[str, ...]] = {
     "openai": ("OPENAI_API_KEY",),
     "gemini": ("GEMINI_API_KEY", "GOOGLE_API_KEY"),
     "fireworks": ("FIREWORKS_API_KEY",),
+    "openrouter": ("OPENROUTER_API_KEY",),
 }
 
 # Default model id per provider, overridable via config ``[model].model`` or the
 # ``MAGI_MODEL`` env var. Model ids drift over time; treat these as a best-effort
-# starting point and override when a provider retires a name.
+# starting point and override when a provider retires a name. OpenRouter's model
+# is itself a routed slug (``<vendor>/<model>``) that becomes
+# ``openrouter/<vendor>/<model>`` once the litellm prefix is applied.
 _DEFAULT_MODEL: dict[str, str] = {
     "anthropic": "claude-sonnet-4-6",
     "openai": "gpt-5.5",
     "gemini": "gemini-3.5-flash",
     "fireworks": "accounts/fireworks/models/kimi-k2-instruct",
+    "openrouter": "openai/gpt-5.5",
 }
 
 # litellm provider prefix per provider (``<prefix>/<model>``).
@@ -175,6 +189,7 @@ _LITELLM_PREFIX: dict[str, str] = {
     "openai": "openai",
     "gemini": "gemini",
     "fireworks": "fireworks_ai",
+    "openrouter": "openrouter",
 }
 
 

@@ -54,6 +54,49 @@ def test_fireworks_uses_fireworks_ai_litellm_prefix() -> None:
     assert cfg.litellm_model.startswith("fireworks_ai/")
 
 
+def test_openrouter_uses_openrouter_litellm_prefix() -> None:
+    cfg = resolve_provider_config(env={"OPENROUTER_API_KEY": "sk-or-x"}, config={})
+    assert cfg is not None
+    assert cfg.provider == "openrouter"
+    assert cfg.api_key == "sk-or-x"
+    assert cfg.model == "openai/gpt-5.5"
+    assert cfg.litellm_model == "openrouter/openai/gpt-5.5"
+
+
+def test_openrouter_is_last_in_autodetect_order() -> None:
+    # OpenRouter is a meta-router: a direct provider key must win over it so the
+    # user opts into OpenRouter explicitly rather than having it hijack detection.
+    assert SUPPORTED_PROVIDERS[-1] == "openrouter"
+    cfg = resolve_provider_config(
+        env={"OPENROUTER_API_KEY": "sk-or", "ANTHROPIC_API_KEY": "a"}, config={}
+    )
+    assert cfg is not None
+    assert cfg.provider == "anthropic"
+
+
+def test_openrouter_explicit_without_key_returns_none() -> None:
+    assert resolve_provider_config(env={"MAGI_PROVIDER": "openrouter"}, config={}) is None
+
+
+def test_openrouter_config_section_supplies_key_and_slug() -> None:
+    cfg = resolve_provider_config(
+        env={},
+        config={
+            "model": {"provider": "openrouter", "model": "anthropic/claude-sonnet-4.5"},
+            "providers": {"openrouter": {"api_key": "sk-or-cfg"}},
+        },
+    )
+    assert cfg is not None
+    assert cfg.provider == "openrouter"
+    assert cfg.api_key == "sk-or-cfg"
+    assert cfg.model == "anthropic/claude-sonnet-4.5"
+    assert cfg.litellm_model == "openrouter/anthropic/claude-sonnet-4.5"
+
+
+def test_default_model_for_openrouter() -> None:
+    assert default_model_for("openrouter") == "openai/gpt-5.5"
+
+
 def test_explicit_provider_in_config_overrides_autodetect() -> None:
     cfg = resolve_provider_config(
         env={"ANTHROPIC_API_KEY": "a", "OPENAI_API_KEY": "o"},

@@ -20,13 +20,14 @@ Provider keys (the CLI auto-detects the first one present, in this order):
 - `GEMINI_API_KEY` — selects the `gemini` provider. Default model `gemini-3.5-flash`.
 - `GOOGLE_API_KEY` — alias accepted for the `gemini` provider (used when `GEMINI_API_KEY` is unset).
 - `FIREWORKS_API_KEY` — selects the `fireworks` provider. Default model `accounts/fireworks/models/kimi-k2-instruct`.
+- `OPENROUTER_API_KEY` — selects the `openrouter` provider. Default model `openai/gpt-5.5`. OpenRouter is a meta-router: the model id is a `<vendor>/<model>` slug (e.g. `anthropic/claude-sonnet-4.5`) that the CLI sends to LiteLlm as `openrouter/<vendor>/<model>`. It is auto-detected **last**, so a direct provider key wins; set `MAGI_PROVIDER=openrouter` to force it.
 
 > Default model ids drift as providers retire names; override with `MAGI_MODEL`
 > or `[model].model`. The authoritative defaults live in `magi_agent/cli/providers.py`.
 
 Provider / model selection:
 
-- `MAGI_PROVIDER` — force a specific provider (`anthropic`, `openai`, `gemini`, `fireworks`) instead of auto-detecting.
+- `MAGI_PROVIDER` — force a specific provider (`anthropic`, `openai`, `gemini`, `fireworks`, `openrouter`) instead of auto-detecting.
 - `MAGI_MODEL` — override the model id for the selected provider.
 
 Config file alternative (instead of, or in addition to, env keys):
