@@ -74,10 +74,11 @@ def discover_pack_files(bases: list[Path]) -> list[DiscoveredPack]:
         for pack_file in pack_files:
             # skip-and-continue mirrors the existing unreadable-base skipping;
             # one broken pack must not poison discovery for every gate that reads
-            # static manifests.
+            # static manifests.  OSError covers IsADirectoryError (rglob matches
+            # directories named pack.toml) and PermissionError (unreadable files).
             try:
                 manifest = load_manifest_from_toml(pack_file)
-            except (ValueError, ValidationError):
+            except (OSError, ValueError, ValidationError):
                 continue
             discovered.append(
                 DiscoveredPack(

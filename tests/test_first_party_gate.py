@@ -27,15 +27,10 @@ _PACK_TOML = "\n".join(
 )
 
 
-def _write_pack(base: Path, *, pack_id_line: str | None = None) -> None:
+def _write_pack(base: Path) -> None:
     pack_dir = base / "test_evidence"
     pack_dir.mkdir(parents=True)
-    body = (
-        _PACK_TOML
-        if pack_id_line is None
-        else _PACK_TOML.replace('packId = "user.test-evidence"', pack_id_line)
-    )
-    (pack_dir / "pack.toml").write_text(body, encoding="utf-8")
+    (pack_dir / "pack.toml").write_text(_PACK_TOML, encoding="utf-8")
 
 
 def test_kill_switch(monkeypatch) -> None:
@@ -45,6 +40,9 @@ def test_kill_switch(monkeypatch) -> None:
     assert first_party_evidence_disabled() is True
     monkeypatch.setenv(FIRST_PARTY_EVIDENCE_DISABLED_ENV, "off")
     assert first_party_evidence_disabled() is False
+    # injectable env dict — process env not consulted
+    assert first_party_evidence_disabled(env={}) is False
+    assert first_party_evidence_disabled(env={"MAGI_FP_EVIDENCE_DISABLED": "1"}) is True
 
 
 def test_refs_from_static_manifests(tmp_path, monkeypatch) -> None:
