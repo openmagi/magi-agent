@@ -84,6 +84,4 @@ def test_bundled_pack_enabled_by_default(monkeypatch, tmp_path) -> None:
     # lands, the bundled activity pack's refs appear with no config at all.
     monkeypatch.setenv("MAGI_CONFIG", str(tmp_path / "config.toml"))
     refs = enabled_first_party_activity_refs()
-    # before Task 5 this asserts the call is safe; after Task 5 flip to:
-    # assert "evidence:toolCall@1" in refs
-    assert isinstance(refs, tuple)
+    assert "evidence:toolCall@1" in refs
