@@ -415,6 +415,29 @@ FLAGS: tuple[FlagSpec, ...] = (
             "default-OFF and inert unless explicitly set."
         ),
     ),
+    _b(
+        "MAGI_FACT_GROUNDING_VERIFICATION_ENABLED",
+        stage="stage2",
+        summary=(
+            "Run semantic grounding verification on the live evidence gate: a "
+            "research answer asserting a specific numeric/identifier value not "
+            "present in the opened-source corpus stays ungrounded and blocks. "
+            "Strict default-OFF and inert unless explicitly set."
+        ),
+    ),
+    _b(
+        "MAGI_GATE5B_GOVERNANCE_ENABLED",
+        stage="stage2",
+        summary=(
+            "Run cli/engine-parity governance on the gate5b serving path: attach "
+            "the control-plane plugin (loop-guard / compaction / edit-retry / "
+            "self-review / max-steps / tool-synthesis etc., each behind its own "
+            "existing flag) to the gate5b runner AND run a pre-final "
+            "evidence/fact-grounding check over the turn's tool evidence before "
+            "emitting the user-visible response. Strict default-OFF: when unset "
+            "the gate5b path is byte-identical to today."
+        ),
+    ),
     _pb(
         "MAGI_SELF_INTROSPECTION_ENABLED",
         summary="Advertise the InspectSelfEvidence tool (default-ON full profile).",

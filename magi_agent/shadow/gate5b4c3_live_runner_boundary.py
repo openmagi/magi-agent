@@ -99,7 +99,13 @@ _ALLOWED_AGENT_KWARGS = (
     "name",
     "tools",
 )
-_ALLOWED_RUNNER_KWARGS = ("agent", "app_name", "auto_create_session", "session_service")
+_ALLOWED_RUNNER_KWARGS = (
+    "agent",
+    "app_name",
+    "auto_create_session",
+    "plugins",
+    "session_service",
+)
 _ALLOWED_RUN_ASYNC_KWARGS = ("new_message", "run_config", "session_id", "user_id")
 _MAX_MANUAL_TOOL_CONTINUATIONS = 4
 _MANUAL_TOOL_EVENT_LIMIT = 64
@@ -423,6 +429,7 @@ class Gate5B4C3LiveRunnerBoundary:
         gate1a_egress_proxy_url: str | None = None,
         public_event_sink: Gate5B4C3PublicEventSink | None = None,
         session_service_registry: SessionServiceRegistry | None = None,
+        control_plane_plugins: Sequence[object] = (),
     ) -> None:
         self._adk_primitives_loader = (
             adk_primitives_loader or load_gate5b4c3_live_adk_primitives
@@ -432,6 +439,14 @@ class Gate5B4C3LiveRunnerBoundary:
         self._gate1a_egress_proxy_url = str(gate1a_egress_proxy_url or "").strip()
         self._public_event_sink = public_event_sink
         self._session_service_registry = session_service_registry
+        # MAGI_GATE5B_GOVERNANCE: optional control-plane plugin(s) to attach to
+        # the gate5b ADK runner so loop-guard / compaction / edit-retry /
+        # self-review / max-steps / tool-synthesis controls reach this path the
+        # SAME way they reach the cli/engine runner (via App/Runner plugins). The
+        # caller (chat_routes) builds these from ``build_default_plugin`` only
+        # when the governance flag is ON; the default empty tuple keeps every
+        # pre-existing call site byte-identical (no ``plugins`` kwarg passed).
+        self._control_plane_plugins = tuple(control_plane_plugins)
 
     def invoke(
         self,
@@ -668,6 +683,12 @@ class Gate5B4C3LiveRunnerBoundary:
             "session_service": session_service,
             "auto_create_session": True,
         }
+        # MAGI_GATE5B_GOVERNANCE: attach the control-plane plugin(s) only when the
+        # caller supplied them (flag ON). The key is omitted entirely otherwise so
+        # ``_allowlist_kwargs`` never adds ``plugins`` to the Runner call — the
+        # flag-OFF runner construction is byte-identical to today.
+        if self._control_plane_plugins:
+            runner_kwargs["plugins"] = list(self._control_plane_plugins)
         try:
             runner = primitives.Runner(**_allowlist_kwargs(runner_kwargs, _ALLOWED_RUNNER_KWARGS))
         except Exception as exc:
@@ -1306,6 +1327,7 @@ def run_gate5b4c3_live_runner_boundary(
     gate1a_egress_correlation_context: Gate1AEgressCorrelationContext | None = None,
     gate1a_egress_proxy_url: str | None = None,
     public_event_sink: Gate5B4C3PublicEventSink | None = None,
+    control_plane_plugins: Sequence[object] = (),
 ) -> Gate5B4C3LiveRunnerBoundaryResult:
     boundary = Gate5B4C3LiveRunnerBoundary(
         adk_primitives_loader or load_gate5b4c3_live_adk_primitives,
@@ -1313,6 +1335,7 @@ def run_gate5b4c3_live_runner_boundary(
         gate1a_egress_correlation_context=gate1a_egress_correlation_context,
         gate1a_egress_proxy_url=gate1a_egress_proxy_url,
         public_event_sink=public_event_sink,
+        control_plane_plugins=control_plane_plugins,
     )
     return boundary.invoke(request, config=config)
 
@@ -1326,6 +1349,7 @@ async def run_gate5b4c3_live_runner_boundary_async(
     gate1a_egress_correlation_context: Gate1AEgressCorrelationContext | None = None,
     gate1a_egress_proxy_url: str | None = None,
     public_event_sink: Gate5B4C3PublicEventSink | None = None,
+    control_plane_plugins: Sequence[object] = (),
 ) -> Gate5B4C3LiveRunnerBoundaryResult:
     boundary = Gate5B4C3LiveRunnerBoundary(
         adk_primitives_loader or load_gate5b4c3_live_adk_primitives,
@@ -1333,6 +1357,7 @@ async def run_gate5b4c3_live_runner_boundary_async(
         gate1a_egress_correlation_context=gate1a_egress_correlation_context,
         gate1a_egress_proxy_url=gate1a_egress_proxy_url,
         public_event_sink=public_event_sink,
+        control_plane_plugins=control_plane_plugins,
     )
     return await boundary.invoke_async(request, config=config)
 
