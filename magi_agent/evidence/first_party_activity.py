@@ -13,7 +13,7 @@ from __future__ import annotations
 import hashlib
 import json
 import time
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -65,11 +65,34 @@ def _sha256(value: object) -> str:
     return hashlib.sha256(payload.encode("utf-8", errors="replace")).hexdigest()
 
 
+_LONG_VALUE_THRESHOLD = 64
+_LONG_VALUE_REDACTED = "[redacted:long-value]"
+
+
+def _redact_long_values(value: object) -> object:
+    """Replace any string value whose length >= _LONG_VALUE_THRESHOLD with a
+    redaction marker.  Long opaque strings in arg/result summaries are never
+    needed — the full content is already represented by the sha256 digest
+    fields.  Walk mappings and sequences recursively so nested secrets are also
+    covered.
+    """
+    if isinstance(value, Mapping):
+        return {k: _redact_long_values(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, Sequence)) and not isinstance(value, (str, bytes)):
+        return [_redact_long_values(item) for item in value]
+    if isinstance(value, str) and len(value) >= _LONG_VALUE_THRESHOLD:
+        return _LONG_VALUE_REDACTED
+    return value
+
+
 def _summary(value: object) -> str:
     # Use _sanitize_public_summary_value for Mapping inputs so that key-based
     # secret detection and string truncation run before the JSON encoding step,
     # preventing long secrets from surviving the raw-JSON cap.
     sanitized = _sanitize_public_summary_value(value)
+    # Redact any remaining long string values (e.g. tokens under keys not in
+    # _SECRET_FIELD_FRAGMENTS such as "auth").  Truncation is not redaction.
+    sanitized = _redact_long_values(sanitized)
     try:
         text = json.dumps(sanitized, sort_keys=True, default=str)
     except (TypeError, ValueError):

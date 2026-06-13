@@ -160,7 +160,10 @@ def test_summaries_are_redacted_and_capped() -> None:
     secret = "xoxb-" + "1234567890-" * 30  # assembled at runtime — GH push protection
     result = ToolResult(status="ok", output={"token": secret})
     (activity,) = _build("web_search", result, arguments={"auth": secret})
-    assert secret not in json.dumps(dict(activity.detail))
+    detail_json = json.dumps(dict(activity.detail))
+    assert secret not in detail_json
+    # Truncation is not redaction: assert no actionable prefix leaks either
+    assert secret[:24] not in detail_json
     assert len(str(activity.detail["argsSummary"])) <= 400
     assert len(str(activity.detail["resultSummary"])) <= 400
 
