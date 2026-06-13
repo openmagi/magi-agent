@@ -15,6 +15,13 @@ Versions follow the tags published on GitHub Releases.
 
 ### Fixed
 
+## 0.1.31
+
+### Fixed
+- Hosted selected Gate5B streams now surface child-runner progress while the
+  child work is running, so hosted Work panels no longer wait until final answer
+  projection to show helper activity.
+
 ## 0.1.30
 
 ### Added
