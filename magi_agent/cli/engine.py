@@ -1937,6 +1937,7 @@ class MagiEngineDriver:
                 harness_state=effective_harness_state,
                 observed_public_refs=observed_public_refs,
                 repair_attempt_count=repair_attempts,
+                final_text=emitted_text,
             )
             if pre_final_gate is None:
                 break
@@ -2593,6 +2594,7 @@ class MagiEngineDriver:
         harness_state: object | None,
         observed_public_refs: set[str],
         repair_attempt_count: int = 0,
+        final_text: str = "",
     ) -> dict[str, object] | None:
         assembly = self._runner_policy_assembly
         if assembly is None:
@@ -2640,6 +2642,12 @@ class MagiEngineDriver:
             )
         observed_public_refs.update(
             self._ga_deliverable_matched_requirement_labels(evidence_records)
+        )
+        observed_public_refs.update(
+            self._fact_grounding_matched_requirement_labels(
+                final_text=final_text,
+                evidence_records=evidence_records,
+            )
         )
         missing_evidence = [
             ref for ref in assembly.evidence_requirements if ref not in observed_public_refs
@@ -2811,6 +2819,64 @@ class MagiEngineDriver:
         if missing_deliverable_labels(required, evidence_records):
             return []
         return [label for label in labels if "artifact" in label]
+
+    def _fact_grounding_matched_requirement_labels(
+        self,
+        *,
+        final_text: str,
+        evidence_records: Sequence[object],
+    ) -> list[str]:
+        """Required-validator labels satisfied by a GROUNDED final answer.
+
+        Behind strict default-OFF ``MAGI_FACT_GROUNDING_VERIFICATION_ENABLED``.
+        When OFF this returns ``[]`` so the gate is byte-identical to main: the
+        bare ``fact_grounding`` required-validator behaves exactly as it does
+        today. When ON, and the assembled policy actually carries that bare
+        ``fact_grounding`` label, the turn's final answer is grounded against the
+        collected evidence corpus with the deterministic
+        ``evaluate_answer_grounding`` detector (via
+        :class:`~magi_agent.evidence.claim_grounding.FactGroundingEvidenceProducer`):
+
+        * grounded (value supported, or no specific value to ground — the G4
+          boundary) ⇒ ``["fact_grounding"]`` ⇒ the requirement is satisfied and
+          the gate does not block on it;
+        * guess (a specific numeric/identifier value with no corroborating
+          evidence) ⇒ ``[]`` ⇒ ``fact_grounding`` stays missing ⇒ the gate
+          blocks.
+
+        Only the ``fact_grounding`` label is ever satisfied here; an unrelated
+        missing validator is untouched. Fail-open: any error grounds nothing
+        (returns ``[]``) so the satisfier can never wedge a turn — it can only
+        REMOVE a block, never add one.
+        """
+        import os  # noqa: PLC0415
+
+        from magi_agent.config.env import (  # noqa: PLC0415
+            parse_fact_grounding_verification_enabled,
+        )
+
+        if not parse_fact_grounding_verification_enabled(os.environ):
+            return []
+        assembly = self._runner_policy_assembly
+        if assembly is None:
+            return []
+        try:
+            from magi_agent.evidence.claim_grounding import (  # noqa: PLC0415
+                FACT_GROUNDING_REQUIREMENT_LABEL,
+                FactGroundingEvidenceProducer,
+            )
+
+            if FACT_GROUNDING_REQUIREMENT_LABEL not in assembly.required_validators:
+                return []
+            return list(
+                FactGroundingEvidenceProducer().satisfied_requirement_labels(
+                    final_text=final_text,
+                    evidence_records=evidence_records,
+                )
+            )
+        except Exception:
+            logger.debug("fact-grounding satisfier failed", exc_info=True)
+            return []
 
     @staticmethod
     def _collect_public_refs(value: object, refs: set[str]) -> None:

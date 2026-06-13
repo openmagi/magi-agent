@@ -74,6 +74,7 @@ openmagi	magi_agent/cli/session_log.py	2
 openmagi	magi_agent/cli/tests/test_commands.py	4
 openmagi	magi_agent/cli/tests/test_engine.py	9
 openmagi	magi_agent/cli/tests/test_engine_recovery.py	2
+openmagi	magi_agent/cli/tests/test_fact_grounding_gate_wiring.py	4
 openmagi	magi_agent/cli/tests/test_phase_route_consumption.py	3
 openmagi	magi_agent/cli/tests/test_runtime_policy_wiring.py	20
 openmagi	magi_agent/cli/tests/test_slash_p2_mcp.py	2
