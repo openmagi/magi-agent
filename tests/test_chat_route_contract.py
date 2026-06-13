@@ -951,6 +951,102 @@ def test_chat_route_live_canary_uses_adk_boundary_and_counter_store(
     assert canary_request_digest in request_records
 
 
+def test_chat_route_projects_session_id_for_hosted_session_reuse(
+    monkeypatch,
+    tmp_path: Path,
+    request,
+) -> None:
+    from magi_agent.gates.gate5b_full_toolhost import (
+        GATE5B_FULL_TOOLHOST_TOOL_NAMES,
+        Gate5BFullToolHostConfig,
+    )
+    from magi_agent.shadow.session_service_registry import (
+        reset_default_session_service_registry,
+    )
+
+    monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
+    monkeypatch.setenv("MAGI_HOSTED_SESSION_REUSE", "1")
+    reset_default_session_service_registry()
+    request.addfinalizer(reset_default_session_service_registry)
+
+    runtime = make_runtime(
+        authority=PythonRuntimeAuthorityConfig(
+            userVisibleOutputAllowed=True,
+            canaryRoutingAllowed=True,
+        )
+    )
+    runtime.gate5b_user_visible_chat_route_config = Gate5BUserVisibleChatRouteConfig(
+        enabled=True,
+        killSwitchEnabled=False,
+        selectedBotDigest=_sha256("bot-test"),
+        selectedOwnerUserIdDigest=_sha256("user-test"),
+        environment="production",
+        environmentAllowlist=("production",),
+        adkPrimitivesLoader=_fake_primitives,
+    )
+    runtime.gate5b_full_toolhost_config = Gate5BFullToolHostConfig.model_validate(
+        {
+            "enabled": True,
+            "killSwitchEnabled": False,
+            "routeAttachmentEnabled": True,
+            "selectedBotDigest": _sha256("bot-test"),
+            "selectedOwnerDigest": _sha256("user-test"),
+            "environment": "production",
+            "environmentAllowlist": ("production",),
+            "allowedToolNames": GATE5B_FULL_TOOLHOST_TOOL_NAMES,
+            "maxToolCallsPerTurn": 8,
+        }
+    )
+    runtime.gate5b4c3_shadow_generation_route_config = Gate5B4C3ShadowGenerationRouteConfig(
+        liveRunnerBoundaryEnabled=True,
+        counterStore=Gate5B4C3ShadowCounterStore(tmp_path / "counters.json"),
+        generationConfig=Gate5B4C3ShadowGenerationConfig(
+            enabled=True,
+            killSwitchActive=False,
+            capStateInitialized=True,
+            providerProjectSpendControlsVerified=True,
+            selectedBotDigest=_sha256("bot-test"),
+            trustedOwnerUserIdDigest=_sha256("user-test"),
+            environment="production",
+            allowedProviderLabels=("google",),
+            allowedModelLabels=("gemini-3.5-flash",),
+            allowedModelRoutes=("google:gemini-3.5-flash",),
+            allowedShadowCredentialRefs=("gate5b-google-api-key-smoke-v1",),
+            providerCredentialBindingRequired=False,
+            approvedBudgets={
+                "maxDailyGenerationRuns": 2,
+                "maxDailyGenerationCostUsd": 0.10,
+                "maxCostUsd": 0.05,
+            },
+        ),
+    )
+    client = TestClient(create_app(runtime))
+
+    first = client.post(
+        "/v1/chat/completions",
+        headers={"authorization": "Bearer gateway-token"},
+        json={
+            "sessionId": "hosted-visible-session",
+            "messages": [{"role": "user", "content": "First visible turn."}],
+        },
+    )
+    assert first.status_code == 200, first.json()
+    first_service = _FakeRunner.created_kwargs["session_service"]
+
+    second = client.post(
+        "/v1/chat/completions",
+        headers={"authorization": "Bearer gateway-token"},
+        json={
+            "sessionId": "hosted-visible-session",
+            "messages": [{"role": "user", "content": "What did I ask before?"}],
+        },
+    )
+
+    assert second.status_code == 200, second.json()
+    second_service = _FakeRunner.created_kwargs["session_service"]
+    assert second_service is first_service
+
+
 def test_chat_route_live_runner_blocks_incomplete_progress_projection(
     monkeypatch,
     tmp_path: Path,
