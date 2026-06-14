@@ -53,6 +53,7 @@ from magi_agent.evidence.edit_match_receipts import (
 from magi_agent.evidence.first_party_gate import enabled_first_party_activity_refs
 from magi_agent.runtime.public_events import (
     tool_end_event,
+    tool_input_preview,
     tool_progress_event,
     tool_start_event,
 )
@@ -974,8 +975,20 @@ class Gate5BFullToolHost:
         except Exception:
             return
 
-    def _emit_public_tool_start(self, *, tool_event_id: str, tool_name: str) -> None:
-        self._emit_public_event(tool_start_event(tool_id=tool_event_id, name=tool_name))
+    def _emit_public_tool_start(
+        self,
+        *,
+        tool_event_id: str,
+        tool_name: str,
+        arguments: Mapping[str, object],
+    ) -> None:
+        self._emit_public_event(
+            tool_start_event(
+                tool_id=tool_event_id,
+                name=tool_name,
+                input_preview=tool_input_preview(arguments),
+            )
+        )
         self._emit_public_event(
             tool_progress_event(
                 tool_id=tool_event_id,
@@ -1020,7 +1033,11 @@ class Gate5BFullToolHost:
         argument_digest = _digest(args)
         tool_event_id = _gate5b_live_tool_event_id(tool_call_digest)
         outcome: Gate5BFullToolOutcome | None = None
-        self._emit_public_tool_start(tool_event_id=tool_event_id, tool_name=tool_name)
+        self._emit_public_tool_start(
+            tool_event_id=tool_event_id,
+            tool_name=tool_name,
+            arguments=args,
+        )
         try:
             preflight = self.counter.before_call(
                 request_digest=request_digest,
