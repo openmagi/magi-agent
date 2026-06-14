@@ -1445,6 +1445,85 @@ def test_full_toolhost_env_reuses_user_visible_selected_scope_when_unset() -> No
     assert config.environment_allowlist == ("production",)
 
 
+def test_full_toolhost_config_disabled_when_live_subagents_flag_unset(monkeypatch) -> None:
+    # Default-OFF: with NO CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_* override and the
+    # new live-subagents flag unset, the full toolhost stays disabled (byte-identical
+    # to today: serve falls back to gate1a, SpawnAgent never exposed).
+    monkeypatch.delenv("MAGI_GATE5B_LIVE_SUBAGENTS_ENABLED", raising=False)
+    monkeypatch.setenv("MAGI_CHILD_RUNNER_LIVE_ENABLED", "1")
+
+    config = build_gate5b_full_toolhost_config_from_env({}, make_runtime().config)
+
+    assert config.enabled is False
+
+
+def test_live_subagents_flag_derives_ready_scope_from_runtime(monkeypatch) -> None:
+    # Flag ON + child-runner live ON: the full toolhost config is auto-derived to a
+    # ready, write-EXCLUSIVE, SpawnAgent-inclusive scope matching the serve request
+    # (digests from runtime bot_id/user_id; environment local + allowlisted).
+    monkeypatch.setenv("MAGI_GATE5B_LIVE_SUBAGENTS_ENABLED", "1")
+    monkeypatch.setenv("MAGI_CHILD_RUNNER_LIVE_ENABLED", "1")
+    monkeypatch.delenv("MAGI_CHILD_RUNNER_LIVE_KILL_SWITCH", raising=False)
+
+    config = build_gate5b_full_toolhost_config_from_env(
+        {
+            "MAGI_GATE5B_LIVE_SUBAGENTS_ENABLED": "1",
+            "MAGI_CHILD_RUNNER_LIVE_ENABLED": "1",
+        },
+        make_runtime().config,
+    )
+
+    assert config.enabled is True
+    assert config.kill_switch_enabled is False
+    assert config.route_attachment_enabled is True
+    assert config.selected_bot_digest == _sha256("bot-test")
+    assert config.selected_owner_digest == _sha256("user-test")
+    assert config.environment == "local"
+    assert "local" in config.environment_allowlist
+    # Write-EXCLUSIVE: SpawnAgent exposed, but no FileWrite/FileEdit/PatchApply/Bash.
+    assert "SpawnAgent" in config.allowed_tool_names
+    assert not ({"FileWrite", "FileEdit", "PatchApply", "Bash"} & set(config.allowed_tool_names))
+
+
+def test_live_subagents_flag_inert_without_child_runner(monkeypatch) -> None:
+    # The new flag NEVER self-enables live child runs: if the child-runner master
+    # gate is OFF, the full toolhost config stays disabled (no SpawnAgent surface).
+    monkeypatch.delenv("MAGI_CHILD_RUNNER_LIVE_ENABLED", raising=False)
+    monkeypatch.delenv("MAGI_CHILD_RUNNER_LIVE_KILL_SWITCH", raising=False)
+
+    config = build_gate5b_full_toolhost_config_from_env(
+        {"MAGI_GATE5B_LIVE_SUBAGENTS_ENABLED": "1"},
+        make_runtime().config,
+    )
+
+    assert config.enabled is False
+
+
+def test_live_subagents_flag_respects_explicit_full_toolhost_override(monkeypatch) -> None:
+    # Operator-set CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_* always wins over the
+    # derived live-subagents scope (explicit env is authoritative).
+    monkeypatch.setenv("MAGI_CHILD_RUNNER_LIVE_ENABLED", "1")
+    env = {
+        "MAGI_GATE5B_LIVE_SUBAGENTS_ENABLED": "1",
+        "MAGI_CHILD_RUNNER_LIVE_ENABLED": "1",
+        "CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_ENABLED": "1",
+        "CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_KILL_SWITCH": "0",
+        "CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_SELECTED_BOT_DIGEST": _sha256("bot-test"),
+        "CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_TRUSTED_OWNER_USER_ID_DIGEST": _sha256(
+            "user-test"
+        ),
+        "CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_ENVIRONMENT": "production",
+        "CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_ENV_ALLOWLIST": "production",
+        "CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_ALLOWLIST": "FileRead,Glob,Grep,SpawnAgent",
+    }
+
+    config = build_gate5b_full_toolhost_config_from_env(env, make_runtime().config)
+
+    assert config.enabled is True
+    assert config.environment == "production"
+    assert config.allowed_tool_names == ("FileRead", "Glob", "Grep", "SpawnAgent")
+
+
 def test_hosted_like_full_toolhost_env_attaches_selected_bundle(
     monkeypatch,
     tmp_path: Path,
