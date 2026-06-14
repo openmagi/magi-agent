@@ -84,6 +84,30 @@ def test_profile_enables_gate5b_governance_for_canary(profile: dict[str, str]) -
     assert cfg_env.is_gate5b_governance_enabled(profile) is True
 
 
+def test_profile_enables_live_subagents_on_serve(profile: dict[str, str]) -> None:
+    # The line that exposes live sub-agents (SpawnAgent) on the gate5b SERVE path,
+    # not just the local CLI. It requires the child-runner master gate too; the
+    # resolver returns True only when BOTH are present in the profile.
+    from magi_agent.transport.chat_shared import live_subagents_serve_enabled
+
+    assert profile.get("MAGI_GATE5B_LIVE_SUBAGENTS_ENABLED") == "1"
+    assert profile.get("MAGI_CHILD_RUNNER_LIVE_ENABLED") == "1"
+    assert live_subagents_serve_enabled(profile) is True
+
+
+def test_unset_env_keeps_live_subagents_off_on_serve() -> None:
+    # CONFIG, not a code-default flip: with the profile NOT loaded the resolver is
+    # False, so the gate5b full toolhost stays disabled on serve (byte-identical).
+    from magi_agent.transport.chat_shared import live_subagents_serve_enabled
+
+    assert live_subagents_serve_enabled({}) is False
+    # The serve flag never self-enables without the child-runner master gate.
+    assert (
+        live_subagents_serve_enabled({"MAGI_GATE5B_LIVE_SUBAGENTS_ENABLED": "1"})
+        is False
+    )
+
+
 # ---------------------------------------------------------------------------
 # Strict opt-in bool gates (kind="bool", default-OFF): each MUST read True under
 # the profile via the canonical flag_bool reader.
