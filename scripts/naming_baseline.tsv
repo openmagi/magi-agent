@@ -14,13 +14,12 @@ CORE_AGENT_	magi_agent/evidence/observed_egress.py	3
 CORE_AGENT_	magi_agent/harness/presets.py	15
 CORE_AGENT_	magi_agent/hooks/builtin/prompt_transforms.py	3
 CORE_AGENT_	magi_agent/main.py	6
-CORE_AGENT_	magi_agent/plugins/native/web.py	4
 CORE_AGENT_	magi_agent/research/research_first_canary.py	2
 CORE_AGENT_	magi_agent/shadow/fixture_runner.py	1
 CORE_AGENT_	magi_agent/shadow/mission_lifecycle_contract.py	6
 CORE_AGENT_	magi_agent/transport/app_api.py	2
 CORE_AGENT_	magi_agent/transport/chat_routes.py	9
-CORE_AGENT_	magi_agent/transport/chat_shared.py	39
+CORE_AGENT_	magi_agent/transport/chat_shared.py	49
 CORE_AGENT_	magi_agent/transport/gate2_sandbox_canary.py	10
 CORE_AGENT_	magi_agent/transport/health.py	1
 CORE_AGENT_	magi_agent/transport/streaming_chat_route.py	1
