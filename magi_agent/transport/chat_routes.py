@@ -965,6 +965,7 @@ async def run_gate5b_user_visible_chat_response(
         route_config,
         memory_mode=memory_mode,
         public_event_sink=public_event_sink,
+        session_id=_local_chat_string(payload, "sessionId", "") or None,
     )
     tool_bundle = (
         gate5b_full_bundle
@@ -1085,6 +1086,7 @@ def _gate5b_full_toolhost_bundle(
     *,
     memory_mode: "MemoryMode | str" = "normal",
     public_event_sink: Callable[[Mapping[str, object]], None] | None = None,
+    session_id: str | None = None,
 ) -> Gate5BFullToolBundle:
     return build_gate5b_full_toolhost_bundle(
         config=_gate5b_full_toolhost_config(runtime),
@@ -1097,6 +1099,10 @@ def _gate5b_full_toolhost_bundle(
         tool_registry=runtime.tool_registry,
         memory_mode=memory_mode,
         public_event_sink=public_event_sink,
+        # Top-level serve turn: parent depth 0 (a SpawnAgent call requests depth
+        # 1). The session id gives spawned children a stable parent reference.
+        session_id=session_id,
+        spawn_depth=0,
     )
 
 
