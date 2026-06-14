@@ -15,6 +15,19 @@ Versions follow the tags published on GitHub Releases.
 
 ### Fixed
 
+## 0.1.37
+
+### Changed
+- CLI runs that omit `--permission-mode` now default to `bypassPermissions`,
+  while explicit permission-mode choices remain respected.
+
+### Fixed
+- Added a `/v1/app/tools` compatibility route for the restored dashboard
+  surface.
+- Hosted Gate5B/full-toolhost public events now include redacted tool input
+  previews so Work panels can show what tools are doing while they run.
+- Added a SpawnAgent full-toolhost regression test for live child-runner wiring.
+
 ## 0.1.36
 
 ### Added
