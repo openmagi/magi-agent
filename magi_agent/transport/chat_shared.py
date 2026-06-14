@@ -241,7 +241,7 @@ def build_gate1a_readonly_tools_config_from_env(
 
 # Default-OFF serve-path live-sub-agents enablement. When set (and the existing
 # child-runner master gate ``MAGI_CHILD_RUNNER_LIVE_ENABLED`` is on, not kill-
-# switched) this derives a *ready*, write-EXCLUSIVE, SpawnAgent-inclusive
+# switched) this derives a *ready*, FULL (read+write+SpawnAgent)
 # gate5b full-toolhost config from the runtime selection so a dashboard-chat turn
 # can actually spawn a real sub-agent. Unset => no derivation => the full toolhost
 # stays disabled (gate1a fallback, byte-identical to today). It only fills gaps:

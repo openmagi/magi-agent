@@ -1459,7 +1459,7 @@ def test_full_toolhost_config_disabled_when_live_subagents_flag_unset(monkeypatc
 
 def test_live_subagents_flag_derives_ready_scope_from_runtime(monkeypatch) -> None:
     # Flag ON + child-runner live ON: the full toolhost config is auto-derived to a
-    # ready, write-EXCLUSIVE, SpawnAgent-inclusive scope matching the serve request
+    # ready, FULL (read+write+SpawnAgent) scope matching the serve request
     # (digests from runtime bot_id/user_id; environment local + allowlisted).
     monkeypatch.setenv("MAGI_GATE5B_LIVE_SUBAGENTS_ENABLED", "1")
     monkeypatch.setenv("MAGI_CHILD_RUNNER_LIVE_ENABLED", "1")
