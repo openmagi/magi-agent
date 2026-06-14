@@ -337,6 +337,22 @@ async def test_selected_registry_spawn_agent_emits_live_child_events(
     )
 
     assert outcome.status == "ok"
+    preview = outcome.output_preview
+    assert isinstance(preview, dict)
+    assert preview["status"] == "ok"
+    assert preview["errorCode"] is None
+    metadata = preview["metadata"]
+    assert isinstance(metadata, dict)
+    assert metadata["toolName"] == "SpawnAgent"
+    assert metadata["handler"] == "first_party_native_local"
+    assert str(metadata["outputDigest"]).startswith("sha256:")
+    output = preview["output"]
+    llm_output = preview["llmOutput"]
+    assert isinstance(output, dict)
+    assert output == llm_output
+    assert output["status"] == "ok"
+    assert output["liveChildRunnerAttached"] is True
+    assert output["summary"] == "Delegated child completed."
     event_types = [event["type"] for event in public_events]
     assert event_types == [
         "tool_start",
