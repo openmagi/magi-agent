@@ -90,6 +90,16 @@ class ToolPermissionPolicy:
                 metadata=safety_decision.metadata,
             )
 
+        if bypass_preapproved(context, safety_decision.metadata, mode=mode):
+            metadata = dict(safety_decision.metadata)
+            metadata["bypassPermissionsPreapproved"] = True
+            metadata["reason"] = "bypass permissions preapproved"
+            return ToolPermissionDecision(
+                action="allow",
+                reason="bypass permissions preapproved",
+                metadata=metadata,
+            )
+
         if selected_full_toolhost_preapproved(manifest, context, safety_decision.metadata):
             metadata = dict(safety_decision.metadata)
             metadata["selectedFullToolhostPreapproved"] = True
@@ -157,6 +167,23 @@ def selected_full_toolhost_preapproved(
         or manifest.dangerous
         or manifest.mutates_workspace
     )
+
+
+def bypass_preapproved(
+    context: ToolContext,
+    safety_metadata: dict[str, object],
+    *,
+    mode: RuntimeMode,
+) -> bool:
+    if mode != "act":
+        return False
+    raw_scope = context.permission_scope
+    if not isinstance(raw_scope, dict):
+        return False
+    scope_mode = _scope_token(raw_scope.get("mode") or raw_scope.get("permissionMode"))
+    if scope_mode != "bypass":
+        return False
+    return safety_metadata.get("securityPrecheck") == "passed"
 
 
 def _scope_token(value: object) -> str:

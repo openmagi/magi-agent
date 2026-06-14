@@ -168,21 +168,21 @@ model per provider is `claude-sonnet-4-6` (anthropic), `gpt-5.5` (openai),
 (fireworks). Model ids drift; override with `MAGI_MODEL` or `[model].model`.
 
 For a task that uses tools (file read/write/edit, patch, Bash), tool execution
-is gated by Claude-Code-style permission modes. Headless `-p` runs use the
-`default` mode, which asks per tool and cannot auto-resolve those asks without an
-input stream, so use `acceptEdits` (or run the interactive TUI and approve):
+is gated by Claude-Code-style permission modes. A local CLI run defaults to
+`bypassPermissions` when `--permission-mode` is omitted, so tools can run without
+approval prompts. Pass `--permission-mode default` when you want per-tool
+approval prompts, or `--mode plan` for read-only planning:
 
 ```bash
-# Interactive: approve tool use when prompted
+# Interactive: tools run without approval prompts by default
 magi
 
-# Headless: auto-allow edit-class tools
-magi -p --permission-mode acceptEdits "Read README.md and summarize the install steps"
+# Headless: same default-bypass behavior
+magi -p "Read README.md and summarize the install steps"
 ```
 
 Expect the model to answer pure questions directly; for tool-using tasks you
-will see permission prompts unless you pass `--permission-mode acceptEdits` (or
-`bypassPermissions`).
+will only see permission prompts when you explicitly choose a prompting mode.
 
 ## Front door / where to start
 
@@ -436,7 +436,7 @@ should require explicit toolkit scope, credential scope, user approval, and
 leak-safe evidence before an external action is enabled.
 
 A provider key does enable the real local model plus first-party local tools
-(file read/write/edit, patch, Bash, behind permission prompts); what stays
+(file read/write/edit, patch, Bash, governed by permission modes); what stays
 default-off is external delivery/integrations and production enforcement
 authority.
 

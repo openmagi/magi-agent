@@ -21,7 +21,7 @@ magi-agent serve --port 8080
 open http://localhost:8080/dashboard
 ```
 
-Configure a provider with one API key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`/`GOOGLE_API_KEY`, or `FIREWORKS_API_KEY`) or `~/.magi/config.toml`. With a provider key the local `magi` CLI runs a real model plus first-party tools behind permission prompts. Run `magi doctor` to verify setup.
+Configure a provider with one API key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`/`GOOGLE_API_KEY`, or `FIREWORKS_API_KEY`) or `~/.magi/config.toml`. With a provider key the local `magi` CLI runs a real model plus first-party tools through permission modes; omitted `--permission-mode` defaults to `bypassPermissions`. Run `magi doctor` to verify setup.
 
 ## Source Checkout For Contributors
 

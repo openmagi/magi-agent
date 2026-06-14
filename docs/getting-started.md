@@ -31,7 +31,7 @@ export ANTHROPIC_API_KEY=...   # or OPENAI_API_KEY / GEMINI_API_KEY / GOOGLE_API
 magi -p "What is 2+2?"
 ```
 
-A pure question answers directly. For a tool-using task, run the interactive `magi` TUI and approve the tool, or pass `--permission-mode acceptEdits` headlessly (otherwise `default` mode asks per tool and cannot auto-resolve without an input stream).
+A pure question answers directly. For a tool-using task, the local CLI defaults to `bypassPermissions` when `--permission-mode` is omitted, so tools can execute without approval prompts. Pass `--permission-mode default` when you want per-tool approval prompts.
 
 ## Source checkout (contributors only)
 
