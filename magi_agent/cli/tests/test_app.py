@@ -573,6 +573,7 @@ class TestAgentDefaultCommand:
         captured: dict[str, object] = {}
 
         def fake_build_headless_runtime(**kwargs: object) -> object:
+            captured["build_permission_mode"] = kwargs.get("permission_mode")
             captured["runner_policy_routing_enabled"] = kwargs.get(
                 "runner_policy_routing_enabled"
             )
@@ -586,6 +587,7 @@ class TestAgentDefaultCommand:
 
         async def fake_headless(prompt: str, **kwargs: object) -> int:
             captured["prompt"] = prompt
+            captured["run_permission_mode"] = kwargs.get("permission_mode")
             return 0
 
         runner = CliRunner()
@@ -601,8 +603,10 @@ class TestAgentDefaultCommand:
 
         assert result.exit_code == 0, result.output
         assert captured == {
+            "build_permission_mode": "bypassPermissions",
             "runner_policy_routing_enabled": True,
             "prompt": "hello",
+            "run_permission_mode": "bypassPermissions",
         }
         assert os.environ["MAGI_RUNNER_POLICY_ROUTING_ENABLED"] == "1"
         assert os.environ["MAGI_RUNNER_POLICY_ROUTE_BLOCKING_ENABLED"] == "0"

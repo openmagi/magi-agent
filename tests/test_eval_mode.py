@@ -86,20 +86,18 @@ def test_eval_explicit_flag_wins():
     ) == "acceptEdits"
 
 
-def test_non_eval_default_flag_resolves_to_accept_edits():
-    # B9: a one-shot headless run has no interactive approver — leaving it on
-    # "default" denied every write tool, while the interactive TUI already
-    # defaults to acceptEdits. Headless inherits the same default; an explicit
-    # --permission-mode always wins.
+def test_non_eval_default_flag_resolves_to_bypass_permissions():
+    # Default installed CLI should be yolo/bypass for local tool use. Operators
+    # who want prompts can still pass an explicit --permission-mode default.
     assert resolve_headless_permission_mode(
         permission_mode="default", flag_is_default=True, runtime_profile=None
-    ) == "acceptEdits"
+    ) == "bypassPermissions"
 
 
-def test_full_profile_default_flag_resolves_to_accept_edits():
+def test_full_profile_default_flag_resolves_to_bypass_permissions():
     assert resolve_headless_permission_mode(
         permission_mode="default", flag_is_default=True, runtime_profile="full"
-    ) == "acceptEdits"
+    ) == "bypassPermissions"
 
 
 def test_explicit_default_mode_is_respected():

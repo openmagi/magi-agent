@@ -8,10 +8,11 @@ rather than performing the live side effect (see
 | I want to… | Command | Doc |
 |---|---|---|
 | Ask a question (no tools, no file changes) | `magi -p "explain this error message"` | [cli/magi.md](cli/magi.md) |
-| Work interactively with the agent in a repo | `magi` (then approve tool calls as prompted) | [cli/magi.md](cli/magi.md) |
-| Let the agent read & edit files without approving every edit | `magi -p --permission-mode acceptEdits "fix the type error in utils.py"` | [cli/magi.md](cli/magi.md) |
+| Work interactively with the agent in a repo | `magi` | [cli/magi.md](cli/magi.md) |
+| Ask before tool calls | `magi --permission-mode default` | [cli/magi.md](cli/magi.md) |
+| Let the agent read & edit files without approval prompts | `magi -p "fix the type error in utils.py"` | [cli/magi.md](cli/magi.md) |
 | Plan only — read-only, no mutations | start in plan mode (the agent uses `EnterPlanMode`; only read tools run) | [tools.md](tools.md) |
-| Run with no approval prompts at all (careful) | `magi -p --permission-mode bypassPermissions "..."` | [cli/magi.md](cli/magi.md) |
+| Run with no approval prompts explicitly | `magi -p --permission-mode bypassPermissions "..."` | [cli/magi.md](cli/magi.md) |
 | Get a single JSON result for automation | `magi -p "summarise the README" --output json` | [cli/magi.md](cli/magi.md) |
 | Stream NDJSON frames for a live pipeline | `magi -p "count to 3" --output stream-json` | [cli/magi.md](cli/magi.md) |
 | Include raw engine/token events in the stream | `magi -p "..." --output stream-json --include-partial-messages` | [cli/magi.md](cli/magi.md) |

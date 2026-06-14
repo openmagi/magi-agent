@@ -46,9 +46,11 @@ configured, `magi` still launches but uses a model-free stub.
 
 ## Permission modes
 
-The CLI gates tool calls with four permission modes (set via `--permission-mode`):
+The CLI gates tool calls with four permission modes (set via `--permission-mode`).
+When omitted, local CLI runs default to `bypassPermissions`; choose a stricter
+mode explicitly when you want prompts or read-only planning.
 
-- `default` — prompts for each tool call that requires approval.
+- `default` — explicit prompting mode; prompts for each tool call that requires approval.
 - `acceptEdits` — auto-allows edit-class tools (file writes, patches); everything else still prompts.
 - `bypassPermissions` — allows all tool calls without prompting.
 - `smartApprove` — opt-in mode that auto-approves low-risk tool calls and only

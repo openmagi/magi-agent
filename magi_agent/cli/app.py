@@ -166,20 +166,13 @@ def resolve_headless_permission_mode(
 ) -> str:
     """Resolve the headless permission mode.
 
-    Eval runs are unattended batch scoring (no human approver) in ephemeral
-    sandboxes, so when the operator left ``--permission-mode`` at its default the
-    eval profile defaults to ``bypassPermissions`` (otherwise every write/exec
-    tool is denied for lack of an approver and the run produces an empty result).
-
-    All other profiles default a one-shot headless run to ``acceptEdits`` — the
-    same default the interactive TUI ships — because headless ``default`` mode
-    has no approver and silently denies every write tool (B9). An explicit
-    ``--permission-mode`` always wins, including an explicit ``default``.
+    Local CLI/TUI installs default to ``bypassPermissions`` when the operator
+    omits ``--permission-mode``. An explicit ``--permission-mode`` always wins,
+    including an explicit ``default``.
     """
-    if flag_is_default and _normalize_runtime_profile(runtime_profile) == "eval":
-        return "bypassPermissions"
+    del runtime_profile  # Reserved for compatibility with existing callers.
     if flag_is_default and permission_mode == "default":
-        return "acceptEdits"
+        return "bypassPermissions"
     return permission_mode
 
 

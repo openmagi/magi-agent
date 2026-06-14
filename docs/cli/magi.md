@@ -257,13 +257,15 @@ violation; it never raises — it degrades to the built-in defaults on error.
 
 | Mode | Behavior |
 |------|----------|
-| `default` | Prompts for each tool call that requires approval. |
+| omitted | Defaults to `bypassPermissions` for local CLI runs. |
+| `default` | Explicit prompting mode; prompts for each tool call that requires approval. |
 | `acceptEdits` | Automatically allows edit-class tools (file writes, patches). |
 | `bypassPermissions` | Allows all tool calls without prompting. |
 | `smartApprove` | Opt-in: auto-approves low-risk tool calls and only prompts for higher-risk ones. Never selected automatically — pass `--permission-mode smartApprove`. |
 
 ```sh
-magi -p "apply the patch" --permission-mode acceptEdits
+magi -p "apply the patch"
+magi -p "apply the patch" --permission-mode default
 magi -p "apply the patch" --permission-mode smartApprove
 ```
 

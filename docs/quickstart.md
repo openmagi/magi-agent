@@ -20,13 +20,14 @@ magi -p "What is 2+2?"
 Setting one provider key (or creating `~/.magi/config.toml`) builds a real
 model-backed runner. With neither, the CLI falls back to a model-free stub.
 
-For a tool-using task, run the interactive `magi` TUI and approve the tool, or
-pass `--permission-mode acceptEdits` headlessly. In `default` mode, headless `-p`
-asks per tool and cannot auto-resolve those asks without an input stream:
+For a tool-using task, run the interactive `magi` TUI or a headless `magi -p`
+command. When `--permission-mode` is omitted, local CLI runs default to
+`bypassPermissions` so tools can execute without approval prompts. Pass
+`--permission-mode default` when you want per-tool approval prompts:
 
 ```
-magi   # interactive: approve tool use when prompted
-magi -p --permission-mode acceptEdits "Read README.md and summarize the install steps"
+magi   # interactive, no approval prompts by default
+magi -p "Read README.md and summarize the install steps"
 ```
 
 ## Local dashboard

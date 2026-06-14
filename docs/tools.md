@@ -78,29 +78,28 @@ there is no `WebReader` tool handler today, so it is out of scope for this row.
 
 ### Example: invocation and approval
 
-A tool call is a proposal that must clear the permission gate. **How the gate is
-resolved depends on the surface:**
+A tool call is a proposal that must clear the permission gate. When
+`--permission-mode` is omitted, local CLI runs use `bypassPermissions` so tools
+execute without approval prompts. Choose stricter modes explicitly when needed:
 
-- **Interactive (`magi` TUI):** under the `default` mode you are prompted to
-  approve each tool; on approval it runs and a receipt is recorded.
-- **Headless one-shot (`magi -p ...`) in `default` mode with `--output text`:**
-  there is no prompt surface to answer the approval, so tool calls are **denied**
-  rather than executed. To let tools run headlessly, pass
-  `--permission-mode acceptEdits` (auto-allow edit-class tools) or
-  `bypassPermissions` (allow all), or drive approvals over
-  `--output stream-json` with an inbound responder.
+- **Prompting mode:** pass `--permission-mode default` to ask before tools that
+  require approval.
+- **Edit-only auto-approval:** pass `--permission-mode acceptEdits` to allow
+  file edits and patches while prompting for non-edit tools.
+- **Automation responder:** use `--output stream-json` with an inbound responder
+  if you want a host process to answer approval requests.
 
 ```text
-# Interactive — you approve each tool:
+# Interactive — no approval prompts by default:
 magi
 > run the test suite and report failures
 
-# Headless, allowing edits without prompts:
-magi -p --permission-mode acceptEdits "fix the failing test in foo.py"
+# Headless, same default-bypass behavior:
+magi -p "fix the failing test in foo.py"
 ```
 
-`Bash` and `TestRun` are `dangerous` and still require explicit approval (they are
-not auto-allowed by `acceptEdits`).
+`Bash` and `TestRun` are `dangerous`; they are not auto-allowed by
+`acceptEdits`. `bypassPermissions` allows them after hard-safety checks pass.
 
 Choosing `--permission-mode acceptEdits` auto-allows file edits
 (`FileWrite` / `FileEdit` / `PatchApply`) without a prompt, while `Bash` and
