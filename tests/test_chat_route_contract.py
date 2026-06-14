@@ -1480,9 +1480,9 @@ def test_live_subagents_flag_derives_ready_scope_from_runtime(monkeypatch) -> No
     assert config.selected_owner_digest == _sha256("user-test")
     assert config.environment == "local"
     assert "local" in config.environment_allowlist
-    # Write-EXCLUSIVE: SpawnAgent exposed, but no FileWrite/FileEdit/PatchApply/Bash.
+    # FULL surface: SpawnAgent + the write/mutation tools are all exposed.
     assert "SpawnAgent" in config.allowed_tool_names
-    assert not ({"FileWrite", "FileEdit", "PatchApply", "Bash"} & set(config.allowed_tool_names))
+    assert {"FileWrite", "FileEdit", "PatchApply", "Bash"} <= set(config.allowed_tool_names)
 
 
 def test_live_subagents_flag_inert_without_child_runner(monkeypatch) -> None:
