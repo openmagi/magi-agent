@@ -248,16 +248,12 @@ def build_gate1a_readonly_tools_config_from_env(
 # any explicit ``CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_*`` override always wins.
 LIVE_SUBAGENTS_SERVE_ENABLED_ENV = "MAGI_GATE5B_LIVE_SUBAGENTS_ENABLED"
 
-# Scoped, write-EXCLUSIVE serve surface for the live-sub-agents profile: the
-# existing gate1a read-only tools plus SpawnAgent. Enabling live sub-agents must
-# NOT silently expose the entire full-toolhost write surface
-# (FileWrite/FileEdit/PatchApply/Bash). Every name here is a subset of
-# ``GATE5B_FULL_TOOLHOST_TOOL_NAMES`` so the toolhost's own allowlist filter keeps
-# it intact.
-LIVE_SUBAGENTS_SERVE_TOOL_NAMES: tuple[str, ...] = (
-    *GATE1A_READONLY_TOOL_NAMES,
-    "SpawnAgent",
-)
+# FULL serve surface for the live-sub-agents dogfood profile: the entire gate5b
+# full toolhost (read + write + SpawnAgent). The operator explicitly wants every
+# tool live on the dashboard serve path, not a read-only subset. Still gated by
+# the strict default-OFF ``MAGI_GATE5B_LIVE_SUBAGENTS_ENABLED`` flag AND the live
+# child-runner master gate, so a plain install stays read-only.
+LIVE_SUBAGENTS_SERVE_TOOL_NAMES: tuple[str, ...] = GATE5B_FULL_TOOLHOST_TOOL_NAMES
 
 
 def live_subagents_serve_enabled(env: Mapping[str, str]) -> bool:

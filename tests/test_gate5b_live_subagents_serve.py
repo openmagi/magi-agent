@@ -116,8 +116,8 @@ def test_serve_bundle_ready_exposes_spawn_agent_without_write_tools(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    # Flag ON (+ child-runner live ON): the serve bundle reaches ready, exposes
-    # SpawnAgent, and the write/mutation surface stays OFF (scoped enablement).
+    # Flag ON (+ child-runner live ON): the serve bundle reaches ready and exposes
+    # the FULL toolhost surface (SpawnAgent + read + write/mutation tools).
     monkeypatch.setenv("MAGI_GATE5B_LIVE_SUBAGENTS_ENABLED", "1")
     monkeypatch.setenv("MAGI_CHILD_RUNNER_LIVE_ENABLED", "1")
     monkeypatch.delenv("MAGI_CHILD_RUNNER_LIVE_KILL_SWITCH", raising=False)
@@ -138,10 +138,12 @@ def test_serve_bundle_ready_exposes_spawn_agent_without_write_tools(
 
     assert bundle.status == "ready"
     assert "SpawnAgent" in bundle.exposed_tool_names
-    assert not (
-        {"FileWrite", "FileEdit", "PatchApply", "Bash"} & set(bundle.exposed_tool_names)
+    # FULL serve surface: the entire write/mutation toolset is exposed (operator
+    # explicitly enabled every tool on the dashboard serve path).
+    assert {"FileWrite", "FileEdit", "PatchApply", "Bash"} <= set(
+        bundle.exposed_tool_names
     )
-    # Read-only surface remains available alongside SpawnAgent.
+    # Read-only surface remains available alongside the write surface + SpawnAgent.
     assert {"FileRead", "Glob", "Grep"} <= set(bundle.exposed_tool_names)
     bundle.host.shutdown()
 
