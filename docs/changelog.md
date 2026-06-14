@@ -15,6 +15,13 @@ Versions follow the tags published on GitHub Releases.
 
 ### Fixed
 
+## 0.1.38
+
+### Fixed
+- Hosted Gate5B/full-toolhost child-runner public events now preserve live
+  child-runner receipts instead of reporting helper assignment while the final
+  answer says the child runner was unavailable.
+
 ## 0.1.37
 
 ### Changed
