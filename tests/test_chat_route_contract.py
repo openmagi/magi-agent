@@ -1315,6 +1315,9 @@ def test_chat_route_selected_scope_attaches_full_toolhost_tools(
     )
 
     monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
+    monkeypatch.setenv("MAGI_CHILD_RUNNER_LIVE_ENABLED", "1")
+    monkeypatch.setenv("MAGI_CHILD_RUNNER_LIVE_KILL_SWITCH", "0")
+    monkeypatch.setenv("MAGI_CHILD_RUNNER_TOOLSET", "readonly")
     monkeypatch.setenv("CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_WORKSPACE_ROOT", str(tmp_path))
     runtime = make_runtime(
         authority=PythonRuntimeAuthorityConfig(
@@ -1390,6 +1393,16 @@ def test_chat_route_selected_scope_attaches_full_toolhost_tools(
     assert body["tooling"]["mode"] == "selected_full_toolhost"
     assert body["tooling"]["productionAttached"] is False
     assert body["tooling"]["forbiddenToolsExposed"] == []
+    assert body["tooling"]["childRunner"] == {
+        "legacyChildExecutionAllowed": False,
+        "liveChildRunnerEnabled": True,
+        "liveChildRunnerKillSwitchEnabled": False,
+        "childRunnerToolset": "readonly",
+        "spawnAgentExposed": True,
+        "liveChildRunnerAttached": True,
+        "effectiveChildRunnerAvailable": True,
+        "availabilityStatus": "live_attached",
+    }
     attached_names = [tool.name for tool in _FakeAgent.created_kwargs["tools"]]
     assert attached_names == list(GATE5B_FULL_TOOLHOST_TOOL_NAMES)
     assert {"FileWrite", "FileEdit", "PatchApply", "Bash"}.issubset(attached_names)
@@ -1399,6 +1412,11 @@ def test_chat_route_selected_scope_attaches_full_toolhost_tools(
     assert "answer ordinary conversation directly without tools" in instruction.lower()
     assert "Only request a tool when the user explicitly asks" in instruction
     assert "For brief replies, do not call tools" in instruction
+    assert (
+        "SpawnAgent is the selected first-party child-runner surface"
+        in instruction
+    )
+    assert "child runner is unavailable" not in instruction.lower()
 
 
 def test_full_toolhost_env_reuses_user_visible_selected_scope_when_unset() -> None:

@@ -12,11 +12,7 @@ from magi_agent.gates.gate5b_full_toolhost import (
     build_gate5b_full_toolhost_bundle,
 )
 from magi_agent.runtime.openmagi_runtime import OpenMagiRuntime
-from magi_agent.runtime.child_runner_live import (
-    LIVE_CHILD_RUNNER_KILL_SWITCH_ENV,
-    is_live_child_runner_enabled,
-)
-from magi_agent.runtime.child_toolset import resolve_child_toolset_profile
+from magi_agent.runtime.child_runner_status import child_runner_availability_metadata
 from magi_agent.transport.chat import (
     build_gate2_sandbox_workspace_canary_config_from_env,
     gate5b_user_visible_chat_gate_active,
@@ -283,22 +279,10 @@ def _child_runner_health_metadata(
     legacy_child_execution_allowed: bool,
     allowed_tool_names: list[str] | tuple[str, ...] = (),
 ) -> dict[str, object]:
-    live_enabled = is_live_child_runner_enabled(os.environ)
-    spawn_agent_exposed = "SpawnAgent" in set(allowed_tool_names)
-    return {
-        "legacyChildExecutionAllowed": bool(legacy_child_execution_allowed),
-        "liveChildRunnerEnabled": live_enabled,
-        "liveChildRunnerKillSwitchEnabled": _env_truthy(
-            os.environ.get(LIVE_CHILD_RUNNER_KILL_SWITCH_ENV, "")
-        ),
-        "childRunnerToolset": resolve_child_toolset_profile(os.environ),
-        "spawnAgentExposed": spawn_agent_exposed,
-        "liveChildRunnerAttached": live_enabled and spawn_agent_exposed,
-    }
-
-
-def _env_truthy(value: object) -> bool:
-    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+    return child_runner_availability_metadata(
+        legacy_child_execution_allowed=legacy_child_execution_allowed,
+        allowed_tool_names=allowed_tool_names,
+    )
 
 
 def _healthz_gate5b_full_toolhost_bundle(

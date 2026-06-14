@@ -375,6 +375,92 @@ async def test_selected_registry_spawn_agent_emits_live_child_events(
     assert "Delegated child completed" not in json.dumps(child_events, sort_keys=True)
 
 
+@pytest.mark.asyncio
+async def test_selected_registry_spawn_agent_preserves_live_attached_blocked_receipt(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("MAGI_CHILD_RUNNER_LIVE_ENABLED", "1")
+    monkeypatch.delenv("MAGI_CHILD_RUNNER_LIVE_KILL_SWITCH", raising=False)
+
+    import magi_agent.runtime.child_runner_live as _live_mod
+
+    class _BlockedLiveChildRunner:
+        openmagi_live_provider = True
+
+        def __init__(self, **kwargs: object) -> None:
+            pass
+
+        async def run_child(self, request: object) -> Mapping[str, object]:
+            return {
+                "childExecutionId": "child-exec-gate5b-blocked",
+                "status": "blocked",
+                "summary": "child_provider_key_missing",
+                "evidenceRefs": (),
+                "artifactRefs": (),
+                "auditEventRefs": (),
+            }
+
+    monkeypatch.setattr(_live_mod, "RealLocalChildRunner", _BlockedLiveChildRunner)
+    public_events: list[dict[str, object]] = []
+    runtime = _runtime()
+    bundle = build_gate5b_full_toolhost_bundle(
+        config=Gate5BFullToolHostConfig.model_validate(
+            {
+                "enabled": True,
+                "killSwitchEnabled": False,
+                "routeAttachmentEnabled": True,
+                "selectedBotDigest": _sha256("bot-test"),
+                "selectedOwnerDigest": _sha256("user-test"),
+                "environment": "production",
+                "environmentAllowlist": ("production",),
+                "allowedToolNames": GATE5B_FULL_TOOLHOST_TOOL_NAMES,
+                "maxToolCallsPerTurn": 8,
+            }
+        ),
+        scope={
+            "selectedBotDigest": _sha256("bot-test"),
+            "selectedOwnerDigest": _sha256("user-test"),
+            "environment": "production",
+        },
+        workspace_root=tmp_path,
+        tool_registry=runtime.tool_registry,
+        public_event_sink=lambda event: public_events.append(dict(event)),
+    )
+
+    outcome = await bundle.host.dispatch(
+        "SpawnAgent",
+        {"prompt": "assign a helper"},
+        request_digest=_sha256("request-spawn-live-blocked"),
+        tool_call_id="call-spawn-live-blocked",
+    )
+
+    assert outcome.status == "ok"
+    preview = outcome.output_preview
+    assert isinstance(preview, dict)
+    assert preview["status"] == "blocked"
+    assert preview["errorCode"] == "child_provider_key_missing"
+    output = preview["output"]
+    assert isinstance(output, dict)
+    assert output["liveChildRunnerAttached"] is True
+    assert output["childRunnerAvailability"] == "live_attached"
+    assert output["childExecutionFailed"] is True
+    assert output["childFailureReason"] == "child_provider_key_missing"
+    metadata = preview["metadata"]
+    assert isinstance(metadata, dict)
+    assert metadata["liveChildRunnerAttached"] is True
+    assert metadata["childRunnerAvailability"] == "live_attached"
+    assert metadata["childExecutionFailed"] is True
+    assert [event["type"] for event in public_events] == [
+        "tool_start",
+        "tool_progress",
+        "child_started",
+        "child_progress",
+        "child_cancelled",
+        "tool_end",
+    ]
+    assert public_events[-1]["status"] == "ok"
+
+
 def test_selected_full_toolhost_adk_declarations_are_google_schema_compatible(tmp_path):
     runtime = _runtime()
     bundle = build_gate5b_full_toolhost_bundle(

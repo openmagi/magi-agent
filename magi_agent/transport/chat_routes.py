@@ -70,6 +70,7 @@ from magi_agent.runtime.public_events import (
     tool_start_event,
     turn_phase_event,
 )
+from magi_agent.runtime.child_runner_status import child_runner_availability_metadata
 from magi_agent.runtime.session_identity import _memory_mode_from_header
 
 if TYPE_CHECKING:
@@ -2380,6 +2381,10 @@ def _gate5b_full_tooling_metadata(bundle: Gate5BFullToolBundle) -> dict[str, obj
         "mode": "selected_full_toolhost",
         "toolsPolicy": "selected_full_toolhost",
         "allowedToolNames": list(bundle.exposed_tool_names),
+        "childRunner": child_runner_availability_metadata(
+            legacy_child_execution_allowed=False,
+            allowed_tool_names=bundle.exposed_tool_names,
+        ),
         "forbiddenToolsExposed": forbidden,
         "receiptCount": bundle.host.counter.receipt_count,
         "routeAttached": attachment_flags["routeAttached"],
