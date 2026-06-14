@@ -26,6 +26,7 @@ from magi_agent.runtime.output_continuation import (
 )
 from magi_agent.runtime.public_events import (
     tool_end_event,
+    tool_input_preview,
     tool_progress_event,
     tool_start_event,
     turn_phase_event,
@@ -834,6 +835,9 @@ class Gate5B4C3LiveRunnerBoundary:
                                         tool_start_event(
                                             tool_id=tool_event_id,
                                             name=str(function_call.get("name", "")),
+                                            input_preview=tool_input_preview(
+                                                _function_call_args(function_call)
+                                            ),
                                         )
                                     )
                                     self._emit_public_event(
@@ -2196,13 +2200,17 @@ def _live_tool_event_id_for_function_call(
     *,
     index: int,
 ) -> str:
-    args = function_call.get("args")
     return _manual_tool_event_id(
         name=str(function_call.get("name", "")),
-        args=dict(args) if isinstance(args, Mapping) else {},
+        args=_function_call_args(function_call),
         call_id=function_call.get("id"),
         index=index,
     )
+
+
+def _function_call_args(function_call: Mapping[str, object]) -> dict[str, object]:
+    args = function_call.get("args")
+    return dict(args) if isinstance(args, Mapping) else {}
 
 
 def _remember_live_tool_event_id(
@@ -2309,7 +2317,11 @@ async def _run_manual_tool_calls(
         ):
             _emit_manual_tool_public_event(
                 public_event_sink,
-                lambda: tool_start_event(tool_id=tool_event_id, name=name),
+                lambda: tool_start_event(
+                    tool_id=tool_event_id,
+                    name=name,
+                    input_preview=tool_input_preview(safe_args),
+                ),
             )
             _emit_manual_tool_public_event(
                 public_event_sink,

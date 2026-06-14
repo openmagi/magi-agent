@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+import json
 import math
 import re
 from typing import Literal
@@ -48,6 +49,21 @@ _SOURCE_SNIPPET_LIMIT = 5
 _TASK_LIMIT = 25
 _TASK_DEPENDENCY_LIMIT = 25
 _REF_LIMIT = 25
+_TOOL_INPUT_PREVIEW_VALUE_LIMIT = 160
+_TOOL_INPUT_PREVIEW_KEYS = (
+    "query",
+    "q",
+    "url",
+    "path",
+    "target",
+    "title",
+    "pattern",
+    "glob",
+    "file",
+    "filename",
+    "workspacePath",
+    "workspace_path",
+)
 _RULE_CHECK_AUTHORITY_FIELD = "_openmagiRuleCheckAuthority"
 _RULE_CHECK_AUTHORITY_TOKEN = object()
 _DIGEST_RE = re.compile(r"^(?:receipt:)?sha256:[a-fA-F0-9]{64}$")
@@ -296,6 +312,25 @@ def tool_start_event(
     }
     _put_text(event, "input_preview", input_preview)
     return event
+
+
+def tool_input_preview(arguments: Mapping[str, object] | None) -> str | None:
+    if arguments is None:
+        return None
+    preview: dict[str, str] = {}
+    for key in _TOOL_INPUT_PREVIEW_KEYS:
+        value = arguments.get(key)
+        if not isinstance(value, str) or not value.strip():
+            continue
+        safe_value = _public_text(
+            value.strip(),
+            limit=_TOOL_INPUT_PREVIEW_VALUE_LIMIT,
+        )
+        if safe_value:
+            preview[key] = safe_value
+    if not preview:
+        return None
+    return json.dumps(preview, sort_keys=True, separators=(",", ":"))
 
 
 def tool_end_event(

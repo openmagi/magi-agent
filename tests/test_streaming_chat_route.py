@@ -731,6 +731,84 @@ def test_selected_full_toolhost_stream_does_not_replay_posthoc_tool_progress(
     assert payloads[-1]["terminal"] == "completed"
 
 
+def test_selected_full_toolhost_stream_surfaces_tool_input_preview(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
+    monkeypatch.setenv(
+        "CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_WORKSPACE_ROOT",
+        str(tmp_path),
+    )
+
+    class _WebSearchFunctionCallPart:
+        function_call = {
+            "name": "WebSearch",
+            "args": {
+                "query": "openmagi gate5b streaming",
+                "content": "private prompt content that must not be shown",
+            },
+            "id": "route-live-web-search",
+        }
+
+    class _WebSearchFunctionCallEvent:
+        content = SimpleNamespace(
+            parts=[_WebSearchFunctionCallPart()],
+            role="model",
+        )
+
+    class _WebSearchThenFinalRunner(_FakeRunner):
+        calls: list[dict[str, object]] = []
+
+        async def run_async(self, **kwargs: object) -> object:
+            type(self).run_kwargs = kwargs
+            type(self).calls.append(kwargs)
+            if len(type(self).calls) == 1:
+                yield _WebSearchFunctionCallEvent()
+                return
+            yield SimpleNamespace(
+                content=SimpleNamespace(
+                    parts=[SimpleNamespace(text="final answer after live web search")]
+                )
+            )
+
+    def _web_search_primitives() -> Gate5B4C3LiveAdkPrimitives:
+        _WebSearchThenFinalRunner.calls = []
+        return Gate5B4C3LiveAdkPrimitives(
+            Agent=_FakeAgent,
+            Runner=_WebSearchThenFinalRunner,
+            InMemorySessionService=_FakeSessionService,
+            Content=_FakeContent,
+            Part=_FakePart,
+            GenerateContentConfig=_FakeGenerateContentConfig,
+        )
+
+    async def _collect() -> list[dict]:
+        frames = _drive_selected_gate5b_stream(
+            _selected_runtime(
+                tmp_path,
+                full_toolhost=True,
+                primitives_loader=_web_search_primitives,
+            ),
+            {"messages": [{"role": "user", "content": "search the web"}]},
+            SimpleNamespace(headers={}),
+            session_id="s-selected-web-preview",
+            turn_id="t-selected-web-preview",
+        )
+        return [payload async for frame in frames for payload in _data_lines(frame.decode("utf-8"))]
+
+    payloads = asyncio.run(_collect())
+
+    tool_start = next(
+        payload for payload in payloads if payload.get("type") == "tool_start"
+    )
+    assert tool_start["name"] == "WebSearch"
+    assert tool_start["input_preview"] == '{"query":"openmagi gate5b streaming"}'
+    assert "private prompt content" not in json.dumps(payloads, sort_keys=True)
+    assert payloads[-1]["type"] == "turn_result"
+    assert payloads[-1]["terminal"] == "completed"
+
+
 def test_selected_full_toolhost_stream_emits_live_child_events_before_final(
     monkeypatch,
     tmp_path: Path,

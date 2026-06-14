@@ -141,6 +141,47 @@ async def test_full_toolhost_dispatch_emits_live_public_tool_progress_events(tmp
 
 
 @pytest.mark.asyncio
+async def test_full_toolhost_dispatch_public_tool_start_includes_safe_input_preview(tmp_path):
+    public_events: list[dict[str, object]] = []
+    runtime = _runtime()
+    bundle = build_gate5b_full_toolhost_bundle(
+        config=Gate5BFullToolHostConfig.model_validate(
+            {
+                "enabled": True,
+                "killSwitchEnabled": False,
+                "routeAttachmentEnabled": True,
+                "selectedBotDigest": _sha256("bot-test"),
+                "selectedOwnerDigest": _sha256("user-test"),
+                "environment": "production",
+                "environmentAllowlist": ("production",),
+                "allowedToolNames": GATE5B_FULL_TOOLHOST_TOOL_NAMES,
+                "maxToolCallsPerTurn": 8,
+            }
+        ),
+        scope={
+            "selectedBotDigest": _sha256("bot-test"),
+            "selectedOwnerDigest": _sha256("user-test"),
+            "environment": "production",
+        },
+        workspace_root=tmp_path,
+        tool_registry=runtime.tool_registry,
+        public_event_sink=lambda event: public_events.append(dict(event)),
+    )
+
+    await bundle.host.dispatch(
+        "WebSearch",
+        {"query": "openmagi gate5b streaming"},
+        request_digest=_sha256("request-web-preview"),
+        tool_call_id="call-web-preview",
+    )
+
+    start_event = public_events[0]
+    assert start_event["type"] == "tool_start"
+    assert start_event["name"] == "WebSearch"
+    assert start_event["input_preview"] == '{"query":"openmagi gate5b streaming"}'
+
+
+@pytest.mark.asyncio
 async def test_selected_scope_exposes_first_party_registry_tools_with_gate5b_receipts(tmp_path):
     runtime = _runtime()
     bundle = build_gate5b_full_toolhost_bundle(
