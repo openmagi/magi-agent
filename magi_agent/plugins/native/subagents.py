@@ -136,11 +136,22 @@ def _spawn_agent_result(
 ) -> ToolResult:
     safe_output = dict(output)
     output_digest = digest(safe_output)
+    live_attached = safe_output.get("liveChildRunnerAttached") is True
+    child_runner_availability = safe_output.get("childRunnerAvailability")
+    child_execution_failed = safe_output.get("childExecutionFailed")
     metadata: dict[str, object] = {
         "toolName": "SpawnAgent",
         "handler": "first_party_native_local",
         "outputDigest": output_digest,
+        "liveChildRunnerAttached": live_attached,
     }
+    if isinstance(child_runner_availability, str) and child_runner_availability.strip():
+        metadata["childRunnerAvailability"] = child_runner_availability
+    if isinstance(child_execution_failed, bool):
+        metadata["childExecutionFailed"] = child_execution_failed
+    failure_reason = safe_output.get("childFailureReason")
+    if isinstance(failure_reason, str) and failure_reason.strip():
+        metadata["childFailureReason"] = failure_reason
     if error_code:
         metadata["reason"] = error_code
     return ToolResult(
@@ -446,9 +457,13 @@ async def spawn_agent(arguments: dict[str, object], context: ToolContext) -> Too
             "promptDigest": digest(prompt),
             "spawnDepth": context.spawn_depth,
             "liveChildRunnerAttached": True,
+            "childRunnerAvailability": "live_attached",
+            "childExecutionFailed": tool_status != "ok",
             # Sanitised summary from the envelope (already redacted by boundary).
             "summary": summary,
         }
+        if tool_status != "ok" and error_code is not None:
+            output["childFailureReason"] = error_code
         return _spawn_agent_result(tool_status, output, error_code=error_code)
 
     except Exception:  # noqa: BLE001 — NEVER raise out of spawn_agent

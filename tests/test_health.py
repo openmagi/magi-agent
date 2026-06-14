@@ -109,6 +109,8 @@ def test_healthz_exposes_explicit_false_authority_fields(monkeypatch) -> None:
         "childRunnerToolset": "none",
         "spawnAgentExposed": False,
         "liveChildRunnerAttached": False,
+        "effectiveChildRunnerAvailable": False,
+        "availabilityStatus": "disabled",
     }
 
 
@@ -166,6 +168,8 @@ def test_healthz_reports_live_child_runner_status_separately_from_legacy_authori
         "childRunnerToolset": "readonly",
         "spawnAgentExposed": True,
         "liveChildRunnerAttached": True,
+        "effectiveChildRunnerAvailable": True,
+        "availabilityStatus": "live_attached",
     }
     assert body["childExecutionAllowed"] is False
     assert body["childRunner"] == expected
@@ -189,6 +193,8 @@ def test_healthz_reports_live_child_runner_kill_switch_as_detached(
     assert child_runner["childRunnerToolset"] == "readonly"
     assert child_runner["spawnAgentExposed"] is False
     assert child_runner["liveChildRunnerAttached"] is False
+    assert child_runner["effectiveChildRunnerAvailable"] is False
+    assert child_runner["availabilityStatus"] == "kill_switch_enabled"
 
 
 def test_healthz_keeps_user_visible_authority_false_without_active_chat_gate() -> None:

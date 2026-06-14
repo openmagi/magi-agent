@@ -1580,6 +1580,8 @@ class Gate5BFullToolHost:
         )
         if result.status == "ok":
             return result.model_dump(by_alias=True, mode="json", warnings=False)
+        if tool_name == "SpawnAgent" and _is_live_attached_spawn_agent_result(result):
+            return result.model_dump(by_alias=True, mode="json", warnings=False)
         if result.status in {"blocked", "needs_approval"}:
             raise Gate5BFullToolRegistryBlocked(
                 _safe_reason_label(
@@ -2510,6 +2512,13 @@ def _registry_adk_arguments(**values: str) -> dict[str, object]:
         for key, value in values.items()
         if isinstance(value, str) and value.strip()
     }
+
+
+def _is_live_attached_spawn_agent_result(result: ToolResult) -> bool:
+    if result.status not in {"blocked", "error"}:
+        return False
+    output = result.output if isinstance(result.output, Mapping) else {}
+    return output.get("liveChildRunnerAttached") is True
 
 
 async def _dispatch_adk_tool(
