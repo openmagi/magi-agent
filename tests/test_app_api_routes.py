@@ -141,6 +141,29 @@ def test_runtime_returns_expected_sections(tmp_path, monkeypatch) -> None:
     assert "loadedCount" in body["skills"]
 
 
+def test_app_tools_alias_returns_existing_tool_inventory(tmp_path, monkeypatch) -> None:
+    client = _client(tmp_path, monkeypatch)
+
+    app_res = client.get("/v1/app/tools")
+    api_res = client.get("/api/tools")
+
+    assert app_res.status_code == 200
+    assert api_res.status_code == 200
+    assert app_res.json() == api_res.json()
+    assert set(app_res.json()) == {"tools"}
+    assert app_res.json()["tools"]
+
+
+def test_app_tools_alias_requires_gateway_token(tmp_path, monkeypatch) -> None:
+    client = _client(tmp_path, monkeypatch)
+    client.headers.pop("x-gateway-token", None)
+
+    res = client.get("/v1/app/tools")
+
+    assert res.status_code == 401
+    assert res.json() == {"error": "unauthorized"}
+
+
 def test_config_get_does_not_leak_secrets(tmp_path, monkeypatch) -> None:
     (tmp_path / "config.toml").write_text(
         '[model]\nprovider = "anthropic"\nmodel = "claude-x"\napi_key = "sk-secret"\n',

@@ -19,6 +19,7 @@ ZERO_TOOL_STATS = {
 
 
 def register_tool_admin_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
+    @app.get("/v1/app/tools")
     @app.get("/v1/admin/tools")
     @app.get("/api/tools")
     async def list_tools(request: Request) -> JSONResponse:
