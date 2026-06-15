@@ -89,50 +89,16 @@ def repair_gemini_content_ordering(contents: Any) -> list[Any] | None:
     return merged
 
 
-def _is_true(value: str | None) -> bool:
-    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+def apply_gemini_content_ordering_repair(llm_request: Any) -> bool:
+    """Repair ``llm_request.contents`` in place. Returns True if it changed.
 
-
-class GeminiContentOrderingRepairControl:
-    """``LoopControl`` that repairs ``llm_request.contents`` ordering before each
-    model call so the Gemini provider does not 400 on multi-tool turns.
-
-    Mutation-only ``on_before_model`` (returns ``None``), matching the
-    control-plane contract. Other hooks are no-ops; duck-typed so it satisfies
-    the ``LoopControl`` protocol without importing it.
+    Thin adapter used by the control-plane ``on_before_model`` control; kept here
+    so the contents-mutation logic is unit-testable without importing the
+    control-plane (and its ADK dependencies).
     """
-
-    name = GEMINI_CONTENT_ORDER_REPAIR_CONTROL_NAME
-
-    async def on_before_tool(self, *, tool: Any, args: Any, tool_context: Any) -> None:
-        return None
-
-    async def on_after_tool(
-        self, *, tool: Any, args: Any, tool_context: Any, result: Any
-    ) -> None:
-        return None
-
-    async def on_after_agent(self, *, agent: Any, callback_context: Any) -> None:
-        return None
-
-    async def on_before_model(self, *, callback_context: Any, llm_request: Any) -> None:
-        contents = getattr(llm_request, "contents", None)
-        repaired = repair_gemini_content_ordering(contents)
-        if repaired is not None:
-            llm_request.contents = repaired
-        return None
-
-
-def build_gemini_content_ordering_control(
-    env: dict[str, str],
-) -> GeminiContentOrderingRepairControl | None:
-    """Return the repair control unless the default-ON kill switch disables it.
-
-    Registered by the control-plane builder. Default-ON because this is a
-    crash-safety repair that is a no-op on already-valid content; the kill
-    switch (``MAGI_GEMINI_CONTENT_ORDER_REPAIR_DISABLED``) exists only for
-    instant rollback.
-    """
-    if _is_true(env.get(REPAIR_DISABLED_ENV, "")):
-        return None
-    return GeminiContentOrderingRepairControl()
+    contents = getattr(llm_request, "contents", None)
+    repaired = repair_gemini_content_ordering(contents)
+    if repaired is None:
+        return False
+    llm_request.contents = repaired
+    return True

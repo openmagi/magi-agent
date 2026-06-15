@@ -12,10 +12,12 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace as NS
 
-from magi_agent.adk_bridge.gemini_content_ordering import (
+from magi_agent.adk_bridge.control_plane import (
     GeminiContentOrderingRepairControl,
-    REPAIR_DISABLED_ENV,
     build_gemini_content_ordering_control,
+)
+from magi_agent.adk_bridge.gemini_content_ordering import (
+    REPAIR_DISABLED_ENV,
     repair_gemini_content_ordering,
 )
 
