@@ -379,6 +379,9 @@ _CHILD_INNER_STATUS = {
     "child_failed": "failed",
 }
 _SUBAGENT_LABEL_MAX_CHARS = 60
+# Cap a tool name pushed into the footer activity word so a verbose tool name
+# can't blow the one-line footer width (mirrors the subagent-label truncation).
+_FOOTER_ACTIVITY_MAX_CHARS = 32
 # Dim throughout so the subagent line reads as quiet nested annotation.
 _SUBAGENT_INDENT = "  "
 _SUBAGENT_MARKER_STYLE = "dim #9ece6a"
@@ -954,6 +957,22 @@ class MagiTuiApp(App[None]):
         import os as _os_verbose  # noqa: PLC0415
 
         self._verbose = _os_verbose.environ.get("MAGI_TUI_VERBOSE", "") == "1"
+        # Waiting-liveness (footer current-activity word + optional stall hint).
+        # ``_open_tools`` is an ORDERED list of (tool_id, name) so overlapping/
+        # nested tools pop by id back to the still-open parent; the footer shows
+        # the top-of-stack tool while ``state == "running"``. ``_last_event_
+        # monotonic`` is stamped at the TOP of ``_fold_event`` (before the token
+        # early-return) so the stall hint never fires mid-token-stream. The stall
+        # hint is DEFAULT-OFF: ``MAGI_TUI_STALL_SECONDS`` unset/0/invalid -> 0 =
+        # disabled (zero per-tick cost); a positive int opts in.
+        self._open_tools: list[tuple[str, str]] = []
+        self._last_event_monotonic: float | None = None
+        try:
+            self._stall_seconds = int(
+                _os_verbose.environ.get("MAGI_TUI_STALL_SECONDS", "0") or "0"
+            )
+        except ValueError:
+            self._stall_seconds = 0
         # Session list (PR2.4) seams. ``_session_source`` is an optional test/
         # injection hook ``() -> list[SessionEntry]``; when None the dialog reads
         # the runtime's ``session_lister`` seam via ``session_entries``.
@@ -1163,6 +1182,26 @@ class MagiTuiApp(App[None]):
             # whole-second value changes — so this 25Hz tick no longer triggers
             # ~24/25 identical repaints for the 1s-granularity render.
             self._footer.set_elapsed(self._turn_elapsed())
+            # Optional stall hint (DEFAULT-OFF). When enabled and the stream has
+            # gone quiet past the threshold, compose an honest ` · no output Ns`
+            # suffix onto the open-tool word; otherwise re-assert the plain word
+            # so the hint clears the instant activity resumes. Integer-second
+            # granularity + Textual's reactive-equality short-circuit collapse
+            # this 25Hz re-assert to ≤1 repaint/sec (no new timer added).
+            if self._stall_seconds > 0 and self._last_event_monotonic is not None:
+                import time as _time  # noqa: PLC0415
+
+                silence = int(_time.monotonic() - self._last_event_monotonic)
+                if silence >= self._stall_seconds:
+                    base = self._open_tool_name()
+                    hint = (
+                        f"{base} · no output {silence}s"
+                        if base
+                        else f"no output {silence}s"
+                    )
+                    self.update_footer(activity=hint)
+                else:
+                    self._refresh_activity()
 
     def _render_welcome(self) -> None:
         """Render the initial TUI state so bare ``magi`` never opens blank."""
@@ -1579,7 +1618,12 @@ class MagiTuiApp(App[None]):
         self._hide_whichkey()
         # Fresh id->name tool map per turn (ids are turn-scoped).
         self._tool_names_by_id = {}
-        self.update_footer(state="running")
+        # Fresh waiting-liveness state per turn: no open tools, a fresh stall
+        # baseline, and a cleared activity word — so a cancelled-mid-tool turn
+        # cannot leak a stale word or stack entry into the next turn.
+        self._open_tools = []
+        self._last_event_monotonic = _time.monotonic()
+        self.update_footer(state="running", activity="")
         self._echo_user(prompt)
         self._run_turn(prompt, turn_id, cancel)
 
@@ -1688,11 +1732,19 @@ class MagiTuiApp(App[None]):
         """
 
         self._turn_started_monotonic = None
-        self.update_footer(state=Terminal.error.value)
+        self._open_tools = []
+        self.update_footer(state=Terminal.error.value, activity="")
 
     async def _fold_event(self, event: RuntimeEvent) -> None:
         """Fold one ``RuntimeEvent`` into the transcript regions."""
 
+        import time as _time  # noqa: PLC0415
+
+        # Stamp the last-event time as the VERY FIRST statement — BEFORE the
+        # token early-return below — so high-frequency ``token`` events advance
+        # it. If this were placed after the early-return, the stall hint would
+        # falsely fire ``no output Ns`` WHILE text is visibly streaming.
+        self._last_event_monotonic = _time.monotonic()
         controller = self.controller
         if event.type == "token":
             controller.append_delta(_token_text(event.payload))
@@ -1745,6 +1797,13 @@ class MagiTuiApp(App[None]):
                 name = self._tool_names_by_id.get(tool_id, name)
         renderer = self._lookup_tool_renderer(name)
         if inner == "tool_start":
+            # Track the most-recent still-open tool so the footer can show WHICH
+            # tool is running (id-keyed so a nested tool ending pops back to its
+            # parent). Push BEFORE rendering so the activity word appears with the
+            # call. A name-less ("tool") start carries no useful word -> skip.
+            if isinstance(tool_id, str) and tool_id and name != "tool":
+                self._open_tools.append((tool_id, name))
+                self._refresh_activity()
             # Fold this tool_start into the sidebar panes (todo / recent files)
             # BEFORE rendering the call, so the side panes track activity even
             # when the sidebar is currently hidden.
@@ -1753,6 +1812,14 @@ class MagiTuiApp(App[None]):
         elif inner == "tool_progress":
             node = renderer.render_progress(_tool_result(payload) or payload)
         elif inner == "tool_end":
+            # Pop the matching open tool by id (a tool_end whose id isn't on the
+            # stack is a defined no-op) and re-point the footer at the last
+            # still-open tool, or clear it when none remain.
+            if isinstance(tool_id, str) and tool_id:
+                self._open_tools = [
+                    t for t in self._open_tools if t[0] != tool_id
+                ]
+                self._refresh_activity()
             if _is_rejected_end(payload):
                 node = renderer.render_rejected(_tool_input(payload) or payload)
             else:
@@ -1900,12 +1967,14 @@ class MagiTuiApp(App[None]):
         state: str | None = None,
         tokens: int | None = None,
         elapsed: float | None = None,
+        activity: str | None = None,
     ) -> None:
         """Single seam every fold/turn path uses to refresh the footer.
 
         No-op before mount (the footer is created in ``compose``); each provided
         field updates the corresponding reactive on ``StatusFooter`` (which
-        repaints only itself).
+        repaints only itself). ``activity`` is the current-activity word the
+        footer appends to ``running`` (e.g. ``Bash`` or ``Bash · no output 9s``).
         """
 
         if self._footer is None:
@@ -1916,6 +1985,27 @@ class MagiTuiApp(App[None]):
             self._footer.set_tokens(tokens)
         if elapsed is not None:
             self._footer.set_elapsed(elapsed)
+        if activity is not None:
+            self._footer.set_activity(activity)
+
+    def _open_tool_name(self) -> str:
+        """The truncated name of the last still-open tool, or ``""`` if none."""
+
+        if not self._open_tools:
+            return ""
+        name = self._open_tools[-1][1]
+        if len(name) > _FOOTER_ACTIVITY_MAX_CHARS:
+            name = name[: _FOOTER_ACTIVITY_MAX_CHARS - 1].rstrip() + "…"
+        return name
+
+    def _refresh_activity(self) -> None:
+        """Re-point the footer activity word at the current open tool (or clear).
+
+        The single place that maps ``_open_tools`` -> footer; the stall hint
+        (``_on_flush_tick``) composes its own suffix on top of this base name.
+        """
+
+        self.update_footer(activity=self._open_tool_name())
 
     def _turn_elapsed(self) -> float:
         """Seconds since the in-flight turn started (0.0 when idle)."""
@@ -1946,6 +2036,11 @@ class MagiTuiApp(App[None]):
         # Stop the running clock once the turn is terminal (the flush-tick
         # elapsed advance keys off this being None / state != "running").
         self._turn_started_monotonic = None
+        # Clear the current-activity word + open-tool stack so a finished/aborted
+        # turn never leaves a stale word (covers the normal Ctrl+C cancel path,
+        # which yields an ``aborted`` EngineResult routed through here).
+        self._open_tools = []
+        self.update_footer(activity="")
         # Gated focus-aware attention bell (PR3.4): ring only when the terminal
         # is unfocused AND MAGI_TUI_NOTIFY_BELL is on (default OFF). Fired here
         # so it covers completed AND non-completed turns (before the early
