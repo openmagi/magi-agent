@@ -151,7 +151,11 @@ def build_vault_admin_app(*, admin_token: str, store_dir: Path | str) -> FastAPI
 
     def _auth(request: Request) -> JSONResponse | None:
         token = request.headers.get("x-gateway-token")
-        if token is not None and compare_digest(token, admin_token):
+        # Compare bytes so a non-ASCII header byte fails closed as 401 rather
+        # than raising from compare_digest's ASCII-only string path.
+        if token is not None and compare_digest(
+            token.encode("utf-8"), admin_token.encode("utf-8")
+        ):
             return None
         return JSONResponse(status_code=401, content={"error": "unauthorized"})
 
@@ -406,7 +410,7 @@ def bootstrap_ca(*, ca_dir: Path | str, confdir: Path | str) -> Path:
 
 def _harden_ca_key_perms(confdir: Path) -> None:
     """chmod 0600 the mitmproxy CA private-key material in ``confdir``."""
-    for name in ("mitmproxy-ca.pem", "mitmproxy-ca-key.pem"):
+    for name in ("mitmproxy-ca.pem", "mitmproxy-ca-key.pem", "mitmproxy-ca.p12"):
         target = confdir / name
         if target.is_file():
             try:
