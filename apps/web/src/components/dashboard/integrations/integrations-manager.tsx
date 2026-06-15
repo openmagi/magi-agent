@@ -10,6 +10,10 @@ import {
   composioConnect,
   composioConnectStatus,
   composioDisconnect,
+  easyCreateBot,
+  easySendCode,
+  easyVerify2fa,
+  easyVerifyCode,
   fetchComposioCatalog,
   fetchComposioConnections,
   setComposioKey,
@@ -60,6 +64,7 @@ export function IntegrationsManager({ botId }: IntegrationsManagerProps) {
           <TelegramSection
             configured={data.telegram.configured}
             label={data.telegram.label}
+            easyAvailable={data.telegram.easy_available ?? false}
             onChange={reload}
           />
         </>
@@ -327,31 +332,18 @@ function ComposioSection({
 function TelegramSection({
   configured,
   label,
+  easyAvailable,
   onChange,
 }: {
   configured: boolean;
   label: string | null;
+  easyAvailable: boolean;
   onChange: () => void;
 }) {
   const agentFetch = useAgentFetch();
-  const [token, setToken] = useState("");
+  const [mode, setMode] = useState<"advanced" | "easy">("advanced");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-
-  async function save() {
-    if (!token.trim()) return;
-    setBusy(true);
-    setErr(null);
-    try {
-      await setTelegramToken(agentFetch, token.trim());
-      setToken("");
-      onChange();
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : "Failed to save token");
-    } finally {
-      setBusy(false);
-    }
-  }
 
   async function remove() {
     setBusy(true);
@@ -367,7 +359,7 @@ function TelegramSection({
     <SectionCard
       icon={<Send className="w-5 h-5 text-foreground" />}
       title="Telegram bot"
-      description="Run your agent as a Telegram bot. Paste a token from @BotFather."
+      description="Run your agent as a Telegram bot."
     >
       {err && (
         <div className="p-2.5 rounded-lg bg-red-500/10 border border-red-500/20 text-xs text-red-400">
@@ -391,38 +383,241 @@ function TelegramSection({
           </button>
         </div>
       ) : (
-        <div className="space-y-2">
-          <div className="flex gap-2">
-            <input
-              type="password"
-              value={token}
-              onChange={(e) => setToken(e.target.value)}
-              placeholder="123456:ABC-DEF…"
-              className="flex-1 text-xs px-3 py-1.5 rounded-lg bg-white border border-gray-300 text-foreground placeholder:text-gray-400 focus:outline-none focus:border-primary/40"
-            />
-            <button
-              onClick={save}
-              disabled={busy || !token.trim()}
-              className="text-xs px-3 py-1.5 rounded-lg bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20 transition-colors disabled:opacity-40"
-            >
-              {busy ? "Connecting…" : "Connect"}
-            </button>
-          </div>
-          <p className="text-[10px] text-secondary/70">
-            Open Telegram, message{" "}
-            <a
-              href="https://t.me/BotFather"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-primary hover:underline"
-            >
-              @BotFather
-            </a>
-            , send <code>/newbot</code>, and paste the token it gives you.
-          </p>
+        <div className="space-y-3">
+          {easyAvailable && (
+            <div className="flex gap-1 text-[11px]">
+              <button
+                onClick={() => setMode("easy")}
+                className={`px-2.5 py-1 rounded-lg border transition-colors ${
+                  mode === "easy"
+                    ? "border-primary/40 text-primary bg-primary/10"
+                    : "border-gray-200 text-secondary"
+                }`}
+              >
+                Easy (phone)
+              </button>
+              <button
+                onClick={() => setMode("advanced")}
+                className={`px-2.5 py-1 rounded-lg border transition-colors ${
+                  mode === "advanced"
+                    ? "border-primary/40 text-primary bg-primary/10"
+                    : "border-gray-200 text-secondary"
+                }`}
+              >
+                Advanced (token)
+              </button>
+            </div>
+          )}
+          {easyAvailable && mode === "easy" ? (
+            <TelegramEasyWizard onConnected={onChange} setError={setErr} />
+          ) : (
+            <TelegramAdvancedForm onConnected={onChange} setError={setErr} />
+          )}
         </div>
       )}
     </SectionCard>
+  );
+}
+
+function TelegramAdvancedForm({
+  onConnected,
+  setError,
+}: {
+  onConnected: () => void;
+  setError: (v: string | null) => void;
+}) {
+  const agentFetch = useAgentFetch();
+  const [token, setToken] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function save() {
+    if (!token.trim()) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await setTelegramToken(agentFetch, token.trim());
+      setToken("");
+      onConnected();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to save token");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="flex gap-2">
+        <input
+          type="password"
+          value={token}
+          onChange={(e) => setToken(e.target.value)}
+          placeholder="123456:ABC-DEF…"
+          className="flex-1 text-xs px-3 py-1.5 rounded-lg bg-white border border-gray-300 text-foreground placeholder:text-gray-400 focus:outline-none focus:border-primary/40"
+        />
+        <button
+          onClick={save}
+          disabled={busy || !token.trim()}
+          className="text-xs px-3 py-1.5 rounded-lg bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20 transition-colors disabled:opacity-40"
+        >
+          {busy ? "Connecting…" : "Connect"}
+        </button>
+      </div>
+      <p className="text-[10px] text-secondary/70">
+        Message{" "}
+        <a
+          href="https://t.me/BotFather"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-primary hover:underline"
+        >
+          @BotFather
+        </a>
+        , send <code>/newbot</code>, and paste the token it gives you.
+      </p>
+    </div>
+  );
+}
+
+function TelegramEasyWizard({
+  onConnected,
+  setError,
+}: {
+  onConnected: () => void;
+  setError: (v: string | null) => void;
+}) {
+  const agentFetch = useAgentFetch();
+  const [step, setStep] = useState<"phone" | "code" | "2fa" | "name">("phone");
+  const [phone, setPhone] = useState("");
+  const [sessionId, setSessionId] = useState("");
+  const [code, setCode] = useState("");
+  const [password, setPassword] = useState("");
+  const [botName, setBotName] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  function fail(e: unknown, fallback: string) {
+    setError(e instanceof Error ? e.message : fallback);
+  }
+
+  async function sendCode() {
+    if (!phone.trim()) return;
+    setBusy(true);
+    setError(null);
+    try {
+      setSessionId(await easySendCode(agentFetch, phone.trim()));
+      setStep("code");
+    } catch (e) {
+      fail(e, "Failed to send code");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function verifyCode() {
+    setBusy(true);
+    setError(null);
+    try {
+      const needs2fa = await easyVerifyCode(agentFetch, sessionId, code.trim());
+      setStep(needs2fa ? "2fa" : "name");
+    } catch (e) {
+      fail(e, "Failed to verify code");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function verify2fa() {
+    setBusy(true);
+    setError(null);
+    try {
+      await easyVerify2fa(agentFetch, sessionId, password);
+      setStep("name");
+    } catch (e) {
+      fail(e, "Failed to verify password");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function createBot() {
+    if (!botName.trim()) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await easyCreateBot(agentFetch, sessionId, botName.trim());
+      onConnected();
+    } catch (e) {
+      fail(e, "Failed to create bot");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const inputClass =
+    "flex-1 text-xs px-3 py-1.5 rounded-lg bg-white border border-gray-300 text-foreground placeholder:text-gray-400 focus:outline-none focus:border-primary/40";
+  const btnClass =
+    "text-xs px-3 py-1.5 rounded-lg bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20 transition-colors disabled:opacity-40";
+
+  return (
+    <div className="space-y-2">
+      {step === "phone" && (
+        <div className="flex gap-2">
+          <input
+            value={phone}
+            onChange={(e) => setPhone(e.target.value)}
+            placeholder="+1 555 123 4567"
+            className={inputClass}
+          />
+          <button onClick={sendCode} disabled={busy || !phone.trim()} className={btnClass}>
+            {busy ? "Sending…" : "Send code"}
+          </button>
+        </div>
+      )}
+      {step === "code" && (
+        <div className="flex gap-2">
+          <input
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+            placeholder="Login code from Telegram"
+            className={inputClass}
+          />
+          <button onClick={verifyCode} disabled={busy || !code.trim()} className={btnClass}>
+            {busy ? "Verifying…" : "Verify"}
+          </button>
+        </div>
+      )}
+      {step === "2fa" && (
+        <div className="flex gap-2">
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="2FA password"
+            className={inputClass}
+          />
+          <button onClick={verify2fa} disabled={busy || !password} className={btnClass}>
+            {busy ? "Verifying…" : "Verify"}
+          </button>
+        </div>
+      )}
+      {step === "name" && (
+        <div className="flex gap-2">
+          <input
+            value={botName}
+            onChange={(e) => setBotName(e.target.value)}
+            placeholder="Bot display name"
+            className={inputClass}
+          />
+          <button onClick={createBot} disabled={busy || !botName.trim()} className={btnClass}>
+            {busy ? "Creating…" : "Create bot"}
+          </button>
+        </div>
+      )}
+      <p className="text-[10px] text-secondary/70">
+        Enter your phone number; we log in to Telegram and create the bot via
+        @BotFather for you. Your login session is discarded afterwards.
+      </p>
+    </div>
   );
 }
 
