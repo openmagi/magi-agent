@@ -16,8 +16,11 @@ WORKDIR /app
 COPY pyproject.toml README.md ./
 COPY magi_agent/ ./magi_agent/
 
-RUN python -m pip install --no-cache-dir --upgrade pip \
-  && python -m pip install --no-cache-dir ".[vault]" \
+# Resolve with uv: pip's backtracking resolver explodes ("resolution-too-deep")
+# on the base runtime deps (loose litellm/lxml pins) + mitmproxy. uv resolves
+# the same set cleanly. --system installs into the image's global env.
+RUN python -m pip install --no-cache-dir --upgrade pip uv \
+  && uv pip install --system --no-cache ".[vault]" \
   && rm -rf /var/lib/apt/lists/*
 
 # Dedicated non-root runtime user. /app stays root-owned/read-only. The store dir
