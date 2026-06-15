@@ -2061,7 +2061,8 @@ def _first_party_packs() -> tuple[RecipePackManifest, ...]:
                 "git-worktree, and branch-finishing workflows."
             ),
             whenToUse=(
-                "복잡한 다단계 작업을 체계적 방법론으로 분해·계획·검증해야 할 때"
+                "When a complex multi-step task must be decomposed, planned, "
+                "and verified through a disciplined methodology."
             ),
             taskProfileSelectors=(
                 "methodology",
@@ -2169,7 +2170,8 @@ def _first_party_packs() -> tuple[RecipePackManifest, ...]:
                 "skill namespace without live slash execution."
             ),
             whenToUse=(
-                "번들된 Superpowers 스킬 방법론을 가이드로 참조해야 할 때"
+                "When the user wants to reference the bundled Superpowers skill "
+                "methodology as guidance without live slash execution."
             ),
             taskProfileSelectors=("superpowers", "superpowers-compat"),
             dependsOnPackIds=("openmagi.agent-methodology",),
@@ -2201,7 +2203,8 @@ def _first_party_packs() -> tuple[RecipePackManifest, ...]:
                 "and general web Q&A."
             ),
             whenToUse=(
-                "웹에서 콘텐츠·출처를 가져오거나 외부 페이지를 읽어야 할 때"
+                "When content or sources must be fetched from the web, or an "
+                "external page needs to be read."
             ),
             taskProfileSelectors=(
                 "web",
@@ -2240,7 +2243,8 @@ def _first_party_packs() -> tuple[RecipePackManifest, ...]:
             displayName="Research",
             description="Configurable research workflow metadata.",
             whenToUse=(
-                "사용자가 외부 사실·출처·조사를 요구하거나 답을 검증/대조해야 할 때"
+                "When the user asks for external facts, sources, or "
+                "investigation, or an answer must be verified or cross-checked."
             ),
             taskProfileSelectors=("research", "document-review"),
             dependsOnPackIds=("openmagi.web-acquisition",),
@@ -2268,7 +2272,8 @@ def _first_party_packs() -> tuple[RecipePackManifest, ...]:
                 "OpenCode-inspired repository research profiles."
             ),
             whenToUse=(
-                "저장소를 클론·개관하며 레퍼런스 코드를 정찰·조사해야 할 때"
+                "When a repository must be cloned and surveyed to scout and "
+                "study reference code."
             ),
             taskProfileSelectors=("scout_repo_fixture",),
             dependsOnPackIds=("openmagi.research",),
@@ -2323,7 +2328,8 @@ def _first_party_packs() -> tuple[RecipePackManifest, ...]:
             displayName="Development Coding",
             description="Configurable coding workflow metadata.",
             whenToUse=(
-                "코드 변경·디버깅·리팩터·테스트 작성이 목표일 때"
+                "When the goal is to change code, debug, refactor, or write "
+                "tests."
             ),
             taskProfileSelectors=("coding", "development", "dev-coding"),
             instructionRefs=("instruction:dev-coding:tdd",),
@@ -2348,7 +2354,8 @@ def _first_party_packs() -> tuple[RecipePackManifest, ...]:
                 "gate-failure return-to-plan."
             ),
             whenToUse=(
-                "요구가 모호한 빌드 요청을 인터뷰→계획→실행→QA까지 완전 자율로 수행해야 할 때"
+                "When an ambiguous build request must be carried fully "
+                "autonomously from interview through plan, execute, and QA."
             ),
             taskProfileSelectors=(
                 "autopilot",
@@ -2406,7 +2413,8 @@ def _first_party_packs() -> tuple[RecipePackManifest, ...]:
             displayName="Missions",
             description="Metadata-only mission lifecycle recipe boundary.",
             whenToUse=(
-                "목표·예산이 있는 장기 미션을 진행·체크포인트·재개 제어로 수행할 때"
+                "When a long-running mission with an objective and budget must "
+                "run under progress, checkpoint, and resume control."
             ),
             taskProfileSelectors=("mission", "missions", "scheduled-work"),
             instructionRefs=("instruction:missions:objective",),
@@ -2439,7 +2447,8 @@ def _first_party_packs() -> tuple[RecipePackManifest, ...]:
             displayName="Scheduled Work",
             description="Metadata-only scheduler, cron, and background task recipe boundary.",
             whenToUse=(
-                "예약·반복(cron)·백그라운드로 실행되는 작업을 설정·관리해야 할 때"
+                "When scheduled, recurring (cron), or background-running tasks "
+                "must be set up or managed."
             ),
             taskProfileSelectors=(
                 "scheduled-work",
@@ -2487,7 +2496,8 @@ def _first_party_packs() -> tuple[RecipePackManifest, ...]:
                 "OpenMagi memory policy."
             ),
             whenToUse=(
-                "과거 세션 맥락·학습된 사실을 회상하거나 저장해야 할 때"
+                "When prior-session context or learned facts must be recalled "
+                "or stored."
             ),
             taskProfileSelectors=("memory-provider-eval", "agentmemory"),
             toolRefs=("tool:AgentMemorySearch", "tool:AgentMemoryRemember"),
@@ -2506,7 +2516,8 @@ def _first_party_packs() -> tuple[RecipePackManifest, ...]:
                 "Telegram, Discord, and web app delivery intents."
             ),
             whenToUse=(
-                "결과·파일을 Telegram/Discord/웹 등 채널로 사용자에게 전달·알림해야 할 때"
+                "When the act itself is sending or notifying the user over a "
+                "channel such as Telegram, Discord, or the web app."
             ),
             taskProfileSelectors=(
                 "channel-delivery",
@@ -2545,7 +2556,8 @@ def _first_party_packs() -> tuple[RecipePackManifest, ...]:
             displayName="Office Automation",
             description="Configurable office automation workflow metadata.",
             whenToUse=(
-                "문서/스프레드시트/슬라이드를 읽거나 만들거나 변환해야 할 때"
+                "When document or slide files must be read, created, or "
+                "converted at the file level."
             ),
             taskProfileSelectors=("office", "office-automation"),
             instructionRefs=("instruction:office-automation:preview-then-approve",),
@@ -2572,7 +2584,8 @@ def _first_party_packs() -> tuple[RecipePackManifest, ...]:
                 "channel delivery planning, and delivery acknowledgement."
             ),
             whenToUse=(
-                "생성한 파일·산출물을 정제·준비해 사용자에게 전달해야 할 때"
+                "When a produced file or artifact must be sanitized and "
+                "prepared before it is delivered to the user."
             ),
             taskProfileSelectors=(
                 "artifact",
@@ -2609,7 +2622,8 @@ def _first_party_packs() -> tuple[RecipePackManifest, ...]:
             displayName="Spreadsheet Automation",
             description="Configurable spreadsheet workflow metadata.",
             whenToUse=(
-                "표 형식 데이터를 계산·집계·변환해야 할 때"
+                "When tabular data must be calculated, aggregated, or "
+                "transformed in-place."
             ),
             taskProfileSelectors=("spreadsheet", "spreadsheet-automation"),
             instructionRefs=("instruction:spreadsheet-automation:preview-then-approve",),
@@ -2633,7 +2647,8 @@ def _first_party_packs() -> tuple[RecipePackManifest, ...]:
             displayName="Browser Automation",
             description="Configurable browser workflow metadata.",
             whenToUse=(
-                "브라우저로 웹 페이지를 조작·탐색하며 상호작용해야 할 때"
+                "When a browser must drive and navigate web pages "
+                "interactively."
             ),
             taskProfileSelectors=("browser", "browser-automation"),
             instructionRefs=("instruction:browser-automation:inspect-before-act",),
@@ -2657,7 +2672,8 @@ def _first_party_packs() -> tuple[RecipePackManifest, ...]:
             displayName="Document Review",
             description="Configurable document review workflow metadata.",
             whenToUse=(
-                "기존 문서를 출처 기반으로 검토·평가·코멘트해야 할 때"
+                "When an existing document must be reviewed, assessed, or "
+                "commented on with source-grounded findings."
             ),
             taskProfileSelectors=("document-review", "document"),
             instructionRefs=("instruction:document-review:source-grounded-review",),
@@ -2678,7 +2694,8 @@ def _first_party_packs() -> tuple[RecipePackManifest, ...]:
             displayName="Lightweight Scripting",
             description="Configurable lightweight scripting workflow metadata.",
             whenToUse=(
-                "한 번 쓰고 버리는 작은 스크립트·자동화를 빠르게 작성·실행할 때"
+                "When a small throwaway script or quick automation needs to be "
+                "written and run fast."
             ),
             taskProfileSelectors=("lightweight-scripting", "scripting"),
             instructionRefs=("instruction:lightweight-scripting:small-script-plan",),

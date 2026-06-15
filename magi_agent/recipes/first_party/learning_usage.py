@@ -78,7 +78,8 @@ def build_learning_usage_pack() -> RecipePackManifest:
             "via the learning mechanism rather than self-mutating."
         ),
         whenToUse=(
-            "학습된 규칙·사례를 적용하거나 자기개선 교훈을 제안해야 할 때"
+            "When active learned rules or examples should be applied, or a "
+            "self-improvement lesson should be proposed."
         ),
         taskProfileSelectors=(
             "learning",

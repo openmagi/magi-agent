@@ -71,7 +71,8 @@ def build_discovery_pack() -> RecipePackManifest:
             "in cumulative rounds, labeled by problem template."
         ),
         whenToUse=(
-            "저장소·코퍼스 구조를 처음 탐색하며 다수의 근거 있는 문제를 발굴해야 할 때"
+            "When the user wants problems proactively surfaced across a "
+            "repository or corpus rather than a single targeted answer."
         ),
         taskProfileSelectors=("discovery",),
         instructionRefs=(DISCOVERY_INSTRUCTION_REF,),
