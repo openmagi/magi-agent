@@ -34,6 +34,7 @@ from typing import TYPE_CHECKING
 
 from magi_agent.cli.contracts import EngineResult, Terminal
 from magi_agent.runtime.events import RuntimeEvent
+from magi_agent.runtime.public_events import turn_phase_event
 from magi_agent.transport.active_turn import ActiveTurn, ActiveTurnTable
 from magi_agent.transport.streaming_chat import frame_for_event, frame_for_terminal
 
@@ -167,6 +168,20 @@ async def drive_streaming_chat(
     producer = asyncio.ensure_future(_produce())
 
     try:
+        # Emit a turn_phase "executing" frame up front. The local full-engine
+        # stream has no other phase signal, so without this the live WORK panel
+        # sits at "Idle" while the agent works. Mirrors the hosted gate5b
+        # stream's start event.
+        phase_frame = frame_for_event(
+            RuntimeEvent(
+                type="status",
+                payload=dict(turn_phase_event(turn_id=turn_id, phase="executing")),
+                turn_id=turn_id,
+            )
+        )
+        if phase_frame is not None:
+            yield phase_frame
+
         while True:
             item = await queue.get()
             if item is _END:

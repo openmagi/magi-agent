@@ -474,7 +474,9 @@ _ERROR_EVENT_TYPES = frozenset({"error"})
 # Tool names that perform file mutations (writes / edits / patches). When a
 # turn ends and none of these were observed, the guard fires a single "apply
 # it" re-invocation so the agent doesn't get away with just describing a fix.
-_EDIT_CLASS_TOOLS = frozenset({"FileEdit", "FileWrite", "Edit", "Write", "ApplyPatch"})
+_EDIT_CLASS_TOOLS = frozenset(
+    {"FileEdit", "FileWrite", "Edit", "Write", "ApplyPatch", "PatchApply"}
+)
 
 
 def should_reprompt_for_zero_edits(
@@ -654,19 +656,27 @@ def _pre_final_gate_applies(
     assembly: RunnerPolicyAssembly,
     prompt: str,
     harness_state: object | None,
+    coding_mutation_observed: bool,
 ) -> bool:
     """Return whether the assembled policy should enforce the final gate.
 
     The local runner may assemble the dev-coding pack as an available first-party
     policy, but availability is not the same thing as routing every turn through
-    a coding verification gate.  Explicit task profiles win; otherwise a small
-    conservative prompt classifier avoids blocking ordinary chat while still
-    enforcing evidence on obvious coding/workspace turns.
+    a coding verification gate.  The dev-coding verification gate exists to
+    confirm that *code mutations* were tested/grounded — so it only has something
+    to enforce on a turn that actually mutated a file. A read-only / research
+    turn (no file-mutating tool call) produces nothing to verify and must not be
+    blocked, even when the prompt classifier would otherwise flag it as coding.
     """
 
     selected = set(assembly.selected_pack_ids)
     if "openmagi.dev-coding" not in selected:
         return True
+
+    # Mutation-scope: the coding evidence gate only applies to turns that
+    # actually changed code. No file mutation ⇒ nothing to verify ⇒ no block.
+    if not coding_mutation_observed:
+        return False
 
     task_types = _extract_task_types(harness_state)
     if task_types:
@@ -1936,6 +1946,7 @@ class MagiEngineDriver:
                 prompt=prompt,
                 harness_state=effective_harness_state,
                 observed_public_refs=observed_public_refs,
+                coding_mutation_observed=file_edit_calls > 0,
                 repair_attempt_count=repair_attempts,
                 final_text=emitted_text,
             )
@@ -2593,6 +2604,7 @@ class MagiEngineDriver:
         prompt: str,
         harness_state: object | None,
         observed_public_refs: set[str],
+        coding_mutation_observed: bool = False,
         repair_attempt_count: int = 0,
         final_text: str = "",
     ) -> dict[str, object] | None:
@@ -2603,6 +2615,7 @@ class MagiEngineDriver:
             assembly=assembly,
             prompt=prompt,
             harness_state=harness_state,
+            coding_mutation_observed=coding_mutation_observed,
         ):
             return None
         evidence_records: tuple[object, ...] = ()
