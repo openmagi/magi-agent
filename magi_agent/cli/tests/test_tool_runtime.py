@@ -29,6 +29,31 @@ def test_build_cli_adk_tools_exposes_real_core_tools(tmp_path) -> None:
     assert {"FileRead", "FileWrite", "FileEdit", "Glob", "Grep", "Bash"}.issubset(names)
 
 
+def test_build_cli_adk_tools_registers_browser_task_by_default(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    monkeypatch.delenv("MAGI_BROWSER_TOOL_ENABLED", raising=False)
+    monkeypatch.delenv("MAGI_BROWSER_TOOL_KILL_SWITCH", raising=False)
+    monkeypatch.delenv("MAGI_RUNTIME_PROFILE", raising=False)
+
+    tools = build_cli_adk_tools(workspace_root=str(tmp_path))
+
+    assert "BrowserTask" in {getattr(tool, "name", None) for tool in tools}
+
+
+def test_build_cli_adk_tools_respects_browser_kill_switch(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    monkeypatch.delenv("MAGI_BROWSER_TOOL_ENABLED", raising=False)
+    monkeypatch.setenv("MAGI_BROWSER_TOOL_KILL_SWITCH", "1")
+
+    tools = build_cli_adk_tools(workspace_root=str(tmp_path))
+
+    assert "BrowserTask" not in {getattr(tool, "name", None) for tool in tools}
+
+
 def test_file_read_tool_performs_real_read(tmp_path) -> None:
     # Non-mocked proof: the FileRead tool runs the REAL core toolhost and reads
     # an actual file written into the workspace.

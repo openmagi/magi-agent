@@ -730,6 +730,15 @@ def _project_content_parts(
 
     for index, part in enumerate(_event_parts(event)):
         if getattr(part, "thought", False):
+            # Model reasoning (ADK marks it thought=True). Surface streaming
+            # thought as a separate thinking_delta channel so the hosted UI can
+            # render it in the collapsible thinking block instead of dropping it.
+            # sse.py gates this behind MAGI_STREAM_THINKING for the public path.
+            thought_text = getattr(part, "text", None)
+            if thought_text and event.partial:
+                agent_events.append(
+                    {"type": "thinking_delta", "delta": _public_stream_text(thought_text)}
+                )
             continue
         text = getattr(part, "text", None)
         if text:

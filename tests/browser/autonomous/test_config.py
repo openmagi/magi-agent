@@ -4,8 +4,12 @@ from magi_agent.browser.autonomous.config import (
 )
 
 
-def test_disabled_by_default():
-    assert browser_tool_active(env={}) is False
+def test_active_by_default_in_full_profile():
+    assert browser_tool_active(env={}) is True
+
+
+def test_disabled_by_explicit_off():
+    assert browser_tool_active(env={"MAGI_BROWSER_TOOL_ENABLED": "0"}) is False
 
 
 def test_enabled_via_env():

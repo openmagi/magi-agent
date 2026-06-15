@@ -510,7 +510,7 @@ def test_healthz_returns_503_when_runtime_status_is_degraded() -> None:
     assert response.json()["ok"] is False
 
 
-def test_healthz_includes_composio_default_disabled_metadata(monkeypatch) -> None:
+def test_healthz_includes_composio_default_auto_unconfigured_metadata(monkeypatch) -> None:
     monkeypatch.delenv("COMPOSIO_API_KEY", raising=False)
     monkeypatch.delenv("MAGI_COMPOSIO_ENABLED", raising=False)
     client = TestClient(create_app(make_runtime()))
@@ -521,7 +521,8 @@ def test_healthz_includes_composio_default_disabled_metadata(monkeypatch) -> Non
     composio = response.json()["composio"]
     assert composio["configured"] is False
     assert composio["active"] is False
-    assert composio["disabledReason"] == "disabled_by_config"
+    assert composio["enabledMode"] == "auto"
+    assert composio["disabledReason"] == "not_configured"
 
 
 def test_healthz_composio_metadata_does_not_leak_api_key(monkeypatch) -> None:

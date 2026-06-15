@@ -1656,13 +1656,12 @@ MAGI_SELF_INTROSPECTION_ENABLED_ENV = "MAGI_SELF_INTROSPECTION_ENABLED"
 def is_self_introspection_enabled(env: Mapping[str, str] | None = None) -> bool:
     """Single source of truth for the self-introspection tool activation flag.
 
-    Default OFF (strict truthy opt-in: "1"/"true"/"yes"/"on"). When OFF the
-    ``InspectSelfEvidence`` tool is bound-but-not-advertised so the model never
-    sees it. This deliberately does NOT follow the runtime-profile default-ON
-    convention — introspection is an additive, default-disabled seam.
+    Default ON in the local full runtime profile. Explicit false/off values or
+    safe runtime profiles keep the ``InspectSelfEvidence`` tool bound but not
+    advertised, so the model never sees it.
     """
     source = os.environ if env is None else env
-    return _is_true(source.get(MAGI_SELF_INTROSPECTION_ENABLED_ENV))
+    return _runtime_feature_enabled(source, MAGI_SELF_INTROSPECTION_ENABLED_ENV)
 
 
 MAGI_EVIDENCE_LEDGER_LIFECYCLE_ENABLED_ENV = "MAGI_EVIDENCE_LEDGER_LIFECYCLE_ENABLED"
@@ -1671,19 +1670,15 @@ MAGI_EVIDENCE_LEDGER_LIFECYCLE_ENABLED_ENV = "MAGI_EVIDENCE_LEDGER_LIFECYCLE_ENA
 def is_evidence_ledger_lifecycle_enabled(env: Mapping[str, str] | None = None) -> bool:
     """Single source of truth for the per-turn EvidenceLedger lifecycle flag.
 
-    Default OFF (strict truthy opt-in: "1"/"true"/"yes"/"on"). When OFF the
-    local tool-evidence collector builds NO ``EvidenceLedger`` objects and the
-    CLI tool-context factories leave ``source_ledger`` byte-identical to today
-    (an empty tuple), so ``InspectSelfEvidence`` keeps returning empty
-    ``tool_calls``. When ON the collector synthesizes a minimal per-turn
-    ``EvidenceLedger`` from each recorded tool result and the factories thread
-    those ledgers onto ``ToolContext.source_ledger`` so the tool reports REAL
-    tool calls. Like ``is_self_introspection_enabled`` this deliberately does
-    NOT follow the runtime-profile default-ON convention — it is an additive,
-    default-disabled seam.
+    Default ON in the local full runtime profile. Explicit false/off values or
+    safe runtime profiles keep the local tool-evidence collector from building
+    ``EvidenceLedger`` objects and leave CLI ``source_ledger`` empty. When ON
+    the collector synthesizes minimal per-turn ledgers from recorded tool
+    results and the factories thread those ledgers onto ``ToolContext`` so
+    ``InspectSelfEvidence`` can report real local tool calls.
     """
     source = os.environ if env is None else env
-    return _is_true(source.get(MAGI_EVIDENCE_LEDGER_LIFECYCLE_ENABLED_ENV))
+    return _runtime_feature_enabled(source, MAGI_EVIDENCE_LEDGER_LIFECYCLE_ENABLED_ENV)
 
 
 MAGI_EGRESS_GATE_ENABLED_ENV = "MAGI_EGRESS_GATE_ENABLED"
@@ -1926,21 +1921,20 @@ def file_tools_enabled(env: Mapping[str, str] | None = None) -> bool:
 def browser_tool_enabled(env: Mapping[str, str] | None = None) -> bool:
     """Single source of truth for the autonomous browser tool gate.
 
-    Returns True iff ``MAGI_BROWSER_TOOL_ENABLED`` is truthy AND the
-    ``MAGI_BROWSER_TOOL_KILL_SWITCH`` is NOT truthy. The kill-switch always
-    wins, so an operator can disable the tool fleet-wide even when the enable
-    flag is set.
+    Returns True iff the runtime profile enables ``MAGI_BROWSER_TOOL_ENABLED``
+    AND the ``MAGI_BROWSER_TOOL_KILL_SWITCH`` is NOT truthy. The kill-switch
+    always wins, so an operator can disable the tool fleet-wide even when the
+    enable flag or full/local profile is active.
 
-    Default OFF. When ON (and the ``browser`` extra is installed), the
-    ``BrowserTask`` tool is registered and bound. The handler degrades with
-    ``status="blocked"`` when the optional dependency is missing rather than
-    crashing.
+    Default ON in the local full runtime profile. When ON, the ``BrowserTask``
+    tool is registered and bound. The handler degrades with ``status="blocked"``
+    when the optional dependency is missing rather than crashing.
     """
     if env is None:
         import os as _os
 
         env = _os.environ
-    return _is_true(env.get("MAGI_BROWSER_TOOL_ENABLED")) and not _is_true(
+    return _runtime_feature_enabled(env, "MAGI_BROWSER_TOOL_ENABLED") and not _is_true(
         env.get("MAGI_BROWSER_TOOL_KILL_SWITCH")
     )
 
