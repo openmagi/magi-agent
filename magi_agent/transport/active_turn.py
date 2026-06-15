@@ -51,12 +51,21 @@ class ActiveTurn:
         The streaming prompt sink (a :class:`HeadlessSink`). The control-response
         route calls ``sink.deliver(ControlResponse(...))`` on it to resolve a
         parked tool-permission ask.
+    task:
+        Optional handle to the :class:`asyncio.Task` driving this turn. The
+        gate5b user-visible chat path (``chat_routes.py``) runs as an asyncio
+        task and threads NO cooperative ``cancel`` poll, so the interrupt route
+        hard-cancels this task to abort the turn (the live-runner boundary
+        catches :class:`asyncio.CancelledError` and reports ``client_aborted``).
+        ``None`` when the turn does not run as a cancellable task (e.g. the
+        cooperative streaming path that only watches ``cancel``).
     """
 
     session_id: str
     turn_id: str
     cancel: asyncio.Event
     sink: "HeadlessSink"
+    task: "asyncio.Task[object] | None" = None
 
 
 class ActiveTurnTable:

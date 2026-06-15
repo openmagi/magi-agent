@@ -3154,3 +3154,349 @@ def test_chat_route_import_boundary_keeps_live_surfaces_unwired() -> None:
         "Agent(",
     ):
         assert forbidden_symbol not in source
+
+
+# ---------------------------------------------------------------------------
+# /v1/chat/interrupt + /v1/chat/inject — wired to ACTIVE_TURNS
+# ---------------------------------------------------------------------------
+
+
+def _live_runtime() -> OpenMagiRuntime:
+    """A runtime whose gate5b live path is reachable (mirrors live-canary tests)."""
+    import tempfile
+
+    runtime = make_runtime(
+        authority=PythonRuntimeAuthorityConfig(
+            userVisibleOutputAllowed=True,
+            canaryRoutingAllowed=True,
+        )
+    )
+    runtime.gate5b_user_visible_chat_route_config = Gate5BUserVisibleChatRouteConfig(
+        enabled=True,
+        killSwitchEnabled=False,
+        selectedBotDigest=_sha256("bot-test"),
+        selectedOwnerUserIdDigest=_sha256("user-test"),
+        environment="production",
+        environmentAllowlist=("production",),
+        adkPrimitivesLoader=_fake_primitives,
+    )
+    counters = Path(tempfile.mkdtemp()) / "counters.json"
+    runtime.gate5b4c3_shadow_generation_route_config = Gate5B4C3ShadowGenerationRouteConfig(
+        liveRunnerBoundaryEnabled=True,
+        counterStore=Gate5B4C3ShadowCounterStore(counters),
+        generationConfig=Gate5B4C3ShadowGenerationConfig(
+            enabled=True,
+            killSwitchActive=False,
+            capStateInitialized=True,
+            providerProjectSpendControlsVerified=True,
+            selectedBotDigest=_sha256("bot-test"),
+            trustedOwnerUserIdDigest=_sha256("user-test"),
+            environment="production",
+            allowedProviderLabels=("google",),
+            allowedModelLabels=("gemini-3.5-flash",),
+            allowedModelRoutes=("google:gemini-3.5-flash",),
+            allowedShadowCredentialRefs=("gate5b-google-api-key-smoke-v1",),
+            providerCredentialBindingRequired=False,
+            approvedBudgets={
+                "maxDailyGenerationRuns": 5,
+                "maxDailyGenerationCostUsd": 0.5,
+                "maxCostUsd": 0.5,
+            },
+        ),
+    )
+    return runtime
+
+
+def _register_fake_turn(session_id: str) -> "tuple[object, object]":
+    import asyncio as _asyncio
+
+    from magi_agent.transport.active_turn import ACTIVE_TURNS, ActiveTurn
+
+    cancel = _asyncio.Event()
+    turn = ActiveTurn(
+        session_id=session_id,
+        turn_id=f"{session_id}:t1",
+        cancel=cancel,
+        sink=object(),  # type: ignore[arg-type]
+    )
+    ACTIVE_TURNS.register(turn)
+    return turn, cancel
+
+
+def test_interrupt_disabled_returns_503_fallback(monkeypatch) -> None:
+    monkeypatch.delenv("CORE_AGENT_PYTHON_CHAT_ROUTE", raising=False)
+    client = TestClient(create_app(make_runtime()))
+    response = client.post(
+        "/v1/chat/interrupt",
+        headers={"authorization": "Bearer gateway-token"},
+        json={"sessionId": "agent:x:app:y"},
+    )
+    assert response.status_code == 503
+    body = response.json()
+    assert body["error"] == "chat_route_disabled"
+    assert body["fallback"] == "typescript_interrupt_required"
+    assert body["activeTurnCompatible"] is False
+    assert body["responseAuthority"] == "typescript"
+
+
+def test_interrupt_checks_bearer_before_gate(monkeypatch) -> None:
+    monkeypatch.delenv("CORE_AGENT_PYTHON_CHAT_ROUTE", raising=False)
+    client = TestClient(create_app(make_runtime()))
+    response = client.post("/v1/chat/interrupt", json={"sessionId": "s"})
+    assert response.status_code == 401
+    assert response.json()["error"] == "unauthorized"
+
+
+def test_interrupt_no_active_turn_returns_409_envelope(monkeypatch) -> None:
+    monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
+    client = TestClient(create_app(make_runtime()))
+    response = client.post(
+        "/v1/chat/interrupt",
+        headers={"authorization": "Bearer gateway-token"},
+        json={"sessionId": "no-such-session", "handoffRequested": True},
+    )
+    assert response.status_code == 409
+    assert response.json() == {
+        "error": "no_active_turn",
+        "reason": "python_interrupt_unsupported",
+        "fallback": "typescript_interrupt_required",
+        "activeTurnCompatible": False,
+        "handoffRequested": True,
+        "gateStateOpen": False,
+        "responseAuthority": "typescript",
+    }
+
+
+def test_interrupt_cancels_active_turn(monkeypatch) -> None:
+    monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
+    from magi_agent.transport.active_turn import ACTIVE_TURNS
+
+    session_id = "agent:bot:app:web"
+    turn, cancel = _register_fake_turn(session_id)
+    try:
+        client = TestClient(create_app(make_runtime()))
+        response = client.post(
+            "/v1/chat/interrupt",
+            headers={"authorization": "Bearer gateway-token"},
+            json={"sessionId": session_id},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["status"] == "cancelling"
+        assert body["activeTurnCompatible"] is True
+        assert body["responseAuthority"] == "python"
+        # TS-parsed keys present
+        assert set(body) >= {
+            "reason",
+            "fallback",
+            "activeTurnCompatible",
+            "handoffRequested",
+            "gateStateOpen",
+            "responseAuthority",
+        }
+        assert cancel.is_set()
+    finally:
+        ACTIVE_TURNS.unregister(session_id, turn.turn_id)
+
+
+def test_interrupt_reads_session_from_header(monkeypatch) -> None:
+    monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
+    from magi_agent.transport.active_turn import ACTIVE_TURNS
+
+    session_id = "agent:bot:app:hdr"
+    turn, cancel = _register_fake_turn(session_id)
+    try:
+        client = TestClient(create_app(make_runtime()))
+        response = client.post(
+            "/v1/chat/interrupt",
+            headers={
+                "authorization": "Bearer gateway-token",
+                "x-openclaw-session-key": session_id,
+            },
+            json={},
+        )
+        assert response.status_code == 200
+        assert cancel.is_set()
+    finally:
+        ACTIVE_TURNS.unregister(session_id, turn.turn_id)
+
+
+def test_interrupt_via_body_session_key_matches_header_registration(monkeypatch) -> None:
+    # The gate5b serve path registers a turn under the session-key HEADER, while
+    # chat-proxy interrupt-handler.js POSTs the same value in the body as
+    # `sessionKey`. Both must resolve to one canonical key so interrupt finds it.
+    monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
+    from magi_agent.transport.active_turn import ACTIVE_TURNS
+
+    session_id = "agent:bot:app:body-key"
+    turn, cancel = _register_fake_turn(session_id)
+    try:
+        client = TestClient(create_app(make_runtime()))
+        response = client.post(
+            "/v1/chat/interrupt",
+            headers={"authorization": "Bearer gateway-token"},
+            json={"sessionKey": session_id},
+        )
+        assert response.status_code == 200
+        assert response.json()["activeTurnCompatible"] is True
+        assert cancel.is_set()
+    finally:
+        ACTIVE_TURNS.unregister(session_id, turn.turn_id)
+
+
+def test_inject_disabled_returns_503_fallback(monkeypatch) -> None:
+    monkeypatch.delenv("CORE_AGENT_PYTHON_CHAT_ROUTE", raising=False)
+    client = TestClient(create_app(make_runtime()))
+    response = client.post(
+        "/v1/chat/inject",
+        headers={"authorization": "Bearer gateway-token"},
+        json={"sessionId": "s", "message": "hi"},
+    )
+    assert response.status_code == 503
+    body = response.json()
+    assert body["fallback"] == "queue_to_completions"
+    assert body["responseAuthority"] == "typescript"
+
+
+def test_inject_checks_bearer_before_gate(monkeypatch) -> None:
+    monkeypatch.delenv("CORE_AGENT_PYTHON_CHAT_ROUTE", raising=False)
+    client = TestClient(create_app(make_runtime()))
+    response = client.post("/v1/chat/inject", json={"sessionId": "s"})
+    assert response.status_code == 401
+    assert response.json()["error"] == "unauthorized"
+
+
+def test_inject_no_active_turn_returns_409(monkeypatch) -> None:
+    monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
+    client = TestClient(create_app(make_runtime()))
+    response = client.post(
+        "/v1/chat/inject",
+        headers={"authorization": "Bearer gateway-token"},
+        json={"sessionId": "no-such-session", "message": "hi"},
+    )
+    assert response.status_code == 409
+    body = response.json()
+    assert body["error"] == "no_active_turn"
+    assert body["fallback"] == "queue_to_completions"
+    assert body["activeTurnCompatible"] is False
+
+
+def test_inject_queues_to_next_turn_when_active(monkeypatch) -> None:
+    monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
+    from magi_agent.transport.active_turn import ACTIVE_TURNS
+
+    session_id = "agent:bot:app:inj"
+    turn, _ = _register_fake_turn(session_id)
+    chat_routes_module._INJECT_BUFFERS.pop(session_id, None)
+    try:
+        client = TestClient(create_app(make_runtime()))
+        # chat-proxy inject-handler.js POSTs the canonical { sessionKey, text } body.
+        first = client.post(
+            "/v1/chat/inject",
+            headers={"authorization": "Bearer gateway-token"},
+            json={"sessionKey": session_id, "text": "wait, change plan"},
+        )
+        assert first.status_code == 200
+        body = first.json()
+        assert body["status"] == "queued"
+        assert body["queuedCount"] == 1
+        assert body["delivery"] == "next_turn"
+        assert body["activeTurnCompatible"] is True
+        assert body["responseAuthority"] == "python"
+        assert "injectionId" in body
+
+        second = client.post(
+            "/v1/chat/inject",
+            headers={"authorization": "Bearer gateway-token"},
+            json={"sessionKey": session_id, "text": "also this"},
+        )
+        assert second.json()["queuedCount"] == 2
+        assert chat_routes_module._INJECT_BUFFERS[session_id] == [
+            "wait, change plan",
+            "also this",
+        ]
+    finally:
+        ACTIVE_TURNS.unregister(session_id, turn.turn_id)
+        chat_routes_module._INJECT_BUFFERS.pop(session_id, None)
+
+
+def test_gate5b_registers_turn_during_boundary_and_unregisters_after(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("CORE_AGENT_PYTHON_CHAT_ROUTE", "on")
+    import asyncio as _asyncio
+
+    from magi_agent.transport.active_turn import ACTIVE_TURNS
+
+    session_id = "agent:bot:app:reg"
+    observed: dict[str, object] = {}
+
+    async def fake_boundary(generation, **kwargs):
+        seen = ACTIVE_TURNS.get(session_id)
+        observed["during"] = seen
+        observed["task"] = seen.task if seen is not None else None
+        # Mimic a hard task-cancel reaching the boundary: cancel the driving
+        # task (recorded as ActiveTurn.task) so the await surfaces
+        # CancelledError exactly as a real interrupt would.
+        if seen is not None and seen.task is not None:
+            seen.task.cancel()
+        await _asyncio.sleep(0)
+
+    monkeypatch.setattr(
+        chat_routes_module,
+        "run_gate5b4c3_live_runner_boundary_async",
+        fake_boundary,
+    )
+
+    runtime = _live_runtime()
+    client = TestClient(create_app(runtime))
+    response = client.post(
+        "/v1/chat/completions",
+        headers={
+            "authorization": "Bearer gateway-token",
+            "x-gate5b-canary-request-digest": "sha256:" + "a" * 64,
+        },
+        json={
+            "sessionId": session_id,
+            "messages": [{"role": "user", "content": "hello"}],
+        },
+    )
+    # boundary raised CancelledError -> client_aborted fallback (hard-cancel path)
+    assert response.status_code == 503
+    assert response.json()["reason"] == "client_aborted"
+    # turn WAS registered while the boundary awaited
+    assert observed["during"] is not None
+    assert observed["task"] is not None
+    # ...and unregistered in the finally afterwards
+    assert ACTIVE_TURNS.get(session_id) is None
+
+
+def test_streaming_cancel_unchanged_after_active_turn_task_field(monkeypatch) -> None:
+    """Regression: optional task field must not break /v1/chat/cancel envelope."""
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "on")
+    from magi_agent.transport.active_turn import ACTIVE_TURNS, ActiveTurn
+    import asyncio as _asyncio
+
+    session_id = "agent:bot:app:cancel"
+    cancel = _asyncio.Event()
+    turn = ActiveTurn(
+        session_id=session_id,
+        turn_id="t1",
+        cancel=cancel,
+        sink=object(),  # type: ignore[arg-type]
+    )
+    ACTIVE_TURNS.register(turn)
+    try:
+        client = TestClient(create_app(make_runtime()))
+        response = client.post(
+            "/v1/chat/cancel",
+            headers={"authorization": "Bearer gateway-token"},
+            json={"sessionId": session_id},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["status"] == "cancelling"
+        assert body["activeTurnCompatible"] is True
+        assert cancel.is_set()
+    finally:
+        ACTIVE_TURNS.unregister(session_id, turn.turn_id)

@@ -51,3 +51,53 @@ def test_unregister_different_turn_id_is_noop() -> None:
 def test_get_unknown_session_returns_none() -> None:
     table = ActiveTurnTable()
     assert table.get("no-such-session") is None
+
+
+def test_task_field_defaults_to_none_and_round_trips() -> None:
+    import asyncio as _asyncio
+
+    table = ActiveTurnTable()
+    # Default: no task threaded (cooperative streaming path).
+    turn = _make_turn("sess-d", "turn-1")
+    assert turn.task is None
+    table.register(turn)
+    assert table.get("sess-d").task is None
+
+    async def _drive() -> None:
+        sentinel = _asyncio.get_running_loop().create_future()
+
+        async def _runner() -> None:
+            await sentinel
+
+        task = _asyncio.ensure_future(_runner())
+        with_task = ActiveTurn(
+            session_id="sess-e",
+            turn_id="turn-2",
+            cancel=_asyncio.Event(),
+            sink=object(),  # type: ignore[arg-type]
+            task=task,
+        )
+        table.register(with_task)
+        assert table.get("sess-e").task is task
+        task.cancel()
+        try:
+            await task
+        except _asyncio.CancelledError:
+            pass
+
+    asyncio.run(_drive())
+
+
+def test_unregister_turn_id_guard_holds_with_task_field() -> None:
+    """The turn_id guard still protects a newer turn after the dataclass grew."""
+    table = ActiveTurnTable()
+    newer = ActiveTurn(
+        session_id="sess-f",
+        turn_id="turn-2",
+        cancel=asyncio.Event(),
+        sink=object(),  # type: ignore[arg-type]
+        task=None,
+    )
+    table.register(newer)
+    table.unregister("sess-f", "turn-1")  # stale teardown
+    assert table.get("sess-f") is newer
