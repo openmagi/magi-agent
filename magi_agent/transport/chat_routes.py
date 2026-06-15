@@ -103,6 +103,8 @@ from magi_agent.transport.chat_shared import (
     _sha256_digest,
     _shadow_generation_route_config,
 )
+from magi_agent.transport.active_turn import ACTIVE_TURNS, ActiveTurn
+from magi_agent.runtime.session_identity import session_key_from_headers
 from magi_agent.transport.egress_critic import _maybe_run_egress_critic_gate
 from magi_agent.transport.gate5b_governance import (
     build_gate5b_control_plane_plugins,
@@ -460,6 +462,60 @@ def _local_chat_string(payload: object, key: str, default: str) -> str:
     return default
 
 
+# --------------------------------------------------------------------------
+# Inject buffer (queue-to-next-turn)
+#
+# The gate5b live-runner boundary is a one-shot JSONResponse: it threads NO
+# cooperative mid-turn seam, so we CANNOT deliver an injected message into a
+# turn that is already running. The honest native behaviour is queue-to-next-
+# turn: when a turn is in flight we append the injected text to a per-session
+# buffer and acknowledge it. Consuming that buffer into the *next* turn's
+# prompt is a separate prompt-assembly change (see deferral note in the inject
+# route); this module only owns the buffer so the contract — accept + count —
+# is real today and a future consumer has a single place to read from.
+#
+# Process-local, asyncio-loop-only (same constraints as ACTIVE_TURNS).
+_INJECT_BUFFERS: dict[str, list[str]] = {}
+
+
+def _buffer_injection(session_id: str, text: str) -> int:
+    """Append *text* to *session_id*'s pending-injection buffer; return its size."""
+    buffer = _INJECT_BUFFERS.setdefault(session_id, [])
+    buffer.append(text)
+    return len(buffer)
+
+
+def _resolve_session_key(payload: object, request: Request) -> str:
+    """Resolve the canonical chat session key across completions/interrupt/inject.
+
+    The chat-proxy sends the session in the interrupt/inject *body* as
+    ``sessionKey`` and on ``/v1/chat/completions`` via the session-key *header*;
+    both carry the same ``agent:main:app:<channel>`` value, so a turn registered
+    from the completions header is found by an interrupt carrying the body key.
+    ``sessionId`` body fallback preserves local-dashboard callers.
+    """
+    explicit = (
+        _local_chat_string(payload, "sessionKey", "")
+        or _local_chat_string(payload, "sessionId", "")
+    )
+    if explicit:
+        return explicit
+    return session_key_from_headers(request.headers) or ""
+
+
+class _NoopChatSink:
+    """A do-nothing :class:`ActiveTurn.sink` stand-in for the gate5b path.
+
+    The gate5b live-runner boundary has no headless permission sink (that is a
+    cli/engine concept consumed by ``/v1/chat/control-response``). The interrupt
+    route never touches ``turn.sink``, so a no-op placeholder satisfies the
+    dataclass without dragging engine imports into this module.
+    """
+
+    def deliver(self, *_args: object, **_kwargs: object) -> None:  # pragma: no cover
+        return None
+
+
 def _sse_data(payload: Mapping[str, object]) -> str:
     return f"data: {json.dumps(payload, separators=(',', ':'))}\n\n"
 
@@ -620,14 +676,45 @@ def register_chat_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
                     "responseAuthority": "typescript",
                 },
             )
+        try:
+            payload = await request.json()
+        except (JSONDecodeError, ValueError):
+            payload = {}
+        session_id = _resolve_session_key(payload, request)
+        turn = ACTIVE_TURNS.get(session_id) if session_id else None
+        if turn is None:
+            # No in-flight turn: the caller falls back to queue_to_completions,
+            # which is the correct behaviour — there is nothing to inject into.
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "error": "no_active_turn",
+                    "reason": "python_inject_unsupported",
+                    "fallback": "queue_to_completions",
+                    "activeTurnCompatible": False,
+                    "responseAuthority": "typescript",
+                },
+            )
+        # A turn IS running. The gate5b live-runner boundary is a one-shot
+        # JSONResponse with no cooperative mid-turn seam, so we honestly
+        # queue-to-next-turn rather than claim mid-turn delivery. Buffer the
+        # text and acknowledge with a count the chat-proxy can surface.
+        text = (
+            _local_chat_string(payload, "text", "")
+            or _local_chat_string(payload, "message", "")
+            or _local_chat_string(payload, "content", "")
+        )
+        injection_id = f"{session_id}:inj:{int(time.time() * 1000)}"
+        queued_count = _buffer_injection(session_id, text)
         return JSONResponse(
-            status_code=409,
+            status_code=200,
             content={
-                "error": "no_active_turn",
-                "reason": "python_inject_unsupported",
-                "fallback": "queue_to_completions",
-                "activeTurnCompatible": False,
-                "responseAuthority": "typescript",
+                "status": "queued",
+                "injectionId": injection_id,
+                "queuedCount": queued_count,
+                "delivery": "next_turn",
+                "activeTurnCompatible": True,
+                "responseAuthority": "python",
             },
         )
 
@@ -660,16 +747,38 @@ def register_chat_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
         handoff_requested = (
             isinstance(payload, Mapping) and payload.get("handoffRequested") is True
         )
+        session_id = _resolve_session_key(payload, request)
+        turn = ACTIVE_TURNS.get(session_id) if session_id else None
+        if turn is None:
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "error": "no_active_turn",
+                    "reason": "python_interrupt_unsupported",
+                    "fallback": "typescript_interrupt_required",
+                    "activeTurnCompatible": False,
+                    "handoffRequested": handoff_requested,
+                    "gateStateOpen": False,
+                    "responseAuthority": "typescript",
+                },
+            )
+        # Request a cooperative abort (for any path that polls it) AND hard-
+        # cancel the driving task. The gate5b live-runner boundary has no
+        # cancel poll, so the task-cancel is what actually aborts it — the
+        # boundary catches asyncio.CancelledError and reports client_aborted.
+        turn.cancel.set()
+        if turn.task is not None and not turn.task.done():
+            turn.task.cancel()
         return JSONResponse(
-            status_code=409,
+            status_code=200,
             content={
-                "error": "no_active_turn",
-                "reason": "python_interrupt_unsupported",
+                "status": "cancelling",
+                "reason": "python_interrupt_accepted",
                 "fallback": "typescript_interrupt_required",
-                "activeTurnCompatible": False,
+                "activeTurnCompatible": True,
                 "handoffRequested": handoff_requested,
                 "gateStateOpen": False,
-                "responseAuthority": "typescript",
+                "responseAuthority": "python",
             },
         )
 
@@ -1344,6 +1453,30 @@ async def _run_live_chat_runner(
         else public_event_sink
     )
     model_call_window_start = _utc_now_iso()
+    # Register this in-flight turn so the /v1/chat/interrupt route can find and
+    # hard-cancel it. The gate5b boundary threads NO cooperative cancel poll, so
+    # interrupt cancels ``ActiveTurn.task`` (the boundary catches CancelledError
+    # → client_aborted). Fail-soft: registration must never break a normal turn,
+    # and is a no-op when no session key is resolvable (nothing can address it).
+    # Completions carries the session in the session-key header; interrupt/inject
+    # carry the same value in the body, so both resolve to one canonical key.
+    active_session_id = _resolve_session_key(payload, request)
+    active_turn_id = generation.shadow_generation_id
+    active_turn_registered = False
+    if active_session_id:
+        try:
+            ACTIVE_TURNS.register(
+                ActiveTurn(
+                    session_id=active_session_id,
+                    turn_id=active_turn_id,
+                    cancel=asyncio.Event(),
+                    sink=_NoopChatSink(),  # type: ignore[arg-type]
+                    task=asyncio.current_task(),
+                )
+            )
+            active_turn_registered = True
+        except Exception:  # noqa: BLE001 — registration must never break a turn
+            active_turn_registered = False
     try:
         boundary_result = await run_gate5b4c3_live_runner_boundary_async(
             generation,
@@ -1433,6 +1566,16 @@ async def _run_live_chat_runner(
             counter_status="error",
             runner_error_diagnostic=runner_error_diagnostic,
         )
+    finally:
+        # Turn is no longer in flight at the runner boundary; drop it from the
+        # interrupt-addressable registry. turn_id-guarded so a NEWER turn that
+        # already replaced this one under the same session is not evicted.
+        # Fail-soft: never let teardown break the response.
+        if active_turn_registered:
+            try:
+                ACTIVE_TURNS.unregister(active_session_id, active_turn_id)
+            except Exception:  # noqa: BLE001 — teardown must never break a response
+                pass
     if (
         boundary_result.status == "completed"
         and boundary_result.output_text_internal
