@@ -222,6 +222,7 @@ openmagi	magi_agent/transport/customize.py	2
 openmagi	magi_agent/transport/gate2_sandbox_canary.py	13
 openmagi	magi_agent/transport/generation_request.py	7
 openmagi	magi_agent/transport/health.py	6
+openmagi	magi_agent/transport/integrations.py	2
 openmagi	magi_agent/transport/learning_dashboard.py	2
 openmagi	magi_agent/transport/plugins.py	4
 openmagi	magi_agent/transport/product_admin.py	16
