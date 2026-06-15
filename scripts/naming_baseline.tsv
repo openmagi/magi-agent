@@ -74,7 +74,7 @@ openmagi	magi_agent/cli/tests/test_commands.py	4
 openmagi	magi_agent/cli/tests/test_engine.py	9
 openmagi	magi_agent/cli/tests/test_engine_recovery.py	2
 openmagi	magi_agent/cli/tests/test_fact_grounding_gate_wiring.py	4
-openmagi	magi_agent/cli/tests/test_phase_route_consumption.py	3
+openmagi	magi_agent/cli/tests/test_phase_route_consumption.py	5
 openmagi	magi_agent/cli/tests/test_runtime_policy_wiring.py	20
 openmagi	magi_agent/cli/tests/test_slash_p2_mcp.py	2
 openmagi	magi_agent/cli/tests/test_tool_runtime.py	1
@@ -222,6 +222,7 @@ openmagi	magi_agent/transport/customize.py	2
 openmagi	magi_agent/transport/gate2_sandbox_canary.py	13
 openmagi	magi_agent/transport/generation_request.py	7
 openmagi	magi_agent/transport/health.py	6
+openmagi	magi_agent/transport/integrations.py	2
 openmagi	magi_agent/transport/learning_dashboard.py	2
 openmagi	magi_agent/transport/plugins.py	4
 openmagi	magi_agent/transport/product_admin.py	16

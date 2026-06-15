@@ -27,6 +27,7 @@ Hard rules (from the spec):
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 
 from rich.text import Text
 
@@ -35,6 +36,7 @@ from magi_agent.cli.contracts import (
     ToolRendererRegistry,
 )
 from magi_agent.cli.render import diff as diffmod
+from magi_agent.cli.render.width import truncate_cells
 
 __all__ = [
     "EditRenderer",
@@ -42,12 +44,37 @@ __all__ = [
     "ReadRenderer",
     "ToolCardRenderer",
     "build_tool_renderers",
+    "full_output",
     "register_default_renderers",
 ]
 
 # Result preview limits — keep the transcript scannable.
+# ``_PREVIEW_MAX_CHARS`` is a budget in terminal CELLS (East-Asian Wide chars
+# count 2), enforced via ``truncate_cells`` so a CJK preview doesn't overflow.
 _PREVIEW_MAX_LINES = 8
 _PREVIEW_MAX_CHARS = 1200
+
+# When True, ``_preview`` skips the line/char clamp and returns the full text.
+# This is the single chokepoint that lets the expand affordance recover the whole
+# ~8 KB payload (every renderer's ``render_result`` funnels through ``_preview``
+# via ``_result_node``), while the flat path keeps the clamp. Scoped by the
+# ``full_output()`` context manager around the synchronous render call; turns run
+# one-at-a-time on a single exclusive worker, so a module-level flag has no
+# interleaving risk (a ``threading.local`` would be a drop-in if ever needed).
+_FULL_OUTPUT = False
+
+
+@contextmanager
+def full_output():
+    """Lift the ``_preview`` truncation clamp for the duration of the block."""
+
+    global _FULL_OUTPUT
+    prev = _FULL_OUTPUT
+    _FULL_OUTPUT = True
+    try:
+        yield
+    finally:
+        _FULL_OUTPUT = prev
 
 # Status-dot colors.
 _DOT_OK = "bold #4ec9b0"      # teal
@@ -107,11 +134,13 @@ _GENERIC_ARG_KEYS = (
     "file",
 )
 
+# Primary-arg head budget, measured in terminal CELLS (East-Asian Wide chars
+# count 2) so a CJK path/query stays one column-friendly line, not ~2x over.
 _ARG_HEAD_MAX = 80
 
 
 def _clip(value: str) -> str:
-    return value if len(value) <= _ARG_HEAD_MAX else value[: _ARG_HEAD_MAX - 1] + "…"
+    return truncate_cells(value, _ARG_HEAD_MAX)
 
 
 def _string_head(value: str) -> str:
@@ -188,13 +217,15 @@ def _preview(text: str) -> str:
     text = text.strip("\n")
     if not text:
         return ""
+    if _FULL_OUTPUT:
+        # Expand mode: return the whole payload with no clamp and no marker.
+        return text
     lines = text.split("\n")
     clipped = lines[:_PREVIEW_MAX_LINES]
     body = "\n".join(clipped)
     if len(lines) > _PREVIEW_MAX_LINES:
         body += f"\n… (+{len(lines) - _PREVIEW_MAX_LINES} more lines)"
-    if len(body) > _PREVIEW_MAX_CHARS:
-        body = body[:_PREVIEW_MAX_CHARS].rstrip() + " …"
+    body = truncate_cells(body, _PREVIEW_MAX_CHARS, ellipsis=" …")
     return body
 
 
@@ -252,7 +283,10 @@ class ToolCardRenderer:
         if isinstance(partial_input, str) and partial_input.strip():
             return _string_head(partial_input)
         data = _as_dict(partial_input)
-        return _first_str(data, self._primary_keys) or _generic_arg(data)
+        primary = _first_str(data, self._primary_keys)
+        # Clip the primary arg too (``_generic_arg`` already clips): a long CJK
+        # path/pattern must stay within the cell budget like every other header.
+        return _clip(primary) if primary else _generic_arg(data)
 
     def extract_search_text(self, node: object) -> str:
         return _search_text(node)

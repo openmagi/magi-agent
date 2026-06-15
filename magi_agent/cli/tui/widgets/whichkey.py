@@ -20,6 +20,19 @@ from magi_agent.cli.keybindings.schema import Context, Keystroke, ParsedBinding
 
 __all__ = ["chord_continuations", "WhichKeyOverlay"]
 
+# Display-only labels for action ids shown in the which-key overlay. The raw
+# ``Action`` enum values (e.g. ``chat:killAgents``) are machine vocab and stay
+# byte-for-byte on the binding/seam; this map ONLY humanizes them at render
+# time. Unknown ids (incl. ``command:<name>`` forms) fall back to the raw id.
+_ACTION_LABELS: dict[str, str] = {
+    "chat:killAgents": "Stop agents",
+    "chat:stash": "Stash draft",
+    "chat:submit": "Send",
+    "chat:cancel": "Interrupt",
+    "chat:newline": "New line",
+    "global:quit": "Quit",
+}
+
 
 def _keystroke_label(ks: Keystroke) -> str:
     """Render a keystroke back to a ``mod+...+key`` label for display."""
@@ -93,7 +106,9 @@ class WhichKeyOverlay(Static):
         if not hints:
             self.hide_hints()
             return
-        line = "   ".join(f"{key} → {action}" for key, action in hints)
+        line = "   ".join(
+            f"{key} → {_ACTION_LABELS.get(action, action)}" for key, action in hints
+        )
         self.update(f"…  {line}")
         self.add_class("visible")
 

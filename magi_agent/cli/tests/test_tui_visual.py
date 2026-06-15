@@ -114,6 +114,18 @@ def test_topbar_handles_missing_model() -> None:
     assert "no model" in app._topbar_text()
 
 
+def test_topbar_cwd_cjk_fits_cell_budget() -> None:
+    """A long CJK cwd tail-truncates to 48 *cells*, not 48 codepoints (which
+    would be ~96 cells and blow the topbar layout). Leads with ``…``."""
+
+    from magi_agent.cli.render.width import display_width
+
+    app = _app(cwd="/Users/kevin/" + "프" * 40)
+    cwd = app._topbar_cwd()
+    assert display_width(cwd) <= 48
+    assert cwd.startswith("…")
+
+
 def test_user_prompt_is_echoed_into_transcript() -> None:
     async def _run() -> None:
         app = _app()

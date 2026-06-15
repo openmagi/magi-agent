@@ -92,7 +92,7 @@ class WebAcquisitionProviderPackConfig(BaseModel):
     local_fake_provider_enabled: bool = Field(default=False, alias="localFakeProviderEnabled")
     provider_allowlist: tuple[str, ...] = Field(default=(), alias="providerAllowlist")
     max_results: int = Field(default=5, alias="maxResults", ge=1, le=20)
-    max_content_bytes: int = Field(default=32_768, alias="maxContentBytes", ge=1)
+    max_content_bytes: int = Field(default=131_072, alias="maxContentBytes", ge=1)
     timeout_ms: int = Field(default=30_000, alias="timeoutMs", ge=1)
     browser_fallback_enabled: bool = Field(default=False, alias="browserFallbackEnabled")
     production_network_enabled: Literal[False] = Field(default=False, alias="productionNetworkEnabled")
@@ -147,7 +147,7 @@ class LiveWebAcquisitionPackConfig(BaseModel):
     live_network_enabled: bool = Field(default=False, alias="liveNetworkEnabled")
     provider_allowlist: tuple[str, ...] = Field(default=(), alias="providerAllowlist")
     max_results: int = Field(default=5, alias="maxResults", ge=1, le=20)
-    max_content_bytes: int = Field(default=32_768, alias="maxContentBytes", ge=1)
+    max_content_bytes: int = Field(default=131_072, alias="maxContentBytes", ge=1)
     timeout_ms: int = Field(default=30_000, alias="timeoutMs", ge=1)
     browser_fallback_enabled: bool = Field(default=False, alias="browserFallbackEnabled")
 

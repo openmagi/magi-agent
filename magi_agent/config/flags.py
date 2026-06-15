@@ -221,6 +221,29 @@ FLAGS: tuple[FlagSpec, ...] = (
         "MAGI_OBSERVABILITY_ENABLED",
         summary="Enable the hook-tap observability module (bot-activity visibility).",
     ),
+    _b(
+        "MAGI_SESSION_TRANSCRIPT_ENABLED",
+        summary=(
+            "Write per-session JSONL debug transcripts (turn stages, tool "
+            "calls, subagent spawns, messages) under the observability home."
+        ),
+    ),
+    FlagSpec(
+        name="MAGI_SESSION_TRANSCRIPT_RETENTION_DAYS",
+        default=14,
+        scope="public",
+        stage="stage1",
+        summary="Session-transcript retention in days; older files are pruned.",
+        kind="int",
+    ),
+    FlagSpec(
+        name="MAGI_SESSION_TRANSCRIPT_MAX_FILES",
+        default=500,
+        scope="public",
+        stage="stage1",
+        summary="Max session-transcript files kept; oldest beyond this are pruned.",
+        kind="int",
+    ),
     # --- Web / research tools ----------------------------------------------
     _b(
         "MAGI_DEEP_WEB_RESEARCH_ENABLED",

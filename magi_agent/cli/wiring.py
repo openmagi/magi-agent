@@ -226,9 +226,17 @@ def build_headless_runtime(
     #     ``None`` (the default OFF) leaves streaming byte-for-byte identical.
     if event_sink is None:
         try:
-            from magi_agent.observability.runtime_sink import get_active_sink
+            from magi_agent.observability.runtime_sink import (
+                combine_sinks,
+                get_active_sink,
+            )
+            from magi_agent.observability.transcript import (
+                get_active_transcript_sink,
+            )
 
-            event_sink = get_active_sink()
+            event_sink = combine_sinks(
+                [get_active_sink(), get_active_transcript_sink()]
+            )
         except Exception:
             event_sink = None
     local_tool_evidence = _local_tool_evidence_collector(effective_runner)
@@ -905,6 +913,37 @@ def build_tui_app(
     from magi_agent.cli.tui.app import MagiTuiApp  # noqa: PLC0415
     from magi_agent.cli.tui.tool_render import build_tool_renderers  # noqa: PLC0415
 
+    # Resolve a DISPLAY model so the topbar/footer show the model the session
+    # will actually use (not the raw, possibly-None ``--model`` flag). This is a
+    # SECOND, independent ``resolve_provider_config`` read (display-only); it
+    # mirrors but does not literally share the runner's resolve in
+    # ``_build_default_runner``. Honesty holds because both read the same
+    # ``~/.magi/config.toml`` + ``model_override``. When nothing is configured
+    # (``resolve_provider_config`` -> ``None``, runner is the model-free stub),
+    # ``display_model`` stays ``None`` so the App's ``or "no model"`` fallback
+    # remains honest.
+    from magi_agent.cli.providers import resolve_provider_config  # noqa: PLC0415
+
+    _display = resolve_provider_config(model_override=model)
+    display_model = (_display.model if _display is not None else None) or model
+
+    # Default cwd BEFORE constructing the @-file provider so it never walks
+    # ``None`` regardless of caller (belt-and-suspenders: the interactive caller
+    # also threads ``cwd=os.getcwd()``). The new capability — typing ``@`` lists
+    # workspace files — is behavior-changing, so it is gated behind
+    # ``MAGI_TUI_FILE_MENTIONS`` (default OFF, matching the ``MAGI_TUI_*ENABLED``
+    # ``== "1"`` opt-in idiom). When OFF, ``@`` stays dead-but-silent (status
+    # quo). ``#`` is intentionally left without a provider (no local channel
+    # concept). The provider import is LAZY to keep the cold-start contract.
+    effective_cwd = str(cwd) if cwd is not None else os.getcwd()
+    file_provider: object | None = None
+    if os.environ.get("MAGI_TUI_FILE_MENTIONS", "") == "1":
+        from magi_agent.cli.tui.file_provider import (  # noqa: PLC0415
+            WorkspaceFileProvider,
+        )
+
+        file_provider = WorkspaceFileProvider(effective_cwd)
+
     runtime_runner = getattr(runtime, "runner", None) if runtime is not None else None
     effective_runner = runner if runner is not None else runtime_runner
 
@@ -928,7 +967,9 @@ def build_tui_app(
         renderers=renderers,
         runtime=runtime,
         session_id=session_id,
-        model=model,
+        model=display_model,
+        mode=mode,
+        file_provider=file_provider,
         cwd=str(cwd) if cwd is not None else None,
     )
 

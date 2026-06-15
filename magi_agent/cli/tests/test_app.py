@@ -175,6 +175,109 @@ class TestBuildTuiApp:
         tui = build_tui_app(cwd="/tmp", session_id="tui-test")
         assert isinstance(tui, MagiTuiApp)
 
+    def test_build_tui_app_threads_mode(self) -> None:
+        """``--mode plan`` must reach the App so the topbar honors it (not [act])."""
+        from magi_agent.cli.wiring import build_tui_app
+        tui = build_tui_app(cwd="/tmp", session_id="tui-mode", mode="plan")
+        assert tui._mode == "plan"
+        assert "[plan]" in tui._topbar_text()
+
+    def test_build_tui_app_uses_resolved_model(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The topbar/footer show the RESOLVED model, not the raw (None) flag.
+
+        An explicit ``runner`` is injected so the runner-build path (which also
+        reads ``resolve_provider_config``) is skipped — this isolates the new
+        display-only resolve in ``build_tui_app``.
+        """
+        from magi_agent.cli import providers as providers_mod
+        from magi_agent.cli.wiring import build_tui_app
+
+        monkeypatch.setattr(
+            providers_mod,
+            "resolve_provider_config",
+            lambda *, model_override=None: SimpleNamespace(model="claude-x"),
+        )
+        tui = build_tui_app(
+            cwd="/tmp", session_id="tui-rm", model=None, runner=MagicMock()
+        )
+        # Footer is fed self._model at compose, so asserting _model covers both.
+        assert tui._model == "claude-x"
+        assert "claude-x" in tui._topbar_text()
+
+    def test_build_tui_app_unconfigured_model_shows_no_model(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Unconfigured machine (resolve -> None) keeps the honest 'no model'."""
+        from magi_agent.cli import providers as providers_mod
+        from magi_agent.cli.wiring import build_tui_app
+
+        monkeypatch.setattr(
+            providers_mod,
+            "resolve_provider_config",
+            lambda *, model_override=None: None,
+        )
+        tui = build_tui_app(
+            cwd="/tmp", session_id="tui-nm", model=None, runner=MagicMock()
+        )
+        assert tui._model is None
+        assert "no model" in tui._topbar_text()
+
+    def test_build_tui_app_at_provider_disabled_by_default(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path
+    ) -> None:
+        """With MAGI_TUI_FILE_MENTIONS unset, @ stays dead-but-silent (no provider)."""
+        from magi_agent.cli.wiring import build_tui_app
+
+        monkeypatch.delenv("MAGI_TUI_FILE_MENTIONS", raising=False)
+        (tmp_path / "readme.md").write_text("x", encoding="utf-8")
+        tui = build_tui_app(
+            cwd=tmp_path, session_id="atoff", runner=MagicMock()
+        )
+        assert tui._router.route("@readme").results == []
+
+    def test_build_tui_app_at_provider_lists_files_when_enabled(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path
+    ) -> None:
+        """With the flag ON, typing @ lists workspace files."""
+        from magi_agent.cli.wiring import build_tui_app
+
+        monkeypatch.setenv("MAGI_TUI_FILE_MENTIONS", "1")
+        (tmp_path / "readme.md").write_text("x", encoding="utf-8")
+        tui = build_tui_app(
+            cwd=tmp_path, session_id="aton", runner=MagicMock()
+        )
+        results = tui._router.route("@readme").results
+        assert results
+        assert any("readme.md" in c.value for c in results)
+
+    def test_build_tui_app_defaults_cwd_to_getcwd_for_at(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path
+    ) -> None:
+        """Production path: no cwd= passed -> build_tui_app defaults to os.getcwd()."""
+        from magi_agent.cli.wiring import build_tui_app
+
+        monkeypatch.setenv("MAGI_TUI_FILE_MENTIONS", "1")
+        (tmp_path / "readme.md").write_text("x", encoding="utf-8")
+        monkeypatch.chdir(tmp_path)
+        tui = build_tui_app(session_id="atcwd", runner=MagicMock())
+        results = tui._router.route("@readme").results
+        assert results
+        assert any("readme.md" in c.value for c in results)
+
+    def test_build_tui_app_hash_stays_dead_but_silent(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path
+    ) -> None:
+        """Even with @ enabled, # has no provider injected -> no results."""
+        from magi_agent.cli.wiring import build_tui_app
+
+        monkeypatch.setenv("MAGI_TUI_FILE_MENTIONS", "1")
+        tui = build_tui_app(
+            cwd=tmp_path, session_id="athash", runner=MagicMock()
+        )
+        assert tui._router.route("#foo").results == []
+
     def test_engine_is_same_type_as_headless(self) -> None:
         """TUI uses MagiEngineDriver — same engine class as headless."""
         from magi_agent.cli.engine import MagiEngineDriver
@@ -412,10 +515,10 @@ class TestModeBranchInteractive:
             f"TUI was not launched in interactive mode; headless_called={headless_called}, output={result.output}"
         assert not headless_called, "Headless should not run in interactive mode"
 
-    def _launch_tui(
+    def _capture_tui_kwargs(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path, extra_args: list[str]
-    ) -> str:
-        """Invoke the interactive TUI path and return the permission_mode passed."""
+    ) -> dict[str, Any]:
+        """Invoke the interactive TUI path and return ALL kwargs build_tui_app got."""
         monkeypatch.setenv("MAGI_CLI_ENABLED", "1")
         monkeypatch.setenv("MAGI_CLI_SESSION_DIR", str(tmp_path))
         captured: dict[str, Any] = {}
@@ -437,7 +540,22 @@ class TestModeBranchInteractive:
             mock_sys.stdin = fake_stdin
             runner = CliRunner()
             runner.invoke(app_module.app, extra_args, catch_exceptions=False)
-        return captured.get("permission_mode")
+        return captured
+
+    def _launch_tui(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path, extra_args: list[str]
+    ) -> str:
+        """Invoke the interactive TUI path and return the permission_mode passed."""
+        return self._capture_tui_kwargs(
+            monkeypatch, tmp_path, extra_args
+        ).get("permission_mode")
+
+    def test_interactive_threads_cwd_into_build_tui_app(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path
+    ) -> None:
+        """The interactive caller must thread cwd so the @-provider has a real root."""
+        captured = self._capture_tui_kwargs(monkeypatch, tmp_path, [])
+        assert captured.get("cwd") == os.getcwd()
 
     def test_interactive_default_upgrades_to_bypass_permissions(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path

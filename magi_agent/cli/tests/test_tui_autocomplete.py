@@ -122,7 +122,95 @@ def test_missing_provider_yields_no_results() -> None:
     assert router.route("#foo").results == []
 
 
+def test_module_docstring_does_not_advertise_channels() -> None:
+    """The local CLI has no channel concept; the docstring must not promise one."""
+    import magi_agent.cli.tui.autocomplete as ac
+
+    doc = ac.__doc__ or ""
+    assert "-> channels" not in doc
+    # The seam is retained but documented as intentionally unbacked locally.
+    assert "unbacked" in doc
+
+
 def test_non_trigger_token_yields_no_results() -> None:
     registry = FakeRegistry(["compact"])
     router = AutocompleteRouter(commands=registry)
     assert router.route("hello world").results == []
+
+
+# ---------------------------------------------------------------------------
+# WorkspaceFileProvider — stdlib-only bounded scan for @-mentions
+# ---------------------------------------------------------------------------
+def test_workspace_provider_lists_relative_posix_paths(tmp_path) -> None:
+    from magi_agent.cli.tui.file_provider import WorkspaceFileProvider
+
+    (tmp_path / "readme.md").write_text("x", encoding="utf-8")
+    sub = tmp_path / "src"
+    sub.mkdir()
+    (sub / "main.py").write_text("x", encoding="utf-8")
+
+    candidates = list(WorkspaceFileProvider(str(tmp_path)).candidates(""))
+    assert "readme.md" in candidates
+    # Nested paths use forward slashes (repo-relative POSIX), never backslashes.
+    assert "src/main.py" in candidates
+    assert all("\\" not in c for c in candidates)
+
+
+def test_workspace_provider_excludes_noise_dirs(tmp_path) -> None:
+    from magi_agent.cli.tui.file_provider import WorkspaceFileProvider
+
+    for noise in (".git", "node_modules", ".venv", "__pycache__", ".hidden"):
+        d = tmp_path / noise
+        d.mkdir()
+        (d / "junk.txt").write_text("x", encoding="utf-8")
+    (tmp_path / "keep.py").write_text("x", encoding="utf-8")
+
+    candidates = list(WorkspaceFileProvider(str(tmp_path)).candidates(""))
+    assert "keep.py" in candidates
+    assert not any("junk.txt" in c for c in candidates)
+
+
+def test_workspace_provider_respects_file_cap(tmp_path) -> None:
+    from magi_agent.cli.tui.file_provider import WorkspaceFileProvider
+
+    provider = WorkspaceFileProvider(str(tmp_path), file_cap=5)
+    for i in range(20):
+        (tmp_path / f"f{i}.txt").write_text("x", encoding="utf-8")
+    assert len(provider.candidates("")) <= 5
+
+
+def test_workspace_provider_swallows_permission_error(tmp_path) -> None:
+    import os
+
+    from magi_agent.cli.tui.file_provider import WorkspaceFileProvider
+
+    (tmp_path / "keep.py").write_text("x", encoding="utf-8")
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    (locked / "secret.txt").write_text("x", encoding="utf-8")
+    os.chmod(locked, 0o000)
+    try:
+        candidates = list(WorkspaceFileProvider(str(tmp_path)).candidates(""))
+        # Did not raise; the readable file still surfaces.
+        assert "keep.py" in candidates
+    finally:
+        os.chmod(locked, 0o755)
+
+
+def test_workspace_provider_does_not_follow_symlinks(tmp_path) -> None:
+    import os
+
+    from magi_agent.cli.tui.file_provider import WorkspaceFileProvider
+
+    real = tmp_path / "real"
+    real.mkdir()
+    (real / "inside.txt").write_text("x", encoding="utf-8")
+    link = tmp_path / "loop"
+    try:
+        os.symlink(tmp_path, link)
+    except (OSError, NotImplementedError):
+        return  # platform without symlink support — nothing to assert
+    # Must not hang / recurse into the symlinked dir.
+    candidates = list(WorkspaceFileProvider(str(tmp_path)).candidates(""))
+    assert "real/inside.txt" in candidates
+    assert not any(c.startswith("loop/") for c in candidates)

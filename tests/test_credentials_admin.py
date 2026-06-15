@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import logging
+from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from magi_agent.app import create_app
@@ -10,6 +12,17 @@ from magi_agent.config.models import BuildInfo, RuntimeConfig
 from magi_agent.credentials_admin import vault_local
 from magi_agent.credentials_admin.store import credentials_path
 from magi_agent.runtime.openmagi_runtime import OpenMagiRuntime
+
+
+@pytest.fixture(autouse=True)
+def _clean_vault_env(monkeypatch):
+    # Other test files apply local-runtime defaults that setdefault
+    # MAGI_LOCAL_VAULT_ENABLED into the global os.environ; clear any such leak so
+    # these default-OFF assertions stay isolated. Tests that need the local vault
+    # (or external URL) set their env vars explicitly, which overrides this.
+    monkeypatch.delenv("MAGI_LOCAL_VAULT_ENABLED", raising=False)
+    monkeypatch.delenv("MAGI_VAULT_ADMIN_ENABLED", raising=False)
+    monkeypatch.delenv("MAGI_VAULT_ADMIN_URL", raising=False)
 
 # A realistic-looking secret used across tests. It is intentionally
 # "secret-shaped" so the durable-store guard and redaction helpers are exercised.
@@ -239,3 +252,273 @@ def test_revoke_unknown_credential_returns_404(monkeypatch, tmp_path) -> None:
         headers={"x-gateway-token": "local-token"},
     )
     assert response.status_code == 404
+
+
+# --- Native local vault backend (Phase 1) -----------------------------------
+
+
+def _enable_local_vault(monkeypatch, tmp_path) -> Path:
+    """Point the local vault at a tmp dir and enable the native backend."""
+    import os
+
+    vault_dir = Path(tmp_path) / "vault"
+    monkeypatch.setenv("MAGI_VAULT_DIR", str(vault_dir))
+    monkeypatch.setenv("MAGI_LOCAL_VAULT_ENABLED", "1")
+    monkeypatch.delenv("MAGI_VAULT_ADMIN_URL", raising=False)
+    monkeypatch.delenv("MAGI_VAULT_ADMIN_ENABLED", raising=False)
+    os.environ.pop("MAGI_VAULT_ADMIN_URL", None)
+    return vault_dir
+
+
+def test_vault_status_present_with_local_backend(monkeypatch, tmp_path) -> None:
+    _isolate_store(monkeypatch, tmp_path)
+    _enable_local_vault(monkeypatch, tmp_path)
+    status = vault_local.vault_status()
+    assert status == {"present": True, "healthy": True}
+
+
+def test_register_with_local_vault_stores_ciphertext_only(
+    monkeypatch, tmp_path
+) -> None:
+    """End-to-end: register → status active, no secret in response/metadata,
+    secrets.enc exists and is ciphertext (plaintext absent)."""
+    _isolate_store(monkeypatch, tmp_path)
+    vault_dir = _enable_local_vault(monkeypatch, tmp_path)
+    client = _client()
+
+    response = client.post(
+        "/v1/admin/credentials",
+        headers={"x-gateway-token": "local-token"},
+        json={
+            "service": "openai",
+            "label": "Prod key",
+            "auth_scheme": "bearer",
+            "secret": SECRET_VALUE,
+        },
+    )
+    assert response.status_code == 200
+    credential = response.json()["credential"]
+    assert credential["status"] == "active"
+    assert credential["vault_ref"]
+
+    # The response carries NO secret.
+    assert SECRET_VALUE not in json.dumps(response.json())
+
+    # The metadata store holds NO secret.
+    meta_text = credentials_path().read_text(encoding="utf-8")
+    assert SECRET_VALUE not in meta_text
+
+    # The encrypted store exists and is ciphertext (plaintext absent).
+    enc_path = vault_dir / "secrets.enc"
+    assert enc_path.is_file()
+    enc_bytes = enc_path.read_bytes()
+    assert SECRET_VALUE.encode("utf-8") not in enc_bytes
+    assert credential["vault_ref"] in enc_bytes.decode("utf-8")
+
+
+def test_local_vault_register_never_logs_secret(monkeypatch, tmp_path, caplog) -> None:
+    _isolate_store(monkeypatch, tmp_path)
+    _enable_local_vault(monkeypatch, tmp_path)
+    client = _client()
+    with caplog.at_level(logging.DEBUG):
+        client.post(
+            "/v1/admin/credentials",
+            headers={"x-gateway-token": "local-token"},
+            json={
+                "service": "openai",
+                "label": "Prod key",
+                "auth_scheme": "bearer",
+                "secret": SECRET_VALUE,
+            },
+        )
+    for record in caplog.records:
+        assert SECRET_VALUE not in record.getMessage()
+        assert SECRET_VALUE not in str(record.args)
+
+
+def test_local_vault_revoke_deletes_secret(monkeypatch, tmp_path) -> None:
+    _isolate_store(monkeypatch, tmp_path)
+    vault_dir = _enable_local_vault(monkeypatch, tmp_path)
+    client = _client()
+    created = client.post(
+        "/v1/admin/credentials",
+        headers={"x-gateway-token": "local-token"},
+        json={
+            "service": "openai",
+            "label": "Prod key",
+            "auth_scheme": "bearer",
+            "secret": SECRET_VALUE,
+        },
+    ).json()["credential"]
+    vault_ref = created["vault_ref"]
+    credential_id = created["id"]
+
+    # The ciphertext entry exists.
+    from magi_agent.credentials_admin.local_vault import LocalVault
+
+    vault = LocalVault(vault_dir=vault_dir)
+    assert vault.get_secret(vault_ref) == SECRET_VALUE
+
+    revoke = client.post(
+        f"/v1/admin/credentials/{credential_id}/revoke",
+        headers={"x-gateway-token": "local-token"},
+    )
+    assert revoke.status_code == 200
+    assert revoke.json()["credential"]["status"] == "revoked"
+
+    # The secret is deleted from the encrypted store.
+    assert vault.get_secret(vault_ref) is None
+
+
+def test_external_url_takes_precedence_over_local_vault(monkeypatch, tmp_path) -> None:
+    """When MAGI_VAULT_ADMIN_URL is set, the external path is taken (LocalVault
+    NOT used) even if the local flag is on."""
+    _isolate_store(monkeypatch, tmp_path)
+    _enable_local_vault(monkeypatch, tmp_path)
+    monkeypatch.setenv("MAGI_VAULT_ADMIN_ENABLED", "1")
+    monkeypatch.setenv("MAGI_VAULT_ADMIN_URL", "https://vault.example/admin")
+
+    # Backend selection: local vault must be inert when an external URL is set.
+    assert vault_local.local_vault_enabled() is False
+
+    # vault_status reports present (external) but unprobed → not healthy.
+    assert vault_local.vault_status() == {"present": True, "healthy": False}
+
+    captured: dict[str, object] = {}
+
+    def _fake_local_store(self, secret):  # pragma: no cover - must NOT be called
+        captured["local_used"] = True
+        return "should-not-happen"
+
+    from magi_agent.credentials_admin.local_vault import LocalVault
+
+    monkeypatch.setattr(LocalVault, "store_secret", _fake_local_store)
+
+    # The external transport is unwired in the OSS scaffold → VaultSeamError →
+    # register_credential raises, proving the external (not local) path ran.
+    import pytest
+
+    with pytest.raises(vault_local.VaultSeamError):
+        vault_local.register_credential(
+            service="openai",
+            label="Prod key",
+            auth_scheme="bearer",
+            secret=SECRET_VALUE,
+        )
+    assert "local_used" not in captured
+
+
+def test_disabled_when_neither_external_nor_local(monkeypatch, tmp_path) -> None:
+    """Unchanged pending behavior when nothing is configured."""
+    _isolate_store(monkeypatch, tmp_path)
+    monkeypatch.delenv("MAGI_VAULT_ADMIN_URL", raising=False)
+    monkeypatch.delenv("MAGI_VAULT_ADMIN_ENABLED", raising=False)
+    monkeypatch.delenv("MAGI_LOCAL_VAULT_ENABLED", raising=False)
+    import os
+
+    os.environ.pop("MAGI_VAULT_ADMIN_URL", None)
+    assert vault_local.vault_status() == {"present": False, "healthy": False}
+    assert vault_local.register_credential(
+        service="openai",
+        label="Prod key",
+        auth_scheme="bearer",
+        secret=SECRET_VALUE,
+    ) == {"disabled": True}
+
+
+# -- host field (additive, non-secret) ------------------------------------
+
+
+def test_store_host_round_trips(monkeypatch, tmp_path) -> None:
+    """add_credential persists host; the projection reads it back; absent → None."""
+    from magi_agent.credentials_admin import store as cred_store
+
+    _isolate_store(monkeypatch, tmp_path)
+
+    with_host = cred_store.add_credential(
+        service="notion",
+        label="Notion",
+        auth_scheme="bearer",
+        status=cred_store.STATUS_ACTIVE,
+        vault_ref="ref-1",
+        host="api.notion.com",
+    )
+    assert with_host["host"] == "api.notion.com"
+
+    without_host = cred_store.add_credential(
+        service="slack",
+        label="Slack",
+        auth_scheme="bearer",
+        status=cred_store.STATUS_ACTIVE,
+        vault_ref="ref-2",
+    )
+    assert without_host["host"] is None
+
+    # Persisted + reloaded.
+    reloaded = cred_store.load_credentials()["credentials"]
+    by_service = {c["service"]: c for c in reloaded}
+    assert by_service["notion"]["host"] == "api.notion.com"
+    assert by_service["slack"]["host"] is None
+
+
+def test_post_accepts_optional_host(monkeypatch, tmp_path) -> None:
+    from magi_agent.credentials_admin.store import credentials_path
+
+    _isolate_store(monkeypatch, tmp_path)
+    _enable_local_vault(monkeypatch, tmp_path)
+    client = _client()
+
+    response = client.post(
+        "/v1/admin/credentials",
+        headers={"x-gateway-token": "local-token"},
+        json={
+            "service": "notion",
+            "label": "Notion",
+            "auth_scheme": "bearer",
+            "secret": SECRET_VALUE,
+            "host": "api.notion.com",
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["credential"]["host"] == "api.notion.com"
+    # Host is non-secret and persisted in the metadata store.
+    assert "api.notion.com" in credentials_path().read_text(encoding="utf-8")
+
+
+def test_post_host_absent_defaults_none(monkeypatch, tmp_path) -> None:
+    _isolate_store(monkeypatch, tmp_path)
+    _enable_local_vault(monkeypatch, tmp_path)
+    client = _client()
+
+    response = client.post(
+        "/v1/admin/credentials",
+        headers={"x-gateway-token": "local-token"},
+        json={
+            "service": "notion",
+            "label": "Notion",
+            "auth_scheme": "bearer",
+            "secret": SECRET_VALUE,
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["credential"]["host"] is None
+
+
+def test_post_rejects_blank_host(monkeypatch, tmp_path) -> None:
+    _isolate_store(monkeypatch, tmp_path)
+    _enable_local_vault(monkeypatch, tmp_path)
+    client = _client()
+
+    response = client.post(
+        "/v1/admin/credentials",
+        headers={"x-gateway-token": "local-token"},
+        json={
+            "service": "notion",
+            "label": "Notion",
+            "auth_scheme": "bearer",
+            "secret": SECRET_VALUE,
+            "host": "   ",
+        },
+    )
+    assert response.status_code == 400
+    assert response.json()["field"] == "host"

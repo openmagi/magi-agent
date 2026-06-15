@@ -1,0 +1,46 @@
+# Agent Vault sidecar image — the per-bot hosted credential-injection sidecar.
+#
+# LEAN by design: installs only the [vault] extra (mitmproxy) — no
+# browser/playwright, no provider SDKs. The sidecar's job is narrow:
+#   1. self-generate a CA into the shared CA volume (only the cert is shared),
+#   2. run the 127.0.0.1 credential-injection proxy,
+#   3. run the token-authed admin API.
+#
+# Entrypoint: `magi-agent vault-serve` (see magi_agent/credentials_admin/vault_server.py).
+FROM python:3.12-slim
+
+ARG AGENT_VAULT_BUILD_SHA=""
+
+WORKDIR /app
+
+COPY pyproject.toml README.md ./
+COPY magi_agent/ ./magi_agent/
+
+RUN python -m pip install --no-cache-dir --upgrade pip \
+  && python -m pip install --no-cache-dir ".[vault]" \
+  && rm -rf /var/lib/apt/lists/*
+
+# Dedicated non-root runtime user. /app stays root-owned/read-only. The store dir
+# (encrypted vault + redacted metadata + mitmproxy confdir with the 0600 CA key)
+# and the shared CA dir are the only writable paths; both are mounted volumes in
+# k8s. We pre-create them owned by the runtime user so the process can write the
+# Fernet key, secrets.enc, and ca.pem under a readOnlyRootFilesystem posture.
+RUN groupadd --gid 10001 magi \
+  && useradd --uid 10001 --gid 10001 --create-home --home-dir /home/magi \
+       --shell /usr/sbin/nologin magi \
+  && mkdir -p /var/lib/agent-vault /etc/agent-vault \
+  && chown -R magi:magi /var/lib/agent-vault /etc/agent-vault
+
+ENV AGENT_VAULT_CA_DIR=/etc/agent-vault \
+    AGENT_VAULT_STORE_DIR=/var/lib/agent-vault \
+    AGENT_VAULT_LISTEN_PORT=8443 \
+    AGENT_VAULT_ADMIN_PORT=8444 \
+    AGENT_VAULT_BUILT_BUILD_SHA=${AGENT_VAULT_BUILD_SHA}
+
+# Proxy (127.0.0.1, same-pod netns) + admin API (0.0.0.0, token-authed).
+EXPOSE 8443 8444
+
+USER magi
+WORKDIR /home/magi
+
+ENTRYPOINT ["magi-agent", "vault-serve"]

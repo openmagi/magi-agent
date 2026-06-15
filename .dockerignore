@@ -1,0 +1,19 @@
+# Keep the Docker build context lean for both the runtime and the agent-vault
+# sidecar images. The Dockerfiles copy only pyproject.toml, README.md, and
+# magi_agent/, so everything else is build-context noise.
+.git
+.worktrees
+.venv
+**/__pycache__/
+**/*.pyc
+.pytest_cache
+.ruff_cache
+.mypy_cache
+tests
+internal
+docs
+scripts
+*.md
+!README.md
+.env
+.env.*

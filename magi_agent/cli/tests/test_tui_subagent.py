@@ -293,6 +293,28 @@ def test_two_taskids_sharing_long_prefix_do_not_collide() -> None:
     asyncio.run(_run())
 
 
+def test_child_task_label_cjk_is_cell_bounded() -> None:
+    """A long Hangul ``taskId`` yields a DISPLAY label bounded by
+    ``_SUBAGENT_LABEL_MAX_CHARS`` in *cells*, not codepoints. The test touches
+    ONLY the label path (``_child_task_label``); the raw coalescing key
+    (``_child_task_key``) is computed independently and must stay untruncated."""
+
+    from magi_agent.cli.render.width import display_width
+    from magi_agent.cli.tui.app import (
+        _SUBAGENT_LABEL_MAX_CHARS,
+        _child_task_key,
+        _child_task_label,
+    )
+
+    payload = {"taskId": "가" * 80, "childReceiptRef": "rcpt-1"}
+    label = _child_task_label(payload)
+    assert display_width(label) <= _SUBAGENT_LABEL_MAX_CHARS
+    assert label.endswith("…")
+    # Coalescing safety: the raw key is the FULL untruncated taskId, NOT the
+    # truncated label — truncation can never corrupt the dedup key.
+    assert _child_task_key(payload) == "가" * 80
+
+
 def test_same_turn_thinking_and_child_do_not_clobber() -> None:
     """A ``thinking_delta`` AND a ``child_started`` in the SAME turn each get
     their OWN committed line — the shared coalescing primitive

@@ -1157,7 +1157,7 @@ def test_superpowers_runtime_flag_off_keeps_local_ack_no_engine_turn(
 
     assert code == 0
     assert driver.seen_input is None
-    assert "superpowers: command_intent" in buffer.getvalue()
+    assert "superpowers: recognized" in buffer.getvalue()
 
 
 def test_unknown_slash_command_errors(monkeypatch: pytest.MonkeyPatch) -> None:

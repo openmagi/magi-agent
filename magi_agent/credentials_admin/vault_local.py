@@ -19,6 +19,7 @@ import logging
 import os
 from collections.abc import Mapping
 
+from magi_agent.credentials_admin.local_vault import LocalVault
 from magi_agent.storage.durable_store import DurableRecord
 
 logger = logging.getLogger(__name__)
@@ -39,6 +40,52 @@ def _truthy(value: str | None) -> bool:
 def vault_admin_enabled(env: Mapping[str, str] | None = None) -> bool:
     env = os.environ if env is None else env
     return _truthy(env.get("MAGI_VAULT_ADMIN_ENABLED"))
+
+
+def _external_vault_url(env: Mapping[str, str]) -> str:
+    return (env.get("MAGI_VAULT_ADMIN_URL") or "").strip()
+
+
+def local_vault_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Whether the native local vault backend is active.
+
+    Default OFF at the helper level (code default stays conservative). The local
+    serve / web-dashboard bootstrap is the ONLY place that flips this on by
+    setdefault'ing ``MAGI_LOCAL_VAULT_ENABLED=1`` (see
+    ``runtime/local_defaults.py``), so hosted bots — which never run that local
+    overlay and which set ``MAGI_VAULT_ADMIN_URL`` once a hosted vault exists —
+    stay on the disabled/pending path and never silently write secrets to a PVC.
+
+    When an external ``MAGI_VAULT_ADMIN_URL`` is configured the external HTTP
+    backend takes precedence and the local backend is NOT used, even if this flag
+    is set.
+    """
+    env = os.environ if env is None else env
+    if _external_vault_url(env):
+        return False
+    return _truthy(env.get("MAGI_LOCAL_VAULT_ENABLED"))
+
+
+def local_vault_proxy_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Whether the local credential-injecting forward proxy should start.
+
+    Gated identically to ``local_vault_enabled``: it requires the native local
+    vault to be active AND the proxy flag set, and is forced OFF whenever an
+    external ``MAGI_VAULT_ADMIN_URL`` is configured (hosted bots never run the
+    local proxy). The serve bootstrap is the only place that setdefaults
+    ``MAGI_LOCAL_VAULT_PROXY_ENABLED=1`` (see ``runtime/local_defaults.py``); the
+    helper default stays OFF so library/test imports never start a proxy.
+    """
+    env = os.environ if env is None else env
+    if _external_vault_url(env):
+        return False
+    if not local_vault_enabled(env):
+        return False
+    return _truthy(env.get("MAGI_LOCAL_VAULT_PROXY_ENABLED"))
+
+
+def _local_vault(env: Mapping[str, str] | None = None) -> LocalVault:
+    return LocalVault()
 
 
 def redact(value: object) -> str:
@@ -80,21 +127,33 @@ def register_credential(
     ``requires_approval`` marks the credential as guarded: the future vault
     raises a human-approval request (see ``resolve_approval``) before the agent
     may use it. It is forwarded to the vault seam body and is non-secret.
+
+    Backend resolution (hosted behavior preserved):
+      * ``MAGI_VAULT_ADMIN_URL`` set → external HTTP path (``_forward_to_vault``).
+      * else local vault enabled → native encrypted ``LocalVault``.
+      * else → disabled/pending.
     """
-    if not vault_admin_enabled():
+    env = os.environ
+    use_external = vault_admin_enabled(env) and bool(_external_vault_url(env))
+    use_local = (not use_external) and local_vault_enabled(env)
+
+    if not use_external and not use_local:
         # Default-OFF: inert. No network, no vault_ref. The caller records the
         # credential metadata with a "pending" status.
         return {"disabled": True}
 
     try:
-        vault_ref = _forward_to_vault(
-            service=service,
-            label=label,
-            auth_scheme=auth_scheme,
-            secret=secret,
-            requires_approval=requires_approval,
-        )
-    except Exception as exc:  # noqa: BLE001 - normalize to a secret-free error
+        if use_local:
+            vault_ref = _local_vault(env).store_secret(secret)
+        else:
+            vault_ref = _forward_to_vault(
+                service=service,
+                label=label,
+                auth_scheme=auth_scheme,
+                secret=secret,
+                requires_approval=requires_approval,
+            )
+    except Exception:  # noqa: BLE001 - normalize to a secret-free error
         # Re-raise a scrubbed error: the original exception may have embedded the
         # request/secret, so we never propagate it directly.
         raise VaultSeamError(
@@ -110,10 +169,19 @@ def register_credential(
 
 
 def revoke_credential(*, vault_ref: str) -> None:
-    """Revoke a previously issued vault reference. No-op when default-OFF."""
-    if not vault_admin_enabled():
+    """Revoke a previously issued vault reference. No-op when default-OFF.
+
+    Routes to the same backend as registration: external HTTP when
+    ``MAGI_VAULT_ADMIN_URL`` is set, else the native local vault's
+    ``delete_secret`` when the local backend is enabled.
+    """
+    env = os.environ
+    if vault_admin_enabled(env) and _external_vault_url(env):
+        _revoke_in_vault(vault_ref=vault_ref)
         return
-    _revoke_in_vault(vault_ref=vault_ref)
+    if local_vault_enabled(env):
+        _local_vault(env).delete_secret(vault_ref)
+        return
 
 
 def vault_status(env: Mapping[str, str] | None = None) -> dict[str, bool]:
@@ -123,13 +191,22 @@ def vault_status(env: Mapping[str, str] | None = None) -> dict[str, bool]:
     provisioned" state surfaced by the dashboard banner).
     """
     env = os.environ if env is None else env
-    if not vault_admin_enabled(env):
-        return {"present": False, "healthy": False}
-    url = (env.get("MAGI_VAULT_ADMIN_URL") or "").strip()
-    present = bool(url)
-    # Without a live probe we cannot claim healthy; B's real adapter replaces
-    # this with an actual health call. Honest: present-but-unprobed → not healthy.
-    return {"present": present, "healthy": False}
+
+    # External HTTP backend takes precedence when its URL is configured.
+    if vault_admin_enabled(env) and _external_vault_url(env):
+        # Without a live probe we cannot claim healthy; B's real adapter replaces
+        # this with an actual health call. Honest: present-but-unprobed → not
+        # healthy.
+        return {"present": True, "healthy": False}
+
+    # Native local vault: present + healthy when the dir is usable. This is what
+    # flips the dashboard "Vault not provisioned" banner on the local serve path.
+    if local_vault_enabled(env):
+        provisioned = _local_vault(env).is_provisioned()
+        return {"present": provisioned, "healthy": provisioned}
+
+    # Disabled: honest "not provisioned".
+    return {"present": False, "healthy": False}
 
 
 class VaultSeamError(RuntimeError):
