@@ -15,6 +15,14 @@ Versions follow the tags published on GitHub Releases.
 
 ### Fixed
 
+## 0.1.39
+
+### Added
+- The dashboard serve path (Gate5B full toolhost) can now spawn live sub-agents
+  via `SpawnAgent` with the full read/write tool surface, gated by
+  `MAGI_GATE5B_LIVE_SUBAGENTS_ENABLED` (requires the live child-runner master
+  gate). Child-runner depth/total/output/toolset caps are preserved.
+
 ## 0.1.38
 
 ### Fixed
