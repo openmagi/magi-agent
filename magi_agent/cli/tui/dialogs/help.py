@@ -26,7 +26,13 @@ from textual.containers import VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Static
 
-__all__ = ["HelpDialog", "build_help_sections", "PROMPT_KEYS", "ENV_HELP"]
+__all__ = [
+    "HelpDialog",
+    "build_help_sections",
+    "PROMPT_KEYS",
+    "EXIT_KEYS",
+    "ENV_HELP",
+]
 
 
 # Phase-1 prompt-input keys. These live on ``PromptInput`` (its ``_on_key``),
@@ -38,6 +44,20 @@ PROMPT_KEYS: tuple[tuple[str, str], ...] = (
     ("Shift+Enter", "Insert newline"),
     ("↑ / ↓", "History recall"),
     ("Ctrl+S", "Stash / restore draft"),
+)
+
+
+# Exit gestures (exit-safety double-press). Esc/Ctrl+C/Ctrl+D live on the app
+# convergence method / PromptInput, NOT as visible BINDINGS, so they would be
+# absent from the BINDINGS-driven reference. Surfaced here as a static (key,
+# description) "Exit" section so the double-press quit contract is discoverable.
+# Ctrl+Q is intentionally EXCLUDED: it is a real priority Binding (see
+# ``MagiTuiApp.BINDINGS``) and already surfaces via ``from_app`` — listing it
+# here too would duplicate it.
+EXIT_KEYS: tuple[tuple[str, str], ...] = (
+    ("Esc", "Clear input · twice to quit"),
+    ("Ctrl+C", "Cancel turn · twice to quit"),
+    ("Ctrl+D", "Quit (empty prompt)"),
 )
 
 
@@ -53,6 +73,10 @@ ENV_HELP: tuple[tuple[str, str], ...] = (
         "MAGI_STREAM_THINKING=1",
         "show the agent's reasoning as a dim one-line trace",
     ),
+    (
+        "MAGI_TUI_INSTANT_QUIT=1",
+        "Legacy single-press quit (skip the twice-to-quit safety) — default OFF",
+    ),
 )
 
 
@@ -61,14 +85,17 @@ def build_help_sections(
     bindings: list[tuple[str, str]],
     commands: list[str],
     prompt_keys: list[tuple[str, str]] | None = None,
+    exit_keys: list[tuple[str, str]] | None = None,
     env: list[tuple[str, str]] | None = None,
 ) -> list[tuple[str, list[str]]]:
     """Return ``[(section_title, lines)]`` for the help reference.
 
     Pure formatting — no App, no Textual widgets — so it is unit-testable.
-    Empty sections (no keys / no commands / no prompt keys / no env) are dropped.
-    ``prompt_keys`` are the Phase-1 ``PromptInput`` keys (not in ``BINDINGS``);
-    they render as a dedicated "Prompt" section. ``env`` are opt-in environment
+    Empty sections (no keys / no commands / no prompt keys / no exit keys / no
+    env) are dropped. ``prompt_keys`` are the Phase-1 ``PromptInput`` keys (not
+    in ``BINDINGS``); they render as a dedicated "Prompt" section. ``exit_keys``
+    are the double-press exit gestures (Esc/Ctrl+C/Ctrl+D — not visible
+    BINDINGS); they render as an "Exit" section. ``env`` are opt-in environment
     toggles (not keys/commands); they render as an "Environment" section.
     """
 
@@ -76,11 +103,16 @@ def build_help_sections(
     prompt_lines = [
         f"  {key:<12} {desc}" for key, desc in (prompt_keys or []) if key
     ]
+    exit_lines = [
+        f"  {key:<12} {desc}" for key, desc in (exit_keys or []) if key
+    ]
     command_lines = [f"  /{name}" for name in commands if name]
     env_lines = [f"  {name}\n    {desc}" for name, desc in (env or []) if name]
     sections: list[tuple[str, list[str]]] = []
     if prompt_lines:
         sections.append(("Prompt", prompt_lines))
+    if exit_lines:
+        sections.append(("Exit", exit_lines))
     if key_lines:
         sections.append(("Keybindings", key_lines))
     if command_lines:
@@ -126,6 +158,7 @@ class HelpDialog(ModalScreen[None]):
         bindings: list[tuple[str, str]],
         commands: list[str],
         prompt_keys: list[tuple[str, str]] | None = None,
+        exit_keys: list[tuple[str, str]] | None = None,
         env: list[tuple[str, str]] | None = None,
     ) -> None:
         super().__init__()
@@ -134,6 +167,8 @@ class HelpDialog(ModalScreen[None]):
             commands=commands,
             prompt_keys=list(prompt_keys) if prompt_keys is not None
             else list(PROMPT_KEYS),
+            exit_keys=list(exit_keys) if exit_keys is not None
+            else list(EXIT_KEYS),
             env=list(env) if env is not None else list(ENV_HELP),
         )
 

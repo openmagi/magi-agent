@@ -25,6 +25,7 @@ from magi_agent.cli.contracts import (
     Terminal,
     ToolRendererRegistry,
 )
+from magi_agent.cli.keybindings.schema import Action
 from magi_agent.cli.tui.app import MagiTuiApp, TextualSink, ToolUseConfirm
 
 TUI = CommandSurface(tui=True, headless=False)
@@ -148,6 +149,11 @@ def test_tui_mount_renders_welcome_state() -> None:
         # Phase 2 doors advertised too: command palette + help.
         assert "Ctrl+P" in joined
         assert "F1" in joined
+        # Exit-safety: the banner must teach the REAL double-press gesture and
+        # mention Esc; it must NOT claim a single Ctrl+C is "again to quit".
+        assert "twice to quit" in joined
+        assert "Esc" in joined
+        assert "again to quit" not in joined
         assert app.last_terminal is None
 
     asyncio.run(_run())
@@ -331,10 +337,355 @@ def test_ctrl_c_cancels_when_running_quits_when_idle() -> None:
             assert app._cancel.is_set()
             assert exits == []
 
-            # Idle -> exit.
+            # Idle -> first press arms (no exit), second within-window quits.
             app._turn_active = False
             app.action_cancel_turn()
+            assert exits == []
+            assert app._quit_armed_at is not None
+            app.action_cancel_turn()
             assert exits == [True]
+            await pilot.pause()
+
+    asyncio.run(_run())
+
+
+def test_cancel_turn_carries_escape_key_via_run_key_action() -> None:
+    async def _run() -> None:
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            exits: list[bool] = []
+            app.exit = lambda *a, **k: exits.append(True)  # type: ignore[method-assign]
+            app._turn_active = False
+            app._input.text = "draft"
+            # Esc resolves to CHAT_CANCEL; the resolver must mark _cancel_key
+            # "escape" so the idle branch clears the buffer before arming.
+            app._run_key_action(Action.CHAT_CANCEL.value)
+            assert app._input.text == ""
+            assert exits == []
+            await pilot.pause()
+
+    asyncio.run(_run())
+
+
+def test_idle_esc_clears_nonempty_input_before_arming() -> None:
+    async def _run() -> None:
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            exits: list[bool] = []
+            app.exit = lambda *a, **k: exits.append(True)  # type: ignore[method-assign]
+            app._turn_active = False
+            app._input.text = "draft"
+            app._cancel_key = "escape"
+            app.action_cancel_turn()
+            assert app._input.text == ""
+            assert exits == []
+            assert app._quit_armed_at is None
+            await pilot.pause()
+
+    asyncio.run(_run())
+
+
+def test_idle_ctrl_c_does_not_clear_nonempty_input() -> None:
+    async def _run() -> None:
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            exits: list[bool] = []
+            app.exit = lambda *a, **k: exits.append(True)  # type: ignore[method-assign]
+            app._turn_active = False
+            app._input.text = "draft"
+            app._cancel_key = None  # Ctrl+C priority-Binding path
+            app.action_cancel_turn()
+            assert app._input.text == "draft"
+            assert app._quit_armed_at is not None
+            assert exits == []
+            await pilot.pause()
+
+    asyncio.run(_run())
+
+
+def test_kill_agents_idle_does_not_arm_quit() -> None:
+    async def _run() -> None:
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            exits: list[bool] = []
+            app.exit = lambda *a, **k: exits.append(True)  # type: ignore[method-assign]
+            # Idle kill-agents chord (ctrl+x ctrl+k) is cancel-only: a no-op
+            # when idle, never arms a quit.
+            app._turn_active = False
+            app._run_key_action(Action.CHAT_KILL_AGENTS.value)
+            assert exits == []
+            assert app._quit_armed_at is None
+            await pilot.pause()
+
+    asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
+# 5b-quit-safety (Pilot). Real key dispatch — direct action_* calls false-green
+# the routing (they bypass Textual's Ctrl+Q preemption / TextArea Ctrl+D consume).
+# ---------------------------------------------------------------------------
+def test_idle_esc_arms_then_quits_via_pilot() -> None:
+    async def _run() -> None:
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            app._input.focus()
+            await pilot.pause()
+            exits: list[bool] = []
+            app.exit = lambda *a, **k: exits.append(True)  # type: ignore[method-assign]
+            app._turn_active = False
+            # Real Esc -> on_key -> resolve -> CHAT_CANCEL -> action_cancel_turn
+            # -> _arm_or_quit. Depends on PromptInput keeping tab_behavior="focus"
+            # so Escape bubbles (TextArea swallows it under "indent").
+            await pilot.press("escape")
+            assert exits == []
+            assert app._quit_armed_at is not None
+            await pilot.press("escape")
+            assert exits == [True]
+
+    asyncio.run(_run())
+
+
+def test_idle_ctrl_c_arms_then_quits_via_pilot() -> None:
+    async def _run() -> None:
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            app._input.focus()
+            await pilot.pause()
+            exits: list[bool] = []
+            app.exit = lambda *a, **k: exits.append(True)  # type: ignore[method-assign]
+            app._turn_active = False
+            # Real Ctrl+C goes through the priority=True Binding (app BINDINGS)
+            # -> action_cancel_turn with _cancel_key unset -> "ctrl+c" (no clear).
+            await pilot.press("ctrl+c")
+            assert exits == []
+            assert app._quit_armed_at is not None
+            await pilot.press("ctrl+c")
+            assert exits == [True]
+
+    asyncio.run(_run())
+
+
+def test_ctrl_q_binding_is_priority() -> None:
+    from textual.binding import Binding
+
+    ctrl_q = [
+        b
+        for b in MagiTuiApp.BINDINGS
+        if isinstance(b, Binding) and b.key == "ctrl+q"
+    ]
+    assert ctrl_q, "ctrl+q must be a Binding to preempt Textual's built-in quit"
+    assert len(ctrl_q) == 1
+    assert ctrl_q[0].priority is True
+    assert ctrl_q[0].action == "request_quit"
+
+
+def test_idle_ctrl_q_routes_to_arming_not_textual_quit_via_pilot() -> None:
+    async def _run() -> None:
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            app._input.focus()
+            await pilot.pause()
+            exits: list[bool] = []
+            app.exit = lambda *a, **k: exits.append(True)  # type: ignore[method-assign]
+            app._turn_active = False
+            # Magi's priority=True ctrl+q must preempt Textual's built-in
+            # ctrl+q->quit; the first press arms instead of exiting.
+            await pilot.press("ctrl+q")
+            assert exits == []
+            assert app._quit_armed_at is not None
+            await pilot.press("ctrl+q")
+            assert exits == [True]
+
+    asyncio.run(_run())
+
+
+def test_idle_ctrl_d_empty_buffer_arms_via_pilot() -> None:
+    async def _run() -> None:
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            app._input.focus()
+            await pilot.pause()
+            app._input.text = ""
+            exits: list[bool] = []
+            app.exit = lambda *a, **k: exits.append(True)  # type: ignore[method-assign]
+            app._turn_active = False
+            # Empty-buffer Ctrl+D is intercepted in PromptInput._on_key before
+            # the base TextArea delete-right and calls up to request_quit.
+            await pilot.press("ctrl+d")
+            assert exits == []
+            assert app._quit_armed_at is not None
+            await pilot.press("ctrl+d")
+            assert exits == [True]
+
+    asyncio.run(_run())
+
+
+def test_ctrl_d_nonempty_buffer_deletes_not_quits_via_pilot() -> None:
+    async def _run() -> None:
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            app._input.focus()
+            await pilot.pause()
+            app._input.text = "abc"
+            app._input.move_cursor((0, 0))
+            exits: list[bool] = []
+            app.exit = lambda *a, **k: exits.append(True)  # type: ignore[method-assign]
+            app._turn_active = False
+            # Non-empty buffer: Ctrl+D stays forward-delete (no quit, no arm).
+            await pilot.press("ctrl+d")
+            assert app._input.text == "bc"
+            assert exits == []
+            assert app._quit_armed_at is None
+
+    asyncio.run(_run())
+
+
+def test_cross_key_arming_confirms_quit_via_pilot() -> None:
+    async def _run() -> None:
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            app._input.focus()
+            await pilot.pause()
+            app._input.text = ""  # empty so Esc arms (not clear-first)
+            exits: list[bool] = []
+            app.exit = lambda *a, **k: exits.append(True)  # type: ignore[method-assign]
+            app._turn_active = False
+            # Cross-key: Esc arms, then Ctrl+C within the window confirms quit
+            # (shared _quit_armed_at). Proven through real dispatch.
+            await pilot.press("escape")
+            assert exits == []
+            assert app._quit_armed_at is not None
+            await pilot.press("ctrl+c")
+            assert exits == [True]
+
+    asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
+# 5b-quit-safety. Idle Esc/Ctrl+C/Ctrl+Q/Ctrl+D are a taught double-press, not
+# a bare quit. See docs/plans/2026-06-14-magi-tui-ux/01-exit-cancel-safety.md.
+# ---------------------------------------------------------------------------
+def test_quit_armed_state_initialized_none() -> None:
+    async def _run() -> None:
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            assert app._quit_armed_at is None
+
+    asyncio.run(_run())
+
+
+def test_arm_or_quit_first_press_arms_and_toasts() -> None:
+    async def _run() -> None:
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            exits: list[bool] = []
+            app.exit = lambda *a, **k: exits.append(True)  # type: ignore[method-assign]
+            toasts: list[str] = []
+            import magi_agent.cli.tui.app as _appmod
+
+            monkey = _appmod._notify.info
+            _appmod._notify.info = lambda _app, msg, **k: toasts.append(msg)  # type: ignore[attr-defined]
+            try:
+                app._turn_active = False
+                app._arm_or_quit(key="ctrl+c")
+            finally:
+                _appmod._notify.info = monkey  # type: ignore[attr-defined]
+            assert exits == []
+            assert app._quit_armed_at is not None
+            assert toasts == ["Press again to quit"]
+            await pilot.pause()
+
+    asyncio.run(_run())
+
+
+def test_arm_or_quit_second_press_within_window_quits() -> None:
+    async def _run() -> None:
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            exits: list[bool] = []
+            app.exit = lambda *a, **k: exits.append(True)  # type: ignore[method-assign]
+            app._turn_active = False
+            app._arm_or_quit(key="ctrl+c")
+            assert exits == []
+            app._arm_or_quit(key="ctrl+c")
+            assert exits == [True]
+            await pilot.pause()
+
+    asyncio.run(_run())
+
+
+def test_arm_or_quit_disarms_after_window() -> None:
+    async def _run() -> None:
+        import time as _time
+
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            exits: list[bool] = []
+            app.exit = lambda *a, **k: exits.append(True)  # type: ignore[method-assign]
+            app._turn_active = False
+            app._arm_or_quit(key="ctrl+c")
+            assert app._quit_armed_at is not None
+            # Backdate the arm beyond the window -> the next press re-arms.
+            app._quit_armed_at = _time.monotonic() - (MagiTuiApp.QUIT_WINDOW_S + 1)
+            app._arm_or_quit(key="ctrl+c")
+            assert exits == []
+            assert app._quit_armed_at is not None
+            await pilot.pause()
+
+    asyncio.run(_run())
+
+
+def test_arm_or_quit_window_constant() -> None:
+    assert MagiTuiApp.QUIT_WINDOW_S == 1.5
+    assert MagiTuiApp.INSTANT_QUIT_ENV == "MAGI_TUI_INSTANT_QUIT"
+
+
+def test_instant_quit_env_bypasses_arming(monkeypatch) -> None:
+    monkeypatch.setenv("MAGI_TUI_INSTANT_QUIT", "1")
+
+    async def _run() -> None:
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            exits: list[bool] = []
+            app.exit = lambda *a, **k: exits.append(True)  # type: ignore[method-assign]
+            app._turn_active = False
+            app._arm_or_quit(key="ctrl+c")
+            assert exits == [True]
+            assert app._quit_armed_at is None
+            await pilot.pause()
+
+    asyncio.run(_run())
+
+
+def test_instant_quit_env_non_truthy_does_not_bypass(monkeypatch) -> None:
+    monkeypatch.setenv("MAGI_TUI_INSTANT_QUIT", "0")
+
+    async def _run() -> None:
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            exits: list[bool] = []
+            app.exit = lambda *a, **k: exits.append(True)  # type: ignore[method-assign]
+            app._turn_active = False
+            app._arm_or_quit(key="ctrl+c")
+            assert exits == []
+            assert app._quit_armed_at is not None
             await pilot.pause()
 
     asyncio.run(_run())
@@ -395,6 +746,397 @@ def test_ctrl_c_cancels_replacement_turn_after_stale_worker_finishes() -> None:
         assert engine.second_cancelled is True
         assert app.last_terminal is not None
         assert app.last_terminal.terminal == Terminal.aborted
+
+    asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
+# busy-input-queue (gap: busy-input-queue) — default-OFF, surface-only FIFO that
+# buffers a prompt submitted while a turn runs and drains it after the turn ends.
+# ---------------------------------------------------------------------------
+class _BlockingFirstDriver:
+    """First turn yields one token then blocks forever; later turns complete.
+
+    A function-local style helper (the pinned ``ReplacementTurnDriver`` is NOT
+    importable). ``calls`` counts ``run_turn_stream`` entries; ``turn_inputs``
+    records each ``TurnInput`` so attachment/image assertions can inspect them.
+    """
+
+    def __init__(self) -> None:
+        self.calls = 0
+        self.turn_inputs: list[object] = []
+
+    async def run_turn_stream(self, runtime, turn_input, *, cancel, gate=None):
+        _ = runtime, gate
+        self.calls += 1
+        self.turn_inputs.append(turn_input)
+        if self.calls == 1:
+            yield RuntimeEvent(
+                type="token",
+                payload={"delta": "first"},
+                turn_id=turn_input.turn_id,
+            )
+            await asyncio.Event().wait()
+            return
+        yield RuntimeEvent(
+            type="token",
+            payload={"delta": "drained"},
+            turn_id=turn_input.turn_id,
+        )
+        yield EngineResult(terminal=Terminal.completed, turn_id=turn_input.turn_id)
+
+
+def test_queue_buffer_inits_empty_and_flag_defaults_off(monkeypatch) -> None:
+    async def _run() -> None:
+        monkeypatch.delenv("MAGI_TUI_QUEUE", raising=False)
+        app = _make_app(FakeEngineDriver())
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            assert app._prompt_queue == []
+            assert app._queue_enabled is False
+
+    asyncio.run(_run())
+
+
+def test_queue_flag_on_when_env_set(monkeypatch) -> None:
+    async def _run() -> None:
+        monkeypatch.setenv("MAGI_TUI_QUEUE", "1")
+        app = _make_app(FakeEngineDriver())
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            assert app._queue_enabled is True
+
+    asyncio.run(_run())
+
+
+def test_start_or_enqueue_enqueues_when_busy(monkeypatch) -> None:
+    async def _run() -> None:
+        monkeypatch.setenv("MAGI_TUI_QUEUE", "1")
+        engine = _BlockingFirstDriver()
+        app = _make_app(engine, flush_interval=999)
+        async with app.run_test() as pilot:
+            app.start_turn("first")
+            await pilot.pause()
+            assert app._turn_active is True
+            app.start_or_enqueue_turn("second")
+            # First turn NOT replaced; second parked in the queue (text-only
+            # snapshot in Task 3 — empty attachment tuple).
+            assert engine.calls == 1
+            assert app._prompt_queue == [("second", ())]
+            assert app._turn_active is True
+            snapshot = app.controller.committed_blocks_snapshot()
+            assert any(
+                b.startswith("⏳ queued:") and "second" in b for b in snapshot
+            )
+
+    asyncio.run(_run())
+
+
+def test_start_or_enqueue_starts_when_idle(monkeypatch) -> None:
+    async def _run() -> None:
+        monkeypatch.setenv("MAGI_TUI_QUEUE", "1")
+        engine = FakeEngineDriver(tokens=["x"])
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.start_or_enqueue_turn("solo")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            # Idle path is just start_turn: the turn ran to a terminal and
+            # nothing was queued.
+            assert app.last_terminal is not None
+            assert app._prompt_queue == []
+            snapshot = app.controller.committed_blocks_snapshot()
+            assert any("› solo" in b for b in snapshot)
+
+    asyncio.run(_run())
+
+
+def _submit_via_funnel(app, text: str) -> None:
+    """Drive the REAL typed-submission funnel for ``text``."""
+
+    from magi_agent.cli.tui.input import PromptInput, classify_line  # noqa: PLC0415
+
+    submission = classify_line(text, app._commands)
+    app.on_prompt_input_prompt_submitted(PromptInput.PromptSubmitted(submission))
+
+
+def test_submit_while_busy_enqueues_via_funnel(monkeypatch) -> None:
+    async def _run() -> None:
+        monkeypatch.setenv("MAGI_TUI_QUEUE", "1")
+        engine = _BlockingFirstDriver()
+        app = _make_app(engine, flush_interval=999)
+        async with app.run_test() as pilot:
+            app.start_turn("first")
+            await pilot.pause()
+            _submit_via_funnel(app, "second")
+            assert engine.calls == 1  # first NOT replaced
+            assert app._prompt_queue == [("second", ())]
+            snapshot = app.controller.committed_blocks_snapshot()
+            assert any(
+                b.startswith("⏳ queued:") and "second" in b for b in snapshot
+            )
+
+    asyncio.run(_run())
+
+
+class _DrainDriver:
+    """First turn completes normally; records each TurnInput.
+
+    Unlike ``_BlockingFirstDriver`` the first turn does NOT block — it yields
+    one token then a terminal, so the queue can drain after it finishes. A small
+    ``first_started`` event lets a test enqueue while the first turn is still
+    observably the active one (before its terminal lands).
+    """
+
+    def __init__(self) -> None:
+        self.calls = 0
+        self.turn_inputs: list[object] = []
+        self.first_started = asyncio.Event()
+        self._release_first = asyncio.Event()
+
+    async def run_turn_stream(self, runtime, turn_input, *, cancel, gate=None):
+        _ = runtime, gate
+        self.calls += 1
+        self.turn_inputs.append(turn_input)
+        if self.calls == 1:
+            self.first_started.set()
+            yield RuntimeEvent(
+                type="token",
+                payload={"delta": "first"},
+                turn_id=turn_input.turn_id,
+            )
+            # Hold until the test has enqueued "second", then complete.
+            await self._release_first.wait()
+            yield EngineResult(terminal=Terminal.completed, turn_id=turn_input.turn_id)
+            return
+        yield RuntimeEvent(
+            type="token",
+            payload={"delta": "drained"},
+            turn_id=turn_input.turn_id,
+        )
+        yield EngineResult(terminal=Terminal.completed, turn_id=turn_input.turn_id)
+
+
+def test_queue_drains_after_turn_completes(monkeypatch) -> None:
+    async def _run() -> None:
+        monkeypatch.setenv("MAGI_TUI_QUEUE", "1")
+        engine = _DrainDriver()
+        app = _make_app(engine, flush_interval=999)
+        async with app.run_test() as pilot:
+            app.start_turn("first")
+            await asyncio.wait_for(engine.first_started.wait(), timeout=2)
+            await pilot.pause()
+            app.start_or_enqueue_turn("second")
+            assert app._prompt_queue == [("second", ())]
+            # Let the first turn complete; the drain is scheduled from finally
+            # via call_after_refresh, so pump the loop after completion.
+            engine._release_first.set()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            await pilot.pause()
+            assert engine.calls == 2
+            assert app._prompt_queue == []
+            assert app._turn_active is False
+            assert app._footer.queued == 0
+            snapshot = app.controller.committed_blocks_snapshot()
+            assert any("› second" in b for b in snapshot)
+
+    asyncio.run(_run())
+
+
+def test_queue_drains_after_engine_raises(monkeypatch) -> None:
+    async def _run() -> None:
+        from textual.worker import WorkerFailed
+
+        monkeypatch.setenv("MAGI_TUI_QUEUE", "1")
+
+        class _RaiseThenOkDriver:
+            def __init__(self) -> None:
+                self.calls = 0
+                self.first_started = asyncio.Event()
+                self._release_first = asyncio.Event()
+
+            async def run_turn_stream(self, runtime, turn_input, *, cancel, gate=None):
+                _ = runtime, gate
+                self.calls += 1
+                if self.calls == 1:
+                    self.first_started.set()
+                    yield RuntimeEvent(
+                        type="token",
+                        payload={"delta": "first"},
+                        turn_id=turn_input.turn_id,
+                    )
+                    await self._release_first.wait()
+                    raise RuntimeError("boom")
+                yield RuntimeEvent(
+                    type="token",
+                    payload={"delta": "drained"},
+                    turn_id=turn_input.turn_id,
+                )
+                yield EngineResult(
+                    terminal=Terminal.completed, turn_id=turn_input.turn_id
+                )
+
+        engine = _RaiseThenOkDriver()
+        captured: dict[str, object] = {}
+        app = _make_app(engine, flush_interval=999)
+        try:
+            async with app.run_test() as pilot:
+                app.start_turn("first")
+                await asyncio.wait_for(engine.first_started.wait(), timeout=2)
+                await pilot.pause()
+                app.start_or_enqueue_turn("second")
+                # Release the first turn so it RAISES; the finally-drain must
+                # still pick up "second" despite the raise path.
+                engine._release_first.set()
+                try:
+                    await app.workers.wait_for_complete()
+                except WorkerFailed:
+                    pass
+                await pilot.pause()
+                await pilot.pause()
+                captured["calls"] = engine.calls
+                captured["queue"] = list(app._prompt_queue)
+        except (WorkerFailed, RuntimeError):
+            pass
+        # The queued "second" turn drained and ran despite the engine raise.
+        assert captured.get("calls") == 2
+        assert captured.get("queue") == []
+
+    asyncio.run(_run())
+
+
+def test_submit_with_attachment_while_busy_preserves_image(monkeypatch) -> None:
+    async def _run() -> None:
+        monkeypatch.setenv("MAGI_TUI_QUEUE", "1")
+        engine = _DrainDriver()
+        app = _make_app(engine, flush_interval=999)
+        block = {"type": "image", "source": {"data": "fake"}}
+        async with app.run_test() as pilot:
+            app.start_turn("first")
+            await asyncio.wait_for(engine.first_started.wait(), timeout=2)
+            await pilot.pause()
+            # User attached an image (Ctrl+V) then submitted while busy.
+            app._pending_attachments.append(block)
+            app.start_or_enqueue_turn("p")
+            # The queue captured the attachment snapshot; the shared buffer is
+            # cleared so an unrelated turn can't consume the image.
+            assert app._prompt_queue == [("p", (block,))]
+            assert app._pending_attachments == []
+            engine._release_first.set()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            await pilot.pause()
+            # The drained turn carried the snapshotted image into its TurnInput.
+            assert engine.calls == 2
+            drained_input = engine.turn_inputs[-1]
+            assert block in tuple(drained_input.image_blocks)
+
+    asyncio.run(_run())
+
+
+def test_queue_cleared_on_resume(monkeypatch) -> None:
+    async def _run() -> None:
+        monkeypatch.setenv("MAGI_TUI_QUEUE", "1")
+        engine = _BlockingFirstDriver()
+        app = _make_app(engine, flush_interval=999)
+        async with app.run_test() as pilot:
+            app.start_turn("first")
+            await pilot.pause()
+            app.start_or_enqueue_turn("second")
+            assert len(app._prompt_queue) == 1
+            assert app._footer.queued == 1
+            # A queue is turn-local intent for the OLD session; resume drops it.
+            app._resume_session("other-session")
+            assert app._prompt_queue == []
+            assert app._footer.queued == 0
+
+    asyncio.run(_run())
+
+
+def test_prompt_command_while_busy_enqueues(monkeypatch) -> None:
+    async def _run() -> None:
+        from magi_agent.cli.contracts import (  # noqa: PLC0415
+            ContentBlock,
+            PromptCommand,
+        )
+
+        monkeypatch.setenv("MAGI_TUI_QUEUE", "1")
+
+        class _EchoPrompt(PromptCommand):
+            async def build_prompt(self, args, ctx):  # type: ignore[override]
+                return [ContentBlock(type="text", text=f"expanded:{args}")]
+
+        class _PromptRegistry:
+            def __init__(self) -> None:
+                self._cmd = _EchoPrompt(name="ask", surface=TUI)
+
+            def lookup(self, name: str):
+                return self._cmd if name == "ask" else None
+
+            def list_for(self, surface):
+                _ = surface
+                return [self._cmd]
+
+        engine = _BlockingFirstDriver()
+        app = _make_app(engine, commands=_PromptRegistry(), flush_interval=999)
+        async with app.run_test() as pilot:
+            app.start_turn("first")
+            await pilot.pause()
+            # Prompt-command submitted while busy must ENQUEUE, not replace.
+            # NOTE: the first turn worker blocks forever, so we cannot
+            # ``wait_for_complete()`` (it waits on ALL workers). The command runs
+            # in the separate group="command" worker; pump the loop so it drains
+            # build_prompt -> the admission seam -> enqueue.
+            app.submit_command("ask", "now")
+            for _ in range(5):
+                await pilot.pause()
+            assert engine.calls == 1  # first turn NOT replaced
+            assert len(app._prompt_queue) == 1
+            assert app._prompt_queue[0][0] == "expanded:now"
+
+    asyncio.run(_run())
+
+
+def test_submit_while_busy_disabled_restores_replace(monkeypatch) -> None:
+    async def _run() -> None:
+        monkeypatch.delenv("MAGI_TUI_QUEUE", raising=False)
+
+        class _ReplaceDriver:
+            def __init__(self) -> None:
+                self.calls = 0
+                self.second_entered = asyncio.Event()
+
+            async def run_turn_stream(self, runtime, turn_input, *, cancel, gate=None):
+                _ = runtime, gate
+                self.calls += 1
+                if self.calls == 1:
+                    yield RuntimeEvent(
+                        type="token",
+                        payload={"delta": "first"},
+                        turn_id=turn_input.turn_id,
+                    )
+                    await asyncio.Event().wait()
+                    return
+                self.second_entered.set()
+                yield RuntimeEvent(
+                    type="token",
+                    payload={"delta": "second"},
+                    turn_id=turn_input.turn_id,
+                )
+                await asyncio.Event().wait()
+
+        engine = _ReplaceDriver()
+        app = _make_app(engine, flush_interval=999)
+        async with app.run_test() as pilot:
+            app.start_turn("first")
+            await pilot.pause()
+            _submit_via_funnel(app, "second")
+            # Flag OFF == today: the second REPLACES the first (exclusive worker).
+            await asyncio.wait_for(engine.second_entered.wait(), timeout=2)
+            assert app._prompt_queue == []
+            assert app._turn_active is True
 
     asyncio.run(_run())
 
@@ -1424,6 +2166,64 @@ def test_footer_reflects_turn_state_and_token_usage() -> None:
     asyncio.run(_run())
 
 
+def test_footer_shows_queued_badge_during_turn(monkeypatch) -> None:
+    async def _run() -> None:
+        from magi_agent.cli.tui.footer import StatusFooter
+
+        monkeypatch.setenv("MAGI_TUI_QUEUE", "1")
+        engine = _BlockingFirstDriver()
+        app = _make_app(engine, flush_interval=999)
+        async with app.run_test() as pilot:
+            footer = app.query_one("#footer", StatusFooter)
+            app.start_turn("first")
+            await pilot.pause()
+            app.start_or_enqueue_turn("second")
+            await pilot.pause()
+            assert app._footer.queued == 1
+            assert " · 1 queued" in footer.status_text()
+
+    asyncio.run(_run())
+
+
+def test_footer_shows_cumulative_session_tokens_across_turns() -> None:
+    async def _run() -> None:
+        from magi_agent.cli.tui.footer import StatusFooter
+
+        class _TwoTurnUsageEngine(FakeEngineDriver):
+            def __init__(self) -> None:
+                super().__init__()
+                self._turn = 0
+
+            async def run_turn_stream(self, runtime, turn_input, *, cancel, gate=None):
+                self._turn += 1
+                turn_id = getattr(turn_input, "turn_id", "t")
+                yield RuntimeEvent(type="token", payload={"delta": "hi"}, turn_id=turn_id)
+                usage = (
+                    {"input_tokens": 100, "output_tokens": 23}
+                    if self._turn == 1
+                    else {"input_tokens": 10, "output_tokens": 7}
+                )
+                yield EngineResult(
+                    terminal=Terminal.completed, usage=usage, turn_id=turn_id
+                )
+
+        app = _make_app(_TwoTurnUsageEngine())
+        async with app.run_test() as pilot:
+            footer = app.query_one("#footer", StatusFooter)
+            app.start_turn("one")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert "123 tok" in footer.status_text()  # turn 1: 100 + 23
+            app.start_turn("two")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            text = footer.status_text()
+        # Cumulative across the session: 123 + (10 + 7) = 140, NOT the last turn's 17.
+        assert "140 tok" in text
+
+    asyncio.run(_run())
+
+
 def test_footer_elapsed_ticks_during_turn() -> None:
     async def _run() -> None:
         import asyncio as _asyncio
@@ -2132,5 +2932,819 @@ def test_unknown_tool_renders_named_header_with_arg() -> None:
         joined = "\n".join(blocks)
         assert "SpawnAgent" in joined
         assert "calc 1+1" in joined
+
+    asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
+# Waiting liveness: footer current-activity word + gated stall hint
+# ---------------------------------------------------------------------------
+class _ActivityToolEngine(FakeEngineDriver):
+    """Yields scripted tool_start/tool_end events (with ids) for activity tests.
+
+    ``script`` is a list of ``(inner_type, tool_id, name)`` tuples; a ``None``
+    name on a ``tool_end`` mirrors the sanitized public payload (no name). An
+    optional ``pause`` event ``("pause", seconds, None)`` sleeps mid-stream so a
+    test can sample the footer in the window between two events.
+    """
+
+    def __init__(self, script, *, terminal: Terminal = Terminal.completed) -> None:
+        super().__init__(tokens=[], terminal=terminal)
+        self._script = script
+
+    async def run_turn_stream(self, runtime, turn_input, *, cancel, gate=None):
+        import asyncio as _asyncio
+
+        turn_id = getattr(turn_input, "turn_id", "t")
+        for inner, ident, name in self._script:
+            if inner == "pause":
+                await _asyncio.sleep(ident)
+                continue
+            payload = {"type": inner, "id": ident}
+            if name is not None:
+                payload["name"] = name
+            yield RuntimeEvent(type="tool", payload=payload, turn_id=turn_id)
+        yield EngineResult(terminal=self._terminal, turn_id=turn_id)
+
+
+def test_update_footer_forwards_activity() -> None:
+    async def _run() -> None:
+        app = _make_app(FakeEngineDriver())
+        async with app.run_test() as pilot:
+            app.update_footer(activity="Read")
+            await pilot.pause()
+            value = app._footer.activity
+        assert value == "Read"
+
+    asyncio.run(_run())
+
+
+def test_stall_init_fields_present(monkeypatch) -> None:
+    async def _run() -> None:
+        monkeypatch.delenv("MAGI_TUI_STALL_SECONDS", raising=False)
+        app = _make_app(FakeEngineDriver())
+        async with app.run_test():
+            pass
+        assert app._open_tools == []
+        assert app._last_event_monotonic is None
+        assert app._stall_seconds == 0
+
+    asyncio.run(_run())
+
+
+def test_tool_start_sets_footer_activity() -> None:
+    async def _run() -> None:
+        # tool_start, then a pause BEFORE tool_end -> sample the footer in the gap.
+        engine = _ActivityToolEngine(
+            [
+                ("tool_start", "call-1", "Bash"),
+                ("pause", 0.05, None),
+                ("tool_end", "call-1", None),
+            ]
+        )
+        app = _make_app(engine, flush_interval=0.01)
+        async with app.run_test() as pilot:
+            app.start_turn("run ls")
+            await pilot.pause(0.02)
+            mid = app._footer.activity
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+        assert mid == "Bash"
+# Expand affordance (ctrl+o) — DEFAULT-OFF flag that reveals full tool output.
+#
+# The flat path commits a hard-truncated (8 lines / 1200 chars) preview; expand
+# mode re-renders the result with the cap lifted and mounts it as a collapsed
+# ``ToolCard`` via the existing ``commit_tool`` seam. The toggle is session-
+# global and forward-acting with a bounded retro-flip of already-mounted cards.
+# ---------------------------------------------------------------------------
+def _multiline_output(n: int = 12) -> str:
+    """A JSON ``output_preview`` whose stdout exceeds the 8-line preview cap."""
+
+    body = "\\n".join(f"L{i}" for i in range(1, n + 1))
+    return '{"output": {"stdout": "' + body + '"}}'
+
+
+class _MultiLineToolEngine(FakeEngineDriver):
+    """Emits ``count`` Bash tool_start/tool_end pairs with multi-line output.
+
+    The stock ``FakeEngineDriver(ask_tool=...)`` emits a ``tool_end`` with NO
+    ``output_preview`` (-> ``_tool_result`` returns ``{}`` -> ``(done)``), so it
+    can never exceed 8 lines. This subclass mirrors the ``_ToolEngine`` fixture
+    used elsewhere in this file and threads a real >8-line ``output_preview``.
+    """
+
+    def __init__(self, *, count: int = 1, lines: int = 12) -> None:
+        super().__init__()
+        self._count = count
+        self._lines = lines
+
+    async def run_turn_stream(self, runtime, turn_input, *, cancel, gate=None):
+        turn_id = getattr(turn_input, "turn_id", "t")
+        for idx in range(self._count):
+            call_id = f"call-{idx}"
+            yield RuntimeEvent(
+                type="tool",
+                payload={
+                    "type": "tool_start",
+                    "id": call_id,
+                    "name": "Bash",
+                    "input_preview": '{"command": "ls"}',
+                },
+                turn_id=turn_id,
+            )
+            yield RuntimeEvent(
+                type="tool",
+                payload={
+                    "type": "tool_end",
+                    "id": call_id,
+                    "status": "ok",
+                    "output_preview": _multiline_output(self._lines),
+                },
+                turn_id=turn_id,
+            )
+        yield EngineResult(terminal=Terminal.completed, turn_id=turn_id)
+
+
+# -- Task 2: flag + state fields (default-OFF, session-global) ---------------
+def test_expand_flag_defaults_off(monkeypatch) -> None:
+    monkeypatch.delenv("MAGI_TUI_EXPAND_TOOLS", raising=False)
+    app = _make_app(FakeEngineDriver())
+    assert app._expand_tools is False
+    assert app._tool_cards == []
+    assert app._expand_hint_shown is False
+
+
+def test_expand_flag_reads_env(monkeypatch) -> None:
+    monkeypatch.setenv("MAGI_TUI_EXPAND_TOOLS", "1")
+    app = _make_app(FakeEngineDriver())
+    assert app._expand_tools is True
+
+
+def test_expand_state_survives_turn(monkeypatch) -> None:
+    async def _run() -> None:
+        monkeypatch.setenv("MAGI_TUI_EXPAND_TOOLS", "1")
+        app = _make_app(FakeEngineDriver(tokens=["ok"]))
+        async with app.run_test() as pilot:
+            cards_before = app._tool_cards
+            app.start_turn("hi")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            # Session-global: a turn does NOT reset expand state.
+            assert app._expand_tools is True
+            assert app._tool_cards is cards_before
+
+    asyncio.run(_run())
+
+
+def test_tool_end_clears_footer_activity() -> None:
+    async def _run() -> None:
+        engine = _ActivityToolEngine(
+            [
+                ("tool_start", "call-1", "Bash"),
+                ("tool_end", "call-1", None),
+            ]
+        )
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            app.start_turn("run ls")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            value = app._footer.activity
+        assert value == ""
+
+    asyncio.run(_run())
+
+
+def test_overlapping_tools_activity_pops_to_parent() -> None:
+    async def _run() -> None:
+        # A opens, B opens, B ends (-> back to A), pause to sample, A ends.
+        engine = _ActivityToolEngine(
+            [
+                ("tool_start", "A", "Bash"),
+                ("tool_start", "B", "Read"),
+                ("tool_end", "B", None),
+                ("pause", 0.05, None),
+                ("tool_end", "A", None),
+            ]
+        )
+        app = _make_app(engine, flush_interval=0.01)
+        async with app.run_test() as pilot:
+            app.start_turn("nested")
+            await pilot.pause(0.02)
+            after_b = app._footer.activity
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            after_a = app._footer.activity
+        assert after_b == "Bash"
+        assert after_a == ""
+
+    asyncio.run(_run())
+
+
+def test_terminal_clears_activity() -> None:
+    async def _run() -> None:
+        # A tool that opens but never ends, then the terminal arrives.
+        engine = _ActivityToolEngine([("tool_start", "call-1", "Bash")])
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            app.start_turn("run ls")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            activity = app._footer.activity
+            open_tools = list(app._open_tools)
+        assert activity == ""
+        assert open_tools == []
+# -- Task 3: ctrl+o binding + action_toggle_expand (real dispatch) -----------
+def test_ctrl_o_toggles_expand_flag(monkeypatch) -> None:
+    async def _run() -> None:
+        monkeypatch.delenv("MAGI_TUI_EXPAND_TOOLS", raising=False)
+        app = _make_app(FakeEngineDriver())
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            assert app._expand_tools is False
+            await pilot.press("ctrl+o")
+            await pilot.pause()
+            assert app._expand_tools is True
+            await pilot.press("ctrl+o")
+            await pilot.pause()
+            assert app._expand_tools is False
+
+    asyncio.run(_run())
+
+
+def test_activity_clear_after_cancel_mid_tool() -> None:
+    async def _run() -> None:
+        # Open a tool then stream forever; cancel mid-tool (no tool_end arrives).
+        class _StuckToolEngine(FakeEngineDriver):
+            async def run_turn_stream(self, runtime, turn_input, *, cancel, gate=None):
+                import asyncio as _asyncio
+
+                turn_id = getattr(turn_input, "turn_id", "t")
+                yield RuntimeEvent(
+                    type="tool",
+                    payload={"type": "tool_start", "id": "call-1", "name": "Bash"},
+                    turn_id=turn_id,
+                )
+                while not cancel.is_set():
+                    await _asyncio.sleep(0.01)
+                yield EngineResult(
+                    terminal=Terminal.aborted, error="cancelled", turn_id=turn_id
+                )
+
+        app = _make_app(_StuckToolEngine(), flush_interval=0.01)
+        async with app.run_test() as pilot:
+            app.start_turn("run ls")
+            await pilot.pause(0.03)
+            app.action_cancel_turn()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            activity = app._footer.activity
+            open_tools = list(app._open_tools)
+        assert activity == ""
+        assert open_tools == []
+
+    asyncio.run(_run())
+
+
+def test_activity_reset_on_new_turn() -> None:
+    async def _run() -> None:
+        # Turn 1 opens a tool and aborts; turn 2 must start with a clean slate.
+        class _OneShotStuckEngine(FakeEngineDriver):
+            async def run_turn_stream(self, runtime, turn_input, *, cancel, gate=None):
+                import asyncio as _asyncio
+
+                turn_id = getattr(turn_input, "turn_id", "t")
+                yield RuntimeEvent(
+                    type="tool",
+                    payload={"type": "tool_start", "id": "call-1", "name": "Bash"},
+                    turn_id=turn_id,
+                )
+                while not cancel.is_set():
+                    await _asyncio.sleep(0.01)
+                yield EngineResult(
+                    terminal=Terminal.aborted, error="cancelled", turn_id=turn_id
+                )
+
+        app = _make_app(_OneShotStuckEngine(), flush_interval=0.01)
+        async with app.run_test() as pilot:
+            app.start_turn("turn one")
+            await pilot.pause(0.03)
+            app.action_cancel_turn()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            # Start turn 2 — ``start_turn`` must reset the slate synchronously
+            # (sample BEFORE pumping the loop so turn-2's own tool_start can't
+            # repopulate it first).
+            app.start_turn("turn two")
+            open_tools = list(app._open_tools)
+            activity = app._footer.activity
+            await pilot.pause()
+            app.action_cancel_turn()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+        assert open_tools == []
+        assert activity == ""
+
+    asyncio.run(_run())
+
+
+def test_activity_truncates_long_tool_name() -> None:
+    async def _run() -> None:
+        long_name = "A" * 80
+        engine = _ActivityToolEngine(
+            [
+                ("tool_start", "call-1", long_name),
+                ("pause", 0.05, None),
+                ("tool_end", "call-1", None),
+            ]
+        )
+        app = _make_app(engine, flush_interval=0.01)
+        async with app.run_test() as pilot:
+            app.start_turn("long")
+            await pilot.pause(0.02)
+            mid = app._footer.activity
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+        assert mid != long_name
+        assert mid.endswith("…")
+        assert len(mid) <= 32
+def test_ctrl_o_binding_present_and_no_collision() -> None:
+    from textual.binding import Binding
+
+    from magi_agent.cli.keybindings.defaults import DEFAULT_SPEC
+
+    def _key(binding: object) -> str:
+        if isinstance(binding, Binding):
+            return binding.key
+        return binding[0]
+
+    keys = [_key(b) for b in MagiTuiApp.BINDINGS]
+    assert keys.count("ctrl+o") == 1, "ctrl+o must be bound exactly once"
+    # ctrl+o is NOT a keybindings default, so it bubbles to the App BINDING.
+    default_keys = {chord for _ctx, chord, _action in DEFAULT_SPEC}
+    assert "ctrl+o" not in default_keys
+
+
+# -- Task 4: expand-ON mounts a collapsed ToolCard via commit_tool ----------
+def test_expand_on_mounts_collapsed_card(monkeypatch) -> None:
+    async def _run() -> None:
+        from magi_agent.cli.tui.tool_render import build_tool_renderers
+        from magi_agent.cli.tui.widgets.tool_card import ToolCard
+
+        monkeypatch.delenv("MAGI_TUI_LEGACY_RICHLOG", raising=False)
+        monkeypatch.setenv("MAGI_TUI_EXPAND_TOOLS", "1")
+        app = MagiTuiApp(
+            engine=_MultiLineToolEngine(),
+            gate=AllowGate(),
+            commands=FakeRegistry(["compact"]),
+            renderers=build_tool_renderers(),
+        )
+        async with app.run_test() as pilot:
+            app.start_turn("run ls")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert len(app.query(ToolCard)) == 1
+            assert app.query_one(ToolCard).collapsed is True
+
+    asyncio.run(_run())
+
+
+def test_fold_event_stamps_last_event_on_token() -> None:
+    async def _run() -> None:
+        import asyncio as _asyncio
+
+        class _SlowTokenEngine(FakeEngineDriver):
+            async def run_turn_stream(self, runtime, turn_input, *, cancel, gate=None):
+                turn_id = getattr(turn_input, "turn_id", "t")
+                for tok in ("a", "b", "c", "d", "e"):
+                    await _asyncio.sleep(0.02)
+                    yield RuntimeEvent(
+                        type="token", payload={"delta": tok}, turn_id=turn_id
+                    )
+                yield EngineResult(terminal=Terminal.completed, turn_id=turn_id)
+
+        app = _make_app(_SlowTokenEngine(), flush_interval=0.01)
+        async with app.run_test() as pilot:
+            app.start_turn("go")
+            await pilot.pause(0.03)
+            first = app._last_event_monotonic
+            await pilot.pause(0.06)
+            second = app._last_event_monotonic
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+        assert first is not None
+        assert second is not None
+        # The stamp must ADVANCE across token events (proves it's stamped at the
+        # top of _fold_event, before the token early-return).
+        assert second > first
+def test_default_still_flat_with_output(monkeypatch) -> None:
+    async def _run() -> None:
+        from magi_agent.cli.tui.tool_render import build_tool_renderers
+        from magi_agent.cli.tui.widgets.tool_card import ToolCard
+
+        monkeypatch.delenv("MAGI_TUI_LEGACY_RICHLOG", raising=False)
+        monkeypatch.delenv("MAGI_TUI_EXPAND_TOOLS", raising=False)
+        app = MagiTuiApp(
+            engine=_MultiLineToolEngine(),
+            gate=AllowGate(),
+            commands=FakeRegistry(["compact"]),
+            renderers=build_tool_renderers(),
+        )
+        async with app.run_test() as pilot:
+            app.start_turn("run ls")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert len(app.query(ToolCard)) == 0
+            joined = "\n".join(app.controller.committed_blocks_snapshot())
+            assert "Bash" in joined
+
+    asyncio.run(_run())
+
+
+def test_stall_seconds_disabled_by_default(monkeypatch) -> None:
+    monkeypatch.delenv("MAGI_TUI_STALL_SECONDS", raising=False)
+    app = _make_app(FakeEngineDriver())
+    assert app._stall_seconds == 0
+
+
+def test_stall_seconds_reads_env(monkeypatch) -> None:
+    monkeypatch.setenv("MAGI_TUI_STALL_SECONDS", "5")
+    app = _make_app(FakeEngineDriver())
+    assert app._stall_seconds == 5
+
+
+def test_stall_seconds_invalid_falls_back_to_zero(monkeypatch) -> None:
+    monkeypatch.setenv("MAGI_TUI_STALL_SECONDS", "abc")
+    app = _make_app(FakeEngineDriver())
+    assert app._stall_seconds == 0
+
+
+class _OpenThenSilentEngine(FakeEngineDriver):
+    """Opens a tool then goes silent until cancelled (no further events)."""
+
+    async def run_turn_stream(self, runtime, turn_input, *, cancel, gate=None):
+        import asyncio as _asyncio
+
+        turn_id = getattr(turn_input, "turn_id", "t")
+        yield RuntimeEvent(
+            type="tool",
+            payload={"type": "tool_start", "id": "call-1", "name": "Bash"},
+            turn_id=turn_id,
+        )
+        while not cancel.is_set():
+            await _asyncio.sleep(0.01)
+        yield EngineResult(
+            terminal=Terminal.aborted, error="cancelled", turn_id=turn_id
+        )
+
+
+def test_stall_hint_appears_after_threshold(monkeypatch) -> None:
+    async def _run() -> None:
+        import time as _time
+
+        monkeypatch.setenv("MAGI_TUI_STALL_SECONDS", "1")
+        app = _make_app(_OpenThenSilentEngine(), flush_interval=0.01)
+        async with app.run_test() as pilot:
+            app.start_turn("run ls")
+            await pilot.pause(0.03)  # let the tool_start land
+            # Simulate elapsed silence: backdate the last-event stamp past the
+            # 1s threshold, then let the flush tick recompute.
+            app._last_event_monotonic = _time.monotonic() - 3.0
+            await pilot.pause(0.03)
+            text = app._footer.status_text()
+            app.action_cancel_turn()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+        assert "no output" in text
+        assert "Bash · no output" in text
+# -- Task 5: full output reaches the card body + ctrl+o retro-flips ----------
+def _card_body_text(card: object) -> str:
+    """Extract the displayed text of a ToolCard body (the wrapped Static).
+
+    A ``Collapsible``'s title is itself a ``Static`` subclass, so scope the body
+    lookup to the ``Collapsible.Contents`` container (where ``from_render_node``
+    mounts the body ``Static``) to avoid matching the title.
+    """
+
+    from textual.widgets import Collapsible, Static
+
+    body = card.query_one(Collapsible.Contents).query_one(Static)
+    # ``Static`` stores its original renderable in the name-mangled
+    # ``_Static__content`` (this Textual has no public ``.renderable``).
+    renderable = getattr(body, "_Static__content", None)
+    if renderable is None:
+        renderable = body.render()
+    plain = getattr(renderable, "plain", None)
+    return plain if isinstance(plain, str) else str(renderable)
+
+
+def test_expand_body_carries_full_output(monkeypatch) -> None:
+    async def _run() -> None:
+        from magi_agent.cli.tui.tool_render import build_tool_renderers
+        from magi_agent.cli.tui.widgets.tool_card import ToolCard
+
+        monkeypatch.delenv("MAGI_TUI_LEGACY_RICHLOG", raising=False)
+        # Expand ON: the line beyond the 8-line cap reaches the card body.
+        monkeypatch.setenv("MAGI_TUI_EXPAND_TOOLS", "1")
+        app_on = MagiTuiApp(
+            engine=_MultiLineToolEngine(),
+            gate=AllowGate(),
+            commands=FakeRegistry(["compact"]),
+            renderers=build_tool_renderers(),
+        )
+        async with app_on.run_test() as pilot:
+            app_on.start_turn("run ls")
+            await app_on.workers.wait_for_complete()
+            await pilot.pause()
+            card = app_on.query_one(ToolCard)
+            assert "L12" in _card_body_text(card)
+
+        # Expand OFF (sibling run, same data): L12 is dropped, marker present —
+        # fidelity differs by MODE, not data loss.
+        monkeypatch.delenv("MAGI_TUI_EXPAND_TOOLS", raising=False)
+        app_off = MagiTuiApp(
+            engine=_MultiLineToolEngine(),
+            gate=AllowGate(),
+            commands=FakeRegistry(["compact"]),
+            renderers=build_tool_renderers(),
+        )
+        async with app_off.run_test() as pilot:
+            app_off.start_turn("run ls")
+            await app_off.workers.wait_for_complete()
+            await pilot.pause()
+            joined = "\n".join(app_off.controller.committed_blocks_snapshot())
+            assert "L12" not in joined
+            assert "… (+" in joined
+
+    asyncio.run(_run())
+
+
+def test_stall_hint_disabled_by_default(monkeypatch) -> None:
+    async def _run() -> None:
+        import time as _time
+
+        monkeypatch.delenv("MAGI_TUI_STALL_SECONDS", raising=False)
+        app = _make_app(_OpenThenSilentEngine(), flush_interval=0.01)
+        async with app.run_test() as pilot:
+            app.start_turn("run ls")
+            await pilot.pause(0.03)
+            app._last_event_monotonic = _time.monotonic() - 30.0
+            await pilot.pause(0.03)
+            text = app._footer.status_text()
+            app.action_cancel_turn()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+        assert "no output" not in text
+def test_ctrl_o_retro_flips_mounted_cards(monkeypatch) -> None:
+    async def _run() -> None:
+        from magi_agent.cli.tui.tool_render import build_tool_renderers
+        from magi_agent.cli.tui.widgets.tool_card import ToolCard
+
+        monkeypatch.delenv("MAGI_TUI_LEGACY_RICHLOG", raising=False)
+        monkeypatch.setenv("MAGI_TUI_EXPAND_TOOLS", "1")
+        app = MagiTuiApp(
+            engine=_MultiLineToolEngine(count=2),
+            gate=AllowGate(),
+            commands=FakeRegistry(["compact"]),
+            renderers=build_tool_renderers(),
+        )
+        async with app.run_test() as pilot:
+            app.start_turn("run ls")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            cards = app.query(ToolCard)
+            assert len(cards) == 2
+            assert all(c.collapsed is True for c in cards)
+            # First ctrl+o flips _expand_tools True->False; action sets each
+            # card.collapsed = not False = True (no visible change).
+            await pilot.press("ctrl+o")
+            await pilot.pause()
+            assert all(c.collapsed is True for c in app.query(ToolCard))
+            # Second ctrl+o flips False->True; sets each card.collapsed = False.
+            await pilot.press("ctrl+o")
+            await pilot.pause()
+            assert all(c.collapsed is False for c in app.query(ToolCard))
+
+    asyncio.run(_run())
+
+
+def test_stall_hint_clears_when_activity_resumes(monkeypatch) -> None:
+    async def _run() -> None:
+        import time as _time
+
+        monkeypatch.setenv("MAGI_TUI_STALL_SECONDS", "1")
+        app = _make_app(_OpenThenSilentEngine(), flush_interval=0.01)
+        async with app.run_test() as pilot:
+            app.start_turn("run ls")
+            await pilot.pause(0.03)
+            app._last_event_monotonic = _time.monotonic() - 3.0
+            await pilot.pause(0.03)
+            stalled = app._footer.status_text()
+            # Activity resumes (fresh stamp); next tick must clear the hint.
+            app._last_event_monotonic = _time.monotonic()
+            await pilot.pause(0.03)
+            resumed = app._footer.status_text()
+            app.action_cancel_turn()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+        assert "no output" in stalled
+        assert "no output" not in resumed
+        assert "Bash" in resumed  # back to the plain open-tool word
+# -- Task 6: one-time discoverability hint + bounded retro-flip window -------
+def test_one_time_expand_hint(monkeypatch) -> None:
+    async def _run() -> None:
+        from magi_agent.cli.tui.tool_render import build_tool_renderers
+
+        monkeypatch.delenv("MAGI_TUI_LEGACY_RICHLOG", raising=False)
+        monkeypatch.delenv("MAGI_TUI_EXPAND_TOOLS", raising=False)
+        app = MagiTuiApp(
+            engine=_MultiLineToolEngine(count=2),
+            gate=AllowGate(),
+            commands=FakeRegistry(["compact"]),
+            renderers=build_tool_renderers(),
+        )
+        async with app.run_test() as pilot:
+            app.start_turn("run ls")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            joined = "\n".join(app.controller.committed_blocks_snapshot())
+            # Hint appears exactly once across BOTH truncated tool results.
+            assert joined.count("(ctrl+o to expand") == 1
+
+    asyncio.run(_run())
+
+
+def test_stall_hint_does_not_appear_during_token_stream(monkeypatch) -> None:
+    # The must-fix regression lock: while tokens stream with inter-token gaps
+    # SHORTER than the threshold (but a total duration LONGER than it), the stall
+    # hint must NEVER appear — because _last_event_monotonic is re-stamped on
+    # every token at the TOP of _fold_event.
+    async def _run() -> None:
+        import asyncio as _asyncio
+
+        monkeypatch.setenv("MAGI_TUI_STALL_SECONDS", "1")
+
+        class _SlowTokenEngine(FakeEngineDriver):
+            async def run_turn_stream(self, runtime, turn_input, *, cancel, gate=None):
+                turn_id = getattr(turn_input, "turn_id", "t")
+                # 12 tokens × 0.12s ≈ 1.4s total > 1s threshold, but each gap
+                # (0.12s) is well under the threshold.
+                for i in range(12):
+                    await _asyncio.sleep(0.12)
+                    yield RuntimeEvent(
+                        type="token", payload={"delta": f"t{i}"}, turn_id=turn_id
+                    )
+                yield EngineResult(terminal=Terminal.completed, turn_id=turn_id)
+
+        app = _make_app(_SlowTokenEngine(), flush_interval=0.01)
+        seen_no_output = False
+        async with app.run_test() as pilot:
+            app.start_turn("go")
+            for _ in range(14):
+                await pilot.pause(0.12)
+                if "no output" in app._footer.status_text():
+                    seen_no_output = True
+                    break
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+        assert seen_no_output is False
+def test_no_hint_when_not_truncated(monkeypatch) -> None:
+    async def _run() -> None:
+        from magi_agent.cli.tui.tool_render import build_tool_renderers
+
+        monkeypatch.delenv("MAGI_TUI_LEGACY_RICHLOG", raising=False)
+        monkeypatch.delenv("MAGI_TUI_EXPAND_TOOLS", raising=False)
+        # Short output (<= 8 lines) is not truncated -> no hint.
+        app = MagiTuiApp(
+            engine=_MultiLineToolEngine(lines=3),
+            gate=AllowGate(),
+            commands=FakeRegistry(["compact"]),
+            renderers=build_tool_renderers(),
+        )
+        async with app.run_test() as pilot:
+            app.start_turn("run ls")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            joined = "\n".join(app.controller.committed_blocks_snapshot())
+            assert "(ctrl+o to expand" not in joined
+
+    asyncio.run(_run())
+
+
+def test_footer_never_shows_percent_or_ratio(monkeypatch) -> None:
+    # Honest primitives: the footer surfaces a real tool name + real integer
+    # seconds — never a fabricated % or token-ratio — even with the stall hint on.
+    async def _run() -> None:
+        import time as _time
+
+        monkeypatch.setenv("MAGI_TUI_STALL_SECONDS", "1")
+        app = _make_app(_OpenThenSilentEngine(), flush_interval=0.01)
+        async with app.run_test() as pilot:
+            app.start_turn("run ls")
+            await pilot.pause(0.03)
+            running_text = app._footer.status_text()
+            running_activity = app._footer.activity
+            app._last_event_monotonic = _time.monotonic() - 3.0
+            await pilot.pause(0.03)
+            stalled_text = app._footer.status_text()
+            stalled_activity = app._footer.activity
+            app.action_cancel_turn()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+        # No fabricated percentage anywhere on the line.
+        assert "%" not in running_text
+        assert "%" not in stalled_text
+        # No token-ratio in the activity/stall word (the cwd legitimately holds
+        # path slashes, so scope the ratio check to the activity field).
+        for word in (running_activity, stalled_activity):
+            assert "%" not in word
+            assert "/" not in word
+def test_tool_cards_list_capped(monkeypatch) -> None:
+    async def _run() -> None:
+        from magi_agent.cli.tui import app as app_mod
+        from magi_agent.cli.tui.tool_render import build_tool_renderers
+
+        monkeypatch.delenv("MAGI_TUI_LEGACY_RICHLOG", raising=False)
+        monkeypatch.setenv("MAGI_TUI_EXPAND_TOOLS", "1")
+        cap = app_mod._MAX_TRACKED_TOOL_CARDS
+        app = MagiTuiApp(
+            engine=_MultiLineToolEngine(count=cap + 2),
+            gate=AllowGate(),
+            commands=FakeRegistry(["compact"]),
+            renderers=build_tool_renderers(),
+        )
+        async with app.run_test() as pilot:
+            app.start_turn("run ls")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert len(app._tool_cards) <= cap
+
+    asyncio.run(_run())
+
+
+def test_activity_same_string_does_not_overrepaint(monkeypatch) -> None:
+    # Documents the reliance on Textual's reactive equality short-circuit: an
+    # unchanged composed activity string re-asserted across many flush ticks
+    # repaints at most once.
+    async def _run() -> None:
+        import time as _time
+
+        from magi_agent.cli.tui.footer import StatusFooter
+
+        monkeypatch.setenv("MAGI_TUI_STALL_SECONDS", "1")
+        app = _make_app(_OpenThenSilentEngine(), flush_interval=0.01)
+        async with app.run_test() as pilot:
+            app.start_turn("run ls")
+            await pilot.pause(0.03)
+            # Pin the silence to a CONSTANT integer second so the composed
+            # activity string is byte-identical across every following tick.
+            pinned = _time.monotonic() - 3.0
+            app._last_event_monotonic = pinned
+            await pilot.pause(0.03)
+            assert "no output 3s" in app._footer.status_text()
+            calls = {"n": 0}
+            real_repaint = StatusFooter._repaint
+
+            def _counting_repaint(self) -> None:
+                calls["n"] += 1
+                real_repaint(self)
+
+            monkeypatch.setattr(StatusFooter, "_repaint", _counting_repaint)
+            # Hold the same pinned stamp across many ticks; the composed string
+            # does not change, so watch_activity must not refire.
+            for _ in range(8):
+                app._last_event_monotonic = pinned
+                await pilot.pause(0.02)
+            activity_repaints = calls["n"]
+            app.action_cancel_turn()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+        # Elapsed advances whole seconds (its own repaint), but the ACTIVITY
+        # string is unchanged — so the extra repaints attributable to activity
+        # are zero. Allow a tiny slack for the 1Hz elapsed repaint during the
+        # ~0.16s window (at most one whole-second boundary).
+        assert activity_repaints <= 1
+# -- Task 7: legacy RichLog degrade (expand ON = no-op) ----------------------
+def test_expand_on_legacy_richlog_no_card(monkeypatch) -> None:
+    async def _run() -> None:
+        from magi_agent.cli.tui.tool_render import build_tool_renderers
+        from magi_agent.cli.tui.widgets.tool_card import ToolCard
+
+        monkeypatch.setenv("MAGI_TUI_LEGACY_RICHLOG", "1")
+        monkeypatch.setenv("MAGI_TUI_EXPAND_TOOLS", "1")
+        app = MagiTuiApp(
+            engine=_MultiLineToolEngine(),
+            gate=AllowGate(),
+            commands=FakeRegistry(["compact"]),
+            renderers=build_tool_renderers(),
+        )
+        async with app.run_test() as pilot:
+            app.start_turn("run ls")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            # RichLog can't host a Collapsible -> no card; header still lands.
+            assert len(app.query(ToolCard)) == 0
+            joined = "\n".join(app.controller.committed_blocks_snapshot())
+            assert "Bash" in joined
 
     asyncio.run(_run())

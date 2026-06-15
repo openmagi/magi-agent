@@ -83,6 +83,31 @@ def _fake_engine_deps() -> dict[str, object]:
     }
 
 
+class _MutatingAdapter(_FakeAdapter):
+    """Emits a single file-mutation tool call so the (mutation-scoped) pre-final
+    coding evidence gate has something to enforce."""
+
+    async def run_turn(self, runner_input: object) -> AsyncIterator[object]:
+        del runner_input
+        yield {"type": "tool_start", "name": "FileEdit", "id": "edit-1"}
+        yield {"type": "tool_end", "id": "edit-1", "status": "ok"}
+
+
+class _PassthroughBridge(_FakeBridge):
+    def project_adk_event(self, adk_event: object, *, turn_id: str) -> object:
+        del turn_id
+        if isinstance(adk_event, dict):
+            return type("Projection", (), {"agent_events": [dict(adk_event)]})()
+        return type("Projection", (), {"agent_events": []})()
+
+
+def _mutating_engine_deps() -> dict[str, object]:
+    deps = _fake_engine_deps()
+    deps["OpenMagiRunnerAdapter"] = _MutatingAdapter
+    deps["OpenMagiEventBridge"] = _PassthroughBridge
+    return deps
+
+
 def _phase_routing_dict(
     *,
     route_denied: bool = False,
@@ -247,7 +272,7 @@ def test_engine_omits_phase_route_decision_event_when_routing_absent(monkeypatch
 # 3. The pre-final gate must CONSUME the verifier-escalation routing decision.
 # --------------------------------------------------------------------------- #
 def test_pre_final_gate_escalates_remediation_for_stronger_verifier_route(monkeypatch) -> None:
-    monkeypatch.setattr(engine_module, "_lazy_engine_deps", _fake_engine_deps)
+    monkeypatch.setattr(engine_module, "_lazy_engine_deps", _mutating_engine_deps)
     # missing_evidence_action starts as the weak "audit"; the route demands a
     # bounded stronger verifier for final_verification, so an already-blocking
     # gate must escalate its remediation to "repair_required".
@@ -278,7 +303,7 @@ def test_pre_final_gate_escalates_remediation_for_stronger_verifier_route(monkey
 
 
 def test_pre_final_gate_no_escalation_without_stronger_verifier_route(monkeypatch) -> None:
-    monkeypatch.setattr(engine_module, "_lazy_engine_deps", _fake_engine_deps)
+    monkeypatch.setattr(engine_module, "_lazy_engine_deps", _mutating_engine_deps)
     driver = MagiEngineDriver(
         runner=_NoopRunner(),
         runner_policy_assembly=_assembly(
