@@ -360,6 +360,22 @@ def build_engine_recovery_policy(env: object = None) -> "EngineRecoveryPolicy | 
     )
 
 
+def _adk_invocation_id(event: object) -> str | None:
+    """Extract the ADK ``invocation_id`` from a raw ADK event as a plain string.
+
+    Duck-typed (``getattr``/``Mapping`` only) so ``engine.py`` names no
+    ``google.*`` symbol at module scope. This is the id the CLI tool wrapper
+    keys recorded evidence under (see ``cli/tool_runtime.py``); the engine notes
+    it so the pre-final gate can reconcile it with the engine's static turn id.
+    Returns ``None`` when absent/blank.
+    """
+    if isinstance(event, Mapping):
+        value = event.get("invocation_id")
+    else:
+        value = getattr(event, "invocation_id", None)
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
 def _adk_finish_reason(event: object) -> str | None:
     """Extract the model finish reason from a raw ADK event as a plain string.
 
@@ -1141,6 +1157,18 @@ class MagiEngineDriver:
         self._evidence_collector: Callable[[str], Sequence[object]] | None = (
             evidence_collector
         )
+        # Root-cause-1 reconciliation (live turn_id mismatch). The CLI tool
+        # wrapper records evidence into the SHARED collector keyed on the ADK
+        # ``invocation_id`` (e.g. ``"e-fbb68880-..."``), but the engine's gate
+        # queries ``_collect_evidence`` with the engine's static ``turn_id``
+        # (the ``"cli-turn"`` default from ``_turn_identity``). They never match,
+        # so live evidence was invisible to the gate. ``_drive`` notes each ADK
+        # ``invocation_id`` it observes on the live event stream here; the set is
+        # RESET at the start of every ``_drive`` (per-turn scope — the
+        # single-flight registry guarantees one active turn per session). The
+        # engine's own ``turn_id`` is left UNCHANGED so every emitted event label
+        # stays byte-identical (no coding/hosted regression).
+        self._observed_invocation_ids: set[str] = set()
         # Shared across all turns of this driver instance: single-flight per
         # session id. Lazily built so construction stays cheap + import-clean.
         self._registry: object | None = None
@@ -1371,6 +1399,11 @@ class MagiEngineDriver:
         resume_prefix = _render_resume_prefix(initial_messages)
         if resume_prefix:
             prompt = f"{resume_prefix}{prompt}"
+
+        # Root-cause-1: per-turn scope for observed ADK invocation ids. Reset at
+        # the start of every drive so one turn's reconciliation set never leaks
+        # into the next on a reused engine instance.
+        self._observed_invocation_ids = set()
 
         runner = self._resolve_runner(runtime)
         if runner is None:
@@ -1626,6 +1659,11 @@ class MagiEngineDriver:
 
                         adk_event = step
                         event_count += 1
+                        # Root-cause-1: note the ADK invocation id so the
+                        # pre-final gate can reconcile it with the engine turn id.
+                        self._note_observed_invocation_id(
+                            _adk_invocation_id(adk_event)
+                        )
                         reading = _adk_usage_metadata(adk_event)
                         if reading:
                             attempt_usage.update(reading)
@@ -1997,6 +2035,9 @@ class MagiEngineDriver:
                     if _zstep is _EXHAUSTED:
                         break
                     _zadk_event = _zstep
+                    self._note_observed_invocation_id(
+                        _adk_invocation_id(_zadk_event)
+                    )
                     _ze_reading = _adk_usage_metadata(_zadk_event)
                     if _ze_reading:
                         _ze_usage.update(_ze_reading)
@@ -2151,6 +2192,9 @@ class MagiEngineDriver:
 
                     adk_event = step
                     event_count += 1
+                    self._note_observed_invocation_id(
+                        _adk_invocation_id(adk_event)
+                    )
                     _repair_reading = _adk_usage_metadata(adk_event)
                     if _repair_reading:
                         _repair_usage.update(_repair_reading)
@@ -2261,9 +2305,60 @@ class MagiEngineDriver:
         above the engine uses this seam to make evidence-backed :class:`GoalNudge`
         goals functional without coupling the engine to a concrete ledger type.
         """
-        if self._evidence_collector is not None:
-            return tuple(self._evidence_collector(turn_id))
-        return ()
+        if self._evidence_collector is None:
+            return ()
+        # Always query the engine's own ``turn_id`` first (preserves the DI
+        # contract + every existing caller/test that records and queries under
+        # the same id — the coding/hosted shape).
+        records: list[object] = list(self._evidence_collector(turn_id))
+        # Root-cause-1 reconciliation: ALSO fold in records the collector stored
+        # under any ADK ``invocation_id`` observed on this turn's live event
+        # stream (which is what the CLI tool wrapper keys on). Deduped by object
+        # identity so an observed id equal to ``turn_id`` never double-counts.
+        # Purely additive: with no observed ids (the coding/hosted test shape)
+        # this is byte-identical to the prior single-query behaviour.
+        if self._observed_invocation_ids:
+            seen_ids: set[int] = {id(record) for record in records}
+            for invocation_id in self._observed_invocation_ids:
+                if invocation_id == turn_id:
+                    continue
+                for extra in self._collect_for_id(invocation_id):
+                    if id(extra) not in seen_ids:
+                        seen_ids.add(id(extra))
+                        records.append(extra)
+        return tuple(records)
+
+    def _note_observed_invocation_id(self, invocation_id: object) -> None:
+        """Record an ADK ``invocation_id`` seen on this turn's live event stream.
+
+        ``_drive`` calls this for each raw ADK event so the pre-final gate's
+        ``_collect_evidence`` can reconcile the engine's static ``turn_id`` with
+        the ADK invocation id that the CLI tool wrapper keys evidence under.
+        Defensive: only non-empty strings are kept; anything else is ignored so
+        a malformed event can never wedge the turn.
+        """
+        if isinstance(invocation_id, str) and invocation_id.strip():
+            self._observed_invocation_ids.add(invocation_id.strip())
+
+    def _collect_for_id(self, turn_id: str) -> tuple[object, ...]:
+        """Query the wired collector for one turn/invocation id, fail-soft.
+
+        Prefers the owning collector's ``collect_for_turn`` (recovered via the
+        bound method's ``__self__``, the same pattern as ``_record_phase_reached``)
+        and falls back to calling the DI callable directly. Any failure yields
+        ``()`` so reconciliation can never break the gate.
+        """
+        collector = self._evidence_collector
+        if collector is None:
+            return ()
+        owner = getattr(collector, "__self__", None)
+        collect_for_turn = getattr(owner, "collect_for_turn", None)
+        try:
+            if callable(collect_for_turn):
+                return tuple(collect_for_turn(turn_id))
+            return tuple(collector(turn_id))
+        except Exception:
+            return ()
 
     def _record_phase_reached(
         self,

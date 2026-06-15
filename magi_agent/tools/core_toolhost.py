@@ -384,6 +384,64 @@ def _tool_call_id(
     return f"core-toolhost:{tool_name}:{_digest(arguments)[7:23]}"
 
 
+# Read-only source-inspection tools whose successful Gate5BFullToolHost outcome
+# represents inspecting a workspace source. The LIVE CLI FileRead/Glob/Grep/
+# GitDiff execute through Gate5BFullToolHost (NOT LocalReadOnlyToolHost), so the
+# rebuilt ToolResult below is the ONLY place a ``sourceProjection`` can be
+# attached for the live path. Mirrors ``LOCAL_READONLY_TOOL_NAMES``.
+_SOURCE_INSPECTION_TOOL_NAMES = frozenset({"FileRead", "Glob", "Grep", "GitDiff"})
+
+
+def _source_ledger_evidence_gate_enabled() -> bool:
+    from magi_agent.config.env import (  # noqa: PLC0415
+        parse_source_ledger_evidence_gate_enabled,
+    )
+
+    return parse_source_ledger_evidence_gate_enabled(os.environ)
+
+
+def _synthesized_source_projection(outcome) -> dict[str, object] | None:
+    """Build a minimal ``sourceProjection`` for a successful read-only source
+    tool's Gate5BFullToolHost outcome.
+
+    Root cause 2: a live FileRead runs through Gate5BFullToolHost, whose outcome
+    carries no source-ledger projection — so ``record_tool_result`` saw
+    ``hasSourceProj=False`` and the source-ledger gate had no SourceInspection
+    record. This synthesizes exactly the shape
+    ``local_tool_collector._projected_source_inspection_records`` reads (one
+    ``SourceInspection`` source with a stable ``src_N`` id, ``kind='file'``,
+    ``inspected=True``). Default-OFF behind
+    ``MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED`` so the flag-OFF metadata shape
+    is byte-identical to main. Returns ``None`` (no projection attached) when
+    the flag is off, the tool is not a source tool, or the status is not ``ok``.
+    Fail-open: any error yields ``None``.
+    """
+    try:
+        if not _source_ledger_evidence_gate_enabled():
+            return None
+        receipt = outcome.receipt
+        if receipt.tool_name not in _SOURCE_INSPECTION_TOOL_NAMES:
+            return None
+        if outcome.status != "ok":
+            return None
+        # ``src_N`` is the only id shape the SourceLedgerRecord validator + the
+        # collector projector accept. One inspected source per successful read.
+        return {
+            "schemaVersion": "openmagi.coreToolhostSourceProjection.v1",
+            "sources": [
+                {
+                    "sourceId": "src_1",
+                    "evidenceType": "SourceInspection",
+                    "kind": "file",
+                    "inspected": True,
+                    "inspectedAt": 1,
+                }
+            ],
+        }
+    except Exception:
+        return None
+
+
 def _tool_result_from_outcome(outcome) -> ToolResult:
     receipt = outcome.receipt.model_dump(by_alias=True, mode="json", warnings=False)
     metadata: dict[str, object] = {
@@ -391,6 +449,9 @@ def _tool_result_from_outcome(outcome) -> ToolResult:
         "reason": outcome.reason,
         "gate5bFullToolhostReceipt": receipt,
     }
+    source_projection = _synthesized_source_projection(outcome)
+    if source_projection is not None:
+        metadata["sourceProjection"] = source_projection
     if outcome.coding_mutation_receipt is not None:
         metadata["codingMutationReceipt"] = outcome.coding_mutation_receipt.public_projection()
     if outcome.code_diagnostics_receipt is not None:
