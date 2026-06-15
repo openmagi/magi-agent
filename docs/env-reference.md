@@ -252,6 +252,7 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 - `MAGI_SESSION_TRANSCRIPT_ENABLED` (default off) — Write per-session JSONL debug transcripts (turn stages, tool calls, subagent spawns, messages) under the observability home.
 - `MAGI_SESSION_TRANSCRIPT_MAX_FILES` (default `500`) — Max session-transcript files kept; oldest beyond this are pruned.
 - `MAGI_SESSION_TRANSCRIPT_RETENTION_DAYS` (default `14`) — Session-transcript retention in days; older files are pruned.
+- `MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED` (default off) — Project the live turn's inspected-source ledger into the engine's harvested public refs as the named ref 'verifier:research-source-evidence' so a recipe can require source grounding: a turn that read >=1 source passes, a turn that read none blocks. Strict default-OFF and inert unless explicitly set.
 - `MAGI_STEP_DECOMPOSITION_ENABLED` (default off) — Inject a light first-pass guidance asking the agent to enumerate dependent sub-steps up front and confirm each before proceeding (prompt-only nudge; reuses existing planning seams).
 - `MAGI_TOOL_SYNTHESIS_NUDGE_ENABLED` (default off) — Live-SWE-style tool-synthesis: per-step reflection nudge + 'create your own tools' recipe block (frontier-tier models only).
 - `MAGI_VISION_MODEL` (no default) — Vision-sidecar model override for image_understand (bare model id, same semantics as MAGI_MODEL); unset keeps the main provider/model.

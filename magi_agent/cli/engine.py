@@ -2759,6 +2759,9 @@ class MagiEngineDriver:
                 evidence_records=evidence_records,
             )
         )
+        observed_public_refs.update(
+            self._source_ledger_matched_requirement_refs(evidence_records)
+        )
         missing_evidence = [
             ref for ref in assembly.evidence_requirements if ref not in observed_public_refs
         ]
@@ -2986,6 +2989,63 @@ class MagiEngineDriver:
             )
         except Exception:
             logger.debug("fact-grounding satisfier failed", exc_info=True)
+            return []
+
+    def _source_ledger_matched_requirement_refs(
+        self,
+        evidence_records: Sequence[object],
+    ) -> list[str]:
+        """Named public ref harvested from the live turn's inspected sources.
+
+        Behind strict default-OFF ``MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED``.
+        When OFF this returns ``[]`` so the gate is byte-identical to main: today
+        only ``sha256:`` source receipts reach ``_collect_public_refs``; the NAMED
+        ref ``verifier:research-source-evidence`` is never emitted on the live
+        path (only ``research/research_first_canary`` emits it), so a recipe
+        requiring it always blocks. When ON, and the assembled policy actually
+        requires that named ref, the turn's already-collected evidence records
+        are scanned for at least one inspected source (a ``SourceInspection`` /
+        ``WebSearch`` / ``KnowledgeSearch`` evidence record, the same source
+        evidence types the recipe-layer ``final_output_gate`` keys off). If found,
+        the named ref is returned and merged into ``observed_public_refs`` so the
+        requirement is satisfied; a source-less turn yields ``[]`` and the gate
+        blocks on the named ref.
+
+        Only the ``verifier:research-source-evidence`` ref is ever satisfied here;
+        an unrelated missing validator is untouched. Fail-open: any error matches
+        nothing (returns ``[]``) so the projector can never wedge a turn — it can
+        only REMOVE a block, never add one.
+        """
+        import os  # noqa: PLC0415
+
+        from magi_agent.config.env import (  # noqa: PLC0415
+            parse_source_ledger_evidence_gate_enabled,
+        )
+
+        if not parse_source_ledger_evidence_gate_enabled(os.environ):
+            return []
+        assembly = self._runner_policy_assembly
+        if assembly is None:
+            return []
+        try:
+            from magi_agent.evidence.final_output_gate import (  # noqa: PLC0415
+                _SOURCE_EVIDENCE_TYPES,
+            )
+
+            named_ref = "verifier:research-source-evidence"
+            if named_ref not in assembly.required_validators:
+                return []
+            for record in evidence_records:
+                record_type = (
+                    record.get("type")
+                    if isinstance(record, Mapping)
+                    else getattr(record, "type", None)
+                )
+                if isinstance(record_type, str) and record_type in _SOURCE_EVIDENCE_TYPES:
+                    return [named_ref]
+            return []
+        except Exception:
+            logger.debug("source-ledger evidence projector failed", exc_info=True)
             return []
 
     @staticmethod

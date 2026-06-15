@@ -2598,6 +2598,25 @@ def parse_fact_grounding_verification_enabled(env: Mapping[str, str]) -> bool:
     return flag_bool("MAGI_FACT_GROUNDING_VERIFICATION_ENABLED", env=env)
 
 
+def parse_source_ledger_evidence_gate_enabled(env: Mapping[str, str]) -> bool:
+    """MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED — live source-ledger evidence ref.
+
+    Projects the live turn's inspected-source ledger into the engine's harvested
+    public refs as the NAMED ref ``verifier:research-source-evidence`` (mirroring
+    the ``research/research_first_canary`` projection). When ON, a recipe whose
+    final gate requires that named ref is satisfied by any turn that actually
+    read at least one source, and blocks a turn that read none — so the gate can
+    require source grounding without false-blocking. This is a **strict
+    default-OFF** gate: it never defaults ON in any runtime profile and only
+    flips for an explicit truthy value, so flag-OFF behavior stays byte-identical
+    to ``main`` (today only ``sha256:`` receipts reach the harvest; the named ref
+    is never emitted on the live path, so the projector is inert when OFF).
+    """
+    from .flags import flag_bool
+
+    return flag_bool("MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED", env=env)
+
+
 MAGI_GATE5B_GOVERNANCE_ENABLED_ENV = "MAGI_GATE5B_GOVERNANCE_ENABLED"
 
 
