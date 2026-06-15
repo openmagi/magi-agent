@@ -361,6 +361,7 @@ def agent(
             else permission_mode.value
         )
         tui = build_tui_app(
+            cwd=os.getcwd(),
             permission_mode=tui_permission_mode,  # type: ignore[arg-type]
             session_id=resume or "cli-session",
             model=model,

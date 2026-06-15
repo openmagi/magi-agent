@@ -445,11 +445,14 @@ def test_status_and_reset_delegate_to_boundary(monkeypatch) -> None:
     # Both consulted the boundary with the expected slash text.
     assert any(t.startswith("/status") for t in calls)
     assert any(t.startswith("/reset") for t in calls)
-    # status Text reflects the boundary's command_intent projection.
+    # status Text reflects the boundary's recognized (command_intent) projection,
+    # humanized for display (the raw machine token must not leak).
     assert isinstance(status_out, Text)
-    assert "command_intent" in status_out.text
+    assert "recognized" in status_out.text
+    assert "command_intent" not in status_out.text
     assert isinstance(reset_out, Text)
-    assert "command_intent" in reset_out.text
+    assert "recognized" in reset_out.text
+    assert "command_intent" not in reset_out.text
 
 
 def test_status_uses_app_snapshot_when_available(monkeypatch) -> None:
@@ -576,7 +579,8 @@ def test_plan_command_returns_command_intent() -> None:
     reg = build_registry("/tmp/no-such-cwd")
     out = asyncio.run(dispatch(reg, "plan", None, _ctx(), surface=HEADLESS))
     assert isinstance(out, Text)
-    assert "command_intent" in out.text
+    assert "recognized" in out.text
+    assert "command_intent" not in out.text
 
 
 def test_plan_command_includes_recipe_and_checkpoint() -> None:
@@ -591,7 +595,8 @@ def test_goal_command_returns_command_intent() -> None:
     reg = build_registry("/tmp/no-such-cwd")
     out = asyncio.run(dispatch(reg, "goal", None, _ctx(), surface=HEADLESS))
     assert isinstance(out, Text)
-    assert "command_intent" in out.text
+    assert "recognized" in out.text
+    assert "command_intent" not in out.text
 
 
 def test_goal_command_includes_recipe_and_checkpoint() -> None:
@@ -606,7 +611,8 @@ def test_onboarding_command_returns_command_intent() -> None:
     reg = build_registry("/tmp/no-such-cwd")
     out = asyncio.run(dispatch(reg, "onboarding", None, _ctx(), surface=HEADLESS))
     assert isinstance(out, Text)
-    assert "command_intent" in out.text
+    assert "recognized" in out.text
+    assert "command_intent" not in out.text
 
 
 def test_onboarding_command_includes_recipe_and_checkpoint() -> None:
@@ -622,7 +628,8 @@ def test_superpowers_command_returns_command_intent() -> None:
     reg = build_registry("/tmp/no-such-cwd")
     out = asyncio.run(dispatch(reg, "superpowers", None, _ctx(), surface=HEADLESS))
     assert isinstance(out, Text)
-    assert "command_intent" in out.text
+    assert "recognized" in out.text
+    assert "command_intent" not in out.text
 
 
 def test_superpowers_command_includes_recipe_and_checkpoint() -> None:
@@ -639,7 +646,8 @@ def test_superpowers_command_with_subcommand() -> None:
     cmd = SuperpowersCommand(name="superpowers", surface=BOTH)
     out = asyncio.run(cmd.call("search", ctx))
     assert isinstance(out, Text)
-    assert "command_intent" in out.text
+    assert "recognized" in out.text
+    assert "command_intent" not in out.text
 
 
 # ---------------------------------------------------------------------------

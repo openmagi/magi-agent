@@ -161,6 +161,23 @@ def _intent_refs(proj: dict[str, object]) -> tuple[str, str]:
     return str(intent.get("recipePackRef") or ""), str(intent.get("checkpointRef") or "")
 
 
+# Display-only label map for boundary status codes. The boundary's machine
+# values (e.g. ``"command_intent"``) are part of the slash-control contract and
+# MUST NOT change — this translates them ONLY at the point of display so users
+# don't see raw engineering tokens. Unknown statuses fall back to the raw value.
+_STATUS_LABELS: dict[str, str] = {
+    "command_intent": "recognized",
+    "disabled": "disabled",
+}
+
+
+def _humanize_status(status: object) -> str:
+    """Map a boundary status code to user-facing copy (display-only)."""
+
+    text = str(status)
+    return _STATUS_LABELS.get(text, text)
+
+
 def _render_status(snap: dict[str, object]) -> str:
     """Format an app status snapshot into a readable multi-line block."""
 
@@ -198,7 +215,9 @@ class StatusCommand(LocalCommand):
         decision = _project("status", args, ctx)
         proj = decision.public_projection()
         reasons = ", ".join(proj.get("reasonCodes", []) or []) or "-"
-        return Text(text=f"status: {proj.get('status')} | reasons: {reasons}")
+        return Text(
+            text=f"status: {_humanize_status(proj.get('status'))} | reasons: {reasons}"
+        )
 
     @staticmethod
     def _app_snapshot(ctx: CommandContext) -> dict[str, object] | None:
@@ -226,7 +245,7 @@ class ResetCommand(LocalCommand):
     async def call(self, args: object, ctx: CommandContext) -> LocalResult:  # type: ignore[override]
         decision = _project("reset", args, ctx)
         proj = decision.public_projection()
-        return Text(text=f"reset acknowledged ({proj.get('status')})")
+        return Text(text=f"reset acknowledged ({_humanize_status(proj.get('status'))})")
 
 
 @dataclass
@@ -294,7 +313,7 @@ class PlanCommand(LocalCommand):
         proj = decision.public_projection()
         recipe, checkpoint = _intent_refs(proj)
         return Text(
-            text=f"plan: {proj.get('status')} | recipe: {recipe} | checkpoint: {checkpoint}"
+            text=f"plan: {_humanize_status(proj.get('status'))} | recipe: {recipe} | checkpoint: {checkpoint}"
         )
 
 
@@ -312,7 +331,7 @@ class GoalCommand(LocalCommand):
         proj = decision.public_projection()
         recipe, checkpoint = _intent_refs(proj)
         return Text(
-            text=f"goal: {proj.get('status')} | recipe: {recipe} | checkpoint: {checkpoint}"
+            text=f"goal: {_humanize_status(proj.get('status'))} | recipe: {recipe} | checkpoint: {checkpoint}"
         )
 
 
@@ -330,7 +349,7 @@ class OnboardingCommand(LocalCommand):
         proj = decision.public_projection()
         recipe, checkpoint = _intent_refs(proj)
         return Text(
-            text=f"onboarding: {proj.get('status')} | recipe: {recipe} | checkpoint: {checkpoint}"
+            text=f"onboarding: {_humanize_status(proj.get('status'))} | recipe: {recipe} | checkpoint: {checkpoint}"
         )
 
 
@@ -361,7 +380,7 @@ class SuperpowersCommand(LocalCommand):
         proj = decision.public_projection()
         recipe, checkpoint = _intent_refs(proj)
         return Text(
-            text=f"superpowers: {proj.get('status')} | recipe: {recipe} | checkpoint: {checkpoint}"
+            text=f"superpowers: {_humanize_status(proj.get('status'))} | recipe: {recipe} | checkpoint: {checkpoint}"
         )
 
 

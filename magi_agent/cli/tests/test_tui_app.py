@@ -245,6 +245,55 @@ def test_tool_ask_raises_modal_and_approve_resolves() -> None:
 
 
 # ---------------------------------------------------------------------------
+# 2b. The modal suppresses the generic engineering "tool_use" reason token but
+#     still surfaces a genuinely-informative reason.
+# ---------------------------------------------------------------------------
+def _mount_tool_confirm(req: ControlRequest) -> str:
+    """Mount a bare ``ToolUseConfirm`` and return its message Static text."""
+
+    rendered: dict[str, str] = {}
+
+    async def _run() -> None:
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            await app.push_screen(ToolUseConfirm(req))
+            await pilot.pause()
+            msg = app.screen.query_one("#tool-confirm-msg")
+            # Textual 8.2.7: Static has no .renderable — use .render().
+            rendered["text"] = str(msg.render())
+
+    asyncio.run(_run())
+    return rendered["text"]
+
+
+def test_tool_confirm_suppresses_generic_tool_use_reason() -> None:
+    req = ControlRequest(
+        requestId="req-x",
+        turnId="turn-x",
+        toolName="Bash",
+        arguments={"command": "ls"},
+        reason="tool_use",
+    )
+    text = _mount_tool_confirm(req)
+    assert "Bash" in text
+    assert "tool_use" not in text
+
+
+def test_tool_confirm_shows_informative_reason() -> None:
+    req = ControlRequest(
+        requestId="req-y",
+        turnId="turn-y",
+        toolName="Bash",
+        arguments={"command": "ls"},
+        reason="writes outside workspace",
+    )
+    text = _mount_tool_confirm(req)
+    assert "Bash" in text
+    assert "writes outside workspace" in text
+
+
+# ---------------------------------------------------------------------------
 # 3. Modal REJECT maps to a deny decision
 # ---------------------------------------------------------------------------
 def test_tool_ask_reject_maps_to_deny() -> None:
