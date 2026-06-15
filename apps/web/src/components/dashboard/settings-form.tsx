@@ -5,6 +5,12 @@ import { useAgentFetch } from "@/lib/local-api";
 import { GlassCard } from "@/components/ui/glass-card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import {
+  CUSTOM_MODEL_VALUE,
+  LOCAL_RUNTIME_DEFAULT_MODEL,
+  LOCAL_RUNTIME_MODEL_PRESETS,
+  isPresetModel,
+} from "@/lib/models/local-runtime-models";
 import { useMessages } from "@/lib/i18n";
 
 type ProviderName = "anthropic" | "openai" | "gemini" | "fireworks";
@@ -58,6 +64,9 @@ export function SettingsForm(_props: SettingsFormProps) {
 
   const [provider, setProvider] = useState<ProviderName>("anthropic");
   const [model, setModel] = useState("claude-sonnet-4-6");
+  // When true, the Model field is a free-text input ("Custom…") instead of the
+  // provider's preset dropdown.
+  const [customModel, setCustomModel] = useState(false);
   const [baseUrl, setBaseUrl] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [apiKeySet, setApiKeySet] = useState(false);
@@ -82,8 +91,11 @@ export function SettingsForm(_props: SettingsFormProps) {
       const llm = data.config?.llm;
       const server = data.config?.server;
       const nextProvider = asString(llm?.provider);
+      const loadedProvider: ProviderName = isProviderName(nextProvider) ? nextProvider : "anthropic";
       if (isProviderName(nextProvider)) setProvider(nextProvider);
-      setModel(asString(llm?.model) || "claude-sonnet-4-6");
+      const loadedModel = asString(llm?.model) || "claude-sonnet-4-6";
+      setModel(loadedModel);
+      setCustomModel(!isPresetModel(loadedProvider, loadedModel));
       setBaseUrl(asString(llm?.baseUrl));
       setApiKey("");
       setApiKeySet(Boolean(llm?.apiKeySet));
@@ -186,7 +198,13 @@ export function SettingsForm(_props: SettingsFormProps) {
             <span className="mb-1.5 block text-sm font-medium text-secondary">Provider</span>
             <select
               value={provider}
-              onChange={(event) => setProvider(event.target.value as ProviderName)}
+              onChange={(event) => {
+                const nextProvider = event.target.value as ProviderName;
+                setProvider(nextProvider);
+                // Reset to the new provider's default so the model stays valid.
+                setModel(LOCAL_RUNTIME_DEFAULT_MODEL[nextProvider]);
+                setCustomModel(false);
+              }}
               className="min-h-11 w-full cursor-pointer rounded-xl border border-black/10 bg-white px-4 py-3 text-sm font-medium text-foreground outline-none transition-colors focus:border-primary/45 focus:ring-4 focus:ring-primary/10"
             >
               {PROVIDER_OPTIONS.map((option) => (
@@ -197,12 +215,38 @@ export function SettingsForm(_props: SettingsFormProps) {
             </select>
           </label>
 
-          <Input
-            label="Model"
-            value={model}
-            onChange={(event) => setModel(event.target.value)}
-            placeholder="claude-sonnet-4-6, gpt-4.1, llama3.1"
-          />
+          <label className="block">
+            <span className="mb-1.5 block text-sm font-medium text-secondary">Model</span>
+            <select
+              value={customModel ? CUSTOM_MODEL_VALUE : model}
+              onChange={(event) => {
+                const next = event.target.value;
+                if (next === CUSTOM_MODEL_VALUE) {
+                  setCustomModel(true);
+                  return;
+                }
+                setCustomModel(false);
+                setModel(next);
+              }}
+              className="min-h-11 w-full cursor-pointer rounded-xl border border-black/10 bg-white px-4 py-3 text-sm font-medium text-foreground outline-none transition-colors focus:border-primary/45 focus:ring-4 focus:ring-primary/10"
+            >
+              {LOCAL_RUNTIME_MODEL_PRESETS[provider].map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+              <option value={CUSTOM_MODEL_VALUE}>Custom… (enter model id)</option>
+            </select>
+          </label>
+
+          {customModel ? (
+            <Input
+              label="Custom model id"
+              value={model}
+              onChange={(event) => setModel(event.target.value)}
+              placeholder="claude-sonnet-4-6, gpt-5.5, accounts/fireworks/models/…"
+            />
+          ) : null}
 
           <Input
             label="Base URL"

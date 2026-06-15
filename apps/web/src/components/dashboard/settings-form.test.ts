@@ -26,4 +26,17 @@ describe("SettingsForm local runtime wiring", () => {
     expect(source).not.toContain('"openai-compatible"');
     expect(source).not.toContain("OpenAI-Compatible");
   });
+
+  it("renders the Model field as a provider-scoped preset dropdown with a Custom escape", () => {
+    const source = readFileSync(new URL("./settings-form.tsx", import.meta.url), "utf8");
+
+    // Presets come from the curated per-provider catalog, scoped to the selection.
+    expect(source).toContain("LOCAL_RUNTIME_MODEL_PRESETS[provider]");
+    // A dedicated "Custom…" option reveals the free-text input.
+    expect(source).toContain("CUSTOM_MODEL_VALUE");
+    expect(source).toContain("Custom… (enter model id)");
+    expect(source).toContain("customModel");
+    // Switching provider resets to that provider's default model.
+    expect(source).toContain("LOCAL_RUNTIME_DEFAULT_MODEL[nextProvider]");
+  });
 });
