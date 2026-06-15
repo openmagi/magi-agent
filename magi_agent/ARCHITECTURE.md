@@ -506,6 +506,7 @@ graph LR
 | test_streaming_chat.py | Tests for magi_agent.transport.streaming_chat — SSE frame serializer. | contracts, events, streaming_chat | — |
 | test_streaming_driver.py | Tests for magi_agent.transport.streaming_driver.drive_streaming_chat. | active_turn, contracts, control, events, permissions, protocol, streaming_driver, streaming_sink | — |
 | test_streaming_sink.py | Tests for magi_agent.transport.streaming_sink. | control, events, protocol, streaming_sink, wiring | — |
+| test_tool_render.py | Render-layer tests for the ``full_output`` cap-override chokepoint. | tool_render | — |
 | test_tool_runtime.py | — | local_tool_collector, task_completion, tool_adapter, tool_runtime | — |
 | test_tui_app.py | Tests for the PR-E2 Textual App + REPL loop + TextualSink. | app, builtins, contracts, defaults, footer, help, input, model, palette, schema, session, tool_card, tool_render, transcript_view, tui | — |
 | test_tui_autocomplete.py | Tests for the PR-E2 prefix autocomplete router. | autocomplete, contracts | — |
@@ -536,7 +537,7 @@ graph LR
 |---|---|---|---|
 | __init__.py | Interactive Textual TUI for the Magi headless CLI (Stream E). | — | cli/tests/test_tui_app.py, cli/tests/test_tui_notify.py, cli/tests/test_tui_tool_render.py, cli/tui/app.py |
 | _bench.py | Headless throughput benchmark for the streaming-transcript spike (PR-E1). | transcript | cli/tests/test_tui_transcript.py |
-| app.py | Interactive Textual App + REPL loop for the Magi CLI (PR-E2). | autocomplete, clipboard_image, contracts, diff, executor, footer, help, history, input, loader, markdown, model, notify, palette, providers, resolver, schema, session, session_log, sidebar, theme, tool_render, transcript, transcript_view, tui, whichkey | cli/tests/test_app.py, cli/tests/test_e2e_parity.py, cli/tests/test_model_picker_wire.py, cli/tests/test_tui_app.py, cli/tests/test_tui_followups.py, cli/tests/test_tui_history.py, cli/tests/test_tui_input.py, cli/tests/test_tui_palette.py, cli/tests/test_tui_subagent.py, cli/tests/test_tui_theme.py, cli/tests/test_tui_thinking.py, cli/tests/test_tui_visual.py, cli/tests/test_tui_whichkey.py, cli/wiring.py |
+| app.py | Interactive Textual App + REPL loop for the Magi CLI (PR-E2). | autocomplete, clipboard_image, contracts, diff, executor, footer, help, history, input, loader, markdown, model, notify, palette, providers, resolver, schema, session, session_log, sidebar, theme, tool_card, tool_render, transcript, transcript_view, tui, whichkey | cli/tests/test_app.py, cli/tests/test_e2e_parity.py, cli/tests/test_model_picker_wire.py, cli/tests/test_tui_app.py, cli/tests/test_tui_followups.py, cli/tests/test_tui_history.py, cli/tests/test_tui_input.py, cli/tests/test_tui_palette.py, cli/tests/test_tui_subagent.py, cli/tests/test_tui_theme.py, cli/tests/test_tui_thinking.py, cli/tests/test_tui_visual.py, cli/tests/test_tui_whichkey.py, cli/wiring.py |
 | autocomplete.py | Prefix autocomplete router for the Magi TUI input (PR-E2). | contracts | cli/tests/test_tui_autocomplete.py, cli/tests/test_tui_input.py, cli/tui/app.py, cli/tui/input.py |
 | footer.py | Bottom status footer for the Magi TUI (PR3.1). | — | cli/tests/test_tui_app.py, cli/tests/test_tui_footer.py, cli/tui/app.py |
 | history.py | Per-session input history + draft stash for the Magi TUI (PR1.2 / PR1.3). | session_log | cli/tests/test_tui_history.py, cli/tests/test_tui_input.py, cli/tui/app.py, cli/tui/input.py |
@@ -545,7 +546,7 @@ graph LR
 | palette.py | Textual command-palette providers for the Magi TUI (PR2.1+). | contracts, theme | cli/tests/test_tui_app.py, cli/tests/test_tui_palette.py, cli/tests/test_tui_theme.py, cli/tui/app.py, cli/tui/dialogs/help.py |
 | sidebar.py | Toggleable left sidebar for the Magi TUI (PR3.2). | — | cli/tests/test_tui_sidebar.py, cli/tui/app.py |
 | theme.py | PR4.1 — curated theme set + registration + persistence for the Magi TUI. | session_log | cli/tests/test_tui_theme.py, cli/tui/app.py, cli/tui/palette.py |
-| tool_render.py | Per-tool renderers conforming to the frozen ``ToolRenderer`` Protocol. | contracts, render | cli/tests/test_model_picker_wire.py, cli/tests/test_tui_app.py, cli/tests/test_tui_followups.py, cli/tests/test_tui_subagent.py, cli/tests/test_tui_thinking.py, cli/tests/test_tui_visual.py, cli/tui/app.py, cli/wiring.py |
+| tool_render.py | Per-tool renderers conforming to the frozen ``ToolRenderer`` Protocol. | contracts, render | cli/tests/test_model_picker_wire.py, cli/tests/test_tool_render.py, cli/tests/test_tui_app.py, cli/tests/test_tui_followups.py, cli/tests/test_tui_subagent.py, cli/tests/test_tui_thinking.py, cli/tests/test_tui_visual.py, cli/tui/app.py, cli/wiring.py |
 | transcript.py | Streaming-transcript widget — the one architectural risk of the TUI stream. | markdown, message | cli/tests/test_tui_transcript.py, cli/tui/_bench.py, cli/tui/app.py |
 
 ### cli/tui/dialogs/
@@ -571,7 +572,7 @@ graph LR
 |---|---|---|---|
 | __init__.py | Mounted transcript widgets (PR0.3+). The finalized region is a list of these. | — | — |
 | message.py | Message widgets for the mounted-widget transcript (01-architecture §2.3). | — | cli/tests/test_tui_transcript.py, cli/tests/test_tui_widgets.py, cli/tui/transcript.py |
-| tool_card.py | Collapsible tool-output card (01-architecture §2.3, PR0.4). | contracts | cli/tests/test_tui_app.py, cli/tests/test_tui_transcript.py, cli/tests/test_tui_widgets.py |
+| tool_card.py | Collapsible tool-output card (01-architecture §2.3, PR0.4). | contracts | cli/tests/test_tui_app.py, cli/tests/test_tui_transcript.py, cli/tests/test_tui_widgets.py, cli/tui/app.py |
 | transcript_view.py | The mounted-widget finalized region (01-architecture §2.3, PR0.3). | — | cli/tests/test_tui_app.py, cli/tests/test_tui_transcript.py, cli/tests/test_tui_widgets.py, cli/tui/app.py |
 | whichkey.py | PR4.4 — which-key chord-hint overlay. | resolver, schema | cli/tests/test_tui_whichkey.py, cli/tui/app.py |
 

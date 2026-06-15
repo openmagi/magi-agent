@@ -2934,3 +2934,364 @@ def test_unknown_tool_renders_named_header_with_arg() -> None:
         assert "calc 1+1" in joined
 
     asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
+# Expand affordance (ctrl+o) — DEFAULT-OFF flag that reveals full tool output.
+#
+# The flat path commits a hard-truncated (8 lines / 1200 chars) preview; expand
+# mode re-renders the result with the cap lifted and mounts it as a collapsed
+# ``ToolCard`` via the existing ``commit_tool`` seam. The toggle is session-
+# global and forward-acting with a bounded retro-flip of already-mounted cards.
+# ---------------------------------------------------------------------------
+def _multiline_output(n: int = 12) -> str:
+    """A JSON ``output_preview`` whose stdout exceeds the 8-line preview cap."""
+
+    body = "\\n".join(f"L{i}" for i in range(1, n + 1))
+    return '{"output": {"stdout": "' + body + '"}}'
+
+
+class _MultiLineToolEngine(FakeEngineDriver):
+    """Emits ``count`` Bash tool_start/tool_end pairs with multi-line output.
+
+    The stock ``FakeEngineDriver(ask_tool=...)`` emits a ``tool_end`` with NO
+    ``output_preview`` (-> ``_tool_result`` returns ``{}`` -> ``(done)``), so it
+    can never exceed 8 lines. This subclass mirrors the ``_ToolEngine`` fixture
+    used elsewhere in this file and threads a real >8-line ``output_preview``.
+    """
+
+    def __init__(self, *, count: int = 1, lines: int = 12) -> None:
+        super().__init__()
+        self._count = count
+        self._lines = lines
+
+    async def run_turn_stream(self, runtime, turn_input, *, cancel, gate=None):
+        turn_id = getattr(turn_input, "turn_id", "t")
+        for idx in range(self._count):
+            call_id = f"call-{idx}"
+            yield RuntimeEvent(
+                type="tool",
+                payload={
+                    "type": "tool_start",
+                    "id": call_id,
+                    "name": "Bash",
+                    "input_preview": '{"command": "ls"}',
+                },
+                turn_id=turn_id,
+            )
+            yield RuntimeEvent(
+                type="tool",
+                payload={
+                    "type": "tool_end",
+                    "id": call_id,
+                    "status": "ok",
+                    "output_preview": _multiline_output(self._lines),
+                },
+                turn_id=turn_id,
+            )
+        yield EngineResult(terminal=Terminal.completed, turn_id=turn_id)
+
+
+# -- Task 2: flag + state fields (default-OFF, session-global) ---------------
+def test_expand_flag_defaults_off(monkeypatch) -> None:
+    monkeypatch.delenv("MAGI_TUI_EXPAND_TOOLS", raising=False)
+    app = _make_app(FakeEngineDriver())
+    assert app._expand_tools is False
+    assert app._tool_cards == []
+    assert app._expand_hint_shown is False
+
+
+def test_expand_flag_reads_env(monkeypatch) -> None:
+    monkeypatch.setenv("MAGI_TUI_EXPAND_TOOLS", "1")
+    app = _make_app(FakeEngineDriver())
+    assert app._expand_tools is True
+
+
+def test_expand_state_survives_turn(monkeypatch) -> None:
+    async def _run() -> None:
+        monkeypatch.setenv("MAGI_TUI_EXPAND_TOOLS", "1")
+        app = _make_app(FakeEngineDriver(tokens=["ok"]))
+        async with app.run_test() as pilot:
+            cards_before = app._tool_cards
+            app.start_turn("hi")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            # Session-global: a turn does NOT reset expand state.
+            assert app._expand_tools is True
+            assert app._tool_cards is cards_before
+
+    asyncio.run(_run())
+
+
+# -- Task 3: ctrl+o binding + action_toggle_expand (real dispatch) -----------
+def test_ctrl_o_toggles_expand_flag(monkeypatch) -> None:
+    async def _run() -> None:
+        monkeypatch.delenv("MAGI_TUI_EXPAND_TOOLS", raising=False)
+        app = _make_app(FakeEngineDriver())
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            assert app._expand_tools is False
+            await pilot.press("ctrl+o")
+            await pilot.pause()
+            assert app._expand_tools is True
+            await pilot.press("ctrl+o")
+            await pilot.pause()
+            assert app._expand_tools is False
+
+    asyncio.run(_run())
+
+
+def test_ctrl_o_binding_present_and_no_collision() -> None:
+    from textual.binding import Binding
+
+    from magi_agent.cli.keybindings.defaults import DEFAULT_SPEC
+
+    def _key(binding: object) -> str:
+        if isinstance(binding, Binding):
+            return binding.key
+        return binding[0]
+
+    keys = [_key(b) for b in MagiTuiApp.BINDINGS]
+    assert keys.count("ctrl+o") == 1, "ctrl+o must be bound exactly once"
+    # ctrl+o is NOT a keybindings default, so it bubbles to the App BINDING.
+    default_keys = {chord for _ctx, chord, _action in DEFAULT_SPEC}
+    assert "ctrl+o" not in default_keys
+
+
+# -- Task 4: expand-ON mounts a collapsed ToolCard via commit_tool ----------
+def test_expand_on_mounts_collapsed_card(monkeypatch) -> None:
+    async def _run() -> None:
+        from magi_agent.cli.tui.tool_render import build_tool_renderers
+        from magi_agent.cli.tui.widgets.tool_card import ToolCard
+
+        monkeypatch.delenv("MAGI_TUI_LEGACY_RICHLOG", raising=False)
+        monkeypatch.setenv("MAGI_TUI_EXPAND_TOOLS", "1")
+        app = MagiTuiApp(
+            engine=_MultiLineToolEngine(),
+            gate=AllowGate(),
+            commands=FakeRegistry(["compact"]),
+            renderers=build_tool_renderers(),
+        )
+        async with app.run_test() as pilot:
+            app.start_turn("run ls")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert len(app.query(ToolCard)) == 1
+            assert app.query_one(ToolCard).collapsed is True
+
+    asyncio.run(_run())
+
+
+def test_default_still_flat_with_output(monkeypatch) -> None:
+    async def _run() -> None:
+        from magi_agent.cli.tui.tool_render import build_tool_renderers
+        from magi_agent.cli.tui.widgets.tool_card import ToolCard
+
+        monkeypatch.delenv("MAGI_TUI_LEGACY_RICHLOG", raising=False)
+        monkeypatch.delenv("MAGI_TUI_EXPAND_TOOLS", raising=False)
+        app = MagiTuiApp(
+            engine=_MultiLineToolEngine(),
+            gate=AllowGate(),
+            commands=FakeRegistry(["compact"]),
+            renderers=build_tool_renderers(),
+        )
+        async with app.run_test() as pilot:
+            app.start_turn("run ls")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert len(app.query(ToolCard)) == 0
+            joined = "\n".join(app.controller.committed_blocks_snapshot())
+            assert "Bash" in joined
+
+    asyncio.run(_run())
+
+
+# -- Task 5: full output reaches the card body + ctrl+o retro-flips ----------
+def _card_body_text(card: object) -> str:
+    """Extract the displayed text of a ToolCard body (the wrapped Static).
+
+    A ``Collapsible``'s title is itself a ``Static`` subclass, so scope the body
+    lookup to the ``Collapsible.Contents`` container (where ``from_render_node``
+    mounts the body ``Static``) to avoid matching the title.
+    """
+
+    from textual.widgets import Collapsible, Static
+
+    body = card.query_one(Collapsible.Contents).query_one(Static)
+    # ``Static`` stores its original renderable in the name-mangled
+    # ``_Static__content`` (this Textual has no public ``.renderable``).
+    renderable = getattr(body, "_Static__content", None)
+    if renderable is None:
+        renderable = body.render()
+    plain = getattr(renderable, "plain", None)
+    return plain if isinstance(plain, str) else str(renderable)
+
+
+def test_expand_body_carries_full_output(monkeypatch) -> None:
+    async def _run() -> None:
+        from magi_agent.cli.tui.tool_render import build_tool_renderers
+        from magi_agent.cli.tui.widgets.tool_card import ToolCard
+
+        monkeypatch.delenv("MAGI_TUI_LEGACY_RICHLOG", raising=False)
+        # Expand ON: the line beyond the 8-line cap reaches the card body.
+        monkeypatch.setenv("MAGI_TUI_EXPAND_TOOLS", "1")
+        app_on = MagiTuiApp(
+            engine=_MultiLineToolEngine(),
+            gate=AllowGate(),
+            commands=FakeRegistry(["compact"]),
+            renderers=build_tool_renderers(),
+        )
+        async with app_on.run_test() as pilot:
+            app_on.start_turn("run ls")
+            await app_on.workers.wait_for_complete()
+            await pilot.pause()
+            card = app_on.query_one(ToolCard)
+            assert "L12" in _card_body_text(card)
+
+        # Expand OFF (sibling run, same data): L12 is dropped, marker present —
+        # fidelity differs by MODE, not data loss.
+        monkeypatch.delenv("MAGI_TUI_EXPAND_TOOLS", raising=False)
+        app_off = MagiTuiApp(
+            engine=_MultiLineToolEngine(),
+            gate=AllowGate(),
+            commands=FakeRegistry(["compact"]),
+            renderers=build_tool_renderers(),
+        )
+        async with app_off.run_test() as pilot:
+            app_off.start_turn("run ls")
+            await app_off.workers.wait_for_complete()
+            await pilot.pause()
+            joined = "\n".join(app_off.controller.committed_blocks_snapshot())
+            assert "L12" not in joined
+            assert "… (+" in joined
+
+    asyncio.run(_run())
+
+
+def test_ctrl_o_retro_flips_mounted_cards(monkeypatch) -> None:
+    async def _run() -> None:
+        from magi_agent.cli.tui.tool_render import build_tool_renderers
+        from magi_agent.cli.tui.widgets.tool_card import ToolCard
+
+        monkeypatch.delenv("MAGI_TUI_LEGACY_RICHLOG", raising=False)
+        monkeypatch.setenv("MAGI_TUI_EXPAND_TOOLS", "1")
+        app = MagiTuiApp(
+            engine=_MultiLineToolEngine(count=2),
+            gate=AllowGate(),
+            commands=FakeRegistry(["compact"]),
+            renderers=build_tool_renderers(),
+        )
+        async with app.run_test() as pilot:
+            app.start_turn("run ls")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            cards = app.query(ToolCard)
+            assert len(cards) == 2
+            assert all(c.collapsed is True for c in cards)
+            # First ctrl+o flips _expand_tools True->False; action sets each
+            # card.collapsed = not False = True (no visible change).
+            await pilot.press("ctrl+o")
+            await pilot.pause()
+            assert all(c.collapsed is True for c in app.query(ToolCard))
+            # Second ctrl+o flips False->True; sets each card.collapsed = False.
+            await pilot.press("ctrl+o")
+            await pilot.pause()
+            assert all(c.collapsed is False for c in app.query(ToolCard))
+
+    asyncio.run(_run())
+
+
+# -- Task 6: one-time discoverability hint + bounded retro-flip window -------
+def test_one_time_expand_hint(monkeypatch) -> None:
+    async def _run() -> None:
+        from magi_agent.cli.tui.tool_render import build_tool_renderers
+
+        monkeypatch.delenv("MAGI_TUI_LEGACY_RICHLOG", raising=False)
+        monkeypatch.delenv("MAGI_TUI_EXPAND_TOOLS", raising=False)
+        app = MagiTuiApp(
+            engine=_MultiLineToolEngine(count=2),
+            gate=AllowGate(),
+            commands=FakeRegistry(["compact"]),
+            renderers=build_tool_renderers(),
+        )
+        async with app.run_test() as pilot:
+            app.start_turn("run ls")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            joined = "\n".join(app.controller.committed_blocks_snapshot())
+            # Hint appears exactly once across BOTH truncated tool results.
+            assert joined.count("(ctrl+o to expand") == 1
+
+    asyncio.run(_run())
+
+
+def test_no_hint_when_not_truncated(monkeypatch) -> None:
+    async def _run() -> None:
+        from magi_agent.cli.tui.tool_render import build_tool_renderers
+
+        monkeypatch.delenv("MAGI_TUI_LEGACY_RICHLOG", raising=False)
+        monkeypatch.delenv("MAGI_TUI_EXPAND_TOOLS", raising=False)
+        # Short output (<= 8 lines) is not truncated -> no hint.
+        app = MagiTuiApp(
+            engine=_MultiLineToolEngine(lines=3),
+            gate=AllowGate(),
+            commands=FakeRegistry(["compact"]),
+            renderers=build_tool_renderers(),
+        )
+        async with app.run_test() as pilot:
+            app.start_turn("run ls")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            joined = "\n".join(app.controller.committed_blocks_snapshot())
+            assert "(ctrl+o to expand" not in joined
+
+    asyncio.run(_run())
+
+
+def test_tool_cards_list_capped(monkeypatch) -> None:
+    async def _run() -> None:
+        from magi_agent.cli.tui import app as app_mod
+        from magi_agent.cli.tui.tool_render import build_tool_renderers
+
+        monkeypatch.delenv("MAGI_TUI_LEGACY_RICHLOG", raising=False)
+        monkeypatch.setenv("MAGI_TUI_EXPAND_TOOLS", "1")
+        cap = app_mod._MAX_TRACKED_TOOL_CARDS
+        app = MagiTuiApp(
+            engine=_MultiLineToolEngine(count=cap + 2),
+            gate=AllowGate(),
+            commands=FakeRegistry(["compact"]),
+            renderers=build_tool_renderers(),
+        )
+        async with app.run_test() as pilot:
+            app.start_turn("run ls")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert len(app._tool_cards) <= cap
+
+    asyncio.run(_run())
+
+
+# -- Task 7: legacy RichLog degrade (expand ON = no-op) ----------------------
+def test_expand_on_legacy_richlog_no_card(monkeypatch) -> None:
+    async def _run() -> None:
+        from magi_agent.cli.tui.tool_render import build_tool_renderers
+        from magi_agent.cli.tui.widgets.tool_card import ToolCard
+
+        monkeypatch.setenv("MAGI_TUI_LEGACY_RICHLOG", "1")
+        monkeypatch.setenv("MAGI_TUI_EXPAND_TOOLS", "1")
+        app = MagiTuiApp(
+            engine=_MultiLineToolEngine(),
+            gate=AllowGate(),
+            commands=FakeRegistry(["compact"]),
+            renderers=build_tool_renderers(),
+        )
+        async with app.run_test() as pilot:
+            app.start_turn("run ls")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            # RichLog can't host a Collapsible -> no card; header still lands.
+            assert len(app.query(ToolCard)) == 0
+            joined = "\n".join(app.controller.committed_blocks_snapshot())
+            assert "Bash" in joined
+
+    asyncio.run(_run())
