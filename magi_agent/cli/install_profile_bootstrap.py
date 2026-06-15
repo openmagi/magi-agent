@@ -2,12 +2,12 @@
 
 WHY THIS EXISTS
 ---------------
-Every runtime feature gate reads the **process ENV** (``MAGI_*`` /
-``CORE_AGENT_*``). A fresh install therefore starts with all opt-in gates OFF
-unless the operator manually exports them every launch. This module bridges that
-gap: at real CLI startup it loads a ``KEY=VAL`` profile file and ``setdefault``s
-each matching env var, so a packaged install (e.g. Homebrew seeds
-``~/.magi/profile.env``) boots with its chosen profile already on.
+Every runtime feature gate reads the **process ENV** (``MAGI_*``). A fresh
+install therefore starts with all opt-in gates OFF unless the operator manually
+exports them every launch. This module bridges that gap: at real CLI startup it
+loads a ``KEY=VAL`` profile file and ``setdefault``s each matching env var, so a
+packaged install (e.g. Homebrew seeds ``~/.magi/profile.env``) boots with its
+chosen profile already on.
 
 INSTALL-DEFAULT, CODE-DEFAULT-OFF
 ---------------------------------
@@ -20,8 +20,8 @@ PRECEDENCE + SAFETY
 -------------------
 * Each key is applied via ``os.environ.setdefault`` so an explicit pre-set env
   var STILL WINS. Precedence: ``env > profile file``.
-* Only ``MAGI_`` / ``CORE_AGENT_`` keys are honoured — the profile can never
-  inject ``PATH``/``HOME``/etc.
+* Only ``MAGI_`` keys are honoured — the profile can never inject
+  ``PATH``/``HOME``/etc.
 * Fail-soft: an unreadable/malformed file (or line) never crashes startup; valid
   lines are still applied.
 
@@ -43,7 +43,7 @@ DEFAULT_PROFILE_PATH = Path.home() / ".magi" / "profile.env"
 
 #: Only keys with these prefixes are applied (the profile cannot set arbitrary
 #: process env such as ``PATH``/``HOME``).
-_ALLOWED_PREFIXES = ("MAGI_", "CORE_AGENT_")
+_ALLOWED_PREFIXES = ("MAGI_",)
 
 
 def apply_install_profile_bootstrap(

@@ -70,9 +70,9 @@ def main(argv: Sequence[str] | None = None) -> None:
     # unless config/env explicitly enables it.
     if local_full_runtime_defaults_enabled(os.environ):
         # File-driven install profile (e.g. Homebrew-seeded ~/.magi/profile.env):
-        # setdefault MAGI_*/CORE_AGENT_* flags BEFORE the memory bootstrap so a
-        # profile that sets MAGI_RUNTIME_PROFILE/memory flags is honoured. No file
-        # => no-op (pip installs stay at code defaults). Explicit env still wins.
+        # setdefault MAGI_* flags BEFORE the memory bootstrap so a profile that
+        # sets MAGI_RUNTIME_PROFILE/memory flags is honoured. No file => no-op
+        # (pip installs stay at code defaults). Explicit env still wins.
         from .cli.install_profile_bootstrap import apply_install_profile_bootstrap
 
         apply_install_profile_bootstrap(os.environ)

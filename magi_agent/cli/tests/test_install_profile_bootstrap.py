@@ -63,19 +63,19 @@ def test_export_prefix_and_comments_and_blanks(tmp_path: Path) -> None:
     assert env["MAGI_CHILD_RUNNER_TOOLSET"] == "readonly"
 
 
-def test_only_magi_and_core_agent_keys_applied(tmp_path: Path) -> None:
+def test_only_magi_keys_applied(tmp_path: Path) -> None:
     profile = _write(
         tmp_path / "profile.env",
         "PATH=/evil/bin\n"
         "HOME=/tmp/evil\n"
-        "MAGI_FOO=1\n"
-        "CORE_AGENT_BAR=2\n",
+        "OTHER_PREFIX_BAR=2\n"
+        "MAGI_FOO=1\n",
     )
     env: dict[str, str] = {}
 
     apply_install_profile_bootstrap(env, profile_path=profile)
 
-    assert env == {"MAGI_FOO": "1", "CORE_AGENT_BAR": "2"}
+    assert env == {"MAGI_FOO": "1"}
 
 
 def test_quoted_values_unwrapped(tmp_path: Path) -> None:
