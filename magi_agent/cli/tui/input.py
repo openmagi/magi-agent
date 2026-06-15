@@ -106,6 +106,10 @@ class PromptInput(TextArea):
         # A single-line-looking prompt by default; grows as the user types.
         self.show_line_numbers = False
         self.soft_wrap = True
+        # INVARIANT: ``tab_behavior`` MUST stay the default "focus". Under
+        # "indent" the base TextArea swallows Escape (_text_area.py: escape stop
+        # is guarded on tab_behavior=="indent"), which would silently break the
+        # idle-Esc arm-then-quit path (Esc would never bubble to the app).
         # Per-session ↑/↓ recall ring (wired by the App via attach_history).
         self._history: "InputHistory | None" = None
 
@@ -243,6 +247,20 @@ class PromptInput(TextArea):
             self.post_message(self.AttachImageRequested())
             return
         if event.key == "enter":
+            # IME / CJK composition note (no defer needed here — analysis only):
+            # React-style TUIs (e.g. OpenCode) double-``setTimeout`` before
+            # submit to dodge a batching race where a composed Hangul/CJK string
+            # hasn't flushed to state when the keydown handler reads it. Textual's
+            # input pump is SYNCHRONOUS and ordered: the XTerm parser emits one
+            # printable ``Key`` per committed syllable, each handled by the base
+            # ``TextArea`` before this Enter handler runs, so ``self.text`` already
+            # holds the full committed buffer. The React race does not exist; a
+            # submit-defer would be cargo-cult. Two residuals are TERMINAL-owned,
+            # not fixable here: (1) an UNCOMMITTED IME composition still in the
+            # terminal's overlay was never sent as bytes, so neither Textual nor
+            # we ever see it (most IMEs make Enter commit first, then submit on a
+            # second Enter — correct, do not override); (2) terminals lacking
+            # proper wide-char/grapheme handling. See design gap ``cjk-width-ime``.
             event.stop()
             event.prevent_default()
             self.submit()
@@ -268,4 +286,21 @@ class PromptInput(TextArea):
                     event.prevent_default()
                     self._set_text(recalled)
                     return
+        # Ctrl+D is fully owned here so it never bubbles to the app's keybinding
+        # resolver, where ctrl+d is mapped to global:quit (a bare, single-press
+        # exit — exit-safety regression). On an EMPTY buffer it is a quit gesture
+        # routed to the arm-then-quit debounce; on a NON-empty buffer it keeps
+        # the conventional delete-right (via the base TextArea action) with NO
+        # quit/arm. Stopping the event in both cases is what suppresses the dead
+        # global:quit mapping for the focused prompt.
+        if event.key == "ctrl+d":
+            event.stop()
+            event.prevent_default()
+            if not self.text.strip():
+                # ``_call_app`` does a direct getattr, so name the real method
+                # (``action_request_quit``), which also accepts the origin key.
+                self._call_app("action_request_quit", "ctrl+d")
+            else:
+                self.action_delete_right()
+            return
         await super()._on_key(event)

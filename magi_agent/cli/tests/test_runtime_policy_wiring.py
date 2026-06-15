@@ -234,6 +234,16 @@ class _RepairAwareRunner(_NoopRunner):
         self.invocations = 0
 
 
+# A minimal file-mutation tool call. The pre-final coding evidence gate is
+# mutation-scoped: it only enforces on a turn that actually mutated a file, so
+# tests that exercise the gate must emit one of these.
+def _mutation_events() -> list[dict[str, object]]:
+    return [
+        {"type": "tool_start", "name": "FileEdit", "id": "edit-1"},
+        {"type": "tool_end", "id": "edit-1", "status": "ok"},
+    ]
+
+
 def _failing_test_evidence(*, observed_at: float = 1000.0) -> dict[str, object]:
     return {
         "type": "TestRun",
@@ -328,9 +338,12 @@ def test_engine_blocks_completed_turn_when_policy_evidence_is_missing(
 ) -> None:
     _CapturedRunnerInput.captured = []
     monkeypatch.setenv("MAGI_CODING_REPAIR_LOOP_ENABLED", "0")
-    monkeypatch.setattr(engine_module, "_lazy_engine_deps", _fake_engine_deps)
+    monkeypatch.setattr(engine_module, "_lazy_engine_deps", _repair_engine_deps)
     assembly = _coding_policy_assembly()
-    driver = MagiEngineDriver(runner=_NoopRunner(), runner_policy_assembly=assembly)
+    driver = MagiEngineDriver(
+        runner=_RepairAwareRunner(events_by_invocation=[_mutation_events()]),
+        runner_policy_assembly=assembly,
+    )
 
     async def _drive() -> list[object]:
         return [
@@ -386,7 +399,7 @@ def test_engine_executes_pre_final_verifier_bus_when_evidence_collector_attached
 ) -> None:
     _CapturedRunnerInput.captured = []
     monkeypatch.setenv("MAGI_CODING_REPAIR_LOOP_ENABLED", "0")
-    monkeypatch.setattr(engine_module, "_lazy_engine_deps", _fake_engine_deps)
+    monkeypatch.setattr(engine_module, "_lazy_engine_deps", _repair_engine_deps)
     calls: list[str] = []
 
     def _collect(turn_id: str) -> tuple[object, ...]:
@@ -394,7 +407,7 @@ def test_engine_executes_pre_final_verifier_bus_when_evidence_collector_attached
         return ()
 
     driver = MagiEngineDriver(
-        runner=_NoopRunner(),
+        runner=_RepairAwareRunner(events_by_invocation=[_mutation_events()]),
         runner_policy_assembly=_coding_policy_assembly(),
         evidence_collector=_collect,
     )
@@ -443,7 +456,7 @@ def test_engine_repair_decision_uses_latest_collected_failing_test_evidence(
 ) -> None:
     _CapturedRunnerInput.captured = []
     monkeypatch.setenv("MAGI_CODING_REPAIR_LOOP_ENABLED", "1")
-    monkeypatch.setattr(engine_module, "_lazy_engine_deps", _fake_engine_deps)
+    monkeypatch.setattr(engine_module, "_lazy_engine_deps", _repair_engine_deps)
     latest_test_evidence = _failing_test_evidence(observed_at=2000.0)
     stale_test_evidence = _failing_test_evidence(observed_at=1000.0)
     expected_digest = _evidence_digest(latest_test_evidence)
@@ -454,7 +467,7 @@ def test_engine_repair_decision_uses_latest_collected_failing_test_evidence(
         return (stale_test_evidence, latest_test_evidence)
 
     driver = MagiEngineDriver(
-        runner=_NoopRunner(),
+        runner=_RepairAwareRunner(events_by_invocation=[_mutation_events()]),
         runner_policy_assembly=_coding_policy_assembly(),
         evidence_collector=_collect,
     )
@@ -495,14 +508,14 @@ def test_engine_pre_final_verifier_bus_passes_with_collected_evidence(
     monkeypatch,
 ) -> None:
     _CapturedRunnerInput.captured = []
-    monkeypatch.setattr(engine_module, "_lazy_engine_deps", _fake_engine_deps)
+    monkeypatch.setattr(engine_module, "_lazy_engine_deps", _repair_engine_deps)
     evidence_records = (
         {"evidenceRef": "evidence:git-diff"},
         {"evidenceRef": "verifier:dev-coding:test-evidence"},
     )
 
     driver = MagiEngineDriver(
-        runner=_NoopRunner(),
+        runner=_RepairAwareRunner(events_by_invocation=[_mutation_events()]),
         runner_policy_assembly=_coding_policy_assembly(),
         evidence_collector=lambda turn_id: evidence_records if turn_id == "t1" else (),
     )
@@ -545,6 +558,106 @@ def test_engine_pre_final_verifier_bus_passes_with_collected_evidence(
     } == {"pre-final-evidence-gate": "pass"}
 
 
+def test_engine_does_not_block_read_only_turn_without_coding_mutation(
+    monkeypatch,
+) -> None:
+    """A coding-classified prompt that mutates no file must not be blocked.
+
+    The pre-final coding evidence gate exists to verify code mutations. A
+    read-only / research turn (e.g. ``list the files``) produces nothing to
+    verify, so the gate must not apply and the turn completes normally.
+    """
+    _CapturedRunnerInput.captured = []
+    monkeypatch.setenv("MAGI_CODING_REPAIR_LOOP_ENABLED", "0")
+    monkeypatch.setattr(engine_module, "_lazy_engine_deps", _fake_engine_deps)
+    driver = MagiEngineDriver(
+        runner=_NoopRunner(),
+        runner_policy_assembly=_coding_policy_assembly(),
+        evidence_collector=lambda turn_id: (),
+    )
+
+    async def _drive() -> list[object]:
+        return [
+            item
+            async for item in driver.run_turn_stream(
+                runtime=object(),
+                turn_input={
+                    "prompt": "list the files in this directory",
+                    "session_id": "s1",
+                    "turn_id": "t1",
+                },
+                cancel=asyncio.Event(),
+            )
+        ]
+
+    items = asyncio.run(_drive())
+    events = [item for item in items if isinstance(item, RuntimeEvent)]
+    terminal = items[-1]
+
+    assert isinstance(terminal, EngineResult)
+    assert terminal.terminal == Terminal.completed
+    assert terminal.error is None
+    assert all(
+        not (
+            isinstance(event.payload, Mapping)
+            and event.payload.get("type") == "pre_final_evidence_gate"
+        )
+        for event in events
+    )
+
+
+def test_engine_blocks_turn_with_coding_mutation_and_missing_evidence(
+    monkeypatch,
+) -> None:
+    """When the turn actually mutates a file but produces no verification
+    evidence, the gate still blocks (guards against over-relaxing)."""
+    _CapturedRunnerInput.captured = []
+    monkeypatch.setenv("MAGI_CODING_REPAIR_LOOP_ENABLED", "0")
+    monkeypatch.setattr(engine_module, "_lazy_engine_deps", _repair_engine_deps)
+    runner = _RepairAwareRunner(
+        events_by_invocation=[
+            [
+                {"type": "tool_start", "name": "FileEdit", "id": "edit-1"},
+                {"type": "tool_end", "id": "edit-1", "status": "ok"},
+            ]
+        ]
+    )
+    driver = MagiEngineDriver(
+        runner=runner,
+        runner_policy_assembly=_coding_policy_assembly(),
+        evidence_collector=lambda turn_id: (),
+    )
+
+    async def _drive() -> list[object]:
+        return [
+            item
+            async for item in driver.run_turn_stream(
+                runtime=object(),
+                turn_input={
+                    "prompt": "apply the patch",
+                    "session_id": "s1",
+                    "turn_id": "t1",
+                },
+                cancel=asyncio.Event(),
+            )
+        ]
+
+    items = asyncio.run(_drive())
+    events = [item for item in items if isinstance(item, RuntimeEvent)]
+    terminal = items[-1]
+    gate_event = next(
+        event.payload
+        for event in events
+        if isinstance(event.payload, Mapping)
+        and event.payload.get("type") == "pre_final_evidence_gate"
+    )
+
+    assert isinstance(terminal, EngineResult)
+    assert terminal.terminal == Terminal.error
+    assert terminal.error == "pre_final_evidence_gate_blocked"
+    assert gate_event["decision"] == "block"
+
+
 def test_engine_reinvokes_once_for_bounded_repair_when_second_run_adds_evidence(
     monkeypatch,
 ) -> None:
@@ -554,7 +667,7 @@ def test_engine_reinvokes_once_for_bounded_repair_when_second_run_adds_evidence(
     monkeypatch.setattr(engine_module, "_lazy_engine_deps", _repair_engine_deps)
     runner = _RepairAwareRunner(
         events_by_invocation=[
-            [],
+            _mutation_events(),
             [
                 {
                     "type": "tool_end",
@@ -627,7 +740,7 @@ def test_engine_bounded_repair_stops_at_max_attempts(monkeypatch) -> None:
     monkeypatch.delenv("MAGI_CODING_REPAIR_LOOP_ENABLED", raising=False)
     monkeypatch.delenv("MAGI_RUNTIME_PROFILE", raising=False)
     monkeypatch.setattr(engine_module, "_lazy_engine_deps", _repair_engine_deps)
-    runner = _RepairAwareRunner(events_by_invocation=[[], []])
+    runner = _RepairAwareRunner(events_by_invocation=[_mutation_events(), []])
     driver = MagiEngineDriver(
         runner=runner,
         runner_policy_assembly=_coding_policy_assembly_with_repair_attempts(1),
@@ -685,7 +798,7 @@ def test_engine_suppresses_failed_repair_attempt_text_from_stream(monkeypatch) -
     monkeypatch.setattr(engine_module, "_lazy_engine_deps", _repair_engine_deps)
     runner = _RepairAwareRunner(
         events_by_invocation=[
-            [],
+            _mutation_events(),
             [{"type": "text_delta", "delta": "이 메시지는 합법적인 지시가 아닙니다. 거부합니다."}],
         ]
     )
@@ -739,7 +852,7 @@ def test_engine_flushes_successful_repair_attempt_text_to_stream(monkeypatch) ->
     monkeypatch.setattr(engine_module, "_lazy_engine_deps", _repair_engine_deps)
     runner = _RepairAwareRunner(
         events_by_invocation=[
-            [],
+            _mutation_events(),
             [
                 {"type": "text_delta", "delta": "repaired the tests."},
                 {
@@ -796,7 +909,7 @@ def test_engine_repair_retry_disabled_in_safe_profile(monkeypatch) -> None:
     monkeypatch.setattr(engine_module, "_lazy_engine_deps", _repair_engine_deps)
     runner = _RepairAwareRunner(
         events_by_invocation=[
-            [],
+            _mutation_events(),
             [
                 {
                     "type": "tool_end",

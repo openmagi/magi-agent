@@ -91,6 +91,36 @@ def test_sidebar_recent_files_display_shortened_but_keys_full_path() -> None:
     asyncio.run(_run())
 
 
+def test_shorten_file_cjk_is_cell_bounded() -> None:
+    """A long Hangul basename shortens to ``MAX_FILE_DISPLAY_WIDTH`` *cells*, not
+    codepoints (which would be ~2x and overflow the 32-wide dock), leads with
+    ``…``, and the stored dedup key remains the FULL path."""
+
+    from magi_agent.cli.render.width import display_width
+    from magi_agent.cli.tui import sidebar as sidebar_mod
+
+    async def _run() -> None:
+        sidebar = Sidebar(id="sidebar")
+        app = _Harness(sidebar)
+        full_path = "lib/services/" + "파일이름" * 8 + ".py"
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            sidebar.add_file(full_path)
+            await pilot.pause()
+            text = sidebar.panes_text()
+            files = sidebar.recent_files()
+
+        # The shortened DISPLAY line is cell-bounded and leads with ``…``.
+        shortened = sidebar_mod._shorten_file(full_path)
+        assert display_width(shortened) <= sidebar_mod.MAX_FILE_DISPLAY_WIDTH
+        assert shortened.startswith("…")
+        assert shortened in text
+        # Dedup key keeps the FULL path exactly once (display never corrupts it).
+        assert files == [full_path]
+
+    asyncio.run(_run())
+
+
 def test_sidebar_recent_files_dedupe_and_cap() -> None:
     async def _run() -> None:
         sidebar = Sidebar(id="sidebar")

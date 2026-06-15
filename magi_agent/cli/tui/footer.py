@@ -42,6 +42,12 @@ class StatusFooter(Static):
     state: reactive[str] = reactive("idle")
     tokens: reactive[int] = reactive(0)
     elapsed: reactive[float] = reactive(0.0)
+    # The current-activity word (e.g. "Bash" or "Bash · no output 12s"). The App
+    # composes the FULLY-rendered string (tool name + optional stall suffix at
+    # integer-second granularity) and assigns it via ``set_activity``; the footer
+    # is a dumb renderer that only appends it while ``state == "running"``.
+    activity: reactive[str] = reactive("")
+    queued: reactive[int] = reactive(0)
 
     def __init__(
         self,
@@ -74,6 +80,17 @@ class StatusFooter(Static):
     def set_elapsed(self, seconds: float) -> None:
         self.elapsed = max(0.0, float(seconds))
 
+    def set_activity(self, text: str) -> None:
+        # Assign only — NEVER call ``_repaint`` here; ``watch_activity`` repaints
+        # (one repaint pattern, not two). This relies on Textual's reactive
+        # equality short-circuit: assigning the SAME composed string does not
+        # fire ``watch_activity``, so the ~25Hz flush tick that re-asserts an
+        # unchanged integer-second activity string repaints at most once/second.
+        self.activity = text
+
+    def set_queued(self, n: int) -> None:
+        self.queued = max(0, int(n))
+
     # -- reactive watchers (the ONE repaint path) ---------------------------
     def watch_model(self, _old: str, _new: str) -> None:
         self._repaint()
@@ -94,14 +111,38 @@ class StatusFooter(Static):
         if int(_old) != int(_new):
             self._repaint()
 
+    def watch_activity(self, _old: str, _new: str) -> None:
+        # Repaints only when the composed activity string actually changes —
+        # Textual short-circuits ``watch_`` for equal new == old, which is the
+        # load-bearing throttle that collapses identical integer-second stall
+        # strings re-asserted on every flush tick into a single repaint/second.
+        self._repaint()
+
+    def watch_queued(self, _old: int, _new: int) -> None:
+        self._repaint()
+
     # -- rendering -----------------------------------------------------------
     def status_text(self) -> str:
         """The exact text the footer displays (asserted by tests)."""
 
-        return (
+        # Append the current-activity word ONLY while running and non-empty, so
+        # idle/terminal text stays byte-identical to the historical five-field
+        # format (no stray ` · ` ever leaks in). The App composes ``activity``
+        # (tool name + optional stall suffix); the footer just renders it.
+        state = self.state
+        if state == "running" and self.activity:
+            state = f"{state} · {self.activity}"
+        base = (
             f"{self.model}   {self.cwd}   "
-            f"{self.state}   {self.tokens:,} tok   {int(self.elapsed)}s"
+            f"{state}   {self.tokens:,} tok   {int(self.elapsed)}s"
         )
+        # Append the queued badge ONLY while a turn runs (running-only
+        # affordance) and the queue is non-empty. When queued==0 the line is
+        # byte-for-byte the five-field string, so every existing footer
+        # assertion is unchanged.
+        if self.queued > 0 and self.state == "running":
+            base += f" · {self.queued} queued"
+        return base
 
     def _repaint(self) -> None:
         # ``update`` is a cheap single-widget refresh (Textual only re-renders
