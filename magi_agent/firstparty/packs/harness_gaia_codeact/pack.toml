@@ -1,0 +1,12 @@
+# Bundled first-party harness pack (no privilege; same loader/format).
+# Schema = magi_agent/packs/manifest.py (top-level packId/displayName).
+
+packId = "openmagi.harness-gaia-codeact"
+displayName = "CodeAct harness"
+version = "1.0.0"
+description = "First-party CodeAct harness: bundles PersistentPython + CodeAct discipline, bundled as a removable pack."
+
+[[provides]]
+type = "harness"
+ref = "harness:gaia-codeact@1"
+impl = "magi_agent.firstparty.packs.harness_gaia_codeact.impl:provide_harness"
