@@ -25,6 +25,7 @@ from magi_agent.cli.contracts import (
     Terminal,
     ToolRendererRegistry,
 )
+from magi_agent.cli.keybindings.schema import Action
 from magi_agent.cli.tui.app import MagiTuiApp, TextualSink, ToolUseConfirm
 
 TUI = CommandSurface(tui=True, headless=False)
@@ -148,6 +149,11 @@ def test_tui_mount_renders_welcome_state() -> None:
         # Phase 2 doors advertised too: command palette + help.
         assert "Ctrl+P" in joined
         assert "F1" in joined
+        # Exit-safety: the banner must teach the REAL double-press gesture and
+        # mention Esc; it must NOT claim a single Ctrl+C is "again to quit".
+        assert "twice to quit" in joined
+        assert "Esc" in joined
+        assert "again to quit" not in joined
         assert app.last_terminal is None
 
     asyncio.run(_run())
@@ -331,10 +337,355 @@ def test_ctrl_c_cancels_when_running_quits_when_idle() -> None:
             assert app._cancel.is_set()
             assert exits == []
 
-            # Idle -> exit.
+            # Idle -> first press arms (no exit), second within-window quits.
             app._turn_active = False
             app.action_cancel_turn()
+            assert exits == []
+            assert app._quit_armed_at is not None
+            app.action_cancel_turn()
             assert exits == [True]
+            await pilot.pause()
+
+    asyncio.run(_run())
+
+
+def test_cancel_turn_carries_escape_key_via_run_key_action() -> None:
+    async def _run() -> None:
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            exits: list[bool] = []
+            app.exit = lambda *a, **k: exits.append(True)  # type: ignore[method-assign]
+            app._turn_active = False
+            app._input.text = "draft"
+            # Esc resolves to CHAT_CANCEL; the resolver must mark _cancel_key
+            # "escape" so the idle branch clears the buffer before arming.
+            app._run_key_action(Action.CHAT_CANCEL.value)
+            assert app._input.text == ""
+            assert exits == []
+            await pilot.pause()
+
+    asyncio.run(_run())
+
+
+def test_idle_esc_clears_nonempty_input_before_arming() -> None:
+    async def _run() -> None:
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            exits: list[bool] = []
+            app.exit = lambda *a, **k: exits.append(True)  # type: ignore[method-assign]
+            app._turn_active = False
+            app._input.text = "draft"
+            app._cancel_key = "escape"
+            app.action_cancel_turn()
+            assert app._input.text == ""
+            assert exits == []
+            assert app._quit_armed_at is None
+            await pilot.pause()
+
+    asyncio.run(_run())
+
+
+def test_idle_ctrl_c_does_not_clear_nonempty_input() -> None:
+    async def _run() -> None:
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            exits: list[bool] = []
+            app.exit = lambda *a, **k: exits.append(True)  # type: ignore[method-assign]
+            app._turn_active = False
+            app._input.text = "draft"
+            app._cancel_key = None  # Ctrl+C priority-Binding path
+            app.action_cancel_turn()
+            assert app._input.text == "draft"
+            assert app._quit_armed_at is not None
+            assert exits == []
+            await pilot.pause()
+
+    asyncio.run(_run())
+
+
+def test_kill_agents_idle_does_not_arm_quit() -> None:
+    async def _run() -> None:
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            exits: list[bool] = []
+            app.exit = lambda *a, **k: exits.append(True)  # type: ignore[method-assign]
+            # Idle kill-agents chord (ctrl+x ctrl+k) is cancel-only: a no-op
+            # when idle, never arms a quit.
+            app._turn_active = False
+            app._run_key_action(Action.CHAT_KILL_AGENTS.value)
+            assert exits == []
+            assert app._quit_armed_at is None
+            await pilot.pause()
+
+    asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
+# 5b-quit-safety (Pilot). Real key dispatch — direct action_* calls false-green
+# the routing (they bypass Textual's Ctrl+Q preemption / TextArea Ctrl+D consume).
+# ---------------------------------------------------------------------------
+def test_idle_esc_arms_then_quits_via_pilot() -> None:
+    async def _run() -> None:
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            app._input.focus()
+            await pilot.pause()
+            exits: list[bool] = []
+            app.exit = lambda *a, **k: exits.append(True)  # type: ignore[method-assign]
+            app._turn_active = False
+            # Real Esc -> on_key -> resolve -> CHAT_CANCEL -> action_cancel_turn
+            # -> _arm_or_quit. Depends on PromptInput keeping tab_behavior="focus"
+            # so Escape bubbles (TextArea swallows it under "indent").
+            await pilot.press("escape")
+            assert exits == []
+            assert app._quit_armed_at is not None
+            await pilot.press("escape")
+            assert exits == [True]
+
+    asyncio.run(_run())
+
+
+def test_idle_ctrl_c_arms_then_quits_via_pilot() -> None:
+    async def _run() -> None:
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            app._input.focus()
+            await pilot.pause()
+            exits: list[bool] = []
+            app.exit = lambda *a, **k: exits.append(True)  # type: ignore[method-assign]
+            app._turn_active = False
+            # Real Ctrl+C goes through the priority=True Binding (app BINDINGS)
+            # -> action_cancel_turn with _cancel_key unset -> "ctrl+c" (no clear).
+            await pilot.press("ctrl+c")
+            assert exits == []
+            assert app._quit_armed_at is not None
+            await pilot.press("ctrl+c")
+            assert exits == [True]
+
+    asyncio.run(_run())
+
+
+def test_ctrl_q_binding_is_priority() -> None:
+    from textual.binding import Binding
+
+    ctrl_q = [
+        b
+        for b in MagiTuiApp.BINDINGS
+        if isinstance(b, Binding) and b.key == "ctrl+q"
+    ]
+    assert ctrl_q, "ctrl+q must be a Binding to preempt Textual's built-in quit"
+    assert len(ctrl_q) == 1
+    assert ctrl_q[0].priority is True
+    assert ctrl_q[0].action == "request_quit"
+
+
+def test_idle_ctrl_q_routes_to_arming_not_textual_quit_via_pilot() -> None:
+    async def _run() -> None:
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            app._input.focus()
+            await pilot.pause()
+            exits: list[bool] = []
+            app.exit = lambda *a, **k: exits.append(True)  # type: ignore[method-assign]
+            app._turn_active = False
+            # Magi's priority=True ctrl+q must preempt Textual's built-in
+            # ctrl+q->quit; the first press arms instead of exiting.
+            await pilot.press("ctrl+q")
+            assert exits == []
+            assert app._quit_armed_at is not None
+            await pilot.press("ctrl+q")
+            assert exits == [True]
+
+    asyncio.run(_run())
+
+
+def test_idle_ctrl_d_empty_buffer_arms_via_pilot() -> None:
+    async def _run() -> None:
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            app._input.focus()
+            await pilot.pause()
+            app._input.text = ""
+            exits: list[bool] = []
+            app.exit = lambda *a, **k: exits.append(True)  # type: ignore[method-assign]
+            app._turn_active = False
+            # Empty-buffer Ctrl+D is intercepted in PromptInput._on_key before
+            # the base TextArea delete-right and calls up to request_quit.
+            await pilot.press("ctrl+d")
+            assert exits == []
+            assert app._quit_armed_at is not None
+            await pilot.press("ctrl+d")
+            assert exits == [True]
+
+    asyncio.run(_run())
+
+
+def test_ctrl_d_nonempty_buffer_deletes_not_quits_via_pilot() -> None:
+    async def _run() -> None:
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            app._input.focus()
+            await pilot.pause()
+            app._input.text = "abc"
+            app._input.move_cursor((0, 0))
+            exits: list[bool] = []
+            app.exit = lambda *a, **k: exits.append(True)  # type: ignore[method-assign]
+            app._turn_active = False
+            # Non-empty buffer: Ctrl+D stays forward-delete (no quit, no arm).
+            await pilot.press("ctrl+d")
+            assert app._input.text == "bc"
+            assert exits == []
+            assert app._quit_armed_at is None
+
+    asyncio.run(_run())
+
+
+def test_cross_key_arming_confirms_quit_via_pilot() -> None:
+    async def _run() -> None:
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            app._input.focus()
+            await pilot.pause()
+            app._input.text = ""  # empty so Esc arms (not clear-first)
+            exits: list[bool] = []
+            app.exit = lambda *a, **k: exits.append(True)  # type: ignore[method-assign]
+            app._turn_active = False
+            # Cross-key: Esc arms, then Ctrl+C within the window confirms quit
+            # (shared _quit_armed_at). Proven through real dispatch.
+            await pilot.press("escape")
+            assert exits == []
+            assert app._quit_armed_at is not None
+            await pilot.press("ctrl+c")
+            assert exits == [True]
+
+    asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
+# 5b-quit-safety. Idle Esc/Ctrl+C/Ctrl+Q/Ctrl+D are a taught double-press, not
+# a bare quit. See docs/plans/2026-06-14-magi-tui-ux/01-exit-cancel-safety.md.
+# ---------------------------------------------------------------------------
+def test_quit_armed_state_initialized_none() -> None:
+    async def _run() -> None:
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            assert app._quit_armed_at is None
+
+    asyncio.run(_run())
+
+
+def test_arm_or_quit_first_press_arms_and_toasts() -> None:
+    async def _run() -> None:
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            exits: list[bool] = []
+            app.exit = lambda *a, **k: exits.append(True)  # type: ignore[method-assign]
+            toasts: list[str] = []
+            import magi_agent.cli.tui.app as _appmod
+
+            monkey = _appmod._notify.info
+            _appmod._notify.info = lambda _app, msg, **k: toasts.append(msg)  # type: ignore[attr-defined]
+            try:
+                app._turn_active = False
+                app._arm_or_quit(key="ctrl+c")
+            finally:
+                _appmod._notify.info = monkey  # type: ignore[attr-defined]
+            assert exits == []
+            assert app._quit_armed_at is not None
+            assert toasts == ["Press again to quit"]
+            await pilot.pause()
+
+    asyncio.run(_run())
+
+
+def test_arm_or_quit_second_press_within_window_quits() -> None:
+    async def _run() -> None:
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            exits: list[bool] = []
+            app.exit = lambda *a, **k: exits.append(True)  # type: ignore[method-assign]
+            app._turn_active = False
+            app._arm_or_quit(key="ctrl+c")
+            assert exits == []
+            app._arm_or_quit(key="ctrl+c")
+            assert exits == [True]
+            await pilot.pause()
+
+    asyncio.run(_run())
+
+
+def test_arm_or_quit_disarms_after_window() -> None:
+    async def _run() -> None:
+        import time as _time
+
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            exits: list[bool] = []
+            app.exit = lambda *a, **k: exits.append(True)  # type: ignore[method-assign]
+            app._turn_active = False
+            app._arm_or_quit(key="ctrl+c")
+            assert app._quit_armed_at is not None
+            # Backdate the arm beyond the window -> the next press re-arms.
+            app._quit_armed_at = _time.monotonic() - (MagiTuiApp.QUIT_WINDOW_S + 1)
+            app._arm_or_quit(key="ctrl+c")
+            assert exits == []
+            assert app._quit_armed_at is not None
+            await pilot.pause()
+
+    asyncio.run(_run())
+
+
+def test_arm_or_quit_window_constant() -> None:
+    assert MagiTuiApp.QUIT_WINDOW_S == 1.5
+    assert MagiTuiApp.INSTANT_QUIT_ENV == "MAGI_TUI_INSTANT_QUIT"
+
+
+def test_instant_quit_env_bypasses_arming(monkeypatch) -> None:
+    monkeypatch.setenv("MAGI_TUI_INSTANT_QUIT", "1")
+
+    async def _run() -> None:
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            exits: list[bool] = []
+            app.exit = lambda *a, **k: exits.append(True)  # type: ignore[method-assign]
+            app._turn_active = False
+            app._arm_or_quit(key="ctrl+c")
+            assert exits == [True]
+            assert app._quit_armed_at is None
+            await pilot.pause()
+
+    asyncio.run(_run())
+
+
+def test_instant_quit_env_non_truthy_does_not_bypass(monkeypatch) -> None:
+    monkeypatch.setenv("MAGI_TUI_INSTANT_QUIT", "0")
+
+    async def _run() -> None:
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            exits: list[bool] = []
+            app.exit = lambda *a, **k: exits.append(True)  # type: ignore[method-assign]
+            app._turn_active = False
+            app._arm_or_quit(key="ctrl+c")
+            assert exits == []
+            assert app._quit_armed_at is not None
             await pilot.pause()
 
     asyncio.run(_run())

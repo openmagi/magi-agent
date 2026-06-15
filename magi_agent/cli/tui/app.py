@@ -881,11 +881,26 @@ class MagiTuiApp(App[None]):
         # to cursor-left); it is NOT in the keybindings defaults (defaults.py),
         # so on_key resolves it UNBOUND and lets it bubble to this App BINDING.
         Binding("ctrl+b", "toggle_sidebar", "Sidebar", priority=True),
+        # ctrl+q quits — but SAFELY (exit-safety). priority=True so it preempts
+        # Textual's OWN built-in Binding("ctrl+q","quit",priority=True): app
+        # dispatch runs priority bindings first and does NOT forward the event
+        # once one matches, so without this our resolver never sees ctrl+q and
+        # Textual would quit instantly on the first press. Routing it through
+        # action_request_quit -> _arm_or_quit makes the first press arm instead.
+        Binding("ctrl+q", "request_quit", "Quit", priority=True),
         # F1 opens the help dialog. F1 is not in the keybindings defaults
         # (defaults.py) and (unlike "?") never collides with typed prompt text,
         # so it is safe to bind globally while the prompt input is focused.
         ("f1", "open_help", "Help"),
     ]
+
+    # Exit-safety (double-press window): an idle quit-intent keypress arms a quit
+    # for this many seconds; a second within the window confirms. 1.5s sits
+    # between Claude Code (~800ms) and OpenCode (5000ms). Hardcoded by design.
+    QUIT_WINDOW_S = 1.5
+    # Legacy single-press instant-quit escape hatch (default OFF), parsed with
+    # the shared truthy convention (notify._TRUTHY), NOT a bare ``== "1"``.
+    INSTANT_QUIT_ENV = "MAGI_TUI_INSTANT_QUIT"
 
     # Textual's built-in command palette (PR2.1). Ctrl+P is already the 8.2.7
     # default (verified: ``App.COMMAND_PALETTE_BINDING == "ctrl+p"``); pin it
@@ -972,6 +987,13 @@ class MagiTuiApp(App[None]):
         # True while an engine turn is in flight; gates Ctrl+C (cancel vs quit).
         self._turn_active = False
         self._active_turn_id: str | None = None
+        # Idle quit-arming state (exit-safety): a monotonic() stamp set on the
+        # FIRST idle quit-intent keypress; a second within ``QUIT_WINDOW_S``
+        # confirms the quit. None when not armed. See ``_arm_or_quit``.
+        self._quit_armed_at: float | None = None
+        # Transient carrier for the originating quit key into action_cancel_turn
+        # (Esc sets "escape" so it clears input first; Ctrl+C leaves it None).
+        self._cancel_key: str | None = None
         # Reasoning/thinking inline display (PR4.2): the in-flight dim thinking
         # line's update handle + accumulated reasoning text. Reset per turn so
         # streaming deltas coalesce into ONE updating line, not a new line each.
@@ -1184,8 +1206,10 @@ class MagiTuiApp(App[None]):
         welcome.append("Type a task and press ", style="dim")
         welcome.append("Enter", style="#7aa2f7")
         welcome.append(".  ", style="dim")
+        welcome.append("Esc", style="#7aa2f7")
+        welcome.append("/", style="dim")
         welcome.append("Ctrl+C", style="#7aa2f7")
-        welcome.append(" cancels a turn (again to quit).\n", style="dim")
+        welcome.append(" clears input · twice to quit.\n", style="dim")
         welcome.append("Keys: ", style="dim")
         welcome.append("Shift+Enter", style="#7aa2f7")
         welcome.append(" newline · ", style="dim")
@@ -1210,6 +1234,7 @@ class MagiTuiApp(App[None]):
             welcome,
             text=(
                 "Welcome to Magi  "
+                "Esc/Ctrl+C clears input · twice to quit.  "
                 "Keys: Shift+Enter newline · ↑ history · Ctrl+S draft · "
                 "Ctrl+B sidebar · Ctrl+P palette · F1 help  "
                 "Copy: drag to select · Ctrl+Y copy (⌥-drag for native terminal copy)  "
@@ -2007,19 +2032,75 @@ class MagiTuiApp(App[None]):
 
         self.app_is_focused = True
 
+    # -- exit-safety (double-press quit) ------------------------------------
+    def action_request_quit(self, key: str = "ctrl+q") -> None:
+        """Quit gesture entrypoint: route to the arm-then-quit debounce.
+
+        Referenced by the priority ``ctrl+q`` Binding and by ``PromptInput``'s
+        empty-buffer Ctrl+D call-up (which passes ``key="ctrl+d"``). Never quits
+        on a single press — ``_arm_or_quit`` arms first.
+        """
+
+        self._arm_or_quit(key=key)
+
+    def _arm_or_quit(self, *, key: str) -> None:
+        """Idle quit-intent debounce: arm on first press, quit on second.
+
+        A reflexive single keypress must never quit (matches Claude Code's
+        double-Ctrl+C and OpenCode's double-Esc). All idle quit gestures
+        (Esc / Ctrl+C / Ctrl+Q / Ctrl+D-on-empty) route here. The first press
+        arms a shared ``_quit_armed_at`` stamp and shows a "Press again to quit"
+        toast; a second press within ``QUIT_WINDOW_S`` confirms and exits.
+
+        Cross-key arming is intentional: a single shared stamp means any second
+        quit-intent key within the window confirms (e.g. Esc then Ctrl+C quits).
+
+        ``key`` is the originating gesture: only ``"escape"`` clears a non-empty
+        input buffer first (then returns, disarmed) — matching shell convention
+        where Ctrl+C / Ctrl+D do not wipe the line. The legacy single-press
+        instant-quit is gated behind ``INSTANT_QUIT_ENV`` (default OFF).
+        """
+
+        import os  # noqa: PLC0415
+        import time as _time  # noqa: PLC0415  (no module-level _time; cf. app.py:1562/1923)
+
+        from magi_agent.cli.tui.notify import _TRUTHY  # shared truthy set (notify.py:75)
+
+        if os.environ.get(self.INSTANT_QUIT_ENV, "").strip().lower() in _TRUTHY:
+            self.exit()
+            return
+        # Esc-only clear-input-first (per-key asymmetry; Ctrl+C/Q/D do not clear).
+        if key == "escape" and self._input is not None and self._input.text.strip():
+            self._input.text = ""
+            self._quit_armed_at = None
+            return
+        now = _time.monotonic()
+        if (
+            self._quit_armed_at is not None
+            and now - self._quit_armed_at <= self.QUIT_WINDOW_S
+        ):
+            self.exit()
+            return
+        self._quit_armed_at = now
+        _notify.info(self, "Press again to quit")
+
     # -- cancellation -------------------------------------------------------
     def action_cancel_turn(self) -> None:
-        """Ctrl+C: cancel an in-flight turn, or quit the app when idle.
+        """Esc/Ctrl+C: cancel an in-flight turn, or arm-then-quit when idle.
 
         While a turn runs, this signals the per-turn cancel event so the turn
-        aborts. When no turn is in flight there is nothing to cancel, so Ctrl+C
-        exits the app.
+        aborts (unchanged). When no turn is in flight there is nothing to
+        cancel, so the gesture routes through ``_arm_or_quit``: a single press
+        never quits — it arms a "Press again to quit" toast, and a second press
+        within ``QUIT_WINDOW_S`` exits. Esc additionally clears a non-empty
+        input buffer first; Ctrl+C does not (per ``_cancel_key``).
         """
 
         if self._active_turn_id is not None or self._turn_active:
             self._cancel.set()
         else:
-            self.exit()
+            self._arm_or_quit(key=self._cancel_key or "ctrl+c")
+            self._cancel_key = None
 
     # -- keybinding resolution ----------------------------------------------
     def _active_contexts(self) -> list[Context]:
@@ -2089,8 +2170,18 @@ class MagiTuiApp(App[None]):
 
         if action is None:
             return
-        if action in (Action.CHAT_CANCEL.value, Action.CHAT_KILL_AGENTS.value):
+        if action == Action.CHAT_CANCEL.value:
+            # Esc path: carry the originating key so the idle branch clears a
+            # non-empty buffer before arming (Ctrl+C, a priority Binding, never
+            # reaches here, so it leaves _cancel_key None -> "ctrl+c").
+            self._cancel_key = "escape"
             self.action_cancel_turn()
+        elif action == Action.CHAT_KILL_AGENTS.value:
+            # The kill-agents chord (ctrl+x ctrl+k) is DECOUPLED from quit: it
+            # cancels an in-flight turn and is a no-op when idle. It must NOT
+            # route through action_cancel_turn (that would arm a quit at idle).
+            if self._active_turn_id is not None or self._turn_active:
+                self._cancel.set()
         elif action == Action.GLOBAL_QUIT.value:
             self.exit()
         # NOTE: these CHAT_SUBMIT/CHAT_NEWLINE branches are NOT reached while
