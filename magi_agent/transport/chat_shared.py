@@ -31,6 +31,7 @@ from magi_agent.gates.gate5b_full_toolhost import (
     Gate5BFullToolBundle,
     Gate5BFullToolHostConfig,
 )
+from magi_agent.runtime.child_runner_live import is_live_child_runner_enabled
 from magi_agent.runtime.openmagi_runtime import OpenMagiRuntime
 from magi_agent.runtime.user_visible_model_routing import _safe_label_or_none
 from magi_agent.shadow.gate5b4c3_live_runner_boundary import AdkPrimitivesLoader
@@ -238,16 +239,94 @@ def build_gate1a_readonly_tools_config_from_env(
     )
 
 
+# Default-OFF serve-path live-sub-agents enablement. When set (and the existing
+# child-runner master gate ``MAGI_CHILD_RUNNER_LIVE_ENABLED`` is on, not kill-
+# switched) this derives a *ready*, FULL (read+write+SpawnAgent)
+# gate5b full-toolhost config from the runtime selection so a dashboard-chat turn
+# can actually spawn a real sub-agent. Unset => no derivation => the full toolhost
+# stays disabled (gate1a fallback, byte-identical to today). It only fills gaps:
+# any explicit ``CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_*`` override always wins.
+LIVE_SUBAGENTS_SERVE_ENABLED_ENV = "MAGI_GATE5B_LIVE_SUBAGENTS_ENABLED"
+
+# FULL serve surface for the live-sub-agents dogfood profile: the entire gate5b
+# full toolhost (read + write + SpawnAgent). The operator explicitly wants every
+# tool live on the dashboard serve path, not a read-only subset. Still gated by
+# the strict default-OFF ``MAGI_GATE5B_LIVE_SUBAGENTS_ENABLED`` flag AND the live
+# child-runner master gate, so a plain install stays read-only.
+LIVE_SUBAGENTS_SERVE_TOOL_NAMES: tuple[str, ...] = GATE5B_FULL_TOOLHOST_TOOL_NAMES
+
+
+def live_subagents_serve_enabled(env: Mapping[str, str]) -> bool:
+    """True iff the serve-path live-sub-agents overlay should apply.
+
+    Requires BOTH the dedicated default-OFF serve flag and the existing live
+    child-runner master gate (which honours its own kill switch). The new flag
+    NEVER self-enables live child execution on its own — it only EXPOSES the
+    SpawnAgent surface on serve once the child runner is already permitted.
+    """
+
+    return _is_true(env.get(LIVE_SUBAGENTS_SERVE_ENABLED_ENV)) and (
+        is_live_child_runner_enabled(env)
+    )
+
+
+def _live_subagents_full_toolhost_overlay(
+    env: Mapping[str, str],
+    runtime_config: object,
+) -> dict[str, str]:
+    """Gap-filling env overlay that makes the full toolhost reach ``ready`` on the
+    serve scope. Only used when :func:`live_subagents_serve_enabled` is true.
+
+    Derives the selection digests from the runtime ``bot_id``/``user_id`` (so the
+    scope matches what ``_gate5b_full_toolhost_bundle`` computes per request) and
+    pins a local-friendly environment + allowlist. Values are written with
+    ``setdefault`` semantics by the caller: explicit operator env always wins.
+    """
+
+    bot_id = str(getattr(runtime_config, "bot_id", "") or "")
+    user_id = str(getattr(runtime_config, "user_id", "") or "")
+    environment = (
+        env.get("CORE_AGENT_PYTHON_GATE5B_USER_VISIBLE_CANARY_ENVIRONMENT") or ""
+    ).strip() or "local"
+    return {
+        "CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_ENABLED": "1",
+        "CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_KILL_SWITCH": "0",
+        "CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_ROUTE_ATTACHMENT": "1",
+        "CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_SELECTED_BOT_DIGEST": _sha256_digest(
+            bot_id
+        ),
+        "CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_TRUSTED_OWNER_USER_ID_DIGEST": (
+            _sha256_digest(user_id)
+        ),
+        "CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_ENVIRONMENT": environment,
+        "CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_ENV_ALLOWLIST": environment,
+        "CORE_AGENT_PYTHON_GATE5B_FULL_TOOLHOST_ALLOWLIST": ",".join(
+            LIVE_SUBAGENTS_SERVE_TOOL_NAMES
+        ),
+    }
+
+
 def build_gate5b_full_toolhost_config_from_env(
     env: Mapping[str, str],
     runtime_config: object,
 ) -> Gate5BFullToolHostConfig:
-    del runtime_config
     from magi_agent.config.env import (
         apply_patch_enabled,
         is_format_on_write_enabled,
         parse_lsp_diagnostics_env,
     )
+
+    # Default-OFF serve-path live-sub-agents enablement: when the flag is set and
+    # the child runner is permitted, fill any UNSET full-toolhost env from the
+    # runtime selection so the toolhost reaches ``ready`` (explicit operator env
+    # still wins). Flag-unset leaves ``env`` untouched => byte-identical to today.
+    if live_subagents_serve_enabled(env):
+        merged = dict(env)
+        for key, value in _live_subagents_full_toolhost_overlay(
+            env, runtime_config
+        ).items():
+            merged.setdefault(key, value)
+        env = merged
 
     lsp_diagnostics = parse_lsp_diagnostics_env(env)
     return Gate5BFullToolHostConfig.model_validate(

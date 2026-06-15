@@ -840,6 +840,11 @@ class Gate5BFullToolHost:
         diagnostics_provider: DiagnosticsProvider | None = None,
         memory_mode: "MemoryMode | str" = "normal",
         public_event_sink: Callable[[Mapping[str, object]], None] | None = None,
+        # Parent identity threaded into the per-tool ToolContext (SpawnAgent depth
+        # cap + stable parent session id). Defaults preserve today's behavior:
+        # session_id=None, spawn_depth=0 => a top-level spawn requests depth 1.
+        session_id: str | None = None,
+        spawn_depth: int = 0,
         # C1 seams (dual-load: empty/None preserves legacy behavior exactly).
         workspace_handlers: Mapping[str, object] | None = None,
         dispatch_policies: Sequence[object] | None = None,
@@ -849,6 +854,8 @@ class Gate5BFullToolHost:
         self.exposed_tool_names = exposed_tool_names
         self.now_ms = now_ms
         self.memory_mode = normalize_memory_mode(memory_mode)
+        self._session_id = session_id
+        self._spawn_depth = max(0, int(spawn_depth))
         self.counter = Gate5BFullToolCounter(config)
         self._tool_registry = tool_registry
         # First-party activity capture: pass ONLY the bundled producer pack's
@@ -1561,10 +1568,15 @@ class Gate5BFullToolHost:
             dict(args),
             ToolContext(
                 botId="gate5b-selected-full-toolhost",
+                sessionId=self._session_id,
                 turnId=f"gate5b-full-toolhost:{tool_call_id}",
                 toolUseId=tool_call_id,
                 workspaceRoot=str(self.workspace_root),
                 memoryMode=self.memory_mode,
+                # Thread the parent spawn depth so SpawnAgent requests depth
+                # parent+1 and the child_runner_boundary depth cap protects
+                # NESTED spawns on the serve path (default 0 => top-level depth 1).
+                spawnDepth=self._spawn_depth,
                 permissionScope={
                     "mode": "selected_full_toolhost",
                     "source": "selected_full_toolhost",
@@ -2100,6 +2112,8 @@ def build_gate5b_full_toolhost_bundle(
     diagnostics_provider: DiagnosticsProvider | None = None,
     memory_mode: "MemoryMode | str" = "normal",
     public_event_sink: Callable[[Mapping[str, object]], None] | None = None,
+    session_id: str | None = None,
+    spawn_depth: int = 0,
     workspace_handlers: Mapping[str, object] | None = None,
     dispatch_policies: Sequence[object] | None = None,
 ) -> Gate5BFullToolBundle:
@@ -2133,6 +2147,8 @@ def build_gate5b_full_toolhost_bundle(
         diagnostics_provider=diagnostics_provider,
         memory_mode=memory_mode,
         public_event_sink=public_event_sink,
+        session_id=session_id,
+        spawn_depth=spawn_depth,
         workspace_handlers=workspace_handlers,
         dispatch_policies=dispatch_policies,
     )
