@@ -373,6 +373,82 @@ def _adk_finish_reason(event: object) -> str | None:
     return value if isinstance(value, str) else str(finish_reason)
 
 
+def _usage_member(value: object, *names: str) -> object:
+    """First non-None ``name`` read from a Mapping (``.get``) or object (``getattr``)."""
+    for name in names:
+        if isinstance(value, Mapping):
+            found = value.get(name)
+        else:
+            try:
+                found = getattr(value, name, None)
+            except Exception:  # noqa: BLE001 - duck-typed read must never raise
+                found = None
+        if found is not None:
+            return found
+    return None
+
+
+def _usage_int(meta: object, *names: str) -> int | None:
+    """First non-negative ``int`` among ``names`` (bools rejected)."""
+    for name in names:
+        value = _usage_member(meta, name)
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, int) and value >= 0:
+            return value
+    return None
+
+
+def _adk_usage_metadata(event: object, *, depth: int = 0) -> dict[str, int] | None:
+    """Token usage from a raw ADK event as canonical snake_case keys, or ``None``.
+
+    Duck-typed (``getattr``/``Mapping`` only) so ``engine.py`` names no ``google.*``
+    symbol at module scope (asserted by ``test_engine_import_clean_in_fresh_interpreter``).
+    Mirrors the shadow twin
+    ``shadow/gate5b4c3_live_runner_boundary.py:_event_usage_metadata``.
+
+    ADK ``usage_metadata`` is cumulative WITHIN one ``run_async`` stream, so callers
+    last-writer-wins within a stream and SUM across re-invocations (``_fold_usage``).
+    Zero/missing counts are omitted (never fabricated); ``total_tokens`` is taken
+    verbatim from ``total_token_count`` only when the provider supplies it.
+    """
+    if depth > 3:
+        return None
+    meta = _usage_member(event, "usage_metadata", "usageMetadata")
+    if meta is not None:
+        prompt = _usage_int(meta, "prompt_token_count", "promptTokenCount")
+        candidates = _usage_int(meta, "candidates_token_count", "candidatesTokenCount")
+        cached = _usage_int(meta, "cached_content_token_count", "cachedContentTokenCount")
+        total = _usage_int(meta, "total_token_count", "totalTokenCount")
+        result: dict[str, int] = {}
+        if prompt:
+            result["input_tokens"] = prompt
+        if candidates:
+            result["output_tokens"] = candidates
+        if cached:
+            result["cache_read_tokens"] = cached
+        if total:
+            result["total_tokens"] = total
+        if result:
+            return result
+    for nested_name in ("llm_response", "response"):
+        nested = _usage_member(event, nested_name)
+        if nested is not None:
+            found = _adk_usage_metadata(nested, depth=depth + 1)
+            if found is not None:
+                return found
+    return None
+
+
+def _fold_usage(turn_usage: dict[str, object], attempt_usage: Mapping[str, object]) -> None:
+    """Sum one attempt's usage into the turn total (ADK usage resets per stream)."""
+    for key, value in attempt_usage.items():
+        try:
+            turn_usage[key] = int(turn_usage.get(key, 0)) + int(value)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            continue
+
+
 def build_output_continuation_config(
     env: object = None,
 ) -> "OutputContinuationConfig | None":
@@ -1521,6 +1597,10 @@ class MagiEngineDriver:
                 attempt_tool_ran = False
                 attempt_text_seen = False
                 budget_exhausted = False
+                # Per-attempt token usage. ADK usage_metadata is cumulative WITHIN
+                # one run_async stream, so we last-writer-wins into this dict here
+                # and SUM it into the turn-level ``usage`` in the finally below.
+                attempt_usage: dict[str, int] = {}
                 try:
                     while True:
                         if cancel.is_set():
@@ -1536,6 +1616,9 @@ class MagiEngineDriver:
 
                         adk_event = step
                         event_count += 1
+                        reading = _adk_usage_metadata(adk_event)
+                        if reading:
+                            attempt_usage.update(reading)
                         # Detect output-cap truncation from the RAW model finish
                         # reason — the source of truth. The bridge's turn_end
                         # projection can rewrite the reason (e.g. to
@@ -1618,6 +1701,10 @@ class MagiEngineDriver:
                     attempt_error = exc
                 finally:
                     await self._aclose_iter(adk_iter)
+                    # Fold this attempt's usage into the turn total (SUM across
+                    # re-invocations). Runs on every exit — exhaustion, error, and
+                    # cancel — so partial usage survives on aborted turns too.
+                    _fold_usage(usage, attempt_usage)
 
                 if cancelled:
                     break
@@ -1887,6 +1974,7 @@ class MagiEngineDriver:
                 route_selection=route_selection,
             )
             zero_edit_iter: AsyncIterator[object] = adapter.run_turn(zero_edit_runner_input).__aiter__()  # type: ignore[union-attr]
+            _ze_usage: dict[str, int] = {}
             try:
                 while True:
                     if cancel.is_set():
@@ -1899,6 +1987,9 @@ class MagiEngineDriver:
                     if _zstep is _EXHAUSTED:
                         break
                     _zadk_event = _zstep
+                    _ze_reading = _adk_usage_metadata(_zadk_event)
+                    if _ze_reading:
+                        _ze_usage.update(_ze_reading)
                     _zprojection = bridge.project_adk_event(_zadk_event, turn_id=turn_id)  # type: ignore[union-attr]
                     for _zraw in _zprojection.agent_events:  # type: ignore[union-attr]
                         _zsafe = sanitize(dict(_zraw))  # type: ignore[operator]
@@ -1919,6 +2010,7 @@ class MagiEngineDriver:
                 await self._aclose_iter(zero_edit_iter)
                 self._restore_runner_policy_route(zero_edit_route_attach)
                 self._restore_gate_callback(zero_edit_gate_attach)
+                _fold_usage(usage, _ze_usage)
 
             # If cancelled during the guard retry, fall through to the cancel
             # block below (cancelled flag is already set).
@@ -2032,6 +2124,7 @@ class MagiEngineDriver:
             )
             adk_iter = adapter.run_turn(runner_input).__aiter__()  # type: ignore[union-attr]
             attempt_error: Exception | None = None
+            _repair_usage: dict[str, int] = {}
             try:
                 while True:
                     if cancel.is_set():
@@ -2047,6 +2140,9 @@ class MagiEngineDriver:
 
                     adk_event = step
                     event_count += 1
+                    _repair_reading = _adk_usage_metadata(adk_event)
+                    if _repair_reading:
+                        _repair_usage.update(_repair_reading)
                     projection = bridge.project_adk_event(adk_event, turn_id=turn_id)  # type: ignore[union-attr]
                     for raw_event in _projected_events_with_transcript_text_fallback(
                         projection,
@@ -2088,6 +2184,7 @@ class MagiEngineDriver:
                 self._restore_runner_policy_route(repair_route_attach)
                 self._restore_user_hook_bus(repair_hook_attach)
                 self._restore_gate_callback(repair_gate_attach)
+                _fold_usage(usage, _repair_usage)
 
             if cancelled:
                 for safe in self._synthesize_orphan_tool_results(
