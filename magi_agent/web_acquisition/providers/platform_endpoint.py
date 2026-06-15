@@ -269,17 +269,27 @@ def _normalise_response(data: dict[str, object], operation: str) -> Mapping[str,
     if operation == "search":
         results = data.get("results")
         if not isinstance(results, list):
-            return {"results": []}
+            # Brave-style payload (what the platform api-proxy returns): the
+            # results live under ``web.results`` rather than the top level.
+            web = data.get("web")
+            if isinstance(web, dict) and isinstance(web.get("results"), list):
+                results = web["results"]
+            else:
+                return {"results": []}
         normalised = []
         for item in results:
             if not isinstance(item, dict):
                 continue
             normalised.append(
                 {
-                    "url": _str_or_none(item.get("url")) or "",
+                    # Serper uses "url"/"link"; Brave uses "url".
+                    "url": _str_or_none(item.get("url"))
+                    or _str_or_none(item.get("link"))
+                    or "",
                     "title": _str_or_none(item.get("title")),
-                    # Prefer "snippet" for search results; "content"/"body" as fallback.
+                    # Serper="snippet", Brave="description"; content/body as fallback.
                     "snippet": _str_or_none(item.get("snippet"))
+                    or _str_or_none(item.get("description"))
                     or _str_or_none(item.get("content"))
                     or _str_or_none(item.get("body"))
                     or "",
