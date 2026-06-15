@@ -12,6 +12,7 @@ DEFAULT_OVERRIDES: dict[str, Any] = {
         "recipes": [],
         "harness_presets": [],
         "hooks": {},
+        "modes": {},
         "custom_rules": [],
     },
     "tools": {},
@@ -85,5 +86,40 @@ def set_tool_override(name: str, enabled: bool, path: Path | None = None) -> dic
     target = path or customize_path()
     overrides = load_overrides(target)
     overrides["tools"][name] = bool(enabled)
+    save_overrides(overrides, target)
+    return overrides
+
+
+_VERIFICATION_LIST_KINDS = ("recipes", "harness_presets")
+
+
+def set_verification_override(
+    kind: str,
+    item_id: str,
+    enabled: bool,
+    mode: str | None = None,
+    path: Path | None = None,
+) -> dict[str, Any]:
+    """Enable/disable one verification item and record its mode.
+
+    ``kind`` is one of ``recipes``, ``harness_presets`` (list-backed) or
+    ``hooks`` (dict-backed). Enabling appends/sets; disabling removes the entry
+    and clears its mode. Never raises on bad input; returns the new overrides.
+    """
+    target = path or customize_path()
+    overrides = load_overrides(target)
+    verification = overrides["verification"]
+    if kind == "hooks":
+        verification["hooks"][item_id] = bool(enabled)
+    elif kind in _VERIFICATION_LIST_KINDS:
+        bucket = verification[kind]
+        if enabled and item_id not in bucket:
+            bucket.append(item_id)
+        if not enabled and item_id in bucket:
+            bucket.remove(item_id)
+    if enabled and mode:
+        verification["modes"][item_id] = mode
+    elif not enabled:
+        verification["modes"].pop(item_id, None)
     save_overrides(overrides, target)
     return overrides
