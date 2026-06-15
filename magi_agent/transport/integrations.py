@@ -26,12 +26,18 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from collections.abc import Callable
 from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from magi_agent.channels import telegram_easy
+from magi_agent.channels.telegram_easy import (
+    EasySessionStore,
+    TelegramUserAuthPort,
+)
 from magi_agent.channels.telegram_validate import InvalidBotToken, validate_bot_token
 from magi_agent.composio import connections as composio_connections
 from magi_agent.composio.config import resolve_composio_config
@@ -46,6 +52,14 @@ _MAX_FIELD_LEN = 4096
 
 ComposioClientProvider = Callable[[], Any | None]
 TelegramFetchJson = Callable[[str], dict[str, Any]]
+TelegramAuthPortProvider = Callable[[], TelegramUserAuthPort | None]
+
+
+class _PersistError(Exception):
+    """Carries an error JSONResponse out of a persist callback."""
+
+    def __init__(self, response: JSONResponse) -> None:
+        self.response = response
 
 
 def register_integrations_routes(
@@ -54,9 +68,21 @@ def register_integrations_routes(
     *,
     composio_client_provider: ComposioClientProvider | None = None,
     telegram_fetch_json: TelegramFetchJson | None = None,
+    telegram_auth_port_provider: TelegramAuthPortProvider | None = None,
+    easy_session_store: EasySessionStore | None = None,
+    now_fn: Callable[[], float] | None = None,
 ) -> None:
     provide_composio = composio_client_provider or _default_composio_client_provider
     fetch_json = telegram_fetch_json or _default_telegram_fetch_json
+    provide_auth_port = telegram_auth_port_provider or _default_telegram_auth_port
+    easy_store = easy_session_store or EasySessionStore()
+    clock = now_fn or time.time
+
+    def persist_token(token: str) -> dict[str, Any]:
+        result = _persist_telegram_token(token, fetch_json)
+        if isinstance(result, JSONResponse):
+            raise _PersistError(result)
+        return result
 
     # -- aggregate ----------------------------------------------------------
     @app.get("/v1/admin/integrations")
@@ -202,23 +228,130 @@ def register_integrations_routes(
         value = await _read_secret_field(request, "token")
         if isinstance(value, JSONResponse):
             return value
-        try:
-            identity = validate_bot_token(value, fetch_json=fetch_json)
-        except InvalidBotToken:
-            return JSONResponse(status_code=400, content={"error": "invalid_bot_token"})
-        except Exception:
-            return JSONResponse(status_code=502, content={"error": "telegram_unreachable"})
-
-        username = identity.get("username")
-        label = f"@{username}" if username else "Telegram bot"
-        # Single active bot: clear any prior token first.
-        _revoke_service_credentials(service="telegram", auth_scheme="bot_token")
-        result = _store_secret(
-            service="telegram", label=label, auth_scheme="bot_token", secret=value
-        )
+        result = _persist_telegram_token(value, fetch_json)
         if isinstance(result, JSONResponse):
             return result
-        return JSONResponse(content={"telegram": _telegram_status()})
+        return JSONResponse(content={"telegram": result})
+
+    # -- telegram: easy setup (phone → BotFather, gated) --------------------
+    @app.post("/v1/admin/integrations/telegram/easy/send-code")
+    @app.post("/api/integrations/telegram/easy/send-code")
+    async def telegram_easy_send_code(request: Request) -> JSONResponse:
+        unauthorized = _unauthorized_response(request, runtime)
+        if unauthorized is not None:
+            return unauthorized
+        if not is_telegram_easy_enabled():
+            return _easy_disabled()
+        body = await _read_json(request)
+        if isinstance(body, JSONResponse):
+            return body
+        phone = body.get("phone")
+        if not isinstance(phone, str) or not phone.strip():
+            return JSONResponse(status_code=400, content={"error": "phone_required"})
+        port = provide_auth_port()
+        if port is None:
+            return _easy_disabled()
+        try:
+            session_id = telegram_easy.begin_login(easy_store, port, phone.strip(), now=clock())
+        except Exception:
+            return JSONResponse(status_code=502, content={"error": "telegram_unreachable"})
+        return JSONResponse(content={"session_id": session_id})
+
+    @app.post("/v1/admin/integrations/telegram/easy/verify-code")
+    @app.post("/api/integrations/telegram/easy/verify-code")
+    async def telegram_easy_verify_code(request: Request) -> JSONResponse:
+        unauthorized = _unauthorized_response(request, runtime)
+        if unauthorized is not None:
+            return unauthorized
+        if not is_telegram_easy_enabled():
+            return _easy_disabled()
+        body = await _read_json(request)
+        if isinstance(body, JSONResponse):
+            return body
+        session_id = body.get("session_id")
+        code = body.get("code")
+        if not isinstance(session_id, str) or not isinstance(code, str) or not code.strip():
+            return JSONResponse(status_code=400, content={"error": "session_id_and_code_required"})
+        port = provide_auth_port()
+        if port is None:
+            return _easy_disabled()
+        try:
+            needs_2fa = telegram_easy.submit_code(
+                easy_store, port, session_id, code.strip(), now=clock()
+            )
+        except telegram_easy.SessionNotFound:
+            return JSONResponse(status_code=404, content={"error": "session_not_found"})
+        except Exception:
+            return JSONResponse(status_code=502, content={"error": "telegram_unreachable"})
+        return JSONResponse(content={"needs_2fa": needs_2fa})
+
+    @app.post("/v1/admin/integrations/telegram/easy/verify-2fa")
+    @app.post("/api/integrations/telegram/easy/verify-2fa")
+    async def telegram_easy_verify_2fa(request: Request) -> JSONResponse:
+        unauthorized = _unauthorized_response(request, runtime)
+        if unauthorized is not None:
+            return unauthorized
+        if not is_telegram_easy_enabled():
+            return _easy_disabled()
+        body = await _read_json(request)
+        if isinstance(body, JSONResponse):
+            return body
+        session_id = body.get("session_id")
+        password = body.get("password")
+        if not isinstance(session_id, str) or not isinstance(password, str) or not password:
+            return JSONResponse(
+                status_code=400, content={"error": "session_id_and_password_required"}
+            )
+        port = provide_auth_port()
+        if port is None:
+            return _easy_disabled()
+        try:
+            telegram_easy.submit_password(easy_store, port, session_id, password, now=clock())
+        except telegram_easy.SessionNotFound:
+            return JSONResponse(status_code=404, content={"error": "session_not_found"})
+        except Exception:
+            return JSONResponse(status_code=502, content={"error": "telegram_unreachable"})
+        return JSONResponse(content={"ok": True})
+
+    @app.post("/v1/admin/integrations/telegram/easy/create-bot")
+    @app.post("/api/integrations/telegram/easy/create-bot")
+    async def telegram_easy_create_bot(request: Request) -> JSONResponse:
+        unauthorized = _unauthorized_response(request, runtime)
+        if unauthorized is not None:
+            return unauthorized
+        if not is_telegram_easy_enabled():
+            return _easy_disabled()
+        body = await _read_json(request)
+        if isinstance(body, JSONResponse):
+            return body
+        session_id = body.get("session_id")
+        bot_name = body.get("bot_name")
+        if not isinstance(session_id, str) or not isinstance(bot_name, str) or not bot_name.strip():
+            return JSONResponse(
+                status_code=400, content={"error": "session_id_and_bot_name_required"}
+            )
+        port = provide_auth_port()
+        if port is None:
+            return _easy_disabled()
+        try:
+            status = telegram_easy.finish_create_bot(
+                easy_store,
+                port,
+                session_id,
+                bot_name.strip(),
+                now=clock(),
+                persist=persist_token,
+                username_suffixes=telegram_easy.default_username_suffixes(),
+            )
+        except telegram_easy.SessionNotFound:
+            return JSONResponse(status_code=404, content={"error": "session_not_found"})
+        except _PersistError as exc:
+            return exc.response
+        except telegram_easy.BotCreationFailed:
+            return JSONResponse(status_code=502, content={"error": "botfather_failed"})
+        except Exception:
+            return JSONResponse(status_code=502, content={"error": "telegram_unreachable"})
+        return JSONResponse(content={"telegram": status})
 
     @app.delete("/v1/admin/integrations/telegram/token")
     @app.delete("/api/integrations/telegram/token")
@@ -240,9 +373,63 @@ def _composio_status() -> dict[str, Any]:
 
 def _telegram_status() -> dict[str, Any]:
     item = _active_credential(service="telegram", auth_scheme="bot_token")
+    easy_available = is_telegram_easy_enabled()
     if item is None:
-        return {"configured": False, "label": None}
-    return {"configured": True, "label": item.get("label") or None}
+        return {"configured": False, "label": None, "easy_available": easy_available}
+    return {
+        "configured": True,
+        "label": item.get("label") or None,
+        "easy_available": easy_available,
+    }
+
+
+def is_telegram_easy_enabled(env: dict[str, str] | None = None) -> bool:
+    """Gate for the phone-number Telegram path (default OFF).
+
+    Requires the master flag AND operator-supplied Telegram app credentials
+    (api_id / api_hash from my.telegram.org) — the phone path cannot work
+    without them.
+    """
+    environ = os.environ if env is None else env
+    flag = (environ.get("MAGI_TELEGRAM_EASY_SETUP_ENABLED") or "").strip().lower()
+    if flag in ("", "0", "false", "no", "off"):
+        return False
+    return bool(environ.get("TELEGRAM_API_ID") and environ.get("TELEGRAM_API_HASH"))
+
+
+def _persist_telegram_token(
+    token: str, fetch_json: TelegramFetchJson
+) -> dict[str, Any] | JSONResponse:
+    """Validate (getMe) + vault-store a bot token. Convergence point for both
+    the advanced (paste) and easy (BotFather) paths."""
+    try:
+        identity = validate_bot_token(token, fetch_json=fetch_json)
+    except InvalidBotToken:
+        return JSONResponse(status_code=400, content={"error": "invalid_bot_token"})
+    except Exception:
+        return JSONResponse(status_code=502, content={"error": "telegram_unreachable"})
+    username = identity.get("username")
+    label = f"@{username}" if username else "Telegram bot"
+    _revoke_service_credentials(service="telegram", auth_scheme="bot_token")
+    result = _store_secret(
+        service="telegram", label=label, auth_scheme="bot_token", secret=token
+    )
+    if isinstance(result, JSONResponse):
+        return result
+    return _telegram_status()
+
+
+def _default_telegram_auth_port() -> TelegramUserAuthPort | None:
+    if not is_telegram_easy_enabled():
+        return None
+    try:
+        from magi_agent.channels.telegram_easy_telethon import build_telethon_auth_port
+    except ImportError:
+        return None
+    return build_telethon_auth_port(
+        api_id=int(os.environ["TELEGRAM_API_ID"]),
+        api_hash=os.environ["TELEGRAM_API_HASH"],
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -382,6 +569,16 @@ def _vault_unavailable(status: dict[str, bool]) -> JSONResponse:
             "error": "vault_unavailable",
             "message": "integration storage requires an available vault",
             "vault_status": status,
+        },
+    )
+
+
+def _easy_disabled() -> JSONResponse:
+    return JSONResponse(
+        status_code=409,
+        content={
+            "error": "telegram_easy_disabled",
+            "message": "set MAGI_TELEGRAM_EASY_SETUP_ENABLED=1 plus TELEGRAM_API_ID/TELEGRAM_API_HASH",
         },
     )
 
