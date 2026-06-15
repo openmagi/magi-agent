@@ -83,6 +83,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     config = _parse_runtime_config(os.environ)
     if _local_runtime_defaults_active(config):
         apply_local_full_runtime_defaults(os.environ)
+        _maybe_start_local_vault_proxy(os.environ)
         _print_local_startup_notice(port)
     else:
         # Hosted bots (real bot_id/user_id/gateway_token) never inherit the
@@ -141,6 +142,67 @@ def _local_runtime_defaults_active(config: RuntimeConfig) -> bool:
         config.bot_id == "local-bot"
         and config.user_id == "local-user"
         and config.gateway_token == "local-dev-token"
+    )
+
+
+def _maybe_start_local_vault_proxy(environ) -> None:
+    """Start the local credential-injecting proxy when enabled (local serve only).
+
+    Gated by ``local_vault_proxy_enabled`` (requires the native local vault AND
+    the proxy flag, forced OFF when MAGI_VAULT_ADMIN_URL is set — i.e. hosted).
+    When it can start, the three ``MAGI_EGRESS_PROXY_*`` vars are setdefault'd to
+    point at it so the A egress seam routes tool egress through the proxy.
+
+    Fail-soft: if the optional ``magi-agent[vault]`` extra (mitmproxy) is missing,
+    log the install hint and continue serving WITHOUT the proxy — never crash
+    serve.
+    """
+    from .credentials_admin.local_vault import resolve_vault_dir
+    from .credentials_admin.vault_local import local_vault_proxy_enabled
+
+    if not local_vault_proxy_enabled(environ):
+        return
+
+    from .credentials_admin.local_proxy import (
+        LocalProxyUnavailable,
+        start_local_proxy,
+    )
+
+    vault_dir = resolve_vault_dir(environ)
+    try:
+        handle = start_local_proxy(vault_dir)
+    except LocalProxyUnavailable as exc:
+        print(
+            "  Credential proxy: not started — "
+            f"{exc} (mitmproxy not installed). "
+            "Install the 'vault' extra to let the bot use registered "
+            "credentials without seeing them: pip install 'magi-agent[vault]'.",
+            file=sys.stderr,
+            flush=True,
+        )
+        return
+    except Exception:  # noqa: BLE001 - never crash serve on proxy failure
+        print(
+            "  Credential proxy: failed to start; continuing without it.",
+            file=sys.stderr,
+            flush=True,
+        )
+        return
+
+    environ.setdefault("MAGI_EGRESS_PROXY_ENABLED", "1")
+    environ.setdefault(
+        "MAGI_EGRESS_PROXY_URL", f"http://127.0.0.1:{handle.port}"
+    )
+    environ.setdefault("MAGI_EGRESS_PROXY_CA_CERT_PATH", handle.ca_cert_path)
+    # Keep the handle alive for the process lifetime + best-effort clean shutdown.
+    import atexit
+
+    atexit.register(handle.stop)
+    print(
+        f"  Credential proxy: 127.0.0.1:{handle.port} — registered credentials "
+        "are injected into matching egress (the bot never sees the secret).",
+        file=sys.stderr,
+        flush=True,
     )
 
 
