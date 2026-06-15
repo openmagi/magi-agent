@@ -360,6 +360,22 @@ def build_engine_recovery_policy(env: object = None) -> "EngineRecoveryPolicy | 
     )
 
 
+def _adk_invocation_id(event: object) -> str | None:
+    """Extract the ADK ``invocation_id`` from a raw ADK event as a plain string.
+
+    Duck-typed (``getattr``/``Mapping`` only) so ``engine.py`` names no
+    ``google.*`` symbol at module scope. This is the id the CLI tool wrapper
+    keys recorded evidence under (see ``cli/tool_runtime.py``); the engine notes
+    it so the pre-final gate can reconcile it with the engine's static turn id.
+    Returns ``None`` when absent/blank.
+    """
+    if isinstance(event, Mapping):
+        value = event.get("invocation_id")
+    else:
+        value = getattr(event, "invocation_id", None)
+    return value.strip() if isinstance(value, str) and value.strip() else None
+
+
 def _adk_finish_reason(event: object) -> str | None:
     """Extract the model finish reason from a raw ADK event as a plain string.
 
@@ -1141,6 +1157,18 @@ class MagiEngineDriver:
         self._evidence_collector: Callable[[str], Sequence[object]] | None = (
             evidence_collector
         )
+        # Root-cause-1 reconciliation (live turn_id mismatch). The CLI tool
+        # wrapper records evidence into the SHARED collector keyed on the ADK
+        # ``invocation_id`` (e.g. ``"e-fbb68880-..."``), but the engine's gate
+        # queries ``_collect_evidence`` with the engine's static ``turn_id``
+        # (the ``"cli-turn"`` default from ``_turn_identity``). They never match,
+        # so live evidence was invisible to the gate. ``_drive`` notes each ADK
+        # ``invocation_id`` it observes on the live event stream here; the set is
+        # RESET at the start of every ``_drive`` (per-turn scope — the
+        # single-flight registry guarantees one active turn per session). The
+        # engine's own ``turn_id`` is left UNCHANGED so every emitted event label
+        # stays byte-identical (no coding/hosted regression).
+        self._observed_invocation_ids: set[str] = set()
         # Shared across all turns of this driver instance: single-flight per
         # session id. Lazily built so construction stays cheap + import-clean.
         self._registry: object | None = None
@@ -1371,6 +1399,11 @@ class MagiEngineDriver:
         resume_prefix = _render_resume_prefix(initial_messages)
         if resume_prefix:
             prompt = f"{resume_prefix}{prompt}"
+
+        # Root-cause-1: per-turn scope for observed ADK invocation ids. Reset at
+        # the start of every drive so one turn's reconciliation set never leaks
+        # into the next on a reused engine instance.
+        self._observed_invocation_ids = set()
 
         runner = self._resolve_runner(runtime)
         if runner is None:
@@ -1626,6 +1659,11 @@ class MagiEngineDriver:
 
                         adk_event = step
                         event_count += 1
+                        # Root-cause-1: note the ADK invocation id so the
+                        # pre-final gate can reconcile it with the engine turn id.
+                        self._note_observed_invocation_id(
+                            _adk_invocation_id(adk_event)
+                        )
                         reading = _adk_usage_metadata(adk_event)
                         if reading:
                             attempt_usage.update(reading)
@@ -1997,6 +2035,9 @@ class MagiEngineDriver:
                     if _zstep is _EXHAUSTED:
                         break
                     _zadk_event = _zstep
+                    self._note_observed_invocation_id(
+                        _adk_invocation_id(_zadk_event)
+                    )
                     _ze_reading = _adk_usage_metadata(_zadk_event)
                     if _ze_reading:
                         _ze_usage.update(_ze_reading)
@@ -2151,6 +2192,9 @@ class MagiEngineDriver:
 
                     adk_event = step
                     event_count += 1
+                    self._note_observed_invocation_id(
+                        _adk_invocation_id(adk_event)
+                    )
                     _repair_reading = _adk_usage_metadata(adk_event)
                     if _repair_reading:
                         _repair_usage.update(_repair_reading)
@@ -2261,9 +2305,70 @@ class MagiEngineDriver:
         above the engine uses this seam to make evidence-backed :class:`GoalNudge`
         goals functional without coupling the engine to a concrete ledger type.
         """
-        if self._evidence_collector is not None:
-            return tuple(self._evidence_collector(turn_id))
-        return ()
+        if self._evidence_collector is None:
+            return ()
+        # Always query the engine's own ``turn_id`` first (preserves the DI
+        # contract + every existing caller/test that records and queries under
+        # the same id — the coding/hosted shape).
+        records: list[object] = list(self._evidence_collector(turn_id))
+        # Root-cause-1 reconciliation: ALSO fold in records the collector stored
+        # under any ADK ``invocation_id`` observed on this turn's live event
+        # stream (which is what the CLI tool wrapper keys on). Deduped by object
+        # identity so an observed id equal to ``turn_id`` never double-counts.
+        # Purely additive: with no observed ids (the coding/hosted test shape)
+        # this is byte-identical to the prior single-query behaviour.
+        # Flag-gated (default-OFF) so existing coding/hosted live turns are
+        # untouched unless source-grounded enforcement is explicitly enabled.
+        import os as _recon_os  # noqa: PLC0415
+
+        from magi_agent.config.env import (  # noqa: PLC0415
+            parse_source_ledger_evidence_gate_enabled,
+        )
+
+        if self._observed_invocation_ids and parse_source_ledger_evidence_gate_enabled(
+            _recon_os.environ
+        ):
+            seen_ids: set[int] = {id(record) for record in records}
+            for invocation_id in self._observed_invocation_ids:
+                if invocation_id == turn_id:
+                    continue
+                for extra in self._collect_for_id(invocation_id):
+                    if id(extra) not in seen_ids:
+                        seen_ids.add(id(extra))
+                        records.append(extra)
+        return tuple(records)
+
+    def _note_observed_invocation_id(self, invocation_id: object) -> None:
+        """Record an ADK ``invocation_id`` seen on this turn's live event stream.
+
+        ``_drive`` calls this for each raw ADK event so the pre-final gate's
+        ``_collect_evidence`` can reconcile the engine's static ``turn_id`` with
+        the ADK invocation id that the CLI tool wrapper keys evidence under.
+        Defensive: only non-empty strings are kept; anything else is ignored so
+        a malformed event can never wedge the turn.
+        """
+        if isinstance(invocation_id, str) and invocation_id.strip():
+            self._observed_invocation_ids.add(invocation_id.strip())
+
+    def _collect_for_id(self, turn_id: str) -> tuple[object, ...]:
+        """Query the wired collector for one turn/invocation id, fail-soft.
+
+        Prefers the owning collector's ``collect_for_turn`` (recovered via the
+        bound method's ``__self__``, the same pattern as ``_record_phase_reached``)
+        and falls back to calling the DI callable directly. Any failure yields
+        ``()`` so reconciliation can never break the gate.
+        """
+        collector = self._evidence_collector
+        if collector is None:
+            return ()
+        owner = getattr(collector, "__self__", None)
+        collect_for_turn = getattr(owner, "collect_for_turn", None)
+        try:
+            if callable(collect_for_turn):
+                return tuple(collect_for_turn(turn_id))
+            return tuple(collector(turn_id))
+        except Exception:
+            return ()
 
     def _record_phase_reached(
         self,
@@ -2759,6 +2864,15 @@ class MagiEngineDriver:
                 evidence_records=evidence_records,
             )
         )
+        observed_public_refs.update(
+            self._source_ledger_matched_requirement_refs(evidence_records)
+        )
+        observed_public_refs.update(
+            self._hard_redaction_matched_requirement_labels(final_text=final_text)
+        )
+        observed_public_refs.update(
+            self._evidence_pack_matched_requirement_labels(evidence_records)
+        )
         missing_evidence = [
             ref for ref in assembly.evidence_requirements if ref not in observed_public_refs
         ]
@@ -2987,6 +3101,327 @@ class MagiEngineDriver:
         except Exception:
             logger.debug("fact-grounding satisfier failed", exc_info=True)
             return []
+
+    def _source_ledger_matched_requirement_refs(
+        self,
+        evidence_records: Sequence[object],
+    ) -> list[str]:
+        """Named public ref harvested from the live turn's inspected sources.
+
+        Behind strict default-OFF ``MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED``.
+        When OFF this returns ``[]`` so the gate is byte-identical to main: today
+        only ``sha256:`` source receipts reach ``_collect_public_refs``; the NAMED
+        ref ``verifier:research-source-evidence`` is never emitted on the live
+        path (only ``research/research_first_canary`` emits it), so a recipe
+        requiring it always blocks. When ON, and the assembled policy actually
+        requires that named ref, the turn's already-collected evidence records
+        are scanned for at least one inspected source (a ``SourceInspection`` /
+        ``WebSearch`` / ``KnowledgeSearch`` evidence record, the same source
+        evidence types the recipe-layer ``final_output_gate`` keys off). If found,
+        the named ref is returned and merged into ``observed_public_refs`` so the
+        requirement is satisfied; a source-less turn yields ``[]`` and the gate
+        blocks on the named ref.
+
+        Only the ``verifier:research-source-evidence`` ref is ever satisfied here;
+        an unrelated missing validator is untouched. Fail-open: any error matches
+        nothing (returns ``[]``) so the projector can never wedge a turn — it can
+        only REMOVE a block, never add one.
+        """
+        import os  # noqa: PLC0415
+
+        from magi_agent.config.env import (  # noqa: PLC0415
+            parse_source_ledger_evidence_gate_enabled,
+        )
+
+        if not parse_source_ledger_evidence_gate_enabled(os.environ):
+            return []
+        assembly = self._runner_policy_assembly
+        if assembly is None:
+            return []
+        try:
+            from magi_agent.evidence.final_output_gate import (  # noqa: PLC0415
+                _SOURCE_EVIDENCE_TYPES,
+            )
+
+            # All source-read refs that ONE inspected-source evidence record
+            # legitimately satisfies. Each is emitted ONLY when actually in the
+            # assembled requirement set (same ``if ref not in required: skip``
+            # guard pattern as the redaction satisfier), so this never invents a
+            # requirement — it can only REMOVE a block on a turn that read >=1
+            # inspected source.
+            #   * ``verifier:research-source-evidence`` (validator) — the named
+            #     source-evidence verifier the source-grounded / research recipes
+            #     require.
+            #   * ``evidence:inspected-source`` (evidence) — the inspected-source
+            #     evidence requirement the same recipes carry; before this it had
+            #     no live producer so the gate blocked even on a real read.
+            #   * ``verifier:sourceOpened@1`` (validator) — the "at least one
+            #     source opened" verifier; satisfied by the same single record
+            #     when a recipe requires it.
+            named_validator = "verifier:research-source-evidence"
+            inspected_evidence = "evidence:inspected-source"
+            source_opened = "verifier:sourceOpened@1"
+            required_validators = tuple(
+                getattr(assembly, "required_validators", ()) or ()
+            )
+            required_evidence = tuple(
+                getattr(assembly, "evidence_requirements", ()) or ()
+            )
+            wants_validator = named_validator in required_validators
+            wants_inspected = inspected_evidence in required_evidence
+            wants_opened = source_opened in required_validators
+            if not (wants_validator or wants_inspected or wants_opened):
+                return []
+            has_source_record = False
+            for record in evidence_records:
+                record_type = (
+                    record.get("type")
+                    if isinstance(record, Mapping)
+                    else getattr(record, "type", None)
+                )
+                if isinstance(record_type, str) and record_type in _SOURCE_EVIDENCE_TYPES:
+                    has_source_record = True
+                    break
+            if not has_source_record:
+                return []
+            matched: list[str] = []
+            if wants_validator:
+                matched.append(named_validator)
+            if wants_inspected:
+                matched.append(inspected_evidence)
+            if wants_opened:
+                matched.append(source_opened)
+            return matched
+        except Exception:
+            logger.debug("source-ledger evidence projector failed", exc_info=True)
+            return []
+
+    def _hard_redaction_matched_requirement_labels(
+        self,
+        *,
+        final_text: str,
+    ) -> list[str]:
+        """BARE hard validator/evidence labels satisfied on a clean turn.
+
+        ``recipes/reliability_policy`` force-merges three BARE refs into every
+        recipe's final-gate policy: the validators ``no_production_attachment``
+        / ``public_redaction`` and the evidence label ``redaction_audit``. They
+        carry no public-ref prefix and (before this satisfier) had no live
+        producer, so the pre-final gate always blocked — even on a perfect
+        non-coding turn. This satisfier makes them legitimately satisfiable.
+
+        Behind the same strict default-OFF flag as the source-ledger projector
+        (``MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED``). When OFF this returns
+        ``[]`` so the gate is byte-identical to main (the bare hard refs stay
+        missing ⇒ block). Each label is only emitted when it is actually in the
+        assembled requirement set, mirroring the source-ledger satisfier's
+        ``if label not in required: return []`` guard.
+
+        Semantics (founder sign-off):
+
+        * ``no_production_attachment`` — emitted when the genuine config
+          invariant holds (no production tool-host attachment). The invariant is
+          enforced at config time (``parse_python_toolhost_attachment_env``
+          raises if the production-attachment env is set; the model pins
+          ``Literal[False]``). We read that accessor live; if it raises we emit
+          nothing (block) rather than hardcoding the answer.
+        * ``public_redaction`` — the turn's ``final_text`` is scanned for
+          CREDENTIALS ONLY (API keys / tokens / JWTs / bearer values) reusing
+          the existing credential detectors. No credential ⇒ emitted; a
+          credential ⇒ NOT emitted ⇒ the gate BLOCKS. Block-only: the output is
+          never rewritten/redacted here.
+        * ``redaction_audit`` — emitted iff the redaction scan ran and found no
+          credential (reuses the ``public_redaction`` result).
+
+        Fail-open per label: any error emits nothing, so the satisfier can only
+        REMOVE a block, never add one.
+        """
+        import os  # noqa: PLC0415
+
+        from magi_agent.config.env import (  # noqa: PLC0415
+            parse_source_ledger_evidence_gate_enabled,
+        )
+
+        if not parse_source_ledger_evidence_gate_enabled(os.environ):
+            return []
+        assembly = self._runner_policy_assembly
+        if assembly is None:
+            return []
+        matched: list[str] = []
+        required_validators = tuple(getattr(assembly, "required_validators", ()) or ())
+        required_evidence = tuple(getattr(assembly, "evidence_requirements", ()) or ())
+
+        # no_production_attachment — read the genuine config invariant. The
+        # mandatory ``openmagi.context-safety`` pack ALSO requires the PREFIXED
+        # alias ``validator:context-safety:no-production-attachment`` for the
+        # SAME invariant (compiler.py:2014-2019); it is the same check, so emit
+        # both under the single invariant read (each guarded on membership).
+        no_prod_bare = "no_production_attachment"
+        no_prod_prefixed = "validator:context-safety:no-production-attachment"
+        wants_no_prod_bare = no_prod_bare in required_validators
+        wants_no_prod_prefixed = no_prod_prefixed in required_validators
+        if wants_no_prod_bare or wants_no_prod_prefixed:
+            try:
+                from magi_agent.config.env import (  # noqa: PLC0415
+                    parse_python_toolhost_attachment_env,
+                )
+
+                toolhost = parse_python_toolhost_attachment_env(os.environ)
+                if toolhost.production_attachment_enabled is False:
+                    if wants_no_prod_bare:
+                        matched.append(no_prod_bare)
+                    if wants_no_prod_prefixed:
+                        matched.append(no_prod_prefixed)
+            except Exception:
+                logger.debug(
+                    "no-production-attachment invariant read failed", exc_info=True
+                )
+
+        # public_redaction / redaction_audit — credential-only scan of
+        # final_text. The mandatory ``openmagi.context-safety`` pack carries
+        # PREFIXED aliases for the SAME redaction check
+        # (``validator:context-safety:public-redaction`` ==
+        # ``public_redaction``; ``evidence:context-safety-redaction`` ==
+        # ``redaction_audit``; compiler.py:2018-2024). It also requires the bare
+        # ``no_raw_evidence_payload`` validator (reliability_policy.py:111),
+        # whose honest deterministic condition is the SAME credential-clean
+        # scan (a final answer carrying no raw credential material). All four
+        # are emitted from the single scan, each guarded on membership, so no
+        # new logic is introduced.
+        bare_public_redaction = "public_redaction"
+        prefixed_public_redaction = "validator:context-safety:public-redaction"
+        no_raw_payload = "no_raw_evidence_payload"
+        bare_redaction_audit = "redaction_audit"
+        prefixed_redaction_audit = "evidence:context-safety-redaction"
+        wants_bare_redaction = bare_public_redaction in required_validators
+        wants_prefixed_redaction = prefixed_public_redaction in required_validators
+        wants_no_raw_payload = no_raw_payload in required_validators
+        wants_bare_audit = bare_redaction_audit in required_evidence
+        wants_prefixed_audit = prefixed_redaction_audit in required_evidence
+        if (
+            wants_bare_redaction
+            or wants_prefixed_redaction
+            or wants_no_raw_payload
+            or wants_bare_audit
+            or wants_prefixed_audit
+        ):
+            try:
+                if not self._final_text_contains_credential(final_text):
+                    if wants_bare_redaction:
+                        matched.append(bare_public_redaction)
+                    if wants_prefixed_redaction:
+                        matched.append(prefixed_public_redaction)
+                    if wants_no_raw_payload:
+                        matched.append(no_raw_payload)
+                    if wants_bare_audit:
+                        matched.append(bare_redaction_audit)
+                    if wants_prefixed_audit:
+                        matched.append(prefixed_redaction_audit)
+            except Exception:
+                logger.debug("public-redaction credential scan failed", exc_info=True)
+        return matched
+
+    def _evidence_pack_matched_requirement_labels(
+        self,
+        evidence_records: tuple[object, ...],
+    ) -> list[str]:
+        """Satisfiers for the mandatory ``openmagi.evidence`` pack's refs.
+
+        ``openmagi.evidence`` is a hard-safety, non-opt-out pack
+        (``compiler.py:2037-2042``), so its refs are ALWAYS required on the live
+        gate yet had no live producer, blocking every turn. This emits them from
+        EXISTING deterministic conditions only (no new enforcement logic), each
+        guarded on membership in the assembled requirement set so OFF / absent
+        requirements stay byte-identical:
+
+        * ``runtime_evidence_record`` (bare) + ``evidence:runtime-issued-record``
+          (prefixed) — the SAME "the runtime issued at least one evidence
+          record this turn" attestation. Honest deterministic condition: the
+          turn's already-collected ``evidence_records`` is non-empty (auto-
+          attest from the real per-turn ledger the engine already passes in).
+          No records ⇒ not emitted ⇒ the gate keeps blocking.
+        * ``validator:evidence:no-block-mode`` — a structural attestation that
+          the evidence verification subsystem runs in AUDIT mode, never
+          block-mode. Read from the existing ``block_mode = Literal[False]``
+          config invariant on ``CitationAuditResult`` (``citation_audit.py:88``);
+          if that invariant ever flips to True the ref is NOT emitted.
+
+        Behind the same strict default-OFF flag. Fail-open per ref.
+        """
+        import os  # noqa: PLC0415
+
+        from magi_agent.config.env import (  # noqa: PLC0415
+            parse_source_ledger_evidence_gate_enabled,
+        )
+
+        if not parse_source_ledger_evidence_gate_enabled(os.environ):
+            return []
+        assembly = self._runner_policy_assembly
+        if assembly is None:
+            return []
+        matched: list[str] = []
+        required_validators = tuple(getattr(assembly, "required_validators", ()) or ())
+        required_evidence = tuple(getattr(assembly, "evidence_requirements", ()) or ())
+
+        # runtime_evidence_record / evidence:runtime-issued-record — emit when
+        # the turn actually collected >=1 evidence record.
+        bare_runtime = "runtime_evidence_record"
+        prefixed_runtime = "evidence:runtime-issued-record"
+        wants_bare_runtime = bare_runtime in required_evidence
+        wants_prefixed_runtime = prefixed_runtime in required_evidence
+        if (wants_bare_runtime or wants_prefixed_runtime) and len(evidence_records) >= 1:
+            if wants_bare_runtime:
+                matched.append(bare_runtime)
+            if wants_prefixed_runtime:
+                matched.append(prefixed_runtime)
+
+        # validator:evidence:no-block-mode — structural audit-mode invariant.
+        no_block_mode = "validator:evidence:no-block-mode"
+        if no_block_mode in required_validators:
+            try:
+                from magi_agent.evidence.citation_audit import (  # noqa: PLC0415
+                    CitationAuditResult,
+                )
+
+                block_mode_field = CitationAuditResult.model_fields["block_mode"]
+                if block_mode_field.default is False:
+                    matched.append(no_block_mode)
+            except Exception:
+                logger.debug("no-block-mode invariant read failed", exc_info=True)
+        return matched
+
+    @staticmethod
+    def _final_text_contains_credential(final_text: str) -> bool:
+        """True if ``final_text`` leaks a CREDENTIAL (key / token / JWT / bearer).
+
+        Reuses the existing credential-value detectors only: ``_JWT_LIKE_RE``
+        (``evidence/validator_taxonomy.py``) and the cloud/API-key + bearer
+        regexes from ``evidence/ledger.py`` (``_GITHUB_TOKEN_RE``,
+        ``_OPENAI_TOKEN_RE``, ``_STRIPE_TOKEN_RE``, ``_BEARER_TOKEN_RE``). These
+        match actual secret MATERIAL — NOT bare filesystem paths (``/Users/``),
+        emails, or the bare word ``token`` (those are explicitly out of scope to
+        avoid false positives).
+        """
+        if not final_text:
+            return False
+        from magi_agent.evidence.ledger import (  # noqa: PLC0415
+            _BEARER_TOKEN_RE,
+            _GITHUB_TOKEN_RE,
+            _OPENAI_TOKEN_RE,
+            _STRIPE_TOKEN_RE,
+        )
+        from magi_agent.evidence.validator_taxonomy import _JWT_LIKE_RE  # noqa: PLC0415
+
+        for pattern in (
+            _GITHUB_TOKEN_RE,
+            _OPENAI_TOKEN_RE,
+            _STRIPE_TOKEN_RE,
+            _BEARER_TOKEN_RE,
+            _JWT_LIKE_RE,
+        ):
+            if pattern.search(final_text):
+                return True
+        return False
 
     @staticmethod
     def _collect_public_refs(value: object, refs: set[str]) -> None:

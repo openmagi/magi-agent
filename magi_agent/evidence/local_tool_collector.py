@@ -108,6 +108,22 @@ class LocalToolEvidenceCollector:
         if explicit is not None:
             records.append(explicit)
 
+        # Source-ledger projection (default-OFF
+        # MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED). A read-only source tool
+        # (FileRead / DocumentRead / Glob / Grep / GitDiff) records inspected
+        # sources in its own ``LocalResearchSourceLedger`` and surfaces the
+        # public ledger report under ``metadata["sourceProjection"]``. Those
+        # records were NEVER projected into the collector's ``_records``, so the
+        # pre-final gate's source-evidence ref had no live producer and a real
+        # source-read still blocked. This projects each inspected SourceInspection
+        # source into an EvidenceRecord using the EXISTING
+        # ``SourceLedgerRecord.to_evidence_record()`` — no new evidence shape.
+        # When the flag is OFF this is skipped entirely so ``_records`` is
+        # byte-identical to main.
+        records.extend(
+            _projected_source_inspection_records(tool_result.metadata)
+        )
+
         receipt = None
         if not self._has_canonical_general_automation_entry(
             turn_id=turn_id,
@@ -525,6 +541,83 @@ class LocalToolEvidenceCollector:
         ):
             return False
         return bool(self._general_automation_entries_for_turn(turn_id))
+
+
+def _source_ledger_evidence_gate_enabled() -> bool:
+    import os  # noqa: PLC0415
+
+    from magi_agent.config.env import (  # noqa: PLC0415
+        parse_source_ledger_evidence_gate_enabled,
+    )
+
+    return parse_source_ledger_evidence_gate_enabled(os.environ)
+
+
+def _projected_source_inspection_records(
+    metadata: Mapping[str, object],
+) -> list[object]:
+    """Project a read-only tool's source-ledger report into EvidenceRecords.
+
+    Default-OFF behind ``MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED``; returns
+    ``[]`` (byte-identical to main) when the flag is off, when the result has no
+    ``sourceProjection``, or when nothing was inspected.
+
+    Reuses the EXISTING ``SourceLedgerRecord.to_evidence_record()`` (which
+    returns ``EvidenceRecord(type="SourceInspection")``) — it reconstructs a
+    ``SourceLedgerRecord`` from each public source report entry and projects it.
+    Only ``inspected`` ``SourceInspection`` sources are surfaced. Fail-open: any
+    error yields ``[]`` so a malformed projection can never wedge the turn.
+    """
+    if not _source_ledger_evidence_gate_enabled():
+        return []
+    projection = metadata.get("sourceProjection")
+    if not isinstance(projection, Mapping):
+        return []
+    sources = projection.get("sources")
+    if not isinstance(sources, (list, tuple)):
+        return []
+    turn_id = projection.get("turnId")
+    records: list[object] = []
+    try:
+        from magi_agent.evidence.source_ledger import (  # noqa: PLC0415
+            SourceLedgerRecord,
+        )
+
+        for source in sources:
+            if not isinstance(source, Mapping):
+                continue
+            if source.get("evidenceType") != "SourceInspection":
+                continue
+            if source.get("inspected") is not True:
+                continue
+            source_id = source.get("sourceId")
+            kind = source.get("kind")
+            inspected_at = source.get("inspectedAt")
+            if not isinstance(source_id, str) or not isinstance(kind, str):
+                continue
+            payload: dict[str, object] = {
+                "sourceId": source_id,
+                "turnId": turn_id if isinstance(turn_id, str) and turn_id else "unknown-turn",
+                "toolName": _SOURCE_LEDGER_PROJECTION_TOOL_NAME,
+                "evidenceType": "SourceInspection",
+                "kind": kind,
+                # The public report redacts the uri; the projected EvidenceRecord
+                # only needs a non-empty placeholder (it is never sent anywhere).
+                "uri": "source://redacted",
+                "inspectedAt": inspected_at if isinstance(inspected_at, (int, float)) else 1,
+                "inspected": True,
+            }
+            try:
+                record = SourceLedgerRecord.model_validate(payload)
+            except Exception:
+                continue
+            records.append(record.to_evidence_record())
+    except Exception:
+        return []
+    return records
+
+
+_SOURCE_LEDGER_PROJECTION_TOOL_NAME = "SourceInspection"
 
 
 def _local_receipt_projection(

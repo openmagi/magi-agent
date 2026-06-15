@@ -300,6 +300,7 @@ def test_pack_registry_catalog_is_metadata_only_and_has_expected_first_party_pac
         "openmagi.spreadsheet-automation",
         "openmagi.browser-automation",
         "openmagi.document-review",
+        "openmagi.source-grounded",
         "openmagi.lightweight-scripting",
         "openmagi.learning-usage",
         "openmagi.discovery",

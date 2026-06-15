@@ -2625,6 +2625,48 @@ def _first_party_packs() -> tuple[RecipePackManifest, ...]:
             approvalGateMetadata=("ApprovalGate:document-review:metadata-only",),
         ),
         RecipePackManifest(
+            # Minimal selectable source-grounded read-only pack. It pairs with
+            # the ``openmagi.source-grounded`` reliability-policy recipe whose
+            # only non-hard required validator is the NAMED public ref
+            # ``verifier:research-source-evidence`` (satisfied by the live
+            # source-ledger projector behind MAGI_SOURCE_LEDGER_EVIDENCE_GATE_
+            # ENABLED on a turn that read >=1 inspected source). Registering it
+            # lets MAGI_FORCE_RECIPE=openmagi.source-grounded resolve via the
+            # explicit-selection path instead of failing closed with
+            # ``explicit_recipe_missing``. Default-off + opt-out, so the
+            # automatic (unforced) OFF selection stays byte-identical. The
+            # ``source-grounded`` task selector is unique to this pack so it is
+            # never auto-selected by an existing task profile.
+            packId="openmagi.source-grounded",
+            displayName="Source Grounded",
+            description=(
+                "Configurable source-grounded read-only workflow metadata "
+                "requiring named source-evidence before a final answer."
+            ),
+            taskProfileSelectors=("source-grounded",),
+            # NOTE: NO ``dependsOnPackIds``. ``openmagi.web-acquisition`` was
+            # pulled in ONLY via this dep (it is not hard-safety and not a
+            # default pack), and its refs (``verifier:web-acquisition:provider-
+            # boundary``, ``evidence:web-acquisition:source-ledger-input``, plus
+            # the reliability-policy ``source_quality`` / ``no_auth_bypass`` /
+            # ``source_ledger``) have no live producer on the source-grounded
+            # path, so the dep made the gate permanently block. Source-grounded
+            # carries its OWN named source-evidence refs (``verifier:research-
+            # source-evidence`` + ``evidence:inspected-source``), satisfied by
+            # the live source-ledger projector on a real read.
+            instructionRefs=("instruction:source-grounded:read-before-answer",),
+            callbackRefs=("callback:source-grounded:source-capture",),
+            validatorRefs=("verifier:research-source-evidence",),
+            approvalGateRefs=("approval:source-grounded:external-source-use",),
+            evidenceRefs=("evidence:inspected-source",),
+            auditRefs=("audit:source-grounded-ledger",),
+            adkPrimitiveOwnership=common_adk_owners,
+            openmagiBoundaryOwnership=common_openmagi_owners,
+            callbackSetMetadata=("CallbackSet:source-grounded:metadata-only",),
+            validatorSetMetadata=("ValidatorSet:source-grounded:metadata-only",),
+            approvalGateMetadata=("ApprovalGate:source-grounded:metadata-only",),
+        ),
+        RecipePackManifest(
             packId="openmagi.lightweight-scripting",
             displayName="Lightweight Scripting",
             description="Configurable lightweight scripting workflow metadata.",

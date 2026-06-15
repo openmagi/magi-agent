@@ -456,6 +456,17 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
     ),
     _b(
+        "MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED",
+        stage="stage2",
+        summary=(
+            "Project the live turn's inspected-source ledger into the engine's "
+            "harvested public refs as the named ref "
+            "'verifier:research-source-evidence' so a recipe can require source "
+            "grounding: a turn that read >=1 source passes, a turn that read none "
+            "blocks. Strict default-OFF and inert unless explicitly set."
+        ),
+    ),
+    _b(
         "MAGI_GATE5B_GOVERNANCE_ENABLED",
         stage="stage2",
         summary=(
