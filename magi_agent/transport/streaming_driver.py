@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from typing import TYPE_CHECKING
 
 from magi_agent.cli.contracts import EngineResult, Terminal
@@ -84,6 +84,7 @@ async def drive_streaming_chat(
     registry: ActiveTurnTable,
     session_id: str,
     turn_id: str,
+    usage_recorder: "Callable[[EngineResult], None] | None" = None,
 ) -> AsyncIterator[bytes]:
     """Drive one turn and yield its SSE byte frames, interleaving control events.
 
@@ -114,6 +115,12 @@ async def drive_streaming_chat(
         teardown).
     session_id, turn_id:
         Identity of this turn.
+    usage_recorder:
+        Optional callback invoked once with the terminal :class:`EngineResult`
+        after the turn completes (any terminal status), BEFORE the terminal SSE
+        frame is emitted. Used to persist per-turn token/cost usage for the local
+        Usage dashboard. Any exception it raises is swallowed so usage accounting
+        can never break the live stream.
 
     Yields
     ------
@@ -206,6 +213,10 @@ async def drive_streaming_chat(
                 session_id=session_id,
                 turn_id=turn_id,
             )
+        if usage_recorder is not None:
+            # Usage accounting must never break the live stream — swallow any fault.
+            with contextlib.suppress(Exception):
+                usage_recorder(terminal)
         for chunk in frame_for_terminal(terminal):
             yield chunk
     finally:

@@ -543,3 +543,87 @@ def test_noncooperative_engine_teardown_times_out():
         f"teardown took {elapsed:.2f}s, expected ~<= "
         f"{_PRODUCER_TEARDOWN_TIMEOUT_S}s"
     )
+
+
+# ---------------------------------------------------------------------------
+# usage_recorder hook
+# ---------------------------------------------------------------------------
+def test_usage_recorder_called_with_terminal():
+    registry = ActiveTurnTable()
+    queue: asyncio.Queue[object] = asyncio.Queue()
+    sink = build_streaming_prompt_sink(queue, turn_id="t-turn")
+    cancel = asyncio.Event()
+    recorded: list[EngineResult] = []
+
+    class FakeEngine:
+        async def run_turn_stream(self, runtime, turn_input, *, cancel, gate):
+            yield _ev("text_delta", delta="hi")
+            yield EngineResult(
+                terminal=Terminal.completed,
+                usage={"input_tokens": 10, "output_tokens": 4},
+                session_id="s1",
+                turn_id="t-turn",
+            )
+
+    async def _run() -> None:
+        async for _chunk in drive_streaming_chat(
+            FakeEngine(),
+            None,
+            {"prompt": "hi", "session_id": "s1", "turn_id": "t-turn"},
+            cancel=cancel,
+            queue=queue,
+            sink=sink,
+            registry=registry,
+            session_id="s1",
+            turn_id="t-turn",
+            usage_recorder=recorded.append,
+        ):
+            pass
+
+    asyncio.run(_run())
+    assert len(recorded) == 1
+    assert recorded[0].terminal is Terminal.completed
+    assert recorded[0].usage == {"input_tokens": 10, "output_tokens": 4}
+
+
+def test_usage_recorder_exception_does_not_break_stream():
+    registry = ActiveTurnTable()
+    queue: asyncio.Queue[object] = asyncio.Queue()
+    sink = build_streaming_prompt_sink(queue, turn_id="t-turn")
+    cancel = asyncio.Event()
+
+    class FakeEngine:
+        async def run_turn_stream(self, runtime, turn_input, *, cancel, gate):
+            yield _ev("text_delta", delta="hi")
+            yield EngineResult(
+                terminal=Terminal.completed,
+                usage={"input_tokens": 1},
+                session_id="s1",
+                turn_id="t-turn",
+            )
+
+    def _boom(_terminal: EngineResult) -> None:
+        raise RuntimeError("recorder blew up")
+
+    async def _run() -> str:
+        chunks: list[bytes] = []
+        async for chunk in drive_streaming_chat(
+            FakeEngine(),
+            None,
+            {"prompt": "hi", "session_id": "s1", "turn_id": "t-turn"},
+            cancel=cancel,
+            queue=queue,
+            sink=sink,
+            registry=registry,
+            session_id="s1",
+            turn_id="t-turn",
+            usage_recorder=_boom,
+        ):
+            chunks.append(chunk)
+        return b"".join(chunks).decode()
+
+    text = asyncio.run(_run())
+    # Stream still terminates cleanly despite the recorder raising.
+    frames = _data_lines(text)
+    assert any(f.get("type") == "turn_result" for f in frames)
+    assert "[DONE]" in text
