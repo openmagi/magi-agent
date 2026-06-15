@@ -28,12 +28,14 @@ Architecture notes
 from __future__ import annotations
 
 import json
+from collections.abc import Mapping
 from enum import Enum
 from hashlib import sha256
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from magi_agent.config.env import worker_routing_llm_enabled
 from magi_agent.research.child_roles import ResearchChildRoleName, RESEARCH_CHILD_ROLE_NAMES
 from magi_agent.recipes.ledger_task import (
     LedgerFact,
@@ -100,6 +102,38 @@ _ROLE_TABLE: dict[tuple[str, str], ResearchChildRoleName] = {
     ("verified_intermediate", "unknown"): "synthesis_reviewer",
     ("open_question", "unknown"): "research_searcher",
 }
+
+# Public, planner-facing "when to use" advertisement for each worker role.
+# Data only — a planner prompt may surface these so the model can emit an
+# explicit ``worker_role`` per step (honored when
+# ``MAGI_WORKER_ROUTING_LLM_ENABLED`` is on).  Keys are the valid worker roles.
+WORKER_ROLE_WHEN_TO_USE: dict[ResearchChildRoleName, str] = {
+    "research_searcher": (
+        "Use to look up, search, retrieve, or fetch external information for a "
+        "step that needs new source material."
+    ),
+    "source_inspector": (
+        "Use to open, read, parse, or extract content from a specific source, "
+        "file, or attachment that is already identified."
+    ),
+    "claim_mapper": (
+        "Use to identify, enumerate, or structure the claims and entities within "
+        "gathered material into a mapped representation."
+    ),
+    "research_verifier": (
+        "Use to verify, validate, confirm, or cross-check a working guess or claim "
+        "against corroborating evidence."
+    ),
+    "synthesis_reviewer": (
+        "Use to assemble, summarize, compose, or write the final synthesized answer "
+        "from verified facts."
+    ),
+}
+
+# Valid planner-provided worker roles (the keys the role table / honor path
+# accepts).  ``LedgerPlanStep.worker_role`` defaults to ``"orchestrator"`` which
+# is NOT a worker role and is treated as "no explicit role provided".
+_VALID_WORKER_ROLES: frozenset[ResearchChildRoleName] = frozenset(RESEARCH_CHILD_ROLE_NAMES)
 
 _SEARCH_KEYWORDS = frozenset({"search", "look", "find", "retrieve", "fetch", "web", "query"})
 _INSPECT_KEYWORDS = frozenset({"inspect", "read", "open", "parse", "extract", "file", "attachment"})
@@ -180,6 +214,8 @@ class RoleAssignmentPolicy(BaseModel):
         self,
         step: LedgerPlanStep,
         task_ledger: TaskLedgerContract,
+        *,
+        env: Mapping[str, str] | None = None,
     ) -> ResearchChildRoleName:
         """Assign the best worker role for ``step`` given current ``task_ledger``.
 
@@ -189,12 +225,26 @@ class RoleAssignmentPolicy(BaseModel):
             The plan step to assign a role to.
         task_ledger:
             Current task ledger (used to determine dependency fact kinds).
+        env:
+            Optional environment mapping for flag resolution (defaults to the
+            process environment).
 
         Returns
         -------
         ResearchChildRoleName
             The role that should execute this step.
+
+        Notes
+        -----
+        When ``MAGI_WORKER_ROUTING_LLM_ENABLED`` is on **and** the step carries
+        a valid explicit planner-provided ``worker_role`` (a
+        :data:`ResearchChildRoleName`, not the ``"orchestrator"`` default), that
+        role is honored directly and keyword inference is skipped.  When the flag
+        is off, or the role is missing/invalid, behaviour is byte-identical to the
+        keyword-inference path (``_infer_evidence_hint`` → role table).
         """
+        if worker_routing_llm_enabled(env) and step.worker_role in _VALID_WORKER_ROLES:
+            return step.worker_role  # type: ignore[return-value]
         dominant = _dominant_fact_kind(step.depends_on_fact_ids, task_ledger)
         hint = _infer_evidence_hint(step.description)
         role = _ROLE_TABLE.get((dominant, hint))
@@ -230,6 +280,7 @@ def assign_worker_role(
     task_ledger: TaskLedgerContract,
     *,
     policy: RoleAssignmentPolicy | None = None,
+    env: Mapping[str, str] | None = None,
 ) -> ResearchChildRoleName:
     """Convenience wrapper — assign a worker role to ``step``.
 
@@ -241,6 +292,8 @@ def assign_worker_role(
         Current task ledger.
     policy:
         Optional custom policy.  Defaults to ``RoleAssignmentPolicy()``.
+    env:
+        Optional environment mapping for flag resolution.
 
     Returns
     -------
@@ -248,7 +301,7 @@ def assign_worker_role(
         The assigned role.
     """
     _policy = policy or RoleAssignmentPolicy()
-    return _policy.assign_role(step, task_ledger)
+    return _policy.assign_role(step, task_ledger, env=env)
 
 
 # ---------------------------------------------------------------------------
@@ -288,6 +341,7 @@ def batch_independent_steps(
     policy: RoleAssignmentPolicy | None = None,
     batch_id_prefix: str = "batch",
     batch_number: int = 0,
+    env: Mapping[str, str] | None = None,
 ) -> StepBatch | None:
     """Identify the next batch of parallelisable pending steps.
 
@@ -336,7 +390,7 @@ def batch_independent_steps(
         if produces & batch_produces:
             # Write conflict with an already-batched step.
             continue
-        role = _policy.assign_role(step, task_ledger)
+        role = _policy.assign_role(step, task_ledger, env=env)
         batch_steps.append(step)
         batch_produces |= produces
         batch_roles.append(role)
@@ -352,6 +406,7 @@ def batch_independent_steps(
 
 
 __all__ = [
+    "WORKER_ROLE_WHEN_TO_USE",
     "LedgerOrchestrationMode",
     "RoleAssignmentPolicy",
     "StepBatch",

@@ -323,3 +323,71 @@ class TestStepBatch:
         )
         assert batch.default_off is True
         assert batch.batch_id == "batch:1"
+
+
+# ---------------------------------------------------------------------------
+# Planner-provided worker_role routing (flag-gated)
+# ---------------------------------------------------------------------------
+
+class TestPlannerWorkerRoleRouting:
+    def _ledger_with_fact(self, kind: LedgerFactKind, fact_id: str) -> object:
+        fact = make_fact(fact_id=fact_id, kind=kind)
+        ledger = make_task_ledger(ledger_id="ledger:pwr", objective_text="planner role")
+        return update_task_ledger(ledger, facts=(fact,))  # type: ignore[arg-type]
+
+    def test_planner_worker_role_honored_when_flag_on(self, monkeypatch) -> None:
+        """A valid explicit worker_role is used directly; keyword inference is NOT consulted."""
+        import magi_agent.recipes.ledger_workforce as wf
+
+        def _boom(_description: str) -> str:  # pragma: no cover - must not be called
+            raise AssertionError("_infer_evidence_hint must not be called when role honored")
+
+        monkeypatch.setattr(wf, "_infer_evidence_hint", _boom)
+
+        ledger = self._ledger_with_fact(LedgerFactKind.open_question, "fact:q")
+        # Description keywords would imply "search" -> research_searcher, but the
+        # planner explicitly asked for a verifier; the explicit role must win.
+        step = make_plan_step(
+            step_id="step:explicit",
+            description="Search for the publication data",
+            worker_role="research_verifier",
+            depends_on_fact_ids=("fact:q",),
+        )
+        role = assign_worker_role(step, ledger, env={"MAGI_WORKER_ROUTING_LLM_ENABLED": "true"})  # type: ignore[arg-type]
+        assert role == "research_verifier"
+
+    def test_invalid_or_missing_role_falls_back_to_keyword_then_default(self) -> None:
+        """Missing/invalid role (the 'orchestrator' default) -> keyword inference path."""
+        ledger = self._ledger_with_fact(LedgerFactKind.known_fact, "fact:k")
+        # worker_role left at default ("orchestrator") = not a valid worker role.
+        step = make_plan_step(
+            step_id="step:fallback",
+            description="Synthesize and write the final answer",
+            depends_on_fact_ids=("fact:k",),
+        )
+        role = assign_worker_role(step, ledger, env={"MAGI_WORKER_ROUTING_LLM_ENABLED": "true"})  # type: ignore[arg-type]
+        # Keyword inference -> "synthesize" -> synthesis_reviewer.
+        assert role == "synthesis_reviewer"
+
+    def test_flag_off_is_byte_identical_keyword_inference(self) -> None:
+        """Flag OFF -> keyword inference even when a valid worker_role is set."""
+        ledger = self._ledger_with_fact(LedgerFactKind.open_question, "fact:q2")
+        step = make_plan_step(
+            step_id="step:flagoff",
+            description="Search for the publication data",
+            worker_role="research_verifier",  # would win if flag ON
+            depends_on_fact_ids=("fact:q2",),
+        )
+        # Flag OFF (env without the var) -> keyword inference: "search" -> searcher.
+        role = assign_worker_role(step, ledger, env={})  # type: ignore[arg-type]
+        assert role == "research_searcher"
+
+
+class TestWorkerRoleWhenToUse:
+    def test_when_to_use_covers_all_roles(self) -> None:
+        from magi_agent.recipes.ledger_workforce import WORKER_ROLE_WHEN_TO_USE
+        from magi_agent.research.child_roles import RESEARCH_CHILD_ROLE_NAMES
+
+        assert set(WORKER_ROLE_WHEN_TO_USE) == set(RESEARCH_CHILD_ROLE_NAMES)
+        for role, desc in WORKER_ROLE_WHEN_TO_USE.items():
+            assert isinstance(desc, str) and desc.strip()
