@@ -1,7 +1,50 @@
 import json
 from pathlib import Path
 
-from magi_agent.customize.store import DEFAULT_OVERRIDES, customize_path, load_overrides
+from magi_agent.customize.store import (
+    DEFAULT_OVERRIDES,
+    customize_path,
+    load_overrides,
+    set_user_rules,
+    set_verification_override,
+)
+
+
+def test_set_user_rules_roundtrip(tmp_path: Path) -> None:
+    p = tmp_path / "customize.json"
+    set_user_rules("Always cite sources.", path=p)
+    assert load_overrides(p)["user_rules"] == "Always cite sources."
+
+
+def test_set_user_rules_caps_length(tmp_path: Path) -> None:
+    p = tmp_path / "customize.json"
+    out = set_user_rules("x" * 50_000, path=p)
+    assert len(out["user_rules"]) == 20_000
+
+
+def test_set_verification_override_persists_and_normalizes(tmp_path: Path) -> None:
+    p = tmp_path / "customize.json"
+    out = set_verification_override(
+        "harness_presets", "answer_quality", True, mode="hybrid", path=p
+    )
+    assert "answer_quality" in out["verification"]["harness_presets"]
+    assert out["verification"]["modes"]["answer_quality"] == "hybrid"
+    reloaded = load_overrides(p)
+    assert reloaded["verification"]["modes"]["answer_quality"] == "hybrid"
+
+
+def test_set_verification_override_disable_removes(tmp_path: Path) -> None:
+    p = tmp_path / "customize.json"
+    set_verification_override("harness_presets", "answer_quality", True, mode="deterministic", path=p)
+    out = set_verification_override("harness_presets", "answer_quality", False, mode=None, path=p)
+    assert "answer_quality" not in out["verification"]["harness_presets"]
+    assert "answer_quality" not in out["verification"]["modes"]
+
+
+def test_set_verification_override_hooks_kind(tmp_path: Path) -> None:
+    p = tmp_path / "customize.json"
+    out = set_verification_override("hooks", "beforeCommit", True, path=p)
+    assert out["verification"]["hooks"]["beforeCommit"] is True
 
 
 def test_missing_file_returns_default(tmp_path: Path) -> None:
@@ -26,6 +69,7 @@ def test_partial_file_is_shape_normalized(tmp_path: Path) -> None:
         "recipes": [],
         "harness_presets": [],
         "hooks": {},
+        "modes": {},
         "custom_rules": [],
     }
 
