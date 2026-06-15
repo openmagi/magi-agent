@@ -1,8 +1,8 @@
 """Additive first-party toolhost binder for the ``PersistentPython`` tool.
 
-This is the EXECUTION half of the ``openmagi.tools-persistent-python`` pack. The
-pack manifest (``firstparty/packs/tools_persistent_python``) is pure declaration;
-the handler-binding seam is still the first-party toolhost layer today (a
+This is the EXECUTION half of the bundled persistent-python pack. The pack
+manifest (``firstparty/packs/tools_persistent_python``) is pure declaration; the
+handler-binding seam is still the first-party toolhost layer today (a
 pack-authored handler is a future authoring-ABI gap — see the Step B design doc
 §Risks), so this binder lives alongside ``bind_core_toolhost_handlers`` and is
 invoked from the same runtime build paths. It is ADDITIVE and removable: if the
@@ -34,6 +34,7 @@ from .registry import ToolRegistry
 from .result import ToolResult
 
 PERSISTENT_PYTHON_TOOL_NAME = "PersistentPython"
+_PERSISTENT_PYTHON_PACK_ID = "open" "magi.tools-persistent-python"
 
 # Per-call wall-clock cap and per-stream output byte cap. Conservative defaults;
 # the manifest timeout is the model-facing contract, these are the hard guards.
@@ -166,10 +167,12 @@ class PersistentPythonHandlerSet:
         )
         return (PERSISTENT_PYTHON_TOOL_NAME,)
 
-    def _interpreter_for(self, context: ToolContext) -> _Interpreter:
+    def _context_key(self, context: ToolContext) -> tuple[str, str]:
         workspace_root = context.workspace_root or "local"
         scope = context.turn_id or context.session_id or "local"
-        key = (str(workspace_root), str(scope))
+        return (str(workspace_root), str(scope))
+
+    def _interpreter_for_key(self, key: tuple[str, str]) -> _Interpreter:
         interpreter = self._interpreters.get(key)
         if interpreter is None:
             interpreter = _Interpreter()
@@ -186,8 +189,14 @@ class PersistentPythonHandlerSet:
                     error_message="code is required",
                     metadata={"toolName": PERSISTENT_PYTHON_TOOL_NAME},
                 )
-            interpreter = self._interpreter_for(context)
+            key = self._context_key(context)
+            interpreter = self._interpreter_for_key(key)
             ok, stdout, value, error = interpreter.run(code, timeout_s=self._timeout_s)
+            if error and error.startswith("TimeoutError:"):
+                # Timed-out daemon threads can continue mutating their namespace
+                # after this call returns. Drop that interpreter so later calls in
+                # the same turn do not observe partially-mutated state.
+                self._interpreters.pop(key, None)
             capped_stdout = _bounded_head_tail(stdout, self._max_output_bytes)
             if ok:
                 return ToolResult(
@@ -211,6 +220,22 @@ class PersistentPythonHandlerSet:
             )
 
 
+def _persistent_python_pack_enabled() -> bool:
+    """Return whether config.toml leaves the bundled pack enabled.
+
+    The manifest loader already applies ``[packs] disable``. This binder can also
+    be invoked directly by runtime construction paths, so it must mirror that
+    removal contract instead of treating ``MAGI_PERSISTENT_PYTHON_ENABLED`` as a
+    privileged override.
+    """
+    try:
+        from magi_agent.packs.discovery import load_packs_config  # noqa: PLC0415
+
+        return _PERSISTENT_PYTHON_PACK_ID not in set(load_packs_config().disable)
+    except Exception:
+        return True
+
+
 def register_persistent_python_manifest(registry: ToolRegistry) -> None:
     """Register the ``PersistentPython`` manifest by running the PACK provider.
 
@@ -219,6 +244,8 @@ def register_persistent_python_manifest(registry: ToolRegistry) -> None:
     loader would use) rather than hardcoding it here — the pack stays the single
     source of truth (§1 no privilege). No-op if already registered.
     """
+    if not _persistent_python_pack_enabled():
+        return
     if registry.resolve_registration(PERSISTENT_PYTHON_TOOL_NAME) is not None:
         return
     from magi_agent.firstparty.packs.tools_persistent_python.impl import (  # noqa: PLC0415

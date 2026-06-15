@@ -54,7 +54,7 @@ def provide_persistent_python(context: ToolProvideContext) -> None:
             source=CORE_TOOL_SOURCE,
             permission="execute",
             input_schema=_INPUT_SCHEMA,
-            timeout_ms=120_000,
+            timeout_ms=30_000,
             budget=Budget(max_calls_per_turn=64, max_parallel=1),
             dangerous=True,
             is_concurrency_safe=False,

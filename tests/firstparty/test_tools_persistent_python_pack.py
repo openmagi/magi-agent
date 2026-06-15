@@ -24,6 +24,7 @@ from magi_agent.tools.persistent_python_toolhost import (
     PERSISTENT_PYTHON_TOOL_NAME,
     PersistentPythonHandlerSet,
     bind_persistent_python_handler,
+    register_persistent_python_manifest,
 )
 from magi_agent.tools.registry import ToolRegistry
 
@@ -55,6 +56,7 @@ def test_tool_pack_registers_persistent_python_manifest() -> None:
     assert manifest.name == PERSISTENT_PYTHON_TOOL_NAME
     assert manifest.mutates_workspace is True
     assert manifest.parallel_safety == "unsafe"
+    assert manifest.timeout_ms == 30_000
     assert "act" in manifest.available_in_modes
     # Input schema = a single required string ``code``.
     schema = manifest.input_schema
@@ -186,6 +188,26 @@ def test_handler_truncates_large_output() -> None:
     assert "elided" in stdout or "truncated" in stdout
 
 
+def test_timeout_drops_interpreter_state_for_future_calls() -> None:
+    registries, _ = load_into_registries([_TOOL_PACK])
+    registry = registries.tools
+    handler_set = PersistentPythonHandlerSet(timeout_s=0.01)
+    assert bind_persistent_python_handler(registry, handler_set=handler_set) is handler_set
+    handler = _handler(registry)
+    ctx = _ctx("turn-timeout")
+
+    seeded = handler({"code": "x = 41"}, ctx)
+    assert seeded.status == "ok"
+
+    timed_out = handler({"code": "import time\ntime.sleep(0.2)\nx = 99"}, ctx)
+    assert timed_out.status == "error"
+    assert "TimeoutError" in str(timed_out.error_message)
+
+    fresh = handler({"code": "print(x)"}, ctx)
+    assert fresh.status == "error"
+    assert "NameError" in str(fresh.error_message) + str(fresh.output or "")
+
+
 def _stdout(output: object) -> str:
     if isinstance(output, dict):
         return str(output.get("stdout") or output.get("value") or output)
@@ -243,3 +265,32 @@ def test_cli_build_path_registers_and_binds_tool_when_gate_on(monkeypatch) -> No
     assert registration is not None
     assert registration.handler is not None
     assert registration.enabled is True
+
+
+def test_direct_manifest_registration_respects_pack_disable(tmp_path, monkeypatch) -> None:
+    cfg = tmp_path / "config.toml"
+    cfg.write_text(
+        '[packs]\ndisable = ["open' 'magi.tools-persistent-python"]\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("MAGI_CONFIG", str(cfg))
+
+    registry = ToolRegistry()
+    register_persistent_python_manifest(registry)
+
+    assert registry.resolve(PERSISTENT_PYTHON_TOOL_NAME) is None
+    assert bind_persistent_python_handler(registry) is None
+
+
+def test_cli_build_path_respects_pack_disable_when_gate_on(tmp_path, monkeypatch) -> None:
+    cfg = tmp_path / "config.toml"
+    cfg.write_text(
+        '[packs]\ndisable = ["open' 'magi.tools-persistent-python"]\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("MAGI_CONFIG", str(cfg))
+    monkeypatch.setenv("MAGI_PERSISTENT_PYTHON_ENABLED", "1")
+    from magi_agent.cli.tool_runtime import build_cli_tool_runtime
+
+    runtime = build_cli_tool_runtime(workspace_root="/tmp", session_id="s-disabled")
+    assert runtime.registry.resolve(PERSISTENT_PYTHON_TOOL_NAME) is None
