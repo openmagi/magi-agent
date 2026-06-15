@@ -2762,6 +2762,9 @@ class MagiEngineDriver:
         observed_public_refs.update(
             self._source_ledger_matched_requirement_refs(evidence_records)
         )
+        observed_public_refs.update(
+            self._hard_redaction_matched_requirement_labels(final_text=final_text)
+        )
         missing_evidence = [
             ref for ref in assembly.evidence_requirements if ref not in observed_public_refs
         ]
@@ -3047,6 +3050,123 @@ class MagiEngineDriver:
         except Exception:
             logger.debug("source-ledger evidence projector failed", exc_info=True)
             return []
+
+    def _hard_redaction_matched_requirement_labels(
+        self,
+        *,
+        final_text: str,
+    ) -> list[str]:
+        """BARE hard validator/evidence labels satisfied on a clean turn.
+
+        ``recipes/reliability_policy`` force-merges three BARE refs into every
+        recipe's final-gate policy: the validators ``no_production_attachment``
+        / ``public_redaction`` and the evidence label ``redaction_audit``. They
+        carry no public-ref prefix and (before this satisfier) had no live
+        producer, so the pre-final gate always blocked — even on a perfect
+        non-coding turn. This satisfier makes them legitimately satisfiable.
+
+        Behind the same strict default-OFF flag as the source-ledger projector
+        (``MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED``). When OFF this returns
+        ``[]`` so the gate is byte-identical to main (the bare hard refs stay
+        missing ⇒ block). Each label is only emitted when it is actually in the
+        assembled requirement set, mirroring the source-ledger satisfier's
+        ``if label not in required: return []`` guard.
+
+        Semantics (founder sign-off):
+
+        * ``no_production_attachment`` — emitted when the genuine config
+          invariant holds (no production tool-host attachment). The invariant is
+          enforced at config time (``parse_python_toolhost_attachment_env``
+          raises if the production-attachment env is set; the model pins
+          ``Literal[False]``). We read that accessor live; if it raises we emit
+          nothing (block) rather than hardcoding the answer.
+        * ``public_redaction`` — the turn's ``final_text`` is scanned for
+          CREDENTIALS ONLY (API keys / tokens / JWTs / bearer values) reusing
+          the existing credential detectors. No credential ⇒ emitted; a
+          credential ⇒ NOT emitted ⇒ the gate BLOCKS. Block-only: the output is
+          never rewritten/redacted here.
+        * ``redaction_audit`` — emitted iff the redaction scan ran and found no
+          credential (reuses the ``public_redaction`` result).
+
+        Fail-open per label: any error emits nothing, so the satisfier can only
+        REMOVE a block, never add one.
+        """
+        import os  # noqa: PLC0415
+
+        from magi_agent.config.env import (  # noqa: PLC0415
+            parse_source_ledger_evidence_gate_enabled,
+        )
+
+        if not parse_source_ledger_evidence_gate_enabled(os.environ):
+            return []
+        assembly = self._runner_policy_assembly
+        if assembly is None:
+            return []
+        matched: list[str] = []
+        required_validators = tuple(getattr(assembly, "required_validators", ()) or ())
+        required_evidence = tuple(getattr(assembly, "evidence_requirements", ()) or ())
+
+        # no_production_attachment — read the genuine config invariant.
+        if "no_production_attachment" in required_validators:
+            try:
+                from magi_agent.config.env import (  # noqa: PLC0415
+                    parse_python_toolhost_attachment_env,
+                )
+
+                toolhost = parse_python_toolhost_attachment_env(os.environ)
+                if toolhost.production_attachment_enabled is False:
+                    matched.append("no_production_attachment")
+            except Exception:
+                logger.debug(
+                    "no-production-attachment invariant read failed", exc_info=True
+                )
+
+        # public_redaction / redaction_audit — credential-only scan of final_text.
+        wants_public_redaction = "public_redaction" in required_validators
+        wants_redaction_audit = "redaction_audit" in required_evidence
+        if wants_public_redaction or wants_redaction_audit:
+            try:
+                if not self._final_text_contains_credential(final_text):
+                    if wants_public_redaction:
+                        matched.append("public_redaction")
+                    if wants_redaction_audit:
+                        matched.append("redaction_audit")
+            except Exception:
+                logger.debug("public-redaction credential scan failed", exc_info=True)
+        return matched
+
+    @staticmethod
+    def _final_text_contains_credential(final_text: str) -> bool:
+        """True if ``final_text`` leaks a CREDENTIAL (key / token / JWT / bearer).
+
+        Reuses the existing credential-value detectors only: ``_JWT_LIKE_RE``
+        (``evidence/validator_taxonomy.py``) and the cloud/API-key + bearer
+        regexes from ``evidence/ledger.py`` (``_GITHUB_TOKEN_RE``,
+        ``_OPENAI_TOKEN_RE``, ``_STRIPE_TOKEN_RE``, ``_BEARER_TOKEN_RE``). These
+        match actual secret MATERIAL — NOT bare filesystem paths (``/Users/``),
+        emails, or the bare word ``token`` (those are explicitly out of scope to
+        avoid false positives).
+        """
+        if not final_text:
+            return False
+        from magi_agent.evidence.ledger import (  # noqa: PLC0415
+            _BEARER_TOKEN_RE,
+            _GITHUB_TOKEN_RE,
+            _OPENAI_TOKEN_RE,
+            _STRIPE_TOKEN_RE,
+        )
+        from magi_agent.evidence.validator_taxonomy import _JWT_LIKE_RE  # noqa: PLC0415
+
+        for pattern in (
+            _GITHUB_TOKEN_RE,
+            _OPENAI_TOKEN_RE,
+            _STRIPE_TOKEN_RE,
+            _BEARER_TOKEN_RE,
+            _JWT_LIKE_RE,
+        ):
+            if pattern.search(final_text):
+                return True
+        return False
 
     @staticmethod
     def _collect_public_refs(value: object, refs: set[str]) -> None:

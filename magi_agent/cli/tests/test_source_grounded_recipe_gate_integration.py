@@ -93,6 +93,7 @@ def _gate(
     assembly: RunnerPolicyAssembly,
     *,
     records: tuple[object, ...],
+    final_text: str = "here is the summary",
 ) -> dict[str, object]:
     driver = MagiEngineDriver(
         runner=object(),
@@ -105,7 +106,7 @@ def _gate(
         prompt="read the file and summarize it",
         harness_state={"taskProfile": {"taskType": "research"}},
         observed_public_refs=set(),
-        final_text="here is the summary",
+        final_text=final_text,
     )
     assert payload is not None
     return payload
@@ -122,25 +123,65 @@ def test_recipe_materializes_named_ref_plus_force_merged_hard_requirements() -> 
         assert hard in assembly.evidence_requirements
 
 
-def test_flag_on_source_read_still_BLOCKS_due_to_force_merged_hard_validators(
+_REAL_JWT = ".".join(
+    (
+        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9",
+        "eyJzdWIiOiIxMjM0NTY3ODkwIn0",
+        "SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c",
+    )
+)
+
+
+def test_flag_on_clean_source_read_PASSES_full_recipe(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """THE TRUTH: a perfect source-read turn STILL blocks under the new recipe.
+    """THE PAYOFF: a clean source-read turn now PASSES the whole recipe gate.
 
-    The named ref is matched (the projector works), but the force-merged hard
-    validators / evidence are bare names with no live producer, so they remain
-    missing and the gate blocks. "Just make a recipe" is NOT sufficient.
+    The named source ref is matched AND the three force-merged hard refs
+    (no_production_attachment / public_redaction / redaction_audit) are now
+    satisfied by their live satisfiers, so a perfect non-coding source-grounded
+    turn passes the pre-final gate — with NO safety guard removed.
     """
     monkeypatch.setenv("MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED", "1")
     monkeypatch.setenv("MAGI_CODING_REPAIR_LOOP_ENABLED", "0")
-    payload = _gate(_real_assembly(), records=(_source_record(),))
+    payload = _gate(
+        _real_assembly(),
+        records=(_source_record(),),
+        final_text="The file at /Users/kevin/notes.md mentions the token economy.",
+    )
 
-    # The source-evidence projector DID its job:
+    assert payload["decision"] == "pass"
+    assert payload["missingValidators"] == []
+    assert payload["missingEvidence"] == []
     assert _SOURCE_EVIDENCE_REF in payload["matchedRefs"]
-    # ...but the gate STILL blocks, and ONLY on the force-merged hard refs:
+    for hard in (*_HARD_VALIDATORS, *_HARD_EVIDENCE):
+        assert hard in payload["matchedRefs"]
+
+
+def test_flag_on_credential_leak_BLOCKS_on_public_redaction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A source-read turn that leaks a credential blocks on public_redaction.
+
+    The redaction satisfiers refuse to emit ``public_redaction`` /
+    ``redaction_audit`` when a real credential is present, so the gate blocks —
+    proving the wiring is a genuine guard, not a rubber stamp.
+    """
+    monkeypatch.setenv("MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED", "1")
+    monkeypatch.setenv("MAGI_CODING_REPAIR_LOOP_ENABLED", "0")
+    payload = _gate(
+        _real_assembly(),
+        records=(_source_record(),),
+        final_text=f"The file leaked this token: {_REAL_JWT}",
+    )
+
     assert payload["decision"] == "block"
-    assert set(payload["missingValidators"]) == set(_HARD_VALIDATORS)
-    assert set(payload["missingEvidence"]) == set(_HARD_EVIDENCE)
+    # source ref + the production-attachment invariant are satisfied...
+    assert _SOURCE_EVIDENCE_REF in payload["matchedRefs"]
+    assert "no_production_attachment" in payload["matchedRefs"]
+    # ...but the credential keeps the redaction refs missing.
+    assert "public_redaction" in payload["missingValidators"]
+    assert "redaction_audit" in payload["missingEvidence"]
 
 
 def test_flag_off_source_read_blocks_on_named_ref_and_hard_refs(
@@ -157,10 +198,11 @@ def test_flag_off_source_read_blocks_on_named_ref_and_hard_refs(
     assert set(_HARD_VALIDATORS).issubset(set(payload["missingValidators"]))
 
 
-def test_no_source_blocks_on_named_ref_plus_hard_refs(
+def test_no_source_blocks_on_named_ref(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Flag ON but no source read: named ref absent, hard refs still missing."""
+    """Flag ON but no source read: the hard refs are satisfied on a clean turn,
+    yet the gate still BLOCKS because the named source ref is missing."""
     monkeypatch.setenv("MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED", "1")
     monkeypatch.setenv("MAGI_CODING_REPAIR_LOOP_ENABLED", "0")
     non_source = {
@@ -173,5 +215,9 @@ def test_no_source_blocks_on_named_ref_plus_hard_refs(
     payload = _gate(_real_assembly(), records=(non_source,))
 
     assert payload["decision"] == "block"
-    assert _SOURCE_EVIDENCE_REF in payload["missingValidators"]
-    assert set(_HARD_VALIDATORS).issubset(set(payload["missingValidators"]))
+    # the named source ref is the ONLY thing still missing: source grounding
+    # is genuinely required and a source-less turn cannot pass.
+    assert payload["missingValidators"] == [_SOURCE_EVIDENCE_REF]
+    assert payload["missingEvidence"] == []
+    for hard in (*_HARD_VALIDATORS, *_HARD_EVIDENCE):
+        assert hard in payload["matchedRefs"]
