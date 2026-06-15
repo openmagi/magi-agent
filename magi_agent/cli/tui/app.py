@@ -253,6 +253,19 @@ def _tool_result(payload: dict) -> object:
 # tool_end statuses that mean the tool was NOT executed (-> render_rejected).
 _REJECTED_STATUSES = {"rejected", "blocked", "denied", "deny", "error"}
 
+# Upper bound on the tracked ToolCard list (expand mode, ctrl+o). Session-global
+# mode would otherwise grow one entry per tool result for the whole session, and
+# ``action_toggle_expand`` iterates all of them on every ctrl+o; capping the
+# retro-flip to the recent window bounds both memory and latency. Older cards
+# keep their current collapsed state (a quiet, acceptable limitation).
+_MAX_TRACKED_TOOL_CARDS = 200
+
+# One-time discoverability hint shown on the FLAT path when a result is
+# truncated and expand mode is off. "applies to new results" is deliberate:
+# flat output already committed cannot retroactively become a card (committed-
+# once), so the hint must not imply scroll-up-to-expand.
+_EXPAND_HINT = "(ctrl+o to expand tool output — applies to new results)"
+
 
 def _is_rejected_end(payload: dict) -> bool:
     status = payload.get("status")
@@ -865,6 +878,14 @@ class MagiTuiApp(App[None]):
     .confirm-subview { height: auto; }
     #edit-area { height: 8; }
     #edit-error { color: $error; }
+    /* Expanded tool-output card (ctrl+o). Bound the body height + internal
+       scroll so a single ~8 KB result (hundreds of lines) does not shove the
+       transcript when several cards are open (OpenCode/Claude-Code both cap the
+       expanded view). Quiet variant: transparent border + dim title to keep the
+       flat one-line aesthetic. */
+    ToolCard { border: none; background: transparent; }
+    ToolCard > CollapsibleTitle { color: $text-muted; }
+    ToolCard Contents { max-height: 20; overflow-y: auto; }
     """
 
     BINDINGS = [
@@ -884,11 +905,33 @@ class MagiTuiApp(App[None]):
         # to cursor-left); it is NOT in the keybindings defaults (defaults.py),
         # so on_key resolves it UNBOUND and lets it bubble to this App BINDING.
         Binding("ctrl+b", "toggle_sidebar", "Sidebar", priority=True),
+        # ctrl+o toggles "expand tool output" mode (default-OFF). priority=True
+        # so it preempts any built-in ctrl+o on the focused Input/TextArea; it is
+        # NOT in the keybindings defaults (defaults.py), so on_key resolves it
+        # UNBOUND and lets it bubble to this App BINDING — identical to the
+        # ctrl+b / ctrl+t path. The "Expand" description surfaces in the help
+        # dialog (HelpDialog.from_app) automatically.
+        Binding("ctrl+o", "toggle_expand", "Expand", priority=True),
+        # ctrl+q quits — but SAFELY (exit-safety). priority=True so it preempts
+        # Textual's OWN built-in Binding("ctrl+q","quit",priority=True): app
+        # dispatch runs priority bindings first and does NOT forward the event
+        # once one matches, so without this our resolver never sees ctrl+q and
+        # Textual would quit instantly on the first press. Routing it through
+        # action_request_quit -> _arm_or_quit makes the first press arm instead.
+        Binding("ctrl+q", "request_quit", "Quit", priority=True),
         # F1 opens the help dialog. F1 is not in the keybindings defaults
         # (defaults.py) and (unlike "?") never collides with typed prompt text,
         # so it is safe to bind globally while the prompt input is focused.
         ("f1", "open_help", "Help"),
     ]
+
+    # Exit-safety (double-press window): an idle quit-intent keypress arms a quit
+    # for this many seconds; a second within the window confirms. 1.5s sits
+    # between Claude Code (~800ms) and OpenCode (5000ms). Hardcoded by design.
+    QUIT_WINDOW_S = 1.5
+    # Legacy single-press instant-quit escape hatch (default OFF), parsed with
+    # the shared truthy convention (notify._TRUTHY), NOT a bare ``== "1"``.
+    INSTANT_QUIT_ENV = "MAGI_TUI_INSTANT_QUIT"
 
     # Textual's built-in command palette (PR2.1). Ctrl+P is already the 8.2.7
     # default (verified: ``App.COMMAND_PALETTE_BINDING == "ctrl+p"``); pin it
@@ -935,6 +978,20 @@ class MagiTuiApp(App[None]):
         from magi_agent.cli.clipboard_image import read_clipboard_image  # noqa: PLC0415
         self._clipboard_reader: Callable[[], dict | None] = clipboard_reader or read_clipboard_image
         self._pending_attachments: list[dict] = []
+        # busy-input-queue (gap: busy-input-queue): a surface-only end-of-turn
+        # FIFO. When a turn is active AND the flag is on, a submitted prompt is
+        # buffered (attachment-aware) and drained after the current turn ends,
+        # instead of cancelling/replacing it (the @work(exclusive=True) default).
+        # Each element is (prompt, attachment_snapshot). Default-OFF behind
+        # MAGI_TUI_QUEUE (== "1"), identical shape to MAGI_TUI_VERBOSE /
+        # MAGI_TUI_LEGACY_RICHLOG; with the flag unset every funnel is
+        # byte-for-byte the legacy replace path.
+        import os as _os_queue  # noqa: PLC0415
+
+        self._prompt_queue: list[tuple[str, tuple[dict, ...]]] = []
+        self._queue_enabled: bool = (
+            _os_queue.environ.get("MAGI_TUI_QUEUE", "") == "1"
+        )
         # Count of /compact (Compact()) acknowledgements; asserted by tests. Real
         # compaction is gated runtime authority (Stream B/E).
         self.compact_requests = 0
@@ -973,6 +1030,19 @@ class MagiTuiApp(App[None]):
             )
         except ValueError:
             self._stall_seconds = 0
+        # Expand-tool-output mode (ctrl+o). DEFAULT-OFF: tools commit as flat,
+        # scannable blocks unless the user opts in (env or keypress). When on,
+        # each tool result mounts as a collapsed ``ToolCard`` carrying the full
+        # (uncapped) payload via the existing ``commit_tool`` seam. Session-
+        # global and forward-acting with a bounded retro-flip — NOT reset per
+        # turn (see start_turn). ``_tool_cards`` tracks mounted cards (capped to
+        # the recent window) so ctrl+o can retro-flip their ``.collapsed`` state;
+        # ``_expand_hint_shown`` gates the one-time discoverability hint.
+        self._expand_tools: bool = (
+            _os_verbose.environ.get("MAGI_TUI_EXPAND_TOOLS", "") == "1"
+        )
+        self._tool_cards: list = []
+        self._expand_hint_shown: bool = False
         # Session list (PR2.4) seams. ``_session_source`` is an optional test/
         # injection hook ``() -> list[SessionEntry]``; when None the dialog reads
         # the runtime's ``session_lister`` seam via ``session_entries``.
@@ -991,6 +1061,13 @@ class MagiTuiApp(App[None]):
         # True while an engine turn is in flight; gates Ctrl+C (cancel vs quit).
         self._turn_active = False
         self._active_turn_id: str | None = None
+        # Idle quit-arming state (exit-safety): a monotonic() stamp set on the
+        # FIRST idle quit-intent keypress; a second within ``QUIT_WINDOW_S``
+        # confirms the quit. None when not armed. See ``_arm_or_quit``.
+        self._quit_armed_at: float | None = None
+        # Transient carrier for the originating quit key into action_cancel_turn
+        # (Esc sets "escape" so it clears input first; Ctrl+C leaves it None).
+        self._cancel_key: str | None = None
         # Reasoning/thinking inline display (PR4.2): the in-flight dim thinking
         # line's update handle + accumulated reasoning text. Reset per turn so
         # streaming deltas coalesce into ONE updating line, not a new line each.
@@ -1035,6 +1112,10 @@ class MagiTuiApp(App[None]):
         # Used by the footer elapsed clock (set in start_turn, cleared in
         # _render_terminal).
         self._turn_started_monotonic: float | None = None
+        # Cumulative tokens across the session: the footer/sidebar show a running
+        # total while EngineResult.usage stays honestly per-turn. Session-scoped
+        # (resets on app restart).
+        self._session_tokens: int = 0
         self._log: RichLog | None = None
         self._view: TranscriptView | None = None
         self._live: Static | None = None
@@ -1223,8 +1304,10 @@ class MagiTuiApp(App[None]):
         welcome.append("Type a task and press ", style="dim")
         welcome.append("Enter", style="#7aa2f7")
         welcome.append(".  ", style="dim")
+        welcome.append("Esc", style="#7aa2f7")
+        welcome.append("/", style="dim")
         welcome.append("Ctrl+C", style="#7aa2f7")
-        welcome.append(" cancels a turn (again to quit).\n", style="dim")
+        welcome.append(" clears input · twice to quit.\n", style="dim")
         welcome.append("Keys: ", style="dim")
         welcome.append("Shift+Enter", style="#7aa2f7")
         welcome.append(" newline · ", style="dim")
@@ -1249,6 +1332,7 @@ class MagiTuiApp(App[None]):
             welcome,
             text=(
                 "Welcome to Magi  "
+                "Esc/Ctrl+C clears input · twice to quit.  "
                 "Keys: Shift+Enter newline · ↑ history · Ctrl+S draft · "
                 "Ctrl+B sidebar · Ctrl+P palette · F1 help  "
                 "Copy: drag to select · Ctrl+Y copy (⌥-drag for native terminal copy)  "
@@ -1305,7 +1389,10 @@ class MagiTuiApp(App[None]):
         if submission.kind == "command":
             self._dispatch_command(submission)
             return
-        self.start_turn(submission.text)
+        # Busy-aware admission (gap: busy-input-queue): when MAGI_TUI_QUEUE=1 and
+        # a turn is running this buffers the prompt instead of replacing the
+        # in-flight turn. With the flag OFF it is byte-for-byte ``start_turn``.
+        self.start_or_enqueue_turn(submission.text)
 
     def submit_command(self, name: str, args: str = "") -> None:
         """Submit a slash command exactly as if typed at the prompt.
@@ -1539,6 +1626,10 @@ class MagiTuiApp(App[None]):
         # wired the original; the input must follow the resumed session too).
         if self._input is not None:
             self._input.attach_history(self._history)
+        # busy-input-queue (gap: busy-input-queue): a pending queue is turn-local
+        # intent for the OLD session and must not carry across a resume.
+        self._prompt_queue.clear()
+        self.update_footer(queued=0)
         self.controller.commit_block(f"[resumed session {ref}]")
 
     # -- help (PR2.5) ------------------------------------------------------
@@ -1627,6 +1718,68 @@ class MagiTuiApp(App[None]):
         self._echo_user(prompt)
         self._run_turn(prompt, turn_id, cancel)
 
+    def start_or_enqueue_turn(
+        self, prompt: str, *, attachments: tuple[dict, ...] | None = None
+    ) -> None:
+        """The single busy-aware admission seam (gap: busy-input-queue).
+
+        When the queue flag is on AND a turn is already active, buffer the
+        prompt (with its attachment snapshot) and render a dim queued marker
+        instead of starting a turn — the running turn keeps its work. Otherwise
+        this is exactly today's behavior: restore any explicit attachments and
+        call :meth:`start_turn` (which replaces an in-flight turn if one is
+        somehow active, preserving the pinned ``start_turn``-direct semantics).
+        """
+
+        if self._queue_enabled and self._turn_active:
+            # Snapshot the live attachment buffer (images from Ctrl+V) and clear
+            # it so the queued prompt owns its images and an unrelated turn can't
+            # consume them. On drain, ``_drain_queue`` restores this snapshot
+            # before ``start_turn`` so ``_run_turn``'s snapshot reads them.
+            if attachments is not None:
+                attach = attachments
+            else:
+                attach = tuple(self._pending_attachments)
+                self._pending_attachments.clear()
+            self._prompt_queue.append((prompt, attach))
+            self._commit_queued_marker(prompt)
+            self.update_footer(queued=len(self._prompt_queue))
+            return
+        if attachments:
+            self._pending_attachments = list(attachments)
+        self.start_turn(prompt)
+
+    def _commit_queued_marker(self, prompt: str) -> None:
+        """Commit a dim one-line ``⏳ queued: …`` marker (honest affordance)."""
+
+        if self._controller is None:
+            return
+        from rich.text import Text  # noqa: PLC0415
+
+        label = f"⏳ queued: {prompt[:60]}"
+        block = Text(label, style="dim")
+        self._controller.commit_rich(block, text=label)
+
+    def _drain_queue(self) -> None:
+        """Pop the head of the busy-input-queue and start it as the next turn.
+
+        Scheduled via ``call_after_refresh`` from ``_run_turn``'s ``finally`` on
+        every terminal path. No-op when the queue is empty or the flag is off.
+        Restores the queued prompt's attachment snapshot into the shared buffer
+        BEFORE ``start_turn`` so ``_run_turn`` picks up the right images. If a
+        turn is somehow already active (a race), re-defer rather than replace.
+        """
+
+        if not (self._prompt_queue and self._queue_enabled):
+            return
+        if self._turn_active:
+            self.call_after_refresh(self._drain_queue)
+            return
+        prompt, attach = self._prompt_queue.pop(0)
+        self._pending_attachments = list(attach)
+        self.update_footer(queued=len(self._prompt_queue))
+        self.start_turn(prompt)
+
     def _echo_user(self, prompt: str) -> None:
         """Echo the user's message into the transcript (CC/OpenCode style)."""
 
@@ -1709,9 +1862,23 @@ class MagiTuiApp(App[None]):
             raise
         finally:
             await gen.aclose()
-            if self._active_turn_id == turn_id:
+            # busy-input-queue (gap: busy-input-queue): the drain MUST run on
+            # ALL terminal paths — normal, cancel, AND engine-raise (the except
+            # above re-raises, so any drain placed after ``_render_terminal``
+            # would never run on a raise and the queue would stall forever).
+            # ``_active_turn_id == turn_id`` is the existing "am I still the
+            # current turn?" gate (``start_turn`` sets ``_active_turn_id`` before
+            # ``_run_turn``), so a REPLACED stale worker evaluates False and
+            # never drains. Defer via ``call_after_refresh`` so this finishing
+            # worker fully returns to the event loop before the next exclusive
+            # ``@work(group="turn")`` worker spawns (sidesteps exclusive=True
+            # self-cancel) AND so ``_render_terminal`` (non-raise tail) runs
+            # first, preserving visual order.
+            should_drain = self._active_turn_id == turn_id
+            if should_drain:
                 self._active_turn_id = None
                 self._turn_active = False
+                self.call_after_refresh(self._drain_queue)
         # Finalize the in-flight assistant block as markdown (commits any
         # streamed text). The plain text is preserved in the committed snapshot
         # for search fidelity.
@@ -1824,10 +1991,66 @@ class MagiTuiApp(App[None]):
                 node = renderer.render_rejected(_tool_input(payload) or payload)
             else:
                 node = renderer.render_result(_tool_result(payload))
+                # Expand mode (ctrl+o): when on AND there is a real widget
+                # backing (``_view`` is a TranscriptView; legacy RichLog has
+                # ``_view is None`` and cannot host a Collapsible), re-render the
+                # result with the truncation cap lifted and mount it as a
+                # collapsed ``ToolCard`` via the existing ``commit_tool`` seam.
+                # The flat/card choice is made HERE, at mount time — committed-
+                # once holds (no re-render of finalized blocks). Otherwise fall
+                # through to the flat ``_commit_render_node`` path unchanged.
+                if self._expand_tools and self._view is not None:
+                    from magi_agent.cli.tui.tool_render import (  # noqa: PLC0415
+                        full_output,
+                    )
+                    from magi_agent.cli.tui.widgets.tool_card import (  # noqa: PLC0415
+                        ToolCard,
+                    )
+
+                    with full_output():
+                        full = renderer.render_result(_tool_result(payload))
+                    card = ToolCard.from_render_node(full, collapsed=True)
+                    self.controller.commit_tool(card, text=full.text)
+                    self._tool_cards.append(card)
+                    # Bound the tracked window: ctrl+o retro-flips only the most
+                    # recent cards; older ones keep their collapsed state.
+                    del self._tool_cards[:-_MAX_TRACKED_TOOL_CARDS]
+                    return
+                # Flat path, expand OFF: surface the one-time discoverability
+                # hint the FIRST time a result is actually truncated. OFF-path
+                # only (``not self._expand_tools`` — on legacy RichLog with
+                # expand ON the card path is skipped, but the hint would be
+                # misleading there), so the flag-OFF default stays byte-identical
+                # apart from this single hint line.
+                if (
+                    not self._expand_tools
+                    and not self._expand_hint_shown
+                    and self._preview_truncated(payload, renderer, node)
+                ):
+                    self.controller.commit_block(_EXPAND_HINT)
+                    self._expand_hint_shown = True
         else:  # unknown inner type -> fall back to the one-line summary
             self.controller.commit_block(_status_summary(event))
             return
         self._commit_render_node(node, tool_name=name)
+
+    @staticmethod
+    def _preview_truncated(payload: dict, renderer: object, node: object) -> bool:
+        """Whether the flat result preview dropped content (-> hint is honest).
+
+        Compares the flat (capped) ``node.text`` to a full re-render with the
+        truncation cap lifted; truncated iff they differ. Cheap and OFF-path
+        only — the full re-render here is just to detect loss, not to display.
+        """
+
+        from magi_agent.cli.tui.tool_render import full_output  # noqa: PLC0415
+
+        render_result = getattr(renderer, "render_result", None)
+        if not callable(render_result):
+            return False
+        with full_output():
+            full = render_result(_tool_result(payload))
+        return getattr(full, "text", "") != getattr(node, "text", "")
 
     def _lookup_tool_renderer(self, name: str) -> object:
         """Resolve a renderer for ``name``, synthesizing a named card renderer
@@ -1968,6 +2191,7 @@ class MagiTuiApp(App[None]):
         tokens: int | None = None,
         elapsed: float | None = None,
         activity: str | None = None,
+        queued: int | None = None,
     ) -> None:
         """Single seam every fold/turn path uses to refresh the footer.
 
@@ -1975,6 +2199,8 @@ class MagiTuiApp(App[None]):
         field updates the corresponding reactive on ``StatusFooter`` (which
         repaints only itself). ``activity`` is the current-activity word the
         footer appends to ``running`` (e.g. ``Bash`` or ``Bash · no output 9s``).
+        ``queued`` carries the busy-input-queue depth (gap: busy-input-queue);
+        the footer shows it only while running.
         """
 
         if self._footer is None:
@@ -1987,6 +2213,8 @@ class MagiTuiApp(App[None]):
             self._footer.set_elapsed(elapsed)
         if activity is not None:
             self._footer.set_activity(activity)
+        if queued is not None:
+            self._footer.set_queued(queued)
 
     def _open_tool_name(self) -> str:
         """The truncated name of the last still-open tool, or ``""`` if none."""
@@ -2020,18 +2248,20 @@ class MagiTuiApp(App[None]):
         # Fold the terminal state + token usage + elapsed into the footer FIRST,
         # so it updates for completed AND non-completed turns (the early return
         # below is only for the transcript marker, not the footer).
-        tokens = _usage_tokens(terminal.usage)
+        # Accumulate a cumulative session total (OpenCode-style running counter)
+        # from each turn's honestly per-turn EngineResult.usage.
+        self._session_tokens += _usage_tokens(terminal.usage)
         self.update_footer(
             state=terminal.terminal.value,
-            tokens=tokens,
+            tokens=self._session_tokens,
             elapsed=self._turn_elapsed(),
         )
-        # Mirror the turn's token usage into the sidebar context pane. The limit
-        # is kept as a future per-model seam, but the sidebar currently renders
-        # only a bare token count to avoid a misleading hardcoded ratio.
+        # Mirror the running session total into the sidebar context pane. The
+        # limit is kept as a future per-model seam, but the sidebar currently
+        # renders only a bare token count to avoid a misleading hardcoded ratio.
         if self._sidebar is not None:
             self._sidebar.set_context(
-                usage=tokens, limit=_context_limit(self._model)
+                usage=self._session_tokens, limit=_context_limit(self._model)
             )
         # Stop the running clock once the turn is terminal (the flush-tick
         # elapsed advance keys off this being None / state != "running").
@@ -2082,6 +2312,23 @@ class MagiTuiApp(App[None]):
             return
         self._sidebar.display = not self._sidebar.display
 
+    # -- expand tool output toggle (ctrl+o) --------------------------------
+    def action_toggle_expand(self) -> None:
+        """Toggle session-global "expand tool output" mode (ctrl+o).
+
+        Forward-acting: subsequent tool results commit as collapsed ``ToolCard``s
+        (expanded body carries the full payload) instead of flat blocks. Also
+        retro-flips ALREADY-mounted cards' ``.collapsed`` so the toggle feels
+        global like Claude Code's ctrl+o. This is a ``.collapsed`` write on
+        existing widgets — NOT a transcript re-render, so committed-once holds.
+        Flat blocks committed before expand was ever on have no card to open
+        (committed-once); that quiet limitation is surfaced in the hint.
+        """
+
+        self._expand_tools = not self._expand_tools
+        for card in self._tool_cards:
+            card.collapsed = not self._expand_tools
+
     # -- focus tracking for the attention bell (PR3.4) ---------------------
     def on_app_blur(self, _event: object) -> None:
         """Terminal lost focus -> the attention bell may fire on next turn-done.
@@ -2102,19 +2349,75 @@ class MagiTuiApp(App[None]):
 
         self.app_is_focused = True
 
+    # -- exit-safety (double-press quit) ------------------------------------
+    def action_request_quit(self, key: str = "ctrl+q") -> None:
+        """Quit gesture entrypoint: route to the arm-then-quit debounce.
+
+        Referenced by the priority ``ctrl+q`` Binding and by ``PromptInput``'s
+        empty-buffer Ctrl+D call-up (which passes ``key="ctrl+d"``). Never quits
+        on a single press — ``_arm_or_quit`` arms first.
+        """
+
+        self._arm_or_quit(key=key)
+
+    def _arm_or_quit(self, *, key: str) -> None:
+        """Idle quit-intent debounce: arm on first press, quit on second.
+
+        A reflexive single keypress must never quit (matches Claude Code's
+        double-Ctrl+C and OpenCode's double-Esc). All idle quit gestures
+        (Esc / Ctrl+C / Ctrl+Q / Ctrl+D-on-empty) route here. The first press
+        arms a shared ``_quit_armed_at`` stamp and shows a "Press again to quit"
+        toast; a second press within ``QUIT_WINDOW_S`` confirms and exits.
+
+        Cross-key arming is intentional: a single shared stamp means any second
+        quit-intent key within the window confirms (e.g. Esc then Ctrl+C quits).
+
+        ``key`` is the originating gesture: only ``"escape"`` clears a non-empty
+        input buffer first (then returns, disarmed) — matching shell convention
+        where Ctrl+C / Ctrl+D do not wipe the line. The legacy single-press
+        instant-quit is gated behind ``INSTANT_QUIT_ENV`` (default OFF).
+        """
+
+        import os  # noqa: PLC0415
+        import time as _time  # noqa: PLC0415  (no module-level _time; cf. app.py:1562/1923)
+
+        from magi_agent.cli.tui.notify import _TRUTHY  # shared truthy set (notify.py:75)
+
+        if os.environ.get(self.INSTANT_QUIT_ENV, "").strip().lower() in _TRUTHY:
+            self.exit()
+            return
+        # Esc-only clear-input-first (per-key asymmetry; Ctrl+C/Q/D do not clear).
+        if key == "escape" and self._input is not None and self._input.text.strip():
+            self._input.text = ""
+            self._quit_armed_at = None
+            return
+        now = _time.monotonic()
+        if (
+            self._quit_armed_at is not None
+            and now - self._quit_armed_at <= self.QUIT_WINDOW_S
+        ):
+            self.exit()
+            return
+        self._quit_armed_at = now
+        _notify.info(self, "Press again to quit")
+
     # -- cancellation -------------------------------------------------------
     def action_cancel_turn(self) -> None:
-        """Ctrl+C: cancel an in-flight turn, or quit the app when idle.
+        """Esc/Ctrl+C: cancel an in-flight turn, or arm-then-quit when idle.
 
         While a turn runs, this signals the per-turn cancel event so the turn
-        aborts. When no turn is in flight there is nothing to cancel, so Ctrl+C
-        exits the app.
+        aborts (unchanged). When no turn is in flight there is nothing to
+        cancel, so the gesture routes through ``_arm_or_quit``: a single press
+        never quits — it arms a "Press again to quit" toast, and a second press
+        within ``QUIT_WINDOW_S`` exits. Esc additionally clears a non-empty
+        input buffer first; Ctrl+C does not (per ``_cancel_key``).
         """
 
         if self._active_turn_id is not None or self._turn_active:
             self._cancel.set()
         else:
-            self.exit()
+            self._arm_or_quit(key=self._cancel_key or "ctrl+c")
+            self._cancel_key = None
 
     # -- keybinding resolution ----------------------------------------------
     def _active_contexts(self) -> list[Context]:
@@ -2184,8 +2487,18 @@ class MagiTuiApp(App[None]):
 
         if action is None:
             return
-        if action in (Action.CHAT_CANCEL.value, Action.CHAT_KILL_AGENTS.value):
+        if action == Action.CHAT_CANCEL.value:
+            # Esc path: carry the originating key so the idle branch clears a
+            # non-empty buffer before arming (Ctrl+C, a priority Binding, never
+            # reaches here, so it leaves _cancel_key None -> "ctrl+c").
+            self._cancel_key = "escape"
             self.action_cancel_turn()
+        elif action == Action.CHAT_KILL_AGENTS.value:
+            # The kill-agents chord (ctrl+x ctrl+k) is DECOUPLED from quit: it
+            # cancels an in-flight turn and is a no-op when idle. It must NOT
+            # route through action_cancel_turn (that would arm a quit at idle).
+            if self._active_turn_id is not None or self._turn_active:
+                self._cancel.set()
         elif action == Action.GLOBAL_QUIT.value:
             self.exit()
         # NOTE: these CHAT_SUBMIT/CHAT_NEWLINE branches are NOT reached while

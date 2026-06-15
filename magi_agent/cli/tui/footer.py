@@ -47,6 +47,7 @@ class StatusFooter(Static):
     # integer-second granularity) and assigns it via ``set_activity``; the footer
     # is a dumb renderer that only appends it while ``state == "running"``.
     activity: reactive[str] = reactive("")
+    queued: reactive[int] = reactive(0)
 
     def __init__(
         self,
@@ -87,6 +88,9 @@ class StatusFooter(Static):
         # unchanged integer-second activity string repaints at most once/second.
         self.activity = text
 
+    def set_queued(self, n: int) -> None:
+        self.queued = max(0, int(n))
+
     # -- reactive watchers (the ONE repaint path) ---------------------------
     def watch_model(self, _old: str, _new: str) -> None:
         self._repaint()
@@ -114,6 +118,9 @@ class StatusFooter(Static):
         # strings re-asserted on every flush tick into a single repaint/second.
         self._repaint()
 
+    def watch_queued(self, _old: int, _new: int) -> None:
+        self._repaint()
+
     # -- rendering -----------------------------------------------------------
     def status_text(self) -> str:
         """The exact text the footer displays (asserted by tests)."""
@@ -125,10 +132,17 @@ class StatusFooter(Static):
         state = self.state
         if state == "running" and self.activity:
             state = f"{state} · {self.activity}"
-        return (
+        base = (
             f"{self.model}   {self.cwd}   "
             f"{state}   {self.tokens:,} tok   {int(self.elapsed)}s"
         )
+        # Append the queued badge ONLY while a turn runs (running-only
+        # affordance) and the queue is non-empty. When queued==0 the line is
+        # byte-for-byte the five-field string, so every existing footer
+        # assertion is unchanged.
+        if self.queued > 0 and self.state == "running":
+            base += f" · {self.queued} queued"
+        return base
 
     def _repaint(self) -> None:
         # ``update`` is a cheap single-widget refresh (Textual only re-renders
