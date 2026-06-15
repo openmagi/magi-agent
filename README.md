@@ -345,13 +345,6 @@ requirement forces the next layer. A lawyer wants a contract-review bot. Watch
 the *kind* of each request decide which layer answers it — and where it stops
 being "ask the model nicely" and becomes a runtime guarantee.
 
-> **Status:** this illustrates the evidence-governance *model*; enforcement
-> strength is domain-specific today. The research/citation final projection gate
-> is **audit-only** (default-OFF): it records claims but it
-> **does not block the final answer**. The gate that *does* block today is the
-> coding-domain **pre-final** completion/evidence gate (default-ON for coding
-> turns). Read rung 4 as the governance model, not as research blocking.
-
 1. **Skill — "review contracts our firm's way."**
    A `review-contract` skill encodes the toxic-clause checklist, house style, and
    review order. No code; pure model-visible guidance. The need is a *procedure*,
@@ -377,7 +370,8 @@ being "ask the model nicely" and becomes a runtime guarantee.
    This is the same receipts pattern coding uses (read receipts, stale-edit
    rejection, diff/test evidence). The point of this rung is that the requirement
    is *declared and recorded by the runtime*, not left to the prompt — see the
-   status note above on where that recording becomes a hard block today.
+   **Verify Source Before Claim** status note below on where that recording
+   becomes a hard block today.
 
 5. **Harness — "client PII must never leak to that external API."**
    Same `search_case_law` call, but a different *kind* of requirement. Not "cite
@@ -395,6 +389,20 @@ already exist." Rung 5 is the only one that requires building runtime machinery,
 and you reach it only when you need a guarantee that holds **whether or not the
 model cooperates, even across turns, even where the model cannot see it.** Most
 domain work — legal, finance, research, operations — lives in rungs 1–4.
+
+### Example: Verify Source Before Claim
+
+Rung 4's evidence machinery also backs Magi's flagship governance example: a
+research task instructed to answer only from inspected sources, with each claim
+linked to a source span before it can reach the final answer. Be precise about
+how strong that enforcement is today:
+
+> **Status:** this is the evidence-governance *model*, not a fresh-install hard
+> block. The research final projection gate is **audit-only** (default-OFF): it
+> records claims but it **does not block the final answer**. The gate that *does*
+> block today is the coding-domain **pre-final** completion/evidence gate
+> (default-ON for coding turns). Treat the research rungs as the governance
+> model, not as out-of-the-box research blocking.
 
 ## Local web dashboard
 
