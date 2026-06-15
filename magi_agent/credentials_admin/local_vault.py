@@ -198,6 +198,12 @@ class LocalVault:
             pass
         key_path = self.key_path
         if key_path.is_file():
+            # Enforce 0600 on a pre-existing key (it may have been created with
+            # looser perms outside this code path).
+            try:
+                os.chmod(key_path, 0o600)
+            except OSError:
+                pass
             return key_path.read_bytes()
         key = Fernet.generate_key()
         _atomic_write_bytes(key_path, key, mode=0o600)
