@@ -2289,15 +2289,41 @@ def _function_call_args(function_call: Mapping[str, object]) -> dict[str, object
     return dict(args) if isinstance(args, Mapping) else {}
 
 
+_SECRET_KEY_RE = re.compile(
+    r"(api[_-]?key|secret|token|password|passwd|credential|authorization"
+    r"|auth[_-]?token|access[_-]?key|private[_-]?key|bearer|session[_-]?token)",
+    re.IGNORECASE,
+)
+
+
+def _redact_secrets(value: object) -> object:
+    """Mask values under secret-named keys while keeping all other values at full
+    fidelity. Recursive over mappings/sequences. Defends the plaintext transcript
+    against logging credential/vault tool args+results; value-pattern redaction
+    (e.g. bare ``AKIA…`` strings under innocuous keys) is a known follow-up."""
+    if isinstance(value, Mapping):
+        out: dict[object, object] = {}
+        for key, item in value.items():
+            if isinstance(key, str) and _SECRET_KEY_RE.search(key):
+                out[key] = "[redacted]"
+            else:
+                out[key] = _redact_secrets(item)
+        return out
+    if isinstance(value, (list, tuple)):
+        return [_redact_secrets(item) for item in value]
+    return value
+
+
 def _transcript_tool_call_record(
     function_call: Mapping[str, object], *, call_id: str
 ) -> dict[str, object]:
     """Full-fidelity tool_call record for the session transcript (no truncation —
-    unlike the SSE ``tool_start`` event which carries only an input *preview*)."""
+    unlike the SSE ``tool_start`` event which carries only an input *preview*).
+    Secret-named arg values are redacted; everything else is verbatim."""
     return {
         "type": "tool_call",
         "tool_name": str(function_call.get("name", "")),
-        "args": _function_call_args(function_call),
+        "args": _redact_secrets(_function_call_args(function_call)),
         "call_id": call_id,
     }
 
@@ -2314,7 +2340,7 @@ def _transcript_tool_result_record(
         "call_id": call_id,
         "tool_name": str(normalized_response.get("name", "")),
         "status": _manual_tool_status(response),
-        "output": response,
+        "output": _redact_secrets(response),
     }
 
 
@@ -2331,7 +2357,7 @@ def _transcript_subagent_record(
         "type": "subagent_spawn",
         "prompt": args.get("prompt") or args.get("task"),
         "persona": args.get("persona"),
-        "args": args,
+        "args": _redact_secrets(args),
     }
 
 

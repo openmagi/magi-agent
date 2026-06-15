@@ -51,6 +51,26 @@ def test_subagent_record_none_for_non_spawn_tool():
     assert _transcript_subagent_record({"name": "Bash", "args": {}}) is None
 
 
+def test_tool_call_record_redacts_secret_named_args():
+    fc = {
+        "name": "VaultFetch",
+        "args": {"command": "get", "api_key": "sk-LIVE-123", "nested": {"password": "p@ss"}},
+        "id": "adk-9",
+    }
+    rec = _transcript_tool_call_record(fc, call_id="ev-9")
+    # non-secret values stay full-fidelity; secret-named keys are masked.
+    assert rec["args"]["command"] == "get"
+    assert rec["args"]["api_key"] == "[redacted]"
+    assert rec["args"]["nested"]["password"] == "[redacted]"
+
+
+def test_tool_result_record_redacts_secret_named_output():
+    resp = {"name": "VaultFetch", "response": {"ok": True, "token": "tok-abc"}, "id": "adk-9"}
+    rec = _transcript_tool_result_record(resp, call_id="ev-9")
+    assert rec["output"]["ok"] is True
+    assert rec["output"]["token"] == "[redacted]"
+
+
 # ---- boundary emit methods ------------------------------------------------
 
 def _capture_sink():

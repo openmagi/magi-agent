@@ -73,22 +73,24 @@ class SessionTranscriptWriter:
                 # Token-level streaming noise — the assembled `message` record
                 # carries the final body. Skip before consuming a seq number.
                 return
+            path = self._session_path(session_id)
+            payload = dict(event) if isinstance(event, dict) else {}
             with self._lock:
                 seq = self._seq.get(session_id, 0) + 1
                 self._seq[session_id] = seq
-            line: dict = {
-                "ts": _now_iso(),
-                "seq": seq,
-                "session_id": session_id,
-                "turn_id": turn_id,
-            }
-            if isinstance(event, dict):
-                for key, value in event.items():
-                    line[key] = value
-            path = self._session_path(session_id)
-            path.parent.mkdir(parents=True, exist_ok=True)
-            with path.open("a", encoding="utf-8") as handle:
-                handle.write(json.dumps(line, default=str) + "\n")
+                line: dict = {
+                    "ts": _now_iso(),
+                    "seq": seq,
+                    "session_id": session_id,
+                    "turn_id": turn_id,
+                }
+                line.update(payload)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                # Append under the lock so concurrent same-session writes (turns
+                # run via asyncio.run on multiple worker threads) cannot interleave
+                # bytes within a single JSONL line.
+                with path.open("a", encoding="utf-8") as handle:
+                    handle.write(json.dumps(line, default=str) + "\n")
         except Exception:
             logger.debug("session transcript record failed", exc_info=True)
 
