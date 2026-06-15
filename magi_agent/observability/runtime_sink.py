@@ -11,11 +11,34 @@ try/except so it is always fail-open.
 """
 from __future__ import annotations
 
-from typing import Callable
+import logging
+from typing import Callable, Iterable
+
+logger = logging.getLogger(__name__)
 
 EventSink = Callable[[dict, "str | None", "str | None"], None]
 
 _active_sink: "EventSink | None" = None
+
+
+def combine_sinks(sinks: "Iterable[EventSink | None]") -> "EventSink | None":
+    """Fan one event out to several sinks. Each call is guarded so a failing
+    sink never blocks the others or raises. Returns ``None`` when no usable sink
+    is supplied (so callers can keep ``event_sink=None`` semantics)."""
+    active = [s for s in sinks if s is not None]
+    if not active:
+        return None
+    if len(active) == 1:
+        return active[0]
+
+    def _fanout(event: dict, session_id: "str | None", turn_id: "str | None") -> None:
+        for sink in active:
+            try:
+                sink(event, session_id, turn_id)
+            except Exception:
+                logger.debug("combined event sink member failed", exc_info=True)
+
+    return _fanout
 
 
 def set_active_sink(sink: "EventSink | None") -> None:

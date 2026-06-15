@@ -88,6 +88,16 @@ browser = [
 waf = [
   "curl_cffi>=0.7",
 ]
+# Optional: local credential-injecting forward proxy (Agent Vault Phase 2,
+# MAGI_LOCAL_VAULT_PROXY_ENABLED). mitmproxy is the TLS-MITM engine that
+# terminates the bot's egress TLS, matches the host to a registered credential,
+# and injects the auth header (secret fetched only inside the addon). It is
+# lazily imported inside magi_agent/credentials_admin/local_proxy.py so the core
+# import graph is unaffected when this extra is not installed.
+# Install with: uv sync --extra vault
+vault = [
+  "mitmproxy>=10",
+]
 
 [project.scripts]
 magi-agent = "magi_agent.main:main"

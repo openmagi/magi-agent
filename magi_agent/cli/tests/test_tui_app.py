@@ -2185,6 +2185,45 @@ def test_footer_shows_queued_badge_during_turn(monkeypatch) -> None:
     asyncio.run(_run())
 
 
+def test_footer_shows_cumulative_session_tokens_across_turns() -> None:
+    async def _run() -> None:
+        from magi_agent.cli.tui.footer import StatusFooter
+
+        class _TwoTurnUsageEngine(FakeEngineDriver):
+            def __init__(self) -> None:
+                super().__init__()
+                self._turn = 0
+
+            async def run_turn_stream(self, runtime, turn_input, *, cancel, gate=None):
+                self._turn += 1
+                turn_id = getattr(turn_input, "turn_id", "t")
+                yield RuntimeEvent(type="token", payload={"delta": "hi"}, turn_id=turn_id)
+                usage = (
+                    {"input_tokens": 100, "output_tokens": 23}
+                    if self._turn == 1
+                    else {"input_tokens": 10, "output_tokens": 7}
+                )
+                yield EngineResult(
+                    terminal=Terminal.completed, usage=usage, turn_id=turn_id
+                )
+
+        app = _make_app(_TwoTurnUsageEngine())
+        async with app.run_test() as pilot:
+            footer = app.query_one("#footer", StatusFooter)
+            app.start_turn("one")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert "123 tok" in footer.status_text()  # turn 1: 100 + 23
+            app.start_turn("two")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            text = footer.status_text()
+        # Cumulative across the session: 123 + (10 + 7) = 140, NOT the last turn's 17.
+        assert "140 tok" in text
+
+    asyncio.run(_run())
+
+
 def test_footer_elapsed_ticks_during_turn() -> None:
     async def _run() -> None:
         import asyncio as _asyncio
