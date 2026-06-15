@@ -28,7 +28,7 @@ Architecture notes
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from enum import Enum
 from hashlib import sha256
 from typing import Literal
@@ -216,6 +216,7 @@ class RoleAssignmentPolicy(BaseModel):
         task_ledger: TaskLedgerContract,
         *,
         env: Mapping[str, str] | None = None,
+        emit: Callable[[dict[str, object]], object] | None = None,
     ) -> ResearchChildRoleName:
         """Assign the best worker role for ``step`` given current ``task_ledger``.
 
@@ -228,6 +229,13 @@ class RoleAssignmentPolicy(BaseModel):
         env:
             Optional environment mapping for flag resolution (defaults to the
             process environment).
+        emit:
+            Optional best-effort sink for the ADVISORY ``worker_route_decided``
+            decision event.  Default ``None`` → no-op.  The event is emitted ONLY
+            when ``MAGI_WORKER_ROUTING_LLM_ENABLED`` is on, so flag-OFF callers
+            (including the keyword fallback path that runs even when the flag is
+            off) stay byte-identical.  Emission never raises and never changes the
+            returned role.
 
         Returns
         -------
@@ -243,14 +251,21 @@ class RoleAssignmentPolicy(BaseModel):
         is off, or the role is missing/invalid, behaviour is byte-identical to the
         keyword-inference path (``_infer_evidence_hint`` → role table).
         """
-        if worker_routing_llm_enabled(env) and step.worker_role in _VALID_WORKER_ROLES:
-            return step.worker_role  # type: ignore[return-value]
+        flag_on = worker_routing_llm_enabled(env)
+        if flag_on and step.worker_role in _VALID_WORKER_ROLES:
+            role = step.worker_role
+            _emit_worker_route_decided(emit, flag_on=flag_on, role=role, source="model")
+            return role  # type: ignore[return-value]
         dominant = _dominant_fact_kind(step.depends_on_fact_ids, task_ledger)
         hint = _infer_evidence_hint(step.description)
         role = _ROLE_TABLE.get((dominant, hint))
         if role is None:
-            # Fallback: use unknown hint row.
+            # Fallback: use unknown hint row → "default" routing source.
             role = _ROLE_TABLE.get((dominant, "unknown"), "research_searcher")
+            source = "default"
+        else:
+            source = "default" if hint == "unknown" else "keyword"
+        _emit_worker_route_decided(emit, flag_on=flag_on, role=role, source=source)
         return role
 
     def policy_digest(self) -> str:
@@ -275,12 +290,57 @@ class RoleAssignmentPolicy(BaseModel):
         }
 
 
+def project_worker_route_decided_event(
+    *,
+    role: ResearchChildRoleName,
+    source: str,
+) -> dict[str, object]:
+    """Project a worker-route decision into a public-safe ADVISORY event dict.
+
+    Mirrors the projection seam used elsewhere (``coding/repair_loop``): a pure
+    function returning a JSON-safe dict carrying only the chosen worker ``role``
+    and the ``source`` of the decision — ``"model"`` (honored planner role),
+    ``"keyword"`` (``_infer_evidence_hint``), or ``"default"`` (table default
+    row).  Never gating — purely for debuggability.
+    """
+    return {
+        "type": "worker_route_decided",
+        "role": role,
+        "source": source,
+    }
+
+
+def _emit_worker_route_decided(
+    emit: Callable[[dict[str, object]], object] | None,
+    *,
+    flag_on: bool,
+    role: ResearchChildRoleName,
+    source: str,
+) -> None:
+    """Best-effort emit of the advisory ``worker_route_decided`` event.
+
+    Gated on ``flag_on`` (``MAGI_WORKER_ROUTING_LLM_ENABLED``) so that flag-OFF
+    behaviour — including the keyword fallback path that runs even when the flag
+    is off — emits NOTHING and stays byte-identical.  Fail-safe: no-op when no
+    sink is supplied and swallows any emitter exception so telemetry can never
+    raise or change the assigned role.
+    """
+    if not flag_on or emit is None:
+        return
+    try:
+        emit(project_worker_route_decided_event(role=role, source=source))
+    except Exception:
+        # Advisory only — never let telemetry break routing.
+        return
+
+
 def assign_worker_role(
     step: LedgerPlanStep,
     task_ledger: TaskLedgerContract,
     *,
     policy: RoleAssignmentPolicy | None = None,
     env: Mapping[str, str] | None = None,
+    emit: Callable[[dict[str, object]], object] | None = None,
 ) -> ResearchChildRoleName:
     """Convenience wrapper — assign a worker role to ``step``.
 
@@ -294,6 +354,9 @@ def assign_worker_role(
         Optional custom policy.  Defaults to ``RoleAssignmentPolicy()``.
     env:
         Optional environment mapping for flag resolution.
+    emit:
+        Optional best-effort sink for the advisory ``worker_route_decided``
+        event (see :meth:`RoleAssignmentPolicy.assign_role`).
 
     Returns
     -------
@@ -301,7 +364,7 @@ def assign_worker_role(
         The assigned role.
     """
     _policy = policy or RoleAssignmentPolicy()
-    return _policy.assign_role(step, task_ledger, env=env)
+    return _policy.assign_role(step, task_ledger, env=env, emit=emit)
 
 
 # ---------------------------------------------------------------------------
@@ -342,6 +405,7 @@ def batch_independent_steps(
     batch_id_prefix: str = "batch",
     batch_number: int = 0,
     env: Mapping[str, str] | None = None,
+    emit: Callable[[dict[str, object]], object] | None = None,
 ) -> StepBatch | None:
     """Identify the next batch of parallelisable pending steps.
 
@@ -390,7 +454,7 @@ def batch_independent_steps(
         if produces & batch_produces:
             # Write conflict with an already-batched step.
             continue
-        role = _policy.assign_role(step, task_ledger, env=env)
+        role = _policy.assign_role(step, task_ledger, env=env, emit=emit)
         batch_steps.append(step)
         batch_produces |= produces
         batch_roles.append(role)
@@ -412,4 +476,5 @@ __all__ = [
     "StepBatch",
     "assign_worker_role",
     "batch_independent_steps",
+    "project_worker_route_decided_event",
 ]

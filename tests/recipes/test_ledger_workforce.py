@@ -391,3 +391,116 @@ class TestWorkerRoleWhenToUse:
         assert set(WORKER_ROLE_WHEN_TO_USE) == set(RESEARCH_CHILD_ROLE_NAMES)
         for role, desc in WORKER_ROLE_WHEN_TO_USE.items():
             assert isinstance(desc, str) and desc.strip()
+
+
+# ---------------------------------------------------------------------------
+# worker_route_decided advisory decision event (Task 9)
+# ---------------------------------------------------------------------------
+
+_FLAG_ON = {"MAGI_WORKER_ROUTING_LLM_ENABLED": "true"}
+
+
+class TestWorkerRouteDecidedEvent:
+    def _ledger_with_fact(self, kind: LedgerFactKind, fact_id: str) -> object:
+        fact = make_fact(fact_id=fact_id, kind=kind)
+        ledger = make_task_ledger(ledger_id="ledger:wrd", objective_text="route event")
+        return update_task_ledger(ledger, facts=(fact,))  # type: ignore[arg-type]
+
+    def test_emits_source_model_when_role_honored(self) -> None:
+        policy = RoleAssignmentPolicy()
+        ledger = self._ledger_with_fact(LedgerFactKind.open_question, "fact:m")
+        step = make_plan_step(
+            step_id="step:model",
+            description="Search for the publication data",  # would imply searcher
+            worker_role="research_verifier",  # honored when flag ON
+            depends_on_fact_ids=("fact:m",),
+        )
+        sink: list[object] = []
+        role = policy.assign_role(
+            step, ledger, env=_FLAG_ON, emit=lambda e: sink.append(e)  # type: ignore[arg-type]
+        )
+        assert role == "research_verifier"
+        events = [e for e in sink if isinstance(e, dict) and e.get("type") == "worker_route_decided"]
+        assert len(events) == 1
+        assert events[0]["role"] == "research_verifier"
+        assert events[0]["source"] == "model"
+
+    def test_emits_source_keyword_when_inferred(self) -> None:
+        policy = RoleAssignmentPolicy()
+        ledger = self._ledger_with_fact(LedgerFactKind.known_fact, "fact:k")
+        step = make_plan_step(
+            step_id="step:kw",
+            description="Synthesize and write the final answer",  # -> synthesize
+            depends_on_fact_ids=("fact:k",),
+        )
+        sink: list[object] = []
+        role = policy.assign_role(
+            step, ledger, env=_FLAG_ON, emit=lambda e: sink.append(e)  # type: ignore[arg-type]
+        )
+        assert role == "synthesis_reviewer"
+        events = [e for e in sink if isinstance(e, dict) and e.get("type") == "worker_route_decided"]
+        assert len(events) == 1
+        assert events[0]["role"] == "synthesis_reviewer"
+        assert events[0]["source"] == "keyword"
+
+    def test_emits_source_default_when_table_default_used(self) -> None:
+        policy = RoleAssignmentPolicy()
+        # No deps -> dominant fact kind = open_question; unknown hint -> default row.
+        ledger = make_task_ledger(ledger_id="ledger:def", objective_text="default")
+        step = make_plan_step(
+            step_id="step:def",
+            description="ponder the imponderable",  # no keyword match -> unknown
+        )
+        sink: list[object] = []
+        role = policy.assign_role(
+            step, ledger, env=_FLAG_ON, emit=lambda e: sink.append(e)  # type: ignore[arg-type]
+        )
+        # open_question + unknown -> research_searcher (the table default row).
+        assert role == "research_searcher"
+        events = [e for e in sink if isinstance(e, dict) and e.get("type") == "worker_route_decided"]
+        assert len(events) == 1
+        assert events[0]["source"] == "default"
+
+    def test_no_emit_when_flag_off(self) -> None:
+        # Flag OFF: the fallback keyword path still runs but MUST NOT emit, to
+        # preserve byte-identity of observable flag-OFF behavior.
+        policy = RoleAssignmentPolicy()
+        ledger = self._ledger_with_fact(LedgerFactKind.known_fact, "fact:off")
+        step = make_plan_step(
+            step_id="step:off",
+            description="Synthesize and write the final answer",
+            depends_on_fact_ids=("fact:off",),
+        )
+        sink: list[object] = []
+        role = policy.assign_role(
+            step, ledger, env={}, emit=lambda e: sink.append(e)  # type: ignore[arg-type]
+        )
+        assert role == "synthesis_reviewer"
+        assert sink == []
+
+    def test_emit_default_is_noop_and_does_not_break_routing(self) -> None:
+        # No emit callback supplied -> behaviour byte-identical, no raise.
+        policy = RoleAssignmentPolicy()
+        ledger = self._ledger_with_fact(LedgerFactKind.known_fact, "fact:noop")
+        step = make_plan_step(
+            step_id="step:noop",
+            description="Synthesize and write the final answer",
+            depends_on_fact_ids=("fact:noop",),
+        )
+        role = policy.assign_role(step, ledger, env=_FLAG_ON)  # type: ignore[arg-type]
+        assert role == "synthesis_reviewer"
+
+    def test_emit_failure_does_not_break_routing(self) -> None:
+        policy = RoleAssignmentPolicy()
+        ledger = self._ledger_with_fact(LedgerFactKind.known_fact, "fact:boom")
+        step = make_plan_step(
+            step_id="step:boom",
+            description="Synthesize and write the final answer",
+            depends_on_fact_ids=("fact:boom",),
+        )
+
+        def _boom(_event: object) -> None:
+            raise RuntimeError("emit must never break routing")
+
+        role = policy.assign_role(step, ledger, env=_FLAG_ON, emit=_boom)  # type: ignore[arg-type]
+        assert role == "synthesis_reviewer"

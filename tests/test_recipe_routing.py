@@ -12,6 +12,7 @@ from magi_agent.recipes.recipe_routing import (
     SELECTED_RECIPE_PACK_IDS_STATE_KEY,
     SELECT_RECIPE_TOOL_NAME,
     build_recipe_listing_section,
+    project_recipe_route_decided_event,
     register_select_recipe_tool,
     select_recipe_handler,
     select_recipe_manifest,
@@ -335,3 +336,88 @@ def test_select_recipe_manifest_is_meta_readonly_disabled_by_default():
     assert manifest.parallel_safety == "readonly"
     # The live flag — not the manifest default — is the activation authority.
     assert manifest.enabled_by_default is False
+
+
+# ---------------------------------------------------------------------------
+# recipe_route_decided advisory decision event (Task 9)
+# ---------------------------------------------------------------------------
+
+
+def _emitting_context(adk: object | None, sink: list[object]) -> ToolContext:
+    return ToolContext(
+        botId="test-bot",
+        adkToolContext=adk,
+        emitControlEvent=lambda event: sink.append(event),
+    )
+
+
+def test_project_recipe_route_decided_event_carries_pack_id_and_status():
+    event = project_recipe_route_decided_event(
+        pack_id="test.soft-full", status="ok", selected_count=2
+    )
+    assert event["type"] == "recipe_route_decided"
+    assert event["packId"] == "test.soft-full"
+    assert event["status"] == "ok"
+    assert event["selectedCount"] == 2
+
+
+def test_select_handler_emits_recipe_route_decided_on_ok():
+    registry = _routing_registry()
+    sink: list[object] = []
+    adk = _StubAdkToolContext()
+    result = select_recipe_handler(
+        {"pack_id": "test.soft-full"},
+        _emitting_context(adk, sink),
+        registry=registry,
+    )
+    assert result.status == "ok"
+    events = [e for e in sink if isinstance(e, dict) and e.get("type") == "recipe_route_decided"]
+    assert len(events) == 1
+    assert events[0]["packId"] == "test.soft-full"
+    assert events[0]["status"] == "ok"
+    # Running count of accumulated selections (after this selection).
+    assert events[0]["selectedCount"] == 1
+
+
+def test_select_handler_emits_recipe_route_decided_on_error():
+    registry = _routing_registry()
+    sink: list[object] = []
+    result = select_recipe_handler(
+        {"pack_id": "does.not.exist"},
+        _emitting_context(_StubAdkToolContext(), sink),
+        registry=registry,
+    )
+    assert result.status == "error"
+    events = [e for e in sink if isinstance(e, dict) and e.get("type") == "recipe_route_decided"]
+    assert len(events) == 1
+    assert events[0]["status"] == "error"
+
+
+def test_select_handler_does_not_raise_when_no_emitter_present():
+    # Fail-safe: no emit_control_event in scope -> selection still returns ok,
+    # no event emitted, no exception.
+    registry = _routing_registry()
+    result = select_recipe_handler(
+        {"pack_id": "test.soft-full"},
+        _context(_StubAdkToolContext()),
+        registry=registry,
+    )
+    assert result.status == "ok"
+
+
+def test_select_handler_emit_failure_does_not_break_selection():
+    # An emitter that raises must never change routing/selection behavior.
+    registry = _routing_registry()
+
+    def _boom(_event: object) -> None:
+        raise RuntimeError("emit must never break selection")
+
+    ctx = ToolContext(
+        botId="test-bot",
+        adkToolContext=_StubAdkToolContext(),
+        emitControlEvent=_boom,
+    )
+    result = select_recipe_handler(
+        {"pack_id": "test.soft-full"}, ctx, registry=registry
+    )
+    assert result.status == "ok"

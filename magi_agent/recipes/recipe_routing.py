@@ -107,6 +107,9 @@ def select_recipe_handler(
 
     pack_id = arguments.get("pack_id")
     if not isinstance(pack_id, str) or not pack_id.strip():
+        _emit_recipe_route_decided(
+            context, pack_id=None, status="error", selected_count=_selected_count(context)
+        )
         return ToolResult(
             status="error",
             errorCode="recipe_select_invalid",
@@ -118,6 +121,9 @@ def select_recipe_handler(
     try:
         pack = registry.get(pack_id)
     except KeyError:
+        _emit_recipe_route_decided(
+            context, pack_id=pack_id, status="error", selected_count=_selected_count(context)
+        )
         return ToolResult(
             status="error",
             errorCode="recipe_select_unknown",
@@ -128,12 +134,19 @@ def select_recipe_handler(
     if pack.hard_safety:
         # Hard-safety packs are always-on and never routed; selecting one is a
         # no-op so the always-on invariant cannot be subverted via the tool.
+        _emit_recipe_route_decided(
+            context, pack_id=pack_id, status="blocked", selected_count=_selected_count(context)
+        )
         return ToolResult(
             status="blocked",
             metadata={**base_metadata, "reason": "recipe_select_hard_safety", "packId": pack_id},
         )
 
     _accumulate_selected_pack_id(context, pack_id)
+
+    _emit_recipe_route_decided(
+        context, pack_id=pack_id, status="ok", selected_count=_selected_count(context)
+    )
 
     return ToolResult(
         status="ok",
@@ -232,6 +245,69 @@ def register_select_recipe_tool(
     return True
 
 
+def project_recipe_route_decided_event(
+    *,
+    pack_id: str | None,
+    status: str,
+    selected_count: int,
+) -> dict[str, object]:
+    """Project a recipe-route decision into a public-safe ADVISORY event dict.
+
+    Mirrors the established projection seam (``coding/repair_loop`` /
+    ``evidence/event_projection``): a pure function returning a JSON-safe dict
+    that a caller emits via a ``context.emit_*_event`` callback.  Carries only the
+    chosen ``packId`` (an opaque pack identifier — never a path or secret), the
+    handler ``status`` (``ok``/``error``/``blocked``), and the running count of
+    selections accumulated so far.  Never gating — purely for debuggability.
+    """
+    return {
+        "type": "recipe_route_decided",
+        "packId": pack_id,
+        "status": status,
+        "selectedCount": selected_count,
+    }
+
+
+def _emit_recipe_route_decided(
+    context: ToolContext,
+    *,
+    pack_id: str | None,
+    status: str,
+    selected_count: int,
+) -> None:
+    """Best-effort emit of the advisory ``recipe_route_decided`` event.
+
+    Fail-safe: when no ``emit_control_event`` callback is threaded onto the
+    ToolContext (e.g. non-ADK runners or test harnesses) this is a silent no-op,
+    and any emitter exception is swallowed so event emission can never raise or
+    alter the selection result.  The handler itself only runs when recipe routing
+    is enabled, so this is inert when the flag is OFF.
+    """
+    emitter = context.emit_control_event
+    if not callable(emitter):
+        return
+    try:
+        emitter(
+            project_recipe_route_decided_event(
+                pack_id=pack_id, status=status, selected_count=selected_count
+            )
+        )
+    except Exception:
+        # Advisory only — never let telemetry break routing.
+        return
+
+
+def _selected_count(context: ToolContext) -> int:
+    """Count accumulated selections (running total) for the event payload."""
+    state = _adk_state(context)
+    if state is None:
+        return 0
+    existing = state.get(SELECTED_RECIPE_PACK_IDS_STATE_KEY)
+    if isinstance(existing, (tuple, list)):
+        return len(existing)
+    return 0
+
+
 def _select_recipe_input_schema() -> dict[str, object]:
     return {
         "type": "object",
@@ -285,6 +361,7 @@ __all__ = [
     "SELECTED_RECIPE_PACK_IDS_STATE_KEY",
     "SELECT_RECIPE_TOOL_NAME",
     "build_recipe_listing_section",
+    "project_recipe_route_decided_event",
     "register_select_recipe_tool",
     "select_recipe_body",
     "select_recipe_handler",
