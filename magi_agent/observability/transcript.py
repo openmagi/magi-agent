@@ -139,14 +139,15 @@ def get_active_transcript_sink() -> "TranscriptSink | None":
 def register_session_transcript(app: Any, runtime: Any) -> "SessionTranscriptWriter | None":
     """Install the session-transcript sink when ``MAGI_SESSION_TRANSCRIPT_ENABLED``
     is truthy. Default-OFF: returns None and registers nothing, leaving the app
-    surface byte-identical. Files live under ``<MAGI_OBS_HOME or cwd/.openmagi>``,
-    reusing the observability ``.openmagi`` parent so the PVC path works on hosted
-    pods (HOME=/, read-only root)."""
+    surface byte-identical. Files live under the shared observability home
+    (``MAGI_OBS_HOME``) so the PVC path works on hosted pods (HOME=/, read-only
+    root)."""
     if not _truthy(os.environ.get("MAGI_SESSION_TRANSCRIPT_ENABLED")):
         return None
 
-    home = Path(os.environ.get("MAGI_OBS_HOME") or (Path.cwd() / ".openmagi"))
-    writer = SessionTranscriptWriter(home)
+    from magi_agent.observability.integration import resolve_observability_home
+
+    writer = SessionTranscriptWriter(resolve_observability_home())
     set_active_transcript_sink(writer.record)
 
     try:
