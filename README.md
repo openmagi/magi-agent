@@ -194,8 +194,46 @@ will only see permission prompts when you explicitly choose a prompting mode.
 ## Architecture
 
 Magi controls the loop around ADK. The model sees a bounded context packet and
-proposes work. Runtime-only policy, evidence, validation, and projection state
-decide which proposals can continue.
+proposes work; a runtime-only control plane decides which proposals become
+state, evidence, side effects, or user-visible output.
+
+### The stack
+
+Magi is not one loop. It is five layers, each answering a different *kind* of
+need. The rule is simple: **reach for the lowest layer that can express what you
+want, and only climb when that layer genuinely cannot.**
+
+| Layer | Role | Reach for it when | Lives in |
+| --- | --- | --- | --- |
+| **Skill** | Behavior guidance — procedure, format, tone (no code) | "Do the work *this way*" | `SKILL.md` files |
+| **Tool** | A capability the model can call | "The agent needs a new *ability*" | tool registry (`tools/`) |
+| **Recipe** | Per-task composition — which tools, validators, evidence, phases, and model to attach | "For *this class of task*, always assemble this" | recipe packs (`recipes/`, incl. `first_party/`) |
+| **Evidence** | Append-only proof record + enforcement gates | "This claim or action must be *proven*, or blocked" | evidence ledger (`evidence/`) |
+| **Harness** | The execution machinery and runtime primitives a recipe references | "A guarantee the model cannot be *trusted* to keep" | runtime engine + gates (`harness/`) |
+
+How they relate: a **Recipe** is a bill of materials. It references **Tool**,
+**Evidence**, and **Harness** primitives *by name* (`tool_refs`,
+`validator_refs`, `evidence_refs`, …); it does not implement them. The
+**Harness** owns the engine, gates, loops, and schedulers — that is where the
+referenced primitives actually live. The **Evidence** ledger is a separate,
+always-on record produced at the tool-dispatch boundary, which gates consume.
+**Skill** and project context ride on top as model-visible guidance. (Every one
+of these is authored as a disk pack in the same format — see
+[Extending the runtime](#extending-the-runtime).)
+
+Because the layers are orthogonal, each degrades on its own:
+
+- swap only the Recipe → same engine, different domain (a contract-review bot and
+  a coding bot are the *same runtime, different manifest*);
+- run with no opinionated packs ("vanilla") → the *enforcement and verification*
+  levers go quiet, but prompt, tool, and model levers still work;
+- turn evidence *enforcement* off → records are still written (the dispatch-seam
+  producer is default-on); they are simply not gated.
+
+### The runtime boundary
+
+The split that makes the layers enforceable is between what the model can see and
+what only the runtime controls:
 
 ```text
 MODEL-VISIBLE LOOP                  RUNTIME-ONLY CONTROL PLANE
@@ -223,28 +261,38 @@ Final answer/artifact     <-------- Validators + repair/fallback policy
 User-visible projection   <-------- Output projector + audit checkpoint
 ```
 
-| Component | Job |
+### How a run flows
+
+1. **Boot (once per session).** The runtime resolves a profile (which capability
+   packs are on) and applies local `~/.magi/customize.json` tool overrides.
+2. **Compile (per task).** A task profile selects recipe packs; the compiler and
+   materializer bind their `*_refs` to real validators, tools, models, and
+   evidence requirements, producing a frozen *plan*.
+3. **Execute.** The engine runs the turn. Tool calls pass through the dispatcher,
+   which both runs the tool *and* appends an evidence record (default-on).
+4. **Verify.** Gates compare the plan's required evidence against the ledger and
+   decide: continue, repair, downgrade, abstain, or block. Hard-safety gates
+   (permission, path, secret, sealed-file, git) are always on and cannot be
+   disabled.
+
+| Stage primitive | Job |
 | --- | --- |
-| Workflow config | Selects the runtime policy for a class of work |
-| Harness | Adds reusable enforcement behavior to runtime stages |
-| Policy snapshot | Freezes the effective rules for the current run |
+| Policy snapshot | Freezes the effective rules (tools, approvals, evidence, repair) for the run |
 | Context projector | Decides what the model is allowed to see |
 | ADK Runner boundary | Lets the model propose text, actions, and tool calls |
-| ToolHost | Owns tool execution, permission checks, and approvals |
+| ToolHost / dispatcher | Owns tool execution, permission checks, and evidence production |
 | Evidence ledger | Records source, file, calculation, test, approval, and delivery receipts |
-| Validators | Check whether claims and actions satisfy the policy |
+| Validators | Check whether claims and actions satisfy the plan |
 | Repair policy | Defines retry, downgrade, fallback, abstention, or block behavior |
 | Output projector | Renders only public-safe, policy-compliant output |
 | Audit/checkpoint | Preserves digest-safe evidence for review and replay |
 
-The model proposes work inside this loop. The runtime decides when model text
-becomes state, evidence, memory, artifact content, external side effect, or
-user-visible output.
-
 ## First-Party Harnesses
 
-Magi ships first-party harness contracts for the common work classes that need
-deterministic checkpoints:
+These are pre-built **Recipe** bundles that wire **Harness**-layer primitives for
+a common work class, so you do not assemble one from scratch. Magi ships
+first-party harness contracts for the work classes that need deterministic
+checkpoints:
 
 - research-first source inspection, citation, verifier, rule-check, and final
   projection;
@@ -290,6 +338,59 @@ disable = ["openmagi.source-opened"]
 - [Pack manifest reference](docs/pack-manifest-reference.md)
 - [Typed-context API reference](docs/pack-context-reference.md)
 
+## Example: One Task, Up the Stack
+
+The clearest way to see how the layers connect is to grow one bot until each new
+requirement forces the next layer. A lawyer wants a contract-review bot. Watch
+the *kind* of each request decide which layer answers it — and where it stops
+being "ask the model nicely" and becomes a runtime guarantee.
+
+1. **Skill — "review contracts our firm's way."**
+   A `review-contract` skill encodes the toxic-clause checklist, house style, and
+   review order. No code; pure model-visible guidance. The need is a *procedure*,
+   so a skill is enough.
+
+2. **Tool — "you have to actually look up case law."**
+   Register a `search_case_law` tool in the registry. A skill cannot add an
+   ability — this is one new *capability* the model can call. Execution is
+   otherwise unchanged.
+
+3. **Recipe — "for contract review, always assemble this."**
+   A `contract_review` pack declares `tool_refs=(search_case_law, read_pdf, …)`,
+   a model, a review→verify phase split, and the few-shot and rule-injection for
+   the domain. The pack *references* primitives; it does not implement them.
+   Selecting it per task is how one runtime becomes a contract-review specialist
+   without forking the agent.
+
+4. **Evidence — "a legal opinion should cite its source."**
+   The pack adds `evidence_refs=("citation:case-law-source",)`. Every
+   `search_case_law` call is appended to the ledger at the dispatch seam
+   (default-on), and a gate compares the final answer against the recorded
+   sources so unsupported claims can be repaired, weakened, flagged, or blocked.
+   This is the same receipts pattern coding uses (read receipts, stale-edit
+   rejection, diff/test evidence). Note the *enforcement strength is
+   domain-specific today*: the coding pre-final evidence gate hard-blocks
+   (default-ON), while the research/citation final gate currently runs
+   audit-only — recording, not blocking. The point of this rung is that the
+   requirement is *declared and recorded by the runtime*, not left to the prompt.
+
+5. **Harness — "client PII must never leak to that external API."**
+   Same `search_case_law` call, but a different *kind* of requirement. Not "cite
+   your source" (cooperation) but "leaking must be *impossible*, even under a
+   prompt injection or a model mistake." No skill, tool, recipe ref, or workflow
+   can guarantee this — they all run *as*, or *through*, the (bypassable) model. It
+   needs a new non-bypassable mechanism: an egress gate at the dispatch boundary
+   that inspects every outbound payload and blocks PII before it leaves. That is
+   harness work — a new runtime primitive, authored as a pack
+   ([Extending the runtime](#extending-the-runtime)) — and a recipe then
+   references the new gate to switch it on.
+
+The line is sharp. Rungs 1–4 are "tell the model, or declare from parts that
+already exist." Rung 5 is the only one that requires building runtime machinery,
+and you reach it only when you need a guarantee that holds **whether or not the
+model cooperates, even across turns, even where the model cannot see it.** Most
+domain work — legal, finance, research, operations — lives in rungs 1–4.
+
 ## Local web dashboard
 
 `magi-agent serve` includes a browser dashboard for local work:
@@ -304,77 +405,6 @@ transport state when the runtime emits them. Use it for local research, coding,
 document review, planning, and automation experiments without starting a
 separate frontend project.
 
-## Example: Verify Source Before Claim
-
-> **Status: governance demo (research final gate is audit-only, default-OFF).**
-> This example illustrates the evidence-governance *model*. On a fresh install
-> with one provider key it is not reproducible as a hard block: the research
-> final projection gate runs in audit/observe mode
-> (`magi_agent/research/final_projection_gate.py` —
-> `final_answer_blocking_enabled` is `Literal[False]`), so claims are recorded
-> but it **does not block the final answer**. The gate that *does* block today
-> is the coding-domain **pre-final** completion/evidence gate
-> (`magi_agent/cli/engine.py`, `pre_final_evidence_gate_blocked`), which is
-> default-ON for coding turns. Treat steps 4–6 below as the governance model,
-> not as out-of-the-box research blocking.
-
-Suppose the user asks:
-
-```text
-Read the uploaded product spec, market report, and competitor pricing table.
-Answer the competitive positioning questions. If something is not in the
-documents, say so clearly.
-```
-
-In a prompt-only agent, "only use the documents" is just text in the prompt. In
-Magi, a source-verified research workflow changes the loop.
-
-1. **Policy snapshot.** The runtime records that source-sensitive claims require
-   inspected-source evidence, the uploaded documents are the allowed source set,
-   and unsupported claims must be repaired, downgraded, or blocked.
-2. **Context projection.** The model receives the user request, allowed document
-   refs, committed public context, and evidence requirements. It does not
-   receive raw private logs, hidden tool data, or arbitrary workspace paths.
-3. **Source boundary.** If the model proposes reading `market_report.pdf`, the
-   source read goes through ToolHost or a source-inspection boundary. The
-   runtime writes a receipt with fields like `sourceId`, document ref,
-   `snapshotDigest`, `contentDigest`, `retrievedAt`, and citeable span refs.
-4. **Claim boundary.** If the model extracts "Competitor A charges $99 per
-   seat", the research harness can represent that as a claim linked to the exact
-   source span. The claim is not trusted just because the model wrote it.
-5. **Intermediate validation.** The same validators can run before a child-agent
-   result is accepted, before a summary becomes next-step context, before a
-   memory write, before a Slack draft, and before the final answer. Unsupported
-   claims do not have to wait until the final response to be caught.
-6. **Repair or abstain.** If the model later writes "Competitor A is cheaper
-   than us" but the ledger does not contain enough pricing evidence to derive
-   that comparison, the runtime can ask for another allowed source inspection,
-   weaken the wording, remove the claim, say the documents do not support it, or
-   block the step.
-7. **Governed projection.** The final projector renders supported claims,
-   citation refs, uncertainty, and explicit gaps. Raw tool output, private
-   paths, auth material, hidden reasoning, and unsupported claims stay out of
-   the user-visible answer.
-
-That is the difference between "please cite sources" and runtime enforcement.
-The source ledger, claim graph, validators, repair policy, and output projector
-all participate in the run.
-
-## Example: Coding With Receipts
-
-For coding work, Magi treats the workflow as an evidence-producing transaction:
-
-1. The runtime records the files read before an edit is proposed.
-2. Stale edits are rejected when the file changed after the read receipt.
-3. Patch application creates a mutation receipt.
-4. Rollback/delete proof is recorded for sandboxed mutation paths.
-5. Diff and test evidence gates run before a completion claim is projected.
-6. Final output cannot claim success unless the required verification evidence
-   exists.
-
-The same pattern can be applied to analysis, operations, document generation,
-or channel delivery: define the evidence, then make the runtime enforce it.
-
 ## Why Hooks Alone Are Not Enough
 
 Hooks are useful. They can observe lifecycle events, add context, block a step,
@@ -383,14 +413,16 @@ or run checks before and after tool calls.
 But strong deterministic guarantees usually require owning runtime state
 transitions, not just seeing lifecycle payloads.
 
-For example, imagine trying to build the source-verification workflow above as a
+For example, take the rung-4 and rung-5 guarantees from the example above —
+"cite the source" and "PII can never leave" — and try to build them as a
 third-party hook around an existing agent. A `before_reply` hook may see the
 draft answer, but it may not know which intermediate summaries were fed into the
 next model call. An `after_tool` hook may see a tool result, but it usually
 cannot define a structured source ledger, decide which claims become verified
-runtime state, or prevent unsupported claims from entering future context. Even
-if the hook can inspect raw logs, it has to reconstruct the whole run after the
-fact, which is expensive and imprecise.
+runtime state, prevent unsupported claims from entering future context, or block
+an outbound payload before it is sent. Even if the hook can inspect raw logs, it
+has to reconstruct the whole run after the fact, which is expensive and
+imprecise.
 
 First-party coding agents can be reliable because their core loop owns state
 such as file reads, edits, diffs, test runs, stale-edit checks, and final commit
