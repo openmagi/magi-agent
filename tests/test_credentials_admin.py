@@ -4,6 +4,7 @@ import json
 import logging
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from magi_agent.app import create_app
@@ -11,6 +12,17 @@ from magi_agent.config.models import BuildInfo, RuntimeConfig
 from magi_agent.credentials_admin import vault_local
 from magi_agent.credentials_admin.store import credentials_path
 from magi_agent.runtime.openmagi_runtime import OpenMagiRuntime
+
+
+@pytest.fixture(autouse=True)
+def _clean_vault_env(monkeypatch):
+    # Other test files apply local-runtime defaults that setdefault
+    # MAGI_LOCAL_VAULT_ENABLED into the global os.environ; clear any such leak so
+    # these default-OFF assertions stay isolated. Tests that need the local vault
+    # (or external URL) set their env vars explicitly, which overrides this.
+    monkeypatch.delenv("MAGI_LOCAL_VAULT_ENABLED", raising=False)
+    monkeypatch.delenv("MAGI_VAULT_ADMIN_ENABLED", raising=False)
+    monkeypatch.delenv("MAGI_VAULT_ADMIN_URL", raising=False)
 
 # A realistic-looking secret used across tests. It is intentionally
 # "secret-shaped" so the durable-store guard and redaction helpers are exercised.
