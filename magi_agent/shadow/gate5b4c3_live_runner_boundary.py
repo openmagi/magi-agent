@@ -6,10 +6,13 @@ from dataclasses import dataclass
 from functools import cached_property
 import hashlib
 import json
+import logging
 import os
 import re
 import time
 from typing import Any, ClassVar, Literal, Self, TypeAlias
+
+logger = logging.getLogger(__name__)
 
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
 
@@ -476,11 +479,13 @@ class Gate5B4C3LiveRunnerBoundary:
         """
         session_lease_releases: list[Callable[[], None]] = []
         try:
-            return await self._invoke_async_turn(
+            result = await self._invoke_async_turn(
                 request,
                 config=config,
                 session_lease_releases=session_lease_releases,
             )
+            self._emit_turn_completion(request, result)
+            return result
         finally:
             for release_session_lease in session_lease_releases:
                 try:
@@ -764,6 +769,15 @@ class Gate5B4C3LiveRunnerBoundary:
         output_continuation = (
             _output_continuation_config_from_env() if selected_full_toolhost else None
         )
+        self._emit_record(
+            {
+                "type": "turn_start",
+                "prompt": getattr(runner_input, "sanitized_user_input", None),
+                "provider": getattr(runner_input, "provider_label", None),
+                "model": getattr(runner_input, "model_label", None),
+            },
+            request=request,
+        )
         try:
             async with asyncio.timeout(request.budgets.python_runner_timeout_ms / 1000):
                 next_message: object = message
@@ -822,6 +836,15 @@ class Gate5B4C3LiveRunnerBoundary:
                                 ids_by_adk_id=live_tool_event_ids_by_adk_id,
                                 pending_ids_by_name=pending_live_tool_event_ids_by_name,
                             )
+                            self._emit_record(
+                                _transcript_tool_call_record(
+                                    function_call, call_id=tool_event_id
+                                ),
+                                request=request,
+                            )
+                            subagent_record = _transcript_subagent_record(function_call)
+                            if subagent_record is not None:
+                                self._emit_record(subagent_record, request=request)
                             if not _function_call_tool_emits_public_events(
                                 function_call,
                                 self._adk_tools,
@@ -871,6 +894,12 @@ class Gate5B4C3LiveRunnerBoundary:
                             response_payload = normalized_response.get("response")
                             result_digest = _digest(response_payload)
                             status = _manual_tool_status(response_payload)
+                            self._emit_record(
+                                _transcript_tool_result_record(
+                                    normalized_response, call_id=tool_event_id
+                                ),
+                                request=request,
+                            )
                             self._emit_public_event(
                                 tool_end_event(
                                     tool_id=tool_event_id,
@@ -1247,6 +1276,53 @@ class Gate5B4C3LiveRunnerBoundary:
         except Exception:
             # Streaming hints must never change the selected boundary result.
             return
+
+    def _emit_record(
+        self, event: Mapping[str, object], *, request: Gate5B4C3ShadowGenerationRequest
+    ) -> None:
+        """Append one full-fidelity record to the process-global session
+        transcript sink (separate from the SSE ``_emit_public_event`` seam). No-op
+        and fully fail-open when no transcript sink is registered (flag OFF) — so
+        this never alters the boundary result or the SSE contract."""
+        try:
+            from magi_agent.observability.transcript import (
+                get_active_transcript_sink,
+            )
+
+            sink = get_active_transcript_sink()
+            if sink is None:
+                return
+            sink(dict(event), _shadow_session_id(request), request.turn.turn_id)
+        except Exception:
+            logger.debug("gate5b transcript record failed", exc_info=True)
+
+    def _emit_turn_completion(
+        self,
+        request: Gate5B4C3ShadowGenerationRequest,
+        result: object,
+    ) -> None:
+        """Emit the assembled assistant ``message`` (if any) and a ``turn_end``
+        record from the structured boundary result — one chokepoint covering every
+        return path of the turn body."""
+        output_text = getattr(result, "output_text_internal", None)
+        if output_text:
+            self._emit_record(
+                {"type": "message", "role": "assistant", "content": output_text},
+                request=request,
+            )
+        self._emit_record(
+            {
+                "type": "turn_end",
+                "terminal": getattr(result, "status", None),
+                "reason": getattr(result, "reason", None),
+                "usage": getattr(result, "usage_internal", None),
+                "provider": getattr(result, "selected_provider", None),
+                "model": getattr(result, "selected_model", None),
+                "event_count": getattr(result, "event_count", None),
+                "latency_ms": getattr(result, "latency_ms", None),
+            },
+            request=request,
+        )
 
 
 def load_gate5b4c3_live_adk_primitives() -> Gate5B4C3LiveAdkPrimitives:
@@ -2211,6 +2287,52 @@ def _live_tool_event_id_for_function_call(
 def _function_call_args(function_call: Mapping[str, object]) -> dict[str, object]:
     args = function_call.get("args")
     return dict(args) if isinstance(args, Mapping) else {}
+
+
+def _transcript_tool_call_record(
+    function_call: Mapping[str, object], *, call_id: str
+) -> dict[str, object]:
+    """Full-fidelity tool_call record for the session transcript (no truncation —
+    unlike the SSE ``tool_start`` event which carries only an input *preview*)."""
+    return {
+        "type": "tool_call",
+        "tool_name": str(function_call.get("name", "")),
+        "args": _function_call_args(function_call),
+        "call_id": call_id,
+    }
+
+
+def _transcript_tool_result_record(
+    normalized_response: Mapping[str, object], *, call_id: str
+) -> dict[str, object]:
+    """Full-fidelity tool_result record. Carries the real response payload — the
+    SSE ``tool_end`` event only carries a digest (``result:<sha>``), useless for
+    debugging what a subagent or tool actually returned."""
+    response = normalized_response.get("response")
+    return {
+        "type": "tool_result",
+        "call_id": call_id,
+        "tool_name": str(normalized_response.get("name", "")),
+        "status": _manual_tool_status(response),
+        "output": response,
+    }
+
+
+def _transcript_subagent_record(
+    function_call: Mapping[str, object],
+) -> dict[str, object] | None:
+    """Flattened convenience record for a ``SpawnAgent`` call so subagent spawns
+    are greppable in one line. Non-lossy: full args retained alongside the
+    best-effort flattened ``prompt``/``persona``."""
+    if str(function_call.get("name", "")) != "SpawnAgent":
+        return None
+    args = _function_call_args(function_call)
+    return {
+        "type": "subagent_spawn",
+        "prompt": args.get("prompt") or args.get("task"),
+        "persona": args.get("persona"),
+        "args": args,
+    }
 
 
 def _remember_live_tool_event_id(
