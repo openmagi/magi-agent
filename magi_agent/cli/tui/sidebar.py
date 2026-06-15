@@ -20,15 +20,18 @@ from textual.app import ComposeResult
 from textual.containers import VerticalScroll
 from textual.widgets import Static
 
+from magi_agent.cli.render.width import truncate_cells
+
 __all__ = ["Sidebar", "MAX_RECENT_FILES", "MAX_FILE_DISPLAY_WIDTH"]
 
 MAX_RECENT_FILES = 10
 
-# Recent-file display width budget. The sidebar dock is ``width: 32`` (see the
-# App CSS); recent files store FULL paths (for dedup integrity) but DISPLAY a
-# shortened basename so a long path like ``lib/services/handlers/foo.py`` does
-# not overflow/wrap the column. Kept under the dock width minus the 2-space
-# indent and a little slack.
+# Recent-file display width budget, measured in terminal CELLS (East-Asian Wide
+# chars count 2) via ``truncate_cells`` — so a CJK basename doesn't ~2x-overflow.
+# The sidebar dock is ``width: 32`` (see the App CSS); recent files store FULL
+# paths (for dedup integrity) but DISPLAY a shortened basename so a long path
+# like ``lib/services/handlers/foo.py`` does not overflow/wrap the column. Kept
+# under the dock width minus the 2-space indent and a little slack.
 MAX_FILE_DISPLAY_WIDTH = 28
 
 
@@ -41,9 +44,7 @@ def _shorten_file(path: str) -> str:
     """
 
     name = os.path.basename(path.rstrip("/")) or path
-    if len(name) > MAX_FILE_DISPLAY_WIDTH:
-        return "…" + name[-(MAX_FILE_DISPLAY_WIDTH - 1):]
-    return name
+    return truncate_cells(name, MAX_FILE_DISPLAY_WIDTH, lead=True)
 
 
 class Sidebar(VerticalScroll):
