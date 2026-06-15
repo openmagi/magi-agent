@@ -2937,6 +2937,79 @@ def test_unknown_tool_renders_named_header_with_arg() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Waiting liveness: footer current-activity word + gated stall hint
+# ---------------------------------------------------------------------------
+class _ActivityToolEngine(FakeEngineDriver):
+    """Yields scripted tool_start/tool_end events (with ids) for activity tests.
+
+    ``script`` is a list of ``(inner_type, tool_id, name)`` tuples; a ``None``
+    name on a ``tool_end`` mirrors the sanitized public payload (no name). An
+    optional ``pause`` event ``("pause", seconds, None)`` sleeps mid-stream so a
+    test can sample the footer in the window between two events.
+    """
+
+    def __init__(self, script, *, terminal: Terminal = Terminal.completed) -> None:
+        super().__init__(tokens=[], terminal=terminal)
+        self._script = script
+
+    async def run_turn_stream(self, runtime, turn_input, *, cancel, gate=None):
+        import asyncio as _asyncio
+
+        turn_id = getattr(turn_input, "turn_id", "t")
+        for inner, ident, name in self._script:
+            if inner == "pause":
+                await _asyncio.sleep(ident)
+                continue
+            payload = {"type": inner, "id": ident}
+            if name is not None:
+                payload["name"] = name
+            yield RuntimeEvent(type="tool", payload=payload, turn_id=turn_id)
+        yield EngineResult(terminal=self._terminal, turn_id=turn_id)
+
+
+def test_update_footer_forwards_activity() -> None:
+    async def _run() -> None:
+        app = _make_app(FakeEngineDriver())
+        async with app.run_test() as pilot:
+            app.update_footer(activity="Read")
+            await pilot.pause()
+            value = app._footer.activity
+        assert value == "Read"
+
+    asyncio.run(_run())
+
+
+def test_stall_init_fields_present(monkeypatch) -> None:
+    async def _run() -> None:
+        monkeypatch.delenv("MAGI_TUI_STALL_SECONDS", raising=False)
+        app = _make_app(FakeEngineDriver())
+        async with app.run_test():
+            pass
+        assert app._open_tools == []
+        assert app._last_event_monotonic is None
+        assert app._stall_seconds == 0
+
+    asyncio.run(_run())
+
+
+def test_tool_start_sets_footer_activity() -> None:
+    async def _run() -> None:
+        # tool_start, then a pause BEFORE tool_end -> sample the footer in the gap.
+        engine = _ActivityToolEngine(
+            [
+                ("tool_start", "call-1", "Bash"),
+                ("pause", 0.05, None),
+                ("tool_end", "call-1", None),
+            ]
+        )
+        app = _make_app(engine, flush_interval=0.01)
+        async with app.run_test() as pilot:
+            app.start_turn("run ls")
+            await pilot.pause(0.02)
+            mid = app._footer.activity
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+        assert mid == "Bash"
 # Expand affordance (ctrl+o) — DEFAULT-OFF flag that reveals full tool output.
 #
 # The flat path commits a hard-truncated (8 lines / 1200 chars) preview; expand
@@ -3023,6 +3096,64 @@ def test_expand_state_survives_turn(monkeypatch) -> None:
     asyncio.run(_run())
 
 
+def test_tool_end_clears_footer_activity() -> None:
+    async def _run() -> None:
+        engine = _ActivityToolEngine(
+            [
+                ("tool_start", "call-1", "Bash"),
+                ("tool_end", "call-1", None),
+            ]
+        )
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            app.start_turn("run ls")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            value = app._footer.activity
+        assert value == ""
+
+    asyncio.run(_run())
+
+
+def test_overlapping_tools_activity_pops_to_parent() -> None:
+    async def _run() -> None:
+        # A opens, B opens, B ends (-> back to A), pause to sample, A ends.
+        engine = _ActivityToolEngine(
+            [
+                ("tool_start", "A", "Bash"),
+                ("tool_start", "B", "Read"),
+                ("tool_end", "B", None),
+                ("pause", 0.05, None),
+                ("tool_end", "A", None),
+            ]
+        )
+        app = _make_app(engine, flush_interval=0.01)
+        async with app.run_test() as pilot:
+            app.start_turn("nested")
+            await pilot.pause(0.02)
+            after_b = app._footer.activity
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            after_a = app._footer.activity
+        assert after_b == "Bash"
+        assert after_a == ""
+
+    asyncio.run(_run())
+
+
+def test_terminal_clears_activity() -> None:
+    async def _run() -> None:
+        # A tool that opens but never ends, then the terminal arrives.
+        engine = _ActivityToolEngine([("tool_start", "call-1", "Bash")])
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            app.start_turn("run ls")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            activity = app._footer.activity
+            open_tools = list(app._open_tools)
+        assert activity == ""
+        assert open_tools == []
 # -- Task 3: ctrl+o binding + action_toggle_expand (real dispatch) -----------
 def test_ctrl_o_toggles_expand_flag(monkeypatch) -> None:
     async def _run() -> None:
@@ -3041,6 +3172,102 @@ def test_ctrl_o_toggles_expand_flag(monkeypatch) -> None:
     asyncio.run(_run())
 
 
+def test_activity_clear_after_cancel_mid_tool() -> None:
+    async def _run() -> None:
+        # Open a tool then stream forever; cancel mid-tool (no tool_end arrives).
+        class _StuckToolEngine(FakeEngineDriver):
+            async def run_turn_stream(self, runtime, turn_input, *, cancel, gate=None):
+                import asyncio as _asyncio
+
+                turn_id = getattr(turn_input, "turn_id", "t")
+                yield RuntimeEvent(
+                    type="tool",
+                    payload={"type": "tool_start", "id": "call-1", "name": "Bash"},
+                    turn_id=turn_id,
+                )
+                while not cancel.is_set():
+                    await _asyncio.sleep(0.01)
+                yield EngineResult(
+                    terminal=Terminal.aborted, error="cancelled", turn_id=turn_id
+                )
+
+        app = _make_app(_StuckToolEngine(), flush_interval=0.01)
+        async with app.run_test() as pilot:
+            app.start_turn("run ls")
+            await pilot.pause(0.03)
+            app.action_cancel_turn()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            activity = app._footer.activity
+            open_tools = list(app._open_tools)
+        assert activity == ""
+        assert open_tools == []
+
+    asyncio.run(_run())
+
+
+def test_activity_reset_on_new_turn() -> None:
+    async def _run() -> None:
+        # Turn 1 opens a tool and aborts; turn 2 must start with a clean slate.
+        class _OneShotStuckEngine(FakeEngineDriver):
+            async def run_turn_stream(self, runtime, turn_input, *, cancel, gate=None):
+                import asyncio as _asyncio
+
+                turn_id = getattr(turn_input, "turn_id", "t")
+                yield RuntimeEvent(
+                    type="tool",
+                    payload={"type": "tool_start", "id": "call-1", "name": "Bash"},
+                    turn_id=turn_id,
+                )
+                while not cancel.is_set():
+                    await _asyncio.sleep(0.01)
+                yield EngineResult(
+                    terminal=Terminal.aborted, error="cancelled", turn_id=turn_id
+                )
+
+        app = _make_app(_OneShotStuckEngine(), flush_interval=0.01)
+        async with app.run_test() as pilot:
+            app.start_turn("turn one")
+            await pilot.pause(0.03)
+            app.action_cancel_turn()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            # Start turn 2 — ``start_turn`` must reset the slate synchronously
+            # (sample BEFORE pumping the loop so turn-2's own tool_start can't
+            # repopulate it first).
+            app.start_turn("turn two")
+            open_tools = list(app._open_tools)
+            activity = app._footer.activity
+            await pilot.pause()
+            app.action_cancel_turn()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+        assert open_tools == []
+        assert activity == ""
+
+    asyncio.run(_run())
+
+
+def test_activity_truncates_long_tool_name() -> None:
+    async def _run() -> None:
+        long_name = "A" * 80
+        engine = _ActivityToolEngine(
+            [
+                ("tool_start", "call-1", long_name),
+                ("pause", 0.05, None),
+                ("tool_end", "call-1", None),
+            ]
+        )
+        app = _make_app(engine, flush_interval=0.01)
+        async with app.run_test() as pilot:
+            app.start_turn("long")
+            await pilot.pause(0.02)
+            mid = app._footer.activity
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+        assert mid != long_name
+        assert mid.endswith("…")
+        assert len(mid) <= 32
 def test_ctrl_o_binding_present_and_no_collision() -> None:
     from textual.binding import Binding
 
@@ -3082,6 +3309,34 @@ def test_expand_on_mounts_collapsed_card(monkeypatch) -> None:
     asyncio.run(_run())
 
 
+def test_fold_event_stamps_last_event_on_token() -> None:
+    async def _run() -> None:
+        import asyncio as _asyncio
+
+        class _SlowTokenEngine(FakeEngineDriver):
+            async def run_turn_stream(self, runtime, turn_input, *, cancel, gate=None):
+                turn_id = getattr(turn_input, "turn_id", "t")
+                for tok in ("a", "b", "c", "d", "e"):
+                    await _asyncio.sleep(0.02)
+                    yield RuntimeEvent(
+                        type="token", payload={"delta": tok}, turn_id=turn_id
+                    )
+                yield EngineResult(terminal=Terminal.completed, turn_id=turn_id)
+
+        app = _make_app(_SlowTokenEngine(), flush_interval=0.01)
+        async with app.run_test() as pilot:
+            app.start_turn("go")
+            await pilot.pause(0.03)
+            first = app._last_event_monotonic
+            await pilot.pause(0.06)
+            second = app._last_event_monotonic
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+        assert first is not None
+        assert second is not None
+        # The stamp must ADVANCE across token events (proves it's stamped at the
+        # top of _fold_event, before the token early-return).
+        assert second > first
 def test_default_still_flat_with_output(monkeypatch) -> None:
     async def _run() -> None:
         from magi_agent.cli.tui.tool_render import build_tool_renderers
@@ -3106,6 +3361,62 @@ def test_default_still_flat_with_output(monkeypatch) -> None:
     asyncio.run(_run())
 
 
+def test_stall_seconds_disabled_by_default(monkeypatch) -> None:
+    monkeypatch.delenv("MAGI_TUI_STALL_SECONDS", raising=False)
+    app = _make_app(FakeEngineDriver())
+    assert app._stall_seconds == 0
+
+
+def test_stall_seconds_reads_env(monkeypatch) -> None:
+    monkeypatch.setenv("MAGI_TUI_STALL_SECONDS", "5")
+    app = _make_app(FakeEngineDriver())
+    assert app._stall_seconds == 5
+
+
+def test_stall_seconds_invalid_falls_back_to_zero(monkeypatch) -> None:
+    monkeypatch.setenv("MAGI_TUI_STALL_SECONDS", "abc")
+    app = _make_app(FakeEngineDriver())
+    assert app._stall_seconds == 0
+
+
+class _OpenThenSilentEngine(FakeEngineDriver):
+    """Opens a tool then goes silent until cancelled (no further events)."""
+
+    async def run_turn_stream(self, runtime, turn_input, *, cancel, gate=None):
+        import asyncio as _asyncio
+
+        turn_id = getattr(turn_input, "turn_id", "t")
+        yield RuntimeEvent(
+            type="tool",
+            payload={"type": "tool_start", "id": "call-1", "name": "Bash"},
+            turn_id=turn_id,
+        )
+        while not cancel.is_set():
+            await _asyncio.sleep(0.01)
+        yield EngineResult(
+            terminal=Terminal.aborted, error="cancelled", turn_id=turn_id
+        )
+
+
+def test_stall_hint_appears_after_threshold(monkeypatch) -> None:
+    async def _run() -> None:
+        import time as _time
+
+        monkeypatch.setenv("MAGI_TUI_STALL_SECONDS", "1")
+        app = _make_app(_OpenThenSilentEngine(), flush_interval=0.01)
+        async with app.run_test() as pilot:
+            app.start_turn("run ls")
+            await pilot.pause(0.03)  # let the tool_start land
+            # Simulate elapsed silence: backdate the last-event stamp past the
+            # 1s threshold, then let the flush tick recompute.
+            app._last_event_monotonic = _time.monotonic() - 3.0
+            await pilot.pause(0.03)
+            text = app._footer.status_text()
+            app.action_cancel_turn()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+        assert "no output" in text
+        assert "Bash · no output" in text
 # -- Task 5: full output reaches the card body + ctrl+o retro-flips ----------
 def _card_body_text(card: object) -> str:
     """Extract the displayed text of a ToolCard body (the wrapped Static).
@@ -3168,6 +3479,22 @@ def test_expand_body_carries_full_output(monkeypatch) -> None:
     asyncio.run(_run())
 
 
+def test_stall_hint_disabled_by_default(monkeypatch) -> None:
+    async def _run() -> None:
+        import time as _time
+
+        monkeypatch.delenv("MAGI_TUI_STALL_SECONDS", raising=False)
+        app = _make_app(_OpenThenSilentEngine(), flush_interval=0.01)
+        async with app.run_test() as pilot:
+            app.start_turn("run ls")
+            await pilot.pause(0.03)
+            app._last_event_monotonic = _time.monotonic() - 30.0
+            await pilot.pause(0.03)
+            text = app._footer.status_text()
+            app.action_cancel_turn()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+        assert "no output" not in text
 def test_ctrl_o_retro_flips_mounted_cards(monkeypatch) -> None:
     async def _run() -> None:
         from magi_agent.cli.tui.tool_render import build_tool_renderers
@@ -3201,6 +3528,28 @@ def test_ctrl_o_retro_flips_mounted_cards(monkeypatch) -> None:
     asyncio.run(_run())
 
 
+def test_stall_hint_clears_when_activity_resumes(monkeypatch) -> None:
+    async def _run() -> None:
+        import time as _time
+
+        monkeypatch.setenv("MAGI_TUI_STALL_SECONDS", "1")
+        app = _make_app(_OpenThenSilentEngine(), flush_interval=0.01)
+        async with app.run_test() as pilot:
+            app.start_turn("run ls")
+            await pilot.pause(0.03)
+            app._last_event_monotonic = _time.monotonic() - 3.0
+            await pilot.pause(0.03)
+            stalled = app._footer.status_text()
+            # Activity resumes (fresh stamp); next tick must clear the hint.
+            app._last_event_monotonic = _time.monotonic()
+            await pilot.pause(0.03)
+            resumed = app._footer.status_text()
+            app.action_cancel_turn()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+        assert "no output" in stalled
+        assert "no output" not in resumed
+        assert "Bash" in resumed  # back to the plain open-tool word
 # -- Task 6: one-time discoverability hint + bounded retro-flip window -------
 def test_one_time_expand_hint(monkeypatch) -> None:
     async def _run() -> None:
@@ -3225,6 +3574,40 @@ def test_one_time_expand_hint(monkeypatch) -> None:
     asyncio.run(_run())
 
 
+def test_stall_hint_does_not_appear_during_token_stream(monkeypatch) -> None:
+    # The must-fix regression lock: while tokens stream with inter-token gaps
+    # SHORTER than the threshold (but a total duration LONGER than it), the stall
+    # hint must NEVER appear — because _last_event_monotonic is re-stamped on
+    # every token at the TOP of _fold_event.
+    async def _run() -> None:
+        import asyncio as _asyncio
+
+        monkeypatch.setenv("MAGI_TUI_STALL_SECONDS", "1")
+
+        class _SlowTokenEngine(FakeEngineDriver):
+            async def run_turn_stream(self, runtime, turn_input, *, cancel, gate=None):
+                turn_id = getattr(turn_input, "turn_id", "t")
+                # 12 tokens × 0.12s ≈ 1.4s total > 1s threshold, but each gap
+                # (0.12s) is well under the threshold.
+                for i in range(12):
+                    await _asyncio.sleep(0.12)
+                    yield RuntimeEvent(
+                        type="token", payload={"delta": f"t{i}"}, turn_id=turn_id
+                    )
+                yield EngineResult(terminal=Terminal.completed, turn_id=turn_id)
+
+        app = _make_app(_SlowTokenEngine(), flush_interval=0.01)
+        seen_no_output = False
+        async with app.run_test() as pilot:
+            app.start_turn("go")
+            for _ in range(14):
+                await pilot.pause(0.12)
+                if "no output" in app._footer.status_text():
+                    seen_no_output = True
+                    break
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+        assert seen_no_output is False
 def test_no_hint_when_not_truncated(monkeypatch) -> None:
     async def _run() -> None:
         from magi_agent.cli.tui.tool_render import build_tool_renderers
@@ -3248,6 +3631,34 @@ def test_no_hint_when_not_truncated(monkeypatch) -> None:
     asyncio.run(_run())
 
 
+def test_footer_never_shows_percent_or_ratio(monkeypatch) -> None:
+    # Honest primitives: the footer surfaces a real tool name + real integer
+    # seconds — never a fabricated % or token-ratio — even with the stall hint on.
+    async def _run() -> None:
+        import time as _time
+
+        monkeypatch.setenv("MAGI_TUI_STALL_SECONDS", "1")
+        app = _make_app(_OpenThenSilentEngine(), flush_interval=0.01)
+        async with app.run_test() as pilot:
+            app.start_turn("run ls")
+            await pilot.pause(0.03)
+            running_text = app._footer.status_text()
+            running_activity = app._footer.activity
+            app._last_event_monotonic = _time.monotonic() - 3.0
+            await pilot.pause(0.03)
+            stalled_text = app._footer.status_text()
+            stalled_activity = app._footer.activity
+            app.action_cancel_turn()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+        # No fabricated percentage anywhere on the line.
+        assert "%" not in running_text
+        assert "%" not in stalled_text
+        # No token-ratio in the activity/stall word (the cwd legitimately holds
+        # path slashes, so scope the ratio check to the activity field).
+        for word in (running_activity, stalled_activity):
+            assert "%" not in word
+            assert "/" not in word
 def test_tool_cards_list_capped(monkeypatch) -> None:
     async def _run() -> None:
         from magi_agent.cli.tui import app as app_mod
@@ -3271,6 +3682,48 @@ def test_tool_cards_list_capped(monkeypatch) -> None:
     asyncio.run(_run())
 
 
+def test_activity_same_string_does_not_overrepaint(monkeypatch) -> None:
+    # Documents the reliance on Textual's reactive equality short-circuit: an
+    # unchanged composed activity string re-asserted across many flush ticks
+    # repaints at most once.
+    async def _run() -> None:
+        import time as _time
+
+        from magi_agent.cli.tui.footer import StatusFooter
+
+        monkeypatch.setenv("MAGI_TUI_STALL_SECONDS", "1")
+        app = _make_app(_OpenThenSilentEngine(), flush_interval=0.01)
+        async with app.run_test() as pilot:
+            app.start_turn("run ls")
+            await pilot.pause(0.03)
+            # Pin the silence to a CONSTANT integer second so the composed
+            # activity string is byte-identical across every following tick.
+            pinned = _time.monotonic() - 3.0
+            app._last_event_monotonic = pinned
+            await pilot.pause(0.03)
+            assert "no output 3s" in app._footer.status_text()
+            calls = {"n": 0}
+            real_repaint = StatusFooter._repaint
+
+            def _counting_repaint(self) -> None:
+                calls["n"] += 1
+                real_repaint(self)
+
+            monkeypatch.setattr(StatusFooter, "_repaint", _counting_repaint)
+            # Hold the same pinned stamp across many ticks; the composed string
+            # does not change, so watch_activity must not refire.
+            for _ in range(8):
+                app._last_event_monotonic = pinned
+                await pilot.pause(0.02)
+            activity_repaints = calls["n"]
+            app.action_cancel_turn()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+        # Elapsed advances whole seconds (its own repaint), but the ACTIVITY
+        # string is unchanged — so the extra repaints attributable to activity
+        # are zero. Allow a tiny slack for the 1Hz elapsed repaint during the
+        # ~0.16s window (at most one whole-second boundary).
+        assert activity_repaints <= 1
 # -- Task 7: legacy RichLog degrade (expand ON = no-op) ----------------------
 def test_expand_on_legacy_richlog_no_card(monkeypatch) -> None:
     async def _run() -> None:
