@@ -12,10 +12,14 @@ DEFAULT_OVERRIDES: dict[str, Any] = {
         "recipes": [],
         "harness_presets": [],
         "hooks": {},
+        "modes": {},
         "custom_rules": [],
     },
     "tools": {},
+    "user_rules": "",
 }
+
+_USER_RULES_MAX = 20_000
 
 
 def customize_path() -> Path:
@@ -45,6 +49,9 @@ def _normalize(data: dict[str, Any]) -> dict[str, Any]:
     tools = data.get("tools")
     if isinstance(tools, dict):
         merged["tools"] = tools
+    user_rules = data.get("user_rules")
+    if isinstance(user_rules, str):
+        merged["user_rules"] = user_rules[:_USER_RULES_MAX]
     return merged
 
 
@@ -85,5 +92,49 @@ def set_tool_override(name: str, enabled: bool, path: Path | None = None) -> dic
     target = path or customize_path()
     overrides = load_overrides(target)
     overrides["tools"][name] = bool(enabled)
+    save_overrides(overrides, target)
+    return overrides
+
+
+_VERIFICATION_LIST_KINDS = ("recipes", "harness_presets")
+
+
+def set_verification_override(
+    kind: str,
+    item_id: str,
+    enabled: bool,
+    mode: str | None = None,
+    path: Path | None = None,
+) -> dict[str, Any]:
+    """Enable/disable one verification item and record its mode.
+
+    ``kind`` is one of ``recipes``, ``harness_presets`` (list-backed) or
+    ``hooks`` (dict-backed). Enabling appends/sets; disabling removes the entry
+    and clears its mode. Never raises on bad input; returns the new overrides.
+    """
+    target = path or customize_path()
+    overrides = load_overrides(target)
+    verification = overrides["verification"]
+    if kind == "hooks":
+        verification["hooks"][item_id] = bool(enabled)
+    elif kind in _VERIFICATION_LIST_KINDS:
+        bucket = verification[kind]
+        if enabled and item_id not in bucket:
+            bucket.append(item_id)
+        if not enabled and item_id in bucket:
+            bucket.remove(item_id)
+    if enabled and mode:
+        verification["modes"][item_id] = mode
+    elif not enabled:
+        verification["modes"].pop(item_id, None)
+    save_overrides(overrides, target)
+    return overrides
+
+
+def set_user_rules(text: str, path: Path | None = None) -> dict[str, Any]:
+    """Persist the free-text USER-RULES.md body (length-capped). Returns overrides."""
+    target = path or customize_path()
+    overrides = load_overrides(target)
+    overrides["user_rules"] = (text or "")[:_USER_RULES_MAX]
     save_overrides(overrides, target)
     return overrides

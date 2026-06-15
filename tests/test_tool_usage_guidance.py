@@ -45,6 +45,32 @@ def test_registry_entries_are_lean() -> None:
         assert "Do NOT" in guidance, f"{name} guidance lacks a negative rule"
 
 
+def test_spawn_agent_lists_registry_routes_when_on() -> None:
+    desc = "Gate 5B selected full toolhost SpawnAgent tool."
+    result = apply_usage_guidance("SpawnAgent", desc, _ON)
+    assert "Available model routes" in result
+    # A built-in registry SOTA route the child can target.
+    assert "anthropic:claude-sonnet-4-6" in result
+    assert "provider" in result and "model" in result
+
+
+def test_spawn_agent_includes_operator_allowlist_routes() -> None:
+    from magi_agent.config.env import _ALLOWED_MODEL_ROUTES_ENV
+
+    env = {
+        "MAGI_TOOL_USAGE_GUIDANCE_ENABLED": "1",
+        _ALLOWED_MODEL_ROUTES_ENV: "anthropic:claude-opus-4-8",
+    }
+    result = apply_usage_guidance("SpawnAgent", "x", env)
+    # An operator-vetted route absent from the built-in registry is surfaced.
+    assert "anthropic:claude-opus-4-8" in result
+
+
+def test_spawn_agent_routes_absent_when_flag_off() -> None:
+    desc = "Gate 5B selected full toolhost SpawnAgent tool."
+    assert apply_usage_guidance("SpawnAgent", desc, {}) == desc
+
+
 def test_apply_is_fail_open(monkeypatch) -> None:
     import magi_agent.gates.tool_usage_guidance as mod
 
