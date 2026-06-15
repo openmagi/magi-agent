@@ -12,10 +12,17 @@ from magi_agent.observability.runtime_sink import set_active_sink
 logger = logging.getLogger(__name__)
 
 
+def resolve_observability_home() -> Path:
+    """The observability home directory: ``MAGI_OBS_HOME`` when set, else the
+    hidden home dir under the cwd. Shared so sibling features (e.g. the session
+    transcript) write under the same parent without re-deriving the path."""
+    return Path(os.environ.get("MAGI_OBS_HOME") or (Path.cwd() / ".openmagi"))
+
+
 def register_observability(app: Any, runtime: Any) -> ObservabilityCore | None:
     """Mount the observability module into a FastAPI app + activate the event
     sink. Fully inert (returns None) when MAGI_OBSERVABILITY_ENABLED is unset."""
-    home = Path(os.environ.get("MAGI_OBS_HOME") or (Path.cwd() / ".openmagi"))
+    home = resolve_observability_home()
     config = ObservabilityConfig.from_env(home=home)
     if not config.enabled:
         return None

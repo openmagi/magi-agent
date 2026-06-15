@@ -74,6 +74,20 @@ LOCAL_FULL_RUNTIME_ENV_DEFAULTS: Mapping[str, str] = {
     "MAGI_SKILL_CURATOR_ENABLED": "1",
     "MAGI_SKILL_CURATOR_SHADOW": "0",
     "MAGI_AUTOPILOT": "1",
+    # Native encrypted local vault backend: ON only for the local serve overlay
+    # so the dashboard "Credentials" registration works out-of-the-box. Hosted
+    # bots never run this overlay (and set MAGI_VAULT_ADMIN_URL once a hosted
+    # vault exists), so they stay on the disabled/pending path and never write
+    # secrets to a PVC. The helper default (local_vault_enabled) stays OFF.
+    "MAGI_LOCAL_VAULT_ENABLED": "1",
+    # Agent Vault Phase 2: local credential-injecting forward proxy. ON only for
+    # the local serve overlay (same gating as MAGI_LOCAL_VAULT_ENABLED above), so
+    # the bot can USE a registered credential without seeing it. Requires the
+    # optional ``magi-agent[vault]`` extra (mitmproxy); when the extra is missing
+    # the serve bootstrap logs an install hint and continues WITHOUT the proxy.
+    # Hosted bots never run this overlay (and set MAGI_VAULT_ADMIN_URL once a
+    # hosted vault exists), so they never start the local proxy.
+    "MAGI_LOCAL_VAULT_PROXY_ENABLED": "1",
 }
 
 

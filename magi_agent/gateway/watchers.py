@@ -157,11 +157,18 @@ def build_default_watchers() -> tuple[GatewayWatcher, ...]:
     # from here) and keeps this module import-clean.
     from magi_agent.gateway.channel_watchers import (  # noqa: PLC0415
         build_telegram_channel_watcher,
+        build_telegram_supervisor_watcher,
+        is_dashboard_telegram_enabled,
     )
 
-    telegram_watcher = build_telegram_channel_watcher()
-    if telegram_watcher is not None:
-        watchers.append(telegram_watcher)
+    if is_dashboard_telegram_enabled():
+        # Dashboard-managed: long-lived supervisor that hot-reloads the token
+        # from the vault. Mutually exclusive with the legacy env-only watcher.
+        watchers.append(build_telegram_supervisor_watcher())
+    else:
+        telegram_watcher = build_telegram_channel_watcher()
+        if telegram_watcher is not None:
+            watchers.append(telegram_watcher)
 
     return tuple(watchers)
 

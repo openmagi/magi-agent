@@ -22,7 +22,8 @@ from .transport.tools import register_tool_admin_routes
 from .transport.app_api import register_app_api_routes
 from .transport.customize import register_customize_routes
 from .transport.credentials import register_credentials_routes
-from magi_agent.observability import register_observability
+from .transport.integrations import register_integrations_routes
+from magi_agent.observability import register_observability, register_session_transcript
 from magi_agent.egress_proxy.config import EgressProxyConfig
 
 logger = logging.getLogger(__name__)
@@ -109,6 +110,7 @@ def create_app(runtime: OpenMagiRuntime) -> FastAPI:
     # returns 503 and persists nothing until MAGI_VAULT_ADMIN_ENABLED + a real
     # vault admin API are wired.
     register_credentials_routes(app, runtime)
+    register_integrations_routes(app, runtime)
     register_app_api_routes(app, runtime)
     register_plugin_admin_routes(app, runtime)
     register_dashboard_routes(app, runtime)
@@ -119,5 +121,8 @@ def create_app(runtime: OpenMagiRuntime) -> FastAPI:
     # Default-OFF: mounts only when MAGI_OBSERVABILITY_ENABLED is truthy,
     # leaving the default app surface byte-identical.
     register_observability(app, runtime)
+    # Default-OFF: installs the per-session JSONL transcript sink only when
+    # MAGI_SESSION_TRANSCRIPT_ENABLED is truthy; otherwise registers nothing.
+    register_session_transcript(app, runtime)
 
     return app

@@ -15,6 +15,15 @@ Versions follow the tags published on GitHub Releases.
 
 ### Fixed
 
+## 0.1.40
+
+### Added
+- Install-profile bootstrap: at CLI startup the runtime loads `~/.magi/profile.env`
+  (`KEY=VAL` / `export KEY=VAL`) and `setdefault`s each `MAGI_*` flag, so a packaged
+  install can seed a profile that boots with its chosen gates on. No file is a no-op
+  (plain installs keep the default-OFF gates); an explicit env var still wins; an
+  explicit `MAGI_RUNTIME_PROFILE=safe`/`eval` skips it.
+
 ## 0.1.39
 
 ### Added

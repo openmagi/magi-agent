@@ -116,6 +116,53 @@ def test_happy_path_streams_events_then_terminal_and_done():
 
 
 # ---------------------------------------------------------------------------
+# Test 1b — turn_phase executing is emitted at stream start
+# ---------------------------------------------------------------------------
+def test_emits_turn_phase_executing_at_stream_start():
+    registry = ActiveTurnTable()
+    queue: asyncio.Queue[object] = asyncio.Queue()
+    sink = build_streaming_prompt_sink(queue, turn_id="t-turn")
+    cancel = asyncio.Event()
+
+    class FakeEngine:
+        async def run_turn_stream(self, runtime, turn_input, *, cancel, gate):
+            yield _ev("text_delta", delta="hi")
+            yield EngineResult(
+                terminal=Terminal.completed,
+                session_id="s1",
+                turn_id="t-turn",
+            )
+
+    async def _run() -> str:
+        chunks: list[bytes] = []
+        async for chunk in drive_streaming_chat(
+            FakeEngine(),
+            None,
+            {"prompt": "hi", "session_id": "s1", "turn_id": "t-turn"},
+            cancel=cancel,
+            queue=queue,
+            sink=sink,
+            registry=registry,
+            session_id="s1",
+            turn_id="t-turn",
+        ):
+            chunks.append(chunk)
+        return b"".join(chunks).decode()
+
+    text = asyncio.run(_run())
+    payloads = _data_lines(text)
+    types = [p["type"] for p in payloads]
+
+    # The live WORK panel's "Running" status is driven by a turn_phase event;
+    # the local full-engine stream must emit one up front so the dashboard does
+    # not sit at "Idle" while the agent works.
+    assert types[0] == "turn_phase"
+    assert payloads[0]["phase"] == "executing"
+    assert payloads[0].get("turnId") == "t-turn"
+    assert types[-1] == "turn_result"
+
+
+# ---------------------------------------------------------------------------
 # Test 2 — control_request interleave (real sink + queue + driver, fake engine)
 # ---------------------------------------------------------------------------
 def test_control_request_interleaves_before_engine_resumes():
@@ -372,7 +419,10 @@ def test_client_disconnect_aclose_is_prompt_and_cleans_up():
         # the gate (the control_request frame has been emitted). At that point
         # the next __anext__ would block forever, so we stop and aclose().
         first = await gen.__anext__()
-        assert b"text_delta" in first
+        # The local stream now leads with a turn_phase "executing" frame.
+        assert b"turn_phase" in first
+        second = await gen.__anext__()
+        assert b"text_delta" in second
         # Drain the control_request frame so the engine is now awaiting the gate.
         ctrl = await asyncio.wait_for(gen.__anext__(), timeout=5)
         assert b"control_request" in ctrl
@@ -467,7 +517,10 @@ def test_noncooperative_engine_teardown_times_out():
             turn_id="t-turn",
         )
         first = await gen.__anext__()
-        assert b"text_delta" in first
+        # The local stream now leads with a turn_phase "executing" frame.
+        assert b"turn_phase" in first
+        second = await gen.__anext__()
+        assert b"text_delta" in second
 
         loop = asyncio.get_running_loop()
         start = loop.time()

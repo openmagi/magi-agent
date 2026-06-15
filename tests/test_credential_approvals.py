@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 
+import pytest
 from fastapi.testclient import TestClient
 
 from magi_agent.app import create_app
@@ -10,6 +11,16 @@ from magi_agent.config.models import BuildInfo, RuntimeConfig
 from magi_agent.credentials_admin import approvals_store, store, vault_local
 from magi_agent.credentials_admin.store import credentials_path
 from magi_agent.runtime.openmagi_runtime import OpenMagiRuntime
+
+
+@pytest.fixture(autouse=True)
+def _clean_vault_env(monkeypatch):
+    # Isolate from global os.environ leak of MAGI_LOCAL_VAULT_ENABLED (other test
+    # files setdefault it via the local-runtime defaults). Default-OFF assertions
+    # must start from a clean env; tests needing it ON set it explicitly.
+    monkeypatch.delenv("MAGI_LOCAL_VAULT_ENABLED", raising=False)
+    monkeypatch.delenv("MAGI_VAULT_ADMIN_ENABLED", raising=False)
+    monkeypatch.delenv("MAGI_VAULT_ADMIN_URL", raising=False)
 
 # A realistic-looking secret used across tests. It is intentionally
 # "secret-shaped" so we can prove no approval record ever carries it.
