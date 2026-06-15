@@ -208,6 +208,7 @@ graph LR
     shadow --> evidence
     shadow --> harness
     shadow --> hooks
+    shadow --> observability
     shadow --> ops
     shadow --> recipes
     shadow --> runtime
@@ -410,7 +411,7 @@ graph LR
 | real_runner.py | A real, model-backed runner for the local ``magi`` CLI. | compiler, control_plane, discovery, engine, env, live_gate, local_tool_collector, materializer, providers, session_identity, session_service, task_completion, tool_runtime | cli/readonly_classifier.py, cli/tests/test_app.py, cli/tests/test_real_runner.py, cli/tests/test_runtime_policy_wiring.py, cli/wiring.py, discovery/orchestrator.py, runtime/child_runner_live.py |
 | session_log.py | Append-only JSONL session log for the Magi CLI (Stream B, PR-B1). | contracts, session_continuity, session_service, transcript | cli/app.py, cli/headless.py, cli/tests/test_app.py, cli/tests/test_coldstart.py, cli/tests/test_session_log.py, cli/tui/app.py, cli/tui/history.py, cli/tui/theme.py, cli/wiring.py |
 | tool_runtime.py | Real tool runtime for the local ``magi`` CLI agent. | ask_user_question_toolhost, context, core_toolhost, dispatcher, env, file_tool_manifests, file_toolhost, first_party_gate, identity, learning_recall, live_gate, local_tool_collector, manifest, memory_recall_block, memory_snapshot_cache, memory_write_wiring, message_builder, permission_scope, plan_mode_toolhost, prompt_guidance, python_exec, registry, session_identity, tool, tool_adapter, tool_synthesis, tools, web_search_tools | cli/real_runner.py, cli/tests/test_identity.py, cli/tests/test_local_tool_evidence_wiring.py, cli/tests/test_plan_mode.py, cli/tests/test_plan_mode_tools_exposed.py, cli/tests/test_tool_runtime.py, cli/wiring.py, runtime/child_runner_live.py |
-| wiring.py | Composition root for the Magi CLI (PR-F1, Stream F). | app, commands, config, context, contracts, dispatcher, engine, env, file_tool_manifests, file_toolhost, first_party_gate, goal_nudge_wiring, hook_wiring, live_gate, local_runner, local_tool_collector, manifest, mcp, memory_mode_guard, openmagi_runtime, permission_scope, permissions, providers, readonly_classifier, real_runner, registry, runtime_sink, safety, session_identity, session_log, tool, tool_adapter, tool_render, tool_runtime, web_search_tools | cli/app.py, cli/tests/test_app.py, cli/tests/test_coldstart.py, cli/tests/test_plan_mode.py, cli/tests/test_real_runner.py, cli/tests/test_runtime_policy_wiring.py, cli/tests/test_streaming_sink.py, transport/chat_routes.py, transport/streaming_chat_route.py |
+| wiring.py | Composition root for the Magi CLI (PR-F1, Stream F). | app, commands, config, context, contracts, dispatcher, engine, env, file_tool_manifests, file_toolhost, first_party_gate, goal_nudge_wiring, hook_wiring, live_gate, local_runner, local_tool_collector, manifest, mcp, memory_mode_guard, openmagi_runtime, permission_scope, permissions, providers, readonly_classifier, real_runner, registry, runtime_sink, safety, session_identity, session_log, tool, tool_adapter, tool_render, tool_runtime, transcript, web_search_tools | cli/app.py, cli/tests/test_app.py, cli/tests/test_coldstart.py, cli/tests/test_plan_mode.py, cli/tests/test_real_runner.py, cli/tests/test_runtime_policy_wiring.py, cli/tests/test_streaming_sink.py, transport/chat_routes.py, transport/streaming_chat_route.py |
 
 ### cli/commands/
 
@@ -1080,17 +1081,18 @@ graph LR
 
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
-| __init__.py | — | config, core, integration, models | (root)/app.py |
+| __init__.py | — | config, core, integration, models, transcript | (root)/app.py |
 | api.py | — | bus, health, store | observability/core.py |
 | bus.py | — | — | observability/api.py, observability/core.py |
 | config.py | — | — | observability/__init__.py, observability/core.py, observability/integration.py |
 | core.py | — | api, bus, config, projector, store | observability/__init__.py, observability/integration.py |
-| integration.py | — | config, core, page, runtime_sink | observability/__init__.py |
+| integration.py | — | config, core, page, runtime_sink | observability/__init__.py, observability/transcript.py |
 | models.py | — | — | observability/__init__.py, observability/projector.py, observability/store.py |
 | page.py | — | — | observability/integration.py |
 | projector.py | — | models | observability/core.py |
 | runtime_sink.py | Process-global event-sink registry. | — | cli/wiring.py, observability/integration.py |
 | store.py | — | models | observability/api.py, observability/core.py |
+| transcript.py | Per-session JSONL transcript writer + process-global sink registry. | integration | cli/wiring.py, observability/__init__.py, shadow/gate5b4c3_live_runner_boundary.py |
 
 ### ops/
 
@@ -1467,7 +1469,7 @@ graph LR
 | gate5b4_internal_endpoint_contract.py | — | — | — |
 | gate5b4c2_shadow_invocation_contract.py | — | — | transport/shadow_invocations.py |
 | gate5b4c3_image_parts.py | Convert sanitized Anthropic-style image blocks into ADK content parts. | — | cli/engine.py, shadow/gate5b4c3_live_runner_boundary.py |
-| gate5b4c3_live_runner_boundary.py | — | anthropic_cache_model, env, gate1a_egress_correlation, gate5b4c3_image_parts, gate5b4c3_runner_input_adapter, gate5b4c3_shadow_generation_contract, output_continuation, public_events, session_service_registry | shadow/gate5b4c3_shadow_parity.py, transport/chat.py, transport/chat_routes.py, transport/chat_shared.py |
+| gate5b4c3_live_runner_boundary.py | — | anthropic_cache_model, env, gate1a_egress_correlation, gate5b4c3_image_parts, gate5b4c3_runner_input_adapter, gate5b4c3_shadow_generation_contract, output_continuation, public_events, session_service_registry, transcript | shadow/gate5b4c3_shadow_parity.py, transport/chat.py, transport/chat_routes.py, transport/chat_shared.py |
 | gate5b4c3_runner_input_adapter.py | — | env, gate5b4c3_shadow_generation_contract, message_builder | shadow/gate5b4c3_live_runner_boundary.py |
 | gate5b4c3_shadow_comparison.py | — | gate5b4c3_shadow_generation_contract, gate5b4c3_shadow_generation_report | — |
 | gate5b4c3_shadow_counter_store.py | — | — | config/env.py, shadow/gate5b4c3_shadow_generation_report.py, transport/chat.py, transport/chat_routes.py, transport/shadow_generations.py |
