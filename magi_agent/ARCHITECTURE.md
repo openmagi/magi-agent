@@ -637,8 +637,9 @@ graph LR
 |---|---|---|---|
 | __init__.py | Local "Credentials" registration admin surface for the OSS dashboard. | credentials_admin | transport/credentials.py |
 | approvals_store.py | Local approval-request store for guarded credentials. | — | — |
+| local_vault.py | Native encrypted local vault backend for the dashboard "Credentials" feature. | — | credentials_admin/vault_local.py |
 | store.py | Local redacted-metadata store for registered credentials. | — | — |
-| vault_local.py | Local vault seam for the dashboard "Credentials" registration feature. | durable_store | — |
+| vault_local.py | Local vault seam for the dashboard "Credentials" registration feature. | durable_store, local_vault | — |
 
 ### customize/
 
