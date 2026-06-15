@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import pytest
 
+import magi_agent.runtime.usage_cost as usage_cost_mod
 from magi_agent.runtime.usage_cost import compute_cost_usd
 
 
@@ -40,10 +41,10 @@ def test_unknown_model_is_unpriced_zero():
 
 def test_missing_litellm_is_zero(monkeypatch):
     # When litellm cannot be resolved, the default path is unpriced (never raises).
-    monkeypatch.setattr(
-        "magi_agent.runtime.usage_cost._litellm_cost_per_token",
-        lambda: None,
-    )
+    # Patch the module object directly: the magi_agent.runtime package is a lazy
+    # __getattr__ boundary, so a dotted-string monkeypatch target would fail to
+    # resolve the (non-lazy-exported) usage_cost submodule.
+    monkeypatch.setattr(usage_cost_mod, "_litellm_cost_per_token", lambda: None)
     cost = compute_cost_usd(
         "claude-sonnet-4-5",
         {"input_tokens": 1000, "output_tokens": 500},
