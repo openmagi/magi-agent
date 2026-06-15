@@ -95,6 +95,30 @@ def test_prompt_command_reenters_start_turn() -> None:
     asyncio.run(_run())
 
 
+class EnqueueRecordingApp(RecordingApp):
+    """A host app that ALSO exposes the busy-aware admission seam."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.enqueued: list[str] = []
+
+    def start_or_enqueue_turn(self, prompt: str) -> None:
+        self.enqueued.append(prompt)
+
+
+def test_prompt_command_prefers_start_or_enqueue_when_present() -> None:
+    async def _run() -> None:
+        app = EnqueueRecordingApp()
+        ex = _default_executor()
+        await ex.run(EchoPrompt(name="say", surface=TUI), "hi", _ctx(app))
+        # When the host exposes the seam, the executor routes through it (so a
+        # prompt-command queues while busy) and does NOT call start_turn.
+        assert app.enqueued == ["expanded:hi"]
+        assert app.turns == []
+
+    asyncio.run(_run())
+
+
 def test_local_text_command_commits_text() -> None:
     async def _run() -> None:
         app = RecordingApp()

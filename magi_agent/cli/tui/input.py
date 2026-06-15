@@ -106,6 +106,10 @@ class PromptInput(TextArea):
         # A single-line-looking prompt by default; grows as the user types.
         self.show_line_numbers = False
         self.soft_wrap = True
+        # INVARIANT: ``tab_behavior`` MUST stay the default "focus". Under
+        # "indent" the base TextArea swallows Escape (_text_area.py: escape stop
+        # is guarded on tab_behavior=="indent"), which would silently break the
+        # idle-Esc arm-then-quit path (Esc would never bubble to the app).
         # Per-session ↑/↓ recall ring (wired by the App via attach_history).
         self._history: "InputHistory | None" = None
 
@@ -268,4 +272,21 @@ class PromptInput(TextArea):
                     event.prevent_default()
                     self._set_text(recalled)
                     return
+        # Ctrl+D is fully owned here so it never bubbles to the app's keybinding
+        # resolver, where ctrl+d is mapped to global:quit (a bare, single-press
+        # exit — exit-safety regression). On an EMPTY buffer it is a quit gesture
+        # routed to the arm-then-quit debounce; on a NON-empty buffer it keeps
+        # the conventional delete-right (via the base TextArea action) with NO
+        # quit/arm. Stopping the event in both cases is what suppresses the dead
+        # global:quit mapping for the focused prompt.
+        if event.key == "ctrl+d":
+            event.stop()
+            event.prevent_default()
+            if not self.text.strip():
+                # ``_call_app`` does a direct getattr, so name the real method
+                # (``action_request_quit``), which also accepts the origin key.
+                self._call_app("action_request_quit", "ctrl+d")
+            else:
+                self.action_delete_right()
+            return
         await super()._on_key(event)
