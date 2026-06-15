@@ -8,7 +8,9 @@ KIND routing (the ``Command`` union discriminates by subclass, not a string
 field):
 
 * :class:`PromptCommand` -> expand ``build_prompt`` into a prompt string and
-  re-enter the ONE turn loop via ``ctx.app.start_turn``. No new loop is created.
+  re-enter via the busy-aware admission seam (``ctx.app.start_or_enqueue_turn``,
+  falling back to ``start_turn``); queues if a turn is running and
+  ``MAGI_TUI_QUEUE=1``. No new loop is created.
 * :class:`LocalCommand` -> run ``call`` and apply the ``LocalResult``: ``Text``
   commits to the transcript, ``Compact`` requests compaction, ``Skip`` is a
   no-op.
@@ -53,9 +55,18 @@ class DefaultCommandExecutor(CommandExecutor):
         if isinstance(command, PromptCommand):
             blocks = await command.build_prompt(args, ctx)
             prompt = _blocks_to_text(blocks)
-            if prompt and app is not None and hasattr(app, "start_turn"):
-                # Re-enter the ONE turn loop. No new loop is created here.
-                app.start_turn(prompt)
+            if prompt and app is not None:
+                # Re-enter via the busy-aware admission seam
+                # (``start_or_enqueue_turn``), falling back to ``start_turn`` for
+                # host apps that predate it. Routing prompt-commands through the
+                # seam means a slash prompt-command ALSO queues (instead of
+                # replacing the running turn) when a turn is running and
+                # MAGI_TUI_QUEUE=1. No new engine loop is created here.
+                fn = getattr(app, "start_or_enqueue_turn", None) or getattr(
+                    app, "start_turn", None
+                )
+                if callable(fn):
+                    fn(prompt)
             return
 
         if isinstance(command, LocalCommand):

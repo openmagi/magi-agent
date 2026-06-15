@@ -751,6 +751,397 @@ def test_ctrl_c_cancels_replacement_turn_after_stale_worker_finishes() -> None:
 
 
 # ---------------------------------------------------------------------------
+# busy-input-queue (gap: busy-input-queue) — default-OFF, surface-only FIFO that
+# buffers a prompt submitted while a turn runs and drains it after the turn ends.
+# ---------------------------------------------------------------------------
+class _BlockingFirstDriver:
+    """First turn yields one token then blocks forever; later turns complete.
+
+    A function-local style helper (the pinned ``ReplacementTurnDriver`` is NOT
+    importable). ``calls`` counts ``run_turn_stream`` entries; ``turn_inputs``
+    records each ``TurnInput`` so attachment/image assertions can inspect them.
+    """
+
+    def __init__(self) -> None:
+        self.calls = 0
+        self.turn_inputs: list[object] = []
+
+    async def run_turn_stream(self, runtime, turn_input, *, cancel, gate=None):
+        _ = runtime, gate
+        self.calls += 1
+        self.turn_inputs.append(turn_input)
+        if self.calls == 1:
+            yield RuntimeEvent(
+                type="token",
+                payload={"delta": "first"},
+                turn_id=turn_input.turn_id,
+            )
+            await asyncio.Event().wait()
+            return
+        yield RuntimeEvent(
+            type="token",
+            payload={"delta": "drained"},
+            turn_id=turn_input.turn_id,
+        )
+        yield EngineResult(terminal=Terminal.completed, turn_id=turn_input.turn_id)
+
+
+def test_queue_buffer_inits_empty_and_flag_defaults_off(monkeypatch) -> None:
+    async def _run() -> None:
+        monkeypatch.delenv("MAGI_TUI_QUEUE", raising=False)
+        app = _make_app(FakeEngineDriver())
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            assert app._prompt_queue == []
+            assert app._queue_enabled is False
+
+    asyncio.run(_run())
+
+
+def test_queue_flag_on_when_env_set(monkeypatch) -> None:
+    async def _run() -> None:
+        monkeypatch.setenv("MAGI_TUI_QUEUE", "1")
+        app = _make_app(FakeEngineDriver())
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            assert app._queue_enabled is True
+
+    asyncio.run(_run())
+
+
+def test_start_or_enqueue_enqueues_when_busy(monkeypatch) -> None:
+    async def _run() -> None:
+        monkeypatch.setenv("MAGI_TUI_QUEUE", "1")
+        engine = _BlockingFirstDriver()
+        app = _make_app(engine, flush_interval=999)
+        async with app.run_test() as pilot:
+            app.start_turn("first")
+            await pilot.pause()
+            assert app._turn_active is True
+            app.start_or_enqueue_turn("second")
+            # First turn NOT replaced; second parked in the queue (text-only
+            # snapshot in Task 3 — empty attachment tuple).
+            assert engine.calls == 1
+            assert app._prompt_queue == [("second", ())]
+            assert app._turn_active is True
+            snapshot = app.controller.committed_blocks_snapshot()
+            assert any(
+                b.startswith("⏳ queued:") and "second" in b for b in snapshot
+            )
+
+    asyncio.run(_run())
+
+
+def test_start_or_enqueue_starts_when_idle(monkeypatch) -> None:
+    async def _run() -> None:
+        monkeypatch.setenv("MAGI_TUI_QUEUE", "1")
+        engine = FakeEngineDriver(tokens=["x"])
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.start_or_enqueue_turn("solo")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            # Idle path is just start_turn: the turn ran to a terminal and
+            # nothing was queued.
+            assert app.last_terminal is not None
+            assert app._prompt_queue == []
+            snapshot = app.controller.committed_blocks_snapshot()
+            assert any("› solo" in b for b in snapshot)
+
+    asyncio.run(_run())
+
+
+def _submit_via_funnel(app, text: str) -> None:
+    """Drive the REAL typed-submission funnel for ``text``."""
+
+    from magi_agent.cli.tui.input import PromptInput, classify_line  # noqa: PLC0415
+
+    submission = classify_line(text, app._commands)
+    app.on_prompt_input_prompt_submitted(PromptInput.PromptSubmitted(submission))
+
+
+def test_submit_while_busy_enqueues_via_funnel(monkeypatch) -> None:
+    async def _run() -> None:
+        monkeypatch.setenv("MAGI_TUI_QUEUE", "1")
+        engine = _BlockingFirstDriver()
+        app = _make_app(engine, flush_interval=999)
+        async with app.run_test() as pilot:
+            app.start_turn("first")
+            await pilot.pause()
+            _submit_via_funnel(app, "second")
+            assert engine.calls == 1  # first NOT replaced
+            assert app._prompt_queue == [("second", ())]
+            snapshot = app.controller.committed_blocks_snapshot()
+            assert any(
+                b.startswith("⏳ queued:") and "second" in b for b in snapshot
+            )
+
+    asyncio.run(_run())
+
+
+class _DrainDriver:
+    """First turn completes normally; records each TurnInput.
+
+    Unlike ``_BlockingFirstDriver`` the first turn does NOT block — it yields
+    one token then a terminal, so the queue can drain after it finishes. A small
+    ``first_started`` event lets a test enqueue while the first turn is still
+    observably the active one (before its terminal lands).
+    """
+
+    def __init__(self) -> None:
+        self.calls = 0
+        self.turn_inputs: list[object] = []
+        self.first_started = asyncio.Event()
+        self._release_first = asyncio.Event()
+
+    async def run_turn_stream(self, runtime, turn_input, *, cancel, gate=None):
+        _ = runtime, gate
+        self.calls += 1
+        self.turn_inputs.append(turn_input)
+        if self.calls == 1:
+            self.first_started.set()
+            yield RuntimeEvent(
+                type="token",
+                payload={"delta": "first"},
+                turn_id=turn_input.turn_id,
+            )
+            # Hold until the test has enqueued "second", then complete.
+            await self._release_first.wait()
+            yield EngineResult(terminal=Terminal.completed, turn_id=turn_input.turn_id)
+            return
+        yield RuntimeEvent(
+            type="token",
+            payload={"delta": "drained"},
+            turn_id=turn_input.turn_id,
+        )
+        yield EngineResult(terminal=Terminal.completed, turn_id=turn_input.turn_id)
+
+
+def test_queue_drains_after_turn_completes(monkeypatch) -> None:
+    async def _run() -> None:
+        monkeypatch.setenv("MAGI_TUI_QUEUE", "1")
+        engine = _DrainDriver()
+        app = _make_app(engine, flush_interval=999)
+        async with app.run_test() as pilot:
+            app.start_turn("first")
+            await asyncio.wait_for(engine.first_started.wait(), timeout=2)
+            await pilot.pause()
+            app.start_or_enqueue_turn("second")
+            assert app._prompt_queue == [("second", ())]
+            # Let the first turn complete; the drain is scheduled from finally
+            # via call_after_refresh, so pump the loop after completion.
+            engine._release_first.set()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            await pilot.pause()
+            assert engine.calls == 2
+            assert app._prompt_queue == []
+            assert app._turn_active is False
+            assert app._footer.queued == 0
+            snapshot = app.controller.committed_blocks_snapshot()
+            assert any("› second" in b for b in snapshot)
+
+    asyncio.run(_run())
+
+
+def test_queue_drains_after_engine_raises(monkeypatch) -> None:
+    async def _run() -> None:
+        from textual.worker import WorkerFailed
+
+        monkeypatch.setenv("MAGI_TUI_QUEUE", "1")
+
+        class _RaiseThenOkDriver:
+            def __init__(self) -> None:
+                self.calls = 0
+                self.first_started = asyncio.Event()
+                self._release_first = asyncio.Event()
+
+            async def run_turn_stream(self, runtime, turn_input, *, cancel, gate=None):
+                _ = runtime, gate
+                self.calls += 1
+                if self.calls == 1:
+                    self.first_started.set()
+                    yield RuntimeEvent(
+                        type="token",
+                        payload={"delta": "first"},
+                        turn_id=turn_input.turn_id,
+                    )
+                    await self._release_first.wait()
+                    raise RuntimeError("boom")
+                yield RuntimeEvent(
+                    type="token",
+                    payload={"delta": "drained"},
+                    turn_id=turn_input.turn_id,
+                )
+                yield EngineResult(
+                    terminal=Terminal.completed, turn_id=turn_input.turn_id
+                )
+
+        engine = _RaiseThenOkDriver()
+        captured: dict[str, object] = {}
+        app = _make_app(engine, flush_interval=999)
+        try:
+            async with app.run_test() as pilot:
+                app.start_turn("first")
+                await asyncio.wait_for(engine.first_started.wait(), timeout=2)
+                await pilot.pause()
+                app.start_or_enqueue_turn("second")
+                # Release the first turn so it RAISES; the finally-drain must
+                # still pick up "second" despite the raise path.
+                engine._release_first.set()
+                try:
+                    await app.workers.wait_for_complete()
+                except WorkerFailed:
+                    pass
+                await pilot.pause()
+                await pilot.pause()
+                captured["calls"] = engine.calls
+                captured["queue"] = list(app._prompt_queue)
+        except (WorkerFailed, RuntimeError):
+            pass
+        # The queued "second" turn drained and ran despite the engine raise.
+        assert captured.get("calls") == 2
+        assert captured.get("queue") == []
+
+    asyncio.run(_run())
+
+
+def test_submit_with_attachment_while_busy_preserves_image(monkeypatch) -> None:
+    async def _run() -> None:
+        monkeypatch.setenv("MAGI_TUI_QUEUE", "1")
+        engine = _DrainDriver()
+        app = _make_app(engine, flush_interval=999)
+        block = {"type": "image", "source": {"data": "fake"}}
+        async with app.run_test() as pilot:
+            app.start_turn("first")
+            await asyncio.wait_for(engine.first_started.wait(), timeout=2)
+            await pilot.pause()
+            # User attached an image (Ctrl+V) then submitted while busy.
+            app._pending_attachments.append(block)
+            app.start_or_enqueue_turn("p")
+            # The queue captured the attachment snapshot; the shared buffer is
+            # cleared so an unrelated turn can't consume the image.
+            assert app._prompt_queue == [("p", (block,))]
+            assert app._pending_attachments == []
+            engine._release_first.set()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            await pilot.pause()
+            # The drained turn carried the snapshotted image into its TurnInput.
+            assert engine.calls == 2
+            drained_input = engine.turn_inputs[-1]
+            assert block in tuple(drained_input.image_blocks)
+
+    asyncio.run(_run())
+
+
+def test_queue_cleared_on_resume(monkeypatch) -> None:
+    async def _run() -> None:
+        monkeypatch.setenv("MAGI_TUI_QUEUE", "1")
+        engine = _BlockingFirstDriver()
+        app = _make_app(engine, flush_interval=999)
+        async with app.run_test() as pilot:
+            app.start_turn("first")
+            await pilot.pause()
+            app.start_or_enqueue_turn("second")
+            assert len(app._prompt_queue) == 1
+            assert app._footer.queued == 1
+            # A queue is turn-local intent for the OLD session; resume drops it.
+            app._resume_session("other-session")
+            assert app._prompt_queue == []
+            assert app._footer.queued == 0
+
+    asyncio.run(_run())
+
+
+def test_prompt_command_while_busy_enqueues(monkeypatch) -> None:
+    async def _run() -> None:
+        from magi_agent.cli.contracts import (  # noqa: PLC0415
+            ContentBlock,
+            PromptCommand,
+        )
+
+        monkeypatch.setenv("MAGI_TUI_QUEUE", "1")
+
+        class _EchoPrompt(PromptCommand):
+            async def build_prompt(self, args, ctx):  # type: ignore[override]
+                return [ContentBlock(type="text", text=f"expanded:{args}")]
+
+        class _PromptRegistry:
+            def __init__(self) -> None:
+                self._cmd = _EchoPrompt(name="ask", surface=TUI)
+
+            def lookup(self, name: str):
+                return self._cmd if name == "ask" else None
+
+            def list_for(self, surface):
+                _ = surface
+                return [self._cmd]
+
+        engine = _BlockingFirstDriver()
+        app = _make_app(engine, commands=_PromptRegistry(), flush_interval=999)
+        async with app.run_test() as pilot:
+            app.start_turn("first")
+            await pilot.pause()
+            # Prompt-command submitted while busy must ENQUEUE, not replace.
+            # NOTE: the first turn worker blocks forever, so we cannot
+            # ``wait_for_complete()`` (it waits on ALL workers). The command runs
+            # in the separate group="command" worker; pump the loop so it drains
+            # build_prompt -> the admission seam -> enqueue.
+            app.submit_command("ask", "now")
+            for _ in range(5):
+                await pilot.pause()
+            assert engine.calls == 1  # first turn NOT replaced
+            assert len(app._prompt_queue) == 1
+            assert app._prompt_queue[0][0] == "expanded:now"
+
+    asyncio.run(_run())
+
+
+def test_submit_while_busy_disabled_restores_replace(monkeypatch) -> None:
+    async def _run() -> None:
+        monkeypatch.delenv("MAGI_TUI_QUEUE", raising=False)
+
+        class _ReplaceDriver:
+            def __init__(self) -> None:
+                self.calls = 0
+                self.second_entered = asyncio.Event()
+
+            async def run_turn_stream(self, runtime, turn_input, *, cancel, gate=None):
+                _ = runtime, gate
+                self.calls += 1
+                if self.calls == 1:
+                    yield RuntimeEvent(
+                        type="token",
+                        payload={"delta": "first"},
+                        turn_id=turn_input.turn_id,
+                    )
+                    await asyncio.Event().wait()
+                    return
+                self.second_entered.set()
+                yield RuntimeEvent(
+                    type="token",
+                    payload={"delta": "second"},
+                    turn_id=turn_input.turn_id,
+                )
+                await asyncio.Event().wait()
+
+        engine = _ReplaceDriver()
+        app = _make_app(engine, flush_interval=999)
+        async with app.run_test() as pilot:
+            app.start_turn("first")
+            await pilot.pause()
+            _submit_via_funnel(app, "second")
+            # Flag OFF == today: the second REPLACES the first (exclusive worker).
+            await asyncio.wait_for(engine.second_entered.wait(), timeout=2)
+            assert app._prompt_queue == []
+            assert app._turn_active is True
+
+    asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
 # 5b-ii. Ctrl+C binding is priority (preempts Textual's built-in ctrl+c)
 # ---------------------------------------------------------------------------
 def test_ctrl_c_binding_is_priority() -> None:
@@ -1771,6 +2162,25 @@ def test_footer_reflects_turn_state_and_token_usage() -> None:
         assert "completed" in text
         # 100 + 23 = 123 tokens summed from the terminal usage dict.
         assert "123 tok" in text
+
+    asyncio.run(_run())
+
+
+def test_footer_shows_queued_badge_during_turn(monkeypatch) -> None:
+    async def _run() -> None:
+        from magi_agent.cli.tui.footer import StatusFooter
+
+        monkeypatch.setenv("MAGI_TUI_QUEUE", "1")
+        engine = _BlockingFirstDriver()
+        app = _make_app(engine, flush_interval=999)
+        async with app.run_test() as pilot:
+            footer = app.query_one("#footer", StatusFooter)
+            app.start_turn("first")
+            await pilot.pause()
+            app.start_or_enqueue_turn("second")
+            await pilot.pause()
+            assert app._footer.queued == 1
+            assert " · 1 queued" in footer.status_text()
 
     asyncio.run(_run())
 

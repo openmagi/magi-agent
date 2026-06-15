@@ -947,6 +947,20 @@ class MagiTuiApp(App[None]):
         from magi_agent.cli.clipboard_image import read_clipboard_image  # noqa: PLC0415
         self._clipboard_reader: Callable[[], dict | None] = clipboard_reader or read_clipboard_image
         self._pending_attachments: list[dict] = []
+        # busy-input-queue (gap: busy-input-queue): a surface-only end-of-turn
+        # FIFO. When a turn is active AND the flag is on, a submitted prompt is
+        # buffered (attachment-aware) and drained after the current turn ends,
+        # instead of cancelling/replacing it (the @work(exclusive=True) default).
+        # Each element is (prompt, attachment_snapshot). Default-OFF behind
+        # MAGI_TUI_QUEUE (== "1"), identical shape to MAGI_TUI_VERBOSE /
+        # MAGI_TUI_LEGACY_RICHLOG; with the flag unset every funnel is
+        # byte-for-byte the legacy replace path.
+        import os as _os_queue  # noqa: PLC0415
+
+        self._prompt_queue: list[tuple[str, tuple[dict, ...]]] = []
+        self._queue_enabled: bool = (
+            _os_queue.environ.get("MAGI_TUI_QUEUE", "") == "1"
+        )
         # Count of /compact (Compact()) acknowledgements; asserted by tests. Real
         # compaction is gated runtime authority (Stream B/E).
         self.compact_requests = 0
@@ -1291,7 +1305,10 @@ class MagiTuiApp(App[None]):
         if submission.kind == "command":
             self._dispatch_command(submission)
             return
-        self.start_turn(submission.text)
+        # Busy-aware admission (gap: busy-input-queue): when MAGI_TUI_QUEUE=1 and
+        # a turn is running this buffers the prompt instead of replacing the
+        # in-flight turn. With the flag OFF it is byte-for-byte ``start_turn``.
+        self.start_or_enqueue_turn(submission.text)
 
     def submit_command(self, name: str, args: str = "") -> None:
         """Submit a slash command exactly as if typed at the prompt.
@@ -1525,6 +1542,10 @@ class MagiTuiApp(App[None]):
         # wired the original; the input must follow the resumed session too).
         if self._input is not None:
             self._input.attach_history(self._history)
+        # busy-input-queue (gap: busy-input-queue): a pending queue is turn-local
+        # intent for the OLD session and must not carry across a resume.
+        self._prompt_queue.clear()
+        self.update_footer(queued=0)
         self.controller.commit_block(f"[resumed session {ref}]")
 
     # -- help (PR2.5) ------------------------------------------------------
@@ -1608,6 +1629,68 @@ class MagiTuiApp(App[None]):
         self._echo_user(prompt)
         self._run_turn(prompt, turn_id, cancel)
 
+    def start_or_enqueue_turn(
+        self, prompt: str, *, attachments: tuple[dict, ...] | None = None
+    ) -> None:
+        """The single busy-aware admission seam (gap: busy-input-queue).
+
+        When the queue flag is on AND a turn is already active, buffer the
+        prompt (with its attachment snapshot) and render a dim queued marker
+        instead of starting a turn — the running turn keeps its work. Otherwise
+        this is exactly today's behavior: restore any explicit attachments and
+        call :meth:`start_turn` (which replaces an in-flight turn if one is
+        somehow active, preserving the pinned ``start_turn``-direct semantics).
+        """
+
+        if self._queue_enabled and self._turn_active:
+            # Snapshot the live attachment buffer (images from Ctrl+V) and clear
+            # it so the queued prompt owns its images and an unrelated turn can't
+            # consume them. On drain, ``_drain_queue`` restores this snapshot
+            # before ``start_turn`` so ``_run_turn``'s snapshot reads them.
+            if attachments is not None:
+                attach = attachments
+            else:
+                attach = tuple(self._pending_attachments)
+                self._pending_attachments.clear()
+            self._prompt_queue.append((prompt, attach))
+            self._commit_queued_marker(prompt)
+            self.update_footer(queued=len(self._prompt_queue))
+            return
+        if attachments:
+            self._pending_attachments = list(attachments)
+        self.start_turn(prompt)
+
+    def _commit_queued_marker(self, prompt: str) -> None:
+        """Commit a dim one-line ``⏳ queued: …`` marker (honest affordance)."""
+
+        if self._controller is None:
+            return
+        from rich.text import Text  # noqa: PLC0415
+
+        label = f"⏳ queued: {prompt[:60]}"
+        block = Text(label, style="dim")
+        self._controller.commit_rich(block, text=label)
+
+    def _drain_queue(self) -> None:
+        """Pop the head of the busy-input-queue and start it as the next turn.
+
+        Scheduled via ``call_after_refresh`` from ``_run_turn``'s ``finally`` on
+        every terminal path. No-op when the queue is empty or the flag is off.
+        Restores the queued prompt's attachment snapshot into the shared buffer
+        BEFORE ``start_turn`` so ``_run_turn`` picks up the right images. If a
+        turn is somehow already active (a race), re-defer rather than replace.
+        """
+
+        if not (self._prompt_queue and self._queue_enabled):
+            return
+        if self._turn_active:
+            self.call_after_refresh(self._drain_queue)
+            return
+        prompt, attach = self._prompt_queue.pop(0)
+        self._pending_attachments = list(attach)
+        self.update_footer(queued=len(self._prompt_queue))
+        self.start_turn(prompt)
+
     def _echo_user(self, prompt: str) -> None:
         """Echo the user's message into the transcript (CC/OpenCode style)."""
 
@@ -1690,9 +1773,23 @@ class MagiTuiApp(App[None]):
             raise
         finally:
             await gen.aclose()
-            if self._active_turn_id == turn_id:
+            # busy-input-queue (gap: busy-input-queue): the drain MUST run on
+            # ALL terminal paths — normal, cancel, AND engine-raise (the except
+            # above re-raises, so any drain placed after ``_render_terminal``
+            # would never run on a raise and the queue would stall forever).
+            # ``_active_turn_id == turn_id`` is the existing "am I still the
+            # current turn?" gate (``start_turn`` sets ``_active_turn_id`` before
+            # ``_run_turn``), so a REPLACED stale worker evaluates False and
+            # never drains. Defer via ``call_after_refresh`` so this finishing
+            # worker fully returns to the event loop before the next exclusive
+            # ``@work(group="turn")`` worker spawns (sidesteps exclusive=True
+            # self-cancel) AND so ``_render_terminal`` (non-raise tail) runs
+            # first, preserving visual order.
+            should_drain = self._active_turn_id == turn_id
+            if should_drain:
                 self._active_turn_id = None
                 self._turn_active = False
+                self.call_after_refresh(self._drain_queue)
         # Finalize the in-flight assistant block as markdown (commits any
         # streamed text). The plain text is preserved in the committed snapshot
         # for search fidelity.
@@ -1925,12 +2022,14 @@ class MagiTuiApp(App[None]):
         state: str | None = None,
         tokens: int | None = None,
         elapsed: float | None = None,
+        queued: int | None = None,
     ) -> None:
         """Single seam every fold/turn path uses to refresh the footer.
 
         No-op before mount (the footer is created in ``compose``); each provided
         field updates the corresponding reactive on ``StatusFooter`` (which
-        repaints only itself).
+        repaints only itself). ``queued`` carries the busy-input-queue depth
+        (gap: busy-input-queue); the footer shows it only while running.
         """
 
         if self._footer is None:
@@ -1941,6 +2040,8 @@ class MagiTuiApp(App[None]):
             self._footer.set_tokens(tokens)
         if elapsed is not None:
             self._footer.set_elapsed(elapsed)
+        if queued is not None:
+            self._footer.set_queued(queued)
 
     def _turn_elapsed(self) -> float:
         """Seconds since the in-flight turn started (0.0 when idle)."""
