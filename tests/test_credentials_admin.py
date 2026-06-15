@@ -424,3 +424,101 @@ def test_disabled_when_neither_external_nor_local(monkeypatch, tmp_path) -> None
         auth_scheme="bearer",
         secret=SECRET_VALUE,
     ) == {"disabled": True}
+
+
+# -- host field (additive, non-secret) ------------------------------------
+
+
+def test_store_host_round_trips(monkeypatch, tmp_path) -> None:
+    """add_credential persists host; the projection reads it back; absent → None."""
+    from magi_agent.credentials_admin import store as cred_store
+
+    _isolate_store(monkeypatch, tmp_path)
+
+    with_host = cred_store.add_credential(
+        service="notion",
+        label="Notion",
+        auth_scheme="bearer",
+        status=cred_store.STATUS_ACTIVE,
+        vault_ref="ref-1",
+        host="api.notion.com",
+    )
+    assert with_host["host"] == "api.notion.com"
+
+    without_host = cred_store.add_credential(
+        service="slack",
+        label="Slack",
+        auth_scheme="bearer",
+        status=cred_store.STATUS_ACTIVE,
+        vault_ref="ref-2",
+    )
+    assert without_host["host"] is None
+
+    # Persisted + reloaded.
+    reloaded = cred_store.load_credentials()["credentials"]
+    by_service = {c["service"]: c for c in reloaded}
+    assert by_service["notion"]["host"] == "api.notion.com"
+    assert by_service["slack"]["host"] is None
+
+
+def test_post_accepts_optional_host(monkeypatch, tmp_path) -> None:
+    from magi_agent.credentials_admin.store import credentials_path
+
+    _isolate_store(monkeypatch, tmp_path)
+    _enable_local_vault(monkeypatch, tmp_path)
+    client = _client()
+
+    response = client.post(
+        "/v1/admin/credentials",
+        headers={"x-gateway-token": "local-token"},
+        json={
+            "service": "notion",
+            "label": "Notion",
+            "auth_scheme": "bearer",
+            "secret": SECRET_VALUE,
+            "host": "api.notion.com",
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["credential"]["host"] == "api.notion.com"
+    # Host is non-secret and persisted in the metadata store.
+    assert "api.notion.com" in credentials_path().read_text(encoding="utf-8")
+
+
+def test_post_host_absent_defaults_none(monkeypatch, tmp_path) -> None:
+    _isolate_store(monkeypatch, tmp_path)
+    _enable_local_vault(monkeypatch, tmp_path)
+    client = _client()
+
+    response = client.post(
+        "/v1/admin/credentials",
+        headers={"x-gateway-token": "local-token"},
+        json={
+            "service": "notion",
+            "label": "Notion",
+            "auth_scheme": "bearer",
+            "secret": SECRET_VALUE,
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["credential"]["host"] is None
+
+
+def test_post_rejects_blank_host(monkeypatch, tmp_path) -> None:
+    _isolate_store(monkeypatch, tmp_path)
+    _enable_local_vault(monkeypatch, tmp_path)
+    client = _client()
+
+    response = client.post(
+        "/v1/admin/credentials",
+        headers={"x-gateway-token": "local-token"},
+        json={
+            "service": "notion",
+            "label": "Notion",
+            "auth_scheme": "bearer",
+            "secret": SECRET_VALUE,
+            "host": "   ",
+        },
+    )
+    assert response.status_code == 400
+    assert response.json()["field"] == "host"
