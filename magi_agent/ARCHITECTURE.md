@@ -364,7 +364,7 @@ graph LR
 
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
-| __init__.py | Traffic-free OpenMagi channel contract metadata. | contract | — |
+| __init__.py | Traffic-free OpenMagi channel contract metadata. | contract | transport/integrations.py |
 | contract.py | — | — | artifacts/_file_delivery_fakes.py, artifacts/delivery_boundary.py, artifacts/delivery_receipts.py, artifacts/file_delivery.py, artifacts/file_delivery_live.py, channels/__init__.py, channels/discord_adapter.py, channels/discord_live.py, channels/dispatcher.py, channels/push_delivery.py, channels/runtime_boundary.py, channels/telegram_adapter.py, channels/telegram_live.py, harness/cron_runtime.py, harness/scheduler_runtime.py, plugins/native/documents.py, shadow/artifact_channel_delivery_contract.py |
 | discord_adapter.py | — | contract, dispatcher, provider_execution, provider_receipts | channels/discord_live.py |
 | discord_live.py | E3 — Gated live Discord adapter. | contract, discord_adapter, scheduler_delivery | — |
@@ -378,6 +378,8 @@ graph LR
 | telegram_adapter.py | — | contract, dispatcher, provider_execution, provider_receipts, runtime_boundary | channels/providers/telegram_httpx.py, channels/telegram_live.py, gateway/channel_watchers.py |
 | telegram_boundary.py | — | — | — |
 | telegram_credentials.py | Resolve the Telegram bot token from the local vault, then the environment. | credentials_admin, local_vault | gateway/channel_watchers.py |
+| telegram_easy.py | Telegram "easy setup": phone number → MTProto user session → automated | — | channels/telegram_easy_telethon.py, transport/integrations.py |
+| telegram_easy_telethon.py | Telethon adapter for the Telegram "easy setup" path. | telegram_easy | transport/integrations.py |
 | telegram_live.py | E2 — Gated live Telegram polling adapter. | contract, scheduler_delivery, telegram_adapter | gateway/channel_watchers.py |
 | telegram_validate.py | Bot-token validation for the dashboard Telegram integration. | — | transport/integrations.py |
 | workflow_routing.py | — | — | channels/dispatcher.py |
@@ -1673,7 +1675,7 @@ graph LR
 | gate5b_governance.py | Gate5B serving-path governance wiring (cli/engine parity). | control_plane, env, grounded_answer_guard | transport/chat_routes.py |
 | generation_request.py | User-visible generation request, identity, and history contract builders. | chat_shared, gate1a_readonly_tools, gate5b4c3_shadow_generation_contract, gate5b_full_toolhost, message_builder, openmagi_runtime, session_identity, user_visible_model_routing | transport/chat.py, transport/chat_routes.py, transport/egress_critic.py |
 | health.py | — | chat, child_runner_status, config, gate2_activation_loop_a, gate2_readiness, gate3_readiness, gate4_readiness, gate5_readiness, gate5b_full_toolhost, gate7_readiness, gate8_readiness, health, observed_egress, openmagi_runtime, ops, readiness | (root)/app.py, observability/api.py, transport/__init__.py |
-| integrations.py | Dashboard "Integrations" admin routes. | composio, config, credentials_admin, local_vault, openmagi_runtime, telegram_validate, tools | (root)/app.py |
+| integrations.py | Dashboard "Integrations" admin routes. | channels, composio, config, credentials_admin, local_vault, openmagi_runtime, telegram_easy, telegram_easy_telethon, telegram_validate, tools | (root)/app.py |
 | learning_dashboard.py | Learning governance dashboard API — FastAPI router. | api, config, models, openmagi_runtime, store | (root)/app.py |
 | plugins.py | — | audit, manager, openmagi_runtime | (root)/app.py |
 | product_admin.py | — | openmagi_runtime, ops, safety | — |
