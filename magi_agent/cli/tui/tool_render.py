@@ -36,6 +36,7 @@ from magi_agent.cli.contracts import (
     ToolRendererRegistry,
 )
 from magi_agent.cli.render import diff as diffmod
+from magi_agent.cli.render.width import truncate_cells
 
 __all__ = [
     "EditRenderer",
@@ -48,6 +49,8 @@ __all__ = [
 ]
 
 # Result preview limits — keep the transcript scannable.
+# ``_PREVIEW_MAX_CHARS`` is a budget in terminal CELLS (East-Asian Wide chars
+# count 2), enforced via ``truncate_cells`` so a CJK preview doesn't overflow.
 _PREVIEW_MAX_LINES = 8
 _PREVIEW_MAX_CHARS = 1200
 
@@ -131,11 +134,13 @@ _GENERIC_ARG_KEYS = (
     "file",
 )
 
+# Primary-arg head budget, measured in terminal CELLS (East-Asian Wide chars
+# count 2) so a CJK path/query stays one column-friendly line, not ~2x over.
 _ARG_HEAD_MAX = 80
 
 
 def _clip(value: str) -> str:
-    return value if len(value) <= _ARG_HEAD_MAX else value[: _ARG_HEAD_MAX - 1] + "…"
+    return truncate_cells(value, _ARG_HEAD_MAX)
 
 
 def _string_head(value: str) -> str:
@@ -220,8 +225,7 @@ def _preview(text: str) -> str:
     body = "\n".join(clipped)
     if len(lines) > _PREVIEW_MAX_LINES:
         body += f"\n… (+{len(lines) - _PREVIEW_MAX_LINES} more lines)"
-    if len(body) > _PREVIEW_MAX_CHARS:
-        body = body[:_PREVIEW_MAX_CHARS].rstrip() + " …"
+    body = truncate_cells(body, _PREVIEW_MAX_CHARS, ellipsis=" …")
     return body
 
 
@@ -279,7 +283,10 @@ class ToolCardRenderer:
         if isinstance(partial_input, str) and partial_input.strip():
             return _string_head(partial_input)
         data = _as_dict(partial_input)
-        return _first_str(data, self._primary_keys) or _generic_arg(data)
+        primary = _first_str(data, self._primary_keys)
+        # Clip the primary arg too (``_generic_arg`` already clips): a long CJK
+        # path/pattern must stay within the cell budget like every other header.
+        return _clip(primary) if primary else _generic_arg(data)
 
     def extract_search_text(self, node: object) -> str:
         return _search_text(node)

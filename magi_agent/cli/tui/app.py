@@ -51,6 +51,7 @@ from textual.widgets.option_list import Option
 
 from magi_agent.cli.commands.executor import DefaultCommandExecutor
 from magi_agent.cli.render.diff import render_diff
+from magi_agent.cli.render.width import truncate_cells
 from magi_agent.cli.contracts import (
     CommandContext,
     CommandExecutor,
@@ -295,6 +296,8 @@ def _status_summary(event: RuntimeEvent) -> str:
 # ``MAGI_STREAM_THINKING``). We render it as a DIM one-line ``● thinking <preview>``
 # block — distinct from the teal/blue tool dots and from assistant markdown.
 _THINKING_INNER_TYPES = frozenset({"thinking_delta", "thinking"})
+# Budget in terminal CELLS (East-Asian Wide chars count 2) so a CJK reasoning
+# preview stays one line, enforced via ``truncate_cells``.
 _THINKING_PREVIEW_MAX_CHARS = 100
 # Dim throughout so the reasoning line reads as quiet annotation, not output.
 _THINKING_DOT_STYLE = "dim #7aa2f7"
@@ -345,8 +348,7 @@ def _thinking_preview(text: str) -> str:
             break
     if not first:
         first = text.strip()
-    if len(first) > _THINKING_PREVIEW_MAX_CHARS:
-        first = first[: _THINKING_PREVIEW_MAX_CHARS - 1].rstrip() + "…"
+    first = truncate_cells(first, _THINKING_PREVIEW_MAX_CHARS)
     return first
 
 
@@ -391,6 +393,8 @@ _CHILD_INNER_STATUS = {
     "child_cancelled": "cancelled",
     "child_failed": "failed",
 }
+# Budget in terminal CELLS (East-Asian Wide chars count 2) so a CJK subagent
+# label stays one line, enforced via ``truncate_cells`` on the DISPLAY label.
 _SUBAGENT_LABEL_MAX_CHARS = 60
 # Cap a tool name pushed into the footer activity word so a verbose tool name
 # can't blow the one-line footer width (mirrors the subagent-label truncation).
@@ -441,8 +445,7 @@ def _child_task_label(payload: dict) -> str:
     truncated to one line. Use ``_child_task_key`` for the coalescing key."""
 
     label = _child_task_key(payload)
-    if len(label) > _SUBAGENT_LABEL_MAX_CHARS:
-        label = label[: _SUBAGENT_LABEL_MAX_CHARS - 1].rstrip() + "…"
+    label = truncate_cells(label, _SUBAGENT_LABEL_MAX_CHARS)
     return label
 
 
@@ -1204,8 +1207,9 @@ class MagiTuiApp(App[None]):
         cwd = self._cwd
         if cwd.startswith(home):
             cwd = "~" + cwd[len(home) :]
-        if len(cwd) > 48:
-            cwd = "…" + cwd[-47:]
+        # 48 is a terminal-CELL budget (East-Asian Wide chars count 2): keep the
+        # path TAIL with a leading ``…`` so a CJK cwd doesn't ~2x-overflow.
+        cwd = truncate_cells(cwd, 48, lead=True)
         return cwd
 
     def _topbar_text(self) -> str:

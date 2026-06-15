@@ -454,8 +454,9 @@ graph LR
 
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
-| __init__.py | Surface-specific render helpers for the Magi CLI TUI stream. | — | cli/tests/test_render_diff.py, cli/tests/test_tui_tool_render.py, cli/tui/tool_render.py |
+| __init__.py | Surface-specific render helpers for the Magi CLI TUI stream. | width | cli/tests/test_render_diff.py, cli/tests/test_tui_tool_render.py, cli/tui/tool_render.py |
 | diff.py | Pure-Python diff engine for the Magi CLI TUI. | — | cli/tui/app.py |
+| width.py | Display-width-aware truncation for the Magi CLI TUI. | — | cli/render/__init__.py, cli/tests/test_tui_sidebar.py, cli/tests/test_tui_subagent.py, cli/tests/test_tui_thinking.py, cli/tests/test_tui_tool_render.py, cli/tests/test_tui_visual.py, cli/tests/test_tui_width.py, cli/tui/app.py, cli/tui/sidebar.py, cli/tui/tool_render.py |
 
 ### cli/tests/
 
@@ -521,32 +522,33 @@ graph LR
 | test_tui_markdown.py | Tests for the PR0.1 markdown/syntax renderer (cli/tui/render/markdown.py). | render | — |
 | test_tui_notify.py | Tests for the PR3.3 toast helpers in ``magi_agent.cli.tui.notify``. | tui | — |
 | test_tui_palette.py | — | app, contracts, palette | — |
-| test_tui_sidebar.py | Tests for the PR3.2 toggleable sidebar widget. | sidebar | — |
-| test_tui_subagent.py | PR4.3 — subagent / child-run inline display (REDESIGNED). | app, contracts, tool_render | — |
+| test_tui_sidebar.py | Tests for the PR3.2 toggleable sidebar widget. | sidebar, tui, width | — |
+| test_tui_subagent.py | PR4.3 — subagent / child-run inline display (REDESIGNED). | app, contracts, tool_render, width | — |
 | test_tui_theme.py | PR4.1 — curated theme registration + ctrl+t cycle + persistence + picker. | app, contracts, palette, theme | — |
-| test_tui_thinking.py | PR4.2 — reasoning/thinking inline display (REDESIGNED). | app, contracts, tool_render | — |
-| test_tui_tool_render.py | Tests for the PR-E3 per-tool renderers (``cli/tui/tool_render.py``). | contracts, render, tui | — |
+| test_tui_thinking.py | PR4.2 — reasoning/thinking inline display (REDESIGNED). | app, contracts, tool_render, width | — |
+| test_tui_tool_render.py | Tests for the PR-E3 per-tool renderers (``cli/tui/tool_render.py``). | contracts, render, tui, width | — |
 | test_tui_transcript.py | Tests for the PR-E1 streaming-transcript spike. | _bench, contracts, message, tool_card, transcript, transcript_view | — |
-| test_tui_visual.py | Visual-layer tests: Magi-named tool renderers + the app shell (topbar/echo). | app, contracts, tool_render | — |
+| test_tui_visual.py | Visual-layer tests: Magi-named tool renderers + the app shell (topbar/echo). | app, contracts, tool_render, width | — |
 | test_tui_whichkey.py | PR4.4 — which-key chord-hint overlay. | app, contracts, defaults, schema, whichkey | — |
 | test_tui_widgets.py | Tests for the PR0.3 transcript widget primitives. | contracts, message, tool_card, transcript_view | — |
+| test_tui_width.py | Unit tests for the display-width truncation helper (``cli/render/width.py``). | width | — |
 
 ### cli/tui/
 
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
-| __init__.py | Interactive Textual TUI for the Magi headless CLI (Stream E). | — | cli/tests/test_tui_app.py, cli/tests/test_tui_notify.py, cli/tests/test_tui_tool_render.py, cli/tui/app.py |
+| __init__.py | Interactive Textual TUI for the Magi headless CLI (Stream E). | — | cli/tests/test_tui_app.py, cli/tests/test_tui_notify.py, cli/tests/test_tui_sidebar.py, cli/tests/test_tui_tool_render.py, cli/tui/app.py |
 | _bench.py | Headless throughput benchmark for the streaming-transcript spike (PR-E1). | transcript | cli/tests/test_tui_transcript.py |
-| app.py | Interactive Textual App + REPL loop for the Magi CLI (PR-E2). | autocomplete, clipboard_image, contracts, diff, executor, footer, help, history, input, loader, markdown, model, notify, palette, providers, resolver, schema, session, session_log, sidebar, theme, tool_card, tool_render, transcript, transcript_view, tui, whichkey | cli/tests/test_app.py, cli/tests/test_e2e_parity.py, cli/tests/test_model_picker_wire.py, cli/tests/test_tui_app.py, cli/tests/test_tui_followups.py, cli/tests/test_tui_history.py, cli/tests/test_tui_input.py, cli/tests/test_tui_palette.py, cli/tests/test_tui_subagent.py, cli/tests/test_tui_theme.py, cli/tests/test_tui_thinking.py, cli/tests/test_tui_visual.py, cli/tests/test_tui_whichkey.py, cli/wiring.py |
+| app.py | Interactive Textual App + REPL loop for the Magi CLI (PR-E2). | autocomplete, clipboard_image, contracts, diff, executor, footer, help, history, input, loader, markdown, model, notify, palette, providers, resolver, schema, session, session_log, sidebar, theme, tool_card, tool_render, transcript, transcript_view, tui, whichkey, width | cli/tests/test_app.py, cli/tests/test_e2e_parity.py, cli/tests/test_model_picker_wire.py, cli/tests/test_tui_app.py, cli/tests/test_tui_followups.py, cli/tests/test_tui_history.py, cli/tests/test_tui_input.py, cli/tests/test_tui_palette.py, cli/tests/test_tui_subagent.py, cli/tests/test_tui_theme.py, cli/tests/test_tui_thinking.py, cli/tests/test_tui_visual.py, cli/tests/test_tui_whichkey.py, cli/wiring.py |
 | autocomplete.py | Prefix autocomplete router for the Magi TUI input (PR-E2). | contracts | cli/tests/test_tui_autocomplete.py, cli/tests/test_tui_input.py, cli/tui/app.py, cli/tui/input.py |
 | footer.py | Bottom status footer for the Magi TUI (PR3.1). | — | cli/tests/test_tui_app.py, cli/tests/test_tui_footer.py, cli/tui/app.py |
 | history.py | Per-session input history + draft stash for the Magi TUI (PR1.2 / PR1.3). | session_log | cli/tests/test_tui_history.py, cli/tests/test_tui_input.py, cli/tui/app.py, cli/tui/input.py |
 | input.py | Prompt input widget + submission routing for the Magi TUI (PR-E2 / PR1.1). | autocomplete, contracts, history | cli/tests/test_tui_app.py, cli/tests/test_tui_input.py, cli/tui/app.py |
 | notify.py | Toast + bell helpers for the Magi TUI (PR3.3 + PR3.4). | — | cli/tui/app.py |
 | palette.py | Textual command-palette providers for the Magi TUI (PR2.1+). | contracts, theme | cli/tests/test_tui_app.py, cli/tests/test_tui_palette.py, cli/tests/test_tui_theme.py, cli/tui/app.py, cli/tui/dialogs/help.py |
-| sidebar.py | Toggleable left sidebar for the Magi TUI (PR3.2). | — | cli/tests/test_tui_sidebar.py, cli/tui/app.py |
+| sidebar.py | Toggleable left sidebar for the Magi TUI (PR3.2). | width | cli/tests/test_tui_sidebar.py, cli/tui/app.py |
 | theme.py | PR4.1 — curated theme set + registration + persistence for the Magi TUI. | session_log | cli/tests/test_tui_theme.py, cli/tui/app.py, cli/tui/palette.py |
-| tool_render.py | Per-tool renderers conforming to the frozen ``ToolRenderer`` Protocol. | contracts, render | cli/tests/test_model_picker_wire.py, cli/tests/test_tool_render.py, cli/tests/test_tui_app.py, cli/tests/test_tui_followups.py, cli/tests/test_tui_subagent.py, cli/tests/test_tui_thinking.py, cli/tests/test_tui_visual.py, cli/tui/app.py, cli/wiring.py |
+| tool_render.py | Per-tool renderers conforming to the frozen ``ToolRenderer`` Protocol. | contracts, render, width | cli/tests/test_model_picker_wire.py, cli/tests/test_tool_render.py, cli/tests/test_tui_app.py, cli/tests/test_tui_followups.py, cli/tests/test_tui_subagent.py, cli/tests/test_tui_thinking.py, cli/tests/test_tui_visual.py, cli/tui/app.py, cli/wiring.py |
 | transcript.py | Streaming-transcript widget — the one architectural risk of the TUI stream. | markdown, message | cli/tests/test_tui_transcript.py, cli/tui/_bench.py, cli/tui/app.py |
 
 ### cli/tui/dialogs/

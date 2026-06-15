@@ -247,6 +247,20 @@ class PromptInput(TextArea):
             self.post_message(self.AttachImageRequested())
             return
         if event.key == "enter":
+            # IME / CJK composition note (no defer needed here — analysis only):
+            # React-style TUIs (e.g. OpenCode) double-``setTimeout`` before
+            # submit to dodge a batching race where a composed Hangul/CJK string
+            # hasn't flushed to state when the keydown handler reads it. Textual's
+            # input pump is SYNCHRONOUS and ordered: the XTerm parser emits one
+            # printable ``Key`` per committed syllable, each handled by the base
+            # ``TextArea`` before this Enter handler runs, so ``self.text`` already
+            # holds the full committed buffer. The React race does not exist; a
+            # submit-defer would be cargo-cult. Two residuals are TERMINAL-owned,
+            # not fixable here: (1) an UNCOMMITTED IME composition still in the
+            # terminal's overlay was never sent as bytes, so neither Textual nor
+            # we ever see it (most IMEs make Enter commit first, then submit on a
+            # second Enter — correct, do not override); (2) terminals lacking
+            # proper wide-char/grapheme handling. See design gap ``cjk-width-ime``.
             event.stop()
             event.prevent_default()
             self.submit()

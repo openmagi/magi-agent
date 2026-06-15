@@ -182,6 +182,22 @@ def test_multiline_reasoning_is_truncated_to_a_short_preview() -> None:
     assert node.text.count("\n") <= 1
 
 
+def test_cjk_reasoning_preview_is_cell_bounded() -> None:
+    """A long single-line Hangul reasoning preview is bounded by
+    ``_THINKING_PREVIEW_MAX_CHARS`` in *cells*, not codepoints (which would be
+    ~2x and overflow the one-line ``● thinking <preview>``)."""
+
+    from magi_agent.cli.render.width import display_width
+    from magi_agent.cli.tui.app import _THINKING_PREVIEW_MAX_CHARS, _render_thinking_node
+
+    node = _render_thinking_node("가" * 150)
+    # The preview text is the committed node text minus the "● thinking  " label
+    # (strip the label's 2-space separator before measuring the preview itself).
+    preview = node.text.split("thinking", 1)[-1].lstrip()
+    assert display_width(preview) <= _THINKING_PREVIEW_MAX_CHARS
+    assert node.text.endswith("…")
+
+
 def test_streaming_reasoning_deltas_are_coalesced_into_one_block() -> None:
     """Several thinking deltas in a turn fold terse — not one line per token."""
 
