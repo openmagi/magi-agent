@@ -1016,6 +1016,10 @@ class MagiTuiApp(App[None]):
         # Used by the footer elapsed clock (set in start_turn, cleared in
         # _render_terminal).
         self._turn_started_monotonic: float | None = None
+        # Cumulative tokens across the session: the footer/sidebar show a running
+        # total while EngineResult.usage stays honestly per-turn. Session-scoped
+        # (resets on app restart).
+        self._session_tokens: int = 0
         self._log: RichLog | None = None
         self._view: TranscriptView | None = None
         self._live: Static | None = None
@@ -1930,18 +1934,20 @@ class MagiTuiApp(App[None]):
         # Fold the terminal state + token usage + elapsed into the footer FIRST,
         # so it updates for completed AND non-completed turns (the early return
         # below is only for the transcript marker, not the footer).
-        tokens = _usage_tokens(terminal.usage)
+        # Accumulate a cumulative session total (OpenCode-style running counter)
+        # from each turn's honestly per-turn EngineResult.usage.
+        self._session_tokens += _usage_tokens(terminal.usage)
         self.update_footer(
             state=terminal.terminal.value,
-            tokens=tokens,
+            tokens=self._session_tokens,
             elapsed=self._turn_elapsed(),
         )
-        # Mirror the turn's token usage into the sidebar context pane. The limit
-        # is kept as a future per-model seam, but the sidebar currently renders
-        # only a bare token count to avoid a misleading hardcoded ratio.
+        # Mirror the running session total into the sidebar context pane. The
+        # limit is kept as a future per-model seam, but the sidebar currently
+        # renders only a bare token count to avoid a misleading hardcoded ratio.
         if self._sidebar is not None:
             self._sidebar.set_context(
-                usage=tokens, limit=_context_limit(self._model)
+                usage=self._session_tokens, limit=_context_limit(self._model)
             )
         # Stop the running clock once the turn is terminal (the flush-tick
         # elapsed advance keys off this being None / state != "running").
