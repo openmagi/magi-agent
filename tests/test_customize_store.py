@@ -5,8 +5,21 @@ from magi_agent.customize.store import (
     DEFAULT_OVERRIDES,
     customize_path,
     load_overrides,
+    set_user_rules,
     set_verification_override,
 )
+
+
+def test_set_user_rules_roundtrip(tmp_path: Path) -> None:
+    p = tmp_path / "customize.json"
+    set_user_rules("Always cite sources.", path=p)
+    assert load_overrides(p)["user_rules"] == "Always cite sources."
+
+
+def test_set_user_rules_caps_length(tmp_path: Path) -> None:
+    p = tmp_path / "customize.json"
+    out = set_user_rules("x" * 50_000, path=p)
+    assert len(out["user_rules"]) == 20_000
 
 
 def test_set_verification_override_persists_and_normalizes(tmp_path: Path) -> None:

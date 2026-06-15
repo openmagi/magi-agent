@@ -16,7 +16,10 @@ DEFAULT_OVERRIDES: dict[str, Any] = {
         "custom_rules": [],
     },
     "tools": {},
+    "user_rules": "",
 }
+
+_USER_RULES_MAX = 20_000
 
 
 def customize_path() -> Path:
@@ -46,6 +49,9 @@ def _normalize(data: dict[str, Any]) -> dict[str, Any]:
     tools = data.get("tools")
     if isinstance(tools, dict):
         merged["tools"] = tools
+    user_rules = data.get("user_rules")
+    if isinstance(user_rules, str):
+        merged["user_rules"] = user_rules[:_USER_RULES_MAX]
     return merged
 
 
@@ -121,5 +127,14 @@ def set_verification_override(
         verification["modes"][item_id] = mode
     elif not enabled:
         verification["modes"].pop(item_id, None)
+    save_overrides(overrides, target)
+    return overrides
+
+
+def set_user_rules(text: str, path: Path | None = None) -> dict[str, Any]:
+    """Persist the free-text USER-RULES.md body (length-capped). Returns overrides."""
+    target = path or customize_path()
+    overrides = load_overrides(target)
+    overrides["user_rules"] = (text or "")[:_USER_RULES_MAX]
     save_overrides(overrides, target)
     return overrides

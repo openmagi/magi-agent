@@ -5,6 +5,7 @@ from magi_agent.customize.store import (
     load_overrides,
     save_overrides,
     set_tool_override,
+    set_user_rules,
     set_verification_override,
 )
 
@@ -16,5 +17,6 @@ __all__ = [
     "load_overrides",
     "save_overrides",
     "set_tool_override",
+    "set_user_rules",
     "set_verification_override",
 ]

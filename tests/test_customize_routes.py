@@ -152,6 +152,33 @@ def test_patch_verification_bad_body(tmp_path, monkeypatch):
     assert resp.status_code == 400
 
 
+def test_put_rules_persists(tmp_path, monkeypatch):
+    cfile = tmp_path / "customize.json"
+    monkeypatch.setenv("MAGI_CUSTOMIZE", str(cfile))
+    client = _client(tmp_path)
+    client.headers.update({"x-gateway-token": _TOKEN})
+    resp = client.put("/v1/app/customize/rules", json={"text": "Be terse."})
+    assert resp.status_code == 200
+    assert resp.json()["overrides"]["user_rules"] == "Be terse."
+    import json
+    assert json.loads(cfile.read_text())["user_rules"] == "Be terse."
+
+
+def test_put_rules_requires_auth(tmp_path, monkeypatch):
+    monkeypatch.setenv("MAGI_CUSTOMIZE", str(tmp_path / "customize.json"))
+    client = _client(tmp_path)  # no token
+    resp = client.put("/v1/app/customize/rules", json={"text": "x"})
+    assert resp.status_code == 401
+
+
+def test_put_rules_bad_body(tmp_path, monkeypatch):
+    monkeypatch.setenv("MAGI_CUSTOMIZE", str(tmp_path / "customize.json"))
+    client = _client(tmp_path)
+    client.headers.update({"x-gateway-token": _TOKEN})
+    resp = client.put("/v1/app/customize/rules", json={"nope": 1})
+    assert resp.status_code == 400
+
+
 def test_customize_returns_catalog_and_overrides(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("MAGI_CONFIG", str(tmp_path / "config.toml"))

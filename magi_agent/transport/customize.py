@@ -8,6 +8,7 @@ from magi_agent.customize.catalog import build_catalog
 from magi_agent.customize.store import (
     load_overrides,
     set_tool_override,
+    set_user_rules,
     set_verification_override,
 )
 from magi_agent.runtime.openmagi_runtime import OpenMagiRuntime
@@ -65,5 +66,20 @@ def register_customize_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
             return JSONResponse(status_code=400, content={"error": "enabled_bool_required"})
         mode = body["mode"] if isinstance(body.get("mode"), str) else None
         overrides = set_verification_override(kind, item_id, body["enabled"], mode=mode)
+        apply_verification_overrides(runtime, overrides)
+        return JSONResponse(content={"overrides": overrides})
+
+    @app.put("/v1/app/customize/rules")
+    async def put_rules(request: Request) -> JSONResponse:
+        unauthorized = _unauthorized_response(request, runtime)
+        if unauthorized is not None:
+            return unauthorized
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse(status_code=400, content={"error": "invalid_json"})
+        if not isinstance(body, dict) or not isinstance(body.get("text"), str):
+            return JSONResponse(status_code=400, content={"error": "text_required"})
+        overrides = set_user_rules(body["text"])
         apply_verification_overrides(runtime, overrides)
         return JSONResponse(content={"overrides": overrides})
