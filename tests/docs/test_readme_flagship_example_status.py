@@ -27,6 +27,7 @@ ROOT_README = ROOT / "README.md"
 DOCS_README = ROOT / "docs" / "README.md"
 
 _SECTION_HEADINGS = (
+    "## Example: One Task, Up the Stack",
     "## Example: Verify Source Before Claim",
     "## Verify Source Before Claim",
 )
