@@ -325,6 +325,74 @@ def test_run_child_blocks_on_unknown_model_tier() -> None:
     assert fake.calls == 0
 
 
+def test_operator_allowlist_routes_model_absent_from_registry(monkeypatch) -> None:
+    """A model NOT in the registry but in the operator route allowlist → routed."""
+    from magi_agent.config.env import _ALLOWED_MODEL_ROUTES_ENV
+
+    monkeypatch.setenv(_ALLOWED_MODEL_ROUTES_ENV, "anthropic:claude-opus-4-8")
+    fake = _FakeRunner()
+    runner = RealLocalChildRunner(provider_config=_provider_config(), runner=fake)
+
+    output = asyncio.run(
+        runner.run_child(_request(provider="anthropic", model="claude-opus-4-8"))
+    )
+
+    assert output["status"] == "completed"
+    assert fake.calls == 1
+
+
+def test_unknown_model_still_blocks_when_allowlist_unset(monkeypatch) -> None:
+    """No allowlist env → an unregistered model is still blocked (unchanged)."""
+    from magi_agent.config.env import _ALLOWED_MODEL_ROUTES_ENV
+
+    monkeypatch.delenv(_ALLOWED_MODEL_ROUTES_ENV, raising=False)
+    fake = _FakeRunner()
+    runner = RealLocalChildRunner(provider_config=_provider_config(), runner=fake)
+
+    output = asyncio.run(
+        runner.run_child(_request(provider="anthropic", model="claude-opus-4-8"))
+    )
+
+    assert output["status"] == "blocked"
+    assert output["summary"] == _DEGRADE_ROUTE_UNKNOWN
+    assert fake.calls == 0
+
+
+def test_operator_allowlist_match_is_casefolded(monkeypatch) -> None:
+    from magi_agent.config.env import _ALLOWED_MODEL_ROUTES_ENV
+
+    monkeypatch.setenv(_ALLOWED_MODEL_ROUTES_ENV, "Anthropic:Claude-Opus-4-8")
+    fake = _FakeRunner()
+    runner = RealLocalChildRunner(provider_config=_provider_config(), runner=fake)
+
+    output = asyncio.run(
+        runner.run_child(_request(provider="anthropic", model="claude-opus-4-8"))
+    )
+
+    assert output["status"] == "completed"
+    assert fake.calls == 1
+
+
+def test_operator_allowed_model_routes_parser_failsafe() -> None:
+    from magi_agent.config.env import (
+        _ALLOWED_MODEL_ROUTES_ENV,
+        operator_allowed_model_routes,
+    )
+
+    routes = operator_allowed_model_routes(
+        {
+            _ALLOWED_MODEL_ROUTES_ENV: (
+                "Anthropic:Claude-Opus-4-8, openai:gpt-5.5 , nocolon, :nomodel, google:"
+            )
+        }
+    )
+
+    assert ("anthropic", "claude-opus-4-8") in routes
+    assert ("openai", "gpt-5.5") in routes
+    assert all(provider and model for provider, model in routes)
+    assert operator_allowed_model_routes({}) == frozenset()
+
+
 def test_run_child_never_raises_when_runner_raises_mid_turn() -> None:
     raising = _RaisingRunner()
     runner = RealLocalChildRunner(provider_config=_provider_config(), runner=raising)
