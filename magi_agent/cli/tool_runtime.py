@@ -149,6 +149,18 @@ def build_cli_tool_runtime(
         register_persistent_python_manifest(registry)
         bind_persistent_python_handler(registry)
 
+    # Cross-family recipe routing (MAGI_RECIPE_ROUTING_LLM_ENABLED, default-OFF).
+    # The registrar reads the gate itself and is a no-op when OFF, so the
+    # registry — and therefore the advertised tool set and dispatch surface —
+    # stays byte-identical to before. When ON it registers + enables the
+    # `select_recipe` tool and routes its calls to the recipe-routing handler,
+    # mirroring the GA load-tool mechanism but at the live tool-registry seam.
+    from magi_agent.recipes.recipe_routing import (  # noqa: PLC0415
+        register_select_recipe_tool,
+    )
+
+    register_select_recipe_tool(registry)
+
     receipt_store = general_automation_receipts or GeneralAutomationReceiptLedgerStore()
     # First-party activity capture: pass the bundled producer pack's static refs
     # (computed ONCE here at construction, never per-dispatch) plus the runtime's

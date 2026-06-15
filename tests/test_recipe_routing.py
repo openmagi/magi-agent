@@ -12,9 +12,12 @@ from magi_agent.recipes.recipe_routing import (
     SELECTED_RECIPE_PACK_IDS_STATE_KEY,
     SELECT_RECIPE_TOOL_NAME,
     build_recipe_listing_section,
+    register_select_recipe_tool,
     select_recipe_handler,
+    select_recipe_manifest,
 )
 from magi_agent.tools.context import ToolContext
+from magi_agent.tools.registry import ToolRegistry
 
 
 class _StubAdkToolContext:
@@ -262,3 +265,73 @@ async def test_auto_compact_protects_select_recipe_result():
         m.get("content", "") if isinstance(m.get("content"), str) else "" for m in out
     )
     assert protected_body in serialized
+
+
+# ---------------------------------------------------------------------------
+# Half A — gated registration + dispatch wiring (register_select_recipe_tool).
+#
+# Flag OFF (default) → the tool is NEVER registered: absent from the manifest
+# and not dispatchable, so the registry is byte-identical to before. Flag ON →
+# the tool is registered + enabled and a dispatched call reaches the handler.
+# ---------------------------------------------------------------------------
+
+_FLAG_ENV = "MAGI_RECIPE_ROUTING_LLM_ENABLED"
+
+
+def test_register_select_recipe_tool_noop_when_flag_off():
+    registry = ToolRegistry()
+    # explicit empty env mapping → flag OFF (independent of process env)
+    registered = register_select_recipe_tool(registry, env={})
+    assert registered is False
+    # Not registered: absent from the manifest, not enabled, not dispatchable.
+    assert registry.resolve_registration(SELECT_RECIPE_TOOL_NAME) is None
+    assert registry.is_enabled(SELECT_RECIPE_TOOL_NAME) is False
+    assert SELECT_RECIPE_TOOL_NAME not in {m.name for m in registry.list_all()}
+
+
+def test_register_select_recipe_tool_registers_and_enables_when_flag_on():
+    registry = ToolRegistry()
+    registered = register_select_recipe_tool(registry, env={_FLAG_ENV: "1"})
+    assert registered is True
+    # Registered, enabled, and advertised in the manifest + act-mode listing.
+    assert registry.is_enabled(SELECT_RECIPE_TOOL_NAME) is True
+    assert SELECT_RECIPE_TOOL_NAME in {m.name for m in registry.list_all()}
+    assert SELECT_RECIPE_TOOL_NAME in {
+        m.name for m in registry.list_available(mode="act")
+    }
+
+
+def test_register_select_recipe_tool_is_idempotent_when_flag_on():
+    registry = ToolRegistry()
+    assert register_select_recipe_tool(registry, env={_FLAG_ENV: "1"}) is True
+    # Second call must not raise "already registered"; it is a no-op.
+    assert register_select_recipe_tool(registry, env={_FLAG_ENV: "1"}) is False
+    assert registry.is_enabled(SELECT_RECIPE_TOOL_NAME) is True
+
+
+def test_registered_select_recipe_handler_reaches_handler_and_returns_ok():
+    registry = ToolRegistry()
+    register_select_recipe_tool(
+        registry,
+        pack_registry=_routing_registry(),
+        env={_FLAG_ENV: "1"},
+    )
+    registration = registry.resolve_registration(SELECT_RECIPE_TOOL_NAME)
+    assert registration is not None and registration.handler is not None
+    adk = _StubAdkToolContext()
+    result = registration.handler({"pack_id": "test.soft-full"}, _context(adk))
+    assert result.status == "ok"
+    assert result.metadata.get("toolName") == SELECT_RECIPE_TOOL_NAME
+    # The handler's accumulator side effect fired through the dispatched path.
+    assert adk.state[SELECTED_RECIPE_PACK_IDS_STATE_KEY] == ("test.soft-full",)
+
+
+def test_select_recipe_manifest_is_meta_readonly_disabled_by_default():
+    manifest = select_recipe_manifest()
+    assert manifest.name == SELECT_RECIPE_TOOL_NAME
+    assert manifest.permission == "meta"
+    assert manifest.dangerous is False
+    assert manifest.mutates_workspace is False
+    assert manifest.parallel_safety == "readonly"
+    # The live flag — not the manifest default — is the activation authority.
+    assert manifest.enabled_by_default is False
