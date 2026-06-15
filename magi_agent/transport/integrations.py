@@ -24,6 +24,7 @@ the routes are testable without network.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import time
@@ -252,7 +253,9 @@ def register_integrations_routes(
         if port is None:
             return _easy_disabled()
         try:
-            session_id = telegram_easy.begin_login(easy_store, port, phone.strip(), now=clock())
+            session_id = await asyncio.to_thread(
+                telegram_easy.begin_login, easy_store, port, phone.strip(), now=clock()
+            )
         except Exception:
             return JSONResponse(status_code=502, content={"error": "telegram_unreachable"})
         return JSONResponse(content={"session_id": session_id})
@@ -276,8 +279,8 @@ def register_integrations_routes(
         if port is None:
             return _easy_disabled()
         try:
-            needs_2fa = telegram_easy.submit_code(
-                easy_store, port, session_id, code.strip(), now=clock()
+            needs_2fa = await asyncio.to_thread(
+                telegram_easy.submit_code, easy_store, port, session_id, code.strip(), now=clock()
             )
         except telegram_easy.SessionNotFound:
             return JSONResponse(status_code=404, content={"error": "session_not_found"})
@@ -306,7 +309,9 @@ def register_integrations_routes(
         if port is None:
             return _easy_disabled()
         try:
-            telegram_easy.submit_password(easy_store, port, session_id, password, now=clock())
+            await asyncio.to_thread(
+                telegram_easy.submit_password, easy_store, port, session_id, password, now=clock()
+            )
         except telegram_easy.SessionNotFound:
             return JSONResponse(status_code=404, content={"error": "session_not_found"})
         except Exception:
@@ -334,7 +339,8 @@ def register_integrations_routes(
         if port is None:
             return _easy_disabled()
         try:
-            status = telegram_easy.finish_create_bot(
+            status = await asyncio.to_thread(
+                telegram_easy.finish_create_bot,
                 easy_store,
                 port,
                 session_id,

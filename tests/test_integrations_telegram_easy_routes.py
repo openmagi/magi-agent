@@ -175,3 +175,22 @@ def test_easy_unknown_session_404(monkeypatch, tmp_path) -> None:
         json={"session_id": "nope", "code": "1"},
     )
     assert resp.status_code == 404
+
+
+def test_default_auth_port_none_without_telethon(monkeypatch, tmp_path) -> None:
+    # Easy gate ON but no injected port and the telegram-easy extra is not
+    # installed → the default provider resolves to None → 409 (not a 500).
+    monkeypatch.setenv("MAGI_CONFIG", str(tmp_path / "config.toml"))
+    monkeypatch.setenv("MAGI_TELEGRAM_EASY_SETUP_ENABLED", "1")
+    monkeypatch.setenv("TELEGRAM_API_ID", "12345")
+    monkeypatch.setenv("TELEGRAM_API_HASH", "abc")
+    app = FastAPI()
+    register_integrations_routes(app, _runtime())  # no port injected
+    client = TestClient(app)
+    resp = client.post(
+        "/v1/admin/integrations/telegram/easy/send-code",
+        headers=HEADERS,
+        json={"phone": "+1"},
+    )
+    assert resp.status_code == 409
+    assert resp.json()["error"] == "telegram_easy_disabled"
