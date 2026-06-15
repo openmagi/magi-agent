@@ -28,6 +28,7 @@ operator actually builds the live watcher.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from collections.abc import Callable
@@ -70,6 +71,129 @@ def _default_telegram_provider_factory(token: str) -> Any:
     from magi_agent.channels.providers.telegram_httpx import TelegramHttpxProvider
 
     return TelegramHttpxProvider(token=token)
+
+
+# ---------------------------------------------------------------------------
+# Dashboard-managed Telegram (hot-reload supervisor)
+# ---------------------------------------------------------------------------
+
+def is_dashboard_telegram_enabled(env: dict[str, str] | None = None) -> bool:
+    """Master gate for dashboard-managed Telegram (default OFF).
+
+    When ON, the daemon runs a long-lived supervisor watcher that picks up a
+    token connected via the dashboard (stored in the vault) without a restart.
+    Mutually exclusive with the legacy env-only ``build_telegram_channel_watcher``
+    to avoid double-polling (Telegram 409 on getUpdates).
+    """
+    raw = (os.environ if env is None else env).get("MAGI_DASHBOARD_TELEGRAM_ENABLED", "")
+    return raw.strip().lower() not in ("", "0", "false", "no", "off")
+
+
+def _default_resolve_telegram_token() -> str | None:
+    from magi_agent.channels.telegram_credentials import resolve_telegram_bot_token
+
+    return resolve_telegram_bot_token()
+
+
+class TelegramSupervisor:
+    """Re-resolves the bot token each tick and runs/idles the poll loop.
+
+    The token source (vault → env) is re-read on every :meth:`tick`. When a
+    token appears the concrete provider is built and polled; when it changes the
+    old provider is closed and rebuilt; when it disappears the provider is closed
+    and the supervisor idles. This is what makes dashboard connect/disconnect
+    take effect without restarting the gateway daemon.
+    """
+
+    def __init__(
+        self,
+        *,
+        resolve_token: Callable[[], str | None],
+        provider_factory: ProviderFactory | None = None,
+        on_inbound: OnInbound | None = None,
+        poll_once_factory: Callable[[Any], Callable[[], Any]] | None = None,
+    ) -> None:
+        self._resolve_token = resolve_token
+        self._provider_factory = provider_factory or _default_telegram_provider_factory
+        self._on_inbound = on_inbound or _default_on_inbound
+        self._poll_once_factory = poll_once_factory or self._build_poll_once
+        self._token: str | None = None
+        self._provider: Any | None = None
+        self._poll_once: Callable[[], Any] | None = None
+
+    def _build_poll_once(self, provider: Any) -> Callable[[], Any]:
+        return build_telegram_poll_once(provider=provider, on_inbound=self._on_inbound)
+
+    def tick(self) -> str:
+        token = self._resolve_token()
+        if token != self._token:
+            self._teardown()
+            self._token = token
+            if token:
+                self._provider = self._provider_factory(token)
+                self._poll_once = self._poll_once_factory(self._provider)
+        if self._poll_once is None:
+            return "idle"
+        self._poll_once()
+        return "polled"
+
+    def _teardown(self) -> None:
+        provider = self._provider
+        if provider is not None:
+            close = getattr(provider, "close", None)
+            if callable(close):
+                try:
+                    close()
+                except Exception:  # noqa: BLE001 — close failure must not wedge the loop
+                    _log.warning("telegram provider close failed", exc_info=True)
+        self._provider = None
+        self._poll_once = None
+
+    def close(self) -> None:
+        self._teardown()
+        self._token = None
+
+
+def build_telegram_supervisor_watcher(
+    *,
+    resolve_token: Callable[[], str | None] | None = None,
+    provider_factory: ProviderFactory | None = None,
+    on_inbound: OnInbound | None = None,
+    interval_seconds: float = DEFAULT_TELEGRAM_POLL_INTERVAL_SECONDS,
+) -> GatewayWatcher:
+    """Long-lived supervisor watcher for dashboard-managed Telegram.
+
+    Always startable (gated by ``is_dashboard_telegram_enabled``); the run loop
+    idles until a token is resolvable, so it is safe to add even before any token
+    is connected.
+    """
+    supervisor = TelegramSupervisor(
+        resolve_token=resolve_token or _default_resolve_telegram_token,
+        provider_factory=provider_factory,
+        on_inbound=on_inbound,
+    )
+
+    async def run(stop_event: asyncio.Event) -> None:
+        try:
+            while not stop_event.is_set():
+                try:
+                    await asyncio.to_thread(supervisor.tick)
+                except Exception:  # noqa: BLE001 — transient tick error must not stop loop
+                    _log.warning("telegram supervisor tick failed", exc_info=True)
+                if stop_event.is_set():
+                    break
+                try:
+                    await asyncio.wait_for(stop_event.wait(), timeout=interval_seconds)
+                except asyncio.TimeoutError:
+                    continue
+        finally:
+            supervisor.close()
+
+    return GatewayWatcher(
+        name="channel_telegram",
+        run=run,
+        is_enabled=is_dashboard_telegram_enabled,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -256,7 +380,10 @@ def _default_on_inbound(update: TelegramInboundUpdate) -> None:
 
 __all__ = [
     "DEFAULT_TELEGRAM_POLL_INTERVAL_SECONDS",
+    "TelegramSupervisor",
     "build_telegram_channel_watcher",
     "build_telegram_poll_once",
+    "build_telegram_supervisor_watcher",
+    "is_dashboard_telegram_enabled",
     "live_deliver",
 ]

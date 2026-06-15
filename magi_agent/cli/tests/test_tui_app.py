@@ -25,6 +25,7 @@ from magi_agent.cli.contracts import (
     Terminal,
     ToolRendererRegistry,
 )
+from magi_agent.cli.keybindings.schema import Action
 from magi_agent.cli.tui.app import MagiTuiApp, TextualSink, ToolUseConfirm
 
 TUI = CommandSurface(tui=True, headless=False)
@@ -148,6 +149,11 @@ def test_tui_mount_renders_welcome_state() -> None:
         # Phase 2 doors advertised too: command palette + help.
         assert "Ctrl+P" in joined
         assert "F1" in joined
+        # Exit-safety: the banner must teach the REAL double-press gesture and
+        # mention Esc; it must NOT claim a single Ctrl+C is "again to quit".
+        assert "twice to quit" in joined
+        assert "Esc" in joined
+        assert "again to quit" not in joined
         assert app.last_terminal is None
 
     asyncio.run(_run())
@@ -331,10 +337,355 @@ def test_ctrl_c_cancels_when_running_quits_when_idle() -> None:
             assert app._cancel.is_set()
             assert exits == []
 
-            # Idle -> exit.
+            # Idle -> first press arms (no exit), second within-window quits.
             app._turn_active = False
             app.action_cancel_turn()
+            assert exits == []
+            assert app._quit_armed_at is not None
+            app.action_cancel_turn()
             assert exits == [True]
+            await pilot.pause()
+
+    asyncio.run(_run())
+
+
+def test_cancel_turn_carries_escape_key_via_run_key_action() -> None:
+    async def _run() -> None:
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            exits: list[bool] = []
+            app.exit = lambda *a, **k: exits.append(True)  # type: ignore[method-assign]
+            app._turn_active = False
+            app._input.text = "draft"
+            # Esc resolves to CHAT_CANCEL; the resolver must mark _cancel_key
+            # "escape" so the idle branch clears the buffer before arming.
+            app._run_key_action(Action.CHAT_CANCEL.value)
+            assert app._input.text == ""
+            assert exits == []
+            await pilot.pause()
+
+    asyncio.run(_run())
+
+
+def test_idle_esc_clears_nonempty_input_before_arming() -> None:
+    async def _run() -> None:
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            exits: list[bool] = []
+            app.exit = lambda *a, **k: exits.append(True)  # type: ignore[method-assign]
+            app._turn_active = False
+            app._input.text = "draft"
+            app._cancel_key = "escape"
+            app.action_cancel_turn()
+            assert app._input.text == ""
+            assert exits == []
+            assert app._quit_armed_at is None
+            await pilot.pause()
+
+    asyncio.run(_run())
+
+
+def test_idle_ctrl_c_does_not_clear_nonempty_input() -> None:
+    async def _run() -> None:
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            exits: list[bool] = []
+            app.exit = lambda *a, **k: exits.append(True)  # type: ignore[method-assign]
+            app._turn_active = False
+            app._input.text = "draft"
+            app._cancel_key = None  # Ctrl+C priority-Binding path
+            app.action_cancel_turn()
+            assert app._input.text == "draft"
+            assert app._quit_armed_at is not None
+            assert exits == []
+            await pilot.pause()
+
+    asyncio.run(_run())
+
+
+def test_kill_agents_idle_does_not_arm_quit() -> None:
+    async def _run() -> None:
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            exits: list[bool] = []
+            app.exit = lambda *a, **k: exits.append(True)  # type: ignore[method-assign]
+            # Idle kill-agents chord (ctrl+x ctrl+k) is cancel-only: a no-op
+            # when idle, never arms a quit.
+            app._turn_active = False
+            app._run_key_action(Action.CHAT_KILL_AGENTS.value)
+            assert exits == []
+            assert app._quit_armed_at is None
+            await pilot.pause()
+
+    asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
+# 5b-quit-safety (Pilot). Real key dispatch — direct action_* calls false-green
+# the routing (they bypass Textual's Ctrl+Q preemption / TextArea Ctrl+D consume).
+# ---------------------------------------------------------------------------
+def test_idle_esc_arms_then_quits_via_pilot() -> None:
+    async def _run() -> None:
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            app._input.focus()
+            await pilot.pause()
+            exits: list[bool] = []
+            app.exit = lambda *a, **k: exits.append(True)  # type: ignore[method-assign]
+            app._turn_active = False
+            # Real Esc -> on_key -> resolve -> CHAT_CANCEL -> action_cancel_turn
+            # -> _arm_or_quit. Depends on PromptInput keeping tab_behavior="focus"
+            # so Escape bubbles (TextArea swallows it under "indent").
+            await pilot.press("escape")
+            assert exits == []
+            assert app._quit_armed_at is not None
+            await pilot.press("escape")
+            assert exits == [True]
+
+    asyncio.run(_run())
+
+
+def test_idle_ctrl_c_arms_then_quits_via_pilot() -> None:
+    async def _run() -> None:
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            app._input.focus()
+            await pilot.pause()
+            exits: list[bool] = []
+            app.exit = lambda *a, **k: exits.append(True)  # type: ignore[method-assign]
+            app._turn_active = False
+            # Real Ctrl+C goes through the priority=True Binding (app BINDINGS)
+            # -> action_cancel_turn with _cancel_key unset -> "ctrl+c" (no clear).
+            await pilot.press("ctrl+c")
+            assert exits == []
+            assert app._quit_armed_at is not None
+            await pilot.press("ctrl+c")
+            assert exits == [True]
+
+    asyncio.run(_run())
+
+
+def test_ctrl_q_binding_is_priority() -> None:
+    from textual.binding import Binding
+
+    ctrl_q = [
+        b
+        for b in MagiTuiApp.BINDINGS
+        if isinstance(b, Binding) and b.key == "ctrl+q"
+    ]
+    assert ctrl_q, "ctrl+q must be a Binding to preempt Textual's built-in quit"
+    assert len(ctrl_q) == 1
+    assert ctrl_q[0].priority is True
+    assert ctrl_q[0].action == "request_quit"
+
+
+def test_idle_ctrl_q_routes_to_arming_not_textual_quit_via_pilot() -> None:
+    async def _run() -> None:
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            app._input.focus()
+            await pilot.pause()
+            exits: list[bool] = []
+            app.exit = lambda *a, **k: exits.append(True)  # type: ignore[method-assign]
+            app._turn_active = False
+            # Magi's priority=True ctrl+q must preempt Textual's built-in
+            # ctrl+q->quit; the first press arms instead of exiting.
+            await pilot.press("ctrl+q")
+            assert exits == []
+            assert app._quit_armed_at is not None
+            await pilot.press("ctrl+q")
+            assert exits == [True]
+
+    asyncio.run(_run())
+
+
+def test_idle_ctrl_d_empty_buffer_arms_via_pilot() -> None:
+    async def _run() -> None:
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            app._input.focus()
+            await pilot.pause()
+            app._input.text = ""
+            exits: list[bool] = []
+            app.exit = lambda *a, **k: exits.append(True)  # type: ignore[method-assign]
+            app._turn_active = False
+            # Empty-buffer Ctrl+D is intercepted in PromptInput._on_key before
+            # the base TextArea delete-right and calls up to request_quit.
+            await pilot.press("ctrl+d")
+            assert exits == []
+            assert app._quit_armed_at is not None
+            await pilot.press("ctrl+d")
+            assert exits == [True]
+
+    asyncio.run(_run())
+
+
+def test_ctrl_d_nonempty_buffer_deletes_not_quits_via_pilot() -> None:
+    async def _run() -> None:
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            app._input.focus()
+            await pilot.pause()
+            app._input.text = "abc"
+            app._input.move_cursor((0, 0))
+            exits: list[bool] = []
+            app.exit = lambda *a, **k: exits.append(True)  # type: ignore[method-assign]
+            app._turn_active = False
+            # Non-empty buffer: Ctrl+D stays forward-delete (no quit, no arm).
+            await pilot.press("ctrl+d")
+            assert app._input.text == "bc"
+            assert exits == []
+            assert app._quit_armed_at is None
+
+    asyncio.run(_run())
+
+
+def test_cross_key_arming_confirms_quit_via_pilot() -> None:
+    async def _run() -> None:
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            app._input.focus()
+            await pilot.pause()
+            app._input.text = ""  # empty so Esc arms (not clear-first)
+            exits: list[bool] = []
+            app.exit = lambda *a, **k: exits.append(True)  # type: ignore[method-assign]
+            app._turn_active = False
+            # Cross-key: Esc arms, then Ctrl+C within the window confirms quit
+            # (shared _quit_armed_at). Proven through real dispatch.
+            await pilot.press("escape")
+            assert exits == []
+            assert app._quit_armed_at is not None
+            await pilot.press("ctrl+c")
+            assert exits == [True]
+
+    asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
+# 5b-quit-safety. Idle Esc/Ctrl+C/Ctrl+Q/Ctrl+D are a taught double-press, not
+# a bare quit. See docs/plans/2026-06-14-magi-tui-ux/01-exit-cancel-safety.md.
+# ---------------------------------------------------------------------------
+def test_quit_armed_state_initialized_none() -> None:
+    async def _run() -> None:
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            assert app._quit_armed_at is None
+
+    asyncio.run(_run())
+
+
+def test_arm_or_quit_first_press_arms_and_toasts() -> None:
+    async def _run() -> None:
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            exits: list[bool] = []
+            app.exit = lambda *a, **k: exits.append(True)  # type: ignore[method-assign]
+            toasts: list[str] = []
+            import magi_agent.cli.tui.app as _appmod
+
+            monkey = _appmod._notify.info
+            _appmod._notify.info = lambda _app, msg, **k: toasts.append(msg)  # type: ignore[attr-defined]
+            try:
+                app._turn_active = False
+                app._arm_or_quit(key="ctrl+c")
+            finally:
+                _appmod._notify.info = monkey  # type: ignore[attr-defined]
+            assert exits == []
+            assert app._quit_armed_at is not None
+            assert toasts == ["Press again to quit"]
+            await pilot.pause()
+
+    asyncio.run(_run())
+
+
+def test_arm_or_quit_second_press_within_window_quits() -> None:
+    async def _run() -> None:
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            exits: list[bool] = []
+            app.exit = lambda *a, **k: exits.append(True)  # type: ignore[method-assign]
+            app._turn_active = False
+            app._arm_or_quit(key="ctrl+c")
+            assert exits == []
+            app._arm_or_quit(key="ctrl+c")
+            assert exits == [True]
+            await pilot.pause()
+
+    asyncio.run(_run())
+
+
+def test_arm_or_quit_disarms_after_window() -> None:
+    async def _run() -> None:
+        import time as _time
+
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            exits: list[bool] = []
+            app.exit = lambda *a, **k: exits.append(True)  # type: ignore[method-assign]
+            app._turn_active = False
+            app._arm_or_quit(key="ctrl+c")
+            assert app._quit_armed_at is not None
+            # Backdate the arm beyond the window -> the next press re-arms.
+            app._quit_armed_at = _time.monotonic() - (MagiTuiApp.QUIT_WINDOW_S + 1)
+            app._arm_or_quit(key="ctrl+c")
+            assert exits == []
+            assert app._quit_armed_at is not None
+            await pilot.pause()
+
+    asyncio.run(_run())
+
+
+def test_arm_or_quit_window_constant() -> None:
+    assert MagiTuiApp.QUIT_WINDOW_S == 1.5
+    assert MagiTuiApp.INSTANT_QUIT_ENV == "MAGI_TUI_INSTANT_QUIT"
+
+
+def test_instant_quit_env_bypasses_arming(monkeypatch) -> None:
+    monkeypatch.setenv("MAGI_TUI_INSTANT_QUIT", "1")
+
+    async def _run() -> None:
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            exits: list[bool] = []
+            app.exit = lambda *a, **k: exits.append(True)  # type: ignore[method-assign]
+            app._turn_active = False
+            app._arm_or_quit(key="ctrl+c")
+            assert exits == [True]
+            assert app._quit_armed_at is None
+            await pilot.pause()
+
+    asyncio.run(_run())
+
+
+def test_instant_quit_env_non_truthy_does_not_bypass(monkeypatch) -> None:
+    monkeypatch.setenv("MAGI_TUI_INSTANT_QUIT", "0")
+
+    async def _run() -> None:
+        engine = FakeEngineDriver()
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            exits: list[bool] = []
+            app.exit = lambda *a, **k: exits.append(True)  # type: ignore[method-assign]
+            app._turn_active = False
+            app._arm_or_quit(key="ctrl+c")
+            assert exits == []
+            assert app._quit_armed_at is not None
             await pilot.pause()
 
     asyncio.run(_run())
@@ -395,6 +746,397 @@ def test_ctrl_c_cancels_replacement_turn_after_stale_worker_finishes() -> None:
         assert engine.second_cancelled is True
         assert app.last_terminal is not None
         assert app.last_terminal.terminal == Terminal.aborted
+
+    asyncio.run(_run())
+
+
+# ---------------------------------------------------------------------------
+# busy-input-queue (gap: busy-input-queue) — default-OFF, surface-only FIFO that
+# buffers a prompt submitted while a turn runs and drains it after the turn ends.
+# ---------------------------------------------------------------------------
+class _BlockingFirstDriver:
+    """First turn yields one token then blocks forever; later turns complete.
+
+    A function-local style helper (the pinned ``ReplacementTurnDriver`` is NOT
+    importable). ``calls`` counts ``run_turn_stream`` entries; ``turn_inputs``
+    records each ``TurnInput`` so attachment/image assertions can inspect them.
+    """
+
+    def __init__(self) -> None:
+        self.calls = 0
+        self.turn_inputs: list[object] = []
+
+    async def run_turn_stream(self, runtime, turn_input, *, cancel, gate=None):
+        _ = runtime, gate
+        self.calls += 1
+        self.turn_inputs.append(turn_input)
+        if self.calls == 1:
+            yield RuntimeEvent(
+                type="token",
+                payload={"delta": "first"},
+                turn_id=turn_input.turn_id,
+            )
+            await asyncio.Event().wait()
+            return
+        yield RuntimeEvent(
+            type="token",
+            payload={"delta": "drained"},
+            turn_id=turn_input.turn_id,
+        )
+        yield EngineResult(terminal=Terminal.completed, turn_id=turn_input.turn_id)
+
+
+def test_queue_buffer_inits_empty_and_flag_defaults_off(monkeypatch) -> None:
+    async def _run() -> None:
+        monkeypatch.delenv("MAGI_TUI_QUEUE", raising=False)
+        app = _make_app(FakeEngineDriver())
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            assert app._prompt_queue == []
+            assert app._queue_enabled is False
+
+    asyncio.run(_run())
+
+
+def test_queue_flag_on_when_env_set(monkeypatch) -> None:
+    async def _run() -> None:
+        monkeypatch.setenv("MAGI_TUI_QUEUE", "1")
+        app = _make_app(FakeEngineDriver())
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            assert app._queue_enabled is True
+
+    asyncio.run(_run())
+
+
+def test_start_or_enqueue_enqueues_when_busy(monkeypatch) -> None:
+    async def _run() -> None:
+        monkeypatch.setenv("MAGI_TUI_QUEUE", "1")
+        engine = _BlockingFirstDriver()
+        app = _make_app(engine, flush_interval=999)
+        async with app.run_test() as pilot:
+            app.start_turn("first")
+            await pilot.pause()
+            assert app._turn_active is True
+            app.start_or_enqueue_turn("second")
+            # First turn NOT replaced; second parked in the queue (text-only
+            # snapshot in Task 3 — empty attachment tuple).
+            assert engine.calls == 1
+            assert app._prompt_queue == [("second", ())]
+            assert app._turn_active is True
+            snapshot = app.controller.committed_blocks_snapshot()
+            assert any(
+                b.startswith("⏳ queued:") and "second" in b for b in snapshot
+            )
+
+    asyncio.run(_run())
+
+
+def test_start_or_enqueue_starts_when_idle(monkeypatch) -> None:
+    async def _run() -> None:
+        monkeypatch.setenv("MAGI_TUI_QUEUE", "1")
+        engine = FakeEngineDriver(tokens=["x"])
+        app = _make_app(engine)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            app.start_or_enqueue_turn("solo")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            # Idle path is just start_turn: the turn ran to a terminal and
+            # nothing was queued.
+            assert app.last_terminal is not None
+            assert app._prompt_queue == []
+            snapshot = app.controller.committed_blocks_snapshot()
+            assert any("› solo" in b for b in snapshot)
+
+    asyncio.run(_run())
+
+
+def _submit_via_funnel(app, text: str) -> None:
+    """Drive the REAL typed-submission funnel for ``text``."""
+
+    from magi_agent.cli.tui.input import PromptInput, classify_line  # noqa: PLC0415
+
+    submission = classify_line(text, app._commands)
+    app.on_prompt_input_prompt_submitted(PromptInput.PromptSubmitted(submission))
+
+
+def test_submit_while_busy_enqueues_via_funnel(monkeypatch) -> None:
+    async def _run() -> None:
+        monkeypatch.setenv("MAGI_TUI_QUEUE", "1")
+        engine = _BlockingFirstDriver()
+        app = _make_app(engine, flush_interval=999)
+        async with app.run_test() as pilot:
+            app.start_turn("first")
+            await pilot.pause()
+            _submit_via_funnel(app, "second")
+            assert engine.calls == 1  # first NOT replaced
+            assert app._prompt_queue == [("second", ())]
+            snapshot = app.controller.committed_blocks_snapshot()
+            assert any(
+                b.startswith("⏳ queued:") and "second" in b for b in snapshot
+            )
+
+    asyncio.run(_run())
+
+
+class _DrainDriver:
+    """First turn completes normally; records each TurnInput.
+
+    Unlike ``_BlockingFirstDriver`` the first turn does NOT block — it yields
+    one token then a terminal, so the queue can drain after it finishes. A small
+    ``first_started`` event lets a test enqueue while the first turn is still
+    observably the active one (before its terminal lands).
+    """
+
+    def __init__(self) -> None:
+        self.calls = 0
+        self.turn_inputs: list[object] = []
+        self.first_started = asyncio.Event()
+        self._release_first = asyncio.Event()
+
+    async def run_turn_stream(self, runtime, turn_input, *, cancel, gate=None):
+        _ = runtime, gate
+        self.calls += 1
+        self.turn_inputs.append(turn_input)
+        if self.calls == 1:
+            self.first_started.set()
+            yield RuntimeEvent(
+                type="token",
+                payload={"delta": "first"},
+                turn_id=turn_input.turn_id,
+            )
+            # Hold until the test has enqueued "second", then complete.
+            await self._release_first.wait()
+            yield EngineResult(terminal=Terminal.completed, turn_id=turn_input.turn_id)
+            return
+        yield RuntimeEvent(
+            type="token",
+            payload={"delta": "drained"},
+            turn_id=turn_input.turn_id,
+        )
+        yield EngineResult(terminal=Terminal.completed, turn_id=turn_input.turn_id)
+
+
+def test_queue_drains_after_turn_completes(monkeypatch) -> None:
+    async def _run() -> None:
+        monkeypatch.setenv("MAGI_TUI_QUEUE", "1")
+        engine = _DrainDriver()
+        app = _make_app(engine, flush_interval=999)
+        async with app.run_test() as pilot:
+            app.start_turn("first")
+            await asyncio.wait_for(engine.first_started.wait(), timeout=2)
+            await pilot.pause()
+            app.start_or_enqueue_turn("second")
+            assert app._prompt_queue == [("second", ())]
+            # Let the first turn complete; the drain is scheduled from finally
+            # via call_after_refresh, so pump the loop after completion.
+            engine._release_first.set()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            await pilot.pause()
+            assert engine.calls == 2
+            assert app._prompt_queue == []
+            assert app._turn_active is False
+            assert app._footer.queued == 0
+            snapshot = app.controller.committed_blocks_snapshot()
+            assert any("› second" in b for b in snapshot)
+
+    asyncio.run(_run())
+
+
+def test_queue_drains_after_engine_raises(monkeypatch) -> None:
+    async def _run() -> None:
+        from textual.worker import WorkerFailed
+
+        monkeypatch.setenv("MAGI_TUI_QUEUE", "1")
+
+        class _RaiseThenOkDriver:
+            def __init__(self) -> None:
+                self.calls = 0
+                self.first_started = asyncio.Event()
+                self._release_first = asyncio.Event()
+
+            async def run_turn_stream(self, runtime, turn_input, *, cancel, gate=None):
+                _ = runtime, gate
+                self.calls += 1
+                if self.calls == 1:
+                    self.first_started.set()
+                    yield RuntimeEvent(
+                        type="token",
+                        payload={"delta": "first"},
+                        turn_id=turn_input.turn_id,
+                    )
+                    await self._release_first.wait()
+                    raise RuntimeError("boom")
+                yield RuntimeEvent(
+                    type="token",
+                    payload={"delta": "drained"},
+                    turn_id=turn_input.turn_id,
+                )
+                yield EngineResult(
+                    terminal=Terminal.completed, turn_id=turn_input.turn_id
+                )
+
+        engine = _RaiseThenOkDriver()
+        captured: dict[str, object] = {}
+        app = _make_app(engine, flush_interval=999)
+        try:
+            async with app.run_test() as pilot:
+                app.start_turn("first")
+                await asyncio.wait_for(engine.first_started.wait(), timeout=2)
+                await pilot.pause()
+                app.start_or_enqueue_turn("second")
+                # Release the first turn so it RAISES; the finally-drain must
+                # still pick up "second" despite the raise path.
+                engine._release_first.set()
+                try:
+                    await app.workers.wait_for_complete()
+                except WorkerFailed:
+                    pass
+                await pilot.pause()
+                await pilot.pause()
+                captured["calls"] = engine.calls
+                captured["queue"] = list(app._prompt_queue)
+        except (WorkerFailed, RuntimeError):
+            pass
+        # The queued "second" turn drained and ran despite the engine raise.
+        assert captured.get("calls") == 2
+        assert captured.get("queue") == []
+
+    asyncio.run(_run())
+
+
+def test_submit_with_attachment_while_busy_preserves_image(monkeypatch) -> None:
+    async def _run() -> None:
+        monkeypatch.setenv("MAGI_TUI_QUEUE", "1")
+        engine = _DrainDriver()
+        app = _make_app(engine, flush_interval=999)
+        block = {"type": "image", "source": {"data": "fake"}}
+        async with app.run_test() as pilot:
+            app.start_turn("first")
+            await asyncio.wait_for(engine.first_started.wait(), timeout=2)
+            await pilot.pause()
+            # User attached an image (Ctrl+V) then submitted while busy.
+            app._pending_attachments.append(block)
+            app.start_or_enqueue_turn("p")
+            # The queue captured the attachment snapshot; the shared buffer is
+            # cleared so an unrelated turn can't consume the image.
+            assert app._prompt_queue == [("p", (block,))]
+            assert app._pending_attachments == []
+            engine._release_first.set()
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            await pilot.pause()
+            # The drained turn carried the snapshotted image into its TurnInput.
+            assert engine.calls == 2
+            drained_input = engine.turn_inputs[-1]
+            assert block in tuple(drained_input.image_blocks)
+
+    asyncio.run(_run())
+
+
+def test_queue_cleared_on_resume(monkeypatch) -> None:
+    async def _run() -> None:
+        monkeypatch.setenv("MAGI_TUI_QUEUE", "1")
+        engine = _BlockingFirstDriver()
+        app = _make_app(engine, flush_interval=999)
+        async with app.run_test() as pilot:
+            app.start_turn("first")
+            await pilot.pause()
+            app.start_or_enqueue_turn("second")
+            assert len(app._prompt_queue) == 1
+            assert app._footer.queued == 1
+            # A queue is turn-local intent for the OLD session; resume drops it.
+            app._resume_session("other-session")
+            assert app._prompt_queue == []
+            assert app._footer.queued == 0
+
+    asyncio.run(_run())
+
+
+def test_prompt_command_while_busy_enqueues(monkeypatch) -> None:
+    async def _run() -> None:
+        from magi_agent.cli.contracts import (  # noqa: PLC0415
+            ContentBlock,
+            PromptCommand,
+        )
+
+        monkeypatch.setenv("MAGI_TUI_QUEUE", "1")
+
+        class _EchoPrompt(PromptCommand):
+            async def build_prompt(self, args, ctx):  # type: ignore[override]
+                return [ContentBlock(type="text", text=f"expanded:{args}")]
+
+        class _PromptRegistry:
+            def __init__(self) -> None:
+                self._cmd = _EchoPrompt(name="ask", surface=TUI)
+
+            def lookup(self, name: str):
+                return self._cmd if name == "ask" else None
+
+            def list_for(self, surface):
+                _ = surface
+                return [self._cmd]
+
+        engine = _BlockingFirstDriver()
+        app = _make_app(engine, commands=_PromptRegistry(), flush_interval=999)
+        async with app.run_test() as pilot:
+            app.start_turn("first")
+            await pilot.pause()
+            # Prompt-command submitted while busy must ENQUEUE, not replace.
+            # NOTE: the first turn worker blocks forever, so we cannot
+            # ``wait_for_complete()`` (it waits on ALL workers). The command runs
+            # in the separate group="command" worker; pump the loop so it drains
+            # build_prompt -> the admission seam -> enqueue.
+            app.submit_command("ask", "now")
+            for _ in range(5):
+                await pilot.pause()
+            assert engine.calls == 1  # first turn NOT replaced
+            assert len(app._prompt_queue) == 1
+            assert app._prompt_queue[0][0] == "expanded:now"
+
+    asyncio.run(_run())
+
+
+def test_submit_while_busy_disabled_restores_replace(monkeypatch) -> None:
+    async def _run() -> None:
+        monkeypatch.delenv("MAGI_TUI_QUEUE", raising=False)
+
+        class _ReplaceDriver:
+            def __init__(self) -> None:
+                self.calls = 0
+                self.second_entered = asyncio.Event()
+
+            async def run_turn_stream(self, runtime, turn_input, *, cancel, gate=None):
+                _ = runtime, gate
+                self.calls += 1
+                if self.calls == 1:
+                    yield RuntimeEvent(
+                        type="token",
+                        payload={"delta": "first"},
+                        turn_id=turn_input.turn_id,
+                    )
+                    await asyncio.Event().wait()
+                    return
+                self.second_entered.set()
+                yield RuntimeEvent(
+                    type="token",
+                    payload={"delta": "second"},
+                    turn_id=turn_input.turn_id,
+                )
+                await asyncio.Event().wait()
+
+        engine = _ReplaceDriver()
+        app = _make_app(engine, flush_interval=999)
+        async with app.run_test() as pilot:
+            app.start_turn("first")
+            await pilot.pause()
+            _submit_via_funnel(app, "second")
+            # Flag OFF == today: the second REPLACES the first (exclusive worker).
+            await asyncio.wait_for(engine.second_entered.wait(), timeout=2)
+            assert app._prompt_queue == []
+            assert app._turn_active is True
 
     asyncio.run(_run())
 
@@ -1420,6 +2162,64 @@ def test_footer_reflects_turn_state_and_token_usage() -> None:
         assert "completed" in text
         # 100 + 23 = 123 tokens summed from the terminal usage dict.
         assert "123 tok" in text
+
+    asyncio.run(_run())
+
+
+def test_footer_shows_queued_badge_during_turn(monkeypatch) -> None:
+    async def _run() -> None:
+        from magi_agent.cli.tui.footer import StatusFooter
+
+        monkeypatch.setenv("MAGI_TUI_QUEUE", "1")
+        engine = _BlockingFirstDriver()
+        app = _make_app(engine, flush_interval=999)
+        async with app.run_test() as pilot:
+            footer = app.query_one("#footer", StatusFooter)
+            app.start_turn("first")
+            await pilot.pause()
+            app.start_or_enqueue_turn("second")
+            await pilot.pause()
+            assert app._footer.queued == 1
+            assert " · 1 queued" in footer.status_text()
+
+    asyncio.run(_run())
+
+
+def test_footer_shows_cumulative_session_tokens_across_turns() -> None:
+    async def _run() -> None:
+        from magi_agent.cli.tui.footer import StatusFooter
+
+        class _TwoTurnUsageEngine(FakeEngineDriver):
+            def __init__(self) -> None:
+                super().__init__()
+                self._turn = 0
+
+            async def run_turn_stream(self, runtime, turn_input, *, cancel, gate=None):
+                self._turn += 1
+                turn_id = getattr(turn_input, "turn_id", "t")
+                yield RuntimeEvent(type="token", payload={"delta": "hi"}, turn_id=turn_id)
+                usage = (
+                    {"input_tokens": 100, "output_tokens": 23}
+                    if self._turn == 1
+                    else {"input_tokens": 10, "output_tokens": 7}
+                )
+                yield EngineResult(
+                    terminal=Terminal.completed, usage=usage, turn_id=turn_id
+                )
+
+        app = _make_app(_TwoTurnUsageEngine())
+        async with app.run_test() as pilot:
+            footer = app.query_one("#footer", StatusFooter)
+            app.start_turn("one")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            assert "123 tok" in footer.status_text()  # turn 1: 100 + 23
+            app.start_turn("two")
+            await app.workers.wait_for_complete()
+            await pilot.pause()
+            text = footer.status_text()
+        # Cumulative across the session: 123 + (10 + 7) = 140, NOT the last turn's 17.
+        assert "140 tok" in text
 
     asyncio.run(_run())
 

@@ -70,3 +70,39 @@ Channel delivery is also a projection boundary. User-visible messages should be 
   Discovery (`apify_search_actors`) works without a token. Running an Actor
   (`apify_run_actor`) requires `APIFY_TOKEN` and is billed to your Apify
   account; every run is capped at `APIFY_MAX_USD_PER_RUN`.
+
+## Self-serve Integrations tab (dashboard)
+
+The web dashboard (`magi-agent serve` → `/dashboard/.../integrations`) provides a
+self-serve surface so you can connect services without editing config files. All
+secrets are written to the local encrypted vault (`MAGI_LOCAL_VAULT_ENABLED=1`);
+they are sent once and never returned over HTTP. The HTTP surface is
+`/v1/admin/integrations/*` (gateway-token guarded).
+
+### Composio apps (BYO key)
+
+1. Paste your Composio API key from <https://app.composio.dev/developers>. It is
+   stored in the vault (`service=composio`).
+2. Search the toolkit catalog (`managed_by=composio` toolkits — one-click OAuth,
+   no per-toolkit auth config needed) and click **Connect**. The agent opens the
+   Composio redirect URL; once you authorize, the connection flips to `ACTIVE`.
+3. Connected accounts can be disconnected from the same list.
+
+> Connecting an app makes it available to your Composio entity. Whether those
+> toolsets are *attached to a running agent* still goes through the existing
+> Composio MCP path under `magi_agent/composio/` (see the on-hold note above) —
+> the dashboard manages connections, not the runtime attachment policy.
+
+### Telegram bot
+
+Paste a bot token from [@BotFather](https://t.me/BotFather) (`/newbot`). The token
+is validated via `getMe` and stored in the vault (`service=telegram`,
+`auth_scheme=bot_token`).
+
+To poll for messages without restarting the gateway, set
+`MAGI_DASHBOARD_TELEGRAM_ENABLED=1` (default **OFF**). When on, the gateway daemon
+runs a supervisor watcher that re-reads the bot token from the vault each cycle
+and starts/stops long-poll delivery as you connect or disconnect — no restart
+required. This is mutually exclusive with the legacy env-only path
+(`MAGI_CHANNEL_LIVE_TELEGRAM` + `MAGI_TELEGRAM_BOT_TOKEN`) to avoid `getUpdates`
+409 conflicts. Self-host only — do not enable alongside a hosted Telegram poller.

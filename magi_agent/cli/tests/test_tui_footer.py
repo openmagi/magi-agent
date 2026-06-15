@@ -55,3 +55,27 @@ def test_footer_update_reflects_running_state_tokens_elapsed() -> None:
         assert "7s" in text
 
     asyncio.run(_run())
+
+
+def test_footer_shows_queued_badge_only_when_running() -> None:
+    async def _run() -> None:
+        footer = StatusFooter(model="claude-x", cwd="~/proj", id="footer")
+        app = _Harness(footer)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            # Running + queued>0 -> badge appended.
+            footer.set_state("running")
+            footer.set_queued(2)
+            await pilot.pause()
+            assert " · 2 queued" in footer.status_text()
+            # Idle (queue still 2) -> badge gone (running-only affordance).
+            footer.set_state("idle")
+            await pilot.pause()
+            assert "queued" not in footer.status_text()
+            # Running again but queue drained to 0 -> badge gone.
+            footer.set_state("running")
+            footer.set_queued(0)
+            await pilot.pause()
+            assert "queued" not in footer.status_text()
+
+    asyncio.run(_run())

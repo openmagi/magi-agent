@@ -19,6 +19,7 @@ from textual.widgets import Static
 
 from magi_agent.cli.tui.dialogs.help import (
     ENV_HELP,
+    EXIT_KEYS,
     PROMPT_KEYS,
     HelpDialog,
     _binding_key_desc,
@@ -53,6 +54,29 @@ def test_build_help_sections_includes_prompt_keys_section() -> None:
     assert "↑" in flat
 
 
+def test_build_help_sections_includes_exit_keys_section() -> None:
+    # The exit gestures (Esc / Ctrl+C / Ctrl+D) surface as a dedicated "Exit"
+    # section so the double-press quit contract is discoverable. Ctrl+Q is
+    # deliberately omitted here — it is a real Binding and already appears via
+    # from_app's BINDINGS scan (no double-listing).
+    sections = build_help_sections(
+        bindings=[], commands=[], prompt_keys=[], exit_keys=list(EXIT_KEYS)
+    )
+    titles = [title for title, _lines in sections]
+    assert "Exit" in titles
+    flat = "\n".join(line for _title, lines in sections for line in lines)
+    assert "Esc" in flat
+    assert "Ctrl+D" in flat
+    assert "twice to quit" in flat
+
+
+def test_exit_keys_excludes_ctrl_q() -> None:
+    # Ctrl+Q is a real priority Binding (surfaced via from_app), so it must NOT
+    # also live in the static EXIT_KEYS (dedupe decision).
+    keys = [key for key, _desc in EXIT_KEYS]
+    assert "Ctrl+Q" not in keys
+
+
 def test_build_help_sections_includes_env_section() -> None:
     # Opt-in env toggles (not keys/commands) surface as an "Environment" section
     # so a user can discover the gated bell.
@@ -85,6 +109,30 @@ def test_help_dialog_default_includes_env_bell() -> None:
         line for _title, lines in dialog._sections for line in lines
     )
     assert "MAGI_TUI_NOTIFY_BELL" in flat
+
+
+def test_help_dialog_default_includes_exit_keys() -> None:
+    # from_app does NOT pass exit_keys, so __init__ must default it to EXIT_KEYS
+    # (same surfacing path as env/prompt_keys) for the Exit section to appear.
+    dialog = HelpDialog(bindings=[("ctrl+c", "Cancel")], commands=["compact"])
+    flat = "\n".join(
+        line for _title, lines in dialog._sections for line in lines
+    )
+    assert "twice to quit" in flat
+    assert "Ctrl+D" in flat
+
+
+def test_help_env_surfaces_instant_quit() -> None:
+    # The legacy single-press instant-quit escape hatch is gated behind
+    # MAGI_TUI_INSTANT_QUIT (default OFF); it is otherwise invisible, so it must
+    # be discoverable from the help Environment section.
+    flat = "\n".join(line for _name, desc in ENV_HELP for line in (_name, desc))
+    assert "MAGI_TUI_INSTANT_QUIT" in flat
+    dialog = HelpDialog(bindings=[("ctrl+c", "Cancel")], commands=["compact"])
+    rendered = "\n".join(
+        line for _title, lines in dialog._sections for line in lines
+    )
+    assert "MAGI_TUI_INSTANT_QUIT" in rendered
 
 
 def test_build_help_sections_drops_empty_sections() -> None:

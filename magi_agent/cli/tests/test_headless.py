@@ -72,6 +72,21 @@ def test_json_mode_single_result_object(monkeypatch: pytest.MonkeyPatch) -> None
     assert obj["is_error"] is False
 
 
+def test_json_mode_result_carries_usage_and_cost(monkeypatch: pytest.MonkeyPatch) -> None:
+    """One-engine-two-surfaces: EngineResult.usage/cost_usd flow into the NDJSON
+    result frame with zero headless change (the consumption layer already exists)."""
+    monkeypatch.setenv("MAGI_CLI_ENABLED", "true")
+    buffer = io.StringIO()
+    code = asyncio.run(
+        run_headless("hi", output="json", driver=StubEngineDriver(text="answer"), stream=buffer)
+    )
+    assert code == 0
+    obj = json.loads([line for line in buffer.getvalue().splitlines() if line][0])
+    assert obj["usage"]["input_tokens"] == 8
+    assert obj["usage"]["output_tokens"] == 12
+    assert obj["total_cost_usd"] == 0.0
+
+
 def test_stream_json_mode_valid_ndjson(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MAGI_CLI_ENABLED", "1")
     buffer = io.StringIO()
