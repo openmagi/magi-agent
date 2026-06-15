@@ -33,7 +33,13 @@ from __future__ import annotations
 import pytest
 
 from magi_agent.cli.engine import MagiEngineDriver, RunnerPolicyAssembly
-from magi_agent.recipes.compiler import RecipeSnapshot, build_recipe_snapshot_id
+from magi_agent.recipes.compiler import (
+    AgentRecipeCompiler,
+    PackRegistry,
+    ProfileResolutionRequest,
+    RecipeSnapshot,
+    build_recipe_snapshot_id,
+)
 from magi_agent.recipes.materializer import RecipeMaterializer
 
 _SOURCE_EVIDENCE_REF = "verifier:research-source-evidence"
@@ -221,3 +227,170 @@ def test_no_source_blocks_on_named_ref(
     assert payload["missingEvidence"] == []
     for hard in (*_HARD_VALIDATORS, *_HARD_EVIDENCE):
         assert hard in payload["matchedRefs"]
+
+
+# ---------------------------------------------------------------------------
+# FULL real-compiler-path tests
+#
+# ``_real_assembly`` above hand-builds a snapshot whose ``selectedPackIds`` is
+# ONLY ``openmagi.source-grounded``, so only that recipe's reliability policy
+# (plus the force-merged context-safety hard refs) is materialized. The LIVE
+# runner instead compiles via ``AgentRecipeCompiler`` with the explicit
+# selection ``MAGI_FORCE_RECIPE`` uses, which force-selects the mandatory
+# hard-safety packs (context-safety + evidence) as well. The tests below drive
+# THAT path so the gate faces the full required-ref set a live turn sees.
+# ---------------------------------------------------------------------------
+
+
+def _compiled_assembly() -> RunnerPolicyAssembly:
+    """Build the assembly the live runner builds for a forced source-grounded turn.
+
+    Mirrors ``cli/real_runner._build_default_runner_policy_assembly`` exactly:
+    explicit ``this_turn`` selection with ``allowAdditionalAutoRecipes=False``,
+    compiled by the real ``AgentRecipeCompiler`` so the mandatory hard-safety
+    packs are force-selected, then materialized to the final-gate policy.
+    """
+    runtime_context = {
+        "channel": "cli",
+        "explicitRecipeSelection": {
+            "mode": "this_turn",
+            "requiredRecipeRefs": [{"recipeId": _RECIPE_ID}],
+            "allowAdditionalAutoRecipes": False,
+        },
+    }
+    snapshot = AgentRecipeCompiler(PackRegistry.with_first_party_packs()).compile(
+        ProfileResolutionRequest(
+            taskProfile={"taskType": "research"},
+            runtimeContext=runtime_context,
+            recipePackConfig={},
+        )
+    )
+    plan = RecipeMaterializer.with_reliability_defaults().materialize(
+        snapshot,
+        modelProvider="anthropic",
+        modelLabel="haiku",
+    )
+    return RunnerPolicyAssembly(
+        modelProvider="anthropic",
+        modelLabel="anthropic/claude-sonnet-4-5",
+        selectedPackIds=plan.selected_pack_ids,
+        evidenceRequirements=plan.final_gate_policy.required_evidence,
+        requiredValidators=plan.final_gate_policy.required_validators,
+        missingEvidenceAction=plan.final_gate_policy.missing_evidence_action,
+        repairPolicy={
+            "action": plan.final_gate_policy.missing_evidence_action,
+            "source": "recipe-materializer",
+        },
+        taskProfile={"taskType": "research"},
+    )
+
+
+def _projected_source_record() -> object:
+    """A live ``LocalResearchSourceLedger`` source-read projected via the EXISTING
+    ``SourceLedgerRecord.to_evidence_record()`` — exactly what the collector
+    surfaces for a turn that read one source."""
+    from magi_agent.evidence.source_ledger import LocalResearchSourceLedger
+
+    ledger = LocalResearchSourceLedger(
+        ledgerId="ledger:test",
+        sessionId="session:test",
+        turnId="t",
+    )
+    record = ledger.record_source(
+        {
+            "turnId": "t",
+            "toolName": "DocumentRead",
+            "toolUseId": "DocumentRead:local",
+            "evidenceType": "SourceInspection",
+            "kind": "file",
+            "uri": "workspace://notes.md",
+            "inspected": True,
+            "contentHash": "deadbeef" * 8,
+            "contentType": "text/plain",
+            "snippets": ("the token economy section",),
+            "metadata": {"pathRef": "notes.md"},
+        }
+    )
+    return record.to_evidence_record()
+
+
+def test_compiled_path_requires_the_full_force_selected_ref_set() -> None:
+    """The live compiled path force-selects context-safety + evidence packs.
+
+    Documents the full required-ref surface the gate must satisfy (web-acquisition
+    refs are GONE once its dep is dropped from source-grounded — item 1)."""
+    assembly = _compiled_assembly()
+    assert "openmagi.context-safety" in assembly.selected_pack_ids
+    assert "openmagi.evidence" in assembly.selected_pack_ids
+    # item 1: web-acquisition dep removed ⇒ pack not selected, refs absent
+    assert "openmagi.web-acquisition" not in assembly.selected_pack_ids
+    for gone in (
+        "no_auth_bypass",
+        "source_quality",
+        "verifier:web-acquisition:provider-boundary",
+    ):
+        assert gone not in assembly.required_validators
+    assert "source_ledger" not in assembly.evidence_requirements
+    assert "evidence:web-acquisition:source-ledger-input" not in assembly.evidence_requirements
+    # source-grounded keeps its OWN named refs
+    assert _SOURCE_EVIDENCE_REF in assembly.required_validators
+    assert "evidence:inspected-source" in assembly.evidence_requirements
+
+
+def test_compiled_path_clean_source_read_FULL_PASS(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """THE LIVE PAYOFF: a clean projected source-read PASSES the FULL compiled gate
+    with EMPTY missingValidators AND missingEvidence — no safety guard removed."""
+    monkeypatch.setenv("MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED", "1")
+    monkeypatch.setenv("MAGI_CODING_REPAIR_LOOP_ENABLED", "0")
+    payload = _gate(
+        _compiled_assembly(),
+        records=(_projected_source_record(),),
+        final_text="The notes.md file discusses the token economy in plain prose.",
+    )
+    assert payload["decision"] == "pass"
+    assert payload["missingValidators"] == []
+    assert payload["missingEvidence"] == []
+    assert _SOURCE_EVIDENCE_REF in payload["matchedRefs"]
+    assert "evidence:inspected-source" in payload["matchedRefs"]
+
+
+def test_compiled_path_no_source_BLOCKS_on_source_refs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No source read ⇒ the source-evidence refs stay missing ⇒ BLOCK, even though
+    every redaction / runtime-record / no-block-mode ref is cleanly satisfied."""
+    monkeypatch.setenv("MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED", "1")
+    monkeypatch.setenv("MAGI_CODING_REPAIR_LOOP_ENABLED", "0")
+    non_source = {
+        "schemaVersion": "openmagi.localToolEvidenceReceipt.v1",
+        "toolName": "Bash",
+        "status": "ok",
+        "receiptRefs": [],
+        "evidenceRefs": [],
+    }
+    payload = _gate(_compiled_assembly(), records=(non_source,))
+    assert payload["decision"] == "block"
+    assert _SOURCE_EVIDENCE_REF in payload["missingValidators"]
+    assert "evidence:inspected-source" in payload["missingEvidence"]
+
+
+def test_compiled_path_credential_leak_BLOCKS_on_redaction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A credential in the final text keeps the redaction refs missing ⇒ BLOCK,
+    on BOTH the bare and prefixed context-safety redaction aliases."""
+    monkeypatch.setenv("MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED", "1")
+    monkeypatch.setenv("MAGI_CODING_REPAIR_LOOP_ENABLED", "0")
+    payload = _gate(
+        _compiled_assembly(),
+        records=(_projected_source_record(),),
+        final_text=f"The file leaked this token: {_REAL_JWT}",
+    )
+    assert payload["decision"] == "block"
+    assert _SOURCE_EVIDENCE_REF in payload["matchedRefs"]
+    assert "public_redaction" in payload["missingValidators"]
+    assert "validator:context-safety:public-redaction" in payload["missingValidators"]
+    assert "redaction_audit" in payload["missingEvidence"]
+    assert "evidence:context-safety-redaction" in payload["missingEvidence"]

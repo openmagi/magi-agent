@@ -2765,6 +2765,9 @@ class MagiEngineDriver:
         observed_public_refs.update(
             self._hard_redaction_matched_requirement_labels(final_text=final_text)
         )
+        observed_public_refs.update(
+            self._evidence_pack_matched_requirement_labels(evidence_records)
+        )
         missing_evidence = [
             ref for ref in assembly.evidence_requirements if ref not in observed_public_refs
         ]
@@ -3035,9 +3038,36 @@ class MagiEngineDriver:
                 _SOURCE_EVIDENCE_TYPES,
             )
 
-            named_ref = "verifier:research-source-evidence"
-            if named_ref not in assembly.required_validators:
+            # All source-read refs that ONE inspected-source evidence record
+            # legitimately satisfies. Each is emitted ONLY when actually in the
+            # assembled requirement set (same ``if ref not in required: skip``
+            # guard pattern as the redaction satisfier), so this never invents a
+            # requirement — it can only REMOVE a block on a turn that read >=1
+            # inspected source.
+            #   * ``verifier:research-source-evidence`` (validator) — the named
+            #     source-evidence verifier the source-grounded / research recipes
+            #     require.
+            #   * ``evidence:inspected-source`` (evidence) — the inspected-source
+            #     evidence requirement the same recipes carry; before this it had
+            #     no live producer so the gate blocked even on a real read.
+            #   * ``verifier:sourceOpened@1`` (validator) — the "at least one
+            #     source opened" verifier; satisfied by the same single record
+            #     when a recipe requires it.
+            named_validator = "verifier:research-source-evidence"
+            inspected_evidence = "evidence:inspected-source"
+            source_opened = "verifier:sourceOpened@1"
+            required_validators = tuple(
+                getattr(assembly, "required_validators", ()) or ()
+            )
+            required_evidence = tuple(
+                getattr(assembly, "evidence_requirements", ()) or ()
+            )
+            wants_validator = named_validator in required_validators
+            wants_inspected = inspected_evidence in required_evidence
+            wants_opened = source_opened in required_validators
+            if not (wants_validator or wants_inspected or wants_opened):
                 return []
+            has_source_record = False
             for record in evidence_records:
                 record_type = (
                     record.get("type")
@@ -3045,8 +3075,18 @@ class MagiEngineDriver:
                     else getattr(record, "type", None)
                 )
                 if isinstance(record_type, str) and record_type in _SOURCE_EVIDENCE_TYPES:
-                    return [named_ref]
-            return []
+                    has_source_record = True
+                    break
+            if not has_source_record:
+                return []
+            matched: list[str] = []
+            if wants_validator:
+                matched.append(named_validator)
+            if wants_inspected:
+                matched.append(inspected_evidence)
+            if wants_opened:
+                matched.append(source_opened)
+            return matched
         except Exception:
             logger.debug("source-ledger evidence projector failed", exc_info=True)
             return []
@@ -3106,8 +3146,16 @@ class MagiEngineDriver:
         required_validators = tuple(getattr(assembly, "required_validators", ()) or ())
         required_evidence = tuple(getattr(assembly, "evidence_requirements", ()) or ())
 
-        # no_production_attachment — read the genuine config invariant.
-        if "no_production_attachment" in required_validators:
+        # no_production_attachment — read the genuine config invariant. The
+        # mandatory ``openmagi.context-safety`` pack ALSO requires the PREFIXED
+        # alias ``validator:context-safety:no-production-attachment`` for the
+        # SAME invariant (compiler.py:2014-2019); it is the same check, so emit
+        # both under the single invariant read (each guarded on membership).
+        no_prod_bare = "no_production_attachment"
+        no_prod_prefixed = "validator:context-safety:no-production-attachment"
+        wants_no_prod_bare = no_prod_bare in required_validators
+        wants_no_prod_prefixed = no_prod_prefixed in required_validators
+        if wants_no_prod_bare or wants_no_prod_prefixed:
             try:
                 from magi_agent.config.env import (  # noqa: PLC0415
                     parse_python_toolhost_attachment_env,
@@ -3115,24 +3163,126 @@ class MagiEngineDriver:
 
                 toolhost = parse_python_toolhost_attachment_env(os.environ)
                 if toolhost.production_attachment_enabled is False:
-                    matched.append("no_production_attachment")
+                    if wants_no_prod_bare:
+                        matched.append(no_prod_bare)
+                    if wants_no_prod_prefixed:
+                        matched.append(no_prod_prefixed)
             except Exception:
                 logger.debug(
                     "no-production-attachment invariant read failed", exc_info=True
                 )
 
-        # public_redaction / redaction_audit — credential-only scan of final_text.
-        wants_public_redaction = "public_redaction" in required_validators
-        wants_redaction_audit = "redaction_audit" in required_evidence
-        if wants_public_redaction or wants_redaction_audit:
+        # public_redaction / redaction_audit — credential-only scan of
+        # final_text. The mandatory ``openmagi.context-safety`` pack carries
+        # PREFIXED aliases for the SAME redaction check
+        # (``validator:context-safety:public-redaction`` ==
+        # ``public_redaction``; ``evidence:context-safety-redaction`` ==
+        # ``redaction_audit``; compiler.py:2018-2024). It also requires the bare
+        # ``no_raw_evidence_payload`` validator (reliability_policy.py:111),
+        # whose honest deterministic condition is the SAME credential-clean
+        # scan (a final answer carrying no raw credential material). All four
+        # are emitted from the single scan, each guarded on membership, so no
+        # new logic is introduced.
+        bare_public_redaction = "public_redaction"
+        prefixed_public_redaction = "validator:context-safety:public-redaction"
+        no_raw_payload = "no_raw_evidence_payload"
+        bare_redaction_audit = "redaction_audit"
+        prefixed_redaction_audit = "evidence:context-safety-redaction"
+        wants_bare_redaction = bare_public_redaction in required_validators
+        wants_prefixed_redaction = prefixed_public_redaction in required_validators
+        wants_no_raw_payload = no_raw_payload in required_validators
+        wants_bare_audit = bare_redaction_audit in required_evidence
+        wants_prefixed_audit = prefixed_redaction_audit in required_evidence
+        if (
+            wants_bare_redaction
+            or wants_prefixed_redaction
+            or wants_no_raw_payload
+            or wants_bare_audit
+            or wants_prefixed_audit
+        ):
             try:
                 if not self._final_text_contains_credential(final_text):
-                    if wants_public_redaction:
-                        matched.append("public_redaction")
-                    if wants_redaction_audit:
-                        matched.append("redaction_audit")
+                    if wants_bare_redaction:
+                        matched.append(bare_public_redaction)
+                    if wants_prefixed_redaction:
+                        matched.append(prefixed_public_redaction)
+                    if wants_no_raw_payload:
+                        matched.append(no_raw_payload)
+                    if wants_bare_audit:
+                        matched.append(bare_redaction_audit)
+                    if wants_prefixed_audit:
+                        matched.append(prefixed_redaction_audit)
             except Exception:
                 logger.debug("public-redaction credential scan failed", exc_info=True)
+        return matched
+
+    def _evidence_pack_matched_requirement_labels(
+        self,
+        evidence_records: tuple[object, ...],
+    ) -> list[str]:
+        """Satisfiers for the mandatory ``openmagi.evidence`` pack's refs.
+
+        ``openmagi.evidence`` is a hard-safety, non-opt-out pack
+        (``compiler.py:2037-2042``), so its refs are ALWAYS required on the live
+        gate yet had no live producer, blocking every turn. This emits them from
+        EXISTING deterministic conditions only (no new enforcement logic), each
+        guarded on membership in the assembled requirement set so OFF / absent
+        requirements stay byte-identical:
+
+        * ``runtime_evidence_record`` (bare) + ``evidence:runtime-issued-record``
+          (prefixed) — the SAME "the runtime issued at least one evidence
+          record this turn" attestation. Honest deterministic condition: the
+          turn's already-collected ``evidence_records`` is non-empty (auto-
+          attest from the real per-turn ledger the engine already passes in).
+          No records ⇒ not emitted ⇒ the gate keeps blocking.
+        * ``validator:evidence:no-block-mode`` — a structural attestation that
+          the evidence verification subsystem runs in AUDIT mode, never
+          block-mode. Read from the existing ``block_mode = Literal[False]``
+          config invariant on ``CitationAuditResult`` (``citation_audit.py:88``);
+          if that invariant ever flips to True the ref is NOT emitted.
+
+        Behind the same strict default-OFF flag. Fail-open per ref.
+        """
+        import os  # noqa: PLC0415
+
+        from magi_agent.config.env import (  # noqa: PLC0415
+            parse_source_ledger_evidence_gate_enabled,
+        )
+
+        if not parse_source_ledger_evidence_gate_enabled(os.environ):
+            return []
+        assembly = self._runner_policy_assembly
+        if assembly is None:
+            return []
+        matched: list[str] = []
+        required_validators = tuple(getattr(assembly, "required_validators", ()) or ())
+        required_evidence = tuple(getattr(assembly, "evidence_requirements", ()) or ())
+
+        # runtime_evidence_record / evidence:runtime-issued-record — emit when
+        # the turn actually collected >=1 evidence record.
+        bare_runtime = "runtime_evidence_record"
+        prefixed_runtime = "evidence:runtime-issued-record"
+        wants_bare_runtime = bare_runtime in required_evidence
+        wants_prefixed_runtime = prefixed_runtime in required_evidence
+        if (wants_bare_runtime or wants_prefixed_runtime) and len(evidence_records) >= 1:
+            if wants_bare_runtime:
+                matched.append(bare_runtime)
+            if wants_prefixed_runtime:
+                matched.append(prefixed_runtime)
+
+        # validator:evidence:no-block-mode — structural audit-mode invariant.
+        no_block_mode = "validator:evidence:no-block-mode"
+        if no_block_mode in required_validators:
+            try:
+                from magi_agent.evidence.citation_audit import (  # noqa: PLC0415
+                    CitationAuditResult,
+                )
+
+                block_mode_field = CitationAuditResult.model_fields["block_mode"]
+                if block_mode_field.default is False:
+                    matched.append(no_block_mode)
+            except Exception:
+                logger.debug("no-block-mode invariant read failed", exc_info=True)
         return matched
 
     @staticmethod

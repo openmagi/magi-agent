@@ -2644,7 +2644,16 @@ def _first_party_packs() -> tuple[RecipePackManifest, ...]:
                 "requiring named source-evidence before a final answer."
             ),
             taskProfileSelectors=("source-grounded",),
-            dependsOnPackIds=("openmagi.web-acquisition",),
+            # NOTE: NO ``dependsOnPackIds``. ``openmagi.web-acquisition`` was
+            # pulled in ONLY via this dep (it is not hard-safety and not a
+            # default pack), and its refs (``verifier:web-acquisition:provider-
+            # boundary``, ``evidence:web-acquisition:source-ledger-input``, plus
+            # the reliability-policy ``source_quality`` / ``no_auth_bypass`` /
+            # ``source_ledger``) have no live producer on the source-grounded
+            # path, so the dep made the gate permanently block. Source-grounded
+            # carries its OWN named source-evidence refs (``verifier:research-
+            # source-evidence`` + ``evidence:inspected-source``), satisfied by
+            # the live source-ledger projector on a real read.
             instructionRefs=("instruction:source-grounded:read-before-answer",),
             callbackRefs=("callback:source-grounded:source-capture",),
             validatorRefs=("verifier:research-source-evidence",),

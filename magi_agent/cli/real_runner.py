@@ -588,6 +588,10 @@ def _build_default_runner_policy_assembly(
         runtime_context["explicitRecipeSelection"] = {
             "mode": "this_turn",
             "requiredRecipeRefs": [{"recipeId": forced_recipe}],
+            # Pin to ONLY the forced recipe: auto-selecting other packs (e.g.
+            # dev-coding) would short-circuit _pre_final_gate_applies and skip
+            # the gate. A forced recipe means "this and nothing else".
+            "allowAdditionalAutoRecipes": False,
         }
     try:
         snapshot = AgentRecipeCompiler(PackRegistry.with_first_party_packs()).compile(

@@ -94,15 +94,79 @@ def document_read(arguments: Mapping[str, object], context: ToolContext) -> Tool
         max_chars = min(max(max_chars_raw, 100), _MAX_CHARS)
 
     if suffix == ".pdf":
-        return _read_pdf(resolved, arguments, tool_name, max_chars, byte_size)
-    if suffix == ".docx":
-        return _read_docx(resolved, tool_name, max_chars, byte_size)
-    if suffix == ".pptx":
-        return _read_pptx(resolved, tool_name, max_chars, byte_size)
-    if suffix == ".xml":
-        return _read_xml(resolved, tool_name, max_chars, byte_size)
-    # .csv / .txt / .md / .rst — plain UTF-8 text (stdlib only)
-    return _read_text(resolved, tool_name, max_chars, byte_size)
+        result = _read_pdf(resolved, arguments, tool_name, max_chars, byte_size)
+    elif suffix == ".docx":
+        result = _read_docx(resolved, tool_name, max_chars, byte_size)
+    elif suffix == ".pptx":
+        result = _read_pptx(resolved, tool_name, max_chars, byte_size)
+    elif suffix == ".xml":
+        result = _read_xml(resolved, tool_name, max_chars, byte_size)
+    else:
+        # .csv / .txt / .md / .rst — plain UTF-8 text (stdlib only)
+        result = _read_text(resolved, tool_name, max_chars, byte_size)
+    # A successful DocumentRead is a SOURCE READ (the live model reads documents
+    # via DocumentRead, not FileRead). ``LOCAL_READONLY_TOOL_NAMES`` excludes
+    # DocumentRead, so it never populated a source ledger and a document-grounded
+    # turn could not satisfy the source-evidence gate. Behind the default-OFF
+    # ``MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED`` flag, attach the SAME
+    # ``sourceProjection`` a FileRead emits (built via the existing
+    # ``LocalResearchSourceLedger.record_source`` + ``public_source_ledger_report``)
+    # so the collector projects it as a SourceInspection EvidenceRecord. When the
+    # flag is OFF this is a no-op and the result is byte-identical to main.
+    return _maybe_attach_source_projection(result, context, resolved)
+
+
+def _maybe_attach_source_projection(
+    result: ToolResult,
+    context: ToolContext,
+    resolved: object,
+) -> ToolResult:
+    if result.status != "ok":
+        return result
+    try:
+        import os  # noqa: PLC0415
+
+        from magi_agent.config.env import (  # noqa: PLC0415
+            parse_source_ledger_evidence_gate_enabled,
+        )
+
+        if not parse_source_ledger_evidence_gate_enabled(os.environ):
+            return result
+        if "sourceProjection" in result.metadata:
+            return result
+        from magi_agent.evidence.source_ledger import (  # noqa: PLC0415
+            LocalResearchSourceLedger,
+            public_source_ledger_report,
+        )
+
+        session_ref = _digest_text(context.session_id or "session")
+        turn_ref = context.turn_id or "unknown-turn"
+        path_ref = getattr(resolved, "path_ref", None) or "document"
+        ledger = LocalResearchSourceLedger(
+            ledgerId=f"ledger:{_digest_text(str(path_ref))}",
+            sessionId=f"session:{session_ref}",
+            turnId=turn_ref,
+        )
+        ledger.record_source(
+            {
+                "turnId": turn_ref,
+                "toolName": "DocumentRead",
+                "toolUseId": context.tool_use_id or "DocumentRead:local",
+                "evidenceType": "SourceInspection",
+                "kind": "external_doc",
+                "uri": f"workspace://{path_ref}",
+                "inspected": True,
+                "contentType": "text/plain",
+            }
+        )
+        projection = public_source_ledger_report(ledger).model_dump(
+            by_alias=True, mode="json", warnings=False
+        )
+        return result.model_copy(
+            update={"metadata": {**result.metadata, "sourceProjection": projection}}
+        )
+    except Exception:
+        return result
 
 
 # ---------------------------------------------------------------------------
@@ -445,6 +509,10 @@ def _str_arg(arguments: Mapping[str, object], name: str) -> str | None:
 def _digest_path(path: Path) -> str:
     digest = hashlib.sha256(path.read_bytes()).hexdigest()
     return f"sha256:{digest}"
+
+
+def _digest_text(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()[:24]
 
 
 # ---------------------------------------------------------------------------
