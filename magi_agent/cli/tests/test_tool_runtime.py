@@ -319,7 +319,7 @@ def test_cli_select_recipe_tool_dispatches_to_handler(monkeypatch, tmp_path) -> 
     tools = build_cli_adk_tools(workspace_root=str(tmp_path), session_id="sid-recipe")
     select = _find_tool(tools, "select_recipe")
 
-    # openmagi.dev-coding is a first-party routable (non-hard) pack.
+    # dev-coding is a first-party routable (non-hard) pack.
     result = asyncio.run(select.func({"pack_id": "openmagi.dev-coding"}, object()))
 
     assert result["status"] == "ok"
