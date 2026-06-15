@@ -71,6 +71,9 @@ def public_metadata(item: dict[str, Any]) -> dict[str, Any]:
         "status": str(item.get("status", STATUS_PENDING)),
         "vault_ref": item.get("vault_ref") if item.get("vault_ref") else None,
         "requires_approval": bool(item.get("requires_approval", False)),
+        # Additive, non-secret target host for the local egress proxy to match a
+        # request against this credential. Optional; None when unset.
+        "host": str(item["host"]) if item.get("host") else None,
         "created_at": str(item.get("created_at", "")),
     }
 
@@ -115,6 +118,7 @@ def add_credential(
     status: str,
     vault_ref: str | None,
     requires_approval: bool = False,
+    host: str | None = None,
     path: Path | None = None,
 ) -> dict[str, Any]:
     """Append one credential's metadata, save atomically, return its projection."""
@@ -128,6 +132,7 @@ def add_credential(
         "status": status,
         "vault_ref": vault_ref,
         "requires_approval": requires_approval,
+        "host": host,
         "created_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
     }
     projection = public_metadata(record)

@@ -63,7 +63,7 @@ def register_credentials_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
         fields = _validate_body(body)
         if isinstance(fields, JSONResponse):
             return fields
-        service, label, auth_scheme, secret, requires_approval = fields
+        service, label, auth_scheme, secret, requires_approval, host = fields
 
         # Forward the secret to the vault seam, then drop it. The seam never
         # returns, logs, or raises the plaintext.
@@ -98,6 +98,7 @@ def register_credentials_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
             status=status,
             vault_ref=vault_ref,
             requires_approval=requires_approval,
+            host=host,
         )
 
         # Exercise (do not bypass) the durable store guard with a digest-only
@@ -192,7 +193,7 @@ def register_credentials_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
 
 def _validate_body(
     body: object,
-) -> tuple[str, str, str, str, bool] | JSONResponse:
+) -> tuple[str, str, str, str, bool, str | None] | JSONResponse:
     if not isinstance(body, dict):
         return JSONResponse(status_code=400, content={"error": "object_required"})
     service = body.get("service")
@@ -221,12 +222,30 @@ def _validate_body(
                 status_code=400,
                 content={"error": "field_too_long", "field": name},
             )
+    # Optional, non-secret target host for the local egress proxy. Validated like
+    # the other string fields but allowed to be absent (→ None, resolved from the
+    # service map at proxy time).
+    host_raw = body.get("host")
+    host: str | None = None
+    if host_raw is not None:
+        if not isinstance(host_raw, str) or not host_raw.strip():
+            return JSONResponse(
+                status_code=400,
+                content={"error": "field_invalid", "field": "host"},
+            )
+        if len(host_raw) > _MAX_FIELD_LEN:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "field_too_long", "field": "host"},
+            )
+        host = host_raw.strip()
     return (
         str(service).strip(),
         str(label).strip(),
         str(auth_scheme).strip(),
         str(secret),
         bool(requires_approval_raw),
+        host,
     )
 
 
