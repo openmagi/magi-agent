@@ -3,11 +3,17 @@ from __future__ import annotations
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from magi_agent.customize.apply import apply_tool_overrides
+from magi_agent.customize.apply import apply_tool_overrides, apply_verification_overrides
 from magi_agent.customize.catalog import build_catalog
-from magi_agent.customize.store import load_overrides, set_tool_override
+from magi_agent.customize.store import (
+    load_overrides,
+    set_tool_override,
+    set_verification_override,
+)
 from magi_agent.runtime.openmagi_runtime import OpenMagiRuntime
 from magi_agent.transport.tools import _unauthorized_response
+
+_VERIFICATION_KINDS = {"recipes", "harness_presets", "hooks"}
 
 
 def register_customize_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
@@ -42,4 +48,22 @@ def register_customize_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
             )
         overrides = set_tool_override(name, enabled)
         apply_tool_overrides(runtime, {"tools": {name: enabled}})
+        return JSONResponse(content={"overrides": overrides})
+
+    @app.patch("/v1/app/customize/verification/{kind}/{item_id}")
+    async def patch_verification(kind: str, item_id: str, request: Request) -> JSONResponse:
+        unauthorized = _unauthorized_response(request, runtime)
+        if unauthorized is not None:
+            return unauthorized
+        if kind not in _VERIFICATION_KINDS:
+            return JSONResponse(status_code=400, content={"error": "unknown_kind"})
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse(status_code=400, content={"error": "invalid_json"})
+        if not isinstance(body, dict) or not isinstance(body.get("enabled"), bool):
+            return JSONResponse(status_code=400, content={"error": "enabled_bool_required"})
+        mode = body["mode"] if isinstance(body.get("mode"), str) else None
+        overrides = set_verification_override(kind, item_id, body["enabled"], mode=mode)
+        apply_verification_overrides(runtime, overrides)
         return JSONResponse(content={"overrides": overrides})
