@@ -1,3 +1,12 @@
+import pytest
+
+from magi_agent.context.auto_compact import AutoCompactionEngine
+from magi_agent.context.microcompact import MicrocompactEngine
+from magi_agent.context.protected_tools import (
+    PRUNE_PROTECTED_TOOLS,
+    is_compaction_protected_tool_result,
+)
+from magi_agent.context.types import WarningLevel
 from magi_agent.recipes.compiler import PackRegistry, RecipePackManifest
 from magi_agent.recipes.recipe_routing import (
     SELECTED_RECIPE_PACK_IDS_STATE_KEY,
@@ -149,3 +158,107 @@ def test_select_without_adk_state_still_returns_ok_failsafe():
     )
     assert result.status == "ok"
     assert "test.soft-full" in str(result.output)
+
+
+# ---------------------------------------------------------------------------
+# compaction protection — select_recipe result survives, others compacted.
+#
+# Mirrors the GA protection tests (tests/test_ga_progressive_disclosure.py): the
+# decorative ``metadata["compactionProtected"]`` flag is NOT what the runtime
+# reads — protection is decided by the tool NAME being in
+# ``PRUNE_PROTECTED_TOOLS`` (context/protected_tools.py), exactly like the GA
+# load tool. These tests run the REAL Tier-4 / Tier-5 engines.
+# ---------------------------------------------------------------------------
+
+async def _summarize(prompt: str) -> str:
+    return "SUMMARY"
+
+
+def _protected_select_recipe_msg(*, tool_use_id: str, chars: int = 60_000) -> dict:
+    """A compaction message standing in for a real ``select_recipe`` ToolResult.
+
+    The runtime serializes a :class:`ToolResult` carrying
+    ``metadata["toolName"] == SELECT_RECIPE_TOOL_NAME``; the protection predicate
+    keys on that name (via ``metadata.toolName``), so the message mirrors the
+    metadata the handler emits.
+    """
+    return {
+        "role": "tool",
+        "tool_use_id": tool_use_id,
+        "content": "y" * chars,
+        "metadata": {"toolName": SELECT_RECIPE_TOOL_NAME},
+    }
+
+
+def _big_tool_result(*, name: str, tool_use_id: str, chars: int = 60_000) -> dict:
+    return {
+        "role": "tool",
+        "name": name,
+        "tool_use_id": tool_use_id,
+        "content": "y" * chars,
+    }
+
+
+def test_select_recipe_registered_in_prune_protected_tools():
+    # The real protection set — not the decorative metadata flag — must include
+    # select_recipe, exactly like the GA load tool.
+    assert SELECT_RECIPE_TOOL_NAME in PRUNE_PROTECTED_TOOLS
+
+
+def test_real_handler_result_is_compaction_protected_by_predicate():
+    # The ACTUAL handler result (its metadata.toolName) must be recognized by the
+    # real runtime predicate — proving the protection is not decorative.
+    registry = _routing_registry()
+    result = select_recipe_handler(
+        {"pack_id": "test.soft-full"}, _context(_StubAdkToolContext()), registry=registry
+    )
+    msg = {"role": "tool", "content": str(result.output), "metadata": dict(result.metadata)}
+    assert is_compaction_protected_tool_result(msg) is True
+
+
+def test_predicate_noop_for_non_select_recipe_result():
+    other = {"role": "tool", "name": "test.soft-full", "content": "x" * 100}
+    assert is_compaction_protected_tool_result(other) is False
+
+
+@pytest.mark.asyncio
+async def test_microcompact_protects_select_recipe_result():
+    protected = _protected_select_recipe_msg(tool_use_id="t-protected")
+    other = _big_tool_result(name="some_other_tool", tool_use_id="t-other")
+    engine = MicrocompactEngine(classifier=_summarize)
+    out, result = await engine.apply([protected, other], WarningLevel.HIGH)
+
+    # The protected select_recipe body is unchanged (still the big content).
+    assert out[0]["content"] == protected["content"]
+    # The other big tool result is compacted to the summary.
+    assert out[1]["content"] == "SUMMARY"
+    assert result.messages_compacted == 1
+
+
+@pytest.mark.asyncio
+async def test_auto_compact_protects_select_recipe_result():
+    protected_body = "z" * 5_000
+    messages: list[dict] = []
+    for i in range(6):
+        messages.append({"role": "user", "content": f"user message {i}"})
+        if i == 1:
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_use_id": "t-protected",
+                    "content": protected_body,
+                    "metadata": {"toolName": SELECT_RECIPE_TOOL_NAME},
+                }
+            )
+        messages.append({"role": "assistant", "content": f"assistant reply {i}"})
+
+    engine = AutoCompactionEngine(classifier=_summarize, keep_recent_turns=2)
+    out, result = await engine.apply(messages, WarningLevel.CRITICAL)
+
+    assert result.activated is True
+    # The protected body survives compaction verbatim even though its turn was in
+    # the OLD (summarized) region.
+    serialized = "".join(
+        m.get("content", "") if isinstance(m.get("content"), str) else "" for m in out
+    )
+    assert protected_body in serialized

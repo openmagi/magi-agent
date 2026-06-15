@@ -16,12 +16,18 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
+from magi_agent.context.recipe_routing_constants import SELECT_RECIPE_TOOL_NAME
 from magi_agent.harness.general_automation.constants import LOAD_GA_RECIPE_TOOL_NAME
 
 
 #: Tool names whose results are preserved across compaction. The on-demand GA
-#: playbook loader is the PR8 analog of OpenCode's ``skill`` tool.
-PRUNE_PROTECTED_TOOLS: frozenset[str] = frozenset({LOAD_GA_RECIPE_TOOL_NAME})
+#: playbook loader and the cross-family ``select_recipe`` loader are the PR8
+#: analogs of OpenCode's ``skill`` tool — each loads a body on demand that must
+#: survive long tasks. Both are imported from import-boundary-safe constants
+#: modules so this module stays import-light for the compaction engines.
+PRUNE_PROTECTED_TOOLS: frozenset[str] = frozenset(
+    {LOAD_GA_RECIPE_TOOL_NAME, SELECT_RECIPE_TOOL_NAME}
+)
 
 _NAME_FIELDS = ("name", "tool_name", "toolName")
 

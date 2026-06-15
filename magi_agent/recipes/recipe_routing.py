@@ -8,10 +8,17 @@ from __future__ import annotations
 from collections.abc import Mapping, MutableMapping
 
 from magi_agent.recipes.compiler import PackRegistry, RecipePackManifest
+# Import the constant from the import-boundary-safe constants module
+# (magi_agent.context, an import-light package) so context/protected_tools.py can
+# reference it WITHOUT importing this module — whose package __init__ eagerly
+# loads magi_agent.recipes.compiler and pulls in magi_agent.tools.*. Re-exported
+# here for back-compat: any code that imports
+# ``from magi_agent.recipes.recipe_routing import SELECT_RECIPE_TOOL_NAME``
+# continues to work unchanged (mirrors recipe_disclosure re-exporting
+# LOAD_GA_RECIPE_TOOL_NAME from harness/general_automation/constants.py).
+from magi_agent.context.recipe_routing_constants import SELECT_RECIPE_TOOL_NAME
 from magi_agent.tools.context import ToolContext
 from magi_agent.tools.result import ToolResult
-
-SELECT_RECIPE_TOOL_NAME = "select_recipe"
 
 # Key under which selected pack ids accumulate on the ADK ToolContext ``state``
 # mapping. ``select_recipe`` is called once per recipe, so selections must

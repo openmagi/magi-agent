@@ -172,6 +172,7 @@ graph LR
     recipes --> benchmarks
     recipes --> coding
     recipes --> config
+    recipes --> context
     recipes --> evidence
     recipes --> harness
     recipes --> memory
@@ -643,7 +644,8 @@ graph LR
 | content_replacement.py | — | types | context/hook.py |
 | hook.py | — | auto_compact, collapse_drain, content_replacement, context, manifest, microcompact, reactive_compact, result, scope, token_tracker, types | — |
 | microcompact.py | — | protected_tools, types | context/hook.py |
-| protected_tools.py | Track 19 PR8 — compaction-protected tool-result detection. | constants | context/auto_compact.py, context/microcompact.py |
+| protected_tools.py | Track 19 PR8 — compaction-protected tool-result detection. | constants, recipe_routing_constants | context/auto_compact.py, context/microcompact.py |
+| recipe_routing_constants.py | Import-boundary-safe constant for cross-family recipe routing. | — | context/protected_tools.py, recipes/recipe_routing.py |
 | token_tracker.py | — | token_estimation, types | context/hook.py |
 | types.py | — | types | context/auto_compact.py, context/content_replacement.py, context/hook.py, context/microcompact.py, context/token_tracker.py |
 
@@ -1252,7 +1254,7 @@ graph LR
 | opencode_permission_patterns.py | — | control | — |
 | phase_routing_defaults.py | — | model_tiers, phase_routing, reliability_policy | recipes/materializer.py |
 | projection.py | — | effective_contract | — |
-| recipe_routing.py | Cross-family description-based recipe routing — generalizes the GA-only | compiler, context, result | — |
+| recipe_routing.py | Cross-family description-based recipe routing — generalizes the GA-only | compiler, context, recipe_routing_constants, result | — |
 | reliability_policy.py | — | model_tiers | recipes/materializer.py, recipes/phase_routing_defaults.py |
 | research_agents.py | — | — | harness/research_routing.py |
 | research_child_runner.py | — | runtime | harness/workflow_executor.py |
