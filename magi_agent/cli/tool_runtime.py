@@ -768,6 +768,40 @@ def multi_file_join_block(env: Mapping[str, str] | None = None) -> str:
     )
 
 
+def recipe_listing_block(env: Mapping[str, str] | None = None) -> str:
+    """Return the cross-family recipe listing block (default-OFF).
+
+    Returns an empty string when ``MAGI_RECIPE_ROUTING_LLM_ENABLED`` is falsy
+    (the default) so the caller's prompt is byte-identical to the non-flagged
+    path. When ON, returns the on-demand listing built from the first-party pack
+    registry (each non-hard_safety pack as name + when-to-use, plus the
+    ``select_recipe`` call) so the model can pick recipe packs by description.
+
+    Fail-open: any error returns "" so prompt assembly never breaks and stays
+    byte-identical to baseline on the off path (same contract as the other gated
+    block helpers above).
+
+    Imported lazily inside to keep ``import cli.tool_runtime`` cold-clean.
+    """
+    try:
+        import os as _os  # noqa: PLC0415
+
+        from magi_agent.config.env import recipe_routing_llm_enabled  # noqa: PLC0415
+
+        source = env if env is not None else _os.environ
+        if not recipe_routing_llm_enabled(source):
+            return ""
+
+        from magi_agent.recipes.compiler import PackRegistry  # noqa: PLC0415
+        from magi_agent.recipes.recipe_routing import (  # noqa: PLC0415
+            build_recipe_listing_section,
+        )
+
+        return build_recipe_listing_section(PackRegistry.with_first_party_packs())
+    except Exception:  # noqa: BLE001
+        return ""
+
+
 def build_cli_instruction(
     *,
     session_id: str,
@@ -993,6 +1027,12 @@ def build_cli_instruction(
     _search_rules_block = search_decision_block()
     _redflags_block = anti_rationalization_block()
 
+    # Cross-family recipe listing (default-OFF: MAGI_RECIPE_ROUTING_LLM_ENABLED).
+    # Returns "" when the gate is off so the assembled prompt is byte-identical to
+    # pre-wiring (no listing header). When on, lists non-hard packs by when-to-use
+    # so the model can select recipes on demand via the select_recipe tool.
+    _recipe_listing_block = recipe_listing_block()
+
     # Compute-via-code directive (default-OFF: MAGI_COMPUTE_VIA_CODE_ENABLED).
     # Returns "" when the gate is off, so the assembled prompt is byte-identical
     # to pre-wiring. Only appended when non-empty so no extra "\n\n" separator
@@ -1031,6 +1071,8 @@ def build_cli_instruction(
         parts.append(_search_rules_block)
     if _redflags_block:
         parts.append(_redflags_block)
+    if _recipe_listing_block:
+        parts.append(_recipe_listing_block)
     if _compute_block:
         parts.append(_compute_block)
     if _format_adherence_block:
@@ -1052,6 +1094,7 @@ __all__ = [
     "multi_file_join_block",
     "bind_cli_local_full_tool_handlers",
     "output_format_adherence_block",
+    "recipe_listing_block",
     "step_decomposition_block",
     "wrap_cli_adk_tools_with_evidence_collector",
 ]
