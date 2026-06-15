@@ -27,6 +27,7 @@ Hard rules (from the spec):
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 
 from rich.text import Text
 
@@ -42,12 +43,35 @@ __all__ = [
     "ReadRenderer",
     "ToolCardRenderer",
     "build_tool_renderers",
+    "full_output",
     "register_default_renderers",
 ]
 
 # Result preview limits — keep the transcript scannable.
 _PREVIEW_MAX_LINES = 8
 _PREVIEW_MAX_CHARS = 1200
+
+# When True, ``_preview`` skips the line/char clamp and returns the full text.
+# This is the single chokepoint that lets the expand affordance recover the whole
+# ~8 KB payload (every renderer's ``render_result`` funnels through ``_preview``
+# via ``_result_node``), while the flat path keeps the clamp. Scoped by the
+# ``full_output()`` context manager around the synchronous render call; turns run
+# one-at-a-time on a single exclusive worker, so a module-level flag has no
+# interleaving risk (a ``threading.local`` would be a drop-in if ever needed).
+_FULL_OUTPUT = False
+
+
+@contextmanager
+def full_output():
+    """Lift the ``_preview`` truncation clamp for the duration of the block."""
+
+    global _FULL_OUTPUT
+    prev = _FULL_OUTPUT
+    _FULL_OUTPUT = True
+    try:
+        yield
+    finally:
+        _FULL_OUTPUT = prev
 
 # Status-dot colors.
 _DOT_OK = "bold #4ec9b0"      # teal
@@ -188,6 +212,9 @@ def _preview(text: str) -> str:
     text = text.strip("\n")
     if not text:
         return ""
+    if _FULL_OUTPUT:
+        # Expand mode: return the whole payload with no clamp and no marker.
+        return text
     lines = text.split("\n")
     clipped = lines[:_PREVIEW_MAX_LINES]
     body = "\n".join(clipped)

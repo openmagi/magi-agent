@@ -253,6 +253,19 @@ def _tool_result(payload: dict) -> object:
 # tool_end statuses that mean the tool was NOT executed (-> render_rejected).
 _REJECTED_STATUSES = {"rejected", "blocked", "denied", "deny", "error"}
 
+# Upper bound on the tracked ToolCard list (expand mode, ctrl+o). Session-global
+# mode would otherwise grow one entry per tool result for the whole session, and
+# ``action_toggle_expand`` iterates all of them on every ctrl+o; capping the
+# retro-flip to the recent window bounds both memory and latency. Older cards
+# keep their current collapsed state (a quiet, acceptable limitation).
+_MAX_TRACKED_TOOL_CARDS = 200
+
+# One-time discoverability hint shown on the FLAT path when a result is
+# truncated and expand mode is off. "applies to new results" is deliberate:
+# flat output already committed cannot retroactively become a card (committed-
+# once), so the hint must not imply scroll-up-to-expand.
+_EXPAND_HINT = "(ctrl+o to expand tool output — applies to new results)"
+
 
 def _is_rejected_end(payload: dict) -> bool:
     status = payload.get("status")
@@ -862,6 +875,14 @@ class MagiTuiApp(App[None]):
     .confirm-subview { height: auto; }
     #edit-area { height: 8; }
     #edit-error { color: $error; }
+    /* Expanded tool-output card (ctrl+o). Bound the body height + internal
+       scroll so a single ~8 KB result (hundreds of lines) does not shove the
+       transcript when several cards are open (OpenCode/Claude-Code both cap the
+       expanded view). Quiet variant: transparent border + dim title to keep the
+       flat one-line aesthetic. */
+    ToolCard { border: none; background: transparent; }
+    ToolCard > CollapsibleTitle { color: $text-muted; }
+    ToolCard Contents { max-height: 20; overflow-y: auto; }
     """
 
     BINDINGS = [
@@ -881,6 +902,13 @@ class MagiTuiApp(App[None]):
         # to cursor-left); it is NOT in the keybindings defaults (defaults.py),
         # so on_key resolves it UNBOUND and lets it bubble to this App BINDING.
         Binding("ctrl+b", "toggle_sidebar", "Sidebar", priority=True),
+        # ctrl+o toggles "expand tool output" mode (default-OFF). priority=True
+        # so it preempts any built-in ctrl+o on the focused Input/TextArea; it is
+        # NOT in the keybindings defaults (defaults.py), so on_key resolves it
+        # UNBOUND and lets it bubble to this App BINDING — identical to the
+        # ctrl+b / ctrl+t path. The "Expand" description surfaces in the help
+        # dialog (HelpDialog.from_app) automatically.
+        Binding("ctrl+o", "toggle_expand", "Expand", priority=True),
         # F1 opens the help dialog. F1 is not in the keybindings defaults
         # (defaults.py) and (unlike "?") never collides with typed prompt text,
         # so it is safe to bind globally while the prompt input is focused.
@@ -954,6 +982,19 @@ class MagiTuiApp(App[None]):
         import os as _os_verbose  # noqa: PLC0415
 
         self._verbose = _os_verbose.environ.get("MAGI_TUI_VERBOSE", "") == "1"
+        # Expand-tool-output mode (ctrl+o). DEFAULT-OFF: tools commit as flat,
+        # scannable blocks unless the user opts in (env or keypress). When on,
+        # each tool result mounts as a collapsed ``ToolCard`` carrying the full
+        # (uncapped) payload via the existing ``commit_tool`` seam. Session-
+        # global and forward-acting with a bounded retro-flip — NOT reset per
+        # turn (see start_turn). ``_tool_cards`` tracks mounted cards (capped to
+        # the recent window) so ctrl+o can retro-flip their ``.collapsed`` state;
+        # ``_expand_hint_shown`` gates the one-time discoverability hint.
+        self._expand_tools: bool = (
+            _os_verbose.environ.get("MAGI_TUI_EXPAND_TOOLS", "") == "1"
+        )
+        self._tool_cards: list = []
+        self._expand_hint_shown: bool = False
         # Session list (PR2.4) seams. ``_session_source`` is an optional test/
         # injection hook ``() -> list[SessionEntry]``; when None the dialog reads
         # the runtime's ``session_lister`` seam via ``session_entries``.
@@ -1757,10 +1798,66 @@ class MagiTuiApp(App[None]):
                 node = renderer.render_rejected(_tool_input(payload) or payload)
             else:
                 node = renderer.render_result(_tool_result(payload))
+                # Expand mode (ctrl+o): when on AND there is a real widget
+                # backing (``_view`` is a TranscriptView; legacy RichLog has
+                # ``_view is None`` and cannot host a Collapsible), re-render the
+                # result with the truncation cap lifted and mount it as a
+                # collapsed ``ToolCard`` via the existing ``commit_tool`` seam.
+                # The flat/card choice is made HERE, at mount time — committed-
+                # once holds (no re-render of finalized blocks). Otherwise fall
+                # through to the flat ``_commit_render_node`` path unchanged.
+                if self._expand_tools and self._view is not None:
+                    from magi_agent.cli.tui.tool_render import (  # noqa: PLC0415
+                        full_output,
+                    )
+                    from magi_agent.cli.tui.widgets.tool_card import (  # noqa: PLC0415
+                        ToolCard,
+                    )
+
+                    with full_output():
+                        full = renderer.render_result(_tool_result(payload))
+                    card = ToolCard.from_render_node(full, collapsed=True)
+                    self.controller.commit_tool(card, text=full.text)
+                    self._tool_cards.append(card)
+                    # Bound the tracked window: ctrl+o retro-flips only the most
+                    # recent cards; older ones keep their collapsed state.
+                    del self._tool_cards[:-_MAX_TRACKED_TOOL_CARDS]
+                    return
+                # Flat path, expand OFF: surface the one-time discoverability
+                # hint the FIRST time a result is actually truncated. OFF-path
+                # only (``not self._expand_tools`` — on legacy RichLog with
+                # expand ON the card path is skipped, but the hint would be
+                # misleading there), so the flag-OFF default stays byte-identical
+                # apart from this single hint line.
+                if (
+                    not self._expand_tools
+                    and not self._expand_hint_shown
+                    and self._preview_truncated(payload, renderer, node)
+                ):
+                    self.controller.commit_block(_EXPAND_HINT)
+                    self._expand_hint_shown = True
         else:  # unknown inner type -> fall back to the one-line summary
             self.controller.commit_block(_status_summary(event))
             return
         self._commit_render_node(node, tool_name=name)
+
+    @staticmethod
+    def _preview_truncated(payload: dict, renderer: object, node: object) -> bool:
+        """Whether the flat result preview dropped content (-> hint is honest).
+
+        Compares the flat (capped) ``node.text`` to a full re-render with the
+        truncation cap lifted; truncated iff they differ. Cheap and OFF-path
+        only — the full re-render here is just to detect loss, not to display.
+        """
+
+        from magi_agent.cli.tui.tool_render import full_output  # noqa: PLC0415
+
+        render_result = getattr(renderer, "render_result", None)
+        if not callable(render_result):
+            return False
+        with full_output():
+            full = render_result(_tool_result(payload))
+        return getattr(full, "text", "") != getattr(node, "text", "")
 
     def _lookup_tool_renderer(self, name: str) -> object:
         """Resolve a renderer for ``name``, synthesizing a named card renderer
@@ -1986,6 +2083,23 @@ class MagiTuiApp(App[None]):
         if self._sidebar is None:
             return
         self._sidebar.display = not self._sidebar.display
+
+    # -- expand tool output toggle (ctrl+o) --------------------------------
+    def action_toggle_expand(self) -> None:
+        """Toggle session-global "expand tool output" mode (ctrl+o).
+
+        Forward-acting: subsequent tool results commit as collapsed ``ToolCard``s
+        (expanded body carries the full payload) instead of flat blocks. Also
+        retro-flips ALREADY-mounted cards' ``.collapsed`` so the toggle feels
+        global like Claude Code's ctrl+o. This is a ``.collapsed`` write on
+        existing widgets — NOT a transcript re-render, so committed-once holds.
+        Flat blocks committed before expand was ever on have no card to open
+        (committed-once); that quiet limitation is surfaced in the hint.
+        """
+
+        self._expand_tools = not self._expand_tools
+        for card in self._tool_cards:
+            card.collapsed = not self._expand_tools
 
     # -- focus tracking for the attention bell (PR3.4) ---------------------
     def on_app_blur(self, _event: object) -> None:
