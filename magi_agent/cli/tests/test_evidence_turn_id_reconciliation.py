@@ -70,9 +70,15 @@ def _record_via_live_wrapper(collector: LocalToolEvidenceCollector) -> None:
     asyncio.run(wrapped[0].func({"diffRef": "x"}, _FakeInvocationContext()))
 
 
-def test_collect_evidence_sees_records_under_observed_adk_invocation_id() -> None:
+def test_collect_evidence_sees_records_under_observed_adk_invocation_id(
+    monkeypatch,
+) -> None:
     """RED→GREEN: gate's _collect_evidence must see records recorded under the
-    ADK invocation id even though the engine's turn id is the static default."""
+    ADK invocation id even though the engine's turn id is the static default.
+
+    Reconciliation is flag-gated (default-OFF) so the source-grounded enforcement
+    flag must be on for the fold-in to happen."""
+    monkeypatch.setenv("MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED", "1")
     collector = LocalToolEvidenceCollector()
     _record_via_live_wrapper(collector)
 
@@ -131,9 +137,12 @@ def test_collect_evidence_matching_turn_id_unchanged_no_observed_ids() -> None:
     assert len(via_engine) == len(direct)
 
 
-def test_collect_evidence_no_double_count_when_observed_equals_turn_id() -> None:
+def test_collect_evidence_no_double_count_when_observed_equals_turn_id(
+    monkeypatch,
+) -> None:
     """If the observed ADK id happens to equal the engine turn id, records must
     not be double-counted (the union is deduped by record identity)."""
+    monkeypatch.setenv("MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED", "1")
     collector = LocalToolEvidenceCollector()
     collector.record_tool_result(
         session_id="cli-session",
@@ -156,6 +165,24 @@ def test_collect_evidence_no_double_count_when_observed_equals_turn_id() -> None
     baseline = collector.collect_for_turn("same-id")
     via_engine = engine._collect_evidence("same-id")
     assert len(via_engine) == len(baseline)
+
+
+def test_reconciliation_flag_off_does_not_fold_observed_ids(monkeypatch) -> None:
+    """Flag-OFF guard: even with an observed ADK invocation id whose records
+    differ from the engine turn id, the default-OFF gate does NOT fold them in,
+    so existing coding/hosted live turns are byte-identical to main."""
+    monkeypatch.delenv("MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED", raising=False)
+    collector = LocalToolEvidenceCollector()
+    _record_via_live_wrapper(collector)
+    assert collector.collect_for_turn("e-fbb68880-live") != ()
+
+    engine = MagiEngineDriver(
+        runner=object(),
+        evidence_collector=collector.collect_for_turn,
+    )
+    engine._note_observed_invocation_id("e-fbb68880-live")
+    # Flag off => reconciliation skipped => gate sees only its own turn id (empty).
+    assert engine._collect_evidence("cli-turn") == ()
 
 
 def test_collect_evidence_no_collector_returns_empty() -> None:

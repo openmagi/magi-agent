@@ -2317,7 +2317,17 @@ class MagiEngineDriver:
         # identity so an observed id equal to ``turn_id`` never double-counts.
         # Purely additive: with no observed ids (the coding/hosted test shape)
         # this is byte-identical to the prior single-query behaviour.
-        if self._observed_invocation_ids:
+        # Flag-gated (default-OFF) so existing coding/hosted live turns are
+        # untouched unless source-grounded enforcement is explicitly enabled.
+        import os as _recon_os  # noqa: PLC0415
+
+        from magi_agent.config.env import (  # noqa: PLC0415
+            parse_source_ledger_evidence_gate_enabled,
+        )
+
+        if self._observed_invocation_ids and parse_source_ledger_evidence_gate_enabled(
+            _recon_os.environ
+        ):
             seen_ids: set[int] = {id(record) for record in records}
             for invocation_id in self._observed_invocation_ids:
                 if invocation_id == turn_id:
