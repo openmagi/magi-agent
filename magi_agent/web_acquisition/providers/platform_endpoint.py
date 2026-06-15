@@ -119,7 +119,15 @@ class PlatformEndpointProvider:
         if not query:
             return {"status": "denied"}
         max_results = _get_int(request, "metadata", "maxResults") or 5
-        body: dict[str, object] = {"q": query, "num": max_results}
+        # Send both contract shapes: ``query``/``count`` (platform api-proxy Brave
+        # endpoint reads ``body.query``) and ``q``/``num`` (Serper-style backends).
+        # Sending only ``q`` makes the deployed /v1/search 400 "Missing query field".
+        body: dict[str, object] = {
+            "query": query,
+            "q": query,
+            "count": max_results,
+            "num": max_results,
+        }
         try:
             resp = self._client().post(f"{self._base_url}/v1/search", json=body)
         except httpx.TimeoutException:

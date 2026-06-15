@@ -107,6 +107,38 @@ def test_search_200_normalises_results() -> None:
     assert results[0]["snippet"] == "First snippet."
 
 
+def test_search_request_body_sends_query_field() -> None:
+    """The /v1/search request body MUST carry ``query`` (the field the platform
+    api-proxy reads via ``const { query } = JSON.parse(body)``). Sending only the
+    Serper-style ``q`` makes the deployed endpoint 400 ``Missing query field`` and
+    WebSearch silently fails. We keep ``q`` too for Serper-style backends."""
+    import json as _json
+
+    from magi_agent.web_acquisition.providers.platform_endpoint import (
+        PlatformEndpointProvider,
+    )
+
+    captured: dict[str, object] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.update(_json.loads((request.content or b"{}").decode() or "{}"))
+        return httpx.Response(200, json={"results": []})
+
+    provider = PlatformEndpointProvider(
+        base_url="https://platform.example.com",
+        api_key="test-key",
+        skip_dns_check=True,
+    )
+    provider._client = lambda: httpx.Client(  # type: ignore[method-assign]
+        transport=httpx.MockTransport(handler)
+    )
+
+    provider.search(_MockRequest(query="tesla 10-k"))
+
+    assert captured.get("query") == "tesla 10-k"
+    assert captured.get("q") == "tesla 10-k"
+
+
 def test_search_401_returns_denied() -> None:
     from magi_agent.web_acquisition.providers.platform_endpoint import (
         PlatformEndpointProvider,
