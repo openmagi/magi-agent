@@ -41,6 +41,14 @@ bench = [
 composio = [
   "composio==0.13.1",
 ]
+# Optional: Telegram "easy setup" (phone number → automated @BotFather /newbot).
+# Requires an MTProto user session, so it needs operator-supplied
+# TELEGRAM_API_ID / TELEGRAM_API_HASH and the MAGI_TELEGRAM_EASY_SETUP_ENABLED
+# gate. Lazily imported (magi_agent/channels/telegram_easy_telethon.py) so
+# environments without it are unaffected. Install with: uv sync --extra telegram-easy
+telegram-easy = [
+  "telethon>=1.36,<2",
+]
 # Optional: required only when a Claude/Anthropic model is run through ADK
 # (google.adk.models.Claude / magi_agent.adk_bridge.anthropic_cache_model).
 # Imported lazily so environments without it are unaffected. ADK itself
