@@ -500,6 +500,42 @@ def parse_runtime_env(env: Mapping[str, str]) -> RuntimeConfig:
     )
 
 
+#: Operator's per-deployment vetted model-route allowlist (``provider:model``
+#: CSV). Authoritative single source of truth for which routes a deployment
+#: permits; consumed by the gate5b shadow-generation parser AND
+#: :func:`operator_allowed_model_routes` (child route validation).
+_ALLOWED_MODEL_ROUTES_ENV = (
+    "CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_ALLOWED_MODEL_ROUTES"
+)
+
+
+def operator_allowed_model_routes(
+    env: Mapping[str, str],
+) -> frozenset[tuple[str, str]]:
+    """Fail-soft ``(provider, model)`` allowlist from the operator route env.
+
+    Returns casefolded ``(provider, model)`` pairs the operator explicitly vetted
+    for this deployment, or an empty set when unset/malformed. Used so a child
+    spawn can route to an operator-approved model that is not (yet) in the
+    built-in ``ModelTierRegistry`` — making the deployment env the single source
+    of truth and removing the registry/env drift. Never raises.
+    """
+    try:
+        raw = _trimmed(env.get(_ALLOWED_MODEL_ROUTES_ENV)) or ""
+        routes: set[tuple[str, str]] = set()
+        for route in _csv_values(raw):
+            if route.count(":") != 1:
+                continue
+            provider_label, model_label = (
+                part.strip().casefold() for part in route.split(":", 1)
+            )
+            if provider_label and model_label:
+                routes.add((provider_label, model_label))
+        return frozenset(routes)
+    except Exception:  # noqa: BLE001 — config read must never crash the caller.
+        return frozenset()
+
+
 def parse_gate5b4c3_shadow_generation_route_env(
     env: Mapping[str, str],
 ) -> Gate5B4C3ShadowGenerationRouteConfig:
@@ -524,10 +560,7 @@ def parse_gate5b4c3_shadow_generation_route_env(
     approved_budgets = _parse_gate5b4c3_shadow_generation_budgets(env)
 
     configured_routes = _csv_values(
-        _trimmed(
-            env.get("CORE_AGENT_PYTHON_GATE5B_SHADOW_GENERATION_ALLOWED_MODEL_ROUTES")
-        )
-        or ""
+        _trimmed(env.get(_ALLOWED_MODEL_ROUTES_ENV)) or ""
     )
     if configured_routes:
         (

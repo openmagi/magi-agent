@@ -71,9 +71,11 @@ TOOL_USAGE_GUIDANCE: dict[str, str] = {
     "SpawnAgent": (
         "Use when: an independent subtask benefits from a fresh context "
         "(parallel research, isolated implementation). Give the child a "
-        "self-contained brief. Do NOT spawn for work you can finish "
-        "directly in fewer steps, and do NOT redo the child's work yourself "
-        "after delegating."
+        "self-contained brief. To run the child on a specific model, pass BOTH "
+        "`provider` AND `model` exactly matching one of the routes listed below. "
+        "Do NOT invent model names or pass `model` without its matching "
+        "`provider` (a mismatch is rejected as child_model_route_unknown), and "
+        "do NOT spawn for work you can finish directly in fewer steps."
     ),
     "AskUserQuestion": (
         "Use when: a genuine decision blocks progress and the answer is not "
@@ -104,6 +106,48 @@ def apply_usage_guidance(
         guidance = TOOL_USAGE_GUIDANCE.get(name)
         if not guidance:
             return description
-        return f"{description}\n\n{guidance}"
+        result = f"{description}\n\n{guidance}"
+        if name == "SpawnAgent":
+            routes = _spawn_agent_routes_line(env)
+            if routes:
+                result = f"{result}\n\n{routes}"
+        return result
     except Exception:  # noqa: BLE001
         return description
+
+
+def _spawn_agent_routes_line(env: Mapping[str, str] | None) -> str:
+    """Dynamic ``provider:model`` route list a child spawn may target.
+
+    Union of the built-in ``ModelTierRegistry`` and the operator's deployment
+    route allowlist — the two sources :func:`_validate_route` accepts — so the
+    model requests routes that actually pass validation instead of guessing.
+    Fail-soft: any error returns ``""`` (no line appended).
+    """
+    try:
+        import os  # noqa: PLC0415
+
+        from magi_agent.config.env import (  # noqa: PLC0415
+            operator_allowed_model_routes,
+        )
+        from magi_agent.runtime.model_tiers import (  # noqa: PLC0415
+            ModelTierRegistry,
+        )
+
+        tiers: dict[str, str] = {}
+        for (provider, model), record in ModelTierRegistry.with_defaults()._records.items():
+            tiers[f"{provider}:{model}"] = str(getattr(record, "tier", "") or "")
+        source_env = env if env is not None else os.environ
+        for provider, model in operator_allowed_model_routes(source_env):
+            tiers.setdefault(f"{provider}:{model}", "")
+        if not tiers:
+            return ""
+        listed = ", ".join(
+            f"{route} ({tier})" if tier else route for route, tier in sorted(tiers.items())
+        )
+        return (
+            "Available model routes (pass provider + model exactly; omitting "
+            f"provider defaults to anthropic): {listed}."
+        )
+    except Exception:  # noqa: BLE001
+        return ""
