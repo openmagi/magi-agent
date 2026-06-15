@@ -95,9 +95,20 @@ they are sent once and never returned over HTTP. The HTTP surface is
 
 ### Telegram bot
 
-Paste a bot token from [@BotFather](https://t.me/BotFather) (`/newbot`). The token
-is validated via `getMe` and stored in the vault (`service=telegram`,
-`auth_scheme=bot_token`).
+Two ways to connect, both converging on the same validate (`getMe`) + vault store
+(`service=telegram`, `auth_scheme=bot_token`):
+
+- **Advanced (token).** Paste a bot token from
+  [@BotFather](https://t.me/BotFather) (`/newbot`). Always available.
+- **Easy (phone).** Enter your phone number; the runtime logs in to your Telegram
+  account over MTProto, drives the `@BotFather` `/newbot` conversation for you,
+  and harvests the token. The login code (and 2FA password, if any) are entered
+  in the dashboard; the MTProto user session is discarded immediately after the
+  bot is created and is never written to disk. Gated by
+  `MAGI_TELEGRAM_EASY_SETUP_ENABLED=1` (default **OFF**) **and** operator-supplied
+  `TELEGRAM_API_ID` / `TELEGRAM_API_HASH` (from <https://my.telegram.org>), plus
+  the `telegram-easy` extra (`uv sync --extra telegram-easy`). When unavailable
+  the dashboard shows only the advanced path.
 
 To poll for messages without restarting the gateway, set
 `MAGI_DASHBOARD_TELEGRAM_ENABLED=1` (default **OFF**). When on, the gateway daemon
