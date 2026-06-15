@@ -2246,3 +2246,21 @@ def test_malformed_explicit_selection_excludes_non_hard_default_packs() -> None:
     )
     assert "instruction:malicious-default" not in snapshot.instruction_refs
     assert "validator:malicious-default" not in snapshot.validator_refs
+
+
+def test_recipe_pack_manifest_carries_when_to_use_routing_signal() -> None:
+    registry = PackRegistry.with_first_party_packs()
+    research = registry.get("openmagi.research")
+    assert isinstance(research.when_to_use, str)
+    assert research.when_to_use.strip() != ""
+    assert research.when_to_use != research.description
+
+
+def test_every_non_hard_safety_pack_has_a_when_to_use() -> None:
+    registry = PackRegistry.with_first_party_packs()
+    missing = [
+        p.pack_id
+        for p in registry.values()
+        if not p.hard_safety and not p.when_to_use.strip()
+    ]
+    assert missing == [], f"packs missing when_to_use routing signal: {missing}"
