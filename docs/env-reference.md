@@ -245,6 +245,7 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 - `MAGI_OBSERVABILITY_ENABLED` (default off) — Enable the hook-tap observability module (bot-activity visibility).
 - `MAGI_OUTPUT_CONTINUATION_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Enable automatic continuation of truncated model output (default-ON full profile).
 - `MAGI_PERSISTENT_PYTHON_ENABLED` (default off) — Register + bind the neutral tools-persistent-python pack's PersistentPython tool (CodeAct: persistent interpreter namespace).
+- `MAGI_RECIPE_ROUTING_LLM_ENABLED` (default off) — Let the model select recipe packs by their when_to_use descriptions instead of the selector-membership path; strict default-OFF (OFF is byte-identical to today).
 - `MAGI_RESEARCH_FACT_GUIDANCE_ENABLED` (default off) — Enable research_fact cross-check guidance: consolidated brief header/footer plus the <web_research> system-prompt block (requires BRAVE_API_KEY + FIRECRAWL_API_KEY).
 - `MAGI_RESEARCH_GOVERNANCE_MODE` (default `off`) — Research governance mode. `off` is inert; `audit` records source/citation mismatches without blocking.
 - `MAGI_RIPGREP_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Use ripgrep for fast in-repo search when available (default-ON full profile).
@@ -257,6 +258,7 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 - `MAGI_TOOL_SYNTHESIS_NUDGE_ENABLED` (default off) — Live-SWE-style tool-synthesis: per-step reflection nudge + 'create your own tools' recipe block (frontier-tier models only).
 - `MAGI_VISION_MODEL` (no default) — Vision-sidecar model override for image_understand (bare model id, same semantics as MAGI_MODEL); unset keeps the main provider/model.
 - `MAGI_VISION_PROVIDER` (no default) — Optional provider for MAGI_VISION_MODEL (anthropic|openai|gemini|fireworks); unset inherits the main provider's credentials.
+- `MAGI_WORKER_ROUTING_LLM_ENABLED` (default off) — Honour a planner-emitted worker_role for subagent routing instead of keyword inference; strict default-OFF (OFF is byte-identical to today).
 
 <!-- END GENERATED FLAGS -->
 

@@ -1981,6 +1981,27 @@ def is_tool_synthesis_nudge_enabled(env: Mapping[str, str] | None = None) -> boo
     return _is_true(source.get(MAGI_TOOL_SYNTHESIS_NUDGE_ENABLED_ENV))
 
 
+MAGI_RECIPE_ROUTING_LLM_ENABLED_ENV = "MAGI_RECIPE_ROUTING_LLM_ENABLED"
+
+
+def recipe_routing_llm_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Default OFF (strict truthy). ON = model selects recipe packs by
+    when_to_use descriptions; OFF = byte-identical to today's selector-membership
+    path. Distinct from the runtime-profile default-ON convention."""
+    source = os.environ if env is None else env
+    return _is_true(source.get(MAGI_RECIPE_ROUTING_LLM_ENABLED_ENV))
+
+
+MAGI_WORKER_ROUTING_LLM_ENABLED_ENV = "MAGI_WORKER_ROUTING_LLM_ENABLED"
+
+
+def worker_routing_llm_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Default OFF (strict truthy). ON = planner-emitted worker_role honored;
+    OFF = byte-identical keyword inference (_infer_evidence_hint)."""
+    source = os.environ if env is None else env
+    return _is_true(source.get(MAGI_WORKER_ROUTING_LLM_ENABLED_ENV))
+
+
 MAGI_TOOL_USAGE_GUIDANCE_ENABLED_ENV = "MAGI_TOOL_USAGE_GUIDANCE_ENABLED"
 
 
