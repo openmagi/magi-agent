@@ -1,0 +1,15 @@
+# Bundled first-party tool pack. Loaded by the SAME loader/format a user pack
+# uses (D1/D3). First-party holds NO privilege: this manifest is discovered,
+# overridable, and removable (config.toml [packs] disable) exactly like
+# ~/.magi/packs/* manifests. Schema = magi_agent/packs/manifest.py (top-level
+# packId/displayName, NOT a [pack] table).
+
+packId = "openmagi.tools-persistent-python"
+displayName = "Persistent Python tool"
+version = "1.0.0"
+description = "First-party persistent-namespace Python execution tool (CodeAct) bundled as a removable pack (no privilege)."
+
+[[provides]]
+type = "tool"
+ref = "PersistentPython"
+impl = "magi_agent.firstparty.packs.tools_persistent_python.impl:provide_persistent_python"

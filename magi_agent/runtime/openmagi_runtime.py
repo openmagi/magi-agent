@@ -36,6 +36,12 @@ def _build_core_tool_registry(plugin_state: ResolvedPluginState | None = None) -
     tool_registry = ToolRegistry()
     register_core_tool_manifests(tool_registry)
     bind_core_toolhost_handlers(tool_registry)
+    # Optional persistent-namespace Python tool from the neutral
+    # ``tools_persistent_python`` pack (MAGI_PERSISTENT_PYTHON_ENABLED=true).
+    # Additive + removable: default-OFF so the registry is byte-identical when
+    # the gate is unset; the manifest is sourced from the pack provider (no
+    # hardcode) and the additive first-party binder attaches its handler.
+    _maybe_bind_persistent_python(tool_registry)
     # Self-introspection (pull) tool — bound always, advertised only when the
     # MAGI_SELF_INTROSPECTION_ENABLED env gate is truthy (default OFF).
     bind_inspect_self_evidence_handler(tool_registry)
@@ -47,6 +53,26 @@ def _build_core_tool_registry(plugin_state: ResolvedPluginState | None = None) -
         _register_native_plugin_tool_manifests(tool_registry, plugin_state)
         _bind_native_plugin_tool_handlers(tool_registry, plugin_state)
     return tool_registry
+
+
+def _maybe_bind_persistent_python(tool_registry: ToolRegistry) -> None:
+    """Register + bind the neutral ``PersistentPython`` pack tool when gated ON.
+
+    Default-OFF (``MAGI_PERSISTENT_PYTHON_ENABLED``): when unset this is a no-op
+    and the registry is byte-identical to before. Additive and removable; the
+    manifest is sourced from the pack provider (no hardcode).
+    """
+    from magi_agent.config.env import persistent_python_enabled
+
+    if not persistent_python_enabled():
+        return
+    from magi_agent.tools.persistent_python_toolhost import (
+        bind_persistent_python_handler,
+        register_persistent_python_manifest,
+    )
+
+    register_persistent_python_manifest(tool_registry)
+    bind_persistent_python_handler(tool_registry)
 
 
 def _build_default_plugin_state() -> ResolvedPluginState:

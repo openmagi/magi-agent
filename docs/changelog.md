@@ -15,6 +15,24 @@ Versions follow the tags published on GitHub Releases.
 
 ### Fixed
 
+## 0.1.41
+
+### Added
+- TUI: live token usage in the footer/sidebar and the headless stream (#579).
+- TUI: safe double-press quit and an optional end-of-turn input queue (`MAGI_TUI_QUEUE`) (#580).
+- TUI: `ctrl+o` to expand truncated tool output (`MAGI_TUI_EXPAND_TOOLS`) (#583).
+- TUI: footer current-activity word with an optional stall hint (`MAGI_TUI_STALL_SECONDS`) (#584).
+- TUI: `@`-file mention autocomplete (`MAGI_TUI_FILE_MENTIONS`) and an honest identity row (#586).
+- Self-serve Integrations tab: connect Composio toolkits and a Telegram bot from the dashboard (#578), including a phone-number → BotFather easy-setup path (#587).
+- Chat interrupt/inject wiring to in-flight turns (#575).
+
+### Changed
+- TUI: cell-aware (CJK) truncation across the interface (#585).
+- Serve: stream live work-console events on the local full-engine path; the coding evidence gate now applies only to turns that mutate files (#582).
+
+### Fixed
+- Web search: send the `query` field the platform `/v1/search` expects and raise the per-fetch content cap to 128 KB (#576).
+
 ## 0.1.40
 
 ### Added
