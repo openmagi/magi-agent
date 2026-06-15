@@ -6,8 +6,9 @@ import { isImageMimetype, formatFileSize } from "@/lib/chat/attachment-marker";
 import { extractClipboardImageFiles } from "@/lib/chat/clipboard-images";
 import { kbUploadKey } from "@/lib/chat/kb-uploads";
 import type { ChatResponseLanguage, ReplyTo, KbDocReference } from "@/lib/chat/types";
-import { isStreamingComposerBlockedByQueue } from "@/lib/chat/send-policy";
-import type { StreamingComposerMode } from "@/lib/chat/send-policy";
+import { isStreamingComposerBlockedByQueue } from "@/chat-core";
+
+type StreamingComposerMode = "queue" | "steer";
 import { SKILLS } from "@/lib/skills-catalog";
 import type { KbDocEntry } from "@/hooks/use-kb-docs";
 import type { PendingKbUpload } from "@/lib/chat/kb-uploads";
@@ -279,7 +280,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     streamingMode === "steer" && steeringUnavailable ? "queue" : streamingMode;
   const queueBlocked = isStreamingComposerBlockedByQueue({
     queueFull,
-    mode: effectiveStreamingMode,
+    canAttemptInject: effectiveStreamingMode === "steer",
   });
   const steeringUnavailableReason =
     pendingFiles.length > 0

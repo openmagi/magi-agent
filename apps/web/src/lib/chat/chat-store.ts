@@ -11,7 +11,7 @@ import type {
   MissionActivity,
   SubagentActivity,
 } from "./types";
-import { INTERRUPTED_SUFFIX, MAX_QUEUED_MESSAGES } from "./queue-constants";
+import { INTERRUPTED_SUFFIX, MAX_QUEUED_MESSAGES } from "@/chat-core";
 import { compareChatMessages } from "./message-order";
 import { hasNonTextTurnWork } from "./empty-response";
 import { researchEvidenceFromChannelState } from "./research-evidence";
@@ -424,7 +424,7 @@ interface ChatState {
   /**
    * Client-side outbound queue — messages the user hit Enter on while a
    * stream was in flight. Drained FIFO by the view-client's `onDone`
-   * handler; never persisted. See `src/lib/chat/queue-constants.ts`.
+   * handler; never persisted. See `src/chat-core/queue-constants.ts`.
    */
   queuedMessages: Record<string, QueuedMessage[]>;
   controlRequests: Record<string, ControlRequestRecord[]>;
