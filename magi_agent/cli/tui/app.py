@@ -51,6 +51,7 @@ from textual.widgets.option_list import Option
 
 from magi_agent.cli.commands.executor import DefaultCommandExecutor
 from magi_agent.cli.render.diff import render_diff
+from magi_agent.cli.render.width import truncate_cells
 from magi_agent.cli.contracts import (
     CommandContext,
     CommandExecutor,
@@ -253,6 +254,19 @@ def _tool_result(payload: dict) -> object:
 # tool_end statuses that mean the tool was NOT executed (-> render_rejected).
 _REJECTED_STATUSES = {"rejected", "blocked", "denied", "deny", "error"}
 
+# Upper bound on the tracked ToolCard list (expand mode, ctrl+o). Session-global
+# mode would otherwise grow one entry per tool result for the whole session, and
+# ``action_toggle_expand`` iterates all of them on every ctrl+o; capping the
+# retro-flip to the recent window bounds both memory and latency. Older cards
+# keep their current collapsed state (a quiet, acceptable limitation).
+_MAX_TRACKED_TOOL_CARDS = 200
+
+# One-time discoverability hint shown on the FLAT path when a result is
+# truncated and expand mode is off. "applies to new results" is deliberate:
+# flat output already committed cannot retroactively become a card (committed-
+# once), so the hint must not imply scroll-up-to-expand.
+_EXPAND_HINT = "(ctrl+o to expand tool output — applies to new results)"
+
 
 def _is_rejected_end(payload: dict) -> bool:
     status = payload.get("status")
@@ -282,6 +296,8 @@ def _status_summary(event: RuntimeEvent) -> str:
 # ``MAGI_STREAM_THINKING``). We render it as a DIM one-line ``● thinking <preview>``
 # block — distinct from the teal/blue tool dots and from assistant markdown.
 _THINKING_INNER_TYPES = frozenset({"thinking_delta", "thinking"})
+# Budget in terminal CELLS (East-Asian Wide chars count 2) so a CJK reasoning
+# preview stays one line, enforced via ``truncate_cells``.
 _THINKING_PREVIEW_MAX_CHARS = 100
 # Dim throughout so the reasoning line reads as quiet annotation, not output.
 _THINKING_DOT_STYLE = "dim #7aa2f7"
@@ -332,8 +348,7 @@ def _thinking_preview(text: str) -> str:
             break
     if not first:
         first = text.strip()
-    if len(first) > _THINKING_PREVIEW_MAX_CHARS:
-        first = first[: _THINKING_PREVIEW_MAX_CHARS - 1].rstrip() + "…"
+    first = truncate_cells(first, _THINKING_PREVIEW_MAX_CHARS)
     return first
 
 
@@ -378,7 +393,12 @@ _CHILD_INNER_STATUS = {
     "child_cancelled": "cancelled",
     "child_failed": "failed",
 }
+# Budget in terminal CELLS (East-Asian Wide chars count 2) so a CJK subagent
+# label stays one line, enforced via ``truncate_cells`` on the DISPLAY label.
 _SUBAGENT_LABEL_MAX_CHARS = 60
+# Cap a tool name pushed into the footer activity word so a verbose tool name
+# can't blow the one-line footer width (mirrors the subagent-label truncation).
+_FOOTER_ACTIVITY_MAX_CHARS = 32
 # Dim throughout so the subagent line reads as quiet nested annotation.
 _SUBAGENT_INDENT = "  "
 _SUBAGENT_MARKER_STYLE = "dim #9ece6a"
@@ -425,8 +445,7 @@ def _child_task_label(payload: dict) -> str:
     truncated to one line. Use ``_child_task_key`` for the coalescing key."""
 
     label = _child_task_key(payload)
-    if len(label) > _SUBAGENT_LABEL_MAX_CHARS:
-        label = label[: _SUBAGENT_LABEL_MAX_CHARS - 1].rstrip() + "…"
+    label = truncate_cells(label, _SUBAGENT_LABEL_MAX_CHARS)
     return label
 
 
@@ -529,8 +548,17 @@ class ToolUseConfirm(ModalScreen[PermissionDecision]):
 
     def compose(self) -> ComposeResult:
         with Vertical(id="tool-confirm"):
+            # ``reason="tool_use"`` is the engine's generic wire sentinel (NDJSON
+            # contract; not user copy). Suppress it so the modal does not show a
+            # bare "tool_use" line; render the reason only when it is genuinely
+            # informative (e.g. "writes outside workspace").
+            reason = self._req.reason
+            if reason and reason != "tool_use":
+                message = f"Allow tool: {self._req.tool_name}\n{reason}"
+            else:
+                message = f"Allow tool: {self._req.tool_name}"
             yield Static(
-                f"Allow tool: {self._req.tool_name}\n{self._req.reason}",
+                message,
                 id="tool-confirm-msg",
             )
             # Diff preview (PR3.3): shows what an Edit/Write would change ABOVE
@@ -862,6 +890,14 @@ class MagiTuiApp(App[None]):
     .confirm-subview { height: auto; }
     #edit-area { height: 8; }
     #edit-error { color: $error; }
+    /* Expanded tool-output card (ctrl+o). Bound the body height + internal
+       scroll so a single ~8 KB result (hundreds of lines) does not shove the
+       transcript when several cards are open (OpenCode/Claude-Code both cap the
+       expanded view). Quiet variant: transparent border + dim title to keep the
+       flat one-line aesthetic. */
+    ToolCard { border: none; background: transparent; }
+    ToolCard > CollapsibleTitle { color: $text-muted; }
+    ToolCard Contents { max-height: 20; overflow-y: auto; }
     """
 
     BINDINGS = [
@@ -881,6 +917,13 @@ class MagiTuiApp(App[None]):
         # to cursor-left); it is NOT in the keybindings defaults (defaults.py),
         # so on_key resolves it UNBOUND and lets it bubble to this App BINDING.
         Binding("ctrl+b", "toggle_sidebar", "Sidebar", priority=True),
+        # ctrl+o toggles "expand tool output" mode (default-OFF). priority=True
+        # so it preempts any built-in ctrl+o on the focused Input/TextArea; it is
+        # NOT in the keybindings defaults (defaults.py), so on_key resolves it
+        # UNBOUND and lets it bubble to this App BINDING — identical to the
+        # ctrl+b / ctrl+t path. The "Expand" description surfaces in the help
+        # dialog (HelpDialog.from_app) automatically.
+        Binding("ctrl+o", "toggle_expand", "Expand", priority=True),
         # ctrl+q quits — but SAFELY (exit-safety). priority=True so it preempts
         # Textual's OWN built-in Binding("ctrl+q","quit",priority=True): app
         # dispatch runs priority bindings first and does NOT forward the event
@@ -983,6 +1026,35 @@ class MagiTuiApp(App[None]):
         import os as _os_verbose  # noqa: PLC0415
 
         self._verbose = _os_verbose.environ.get("MAGI_TUI_VERBOSE", "") == "1"
+        # Waiting-liveness (footer current-activity word + optional stall hint).
+        # ``_open_tools`` is an ORDERED list of (tool_id, name) so overlapping/
+        # nested tools pop by id back to the still-open parent; the footer shows
+        # the top-of-stack tool while ``state == "running"``. ``_last_event_
+        # monotonic`` is stamped at the TOP of ``_fold_event`` (before the token
+        # early-return) so the stall hint never fires mid-token-stream. The stall
+        # hint is DEFAULT-OFF: ``MAGI_TUI_STALL_SECONDS`` unset/0/invalid -> 0 =
+        # disabled (zero per-tick cost); a positive int opts in.
+        self._open_tools: list[tuple[str, str]] = []
+        self._last_event_monotonic: float | None = None
+        try:
+            self._stall_seconds = int(
+                _os_verbose.environ.get("MAGI_TUI_STALL_SECONDS", "0") or "0"
+            )
+        except ValueError:
+            self._stall_seconds = 0
+        # Expand-tool-output mode (ctrl+o). DEFAULT-OFF: tools commit as flat,
+        # scannable blocks unless the user opts in (env or keypress). When on,
+        # each tool result mounts as a collapsed ``ToolCard`` carrying the full
+        # (uncapped) payload via the existing ``commit_tool`` seam. Session-
+        # global and forward-acting with a bounded retro-flip — NOT reset per
+        # turn (see start_turn). ``_tool_cards`` tracks mounted cards (capped to
+        # the recent window) so ctrl+o can retro-flip their ``.collapsed`` state;
+        # ``_expand_hint_shown`` gates the one-time discoverability hint.
+        self._expand_tools: bool = (
+            _os_verbose.environ.get("MAGI_TUI_EXPAND_TOOLS", "") == "1"
+        )
+        self._tool_cards: list = []
+        self._expand_hint_shown: bool = False
         # Session list (PR2.4) seams. ``_session_source`` is an optional test/
         # injection hook ``() -> list[SessionEntry]``; when None the dialog reads
         # the runtime's ``session_lister`` seam via ``session_entries``.
@@ -1144,8 +1216,9 @@ class MagiTuiApp(App[None]):
         cwd = self._cwd
         if cwd.startswith(home):
             cwd = "~" + cwd[len(home) :]
-        if len(cwd) > 48:
-            cwd = "…" + cwd[-47:]
+        # 48 is a terminal-CELL budget (East-Asian Wide chars count 2): keep the
+        # path TAIL with a leading ``…`` so a CJK cwd doesn't ~2x-overflow.
+        cwd = truncate_cells(cwd, 48, lead=True)
         return cwd
 
     def _topbar_text(self) -> str:
@@ -1203,6 +1276,26 @@ class MagiTuiApp(App[None]):
             # whole-second value changes — so this 25Hz tick no longer triggers
             # ~24/25 identical repaints for the 1s-granularity render.
             self._footer.set_elapsed(self._turn_elapsed())
+            # Optional stall hint (DEFAULT-OFF). When enabled and the stream has
+            # gone quiet past the threshold, compose an honest ` · no output Ns`
+            # suffix onto the open-tool word; otherwise re-assert the plain word
+            # so the hint clears the instant activity resumes. Integer-second
+            # granularity + Textual's reactive-equality short-circuit collapse
+            # this 25Hz re-assert to ≤1 repaint/sec (no new timer added).
+            if self._stall_seconds > 0 and self._last_event_monotonic is not None:
+                import time as _time  # noqa: PLC0415
+
+                silence = int(_time.monotonic() - self._last_event_monotonic)
+                if silence >= self._stall_seconds:
+                    base = self._open_tool_name()
+                    hint = (
+                        f"{base} · no output {silence}s"
+                        if base
+                        else f"no output {silence}s"
+                    )
+                    self.update_footer(activity=hint)
+                else:
+                    self._refresh_activity()
 
     def _render_welcome(self) -> None:
         """Render the initial TUI state so bare ``magi`` never opens blank."""
@@ -1629,7 +1722,12 @@ class MagiTuiApp(App[None]):
         self._hide_whichkey()
         # Fresh id->name tool map per turn (ids are turn-scoped).
         self._tool_names_by_id = {}
-        self.update_footer(state="running")
+        # Fresh waiting-liveness state per turn: no open tools, a fresh stall
+        # baseline, and a cleared activity word — so a cancelled-mid-tool turn
+        # cannot leak a stale word or stack entry into the next turn.
+        self._open_tools = []
+        self._last_event_monotonic = _time.monotonic()
+        self.update_footer(state="running", activity="")
         self._echo_user(prompt)
         self._run_turn(prompt, turn_id, cancel)
 
@@ -1814,11 +1912,19 @@ class MagiTuiApp(App[None]):
         """
 
         self._turn_started_monotonic = None
-        self.update_footer(state=Terminal.error.value)
+        self._open_tools = []
+        self.update_footer(state=Terminal.error.value, activity="")
 
     async def _fold_event(self, event: RuntimeEvent) -> None:
         """Fold one ``RuntimeEvent`` into the transcript regions."""
 
+        import time as _time  # noqa: PLC0415
+
+        # Stamp the last-event time as the VERY FIRST statement — BEFORE the
+        # token early-return below — so high-frequency ``token`` events advance
+        # it. If this were placed after the early-return, the stall hint would
+        # falsely fire ``no output Ns`` WHILE text is visibly streaming.
+        self._last_event_monotonic = _time.monotonic()
         controller = self.controller
         if event.type == "token":
             controller.append_delta(_token_text(event.payload))
@@ -1871,6 +1977,13 @@ class MagiTuiApp(App[None]):
                 name = self._tool_names_by_id.get(tool_id, name)
         renderer = self._lookup_tool_renderer(name)
         if inner == "tool_start":
+            # Track the most-recent still-open tool so the footer can show WHICH
+            # tool is running (id-keyed so a nested tool ending pops back to its
+            # parent). Push BEFORE rendering so the activity word appears with the
+            # call. A name-less ("tool") start carries no useful word -> skip.
+            if isinstance(tool_id, str) and tool_id and name != "tool":
+                self._open_tools.append((tool_id, name))
+                self._refresh_activity()
             # Fold this tool_start into the sidebar panes (todo / recent files)
             # BEFORE rendering the call, so the side panes track activity even
             # when the sidebar is currently hidden.
@@ -1879,14 +1992,78 @@ class MagiTuiApp(App[None]):
         elif inner == "tool_progress":
             node = renderer.render_progress(_tool_result(payload) or payload)
         elif inner == "tool_end":
+            # Pop the matching open tool by id (a tool_end whose id isn't on the
+            # stack is a defined no-op) and re-point the footer at the last
+            # still-open tool, or clear it when none remain.
+            if isinstance(tool_id, str) and tool_id:
+                self._open_tools = [
+                    t for t in self._open_tools if t[0] != tool_id
+                ]
+                self._refresh_activity()
             if _is_rejected_end(payload):
                 node = renderer.render_rejected(_tool_input(payload) or payload)
             else:
                 node = renderer.render_result(_tool_result(payload))
+                # Expand mode (ctrl+o): when on AND there is a real widget
+                # backing (``_view`` is a TranscriptView; legacy RichLog has
+                # ``_view is None`` and cannot host a Collapsible), re-render the
+                # result with the truncation cap lifted and mount it as a
+                # collapsed ``ToolCard`` via the existing ``commit_tool`` seam.
+                # The flat/card choice is made HERE, at mount time — committed-
+                # once holds (no re-render of finalized blocks). Otherwise fall
+                # through to the flat ``_commit_render_node`` path unchanged.
+                if self._expand_tools and self._view is not None:
+                    from magi_agent.cli.tui.tool_render import (  # noqa: PLC0415
+                        full_output,
+                    )
+                    from magi_agent.cli.tui.widgets.tool_card import (  # noqa: PLC0415
+                        ToolCard,
+                    )
+
+                    with full_output():
+                        full = renderer.render_result(_tool_result(payload))
+                    card = ToolCard.from_render_node(full, collapsed=True)
+                    self.controller.commit_tool(card, text=full.text)
+                    self._tool_cards.append(card)
+                    # Bound the tracked window: ctrl+o retro-flips only the most
+                    # recent cards; older ones keep their collapsed state.
+                    del self._tool_cards[:-_MAX_TRACKED_TOOL_CARDS]
+                    return
+                # Flat path, expand OFF: surface the one-time discoverability
+                # hint the FIRST time a result is actually truncated. OFF-path
+                # only (``not self._expand_tools`` — on legacy RichLog with
+                # expand ON the card path is skipped, but the hint would be
+                # misleading there), so the flag-OFF default stays byte-identical
+                # apart from this single hint line.
+                if (
+                    not self._expand_tools
+                    and not self._expand_hint_shown
+                    and self._preview_truncated(payload, renderer, node)
+                ):
+                    self.controller.commit_block(_EXPAND_HINT)
+                    self._expand_hint_shown = True
         else:  # unknown inner type -> fall back to the one-line summary
             self.controller.commit_block(_status_summary(event))
             return
         self._commit_render_node(node, tool_name=name)
+
+    @staticmethod
+    def _preview_truncated(payload: dict, renderer: object, node: object) -> bool:
+        """Whether the flat result preview dropped content (-> hint is honest).
+
+        Compares the flat (capped) ``node.text`` to a full re-render with the
+        truncation cap lifted; truncated iff they differ. Cheap and OFF-path
+        only — the full re-render here is just to detect loss, not to display.
+        """
+
+        from magi_agent.cli.tui.tool_render import full_output  # noqa: PLC0415
+
+        render_result = getattr(renderer, "render_result", None)
+        if not callable(render_result):
+            return False
+        with full_output():
+            full = render_result(_tool_result(payload))
+        return getattr(full, "text", "") != getattr(node, "text", "")
 
     def _lookup_tool_renderer(self, name: str) -> object:
         """Resolve a renderer for ``name``, synthesizing a named card renderer
@@ -2026,14 +2203,17 @@ class MagiTuiApp(App[None]):
         state: str | None = None,
         tokens: int | None = None,
         elapsed: float | None = None,
+        activity: str | None = None,
         queued: int | None = None,
     ) -> None:
         """Single seam every fold/turn path uses to refresh the footer.
 
         No-op before mount (the footer is created in ``compose``); each provided
         field updates the corresponding reactive on ``StatusFooter`` (which
-        repaints only itself). ``queued`` carries the busy-input-queue depth
-        (gap: busy-input-queue); the footer shows it only while running.
+        repaints only itself). ``activity`` is the current-activity word the
+        footer appends to ``running`` (e.g. ``Bash`` or ``Bash · no output 9s``).
+        ``queued`` carries the busy-input-queue depth (gap: busy-input-queue);
+        the footer shows it only while running.
         """
 
         if self._footer is None:
@@ -2044,8 +2224,29 @@ class MagiTuiApp(App[None]):
             self._footer.set_tokens(tokens)
         if elapsed is not None:
             self._footer.set_elapsed(elapsed)
+        if activity is not None:
+            self._footer.set_activity(activity)
         if queued is not None:
             self._footer.set_queued(queued)
+
+    def _open_tool_name(self) -> str:
+        """The truncated name of the last still-open tool, or ``""`` if none."""
+
+        if not self._open_tools:
+            return ""
+        name = self._open_tools[-1][1]
+        if len(name) > _FOOTER_ACTIVITY_MAX_CHARS:
+            name = name[: _FOOTER_ACTIVITY_MAX_CHARS - 1].rstrip() + "…"
+        return name
+
+    def _refresh_activity(self) -> None:
+        """Re-point the footer activity word at the current open tool (or clear).
+
+        The single place that maps ``_open_tools`` -> footer; the stall hint
+        (``_on_flush_tick``) composes its own suffix on top of this base name.
+        """
+
+        self.update_footer(activity=self._open_tool_name())
 
     def _turn_elapsed(self) -> float:
         """Seconds since the in-flight turn started (0.0 when idle)."""
@@ -2078,6 +2279,11 @@ class MagiTuiApp(App[None]):
         # Stop the running clock once the turn is terminal (the flush-tick
         # elapsed advance keys off this being None / state != "running").
         self._turn_started_monotonic = None
+        # Clear the current-activity word + open-tool stack so a finished/aborted
+        # turn never leaves a stale word (covers the normal Ctrl+C cancel path,
+        # which yields an ``aborted`` EngineResult routed through here).
+        self._open_tools = []
+        self.update_footer(activity="")
         # Gated focus-aware attention bell (PR3.4): ring only when the terminal
         # is unfocused AND MAGI_TUI_NOTIFY_BELL is on (default OFF). Fired here
         # so it covers completed AND non-completed turns (before the early
@@ -2118,6 +2324,23 @@ class MagiTuiApp(App[None]):
         if self._sidebar is None:
             return
         self._sidebar.display = not self._sidebar.display
+
+    # -- expand tool output toggle (ctrl+o) --------------------------------
+    def action_toggle_expand(self) -> None:
+        """Toggle session-global "expand tool output" mode (ctrl+o).
+
+        Forward-acting: subsequent tool results commit as collapsed ``ToolCard``s
+        (expanded body carries the full payload) instead of flat blocks. Also
+        retro-flips ALREADY-mounted cards' ``.collapsed`` so the toggle feels
+        global like Claude Code's ctrl+o. This is a ``.collapsed`` write on
+        existing widgets — NOT a transcript re-render, so committed-once holds.
+        Flat blocks committed before expand was ever on have no card to open
+        (committed-once); that quiet limitation is surfaced in the hint.
+        """
+
+        self._expand_tools = not self._expand_tools
+        for card in self._tool_cards:
+            card.collapsed = not self._expand_tools
 
     # -- focus tracking for the attention bell (PR3.4) ---------------------
     def on_app_blur(self, _event: object) -> None:

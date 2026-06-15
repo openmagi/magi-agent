@@ -235,3 +235,35 @@ def test_registry_is_registered() -> None:
     registry = tool_render.build_tool_renderers()
     assert registry.is_registered("Bash")
     assert not registry.is_registered("SpawnAgent")
+
+
+# ---------------------------------------------------------------------------
+# CJK display-width truncation (cell-accurate, not codepoint-count)
+# ---------------------------------------------------------------------------
+def test_clip_respects_cell_width() -> None:
+    """A long Hangul primary arg clips to ``_ARG_HEAD_MAX`` *cells*, not
+    codepoints — a 60-char Korean pattern is 120 cells and would sail past the
+    old ``len() <= 80`` gate. Search-fidelity (invariant #3) still holds."""
+
+    from magi_agent.cli.render.width import display_width
+
+    renderer = tool_render.ToolCardRenderer("Grep", ("pattern", "query"))
+    node = renderer.render_call({"pattern": "프" * 60})
+    # The displayed arg portion is the header minus the "Grep(" + ")" scaffold;
+    # bound the whole header's width by the cap + the fixed scaffold width.
+    arg = node.text[len("Grep(") : -len(")")]
+    assert display_width(arg) <= tool_render._ARG_HEAD_MAX
+    # Search-fidelity invariant: indexed text == displayed text.
+    assert renderer.extract_search_text(node) == node.text
+
+
+def test_preview_body_respects_cell_width() -> None:
+    """A single long Hangul preview line is capped at ``_PREVIEW_MAX_CHARS`` in
+    *cells*, not codepoints, and keeps the existing ``" …"`` (space + ellipsis)
+    spelling at that site."""
+
+    from magi_agent.cli.render.width import display_width
+
+    body = tool_render._preview("가" * 2000)
+    assert display_width(body) <= tool_render._PREVIEW_MAX_CHARS
+    assert body.endswith(" …")

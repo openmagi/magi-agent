@@ -7,4 +7,6 @@ live in ``cli/tui/tool_render.py``.
 
 from __future__ import annotations
 
-__all__: list[str] = []
+from magi_agent.cli.render.width import display_width, truncate_cells
+
+__all__: list[str] = ["display_width", "truncate_cells"]
