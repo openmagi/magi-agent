@@ -66,6 +66,24 @@ def local_vault_enabled(env: Mapping[str, str] | None = None) -> bool:
     return _truthy(env.get("MAGI_LOCAL_VAULT_ENABLED"))
 
 
+def local_vault_proxy_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Whether the local credential-injecting forward proxy should start.
+
+    Gated identically to ``local_vault_enabled``: it requires the native local
+    vault to be active AND the proxy flag set, and is forced OFF whenever an
+    external ``MAGI_VAULT_ADMIN_URL`` is configured (hosted bots never run the
+    local proxy). The serve bootstrap is the only place that setdefaults
+    ``MAGI_LOCAL_VAULT_PROXY_ENABLED=1`` (see ``runtime/local_defaults.py``); the
+    helper default stays OFF so library/test imports never start a proxy.
+    """
+    env = os.environ if env is None else env
+    if _external_vault_url(env):
+        return False
+    if not local_vault_enabled(env):
+        return False
+    return _truthy(env.get("MAGI_LOCAL_VAULT_PROXY_ENABLED"))
+
+
 def _local_vault(env: Mapping[str, str] | None = None) -> LocalVault:
     return LocalVault()
 
