@@ -267,7 +267,7 @@ graph LR
 | __main__.py | — | main | — |
 | app.py | — | app_api, bootstrap, chat, config, control_requests, credentials, customize, debug_trace, health, learning_dashboard, observability, openmagi_runtime, plugins, shadow_invocations, streaming_chat_route, tools, web_dashboard | (root)/main.py |
 | facades.py | High-level entry-point facades that compose existing modules. | bus, context, dispatcher, manifest, resolved, result | — |
-| main.py | — | app, chat, env, hosted_defaults, install_profile_bootstrap, local_defaults, local_proxy, local_vault, memory_bootstrap, models, observed_egress, openmagi_runtime, otel_noise, providers, vault_local | (root)/__main__.py, cli/tests/test_app.py |
+| main.py | — | app, chat, env, hosted_defaults, install_profile_bootstrap, local_defaults, local_proxy, local_vault, memory_bootstrap, models, observed_egress, openmagi_runtime, otel_noise, providers, vault_local, vault_server | (root)/__main__.py, cli/tests/test_app.py |
 
 ### adk_bridge/
 
@@ -635,13 +635,14 @@ graph LR
 
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
-| __init__.py | Local "Credentials" registration admin surface for the OSS dashboard. | credentials_admin | credentials_admin/local_proxy.py, transport/credentials.py |
+| __init__.py | Local "Credentials" registration admin surface for the OSS dashboard. | credentials_admin | credentials_admin/local_proxy.py, credentials_admin/vault_server.py, transport/credentials.py |
 | approvals_store.py | Local approval-request store for guarded credentials. | — | — |
-| local_proxy.py | mitmproxy addon + lifecycle for the local credential-injecting forward proxy. | credentials_admin, local_proxy_decision, local_vault | (root)/main.py |
+| local_proxy.py | mitmproxy addon + lifecycle for the local credential-injecting forward proxy. | credentials_admin, local_proxy_decision, local_vault | (root)/main.py, credentials_admin/vault_server.py |
 | local_proxy_decision.py | Pure decision core for the local credential-injecting forward proxy. | — | credentials_admin/local_proxy.py |
-| local_vault.py | Native encrypted local vault backend for the dashboard "Credentials" feature. | — | (root)/main.py, credentials_admin/local_proxy.py, credentials_admin/vault_local.py |
+| local_vault.py | Native encrypted local vault backend for the dashboard "Credentials" feature. | — | (root)/main.py, credentials_admin/local_proxy.py, credentials_admin/vault_local.py, credentials_admin/vault_server.py |
 | store.py | Local redacted-metadata store for registered credentials. | — | — |
 | vault_local.py | Local vault seam for the dashboard "Credentials" registration feature. | durable_store, local_vault | (root)/main.py |
+| vault_server.py | Standalone Agent Vault server — the per-bot hosted sidecar process. | credentials_admin, local_proxy, local_vault | (root)/main.py |
 
 ### customize/
 

@@ -57,6 +57,18 @@ def main(argv: Sequence[str] | None = None) -> None:
     from .ops.otel_noise import silence_otel_detach_noise
 
     silence_otel_detach_noise()
+
+    # ``magi-agent vault-serve`` runs the standalone Agent Vault sidecar (CA
+    # bootstrap + credential-injection proxy + token-authed admin API). It is a
+    # separate process from ``serve`` and shares none of the runtime wiring
+    # below; dispatch early and return.
+    raw_args = list(sys.argv[1:] if argv is None else argv)
+    if raw_args and raw_args[0] == "vault-serve":
+        from .credentials_admin.vault_server import run_vault_server
+
+        run_vault_server()
+        return
+
     # Install-default-on memory: overlay ~/.magi/config.toml[memory] on the
     # install defaults ({enabled, prefer_local_search}) and setdefault the
     # matching MAGI_MEMORY_* env vars so the runtime gates (memory_turn_hook on
