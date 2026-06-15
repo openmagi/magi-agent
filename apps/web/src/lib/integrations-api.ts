@@ -23,6 +23,7 @@ export interface ComposioStatus {
 export interface TelegramStatus {
   configured: boolean;
   label: string | null;
+  easy_available?: boolean;
 }
 
 export interface IntegrationsStatus {
@@ -191,5 +192,58 @@ export async function setTelegramToken(fetch: AgentFetch, token: string): Promis
 export async function clearTelegramToken(fetch: AgentFetch): Promise<TelegramStatus> {
   const res = await fetch(`${BASE}/telegram/token`, { method: "DELETE" });
   await expectOk(res, "Failed to clear Telegram token");
+  return ((await res.json()) as { telegram: TelegramStatus }).telegram;
+}
+
+// --- Telegram easy setup (phone → BotFather), gated ---
+
+export async function easySendCode(fetch: AgentFetch, phone: string): Promise<string> {
+  const res = await fetch(`${BASE}/telegram/easy/send-code`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ phone }),
+  });
+  await expectOk(res, "Failed to send code");
+  return ((await res.json()) as { session_id: string }).session_id;
+}
+
+export async function easyVerifyCode(
+  fetch: AgentFetch,
+  sessionId: string,
+  code: string,
+): Promise<boolean> {
+  const res = await fetch(`${BASE}/telegram/easy/verify-code`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ session_id: sessionId, code }),
+  });
+  await expectOk(res, "Failed to verify code");
+  return ((await res.json()) as { needs_2fa: boolean }).needs_2fa;
+}
+
+export async function easyVerify2fa(
+  fetch: AgentFetch,
+  sessionId: string,
+  password: string,
+): Promise<void> {
+  const res = await fetch(`${BASE}/telegram/easy/verify-2fa`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ session_id: sessionId, password }),
+  });
+  await expectOk(res, "Failed to verify password");
+}
+
+export async function easyCreateBot(
+  fetch: AgentFetch,
+  sessionId: string,
+  botName: string,
+): Promise<TelegramStatus> {
+  const res = await fetch(`${BASE}/telegram/easy/create-bot`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ session_id: sessionId, bot_name: botName }),
+  });
+  await expectOk(res, "Failed to create bot");
   return ((await res.json()) as { telegram: TelegramStatus }).telegram;
 }

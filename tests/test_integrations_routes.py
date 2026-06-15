@@ -169,7 +169,11 @@ def test_telegram_token_validates_and_persists(monkeypatch, tmp_path) -> None:
         json={"token": "123:ABC"},
     )
     assert put.status_code == 200
-    assert put.json()["telegram"] == {"configured": True, "label": "@my_bot"}
+    assert put.json()["telegram"] == {
+        "configured": True,
+        "label": "@my_bot",
+        "easy_available": False,
+    }
     # delete clears it
     deleted = client.delete("/v1/admin/integrations/telegram/token", headers=HEADERS)
     assert deleted.json()["telegram"]["configured"] is False
