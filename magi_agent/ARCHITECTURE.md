@@ -394,7 +394,7 @@ graph LR
 
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
-| __init__.py | Magi headless CLI foundation (PR-A1). | — | browser/autonomous/tool.py, cli/app.py, cli/tests/test_model_picker_wire.py, transport/app_api.py |
+| __init__.py | Magi headless CLI foundation (PR-A1). | — | browser/autonomous/tool.py, cli/app.py, cli/tests/test_app.py, cli/tests/test_model_picker_wire.py, transport/app_api.py |
 | __main__.py | Thin stdlib-only shim for ``python -m magi_agent.cli`` (PR-F1). | app | cli/tests/test_app.py |
 | app.py | Typer CLI entrypoint for Magi (PR-F1, Stream F). | cli, config, daemon, env, headless, health, install_profile_bootstrap, legal_eval, local_defaults, memory_bootstrap, otel_noise, providers, scaffold, service_install, session_log, watchers, wiring | cli/__main__.py, cli/tests/test_app.py, cli/tests/test_composio_cli.py, cli/tests/test_doctor.py, cli/tests/test_gateway_start_daemon.py, cli/tests/test_plan_mode.py |
 | clipboard_image.py | Read an image from the OS clipboard for CLI/TUI image attach. | message_builder | cli/tests/test_clipboard_image.py, cli/tui/app.py |
@@ -417,7 +417,7 @@ graph LR
 | real_runner.py | A real, model-backed runner for the local ``magi`` CLI. | compiler, control_plane, discovery, engine, env, live_gate, local_tool_collector, materializer, providers, session_identity, session_service, task_completion, tool_runtime | cli/readonly_classifier.py, cli/tests/test_app.py, cli/tests/test_real_runner.py, cli/tests/test_runtime_policy_wiring.py, cli/wiring.py, discovery/orchestrator.py, runtime/child_runner_live.py |
 | session_log.py | Append-only JSONL session log for the Magi CLI (Stream B, PR-B1). | contracts, session_continuity, session_service, transcript | cli/app.py, cli/headless.py, cli/tests/test_app.py, cli/tests/test_coldstart.py, cli/tests/test_session_log.py, cli/tui/app.py, cli/tui/history.py, cli/tui/theme.py, cli/wiring.py |
 | tool_runtime.py | Real tool runtime for the local ``magi`` CLI agent. | ask_user_question_toolhost, context, core_toolhost, dispatcher, env, file_tool_manifests, file_toolhost, first_party_gate, identity, learning_recall, live_gate, local_tool_collector, manifest, memory_recall_block, memory_snapshot_cache, memory_write_wiring, message_builder, permission_scope, plan_mode_toolhost, prompt_guidance, python_exec, registry, session_identity, tool, tool_adapter, tool_synthesis, tools, web_search_tools | cli/real_runner.py, cli/tests/test_identity.py, cli/tests/test_local_tool_evidence_wiring.py, cli/tests/test_plan_mode.py, cli/tests/test_plan_mode_tools_exposed.py, cli/tests/test_tool_runtime.py, cli/wiring.py, runtime/child_runner_live.py |
-| wiring.py | Composition root for the Magi CLI (PR-F1, Stream F). | app, commands, config, context, contracts, dispatcher, engine, env, file_tool_manifests, file_toolhost, first_party_gate, goal_nudge_wiring, hook_wiring, live_gate, local_runner, local_tool_collector, manifest, mcp, memory_mode_guard, openmagi_runtime, permission_scope, permissions, providers, readonly_classifier, real_runner, registry, runtime_sink, safety, session_identity, session_log, tool, tool_adapter, tool_render, tool_runtime, transcript, web_search_tools | cli/app.py, cli/tests/test_app.py, cli/tests/test_coldstart.py, cli/tests/test_plan_mode.py, cli/tests/test_real_runner.py, cli/tests/test_runtime_policy_wiring.py, cli/tests/test_streaming_sink.py, transport/chat_routes.py, transport/streaming_chat_route.py |
+| wiring.py | Composition root for the Magi CLI (PR-F1, Stream F). | app, commands, config, context, contracts, dispatcher, engine, env, file_provider, file_tool_manifests, file_toolhost, first_party_gate, goal_nudge_wiring, hook_wiring, live_gate, local_runner, local_tool_collector, manifest, mcp, memory_mode_guard, openmagi_runtime, permission_scope, permissions, providers, readonly_classifier, real_runner, registry, runtime_sink, safety, session_identity, session_log, tool, tool_adapter, tool_render, tool_runtime, transcript, web_search_tools | cli/app.py, cli/tests/test_app.py, cli/tests/test_coldstart.py, cli/tests/test_plan_mode.py, cli/tests/test_real_runner.py, cli/tests/test_runtime_policy_wiring.py, cli/tests/test_streaming_sink.py, transport/chat_routes.py, transport/streaming_chat_route.py |
 
 ### cli/commands/
 
@@ -464,7 +464,7 @@ graph LR
 |---|---|---|---|
 | __init__.py | — | — | — |
 | conftest.py | conftest.py for magi_agent/cli/tests. | — | — |
-| test_app.py | Tests for cli/app.py (Typer entrypoint) and cli/wiring.py (PR-F1). | __main__, app, contracts, engine, env, headless, main, permissions, real_runner, session_log, wiring | — |
+| test_app.py | Tests for cli/app.py (Typer entrypoint) and cli/wiring.py (PR-F1). | __main__, app, cli, contracts, engine, env, headless, main, permissions, real_runner, session_log, wiring | — |
 | test_clipboard_image.py | — | clipboard_image | — |
 | test_coldstart.py | Cold-start import discipline tests for CLI Stream F (PR-F1). | contracts, engine, permissions, session_log, wiring | — |
 | test_command_executor.py | Tests for the PR2.2 ``CommandExecutor`` contract + default executor. | contracts, executor | — |
@@ -510,7 +510,7 @@ graph LR
 | test_tool_render.py | Render-layer tests for the ``full_output`` cap-override chokepoint. | tool_render | — |
 | test_tool_runtime.py | — | local_tool_collector, task_completion, tool_adapter, tool_runtime | — |
 | test_tui_app.py | Tests for the PR-E2 Textual App + REPL loop + TextualSink. | app, builtins, contracts, defaults, footer, help, input, model, palette, schema, session, tool_card, tool_render, transcript_view, tui | — |
-| test_tui_autocomplete.py | Tests for the PR-E2 prefix autocomplete router. | autocomplete, contracts | — |
+| test_tui_autocomplete.py | Tests for the PR-E2 prefix autocomplete router. | autocomplete, contracts, file_provider | — |
 | test_tui_dialog_help.py | Tests for the PR2.5 help dialog. | help | — |
 | test_tui_dialog_model.py | Tests for the PR2.3 model picker dialog. | model, providers | — |
 | test_tui_dialog_session.py | Tests for the PR2.4 session list dialog. | session | — |
@@ -541,6 +541,7 @@ graph LR
 | _bench.py | Headless throughput benchmark for the streaming-transcript spike (PR-E1). | transcript | cli/tests/test_tui_transcript.py |
 | app.py | Interactive Textual App + REPL loop for the Magi CLI (PR-E2). | autocomplete, clipboard_image, contracts, diff, executor, footer, help, history, input, loader, markdown, model, notify, palette, providers, resolver, schema, session, session_log, sidebar, theme, tool_card, tool_render, transcript, transcript_view, tui, whichkey, width | cli/tests/test_app.py, cli/tests/test_e2e_parity.py, cli/tests/test_model_picker_wire.py, cli/tests/test_tui_app.py, cli/tests/test_tui_followups.py, cli/tests/test_tui_history.py, cli/tests/test_tui_input.py, cli/tests/test_tui_palette.py, cli/tests/test_tui_subagent.py, cli/tests/test_tui_theme.py, cli/tests/test_tui_thinking.py, cli/tests/test_tui_visual.py, cli/tests/test_tui_whichkey.py, cli/wiring.py |
 | autocomplete.py | Prefix autocomplete router for the Magi TUI input (PR-E2). | contracts | cli/tests/test_tui_autocomplete.py, cli/tests/test_tui_input.py, cli/tui/app.py, cli/tui/input.py |
+| file_provider.py | Workspace file provider for ``@``-mention autocomplete (gap: identity-and-polish). | — | cli/tests/test_tui_autocomplete.py, cli/wiring.py |
 | footer.py | Bottom status footer for the Magi TUI (PR3.1). | — | cli/tests/test_tui_app.py, cli/tests/test_tui_footer.py, cli/tui/app.py |
 | history.py | Per-session input history + draft stash for the Magi TUI (PR1.2 / PR1.3). | session_log | cli/tests/test_tui_history.py, cli/tests/test_tui_input.py, cli/tui/app.py, cli/tui/input.py |
 | input.py | Prompt input widget + submission routing for the Magi TUI (PR-E2 / PR1.1). | autocomplete, contracts, history | cli/tests/test_tui_app.py, cli/tests/test_tui_input.py, cli/tui/app.py |

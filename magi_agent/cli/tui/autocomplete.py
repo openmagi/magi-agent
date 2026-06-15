@@ -8,7 +8,10 @@ cursor) selects a completion *source*:
   :class:`~magi_agent.cli.contracts.CommandRegistry` filtered to the TUI
   surface (ghost text).
 * ``@`` -> files / agents (injectable provider).
-* ``#`` -> channels (injectable provider).
+
+The ``#`` trigger is intentionally unbacked in the local CLI (there is no local
+channel concept), so ``#text`` yields no completions. The ``channel_provider``
+seam is retained for a future memory / channel provider.
 
 Ranking uses ``rapidfuzz`` (the ONLY place ``rapidfuzz`` is imported), results
 are capped (~15), and a monotonically increasing *request token* implements a

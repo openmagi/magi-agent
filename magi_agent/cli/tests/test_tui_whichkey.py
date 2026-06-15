@@ -75,6 +75,22 @@ def test_overlay_show_empty_hints_stays_hidden() -> None:
     asyncio.run(_run())
 
 
+def test_show_hints_renders_friendly_label() -> None:
+    """The overlay shows a human label for a known action, not the raw id."""
+
+    async def _run() -> None:
+        app = _Harness()
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            overlay = app.query_one(WhichKeyOverlay)
+            overlay.show_hints([("ctrl+k", "chat:killAgents")])
+            rendered = str(overlay.render())
+            assert "Stop agents" in rendered
+            assert "chat:killAgents" not in rendered
+
+    asyncio.run(_run())
+
+
 # ---------------------------------------------------------------------------
 # App wiring: overlay shows on a pending chord, hides on resolve/cancel
 # ---------------------------------------------------------------------------
@@ -134,7 +150,8 @@ def test_chord_start_shows_whichkey_then_hides_on_complete() -> None:
             await pilot.press("ctrl+x")
             await pilot.pause()
             assert "visible" in overlay.classes
-            assert "chat:killAgents" in str(overlay.render())
+            # The raw action id is humanized for display.
+            assert "Stop agents" in str(overlay.render())
             # Completing the chord hides the overlay.
             await pilot.press("ctrl+k")
             await pilot.pause()

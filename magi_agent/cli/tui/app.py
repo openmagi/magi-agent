@@ -548,8 +548,17 @@ class ToolUseConfirm(ModalScreen[PermissionDecision]):
 
     def compose(self) -> ComposeResult:
         with Vertical(id="tool-confirm"):
+            # ``reason="tool_use"`` is the engine's generic wire sentinel (NDJSON
+            # contract; not user copy). Suppress it so the modal does not show a
+            # bare "tool_use" line; render the reason only when it is genuinely
+            # informative (e.g. "writes outside workspace").
+            reason = self._req.reason
+            if reason and reason != "tool_use":
+                message = f"Allow tool: {self._req.tool_name}\n{reason}"
+            else:
+                message = f"Allow tool: {self._req.tool_name}"
             yield Static(
-                f"Allow tool: {self._req.tool_name}\n{self._req.reason}",
+                message,
                 id="tool-confirm-msg",
             )
             # Diff preview (PR3.3): shows what an Edit/Write would change ABOVE
