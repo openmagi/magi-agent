@@ -189,10 +189,15 @@ class OpenMagiRuntime:
         # Apply persisted tool enable/disable overrides (~/.magi/customize.json;
         # path honors MAGI_CUSTOMIZE/MAGI_CONFIG). Never let this crash construction.
         try:
-            from magi_agent.customize.apply import apply_tool_overrides
+            from magi_agent.customize.apply import (
+                apply_tool_overrides,
+                apply_verification_overrides,
+            )
             from magi_agent.customize.store import load_overrides
 
-            apply_tool_overrides(self, load_overrides())
+            _overrides = load_overrides()
+            apply_tool_overrides(self, _overrides)
+            apply_verification_overrides(self, _overrides)
         except Exception:
             pass
         # TODO(memory): wire hosted ADK prompt assembly to

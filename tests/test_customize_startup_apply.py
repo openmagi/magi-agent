@@ -17,3 +17,32 @@ def test_startup_applies_tool_overrides(tmp_path, monkeypatch):
     # a freshly constructed runtime must come up with that tool disabled
     fresh = _build_runtime(tmp_path, gateway_token=_TOKEN)
     assert fresh.tool_registry.resolve_registration(tool_name).enabled is False
+
+
+def test_startup_applies_verification_policy_when_flag_on(tmp_path, monkeypatch):
+    monkeypatch.setenv("MAGI_CUSTOMIZE_VERIFICATION_ENABLED", "1")
+    cfile = tmp_path / "customize.json"
+    monkeypatch.setenv("MAGI_CUSTOMIZE", str(cfile))
+    from magi_agent.customize.store import set_verification_override
+
+    set_verification_override("harness_presets", "answer_quality", True, mode="hybrid", path=cfile)
+
+    from tests.test_customize_routes import _TOKEN, _build_runtime
+
+    runtime = _build_runtime(tmp_path, gateway_token=_TOKEN)
+    assert runtime.customize_verification_policy.is_enabled("answer_quality")
+    assert runtime.customize_verification_policy.mode("answer_quality") == "hybrid"
+
+
+def test_startup_skips_verification_policy_when_flag_off(tmp_path, monkeypatch):
+    monkeypatch.delenv("MAGI_CUSTOMIZE_VERIFICATION_ENABLED", raising=False)
+    cfile = tmp_path / "customize.json"
+    monkeypatch.setenv("MAGI_CUSTOMIZE", str(cfile))
+    from magi_agent.customize.store import set_verification_override
+
+    set_verification_override("harness_presets", "answer_quality", True, path=cfile)
+
+    from tests.test_customize_routes import _TOKEN, _build_runtime
+
+    runtime = _build_runtime(tmp_path, gateway_token=_TOKEN)
+    assert not hasattr(runtime, "customize_verification_policy")

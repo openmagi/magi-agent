@@ -1,7 +1,7 @@
 """Tests for apply_tool_overrides."""
 from __future__ import annotations
 
-from magi_agent.customize.apply import apply_tool_overrides
+from magi_agent.customize.apply import apply_tool_overrides, apply_verification_overrides
 
 
 class _Reg:
@@ -39,3 +39,34 @@ def test_apply_tolerates_missing_tools_key():
     rt = _RT(["a"])
     apply_tool_overrides(rt, {})  # must not raise
     assert rt.tool_registry.enabled == {"a": True}
+
+
+class _Bare:
+    pass
+
+
+def test_apply_verification_noop_when_flag_off(monkeypatch):
+    monkeypatch.delenv("MAGI_CUSTOMIZE_VERIFICATION_ENABLED", raising=False)
+    rt = _Bare()
+    apply_verification_overrides(
+        rt, {"verification": {"harness_presets": ["answer_quality"]}}
+    )
+    assert not hasattr(rt, "customize_verification_policy")
+
+
+def test_apply_verification_sets_policy_when_flag_on(monkeypatch):
+    monkeypatch.setenv("MAGI_CUSTOMIZE_VERIFICATION_ENABLED", "1")
+    rt = _Bare()
+    apply_verification_overrides(
+        rt,
+        {"verification": {"harness_presets": ["answer_quality"], "modes": {"answer_quality": "llm"}}},
+    )
+    assert rt.customize_verification_policy.is_enabled("answer_quality")
+    assert rt.customize_verification_policy.mode("answer_quality") == "llm"
+
+
+def test_apply_verification_tolerates_bad_input(monkeypatch):
+    monkeypatch.setenv("MAGI_CUSTOMIZE_VERIFICATION_ENABLED", "1")
+    rt = _Bare()
+    apply_verification_overrides(rt, None)  # must not raise
+    assert rt.customize_verification_policy.enabled_presets == frozenset()
