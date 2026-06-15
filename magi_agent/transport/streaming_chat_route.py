@@ -124,6 +124,61 @@ def _local_full_access(runtime: object) -> bool:
     )
 
 
+def _persist_local_turn_usage(
+    runtime: object,
+    session_id: str,
+    terminal: object,
+) -> None:
+    """Persist one local turn's token/cost usage for the Usage dashboard.
+
+    The local ``magi-agent serve`` engine path is the only writer of the
+    per-session usage the ``/v1/app/runtime`` reader surfaces; nothing else
+    persists it (the ADK session service is wired without a store). Best-effort:
+    a bad model name, an unwritable workspace, or a missing optional dependency
+    must never affect the live turn — the caller already swallows exceptions, and
+    this body adds its own guards.
+    """
+    usage = getattr(terminal, "usage", None) or {}
+    tokens_in = int(usage.get("input_tokens") or 0)
+    tokens_out = int(usage.get("output_tokens") or 0)
+    tokens_cache_read = int(usage.get("cache_read_tokens") or 0)
+    if tokens_in <= 0 and tokens_out <= 0:
+        return  # nothing the model actually consumed this turn
+
+    config = getattr(runtime, "config", None)
+    model = getattr(config, "model", None)
+    user_id = getattr(config, "user_id", None) or "local"
+
+    from magi_agent.runtime.usage_cost import compute_cost_usd
+    from magi_agent.storage.session_store import (
+        SessionSqliteStore,
+        SessionStoreConfig,
+    )
+    from magi_agent.transport.app_api import _workspace_root
+
+    cost_usd = compute_cost_usd(model, usage)
+    store = SessionSqliteStore(
+        SessionStoreConfig(enabled=True),
+        workspace_root=str(_workspace_root()),
+    )
+    try:
+        # Ensure the parent session row exists (session_metadata FK) and refresh
+        # its last-activity timestamp; the local engine path has no channel, so
+        # the dashboard falls back to the session key for the label.
+        store.save_sync(session_id, "magi", user_id, {})
+        store.update_metadata_sync(
+            session_id,
+            model=model,
+            tokens_in=tokens_in,
+            tokens_out=tokens_out,
+            tokens_cache_read=tokens_cache_read,
+            cost_usd=cost_usd,
+            increment_turn=True,
+        )
+    finally:
+        store.close()
+
+
 # ---------------------------------------------------------------------------
 # Local helpers (mirroring chat.py style; NOT imported from there)
 # ---------------------------------------------------------------------------
@@ -719,6 +774,9 @@ def register_streaming_chat_routes(
             return JSONResponse(status_code=500, content={"error": "engine_build_failed"})
         cancel = asyncio.Event()
 
+        def _usage_recorder(terminal: object) -> None:
+            _persist_local_turn_usage(runtime, session_id, terminal)
+
         return _streaming_response(
             drive_streaming_chat(
                 engine,
@@ -730,6 +788,7 @@ def register_streaming_chat_routes(
                 registry=ACTIVE_TURNS,
                 session_id=session_id,
                 turn_id=turn_id,
+                usage_recorder=_usage_recorder,
             )
         )
 
