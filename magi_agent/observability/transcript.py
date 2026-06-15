@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import threading
 import time
 from datetime import datetime, timezone
@@ -23,20 +22,6 @@ from typing import Any, Callable
 logger = logging.getLogger(__name__)
 
 TranscriptSink = Callable[[dict, "str | None", "str | None"], None]
-
-
-def _truthy(value: str | None) -> bool:
-    return (value or "").strip().lower() in {"1", "true", "yes", "on"}
-
-
-def _int_env(name: str, default: int) -> int:
-    raw = os.environ.get(name)
-    if raw is None or not raw.strip():
-        return default
-    try:
-        return int(raw)
-    except ValueError:
-        return default
 
 
 def _now_iso() -> str:
@@ -142,7 +127,9 @@ def register_session_transcript(app: Any, runtime: Any) -> "SessionTranscriptWri
     surface byte-identical. Files live under the shared observability home
     (``MAGI_OBS_HOME``) so the PVC path works on hosted pods (HOME=/, read-only
     root)."""
-    if not _truthy(os.environ.get("MAGI_SESSION_TRANSCRIPT_ENABLED")):
+    from magi_agent.config.flags import flag_bool, flag_int
+
+    if not flag_bool("MAGI_SESSION_TRANSCRIPT_ENABLED"):
         return None
 
     from magi_agent.observability.integration import resolve_observability_home
@@ -157,8 +144,8 @@ def register_session_transcript(app: Any, runtime: Any) -> "SessionTranscriptWri
 
     try:
         writer.prune(
-            retention_days=_int_env("MAGI_SESSION_TRANSCRIPT_RETENTION_DAYS", 14),
-            max_files=_int_env("MAGI_SESSION_TRANSCRIPT_MAX_FILES", 500),
+            retention_days=flag_int("MAGI_SESSION_TRANSCRIPT_RETENTION_DAYS") or 14,
+            max_files=flag_int("MAGI_SESSION_TRANSCRIPT_MAX_FILES") or 500,
         )
     except Exception:
         logger.debug("session transcript initial prune failed", exc_info=True)
