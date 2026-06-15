@@ -226,9 +226,17 @@ def build_headless_runtime(
     #     ``None`` (the default OFF) leaves streaming byte-for-byte identical.
     if event_sink is None:
         try:
-            from magi_agent.observability.runtime_sink import get_active_sink
+            from magi_agent.observability.runtime_sink import (
+                combine_sinks,
+                get_active_sink,
+            )
+            from magi_agent.observability.transcript import (
+                get_active_transcript_sink,
+            )
 
-            event_sink = get_active_sink()
+            event_sink = combine_sinks(
+                [get_active_sink(), get_active_transcript_sink()]
+            )
         except Exception:
             event_sink = None
     local_tool_evidence = _local_tool_evidence_collector(effective_runner)
