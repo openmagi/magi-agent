@@ -1,140 +1,118 @@
-"""Tests for the durable EvidenceLedgerStore (PR1).
+"""Tests for the durable evidence-ledger reader + retention + shared path.
 
-The store persists ``EvidenceLedgerEntry`` objects to append-only per-session
-JSONL files and reads them back for a control-plane reader. It is pure (no
-flags, no callers) and fail-open: a persistence failure must never raise into
-the live turn.
+The CLI collector already WRITES durable evidence (default-ON). These tests
+verify the new read/prune surface over those exact files, the shared path
+resolver, and that the writer still behaves identically after the refactor.
 """
 from __future__ import annotations
 
 import os
 import time
 
-from magi_agent.evidence.ledger import EvidenceLedger
-from magi_agent.evidence.ledger_store import EvidenceLedgerStore
-from magi_agent.evidence.types import EvidenceRecord
+from magi_agent.evidence.ledger_store import (
+    EvidenceLedgerReader,
+    evidence_ledger_filename,
+    evidence_ledger_path,
+    resolve_evidence_ledger_dir,
+)
+from magi_agent.evidence.local_tool_collector import LocalToolEvidenceCollector
+from magi_agent.tools.result import ToolResult
+
+_LIFECYCLE = "MAGI_EVIDENCE_LEDGER_LIFECYCLE_ENABLED"
+_DIR = "MAGI_EVIDENCE_LEDGER_DIR"
 
 
-def _ledger(*, session_id: str = "sess-1", turn_id: str = "turn-1") -> EvidenceLedger:
-    return EvidenceLedger.model_validate(
-        {
-            "ledgerId": f"{session_id}:{turn_id}:evidence",
-            "sessionId": session_id,
-            "turnId": turn_id,
-            "runOn": "main",
-            "agentRole": "general",
-            "spawnDepth": 0,
-            "sourceKind": "tool_trace",
-            "producerSurface": "tool_host",
-            "metadata": {},
-        }
+def _record(collector, *, session_id="sess-1", turn_id="turn-1", tool_name="Read"):
+    collector.record_tool_result(
+        session_id=session_id,
+        turn_id=turn_id,
+        tool_call_id=f"call-{tool_name}-{turn_id}",
+        tool_name=tool_name,
+        result=ToolResult(status="ok", metadata={"toolName": tool_name}),
     )
 
 
-def _tool_trace_entry(*, session_id: str = "sess-1", turn_id: str = "turn-1", tool_name: str = "Read"):
-    record = EvidenceRecord.model_validate(
-        {
-            "type": "custom:ToolTrace",
-            "status": "ok",
-            "observedAt": 123.0,
-            "source": {"kind": "tool_trace", "toolName": tool_name},
-        }
-    )
-    ledger = _ledger(session_id=session_id, turn_id=turn_id).append_evidence_record(record)
-    return ledger.entries[-1]
+# --- shared path resolver --------------------------------------------------
+
+def test_resolve_dir_defaults_to_cwd_magi_evidence(monkeypatch):
+    monkeypatch.delenv(_DIR, raising=False)
+    base = resolve_evidence_ledger_dir({})
+    assert base is not None
+    assert base.parts[-2:] == (".magi", "evidence")
 
 
-def test_append_then_read_round_trips_entry(tmp_path):
-    store = EvidenceLedgerStore(tmp_path)
-    entry = _tool_trace_entry(session_id="sess-1", tool_name="Read")
-
-    store.append(entry)
-    rows = store.read("sess-1")
-
-    assert len(rows) == 1
-    assert rows[0]["kind"] == "evidence_record"
-    assert rows[0]["sessionId"] == "sess-1"
-    assert rows[0]["turnId"] == "turn-1"
-    assert rows[0]["evidenceRef"] == entry.evidence_ref
+def test_resolve_dir_disabled_returns_none():
+    assert resolve_evidence_ledger_dir({_DIR: "off"}) is None
+    assert resolve_evidence_ledger_dir({_DIR: "0"}) is None
 
 
-def test_append_preserves_order(tmp_path):
-    store = EvidenceLedgerStore(tmp_path)
-    ledger = _ledger()
-    rec = EvidenceRecord.model_validate(
-        {"type": "custom:ToolTrace", "status": "ok", "observedAt": 1.0,
-         "source": {"kind": "tool_trace", "toolName": "Read"}}
-    )
-    for _ in range(3):
-        ledger = ledger.append_evidence_record(rec)
-    for entry in ledger.entries:
-        store.append(entry)
-
-    rows = store.read("sess-1")
-    assert [r["sequence"] for r in rows] == [1, 2, 3]
+def test_resolve_dir_honors_explicit_path(tmp_path):
+    assert resolve_evidence_ledger_dir({_DIR: str(tmp_path)}) == tmp_path
 
 
-def test_read_unknown_session_returns_empty(tmp_path):
-    store = EvidenceLedgerStore(tmp_path)
-    assert store.read("does-not-exist") == []
+def test_path_disabled_is_none():
+    assert evidence_ledger_path("s", env={_DIR: "none"}) is None
 
 
-def test_append_is_fail_open_on_bad_entry(tmp_path):
-    store = EvidenceLedgerStore(tmp_path)
-    # A non-entry object must not raise (fail-open contract).
-    store.append(object())  # type: ignore[arg-type]
-    store.append(None)  # type: ignore[arg-type]
-    # A valid entry afterwards still persists.
-    store.append(_tool_trace_entry(session_id="sess-2"))
-    assert len(store.read("sess-2")) == 1
+def test_filename_is_sanitized():
+    # Path separators collapse to "_" (dots are allowed, matching the writer),
+    # so no traversal survives — the file stays inside the store dir.
+    name = evidence_ledger_filename("../../etc/passwd")
+    assert name == ".._.._etc_passwd.jsonl"
+    assert "/" not in name and "\\" not in name
+    assert evidence_ledger_filename("") == "session.jsonl"
 
 
-def test_sessions_are_isolated(tmp_path):
-    store = EvidenceLedgerStore(tmp_path)
-    store.append(_tool_trace_entry(session_id="a", tool_name="Read"))
-    store.append(_tool_trace_entry(session_id="b", tool_name="Write"))
+# --- reader round-trips what the REAL writer wrote -------------------------
 
-    assert len(store.read("a")) == 1
-    assert len(store.read("b")) == 1
-    assert store.read("a")[0]["sessionId"] == "a"
+def test_reader_reads_what_writer_wrote(tmp_path, monkeypatch):
+    monkeypatch.setenv(_LIFECYCLE, "1")
+    monkeypatch.setenv(_DIR, str(tmp_path))
+    collector = LocalToolEvidenceCollector()
+
+    _record(collector, session_id="sess-1", turn_id="turn-1", tool_name="Read")
+    _record(collector, session_id="sess-1", turn_id="turn-2", tool_name="Bash")
+
+    reader = EvidenceLedgerReader(tmp_path)
+    rows = reader.read("sess-1")
+    assert len(rows) >= 2
+    assert all(r["sessionId"] == "sess-1" for r in rows)
+    assert {"turn-1", "turn-2"}.issubset({r["turnId"] for r in rows})
+    assert {"Read", "Bash"}.issubset({r["toolName"] for r in rows})
 
 
-def test_session_id_sanitized_no_path_traversal(tmp_path):
-    store = EvidenceLedgerStore(tmp_path)
-    entry = _tool_trace_entry(session_id="../../etc/passwd")
-    store.append(entry)
+def test_reader_unknown_session_returns_empty(tmp_path):
+    assert EvidenceLedgerReader(tmp_path).read("nope") == []
 
-    # Nothing escaped the base dir.
-    escaped = (tmp_path / ".." / ".." / "etc").resolve()
-    assert not (escaped / "passwd.jsonl").exists()
-    # The file lives under <base>/evidence/.
-    written = list((tmp_path / "evidence").glob("*.jsonl"))
-    assert len(written) == 1
-    assert written[0].resolve().is_relative_to(tmp_path.resolve())
 
+def test_writer_disabled_writes_nothing(tmp_path, monkeypatch):
+    monkeypatch.setenv(_LIFECYCLE, "1")
+    monkeypatch.setenv(_DIR, "off")
+    collector = LocalToolEvidenceCollector()
+    _record(collector, session_id="sess-1")
+    # In-memory ledger still built; nothing on disk under tmp_path.
+    assert not list(tmp_path.glob("*.jsonl"))
+
+
+# --- prune / retention -----------------------------------------------------
 
 def test_prune_removes_files_older_than_retention(tmp_path):
-    store = EvidenceLedgerStore(tmp_path)
-    store.append(_tool_trace_entry(session_id="old"))
-    old_file = tmp_path / "evidence" / "old.jsonl"
+    old = tmp_path / "old.jsonl"
+    old.write_text("{}\n", encoding="utf-8")
     stale = time.time() - 10 * 86400
-    os.utime(old_file, (stale, stale))
+    os.utime(old, (stale, stale))
 
-    removed = store.prune(retention_days=1, max_files=0)
-
+    removed = EvidenceLedgerReader(tmp_path).prune(retention_days=1, max_files=0)
     assert removed == 1
-    assert not old_file.exists()
+    assert not old.exists()
 
 
 def test_prune_keeps_newest_max_files(tmp_path):
-    store = EvidenceLedgerStore(tmp_path)
     for i in range(5):
-        store.append(_tool_trace_entry(session_id=f"s{i}"))
-        path = tmp_path / "evidence" / f"s{i}.jsonl"
-        os.utime(path, (1000 + i, 1000 + i))  # ascending mtime
+        p = tmp_path / f"s{i}.jsonl"
+        p.write_text("{}\n", encoding="utf-8")
+        os.utime(p, (1000 + i, 1000 + i))
 
-    removed = store.prune(retention_days=0, max_files=2)
-
+    removed = EvidenceLedgerReader(tmp_path).prune(retention_days=0, max_files=2)
     assert removed == 3
-    remaining = sorted(p.stem for p in (tmp_path / "evidence").glob("*.jsonl"))
-    assert remaining == ["s3", "s4"]
+    assert sorted(p.stem for p in tmp_path.glob("*.jsonl")) == ["s3", "s4"]

@@ -302,22 +302,23 @@ class LocalToolEvidenceCollector:
         """
         import json as _json  # noqa: PLC0415
         import os as _os  # noqa: PLC0415
-        from pathlib import Path  # noqa: PLC0415
 
-        raw_dir = (_os.environ.get("MAGI_EVIDENCE_LEDGER_DIR") or "").strip()
-        if raw_dir.lower() in ("off", "0", "false", "none", "disable", "disabled"):
+        from magi_agent.evidence.ledger_store import (  # noqa: PLC0415
+            evidence_ledger_path,
+        )
+
+        # Shared resolver with the reader (EvidenceLedgerReader) so writer and
+        # reader agree on one location + disable/default-dir/sanitization rules.
+        path = evidence_ledger_path(session_id)
+        if path is None:
             return
         try:
-            target_dir = Path(raw_dir) if raw_dir else Path.cwd() / ".magi" / "evidence"
+            target_dir = path.parent
             target_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
             try:
                 target_dir.chmod(0o700)
             except OSError:
                 pass
-            safe_session = (
-                "".join(c if c.isalnum() or c in "-_." else "_" for c in session_id) or "session"
-            )
-            path = target_dir / f"{safe_session}.jsonl"
             flags = _os.O_WRONLY | _os.O_CREAT | _os.O_APPEND
             fd = _os.open(path, flags, 0o600)
             try:
