@@ -451,6 +451,15 @@ COMPACTION_SUMMARY_MODEL_ENV = "MAGI_COMPACTION_SUMMARY_MODEL"
 COMPACTION_SUMMARY_TIMEOUT_ENV = "MAGI_COMPACTION_SUMMARY_TIMEOUT"
 _COMPACTION_SUMMARY_TIMEOUT_DEFAULT = 30.0
 
+# G5/G6: anchored (incremental) summary + consecutive-failure circuit breaker.
+# Both strict default-OFF/default-3 (NOT profile-aware). Anchoring is only
+# effective when BOTH summarize and anchored are ON (layered in the builder);
+# the breaker is folded under summarize (active whenever summarize is ON and the
+# max is > 0). OFF / default => byte-identical to Phase-3.
+COMPACTION_ANCHORED_SUMMARY_ENABLED_ENV = "MAGI_COMPACTION_ANCHORED_SUMMARY_ENABLED"
+COMPACTION_SUMMARY_MAX_FAILURES_ENV = "MAGI_COMPACTION_SUMMARY_MAX_FAILURES"
+_COMPACTION_SUMMARY_MAX_FAILURES_DEFAULT = 3
+
 
 @dataclass(frozen=True)
 class ContextCompactionEnv:
@@ -466,6 +475,8 @@ class ContextCompactionEnv:
     summarize_enabled: bool = False
     summary_model: str = ""
     summary_timeout: float = _COMPACTION_SUMMARY_TIMEOUT_DEFAULT
+    anchored_summary_enabled: bool = False
+    summary_max_failures: int = _COMPACTION_SUMMARY_MAX_FAILURES_DEFAULT
 
 
 def parse_context_compaction_env(env: Mapping[str, str]) -> ContextCompactionEnv:
@@ -531,6 +542,20 @@ def parse_context_compaction_env(env: Mapping[str, str]) -> ContextCompactionEnv
     )
     if summary_timeout <= 0:
         raise RuntimeEnvError(f"{COMPACTION_SUMMARY_TIMEOUT_ENV} must be > 0")
+    # G5/G6: strict default-OFF anchored summary + configurable failure breaker
+    # (NOT profile-aware, matching the summarize master switch above).
+    anchored_summary_enabled = _is_true(
+        env.get(COMPACTION_ANCHORED_SUMMARY_ENABLED_ENV)
+    )
+    summary_max_failures = _int_env(
+        env,
+        COMPACTION_SUMMARY_MAX_FAILURES_ENV,
+        _COMPACTION_SUMMARY_MAX_FAILURES_DEFAULT,
+    )
+    if summary_max_failures < 0:
+        raise RuntimeEnvError(
+            f"{COMPACTION_SUMMARY_MAX_FAILURES_ENV} must be >= 0"
+        )
     return ContextCompactionEnv(
         enabled=enabled,
         token_threshold=token_threshold,
@@ -544,6 +569,8 @@ def parse_context_compaction_env(env: Mapping[str, str]) -> ContextCompactionEnv
         summarize_enabled=summarize_enabled,
         summary_model=summary_model,
         summary_timeout=summary_timeout,
+        anchored_summary_enabled=anchored_summary_enabled,
+        summary_max_failures=summary_max_failures,
     )
 
 

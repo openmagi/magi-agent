@@ -92,6 +92,25 @@ _COMPACTION_SUMMARY_DIGEST = "sha256:" + "0" * 64
 # model), which is the intended budget signal — NOT the current pre-call size.
 REAL_PROMPT_TOKENS_STATE_KEY = "magi_compaction_real_prompt_tokens"
 
+# G5/G6 cross-turn session-state keys (same delta-backed seam as
+# REAL_PROMPT_TOKENS_STATE_KEY). ``ANCHOR_SUMMARY_STATE_KEY`` carries the
+# marker-stripped body of the LAST injected summary so the NEXT compaction can
+# feed it back as a previous-summary anchor (anchored/incremental refinement).
+# ``SUMMARY_FAILURE_COUNT_STATE_KEY`` carries the consecutive summary-failure
+# count for the circuit breaker (reset to 0 on any successful summary).
+ANCHOR_SUMMARY_STATE_KEY = "magi_compaction_anchor_summary"
+SUMMARY_FAILURE_COUNT_STATE_KEY = "magi_compaction_summary_failure_count"
+
+# G5: leading marker on the injected summary Content (built in
+# ``_build_summary_head``). Shared so the injection and the dropped-prefix
+# anchor-recognition stay in sync; any change here updates both sites.
+_SUMMARY_MARKER = "[Previous conversation summary]\n\n"
+
+# G5: hard cap on the stored anchor body length so incremental refinement cannot
+# let the anchor grow without bound turn-over-turn (the anchored prompt asks the
+# model to "keep it concise" but does not guarantee a length). Purely defensive.
+_ANCHOR_SUMMARY_MAX_CHARS = 24_000
+
 # Lower bound on the event-count threshold so a small tail does not force a
 # spurious event-count breach. The token threshold is the primary signal at the
 # before-model seam; the event-count threshold mirrors the boundary default.
@@ -159,6 +178,8 @@ class MagiContextCompactionPlugin(BasePlugin):
         summarize_enabled: bool = False,
         summary_model: str | None = None,
         summary_timeout: float = _SUMMARY_TIMEOUT_DEFAULT,
+        anchored_summary_enabled: bool = False,
+        summary_max_failures: int = 3,
     ) -> None:
         super().__init__(name)
         if token_threshold < 1:
@@ -177,6 +198,8 @@ class MagiContextCompactionPlugin(BasePlugin):
             raise ValueError("prune_minimum must be >= 1")
         if summarize_enabled and summary_timeout <= 0:
             raise ValueError("summary_timeout must be > 0")
+        if summary_max_failures < 0:
+            raise ValueError("summary_max_failures must be >= 0")
         self.token_threshold = token_threshold
         self.tail_events = tail_events
         self.event_count_threshold = event_count_threshold
@@ -198,6 +221,25 @@ class MagiContextCompactionPlugin(BasePlugin):
         self._summarize_enabled = bool(summarize_enabled)
         self._summary_model_override = summary_model or None
         self._summary_timeout = summary_timeout
+        # G5/G6 anchored summary + circuit breaker (default-OFF / default-3).
+        # Anchoring is effective only when BOTH summarize and anchored are ON; the
+        # breaker is folded under summarize (active whenever summarize is ON and
+        # max > 0). OFF / default => Phase-3 behaviour byte-identical.
+        self._anchored_enabled = bool(anchored_summary_enabled)
+        self._summary_breaker_max = summary_max_failures
+        # READ-side stash (mirrors the G2 real-token stash): the prior anchor body
+        # + consecutive-failure count read off ``callback_context.state`` at the
+        # start of ``before_model_callback`` and consumed by ``_trim_request``.
+        # Cleared in ``_trim_request``'s finally to avoid cross-turn leakage.
+        self._pending_anchor_summary: str | None = None
+        self._pending_summary_failures: int = 0
+        # PRODUCE-side fields: ``_build_summary_head`` records what it produced this
+        # turn (a freshly generated, marker-stripped anchor) or whether the summary
+        # attempt failed; ``before_model_callback`` writes them to state AFTER
+        # ``apply_before_model`` returns (it has the callback_context handle;
+        # ``_trim_request`` does not). Reset at the start of the next turn's READ.
+        self._produced_summary: str | None = None
+        self._produced_summary_failed: bool = False
         # Per-before-model stash of the real prompt-token count + model id, read
         # off ``callback_context.state`` and threaded to ``_trim_request`` without
         # touching the ``CompactionCapability.trim(llm_request)`` signature. Set at
@@ -256,8 +298,56 @@ class MagiContextCompactionPlugin(BasePlugin):
             self._pending_real_prompt_tokens = None
             self._pending_model = None
 
+        # G5/G6 READ: when summarize is ON, read the prior anchor + consecutive
+        # failure count off the (delta-backed) session state and reset the
+        # PRODUCE-side fields. Guarded by ``_summarize_enabled`` so a flag-OFF
+        # (no-summary) plugin NEVER touches state — the no-regression contract.
+        # The anchor is only meaningful when anchoring is also ON, but reading it
+        # here keeps the seam in one place; ``_build_summary_head`` consults
+        # ``_anchored_enabled`` before using it. Fail-open via the helpers.
+        if self._summarize_enabled:
+            # Anchor is read ONLY when anchoring is on (the anchored-OFF path must
+            # not read/write the anchor key); the failure count is always read
+            # because the circuit breaker is folded under ``_summarize_enabled``.
+            self._pending_anchor_summary = (
+                _read_anchor_summary(callback_context)
+                if self._anchored_enabled
+                else None
+            )
+            self._pending_summary_failures = _read_summary_failures(callback_context)
+            self._produced_summary = None
+            self._produced_summary_failed = False
+        else:
+            self._pending_anchor_summary = None
+            self._pending_summary_failures = 0
+            self._produced_summary = None
+            self._produced_summary_failed = False
+
         ctx = ControlPlaneContext.minimal(compaction=CompactionCapability(self))
-        return await self.apply_before_model(ctx, llm_request=llm_request)
+        result = await self.apply_before_model(ctx, llm_request=llm_request)
+
+        # G5/G6 WRITE: persist what this turn produced to the (delta-backed) state
+        # so the next turn's READ sees the updated anchor / failure count. Only the
+        # summarize path produces anything; flag-OFF leaves state untouched. All
+        # writes are fail-open and never alter the model-loop return contract.
+        if self._summarize_enabled:
+            if self._produced_summary is not None:
+                # Success always resets the breaker; the anchor is persisted ONLY
+                # when anchoring is on, so the anchored-OFF path never writes it.
+                updates: dict[str, object] = {SUMMARY_FAILURE_COUNT_STATE_KEY: 0}
+                if self._anchored_enabled:
+                    updates[ANCHOR_SUMMARY_STATE_KEY] = self._produced_summary
+                _write_compaction_state(callback_context, updates)
+            elif self._produced_summary_failed:
+                _write_compaction_state(
+                    callback_context,
+                    {
+                        SUMMARY_FAILURE_COUNT_STATE_KEY: (
+                            self._pending_summary_failures + 1
+                        )
+                    },
+                )
+        return result
 
     async def after_model_callback(
         self,
@@ -387,6 +477,12 @@ class MagiContextCompactionPlugin(BasePlugin):
             # Clear the per-call real-token stash so it never leaks across calls.
             self._pending_real_prompt_tokens = None
             self._pending_model = None
+            # Clear the G5 anchor stash (consumed by ``_build_summary_head``).
+            # NOTE: ``_pending_summary_failures`` is intentionally NOT cleared here
+            # — the WRITE step in before_model_callback (which runs AFTER this
+            # finally) needs it to compute the incremented count. It is reset at
+            # the next turn's READ instead, alongside the PRODUCE-side fields.
+            self._pending_anchor_summary = None
 
     def _real_token_decision(self) -> bool | None:
         """Return the real-token compaction decision, or ``None`` to defer.
@@ -478,18 +574,48 @@ class MagiContextCompactionPlugin(BasePlugin):
         try:
             from google.genai import types
 
-            transcript = _render_dropped_transcript(dropped)
+            # G6 circuit breaker: once the consecutive-failure count has reached
+            # the configured max, skip the summarizer entirely (no provider/model
+            # resolution, no LLM call) so the caller falls through to pure
+            # tail-drop. The breaker is already tripped, so do NOT mark another
+            # failure here (no further increment). max == 0 disables the breaker.
+            if (
+                self._summary_breaker_max > 0
+                and self._pending_summary_failures >= self._summary_breaker_max
+            ):
+                return None
+
+            # G5 anchored summary: when anchoring is ON, recognize a prior injected
+            # summary inside the dropped prefix (authoritative for what is dropped
+            # this turn) and prefer it over the state-stashed anchor; skip it from
+            # the raw transcript so an already-summarized head is not re-rendered.
+            prior_anchor = None
+            if self._anchored_enabled:
+                prior_anchor = _anchor_from_dropped(dropped)
+                if prior_anchor is None:
+                    prior_anchor = self._pending_anchor_summary
+
+            transcript = _render_dropped_transcript(
+                dropped, skip_anchor=self._anchored_enabled
+            )
             model_id = self._summary_model_override or _resolve_model_id(llm_request)
             summary = await _summarize_dropped_prefix(
-                model_id, transcript, timeout=self._summary_timeout
+                model_id,
+                transcript,
+                timeout=self._summary_timeout,
+                anchor=prior_anchor if self._anchored_enabled else None,
             )
             if not summary:
+                # G6: a failed attempt (None/empty). Record it so the WRITE step
+                # increments the consecutive-failure counter.
+                self._produced_summary_failed = True
                 return None
+            # G5/G6: success — record the marker-stripped anchor body (capped) so
+            # the WRITE step stores it and resets the failure counter to 0.
+            self._produced_summary = summary[:_ANCHOR_SUMMARY_MAX_CHARS]
             summary_content = types.Content(
                 role="user",
-                parts=[
-                    types.Part(text="[Previous conversation summary]\n\n" + summary)
-                ],
+                parts=[types.Part(text=_SUMMARY_MARKER + summary)],
             )
             protected = _protected_text_contents(dropped)
             return [summary_content, *protected]
@@ -664,6 +790,111 @@ def _read_real_prompt_tokens(callback_context: Any) -> int | None:
         return None
 
 
+def _read_anchor_summary(callback_context: Any) -> str | None:
+    """Read the prior turn's anchor summary body off ``callback_context.state``.
+
+    Duck-typed and fail-open (mirrors :func:`_read_real_prompt_tokens`): a
+    missing state / non-string / empty value yields ``None`` so anchoring degrades
+    to a plain (non-anchored) summary. Never raises.
+    """
+    try:
+        state = getattr(callback_context, "state", None)
+        if state is None:
+            return None
+        getter = getattr(state, "get", None)
+        value = getter(ANCHOR_SUMMARY_STATE_KEY) if callable(getter) else None
+        if isinstance(value, str) and value:
+            return value
+        return None
+    except Exception:
+        return None
+
+
+def _read_summary_failures(callback_context: Any) -> int:
+    """Read the consecutive summary-failure count off ``callback_context.state``.
+
+    Duck-typed and fail-open: a missing / odd value yields ``0`` (breaker not yet
+    tripped). Never raises. ``bool`` is rejected (an ``int`` subclass).
+    """
+    try:
+        state = getattr(callback_context, "state", None)
+        if state is None:
+            return 0
+        getter = getattr(state, "get", None)
+        value = getter(SUMMARY_FAILURE_COUNT_STATE_KEY) if callable(getter) else None
+        if isinstance(value, bool):
+            return 0
+        if isinstance(value, int) and value >= 0:
+            return value
+        return 0
+    except Exception:
+        return 0
+
+
+def _write_compaction_state(callback_context: Any, updates: dict[str, Any]) -> None:
+    """Write ``updates`` onto ``callback_context.state`` (fail-open observer).
+
+    Mirrors the after_model_callback state-write guard: duck-typed
+    ``state[key] = value`` with a callable-aware fallback, wrapped so a missing
+    state or a write error NEVER alters the model-loop return contract. Never
+    raises.
+    """
+    try:
+        state = getattr(callback_context, "state", None)
+        if state is None:
+            return None
+        for key, value in updates.items():
+            try:
+                state[key] = value
+            except Exception:
+                setter = getattr(state, "__setitem__", None)
+                if callable(setter):
+                    setter(key, value)
+    except Exception:
+        return None
+    return None
+
+
+def _anchor_text_from_content(content: Any) -> str | None:
+    """Return the marker-stripped anchor body if ``content`` is a summary anchor.
+
+    Duck-types an injected summary Content: its first text Part must start with
+    :data:`_SUMMARY_MARKER`; the return is the text with the marker prefix
+    stripped (the prior anchor body). Any malformed content -> ``None`` (not an
+    anchor). Never raises.
+    """
+    try:
+        parts = getattr(content, "parts", None) or []
+        for part in parts:
+            text = getattr(part, "text", None)
+            if isinstance(text, str) and text.startswith(_SUMMARY_MARKER):
+                return text[len(_SUMMARY_MARKER) :]
+            # Only the FIRST text part is the anchor marker carrier; a leading
+            # non-marker text part means this is not an anchor Content.
+            if isinstance(text, str) and text:
+                return None
+        return None
+    except Exception:
+        return None
+
+
+def _anchor_from_dropped(dropped: list[Any]) -> str | None:
+    """Find the most-recent prior-summary anchor body within the dropped prefix.
+
+    The dropped-prefix anchor is authoritative for what is actually being dropped
+    this turn (the state copy may lag or have moved), so a found anchor is
+    preferred over the state-stashed value. Returns the LAST anchor body found
+    (the freshest injected head if more than one is present). Fail-soft: ``None``
+    when no anchor Content is present.
+    """
+    found: str | None = None
+    for content in dropped:
+        body = _anchor_text_from_content(content)
+        if body is not None:
+            found = body
+    return found
+
+
 def _resolve_model_id(llm_request: Any) -> str | None:
     """Resolve the model id from the outgoing request (``llm_request.model``).
 
@@ -720,7 +951,9 @@ def _serialize_response_payload(payload: Any) -> str:
             return ""
 
 
-def _render_dropped_transcript(dropped: list[Any]) -> str:
+def _render_dropped_transcript(
+    dropped: list[Any], *, skip_anchor: bool = False
+) -> str:
     """Render the dropped prefix Contents to a bounded plain-text transcript.
 
     Modeled on ``AutoCompactionEngine._format_conversation`` but adapted to ADK
@@ -731,6 +964,12 @@ def _render_dropped_transcript(dropped: list[Any]) -> str:
     :data:`_SUMMARY_TRANSCRIPT_MAX_CHARS` (with a truncation marker) so the
     summary prompt stays sane regardless of how large the dropped prefix is.
 
+    G5: when ``skip_anchor`` is set (anchoring ON), a Content recognized as a
+    prior-injected summary anchor (its first text Part starts with
+    :data:`_SUMMARY_MARKER`) is SKIPPED — it is fed back as the previous-summary
+    anchor instead of being re-rendered as raw transcript (avoids compounding /
+    re-summarizing already-summarized text verbatim).
+
     Fully duck-typed and fail-soft: a malformed part contributes nothing rather
     than raising (the outer summarize path is fail-open anyway).
     """
@@ -738,6 +977,8 @@ def _render_dropped_transcript(dropped: list[Any]) -> str:
     used = 0
     truncated = False
     for content in dropped:
+        if skip_anchor and _anchor_text_from_content(content) is not None:
+            continue
         try:
             role = getattr(content, "role", None) or "unknown"
             parts = getattr(content, "parts", None) or []
@@ -832,7 +1073,11 @@ def _protected_text_contents(dropped: list[Any]) -> list[Any]:
 
 
 async def _summarize_dropped_prefix(
-    model_id: str | None, transcript: str, *, timeout: float
+    model_id: str | None,
+    transcript: str,
+    *,
+    timeout: float,
+    anchor: str | None = None,
 ) -> str | None:
     """Summarize ``transcript`` via the session model, or return ``None``.
 
@@ -871,7 +1116,16 @@ async def _summarize_dropped_prefix(
         # carries a provider prefix. Still fail-open if neither is usable.
         override = candidate if "/" in candidate else (provider_default or candidate or None)
         model = _build_litellm_for_config(provider_config, model_override=override)
-        prompt = AutoCompactionEngine.SUMMARY_PROMPT.format(conversation=transcript)
+        # G5: an anchored (incremental-refinement) prompt when a prior anchor is
+        # present; otherwise the plain Phase-3 path is BYTE-IDENTICAL.
+        if isinstance(anchor, str) and anchor:
+            prompt = AutoCompactionEngine.ANCHORED_SUMMARY_PROMPT.format(
+                anchor=anchor, conversation=transcript
+            )
+        else:
+            prompt = AutoCompactionEngine.SUMMARY_PROMPT.format(
+                conversation=transcript
+            )
         return await asyncio.wait_for(
             _invoke_summary_model(model, prompt), timeout=timeout
         )
@@ -1046,6 +1300,8 @@ def build_context_compaction_plugin(
     summarize_enabled: bool = False,
     summary_model: str | None = None,
     summary_timeout: float = _SUMMARY_TIMEOUT_DEFAULT,
+    anchored_summary_enabled: bool = False,
+    summary_max_failures: int = 3,
 ) -> MagiContextCompactionPlugin | None:
     """Return a configured plugin, or ``None`` when the feature is disabled.
 
@@ -1068,12 +1324,16 @@ def build_context_compaction_plugin(
         summarize_enabled=summarize_enabled,
         summary_model=summary_model,
         summary_timeout=summary_timeout,
+        anchored_summary_enabled=anchored_summary_enabled,
+        summary_max_failures=summary_max_failures,
     )
 
 
 __all__ = [
+    "ANCHOR_SUMMARY_STATE_KEY",
     "CONTEXT_COMPACTION_PLUGIN_NAME",
     "REAL_PROMPT_TOKENS_STATE_KEY",
+    "SUMMARY_FAILURE_COUNT_STATE_KEY",
     "CompactionCapability",
     "MagiContextCompactionPlugin",
     "build_context_compaction_plugin",

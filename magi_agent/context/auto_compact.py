@@ -48,6 +48,21 @@ class AutoCompactionEngine:
         "and debugging details.\n\n{conversation}"
     )
 
+    # G5: anchored/incremental refinement variant (adapted from OpenCode's
+    # incremental-summary principle, NOT copied). When a prior anchored summary
+    # exists it is fed back so the model UPDATES/MERGES it instead of
+    # re-summarizing from scratch — bounding cost and preventing drift.
+    ANCHORED_SUMMARY_PROMPT = (
+        "You are maintaining a running anchored summary of a long conversation. "
+        "Update the anchored summary below using the new conversation history. "
+        "Preserve still-true details, remove stale details, and merge in new "
+        "facts. Keep it concise. Preserve: key decisions, important data, file "
+        "paths, error messages, and user requests. Omit: repetitive tool outputs, "
+        "intermediate steps, debugging details.\n\n"
+        "<previous_summary>\n{anchor}\n</previous_summary>\n\n"
+        "<new_history>\n{conversation}\n</new_history>"
+    )
+
     def __init__(
         self,
         classifier: ClassifierCallable,

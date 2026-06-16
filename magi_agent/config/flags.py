@@ -666,6 +666,35 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
         kind="str",
     ),
+    # Strict default-OFF (flat _b, NOT profile-resolved): G5 anchored/incremental
+    # summary. When ON (and MAGI_COMPACTION_SUMMARIZE_ENABLED is also ON), the prior
+    # injected summary is fed back as a previous-summary anchor so the model
+    # updates/merges it instead of re-summarizing from scratch. OFF is byte-
+    # identical to today (plain Phase-3 summary path).
+    _b(
+        "MAGI_COMPACTION_ANCHORED_SUMMARY_ENABLED",
+        stage="stage2",
+        summary=(
+            "Anchored/incremental compaction summary: feed the prior injected "
+            "summary as a previous-summary anchor so the model updates/merges "
+            "instead of re-summarizing from scratch (requires "
+            "MAGI_COMPACTION_SUMMARIZE_ENABLED). Strict default-OFF (OFF is "
+            "byte-identical to today)."
+        ),
+    ),
+    FlagSpec(
+        name="MAGI_COMPACTION_SUMMARY_MAX_FAILURES",
+        default=3,
+        scope="public",
+        stage="stage2",
+        summary=(
+            "Consecutive summary-failure circuit breaker: after this many "
+            "consecutive failed summary attempts in a session, skip the summarizer "
+            "and fall back to pure tail-drop; reset on success. 0 disables the "
+            "breaker. Only consulted when MAGI_COMPACTION_SUMMARIZE_ENABLED is on."
+        ),
+        kind="int",
+    ),
     # --- In-context replanning ----------------------------------------------
     # Strict default-OFF (flat _b, NOT profile-resolved): MAGI_RUNTIME_PROFILE
     # never auto-enables the facts-survey injection.
