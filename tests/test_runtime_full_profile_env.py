@@ -77,6 +77,43 @@ def test_safe_runtime_profile_does_not_enable_child_runner_defaults() -> None:
     assert is_live_child_runner_enabled(env) is False
 
 
+def test_full_runtime_profile_enables_keyless_web_acquisition_defaults() -> None:
+    # The local overlay should give a fresh, keyless user a working web
+    # fetch/reader path (jina-reader is keyless; insane-fetch is local
+    # curl_cffi). Reference the gate constants by name so the legacy-name
+    # naming ratchet is not tripped by duplicated string literals.
+    from magi_agent.web_acquisition.research_tools import (
+        INSANE_FETCH_ENABLED_ENV,
+        JINA_READER_ENABLED_ENV,
+        LIVE_WEB_ACQUISITION_ENABLED_ENV,
+        PROVIDER_ROUTER_ENABLED_ENV,
+        build_native_web_boundary,
+    )
+
+    env: dict[str, str] = {}
+    apply_local_full_runtime_defaults(env)
+
+    assert env[LIVE_WEB_ACQUISITION_ENABLED_ENV] == "1"
+    assert env[PROVIDER_ROUTER_ENABLED_ENV] == "1"
+    assert env[JINA_READER_ENABLED_ENV] == "1"
+    assert env[INSANE_FETCH_ENABLED_ENV] == "1"
+    # End-to-end: the native web boundary is actually reachable (non-None).
+    assert build_native_web_boundary(env) is not None
+
+
+def test_safe_runtime_profile_does_not_enable_web_acquisition() -> None:
+    from magi_agent.web_acquisition.research_tools import (
+        JINA_READER_ENABLED_ENV,
+        build_native_web_boundary,
+    )
+
+    env = {"MAGI_RUNTIME_PROFILE": "safe"}
+    apply_local_full_runtime_defaults(env)
+
+    assert JINA_READER_ENABLED_ENV not in env
+    assert build_native_web_boundary(env) is None
+
+
 def test_browser_tool_kill_switch_overrides_full_runtime_default() -> None:
     assert browser_tool_enabled({"MAGI_BROWSER_TOOL_KILL_SWITCH": "1"}) is False
     assert (

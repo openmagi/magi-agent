@@ -208,6 +208,7 @@ graph LR
     runtime --> shared
     runtime --> tools
     runtime --> transport
+    runtime --> web_acquisition
     security --> ops
     shadow --> adk_bridge
     shadow --> channels
@@ -1392,7 +1393,7 @@ graph LR
 | heartbeat_store.py | — | heartbeat_contract | runtime/heartbeat_boundary.py, runtime/stale_run_detector.py |
 | hosted_defaults.py | Hosted-deployment control-stage overlay. | — | (root)/main.py, config/env.py |
 | llm_stream_reader.py | — | — | — |
-| local_defaults.py | — | — | (root)/main.py, cli/app.py |
+| local_defaults.py | — | research_tools | (root)/main.py, cli/app.py |
 | long_running_activity.py | — | receipt_utils | missions/background_tasks.py |
 | loop_detectors.py | — | — | adk_bridge/resilience_plugin.py |
 | memory_mode_context.py | Async-safe per-request memory-mode context for the live serve path. | session_identity | transport/chat_routes.py, transport/streaming_chat_route.py |
@@ -1748,7 +1749,7 @@ graph LR
 | query_planner.py | Rule-based query planner for deep web research. | deep_research_config | web_acquisition/deep_research.py, web_acquisition/tests/test_query_planner.py |
 | reference_research_tools.py | — | catalog, context, kernel, local_readonly, read_ledger, registry | — |
 | repo_research_tools.py | — | policy, result, source_ledger, source_proof | — |
-| research_tools.py | — | insane_fetch, jina_reader, live_provider_pack, platform_endpoint, policy, provider_boundary, provider_router, result, source_ledger | cli/tests/test_real_runner.py, plugins/native/web.py, web_acquisition/deep_research.py, web_acquisition/opencode_provider_router.py, web_acquisition/tests/test_deep_research_orchestrator.py, web_acquisition/tests/test_gaia_web_tools_deep_research.py |
+| research_tools.py | — | insane_fetch, jina_reader, live_provider_pack, platform_endpoint, policy, provider_boundary, provider_router, result, source_ledger | cli/tests/test_real_runner.py, plugins/native/web.py, runtime/local_defaults.py, web_acquisition/deep_research.py, web_acquisition/opencode_provider_router.py, web_acquisition/tests/test_deep_research_orchestrator.py, web_acquisition/tests/test_gaia_web_tools_deep_research.py |
 
 ### web_acquisition/providers/
 

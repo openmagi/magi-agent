@@ -25,7 +25,9 @@ _WEBSEARCH_NOT_CONFIGURED_MESSAGE = (
     "BRAVE_API_KEY and FIRECRAWL_API_KEY, or set MAGI_WEB_SEARCH_PROVIDER=serpapi "
     "with SERPAPI_API_KEY and FIRECRAWL_API_KEY. For the native WebSearch "
     "provider router, enable live web acquisition plus the web provider router, and set "
-    "MAGI_PLATFORM_BASE_URL+MAGI_PLATFORM_API_KEY."
+    "MAGI_PLATFORM_BASE_URL+MAGI_PLATFORM_API_KEY. "
+    "Without any key, use the browser tool to search: navigate to a search "
+    "engine results page (e.g. a google.com/search query) and read the results."
 )
 
 _WEBFETCH_NOT_CONFIGURED_MESSAGE = (
@@ -34,7 +36,8 @@ _WEBFETCH_NOT_CONFIGURED_MESSAGE = (
     "local CLI direct web toolset, set BRAVE_API_KEY and FIRECRAWL_API_KEY. "
     "For the native WebFetch provider router, enable live web acquisition plus "
     "the web provider router, then set MAGI_PLATFORM_BASE_URL+MAGI_PLATFORM_API_KEY "
-    "or enable the advanced fetch provider gate."
+    "or enable the advanced fetch provider gate. "
+    "Without any key, use the browser tool to open the page and read it."
 )
 
 # Duplicated deliberately to match the env-gate truthy convention used by
