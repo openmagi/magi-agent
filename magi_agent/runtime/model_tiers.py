@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 import re
-from typing import Literal, Self, TypeAlias
+from typing import Literal, NamedTuple, Self, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -317,6 +317,84 @@ def _validate_model(value: str) -> str:
     return clean
 
 
+class ChildRoute(NamedTuple):
+    """A validated child-spawn route (canonical ``provider``/``model``)."""
+
+    provider: str
+    model: str
+
+
+def resolve_child_route(
+    provider: str, model: str, env: Mapping[str, str]
+) -> ChildRoute | None:
+    """Canonical ACCEPTANCE authority for a child-spawn ``(provider, model)``.
+
+    Returns the route a child may run on, else ``None`` (caller blocks). A route
+    is accepted iff it (a) resolves in the built-in :class:`ModelTierRegistry`
+    without an ``unknown_model_*`` reason code — returned canonical/normalised —
+    OR (b) is in the operator's deployment route allowlist — returned as given.
+
+    This is the SINGLE function ``child_runner_live._validate_route`` delegates to
+    and that :func:`available_child_model_routes` enumerates against, so the
+    routes the model is TOLD about (prompt/tool guidance) can never drift from the
+    routes the runner ACCEPTS. Never raises.
+    """
+    try:
+        resolved = ModelTierRegistry.with_defaults().resolve(
+            provider=provider, model=model
+        )
+    except Exception:  # noqa: BLE001 — label-validation failure → not a registry route.
+        resolved = None
+    if resolved is not None:
+        reason_codes = tuple(getattr(resolved, "reason_codes", ()) or ())
+        if not any("unknown_model" in code for code in reason_codes):
+            return ChildRoute(
+                str(getattr(resolved, "provider", provider)),
+                str(getattr(resolved, "model", model)),
+            )
+    try:
+        from magi_agent.config.env import (  # noqa: PLC0415
+            operator_allowed_model_routes,
+        )
+
+        allowlist = operator_allowed_model_routes(env)
+        if (provider.strip().casefold(), model.strip().casefold()) in allowlist:
+            return ChildRoute(provider, model)
+    except Exception:  # noqa: BLE001 — allowlist read must never block validation.
+        pass
+    return None
+
+
+def available_child_model_routes(env: Mapping[str, str]) -> list[str]:
+    """Sorted ``provider:model (tier)`` routes a child spawn may target.
+
+    The union of the two sources :func:`resolve_child_route` accepts: the
+    built-in :class:`ModelTierRegistry` AND the operator's deployment route
+    allowlist. Single source of truth for both the SpawnAgent tool guidance and
+    the system-prompt capability block, so the model is told exactly the routes
+    that pass validation. A consistency test asserts every listed route resolves.
+    Fail-soft: any error contributes nothing.
+    """
+    tiers: dict[str, str] = {}
+    try:
+        for (provider, model), record in ModelTierRegistry.with_defaults()._records.items():
+            tiers[f"{provider}:{model}"] = str(getattr(record, "tier", "") or "")
+    except Exception:  # noqa: BLE001 — registry read must never raise here.
+        pass
+    try:
+        from magi_agent.config.env import (  # noqa: PLC0415
+            operator_allowed_model_routes,
+        )
+
+        for provider, model in operator_allowed_model_routes(env):
+            tiers.setdefault(f"{provider}:{model}", "")
+    except Exception:  # noqa: BLE001 — allowlist read must never raise here.
+        pass
+    return [
+        f"{route} ({tier})" if tier else route for route, tier in sorted(tiers.items())
+    ]
+
+
 __all__ = [
     "ModelCapability",
     "ModelTier",
@@ -324,4 +402,7 @@ __all__ = [
     "ModelTierRegistry",
     "ModelUsagePhase",
     "ResolvedModelTier",
+    "ChildRoute",
+    "available_child_model_routes",
+    "resolve_child_route",
 ]

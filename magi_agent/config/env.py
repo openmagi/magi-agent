@@ -509,6 +509,17 @@ _ALLOWED_MODEL_ROUTES_ENV = (
 )
 
 
+def gate5b_live_subagents_flag_on(env: Mapping[str, str]) -> bool:
+    """True iff the serve-path live-sub-agents flag is set.
+
+    The serve flag ONLY; callers AND it with the live child-runner master gate to
+    reconstruct ``transport.live_subagents_serve_enabled``. Lives here (the config
+    flag-read allowlist) so a consumer above the transport layer can gate on the
+    flag without an inline env read.
+    """
+    return _is_true(env.get("MAGI_GATE5B_LIVE_SUBAGENTS_ENABLED"))
+
+
 def operator_allowed_model_routes(
     env: Mapping[str, str],
 ) -> frozenset[tuple[str, str]]:
