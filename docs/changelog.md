@@ -15,6 +15,18 @@ Versions follow the tags published on GitHub Releases.
 
 ### Fixed
 
+## 0.1.42
+
+### Added
+- Serve: stream model reasoning to a collapsible thinking block via `thinking_delta` (all providers; gated behind `MAGI_STREAM_THINKING`) (#600).
+- Customize: phased verification-preset scaffold (master flag `MAGI_CUSTOMIZE_VERIFICATION_ENABLED`, default-OFF) — coding-verification opt-out plus opt-in fact-grounding / source-authority / artifact-delivery presets (#595, #601, #602).
+- Source-ledger evidence gate for non-coding turns (default-OFF `MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED`) (#589).
+- Child runner honors an operator route allowlist and surfaces valid SpawnAgent routes (#596).
+- Dashboard: browsable Composio catalog + hosted-parity Telegram flow, and a local-runtime Model field with per-provider presets (#591, #592).
+
+### Fixed
+- ADK: repair Gemini content ordering before the model call to stop multi-tool `runner_error` crashes (profile-gated) (#597).
+
 ## 0.1.41
 
 ### Added
