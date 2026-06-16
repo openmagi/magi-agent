@@ -460,6 +460,13 @@ COMPACTION_ANCHORED_SUMMARY_ENABLED_ENV = "MAGI_COMPACTION_ANCHORED_SUMMARY_ENAB
 COMPACTION_SUMMARY_MAX_FAILURES_ENV = "MAGI_COMPACTION_SUMMARY_MAX_FAILURES"
 _COMPACTION_SUMMARY_MAX_FAILURES_DEFAULT = 3
 
+# G7: manual /compact force-compaction. Strict default-OFF (NOT profile-aware).
+# When ON the plugin consumes the cross-turn one-shot signal and forces a
+# compaction on the next model turn regardless of threshold. Only has effect when
+# MAGI_CONTEXT_COMPACTION_ENABLED is ALSO on (the plugin is only attached then).
+# OFF => byte-identical to Phase-4.
+COMPACTION_MANUAL_ENABLED_ENV = "MAGI_COMPACTION_MANUAL_ENABLED"
+
 
 @dataclass(frozen=True)
 class ContextCompactionEnv:
@@ -477,6 +484,7 @@ class ContextCompactionEnv:
     summary_timeout: float = _COMPACTION_SUMMARY_TIMEOUT_DEFAULT
     anchored_summary_enabled: bool = False
     summary_max_failures: int = _COMPACTION_SUMMARY_MAX_FAILURES_DEFAULT
+    manual_enabled: bool = False
 
 
 def parse_context_compaction_env(env: Mapping[str, str]) -> ContextCompactionEnv:
@@ -556,6 +564,9 @@ def parse_context_compaction_env(env: Mapping[str, str]) -> ContextCompactionEnv
         raise RuntimeEnvError(
             f"{COMPACTION_SUMMARY_MAX_FAILURES_ENV} must be >= 0"
         )
+    # G7: strict default-OFF manual /compact force-compaction (NOT profile-aware,
+    # matching the summarize / real-tokens / tool-prune master switches above).
+    manual_enabled = _is_true(env.get(COMPACTION_MANUAL_ENABLED_ENV))
     return ContextCompactionEnv(
         enabled=enabled,
         token_threshold=token_threshold,
@@ -571,6 +582,7 @@ def parse_context_compaction_env(env: Mapping[str, str]) -> ContextCompactionEnv
         summary_timeout=summary_timeout,
         anchored_summary_enabled=anchored_summary_enabled,
         summary_max_failures=summary_max_failures,
+        manual_enabled=manual_enabled,
     )
 
 

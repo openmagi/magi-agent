@@ -498,6 +498,21 @@ async def _dispatch_headless_command(
     if isinstance(result, Text):
         return "local", None, result.text
     if isinstance(result, Compact):
+        # G7: when MAGI_COMPACTION_MANUAL_ENABLED is on, set the cross-turn
+        # one-shot signal so the plugin forces a tail-drop on the next model turn
+        # and report honestly. OFF returns the byte-identical stub message.
+        from magi_agent.runtime.manual_compaction_context import (
+            manual_compaction_enabled,
+            request_manual_compaction,
+        )
+
+        if manual_compaction_enabled():
+            request_manual_compaction()
+            return (
+                "local",
+                None,
+                "[compact] context compaction will run on the next message",
+            )
         return "local", None, "[compact] context compaction requested"
     if isinstance(result, Skip):
         return "error", None, f"unknown command: /{name}"

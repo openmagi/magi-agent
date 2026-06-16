@@ -695,6 +695,24 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
         kind="int",
     ),
+    # Strict default-OFF (flat _b, NOT profile-resolved): G7 manual /compact
+    # force-compaction. When ON, the /compact command sets a cross-turn one-shot
+    # signal and the compaction plugin forces a tail-drop on the next model turn
+    # regardless of token threshold (reusing the existing G1/G4/G5/G8 machinery).
+    # Only has effect when MAGI_CONTEXT_COMPACTION_ENABLED is ALSO on (the plugin
+    # is only attached in the control_plane build when compaction is enabled). OFF
+    # keeps the /compact stub acknowledgement byte-identical to today.
+    _b(
+        "MAGI_COMPACTION_MANUAL_ENABLED",
+        stage="stage2",
+        summary=(
+            "Make manual /compact actually force a context compaction on the next "
+            "model turn (cross-turn one-shot signal consumed by the compaction "
+            "plugin), regardless of token threshold. Requires "
+            "MAGI_CONTEXT_COMPACTION_ENABLED. Strict default-OFF (OFF keeps the "
+            "/compact stub acknowledgement byte-identical to today)."
+        ),
+    ),
     # --- In-context replanning ----------------------------------------------
     # Strict default-OFF (flat _b, NOT profile-resolved): MAGI_RUNTIME_PROFILE
     # never auto-enables the facts-survey injection.
