@@ -442,6 +442,15 @@ COMPACTION_PRUNE_MINIMUM_ENV = "MAGI_COMPACTION_PRUNE_MINIMUM"
 _COMPACTION_PRUNE_PROTECT_DEFAULT = 40_000
 _COMPACTION_PRUNE_MINIMUM_DEFAULT = 20_000
 
+# G1: LLM summary injection on the tail-drop. Strict default-OFF master switch
+# plus an optional session-model override and a summarize timeout. When OFF the
+# parser returns the same triple as before with the additive summary fields at
+# their defaults, so the tail-drop is byte-identical (no LLM call).
+COMPACTION_SUMMARIZE_ENABLED_ENV = "MAGI_COMPACTION_SUMMARIZE_ENABLED"
+COMPACTION_SUMMARY_MODEL_ENV = "MAGI_COMPACTION_SUMMARY_MODEL"
+COMPACTION_SUMMARY_TIMEOUT_ENV = "MAGI_COMPACTION_SUMMARY_TIMEOUT"
+_COMPACTION_SUMMARY_TIMEOUT_DEFAULT = 30.0
+
 
 @dataclass(frozen=True)
 class ContextCompactionEnv:
@@ -454,6 +463,9 @@ class ContextCompactionEnv:
     tool_prune_enabled: bool = False
     prune_protect: int = _COMPACTION_PRUNE_PROTECT_DEFAULT
     prune_minimum: int = _COMPACTION_PRUNE_MINIMUM_DEFAULT
+    summarize_enabled: bool = False
+    summary_model: str = ""
+    summary_timeout: float = _COMPACTION_SUMMARY_TIMEOUT_DEFAULT
 
 
 def parse_context_compaction_env(env: Mapping[str, str]) -> ContextCompactionEnv:
@@ -508,6 +520,17 @@ def parse_context_compaction_env(env: Mapping[str, str]) -> ContextCompactionEnv
     )
     if prune_minimum < 1:
         raise RuntimeEnvError(f"{COMPACTION_PRUNE_MINIMUM_ENV} must be >= 1")
+    # G1: strict default-OFF summary injection (NOT profile-aware, matching the
+    # real-tokens / tool-prune master switches above).
+    summarize_enabled = _is_true(env.get(COMPACTION_SUMMARIZE_ENABLED_ENV))
+    summary_model = _trimmed(env.get(COMPACTION_SUMMARY_MODEL_ENV)) or ""
+    summary_timeout = _float_env(
+        env,
+        COMPACTION_SUMMARY_TIMEOUT_ENV,
+        _COMPACTION_SUMMARY_TIMEOUT_DEFAULT,
+    )
+    if summary_timeout <= 0:
+        raise RuntimeEnvError(f"{COMPACTION_SUMMARY_TIMEOUT_ENV} must be > 0")
     return ContextCompactionEnv(
         enabled=enabled,
         token_threshold=token_threshold,
@@ -518,6 +541,9 @@ def parse_context_compaction_env(env: Mapping[str, str]) -> ContextCompactionEnv
         tool_prune_enabled=tool_prune_enabled,
         prune_protect=prune_protect,
         prune_minimum=prune_minimum,
+        summarize_enabled=summarize_enabled,
+        summary_model=summary_model,
+        summary_timeout=summary_timeout,
     )
 
 

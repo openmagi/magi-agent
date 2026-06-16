@@ -179,3 +179,49 @@ def test_rejects_invalid_prune_protect(value: str) -> None:
 def test_rejects_invalid_prune_minimum(value: str) -> None:
     with pytest.raises(RuntimeEnvError):
         parse_context_compaction_env({"MAGI_COMPACTION_PRUNE_MINIMUM": value})
+
+
+# ---------------------------------------------------------------------------
+# G1 — summary injection (strict default-OFF)
+# ---------------------------------------------------------------------------
+
+
+def test_summarize_defaults_off() -> None:
+    cfg = parse_context_compaction_env({})
+    assert cfg.summarize_enabled is False
+    assert cfg.summary_model == ""
+    assert cfg.summary_timeout == 30.0
+
+
+@pytest.mark.parametrize("value", ["1", "true", "yes", "on", "TRUE", "On"])
+def test_summarize_enabled_strict_truthy(value: str) -> None:
+    # STRICT truthy parse (NOT profile-aware): only an explicit truthy value ON.
+    cfg = parse_context_compaction_env(
+        {"MAGI_COMPACTION_SUMMARIZE_ENABLED": value}
+    )
+    assert cfg.summarize_enabled is True
+
+
+def test_summarize_not_profile_aware() -> None:
+    # The full profile must NOT auto-enable summary injection.
+    cfg = parse_context_compaction_env({"MAGI_RUNTIME_PROFILE": "full"})
+    assert cfg.summarize_enabled is False
+
+
+def test_summarize_model_and_timeout_parsed() -> None:
+    cfg = parse_context_compaction_env(
+        {
+            "MAGI_COMPACTION_SUMMARIZE_ENABLED": "1",
+            "MAGI_COMPACTION_SUMMARY_MODEL": "anthropic/claude-haiku-4-5",
+            "MAGI_COMPACTION_SUMMARY_TIMEOUT": "12.5",
+        }
+    )
+    assert cfg.summarize_enabled is True
+    assert cfg.summary_model == "anthropic/claude-haiku-4-5"
+    assert cfg.summary_timeout == 12.5
+
+
+@pytest.mark.parametrize("value", ["0", "-1"])
+def test_rejects_invalid_summary_timeout(value: str) -> None:
+    with pytest.raises(RuntimeEnvError):
+        parse_context_compaction_env({"MAGI_COMPACTION_SUMMARY_TIMEOUT": value})
