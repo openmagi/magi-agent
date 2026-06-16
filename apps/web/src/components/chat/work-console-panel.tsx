@@ -6,7 +6,7 @@ import {
   type WorkConsoleRow,
   type WorkConsoleRowGroup,
   type WorkConsoleRowStatus,
-} from "@/lib/chat/work-console";
+} from "@/chat-core";
 import {
   WORK_CONSOLE_MOTION_TICK_MS,
   smoothedHeartbeatElapsedMs,

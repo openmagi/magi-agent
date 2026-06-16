@@ -5,7 +5,7 @@ const source = readFileSync("apps/web/src/components/chat/chat-messages.tsx", "u
 
 describe("ChatMessages active run transcript rendering", () => {
   it("keeps live work progress out of inline assistant bubbles", () => {
-    expect(source).toContain("@/lib/chat/assistant-dedupe");
+    expect(source).toContain("@/chat-core");
     expect(source).toContain("hasActiveRunState");
     expect(source).toContain("renderLiveTranscriptWithInjected");
     expect(source).toContain('item.kind === "text"');

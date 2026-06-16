@@ -17,7 +17,7 @@ describe("local OSS chat dashboard", () => {
   });
 
   it("keeps local chat transport while adopting cloud live transcript streaming", () => {
-    expect(source).toContain("@/lib/chat/live-transcript");
+    expect(source).toContain("@/chat-core");
     expect(source).toContain("appendLiveTranscriptText");
     expect(source).toContain("appendLiveWorkSnapshot");
     expect(chatClientSource).toContain("/v1/chat/stream");

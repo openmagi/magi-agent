@@ -5,12 +5,12 @@ import { MessageBubble } from "./message-bubble";
 import { TypingIndicator } from "./typing-indicator";
 import { ControlRequestCard } from "./control-request";
 import { compareChatMessages } from "@/chat-core";
-import { shouldPreferServerAssistantMessage } from "@/lib/chat/server-reconcile";
+import { shouldPreferServerAssistantMessage } from "@/chat-core";
 import {
   assistantContentsSubstantiallyOverlap,
   normalizedAssistantDedupeContent,
   shouldPreferIncomingAssistantMessageCopy,
-} from "@/lib/chat/assistant-dedupe";
+} from "@/chat-core";
 import type { ReactNode } from "react";
 import type {
   ChatMessage,

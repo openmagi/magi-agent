@@ -35,7 +35,7 @@ import { applyMissionEvent } from "@/chat-core";
 import {
   findLatestAssistantServerMessage,
   shouldPatchAssistantTextFromServer,
-} from "@/lib/chat/server-reconcile";
+} from "@/chat-core";
 import {
   channelStateFromActiveSnapshot,
   isLiveActiveSnapshot,
@@ -68,13 +68,13 @@ import {
   liveTranscriptRowsForState,
   replaceLiveTranscriptText,
   upsertLiveTranscriptWorkRows,
-} from "@/lib/chat/live-transcript";
+} from "@/chat-core";
 import {
   buildChatExportFilename,
   buildChatExportMarkdown,
   normalizeSelectedChatExportMessages,
-} from "@/lib/chat/export";
-import type { ChatExportMessage } from "@/lib/chat/export";
+} from "@/chat-core";
+import type { ChatExportMessage } from "@/chat-core";
 import { kbUploadKey, uploadChatFilesToKb, splitImageAndOtherFiles, uploadImagesAsAttachmentMarkers } from "@/chat-core";
 import type { PendingKbUpload } from "@/chat-core";
 import {
