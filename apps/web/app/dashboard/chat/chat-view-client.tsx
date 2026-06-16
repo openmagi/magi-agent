@@ -162,7 +162,6 @@ const HISTORY_PREVIEW_LIMIT = 5;
 const HISTORY_PAGE_SIZE = 100;
 const HISTORY_AUTO_BACKFILL_PAGES = 4;
 const CUSTOM_CATEGORIES_KEY = (botId: string) => `magi:customCategories:${botId}`;
-const CHANNELS_CACHE_KEY = (botId: string) => `magi:channels:${botId}`;
 
 const TELEGRAM_BANNER_KEY = (botId: string) => `magi:telegramBannerDismissed:${botId}`;
 
@@ -439,7 +438,7 @@ export function ChatViewClient({
     const cached = useChatStore.getState().channels;
     if (cached.length === 0) {
       try {
-        const raw = localStorage.getItem(CHANNELS_CACHE_KEY(botId));
+        const raw = localStorage.getItem(chatApi.channelsCacheKey(botId));
         if (raw) {
           const parsed = JSON.parse(raw) as Channel[];
           if (parsed.length > 0) store.setChannels(parsed, { botId });
@@ -456,7 +455,7 @@ export function ChatViewClient({
       .then((chs) => {
         store.setChannels(chs, { botId });
         try {
-          localStorage.setItem(CHANNELS_CACHE_KEY(botId), JSON.stringify(chs));
+          localStorage.setItem(chatApi.channelsCacheKey(botId), JSON.stringify(chs));
         } catch { /* ignore */ }
       })
       .catch((err) => {
@@ -1528,7 +1527,7 @@ export function ChatViewClient({
       .fetchChannels(botId)
       .then((chs) => {
         store.setChannels(chs, { botId });
-        try { localStorage.setItem(CHANNELS_CACHE_KEY(botId), JSON.stringify(chs)); } catch { /* ignore */ }
+        try { localStorage.setItem(chatApi.channelsCacheKey(botId), JSON.stringify(chs)); } catch { /* ignore */ }
       })
       .catch((err) => {
         console.error("[chat] Failed to refresh channels:", err);
@@ -1554,7 +1553,7 @@ export function ChatViewClient({
           if (!alreadyExists) {
             const updated = [...existing, ch];
             store.setChannels(updated, { botId });
-            try { localStorage.setItem(CHANNELS_CACHE_KEY(botId), JSON.stringify(updated)); } catch { /* ignore */ }
+            try { localStorage.setItem(chatApi.channelsCacheKey(botId), JSON.stringify(updated)); } catch { /* ignore */ }
           }
           handleChannelSelect(ch.name);
         })
@@ -1577,7 +1576,7 @@ export function ChatViewClient({
           const remaining = currentState.channels.filter((c) => c.name !== channelName);
           const nextChannel = getNextChannelAfterDeletion(currentState.channels, channelName);
           store.setChannels(remaining, { botId });
-          try { localStorage.setItem(CHANNELS_CACHE_KEY(botId), JSON.stringify(remaining)); } catch { /* ignore */ }
+          try { localStorage.setItem(chatApi.channelsCacheKey(botId), JSON.stringify(remaining)); } catch { /* ignore */ }
           if (currentState.activeChannel === channelName) {
             if (nextChannel) {
               handleChannelSelect(nextChannel);
@@ -1611,7 +1610,7 @@ export function ChatViewClient({
   const handleReorderChannels = useCallback(
     (reordered: Channel[]) => {
       store.setChannels(reordered, { botId });
-      try { localStorage.setItem(CHANNELS_CACHE_KEY(botId), JSON.stringify(reordered)); } catch { /* ignore */ }
+      try { localStorage.setItem(chatApi.channelsCacheKey(botId), JSON.stringify(reordered)); } catch { /* ignore */ }
       chatApi.reorderChannels(
         botId,
         reordered.map((c) => ({ name: c.name, position: c.position, category: c.category || "Other" })),
