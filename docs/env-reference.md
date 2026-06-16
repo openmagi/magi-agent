@@ -205,6 +205,7 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 - `MAGI_CONFIG` (no default) — Path to the Magi config.toml file; empty uses ~/.magi/config.toml.
 - `MAGI_CONTEXT_COMPACTION_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Compact the working context when the token threshold is hit (default-ON full profile).
 - `MAGI_CROSS_VERIFY_ENABLED` (default off) — Enable the cross-verification gate over spawned-agent results.
+- `MAGI_CUSTOMIZE_VERIFICATION_ENABLED` (default off) — Master switch for the dashboard Customize tab's verification presets/rules. When on, persisted verification overrides (~/.magi/customize.json) translate into the recipe-driven pre-final evidence gate; default-OFF keeps presets preview-only.
 - `MAGI_DEEP_WEB_RESEARCH_ENABLED` (default off) — Enable the live deep web-research harness (search + fetch + verify).
 - `MAGI_DEFERRED_TOOLS_ENABLED` (default off) — Enable deferred (lazily-loaded) tool schemas.
 - `MAGI_DOCUMENT_AUTHORING_COVERAGE` (default off) — Block document turns on failed DocumentCoverage (vs audit-only).
@@ -254,6 +255,7 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 - `MAGI_SESSION_TRANSCRIPT_ENABLED` (default off) — Write per-session JSONL debug transcripts (turn stages, tool calls, subagent spawns, messages) under the observability home.
 - `MAGI_SESSION_TRANSCRIPT_MAX_FILES` (default `500`) — Max session-transcript files kept; oldest beyond this are pruned.
 - `MAGI_SESSION_TRANSCRIPT_RETENTION_DAYS` (default `14`) — Session-transcript retention in days; older files are pruned.
+- `MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED` (default off) — Project the live turn's inspected-source ledger into the engine's harvested public refs as the named ref 'verifier:research-source-evidence' so a recipe can require source grounding: a turn that read >=1 source passes, a turn that read none blocks. Strict default-OFF and inert unless explicitly set.
 - `MAGI_STEP_DECOMPOSITION_ENABLED` (default off) — Inject a light first-pass guidance asking the agent to enumerate dependent sub-steps up front and confirm each before proceeding (prompt-only nudge; reuses existing planning seams).
 - `MAGI_TOOL_SYNTHESIS_NUDGE_ENABLED` (default off) — Live-SWE-style tool-synthesis: per-step reflection nudge + 'create your own tools' recipe block (frontier-tier models only).
 - `MAGI_VISION_MODEL` (no default) — Vision-sidecar model override for image_understand (bare model id, same semantics as MAGI_MODEL); unset keeps the main provider/model.

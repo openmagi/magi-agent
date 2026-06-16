@@ -118,6 +118,19 @@ class RecipeReliabilityPolicyRegistry:
                     "requiredCheckpoints": ("domain_policy",),
                     "finalAnswerWithoutEvidence": "insufficient_evidence",
                 },
+                "openmagi.source-grounded": {
+                    # Minimal source-grounded read-only recipe: the only
+                    # outstanding required validator is the NAMED public ref
+                    # ``verifier:research-source-evidence`` (a satisfiable
+                    # prefixed ref). The live source-ledger projector
+                    # (MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED) emits this ref
+                    # when the turn read >=1 inspected source, so the gate
+                    # passes on a source-read turn and blocks on a source-less
+                    # one. No bare-name validators/evidence are added here so
+                    # the only enforced requirement is the prefixed ref.
+                    "requiredValidators": ("verifier:research-source-evidence",),
+                    "finalAnswerWithoutEvidence": "insufficient_evidence",
+                },
                 "openmagi.research": {
                     "requiredEvidence": ("citation_support", "source_ledger"),
                     "requiredValidators": ("citation_support", "fact_grounding"),

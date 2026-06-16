@@ -42,8 +42,9 @@ import type {
   QueuedMessage,
   ServerMessage,
 } from "@/lib/chat/types";
-import { MAX_QUEUED_MESSAGES } from "@/lib/chat/queue-constants";
-import { getStreamingSendMode, type StreamingComposerMode } from "@/lib/chat/send-policy";
+import { MAX_QUEUED_MESSAGES, canInjectMidTurn } from "@/chat-core";
+
+type StreamingComposerMode = "queue" | "steer";
 import {
   buildEscCancelDecision,
   cancelActiveTurnWithQueueHandoff,
@@ -1115,11 +1116,11 @@ export function ChatViewClient({
       if (!isCurrentBot()) return false;
       if (isStreaming) {
         const hasFiles = !!(files && files.length > 0);
-        const sendMode = getStreamingSendMode({
-          hasFiles,
-          hasKbContext: uploadedKbDocs.length > 0,
-          requestedMode: streamingComposerMode,
-        });
+        const sendMode =
+          streamingComposerMode === "steer" &&
+          canInjectMidTurn({ hasFiles, hasKbContext: uploadedKbDocs.length > 0 })
+            ? "inject"
+            : "queue";
         if (sendMode === "inject") {
           try {
             const sessionKey = chatApi.buildSessionKey(botId, channel);

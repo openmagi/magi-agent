@@ -578,11 +578,26 @@ def _build_default_runner_policy_assembly(
         model_label=model_label,
     )
     effective_task_profile = dict(task_profile or _DEFAULT_FIRST_PARTY_TASK_PROFILE)
+    runtime_context: dict[str, object] = {"channel": "cli"}
+    # MAGI_FORCE_RECIPE pins which compiler recipe a live CLI turn selects by
+    # reusing the compiler's existing explicit-selection path (the same
+    # ``explicitRecipeSelection`` block the hosted surface uses). Unset/blank ⇒
+    # no key added ⇒ automatic selection is byte-identical to today.
+    forced_recipe = os.environ.get("MAGI_FORCE_RECIPE", "").strip()
+    if forced_recipe:
+        runtime_context["explicitRecipeSelection"] = {
+            "mode": "this_turn",
+            "requiredRecipeRefs": [{"recipeId": forced_recipe}],
+            # Pin to ONLY the forced recipe: auto-selecting other packs (e.g.
+            # dev-coding) would short-circuit _pre_final_gate_applies and skip
+            # the gate. A forced recipe means "this and nothing else".
+            "allowAdditionalAutoRecipes": False,
+        }
     try:
         snapshot = AgentRecipeCompiler(PackRegistry.with_first_party_packs()).compile(
             ProfileResolutionRequest(
                 taskProfile=effective_task_profile,
-                runtimeContext={"channel": "cli"},
+                runtimeContext=runtime_context,
                 recipePackConfig={},
             )
         )

@@ -102,6 +102,83 @@ def test_patch_tool_unknown_name_returns_404(tmp_path, monkeypatch):
     assert not cfile.exists() or "__definitely_not_a_tool__" not in cfile.read_text()
 
 
+def test_patch_verification_persists_and_applies(tmp_path, monkeypatch):
+    monkeypatch.setenv("MAGI_CUSTOMIZE_VERIFICATION_ENABLED", "1")
+    cfile = tmp_path / "customize.json"
+    monkeypatch.setenv("MAGI_CUSTOMIZE", str(cfile))
+    runtime = _build_runtime(tmp_path, gateway_token=_TOKEN)
+    client = TestClient(create_app(runtime))
+    client.headers.update({"x-gateway-token": _TOKEN})
+
+    resp = client.patch(
+        "/v1/app/customize/verification/harness_presets/answer_quality",
+        json={"enabled": True, "mode": "hybrid"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "answer_quality" in body["overrides"]["verification"]["harness_presets"]
+    assert body["overrides"]["verification"]["modes"]["answer_quality"] == "hybrid"
+    import json
+    assert "answer_quality" in json.loads(cfile.read_text())["verification"]["harness_presets"]
+    # applied live (flag on)
+    assert runtime.customize_verification_policy.is_enabled("answer_quality")
+
+
+def test_patch_verification_unknown_kind_400(tmp_path, monkeypatch):
+    monkeypatch.setenv("MAGI_CUSTOMIZE", str(tmp_path / "customize.json"))
+    client = _client(tmp_path)
+    client.headers.update({"x-gateway-token": _TOKEN})
+    resp = client.patch("/v1/app/customize/verification/bogus/x", json={"enabled": True})
+    assert resp.status_code == 400
+
+
+def test_patch_verification_requires_auth(tmp_path, monkeypatch):
+    monkeypatch.setenv("MAGI_CUSTOMIZE", str(tmp_path / "customize.json"))
+    client = _client(tmp_path)  # no token header
+    resp = client.patch(
+        "/v1/app/customize/verification/harness_presets/answer_quality",
+        json={"enabled": True},
+    )
+    assert resp.status_code == 401
+
+
+def test_patch_verification_bad_body(tmp_path, monkeypatch):
+    monkeypatch.setenv("MAGI_CUSTOMIZE", str(tmp_path / "customize.json"))
+    client = _client(tmp_path)
+    client.headers.update({"x-gateway-token": _TOKEN})
+    resp = client.patch(
+        "/v1/app/customize/verification/harness_presets/answer_quality", json={"nope": 1}
+    )
+    assert resp.status_code == 400
+
+
+def test_put_rules_persists(tmp_path, monkeypatch):
+    cfile = tmp_path / "customize.json"
+    monkeypatch.setenv("MAGI_CUSTOMIZE", str(cfile))
+    client = _client(tmp_path)
+    client.headers.update({"x-gateway-token": _TOKEN})
+    resp = client.put("/v1/app/customize/rules", json={"text": "Be terse."})
+    assert resp.status_code == 200
+    assert resp.json()["overrides"]["user_rules"] == "Be terse."
+    import json
+    assert json.loads(cfile.read_text())["user_rules"] == "Be terse."
+
+
+def test_put_rules_requires_auth(tmp_path, monkeypatch):
+    monkeypatch.setenv("MAGI_CUSTOMIZE", str(tmp_path / "customize.json"))
+    client = _client(tmp_path)  # no token
+    resp = client.put("/v1/app/customize/rules", json={"text": "x"})
+    assert resp.status_code == 401
+
+
+def test_put_rules_bad_body(tmp_path, monkeypatch):
+    monkeypatch.setenv("MAGI_CUSTOMIZE", str(tmp_path / "customize.json"))
+    client = _client(tmp_path)
+    client.headers.update({"x-gateway-token": _TOKEN})
+    resp = client.put("/v1/app/customize/rules", json={"nope": 1})
+    assert resp.status_code == 400
+
+
 def test_customize_returns_catalog_and_overrides(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("MAGI_CONFIG", str(tmp_path / "config.toml"))

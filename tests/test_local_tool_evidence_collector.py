@@ -7,6 +7,74 @@ from magi_agent.harness.verifier_bus import execute_pre_final_verifier_bus
 from magi_agent.tools.result import ToolResult
 
 
+def _source_projection_result() -> ToolResult:
+    """A read-only tool result carrying a source-ledger public projection,
+    exactly as FileRead / DocumentRead emit it."""
+    from magi_agent.evidence.source_ledger import (
+        LocalResearchSourceLedger,
+        public_source_ledger_report,
+    )
+
+    ledger = LocalResearchSourceLedger(
+        ledgerId="ledger:proj",
+        sessionId="session:proj",
+        turnId="turn-src",
+    )
+    ledger.record_source(
+        {
+            "turnId": "turn-src",
+            "toolName": "FileRead",
+            "toolUseId": "FileRead:local",
+            "evidenceType": "SourceInspection",
+            "kind": "file",
+            "uri": "workspace://notes.md",
+            "inspected": True,
+            "contentType": "text/plain",
+        }
+    )
+    projection = public_source_ledger_report(ledger).model_dump(
+        by_alias=True, mode="json", warnings=False
+    )
+    return ToolResult(
+        status="ok",
+        output={"text": "summary"},
+        metadata={"toolName": "FileRead", "sourceProjection": projection},
+    )
+
+
+def test_source_projection_flag_off_not_projected(monkeypatch) -> None:
+    """Item 4: OFF ⇒ source-ledger projection does NOT enter _records."""
+    monkeypatch.delenv("MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED", raising=False)
+    collector = LocalToolEvidenceCollector()
+    collector.record_tool_result(
+        session_id="session:proj",
+        turn_id="turn-src",
+        tool_call_id="call-src",
+        tool_name="FileRead",
+        result=_source_projection_result(),
+    )
+    records = collector.collect_for_turn("turn-src")
+    types = {getattr(r, "type", None) for r in records}
+    assert "SourceInspection" not in types
+
+
+def test_source_projection_flag_on_projects_source_inspection(monkeypatch) -> None:
+    """Item 4 CORE: ON ⇒ each inspected source becomes a SourceInspection record
+    in the collector via the EXISTING to_evidence_record()."""
+    monkeypatch.setenv("MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED", "1")
+    collector = LocalToolEvidenceCollector()
+    collector.record_tool_result(
+        session_id="session:proj",
+        turn_id="turn-src",
+        tool_call_id="call-src",
+        tool_name="FileRead",
+        result=_source_projection_result(),
+    )
+    records = collector.collect_for_turn("turn-src")
+    source_records = [r for r in records if getattr(r, "type", None) == "SourceInspection"]
+    assert len(source_records) == 1
+
+
 def test_local_tool_evidence_collector_feeds_pre_final_verifier_bus() -> None:
     collector = LocalToolEvidenceCollector()
 

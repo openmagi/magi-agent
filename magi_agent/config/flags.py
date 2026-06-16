@@ -443,6 +443,16 @@ FLAGS: tuple[FlagSpec, ...] = (
     ),
     # --- Evidence / verification gates -------------------------------------
     _b(
+        "MAGI_CUSTOMIZE_VERIFICATION_ENABLED",
+        stage="stage2",
+        summary=(
+            "Master switch for the dashboard Customize tab's verification "
+            "presets/rules. When on, persisted verification overrides "
+            "(~/.magi/customize.json) translate into the recipe-driven "
+            "pre-final evidence gate; default-OFF keeps presets preview-only."
+        ),
+    ),
+    _b(
         "MAGI_EGRESS_GATE_ENABLED",
         summary="Run the evidence-grounded critic gate before chat egress.",
     ),
@@ -470,6 +480,17 @@ FLAGS: tuple[FlagSpec, ...] = (
             "research answer asserting a specific numeric/identifier value not "
             "present in the opened-source corpus stays ungrounded and blocks. "
             "Strict default-OFF and inert unless explicitly set."
+        ),
+    ),
+    _b(
+        "MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED",
+        stage="stage2",
+        summary=(
+            "Project the live turn's inspected-source ledger into the engine's "
+            "harvested public refs as the named ref "
+            "'verifier:research-source-evidence' so a recipe can require source "
+            "grounding: a turn that read >=1 source passes, a turn that read none "
+            "blocks. Strict default-OFF and inert unless explicitly set."
         ),
     ),
     _b(

@@ -172,6 +172,66 @@ class TestDocumentReadText:
         )
 
 
+class TestDocumentReadSourceProjection:
+    """Item 5: a DocumentRead source-read populates a source-ledger projection.
+
+    ``LOCAL_READONLY_TOOL_NAMES`` excludes DocumentRead, so it never recorded a
+    source. Behind the default-OFF ``MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED``,
+    a successful DocumentRead now attaches a ``sourceProjection`` exactly like
+    FileRead, so the evidence collector projects it as a SourceInspection.
+    """
+
+    def test_flag_off_no_source_projection(self, tmp_path: Path) -> None:
+        (tmp_path / "notes.txt").write_text("the token economy section\n", encoding="utf-8")
+        from magi_agent.tools.document_tools import document_read
+
+        result = document_read({"path": "notes.txt"}, _ctx(tmp_path))
+        assert result.status == "ok"
+        # OFF ⇒ byte-identical to main: no sourceProjection key.
+        assert "sourceProjection" not in result.metadata
+
+    def test_flag_on_attaches_source_inspection_projection(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED", "1")
+        (tmp_path / "notes.txt").write_text("the token economy section\n", encoding="utf-8")
+        from magi_agent.tools.document_tools import document_read
+
+        result = document_read({"path": "notes.txt"}, _ctx(tmp_path))
+        assert result.status == "ok"
+        projection = result.metadata.get("sourceProjection")
+        assert isinstance(projection, dict)
+        sources = projection["sources"]
+        assert len(sources) == 1
+        assert sources[0]["evidenceType"] == "SourceInspection"
+        assert sources[0]["inspected"] is True
+
+    def test_flag_on_projection_feeds_collector_as_source_inspection(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """End-to-end item 4+5: DocumentRead result → collector → SourceInspection."""
+        monkeypatch.setenv("MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED", "1")
+        (tmp_path / "notes.txt").write_text("the token economy section\n", encoding="utf-8")
+        from magi_agent.evidence.local_tool_collector import LocalToolEvidenceCollector
+        from magi_agent.tools.document_tools import document_read
+
+        result = document_read({"path": "notes.txt"}, _ctx(tmp_path))
+        collector = LocalToolEvidenceCollector()
+        collector.record_tool_result(
+            session_id="test-session",
+            turn_id="test-turn",
+            tool_call_id="call-1",
+            tool_name="DocumentRead",
+            result=result,
+        )
+        records = collector.collect_for_turn("test-turn")
+        types = {
+            getattr(r, "type", None) if not isinstance(r, dict) else r.get("type")
+            for r in records
+        }
+        assert "SourceInspection" in types
+
+
 # ---------------------------------------------------------------------------
 # Fix B — PPTX (optional dependency, guarded)
 # ---------------------------------------------------------------------------
