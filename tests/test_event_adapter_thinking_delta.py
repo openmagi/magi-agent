@@ -1,10 +1,10 @@
-"""Thought parts must surface as thinking_delta events, not be dropped.
+"""Thought parts surface as thinking_delta — gated by MAGI_STREAM_THINKING.
 
-ADK marks model reasoning (Claude/Gemini extended thinking) as parts with
-``thought=True``. The bridge previously dropped them entirely, so hosted chat
-never received a thinking stream and the collapsible thinking block stayed
-empty regardless of MAGI_STREAM_THINKING. They must be projected as
-``thinking_delta`` so sse.py (gated by the flag) can forward them.
+ADK marks model reasoning (Claude/Gemini extended thinking, LiteLLM
+reasoning_content e.g. Kimi) as parts with ``thought=True``. With
+MAGI_STREAM_THINKING enabled the bridge projects them as ``thinking_delta`` so
+the hosted UI can render the collapsible thinking block. With the flag off the
+projection layer stays a hard privacy boundary and drops them entirely.
 """
 
 from google.adk.events import Event
@@ -23,7 +23,8 @@ def _model_event(*, parts, partial, idx=0):
     )
 
 
-def test_partial_thought_part_projects_thinking_delta() -> None:
+def test_partial_thought_part_projects_thinking_delta_when_enabled(monkeypatch) -> None:
+    monkeypatch.setenv("MAGI_STREAM_THINKING", "1")
     bridge = OpenMagiEventBridge(live_compatible=True)
     event = _model_event(
         parts=[types.Part(text="Let me reason about this.", thought=True)],
@@ -33,23 +34,32 @@ def test_partial_thought_part_projects_thinking_delta() -> None:
     thinking = [e for e in projection.agent_events if e.get("type") == "thinking_delta"]
     assert len(thinking) == 1
     assert thinking[0]["delta"].strip() != ""
-    # A thought part is NOT also leaked as visible answer text.
     assert not any(e.get("type") == "text_delta" for e in projection.agent_events)
 
 
-def test_partial_non_thought_text_still_projects_text_delta() -> None:
+def test_thought_part_dropped_when_flag_off(monkeypatch) -> None:
+    monkeypatch.delenv("MAGI_STREAM_THINKING", raising=False)
     bridge = OpenMagiEventBridge(live_compatible=True)
     event = _model_event(
-        parts=[types.Part(text="The answer is 42.")],
+        parts=[types.Part(text="PRIVATE_THOUGHT secret", thought=True)],
         partial=True,
     )
+    projection = bridge.project_adk_event(event, turn_id="turn-think")
+    assert projection.agent_events == []
+
+
+def test_partial_non_thought_text_still_projects_text_delta(monkeypatch) -> None:
+    monkeypatch.setenv("MAGI_STREAM_THINKING", "1")
+    bridge = OpenMagiEventBridge(live_compatible=True)
+    event = _model_event(parts=[types.Part(text="The answer is 42.")], partial=True)
     projection = bridge.project_adk_event(event, turn_id="turn-think")
     text = [e for e in projection.agent_events if e.get("type") == "text_delta"]
     assert len(text) == 1
     assert not any(e.get("type") == "thinking_delta" for e in projection.agent_events)
 
 
-def test_mixed_thought_and_text_parts_split_channels() -> None:
+def test_mixed_thought_and_text_parts_split_channels(monkeypatch) -> None:
+    monkeypatch.setenv("MAGI_STREAM_THINKING", "1")
     bridge = OpenMagiEventBridge(live_compatible=True)
     event = _model_event(
         parts=[

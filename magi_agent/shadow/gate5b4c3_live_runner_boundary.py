@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
 
 from magi_agent.config.env import parse_output_continuation_env
+from magi_agent.ops.health import _truthy_env
 from magi_agent.evidence.gate1a_egress_correlation import (
     Gate1AEgressCorrelationContext,
     build_gate1a_proxy_http_options,
@@ -814,10 +815,15 @@ class Gate5B4C3LiveRunnerBoundary:
                                     }
                                 )
                         thinking_chunk = _event_thinking_text(event)
-                        if thinking_chunk and _event_is_partial(event):
-                            # Stream model reasoning on the thinking channel.
-                            # sse.py gates this behind MAGI_STREAM_THINKING; only
-                            # partial events to avoid the non-partial aggregate.
+                        if (
+                            thinking_chunk
+                            and _event_is_partial(event)
+                            and _truthy_env("MAGI_STREAM_THINKING")
+                        ):
+                            # Stream model reasoning on the thinking channel,
+                            # gated at the producer behind MAGI_STREAM_THINKING
+                            # (sse.py also gates the public path). Only partial
+                            # events, to avoid the non-partial aggregate.
                             self._emit_public_event(
                                 {
                                     "type": "thinking_delta",
@@ -2702,7 +2708,12 @@ async def _run_no_tool_finalizer(
                             }
                         )
             thinking_chunk = _event_thinking_text(event)
-            if thinking_chunk and _event_is_partial(event) and public_event_sink is not None:
+            if (
+                thinking_chunk
+                and _event_is_partial(event)
+                and public_event_sink is not None
+                and _truthy_env("MAGI_STREAM_THINKING")
+            ):
                 public_event_sink(
                     {
                         "type": "thinking_delta",
