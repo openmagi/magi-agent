@@ -702,6 +702,9 @@ def _build_default_runner_policy_assembly(
 def _attach_first_party_policy_callback(
     agent: object,
     assembly: RunnerPolicyAssembly | None,
+    *,
+    pack_registry: object | None = None,
+    env: Mapping[str, str] | None = None,
 ) -> None:
     if assembly is None:
         return
@@ -714,9 +717,34 @@ def _attach_first_party_policy_callback(
         else [original]
     )
 
+    # Recipe-scoped tool enforcement (HB-3) is gated behind the recipe-routing
+    # flag and computed ONCE here so the per-call callback stays cheap. When the
+    # flag is OFF this whole block is skipped and the callback path is
+    # byte-identical to ``main`` (no recipe import, ``scope`` stays None). The
+    # recipe imports are kept local so the OFF path never pulls the recipe stack.
+    scope = None
+    state_key = ""
+    try:
+        from magi_agent.config.env import recipe_routing_llm_enabled  # noqa: PLC0415
+
+        if recipe_routing_llm_enabled(env):
+            from magi_agent.recipes.compiler import PackRegistry  # noqa: PLC0415
+            from magi_agent.recipes.recipe_routing import (  # noqa: PLC0415
+                SELECTED_RECIPE_PACK_IDS_STATE_KEY,
+                build_recipe_tool_scope,
+            )
+
+            resolved_registry = pack_registry or PackRegistry.with_first_party_packs()
+            scope = build_recipe_tool_scope(resolved_registry)
+            state_key = SELECTED_RECIPE_PACK_IDS_STATE_KEY
+    except Exception:
+        # Enforcement must never break attachment: a bad import / registry build
+        # leaves ``scope`` None so the callback behaves exactly as flag-OFF.
+        scope = None
+
     async def magi_first_party_policy_before_tool(*, tool, args, tool_context=None):
-        del tool_context
         tool_name = getattr(tool, "name", "tool")
+        # Production-authority block FIRST, unchanged.
         if _contains_forbidden_production_authority(args):
             return {
                 "status": "blocked",
@@ -725,12 +753,54 @@ def _attach_first_party_policy_callback(
                 "feedback": "Local OSS first-party policy cannot grant production mutation authority.",
                 "runnerPolicyAssembly": assembly.to_public_payload(),
             }
+        # Recipe-scoped enforcement (flag ON only). Fail-safe: ANY error → allow.
+        if scope is not None:
+            try:
+                selected = _read_selected_recipe_pack_ids(tool_context, state_key)
+                if not scope.is_allowed(tool_name, selected_pack_ids=selected):
+                    owners = scope.owning_packs.get(tool_name, ())
+                    owner_text = ", ".join(owners) if owners else "the owning recipe"
+                    return {
+                        "status": "blocked",
+                        "error": "recipe_tool_not_selected",
+                        "tool": tool_name,
+                        "feedback": (
+                            f"Tool '{tool_name}' is scoped to recipe(s): {owner_text}. "
+                            f"Call select_recipe with one of those pack ids "
+                            f"(e.g. {owners[0] if owners else 'the recipe pack id'}) "
+                            "before using this tool."
+                        ),
+                        "runnerPolicyAssembly": assembly.to_public_payload(),
+                    }
+            except Exception:
+                # Enforcement must NEVER raise and NEVER block on its own errors.
+                return None
         return None
 
     agent.before_tool_callback = [
         magi_first_party_policy_before_tool,
         *original_as_list,
     ]
+
+
+def _read_selected_recipe_pack_ids(
+    tool_context: object, state_key: str
+) -> tuple[str, ...]:
+    """Read accumulated recipe-pack selections from the RAW ADK tool context.
+
+    The before_tool_callback receives ADK's own tool context, which exposes a
+    mutable mapping-like ``state`` — the same object ``select_recipe_handler``
+    reaches via ``ToolContext.adk_tool_context.state``. Returns ``()`` when no
+    state / no selection (restriction inactive). Never raises here; callers also
+    guard, but this stays defensive so a missing/odd state degrades to ``()``.
+    """
+    state = getattr(tool_context, "state", None)
+    if state is None or not hasattr(state, "get"):
+        return ()
+    existing = state.get(state_key)
+    if isinstance(existing, (tuple, list)):
+        return tuple(str(item) for item in existing)
+    return ()
 
 
 def _contains_forbidden_production_authority(value: object) -> bool:

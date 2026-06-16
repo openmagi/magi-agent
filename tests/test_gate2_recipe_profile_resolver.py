@@ -2335,3 +2335,13 @@ def test_no_model_selection_falls_back_to_selector_membership_unchanged() -> Non
         "openmagi.research",
     )
     assert snapshot.recipe_selection.selection_source == "automatic"
+
+
+def test_recipe_pack_manifest_carries_granted_tool_names():
+    registry = PackRegistry.with_first_party_packs()
+    p = registry.get("openmagi.dev-coding")
+    assert isinstance(p.granted_tool_names, tuple)
+    assert all(isinstance(t, str) for t in p.granted_tool_names)
+    # Authored in HB-4: dev-coding scopes the gated code-execution tools while
+    # leaving general file/test tools base-free.
+    assert p.granted_tool_names == ("PythonExec", "PersistentPython")

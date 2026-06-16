@@ -893,6 +893,7 @@ class RecipePackManifest(_FrozenRecipeModel):
     display_name: str = Field(alias="displayName")
     description: str
     when_to_use: str = Field(default="", alias="whenToUse")
+    granted_tool_names: tuple[str, ...] = Field(default=(), alias="grantedToolNames")
     default_enabled: bool = Field(default=False, alias="defaultEnabled")
     hard_safety: bool = Field(default=False, alias="hardSafety")
     opt_out_allowed: bool = Field(default=True, alias="optOutAllowed")
@@ -953,6 +954,7 @@ class RecipePackManifest(_FrozenRecipeModel):
         "task_profile_selectors",
         "depends_on_pack_ids",
         "instruction_refs",
+        "granted_tool_names",
         "tool_refs",
         "callback_refs",
         "validator_refs",
@@ -2220,6 +2222,9 @@ def _first_party_packs() -> tuple[RecipePackManifest, ...]:
                 "accounting",
                 "domain-workflow",
             ),
+            # Specialized web-acquisition tools: the direct web search/fetch
+            # FunctionTools (real ADK tool.name from build_web_search_tools).
+            grantedToolNames=("web_search", "web_fetch", "research_fact"),
             instructionRefs=("instruction:web-acquisition:source-ledger-inputs",),
             validatorRefs=("verifier:web-acquisition:provider-boundary",),
             approvalGateRefs=("approval:web-acquisition:provider-opt-in",),
@@ -2248,6 +2253,11 @@ def _first_party_packs() -> tuple[RecipePackManifest, ...]:
             ),
             taskProfileSelectors=("research", "document-review"),
             dependsOnPackIds=("openmagi.web-acquisition",),
+            # Specialized research tools: the direct web search/fetch + composite
+            # research_fact FunctionTools (real ADK tool.name). Granted on the
+            # research pack itself so selecting it scopes the web tools even when
+            # web-acquisition is not separately selected.
+            grantedToolNames=("web_search", "web_fetch", "research_fact"),
             instructionRefs=("instruction:research:source-policy",),
             callbackRefs=("callback:research:source-capture",),
             validatorRefs=(
@@ -2332,6 +2342,11 @@ def _first_party_packs() -> tuple[RecipePackManifest, ...]:
                 "tests."
             ),
             taskProfileSelectors=("coding", "development", "dev-coding"),
+            # Specialized coding tools: the gated code-execution tools
+            # (PythonExec / PersistentPython). General file read/edit + TestRun +
+            # GitDiff are deliberately NOT granted — they are always-needed
+            # base-free tools available to every turn, not recipe-exclusive.
+            grantedToolNames=("PythonExec", "PersistentPython"),
             instructionRefs=("instruction:dev-coding:tdd",),
             toolRefs=("tool:file.read", "tool:test.run"),
             callbackRefs=("callback:dev-coding:diff-capture",),
@@ -2458,6 +2473,18 @@ def _first_party_packs() -> tuple[RecipePackManifest, ...]:
                 "notify-user",
             ),
             instructionRefs=("instruction:scheduled-work:disabled-by-default",),
+            # Specialized scheduled-work tools: the cron/background-task inspection
+            # tools that are actually registered in the core catalog
+            # (CronList + TaskList/TaskGet/TaskOutput). The CronCreate/Update/
+            # Delete/TaskWait/TaskStop tool_refs are forward-looking boundary
+            # metadata with no registered CLI manifest, so they are NOT granted —
+            # a grant must name a tool a turn can actually call.
+            grantedToolNames=(
+                "CronList",
+                "TaskList",
+                "TaskGet",
+                "TaskOutput",
+            ),
             toolRefs=(
                 "tool:CronCreate",
                 "tool:CronList",
@@ -2500,6 +2527,10 @@ def _first_party_packs() -> tuple[RecipePackManifest, ...]:
                 "or stored."
             ),
             taskProfileSelectors=("memory-provider-eval", "agentmemory"),
+            # Specialized memory tool: declarative memory write
+            # (real ADK tool.name MemoryWrite). The AgentMemorySearch/Remember
+            # tool_refs are provider-boundary metadata, not registered CLI tools.
+            grantedToolNames=("MemoryWrite",),
             toolRefs=("tool:AgentMemorySearch", "tool:AgentMemoryRemember"),
             callbackRefs=("callback:agentmemory.recall", "callback:agentmemory.observe"),
             validatorRefs=("verifier:agentmemory-provider-boundary",),
@@ -2560,6 +2591,17 @@ def _first_party_packs() -> tuple[RecipePackManifest, ...]:
                 "converted at the file level."
             ),
             taskProfileSelectors=("office", "office-automation"),
+            # Specialized office tools: document + spreadsheet + archive readers
+            # (real ADK tool.name from the file-tool catalog). General file
+            # read/write stays base-free.
+            grantedToolNames=(
+                "DocumentRead",
+                "DocumentSearch",
+                "DocumentQA",
+                "XLSXRead",
+                "XLSXInfo",
+                "ArchiveExtract",
+            ),
             instructionRefs=("instruction:office-automation:preview-then-approve",),
             toolRefs=("tool:file.read", "tool:spreadsheet.read", "tool:browser.inspect"),
             callbackRefs=(
@@ -2626,6 +2668,9 @@ def _first_party_packs() -> tuple[RecipePackManifest, ...]:
                 "transformed in-place."
             ),
             taskProfileSelectors=("spreadsheet", "spreadsheet-automation"),
+            # Specialized spreadsheet tools: the XLSX reader/inspector
+            # (real ADK tool.name from the file-tool catalog).
+            grantedToolNames=("XLSXRead", "XLSXInfo"),
             instructionRefs=("instruction:spreadsheet-automation:preview-then-approve",),
             toolRefs=("tool:spreadsheet.read", "tool:spreadsheet.plan-write"),
             callbackRefs=(
@@ -2651,6 +2696,9 @@ def _first_party_packs() -> tuple[RecipePackManifest, ...]:
                 "interactively."
             ),
             taskProfileSelectors=("browser", "browser-automation"),
+            # Specialized browser tool: the autonomous vision browser
+            # (real ADK tool.name BrowserTask).
+            grantedToolNames=("BrowserTask",),
             instructionRefs=("instruction:browser-automation:inspect-before-act",),
             toolRefs=("tool:browser.inspect", "tool:browser.plan-action"),
             callbackRefs=(
@@ -2676,6 +2724,9 @@ def _first_party_packs() -> tuple[RecipePackManifest, ...]:
                 "commented on with source-grounded findings."
             ),
             taskProfileSelectors=("document-review", "document"),
+            # Specialized document tools: document reader/search/QA
+            # (real ADK tool.name from the file-tool catalog).
+            grantedToolNames=("DocumentRead", "DocumentSearch", "DocumentQA"),
             instructionRefs=("instruction:document-review:source-grounded-review",),
             toolRefs=("tool:file.read", "tool:document.inspect"),
             callbackRefs=("callback:document-review:finding-capture",),
@@ -2745,6 +2796,9 @@ def _first_party_packs() -> tuple[RecipePackManifest, ...]:
                 "written and run fast."
             ),
             taskProfileSelectors=("lightweight-scripting", "scripting"),
+            # Specialized scripting tools: the gated code-execution tools. General
+            # file read + Bash stay base-free.
+            grantedToolNames=("PythonExec", "PersistentPython"),
             instructionRefs=("instruction:lightweight-scripting:small-script-plan",),
             toolRefs=("tool:file.read", "tool:script.plan-run"),
             callbackRefs=("callback:lightweight-scripting:diff-capture",),

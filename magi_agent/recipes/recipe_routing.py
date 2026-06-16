@@ -7,7 +7,8 @@ registry. The resolver-drain wiring (reading the accumulated selections back int
 a ``ProfileResolutionRequest``) lands in a later task."""
 from __future__ import annotations
 
-from collections.abc import Mapping, MutableMapping
+from collections.abc import Iterable, Mapping, MutableMapping
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from magi_agent.recipes.compiler import PackRegistry, RecipePackManifest
@@ -53,6 +54,73 @@ def build_recipe_listing_section(registry: PackRegistry) -> str:
             f"- **{pack.display_name}** (`{pack.pack_id}`) — When to use: {pack.when_to_use}"
         )
     return "\n".join(lines)
+
+
+@dataclass(frozen=True)
+class RecipeToolScope:
+    """The recipe-exclusive tool model the per-call enforcement (HB-3) consumes.
+
+    "Recipe-exclusive scoping": a tool listed in any non-``hard_safety`` pack's
+    ``granted_tool_names`` becomes *scoped* — it is allowed only when at least
+    one of the packs that grant it has been selected. Every other tool is
+    *base-free* (always allowed). ``hard_safety`` packs never scope tools.
+
+    Pure data + a pure predicate; no I/O, no flag gating (gating is HB-3's job).
+
+    * ``scoped_tools`` — the union of ``granted_tool_names`` across all
+      non-``hard_safety`` packs.
+    * ``owning_packs`` — ``scoped_tool -> tuple(pack_ids that grant it)``,
+      order-preserving over registry iteration.
+    * ``_granted_by_pack`` — internal ``pack_id -> frozenset(granted tools)``
+      used by :meth:`is_allowed` to compute the union of the selected packs.
+    """
+
+    owning_packs: Mapping[str, tuple[str, ...]]
+    scoped_tools: frozenset[str]
+    _granted_by_pack: Mapping[str, frozenset[str]]
+
+    def is_allowed(self, tool_name: str, *, selected_pack_ids: Iterable[str]) -> bool:
+        """Whether ``tool_name`` is permitted given the currently selected packs.
+
+        * no selection (restriction inactive before any selection) → ``True``
+        * ``tool_name`` not scoped (base-free) → ``True``
+        * otherwise → ``True`` iff ``tool_name`` is in the union of
+          ``granted_tool_names`` of the selected packs.
+        """
+        selected = tuple(selected_pack_ids)
+        if not selected:
+            return True
+        if tool_name not in self.scoped_tools:
+            return True
+        for pack_id in selected:
+            if tool_name in self._granted_by_pack.get(pack_id, frozenset()):
+                return True
+        return False
+
+
+def build_recipe_tool_scope(registry: PackRegistry) -> RecipeToolScope:
+    """Compute the recipe-scoped tool model from the pack registry.
+
+    Iterates ``registry.values()`` in order, skipping ``hard_safety`` packs
+    (which never scope tools), and accumulates the scoped-tool set, the
+    order-preserving owning-pack map, and the per-pack granted-tool map. Pure:
+    no I/O, no flag gating.
+    """
+    owning_packs: dict[str, list[str]] = {}
+    granted_by_pack: dict[str, frozenset[str]] = {}
+    for pack in registry.values():
+        if pack.hard_safety:
+            continue
+        granted_by_pack[pack.pack_id] = frozenset(pack.granted_tool_names)
+        for tool_name in pack.granted_tool_names:
+            owners = owning_packs.setdefault(tool_name, [])
+            if pack.pack_id not in owners:
+                owners.append(pack.pack_id)
+    return RecipeToolScope(
+        owning_packs={tool: tuple(packs) for tool, packs in owning_packs.items()},
+        scoped_tools=frozenset(owning_packs),
+        _granted_by_pack=granted_by_pack,
+    )
 
 
 def select_recipe_body(pack: RecipePackManifest) -> str:
@@ -360,7 +428,9 @@ def _adk_state(context: ToolContext) -> MutableMapping[str, object] | None:
 __all__ = [
     "SELECTED_RECIPE_PACK_IDS_STATE_KEY",
     "SELECT_RECIPE_TOOL_NAME",
+    "RecipeToolScope",
     "build_recipe_listing_section",
+    "build_recipe_tool_scope",
     "project_recipe_route_decided_event",
     "register_select_recipe_tool",
     "select_recipe_body",
