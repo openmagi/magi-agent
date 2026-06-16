@@ -73,6 +73,7 @@ def _default_agent_factory(
     chat_model: object,
     on_step: OnStep,
     profile_dir: str,
+    use_vision: bool = True,
 ) -> Any:
     """Build a real browser-use Agent, lazily importing the optional extra.
 
@@ -119,6 +120,7 @@ def _default_agent_factory(
         browser_profile=browser_profile,
         register_new_step_callback=_new_step_callback,
         register_should_stop_callback=_should_stop_callback,
+        use_vision=use_vision,
     )
 
 

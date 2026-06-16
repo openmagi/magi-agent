@@ -1,7 +1,9 @@
 import pytest
 from magi_agent.browser.autonomous.provider_bridge import (
+    BROWSER_USE_VISION_ENV,
     BridgeError,
     chat_model_kwargs_for,
+    resolve_use_vision,
 )
 
 
@@ -29,11 +31,34 @@ def test_maps_gemini():
     assert spec.chat_class_name == "ChatGoogle"
 
 
-def test_fireworks_unsupported_raises():
-    # magi supports "fireworks", but browser_use.llm has no dedicated Chat
-    # class for it, so the bridge must reject it rather than silently pass.
-    with pytest.raises(BridgeError):
-        chat_model_kwargs_for(_Cfg("fireworks", "accounts/fireworks/models/x", "k"))
+def test_fireworks_maps_to_chatopenai_with_base_url():
+    # Fireworks is OpenAI-compatible: browser_use has no ChatFireworks class, so
+    # it is bridged through ChatOpenAI pointed at the Fireworks base_url.
+    spec = chat_model_kwargs_for(_Cfg("fireworks", "accounts/fireworks/models/x", "k"))
+    assert spec.provider == "fireworks"
+    assert spec.chat_class_name == "ChatOpenAI"
+    assert spec.kwargs == {
+        "model": "accounts/fireworks/models/x",
+        "api_key": "k",
+        "base_url": "https://api.fireworks.ai/inference/v1",
+    }
+
+
+def test_openrouter_maps_to_chatopenai_with_base_url():
+    spec = chat_model_kwargs_for(_Cfg("openrouter", "openai/gpt-4o", "k"))
+    assert spec.provider == "openrouter"
+    assert spec.chat_class_name == "ChatOpenAI"
+    assert spec.kwargs == {
+        "model": "openai/gpt-4o",
+        "api_key": "k",
+        "base_url": "https://openrouter.ai/api/v1",
+    }
+
+
+def test_native_openai_has_no_base_url_override():
+    # Native OpenAI uses the library default endpoint (no base_url injected).
+    spec = chat_model_kwargs_for(_Cfg("openai", "gpt-4o", "k"))
+    assert "base_url" not in spec.kwargs
 
 
 def test_unknown_provider_raises():
@@ -69,3 +94,34 @@ def test_falsy_model_raises_bridge_error():
 def test_falsy_api_key_raises_bridge_error():
     with pytest.raises(BridgeError):
         chat_model_kwargs_for(_Cfg("anthropic", "claude-opus-4-7", ""))
+
+
+# --- resolve_use_vision -----------------------------------------------------
+#
+# Vision (screenshots) is ON for providers whose default models are multimodal
+# (anthropic/openai/gemini) and OFF (DOM-only) for generic OpenAI-compatible
+# providers (fireworks/openrouter) where we cannot assume the configured model
+# accepts images -- so a text-only model still drives the browser headlessly.
+
+
+@pytest.mark.parametrize("provider", ["anthropic", "openai", "gemini"])
+def test_vision_on_for_multimodal_default_providers(provider):
+    assert resolve_use_vision(_Cfg(provider, "m", "k"), env={}) is True
+
+
+@pytest.mark.parametrize("provider", ["fireworks", "openrouter"])
+def test_vision_off_for_generic_openai_compatible_providers(provider):
+    assert resolve_use_vision(_Cfg(provider, "m", "k"), env={}) is False
+
+
+def test_env_override_forces_vision_on():
+    assert resolve_use_vision(_Cfg("fireworks", "m", "k"), env={BROWSER_USE_VISION_ENV: "1"}) is True
+
+
+def test_env_override_forces_vision_off():
+    assert resolve_use_vision(_Cfg("anthropic", "m", "k"), env={BROWSER_USE_VISION_ENV: "off"}) is False
+
+
+def test_vision_off_for_none_config():
+    # No provider configured -> conservative DOM-only.
+    assert resolve_use_vision(None, env={}) is False

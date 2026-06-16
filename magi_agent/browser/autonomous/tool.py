@@ -116,11 +116,17 @@ async def _browser_task_handler(
 
     # Lazy imports: keep module import cheap and avoid pulling the optional extra
     # transitively at import time.
+    import functools  # noqa: PLC0415
+
     from magi_agent.browser.autonomous.config import BrowserToolConfig  # noqa: PLC0415
-    from magi_agent.browser.autonomous.engine import BrowserEngine  # noqa: PLC0415
+    from magi_agent.browser.autonomous.engine import (  # noqa: PLC0415
+        BrowserEngine,
+        _default_agent_factory,
+    )
     from magi_agent.browser.autonomous.provider_bridge import (  # noqa: PLC0415
         BridgeError,
         build_chat_model,
+        resolve_use_vision,
     )
     # Import the providers MODULE (not the symbol) so monkeypatching
     # ``magi_agent.cli.providers.resolve_provider_config`` is honored.
@@ -129,8 +135,9 @@ async def _browser_task_handler(
     start_url = arguments.get("start_url")
     max_steps = int(arguments.get("max_steps") or BrowserToolConfig().max_steps)
 
+    provider_config = _providers.resolve_provider_config()
     try:
-        chat_model = build_chat_model(_providers.resolve_provider_config())
+        chat_model = build_chat_model(provider_config)
     except BridgeError as exc:
         return ToolResult(
             status="blocked",
@@ -138,7 +145,14 @@ async def _browser_task_handler(
             error_message=str(exc),
         )
 
-    run = await BrowserEngine().run(
+    # Vision (screenshots) is provider-aware: a text-only OpenAI-compatible model
+    # drives the browser DOM-only rather than being blocked. Bound via partial so
+    # the engine/factory contract stays unchanged.
+    factory = functools.partial(
+        _default_agent_factory,
+        use_vision=resolve_use_vision(provider_config),
+    )
+    run = await BrowserEngine(agent_factory=factory).run(
         task=task,
         chat_model=chat_model,
         max_steps=max_steps,
