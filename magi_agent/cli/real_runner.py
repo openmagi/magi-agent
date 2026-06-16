@@ -551,6 +551,44 @@ def _local_trust_missing_evidence_action(
     return materialized_action
 
 
+def _apply_customize_verification(required_validators: list[str]) -> list[str]:
+    """Apply persisted Customize verification overrides to the required validators.
+
+    Flag-gated: byte-identical to baseline unless
+    ``MAGI_CUSTOMIZE_VERIFICATION_ENABLED`` is on. For each wired preset
+    (``customize.preset_map.PRESET_SEAMS``), the preset's controlled refs are
+    removed when it resolves disabled (opt-out of a default-on gate) and ensured
+    present when it resolves enabled. Fail-open: any error returns the input
+    unchanged so the live gate is never wedged by a bad overrides file.
+    """
+    from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+
+    if not flag_bool("MAGI_CUSTOMIZE_VERIFICATION_ENABLED"):
+        return required_validators
+    try:
+        from magi_agent.customize.preset_map import PRESET_SEAMS  # noqa: PLC0415
+        from magi_agent.customize.store import load_overrides  # noqa: PLC0415
+        from magi_agent.customize.verification_policy import (  # noqa: PLC0415
+            CustomizeVerificationPolicy,
+        )
+
+        policy = CustomizeVerificationPolicy.from_overrides(load_overrides())
+        result = list(required_validators)
+        for preset_id, seam in PRESET_SEAMS.items():
+            enabled = policy.resolve_enabled(
+                preset_id, default=seam.runtime_default_on
+            )
+            if enabled:
+                for ref in seam.controls_refs:
+                    if ref not in result:
+                        result.append(ref)
+            else:
+                result = [r for r in result if r not in seam.controls_refs]
+        return result
+    except Exception:
+        return required_validators
+
+
 def _build_default_runner_policy_assembly(
     *,
     model_provider: str,
@@ -622,6 +660,8 @@ def _build_default_runner_policy_assembly(
             _loaded_pack_validator_refs(),
         )
     )
+    # Customize verification opt-out/opt-in (flag-gated; no-op when off).
+    required_validators = _apply_customize_verification(required_validators)
     missing_action = _local_trust_missing_evidence_action(
         plan.final_gate_policy.missing_evidence_action
     )

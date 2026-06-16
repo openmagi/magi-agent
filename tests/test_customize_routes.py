@@ -111,17 +111,18 @@ def test_patch_verification_persists_and_applies(tmp_path, monkeypatch):
     client.headers.update({"x-gateway-token": _TOKEN})
 
     resp = client.patch(
-        "/v1/app/customize/verification/harness_presets/answer_quality",
-        json={"enabled": True, "mode": "hybrid"},
+        "/v1/app/customize/verification/harness_presets/coding-verification",
+        json={"enabled": False, "mode": "deterministic"},
     )
     assert resp.status_code == 200
     body = resp.json()
-    assert "answer_quality" in body["overrides"]["verification"]["harness_presets"]
-    assert body["overrides"]["verification"]["modes"]["answer_quality"] == "hybrid"
+    # harness_presets persist as explicit tri-state in preset_overrides
+    assert body["overrides"]["verification"]["preset_overrides"]["coding-verification"] is False
     import json
-    assert "answer_quality" in json.loads(cfile.read_text())["verification"]["harness_presets"]
+    persisted = json.loads(cfile.read_text())["verification"]["preset_overrides"]
+    assert persisted["coding-verification"] is False
     # applied live (flag on)
-    assert runtime.customize_verification_policy.is_enabled("answer_quality")
+    assert runtime.customize_verification_policy.explicit_preset("coding-verification") is False
 
 
 def test_patch_verification_unknown_kind_400(tmp_path, monkeypatch):
