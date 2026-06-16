@@ -15,6 +15,26 @@ Versions follow the tags published on GitHub Releases.
 
 ### Fixed
 
+## 0.1.46
+
+### Added
+- Dashboard: Credentials is now its own sidebar tab, split out of Settings
+  (#606).
+
+### Changed
+- Run-until-done now relies on prompt-trust: the serve loop terminates on the
+  model's final answer (OpenCode-style) rather than re-invoking on a phrasing or
+  progress heuristic. The serve prompt was reworded from "complete the requested
+  work in this turn" to "execute each step now with tools and continue until the
+  work is done — don't just state a plan and stop." Removes the #612 regex
+  deferral heuristic (#614).
+
+### Fixed
+- OSS local bot: locally-created chat channels now persist. "Add Channel"
+  previously appeared to do nothing because the mount-time channel refetch
+  overwrote the localStorage cache with only the default channel; the local
+  fetch now reads the persisted list (#615).
+
 ## 0.1.45
 
 ### Added
