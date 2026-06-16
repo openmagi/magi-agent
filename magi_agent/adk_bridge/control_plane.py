@@ -237,18 +237,32 @@ class BaseLoopControl:
 # ---------------------------------------------------------------------------
 
 
+def _genai_user_opener_content() -> Any:
+    """Build a minimal google.genai user Content used as a synthetic opener when
+    context compaction has dropped the original user turn. Lazy-imported so the
+    pure repair helper stays importable without google.genai."""
+    from google.genai import types
+
+    return types.Content(
+        role="user",
+        parts=[types.Part(text="(Earlier conversation context was summarized.)")],
+    )
+
+
 class GeminiContentOrderingRepairControl(BaseLoopControl):
     """Repair ``llm_request.contents`` ordering before each model call.
 
-    Across multi-tool turns ADK can assemble contents with two consecutive
-    ``model`` turns (a text turn then a ``function_call`` turn), which Gemini
-    rejects with HTTP 400 "function call turn comes immediately after a user turn
-    or after a function response turn" — the live runner then dies with a generic
-    ``runner_error`` and the turn is cut off mid-stream. This control merges
-    adjacent same-role turns so roles alternate and every ``function_call`` turn
-    is preceded by a user/function_response turn. ``before_model``-only and a
-    no-op on already-valid content; inherits no-op ``on_before_tool`` from
-    ``BaseLoopControl`` so the permission-gate registration guard is satisfied.
+    Across multi-tool turns ADK can assemble ``contents`` that Gemini 400s on
+    ("function call turn must come immediately after a user turn or after a
+    function response turn"), which makes the live runner die with a generic
+    ``runner_error`` mid-stream. Two repairs: (1) merge adjacent same-role turns
+    so roles alternate; (2) fix a compaction-orphaned head — after context
+    compaction trims the conversation head, ``contents`` can start with a model
+    ``function_call`` turn (original user prompt dropped), so drop leading
+    dangling function_response turns and prepend a synthetic user opener.
+    ``before_model``-only and a no-op on already-valid content; inherits no-op
+    ``on_before_tool`` from ``BaseLoopControl`` so the permission-gate
+    registration guard is satisfied.
     """
 
     name = GEMINI_CONTENT_ORDER_REPAIR_CONTROL_NAME
@@ -259,7 +273,10 @@ class GeminiContentOrderingRepairControl(BaseLoopControl):
         callback_context: Any,
         llm_request: Any,
     ) -> None:
-        apply_gemini_content_ordering_repair(llm_request)
+        apply_gemini_content_ordering_repair(
+            llm_request,
+            user_content_factory=_genai_user_opener_content,
+        )
         return None
 
 
