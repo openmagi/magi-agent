@@ -3,14 +3,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
-  Cable,
   Loader2,
   Lock,
   Plug,
   Search,
   Send,
 } from "lucide-react";
-import { CredentialsPanel } from "@/components/dashboard/credentials/credentials-panel";
 import { useAgentFetch } from "@/lib/local-api";
 import {
   clearComposioKey,
@@ -97,11 +95,7 @@ const COUNTRY_CODES: { code: string; flag: string }[] = [
 const INPUT =
   "flex-1 text-xs px-3 py-1.5 rounded-lg bg-white border border-gray-300 text-foreground placeholder:text-gray-400 focus:outline-none focus:border-primary/40";
 
-interface IntegrationsManagerProps {
-  botId?: string;
-}
-
-export function IntegrationsManager({ botId }: IntegrationsManagerProps) {
+export function IntegrationsManager() {
   const { data, loading, error, reload } = useIntegrations();
 
   return (
@@ -143,17 +137,6 @@ export function IntegrationsManager({ botId }: IntegrationsManagerProps) {
           />
         </>
       )}
-
-      <section className="space-y-2">
-        <div className="flex items-center gap-2">
-          <Cable className="w-4 h-4 text-secondary" />
-          <h2 className="text-sm font-medium text-foreground">Manual credentials</h2>
-        </div>
-        <p className="text-xs text-secondary">
-          Raw API keys for services without a guided connector.
-        </p>
-        <CredentialsPanel botId={botId ?? "local"} />
-      </section>
     </div>
   );
 }
