@@ -94,14 +94,18 @@ def _registered_app_templates() -> list[list[str]]:
 def _is_covered(path: str, templates: list[list[str]]) -> bool:
     segments = [seg for seg in path.split("/") if seg]
     for template in templates:
-        if len(template) == len(segments):
-            if all(t.startswith("{") or t == s for t, s in zip(template, segments)):
-                return True
-        # JS template-literal truncation: bundle path is the static prefix of a
-        # parametric route whose next (final) segment is an interpolated {param}.
-        if len(template) == len(segments) + 1 and template[-1].startswith("{"):
-            if all(t.startswith("{") or t == s for t, s in zip(template, segments)):
-                return True
+        if len(template) < len(segments):
+            continue
+        # The bundle's segments must agree with the template prefix (literal
+        # segments equal; {param} segments match anything).
+        if not all(t.startswith("{") or t == s for t, s in zip(template, segments)):
+            continue
+        # Exact-length match, OR JS template-literal truncation: the bundle path
+        # is the static prefix of a parametric route and EVERY remaining template
+        # segment is an interpolated {param} (handles routes with >1 trailing
+        # param, e.g. /v1/app/customize/verification/{kind}/{item_id}).
+        if all(seg.startswith("{") for seg in template[len(segments):]):
+            return True
     return False
 
 
