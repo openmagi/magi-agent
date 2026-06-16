@@ -97,10 +97,12 @@ from google.adk.plugins.base_plugin import BasePlugin
 
 from magi_agent.adk_bridge.gemini_content_ordering import (
     GEMINI_CONTENT_ORDER_REPAIR_CONTROL_NAME,
-    REPAIR_DISABLED_ENV as GEMINI_CONTENT_ORDER_REPAIR_DISABLED_ENV,
     apply_gemini_content_ordering_repair,
 )
-from magi_agent.config.env import general_automation_live_enabled
+from magi_agent.config.env import (
+    general_automation_live_enabled,
+    parse_provider_repair_enabled,
+)
 from magi_agent.hooks.manifest import HookManifest, HookPoint
 from magi_agent.tools.manifest import ToolSource
 
@@ -264,13 +266,17 @@ class GeminiContentOrderingRepairControl(BaseLoopControl):
 def build_gemini_content_ordering_control(
     env: dict[str, str],
 ) -> GeminiContentOrderingRepairControl | None:
-    """Return the repair control unless the default-ON kill switch disables it.
+    """Return the repair control when provider repair is enabled, else ``None``.
 
-    Default-ON because this is a crash-safety repair that is a no-op on
-    already-valid content; ``MAGI_GEMINI_CONTENT_ORDER_REPAIR_DISABLED`` exists
-    only for instant rollback.
+    Gated on the existing profile-aware ``MAGI_PROVIDER_REPAIR_ENABLED`` flag
+    (PR9 per-provider compat repair): this content-ordering repair is the same
+    class of provider-compatibility fix, just on ``llm_request.contents`` rather
+    than tool schemas. Reusing the flag keeps the conservative ``safe`` profile's
+    control plane empty (the flag is OFF there) and turns the repair ON
+    automatically in the full runtime profile, with no new flag to add to the
+    ratchet.
     """
-    if _is_true(env.get(GEMINI_CONTENT_ORDER_REPAIR_DISABLED_ENV, "")):
+    if not parse_provider_repair_enabled(env):
         return None
     return GeminiContentOrderingRepairControl()
 
@@ -1483,8 +1489,8 @@ def build_core_default_plane(
             )
         )
 
-    # 7. Gemini content-ordering repair (default ON, kill switch
-    #    MAGI_GEMINI_CONTENT_ORDER_REPAIR_DISABLED). before_model-only; a no-op on
+    # 7. Gemini content-ordering repair (gated on MAGI_PROVIDER_REPAIR_ENABLED —
+    #    ON in the full profile, OFF in safe). before_model-only; a no-op on
     #    already-valid content. Prevents the multi-tool "function call turn comes
     #    immediately after a user turn or function response turn" Gemini 400 that
     #    surfaced as a generic runner_error and cut turns off mid-stream.

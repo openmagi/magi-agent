@@ -17,7 +17,6 @@ from magi_agent.adk_bridge.control_plane import (
     build_gemini_content_ordering_control,
 )
 from magi_agent.adk_bridge.gemini_content_ordering import (
-    REPAIR_DISABLED_ENV,
     repair_gemini_content_ordering,
 )
 
@@ -132,8 +131,15 @@ def test_control_leaves_valid_request_untouched() -> None:
     assert request.contents is valid
 
 
-def test_kill_switch_gating() -> None:
-    assert build_gemini_content_ordering_control({}) is not None
-    assert build_gemini_content_ordering_control({REPAIR_DISABLED_ENV: "1"}) is None
-    assert build_gemini_content_ordering_control({REPAIR_DISABLED_ENV: "true"}) is None
-    assert build_gemini_content_ordering_control({REPAIR_DISABLED_ENV: "0"}) is not None
+def test_provider_repair_flag_gates_registration() -> None:
+    # Gated on the profile-aware MAGI_PROVIDER_REPAIR_ENABLED flag: present in the
+    # full profile, absent in the conservative safe profile (keeps its plane empty).
+    assert (
+        build_gemini_content_ordering_control({"MAGI_PROVIDER_REPAIR_ENABLED": "1"})
+        is not None
+    )
+    assert (
+        build_gemini_content_ordering_control({"MAGI_PROVIDER_REPAIR_ENABLED": "0"})
+        is None
+    )
+    assert build_gemini_content_ordering_control({"MAGI_RUNTIME_PROFILE": "safe"}) is None

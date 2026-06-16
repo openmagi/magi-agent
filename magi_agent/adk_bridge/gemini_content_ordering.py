@@ -37,7 +37,6 @@ from __future__ import annotations
 
 from typing import Any
 
-REPAIR_DISABLED_ENV = "MAGI_GEMINI_CONTENT_ORDER_REPAIR_DISABLED"
 GEMINI_CONTENT_ORDER_REPAIR_CONTROL_NAME = "magi_gemini_content_order_repair"
 
 
