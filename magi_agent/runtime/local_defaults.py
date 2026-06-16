@@ -171,6 +171,28 @@ def apply_local_full_runtime_defaults(environ: MutableMapping[str, str]) -> None
     for key, value in LOCAL_FULL_RUNTIME_ENV_DEFAULTS.items():
         environ.setdefault(key, value)
 
+    # Keyless web acquisition for the local overlay: jina-reader is keyless
+    # (optional key only raises rate limits) and insane-fetch runs locally via
+    # curl_cffi, so a fresh user gets a working WebFetch path with zero keys
+    # (WebSearch keyless = the browser tool). The provider/router gate constants
+    # live in research_tools; reference them by name so the legacy-name naming
+    # ratchet is not tripped by duplicated string literals. Lazy-imported to keep
+    # this module import-light.
+    from magi_agent.web_acquisition.research_tools import (  # noqa: PLC0415
+        INSANE_FETCH_ENABLED_ENV,
+        JINA_READER_ENABLED_ENV,
+        LIVE_WEB_ACQUISITION_ENABLED_ENV,
+        PROVIDER_ROUTER_ENABLED_ENV,
+    )
+
+    for key in (
+        LIVE_WEB_ACQUISITION_ENABLED_ENV,
+        PROVIDER_ROUTER_ENABLED_ENV,
+        JINA_READER_ENABLED_ENV,
+        INSANE_FETCH_ENABLED_ENV,
+    ):
+        environ.setdefault(key, "1")
+
 
 def local_full_runtime_defaults_enabled(environ: Mapping[str, str]) -> bool:
     raw = environ.get(LOCAL_FULL_RUNTIME_DEFAULTS_ENABLED_ENV)
