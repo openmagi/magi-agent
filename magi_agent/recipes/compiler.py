@@ -2708,6 +2708,11 @@ def _first_party_packs() -> tuple[RecipePackManifest, ...]:
                 "Configurable source-grounded read-only workflow metadata "
                 "requiring named source-evidence before a final answer."
             ),
+            whenToUse=(
+                "When the answer must read and cite named sources before "
+                "responding — source-grounded answering with required "
+                "source-evidence."
+            ),
             taskProfileSelectors=("source-grounded",),
             # NOTE: NO ``dependsOnPackIds``. ``openmagi.web-acquisition`` was
             # pulled in ONLY via this dep (it is not hard-safety and not a
