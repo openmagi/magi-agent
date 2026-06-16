@@ -269,3 +269,58 @@ def test_build_cli_instruction_includes_format_block_when_flag_on(monkeypatch) -
     assert "unit" in lowered and "scale" in lowered
     assert "round" in lowered
     assert "do not add" in lowered
+
+
+# ---------------------------------------------------------------------------
+# Recipe-routing listing block — default-OFF (MAGI_RECIPE_ROUTING_LLM_ENABLED).
+# When off, prompt assembly must NOT contain the listing header marker; when on,
+# the cross-family recipe listing (with the select_recipe call) is appended.
+# ---------------------------------------------------------------------------
+
+
+def test_recipe_listing_absent_when_flag_off_present_when_on(monkeypatch) -> None:
+    monkeypatch.delenv("MAGI_RECIPE_ROUTING_LLM_ENABLED", raising=False)
+    off = build_cli_instruction(session_id="rr-off", model="claude-sonnet-4-6")
+    assert "Available recipes (load on demand)" not in off
+    assert "select_recipe" not in off
+
+    monkeypatch.setenv("MAGI_RECIPE_ROUTING_LLM_ENABLED", "1")
+    on = build_cli_instruction(session_id="rr-on", model="claude-sonnet-4-6")
+    assert "Available recipes (load on demand)" in on
+    assert "select_recipe" in on
+
+
+# ---------------------------------------------------------------------------
+# select_recipe tool registration at the CLI tool-runtime seam — default-OFF
+# (MAGI_RECIPE_ROUTING_LLM_ENABLED). Flag OFF → the tool is NOT in the runtime
+# registry (byte-identical advertised tool set); flag ON → it is registered,
+# enabled, and dispatchable.
+# ---------------------------------------------------------------------------
+
+
+def test_cli_tool_runtime_omits_select_recipe_when_flag_off(monkeypatch, tmp_path) -> None:
+    monkeypatch.delenv("MAGI_RECIPE_ROUTING_LLM_ENABLED", raising=False)
+    runtime = build_cli_tool_runtime(workspace_root=str(tmp_path))
+    assert runtime.registry.resolve_registration("select_recipe") is None
+    assert runtime.registry.is_enabled("select_recipe") is False
+
+
+def test_cli_tool_runtime_registers_select_recipe_when_flag_on(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("MAGI_RECIPE_ROUTING_LLM_ENABLED", "1")
+    runtime = build_cli_tool_runtime(workspace_root=str(tmp_path))
+    registration = runtime.registry.resolve_registration("select_recipe")
+    assert registration is not None
+    assert registration.handler is not None
+    assert runtime.registry.is_enabled("select_recipe") is True
+
+
+def test_cli_select_recipe_tool_dispatches_to_handler(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("MAGI_RECIPE_ROUTING_LLM_ENABLED", "1")
+    tools = build_cli_adk_tools(workspace_root=str(tmp_path), session_id="sid-recipe")
+    select = _find_tool(tools, "select_recipe")
+
+    # dev-coding is a first-party routable (non-hard) pack.
+    result = asyncio.run(select.func({"pack_id": "openmagi.dev-coding"}, object()))
+
+    assert result["status"] == "ok"
+    assert result["metadata"]["toolName"] == "select_recipe"

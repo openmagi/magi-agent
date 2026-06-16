@@ -70,6 +70,10 @@ def build_discovery_pack() -> RecipePackManifest:
             "to proactively surface multiple grounded problems across a corpus "
             "in cumulative rounds, labeled by problem template."
         ),
+        whenToUse=(
+            "When the user wants problems proactively surfaced across a "
+            "repository or corpus rather than a single targeted answer."
+        ),
         taskProfileSelectors=("discovery",),
         instructionRefs=(DISCOVERY_INSTRUCTION_REF,),
         auditRefs=("audit:discovery:recipe-boundary",),

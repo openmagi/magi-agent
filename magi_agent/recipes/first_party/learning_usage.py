@@ -77,6 +77,10 @@ def build_learning_usage_pack() -> RecipePackManifest:
             "to apply active learned rules/examples and to propose new lessons "
             "via the learning mechanism rather than self-mutating."
         ),
+        whenToUse=(
+            "When active learned rules or examples should be applied, or a "
+            "self-improvement lesson should be proposed."
+        ),
         taskProfileSelectors=(
             "learning",
             "learning-usage",

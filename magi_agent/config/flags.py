@@ -404,6 +404,23 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
     ),
     _b(
+        "MAGI_RECIPE_ROUTING_LLM_ENABLED",
+        stage="stage2",
+        summary=(
+            "Let the model select recipe packs by their when_to_use descriptions "
+            "instead of the selector-membership path; strict default-OFF (OFF is "
+            "byte-identical to today)."
+        ),
+    ),
+    _b(
+        "MAGI_WORKER_ROUTING_LLM_ENABLED",
+        stage="stage2",
+        summary=(
+            "Honour a planner-emitted worker_role for subagent routing instead of "
+            "keyword inference; strict default-OFF (OFF is byte-identical to today)."
+        ),
+    ),
+    _b(
         "MAGI_COMPUTE_VIA_CODE_ENABLED",
         summary=(
             "Append a general prompt directive to compute arithmetic, conversions, "

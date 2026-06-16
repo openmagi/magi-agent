@@ -892,6 +892,7 @@ class RecipePackManifest(_FrozenRecipeModel):
     version: str = "1"
     display_name: str = Field(alias="displayName")
     description: str
+    when_to_use: str = Field(default="", alias="whenToUse")
     default_enabled: bool = Field(default=False, alias="defaultEnabled")
     hard_safety: bool = Field(default=False, alias="hardSafety")
     opt_out_allowed: bool = Field(default=True, alias="optOutAllowed")
@@ -2059,6 +2060,10 @@ def _first_party_packs() -> tuple[RecipePackManifest, ...]:
                 "onboarding, TDD, verification, review, subagent-development, "
                 "git-worktree, and branch-finishing workflows."
             ),
+            whenToUse=(
+                "When a complex multi-step task must be decomposed, planned, "
+                "and verified through a disciplined methodology."
+            ),
             taskProfileSelectors=(
                 "methodology",
                 "agent-methodology",
@@ -2164,6 +2169,10 @@ def _first_party_packs() -> tuple[RecipePackManifest, ...]:
                 "Compatibility/import metadata for the bundled Superpowers "
                 "skill namespace without live slash execution."
             ),
+            whenToUse=(
+                "When the user wants to reference the bundled Superpowers skill "
+                "methodology as guidance without live slash execution."
+            ),
             taskProfileSelectors=("superpowers", "superpowers-compat"),
             dependsOnPackIds=("openmagi.agent-methodology",),
             instructionRefs=("instruction:superpowers-compat:skill-import-index",),
@@ -2192,6 +2201,10 @@ def _first_party_packs() -> tuple[RecipePackManifest, ...]:
                 "ledger inputs shared by research, office automation, browser "
                 "automation, document review, legal/accounting/domain workflows, "
                 "and general web Q&A."
+            ),
+            whenToUse=(
+                "When content or sources must be fetched from the web, or an "
+                "external page needs to be read."
             ),
             taskProfileSelectors=(
                 "web",
@@ -2229,6 +2242,10 @@ def _first_party_packs() -> tuple[RecipePackManifest, ...]:
             packId="openmagi.research",
             displayName="Research",
             description="Configurable research workflow metadata.",
+            whenToUse=(
+                "When the user asks for external facts, sources, or "
+                "investigation, or an answer must be verified or cross-checked."
+            ),
             taskProfileSelectors=("research", "document-review"),
             dependsOnPackIds=("openmagi.web-acquisition",),
             instructionRefs=("instruction:research:source-policy",),
@@ -2253,6 +2270,10 @@ def _first_party_packs() -> tuple[RecipePackManifest, ...]:
             description=(
                 "Default-off fixture-only ScoutResearchAgent recipe metadata for "
                 "OpenCode-inspired repository research profiles."
+            ),
+            whenToUse=(
+                "When a repository must be cloned and surveyed to scout and "
+                "study reference code."
             ),
             taskProfileSelectors=("scout_repo_fixture",),
             dependsOnPackIds=("openmagi.research",),
@@ -2306,6 +2327,10 @@ def _first_party_packs() -> tuple[RecipePackManifest, ...]:
             packId="openmagi.dev-coding",
             displayName="Development Coding",
             description="Configurable coding workflow metadata.",
+            whenToUse=(
+                "When the goal is to change code, debug, refactor, or write "
+                "tests."
+            ),
             taskProfileSelectors=("coding", "development", "dev-coding"),
             instructionRefs=("instruction:dev-coding:tdd",),
             toolRefs=("tool:file.read", "tool:test.run"),
@@ -2327,6 +2352,10 @@ def _first_party_packs() -> tuple[RecipePackManifest, ...]:
                 "Default-off strict autonomous FSM workflow metadata: interview -> "
                 "consensus-plan -> execute -> review -> adversarial-QA with "
                 "gate-failure return-to-plan."
+            ),
+            whenToUse=(
+                "When an ambiguous build request must be carried fully "
+                "autonomously from interview through plan, execute, and QA."
             ),
             taskProfileSelectors=(
                 "autopilot",
@@ -2383,6 +2412,10 @@ def _first_party_packs() -> tuple[RecipePackManifest, ...]:
             packId="openmagi.missions",
             displayName="Missions",
             description="Metadata-only mission lifecycle recipe boundary.",
+            whenToUse=(
+                "When a long-running mission with an objective and budget must "
+                "run under progress, checkpoint, and resume control."
+            ),
             taskProfileSelectors=("mission", "missions", "scheduled-work"),
             instructionRefs=("instruction:missions:objective",),
             toolRefs=("tool:mission-progress-metadata",),
@@ -2413,6 +2446,10 @@ def _first_party_packs() -> tuple[RecipePackManifest, ...]:
             packId="openmagi.scheduled-work",
             displayName="Scheduled Work",
             description="Metadata-only scheduler, cron, and background task recipe boundary.",
+            whenToUse=(
+                "When scheduled, recurring (cron), or background-running tasks "
+                "must be set up or managed."
+            ),
             taskProfileSelectors=(
                 "scheduled-work",
                 "cron",
@@ -2458,6 +2495,10 @@ def _first_party_packs() -> tuple[RecipePackManifest, ...]:
                 "Metadata-only AgentMemory provider recipe boundary behind "
                 "OpenMagi memory policy."
             ),
+            whenToUse=(
+                "When prior-session context or learned facts must be recalled "
+                "or stored."
+            ),
             taskProfileSelectors=("memory-provider-eval", "agentmemory"),
             toolRefs=("tool:AgentMemorySearch", "tool:AgentMemoryRemember"),
             callbackRefs=("callback:agentmemory.recall", "callback:agentmemory.observe"),
@@ -2473,6 +2514,10 @@ def _first_party_packs() -> tuple[RecipePackManifest, ...]:
             description=(
                 "Default-off metadata for generic channel dispatcher, push delivery, "
                 "Telegram, Discord, and web app delivery intents."
+            ),
+            whenToUse=(
+                "When the act itself is sending or notifying the user over a "
+                "channel such as Telegram, Discord, or the web app."
             ),
             taskProfileSelectors=(
                 "channel-delivery",
@@ -2510,6 +2555,10 @@ def _first_party_packs() -> tuple[RecipePackManifest, ...]:
             packId="openmagi.office-automation",
             displayName="Office Automation",
             description="Configurable office automation workflow metadata.",
+            whenToUse=(
+                "When document or slide files must be read, created, or "
+                "converted at the file level."
+            ),
             taskProfileSelectors=("office", "office-automation"),
             instructionRefs=("instruction:office-automation:preview-then-approve",),
             toolRefs=("tool:file.read", "tool:spreadsheet.read", "tool:browser.inspect"),
@@ -2533,6 +2582,10 @@ def _first_party_packs() -> tuple[RecipePackManifest, ...]:
             description=(
                 "Default-off metadata for sanitized file/artifact preparation, "
                 "channel delivery planning, and delivery acknowledgement."
+            ),
+            whenToUse=(
+                "When a produced file or artifact must be sanitized and "
+                "prepared before it is delivered to the user."
             ),
             taskProfileSelectors=(
                 "artifact",
@@ -2568,6 +2621,10 @@ def _first_party_packs() -> tuple[RecipePackManifest, ...]:
             packId="openmagi.spreadsheet-automation",
             displayName="Spreadsheet Automation",
             description="Configurable spreadsheet workflow metadata.",
+            whenToUse=(
+                "When tabular data must be calculated, aggregated, or "
+                "transformed in-place."
+            ),
             taskProfileSelectors=("spreadsheet", "spreadsheet-automation"),
             instructionRefs=("instruction:spreadsheet-automation:preview-then-approve",),
             toolRefs=("tool:spreadsheet.read", "tool:spreadsheet.plan-write"),
@@ -2589,6 +2646,10 @@ def _first_party_packs() -> tuple[RecipePackManifest, ...]:
             packId="openmagi.browser-automation",
             displayName="Browser Automation",
             description="Configurable browser workflow metadata.",
+            whenToUse=(
+                "When a browser must drive and navigate web pages "
+                "interactively."
+            ),
             taskProfileSelectors=("browser", "browser-automation"),
             instructionRefs=("instruction:browser-automation:inspect-before-act",),
             toolRefs=("tool:browser.inspect", "tool:browser.plan-action"),
@@ -2610,6 +2671,10 @@ def _first_party_packs() -> tuple[RecipePackManifest, ...]:
             packId="openmagi.document-review",
             displayName="Document Review",
             description="Configurable document review workflow metadata.",
+            whenToUse=(
+                "When an existing document must be reviewed, assessed, or "
+                "commented on with source-grounded findings."
+            ),
             taskProfileSelectors=("document-review", "document"),
             instructionRefs=("instruction:document-review:source-grounded-review",),
             toolRefs=("tool:file.read", "tool:document.inspect"),
@@ -2643,6 +2708,11 @@ def _first_party_packs() -> tuple[RecipePackManifest, ...]:
                 "Configurable source-grounded read-only workflow metadata "
                 "requiring named source-evidence before a final answer."
             ),
+            whenToUse=(
+                "When the answer must read and cite named sources before "
+                "responding — source-grounded answering with required "
+                "source-evidence."
+            ),
             taskProfileSelectors=("source-grounded",),
             # NOTE: NO ``dependsOnPackIds``. ``openmagi.web-acquisition`` was
             # pulled in ONLY via this dep (it is not hard-safety and not a
@@ -2670,6 +2740,10 @@ def _first_party_packs() -> tuple[RecipePackManifest, ...]:
             packId="openmagi.lightweight-scripting",
             displayName="Lightweight Scripting",
             description="Configurable lightweight scripting workflow metadata.",
+            whenToUse=(
+                "When a small throwaway script or quick automation needs to be "
+                "written and run fast."
+            ),
             taskProfileSelectors=("lightweight-scripting", "scripting"),
             instructionRefs=("instruction:lightweight-scripting:small-script-plan",),
             toolRefs=("tool:file.read", "tool:script.plan-run"),

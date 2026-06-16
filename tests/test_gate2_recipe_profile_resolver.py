@@ -2247,3 +2247,91 @@ def test_malformed_explicit_selection_excludes_non_hard_default_packs() -> None:
     )
     assert "instruction:malicious-default" not in snapshot.instruction_refs
     assert "validator:malicious-default" not in snapshot.validator_refs
+
+
+def test_recipe_pack_manifest_carries_when_to_use_routing_signal() -> None:
+    registry = PackRegistry.with_first_party_packs()
+    research = registry.get("openmagi.research")
+    assert isinstance(research.when_to_use, str)
+    assert research.when_to_use.strip() != ""
+    assert research.when_to_use != research.description
+
+
+def test_every_non_hard_safety_pack_has_a_when_to_use() -> None:
+    registry = PackRegistry.with_first_party_packs()
+    missing = [
+        p.pack_id
+        for p in registry.values()
+        if not p.hard_safety and not p.when_to_use.strip()
+    ]
+    assert missing == [], f"packs missing when_to_use routing signal: {missing}"
+
+
+def test_model_selected_packs_take_precedence_and_selector_is_fallback() -> None:
+    # Model-selected recipe pack_ids (accumulated under
+    # SELECTED_RECIPE_PACK_IDS_STATE_KEY) flow into the resolver via the EXISTING
+    # explicit-selection path (runtimeContext.explicitRecipeSelection /
+    # requiredRecipeRefs) — NOT a hand-rolled selection path. Honored with deps
+    # resolved even when the task has no selector intent.
+    registry = PackRegistry.with_first_party_packs()
+    compiler = AgentRecipeCompiler(registry)
+    snapshot = compiler.compile(
+        ProfileResolutionRequest(
+            taskProfile={"taskType": "general"},  # no selector intent
+            runtimeContext={
+                "explicitRecipeSelection": {
+                    "requiredRecipeRefs": [{"recipeId": "openmagi.research"}],
+                }
+            },
+        )
+    )
+
+    assert "openmagi.research" in snapshot.selected_pack_ids
+    # Dependency resolved via the explicit-selection / admit machinery.
+    assert "openmagi.web-acquisition" in snapshot.selected_pack_ids
+    assert snapshot.recipe_selection.selection_source == "explicit"
+
+
+def test_model_selection_suppresses_selector_membership_as_fallback() -> None:
+    # PRECEDENCE: when the model selected packs (allowAdditionalAutoRecipes=False,
+    # the value the caller sets once a selection exists), the automatic
+    # task_profile_selectors string-membership matching must NOT also add packs —
+    # selector membership is a FALLBACK only. Here taskType="research" WOULD auto-
+    # select research+web-acquisition via selectors, but the model picked only
+    # office-automation, so research must not leak in.
+    registry = PackRegistry.with_first_party_packs()
+    compiler = AgentRecipeCompiler(registry)
+    snapshot = compiler.compile(
+        ProfileResolutionRequest(
+            taskProfile={"taskType": "research"},
+            runtimeContext={
+                "explicitRecipeSelection": {
+                    "requiredRecipeRefs": [{"recipeId": "openmagi.office-automation"}],
+                    "allowAdditionalAutoRecipes": False,
+                }
+            },
+        )
+    )
+
+    assert "openmagi.office-automation" in snapshot.selected_pack_ids
+    assert "openmagi.research" not in snapshot.selected_pack_ids
+    assert "openmagi.web-acquisition" not in snapshot.selected_pack_ids
+    assert snapshot.recipe_selection.selection_source == "explicit"
+
+
+def test_no_model_selection_falls_back_to_selector_membership_unchanged() -> None:
+    # FALLBACK byte-identity: with NO explicit model selection the resolver must
+    # behave exactly as before — task_profile_selectors auto-selection is the
+    # sole driver (mirrors the existing taskType="research" auto scenario).
+    registry = PackRegistry.with_first_party_packs()
+    snapshot = AgentRecipeCompiler(registry).compile(
+        ProfileResolutionRequest(taskProfile={"taskType": "research"})
+    )
+
+    assert snapshot.selected_pack_ids == (
+        "openmagi.context-safety",
+        "openmagi.evidence",
+        "openmagi.web-acquisition",
+        "openmagi.research",
+    )
+    assert snapshot.recipe_selection.selection_source == "automatic"

@@ -263,6 +263,21 @@ def test_env_helper_delegation_matches_flag_bool() -> None:
         )
 
 
+def test_recipe_routing_llm_flag_default_off_and_strict_truthy() -> None:
+    from magi_agent.config import env
+
+    assert env.recipe_routing_llm_enabled({}) is False
+    assert env.recipe_routing_llm_enabled({"MAGI_RECIPE_ROUTING_LLM_ENABLED": "1"}) is True
+    assert env.recipe_routing_llm_enabled({"MAGI_RECIPE_ROUTING_LLM_ENABLED": "0"}) is False
+
+
+def test_worker_routing_llm_flag_default_off_and_strict_truthy() -> None:
+    from magi_agent.config import env
+
+    assert env.worker_routing_llm_enabled({}) is False
+    assert env.worker_routing_llm_enabled({"MAGI_WORKER_ROUTING_LLM_ENABLED": "true"}) is True
+
+
 def test_flagscope_and_stage_are_string_literal_aliases() -> None:
     # Pure type-alias sanity: importable and usable as annotations.
     assert FlagScope is not None

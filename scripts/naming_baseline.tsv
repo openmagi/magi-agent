@@ -82,7 +82,7 @@ openmagi	magi_agent/cli/tests/test_runtime_policy_wiring.py	20
 openmagi	magi_agent/cli/tests/test_slash_p2_mcp.py	2
 openmagi	magi_agent/cli/tests/test_source_grounded_recipe_gate_integration.py	9
 openmagi	magi_agent/cli/tests/test_source_ledger_gate_wiring.py	5
-openmagi	magi_agent/cli/tests/test_tool_runtime.py	1
+openmagi	magi_agent/cli/tests/test_tool_runtime.py	2
 openmagi	magi_agent/cli/tool_runtime.py	1
 openmagi	magi_agent/cli/wiring.py	2
 openmagi	magi_agent/composio/config.py	1
