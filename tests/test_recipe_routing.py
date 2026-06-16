@@ -12,6 +12,7 @@ from magi_agent.recipes.recipe_routing import (
     SELECTED_RECIPE_PACK_IDS_STATE_KEY,
     SELECT_RECIPE_TOOL_NAME,
     build_recipe_listing_section,
+    build_recipe_tool_scope,
     project_recipe_route_decided_event,
     register_select_recipe_tool,
     select_recipe_handler,
@@ -38,7 +39,13 @@ def _context(adk: object | None = None) -> ToolContext:
     return ToolContext(botId="test-bot", adkToolContext=adk)
 
 
-def _manifest(pack_id: str, *, hard_safety: bool, when_to_use: str) -> RecipePackManifest:
+def _manifest(
+    pack_id: str,
+    *,
+    hard_safety: bool,
+    when_to_use: str,
+    granted_tool_names: tuple[str, ...] = (),
+) -> RecipePackManifest:
     # hard-safety packs carry a manifest invariant: they must be non-opt-out and
     # non-customizable (compiler._validate_safety_and_metadata_only). Set those
     # fields accordingly so the synthetic manifests validate without weakening
@@ -51,6 +58,7 @@ def _manifest(pack_id: str, *, hard_safety: bool, when_to_use: str) -> RecipePac
         hardSafety=hard_safety,
         optOutAllowed=not hard_safety,
         customizable=not hard_safety,
+        grantedToolNames=granted_tool_names,
     )
 
 
@@ -421,3 +429,48 @@ def test_select_handler_emit_failure_does_not_break_selection():
         {"pack_id": "test.soft-full"}, ctx, registry=registry
     )
     assert result.status == "ok"
+
+
+# ---------------------------------------------------------------------------
+# Half B — recipe tool-scope map (build_recipe_tool_scope).
+#
+# A pure helper computing the recipe-exclusive tool model the per-call
+# enforcement (HB-3) consumes: scoped tools (the union of granted_tool_names
+# across non-hard_safety packs), the owning-pack map, and an is_allowed
+# predicate (empty selection → allow; base-free → allow; scoped → union of the
+# selected packs' granted tools).
+# ---------------------------------------------------------------------------
+
+
+def test_tool_scope_maps_scoped_tools_to_owning_packs():
+    registry = PackRegistry((
+        _manifest("t.a", hard_safety=False, when_to_use="a", granted_tool_names=("Alpha", "Shared")),
+        _manifest("t.b", hard_safety=False, when_to_use="b", granted_tool_names=("Beta", "Shared")),
+    ))
+    scope = build_recipe_tool_scope(registry)
+    assert scope.owning_packs["Alpha"] == ("t.a",)
+    assert set(scope.owning_packs["Shared"]) == {"t.a", "t.b"}
+    assert scope.scoped_tools == frozenset({"Alpha", "Beta", "Shared"})
+
+
+def test_allowed_unions_granted_plus_base_free_and_activation():
+    registry = PackRegistry((
+        _manifest("t.a", hard_safety=False, when_to_use="a", granted_tool_names=("Alpha",)),
+        _manifest("t.b", hard_safety=False, when_to_use="b", granted_tool_names=("Beta",)),
+    ))
+    scope = build_recipe_tool_scope(registry)
+    assert scope.is_allowed("GeneralRead", selected_pack_ids=("t.a",)) is True   # base-free
+    assert scope.is_allowed("Alpha", selected_pack_ids=("t.a",)) is True
+    assert scope.is_allowed("Beta", selected_pack_ids=("t.a",)) is False         # other recipe's exclusive
+    assert scope.is_allowed("Beta", selected_pack_ids=()) is True                # inactive pre-selection
+    assert scope.is_allowed("Beta", selected_pack_ids=("t.a", "t.b")) is True    # multi-select union
+
+
+def test_hard_safety_pack_granted_tools_do_not_scope():
+    registry = PackRegistry((
+        _manifest("t.hard", hard_safety=True, when_to_use="", granted_tool_names=("HardTool",)),
+        _manifest("t.a", hard_safety=False, when_to_use="a", granted_tool_names=("Alpha",)),
+    ))
+    scope = build_recipe_tool_scope(registry)
+    assert "HardTool" not in scope.scoped_tools          # hard pack doesn't scope
+    assert scope.is_allowed("HardTool", selected_pack_ids=("t.a",)) is True  # base-free → allowed
