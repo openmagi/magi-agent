@@ -2,6 +2,8 @@
 // Pure, framework-agnostic. No react/next/supabase/privy/@-app imports.
 // Populated as files are ported. Vendored to clawy/src/lib/chat-core.
 export * from "./accepted-injections";
+export * from "./agent-activity";
+export * from "./assistant-dedupe";
 export * from "./attachment-marker";
 export * from "./attachments";
 export * from "./channel-i18n";
@@ -14,14 +16,17 @@ export * from "./clipboard-images";
 export * from "./control-questions";
 export * from "./e2ee";
 export * from "./empty-response";
+export * from "./export";
 export * from "./file-drop";
 export * from "./history-backed-channels";
+export * from "./history-envelope";
 export * from "./history-merge";
 export * from "./kb-context-marker";
 export * from "./kb-send";
 export * from "./kb-uploads";
 export * from "./live-run";
 export * from "./live-soft-wrap";
+export * from "./live-transcript";
 export * from "./local-cancel-suppression";
 export * from "./message-copy";
 export * from "./message-language";
@@ -39,7 +44,25 @@ export * from "./research-evidence";
 export * from "./reset-counter";
 export * from "./response-usage";
 export * from "./send-policy";
+export * from "./server-channels";
+export * from "./server-reconcile";
+// `stream-chat-reducer` re-exports all members except `ControlRequestState`,
+// which collides with the type of the same name in `./types`. The reducer's
+// `ControlRequestState` interface remains importable directly from
+// `./stream-chat-reducer` (matches its direct-import consumers).
+export {
+  type ToolCardState,
+  type TurnPhaseState,
+  type TerminalState,
+  type ActivityItem,
+  type StreamChatState,
+  initialStreamChatState,
+  beginStreamChatTurn,
+  foldRuntimeEvent,
+  foldRuntimeEvents,
+} from "./stream-chat-reducer";
 export * from "./user-history-persistence";
+export * from "./work-console";
 export * from "./work-state";
 export * from "./streaming-delta-buffer";
 export * from "./think-tag-splitter";
