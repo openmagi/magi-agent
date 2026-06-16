@@ -1,5 +1,5 @@
-import { buildKbContextMarker } from "@/chat-core";
-import type { KbDocReference } from "@/chat-core";
+import { buildKbContextMarker } from "./kb-context-marker";
+import type { KbDocReference } from "./types";
 
 export function mergeKbDocReferences(
   ...groups: Array<KbDocReference[] | undefined>
@@ -17,6 +17,15 @@ export function mergeKbDocReferences(
   }
 
   return merged;
+}
+
+export function toggleKbDocReference(
+  docs: KbDocReference[],
+  doc: KbDocReference,
+): KbDocReference[] {
+  return docs.some((d) => d.id === doc.id)
+    ? docs.filter((d) => d.id !== doc.id)
+    : [...docs, doc];
 }
 
 export function buildMessageContentWithKbContext(

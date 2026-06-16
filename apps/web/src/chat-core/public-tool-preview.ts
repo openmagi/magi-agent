@@ -1,4 +1,4 @@
-import type { ChatResponseLanguage } from "@/chat-core";
+import type { ChatResponseLanguage } from "./types";
 
 export interface PublicToolPreviewInput {
   label: string;
@@ -15,6 +15,47 @@ export interface PublicToolPreview {
 
 const MAX_SNIPPET_LENGTH = 240;
 const MAX_TARGET_LENGTH = 180;
+const MAX_URL_DISPLAY_LENGTH = 96;
+const MAX_URL_PATH_SEGMENTS = 3;
+const URL_RE = /\bhttps?:\/\/[^\s"'<>),\]}]+/i;
+const URL_GLOBAL_RE = /\bhttps?:\/\/[^\s"'<>),\]}]+/gi;
+const SENSITIVE_URL_PATH_RE =
+  /(?:^|\/)(?:auth|callback|callbacks|cookie|oauth|oauth2|sessions?|tokens?)(?:[/?#]|$)/i;
+const SECRET_SHAPE_RE =
+  /(?:^|[^a-z0-9])(?:sk-[a-z0-9_-]{6,}|sk-proj-[a-z0-9_-]{6,}|[rs]k_(?:live|test)_[a-z0-9_]{8,}|github_pat_[a-z0-9_]{12,}|gh[pousr]_[a-z0-9_]{12,}|xox[abprs]-[a-z0-9-]{12,}|akia[0-9a-z]{16}|eyj[a-z0-9_-]{8,}\.[a-z0-9_-]{8,}\.[a-z0-9_-]{8,})(?:$|[^a-z0-9])/i;
+const SECRET_URL_PATH_VALUE_RE =
+  /\b(?:api[._-]?key|access[._-]?token|authorization|bearer|client[._-]?secret|connector[._-]?token|id[._-]?token|password|refresh[._-]?token|secret|session[._-]?id)\b/i;
+const PRIVATE_PROGRESS_TEXT_RE =
+  /\b(?:api[._-]?key|auth(?:orization)?|bearer|cookie|hidden|private|prompt|raw|secret|session|token|tool[._-]?(?:args?|logs?|results?)|transcript)\b/i;
+const URL_VALUE_KEYS = [
+  "url",
+  "uri",
+  "source",
+  "sourceUrl",
+  "source_url",
+  "resultUrl",
+  "result_url",
+  "canonicalUrl",
+  "canonical_url",
+  "link",
+  "href",
+];
+const URL_TEXT_KEYS = ["target", "detail", "summary", "message"];
+const URL_CONTAINER_KEYS = [
+  "args",
+  "arguments",
+  "data",
+  "items",
+  "meta",
+  "output",
+  "page",
+  "pages",
+  "progress",
+  "result",
+  "results",
+  "source",
+  "sources",
+];
 
 type PreviewObject = Record<string, unknown>;
 
@@ -60,6 +101,142 @@ function bounded(value: string, maxLength: number): string {
   const clean = redact(value).trim();
   if (clean.length <= maxLength) return clean;
   return `${clean.slice(0, Math.max(0, maxLength - 3)).trimEnd()}...`;
+}
+
+function normalizedUrlPath(value: string): string {
+  return value
+    .replace(/%(?:2f|5c)/gi, "/")
+    .replace(/%3f/gi, "?")
+    .replace(/%23/gi, "#");
+}
+
+function shortUrlPath(pathname: string): string {
+  const segments = pathname.split("/").filter(Boolean);
+  if (segments.length === 0) return "";
+  return `/${segments.slice(0, MAX_URL_PATH_SEGMENTS).join("/")}`;
+}
+
+function boundedUrlDisplay(host: string, pathname: string): string {
+  const value = `${host}${pathname}`;
+  if (value.length <= MAX_URL_DISPLAY_LENGTH) return value;
+
+  const availablePathLength = Math.max(0, MAX_URL_DISPLAY_LENGTH - host.length - 3);
+  if (availablePathLength <= 1) {
+    return bounded(host, MAX_URL_DISPLAY_LENGTH);
+  }
+  return `${host}${pathname.slice(0, availablePathLength).replace(/\/?$/, "")}...`;
+}
+
+function safePublicUrl(value?: string): string | undefined {
+  const trimmed = value?.trim();
+  if (!trimmed) return undefined;
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return undefined;
+    if (parsed.username || parsed.password) return undefined;
+
+    const host = parsed.host;
+    if (!host || redact(host) !== host || SECRET_SHAPE_RE.test(host)) return undefined;
+
+    const normalizedPath = normalizedUrlPath(parsed.pathname);
+    if (SENSITIVE_URL_PATH_RE.test(normalizedPath)) return host;
+    if (
+      SECRET_URL_PATH_VALUE_RE.test(normalizedPath) ||
+      SECRET_SHAPE_RE.test(normalizedPath)
+    ) {
+      return undefined;
+    }
+
+    const pathname = shortUrlPath(parsed.pathname);
+    const publicUrl = boundedUrlDisplay(host, pathname);
+    if (redact(publicUrl) !== publicUrl || SECRET_SHAPE_RE.test(publicUrl)) return undefined;
+    return publicUrl;
+  } catch {
+    return undefined;
+  }
+}
+
+function safePublicUrlFromText(value?: string): string | undefined {
+  if (!value) return undefined;
+  return safePublicUrl(value.match(URL_RE)?.[0]);
+}
+
+function safeProgressDetail(value?: string): string | undefined {
+  const normalized = value
+    ?.replace(/\s+/g, " ")
+    .trim()
+    .replace(URL_GLOBAL_RE, (url) => safePublicUrl(url) ?? "[redacted url]");
+  if (!normalized) return undefined;
+  if (PRIVATE_PROGRESS_TEXT_RE.test(normalized) || redact(normalized) !== normalized) {
+    return undefined;
+  }
+  return bounded(normalized, MAX_SNIPPET_LENGTH);
+}
+
+function boundedBrowserUrlDisplay(origin: string, pathname: string): string {
+  const value = `${origin}${pathname}`;
+  if (value.length <= MAX_URL_DISPLAY_LENGTH) return value;
+
+  const availablePathLength = Math.max(0, MAX_URL_DISPLAY_LENGTH - origin.length - 3);
+  if (availablePathLength <= 1) {
+    return bounded(origin, MAX_URL_DISPLAY_LENGTH);
+  }
+  return `${origin}${pathname.slice(0, availablePathLength).replace(/\/?$/, "")}...`;
+}
+
+function safeBrowserAbsoluteUrl(value?: string): string | undefined {
+  const trimmed = value?.trim();
+  if (!trimmed) return undefined;
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return undefined;
+    if (parsed.username || parsed.password) return undefined;
+
+    const host = parsed.host;
+    if (!host || redact(host) !== host || SECRET_SHAPE_RE.test(host)) return undefined;
+
+    const normalizedPath = normalizedUrlPath(parsed.pathname);
+    if (SENSITIVE_URL_PATH_RE.test(normalizedPath)) return parsed.origin;
+    if (
+      SECRET_URL_PATH_VALUE_RE.test(normalizedPath) ||
+      SECRET_SHAPE_RE.test(normalizedPath)
+    ) {
+      return undefined;
+    }
+
+    const pathname = shortUrlPath(parsed.pathname);
+    const publicUrl = boundedBrowserUrlDisplay(parsed.origin, pathname);
+    if (redact(publicUrl) !== publicUrl || SECRET_SHAPE_RE.test(publicUrl)) return undefined;
+    return publicUrl;
+  } catch {
+    return undefined;
+  }
+}
+
+function safeBrowserTarget(value?: string): string | undefined {
+  const trimmed = value?.trim();
+  if (!trimmed) return undefined;
+
+  const publicUrl =
+    safeBrowserAbsoluteUrl(trimmed) ??
+    safeBrowserAbsoluteUrl(trimmed.match(URL_RE)?.[0]);
+  if (publicUrl) return publicUrl;
+
+  const normalized = normalizedUrlPath(trimmed);
+  if (
+    SENSITIVE_URL_PATH_RE.test(normalized) ||
+    SECRET_URL_PATH_VALUE_RE.test(normalized) ||
+    SECRET_SHAPE_RE.test(normalized)
+  ) {
+    return undefined;
+  }
+
+  const withoutQuery = normalized.split(/[?#]/, 1)[0]?.trim();
+  if (!withoutQuery) return undefined;
+  if (PRIVATE_PROGRESS_TEXT_RE.test(withoutQuery) || redact(withoutQuery) !== withoutQuery) {
+    return undefined;
+  }
+  return bounded(withoutQuery, MAX_TARGET_LENGTH);
 }
 
 function normalizeTool(label: string): string {
@@ -610,13 +787,14 @@ function browserPreview(
   const action = displayValue(output, ["action", "type"]);
   const status = displayValue(output, ["status"]);
   const error = displayValue(output, ["error", "message"]);
-  const path = displayValue(output, ["path", "filename", "title", "url"]);
+  const path = safeBrowserTarget(displayValue(output, ["path", "filename", "title", "url"]));
+  const errorSnippet = safeProgressDetail(error);
 
   if (status && /error|fail|aborted/i.test(status)) {
     return {
       action: localized(language, "Browser step failed", "브라우저 단계 실패"),
       ...(path ? { target: bounded(path, MAX_TARGET_LENGTH) } : {}),
-      ...(error ? { snippet: snippetFrom(error) } : {}),
+      ...(errorSnippet ? { snippet: errorSnippet } : {}),
     };
   }
 
@@ -631,7 +809,7 @@ function browserPreview(
     return {
       action: localized(language, "Reading page", "페이지 읽는 중"),
       ...(path ? { target: bounded(path, MAX_TARGET_LENGTH) } : {}),
-      ...(error ? { snippet: snippetFrom(error) } : {}),
+      ...(errorSnippet ? { snippet: errorSnippet } : {}),
     };
   }
 
@@ -653,7 +831,9 @@ function browserFallbackPreview(
   language?: ChatResponseLanguage,
 ): PublicToolPreview {
   const action = stringFromJsonLikeText(previewText, ["action", "type"]);
-  const path = stringFromJsonLikeText(previewText, ["path", "filename", "title", "url"]);
+  const path = safeBrowserTarget(
+    stringFromJsonLikeText(previewText, ["path", "filename", "title", "url"]),
+  );
 
   if (action === "create_session" || action === "open_session" || action === "session") {
     return {
@@ -883,23 +1063,77 @@ function generatedOutputPreview(
   };
 }
 
+function firstUrlFromValue(value: unknown, depth: number): string | undefined {
+  if (depth > 8 || value === null || value === undefined) return undefined;
+  if (typeof value === "string") return safePublicUrlFromText(value);
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const url = firstUrlFromValue(item, depth + 1);
+      if (url) return url;
+    }
+    return undefined;
+  }
+  if (typeof value === "object") {
+    return firstUrlFromResults(value as PreviewObject, depth + 1);
+  }
+  return undefined;
+}
+
+function firstUrlFromResults(object: PreviewObject | null, depth = 0): string | undefined {
+  if (!object || depth > 8) return undefined;
+
+  for (const key of URL_VALUE_KEYS) {
+    const url = safePublicUrl(displayValue(object, [key]));
+    if (url) return url;
+  }
+
+  for (const key of URL_TEXT_KEYS) {
+    const url = safePublicUrlFromText(displayValue(object, [key]));
+    if (url) return url;
+  }
+
+  for (const key of URL_CONTAINER_KEYS) {
+    const url = firstUrlFromValue(object[key], depth + 1);
+    if (url) return url;
+  }
+
+  return undefined;
+}
+
 function searchPreview(tool: string, input: PublicToolPreviewInput): PublicToolPreview | null {
-  const isWebSearch = tool === "websearch" || tool === "websearchtool";
-  const isKnowledgeSearch = tool === "knowledgesearch" || tool === "knowledgesearchtool";
+  const isWebSearch = tool === "websearch" || tool === "websearchtool" ||
+    tool === "searchingtheweb" || tool === "searchweb" || tool === "websearching";
+  const isKnowledgeSearch = tool === "knowledgesearch" || tool === "knowledgesearchtool" ||
+    tool === "searchingknowledgebase";
   if (!isWebSearch && !isKnowledgeSearch) return null;
 
   const parsedInput = previewObject(input.inputPreview);
   const parsedOutput = previewObject(input.outputPreview);
-  const query = displayValue(parsedInput, ["query", "q", "search"]);
+  const query = safeProgressDetail(
+    displayValue(parsedInput, ["query", "q", "search"]) ??
+      displayValue(parsedOutput, ["query", "q", "search"]),
+  );
+  const resultUrl = isWebSearch
+    ? firstUrlFromResults(parsedOutput) ??
+      firstUrlFromResults(parsedInput) ??
+      safePublicUrlFromText(input.outputPreview) ??
+      safePublicUrlFromText(input.inputPreview)
+    : undefined;
+  const target = resultUrl ?? query;
   const resultCount =
     displayValue(parsedOutput, ["count", "resultCount", "total"]) ??
     (Array.isArray(parsedOutput?.results)
       ? String(parsedOutput.results.length)
       : undefined);
+  const safeDetail = safeProgressDetail(
+    displayValue(parsedOutput, ["detail", "summary", "message"]),
+  );
   const snippet = snippetFrom(
     [
+      query && resultUrl ? `Query: ${query}` : undefined,
+      resultUrl ? `URL: ${resultUrl}` : undefined,
+      safeDetail && safeDetail !== resultUrl ? `Detail: ${safeDetail}` : undefined,
       resultCount ? `${resultCount} result${resultCount === "1" ? "" : "s"}` : undefined,
-      displayValue(parsedOutput, ["summary", "message"]),
     ]
       .filter(Boolean)
       .join("\n"),
@@ -907,7 +1141,24 @@ function searchPreview(tool: string, input: PublicToolPreviewInput): PublicToolP
 
   return {
     action: isWebSearch ? "Searching the web" : "Searching knowledge base",
-    ...(query ? { target: bounded(query, MAX_TARGET_LENGTH) } : {}),
+    ...(target ? { target: bounded(target, MAX_TARGET_LENGTH) } : {}),
+    ...(snippet ? { snippet } : {}),
+  };
+}
+
+function webFetchPreview(input: PublicToolPreviewInput): PublicToolPreview | null {
+  const parsedInput = previewObject(input.inputPreview);
+  const parsedOutput = previewObject(input.outputPreview);
+  const url =
+    safePublicUrl(displayValue(parsedInput, ["url", "uri", "sourceUrl", "source_url"])) ??
+    firstUrlFromResults(parsedOutput);
+  const title = displayValue(parsedOutput, ["title", "name"]);
+  const summary = displayValue(parsedOutput, ["summary", "message"]);
+  const snippet = snippetFrom([title, summary].filter(Boolean).join("\n"));
+  if (!url && !snippet) return null;
+  return {
+    action: "Reading web page",
+    ...(url ? { target: bounded(url, MAX_TARGET_LENGTH) } : {}),
     ...(snippet ? { snippet } : {}),
   };
 }
@@ -1105,6 +1356,11 @@ export function derivePublicToolPreview(
 
   if (tool === "activityprogress") {
     return activityProgressPreview(input.inputPreview, input.outputPreview, language);
+  }
+
+  if (tool === "webfetch" || tool === "webfetchtool") {
+    const preview = webFetchPreview(input);
+    if (preview) return preview;
   }
 
   if (tool === "taskboard" || tool === "taskupdate") {

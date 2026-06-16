@@ -123,11 +123,36 @@ describe("derivePublicToolPreview", () => {
     });
 
     expect(preview).toEqual({
-      action: "Bash",
+      action: "Working",
       target: "ls reports",
       snippet: "final-report.pdf\nsummary.md",
     });
     expect(JSON.stringify(preview)).not.toContain("exitCode");
+  });
+
+  it("summarizes web progress with safe URL and detail snippets", () => {
+    const preview = derivePublicToolPreview({
+      label: "Searching the web",
+      inputPreview: JSON.stringify({
+        query: "openmagi docs",
+      }),
+      outputPreview: JSON.stringify({
+        url: "https://example.test/report?token=fixture-secret",
+        detail: "Checking https://example.test/report?session=hidden",
+      }),
+    });
+
+    expect(preview).toEqual({
+      action: "Searching the web",
+      target: "example.test/report",
+      snippet: [
+        "Query: openmagi docs",
+        "URL: example.test/report",
+        "Detail: Checking example.test/report",
+      ].join("\n"),
+    });
+    expect(JSON.stringify(preview)).not.toContain("fixture-secret");
+    expect(JSON.stringify(preview)).not.toContain("session=hidden");
   });
 
   it("does not expose JSON blobs embedded inside command stdout", () => {
@@ -145,7 +170,7 @@ describe("derivePublicToolPreview", () => {
       }),
     });
 
-    expect(preview?.action).toBe("Bash");
+    expect(preview?.action).toBe("Working");
     expect(preview?.target).toBe("cat merchants.json");
     expect(preview?.snippet).toBeUndefined();
     expect(JSON.stringify(preview)).not.toContain("merchantId");
@@ -158,7 +183,7 @@ describe("derivePublicToolPreview", () => {
         outputPreview: JSON.stringify({
           action: "create_session",
           sessionId: "browser-session-fixture",
-          cdpEndpoint: "ws://browser-worker.magi-system:9222/cdp/browser-session-fixture",
+          cdpEndpoint: "ws://browser-worker.clawy-system:9222/cdp/browser-session-fixture",
         }),
       }),
     ).toEqual({
@@ -172,7 +197,7 @@ describe("derivePublicToolPreview", () => {
         outputPreview: JSON.stringify({
           action: "scrape",
           sessionId: "browser-session-fixture",
-          cdpEndpoint: "ws://browser-worker.magi-system:9222/cdp/browser-session-fixture/page",
+          cdpEndpoint: "ws://browser-worker.clawy-system:9222/cdp/browser-session-fixture/page",
           status: "error",
           error: "page closed",
         }),
@@ -191,7 +216,7 @@ describe("derivePublicToolPreview", () => {
         outputPreview: JSON.stringify({
           action: "create_session",
           sessionId: "browser-session-fixture",
-          cdpEndpoint: "ws://browser-worker.magi-system:9222/cdp/browser-session-fixture",
+          cdpEndpoint: "ws://browser-worker.clawy-system:9222/cdp/browser-session-fixture",
         }),
       }),
     ).toEqual({
@@ -212,6 +237,25 @@ describe("derivePublicToolPreview", () => {
       action: "페이지 읽는 중",
       target: "https://example.com/report",
     });
+  });
+
+  it("sanitizes browser URL targets before rendering Work panel rows", () => {
+    const preview = derivePublicToolPreview({
+      label: "Browser",
+      outputPreview: JSON.stringify({
+        action: "open",
+        url: "https://example.com/app/settings?session_token=fixture-secret#raw",
+      }),
+    });
+
+    expect(preview).toEqual({
+      action: "Opening page",
+      target: "https://example.com/app/settings",
+    });
+    expect(JSON.stringify(preview)).not.toContain("session_token");
+    expect(JSON.stringify(preview)).not.toContain("fixture-secret");
+    expect(JSON.stringify(preview)).not.toContain("#raw");
+    expect(JSON.stringify(preview)).not.toContain("?");
   });
 
   it("turns permission denials into plain-language output", () => {
@@ -281,7 +325,7 @@ describe("derivePublicToolPreview", () => {
         toolCallCount: 1,
         attempts: 1,
         artifacts: [],
-        spawnDir: "/home/ocuser/.magi-agent/spawns/spawn_motzdgo9_mzbmo5cy",
+        spawnDir: "/home/ocuser/.openclaw/spawns/spawn_motzdgo9_mzbmo5cy",
       }),
     });
 
@@ -524,7 +568,7 @@ describe("derivePublicToolPreview", () => {
       derivePublicToolPreview({
         label: "Browser",
         outputPreview:
-          '{"action":"create_session","sessionId":"browser-session-fixture","cdpEndpoint":"ws://browser-worker.magi-system:9222/cdp/browser-session-fixture...',
+          '{"action":"create_session","sessionId":"browser-session-fixture","cdpEndpoint":"ws://browser-worker.clawy-system:9222/cdp/browser-session-fixture...',
       }),
     ).toEqual({
       action: "Opening browser",
@@ -557,8 +601,24 @@ describe("derivePublicToolPreview", () => {
       }),
     ).toEqual({
       action: "Searching the web",
-      target: "latest market data",
-      snippet: "2 results",
+      target: "example.test/1",
+      snippet: "Query: latest market data\nURL: example.test/1\n2 results",
+    });
+
+    expect(
+      derivePublicToolPreview({
+        label: "WebFetch",
+        inputPreview: JSON.stringify({ url: "https://example.test/report" }),
+        outputPreview: JSON.stringify({
+          title: "Example report",
+          status: "ok",
+          summary: "Revenue increased this quarter.",
+        }),
+      }),
+    ).toEqual({
+      action: "Reading web page",
+      target: "example.test/report",
+      snippet: "Example report\nRevenue increased this quarter.",
     });
 
     expect(
@@ -576,6 +636,66 @@ describe("derivePublicToolPreview", () => {
       target: "1/2 tasks complete",
       snippet: "Now: Draft answer",
     });
+  });
+
+  it("surfaces safe web progress URLs from action-style labels without query secrets", () => {
+    const preview = derivePublicToolPreview({
+      label: "Searching the web",
+      inputPreview: JSON.stringify({ query: "openmagi docs" }),
+      outputPreview: JSON.stringify({
+        url: "https://example.test/report?token=fixture-secret",
+        detail: "Authorization: Bearer fixture-credential",
+      }),
+    });
+
+    expect(preview).toEqual({
+      action: "Searching the web",
+      target: "example.test/report",
+      snippet: "Query: openmagi docs\nURL: example.test/report",
+    });
+    expect(JSON.stringify(preview)).not.toContain("fixture-secret");
+    expect(JSON.stringify(preview)).not.toContain("Authorization");
+  });
+
+  it("surfaces nested web source URLs while stripping unsafe URL details", () => {
+    const preview = derivePublicToolPreview({
+      label: "WebSearch",
+      inputPreview: JSON.stringify({
+        args: {
+          query: "incident notes",
+          progress: {
+            sourceUrl:
+              "https://docs.example.test/research/incidents/2026/summary?session=fixture#raw",
+          },
+        },
+      }),
+      outputPreview: JSON.stringify({
+        progress: {
+          results: [
+            {
+              title: "Callback result should collapse",
+              source_url:
+                "https://auth.example.test/oauth/callback/code/sk-secret-token?token=fixture",
+            },
+            {
+              title: "Safe result",
+              resultUrl:
+                "https://safe.example.test/research/releases/2026/06/detail?token=fixture",
+            },
+          ],
+        },
+      }),
+    });
+
+    expect(preview).toEqual({
+      action: "Searching the web",
+      target: "auth.example.test",
+      snippet: "URL: auth.example.test",
+    });
+    expect(JSON.stringify(preview)).not.toContain("session=fixture");
+    expect(JSON.stringify(preview)).not.toContain("sk-secret-token");
+    expect(JSON.stringify(preview)).not.toContain("token=fixture");
+    expect(JSON.stringify(preview)).not.toContain("oauth/callback");
   });
 
   it("renders heartbeat model progress as continuing work instead of repeating the same thinking label", () => {

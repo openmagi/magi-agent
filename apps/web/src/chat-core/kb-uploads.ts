@@ -1,8 +1,69 @@
-import { resolveKnowledgeUploadMimeType } from "@/lib/knowledge/upload-mime";
-import { isImageMimetype } from "@/chat-core";
-import { createMarker } from "@/chat-core";
+import { isImageMimetype } from "./attachment-marker";
+import { createMarker } from "./attachment-marker";
 import { uploadAttachment } from "./attachments";
-import type { KbDocReference } from "@/chat-core";
+import type { KbDocReference } from "./types";
+
+// Inlined from @/lib/knowledge/upload-mime (chat-core boundary forbids @/ imports).
+// Reproduces only the resolveKnowledgeUploadMimeType chain used below.
+const SOURCE_TEXT_EXTENSIONS = [
+  "py", "pyw", "rpy", "ipynb",
+  "js", "jsx", "mjs", "cjs", "ts", "tsx", "mts", "cts",
+  "c", "h", "cpp", "cc", "cxx", "hpp", "hh", "hxx",
+  "java", "kt", "kts", "swift", "go", "rs", "rb", "php", "cs",
+  "sh", "bash", "zsh", "fish", "ps1", "bat", "cmd",
+  "sql", "r", "scala", "sc", "dart", "lua", "pl", "pm",
+  "ex", "exs", "erl", "hrl", "fs", "fsx", "fsi",
+  "clj", "cljs", "edn", "hs", "lhs", "elm",
+  "vue", "svelte", "css", "scss", "sass", "less",
+  "yaml", "yml", "toml", "ini", "cfg", "conf", "env", "properties",
+  "gitignore", "dockerfile", "makefile", "mk", "cmake",
+  "gradle", "proto", "graphql", "gql", "lock", "patch", "diff",
+];
+
+const SOURCE_TEXT_MIME_BY_EXTENSION = Object.fromEntries(
+  SOURCE_TEXT_EXTENSIONS.map((ext) => [ext, "text/plain"]),
+) as Record<string, string>;
+
+const KB_MIME_BY_EXTENSION: Record<string, string> = {
+  pdf: "application/pdf",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  xls: "application/vnd.ms-excel",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  hwp: "application/x-hwp",
+  hwpx: "application/x-hwpx",
+  html: "text/html",
+  htm: "text/html",
+  epub: "application/epub+zip",
+  csv: "text/csv",
+  txt: "text/plain",
+  md: "text/markdown",
+  json: "application/json",
+  xml: "application/xml",
+  xhtml: "application/xhtml+xml",
+  zip: "application/zip",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  png: "image/png",
+  gif: "image/gif",
+  webp: "image/webp",
+  ...SOURCE_TEXT_MIME_BY_EXTENSION,
+};
+
+function getKnowledgeUploadExtension(name: string): string {
+  return name.split(".").pop()?.toLowerCase() || "";
+}
+
+function mimeFromKnowledgeUploadExtension(name: string): string {
+  return KB_MIME_BY_EXTENSION[getKnowledgeUploadExtension(name)] || "application/octet-stream";
+}
+
+function resolveKnowledgeUploadMimeType(file: { name: string; type?: string | null }): string {
+  const extensionMimeType = mimeFromKnowledgeUploadExtension(file.name);
+  if (extensionMimeType !== "application/octet-stream") return extensionMimeType;
+  if (file.type && file.type !== "application/octet-stream") return file.type;
+  return extensionMimeType;
+}
 
 export interface SplitFiles {
   imageFiles: File[];

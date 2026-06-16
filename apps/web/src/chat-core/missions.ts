@@ -1,4 +1,4 @@
-import type { ChannelState, MissionActivity } from "@/chat-core";
+import type { ChannelState, MissionActivity } from "./types";
 
 const TERMINAL_GOAL_STATUSES = new Set<MissionActivity["status"]>([
   "completed",

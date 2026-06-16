@@ -7,7 +7,7 @@ import type {
   SubagentActivity,
   TaskBoardSnapshot,
   ToolActivity,
-} from "@/chat-core";
+} from "./types";
 
 function channelState(overrides: Partial<ChannelState> = {}): ChannelState {
   return {

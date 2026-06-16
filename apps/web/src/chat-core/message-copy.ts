@@ -1,5 +1,5 @@
-import { parseMarkers } from "@/chat-core";
-import { parseKbContextMarker } from "@/chat-core";
+import { parseMarkers } from "./attachment-marker";
+import { parseKbContextMarker } from "./kb-context-marker";
 
 interface BuildMessageCopyTextOptions {
   content: string;

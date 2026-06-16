@@ -1,5 +1,5 @@
 import type { ChatMessage } from "@/chat-core";
-import { stripResearchEvidenceMarker } from "./research-evidence";
+import { stripResearchEvidenceMarker } from "@/chat-core";
 import { stripAssistantMetadataPreamble } from "@/chat-core";
 
 export const ASSISTANT_DEDUPE_WINDOW_MS = 5 * 60_000;

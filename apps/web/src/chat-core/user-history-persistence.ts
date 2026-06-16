@@ -1,4 +1,4 @@
-import type { ChatMessage } from "@/chat-core";
+import type { ChatMessage } from "./types";
 
 type SaveUserHistoryMessage = (
   channelName: string,
@@ -22,7 +22,6 @@ interface PersistUserHistoryMessageInput {
 const USER_HISTORY_SAVE_RETRY_MS = 2_000;
 
 export function persistUserHistoryMessage({
-  e2eeReady,
   saveMessages,
   channel,
   message,
@@ -30,7 +29,7 @@ export function persistUserHistoryMessage({
   onError,
   retryDelayMs = USER_HISTORY_SAVE_RETRY_MS,
 }: PersistUserHistoryMessageInput): void {
-  if (!e2eeReady || message.role !== "user") return;
+  if (message.role !== "user") return;
 
   const payload = [{
     role: "user" as const,

@@ -10,8 +10,8 @@ import { AgentActivityTimeline } from "./agent-activity-timeline";
 import { EChartRenderer } from "./echart-renderer";
 import { parseMarkers } from "@/chat-core";
 import { parseKbContextMarker } from "@/chat-core";
-import { buildMessageCopyText } from "@/lib/chat/message-copy";
-import { getAttachmentUrl, getKnowledgeDocumentUrl, fetchAttachmentBlob } from "@/lib/chat/attachments";
+import { buildMessageCopyText } from "@/chat-core";
+import { getAttachmentUrl, getKnowledgeDocumentUrl, fetchAttachmentBlob } from "@/chat-core";
 import {
   stripAssistantMetadataPreamble,
   stripStreamingAssistantMetadataPreamble,

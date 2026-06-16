@@ -4,7 +4,7 @@ import { useRef, useEffect, useLayoutEffect, useMemo, useImperativeHandle, forwa
 import { MessageBubble } from "./message-bubble";
 import { TypingIndicator } from "./typing-indicator";
 import { ControlRequestCard } from "./control-request";
-import { compareChatMessages } from "@/lib/chat/message-order";
+import { compareChatMessages } from "@/chat-core";
 import { shouldPreferServerAssistantMessage } from "@/lib/chat/server-reconcile";
 import {
   assistantContentsSubstantiallyOverlap,

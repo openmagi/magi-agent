@@ -7,11 +7,11 @@
  */
 
 const SALT_V3 = new TextEncoder().encode("openmagi-chat-e2ee-v3");
-const SALT_V2 = new TextEncoder().encode("magi-chat-e2ee-v2");
-const SALT_V1 = new TextEncoder().encode("magi-chat-e2ee");
+const SALT_V2 = new TextEncoder().encode("clawy-chat-e2ee-v2");
+const SALT_V1 = new TextEncoder().encode("clawy-chat-e2ee");
 const KEY_LENGTH = 256;
 export const E2EE_CIPHERTEXT_PREFIX_V3 = "openmagi-e2ee:v3:";
-export const E2EE_CIPHERTEXT_PREFIX_V2 = "magi-e2ee:v2:";
+export const E2EE_CIPHERTEXT_PREFIX_V2 = "clawy-e2ee:v2:";
 
 /**
  * Messages the user personal_signs on their embedded wallet to produce

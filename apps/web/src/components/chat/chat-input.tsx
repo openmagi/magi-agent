@@ -1,17 +1,17 @@
 "use client";
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode } from "react";
-import { CHAT_ATTACHMENT_ACCEPT, validateFile } from "@/lib/chat/attachments";
+import { CHAT_ATTACHMENT_ACCEPT, validateFile } from "@/chat-core";
 import { isImageMimetype, formatFileSize } from "@/chat-core";
 import { extractClipboardImageFiles } from "@/chat-core";
-import { kbUploadKey } from "@/lib/chat/kb-uploads";
+import { kbUploadKey } from "@/chat-core";
 import type { ChatResponseLanguage, ReplyTo, KbDocReference } from "@/chat-core";
 import { isStreamingComposerBlockedByQueue } from "@/chat-core";
 
 type StreamingComposerMode = "queue" | "steer";
 import { SKILLS } from "@/lib/skills-catalog";
 import type { KbDocEntry } from "@/hooks/use-kb-docs";
-import type { PendingKbUpload } from "@/lib/chat/kb-uploads";
+import type { PendingKbUpload } from "@/chat-core";
 
 interface SlashEntry {
   command: string;

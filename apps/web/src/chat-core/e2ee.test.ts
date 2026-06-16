@@ -18,8 +18,7 @@ describe("chat e2ee", () => {
 
     expect(e2ee.E2EE_SIGN_MESSAGE).toContain("Open Magi");
     expect(e2ee.E2EE_SIGN_MESSAGE).toContain("openmagi.ai");
-    const legacyBrand = ["c", "l", "a", "w", "y"].join("");
-    expect(e2ee.E2EE_SIGN_MESSAGE.toLowerCase()).not.toContain(legacyBrand);
+    expect(e2ee.E2EE_SIGN_MESSAGE.toLowerCase()).not.toContain("clawy");
   });
 
   it("prefixes new ciphertexts with the Open Magi v3 marker", async () => {

@@ -1,4 +1,4 @@
-import type { ChatResponseLanguage } from "@/chat-core";
+import type { ChatResponseLanguage } from "./types";
 
 function requestedOutputLanguage(text: string): ChatResponseLanguage | null {
   const lower = text.toLowerCase();
@@ -51,3 +51,4 @@ export function detectMessageResponseLanguage(text: string): ChatResponseLanguag
   if (latin >= 3) return spanishSignal >= 2 ? "es" : "en";
   return "en";
 }
+

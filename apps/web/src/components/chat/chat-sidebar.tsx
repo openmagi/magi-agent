@@ -27,7 +27,7 @@ import {
   formatChannelBaseLabel,
   formatChannelMemoryBadgeLabel,
   formatChannelMemoryLabel,
-} from "@/lib/chat/channel-memory-mode";
+} from "@/chat-core";
 
 const DEFAULT_CATEGORIES = ["General"];
 

@@ -1,4 +1,4 @@
-import type { ChatMessage } from "@/chat-core";
+import type { ChatMessage } from "./types";
 
 const ROLE_ORDER: Record<ChatMessage["role"], number> = {
   user: 0,

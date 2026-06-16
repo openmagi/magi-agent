@@ -1,11 +1,12 @@
 import type {
   ChannelState,
   CitationGateStatus,
+  GovernedClaimSummary,
   InspectedSource,
   InspectedSourceKind,
   ResearchEvidenceSnapshot,
   ServerMessage,
-} from "@/chat-core";
+} from "./types";
 
 const INSPECTED_SOURCE_KINDS: readonly InspectedSourceKind[] = [
   "web_search",
@@ -17,6 +18,43 @@ const INSPECTED_SOURCE_KINDS: readonly InspectedSourceKind[] = [
   "external_doc",
   "subagent_result",
 ];
+const CLAIM_TYPES: readonly GovernedClaimSummary["claimType"][] = [
+  "numeric",
+  "date",
+  "comparison",
+  "quote",
+  "causal",
+  "general",
+];
+const CLAIM_SUPPORT_STATUSES: readonly GovernedClaimSummary["supportStatus"][] = [
+  "supported",
+  "weak",
+  "unverifiable",
+  "contradicted",
+  "not_checked",
+  "failed",
+];
+const PROJECTION_MODES: readonly NonNullable<ResearchEvidenceSnapshot["projectionMode"]>[] = [
+  "structured_claims_only",
+  "artifact_projection",
+  "raw_text_allowed",
+];
+const EVIDENCE_REF_RE = /^evidence:sha256:[a-f0-9]{64}$/;
+const PUBLIC_REF_RE = /^[a-zA-Z0-9._:-]+$/;
+
+function isClaimType(value: string | null): value is GovernedClaimSummary["claimType"] {
+  return CLAIM_TYPES.includes(value as GovernedClaimSummary["claimType"]);
+}
+
+function isClaimSupportStatus(value: string | null): value is GovernedClaimSummary["supportStatus"] {
+  return CLAIM_SUPPORT_STATUSES.includes(value as GovernedClaimSummary["supportStatus"]);
+}
+
+function isProjectionMode(
+  value: string | null,
+): value is NonNullable<ResearchEvidenceSnapshot["projectionMode"]> {
+  return PROJECTION_MODES.includes(value as NonNullable<ResearchEvidenceSnapshot["projectionMode"]>);
+}
 
 function recordFromUnknown(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -39,6 +77,14 @@ function stringArrayField(record: Record<string, unknown> | null, key: string): 
   if (!Array.isArray(value)) return undefined;
   const items = value.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
   return items.length > 0 ? items : undefined;
+}
+
+function publicRefArrayField(record: Record<string, unknown> | null, key: string): string[] {
+  return (stringArrayField(record, key) ?? []).filter((item) => PUBLIC_REF_RE.test(item));
+}
+
+function evidenceRefArrayField(record: Record<string, unknown> | null, key: string): string[] {
+  return (stringArrayField(record, key) ?? []).filter((item) => EVIDENCE_REF_RE.test(item));
 }
 
 export function normalizeInspectedSource(value: unknown): InspectedSource | null {
@@ -101,6 +147,23 @@ export function normalizeCitationGateStatus(value: unknown): CitationGateStatus 
   };
 }
 
+export function normalizeGovernedClaimSummary(value: unknown): GovernedClaimSummary | null {
+  const claim = recordFromUnknown(value);
+  const claimId = stringField(claim, "claimId");
+  const claimType = stringField(claim, "claimType");
+  const supportStatus = stringField(claim, "supportStatus");
+  if (!claimId || !PUBLIC_REF_RE.test(claimId)) return null;
+  if (!isClaimType(claimType)) return null;
+  if (!isClaimSupportStatus(supportStatus)) return null;
+  return {
+    claimId,
+    claimType,
+    supportStatus,
+    citationRefs: publicRefArrayField(claim, "citationRefs"),
+    evidenceRefs: evidenceRefArrayField(claim, "evidenceRefs"),
+  };
+}
+
 export function normalizeResearchEvidenceSnapshot(value: unknown): ResearchEvidenceSnapshot | undefined {
   const evidence = recordFromUnknown(value);
   if (!evidence) return undefined;
@@ -110,11 +173,26 @@ export function normalizeResearchEvidenceSnapshot(value: unknown): ResearchEvide
         .filter((source): source is InspectedSource => source !== null)
     : [];
   const citationGate = normalizeCitationGateStatus(evidence.citationGate);
+  const claims = Array.isArray(evidence.claims)
+    ? evidence.claims
+        .map((claim) => normalizeGovernedClaimSummary(claim))
+        .filter((claim): claim is GovernedClaimSummary => claim !== null)
+    : [];
+  const projectionMode = stringField(evidence, "projectionMode");
+  const publicProjectionMode = isProjectionMode(projectionMode) ? projectionMode : null;
   const capturedAt = numberField(evidence, "capturedAt") ?? Date.now();
-  if (inspectedSources.length === 0 && !citationGate) return undefined;
+  if (
+    inspectedSources.length === 0 &&
+    !citationGate &&
+    claims.length === 0
+  ) {
+    return undefined;
+  }
   return {
     inspectedSources,
     ...(citationGate ? { citationGate } : {}),
+    ...(claims.length > 0 ? { claims } : {}),
+    ...(publicProjectionMode ? { projectionMode: publicProjectionMode } : {}),
     capturedAt,
   };
 }
@@ -140,7 +218,7 @@ export function researchEvidenceFromServerMessage(
 }
 
 const RESEARCH_EVIDENCE_MARKER_RE =
-  /\n?\s*<!-- magi:research-evidence:v1:[A-Za-z0-9_-]+ -->\s*$/;
+  /\n?\s*<!-- clawy:research-evidence:v1:[A-Za-z0-9_-]+ -->\s*$/;
 
 export function stripResearchEvidenceMarker(content: string): string {
   return content.replace(RESEARCH_EVIDENCE_MARKER_RE, "");

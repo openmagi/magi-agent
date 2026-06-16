@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { buildMessageContentWithKbContext, mergeKbDocReferences } from "./kb-send";
-import type { KbDocReference } from "@/chat-core";
+import {
+  buildMessageContentWithKbContext,
+  mergeKbDocReferences,
+  toggleKbDocReference,
+} from "./kb-send";
+import type { KbDocReference } from "./types";
 
 const DOC_A: KbDocReference = {
   id: "doc-a",
@@ -24,6 +28,16 @@ describe("mergeKbDocReferences", () => {
       DOC_A,
       DOC_B,
     ]);
+  });
+});
+
+describe("toggleKbDocReference", () => {
+  it("adds an unselected document", () => {
+    expect(toggleKbDocReference([DOC_A], DOC_B)).toEqual([DOC_A, DOC_B]);
+  });
+
+  it("removes an already selected document", () => {
+    expect(toggleKbDocReference([DOC_A, DOC_B], DOC_A)).toEqual([DOC_B]);
   });
 });
 

@@ -20,18 +20,18 @@ import { useChatStore, syncResetCounters } from "@/lib/chat/chat-store";
 import { subscribeToPushMessages, type PushSubscriptionHandle } from "@/lib/chat/push-realtime";
 import * as chatApi from "@/lib/chat/chat-client";
 import { setChatTokenGetter } from "@/lib/chat/chat-client";
-import { setAttachmentTokenGetter } from "@/lib/chat/attachments";
+import { setAttachmentTokenGetter } from "@/chat-core";
 import { buildReplyPreview } from "@/chat-core";
 import { getNextChannelAfterDeletion } from "@/chat-core";
 import { useE2EE } from "@/lib/chat/use-e2ee";
-import { mergeChatHistoryPage } from "@/lib/chat/history-merge";
-import { persistUserHistoryMessage } from "@/lib/chat/user-history-persistence";
+import { mergeChatHistoryPage } from "@/chat-core";
+import { persistUserHistoryMessage } from "@/chat-core";
 import {
   researchEvidenceFromChannelState,
   researchEvidenceFromServerMessage,
   stripResearchEvidenceMarker,
-} from "@/lib/chat/research-evidence";
-import { applyMissionEvent } from "@/lib/chat/missions";
+} from "@/chat-core";
+import { applyMissionEvent } from "@/chat-core";
 import {
   findLatestAssistantServerMessage,
   shouldPatchAssistantTextFromServer,
@@ -60,9 +60,9 @@ import {
   buildEscCancelDecision,
   cancelActiveTurnWithQueueHandoff,
 } from "@/lib/chat/interrupt-handoff";
-import { buildMessageContentWithKbContext, mergeKbDocReferences } from "@/lib/chat/kb-send";
-import { detectMessageResponseLanguage } from "@/lib/chat/message-language";
-import { shouldRetryEmptyCompletion } from "@/lib/chat/empty-response";
+import { buildMessageContentWithKbContext, mergeKbDocReferences } from "@/chat-core";
+import { detectMessageResponseLanguage } from "@/chat-core";
+import { shouldRetryEmptyCompletion } from "@/chat-core";
 import {
   appendLiveTranscriptText,
   liveTranscriptRowsForState,
@@ -75,8 +75,8 @@ import {
   normalizeSelectedChatExportMessages,
 } from "@/lib/chat/export";
 import type { ChatExportMessage } from "@/lib/chat/export";
-import { kbUploadKey, uploadChatFilesToKb, splitImageAndOtherFiles, uploadImagesAsAttachmentMarkers } from "@/lib/chat/kb-uploads";
-import type { PendingKbUpload } from "@/lib/chat/kb-uploads";
+import { kbUploadKey, uploadChatFilesToKb, splitImageAndOtherFiles, uploadImagesAsAttachmentMarkers } from "@/chat-core";
+import type { PendingKbUpload } from "@/chat-core";
 import {
   channelModelSelectionFromChannel,
   channelModelSelectionToRuntimeModel,
@@ -87,7 +87,7 @@ import {
 import { useI18n } from "@/lib/i18n";
 import { useMessages } from "@/lib/i18n";
 import { localizeChannel } from "@/chat-core";
-import { formatChannelBaseLabel, formatChannelMemoryLabel } from "@/lib/chat/channel-memory-mode";
+import { formatChannelBaseLabel, formatChannelMemoryLabel } from "@/chat-core";
 import { StepTelegram } from "@/components/onboarding/step-telegram";
 import { useWorkspaceFiles } from "@/hooks/use-workspace-files";
 

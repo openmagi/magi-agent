@@ -1,5 +1,50 @@
-import type { MissionActivity } from "@/chat-core";
-import type { MissionStatus, MissionSummary } from "@/lib/missions/types";
+import type { MissionActivity } from "./types";
+
+// Inlined from @/lib/missions/types (chat-core boundary forbids @/ imports).
+// Byte-equivalent to the source MissionStatus/MissionKind/MissionSummary.
+type MissionStatus =
+  | "queued"
+  | "running"
+  | "blocked"
+  | "waiting"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "paused";
+
+type MissionKind =
+  | "manual"
+  | "goal"
+  | "spawn"
+  | "cron"
+  | "script_cron"
+  | "pipeline"
+  | "browser_qa"
+  | "document"
+  | "research";
+
+interface MissionSummary {
+  id: string;
+  bot_id: string;
+  channel_type: "app" | "telegram" | "discord" | "internal";
+  channel_id: string;
+  kind: MissionKind;
+  title: string;
+  summary: string | null;
+  status: MissionStatus;
+  priority: number;
+  created_by: "user" | "agent" | "cron" | "system";
+  assignee_profile: string | null;
+  parent_mission_id: string | null;
+  root_mission_id: string | null;
+  used_turns: number;
+  budget_turns: number | null;
+  last_event_at: string | null;
+  completed_at: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
 
 export type MissionWorkQueueFilter = "active" | "needs_input" | "done" | "all";
 export type MissionWorkQueueSectionKind = "needs_input" | "running" | "done";
