@@ -291,7 +291,7 @@ graph LR
 | anthropic_cache_model.py | Cache-aware Anthropic (Claude) model for the ADK runner boundary — PR11. | env | prompt/injection.py, shadow/gate5b4c3_live_runner_boundary.py |
 | artifact_service.py | — | — | — |
 | callback_adapter.py | — | bus, context, manifest, resolved | — |
-| context_compaction.py | Live context-compaction wiring for the ADK Runner (PR13). | context, context_lifecycle, query_state, session_service, token_estimation, token_tracker, usage_metadata | adk_bridge/control_plane.py |
+| context_compaction.py | Live context-compaction wiring for the ADK Runner (PR13). | context, context_lifecycle, protected_tools, query_state, session_service, token_estimation, token_tracker, usage_metadata | adk_bridge/control_plane.py |
 | control_plane.py | ADK loop control-plane abstraction (PR2, goose-parity). | constraint_reinjection, context, context_compaction, edit_retry_reflection, env, facts_replan_control, fork_runner, gemini_content_ordering, manifest, registries, resilience_plugin, schema_feedback, self_review, tool_exception_reflection, tool_synthesis, tool_synthesis_nudge, turn_policy | adk_bridge/facts_replan_control.py, adk_bridge/local_runner.py, adk_bridge/schema_feedback.py, cli/real_runner.py, cli/tests/test_real_runner.py, firstparty/packs/control_plane_default/impl.py, packs/context.py, packs/registries.py, transport/gate5b_governance.py |
 | edit_retry_reflection.py | Edit-failure reflection / retry wiring for the live ADK Runner. | context, retry_repair_policies, turn_utilities | adk_bridge/control_plane.py, adk_bridge/schema_feedback.py, adk_bridge/tool_exception_reflection.py |
 | event_adapter.py | — | events, health, transcript, transport | cli/engine.py, runtime/stream_withholding.py, shadow/fixture_runner.py, shadow/gate4c1_runner_shadow_invoker.py, transport/sse_buffer.py |
@@ -658,7 +658,7 @@ graph LR
 | content_replacement.py | — | types | context/hook.py |
 | hook.py | — | auto_compact, collapse_drain, content_replacement, context, manifest, microcompact, reactive_compact, result, scope, token_tracker, types | — |
 | microcompact.py | — | protected_tools, types | context/hook.py |
-| protected_tools.py | Track 19 PR8 — compaction-protected tool-result detection. | constants, recipe_routing_constants | context/auto_compact.py, context/microcompact.py |
+| protected_tools.py | Track 19 PR8 — compaction-protected tool-result detection. | constants, recipe_routing_constants | adk_bridge/context_compaction.py, context/auto_compact.py, context/microcompact.py |
 | recipe_routing_constants.py | Import-boundary-safe constant for cross-family recipe routing. | — | context/protected_tools.py, recipes/recipe_routing.py |
 | token_tracker.py | — | token_estimation, types | adk_bridge/context_compaction.py, context/hook.py |
 | types.py | — | types | context/auto_compact.py, context/content_replacement.py, context/hook.py, context/microcompact.py, context/token_tracker.py |
