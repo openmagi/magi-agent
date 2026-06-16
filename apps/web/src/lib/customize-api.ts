@@ -26,9 +26,20 @@ export interface RecipeItem {
 export interface HarnessPresetItem {
   id: string;
   title: string;
-  description: string;
   category: string;
-  enabled: boolean;
+  /** Catalog default state in the live runtime. */
+  defaultEnabled: boolean;
+  /**
+   * Honest enforcement status:
+   * - `enforcing`  — toggling this preset changes runtime behavior now.
+   * - `always-on`  — enforced elsewhere (security/PermissionGate); not togglable here.
+   * - `preview`    — surfaced for parity but not yet wired to a runtime gate.
+   */
+  enforcement: "enforcing" | "always-on" | "preview";
+  /** Evaluation strategies the runtime supports for this preset. */
+  supportedModes: string[];
+  /** Legacy field kept for back-compat; prefer `defaultEnabled`. */
+  enabled?: boolean;
 }
 
 export interface HookItem {
@@ -61,10 +72,15 @@ export interface CustomizeOverrides {
   verification: {
     recipes: string[];
     harness_presets: string[];
+    /** Explicit per-preset enable state (tri-state: present true/false, or absent → catalog default). */
+    preset_overrides: Record<string, boolean>;
     hooks: Record<string, boolean>;
+    modes: Record<string, string>;
     custom_rules: unknown[];
   };
   tools: Record<string, boolean>;
+  /** Free-text USER-RULES.md body injected into the system prompt. */
+  user_rules: string;
 }
 
 export interface CustomizeResponse {
@@ -97,6 +113,54 @@ export async function patchToolOverride(
     body: JSON.stringify({ enabled }),
   });
   if (!res.ok) throw new Error(`Failed to update tool (${res.status})`);
+  const data = (await res.json()) as { overrides: CustomizeOverrides };
+  return data.overrides;
+}
+
+/**
+ * Persists a verification preset/recipe/hook toggle via
+ * `PATCH /v1/app/customize/verification/{kind}/{id}`.
+ *
+ * For `harness_presets` this records an explicit tri-state in `preset_overrides`
+ * (so opt-out of a default-on gate persists). Returns the updated overrides.
+ * Throws on non-2xx so the caller can surface the error and revert.
+ */
+export async function patchVerificationOverride(
+  fetch: (path: string, init?: RequestInit) => Promise<Response>,
+  kind: "recipes" | "harness_presets" | "hooks",
+  id: string,
+  enabled: boolean,
+  mode?: string,
+): Promise<CustomizeOverrides> {
+  const body: { enabled: boolean; mode?: string } = { enabled };
+  if (mode) body.mode = mode;
+  const res = await fetch(
+    `/v1/app/customize/verification/${kind}/${encodeURIComponent(id)}`,
+    {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    },
+  );
+  if (!res.ok) throw new Error(`Failed to update verification rule (${res.status})`);
+  const data = (await res.json()) as { overrides: CustomizeOverrides };
+  return data.overrides;
+}
+
+/**
+ * Persists the USER-RULES.md body via `PUT /v1/app/customize/rules`.
+ * Returns the updated overrides. Throws on non-2xx.
+ */
+export async function putRules(
+  fetch: (path: string, init?: RequestInit) => Promise<Response>,
+  text: string,
+): Promise<CustomizeOverrides> {
+  const res = await fetch(`/v1/app/customize/rules`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
+  });
+  if (!res.ok) throw new Error(`Failed to save rules (${res.status})`);
   const data = (await res.json()) as { overrides: CustomizeOverrides };
   return data.overrides;
 }

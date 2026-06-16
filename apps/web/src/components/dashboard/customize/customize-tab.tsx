@@ -2,8 +2,12 @@
 
 import { useCallback, useState } from "react";
 import { ShieldCheck, Wrench } from "lucide-react";
-import { useCustomize, patchToolOverride } from "@/lib/customize-api";
-import type { CustomizeOverrides } from "@/lib/customize-api";
+import {
+  useCustomize,
+  patchToolOverride,
+  patchVerificationOverride,
+  putRules,
+} from "@/lib/customize-api";
 import { useAgentFetch } from "@/lib/local-api";
 import { VerificationRuleModal } from "./verification-rule-modal";
 import { CustomToolModal } from "./custom-tool-modal";
@@ -11,13 +15,6 @@ import { CustomToolModal } from "./custom-tool-modal";
 interface CustomizeRuntimeConsoleProps {
   botId: string;
 }
-
-const EMPTY_VERIFICATION: CustomizeOverrides["verification"] = {
-  recipes: [],
-  harness_presets: [],
-  hooks: {},
-  custom_rules: [],
-};
 
 function Card({
   icon,
@@ -59,35 +56,27 @@ export function CustomizeRuntimeConsole({ botId }: CustomizeRuntimeConsoleProps)
   const [ruleModalOpen, setRuleModalOpen] = useState(false);
   const [toolModalOpen, setToolModalOpen] = useState(false);
 
-  // Local-only override state seeded from the backend snapshot.
-  //
-  // Recipes and presets use Record<string,boolean> (same pattern as hooks) so
-  // that toggling OFF a default-ON item (remove from array) is not shadowed by
-  // the catalog's `enabled: true`. The backend arrays represent "explicitly
-  // enabled" items; we seed them as true and resolve via `record[id] ?? item.enabled`.
-  //
-  // Verification Rules changes are local-session only (preview). Tool overrides
-  // are persisted via PATCH /v1/app/customize/tools/{name}.
-  const [recipeOverrides, setRecipeOverrides] = useState<Record<string, boolean>>({});
+  // Override state. Presets persist via PATCH /v1/app/customize/verification/...
+  // (explicit tri-state in preset_overrides); tools via PATCH .../tools/{name}.
   const [presetOverrides, setPresetOverrides] = useState<Record<string, boolean>>({});
-  const [hookOverrides, setHookOverrides] = useState<CustomizeOverrides["verification"]["hooks"]>({});
   const [toolOverrides, setToolOverrides] = useState<Record<string, boolean>>({});
 
-  // Per-tool in-flight set: a tool name is present while its PATCH is running.
+  // Per-item in-flight sets while a PATCH is running.
+  const [presetPending, setPresetPending] = useState<Set<string>>(new Set());
   const [toolPending, setToolPending] = useState<Set<string>>(new Set());
 
-  // Transient error displayed inside the tool modal on PATCH failure.
+  // USER-RULES.md editor state.
+  const [userRules, setUserRules] = useState("");
+  const [rulesSaving, setRulesSaving] = useState(false);
+
+  // Transient errors surfaced inside each modal on PATCH failure.
+  const [ruleError, setRuleError] = useState<string | null>(null);
   const [toolError, setToolError] = useState<string | null>(null);
 
   const openRuleModal = useCallback(() => {
-    const v = data?.overrides.verification ?? EMPTY_VERIFICATION;
-    const recipes: Record<string, boolean> = {};
-    for (const id of v.recipes) recipes[id] = true;
-    const presets: Record<string, boolean> = {};
-    for (const id of v.harness_presets) presets[id] = true;
-    setRecipeOverrides(recipes);
-    setPresetOverrides(presets);
-    setHookOverrides(v.hooks);
+    setPresetOverrides(data?.overrides.verification.preset_overrides ?? {});
+    setUserRules(data?.overrides.user_rules ?? "");
+    setRuleError(null);
     setRuleModalOpen(true);
   }, [data]);
 
@@ -96,17 +85,47 @@ export function CustomizeRuntimeConsole({ botId }: CustomizeRuntimeConsoleProps)
     setToolModalOpen(true);
   }, [data]);
 
-  const handleToggleRecipe = useCallback((id: string, enabled: boolean) => {
-    setRecipeOverrides((prev) => ({ ...prev, [id]: enabled }));
-  }, []);
+  const handleTogglePreset = useCallback(
+    (id: string, enabled: boolean) => {
+      setPresetOverrides((prev) => ({ ...prev, [id]: enabled }));
+      setRuleError(null);
+      setPresetPending((prev) => new Set(prev).add(id));
+      patchVerificationOverride(agentFetch, "harness_presets", id, enabled)
+        .then((overrides) => {
+          setPresetOverrides(overrides.verification.preset_overrides);
+        })
+        .catch((err: unknown) => {
+          setPresetOverrides((prev) => ({ ...prev, [id]: !enabled }));
+          setRuleError(
+            err instanceof Error ? err.message : `Failed to update "${id}"`,
+          );
+        })
+        .finally(() => {
+          setPresetPending((prev) => {
+            const next = new Set(prev);
+            next.delete(id);
+            return next;
+          });
+        });
+    },
+    [agentFetch],
+  );
 
-  const handleTogglePreset = useCallback((id: string, enabled: boolean) => {
-    setPresetOverrides((prev) => ({ ...prev, [id]: enabled }));
-  }, []);
-
-  const handleToggleHook = useCallback((name: string, enabled: boolean) => {
-    setHookOverrides((prev) => ({ ...prev, [name]: enabled }));
-  }, []);
+  const handleSaveRules = useCallback(
+    (text: string) => {
+      setRulesSaving(true);
+      setRuleError(null);
+      putRules(agentFetch, text)
+        .then((overrides) => {
+          setUserRules(overrides.user_rules);
+        })
+        .catch((err: unknown) => {
+          setRuleError(err instanceof Error ? err.message : "Failed to save rules");
+        })
+        .finally(() => setRulesSaving(false));
+    },
+    [agentFetch],
+  );
 
   const handleToggleTool = useCallback(
     (name: string, enabled: boolean) => {
@@ -146,8 +165,7 @@ export function CustomizeRuntimeConsole({ botId }: CustomizeRuntimeConsoleProps)
         <h1 className="mt-2 text-2xl font-bold leading-tight text-foreground">Customize</h1>
         <p className="mt-2 max-w-2xl text-sm leading-6 text-secondary">
           Tune the verification rules that gate your agent&apos;s output and choose which tools it can
-          call. Tool changes are saved immediately; verification rule changes apply to this session
-          only.
+          call. Changes are saved to the local runtime immediately.
         </p>
       </header>
 
@@ -195,12 +213,13 @@ export function CustomizeRuntimeConsole({ botId }: CustomizeRuntimeConsoleProps)
             open={ruleModalOpen}
             onClose={() => setRuleModalOpen(false)}
             catalog={data.catalog.verification}
-            recipeOverrides={recipeOverrides}
             presetOverrides={presetOverrides}
-            hookOverrides={hookOverrides}
-            onToggleRecipe={handleToggleRecipe}
+            pendingPresets={presetPending}
             onTogglePreset={handleTogglePreset}
-            onToggleHook={handleToggleHook}
+            userRules={userRules}
+            rulesSaving={rulesSaving}
+            onSaveRules={handleSaveRules}
+            error={ruleError}
           />
           <CustomToolModal
             open={toolModalOpen}

@@ -1,29 +1,57 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { Lock } from "lucide-react";
 import { Modal } from "@/components/ui/modal";
-import type { CustomizeCatalog, CustomizeOverrides } from "@/lib/customize-api";
+import type { CustomizeCatalog, HarnessPresetItem } from "@/lib/customize-api";
 
 interface VerificationRuleModalProps {
   open: boolean;
   onClose: () => void;
   catalog: CustomizeCatalog["verification"];
-  /** Record<id, boolean> — effective state resolved as `recipeOverrides[id] ?? recipe.enabled` */
-  recipeOverrides: Record<string, boolean>;
-  /** Record<id, boolean> — effective state resolved as `presetOverrides[id] ?? preset.enabled` */
+  /** Explicit per-preset overrides; effective state = presetOverrides[id] ?? preset.defaultEnabled. */
   presetOverrides: Record<string, boolean>;
-  hookOverrides: CustomizeOverrides["verification"]["hooks"];
-  onToggleRecipe: (id: string, enabled: boolean) => void;
+  /** Preset ids with an in-flight PATCH. */
+  pendingPresets: Set<string>;
   onTogglePreset: (id: string, enabled: boolean) => void;
-  onToggleHook: (name: string, enabled: boolean) => void;
+  /** USER-RULES.md body + save handler. */
+  userRules: string;
+  rulesSaving: boolean;
+  onSaveRules: (text: string) => void;
+  error: string | null;
 }
+
+// Category display order + labels (matches harness/presets.py PresetCategory).
+const CATEGORY_ORDER = [
+  "answer",
+  "fact",
+  "coding",
+  "task",
+  "output",
+  "research",
+  "memory",
+  "security",
+] as const;
+
+const CATEGORY_LABELS: Record<string, string> = {
+  answer: "Answer Quality",
+  fact: "Factual Grounding",
+  coding: "Coding",
+  task: "Task & Goals",
+  output: "Output & Delivery",
+  research: "Research",
+  memory: "Memory",
+  security: "Security",
+};
 
 function Toggle({
   checked,
+  disabled,
   onChange,
   label,
 }: {
   checked: boolean;
+  disabled: boolean;
   onChange: (next: boolean) => void;
   label: string;
 }) {
@@ -33,8 +61,9 @@ function Toggle({
       role="switch"
       aria-checked={checked}
       aria-label={label}
+      disabled={disabled}
       onClick={() => onChange(!checked)}
-      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45 focus-visible:ring-offset-2 ${
+      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/45 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-40 ${
         checked ? "bg-primary" : "bg-black/15"
       }`}
     >
@@ -47,32 +76,60 @@ function Toggle({
   );
 }
 
-function SectionTitle({ children }: { children: React.ReactNode }) {
-  return (
-    <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-secondary/70">
-      {children}
-    </h3>
-  );
+function EnforcementBadge({ enforcement }: { enforcement: HarnessPresetItem["enforcement"] }) {
+  if (enforcement === "always-on") {
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2.5 py-1 text-[11px] font-medium text-emerald-600">
+        <Lock className="h-3 w-3" />
+        Always on
+      </span>
+    );
+  }
+  if (enforcement === "preview") {
+    return (
+      <span className="inline-flex items-center rounded-full bg-amber-500/10 px-2.5 py-1 text-[11px] font-medium text-amber-600">
+        Preview
+      </span>
+    );
+  }
+  return null; // enforcing → the live toggle is the affordance
 }
 
-function Row({
-  title,
-  description,
-  trailing,
+function PresetRow({
+  preset,
+  checked,
+  pending,
+  onToggle,
 }: {
-  title: string;
-  description: string;
-  trailing: React.ReactNode;
+  preset: HarnessPresetItem;
+  checked: boolean;
+  pending: boolean;
+  onToggle: (id: string, enabled: boolean) => void;
 }) {
+  const togglable = preset.enforcement === "enforcing";
   return (
-    <div className="flex items-start justify-between gap-4 rounded-xl border border-black/[0.06] bg-white px-4 py-3">
+    <div className="flex items-center justify-between gap-4 rounded-xl border border-black/[0.06] bg-white px-4 py-3">
       <div className="min-w-0">
-        <p className="truncate text-sm font-semibold text-foreground">{title}</p>
-        {description ? (
-          <p className="mt-1 text-xs leading-relaxed text-secondary">{description}</p>
+        <p className="truncate text-sm font-semibold text-foreground">{preset.title}</p>
+        {!togglable ? (
+          <p className="mt-0.5 text-[11px] leading-relaxed text-secondary/80">
+            {preset.enforcement === "always-on"
+              ? "Enforced by the runtime — not configurable here."
+              : "Surfaced for parity; no runtime gate yet."}
+          </p>
         ) : null}
       </div>
-      {trailing}
+      <div className="flex items-center gap-3">
+        {togglable ? null : <EnforcementBadge enforcement={preset.enforcement} />}
+        {togglable ? (
+          <Toggle
+            checked={checked}
+            disabled={pending}
+            onChange={(next) => onToggle(preset.id, next)}
+            label={`Toggle preset ${preset.title}`}
+          />
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -81,22 +138,38 @@ export function VerificationRuleModal({
   open,
   onClose,
   catalog,
-  recipeOverrides,
   presetOverrides,
-  hookOverrides,
-  onToggleRecipe,
+  pendingPresets,
   onTogglePreset,
-  onToggleHook,
+  userRules,
+  rulesSaving,
+  onSaveRules,
+  error,
 }: VerificationRuleModalProps): React.ReactElement | null {
+  const [rulesDraft, setRulesDraft] = useState(userRules);
+  // Re-seed the draft whenever the modal (re)opens with fresh backend state.
+  useEffect(() => {
+    if (open) setRulesDraft(userRules);
+  }, [open, userRules]);
+
   if (!open) return null;
 
-  const securityHooks = catalog.hooks.filter((hook) => hook.alwaysOn);
-  const generalHooks = catalog.hooks.filter((hook) => !hook.alwaysOn);
+  const byCategory = new Map<string, HarnessPresetItem[]>();
+  for (const preset of catalog.harnessPresets) {
+    const list = byCategory.get(preset.category) ?? [];
+    list.push(preset);
+    byCategory.set(preset.category, list);
+  }
+  const orderedCategories = [
+    ...CATEGORY_ORDER.filter((c) => byCategory.has(c)),
+    ...[...byCategory.keys()].filter((c) => !CATEGORY_ORDER.includes(c as never)),
+  ];
+
+  const rulesDirty = rulesDraft !== userRules;
 
   return (
     <Modal open={open} onClose={onClose}>
       <div className="p-6">
-        {/* Header */}
         <div className="mb-1 flex items-start justify-between">
           <h2 className="text-lg font-semibold text-foreground">Verification Rules</h2>
           <button
@@ -110,129 +183,68 @@ export function VerificationRuleModal({
             </svg>
           </button>
         </div>
-        <p className="mb-6 text-xs text-secondary">
-          Choose which recipes, harness presets, and hooks enforce your agent&apos;s output. Changes
-          apply to this local session only.
+        <p className="mb-5 text-xs leading-relaxed text-secondary">
+          Toggle the verification gates that constrain your agent&apos;s output. Changes are saved
+          immediately. Presets marked <span className="font-medium text-amber-600">Preview</span> are not
+          yet wired to a runtime gate; <span className="font-medium text-emerald-600">Always on</span>{" "}
+          gates are enforced by the runtime and can&apos;t be turned off here.
         </p>
 
+        {error ? (
+          <div className="mb-4 rounded-lg border border-red-500/25 bg-red-500/[0.06] px-3 py-2 text-xs text-red-600">
+            {error}
+          </div>
+        ) : null}
+
         <div className="space-y-6">
-          {/* Recipes */}
-          <section>
-            <SectionTitle>Recipes</SectionTitle>
-            {catalog.recipes.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-black/[0.10] bg-gray-50/80 px-4 py-6 text-center text-xs text-secondary">
-                No recipes available.
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {catalog.recipes.map((recipe) => {
-                  const enabled = recipeOverrides[recipe.id] ?? recipe.enabled;
-                  return (
-                    <Row
-                      key={recipe.id}
-                      title={recipe.title}
-                      description={recipe.description}
-                      trailing={
-                        <Toggle
-                          checked={enabled}
-                          onChange={(next) => onToggleRecipe(recipe.id, next)}
-                          label={`Toggle recipe ${recipe.title}`}
-                        />
-                      }
-                    />
-                  );
-                })}
-              </div>
-            )}
-          </section>
-
-          {/* Harness Presets */}
-          <section>
-            <SectionTitle>Harness Presets</SectionTitle>
-            {catalog.harnessPresets.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-black/[0.10] bg-gray-50/80 px-4 py-6 text-center text-xs text-secondary">
-                No harness presets available.
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {catalog.harnessPresets.map((preset) => {
-                  const enabled = presetOverrides[preset.id] ?? preset.enabled;
-                  return (
-                    <Row
+          {orderedCategories.map((category) => {
+            const presets = byCategory.get(category) ?? [];
+            if (presets.length === 0) return null;
+            return (
+              <section key={category}>
+                <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-secondary/70">
+                  {CATEGORY_LABELS[category] ?? category}
+                </h3>
+                <div className="space-y-2">
+                  {presets.map((preset) => (
+                    <PresetRow
                       key={preset.id}
-                      title={preset.title}
-                      description={preset.description}
-                      trailing={
-                        <Toggle
-                          checked={enabled}
-                          onChange={(next) => onTogglePreset(preset.id, next)}
-                          label={`Toggle preset ${preset.title}`}
-                        />
-                      }
+                      preset={preset}
+                      checked={presetOverrides[preset.id] ?? preset.defaultEnabled}
+                      pending={pendingPresets.has(preset.id)}
+                      onToggle={onTogglePreset}
                     />
-                  );
-                })}
-              </div>
-            )}
-          </section>
+                  ))}
+                </div>
+              </section>
+            );
+          })}
 
-          {/* Security (Always On) hooks */}
-          {securityHooks.length > 0 ? (
-            <section>
-              <SectionTitle>Security (Always On)</SectionTitle>
-              <div className="space-y-2">
-                {securityHooks.map((hook) => (
-                  <Row
-                    key={hook.name}
-                    title={hook.title}
-                    description={hook.point}
-                    trailing={
-                      <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2.5 py-1 text-[11px] font-medium text-emerald-600">
-                        <Lock className="h-3 w-3" />
-                        Locked
-                      </span>
-                    }
-                  />
-                ))}
-              </div>
-            </section>
-          ) : null}
-
-          {/* General hooks */}
-          {generalHooks.length > 0 ? (
-            <section>
-              <SectionTitle>General</SectionTitle>
-              <div className="space-y-2">
-                {generalHooks.map((hook) => {
-                  const enabled = hookOverrides[hook.name] ?? hook.enabled;
-                  return (
-                    <Row
-                      key={hook.name}
-                      title={hook.title}
-                      description={hook.point}
-                      trailing={
-                        <Toggle
-                          checked={enabled}
-                          onChange={(next) => onToggleHook(hook.name, next)}
-                          label={`Toggle hook ${hook.title}`}
-                        />
-                      }
-                    />
-                  );
-                })}
-              </div>
-            </section>
-          ) : null}
-
-          {/* Add custom rule (coming soon) */}
+          {/* Custom rules (USER-RULES.md) */}
           <section>
-            <button
-              type="button"
-              disabled
-              className="w-full cursor-not-allowed rounded-xl border border-dashed border-black/[0.12] bg-gray-50/60 px-4 py-3 text-sm font-medium text-secondary/70"
-            >
-              Add custom rule (coming soon)
-            </button>
+            <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-secondary/70">
+              Custom Rules
+            </h3>
+            <p className="mb-2 text-xs leading-relaxed text-secondary">
+              Free-text instructions injected into your agent&apos;s system prompt every turn.
+            </p>
+            <textarea
+              value={rulesDraft}
+              onChange={(e) => setRulesDraft(e.target.value)}
+              rows={5}
+              placeholder="e.g. Always cite sources. Never delete files without confirming."
+              className="w-full resize-y rounded-xl border border-black/[0.10] bg-white px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+            />
+            <div className="mt-2 flex justify-end">
+              <button
+                type="button"
+                disabled={!rulesDirty || rulesSaving}
+                onClick={() => onSaveRules(rulesDraft)}
+                className="inline-flex min-h-[36px] items-center rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {rulesSaving ? "Saving…" : rulesDirty ? "Save rules" : "Saved"}
+              </button>
+            </div>
           </section>
         </div>
       </div>

@@ -440,6 +440,31 @@ def _available_subagent_models_block() -> str:
         return ""
 
 
+def _user_rules_block() -> str:
+    """USER-RULES.md section configured in the Customize tab, injected each turn.
+
+    Flag-gated by ``MAGI_CUSTOMIZE_VERIFICATION_ENABLED``: empty (no section) when
+    off or unset, so the prompt is byte-identical to main. Fail-soft to "".
+    """
+    from magi_agent.config.flags import flag_bool
+
+    if not flag_bool("MAGI_CUSTOMIZE_VERIFICATION_ENABLED"):
+        return ""
+    try:
+        from magi_agent.customize.store import load_overrides
+
+        rules = (load_overrides().get("user_rules") or "").strip()
+    except Exception:
+        return ""
+    if not rules:
+        return ""
+    return (
+        "## User Rules\n\n"
+        "The user has configured the following rules for you. Follow them:\n\n"
+        f"{rules}"
+    )
+
+
 def _assemble_prompt_sections(
     *,
     session_key: str,
@@ -514,6 +539,9 @@ def _assemble_prompt_sections(
     addendum = _system_prompt_addendum(user_message)
     if addendum:
         dynamic_parts.append(addendum)
+    user_rules_block = _user_rules_block()
+    if user_rules_block:
+        dynamic_parts.append(user_rules_block)
 
     return static_parts, dynamic_parts
 
