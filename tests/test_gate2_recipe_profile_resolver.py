@@ -2342,5 +2342,6 @@ def test_recipe_pack_manifest_carries_granted_tool_names():
     p = registry.get("openmagi.dev-coding")
     assert isinstance(p.granted_tool_names, tuple)
     assert all(isinstance(t, str) for t in p.granted_tool_names)
-    # default empty until authored in a later task
-    assert p.granted_tool_names == ()
+    # Authored in HB-4: dev-coding scopes the gated code-execution tools while
+    # leaving general file/test tools base-free.
+    assert p.granted_tool_names == ("PythonExec", "PersistentPython")

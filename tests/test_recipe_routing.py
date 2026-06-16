@@ -474,3 +474,82 @@ def test_hard_safety_pack_granted_tools_do_not_scope():
     scope = build_recipe_tool_scope(registry)
     assert "HardTool" not in scope.scoped_tools          # hard pack doesn't scope
     assert scope.is_allowed("HardTool", selected_pack_ids=("t.a",)) is True  # base-free → allowed
+
+
+# ---------------------------------------------------------------------------
+# HB-4 — authored granted_tool_names are REAL ADK tool names.
+#
+# Recipe-scoped enforcement (HB-1..HB-3) compares against the ACTUAL registered
+# ADK tool names available in a CLI turn (``tool.name``). This test asserts the
+# authored grants on the routable first-party packs are (a) non-empty and (b) a
+# subset of the canonical CLI tool-name set, so selecting a recipe scopes the
+# model to tools that genuinely exist. A grant naming a tool that is never
+# registered would be silently un-grantable — this test catches that.
+# ---------------------------------------------------------------------------
+
+
+def canonical_cli_tool_names() -> frozenset[str]:
+    """The real ADK tool names a CLI turn can call, read from the tool catalog.
+
+    Source of truth: the same registration paths assembled by
+    :func:`magi_agent.cli.tool_runtime.build_cli_tool_runtime` /
+    ``build_cli_adk_tools`` — the core tool catalog, the optional file/multimodal
+    manifests, the gated single-tool name constants (BrowserTask, PythonExec,
+    PersistentPython, select_recipe), and the key-gated direct web tools
+    (web_search / web_fetch / research_fact). Names are read from the catalog
+    rather than hardcoded so a renamed/added tool keeps this set in sync.
+    """
+    from magi_agent.browser.autonomous.tool import BROWSER_TOOL_NAME
+    from magi_agent.context.recipe_routing_constants import SELECT_RECIPE_TOOL_NAME
+    from magi_agent.tools.catalog import core_tool_manifests
+    from magi_agent.tools.file_tool_manifests import (
+        document_qa_manifest,
+        file_tool_manifests,
+    )
+    from magi_agent.tools.persistent_python_toolhost import (
+        PERSISTENT_PYTHON_TOOL_NAME,
+    )
+    from magi_agent.tools.python_exec import PYTHON_EXEC_TOOL_NAME
+
+    names: set[str] = set()
+    names.update(m.name for m in core_tool_manifests())
+    names.update(m.name for m in file_tool_manifests())
+    names.add(document_qa_manifest().name)
+    names.update((
+        BROWSER_TOOL_NAME,
+        PYTHON_EXEC_TOOL_NAME,
+        PERSISTENT_PYTHON_TOOL_NAME,
+        SELECT_RECIPE_TOOL_NAME,
+        # Direct web tools (build_web_search_tools) — key-gated FunctionTools
+        # whose ``tool.name`` derives from the function __name__.
+        "web_search",
+        "web_fetch",
+        "research_fact",
+    ))
+    return frozenset(names)
+
+
+def test_authored_granted_tools_are_real_for_key_packs():
+    registry = PackRegistry.with_first_party_packs()
+    real = canonical_cli_tool_names()
+    for pid in (
+        "openmagi.office-automation",
+        "openmagi.research",
+        "openmagi.dev-coding",
+    ):
+        g = registry.get(pid).granted_tool_names
+        assert g, f"{pid} has no granted_tool_names"
+        assert set(g) <= real, f"{pid} grants unknown tool names: {set(g) - real}"
+
+
+def test_all_routable_pack_grants_are_real_or_empty():
+    """Every non-hard_safety pack's grants (if any) must be real tool names."""
+    registry = PackRegistry.with_first_party_packs()
+    real = canonical_cli_tool_names()
+    for pack in registry.values():
+        if pack.hard_safety:
+            # Hard-safety packs must NOT scope tools.
+            assert pack.granted_tool_names == ()
+            continue
+        unknown = set(pack.granted_tool_names) - real
+        assert not unknown, f"{pack.pack_id} grants unknown tool names: {unknown}"
