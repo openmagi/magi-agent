@@ -8,6 +8,7 @@ graph LR
     adk_bridge --> config
     adk_bridge --> harness
     adk_bridge --> hooks
+    adk_bridge --> ops
     adk_bridge --> packs
     adk_bridge --> prompt
     adk_bridge --> recipes
@@ -287,7 +288,7 @@ graph LR
 | context_compaction.py | Live context-compaction wiring for the ADK Runner (PR13). | context, context_lifecycle, query_state, session_service, token_estimation | adk_bridge/control_plane.py |
 | control_plane.py | ADK loop control-plane abstraction (PR2, goose-parity). | constraint_reinjection, context, context_compaction, edit_retry_reflection, env, facts_replan_control, fork_runner, manifest, registries, resilience_plugin, schema_feedback, self_review, tool_exception_reflection, tool_synthesis, tool_synthesis_nudge, turn_policy | adk_bridge/facts_replan_control.py, adk_bridge/local_runner.py, adk_bridge/schema_feedback.py, cli/real_runner.py, cli/tests/test_real_runner.py, firstparty/packs/control_plane_default/impl.py, packs/context.py, packs/registries.py, transport/gate5b_governance.py |
 | edit_retry_reflection.py | Edit-failure reflection / retry wiring for the live ADK Runner. | context, retry_repair_policies, turn_utilities | adk_bridge/control_plane.py, adk_bridge/schema_feedback.py, adk_bridge/tool_exception_reflection.py |
-| event_adapter.py | — | events, transcript, transport | cli/engine.py, runtime/stream_withholding.py, shadow/fixture_runner.py, shadow/gate4c1_runner_shadow_invoker.py, transport/sse_buffer.py |
+| event_adapter.py | — | events, health, transcript, transport | cli/engine.py, runtime/stream_withholding.py, shadow/fixture_runner.py, shadow/gate4c1_runner_shadow_invoker.py, transport/sse_buffer.py |
 | facts_replan_control.py | FactsReplanControl — interval-based facts-survey injection (default-OFF). | context, control_plane, facts_replan | adk_bridge/control_plane.py |
 | local_runner.py | — | control_plane, live_gate, local_toolhost, session_service, task_completion | shadow/fixture_runner.py |
 | local_toolhost.py | — | — | adk_bridge/local_runner.py |
@@ -1142,7 +1143,7 @@ graph LR
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
 | __init__.py | — | — | transport/health.py, transport/product_admin.py |
-| health.py | — | daemon, scheduler_job_execution | gateway/daemon.py, transport/sse.py, transport/streaming_chat_route.py |
+| health.py | — | daemon, scheduler_job_execution | adk_bridge/event_adapter.py, gateway/daemon.py, shadow/gate5b4c3_live_runner_boundary.py, transport/sse.py, transport/streaming_chat_route.py |
 | job_queue.py | — | safety | — |
 | metrics.py | — | safety | — |
 | otel_noise.py | Suppress a benign OpenTelemetry teardown log line. | — | (root)/main.py, cli/app.py |
@@ -1512,7 +1513,7 @@ graph LR
 | gate5b4_internal_endpoint_contract.py | — | — | — |
 | gate5b4c2_shadow_invocation_contract.py | — | — | transport/shadow_invocations.py |
 | gate5b4c3_image_parts.py | Convert sanitized Anthropic-style image blocks into ADK content parts. | — | cli/engine.py, shadow/gate5b4c3_live_runner_boundary.py |
-| gate5b4c3_live_runner_boundary.py | — | anthropic_cache_model, env, gate1a_egress_correlation, gate5b4c3_image_parts, gate5b4c3_runner_input_adapter, gate5b4c3_shadow_generation_contract, output_continuation, public_events, session_service_registry, transcript | shadow/gate5b4c3_shadow_parity.py, transport/chat.py, transport/chat_routes.py, transport/chat_shared.py |
+| gate5b4c3_live_runner_boundary.py | — | anthropic_cache_model, env, gate1a_egress_correlation, gate5b4c3_image_parts, gate5b4c3_runner_input_adapter, gate5b4c3_shadow_generation_contract, health, output_continuation, public_events, session_service_registry, transcript | shadow/gate5b4c3_shadow_parity.py, transport/chat.py, transport/chat_routes.py, transport/chat_shared.py |
 | gate5b4c3_runner_input_adapter.py | — | env, gate5b4c3_shadow_generation_contract, message_builder | shadow/gate5b4c3_live_runner_boundary.py |
 | gate5b4c3_shadow_comparison.py | — | gate5b4c3_shadow_generation_contract, gate5b4c3_shadow_generation_report | — |
 | gate5b4c3_shadow_counter_store.py | — | — | config/env.py, shadow/gate5b4c3_shadow_generation_report.py, transport/chat.py, transport/chat_routes.py, transport/shadow_generations.py |
