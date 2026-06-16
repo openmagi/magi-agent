@@ -9,14 +9,14 @@ import { MissionsPanel, type MissionChannelType, type MissionFocusRequest } from
 import {
   OPEN_MISSION_LEDGER_EVENT,
   readOpenMissionLedgerEvent,
-} from "@/lib/chat/mission-ledger-events";
+} from "@/chat-core";
 import type {
   ChannelState,
   ChatResponseLanguage,
   ControlRequestRecord,
   KbDocReference,
   QueuedMessage,
-} from "@/lib/chat/types";
+} from "@/chat-core";
 import type { KbCollectionWithDocs, KbDocEntry } from "@/hooks/use-kb-docs";
 import {
   buildKbPreviewUrl,

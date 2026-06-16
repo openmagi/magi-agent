@@ -1,6 +1,6 @@
-import type { ChatMessage } from "./types";
+import type { ChatMessage } from "@/chat-core";
 import { stripResearchEvidenceMarker } from "./research-evidence";
-import { stripAssistantMetadataPreamble } from "./visible-content";
+import { stripAssistantMetadataPreamble } from "@/chat-core";
 
 export const ASSISTANT_DEDUPE_WINDOW_MS = 5 * 60_000;
 export const ASSISTANT_DEDUPE_MIN_CHARS = 80;

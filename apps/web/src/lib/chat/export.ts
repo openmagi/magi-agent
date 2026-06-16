@@ -1,7 +1,7 @@
-import { parseMarkers } from "./attachment-marker";
-import { parseKbContextMarker } from "./kb-context-marker";
+import { parseMarkers } from "@/chat-core";
+import { parseKbContextMarker } from "@/chat-core";
 import { compareChatMessages } from "./message-order";
-import type { ChatMessage } from "./types";
+import type { ChatMessage } from "@/chat-core";
 
 export interface ChatExportMessage {
   id: string;

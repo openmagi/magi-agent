@@ -2,10 +2,10 @@
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode } from "react";
 import { CHAT_ATTACHMENT_ACCEPT, validateFile } from "@/lib/chat/attachments";
-import { isImageMimetype, formatFileSize } from "@/lib/chat/attachment-marker";
-import { extractClipboardImageFiles } from "@/lib/chat/clipboard-images";
+import { isImageMimetype, formatFileSize } from "@/chat-core";
+import { extractClipboardImageFiles } from "@/chat-core";
 import { kbUploadKey } from "@/lib/chat/kb-uploads";
-import type { ChatResponseLanguage, ReplyTo, KbDocReference } from "@/lib/chat/types";
+import type { ChatResponseLanguage, ReplyTo, KbDocReference } from "@/chat-core";
 import { isStreamingComposerBlockedByQueue } from "@/chat-core";
 
 type StreamingComposerMode = "queue" | "steer";

@@ -3,7 +3,7 @@ import type {
   ChatResponseLanguage,
   LiveTranscriptItem,
   LiveTranscriptWorkItem,
-} from "./types";
+} from "@/chat-core";
 import { deriveWorkConsoleRows } from "./work-console";
 import type { WorkConsoleRow } from "./work-console";
 

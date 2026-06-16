@@ -8,7 +8,7 @@ import type {
   ToolActivity,
   ChatResponseLanguage,
   MissionActivity,
-} from "./types";
+} from "@/chat-core";
 
 export type WorkStateStatus = string;
 

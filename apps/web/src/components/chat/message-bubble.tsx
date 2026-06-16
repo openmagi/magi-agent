@@ -8,14 +8,14 @@ import remarkGfm from "remark-gfm";
 import { TaskBoard } from "./task-board";
 import { AgentActivityTimeline } from "./agent-activity-timeline";
 import { EChartRenderer } from "./echart-renderer";
-import { parseMarkers } from "@/lib/chat/attachment-marker";
-import { parseKbContextMarker } from "@/lib/chat/kb-context-marker";
+import { parseMarkers } from "@/chat-core";
+import { parseKbContextMarker } from "@/chat-core";
 import { buildMessageCopyText } from "@/lib/chat/message-copy";
 import { getAttachmentUrl, getKnowledgeDocumentUrl, fetchAttachmentBlob } from "@/lib/chat/attachments";
 import {
   stripAssistantMetadataPreamble,
   stripStreamingAssistantMetadataPreamble,
-} from "@/lib/chat/visible-content";
+} from "@/chat-core";
 import type {
   InspectedSource,
   ReplyTo,
@@ -24,7 +24,7 @@ import type {
   ToolActivity,
   TaskBoardSnapshot,
   LiveTranscriptItem,
-} from "@/lib/chat/types";
+} from "@/chat-core";
 
 export type MessageContextAction = "copy" | "select" | "reply";
 

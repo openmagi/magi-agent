@@ -7,7 +7,7 @@ import type {
   MissionActivity,
   QueuedMessage,
   SubagentActivity,
-} from "./types";
+} from "@/chat-core";
 
 function makeQueued(content: string, replyTo?: QueuedMessage["replyTo"]): QueuedMessage {
   return {

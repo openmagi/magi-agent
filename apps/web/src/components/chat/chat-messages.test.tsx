@@ -6,7 +6,7 @@ import type {
   ChatMessage,
   QueuedMessage,
   ControlRequestRecord,
-} from "@/lib/chat/types";
+} from "@/chat-core";
 
 vi.mock("next/dynamic", () => ({
   default: () => function DynamicComponentStub() {

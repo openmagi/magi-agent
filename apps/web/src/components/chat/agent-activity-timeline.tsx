@@ -7,7 +7,7 @@ import {
   getAgentActivitySummary,
   type AgentActivityItem,
 } from "@/lib/chat/agent-activity";
-import type { ChatResponseLanguage, TaskBoardSnapshot, ToolActivity } from "@/lib/chat/types";
+import type { ChatResponseLanguage, TaskBoardSnapshot, ToolActivity } from "@/chat-core";
 
 interface AgentActivityTimelineProps {
   live?: boolean;

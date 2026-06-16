@@ -1,4 +1,4 @@
-import type { ChatResponseLanguage } from "./types";
+import type { ChatResponseLanguage } from "@/chat-core";
 
 export interface PublicToolPreviewInput {
   label: string;

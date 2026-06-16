@@ -2,7 +2,7 @@ import React from "react";
 import { describe, expect, it } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { PinnedTaskBoardDock, shouldPinTaskBoard } from "./pinned-task-board";
-import type { TaskBoardSnapshot } from "@/lib/chat/types";
+import type { TaskBoardSnapshot } from "@/chat-core";
 
 function snapshot(statuses: Array<"pending" | "in_progress" | "completed" | "cancelled">): TaskBoardSnapshot {
   return {

@@ -21,8 +21,8 @@ import { subscribeToPushMessages, type PushSubscriptionHandle } from "@/lib/chat
 import * as chatApi from "@/lib/chat/chat-client";
 import { setChatTokenGetter } from "@/lib/chat/chat-client";
 import { setAttachmentTokenGetter } from "@/lib/chat/attachments";
-import { buildReplyPreview } from "@/lib/chat/attachment-marker";
-import { getNextChannelAfterDeletion } from "@/lib/chat/channel-navigation";
+import { buildReplyPreview } from "@/chat-core";
+import { getNextChannelAfterDeletion } from "@/chat-core";
 import { useE2EE } from "@/lib/chat/use-e2ee";
 import { mergeChatHistoryPage } from "@/lib/chat/history-merge";
 import { persistUserHistoryMessage } from "@/lib/chat/user-history-persistence";
@@ -40,7 +40,7 @@ import {
   channelStateFromActiveSnapshot,
   isLiveActiveSnapshot,
 } from "@/lib/chat/active-snapshot";
-import { shouldHandlePageFileDrop } from "@/lib/chat/file-drop";
+import { shouldHandlePageFileDrop } from "@/chat-core";
 import type {
   Channel,
   ChannelMemoryMode,
@@ -51,7 +51,7 @@ import type {
   QueuedMessage,
   ReplyTo,
   ServerMessage,
-} from "@/lib/chat/types";
+} from "@/chat-core";
 import { useKbDocs } from "@/hooks/use-kb-docs";
 import { MAX_QUEUED_MESSAGES, canInjectMidTurn } from "@/chat-core";
 
@@ -83,10 +83,10 @@ import {
   getChannelModelSelection,
   setChannelModelSelection,
   type ChannelModelSelection,
-} from "@/lib/chat/channel-model-selection";
+} from "@/chat-core";
 import { useI18n } from "@/lib/i18n";
 import { useMessages } from "@/lib/i18n";
-import { localizeChannel } from "@/lib/chat/channel-i18n";
+import { localizeChannel } from "@/chat-core";
 import { formatChannelBaseLabel, formatChannelMemoryLabel } from "@/lib/chat/channel-memory-mode";
 import { StepTelegram } from "@/components/onboarding/step-telegram";
 import { useWorkspaceFiles } from "@/hooks/use-workspace-files";
@@ -225,7 +225,7 @@ export function ChatViewClient({
   const [exportLink, setExportLink] = useState<string | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
   const [creatingExportLink, setCreatingExportLink] = useState(false);
-  const [undoData, setUndoData] = useState<{ channel: string; messages: import("@/lib/chat/types").ChatMessage[]; serverMessages: import("@/lib/chat/types").ChatMessage[] } | null>(null);
+  const [undoData, setUndoData] = useState<{ channel: string; messages: import("@/chat-core").ChatMessage[]; serverMessages: import("@/chat-core").ChatMessage[] } | null>(null);
   const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [hasOlderMessages, setHasOlderMessages] = useState(false);
   const [initialHistoryLoading, setInitialHistoryLoading] = useState(false);

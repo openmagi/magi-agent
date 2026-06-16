@@ -4,7 +4,7 @@ import {
   formatActivityDuration,
   getAgentActivitySummary,
 } from "./agent-activity";
-import type { TaskBoardSnapshot, ToolActivity } from "./types";
+import type { TaskBoardSnapshot, ToolActivity } from "@/chat-core";
 
 function activity(
   label: string,

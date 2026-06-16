@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { ChatSidebar } from "./chat-sidebar";
-import type { Channel } from "@/lib/chat/types";
+import type { Channel } from "@/chat-core";
 
 vi.mock("next/navigation", () => ({
   useParams: () => ({ botId: "bot-1" }),

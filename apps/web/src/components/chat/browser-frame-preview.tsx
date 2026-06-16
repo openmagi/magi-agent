@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, type ReactElement } from "react";
-import type { BrowserFrame, ChatResponseLanguage } from "@/lib/chat/types";
+import type { BrowserFrame, ChatResponseLanguage } from "@/chat-core";
 
 type BrowserFrameSurface = "work-console" | "run-inspector";
 

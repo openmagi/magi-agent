@@ -25,7 +25,7 @@ import type {
   InspectedSourceKind,
   ResponseUsage,
   RuntimeTrace,
-} from "./types";
+} from "@/chat-core";
 import type { ActiveSnapshot } from "./active-snapshot";
 import { getResetCounter } from "./chat-store";
 import { getLocalAgentBaseUrl } from "../local-auth";

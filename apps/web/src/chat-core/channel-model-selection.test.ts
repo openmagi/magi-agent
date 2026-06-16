@@ -33,7 +33,7 @@ describe("channel model selection", () => {
       routerType: "standard",
     });
     setChannelModelSelection("bot-1", "research", {
-      modelSelection: "magi_smart_routing",
+      modelSelection: "clawy_smart_routing",
       routerType: "big_dic",
     });
 
@@ -42,7 +42,7 @@ describe("channel model selection", () => {
       routerType: "standard",
     });
     expect(getChannelModelSelection("bot-1", "research", DEFAULT_CHANNEL_MODEL_SELECTION)).toEqual({
-      modelSelection: "magi_smart_routing",
+      modelSelection: "clawy_smart_routing",
       routerType: "big_dic",
     });
     expect(getChannelModelSelection("bot-1", "new-channel", DEFAULT_CHANNEL_MODEL_SELECTION)).toEqual(
@@ -52,11 +52,11 @@ describe("channel model selection", () => {
 
   it("maps stored UI selections to runtime model overrides", () => {
     expect(channelModelSelectionToRuntimeModel({
-      modelSelection: "magi_smart_routing",
+      modelSelection: "clawy_smart_routing",
       routerType: "standard",
-    })).toBe("magi-smart-router/auto");
+    })).toBe("clawy-smart-router/auto");
     expect(channelModelSelectionToRuntimeModel({
-      modelSelection: "magi_smart_routing",
+      modelSelection: "clawy_smart_routing",
       routerType: "big_dic",
     })).toBe("big-dic-router/auto");
     expect(channelModelSelectionToRuntimeModel({
@@ -66,7 +66,15 @@ describe("channel model selection", () => {
     expect(channelModelSelectionToRuntimeModel({
       modelSelection: "opus",
       routerType: "standard",
-    })).toBe("anthropic/claude-opus-4-6");
+    })).toBe("anthropic/claude-opus-4-8");
+    expect(channelModelSelectionToRuntimeModel({
+      modelSelection: "gemini_3_5_flash",
+      routerType: "standard",
+    })).toBe("google/gemini-3.5-flash");
+    expect(channelModelSelectionToRuntimeModel({
+      modelSelection: "gemini_3_1_flash_lite",
+      routerType: "standard",
+    })).toBe("google/gemini-3.1-flash-lite-preview");
   });
 
   it("restores channel model selection from server channel preferences", () => {
@@ -79,10 +87,10 @@ describe("channel model selection", () => {
     });
 
     expect(channelModelSelectionFromChannel({
-      model_selection: "magi_smart_routing",
+      model_selection: "clawy_smart_routing",
       router_type: "big_dic",
     })).toEqual({
-      modelSelection: "magi_smart_routing",
+      modelSelection: "clawy_smart_routing",
       routerType: "big_dic",
     });
 

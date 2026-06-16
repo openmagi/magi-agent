@@ -11,16 +11,16 @@ export interface ChannelModelPreferenceRecord {
 }
 
 export const DEFAULT_CHANNEL_MODEL_SELECTION: ChannelModelSelection = {
-  modelSelection: "magi_smart_routing",
+  modelSelection: "clawy_smart_routing",
   routerType: "standard",
 };
 
-const STORAGE_KEY = (botId: string) => `magi:channelModelSelections:${botId}`;
+const STORAGE_KEY = (botId: string) => `clawy:channelModelSelections:${botId}`;
 
 const MODEL_SELECTION_TO_RUNTIME_MODEL: Record<string, string> = {
   haiku: "anthropic/claude-haiku-4-5",
   sonnet: "anthropic/claude-sonnet-4-6",
-  opus: "anthropic/claude-opus-4-6",
+  opus: "anthropic/claude-opus-4-8",
   smart_routing: "anthropic/claude-sonnet-4-6",
   gpt_smart_routing: "openai/gpt-5.4-mini",
   gpt_5_nano: "openai/gpt-5.4-nano",
@@ -33,6 +33,7 @@ const MODEL_SELECTION_TO_RUNTIME_MODEL: Record<string, string> = {
   kimi_k2_5: "fireworks/kimi-k2p6",
   minimax_m2_5: "fireworks/minimax-m2p7",
   minimax_m2_7: "fireworks/minimax-m2p7",
+  gemini_3_5_flash: "google/gemini-3.5-flash",
   gemini_3_1_flash: "google/gemini-3.1-flash-lite-preview",
   gemini_3_1_flash_lite: "google/gemini-3.1-flash-lite-preview",
   gemini_3_1_pro: "google/gemini-3.1-pro-preview",
@@ -89,10 +90,10 @@ export function setChannelModelSelection(
 }
 
 export function channelModelSelectionToRuntimeModel(selection: ChannelModelSelection): string {
-  if (selection.modelSelection === "magi_smart_routing") {
+  if (selection.modelSelection === "clawy_smart_routing") {
     return selection.routerType === "big_dic"
       ? "big-dic-router/auto"
-      : "magi-smart-router/auto";
+      : "clawy-smart-router/auto";
   }
   return MODEL_SELECTION_TO_RUNTIME_MODEL[selection.modelSelection] ?? selection.modelSelection;
 }

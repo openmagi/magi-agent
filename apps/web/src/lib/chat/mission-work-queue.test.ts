@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { MissionActivity } from "./types";
+import type { MissionActivity } from "@/chat-core";
 import type { MissionKind, MissionStatus, MissionSummary } from "@/lib/missions/types";
 import {
   buildMissionWorkQueue,

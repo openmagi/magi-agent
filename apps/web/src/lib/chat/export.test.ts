@@ -4,7 +4,7 @@ import {
   buildChatExportMarkdown,
   normalizeSelectedChatExportMessages,
 } from "./export";
-import type { ChatMessage } from "./types";
+import type { ChatMessage } from "@/chat-core";
 
 const messages: ChatMessage[] = [
   { id: "sys-1", role: "system", content: "Reset", timestamp: 1 },

@@ -1,4 +1,6 @@
-import type { Locale } from "@/lib/i18n/types";
+// Inlined from @/lib/i18n/types (Locale) to respect the chat-core boundary
+// (no @/ app imports). Keep in sync with src/lib/i18n/types.ts.
+type Locale = "en" | "es" | "zh" | "ja" | "ko";
 
 const CATEGORY_LABELS: Record<string, Partial<Record<Locale, string>>> = {
   General: { ko: "일반", ja: "一般", es: "General", zh: "常规" },

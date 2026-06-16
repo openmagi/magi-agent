@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback } from "react";
-import type { ChatMessage, ResearchEvidenceSnapshot, ResponseUsage } from "./types";
+import type { ChatMessage, ResearchEvidenceSnapshot, ResponseUsage } from "@/chat-core";
 
 /**
  * OSS stub — E2EE is disabled in the open-source build.

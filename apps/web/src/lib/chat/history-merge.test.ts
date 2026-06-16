@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ChatMessage } from "./types";
+import type { ChatMessage } from "@/chat-core";
 import { mergeChatHistoryPage } from "./history-merge";
 
 function msg(id: string, timestamp: number, role: "user" | "assistant" = "user"): ChatMessage {

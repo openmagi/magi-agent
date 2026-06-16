@@ -1,3 +1,8 @@
+import type {
+  ExplicitRecipeSelectionRequest,
+  PublicRecipeRef,
+} from "./recipe-selection";
+
 /** Response/progress language currently supported by the runtime policy. */
 export type ChatResponseLanguage = "en" | "ko" | "ja" | "zh" | "es";
 
@@ -47,8 +52,8 @@ export interface ChatMessage {
 }
 
 /**
- * Minimal per-task shape echoed by the core-agent `task_board` AgentEvent.
- * See the runtime TaskBoard and design §7.1.
+ * Minimal per-task shape echoed by the Magi Agent `task_board` AgentEvent.
+ * This mirrors the public runtime task-board event contract.
  */
 export interface TaskBoardTask {
   id: string;
@@ -89,7 +94,7 @@ export interface PatchPreview {
 export interface DocumentDraftPreview {
   id: string;
   filename?: string;
-  format: "md" | "txt";
+  format: "md" | "txt" | "html";
   status: "streaming" | "done";
   contentPreview: string;
   contentLength: number;
@@ -175,6 +180,22 @@ export interface CitationGateStatus {
   checkedAt: number;
 }
 
+export type ClaimSupportStatus =
+  | "supported"
+  | "weak"
+  | "unverifiable"
+  | "contradicted"
+  | "not_checked"
+  | "failed";
+
+export interface GovernedClaimSummary {
+  claimId: string;
+  claimType: "numeric" | "date" | "comparison" | "quote" | "causal" | "general";
+  supportStatus: ClaimSupportStatus;
+  citationRefs: string[];
+  evidenceRefs: string[];
+}
+
 export interface RuntimeTrace {
   turnId: string;
   phase: "verifier_blocked" | "retry_scheduled" | "retry_aborted" | "terminal_abort";
@@ -190,9 +211,84 @@ export interface RuntimeTrace {
   receivedAt: number;
 }
 
+export interface DeterministicGuardrailSummary {
+  guardrailId: string;
+  stage: string;
+  status: "passed" | "blocked" | "repair" | "approval_required" | "abstained" | "fallback";
+  reasonCodes: string[];
+  validatorTrustClass: "deterministic" | "llm_assisted" | "runtime";
+  policyDecisionId: string;
+  evidenceRefs: string[];
+}
+
+export interface AppliedRecipeSummary {
+  recipeId: string;
+  version: string;
+  sourceDigest?: string;
+  role: "primary" | "dependency" | "hard_safety" | "default";
+  governed: boolean;
+}
+
+export type RecipeSelectionStatus =
+  | "auto_selected"
+  | "explicit_applied"
+  | "explicit_blocked"
+  | "explicit_incompatible"
+  | "explicit_requested"
+  | "explicit_unavailable";
+
+export type RecipeSelectionSource = "auto" | "explicit" | "session_default";
+
+export interface RecipeSelectionSummary {
+  status: RecipeSelectionStatus;
+  selectionSource?: RecipeSelectionSource;
+  requestedRecipeRefs: PublicRecipeRef[];
+  appliedRecipeRefs: PublicRecipeRef[];
+  omittedRecipeRefs: PublicRecipeRef[];
+  omissionReasons: string[];
+  policySnapshotDigest?: string;
+  turnBlocked?: boolean;
+  fallbackUsed?: boolean;
+  nextAction?: string;
+}
+
+export interface VerificationGateSummary {
+  gateId: string;
+  stage: string;
+  status: "pending" | "passed" | "blocked" | "repair" | "approval_required" | "abstained" | "fallback";
+  validatorTrustClass: "deterministic" | "llm_assisted" | "runtime";
+  reasonCodes: string[];
+  evidenceRefs: string[];
+  policyDecisionId?: string;
+  checkedAt?: number;
+}
+
+export interface DeterministicRuntimeState {
+  workflowId?: string;
+  workflowVersion?: string;
+  routeId?: string;
+  governed?: boolean;
+  effectivePolicySnapshotDigest?: string;
+  ledgerHeadDigest?: string;
+  checkpointId?: string;
+  projectionMode?: "structured_claims_only" | "artifact_projection" | "raw_text_allowed";
+  outputAllowed?: boolean;
+  blockedReasonCodes?: string[];
+  claimCount?: number;
+  renderedClaimCount?: number;
+  fallbackReasonCode?: string;
+  fallbackAuthority?: "typescript" | "none";
+  guardrails?: DeterministicGuardrailSummary[];
+  appliedRecipes?: AppliedRecipeSummary[];
+  recipeSelection?: RecipeSelectionSummary;
+  verificationGates?: VerificationGateSummary[];
+}
+
 export interface ResearchEvidenceSnapshot {
   inspectedSources: InspectedSource[];
   citationGate?: CitationGateStatus | null;
+  claims?: GovernedClaimSummary[];
+  projectionMode?: "structured_claims_only" | "artifact_projection" | "raw_text_allowed";
   capturedAt: number;
 }
 
@@ -293,7 +389,7 @@ export interface ChannelState {
   hasTextContent?: boolean;
   /** Timestamp when thinking phase started (for elapsed timer) */
   thinkingStartedAt?: number | null;
-  /** Latest structured runtime phase from core-agent. */
+  /** Latest structured runtime phase from Magi Agent. */
   turnPhase?: "pending" | "planning" | "executing" | "verifying" | "committing" | "compacting" | "committed" | "aborted" | null;
   /** Latest heartbeat elapsed time while the current iteration is still alive. */
   heartbeatElapsedMs?: number | null;
@@ -329,6 +425,10 @@ export interface ChannelState {
   citationGate?: CitationGateStatus | null;
   /** Public runtime verifier/contract trace for the current live turn. */
   runtimeTraces?: RuntimeTrace[];
+  /** Sanitized deterministic runtime projection state for the current live turn. */
+  determinism?: DeterministicRuntimeState;
+  /** Local/requested recipe selection for the current turn until runtime reports admission. */
+  recipeSelection?: RecipeSelectionSummary;
   /** Final token/cost totals once the runtime commits the turn. */
   turnUsage?: ResponseUsage;
   /** Live public transcript items in the exact client receive order. */
@@ -358,6 +458,14 @@ export type ControlRequestState =
 
 export type ControlRequestDecision = "approved" | "denied" | "answered";
 
+export interface ApprovalReceiptPreview {
+  actionDigest?: string;
+  policySnapshotDigest?: string;
+  approvalScope?: string;
+  expiresAt?: number;
+  approverGroup?: string;
+}
+
 export interface ControlRequestRecord {
   requestId: string;
   kind: ControlRequestKind;
@@ -375,6 +483,7 @@ export interface ControlRequestRecord {
   feedback?: string;
   updatedInput?: unknown;
   answer?: string;
+  approvalReceiptPreview?: ApprovalReceiptPreview;
 }
 
 export type ControlEvent =
@@ -404,12 +513,14 @@ export interface ServerMessage {
   created_at: string;
   research_evidence?: ResearchEvidenceSnapshot | null;
   researchEvidence?: ResearchEvidenceSnapshot | null;
+  usage?: ResponseUsage | null;
 }
 
 export interface ReorderEntry {
   name: string;
   category?: string;
   position: number;
+  display_name?: string;
 }
 
 /**
@@ -440,6 +551,8 @@ export interface QueuedMessage {
   modelOverride?: string;
   /** Preserve persistent-goal intent when the message drains later. */
   goalMode?: boolean;
+  /** Preserve explicit recipe request intent when the message drains later. */
+  explicitRecipeSelection?: ExplicitRecipeSelectionRequest["explicitRecipeSelection"];
   queuedAt: number;
 }
 

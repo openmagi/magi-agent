@@ -1,6 +1,6 @@
 "use client";
 
-import type { Attachment } from "./types";
+import type { Attachment } from "@/chat-core";
 
 const CHAT_PROXY_URL = process.env.NEXT_PUBLIC_CHAT_PROXY_URL || "https://chat.openmagi.ai";
 

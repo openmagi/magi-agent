@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { shouldRetryEmptyCompletion } from "./empty-response";
-import type { ChannelState } from "./types";
+import type { ChannelState } from "@/chat-core";
 
 function state(overrides: Partial<ChannelState> = {}): ChannelState {
   return {

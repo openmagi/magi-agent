@@ -15,7 +15,7 @@ import type {
   QueuedMessage,
   SubagentActivity,
   TaskBoardSnapshot,
-} from "@/lib/chat/types";
+} from "@/chat-core";
 
 interface RunInspectorDockProps {
   channelState: ChannelState;
