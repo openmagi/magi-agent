@@ -290,6 +290,163 @@ def test_cli_model_runner_attaches_first_party_policy_callback_by_default(
     assert "test_interpretation" in payload["phaseRouting"]["phaseRoutes"]
 
 
+class _FakeAdkState(dict):
+    """Minimal mapping standing in for the ADK tool-context ``state``.
+
+    A plain dict already satisfies ``get`` + ``__setitem__``; subclassing keeps
+    the intent explicit and lets a malformed-state test override ``get`` to raise.
+    """
+
+
+class _FakeAdkToolContext:
+    """Stand-in for the RAW ADK tool context the before_tool_callback receives.
+
+    ADK passes its own tool context (which exposes ``.state``) directly to the
+    callback — distinct from the magi ``ToolContext`` wrapper whose
+    ``adk_tool_context.state`` ``select_recipe_handler`` reads. The callback reads
+    ``tool_context.state`` the same way the wrapper's ``adk_tool_context`` does.
+    """
+
+    def __init__(self, state: object) -> None:
+        self.state = state
+
+
+class _PolicyAgent:
+    """Bare agent stub the first-party policy callback attaches to."""
+
+
+def _first_party_callback(agent: object):
+    callbacks = getattr(agent, "before_tool_callback", None) or []
+    for cb in callbacks:
+        if getattr(cb, "__name__", "") == "magi_first_party_policy_before_tool":
+            return cb
+    raise AssertionError("first-party policy callback not attached")
+
+
+def _synthetic_scope_registry():
+    from magi_agent.recipes.compiler import PackRegistry, RecipePackManifest
+
+    return PackRegistry(
+        (
+            RecipePackManifest(
+                packId="synth.pack-a",
+                displayName="Pack A",
+                description="A",
+                whenToUse="use A",
+                grantedToolNames=("ToolOnlyA",),
+            ),
+            RecipePackManifest(
+                packId="synth.pack-b",
+                displayName="Pack B",
+                description="B",
+                whenToUse="use B",
+                grantedToolNames=("ToolOnlyB",),
+            ),
+        )
+    )
+
+
+def _attach_synthetic_policy(*, env: dict[str, str] | None = None) -> object:
+    agent = _PolicyAgent()
+    real_runner._attach_first_party_policy_callback(
+        agent,
+        _coding_policy_assembly(),
+        pack_registry=_synthetic_scope_registry(),
+        env=env if env is not None else {},
+    )
+    return agent
+
+
+def test_first_party_callback_flag_off_allows_scoped_tool_regardless_of_selection() -> None:
+    agent = _attach_synthetic_policy(env={})  # flag OFF
+    callback = _first_party_callback(agent)
+    state = _FakeAdkState({"selected_recipe_pack_ids": ("synth.pack-a",)})
+    ctx = _FakeAdkToolContext(state)
+
+    # A tool exclusively granted by pack B is still allowed when the flag is OFF.
+    result = asyncio.run(
+        callback(tool=_FakeTool("ToolOnlyB"), args={}, tool_context=ctx)
+    )
+    assert result is None
+
+    # Production-authority block still works with the flag OFF.
+    blocked = asyncio.run(
+        callback(
+            tool=_FakeTool("Bash"),
+            args={"productionWriteAllowed": True},
+            tool_context=ctx,
+        )
+    )
+    assert blocked is not None
+    assert blocked["error"] == "production_authority_denied"
+
+
+def test_first_party_callback_flag_on_no_selection_allows() -> None:
+    agent = _attach_synthetic_policy(env={"MAGI_RECIPE_ROUTING_LLM_ENABLED": "1"})
+    callback = _first_party_callback(agent)
+    ctx = _FakeAdkToolContext(_FakeAdkState({}))
+
+    result = asyncio.run(
+        callback(tool=_FakeTool("ToolOnlyB"), args={}, tool_context=ctx)
+    )
+    assert result is None
+
+
+def test_first_party_callback_flag_on_enforces_recipe_scope() -> None:
+    agent = _attach_synthetic_policy(env={"MAGI_RECIPE_ROUTING_LLM_ENABLED": "1"})
+    callback = _first_party_callback(agent)
+    ctx = _FakeAdkToolContext(
+        _FakeAdkState({"selected_recipe_pack_ids": ("synth.pack-a",)})
+    )
+
+    # Pack A's granted tool → allowed.
+    allowed = asyncio.run(
+        callback(tool=_FakeTool("ToolOnlyA"), args={}, tool_context=ctx)
+    )
+    assert allowed is None
+
+    # A base-free tool (granted by no pack) → allowed.
+    base_free = asyncio.run(
+        callback(tool=_FakeTool("Bash"), args={}, tool_context=ctx)
+    )
+    assert base_free is None
+
+    # A tool exclusively granted by pack B (not selected) → blocked, naming B.
+    blocked = asyncio.run(
+        callback(tool=_FakeTool("ToolOnlyB"), args={}, tool_context=ctx)
+    )
+    assert blocked is not None
+    assert blocked["status"] == "blocked"
+    assert blocked["tool"] == "ToolOnlyB"
+    assert "runnerPolicyAssembly" in blocked
+    assert "synth.pack-b" in blocked["feedback"]
+    assert "select_recipe" in blocked["feedback"]
+
+
+def test_first_party_callback_flag_on_malformed_state_is_failsafe() -> None:
+    agent = _attach_synthetic_policy(env={"MAGI_RECIPE_ROUTING_LLM_ENABLED": "1"})
+    callback = _first_party_callback(agent)
+
+    class _RaisingState(_FakeAdkState):
+        def get(self, *args, **kwargs):  # noqa: ANN002, ANN003
+            raise RuntimeError("boom")
+
+    ctx = _FakeAdkToolContext(_RaisingState())
+
+    # Malformed/raising state must never raise and never block → allow.
+    result = asyncio.run(
+        callback(tool=_FakeTool("ToolOnlyB"), args={}, tool_context=ctx)
+    )
+    assert result is None
+
+    # Missing state attribute entirely → also fail-safe.
+    no_state_ctx = object()
+    result2 = asyncio.run(
+        callback(tool=_FakeTool("ToolOnlyB"), args={}, tool_context=no_state_ctx)
+    )
+    assert result2 is None
+
+
 def test_cli_model_runner_materializes_task_profile_phase_routing(tmp_path) -> None:
     runner = build_cli_model_runner(
         _config(),
