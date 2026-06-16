@@ -7,6 +7,8 @@ from typing import Any
 # only tool_registry. Hook manifests are not surfaced via any runtime accessor;
 # the /v1/app/skills endpoint (app_api._RUNTIME_HOOK_POINTS) uses this same
 # hardcoded list. We source from there via import so both surfaces stay in sync.
+from magi_agent.customize.preset_map import enforcement_for, supported_modes_for
+from magi_agent.harness.presets import builtin_preset_catalog
 from magi_agent.transport.app_api import _RUNTIME_HOOK_POINTS as _HOOK_POINTS
 
 # Curated constants mirror REAL recipe modules under magi_agent/recipes/first_party/
@@ -33,20 +35,38 @@ RECIPES: list[dict[str, str]] = [
      "description": "Gated self-improvement proposal loop."},
 ]
 
-HARNESS_PRESETS: list[dict[str, str]] = [
-    {"id": "answer_quality", "title": "Answer Quality", "category": "answer",
-     "description": "Verify answers are complete and well-formed."},
-    {"id": "fact_grounding", "title": "Fact Grounding", "category": "fact",
-     "description": "Require factual claims to be grounded in sources."},
-    {"id": "deterministic_evidence", "title": "Deterministic Evidence", "category": "fact",
-     "description": "Deterministic evidence extraction for claims."},
-    {"id": "coding_verification", "title": "Coding Verification", "category": "coding",
-     "description": "Verify code changes against tests/build."},
-    {"id": "source_authority", "title": "Source Authority", "category": "research",
-     "description": "Weight sources by authority during research."},
-    {"id": "hard_safety", "title": "Hard Safety", "category": "security",
-     "description": "Always-on hard safety guardrails."},
-]
+def _title_from_key(key: str) -> str:
+    return key.replace("-", " ").title()
+
+
+def _build_harness_presets() -> list[dict[str, Any]]:
+    """Source the real harness preset catalog (hyphenated ids, 36 presets).
+
+    Each entry carries the runtime-honest ``enforcement`` status and
+    ``supportedModes`` from ``customize.preset_map`` so the UI never shows a
+    toggle that does nothing.
+    """
+    entries: list[dict[str, Any]] = []
+    for preset in builtin_preset_catalog():
+        category = preset.category.value
+        is_security = bool(preset.hard_safety or preset.security_critical)
+        entries.append(
+            {
+                "id": preset.key,
+                "title": _title_from_key(preset.key),
+                "category": category,
+                "defaultEnabled": bool(preset.default_on),
+                "enforcement": enforcement_for(
+                    preset.key, category=category, is_security=is_security
+                ),
+                "supportedModes": list(supported_modes_for(preset.key)),
+            }
+        )
+    return entries
+
+
+# Real harness preset catalog (36 presets), built once at import.
+HARNESS_PRESETS: list[dict[str, Any]] = _build_harness_presets()
 
 
 def _recipe_entries() -> list[dict[str, Any]]:
@@ -54,7 +74,9 @@ def _recipe_entries() -> list[dict[str, Any]]:
 
 
 def _preset_entries() -> list[dict[str, Any]]:
-    return [{**p, "enabled": False} for p in HARNESS_PRESETS]
+    # ``enabled`` reflects the catalog default; the user's persisted override is
+    # layered separately by the frontend from the overrides payload.
+    return [{**p, "enabled": p["defaultEnabled"]} for p in HARNESS_PRESETS]
 
 
 def _hook_entries(runtime: Any) -> list[dict[str, Any]]:

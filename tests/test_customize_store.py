@@ -22,23 +22,32 @@ def test_set_user_rules_caps_length(tmp_path: Path) -> None:
     assert len(out["user_rules"]) == 20_000
 
 
-def test_set_verification_override_persists_and_normalizes(tmp_path: Path) -> None:
+def test_set_preset_override_persists_explicit_bool_and_mode(tmp_path: Path) -> None:
     p = tmp_path / "customize.json"
     out = set_verification_override(
-        "harness_presets", "answer_quality", True, mode="hybrid", path=p
+        "harness_presets", "coding-verification", True, mode="deterministic", path=p
     )
-    assert "answer_quality" in out["verification"]["harness_presets"]
-    assert out["verification"]["modes"]["answer_quality"] == "hybrid"
+    assert out["verification"]["preset_overrides"]["coding-verification"] is True
+    assert out["verification"]["modes"]["coding-verification"] == "deterministic"
     reloaded = load_overrides(p)
-    assert reloaded["verification"]["modes"]["answer_quality"] == "hybrid"
+    assert reloaded["verification"]["preset_overrides"]["coding-verification"] is True
 
 
-def test_set_verification_override_disable_removes(tmp_path: Path) -> None:
+def test_set_preset_override_disable_retains_explicit_false(tmp_path: Path) -> None:
+    # opt-out of a default-on gate must PERSIST as explicit False (not removed).
     p = tmp_path / "customize.json"
-    set_verification_override("harness_presets", "answer_quality", True, mode="deterministic", path=p)
-    out = set_verification_override("harness_presets", "answer_quality", False, mode=None, path=p)
-    assert "answer_quality" not in out["verification"]["harness_presets"]
-    assert "answer_quality" not in out["verification"]["modes"]
+    set_verification_override("harness_presets", "coding-verification", True, path=p)
+    out = set_verification_override("harness_presets", "coding-verification", False, path=p)
+    assert out["verification"]["preset_overrides"]["coding-verification"] is False
+    assert "coding-verification" not in out["verification"]["modes"]
+
+
+def test_set_verification_override_recipes_list(tmp_path: Path) -> None:
+    p = tmp_path / "customize.json"
+    out = set_verification_override("recipes", "research", True, path=p)
+    assert "research" in out["verification"]["recipes"]
+    out = set_verification_override("recipes", "research", False, path=p)
+    assert "research" not in out["verification"]["recipes"]
 
 
 def test_set_verification_override_hooks_kind(tmp_path: Path) -> None:
@@ -68,6 +77,7 @@ def test_partial_file_is_shape_normalized(tmp_path: Path) -> None:
     assert result["verification"] == {
         "recipes": [],
         "harness_presets": [],
+        "preset_overrides": {},
         "hooks": {},
         "modes": {},
         "custom_rules": [],

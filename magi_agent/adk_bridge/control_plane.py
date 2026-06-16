@@ -95,7 +95,14 @@ from typing import Protocol
 
 from google.adk.plugins.base_plugin import BasePlugin
 
-from magi_agent.config.env import general_automation_live_enabled
+from magi_agent.adk_bridge.gemini_content_ordering import (
+    GEMINI_CONTENT_ORDER_REPAIR_CONTROL_NAME,
+    apply_gemini_content_ordering_repair,
+)
+from magi_agent.config.env import (
+    general_automation_live_enabled,
+    parse_provider_repair_enabled,
+)
 from magi_agent.hooks.manifest import HookManifest, HookPoint
 from magi_agent.tools.manifest import ToolSource
 
@@ -223,6 +230,55 @@ class BaseLoopControl:
         callback_context: Any,
     ) -> None:
         return None
+
+
+# ---------------------------------------------------------------------------
+# GeminiContentOrderingRepairControl
+# ---------------------------------------------------------------------------
+
+
+class GeminiContentOrderingRepairControl(BaseLoopControl):
+    """Repair ``llm_request.contents`` ordering before each model call.
+
+    Across multi-tool turns ADK can assemble contents with two consecutive
+    ``model`` turns (a text turn then a ``function_call`` turn), which Gemini
+    rejects with HTTP 400 "function call turn comes immediately after a user turn
+    or after a function response turn" — the live runner then dies with a generic
+    ``runner_error`` and the turn is cut off mid-stream. This control merges
+    adjacent same-role turns so roles alternate and every ``function_call`` turn
+    is preceded by a user/function_response turn. ``before_model``-only and a
+    no-op on already-valid content; inherits no-op ``on_before_tool`` from
+    ``BaseLoopControl`` so the permission-gate registration guard is satisfied.
+    """
+
+    name = GEMINI_CONTENT_ORDER_REPAIR_CONTROL_NAME
+
+    async def on_before_model(
+        self,
+        *,
+        callback_context: Any,
+        llm_request: Any,
+    ) -> None:
+        apply_gemini_content_ordering_repair(llm_request)
+        return None
+
+
+def build_gemini_content_ordering_control(
+    env: dict[str, str],
+) -> GeminiContentOrderingRepairControl | None:
+    """Return the repair control when provider repair is enabled, else ``None``.
+
+    Gated on the existing profile-aware ``MAGI_PROVIDER_REPAIR_ENABLED`` flag
+    (PR9 per-provider compat repair): this content-ordering repair is the same
+    class of provider-compatibility fix, just on ``llm_request.contents`` rather
+    than tool schemas. Reusing the flag keeps the conservative ``safe`` profile's
+    control plane empty (the flag is OFF there) and turns the repair ON
+    automatically in the full runtime profile, with no new flag to add to the
+    ratchet.
+    """
+    if not parse_provider_repair_enabled(env):
+        return None
+    return GeminiContentOrderingRepairControl()
 
 
 # ---------------------------------------------------------------------------
@@ -1432,6 +1488,15 @@ def build_core_default_plane(
                 env=env,
             )
         )
+
+    # 7. Gemini content-ordering repair (gated on MAGI_PROVIDER_REPAIR_ENABLED —
+    #    ON in the full profile, OFF in safe). before_model-only; a no-op on
+    #    already-valid content. Prevents the multi-tool "function call turn comes
+    #    immediately after a user turn or function response turn" Gemini 400 that
+    #    surfaced as a generic runner_error and cut turns off mid-stream.
+    gemini_content_order_control = build_gemini_content_ordering_control(env)
+    if gemini_content_order_control is not None:
+        plane.register(gemini_content_order_control)
 
     return plane
 

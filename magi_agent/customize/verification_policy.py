@@ -21,6 +21,9 @@ class CustomizeVerificationPolicy:
     enabled_hooks: frozenset[str] = frozenset()
     modes: dict[str, str] = field(default_factory=dict)
     user_rules: str = ""
+    # Explicit per-preset enable state (tri-state: True/False/absent). Source of
+    # truth for opt-out of default-on gates.
+    preset_overrides: dict[str, bool] = field(default_factory=dict)
 
     @classmethod
     def from_overrides(cls, overrides: dict[str, Any]) -> "CustomizeVerificationPolicy":
@@ -37,12 +40,26 @@ class CustomizeVerificationPolicy:
             for k, m in (v.get("modes", {}) or {}).items()
             if isinstance(k, str) and isinstance(m, str)
         }
+        preset_overrides = {
+            k: bool(on)
+            for k, on in (v.get("preset_overrides", {}) or {}).items()
+            if isinstance(k, str) and isinstance(on, bool)
+        }
         raw_rules = (overrides or {}).get("user_rules", "")
         rules = raw_rules if isinstance(raw_rules, str) else ""
-        return cls(presets, recipes, hooks, modes, rules)
+        return cls(presets, recipes, hooks, modes, rules, preset_overrides)
 
     def is_enabled(self, preset_id: str) -> bool:
         return preset_id in self.enabled_presets
+
+    def explicit_preset(self, preset_id: str) -> bool | None:
+        """Explicit per-preset enable state, or None if the user never set it."""
+        return self.preset_overrides.get(preset_id)
+
+    def resolve_enabled(self, preset_id: str, *, default: bool) -> bool:
+        """Resolved enable state: explicit override if set, else ``default``."""
+        explicit = self.preset_overrides.get(preset_id)
+        return explicit if explicit is not None else default
 
     def mode(self, preset_id: str) -> str:
         return self.modes.get(preset_id, _DEFAULT_MODE)

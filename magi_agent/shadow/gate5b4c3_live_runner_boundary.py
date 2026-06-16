@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
 
 from magi_agent.config.env import parse_output_continuation_env
+from magi_agent.ops.health import _truthy_env
 from magi_agent.evidence.gate1a_egress_correlation import (
     Gate1AEgressCorrelationContext,
     build_gate1a_proxy_http_options,
@@ -813,6 +814,22 @@ class Gate5B4C3LiveRunnerBoundary:
                                         "delta": visible_delta,
                                     }
                                 )
+                        thinking_chunk = _event_thinking_text(event)
+                        if (
+                            thinking_chunk
+                            and _event_is_partial(event)
+                            and _truthy_env("MAGI_STREAM_THINKING")
+                        ):
+                            # Stream model reasoning on the thinking channel,
+                            # gated at the producer behind MAGI_STREAM_THINKING
+                            # (sse.py also gates the public path). Only partial
+                            # events, to avoid the non-partial aggregate.
+                            self._emit_public_event(
+                                {
+                                    "type": "thinking_delta",
+                                    "delta": thinking_chunk,
+                                }
+                            )
                         event_usage = _event_usage_metadata(event)
                         if event_usage is not None:
                             stream_usage = event_usage
@@ -2001,10 +2018,39 @@ def _event_is_partial(event: object) -> bool:
 def _text_chunks_from_parts(parts: Sequence[object]) -> list[str]:
     chunks: list[str] = []
     for part in parts:
+        # Model reasoning (thought=True) is NOT visible answer text; it is
+        # surfaced separately via _thinking_chunks_from_parts so the hosted UI
+        # renders it in the collapsible thinking block instead of leaking it
+        # into the final answer.
+        if bool(_mapping_or_attr(part, "thought")):
+            continue
         text = _mapping_or_attr(part, "text")
         if isinstance(text, str) and text:
             chunks.append(text)
     return chunks
+
+
+def _thinking_chunks_from_parts(parts: Sequence[object]) -> list[str]:
+    chunks: list[str] = []
+    for part in parts:
+        if not bool(_mapping_or_attr(part, "thought")):
+            continue
+        text = _mapping_or_attr(part, "text")
+        if isinstance(text, str) and text:
+            chunks.append(text)
+    return chunks
+
+
+def _event_thinking_text(event: object) -> str | None:
+    chunks = _thinking_chunks_from_parts(_event_parts(event))
+    if chunks:
+        return "".join(chunks)
+    dumped = _safe_model_dump_mapping(event)
+    if dumped is not None:
+        chunks = _thinking_chunks_from_parts(_event_parts(dumped))
+        if chunks:
+            return "".join(chunks)
+    return None
 
 
 def _event_function_calls(event: object) -> list[Mapping[str, object]]:
@@ -2661,6 +2707,19 @@ async def _run_no_tool_finalizer(
                                 "delta": visible_delta,
                             }
                         )
+            thinking_chunk = _event_thinking_text(event)
+            if (
+                thinking_chunk
+                and _event_is_partial(event)
+                and public_event_sink is not None
+                and _truthy_env("MAGI_STREAM_THINKING")
+            ):
+                public_event_sink(
+                    {
+                        "type": "thinking_delta",
+                        "delta": thinking_chunk,
+                    }
+                )
             if finalizer_events >= 8:
                 break
     except Exception:

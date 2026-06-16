@@ -11,6 +11,11 @@ DEFAULT_OVERRIDES: dict[str, Any] = {
     "verification": {
         "recipes": [],
         "harness_presets": [],
+        # Explicit per-preset enable state (tri-state: present True/False, or
+        # absent → use the preset's runtime default). Drives opt-out of
+        # default-on verification gates. Distinct from the legacy
+        # ``harness_presets`` enabled-list (kept for back-compat / recipes-style).
+        "preset_overrides": {},
         "hooks": {},
         "modes": {},
         "custom_rules": [],
@@ -96,9 +101,6 @@ def set_tool_override(name: str, enabled: bool, path: Path | None = None) -> dic
     return overrides
 
 
-_VERIFICATION_LIST_KINDS = ("recipes", "harness_presets")
-
-
 def set_verification_override(
     kind: str,
     item_id: str,
@@ -108,17 +110,23 @@ def set_verification_override(
 ) -> dict[str, Any]:
     """Enable/disable one verification item and record its mode.
 
-    ``kind`` is one of ``recipes``, ``harness_presets`` (list-backed) or
-    ``hooks`` (dict-backed). Enabling appends/sets; disabling removes the entry
-    and clears its mode. Never raises on bad input; returns the new overrides.
+    ``kind``:
+    - ``harness_presets`` — explicit tri-state in ``preset_overrides`` (the bool
+      is RETAINED on disable so an opt-out of a default-on gate persists).
+    - ``recipes`` — list-backed (append on enable, remove on disable).
+    - ``hooks`` — dict-backed.
+
+    Never raises on bad input; returns the new overrides.
     """
     target = path or customize_path()
     overrides = load_overrides(target)
     verification = overrides["verification"]
-    if kind == "hooks":
+    if kind == "harness_presets":
+        verification["preset_overrides"][item_id] = bool(enabled)
+    elif kind == "hooks":
         verification["hooks"][item_id] = bool(enabled)
-    elif kind in _VERIFICATION_LIST_KINDS:
-        bucket = verification[kind]
+    elif kind == "recipes":
+        bucket = verification["recipes"]
         if enabled and item_id not in bucket:
             bucket.append(item_id)
         if not enabled and item_id in bucket:

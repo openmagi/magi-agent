@@ -25,13 +25,13 @@ def test_startup_applies_verification_policy_when_flag_on(tmp_path, monkeypatch)
     monkeypatch.setenv("MAGI_CUSTOMIZE", str(cfile))
     from magi_agent.customize.store import set_verification_override
 
-    set_verification_override("harness_presets", "answer_quality", True, mode="hybrid", path=cfile)
+    set_verification_override("harness_presets", "coding-verification", False, mode="deterministic", path=cfile)
 
     from tests.test_customize_routes import _TOKEN, _build_runtime
 
     runtime = _build_runtime(tmp_path, gateway_token=_TOKEN)
-    assert runtime.customize_verification_policy.is_enabled("answer_quality")
-    assert runtime.customize_verification_policy.mode("answer_quality") == "hybrid"
+    assert runtime.customize_verification_policy.explicit_preset("coding-verification") is False
+    assert runtime.customize_verification_policy.resolve_enabled("coding-verification", default=True) is False
 
 
 def test_startup_skips_verification_policy_when_flag_off(tmp_path, monkeypatch):

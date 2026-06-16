@@ -15,6 +15,7 @@ from magi_agent.runtime.events import (
     public_refs,
     public_terminal_refs,
 )
+from magi_agent.ops.health import _truthy_env
 from magi_agent.runtime.transcript import (
     AssistantTextEntry,
     TranscriptEntry,
@@ -742,6 +743,20 @@ def _project_content_parts(
 
     for index, part in enumerate(_event_parts(event)):
         if getattr(part, "thought", False):
+            # Model reasoning (ADK marks it thought=True; covers Anthropic
+            # thinking blocks and LiteLLM reasoning_content e.g. Kimi/Gemini).
+            # Surface streaming thought on the thinking_delta channel so the
+            # hosted UI renders it in the collapsible thinking block instead of
+            # dropping it. sse.py gates this behind MAGI_STREAM_THINKING.
+            # Gated at the producer (defense in depth): when MAGI_STREAM_THINKING
+            # is off the projection layer stays a hard privacy boundary and emits
+            # nothing for thought parts. When on, surface streaming thought as
+            # thinking_delta; sse.py redacts/forwards it for the public path.
+            thought_text = getattr(part, "text", None)
+            if thought_text and event.partial and _truthy_env("MAGI_STREAM_THINKING"):
+                agent_events.append(
+                    {"type": "thinking_delta", "delta": _public_stream_text(thought_text)}
+                )
             continue
         text = getattr(part, "text", None)
         if text:
