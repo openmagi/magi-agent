@@ -1,6 +1,6 @@
 "use client";
 
-import type { KbDocReference } from "@/lib/chat/types";
+import type { KbDocReference } from "@/chat-core";
 
 interface KbContextBarProps {
   docs: KbDocReference[];

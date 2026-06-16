@@ -1,4 +1,4 @@
-import type { ChatMessage, ServerMessage } from "./types";
+import type { ChatMessage, ServerMessage } from "@/chat-core";
 
 const REPLACEMENT_CHAR = "\uFFFD";
 const SERVER_PATCH_EXTRA_CHARS = 20;

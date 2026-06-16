@@ -23,7 +23,7 @@ import type {
   RuntimeTrace,
   SubagentActivity,
   ToolActivity,
-} from "./types";
+} from "@/chat-core";
 
 /**
  * Tests for the mid-turn inject helper (#86). The helper is a thin

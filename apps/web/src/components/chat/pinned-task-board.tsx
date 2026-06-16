@@ -1,7 +1,7 @@
 "use client";
 
 import { TaskBoard } from "./task-board";
-import type { TaskBoardSnapshot } from "@/lib/chat/types";
+import type { TaskBoardSnapshot } from "@/chat-core";
 
 interface PinnedTaskBoardDockProps {
   snapshot?: TaskBoardSnapshot | null;

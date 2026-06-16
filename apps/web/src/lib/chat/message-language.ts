@@ -1,4 +1,4 @@
-import type { ChatResponseLanguage } from "./types";
+import type { ChatResponseLanguage } from "@/chat-core";
 
 function requestedOutputLanguage(text: string): ChatResponseLanguage | null {
   const lower = text.toLowerCase();

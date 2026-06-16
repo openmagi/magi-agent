@@ -9,7 +9,7 @@ import type {
   TaskBoardTask,
   ToolActivity,
   ChatResponseLanguage,
-} from "./types";
+} from "@/chat-core";
 import { derivePublicToolPreview } from "./public-tool-preview";
 
 export type WorkConsoleRowGroup =

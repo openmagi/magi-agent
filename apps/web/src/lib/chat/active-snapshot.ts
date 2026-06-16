@@ -6,7 +6,7 @@ import type {
   SubagentActivity,
   TaskBoardSnapshot,
   ToolActivity,
-} from "./types";
+} from "@/chat-core";
 
 export interface ActiveSnapshot {
   turnId: string | null;

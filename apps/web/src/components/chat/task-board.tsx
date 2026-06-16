@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { TaskBoardSnapshot, TaskBoardTask } from "@/lib/chat/types";
+import type { TaskBoardSnapshot, TaskBoardTask } from "@/chat-core";
 
 interface TaskBoardProps {
   snapshot: TaskBoardSnapshot;

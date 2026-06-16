@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import type { ToolActivity } from "@/lib/chat/types";
+import type { ToolActivity } from "@/chat-core";
 
 interface ThinkingBlockProps {
   /** Thinking text content */

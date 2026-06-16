@@ -3,7 +3,7 @@ import {
   findLatestAssistantServerMessage,
   shouldPatchAssistantTextFromServer,
 } from "./server-reconcile";
-import type { ServerMessage } from "./types";
+import type { ServerMessage } from "@/chat-core";
 
 describe("server chat reconciliation", () => {
   it("patches a streamed assistant message when the local text contains UTF-8 replacement characters", () => {

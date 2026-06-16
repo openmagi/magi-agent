@@ -11,7 +11,7 @@ import {
   WORK_CONSOLE_MOTION_TICK_MS,
   smoothedHeartbeatElapsedMs,
   workConsoleRowDelayMs,
-} from "@/lib/chat/work-console-motion";
+} from "@/chat-core";
 import { BrowserFramePreview } from "./browser-frame-preview";
 import type {
   ChannelState,
@@ -19,7 +19,7 @@ import type {
   ControlRequestRecord,
   DocumentDraftPreview,
   QueuedMessage,
-} from "@/lib/chat/types";
+} from "@/chat-core";
 
 interface WorkConsolePanelProps {
   channelState: ChannelState;

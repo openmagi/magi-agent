@@ -4,7 +4,7 @@ import {
   replaceLiveTranscriptText,
   upsertLiveTranscriptWorkRows,
 } from "./live-transcript";
-import type { LiveTranscriptItem } from "./types";
+import type { LiveTranscriptItem } from "@/chat-core";
 import type { WorkConsoleRow } from "./work-console";
 
 describe("live transcript helpers", () => {

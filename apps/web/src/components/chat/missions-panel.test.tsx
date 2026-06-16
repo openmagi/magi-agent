@@ -6,7 +6,7 @@ import {
   shouldLoadRemoteMissions,
   shouldReloadMissionDetailForEvent,
 } from "./missions-panel";
-import type { MissionActivity } from "@/lib/chat/types";
+import type { MissionActivity } from "@/chat-core";
 import type { MissionDetail, MissionSummary } from "@/lib/missions/types";
 
 const liveMissions: MissionActivity[] = [

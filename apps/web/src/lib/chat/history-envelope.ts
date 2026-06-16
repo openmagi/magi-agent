@@ -1,4 +1,4 @@
-import type { ChatMessage, ResearchEvidenceSnapshot, ResponseUsage } from "./types";
+import type { ChatMessage, ResearchEvidenceSnapshot, ResponseUsage } from "@/chat-core";
 import { normalizeResearchEvidenceSnapshot } from "./research-evidence";
 
 export interface HistoryPlaintextInput {

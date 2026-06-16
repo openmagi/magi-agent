@@ -4,7 +4,7 @@ import {
   normalizedAssistantDedupeContent,
   shouldPreferIncomingAssistantMessageCopy,
 } from "./assistant-dedupe";
-import type { ChatMessage } from "./types";
+import type { ChatMessage } from "@/chat-core";
 
 const baseMessage: ChatMessage = {
   id: "assistant-1",

@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { BrowserFramePreview } from "./browser-frame-preview";
-import type { BrowserFrame } from "@/lib/chat/types";
+import type { BrowserFrame } from "@/chat-core";
 
 const source = readFileSync(new URL("./browser-frame-preview.tsx", import.meta.url), "utf8");
 

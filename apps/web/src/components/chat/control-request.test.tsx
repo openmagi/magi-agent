@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { ControlRequestCard } from "./control-request";
-import type { ControlRequestRecord } from "@/lib/chat/types";
+import type { ControlRequestRecord } from "@/chat-core";
 
 vi.mock("@/hooks/use-auth-fetch", () => ({
   useAuthFetch: () => vi.fn(),

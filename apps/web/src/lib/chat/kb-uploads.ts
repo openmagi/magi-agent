@@ -1,8 +1,8 @@
 import { resolveKnowledgeUploadMimeType } from "@/lib/knowledge/upload-mime";
-import { isImageMimetype } from "./attachment-marker";
-import { createMarker } from "./attachment-marker";
+import { isImageMimetype } from "@/chat-core";
+import { createMarker } from "@/chat-core";
 import { uploadAttachment } from "./attachments";
-import type { KbDocReference } from "./types";
+import type { KbDocReference } from "@/chat-core";
 
 export interface SplitFiles {
   imageFiles: File[];

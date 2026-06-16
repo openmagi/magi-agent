@@ -1,4 +1,4 @@
-import type { ChatResponseLanguage, TaskBoardSnapshot, ToolActivity } from "./types";
+import type { ChatResponseLanguage, TaskBoardSnapshot, ToolActivity } from "@/chat-core";
 
 export type AgentActivityStatus = "running" | "done" | "error" | "denied";
 

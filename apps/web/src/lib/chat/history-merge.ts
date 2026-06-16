@@ -1,4 +1,4 @@
-import type { ChatMessage } from "./types";
+import type { ChatMessage } from "@/chat-core";
 import { compareChatMessages } from "./message-order";
 
 function isSameMessage(a: ChatMessage, b: ChatMessage): boolean {

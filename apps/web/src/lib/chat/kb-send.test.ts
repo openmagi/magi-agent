@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildMessageContentWithKbContext, mergeKbDocReferences } from "./kb-send";
-import type { KbDocReference } from "./types";
+import type { KbDocReference } from "@/chat-core";
 
 const DOC_A: KbDocReference = {
   id: "doc-a",

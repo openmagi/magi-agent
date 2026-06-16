@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import { KbSidePanel } from "./kb-side-panel";
-import type { ChannelState } from "@/lib/chat/types";
+import type { ChannelState } from "@/chat-core";
 import type { KbCollectionWithDocs } from "@/hooks/use-kb-docs";
 import type { WorkspaceFileEntry } from "@/lib/workspace/workspace-files";
 

@@ -8,7 +8,7 @@ import type {
   ControlRequestResponse,
   PatchPreview,
   PatchPreviewFile,
-} from "@/lib/chat/types";
+} from "@/chat-core";
 
 interface ControlRequestCardProps {
   request: ControlRequestRecord;

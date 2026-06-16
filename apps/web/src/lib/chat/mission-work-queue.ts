@@ -1,4 +1,4 @@
-import type { MissionActivity } from "./types";
+import type { MissionActivity } from "@/chat-core";
 import type { MissionStatus, MissionSummary } from "@/lib/missions/types";
 
 export type MissionWorkQueueFilter = "active" | "needs_input" | "done" | "all";

@@ -19,7 +19,7 @@ import type {
   ControlRequestRecord,
   ControlRequestResponse,
   ChatResponseLanguage,
-} from "@/lib/chat/types";
+} from "@/chat-core";
 
 export interface ChatMessagesHandle {
   scrollToBottom: () => void;

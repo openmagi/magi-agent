@@ -5,7 +5,7 @@ import type {
   InspectedSourceKind,
   ResearchEvidenceSnapshot,
   ServerMessage,
-} from "./types";
+} from "@/chat-core";
 
 const INSPECTED_SOURCE_KINDS: readonly InspectedSourceKind[] = [
   "web_search",

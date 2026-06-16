@@ -1,4 +1,4 @@
-import type { Channel, ChannelMemoryMode } from "./types";
+import type { Channel, ChannelMemoryMode } from "@/chat-core";
 
 const MEMORY_MODE_LABELS: Partial<Record<ChannelMemoryMode, string>> = {
   read_only: "Read-only memory",

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { MissionActivity } from "@/lib/chat/types";
+import type { MissionActivity } from "@/chat-core";
 import {
   buildMissionWorkQueue,
   type MissionWorkQueueAction,

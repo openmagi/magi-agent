@@ -10,7 +10,7 @@ import type {
   ControlRequestRecord,
   MissionActivity,
   SubagentActivity,
-} from "./types";
+} from "@/chat-core";
 import { INTERRUPTED_SUFFIX, MAX_QUEUED_MESSAGES } from "@/chat-core";
 import { compareChatMessages } from "./message-order";
 import { hasNonTextTurnWork } from "./empty-response";

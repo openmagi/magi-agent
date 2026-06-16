@@ -1,4 +1,4 @@
-import type { ChannelState } from "./types";
+import type { ChannelState } from "@/chat-core";
 
 export function hasNonTextTurnWork(state: Partial<ChannelState> | null | undefined): boolean {
   if (!state) return false;

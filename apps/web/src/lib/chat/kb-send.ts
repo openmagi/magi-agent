@@ -1,5 +1,5 @@
-import { buildKbContextMarker } from "./kb-context-marker";
-import type { KbDocReference } from "./types";
+import { buildKbContextMarker } from "@/chat-core";
+import type { KbDocReference } from "@/chat-core";
 
 export function mergeKbDocReferences(
   ...groups: Array<KbDocReference[] | undefined>
