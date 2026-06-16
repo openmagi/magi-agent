@@ -553,6 +553,44 @@ FLAGS: tuple[FlagSpec, ...] = (
         "MAGI_CONTEXT_COMPACTION_ENABLED",
         summary="Compact the working context when the token threshold is hit (default-ON full profile).",
     ),
+    # Strict default-OFF (flat _b, NOT profile-resolved): real-token accounting
+    # for compaction. When ON the compaction decision uses the real prompt-token
+    # count of the prior model call against a %-of-window threshold instead of the
+    # char-estimate + fixed token threshold. OFF is byte-identical to today.
+    _b(
+        "MAGI_COMPACTION_REAL_TOKENS_ENABLED",
+        stage="stage2",
+        summary=(
+            "Use the real prompt-token count of the prior model call against a "
+            "percentage of the model's context window as the compaction budget "
+            "signal, instead of the char-estimate + fixed token threshold. Strict "
+            "default-OFF (OFF is byte-identical to today)."
+        ),
+    ),
+    FlagSpec(
+        name="MAGI_COMPACTION_REAL_TOKENS_PCT",
+        default="0.75",
+        scope="public",
+        stage="stage2",
+        summary=(
+            "Fraction (0,1] of the model's effective context window "
+            "(window - output reserve) at which real-token compaction fires; only "
+            "consulted when MAGI_COMPACTION_REAL_TOKENS_ENABLED is on."
+        ),
+        kind="str",
+    ),
+    FlagSpec(
+        name="MAGI_COMPACTION_OUTPUT_RESERVE",
+        default=8_000,
+        scope="public",
+        stage="stage2",
+        summary=(
+            "Tokens reserved for model output, subtracted from the context window "
+            "before applying the real-token compaction percentage (>= 0); only "
+            "consulted when MAGI_COMPACTION_REAL_TOKENS_ENABLED is on."
+        ),
+        kind="int",
+    ),
     # --- In-context replanning ----------------------------------------------
     # Strict default-OFF (flat _b, NOT profile-resolved): MAGI_RUNTIME_PROFILE
     # never auto-enables the facts-survey injection.

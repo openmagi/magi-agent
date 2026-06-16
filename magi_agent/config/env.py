@@ -423,12 +423,25 @@ COMPACTION_TAIL_EVENTS_ENV = "MAGI_COMPACTION_TAIL_EVENTS"
 _COMPACTION_TOKEN_THRESHOLD_DEFAULT = 24_000
 _COMPACTION_TAIL_EVENTS_DEFAULT = 16
 
+# G2: real-token accounting. Strict default-OFF master switch plus the
+# %-of-window threshold knobs. When OFF the parser returns the same
+# enabled/token_threshold/tail_events triple as before with the additive fields
+# at their conservative defaults, so the compaction decision is byte-identical.
+COMPACTION_REAL_TOKENS_ENABLED_ENV = "MAGI_COMPACTION_REAL_TOKENS_ENABLED"
+COMPACTION_REAL_TOKENS_PCT_ENV = "MAGI_COMPACTION_REAL_TOKENS_PCT"
+COMPACTION_OUTPUT_RESERVE_ENV = "MAGI_COMPACTION_OUTPUT_RESERVE"
+_COMPACTION_REAL_TOKENS_PCT_DEFAULT = 0.75
+_COMPACTION_OUTPUT_RESERVE_DEFAULT = 8_000
+
 
 @dataclass(frozen=True)
 class ContextCompactionEnv:
     enabled: bool = False
     token_threshold: int = _COMPACTION_TOKEN_THRESHOLD_DEFAULT
     tail_events: int = _COMPACTION_TAIL_EVENTS_DEFAULT
+    real_tokens_enabled: bool = False
+    real_tokens_pct: float = _COMPACTION_REAL_TOKENS_PCT_DEFAULT
+    output_reserve: int = _COMPACTION_OUTPUT_RESERVE_DEFAULT
 
 
 def parse_context_compaction_env(env: Mapping[str, str]) -> ContextCompactionEnv:
@@ -448,10 +461,31 @@ def parse_context_compaction_env(env: Mapping[str, str]) -> ContextCompactionEnv
     )
     if tail_events < 1:
         raise RuntimeEnvError(f"{COMPACTION_TAIL_EVENTS_ENV} must be >= 1")
+    # G2: strict default-OFF real-token accounting (NOT profile-aware).
+    real_tokens_enabled = _is_true(env.get(COMPACTION_REAL_TOKENS_ENABLED_ENV))
+    real_tokens_pct = _float_env(
+        env,
+        COMPACTION_REAL_TOKENS_PCT_ENV,
+        _COMPACTION_REAL_TOKENS_PCT_DEFAULT,
+    )
+    if not (0.0 < real_tokens_pct <= 1.0):
+        raise RuntimeEnvError(
+            f"{COMPACTION_REAL_TOKENS_PCT_ENV} must be in the range (0, 1]"
+        )
+    output_reserve = _int_env(
+        env,
+        COMPACTION_OUTPUT_RESERVE_ENV,
+        _COMPACTION_OUTPUT_RESERVE_DEFAULT,
+    )
+    if output_reserve < 0:
+        raise RuntimeEnvError(f"{COMPACTION_OUTPUT_RESERVE_ENV} must be >= 0")
     return ContextCompactionEnv(
         enabled=enabled,
         token_threshold=token_threshold,
         tail_events=tail_events,
+        real_tokens_enabled=real_tokens_enabled,
+        real_tokens_pct=real_tokens_pct,
+        output_reserve=output_reserve,
     )
 
 

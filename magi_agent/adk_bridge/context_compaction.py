@@ -84,6 +84,14 @@ CONTEXT_COMPACTION_PLUGIN_NAME = "magi_context_compaction_plugin"
 _COMPACTION_SUMMARY_REF = "summary:compact:before-model"
 _COMPACTION_SUMMARY_DIGEST = "sha256:" + "0" * 64
 
+# Stable session-state key under which the after-model capture stashes the REAL
+# prompt-token count of the just-completed model call (G2). ADK CallbackContext
+# state is delta-backed by session.state, so a write here in after_model_callback
+# (turn N) is readable by the NEXT turn's before_model_callback. The value
+# therefore lags by one turn (it is the prompt size that was actually sent to the
+# model), which is the intended budget signal — NOT the current pre-call size.
+REAL_PROMPT_TOKENS_STATE_KEY = "magi_compaction_real_prompt_tokens"
+
 # Lower bound on the event-count threshold so a small tail does not force a
 # spurious event-count breach. The token threshold is the primary signal at the
 # before-model seam; the event-count threshold mirrors the boundary default.
@@ -105,6 +113,9 @@ class MagiContextCompactionPlugin(BasePlugin):
         tail_events: int,
         event_count_threshold: int = _EVENT_COUNT_THRESHOLD_DEFAULT,
         name: str = CONTEXT_COMPACTION_PLUGIN_NAME,
+        real_tokens_enabled: bool = False,
+        real_tokens_pct: float = 0.75,
+        output_reserve: int = 8_000,
     ) -> None:
         super().__init__(name)
         if token_threshold < 1:
@@ -113,9 +124,25 @@ class MagiContextCompactionPlugin(BasePlugin):
             raise ValueError("tail_events must be >= 1")
         if event_count_threshold < 1:
             raise ValueError("event_count_threshold must be >= 1")
+        if real_tokens_enabled and not (0.0 < real_tokens_pct <= 1.0):
+            raise ValueError("real_tokens_pct must be in the range (0, 1]")
+        if output_reserve < 0:
+            raise ValueError("output_reserve must be >= 0")
         self.token_threshold = token_threshold
         self.tail_events = tail_events
         self.event_count_threshold = event_count_threshold
+        # G2 real-token accounting (default-OFF). When OFF every code path below
+        # is byte-identical to the estimate + fixed-threshold behaviour.
+        self._real_tokens_enabled = bool(real_tokens_enabled)
+        self._real_tokens_pct = real_tokens_pct
+        self._output_reserve = output_reserve
+        # Per-before-model stash of the real prompt-token count + model id, read
+        # off ``callback_context.state`` and threaded to ``_trim_request`` without
+        # touching the ``CompactionCapability.trim(llm_request)`` signature. Set at
+        # the start of ``before_model_callback`` and cleared in ``_trim_request``'s
+        # finally, so there is no cross-turn instance leakage.
+        self._pending_real_prompt_tokens: int | None = None
+        self._pending_model: str | None = None
         self._boundary = ContextLifecycleBoundary()
         # Lazily-built, then cached: the boundary only needs a constant local-fake
         # session_service + session + QueryState for its decision path. Building
@@ -153,8 +180,56 @@ class MagiContextCompactionPlugin(BasePlugin):
         """
         from magi_agent.packs.context import ControlPlaneContext
 
+        # G2: when the real-token path is ON, read the prior turn's real
+        # prompt-token count off the (delta-backed) session state and resolve the
+        # model id from the outgoing request, stashing both on the instance for
+        # ``_trim_request``. Guarded so flag-OFF never reads/writes state and the
+        # stash stays None (estimate path verbatim). Fail-open on any read error.
+        if self._real_tokens_enabled:
+            self._pending_real_prompt_tokens = _read_real_prompt_tokens(
+                callback_context
+            )
+            self._pending_model = _resolve_model_id(llm_request)
+        else:
+            self._pending_real_prompt_tokens = None
+            self._pending_model = None
+
         ctx = ControlPlaneContext.minimal(compaction=CompactionCapability(self))
         return await self.apply_before_model(ctx, llm_request=llm_request)
+
+    async def after_model_callback(
+        self,
+        *,
+        callback_context: Any,
+        llm_response: Any,
+    ) -> None:
+        """Capture the REAL prompt-token count of the just-completed model call.
+
+        Only active when the real-token path is ON. Reads
+        ``llm_response.usage_metadata.prompt_token_count`` via the shared
+        duck-typed extractor and stashes it on ``callback_context.state`` under
+        :data:`REAL_PROMPT_TOKENS_STATE_KEY`, where the next turn's
+        ``before_model_callback`` reads it. Pure observer: never mutates the
+        response, always returns ``None``, fully fail-open (a missing/odd
+        usage-metadata or state simply records nothing — the decision then falls
+        back to the estimate path). Flag-OFF: writes NOTHING to state.
+        """
+        if not self._real_tokens_enabled:
+            return None
+        try:
+            from magi_agent.shared.usage_metadata import prompt_tokens_from_response
+
+            tokens = prompt_tokens_from_response(llm_response)
+            if tokens is None:
+                return None
+            state = getattr(callback_context, "state", None)
+            if state is None:
+                return None
+            state[REAL_PROMPT_TOKENS_STATE_KEY] = tokens
+        except Exception:
+            # Observer must never break the model loop.
+            return None
+        return None
 
     async def apply_before_model(self, ctx: Any, *, llm_request: Any) -> None:
         """Typed-context entry point (S-D): apply the compaction decision exposed
@@ -182,6 +257,22 @@ class MagiContextCompactionPlugin(BasePlugin):
                 # Nothing to trim even in the worst case; skip the boundary call.
                 return None
 
+            # G2: real-token pre-check. When the real-token path is ON and a real
+            # prompt-token count is present (stashed by the prior turn's
+            # after_model capture), compare it against a %-of-window threshold
+            # computed from the model's effective context window. A breach
+            # short-circuits straight to the tail-trim below; a non-breach returns
+            # without trimming (the real signal overrides the char-estimate). When
+            # real tokens are absent, the effective window is non-positive, or the
+            # path is OFF, this is a no-op and the existing estimate ->
+            # compact_if_needed path runs verbatim (fail-open). The stash is
+            # cleared in the finally so it never leaks to a later call.
+            decided = self._real_token_decision()
+            if decided is True:
+                return self._apply_tail_trim(llm_request, contents)
+            if decided is False:
+                return None
+
             events = tuple(
                 ContextLifecycleEvent(
                     eventRef=_content_event_ref(index),
@@ -203,29 +294,68 @@ class MagiContextCompactionPlugin(BasePlugin):
             if decision.status != "compacted":
                 return None
 
-            keep = min(self.tail_events, len(contents))
-            split_index = len(contents) - keep
-            split_index = _adjust_split_to_avoid_orphan_response(contents, split_index)
-            if split_index <= 0:
-                return None
-            kept = len(contents) - split_index
-            if kept > 2 * self.tail_events:
-                # Orphan widening re-included far more than ``tail_events`` (the
-                # tail is a long unbroken run of function responses), so this
-                # compaction reduced almost nothing. Functionally safe — purely
-                # an observability signal that the call became a near no-op.
-                logger.debug(
-                    "context compaction near no-op: orphan widening kept %d contents "
-                    "(tail_events=%d) from %d total",
-                    kept,
-                    self.tail_events,
-                    len(contents),
-                )
-            llm_request.contents = contents[split_index:]
+            return self._apply_tail_trim(llm_request, contents)
         except Exception:
             # Fail-open: compaction must never break a live model turn. Leaving
             # contents untouched is the no-plugin behaviour.
             return None
+        finally:
+            # Clear the per-call real-token stash so it never leaks across calls.
+            self._pending_real_prompt_tokens = None
+            self._pending_model = None
+
+    def _real_token_decision(self) -> bool | None:
+        """Return the real-token compaction decision, or ``None`` to defer.
+
+        ``True``  -> real prompt tokens breach the %-of-window threshold: trim.
+        ``False`` -> real prompt tokens are under the threshold: leave untouched.
+        ``None``  -> the real-token path does not apply (OFF / no stashed tokens /
+                     non-positive effective window): fall through to the existing
+                     estimate + fixed-threshold path (fail-open).
+        """
+        if not self._real_tokens_enabled:
+            return None
+        real_tokens = self._pending_real_prompt_tokens
+        if real_tokens is None or real_tokens < 0:
+            return None
+        effective = _window_for_model(self._pending_model) - self._output_reserve
+        if effective < 1:
+            # Degenerate window/reserve: fall back to the fixed threshold path.
+            return None
+        threshold = int(effective * self._real_tokens_pct)
+        if threshold < 1:
+            return None
+        if real_tokens >= threshold:
+            return True
+        return False
+
+    def _apply_tail_trim(self, llm_request: Any, contents: list[Any]) -> None:
+        """Reduce ``llm_request.contents`` to the orphan-adjusted recent tail.
+
+        Lifted verbatim from the post-decision body so both the real-token
+        short-circuit and the boundary-decision path share one tail-trim
+        implementation (byte-identical reduction). The caller wraps this in the
+        fail-open try/except, so this body may assume well-formed inputs.
+        """
+        keep = min(self.tail_events, len(contents))
+        split_index = len(contents) - keep
+        split_index = _adjust_split_to_avoid_orphan_response(contents, split_index)
+        if split_index <= 0:
+            return None
+        kept = len(contents) - split_index
+        if kept > 2 * self.tail_events:
+            # Orphan widening re-included far more than ``tail_events`` (the
+            # tail is a long unbroken run of function responses), so this
+            # compaction reduced almost nothing. Functionally safe — purely
+            # an observability signal that the call became a near no-op.
+            logger.debug(
+                "context compaction near no-op: orphan widening kept %d contents "
+                "(tail_events=%d) from %d total",
+                kept,
+                self.tail_events,
+                len(contents),
+            )
+        llm_request.contents = contents[split_index:]
         return None
 
     async def _decision_inputs(self) -> tuple[Any, Any, Any]:
@@ -286,6 +416,60 @@ class CompactionCapability:
 
     async def trim(self, llm_request: Any) -> None:
         await self._plugin._trim_request(llm_request)
+
+
+def _read_real_prompt_tokens(callback_context: Any) -> int | None:
+    """Read the prior turn's real prompt-token count off ``callback_context.state``.
+
+    Duck-typed and fail-open: any missing state / odd value yields ``None`` so the
+    decision falls back to the estimate path. Never raises.
+    """
+    try:
+        state = getattr(callback_context, "state", None)
+        if state is None:
+            return None
+        getter = getattr(state, "get", None)
+        value = getter(REAL_PROMPT_TOKENS_STATE_KEY) if callable(getter) else None
+        if isinstance(value, bool):
+            return None
+        if isinstance(value, int) and value >= 0:
+            return value
+        return None
+    except Exception:
+        return None
+
+
+def _resolve_model_id(llm_request: Any) -> str | None:
+    """Resolve the model id from the outgoing request (``llm_request.model``).
+
+    Mirrors ``anthropic_cache_model.py`` which reads ``llm_request.model`` the same
+    way. Returns ``None`` when absent so the window lookup applies its default.
+    """
+    try:
+        model = getattr(llm_request, "model", None)
+        if isinstance(model, str) and model:
+            return model
+        return None
+    except Exception:
+        return None
+
+
+def _window_for_model(model: str | None) -> int:
+    """Effective context window for ``model`` from the shared per-model table.
+
+    Reuses ``magi_agent.context.token_tracker._KNOWN_TOKEN_LIMITS`` /
+    ``_DEFAULT_CONTEXT_WINDOW`` (single source) so the budget signal matches the
+    rest of the runtime. Unknown/absent model -> the conservative default window.
+    Local import keeps this module import-light when the feature is off.
+    """
+    from magi_agent.context.token_tracker import (
+        _DEFAULT_CONTEXT_WINDOW,
+        _KNOWN_TOKEN_LIMITS,
+    )
+
+    if not isinstance(model, str) or not model:
+        return _DEFAULT_CONTEXT_WINDOW
+    return _KNOWN_TOKEN_LIMITS.get(model, _DEFAULT_CONTEXT_WINDOW)
 
 
 def _content_event_ref(index: int) -> str:
@@ -377,23 +561,31 @@ def build_context_compaction_plugin(
     enabled: bool,
     token_threshold: int,
     tail_events: int,
+    real_tokens_enabled: bool = False,
+    real_tokens_pct: float = 0.75,
+    output_reserve: int = 8_000,
 ) -> MagiContextCompactionPlugin | None:
     """Return a configured plugin, or ``None`` when the feature is disabled.
 
     The flag/budget are owned by ``magi_agent.config.env`` (single source);
     callers pass the resolved values here so this module stays import-light and
-    free of env-parsing concerns.
+    free of env-parsing concerns. The real-token args are additive and default-OFF
+    so existing callers are byte-identical.
     """
     if not enabled:
         return None
     return MagiContextCompactionPlugin(
         token_threshold=token_threshold,
         tail_events=tail_events,
+        real_tokens_enabled=real_tokens_enabled,
+        real_tokens_pct=real_tokens_pct,
+        output_reserve=output_reserve,
     )
 
 
 __all__ = [
     "CONTEXT_COMPACTION_PLUGIN_NAME",
+    "REAL_PROMPT_TOKENS_STATE_KEY",
     "CompactionCapability",
     "MagiContextCompactionPlugin",
     "build_context_compaction_plugin",

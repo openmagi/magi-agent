@@ -174,6 +174,14 @@ class LoopControl(Protocol):
     ) -> None:
         ...
 
+    async def on_after_model(
+        self,
+        *,
+        callback_context: Any,
+        llm_response: Any,
+    ) -> None:
+        ...
+
     async def on_after_agent(
         self,
         *,
@@ -221,6 +229,16 @@ class BaseLoopControl:
         callback_context: Any,
         llm_request: Any,
     ) -> None:
+        return None
+
+    async def on_after_model(
+        self,
+        *,
+        callback_context: Any,
+        llm_response: Any,
+    ) -> None:
+        # No-op default: every existing control inherits this, so adding the
+        # after-model dispatch widens the surface without changing behaviour.
         return None
 
     async def on_after_agent(
@@ -390,6 +408,26 @@ class ControlPlane:
             )
         return None
 
+    async def _after_model(
+        self,
+        *,
+        callback_context: Any,
+        llm_response: Any,
+    ) -> None:
+        """Fan-out after_model observers; they cannot alter the ADK response.
+
+        Pure observer dispatch (mirrors ``_before_model`` but post-call). Every
+        control inherits ``BaseLoopControl.on_after_model`` (a no-op) unless it
+        opts in, so this fan-out is a no-op for all controls today except the
+        compaction control's real-token capture. Never short-circuits / never
+        returns a response.
+        """
+        for control in self._controls:
+            await control.on_after_model(
+                callback_context=callback_context, llm_response=llm_response
+            )
+        return None
+
     async def _after_agent(
         self,
         *,
@@ -465,6 +503,25 @@ class ControlPlanePlugin(BasePlugin):
         """Forward to plane._before_model; always returns None (mutations only)."""
         await self._p._before_model(
             callback_context=callback_context, llm_request=llm_request
+        )
+        return None
+
+    async def after_model_callback(
+        self,
+        *,
+        callback_context: Any,
+        llm_response: Any,
+    ) -> None:
+        """Forward ADK's post-model callback to the control plane (observer-only).
+
+        ADK 1.33 BasePlugin.after_model_callback signature is
+        ``(*, callback_context, llm_response)``. This plugin always returns None
+        (it never alters the response). Until now ADK silently never dispatched
+        this callback for the control plane; wiring it lets the compaction
+        control capture the real prompt-token count of the just-completed call.
+        """
+        await self._p._after_model(
+            callback_context=callback_context, llm_response=llm_response
         )
         return None
 
@@ -1262,6 +1319,26 @@ class _CompactionLoopControl(BaseLoopControl):
         )
         return None
 
+    async def on_after_model(
+        self,
+        *,
+        callback_context: Any,
+        llm_response: Any,
+    ) -> None:
+        """Capture the real prompt-token count of the just-completed model call.
+
+        Delegates to the plugin's ``after_model_callback`` which — only when the
+        real-token path is ON — stashes ``llm_response.usage_metadata`` prompt
+        tokens on ``callback_context.state``. A no-op when the path is OFF or the
+        plugin does not implement the callback (fail-open).
+        """
+        handler = getattr(self._plugin, "after_model_callback", None)
+        if callable(handler):
+            await handler(
+                callback_context=callback_context, llm_response=llm_response
+            )
+        return None
+
     async def apply_before_model(
         self,
         ctx: Any,
@@ -1457,6 +1534,9 @@ def build_core_default_plane(
         enabled=compaction_env.enabled,
         token_threshold=compaction_env.token_threshold,
         tail_events=compaction_env.tail_events,
+        real_tokens_enabled=compaction_env.real_tokens_enabled,
+        real_tokens_pct=compaction_env.real_tokens_pct,
+        output_reserve=compaction_env.output_reserve,
     )
     if compaction_plugin is not None:
         plane.register(_CompactionLoopControl(compaction_plugin))

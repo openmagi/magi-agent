@@ -389,71 +389,15 @@ def _adk_finish_reason(event: object) -> str | None:
     return value if isinstance(value, str) else str(finish_reason)
 
 
-def _usage_member(value: object, *names: str) -> object:
-    """First non-None ``name`` read from a Mapping (``.get``) or object (``getattr``)."""
-    for name in names:
-        if isinstance(value, Mapping):
-            found = value.get(name)
-        else:
-            try:
-                found = getattr(value, name, None)
-            except Exception:  # noqa: BLE001 - duck-typed read must never raise
-                found = None
-        if found is not None:
-            return found
-    return None
-
-
-def _usage_int(meta: object, *names: str) -> int | None:
-    """First non-negative ``int`` among ``names`` (bools rejected)."""
-    for name in names:
-        value = _usage_member(meta, name)
-        if isinstance(value, bool):
-            continue
-        if isinstance(value, int) and value >= 0:
-            return value
-    return None
-
-
-def _adk_usage_metadata(event: object, *, depth: int = 0) -> dict[str, int] | None:
-    """Token usage from a raw ADK event as canonical snake_case keys, or ``None``.
-
-    Duck-typed (``getattr``/``Mapping`` only) so ``engine.py`` names no ``google.*``
-    symbol at module scope (asserted by ``test_engine_import_clean_in_fresh_interpreter``).
-    Mirrors the shadow twin
-    ``shadow/gate5b4c3_live_runner_boundary.py:_event_usage_metadata``.
-
-    ADK ``usage_metadata`` is cumulative WITHIN one ``run_async`` stream, so callers
-    last-writer-wins within a stream and SUM across re-invocations (``_fold_usage``).
-    Zero/missing counts are omitted (never fabricated); ``total_tokens`` is taken
-    verbatim from ``total_token_count`` only when the provider supplies it.
-    """
-    if depth > 3:
-        return None
-    meta = _usage_member(event, "usage_metadata", "usageMetadata")
-    if meta is not None:
-        prompt = _usage_int(meta, "prompt_token_count", "promptTokenCount")
-        candidates = _usage_int(meta, "candidates_token_count", "candidatesTokenCount")
-        cached = _usage_int(meta, "cached_content_token_count", "cachedContentTokenCount")
-        total = _usage_int(meta, "total_token_count", "totalTokenCount")
-        result: dict[str, int] = {}
-        if prompt:
-            result["input_tokens"] = prompt
-        if candidates:
-            result["output_tokens"] = candidates
-        if cached:
-            result["cache_read_tokens"] = cached
-        if total:
-            result["total_tokens"] = total
-        if result:
-            return result
-    for nested_name in ("llm_response", "response"):
-        nested = _usage_member(event, nested_name)
-        if nested is not None:
-            found = _adk_usage_metadata(nested, depth=depth + 1)
-            if found is not None:
-                return found
-    return None
+# Duck-typed ADK usage-metadata extraction now lives in the shared module
+# ``magi_agent.shared.usage_metadata`` (single source) so the live
+# context-compaction plugin reuses the SAME hardened logic. These thin aliases
+# preserve the historical private names + call sites here with zero behaviour
+# change; the shared module imports no ``google.*`` at module scope, so
+# ``test_engine_import_clean_in_fresh_interpreter`` stays green.
+from magi_agent.shared.usage_metadata import (
+    adk_usage_metadata as _adk_usage_metadata,
+)
 
 
 def _fold_usage(turn_usage: dict[str, object], attempt_usage: Mapping[str, object]) -> None:
