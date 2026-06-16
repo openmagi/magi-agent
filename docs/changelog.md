@@ -15,6 +15,41 @@ Versions follow the tags published on GitHub Releases.
 
 ### Fixed
 
+## 0.1.44
+
+### Added
+
+- Recipe-scoped tool permissions: once a recipe is selected, tool access is
+  scoped to that recipe's granted tools plus always-allowed base tools; other
+  recipes' exclusive tools are blocked mid-turn with feedback. Default-OFF,
+  gated behind the recipe-routing flag (#610).
+- Browser tool now bridges OpenAI-compatible providers (Fireworks, OpenRouter)
+  via a provider-specific base URL, with provider-aware vision defaults and a
+  `MAGI_BROWSER_USE_VISION` override (#608).
+- Keyless web acquisition for the local overlay: jina-reader (keyless) and
+  insane-fetch (local curl_cffi) are enabled by default so a fresh, keyless
+  user gets a working WebFetch path; "not configured" messages now point to the
+  keyless browser fallback (#609).
+- The bot prompt now surfaces the available sub-agent model routes (#607).
+
+### Changed
+
+- Serve loop now continues when the model defers instead of executing (restates
+  a plan / "next concrete action" without a tool call): it re-invokes with a
+  bounded (max 4), heuristic-gated nudge so multi-step tasks run to completion
+  instead of stopping after planning (#612).
+
+### Fixed
+
+- Gemini multi-tool 400: when context compaction trimmed the conversation head
+  and left `contents` starting with a model `function_call` turn, Gemini
+  rejected the request and the live runner died mid-stream. The content-ordering
+  repair now drops leading dangling function-response turns and prepends a
+  synthetic user opener so a leading function call is always preceded by a user
+  turn (#611).
+- A hung sub-agent can no longer hang its parent: every child turn is now bound
+  by a timeout (#605).
+
 ## 0.1.43
 
 ### Added
