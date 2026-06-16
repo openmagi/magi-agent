@@ -384,17 +384,15 @@ class RealLocalChildRunner:
         them. Mirrors the discovery orchestrator's message construction +
         event-text collection.
 
-        The turn is bounded by ``request.budget_ms`` (clamped to a sane max);
-        on expiry ``asyncio.wait_for`` raises ``asyncio.TimeoutError`` which the
-        caller maps to a degraded ``child_turn_timeout`` result.
-        ``asyncio.CancelledError`` is NEVER swallowed — it propagates.
+        The turn is ALWAYS bounded (by ``request.budget_ms`` when set, else the
+        default ceiling); on expiry ``asyncio.wait_for`` raises
+        ``asyncio.TimeoutError`` which the caller maps to a degraded
+        ``child_turn_timeout`` result. ``asyncio.CancelledError`` is NEVER
+        swallowed — it propagates.
         """
-        timeout_s = self._turn_timeout_s(request)
-        if timeout_s is None:
-            return await self._collect_turn_text(config, request)
         return await asyncio.wait_for(
             self._collect_turn_text(config, request),
-            timeout=timeout_s,
+            timeout=self._turn_timeout_s(request),
         )
 
     async def _collect_turn_text(
@@ -575,18 +573,17 @@ class RealLocalChildRunner:
                     refs.append(ref)
         return _public_evidence_refs(refs)
 
-    def _turn_timeout_s(self, request: object) -> float | None:
+    def _turn_timeout_s(self, request: object) -> float:
         """Resolve the per-turn timeout (seconds) from ``request.budget_ms``.
 
-        Returns ``None`` (no bound) when no positive budget is present, so the
-        existing no-timeout behaviour is preserved for callers that don't set a
-        budget. A positive ``budget_ms`` is clamped to ``[0, _MAX_TURN_TIMEOUT_S]``;
-        ``MAGI_MODEL_TIMEOUT_S`` (if set) further lowers the ceiling so the turn
-        bound never exceeds the underlying model request timeout.
+        EVERY child turn is bounded — a turn that never finishes would otherwise
+        hang the parent turn forever (the spawn_agent tool awaits the child
+        boundary inline on the dispatch loop with no outer bound). When no
+        positive ``budget_ms`` is present the bound falls back to the ceiling
+        (``_MAX_TURN_TIMEOUT_S``, lowered by ``MAGI_MODEL_TIMEOUT_S`` when set)
+        rather than returning ``None`` (which would skip the bound entirely). A
+        positive ``budget_ms`` is clamped to ``[0, ceiling]``.
         """
-        raw = getattr(request, "budget_ms", None)
-        if isinstance(raw, bool) or not isinstance(raw, int) or raw <= 0:
-            return None
         ceiling = _MAX_TURN_TIMEOUT_S
         env_ceiling = _clean_str(self._env.get("MAGI_MODEL_TIMEOUT_S"))
         if env_ceiling is not None:
@@ -596,6 +593,9 @@ class RealLocalChildRunner:
                 parsed = 0.0
             if parsed > 0:
                 ceiling = min(ceiling, parsed)
+        raw = getattr(request, "budget_ms", None)
+        if isinstance(raw, bool) or not isinstance(raw, int) or raw <= 0:
+            return ceiling
         return min(raw / 1000.0, ceiling)
 
     # ------------------------------------------------------------------ #
