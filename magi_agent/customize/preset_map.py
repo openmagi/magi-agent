@@ -32,26 +32,63 @@ from dataclasses import dataclass
 class PresetSeam:
     """How an enabled/disabled preset toggle maps to the pre-final gate.
 
-    ``controls_refs`` are the public validator refs this preset governs. When the
-    preset resolves enabled they are ensured present in ``required_validators``;
-    when explicitly disabled they are removed. ``runtime_default_on`` is the
-    preset's effective default in the live runtime (NOT the catalog's product
-    ``default_on``, which can differ), used to resolve the unset state.
+    ``wiring``:
+    - ``opt_out`` — the controlled refs are in the default assembly and the gate
+      enforces them by default; disabling the preset REMOVES the refs from
+      ``required_validators`` (assembly-layer, ``real_runner``). ``controls_refs``
+      lists those refs.
+    - ``opt_in`` — the enforcement is an env-flag-gated engine satisfier that is
+      OFF by default; enabling the preset turns that satisfier on for the runtime
+      (engine-layer, via ``customize.runtime_gate.preset_enabled``). The toggle is
+      effectively UI for the existing ``MAGI_*`` enforcement flag. ``controls_refs``
+      is documentation-only for these.
+
+    ``runtime_default_on`` is the preset's effective default in the LIVE runtime
+    (not the catalog's product ``default_on``), used to resolve the unset state.
     """
 
     preset_id: str
     controls_refs: tuple[str, ...]
     runtime_default_on: bool = True
     supported_modes: tuple[str, ...] = ("deterministic",)
+    wiring: str = "opt_out"
 
 
-# Presets with a genuine assembly-layer seam wired in Phase 2.
+# Presets with a genuine runtime seam.
+#
+# Phase 2: coding-verification (opt-out, assembly-layer ref removal).
+# Phase 3: fact-grounding / source-authority / artifact-delivery (opt-in; the
+# toggle activates the existing env-flag-gated engine satisfier — runtime default
+# OFF). The remaining presets are metadata-only / no live producer and stay
+# ``preview`` in the catalog. No fake toggles.
 PRESET_SEAMS: dict[str, PresetSeam] = {
     "coding-verification": PresetSeam(
         preset_id="coding-verification",
         controls_refs=("verifier:dev-coding:test-evidence",),
         runtime_default_on=True,
         supported_modes=("deterministic",),
+        wiring="opt_out",
+    ),
+    "fact-grounding": PresetSeam(
+        preset_id="fact-grounding",
+        controls_refs=("fact_grounding",),
+        runtime_default_on=False,
+        supported_modes=("deterministic",),
+        wiring="opt_in",
+    ),
+    "source-authority": PresetSeam(
+        preset_id="source-authority",
+        controls_refs=("verifier:research-source-evidence",),
+        runtime_default_on=False,
+        supported_modes=("deterministic",),
+        wiring="opt_in",
+    ),
+    "artifact-delivery": PresetSeam(
+        preset_id="artifact-delivery",
+        controls_refs=("evidence:artifact-delivery-ref",),
+        runtime_default_on=False,
+        supported_modes=("deterministic",),
+        wiring="opt_in",
     ),
 }
 

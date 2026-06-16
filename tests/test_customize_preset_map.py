@@ -13,6 +13,15 @@ def test_coding_verification_seam_is_opt_out():
     assert cv is not None
     assert cv.controls_refs == ("verifier:dev-coding:test-evidence",)
     assert cv.runtime_default_on is True
+    assert cv.wiring == "opt_out"
+
+
+def test_opt_in_seams_are_runtime_default_off():
+    for pid in ("fact-grounding", "source-authority", "artifact-delivery"):
+        seam = seam_for(pid)
+        assert seam is not None, pid
+        assert seam.wiring == "opt_in", pid
+        assert seam.runtime_default_on is False, pid
 
 
 def test_seam_keys_are_canonical_hyphen_ids():
@@ -21,12 +30,16 @@ def test_seam_keys_are_canonical_hyphen_ids():
 
 
 def test_enforcement_for_classifies_honestly():
+    # wired presets (opt-out + opt-in) → enforcing
     assert enforcement_for("coding-verification", category="coding", is_security=False) == "enforcing"
+    assert enforcement_for("fact-grounding", category="fact", is_security=False) == "enforcing"
+    assert enforcement_for("source-authority", category="research", is_security=False) == "enforcing"
+    assert enforcement_for("artifact-delivery", category="output", is_security=False) == "enforcing"
     # security presets are enforced elsewhere (PermissionGate), not via this toggle
     assert enforcement_for("dangerous-patterns", category="security", is_security=True) == "always-on"
-    # not yet wired (incl. fact-grounding, deferred to Phase 3) → honest preview
+    # metadata-only / no live producer → honest preview
     assert enforcement_for("answer-quality", category="answer", is_security=False) == "preview"
-    assert enforcement_for("fact-grounding", category="fact", is_security=False) == "preview"
+    assert enforcement_for("completion-evidence", category="answer", is_security=False) == "preview"
 
 
 def test_supported_modes_default_deterministic():
@@ -36,4 +49,4 @@ def test_supported_modes_default_deterministic():
 
 def test_seam_for_unknown_returns_none():
     assert seam_for("does-not-exist") is None
-    assert seam_for("fact-grounding") is None  # deferred to Phase 3
+    assert seam_for("completion-evidence") is None  # metadata-only, not wired

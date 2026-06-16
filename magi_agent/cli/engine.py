@@ -3024,7 +3024,12 @@ class MagiEngineDriver:
             parse_ga_deliverable_gate_enabled,
         )
 
-        if not parse_ga_deliverable_gate_enabled(os.environ):
+        from magi_agent.customize.runtime_gate import preset_enabled  # noqa: PLC0415
+
+        if not (
+            parse_ga_deliverable_gate_enabled(os.environ)
+            or preset_enabled("artifact-delivery", default=False)
+        ):
             return []
         assembly = self._runner_policy_assembly
         if assembly is None:
@@ -3078,8 +3083,12 @@ class MagiEngineDriver:
         from magi_agent.config.env import (  # noqa: PLC0415
             parse_fact_grounding_verification_enabled,
         )
+        from magi_agent.customize.runtime_gate import preset_enabled  # noqa: PLC0415
 
-        if not parse_fact_grounding_verification_enabled(os.environ):
+        if not (
+            parse_fact_grounding_verification_enabled(os.environ)
+            or preset_enabled("fact-grounding", default=False)
+        ):
             return []
         assembly = self._runner_policy_assembly
         if assembly is None:
@@ -3133,7 +3142,12 @@ class MagiEngineDriver:
             parse_source_ledger_evidence_gate_enabled,
         )
 
-        if not parse_source_ledger_evidence_gate_enabled(os.environ):
+        from magi_agent.customize.runtime_gate import preset_enabled  # noqa: PLC0415
+
+        if not (
+            parse_source_ledger_evidence_gate_enabled(os.environ)
+            or preset_enabled("source-authority", default=False)
+        ):
             return []
         assembly = self._runner_policy_assembly
         if assembly is None:
