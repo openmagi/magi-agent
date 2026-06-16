@@ -48,7 +48,7 @@ import hashlib
 import inspect
 import os
 from collections.abc import Callable, Mapping
-from typing import Any, NamedTuple
+from typing import Any
 
 
 # ---------------------------------------------------------------------------
@@ -114,17 +114,6 @@ _DEGRADE_KEY_MISSING = "child_provider_key_missing"
 _DEGRADE_TURN_ERROR = "child_turn_error"
 _DEGRADE_TIMEOUT = "child_turn_timeout"
 
-
-class _AllowedRoute(NamedTuple):
-    """Minimal validated route for an operator-allowlisted (non-registry) model.
-
-    The route consumer reads only ``provider``/``model``; the registry's richer
-    ``ResolvedModelTier`` (tier/capabilities) is unavailable for an env-vetted
-    route, which is fine — the child only needs the pair to resolve a key + run.
-    """
-
-    provider: str
-    model: str
 
 #: Hard ceiling for a single child turn (seconds), regardless of the request's
 #: ``budget_ms``. Keeps a runaway/huge budget from blocking indefinitely.
@@ -269,50 +258,21 @@ class RealLocalChildRunner:
         return provider, model
 
     def _validate_route(self, provider: str, model: str) -> object | None:
-        """Resolve the route against the registry, then the operator allowlist.
+        """Accept the route via the canonical ``resolve_child_route`` authority.
 
-        Returns a route object on a KNOWN route, else ``None`` (the caller
-        blocks). A model is "known" if (a) the built-in ``ModelTierRegistry``
-        resolves it without an ``unknown_model_*`` reason code, OR (b) the
-        operator explicitly vetted ``provider:model`` via the deployment route
-        allowlist env. (b) makes the deployment env the single source of truth so
-        an operator-approved model that is not in the built-in registry is still
-        routable; with the env unset the allowlist is empty and behaviour is
-        unchanged. A child can never route to a model that is neither registered
-        nor operator-vetted.
+        Delegates to :func:`magi_agent.runtime.model_tiers.resolve_child_route`,
+        the SINGLE source the route-listing (SpawnAgent guidance / system-prompt
+        block via ``available_child_model_routes``) is also bound to — so what the
+        model is told it can use can never drift from what the runner accepts. A
+        route is accepted iff it resolves in the built-in registry (returned
+        normalised) OR is in the operator deployment allowlist; else ``None`` and
+        the caller blocks.
         """
         from magi_agent.runtime.model_tiers import (  # noqa: PLC0415
-            ModelTierRegistry,
+            resolve_child_route,
         )
 
-        try:
-            resolved = ModelTierRegistry.with_defaults().resolve(
-                provider=provider,
-                model=model,
-            )
-        except Exception:  # noqa: BLE001 — label-validation failure → reject.
-            resolved = None
-        if resolved is not None:
-            reason_codes = tuple(getattr(resolved, "reason_codes", ()) or ())
-            if not any("unknown_model" in code for code in reason_codes):
-                return resolved
-
-        if self._route_in_operator_allowlist(provider, model):
-            return _AllowedRoute(provider=provider, model=model)
-        return None
-
-    @staticmethod
-    def _route_in_operator_allowlist(provider: str, model: str) -> bool:
-        """True iff ``provider:model`` is in the operator route allowlist env."""
-        try:
-            from magi_agent.config.env import (  # noqa: PLC0415
-                operator_allowed_model_routes,
-            )
-
-            allowlist = operator_allowed_model_routes(os.environ)
-            return (provider.strip().casefold(), model.strip().casefold()) in allowlist
-        except Exception:  # noqa: BLE001 — never block validation on a config read.
-            return False
+        return resolve_child_route(provider, model, os.environ)
 
     def _resolve_provider_config(self, provider: str, model: str) -> object | None:
         """Return a ``ProviderConfig`` with a usable key, or ``None``.

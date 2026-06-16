@@ -404,6 +404,9 @@ def _available_subagent_models_block() -> str:
     inventing names or claiming it cannot pick a sub-agent's model. Fail-soft.
     """
     try:
+        from magi_agent.config.env import (  # noqa: PLC0415
+            gate5b_live_subagents_flag_on,
+        )
         from magi_agent.runtime.child_runner_live import (  # noqa: PLC0415
             is_live_child_runner_enabled,
         )
@@ -413,14 +416,12 @@ def _available_subagent_models_block() -> str:
 
         # Mirror transport.live_subagents_serve_enabled WITHOUT importing transport
         # (message_builder must stay above the transport layer): the serve flag
-        # AND the kill-switch-aware live child-runner master gate.
-        serve_flag_on = (os.environ.get("MAGI_GATE5B_LIVE_SUBAGENTS_ENABLED") or "").strip().lower() in (
-            "1",
-            "true",
-            "yes",
-            "on",
-        )
-        if not (serve_flag_on and is_live_child_runner_enabled(os.environ)):
+        # AND the kill-switch-aware live child-runner master gate. The flag read
+        # lives in the config allowlist (no inline env read here).
+        if not (
+            gate5b_live_subagents_flag_on(os.environ)
+            and is_live_child_runner_enabled(os.environ)
+        ):
             return ""
         routes = available_child_model_routes(os.environ)
         if not routes:

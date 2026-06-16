@@ -4,7 +4,34 @@ from __future__ import annotations
 from datetime import datetime
 
 from magi_agent.runtime import message_builder as builder
-from magi_agent.runtime.model_tiers import available_child_model_routes
+from magi_agent.runtime.model_tiers import (
+    available_child_model_routes,
+    resolve_child_route,
+)
+
+
+def _split_route(entry: str) -> tuple[str, str]:
+    """'provider:model (tier)' / 'provider:model' -> (provider, model)."""
+    route = entry.split(" (", 1)[0]
+    provider, _, model = route.partition(":")
+    return provider, model
+
+
+def test_listed_routes_are_exactly_what_validation_accepts() -> None:
+    from magi_agent.config.env import _ALLOWED_MODEL_ROUTES_ENV
+
+    env = {_ALLOWED_MODEL_ROUTES_ENV: "anthropic:claude-opus-4-8"}
+
+    # Every advertised route must be accepted by the canonical authority — the
+    # SAME function _validate_route delegates to (no list/validation drift).
+    listed = available_child_model_routes(env)
+    assert listed
+    for entry in listed:
+        provider, model = _split_route(entry)
+        assert resolve_child_route(provider, model, env) is not None, entry
+
+    # A route nobody vetted is rejected.
+    assert resolve_child_route("anthropic", "totally-made-up-9000", env) is None
 
 
 def _utc(value: str) -> datetime:
