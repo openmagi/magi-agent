@@ -893,6 +893,7 @@ class RecipePackManifest(_FrozenRecipeModel):
     display_name: str = Field(alias="displayName")
     description: str
     when_to_use: str = Field(default="", alias="whenToUse")
+    granted_tool_names: tuple[str, ...] = Field(default=(), alias="grantedToolNames")
     default_enabled: bool = Field(default=False, alias="defaultEnabled")
     hard_safety: bool = Field(default=False, alias="hardSafety")
     opt_out_allowed: bool = Field(default=True, alias="optOutAllowed")
@@ -953,6 +954,7 @@ class RecipePackManifest(_FrozenRecipeModel):
         "task_profile_selectors",
         "depends_on_pack_ids",
         "instruction_refs",
+        "granted_tool_names",
         "tool_refs",
         "callback_refs",
         "validator_refs",
