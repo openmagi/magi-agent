@@ -12,9 +12,9 @@ import type {
   SubagentActivity,
 } from "@/chat-core";
 import { INTERRUPTED_SUFFIX, MAX_QUEUED_MESSAGES } from "@/chat-core";
-import { compareChatMessages } from "./message-order";
-import { hasNonTextTurnWork } from "./empty-response";
-import { researchEvidenceFromChannelState } from "./research-evidence";
+import { compareChatMessages } from "@/chat-core";
+import { hasNonTextTurnWork } from "@/chat-core";
+import { researchEvidenceFromChannelState } from "@/chat-core";
 
 const DEFAULT_CHANNEL_STATE: ChannelState = {
   streaming: false,

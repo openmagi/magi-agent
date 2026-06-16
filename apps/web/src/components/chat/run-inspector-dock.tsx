@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { AgentActivityTimeline } from "./agent-activity-timeline";
 import { BrowserFramePreview } from "./browser-frame-preview";
 import { TaskBoard } from "./task-board";
-import { deriveWorkStateSummary, type WorkStateSummary } from "@/lib/chat/work-state";
+import { deriveWorkStateSummary, type WorkStateSummary } from "@/chat-core";
 import type {
   CitationGateStatus,
   ChannelState,

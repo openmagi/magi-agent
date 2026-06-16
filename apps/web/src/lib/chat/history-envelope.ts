@@ -1,5 +1,5 @@
 import type { ChatMessage, ResearchEvidenceSnapshot, ResponseUsage } from "@/chat-core";
-import { normalizeResearchEvidenceSnapshot } from "./research-evidence";
+import { normalizeResearchEvidenceSnapshot } from "@/chat-core";
 
 export interface HistoryPlaintextInput {
   role: "user" | "assistant";

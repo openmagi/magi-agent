@@ -10,7 +10,7 @@ import type {
   ToolActivity,
   ChatResponseLanguage,
 } from "@/chat-core";
-import { derivePublicToolPreview } from "./public-tool-preview";
+import { derivePublicToolPreview } from "@/chat-core";
 
 export type WorkConsoleRowGroup =
   | "status"

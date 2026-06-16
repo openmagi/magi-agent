@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { fetchAttachmentBlob, getAttachmentUrl } from "@/lib/chat/attachments";
+import { fetchAttachmentBlob, getAttachmentUrl } from "@/chat-core";
 
 /** Minimal info needed to open an HTML artifact. */
 export interface ArtifactRef {

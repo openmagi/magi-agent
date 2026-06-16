@@ -8,7 +8,7 @@ import {
   type MissionWorkQueueFilter,
   type MissionWorkQueueRow,
   type MissionWorkQueueSection,
-} from "@/lib/chat/mission-work-queue";
+} from "@/chat-core";
 import type {
   MissionArtifact,
   MissionDetail,
