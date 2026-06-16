@@ -127,27 +127,17 @@ def _spawn_agent_routes_line(env: Mapping[str, str] | None) -> str:
     try:
         import os  # noqa: PLC0415
 
-        from magi_agent.config.env import (  # noqa: PLC0415
-            operator_allowed_model_routes,
-        )
         from magi_agent.runtime.model_tiers import (  # noqa: PLC0415
-            ModelTierRegistry,
+            available_child_model_routes,
         )
 
-        tiers: dict[str, str] = {}
-        for (provider, model), record in ModelTierRegistry.with_defaults()._records.items():
-            tiers[f"{provider}:{model}"] = str(getattr(record, "tier", "") or "")
         source_env = env if env is not None else os.environ
-        for provider, model in operator_allowed_model_routes(source_env):
-            tiers.setdefault(f"{provider}:{model}", "")
-        if not tiers:
+        routes = available_child_model_routes(source_env)
+        if not routes:
             return ""
-        listed = ", ".join(
-            f"{route} ({tier})" if tier else route for route, tier in sorted(tiers.items())
-        )
         return (
             "Available model routes (pass provider + model exactly; omitting "
-            f"provider defaults to anthropic): {listed}."
+            f"provider defaults to anthropic): {', '.join(routes)}."
         )
     except Exception:  # noqa: BLE001
         return ""

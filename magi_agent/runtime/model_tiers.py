@@ -317,6 +317,35 @@ def _validate_model(value: str) -> str:
     return clean
 
 
+def available_child_model_routes(env: Mapping[str, str]) -> list[str]:
+    """Sorted ``provider:model (tier)`` routes a child spawn may target.
+
+    The union of the two sources ``child_runner_live._validate_route`` accepts:
+    the built-in :class:`ModelTierRegistry` AND the operator's deployment route
+    allowlist. Single source of truth for both the SpawnAgent tool guidance and
+    the system-prompt capability block, so the model is told exactly the routes
+    that pass validation. Fail-soft: any error contributes nothing.
+    """
+    tiers: dict[str, str] = {}
+    try:
+        for (provider, model), record in ModelTierRegistry.with_defaults()._records.items():
+            tiers[f"{provider}:{model}"] = str(getattr(record, "tier", "") or "")
+    except Exception:  # noqa: BLE001 — registry read must never raise here.
+        pass
+    try:
+        from magi_agent.config.env import (  # noqa: PLC0415
+            operator_allowed_model_routes,
+        )
+
+        for provider, model in operator_allowed_model_routes(env):
+            tiers.setdefault(f"{provider}:{model}", "")
+    except Exception:  # noqa: BLE001 — allowlist read must never raise here.
+        pass
+    return [
+        f"{route} ({tier})" if tier else route for route, tier in sorted(tiers.items())
+    ]
+
+
 __all__ = [
     "ModelCapability",
     "ModelTier",
@@ -324,4 +353,5 @@ __all__ = [
     "ModelTierRegistry",
     "ModelUsagePhase",
     "ResolvedModelTier",
+    "available_child_model_routes",
 ]

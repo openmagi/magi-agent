@@ -395,6 +395,50 @@ def _prompt_transform_hooks_enabled() -> bool:
     )
 
 
+def _available_subagent_models_block() -> str:
+    """System-prompt block listing the routes a child spawn may target.
+
+    Empty unless live serve sub-agents are enabled (``live_subagents_serve_enabled``)
+    AND at least one route resolves — so a deployment without sub-agents is
+    byte-identical. Tells the model its real, routable models so it stops
+    inventing names or claiming it cannot pick a sub-agent's model. Fail-soft.
+    """
+    try:
+        from magi_agent.runtime.child_runner_live import (  # noqa: PLC0415
+            is_live_child_runner_enabled,
+        )
+        from magi_agent.runtime.model_tiers import (  # noqa: PLC0415
+            available_child_model_routes,
+        )
+
+        # Mirror transport.live_subagents_serve_enabled WITHOUT importing transport
+        # (message_builder must stay above the transport layer): the serve flag
+        # AND the kill-switch-aware live child-runner master gate.
+        serve_flag_on = (os.environ.get("MAGI_GATE5B_LIVE_SUBAGENTS_ENABLED") or "").strip().lower() in (
+            "1",
+            "true",
+            "yes",
+            "on",
+        )
+        if not (serve_flag_on and is_live_child_runner_enabled(os.environ)):
+            return ""
+        routes = available_child_model_routes(os.environ)
+        if not routes:
+            return ""
+        listed = "\n".join(f"- {route}" for route in routes)
+        return (
+            "<available_subagent_models>\n"
+            "You CAN delegate to sub-agents on specific models via SpawnAgent. "
+            "Pass BOTH `provider` and `model` exactly as one of these routes "
+            "(other names are rejected as child_model_route_unknown; omitting "
+            "`provider` defaults to anthropic):\n"
+            f"{listed}\n"
+            "</available_subagent_models>"
+        )
+    except Exception:  # noqa: BLE001 — prompt assembly must never crash.
+        return ""
+
+
 def _assemble_prompt_sections(
     *,
     session_key: str,
@@ -444,6 +488,9 @@ def _assemble_prompt_sections(
         OUTPUT_EFFICIENCY_BLOCK,
         ACTION_SAFETY_BLOCK,
     ])
+    subagent_models_block = _available_subagent_models_block()
+    if subagent_models_block:
+        static_parts.append(subagent_models_block)
     if coding_agent:
         static_parts.extend([CODING_DISCIPLINE_BLOCK, CODING_WORKFLOW_BLOCK])
         # PR10: semantic per-model coding hint, only when the model-aware flag
