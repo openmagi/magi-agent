@@ -146,6 +146,31 @@ def test_catalog_has_curated_recipes_and_presets() -> None:
     assert catalog["verification"]["recipes"][0]["id"]
 
 
+def test_presets_sourced_from_real_catalog_with_hyphen_ids() -> None:
+    runtime = _FakeRuntime(tools=[])
+    presets = build_catalog(runtime)["verification"]["harnessPresets"]
+    ids = {p["id"] for p in presets}
+    # Real harness catalog uses hyphenated ids (matches hosted)
+    assert "coding-verification" in ids
+    assert "fact-grounding" in ids
+    assert not any("_" in i for i in ids), "preset ids must be hyphenated"
+    # 36-preset real catalog, not the old 6-item stub
+    assert len(presets) >= 30
+
+
+def test_preset_entries_carry_enforcement_and_modes() -> None:
+    runtime = _FakeRuntime(tools=[])
+    presets = {p["id"]: p for p in build_catalog(runtime)["verification"]["harnessPresets"]}
+    cv = presets["coding-verification"]
+    assert cv["enforcement"] == "enforcing"
+    assert cv["supportedModes"] == ["deterministic"]
+    assert "defaultEnabled" in cv
+    # security presets are always-on (enforced via PermissionGate, not this tab)
+    assert presets["dangerous-patterns"]["enforcement"] == "always-on"
+    # not-yet-wired preset is honestly preview
+    assert presets["answer-quality"]["enforcement"] == "preview"
+
+
 # ---------------------------------------------------------------------------
 # Tool tests
 # ---------------------------------------------------------------------------

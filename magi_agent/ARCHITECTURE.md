@@ -75,6 +75,7 @@ graph LR
     context --> tools
     credentials_admin --> storage
     customize --> config
+    customize --> harness
     customize --> transport
     discovery --> cli
     egress_proxy --> evidence
@@ -673,7 +674,8 @@ graph LR
 |---|---|---|---|
 | __init__.py | — | apply, store | — |
 | apply.py | — | flags, verification_policy | customize/__init__.py, runtime/openmagi_runtime.py, transport/customize.py |
-| catalog.py | — | app_api | transport/customize.py |
+| catalog.py | — | app_api, preset_map, presets | transport/customize.py |
+| preset_map.py | Canonical preset id → runtime-seam map for the Customize verification tab. | — | customize/catalog.py |
 | store.py | — | — | customize/__init__.py, runtime/openmagi_runtime.py, transport/customize.py |
 | verification_policy.py | — | — | customize/apply.py |
 
@@ -928,7 +930,7 @@ graph LR
 | parallel_execution.py | — | — | harness/workflow_executor.py |
 | plan_gate.py | — | tool_preview | harness/general_automation/plan_act_switch.py |
 | policy_state.py | — | presets, profiles | — |
-| presets.py | — | — | harness/audit.py, harness/policy_state.py, harness/profiles.py |
+| presets.py | — | — | customize/catalog.py, harness/audit.py, harness/policy_state.py, harness/profiles.py |
 | profiles.py | — | presets | harness/__init__.py, harness/policy_state.py, runtime/openmagi_runtime.py |
 | repair_policy.py | — | — | harness/__init__.py |
 | research_routing.py | — | research_agents | — |
