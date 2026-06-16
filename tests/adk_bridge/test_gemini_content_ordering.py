@@ -17,6 +17,8 @@ from magi_agent.adk_bridge.control_plane import (
     build_gemini_content_ordering_control,
 )
 from magi_agent.adk_bridge.gemini_content_ordering import (
+    apply_gemini_content_ordering_repair,
+    ensure_gemini_user_opener,
     repair_gemini_content_ordering,
 )
 
@@ -129,6 +131,57 @@ def test_control_leaves_valid_request_untouched() -> None:
     request = NS(contents=valid)
     asyncio.run(control.on_before_model(callback_context=None, llm_request=request))
     assert request.contents is valid
+
+
+def _user_opener() -> NS:
+    return _content("user", _part(text="(opener)"))
+
+
+def test_opener_prepends_user_when_compaction_orphaned_head() -> None:
+    # Real failure shape: compaction dropped the original user prompt, leaving a
+    # model function_call turn at the head -> Gemini 400. Prepend a user opener.
+    seq = [
+        _content("model", _part(function_call={"name": "x"}), _part(text="a")),
+        _content("user", _part(function_response={"name": "x"})),
+        _content("model", _part(function_call={"name": "y"}), _part(text="b")),
+        _content("user", _part(function_response={"name": "y"})),
+    ]
+    out = ensure_gemini_user_opener(seq, _user_opener)
+    assert out is not None
+    assert _roles(out) == ["user", "model", "user", "model", "user"]
+
+
+def test_opener_strips_leading_dangling_function_response() -> None:
+    seq = [
+        _content("user", _part(function_response={"name": "x"})),
+        _content("model", _part(function_call={"name": "y"})),
+        _content("user", _part(function_response={"name": "y"})),
+    ]
+    out = ensure_gemini_user_opener(seq, _user_opener)
+    assert out is not None
+    assert _roles(out) == ["user", "model", "user"]
+    assert out[0].parts[0].text == "(opener)"
+
+
+def test_opener_noop_when_head_is_user_text() -> None:
+    seq = [
+        _content("user", _part(text="hi")),
+        _content("model", _part(function_call={"name": "x"})),
+        _content("user", _part(function_response={"name": "x"})),
+    ]
+    assert ensure_gemini_user_opener(seq, _user_opener) is None
+
+
+def test_apply_runs_both_merge_and_opener_with_factory() -> None:
+    request = NS(
+        contents=[
+            _content("model", _part(function_call={"name": "x"})),
+            _content("user", _part(function_response={"name": "x"})),
+        ]
+    )
+    changed = apply_gemini_content_ordering_repair(request, user_content_factory=_user_opener)
+    assert changed is True
+    assert _roles(request.contents) == ["user", "model", "user"]
 
 
 def test_provider_repair_flag_gates_registration() -> None:

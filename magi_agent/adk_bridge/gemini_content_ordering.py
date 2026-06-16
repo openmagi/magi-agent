@@ -88,16 +88,63 @@ def repair_gemini_content_ordering(contents: Any) -> list[Any] | None:
     return merged
 
 
-def apply_gemini_content_ordering_repair(llm_request: Any) -> bool:
+def _is_function_response_only(content: Any) -> bool:
+    parts = getattr(content, "parts", None) or []
+    if not parts:
+        return False
+    return all(getattr(p, "function_response", None) is not None for p in parts)
+
+
+def ensure_gemini_user_opener(contents: Any, user_content_factory: Any) -> list | None:
+    """Make ``contents`` start with a valid Gemini opener, or return ``None``.
+
+    Gemini 400s ("function call turn must come immediately after a user turn or
+    function response turn") when context compaction trims the conversation head
+    and leaves ``contents`` starting with a model ``function_call`` turn (the
+    original user prompt was dropped) or a dangling ``function_response`` turn.
+
+    Repair: drop leading orphaned ``function_response`` turns, then prepend a
+    synthetic user turn (built by ``user_content_factory()``) when the head is a
+    model turn. Returns a new list if anything changed, else ``None``.
+    """
+    if not isinstance(contents, (list, tuple)) or not contents:
+        return None
+    work = list(contents)
+    changed = False
+    while work and _is_function_response_only(work[0]):
+        work.pop(0)
+        changed = True
+    if work and _role(work[0]) == "model":
+        work.insert(0, user_content_factory())
+        changed = True
+    return work if changed else None
+
+
+def apply_gemini_content_ordering_repair(
+    llm_request: Any,
+    user_content_factory: Any = None,
+) -> bool:
     """Repair ``llm_request.contents`` in place. Returns True if it changed.
 
-    Thin adapter used by the control-plane ``on_before_model`` control; kept here
-    so the contents-mutation logic is unit-testable without importing the
-    control-plane (and its ADK dependencies).
+    Two repairs: (1) merge adjacent same-role turns so roles alternate; (2) when
+    ``user_content_factory`` is given, fix a compaction-orphaned head (drop
+    leading dangling function_response turns; prepend a synthetic user turn when
+    the head is a model turn) so a leading ``function_call`` turn is preceded by
+    a user turn. The factory is injected by the control so this stays
+    unit-testable without importing google.genai.
     """
     contents = getattr(llm_request, "contents", None)
-    repaired = repair_gemini_content_ordering(contents)
-    if repaired is None:
-        return False
-    llm_request.contents = repaired
-    return True
+
+    merged = repair_gemini_content_ordering(contents)
+    changed = merged is not None
+    current = merged if changed else contents
+
+    if user_content_factory is not None:
+        opened = ensure_gemini_user_opener(current, user_content_factory)
+        if opened is not None:
+            current = opened
+            changed = True
+
+    if changed:
+        llm_request.contents = current
+    return changed
