@@ -288,10 +288,11 @@ graph LR
 | artifact_service.py | — | — | — |
 | callback_adapter.py | — | bus, context, manifest, resolved | — |
 | context_compaction.py | Live context-compaction wiring for the ADK Runner (PR13). | context, context_lifecycle, query_state, session_service, token_estimation | adk_bridge/control_plane.py |
-| control_plane.py | ADK loop control-plane abstraction (PR2, goose-parity). | constraint_reinjection, context, context_compaction, edit_retry_reflection, env, facts_replan_control, fork_runner, manifest, registries, resilience_plugin, schema_feedback, self_review, tool_exception_reflection, tool_synthesis, tool_synthesis_nudge, turn_policy | adk_bridge/facts_replan_control.py, adk_bridge/local_runner.py, adk_bridge/schema_feedback.py, cli/real_runner.py, cli/tests/test_real_runner.py, firstparty/packs/control_plane_default/impl.py, packs/context.py, packs/registries.py, transport/gate5b_governance.py |
+| control_plane.py | ADK loop control-plane abstraction (PR2, goose-parity). | constraint_reinjection, context, context_compaction, edit_retry_reflection, env, facts_replan_control, fork_runner, gemini_content_ordering, manifest, registries, resilience_plugin, schema_feedback, self_review, tool_exception_reflection, tool_synthesis, tool_synthesis_nudge, turn_policy | adk_bridge/facts_replan_control.py, adk_bridge/local_runner.py, adk_bridge/schema_feedback.py, cli/real_runner.py, cli/tests/test_real_runner.py, firstparty/packs/control_plane_default/impl.py, packs/context.py, packs/registries.py, transport/gate5b_governance.py |
 | edit_retry_reflection.py | Edit-failure reflection / retry wiring for the live ADK Runner. | context, retry_repair_policies, turn_utilities | adk_bridge/control_plane.py, adk_bridge/schema_feedback.py, adk_bridge/tool_exception_reflection.py |
 | event_adapter.py | — | events, health, transcript, transport | cli/engine.py, runtime/stream_withholding.py, shadow/fixture_runner.py, shadow/gate4c1_runner_shadow_invoker.py, transport/sse_buffer.py |
 | facts_replan_control.py | FactsReplanControl — interval-based facts-survey injection (default-OFF). | context, control_plane, facts_replan | adk_bridge/control_plane.py |
+| gemini_content_ordering.py | Gemini content-ordering repair for the ADK before_model hook. | — | adk_bridge/control_plane.py |
 | local_runner.py | — | control_plane, live_gate, local_toolhost, session_service, task_completion | shadow/fixture_runner.py |
 | local_toolhost.py | — | — | adk_bridge/local_runner.py |
 | memory_service.py | — | — | — |
