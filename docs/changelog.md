@@ -15,6 +15,11 @@ Versions follow the tags published on GitHub Releases.
 
 ### Fixed
 
+## 0.1.43
+
+### Added
+- Description-based LLM recipe/worker routing seam (default-OFF `MAGI_RECIPE_ROUTING_LLM_ENABLED` / `MAGI_WORKER_ROUTING_LLM_ENABLED`); packs carry a `when_to_use` routing signal (#599).
+
 ## 0.1.42
 
 ### Added
