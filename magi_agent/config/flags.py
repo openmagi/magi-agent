@@ -591,6 +591,43 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
         kind="int",
     ),
+    # Strict default-OFF (flat _b, NOT profile-resolved): G4 deterministic
+    # tool-output prune pre-tier. When ON, OLD function_response payloads are
+    # content-cleared before the Phase-1 compaction decision (cheaper, lower-loss
+    # than dropping whole turns). OFF is byte-identical to today.
+    _b(
+        "MAGI_COMPACTION_TOOL_PRUNE_ENABLED",
+        stage="stage2",
+        summary=(
+            "Content-clear OLD tool-output (function_response) payloads as a "
+            "deterministic pre-tier before the context-compaction tail-drop "
+            "decision, protecting the recent tail and protected tool results. "
+            "Strict default-OFF (OFF is byte-identical to today)."
+        ),
+    ),
+    FlagSpec(
+        name="MAGI_COMPACTION_PRUNE_PROTECT",
+        default=40_000,
+        scope="public",
+        stage="stage2",
+        summary=(
+            "Most-recent tool-output tokens to protect from the G4 prune pre-tier "
+            "(>= 1); only consulted when MAGI_COMPACTION_TOOL_PRUNE_ENABLED is on."
+        ),
+        kind="int",
+    ),
+    FlagSpec(
+        name="MAGI_COMPACTION_PRUNE_MINIMUM",
+        default=20_000,
+        scope="public",
+        stage="stage2",
+        summary=(
+            "Minimum total freed tokens required to commit a G4 tool-output prune "
+            "(>= 1, no churn for tiny savings); only consulted when "
+            "MAGI_COMPACTION_TOOL_PRUNE_ENABLED is on."
+        ),
+        kind="int",
+    ),
     # --- In-context replanning ----------------------------------------------
     # Strict default-OFF (flat _b, NOT profile-resolved): MAGI_RUNTIME_PROFILE
     # never auto-enables the facts-survey injection.

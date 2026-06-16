@@ -127,3 +127,55 @@ def test_rejects_negative_output_reserve() -> None:
 def test_zero_output_reserve_allowed() -> None:
     cfg = parse_context_compaction_env({"MAGI_COMPACTION_OUTPUT_RESERVE": "0"})
     assert cfg.output_reserve == 0
+
+
+# ---------------------------------------------------------------------------
+# G4 — tool-output prune pre-tier (strict default-OFF)
+# ---------------------------------------------------------------------------
+
+
+def test_tool_prune_defaults_off() -> None:
+    cfg = parse_context_compaction_env({})
+    assert cfg.tool_prune_enabled is False
+    assert cfg.prune_protect == 40_000
+    assert cfg.prune_minimum == 20_000
+
+
+@pytest.mark.parametrize("value", ["1", "true", "yes", "on", "TRUE", "On"])
+def test_tool_prune_enabled_strict_truthy(value: str) -> None:
+    # STRICT truthy parse (NOT profile-aware): only an explicit truthy value ON.
+    cfg = parse_context_compaction_env(
+        {"MAGI_COMPACTION_TOOL_PRUNE_ENABLED": value}
+    )
+    assert cfg.tool_prune_enabled is True
+
+
+def test_tool_prune_not_profile_aware() -> None:
+    # The full profile must NOT auto-enable the prune pre-tier.
+    cfg = parse_context_compaction_env({"MAGI_RUNTIME_PROFILE": "full"})
+    assert cfg.tool_prune_enabled is False
+
+
+def test_tool_prune_int_config_parsed() -> None:
+    cfg = parse_context_compaction_env(
+        {
+            "MAGI_COMPACTION_TOOL_PRUNE_ENABLED": "1",
+            "MAGI_COMPACTION_PRUNE_PROTECT": "50000",
+            "MAGI_COMPACTION_PRUNE_MINIMUM": "10000",
+        }
+    )
+    assert cfg.tool_prune_enabled is True
+    assert cfg.prune_protect == 50_000
+    assert cfg.prune_minimum == 10_000
+
+
+@pytest.mark.parametrize("value", ["0", "-1"])
+def test_rejects_invalid_prune_protect(value: str) -> None:
+    with pytest.raises(RuntimeEnvError):
+        parse_context_compaction_env({"MAGI_COMPACTION_PRUNE_PROTECT": value})
+
+
+@pytest.mark.parametrize("value", ["0", "-5"])
+def test_rejects_invalid_prune_minimum(value: str) -> None:
+    with pytest.raises(RuntimeEnvError):
+        parse_context_compaction_env({"MAGI_COMPACTION_PRUNE_MINIMUM": value})

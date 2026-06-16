@@ -97,6 +97,27 @@ REAL_PROMPT_TOKENS_STATE_KEY = "magi_compaction_real_prompt_tokens"
 # before-model seam; the event-count threshold mirrors the boundary default.
 _EVENT_COUNT_THRESHOLD_DEFAULT = 128
 
+# G4: deterministic tool-output prune pre-tier. The compact placeholder that
+# replaces an OLD ``function_response`` payload when it is cleared to save
+# context (mirrors OpenCode / claude-code content-clear semantics). The part is
+# never deleted — only its ``response`` payload is swapped for this — so the
+# function_call/function_response pairing stays valid.
+_PRUNED_TOOL_OUTPUT_PLACEHOLDER: dict[str, str] = {
+    "pruned": "[old tool output cleared to save context]"
+}
+
+# G4 default knobs (additive, default-OFF). PRUNE_PROTECT is the most-recent
+# tool-output tokens to protect (Layer-2 token tail); PRUNE_MINIMUM is the
+# minimum total freed tokens to commit a prune (no churn for tiny savings).
+_PRUNE_PROTECT_DEFAULT = 40_000
+_PRUNE_MINIMUM_DEFAULT = 20_000
+# Per-result minimum (LOWER clear threshold): only OLD function_response
+# payloads larger than this (in estimated tokens) are worth clearing — clearing
+# a trivial output frees nothing once the placeholder is counted, so they are
+# left untouched. (Distinct from content_replacement's MAX_RESULT_TOKENS, which
+# is an UPPER snip threshold for a different, dict-based engine.)
+_PRUNE_PER_RESULT_MINIMUM = 1_000
+
 
 class MagiContextCompactionPlugin(BasePlugin):
     """ADK plugin that compacts the outgoing context when over budget.
@@ -116,6 +137,9 @@ class MagiContextCompactionPlugin(BasePlugin):
         real_tokens_enabled: bool = False,
         real_tokens_pct: float = 0.75,
         output_reserve: int = 8_000,
+        tool_prune_enabled: bool = False,
+        prune_protect: int = _PRUNE_PROTECT_DEFAULT,
+        prune_minimum: int = _PRUNE_MINIMUM_DEFAULT,
     ) -> None:
         super().__init__(name)
         if token_threshold < 1:
@@ -128,9 +152,19 @@ class MagiContextCompactionPlugin(BasePlugin):
             raise ValueError("real_tokens_pct must be in the range (0, 1]")
         if output_reserve < 0:
             raise ValueError("output_reserve must be >= 0")
+        if prune_protect < 1:
+            raise ValueError("prune_protect must be >= 1")
+        if prune_minimum < 1:
+            raise ValueError("prune_minimum must be >= 1")
         self.token_threshold = token_threshold
         self.tail_events = tail_events
         self.event_count_threshold = event_count_threshold
+        # G4 deterministic tool-output prune pre-tier (default-OFF). When OFF the
+        # prune is never attempted and ``_trim_request`` is byte-identical to the
+        # Phase-1 path (no contents mutation).
+        self._tool_prune_enabled = bool(tool_prune_enabled)
+        self._prune_protect = prune_protect
+        self._prune_minimum = prune_minimum
         # G2 real-token accounting (default-OFF). When OFF every code path below
         # is byte-identical to the estimate + fixed-threshold behaviour.
         self._real_tokens_enabled = bool(real_tokens_enabled)
@@ -257,6 +291,28 @@ class MagiContextCompactionPlugin(BasePlugin):
                 # Nothing to trim even in the worst case; skip the boundary call.
                 return None
 
+            # G4: deterministic tool-output prune pre-tier (default-OFF). When ON,
+            # content-clear OLD function_response payloads (cheaper, lower-loss
+            # than dropping whole turns) BEFORE the Phase-1 decision. The clear is
+            # an IN-PLACE mutation of the shared ``FunctionResponse`` objects (the
+            # ``contents`` list is a shallow copy of ``llm_request.contents``, so
+            # the two share Part objects), which is why no rebind is needed here
+            # and why — like OpenCode's prune — the reduction PERSISTS into later
+            # turns rather than being recomputed each call. OFF / no-op => zero
+            # mutation, so ``llm_request.contents`` stays byte-identical.
+            #
+            # CACHE TRADEOFF (documented, not solved here): clearing OLD prefix
+            # payloads rewrites bytes the model already saw, so when
+            # ``MAGI_MESSAGE_CACHE_ENABLED`` is ON the provider prompt-cache prefix
+            # is invalidated from the first pruned Content forward — the same class
+            # of cost as the tail-drop, but gentler (message count + function
+            # call/response pairing preserved). Note this can introduce a cache
+            # miss even in the prune-avoids-tail-drop case where Phase-1 alone
+            # would have left contents intact. True cache-preserving compaction
+            # (compacting only beyond the last cache breakpoint) is deferred to G5.
+            if self._tool_prune_enabled:
+                self._maybe_prune_tool_outputs(contents)
+
             # G2: real-token pre-check. When the real-token path is ON and a real
             # prompt-token count is present (stashed by the prior turn's
             # after_model capture), compare it against a %-of-window threshold
@@ -357,6 +413,93 @@ class MagiContextCompactionPlugin(BasePlugin):
             )
         llm_request.contents = contents[split_index:]
         return None
+
+    def _maybe_prune_tool_outputs(self, contents: list[Any]) -> None:
+        """G4 deterministic tool-output prune (in-place mutator).
+
+        Content-clear OLD ``function_response`` payloads (replace ``.response``
+        with :data:`_PRUNED_TOOL_OUTPUT_PLACEHOLDER`) in the region BEFORE the
+        protected tail, committing only when the total freed tokens reach
+        ``self._prune_minimum``. Mutates the matching ``FunctionResponse`` objects
+        IN PLACE (the objects are shared with ``llm_request.contents``), so the
+        reduction is visible to the request without a list rebind and persists
+        across turns; returns ``None``. Never deletes a part (keeps the
+        function_call/response pairing valid), never touches protected tool
+        results, never touches the protected tail. When nothing reaches the
+        minimum, no object is mutated (byte-identical no-op). Fail-open: any error
+        sizing or mutating leaves ``contents`` untouched.
+        """
+        from magi_agent.context.protected_tools import PRUNE_PROTECTED_TOOLS
+
+        try:
+            boundary = self._prune_protected_boundary(contents)
+            if boundary <= 0:
+                return None
+
+            # First pass: identify clears + compute freed tokens WITHOUT mutating,
+            # so a sub-minimum total leaves contents fully untouched (no churn).
+            placeholder_tokens = _response_payload_tokens(
+                _PRUNED_TOOL_OUTPUT_PLACEHOLDER
+            )
+            pending: list[tuple[Any, int]] = []  # (function_response, freed)
+            freed_total = 0
+            for content in contents[:boundary]:
+                parts = getattr(content, "parts", None) or []
+                for part in parts:
+                    fr = getattr(part, "function_response", None)
+                    if fr is None:
+                        continue
+                    name = getattr(fr, "name", None)
+                    if isinstance(name, str) and name in PRUNE_PROTECTED_TOOLS:
+                        continue
+                    payload = getattr(fr, "response", None)
+                    size = _response_payload_tokens(payload)
+                    if size < _PRUNE_PER_RESULT_MINIMUM:
+                        continue
+                    freed = size - placeholder_tokens
+                    if freed <= 0:
+                        continue
+                    pending.append((fr, freed))
+                    freed_total += freed
+
+            if freed_total < self._prune_minimum:
+                return None
+
+            # Commit: content-clear the identified payloads in place.
+            for fr, _freed in pending:
+                fr.response = dict(_PRUNED_TOOL_OUTPUT_PLACEHOLDER)
+            return None
+        except Exception:
+            # Fail-open: prune must never break a live model turn.
+            return None
+
+    def _prune_protected_boundary(self, contents: list[Any]) -> int:
+        """Return the index where the prune-eligible OLD region ends (exclusive).
+
+        Two-layer tail protection over ``contents`` (0..n-1, oldest..newest):
+
+        * Layer 1 (count): protect the last ``min(tail_events, len)`` Contents —
+          the SAME tail ``_apply_tail_trim`` keeps.
+        * Layer 2 (token): walking backward from the start of the count-protected
+          region, keep protecting Contents until the running sum of
+          function_response output tokens reaches ``self._prune_protect``.
+
+        The protected boundary = the lower (older) of the two split points.
+        Everything at index < boundary is eligible for prune.
+        """
+        n = len(contents)
+        keep = min(self.tail_events, n)
+        count_split = n - keep  # indices [count_split, n) are count-protected
+        # Walk backward from count_split accumulating output tokens.
+        token_split = count_split
+        running = 0
+        idx = count_split - 1
+        while idx >= 0 and running < self._prune_protect:
+            running += _content_response_tokens(contents[idx])
+            token_split = idx
+            idx -= 1
+        # Protected boundary is the older (smaller) of the two split points.
+        return min(count_split, token_split)
 
     async def _decision_inputs(self) -> tuple[Any, Any, Any]:
         """Return the cached local-fake session service / session / QueryState the
@@ -511,6 +654,46 @@ def _content_token_estimate(content: Any) -> int:
     return total
 
 
+def _response_payload_tokens(payload: Any) -> int:
+    """Estimated token size of a single ``function_response.response`` payload.
+
+    Mirrors ``_content_token_estimate``'s non-text branch (JSON-serialised basis
+    via ``count_text_tokens`` over the payload's ``model_dump_json()`` / json dump)
+    so the freed-token accounting matches the budget basis used elsewhere. A
+    ``None`` payload is zero; a non-serialisable payload raises (the caller's
+    fail-open path then leaves the result un-pruned).
+    """
+    if payload is None:
+        return 0
+    from magi_agent.shared.token_estimation import count_text_tokens
+
+    dump_json = getattr(payload, "model_dump_json", None)
+    if callable(dump_json):
+        serialised = dump_json()
+    else:
+        import json
+
+        serialised = json.dumps(payload, default=str, sort_keys=True)
+    return count_text_tokens(serialised)
+
+
+def _content_response_tokens(content: Any) -> int:
+    """Sum of function_response output tokens carried by one ADK ``Content``.
+
+    Used by the G4 token-tail protection walk; only function_response payloads
+    count (the prune target). Non-response parts contribute nothing here.
+    """
+    total = 0
+    parts = getattr(content, "parts", None) or []
+    for part in parts:
+        fr = getattr(part, "function_response", None)
+        if fr is None:
+            continue
+        payload = getattr(fr, "response", None)
+        total += _response_payload_tokens(payload)
+    return total
+
+
 def _is_orphan_response(content: Any) -> bool:
     """True when ``content`` begins a turn with a function/tool response that has
     no preceding call in the kept tail (which would be an invalid request).
@@ -564,13 +747,16 @@ def build_context_compaction_plugin(
     real_tokens_enabled: bool = False,
     real_tokens_pct: float = 0.75,
     output_reserve: int = 8_000,
+    tool_prune_enabled: bool = False,
+    prune_protect: int = _PRUNE_PROTECT_DEFAULT,
+    prune_minimum: int = _PRUNE_MINIMUM_DEFAULT,
 ) -> MagiContextCompactionPlugin | None:
     """Return a configured plugin, or ``None`` when the feature is disabled.
 
     The flag/budget are owned by ``magi_agent.config.env`` (single source);
     callers pass the resolved values here so this module stays import-light and
-    free of env-parsing concerns. The real-token args are additive and default-OFF
-    so existing callers are byte-identical.
+    free of env-parsing concerns. The real-token and tool-prune args are additive
+    and default-OFF so existing callers are byte-identical.
     """
     if not enabled:
         return None
@@ -580,6 +766,9 @@ def build_context_compaction_plugin(
         real_tokens_enabled=real_tokens_enabled,
         real_tokens_pct=real_tokens_pct,
         output_reserve=output_reserve,
+        tool_prune_enabled=tool_prune_enabled,
+        prune_protect=prune_protect,
+        prune_minimum=prune_minimum,
     )
 
 
@@ -590,3 +779,6 @@ __all__ = [
     "MagiContextCompactionPlugin",
     "build_context_compaction_plugin",
 ]
+
+# Exported for tests asserting the placeholder shape; not part of the public API.
+__all__.append("_PRUNED_TOOL_OUTPUT_PLACEHOLDER")

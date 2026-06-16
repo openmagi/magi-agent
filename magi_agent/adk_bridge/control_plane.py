@@ -1537,6 +1537,9 @@ def build_core_default_plane(
         real_tokens_enabled=compaction_env.real_tokens_enabled,
         real_tokens_pct=compaction_env.real_tokens_pct,
         output_reserve=compaction_env.output_reserve,
+        tool_prune_enabled=compaction_env.tool_prune_enabled,
+        prune_protect=compaction_env.prune_protect,
+        prune_minimum=compaction_env.prune_minimum,
     )
     if compaction_plugin is not None:
         plane.register(_CompactionLoopControl(compaction_plugin))
