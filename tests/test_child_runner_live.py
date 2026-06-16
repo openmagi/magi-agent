@@ -511,15 +511,37 @@ def test_run_child_times_out_on_budget_ms_and_never_raises() -> None:
     assert output["summary"] == _DEGRADE_TIMEOUT
 
 
-def test_run_child_no_budget_ms_runs_unbounded() -> None:
-    """Without a budget, the turn runs to completion (no timeout regression)."""
-    fake = _FakeRunner(text="ANSWER: unbounded ok")
+def test_run_child_no_budget_ms_fast_child_completes() -> None:
+    """Without an explicit budget, a fast child still completes — the default
+    ceiling bounds the turn but does not cut off a child that finishes in time."""
+    fake = _FakeRunner(text="ANSWER: default-bound ok")
     runner = RealLocalChildRunner(provider_config=_provider_config(), runner=fake)
 
     output = asyncio.run(runner.run_child(_request()))  # budget_ms defaults to 0
 
     assert output["status"] == "completed"
-    assert "unbounded ok" in str(output["summary"])
+    assert "default-bound ok" in str(output["summary"])
+
+
+def test_run_child_no_budget_ms_still_times_out_on_hang() -> None:
+    """Regression: a child with NO budget_ms must still be bounded by the default
+    ceiling (lowered by ``MAGI_MODEL_TIMEOUT_S``) so a hung child degrades to
+    ``child_turn_timeout`` instead of hanging the parent turn forever."""
+    slow = _SlowRunner(sleep_s=2.0)
+    runner = RealLocalChildRunner(
+        provider_config=_provider_config(),
+        runner=slow,
+        env={"MAGI_MODEL_TIMEOUT_S": "0.1"},
+    )
+
+    # No budget_ms on the request → previously ran unbounded (the parent turn
+    # hung forever). Now the default ceiling (0.1s) cuts the 2s runner off →
+    # degrade, never hang or raise.
+    output = asyncio.run(runner.run_child(_request()))
+
+    assert slow.calls == 1
+    assert output["status"] in {"failed", "blocked"}
+    assert output["summary"] == _DEGRADE_TIMEOUT
 
 
 def test_run_child_propagates_cancellation() -> None:
