@@ -114,47 +114,6 @@ _ALLOWED_RUNNER_KWARGS = (
 _ALLOWED_RUN_ASYNC_KWARGS = ("new_message", "run_config", "session_id", "user_id")
 _MAX_MANUAL_TOOL_CONTINUATIONS = 4
 _MANUAL_TOOL_EVENT_LIMIT = 64
-
-# Max times we re-invoke the model when it DEFERS (restates a plan / "I'll do X
-# next" with no tool call) instead of executing. Bounds runaway / cost while
-# letting a multi-step task run to completion without a special goal mode.
-_MAX_DEFERRAL_CONTINUATIONS = 4
-
-_DEFERRAL_CONTINUATION_NUDGE = (
-    "Continue now. Perform the next step of your plan immediately using the "
-    "available tools — do not restate the plan or say what you will do next. "
-    "Keep executing step by step until the entire task is fully complete, then "
-    "give the final answer. Only stop early if you hit a concrete blocker, and "
-    "if so state exactly what it is."
-)
-
-# Forward-looking / deferral markers: the model announced a next action rather
-# than performing it. Anchored to task-execution phrasing so genuine final
-# answers and casual chat ("I'll be happy to help") do not match.
-_DEFERRAL_PLAN_RE = re.compile(
-    r"(?:"
-    r"next\s+concrete\s+action"
-    r"|next\s+step\b"
-    r"|remaining\s+work"
-    r"|refreshed\s+(?:short\s+)?plan"
-    r"|\bi(?:'|\s+wi)ll\s+(?:now\s+)?(?:fetch|search|gather|retrieve|spawn|"
-    r"compile|extract|read|look|access|continue|proceed|start|begin|write|run)"
-    r"|\blet me\s+(?:now\s+)?(?:fetch|search|gather|retrieve|spawn|compile|"
-    r"extract|read|access|continue|proceed|start|begin)"
-    r"|다음\s*(?:단계|으로|행동|작업)"
-    r"|(?:가져오|검색|찾|진행|시작|작성|실행|스폰|조회|수집|분석|확인|추출|읽|"
-    r"접근|계속|호출)[가-힣]*겠"
-    r"|할\s*것입니다"
-    r")",
-    re.IGNORECASE,
-)
-
-
-def _looks_like_deferred_plan(text: str) -> bool:
-    """True if model output announces a next action instead of executing it."""
-    if not text or not text.strip():
-        return False
-    return bool(_DEFERRAL_PLAN_RE.search(text))
 _DEFAULT_SELECTED_FULL_TOOLHOST_TEXT_EVENT_LIMIT = 2048
 _MAX_SELECTED_FULL_TOOLHOST_TEXT_EVENT_LIMIT = 8192
 _MAX_MANUAL_TOOL_RESULTS_BYTES = 8192
@@ -801,7 +760,6 @@ class Gate5B4C3LiveRunnerBoundary:
         output_chunks: list[str] = []
         manual_continuations = 0
         output_continuations = 0
-        deferral_continuations = 0
         tool_only_events_seen = False
         prestarted_tool_event_ids: set[str] = set()
         completed_tool_event_ids: set[str] = set()
@@ -1014,45 +972,6 @@ class Gate5B4C3LiveRunnerBoundary:
                             parts=[
                                 primitives.Part.from_text(
                                     text=_build_output_continuation_message()
-                                )
-                            ],
-                            role="user",
-                        )
-                        continue
-                    # The model produced text with no tool call and was not
-                    # truncated, but it DEFERRED — restated a plan / "I'll do X
-                    # next" instead of executing it. This is the canonical
-                    # mid-task stop for multi-step work that cannot finish in one
-                    # turn. Re-invoke with a nudge to perform the next step now so
-                    # the agent runs to completion without a special goal mode.
-                    # Bounded and heuristic-gated to avoid looping on genuine
-                    # final answers / casual chat.
-                    if (
-                        selected_full_toolhost
-                        and self._adk_tools
-                        and not function_calls
-                        and not function_responses_seen
-                        and not current_run_truncated
-                        and bool(current_run_output_chunks)
-                        and deferral_continuations < _MAX_DEFERRAL_CONTINUATIONS
-                        and event_count
-                        < _stream_event_limit(
-                            selected_full_toolhost=selected_full_toolhost
-                        )
-                        and _looks_like_deferred_plan("".join(current_run_output_chunks))
-                    ):
-                        deferral_continuations += 1
-                        self._emit_public_event(
-                            {
-                                "type": "output_continuation",
-                                "continuation": output_continuations + deferral_continuations,
-                                "reason": "deferred_execution",
-                            }
-                        )
-                        next_message = primitives.Content(
-                            parts=[
-                                primitives.Part.from_text(
-                                    text=_DEFERRAL_CONTINUATION_NUDGE
                                 )
                             ],
                             role="user",
