@@ -42,3 +42,16 @@ def test_policy_ignores_malformed_entries() -> None:
 def test_policy_reads_user_rules() -> None:
     policy = CustomizeVerificationPolicy.from_overrides({"user_rules": "Always cite."})
     assert policy.user_rules == "Always cite."
+
+
+def test_resolve_enabled_tri_state() -> None:
+    policy = CustomizeVerificationPolicy.from_overrides(
+        {"verification": {"preset_overrides": {"coding-verification": False}}}
+    )
+    # explicit False overrides a default-on gate (opt-out)
+    assert policy.resolve_enabled("coding-verification", default=True) is False
+    assert policy.explicit_preset("coding-verification") is False
+    # unset → falls back to default
+    assert policy.resolve_enabled("answer-quality", default=True) is True
+    assert policy.resolve_enabled("answer-quality", default=False) is False
+    assert policy.explicit_preset("answer-quality") is None

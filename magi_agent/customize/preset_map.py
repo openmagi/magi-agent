@@ -5,17 +5,22 @@ runtime gate, and how. Canonical ids use HYPHENS (matching
 ``harness/presets.py`` and the hosted product). The catalog, the apply layer,
 and the assembly-wiring all import from here so the mapping never drifts.
 
-Phase 2 wires only the presets whose runtime seam genuinely exists today:
-- ``coding-verification`` — forces the ``verifier:dev-coding:test-evidence``
-  required validator (and keeps the ``openmagi.dev-coding`` pack selected so the
-  pre-final gate stays mutation-scoped).
-- ``fact-grounding`` — injects the bare ``fact_grounding`` evidence label so the
-  deterministic grounding satisfier runs. Deterministic mode only — there is no
-  LLM-grounding code path yet.
+The recipe-driven pre-final evidence gate is default-ON (full profile) and the
+default task profile selects every first-party pack, so the controlled refs are
+already required by default. The Customize tab's job for these presets is
+therefore **opt-out**: when the user explicitly disables a preset, its controlled
+ref is removed from the assembled ``required_validators`` so the gate no longer
+blocks on it.
 
-Everything else is reported honestly (``preview`` = not yet wired; ``always-on``
-= enforced elsewhere, e.g. security presets via the PermissionGate) until later
-phases wire it. No fake toggles.
+Phase 2 wires exactly one preset whose seam is a clean assembly-layer opt-out:
+- ``coding-verification`` — controls the ``verifier:dev-coding:test-evidence``
+  required validator (default-ON; disabling removes it).
+
+Other presets are reported honestly (``preview`` = not yet wired; ``always-on`` =
+enforced elsewhere, e.g. security presets via the PermissionGate). ``fact-grounding``
+is intentionally NOT wired here: its runtime default is OFF (env-flag gated, bare
+label inert in the bus) so it needs opt-IN semantics + engine-satisfier plumbing,
+handled with the Phase 3 reality-check batch. No fake toggles.
 """
 
 from __future__ import annotations
@@ -25,34 +30,28 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class PresetSeam:
-    """How an enabled preset contributes to the recipe-driven pre-final gate."""
+    """How an enabled/disabled preset toggle maps to the pre-final gate.
+
+    ``controls_refs`` are the public validator refs this preset governs. When the
+    preset resolves enabled they are ensured present in ``required_validators``;
+    when explicitly disabled they are removed. ``runtime_default_on`` is the
+    preset's effective default in the live runtime (NOT the catalog's product
+    ``default_on``, which can differ), used to resolve the unset state.
+    """
 
     preset_id: str
+    controls_refs: tuple[str, ...]
+    runtime_default_on: bool = True
     supported_modes: tuple[str, ...] = ("deterministic",)
-    enforcement: str = "enforcing"
-    # Public validator refs (``verifier:``/``evidence:`` prefixed) appended to the
-    # assembly's required_validators when the preset is enabled.
-    validator_refs: tuple[str, ...] = ()
-    # Bare evidence-requirement labels (engine-satisfier driven, e.g.
-    # ``fact_grounding``) appended to required_validators when enabled.
-    evidence_labels: tuple[str, ...] = ()
-    # Pack ids that must be present in selectedPackIds when the preset is enabled
-    # (preserves mutation-scoping for coding gates).
-    require_packs: tuple[str, ...] = ()
 
 
-# Presets with a genuine runtime seam wired in Phase 2.
+# Presets with a genuine assembly-layer seam wired in Phase 2.
 PRESET_SEAMS: dict[str, PresetSeam] = {
     "coding-verification": PresetSeam(
         preset_id="coding-verification",
+        controls_refs=("verifier:dev-coding:test-evidence",),
+        runtime_default_on=True,
         supported_modes=("deterministic",),
-        validator_refs=("verifier:dev-coding:test-evidence",),
-        require_packs=("openmagi.dev-coding",),
-    ),
-    "fact-grounding": PresetSeam(
-        preset_id="fact-grounding",
-        supported_modes=("deterministic",),
-        evidence_labels=("fact_grounding",),
     ),
 }
 
