@@ -15,6 +15,25 @@ Versions follow the tags published on GitHub Releases.
 
 ### Fixed
 
+## 0.1.45
+
+### Added
+- Customize tab: verification-rule modal reaches frontend parity (36 presets ×
+  7 categories with enforcement badges and a USER-RULES editor), and authored
+  USER-RULES are injected into the serve prompt (#603).
+
+### Changed
+- Chat-core Batch B: moved the types-dependent core (attachments,
+  public-tool-preview, research-evidence, history-merge, e2ee, …) into the
+  vendored `chat-core` single-source. Logic unchanged — imports/folds only
+  (#613).
+
+### Fixed
+- Customize verification route coverage: the bundle-vs-backend route gate no
+  longer false-negatives two-parameter routes
+  (`/v1/app/customize/verification/{kind}/{item_id}`); drift detection for
+  genuinely missing routes is preserved (#603).
+
 ## 0.1.44
 
 ### Added
