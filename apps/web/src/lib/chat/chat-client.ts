@@ -46,6 +46,31 @@ const LOCAL_DEFAULT_CHANNEL: Channel = {
   category: "General",
   created_at: "1970-01-01T00:00:00.000Z",
 };
+
+/**
+ * localStorage key for a bot's persisted channel list. The OSS local runtime
+ * has no server-side channels endpoint, so for local bots this store IS the
+ * source of truth — {@link fetchChannels} reads it back rather than always
+ * returning the bare default, so channels created via the dashboard survive
+ * the authoritative refetch the chat view runs on mount.
+ */
+export function channelsCacheKey(botId: string): string {
+  return `magi:channels:${botId}`;
+}
+
+function readPersistedLocalChannels(): Channel[] {
+  if (typeof localStorage === "undefined") return [LOCAL_DEFAULT_CHANNEL];
+  try {
+    const raw = localStorage.getItem(channelsCacheKey(LOCAL_BOT_ID));
+    if (raw) {
+      const parsed = JSON.parse(raw) as Channel[];
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch {
+    /* ignore corrupt cache — fall back to the default channel */
+  }
+  return [LOCAL_DEFAULT_CHANNEL];
+}
 /**
  * Phase 1 — time allotted for HTTP headers to arrive. Cleared once
  * fetch() resolves. §11.12 web watchdog (2026-04-20). Matches
@@ -630,7 +655,7 @@ async function chatProxyFetch(path: string, options?: RequestInit): Promise<Resp
 // --- Channel CRUD ---
 
 export async function fetchChannels(botId: string): Promise<Channel[]> {
-  if (isLocalBot(botId)) return [LOCAL_DEFAULT_CHANNEL];
+  if (isLocalBot(botId)) return readPersistedLocalChannels();
 
   const res = await chatFetch(`/v1/chat/${botId}/channels`);
   if (!res.ok) throw new Error(`Failed to fetch channels: ${res.status}`);

@@ -328,6 +328,10 @@ describe("buildSessionKey", () => {
 });
 
 describe("fetchChannels", () => {
+  beforeEach(() => {
+    if (typeof localStorage !== "undefined") localStorage.clear();
+  });
+
   it("uses a local default channel for the OSS local bot", async () => {
     const fetchMock = vi.fn();
     globalThis.fetch = fetchMock as unknown as typeof globalThis.fetch;
@@ -341,6 +345,22 @@ describe("fetchChannels", () => {
         display_name: "General",
       }),
     ]);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("returns persisted local channels so newly created ones survive refetch", async () => {
+    const fetchMock = vi.fn();
+    globalThis.fetch = fetchMock as unknown as typeof globalThis.fetch;
+
+    const persisted = [
+      { id: "local-general", name: "general", display_name: "General", position: 0, category: "General", created_at: "1970-01-01T00:00:00.000Z" },
+      { id: "local-research", name: "research", display_name: "Research", position: 1, category: "General", created_at: "1970-01-01T00:00:00.000Z" },
+    ];
+    localStorage.setItem("magi:channels:local", JSON.stringify(persisted));
+
+    const channels = await fetchChannels("local");
+
+    expect(channels.map((c) => c.name)).toEqual(["general", "research"]);
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
