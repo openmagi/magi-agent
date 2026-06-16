@@ -575,6 +575,11 @@ def _apply_customize_verification(required_validators: list[str]) -> list[str]:
         policy = CustomizeVerificationPolicy.from_overrides(load_overrides())
         result = list(required_validators)
         for preset_id, seam in PRESET_SEAMS.items():
+            # Only opt-out seams are assembly-layer ref add/remove. opt-in seams
+            # are activated at the engine-satisfier layer
+            # (customize.runtime_gate.preset_enabled), not here.
+            if seam.wiring != "opt_out":
+                continue
             enabled = policy.resolve_enabled(
                 preset_id, default=seam.runtime_default_on
             )
