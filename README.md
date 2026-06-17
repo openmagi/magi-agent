@@ -48,18 +48,17 @@ files, edit, diff, typecheck, test, and commit. The workflow itself gives the
 agent deterministic checkpoints. Most research, operations, finance, document
 review, and general automation work does not have that structure by default.
 
-Magi adds that structure at runtime.
+## The Solution: Programmable Determinism
 
-## Why Programmable Determinism
+Magi adds that missing structure at runtime: a control plane you program. It has
+two properties. It is **deterministic**, and it is **programmable**. Both carry
+weight.
 
-That structure has two properties — it is **deterministic**, and it is
-**programmable**. Both carry weight.
-
-**Deterministic — we do not make the *model* deterministic.** The model stays
+**Deterministic: we do not make the *model* deterministic.** The model stays
 creative, and can be incomplete or wrong. We make the *control around it*
 deterministic: which of the model's proposals become state, evidence, side
 effects, or user-visible output. The component that decides is plain code reading
-an append-only evidence record — zero model calls in the gate. The model
+an append-only evidence record, with zero model calls in the gate. The model
 proposes; the control plane disposes.
 
 Concretely, a workflow defines:
@@ -74,23 +73,23 @@ Concretely, a workflow defines:
 - what becomes user-visible output;
 - what is recorded in the audit ledger.
 
-**Programmable — the right control is not universal.** It varies with what a
+**Programmable: the right control is not universal.** It varies with what a
 domain lets you verify (coding has tests,
 research has sources, finance has reconciliations) and with how much an operator
 wants to enforce (loose vs strict, a source allowlist, a mandatory approval).
-Neither lives in the model's weights — a single model cannot know your policy,
+Neither lives in the model's weights. A single model cannot know your policy,
 risk appetite, or jurisdiction. You supply that as configuration: same engine,
-different rails per task. So the behavior is composable — attach a
+different rails per task. So the behavior is composable: attach a
 source-verification harness, an approval harness, a coding-verification harness,
 or a reconciliation harness without rewriting the agent core for each workflow.
 
-**This matters more as models improve, not less.** Capability scaffolding —
-prompts, planning crutches — gets absorbed by better models, and should. But
+**This matters more as models improve, not less.** Capability scaffolding
+(prompts, planning crutches) gets absorbed by better models, and should. But
 verification against ground truth, authority over side effects, and an audit
 trail are *trust* problems, orthogonal to intelligence. A more capable, more
 autonomous agent raises the cost of a confident mistake, so external,
 deterministic control becomes more necessary, not less. A model checking its own
-work is marking its own homework. Magi is not trying to make the model smart — it
+work is marking its own homework. Magi is not trying to make the model smart. It
 is the control, trust, and verification plane between a powerful model and the
 systems and people that depend on it.
 
@@ -103,7 +102,7 @@ brew update
 brew install --force-bottle openmagi/tap/magi-agent
 ```
 
-Configure a model provider. Set one provider API key — the runtime auto-detects
+Configure a model provider. Set one provider API key, and the runtime auto-detects
 which provider you configured:
 
 ```bash
@@ -178,7 +177,7 @@ brew install --force-bottle openmagi/tap/magi-agent
 # 2. Set ONE provider key (any of these works)
 export ANTHROPIC_API_KEY=...   # or OPENAI_API_KEY / GEMINI_API_KEY / GOOGLE_API_KEY / FIREWORKS_API_KEY
 
-# 3. Ask a no-tools question — the real model answers
+# 3. Ask a no-tools question (the real model answers)
 magi -p "What is 2+2?"
 ```
 
@@ -226,20 +225,20 @@ want, and only climb when that layer genuinely cannot.**
 
 | Layer | Role | Reach for it when | Lives in |
 | --- | --- | --- | --- |
-| **Skill** | Behavior guidance — procedure, format, tone (no code) | "Do the work *this way*" | `SKILL.md` files |
+| **Skill** | Behavior guidance: procedure, format, tone (no code) | "Do the work *this way*" | `SKILL.md` files |
 | **Tool** | A capability the model can call | "The agent needs a new *ability*" | tool registry (`tools/`) |
-| **Recipe** | Per-task composition — which tools, validators, evidence, phases, and model to attach | "For *this class of task*, always assemble this" | recipe packs (`recipes/`, incl. `first_party/`) |
+| **Recipe** | Per-task composition: which tools, validators, evidence, phases, and model to attach | "For *this class of task*, always assemble this" | recipe packs (`recipes/`, incl. `first_party/`) |
 | **Evidence** | Append-only proof record + enforcement gates | "This claim or action must be *proven*, or blocked" | evidence ledger (`evidence/`) |
 | **Harness** | The execution machinery and runtime primitives a recipe references | "A guarantee the model cannot be *trusted* to keep" | runtime engine + gates (`harness/`) |
 
 How they relate: a **Recipe** is a bill of materials. It references **Tool**,
 **Evidence**, and **Harness** primitives *by name* (`tool_refs`,
 `validator_refs`, `evidence_refs`, …); it does not implement them. The
-**Harness** owns the engine, gates, loops, and schedulers — that is where the
+**Harness** owns the engine, gates, loops, and schedulers; that is where the
 referenced primitives actually live. The **Evidence** ledger is a separate,
 always-on record produced at the tool-dispatch boundary, which gates consume.
 **Skill** and project context ride on top as model-visible guidance. (Every one
-of these is authored as a disk pack in the same format — see
+of these is authored as a disk pack in the same format; see
 [Extending the runtime](#extending-the-runtime).)
 
 Because the layers are orthogonal, each degrades on its own:
@@ -358,8 +357,8 @@ USER INPUT:  "Research 2024 EU AI Act penalties, deliver a sourced brief.docx"
  (13) USER SEES brief.docx  <--------  | (14) AUDIT LEDGER  (receipts, verifier events)
 ```
 
-The gate at step 9 is a pure read over recorded evidence with **no model calls**
-— that is what "deterministic control" means in practice. And
+The gate at step 9 is a pure read over recorded evidence with **no model calls**.
+That is what "deterministic control" means in practice. And
 `source_claim_link` only fires because this is a *research* plan; on a coding
 task that stage is never selected. *Same engine, different plan.*
 
@@ -386,15 +385,15 @@ tool authority.
 
 ## Extending the runtime
 
-The harnesses above are a starting point, not a ceiling. Every primitive seam —
-tool, callback, validator, harness, control_plane, evidence_producer, recipe,
-connector — is authored as a disk pack. First-party ships as bundled packs in the
+The harnesses above are a starting point, not a ceiling. Every primitive seam
+(tool, callback, validator, harness, control_plane, evidence_producer, recipe,
+connector) is authored as a disk pack. First-party ships as bundled packs in the
 same format, loaded through the same path as yours: a user pack can add a new
 primitive, override a first-party ref, or remove a first-party pack entirely.
-Each implementation receives the same narrow typed context first-party receives —
+Each implementation receives the same narrow typed context first-party receives;
 there is no privileged handle.
 
-At a glance — what you can change, how, and what is live today:
+At a glance: what you can change, how, and what is live today:
 
 | To change…                                                              | How (compose = author a pack · configure = set a value) | Status |
 | ----------------------------------------------------------------------- | ------------------------------------------------------- | ------ |
@@ -402,12 +401,12 @@ At a glance — what you can change, how, and what is live today:
 | A tool, validator, evidence producer, callback, control_plane, connector | author a `pack.toml` (+ `impl.py` for code-bearing types) | ✅ live |
 | A harness preset (a named bundle of the above)                          | author a `pack.toml` `type="harness"`                  | ✅ live |
 | Which packs are on; enforcement strength                                | `~/.magi/config.toml` or a flag                        | ✅ live |
-| A recipe — the per-task assembly of tools/evidence/validators           | author a `pack.toml` `type="recipe"`                   | 🚧 authored & discovered today; runtime selection landing (default-OFF) |
-| An agent role — a scope label for packs/hooks                           | author a `pack.toml` `type="role"`                     | 🚧 landing (default-OFF) |
-| A new verifier stage or lifecycle hook point                            | first-party / upstream change                          | — fixed core, by design |
+| A recipe: the per-task assembly of tools/evidence/validators           | author a `pack.toml` `type="recipe"`                   | 🚧 authored & discovered today; runtime selection landing (default-OFF) |
+| An agent role: a scope label for packs/hooks                           | author a `pack.toml` `type="role"`                     | 🚧 landing (default-OFF) |
+| A new verifier stage or lifecycle hook point                            | upstream change only                                   | immutable core, by design |
 
-Legend: ✅ live · 🚧 implemented, landing behind a default-OFF flag · — part of the
-fixed core (see [What stays first-party](#what-stays-first-party--and-why-thats-the-point)).
+Legend: ✅ live · 🚧 implemented, landing behind a default-OFF flag. Items marked
+"immutable core" are part of the fixed core (see [The immutable core](#the-immutable-core)).
 
 Scaffold a pack with the CLI:
 
@@ -433,66 +432,68 @@ For most needs you never write code: **change a config value** (`config.toml` /
 a flag), **author a doc** (a `SKILL.md` or a `pack.toml`), or **swap a file** (a
 pack's `impl.py`) only when a manifest cannot express the behavior.
 
-### What stays first-party — and why that's the point
+### The immutable core
 
-Packs extend the runtime *because* a small core does not. The **engine loop**,
-the **hard-safety gates** and their priority floor, the **monotonicity rule** (a
-pack may only *add* constraints, never weaken or bypass a verdict), and the set
-of lifecycle **hook points** are fixed and first-party. That fixed core is the
-trusted base — it is exactly what lets the runtime load anyone's pack and still
-keep its guarantees: an external check can make a task stricter, never neuter it.
+Everything above, including the **first-party harnesses and recipes**, is a
+swappable, non-privileged pack loaded through the same path as yours. What you
+*cannot* change is a small **immutable core**: the **engine loop**, the
+**hard-safety gates** and their priority floor, the **monotonicity rule** (a pack
+may only *add* constraints, never weaken or bypass a verdict), and the set of
+lifecycle **hook points**. That immutable core is the trusted base. It is exactly
+what lets the runtime load anyone's pack and still keep its guarantees: an
+external check can make a task stricter, never neuter it.
 
 ## Example: One Task, Up the Stack
 
 The clearest way to see how the layers connect is to grow one bot until each new
 requirement forces the next layer. A lawyer wants a contract-review bot. Watch
-the *kind* of each request decide which layer answers it — and where it stops
+the *kind* of each request decide which layer answers it, and where it stops
 being "ask the model nicely" and becomes a runtime guarantee.
 
-1. **Skill — "review contracts our firm's way."**
+1. **Skill: "review contracts our firm's way."**
    A `review-contract` skill encodes the toxic-clause checklist, house style, and
    review order. No code; pure model-visible guidance. The need is a *procedure*,
    so a skill is enough.
 
-2. **Tool — "you have to actually look up case law."**
+2. **Tool: "you have to actually look up case law."**
    Register a `search_case_law` tool in the registry. A skill cannot add an
-   ability — this is one new *capability* the model can call. Execution is
+   ability; this is one new *capability* the model can call. Execution is
    otherwise unchanged.
 
-3. **Recipe — "for contract review, always assemble this."**
+3. **Recipe: "for contract review, always assemble this."**
    A `contract_review` pack declares `tool_refs=(search_case_law, read_pdf, …)`,
    a model, a review→verify phase split, and the few-shot and rule-injection for
    the domain. The pack *references* primitives; it does not implement them.
    Selecting it per task is how one runtime becomes a contract-review specialist
    without forking the agent.
 
-4. **Evidence — "a legal opinion should cite its source."**
+4. **Evidence: "a legal opinion should cite its source."**
    The pack adds `evidence_refs=("citation:case-law-source",)`. Every
    `search_case_law` call is appended to the ledger at the dispatch seam
    (default-on), and a gate compares the final answer against the recorded
    sources so unsupported claims can be repaired, weakened, flagged, or blocked.
    This is the same receipts pattern coding uses (read receipts, stale-edit
    rejection, diff/test evidence). The point of this rung is that the requirement
-   is *declared and recorded by the runtime*, not left to the prompt — see the
+   is *declared and recorded by the runtime*, not left to the prompt. See the
    **Verify Source Before Claim** status note below on where that recording
    becomes a hard block today.
 
-5. **Harness — "client PII must never leak to that external API."**
+5. **Harness: "client PII must never leak to that external API."**
    Same `search_case_law` call, but a different *kind* of requirement. Not "cite
    your source" (cooperation) but "leaking must be *impossible*, even under a
    prompt injection or a model mistake." No skill, tool, recipe ref, or workflow
-   can guarantee this — they all run *as*, or *through*, the (bypassable) model. It
+   can guarantee this; they all run *as*, or *through*, the (bypassable) model. It
    needs a new non-bypassable mechanism: an egress gate at the dispatch boundary
    that inspects every outbound payload and blocks PII before it leaves. That is
-   harness work — a new runtime primitive, authored as a pack
-   ([Extending the runtime](#extending-the-runtime)) — and a recipe then
+   harness work: a new runtime primitive, authored as a pack
+   ([Extending the runtime](#extending-the-runtime)), and a recipe then
    references the new gate to switch it on.
 
 The line is sharp. Rungs 1–4 are "tell the model, or declare from parts that
 already exist." Rung 5 is the only one that requires building runtime machinery,
 and you reach it only when you need a guarantee that holds **whether or not the
 model cooperates, even across turns, even where the model cannot see it.** Most
-domain work — legal, finance, research, operations — lives in rungs 1–4.
+domain work (legal, finance, research, operations) lives in rungs 1–4.
 
 ### Example: Verify Source Before Claim
 
@@ -530,8 +531,8 @@ or run checks before and after tool calls.
 But strong deterministic guarantees usually require owning runtime state
 transitions, not just seeing lifecycle payloads.
 
-For example, take the rung-4 and rung-5 guarantees from the example above —
-"cite the source" and "PII can never leave" — and try to build them as a
+For example, take the rung-4 and rung-5 guarantees from the example above
+("cite the source" and "PII can never leave") and try to build them as a
 third-party hook around an existing agent. A `before_reply` hook may see the
 draft answer, but it may not know which intermediate summaries were fed into the
 next model call. An `after_tool` hook may see a tool result, but it usually
