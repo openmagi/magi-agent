@@ -14,7 +14,7 @@ import {
 } from "@/lib/models/local-runtime-models";
 import { useMessages } from "@/lib/i18n";
 
-type ProviderName = "anthropic" | "openai" | "gemini" | "fireworks";
+type ProviderName = "anthropic" | "openai" | "gemini" | "fireworks" | "openrouter";
 
 interface SettingsFormProps {
   bot?: null;
@@ -45,6 +45,7 @@ const PROVIDER_OPTIONS: Array<{ value: ProviderName; label: string }> = [
   { value: "openai", label: "OpenAI" },
   { value: "gemini", label: "Gemini" },
   { value: "fireworks", label: "Fireworks" },
+  { value: "openrouter", label: "OpenRouter" },
 ];
 
 function isProviderName(value: string): value is ProviderName {
