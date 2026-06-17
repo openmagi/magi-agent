@@ -833,6 +833,14 @@ FLAGS: tuple[FlagSpec, ...] = (
             "OFF keeps children incognito."
         ),
     ),
+    _b(
+        "MAGI_SUBAGENT_TOOL_TIGHTEN_ONLY_ENABLED",
+        summary=(
+            "Intersect a spawned subagent's tool set with the parent's effective "
+            "tools (tighten-only) at child-runtime build. Default OFF / empty "
+            "parent cap is a no-op."
+        ),
+    ),
     # --- Surfaces -----------------------------------------------------------
     # NOTE: flat default-ON, NOT profile-aware. cli/headless.py:_cli_enabled
     # reads MAGI_CLI_ENABLED directly (unset => True regardless of
