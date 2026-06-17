@@ -236,6 +236,10 @@ FLAGS: tuple[FlagSpec, ...] = (
             "home/evidence, overridable via MAGI_EVIDENCE_LEDGER_DIR)."
         ),
     ),
+    _b(
+        "MAGI_WORK_QUEUE_ENABLED",
+        summary="Enable the durable multi-agent work-queue (task board + dispatcher).",
+    ),
     FlagSpec(
         name="MAGI_SESSION_TRANSCRIPT_RETENTION_DAYS",
         default=14,
