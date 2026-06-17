@@ -679,3 +679,14 @@ def test_normalize_empty_is_empty():
     from magi_agent.recipes.recipe_routing import normalize_pinned_recipe_pack_ids
 
     assert normalize_pinned_recipe_pack_ids([], build_runtime_pack_registry()) == ()
+
+
+def test_normalize_dedupes_whitespace_variants():
+    from magi_agent.recipes.kernel_recipe_packs import build_runtime_pack_registry
+    from magi_agent.recipes.recipe_routing import normalize_pinned_recipe_pack_ids
+
+    reg = build_runtime_pack_registry()
+    out = normalize_pinned_recipe_pack_ids(
+        ["openmagi.dev-coding", " openmagi.dev-coding "], reg
+    )
+    assert out == ("openmagi.dev-coding",)
