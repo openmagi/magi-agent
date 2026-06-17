@@ -244,6 +244,29 @@ FLAGS: tuple[FlagSpec, ...] = (
         summary="Max session-transcript files kept; oldest beyond this are pruned.",
         kind="int",
     ),
+    FlagSpec(
+        name="MAGI_USAGE_PRICE_IN_PER_MTOK",
+        default="",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Local Usage dashboard: USD per 1M INPUT tokens for the active "
+            "model. Set this (and the OUT counterpart) to price models litellm "
+            "does not have in its map; overrides litellm pricing when set."
+        ),
+        kind="str",
+    ),
+    FlagSpec(
+        name="MAGI_USAGE_PRICE_OUT_PER_MTOK",
+        default="",
+        scope="public",
+        stage="stage1",
+        summary=(
+            "Local Usage dashboard: USD per 1M OUTPUT tokens for the active "
+            "model. Pairs with MAGI_USAGE_PRICE_IN_PER_MTOK."
+        ),
+        kind="str",
+    ),
     # --- Web / research tools ----------------------------------------------
     _b(
         "MAGI_DEEP_WEB_RESEARCH_ENABLED",

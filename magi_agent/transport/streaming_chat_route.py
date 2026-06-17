@@ -124,6 +124,47 @@ def _local_full_access(runtime: object) -> bool:
     )
 
 
+def _qualified_litellm_model(model: str | None) -> str | None:
+    """Resolve the provider-qualified litellm model id (e.g. ``fireworks_ai/...``).
+
+    litellm prices by a provider-qualified id; the bare ``config.model`` (e.g.
+    ``kimi-k2p6``) often is not in its price map. Re-resolve via the same
+    ``resolve_provider_config`` the runner uses so pricing matches the call.
+    Falls back to the bare model on any failure (litellm still infers some bare
+    ids, e.g. ``claude-*``).
+    """
+    if not model:
+        return None
+    try:
+        from magi_agent.cli.providers import resolve_provider_config
+
+        cfg = resolve_provider_config(model_override=model)
+    except Exception:  # noqa: BLE001 — resolution is best-effort
+        return model
+    if cfg is None:
+        return model
+    return getattr(cfg, "litellm_model", None) or model
+
+
+def _usage_price_overrides() -> tuple[float | None, float | None]:
+    """Read the operator's USD-per-1M-token override rates (in, out), or (None, None)."""
+    from magi_agent.config.flags import flag_str
+
+    def _parse(raw: str | None) -> float | None:
+        if not raw or not raw.strip():
+            return None
+        try:
+            value = float(raw.strip())
+        except ValueError:
+            return None
+        return value if value >= 0 else None
+
+    return (
+        _parse(flag_str("MAGI_USAGE_PRICE_IN_PER_MTOK")),
+        _parse(flag_str("MAGI_USAGE_PRICE_OUT_PER_MTOK")),
+    )
+
+
 def _persist_local_turn_usage(
     runtime: object,
     session_id: str,
@@ -156,7 +197,13 @@ def _persist_local_turn_usage(
     )
     from magi_agent.transport.app_api import _workspace_root
 
-    cost_usd = compute_cost_usd(model, usage)
+    price_in, price_out = _usage_price_overrides()
+    cost_usd = compute_cost_usd(
+        _qualified_litellm_model(model),
+        usage,
+        price_in_per_mtok=price_in,
+        price_out_per_mtok=price_out,
+    )
     store = SessionSqliteStore(
         SessionStoreConfig(enabled=True),
         workspace_root=str(_workspace_root()),

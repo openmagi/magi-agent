@@ -88,3 +88,50 @@ def test_real_litellm_when_available():
         cost_per_token=litellm.cost_per_token,
     )
     assert cost > 0.0
+
+
+# ---------------------------------------------------------------------------
+# Manual per-MTok override path (for litellm-unmapped models)
+# ---------------------------------------------------------------------------
+def test_override_rates_take_precedence_over_litellm():
+    # litellm pricer would raise, but the override path must win and never call it.
+    def _explode(*_a, **_k):  # pragma: no cover - must not be called
+        raise AssertionError("litellm pricer must not be consulted under override")
+
+    cost = compute_cost_usd(
+        "kimi-k2p6",
+        {"input_tokens": 1_000_000, "output_tokens": 500_000},
+        cost_per_token=_explode,
+        price_in_per_mtok=0.6,
+        price_out_per_mtok=2.5,
+    )
+    assert cost == pytest.approx(0.6 + 1.25)
+
+
+def test_override_works_without_a_known_model():
+    cost = compute_cost_usd(
+        None,
+        {"input_tokens": 2_000_000},
+        price_in_per_mtok=1.0,
+    )
+    assert cost == pytest.approx(2.0)
+
+
+def test_override_only_output_side_set():
+    cost = compute_cost_usd(
+        "m",
+        {"input_tokens": 1_000_000, "output_tokens": 1_000_000},
+        price_out_per_mtok=3.0,
+    )
+    # Unset input side counts as 0.
+    assert cost == pytest.approx(3.0)
+
+
+def test_override_zero_rates_is_zero():
+    cost = compute_cost_usd(
+        "m",
+        {"input_tokens": 1_000_000, "output_tokens": 1_000_000},
+        price_in_per_mtok=0.0,
+        price_out_per_mtok=0.0,
+    )
+    assert cost == 0.0

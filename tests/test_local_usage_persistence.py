@@ -11,6 +11,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import pytest
+
 from magi_agent.transport import app_api
 from magi_agent.transport.streaming_chat_route import _persist_local_turn_usage
 
@@ -75,3 +77,24 @@ def test_zero_token_turn_is_not_persisted(tmp_path, monkeypatch):
     )
 
     assert app_api._session_items(runtime) == []
+
+
+def test_price_override_yields_nonzero_cost_for_unmapped_model(tmp_path, monkeypatch):
+    # A model litellm cannot price still gets a real cost when the operator
+    # declares per-MTok rates via env.
+    monkeypatch.setenv("MAGI_AGENT_WORKSPACE", str(tmp_path))
+    monkeypatch.setenv("MAGI_USAGE_PRICE_IN_PER_MTOK", "0.6")
+    monkeypatch.setenv("MAGI_USAGE_PRICE_OUT_PER_MTOK", "2.5")
+
+    runtime = _Runtime()
+    runtime.config = _Config(model="kimi-k2p6")  # litellm has no price for this id
+
+    _persist_local_turn_usage(
+        runtime,
+        "sess-kimi",
+        _Terminal({"input_tokens": 1_000_000, "output_tokens": 1_000_000}),
+    )
+
+    items = app_api._session_items(runtime)
+    assert len(items) == 1
+    assert items[0]["budget"]["costUsd"] == pytest.approx(0.6 + 2.5)
