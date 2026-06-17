@@ -18,14 +18,14 @@ def test_registry_classifies_cheap_flash_and_kimi_style_models_without_provider_
     registry = ModelTierRegistry.with_defaults()
 
     flash = registry.resolve(provider="google", model="gemini-3.5-flash")
-    kimi = registry.resolve(provider="moonshot", model="kimi-k2.6")
+    kimi = registry.resolve(provider="fireworks", model="kimi-k2p6")
 
     assert flash.tier == "cheap"
     assert kimi.tier == "cheap"
     assert "streaming" in flash.capabilities
     assert "json_schema" in flash.capabilities
     assert flash.provider == "google"
-    assert kimi.provider == "moonshot"
+    assert kimi.provider == "fireworks"
 
 
 def test_forged_request_cannot_claim_sota_capability_for_cheap_model() -> None:
@@ -163,7 +163,7 @@ def test_gate_on_fireworks_only_anthropic_route_rejected() -> None:
 def test_gate_on_fireworks_only_fireworks_route_accepted() -> None:
     env = _isolated_env(**{_FLAG: "1", "FIREWORKS_API_KEY": "fk-test"})
     result = resolve_child_route(
-        "fireworks", "accounts/fireworks/models/kimi-k2-instruct", env
+        "fireworks", "kimi-k2p6", env
     )
     assert result is not None, (
         "Gate ON fireworks-only: fireworks route must be accepted"
@@ -303,9 +303,9 @@ def test_c4_regression_fireworks_only_local_overlay_applies_key_aware_filter() -
 
     # Fireworks kimi route must be accepted.
     assert resolve_child_route(
-        "fireworks", "accounts/fireworks/models/kimi-k2-instruct", env
+        "fireworks", "kimi-k2p6", env
     ) is not None, (
-        "fireworks kimi-k2-instruct route must be accepted with FIREWORKS_API_KEY"
+        "fireworks kimi-k2p6 route must be accepted with FIREWORKS_API_KEY"
     )
 
 

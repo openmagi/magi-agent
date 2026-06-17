@@ -350,7 +350,7 @@ def test_unknown_model_still_blocks_when_allowlist_unset(monkeypatch) -> None:
     runner = RealLocalChildRunner(provider_config=_provider_config(), runner=fake)
 
     output = asyncio.run(
-        runner.run_child(_request(provider="anthropic", model="claude-opus-4-8"))
+        runner.run_child(_request(provider="anthropic", model="claude-does-not-exist-9000"))
     )
 
     assert output["status"] == "blocked"

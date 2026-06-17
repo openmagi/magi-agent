@@ -216,6 +216,42 @@ class ModelTierRegistry:
                     ),
                 ),
                 _ModelTierRecord(
+                    provider="google",
+                    model="gemini-3.1-pro-preview",
+                    tier="sota",
+                    capabilities=(
+                        "streaming",
+                        "tool_use",
+                        "long_context",
+                        "reasoning",
+                        "vision",
+                    ),
+                ),
+                _ModelTierRecord(
+                    provider="gemini",
+                    model="gemini-3.1-pro-preview",
+                    tier="sota",
+                    capabilities=(
+                        "streaming",
+                        "tool_use",
+                        "long_context",
+                        "reasoning",
+                        "vision",
+                    ),
+                ),
+                _ModelTierRecord(
+                    provider="anthropic",
+                    model="claude-opus-4-8",
+                    tier="sota",
+                    capabilities=(
+                        "streaming",
+                        "tool_use",
+                        "long_context",
+                        "coding",
+                        "reasoning",
+                    ),
+                ),
+                _ModelTierRecord(
                     provider="anthropic",
                     model="claude-sonnet-4-6",
                     tier="sota",
@@ -234,20 +270,8 @@ class ModelTierRegistry:
                     capabilities=("streaming", "tool_use", "low_latency"),
                 ),
                 _ModelTierRecord(
-                    provider="moonshot",
-                    model="kimi-k2.6",
-                    tier="cheap",
-                    capabilities=("streaming", "coding", "long_context"),
-                ),
-                _ModelTierRecord(
                     provider="fireworks",
                     model="kimi-k2p6",
-                    tier="cheap",
-                    capabilities=("streaming", "coding", "long_context"),
-                ),
-                _ModelTierRecord(
-                    provider="fireworks",
-                    model="accounts/fireworks/models/kimi-k2-instruct",
                     tier="cheap",
                     capabilities=("streaming", "coding", "long_context"),
                 ),

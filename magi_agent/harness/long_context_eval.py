@@ -124,7 +124,7 @@ def _model_for_case(tier: ModelTier) -> tuple[str, str, ModelTier]:
     if tier == "sota":
         return ("openai", "gpt-5.5", "sota")
     if tier == "long_context":
-        return ("moonshot", "kimi-k2.6", "cheap")
+        return ("fireworks", "kimi-k2p6", "cheap")
     return ("example", "standard-model", "standard")
 
 
