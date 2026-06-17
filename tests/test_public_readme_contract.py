@@ -37,7 +37,11 @@ def test_readme_documents_local_web_dashboard() -> None:
     assert "Local web dashboard" in text
     assert "http://localhost:8080/dashboard" in text
     assert "magi-agent serve --port 8080" in text
-    assert text.index("brew install --force-bottle openmagi/tap/magi-agent") < text.index("uv sync")
+    # Source/dev build moved to CONTRIBUTING.md; the README documents only the
+    # Homebrew path and links the contributor guide for source builds, so the
+    # old "brew install before uv sync" ordering no longer applies.
+    assert "uv sync" not in text
+    assert "CONTRIBUTING.md" in text
     assert "npm run web:dev" not in text
     assert "http://localhost:3001" not in text
 
