@@ -18,6 +18,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from magi_agent.memory.continuity_policy import build_continuity_policy_block
 from magi_agent.memory.policy import (
     MAGI_MEMORY_PROJECTION_ENABLED_ENV,
     _projection_gate_open,
@@ -301,7 +302,19 @@ def _build_snapshot(
     # regexes, so regex input is bounded by a few KiB, never by unbounded file
     # size.  The final _slice_utf8(combined, content_budget) enforces the exact
     # byte cap over all combined files.
-    headroom = len(MEMORY_CONTEXT_OPEN.encode()) + len(MEMORY_CONTEXT_CLOSE.encode()) + 4
+    #
+    # A1: the continuity-policy preamble is a SMALL FIXED block prepended ahead of
+    # the <memory-context> fence.  Account for its bytes (plus the "\n\n" join)
+    # in the headroom — exactly like the fence tags — so the WHOLE snapshot block
+    # (policy + blank line + fence + content) stays within ``budget`` while the
+    # policy is ALWAYS fully present and the memory CONTENT remains bounded.
+    policy_headroom = len(build_continuity_policy_block().encode()) + len("\n\n".encode())
+    headroom = (
+        len(MEMORY_CONTEXT_OPEN.encode())
+        + len(MEMORY_CONTEXT_CLOSE.encode())
+        + 4
+        + policy_headroom
+    )
     content_budget = max(budget - headroom, 0)
 
     # Pass 1: curated files first, each capped to the FULL remaining content
@@ -348,8 +361,17 @@ def _build_snapshot(
     # Apply byte cap (UTF-8 aware slice).
     truncated = _slice_utf8(combined, content_budget)
 
-    # Build the fenced block.
-    block = f"{MEMORY_CONTEXT_OPEN}\n{truncated}\n{MEMORY_CONTEXT_CLOSE}"
+    # Build the fenced <memory-context> block (the bounded memory CONTENT).
+    memory_context_block = f"{MEMORY_CONTEXT_OPEN}\n{truncated}\n{MEMORY_CONTEXT_CLOSE}"
+
+    # A1: lead with the fixed continuity-policy preamble so recalled memory is
+    # treated as reference material, not as the user's current request.  The
+    # policy is a SMALL FIXED preamble prepended AFTER the content cap is applied
+    # — the memory CONTENT above is still bounded by ``content_budget`` exactly as
+    # before, and the policy is always fully present (never truncated).
+    block = (
+        f"{build_continuity_policy_block()}\n\n{memory_context_block}"
+    )
     block_bytes = len(block.encode("utf-8"))
 
     # Evidence digest (over the REDACTED+truncated content, not raw)
