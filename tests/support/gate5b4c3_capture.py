@@ -6,8 +6,9 @@ output streams:
 
   * ``public_events``      — payloads emitted via ``public_event_sink``
   * ``transcript_records`` — records written to the process-global transcript
-                             sink (requires MAGI_SESSION_TRANSCRIPT_ENABLED=1
-                             to be non-empty, as the boundary is fail-open)
+                             sink (the env var MAGI_SESSION_TRANSCRIPT_ENABLED
+                             has no effect; the sink is installed directly via
+                             set_active_transcript_sink and captures regardless)
   * ``result``             — public-safe scalar fields off the boundary result
                              (status / reason / event_count / selected_provider
                              / selected_model)
@@ -18,6 +19,7 @@ files.
 """
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
 from magi_agent.observability.transcript import set_active_transcript_sink
@@ -43,7 +45,7 @@ async def capture_boundary(
     runner: Any,
     *,
     config: Any = None,
-    adk_tools: tuple = (),
+    adk_tools: Sequence[object] = (),
 ) -> dict:
     """Drive the gate5b4c3 boundary with a fake runner and return a snapshot.
 
@@ -58,7 +60,9 @@ async def capture_boundary(
         Optional ``Gate5B4C3ShadowGenerationConfig``.  Pass
         ``_enabled_config()`` from the boundary test module to get a
         ``"completed"`` result; ``None`` (default) causes the boundary to
-        short-circuit with ``status="skipped"``.
+        short-circuit with ``status="skipped"``.  The signature includes
+        this parameter because the boundary short-circuits to status="skipped"
+        without an accepted config.
     adk_tools:
         Optional sequence of ADK tool objects to pass through to the boundary.
 

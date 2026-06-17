@@ -9,13 +9,13 @@ import asyncio
 from tests.support.gate5b4c3_fakes import _FakeRunner, final_event
 from tests.support.gate5b4c3_capture import capture_boundary
 from magi_agent.shadow.gate5b4c3_live_runner_boundary import (  # noqa: F401
+    # Eagerly verify the production module imports correctly.
     run_gate5b4c3_live_runner_boundary_async,
 )
 from tests.test_gate5b4c3_live_runner_boundary import _enabled_config, _request
 
 
-def test_capture_returns_three_streams(monkeypatch):
-    monkeypatch.setenv("MAGI_SESSION_TRANSCRIPT_ENABLED", "1")
+def test_capture_returns_three_streams():
     snap = asyncio.run(
         capture_boundary(
             _request(),
