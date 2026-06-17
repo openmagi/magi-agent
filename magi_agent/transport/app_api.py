@@ -576,9 +576,9 @@ def _providers_snapshot() -> dict[str, Any]:
     model_section = providers._section(raw, "model")
     active = _canonical_provider(model_section.get("provider"), strict=False)
 
-    # configured_providers uses env + config; here we only look at config (no env
-    # leak), but the endpoint still reflects env-configured providers so the
-    # dashboard is accurate.
+    # configured_providers reads both env and config (config passed explicitly,
+    # env defaults to os.environ), so the dashboard reflects env-configured
+    # providers too. Only a boolean is surfaced — never a key value.
     configured = set(providers.configured_providers(config=raw))
 
     items: list[dict[str, Any]] = []
