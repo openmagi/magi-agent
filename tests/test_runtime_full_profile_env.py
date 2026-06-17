@@ -17,6 +17,11 @@ from magi_agent.config.env import (
     ripgrep_enabled,
     tool_concurrency_enabled,
 )
+from magi_agent.config.flags import flag_bool
+from magi_agent.harness.kernel_roles import MAGI_KERNEL_ROLE_PROVIDES_ENABLED_ENV
+from magi_agent.recipes.kernel_recipe_packs import (
+    MAGI_KERNEL_RECIPE_PACKS_ENABLED_ENV,
+)
 from magi_agent.runtime.child_runner_live import is_live_child_runner_enabled
 from magi_agent.runtime.child_toolset import resolve_child_toolset_profile
 from magi_agent.runtime.local_defaults import apply_local_full_runtime_defaults
@@ -75,6 +80,26 @@ def test_safe_runtime_profile_does_not_enable_child_runner_defaults() -> None:
 
     assert "MAGI_CHILD_RUNNER_LIVE_ENABLED" not in env
     assert is_live_child_runner_enabled(env) is False
+
+
+def test_full_runtime_profile_enables_kernel_seam_defaults() -> None:
+    env: dict[str, str] = {}
+    apply_local_full_runtime_defaults(env)
+
+    assert env[MAGI_KERNEL_RECIPE_PACKS_ENABLED_ENV] == "1"
+    assert env[MAGI_KERNEL_ROLE_PROVIDES_ENABLED_ENV] == "1"
+    assert flag_bool(MAGI_KERNEL_RECIPE_PACKS_ENABLED_ENV, env=env) is True
+    assert flag_bool(MAGI_KERNEL_ROLE_PROVIDES_ENABLED_ENV, env=env) is True
+
+
+def test_safe_runtime_profile_does_not_enable_kernel_seam_defaults() -> None:
+    env = {"MAGI_RUNTIME_PROFILE": "safe"}
+    apply_local_full_runtime_defaults(env)
+
+    assert MAGI_KERNEL_RECIPE_PACKS_ENABLED_ENV not in env
+    assert MAGI_KERNEL_ROLE_PROVIDES_ENABLED_ENV not in env
+    assert flag_bool(MAGI_KERNEL_RECIPE_PACKS_ENABLED_ENV, env=env) is False
+    assert flag_bool(MAGI_KERNEL_ROLE_PROVIDES_ENABLED_ENV, env=env) is False
 
 
 def test_full_runtime_profile_enables_keyless_web_acquisition_defaults() -> None:

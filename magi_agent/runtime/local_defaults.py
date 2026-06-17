@@ -51,6 +51,18 @@ LOCAL_FULL_RUNTIME_ENV_DEFAULTS: Mapping[str, str] = {
     "MAGI_PROMPT_TRANSFORM_HOOKS_ENABLED": "1",
     "MAGI_DEFERRED_TOOLS_ENABLED": "1",
     "MAGI_WORKFLOW_EXECUTOR_ENABLED": "1",
+    # No-fork seam extension: kernel recipe + role packs default-ON for local
+    # full-trust (the author IS the operator). Read via strict flag_bool, so they
+    # only take effect through this env injection; hosted/safe/eval profiles skip
+    # this batch and stay OFF. Safe to default-ON: with no user packs both are
+    # byte-identical to OFF (kernel recipe packs start from the first-party
+    # registry and drop on pack_id collision / fail closed; external role ids add
+    # nothing when no ext.<name> role pack is present). The flip activates the
+    # extension only when a user actually authors a pack under ~/.magi/packs or
+    # <cwd>/.magi/packs, where first-party still wins and user packs are
+    # compose-only (tighten-only).
+    "MAGI_KERNEL_RECIPE_PACKS_ENABLED": "1",
+    "MAGI_KERNEL_ROLE_PROVIDES_ENABLED": "1",
     "MAGI_CHILD_RUNNER_LIVE_ENABLED": "1",
     "MAGI_CHILD_RUNNER_TOOLSET": "readonly",
     "MAGI_SCHEDULER_EXECUTOR_ENABLED": "1",
