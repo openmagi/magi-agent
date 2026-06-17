@@ -218,6 +218,27 @@ FLAGS: tuple[FlagSpec, ...] = (
         summary="Enable the autonomous goal-loop scheduler.",
     ),
     _b(
+        "MAGI_CHANNEL_LIVE_DISCORD",
+        stage="stage3",
+        summary=(
+            "Enable the live Discord channel watcher (self-host only): inbound "
+            "gateway messages drive a governed turn and the reply is delivered "
+            "back to the same channel. Requires MAGI_DISCORD_BOT_TOKEN and the "
+            "discord extra (pip install magi-agent[discord])."
+        ),
+    ),
+    FlagSpec(
+        name="MAGI_DISCORD_BOT_TOKEN",
+        default="",
+        scope="public",
+        stage="stage3",
+        summary=(
+            "Discord bot token for the live channel watcher; unset keeps the "
+            "watcher fail-closed (not built). Never logged or persisted."
+        ),
+        kind="str",
+    ),
+    _b(
         "MAGI_OBSERVABILITY_ENABLED",
         summary="Enable the hook-tap observability module (bot-activity visibility).",
     ),

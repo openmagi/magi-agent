@@ -116,6 +116,7 @@ graph LR
     gates --> shadow
     gates --> tools
     gateway --> channels
+    gateway --> config
     gateway --> harness
     gateway --> ops
     harness --> adk_bridge
@@ -383,8 +384,8 @@ graph LR
 |---|---|---|---|
 | __init__.py | Traffic-free OpenMagi channel contract metadata. | contract | transport/integrations.py |
 | contract.py | — | — | artifacts/_file_delivery_fakes.py, artifacts/delivery_boundary.py, artifacts/delivery_receipts.py, artifacts/file_delivery.py, artifacts/file_delivery_live.py, channels/__init__.py, channels/discord_adapter.py, channels/discord_live.py, channels/dispatcher.py, channels/push_delivery.py, channels/runtime_boundary.py, channels/telegram_adapter.py, channels/telegram_live.py, harness/cron_runtime.py, harness/scheduler_runtime.py, plugins/native/documents.py, shadow/artifact_channel_delivery_contract.py |
-| discord_adapter.py | — | contract, dispatcher, provider_execution, provider_receipts | channels/discord_live.py |
-| discord_live.py | E3 — Gated live Discord adapter. | contract, discord_adapter, scheduler_delivery, turn_bridge | — |
+| discord_adapter.py | — | contract, dispatcher, provider_execution, provider_receipts | channels/discord_live.py, gateway/channel_watchers.py |
+| discord_live.py | E3 — Gated live Discord adapter. | contract, discord_adapter, scheduler_delivery, turn_bridge | gateway/channel_watchers.py |
 | dispatcher.py | — | contract, provider_execution, provider_receipts, runtime_boundary, workflow_routing | channels/discord_adapter.py, channels/runtime_boundary.py, channels/telegram_adapter.py, harness/scheduler_runtime.py |
 | email_live.py | E4 — Gated live email adapter. | platform_registry, scheduler_delivery | — |
 | platform_registry.py | E1 — Platform Registry: self-registration seam for channel platforms. | — | channels/email_live.py, channels/slack_live.py |
@@ -408,6 +409,7 @@ graph LR
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
 | __init__.py | Concrete channel provider implementations (the ONLY place a real network | — | — |
+| discord_gateway.py | Concrete live Discord provider over ``discord.py`` (PR2). | — | gateway/channel_watchers.py |
 | slack_urllib.py | Concrete out-of-box Slack provider over stdlib ``urllib`` (B1). | config, slack_live | channels/slack_live.py |
 | telegram_httpx.py | Concrete live Telegram provider over ``httpx`` (B17). | telegram_adapter | gateway/channel_watchers.py |
 
@@ -638,7 +640,7 @@ graph LR
 |---|---|---|---|
 | __init__.py | — | env, models | config/tests/test_flags.py |
 | env.py | — | facts_replan, flags, gate3a_replay, gate5b4c3_shadow_counter_store, gate5b4c3_shadow_generation_contract, hosted_defaults, models, pregate8_continuity_canary, shadow_generations | (root)/main.py, adk_bridge/anthropic_cache_model.py, adk_bridge/control_plane.py, adk_bridge/tool_adapter.py, browser/autonomous/config.py, cli/app.py, cli/engine.py, cli/goal_nudge_wiring.py, cli/headless.py, cli/hook_wiring.py, cli/permissions.py, cli/providers.py, cli/real_runner.py, cli/tests/test_app.py, cli/tool_runtime.py, cli/wiring.py, config/__init__.py, config/flags.py, evidence/local_tool_collector.py, firstparty/packs/workspace_tools_default/impl.py, gates/gate5b_full_toolhost.py, gates/tool_usage_guidance.py, harness/general_automation/constraint_reinjection.py, harness/general_automation/delegation.py, harness/general_automation/live_gate.py, harness/general_automation/plan_act_switch.py, harness/general_automation/question_tool.py, harness/general_automation/recipe_disclosure.py, harness/general_automation/task_completion.py, introspection/tool.py, plugins/native/missions.py, plugins/native/scheduled_work.py, plugins/native/skills.py, plugins/native/taskboard.py, recipes/coding_mutation.py, recipes/compiler.py, recipes/ledger_workforce.py, recipes/recipe_routing.py, runtime/facts_replan.py, runtime/message_builder.py, runtime/model_tiers.py, runtime/openmagi_runtime.py, runtime/prompt_guidance.py, runtime/tool_synthesis.py, shadow/gate5b4c3_live_runner_boundary.py, shadow/gate5b4c3_runner_input_adapter.py, shadow/session_service_registry.py, tools/ask_user_question_toolhost.py, tools/core_toolhost.py, tools/dispatcher.py, tools/document_tools.py, tools/file_tool_manifests.py, tools/file_toolhost.py, tools/image_tools.py, tools/local_readonly.py, tools/plan_mode_toolhost.py, tools/safety.py, tools/web_search_tools.py, transport/chat.py, transport/chat_routes.py, transport/chat_shared.py, transport/gate5b_governance.py, transport/streaming_chat_route.py |
-| flags.py | Canonical feature-flag registry + typed reader (single source of truth). | env | (root)/main.py, cli/engine.py, cli/real_runner.py, cli/wiring.py, config/env.py, config/tests/test_flags.py, customize/after_tool_gate.py, customize/apply.py, customize/runtime_gate.py, customize/tool_perm.py, harness/kernel_roles.py, observability/transcript.py, packs/discovery.py, recipes/kernel_recipe_packs.py, runtime/child_runner_live.py, runtime/message_builder.py, shadow/gate5b4c3_live_runner_boundary.py, tools/document_qa_tools.py, tools/image_tools.py, tools/python_exec.py, transport/streaming_chat_route.py |
+| flags.py | Canonical feature-flag registry + typed reader (single source of truth). | env | (root)/main.py, cli/engine.py, cli/real_runner.py, cli/wiring.py, config/env.py, config/tests/test_flags.py, customize/after_tool_gate.py, customize/apply.py, customize/runtime_gate.py, customize/tool_perm.py, gateway/channel_watchers.py, harness/kernel_roles.py, observability/transcript.py, packs/discovery.py, recipes/kernel_recipe_packs.py, runtime/child_runner_live.py, runtime/message_builder.py, shadow/gate5b4c3_live_runner_boundary.py, tools/document_qa_tools.py, tools/image_tools.py, tools/python_exec.py, transport/streaming_chat_route.py |
 | models.py | — | pregate8_continuity_canary | (root)/main.py, config/__init__.py, config/env.py, gates/gate2_readiness.py, gates/gate3_readiness.py, gates/gate4_readiness.py, gates/gate5_readiness.py, gates/gate7_readiness.py, gates/gate8_readiness.py, runtime/openmagi_runtime.py |
 
 ### config/tests/
@@ -917,7 +919,7 @@ graph LR
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
 | __init__.py | Track F — the ``magi gateway`` always-on daemon package. | — | — |
-| channel_watchers.py | Operator wiring: tie a concrete channel provider to a gateway poll watcher. | daemon, scheduler_delivery, telegram_adapter, telegram_credentials, telegram_httpx, telegram_live, turn_bridge, watchers | gateway/watchers.py |
+| channel_watchers.py | Operator wiring: tie a concrete channel provider to a gateway poll watcher. | daemon, discord_adapter, discord_gateway, discord_live, flags, scheduler_delivery, telegram_adapter, telegram_credentials, telegram_httpx, telegram_live, turn_bridge, watchers | gateway/watchers.py |
 | daemon.py | GatewayDaemon — the supervised asyncio watcher fleet (Track F). | health, watchers | cli/app.py, gateway/channel_watchers.py, gateway/watchers.py, ops/health.py |
 | service_install.py | OS service install for the ``magi gateway`` daemon (Track F). | — | cli/app.py |
 | watchers.py | Watcher-fleet builders — COMPOSE the existing always-on blocks (Track F). | channel_watchers, daemon, scheduler_job_execution, scheduler_job_store, scheduler_loop_driver, turn_engine | cli/app.py, gateway/channel_watchers.py, gateway/daemon.py |

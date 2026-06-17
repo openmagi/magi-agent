@@ -157,6 +157,7 @@ def build_default_watchers() -> tuple[GatewayWatcher, ...]:
     # from here) and keeps this module import-clean.
     from magi_agent.channels.turn_engine import make_engine_run_turn  # noqa: PLC0415
     from magi_agent.gateway.channel_watchers import (  # noqa: PLC0415
+        build_discord_channel_watcher,
         build_telegram_channel_watcher,
         build_telegram_supervisor_watcher,
         is_dashboard_telegram_enabled,
@@ -176,6 +177,10 @@ def build_default_watchers() -> tuple[GatewayWatcher, ...]:
         telegram_watcher = build_telegram_channel_watcher(run_turn=run_turn)
         if telegram_watcher is not None:
             watchers.append(telegram_watcher)
+
+    discord_watcher = build_discord_channel_watcher(run_turn=run_turn)
+    if discord_watcher is not None:
+        watchers.append(discord_watcher)
 
     return tuple(watchers)
 

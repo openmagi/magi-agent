@@ -41,6 +41,13 @@ bench = [
 composio = [
   "composio==0.13.1",
 ]
+# Optional: live Discord channel watcher (self-host). The gateway provider
+# (magi_agent/channels/providers/discord_gateway.py) imports discord.py lazily,
+# so environments without it are unaffected and the watcher fails closed.
+# Install with: uv sync --extra discord  (or: pip install magi-agent[discord])
+discord = [
+  "discord.py>=2.3,<3",
+]
 # Optional: Telegram "easy setup" (phone number → automated @BotFather /newbot).
 # Requires an MTProto user session, so it needs operator-supplied
 # TELEGRAM_API_ID / TELEGRAM_API_HASH and the MAGI_TELEGRAM_EASY_SETUP_ENABLED

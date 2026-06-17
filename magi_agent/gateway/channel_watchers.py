@@ -29,11 +29,25 @@ operator actually builds the live watcher.
 from __future__ import annotations
 
 import asyncio
+import importlib.util
 import logging
 import os
 from collections.abc import Callable
 from typing import Any
 
+from magi_agent.channels.discord_adapter import (
+    DiscordEventRequest,
+    DiscordProviderSendRequest,
+    _project_event,
+)
+from magi_agent.channels.discord_live import (
+    DiscordLiveEventState,
+    _message_dedup_hash,
+    is_live_discord_enabled,
+)
+from magi_agent.channels.discord_live import (
+    to_channel_inbound as discord_to_channel_inbound,
+)
 from magi_agent.channels.telegram_adapter import TelegramInboundUpdate
 from magi_agent.channels.telegram_live import (
     TelegramLivePollState,
@@ -449,14 +463,239 @@ def _default_on_inbound(update: TelegramInboundUpdate) -> None:
     )
 
 
+# ---------------------------------------------------------------------------
+# Discord live wiring (real provider; bypasses the fake-only boundary, exactly
+# like the telegram real path — reuses discord_adapter._project_event for
+# normalisation/redaction so no trust marker is abused).
+# ---------------------------------------------------------------------------
+
+DEFAULT_DISCORD_READ_INTERVAL_SECONDS = 1.0
+
+_DiscordOnInbound = Callable[[Any], None]
+
+
+def _discord_bot_token_from_env() -> str | None:
+    """Return the configured Discord bot token or None (never logs the value).
+
+    ``MAGI_DISCORD_BOT_TOKEN`` is read through the typed flag registry; the
+    non-namespaced ``DISCORD_BOT_TOKEN`` is accepted as a convenience fallback.
+    """
+    from magi_agent.config.flags import flag_str
+
+    token = flag_str("MAGI_DISCORD_BOT_TOKEN")
+    if token and token.strip():
+        return token.strip()
+    fallback = os.environ.get("DISCORD_BOT_TOKEN", "")
+    return fallback.strip() or None
+
+
+def _default_discord_provider_factory(token: str) -> Any:
+    """Construct the concrete gateway provider (lazy import keeps wiring clean)."""
+    from magi_agent.channels.providers.discord_gateway import DiscordGatewayProvider
+
+    return DiscordGatewayProvider(token=token)
+
+
+def discord_live_deliver(
+    provider: Any,
+    channel_id: str,
+    text: str,
+    *,
+    receipt: dict[str, object] | None = None,
+    reply_to_message_id: str | None = None,
+) -> bool:
+    """Send ``text`` to ``channel_id`` via the injected live Discord provider.
+
+    Real wiring layer (not the audit boundary): records a truthful receipt,
+    respects the ``[SILENT]`` contract and the live gate.
+    """
+    rcpt = receipt if receipt is not None else {}
+    rcpt.setdefault("provider_called", False)
+    rcpt.setdefault("channel_delivery_performed", False)
+    rcpt.setdefault("suppressed", False)
+
+    if not is_live_discord_enabled():
+        rcpt["skipped"] = True
+        rcpt["skip_reason"] = "gate_off"
+        return False
+
+    if is_silent_output(text):
+        rcpt["suppressed"] = True
+        rcpt["suppress_reason"] = "silent_marker"
+        return True
+
+    request = DiscordProviderSendRequest(
+        operation="send_message",
+        requestId="live-discord-deliver",
+        channelId=channel_id,
+        text=text,
+        replyToMessageId=reply_to_message_id,
+    )
+    try:
+        result = provider.send_message(request)
+    except Exception:  # noqa: BLE001 — transient send failure is reported, not raised
+        _log.warning("discord live send failed", exc_info=True)
+        rcpt["error"] = "send_failed"
+        return False
+
+    rcpt["provider_called"] = bool(getattr(provider, "provider_called", True))
+    rcpt["channel_delivery_performed"] = True
+    pmid = result.get("providerMessageId") if isinstance(result, dict) else None
+    rcpt["provider_message_id_present"] = pmid is not None
+    return True
+
+
+def make_discord_deliver(provider: Any) -> Deliver:
+    """Adapt ``discord_live_deliver`` to the shared bridge ``Deliver`` shape."""
+
+    def deliver(channel_id: str, text: str, reply_to_message_id: str | None) -> bool:
+        return discord_live_deliver(
+            provider, channel_id, text, reply_to_message_id=reply_to_message_id
+        )
+
+    return deliver
+
+
+def build_discord_bridge_on_inbound(
+    *,
+    provider: Any,
+    run_turn: RunTurn,
+    evidence: dict[str, object] | None = None,
+) -> _DiscordOnInbound:
+    """Compose the full Discord inbound path: project the event into the shared
+    ``ChannelInbound``, drive the (injected) turn, and deliver the reply via the
+    live provider."""
+    handler = make_inbound_handler(
+        channel_type="discord",
+        run_turn=run_turn,
+        deliver=make_discord_deliver(provider),
+        evidence=evidence if evidence is not None else {},
+    )
+
+    def on_inbound(event: Any) -> None:
+        handler(discord_to_channel_inbound(event))
+
+    return on_inbound
+
+
+def build_discord_read_once(
+    *,
+    provider: Any,
+    on_inbound: _DiscordOnInbound,
+    state: DiscordLiveEventState | None = None,
+    bot_user_id: str | None = None,
+) -> Callable[[], int]:
+    """Build a single-cycle Discord read closure over an injected provider.
+
+    Calls ``provider.read_events`` directly (NOT via the fake-only boundary),
+    normalises each raw event with the shared ``_project_event`` (redaction +
+    mention/DM filtering), deduplicates by ``(channel_id, message_id)`` and calls
+    ``on_inbound`` per new event.  Returns the count of newly dispatched events.
+    """
+    read_state = state or DiscordLiveEventState()
+
+    def read_once() -> int:
+        if not is_live_discord_enabled():
+            return 0
+        request = DiscordEventRequest(
+            requestId="live-discord-read",
+            providerName="live-discord-provider",
+            botIdDigest="live-bot",
+            ownerIdDigest="live-owner",
+            sessionKeyDigest="live-session",
+            botUserId=bot_user_id,
+        )
+        new_count = 0
+        for raw in provider.read_events(request):
+            event = _project_event(raw, bot_user_id)
+            if event is None:
+                continue
+            dedup_hash = _message_dedup_hash(event.channel_id, event.message_id)
+            if read_state.is_seen(dedup_hash):
+                continue
+            read_state.mark_seen(dedup_hash)
+            on_inbound(event)
+            new_count += 1
+        return new_count
+
+    return read_once
+
+
+def build_discord_channel_watcher(
+    *,
+    provider_factory: ProviderFactory | None = None,
+    on_inbound: _DiscordOnInbound | None = None,
+    run_turn: RunTurn | None = None,
+    bot_user_id: str | None = None,
+    interval_seconds: float = DEFAULT_DISCORD_READ_INTERVAL_SECONDS,
+) -> GatewayWatcher | None:
+    """Build the live Discord channel watcher, or None if not fully configured.
+
+    Fail-closed: returns None when the ``MAGI_CHANNEL_LIVE_DISCORD`` gate is off
+    or no bot token is configured (logged explicitly).
+    """
+    if not is_live_discord_enabled():
+        return None
+
+    token = _discord_bot_token_from_env()
+    if token is None:
+        _log.warning(
+            "discord live gate is ON but no bot token is configured "
+            "(set MAGI_DISCORD_BOT_TOKEN) — skipping discord channel watcher"
+        )
+        return None
+
+    # Fail-closed when the optional extra is missing (only when using the default
+    # gateway provider; an injected provider_factory may not need discord.py).
+    if provider_factory is None and importlib.util.find_spec("discord") is None:
+        _log.warning(
+            "discord live gate is ON but the 'discord' extra is not installed "
+            "(pip install magi-agent[discord]) — skipping discord channel watcher"
+        )
+        return None
+
+    factory = provider_factory or _default_discord_provider_factory
+    provider = factory(token)
+    if on_inbound is not None:
+        dispatch: _DiscordOnInbound = on_inbound
+    elif run_turn is not None:
+        dispatch = build_discord_bridge_on_inbound(provider=provider, run_turn=run_turn)
+    else:
+        dispatch = _default_discord_on_inbound
+    read_once = build_discord_read_once(
+        provider=provider, on_inbound=dispatch, bot_user_id=bot_user_id
+    )
+
+    return build_channel_poll_watcher(
+        channel_type="discord",
+        poll_once=read_once,
+        is_enabled=is_live_discord_enabled,
+        interval_seconds=interval_seconds,
+    )
+
+
+def _default_discord_on_inbound(event: Any) -> None:
+    """Default inbound sink — logs receipt only (turn dispatch wired by operator)."""
+    _log.info(
+        "discord inbound event received (digest only)",
+        extra={"messageId": getattr(event, "message_id", None)},
+    )
+
+
 __all__ = [
+    "DEFAULT_DISCORD_READ_INTERVAL_SECONDS",
     "DEFAULT_TELEGRAM_POLL_INTERVAL_SECONDS",
     "TelegramSupervisor",
+    "build_discord_bridge_on_inbound",
+    "build_discord_channel_watcher",
+    "build_discord_read_once",
     "build_telegram_bridge_on_inbound",
     "build_telegram_channel_watcher",
     "build_telegram_poll_once",
     "build_telegram_supervisor_watcher",
+    "discord_live_deliver",
     "is_dashboard_telegram_enabled",
     "live_deliver",
+    "make_discord_deliver",
     "make_telegram_deliver",
 ]
