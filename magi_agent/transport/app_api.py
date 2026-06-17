@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import os
 import re
+import stat
 from importlib import resources
 from importlib.resources.abc import Traversable
 from pathlib import Path
@@ -543,7 +544,17 @@ def _write_config(payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.with_suffix(".toml.tmp")
     try:
-        tmp_path.write_text(rendered, encoding="utf-8")
+        # Create the temp file with 0600 from the start so the secret is never
+        # briefly world-readable at the default umask (M3 defense-in-depth).
+        fd = os.open(
+            tmp_path,
+            os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
+            stat.S_IRUSR | stat.S_IWUSR,  # 0o600
+        )
+        try:
+            os.write(fd, rendered.encode("utf-8"))
+        finally:
+            os.close(fd)
         tmp_path.replace(path)
     finally:
         if tmp_path.exists():
@@ -741,49 +752,19 @@ def register_app_api_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
                 return JSONResponse(status_code=400, content={"error": exc.error})
 
         try:
-            _providers.persist_provider_keys(key_updates, active=active)
+            # Pass model_updates through persist_provider_keys so keys AND models
+            # are written in a single atomic 0600 write (fixes C2/M1/M2).
+            _providers.persist_provider_keys(
+                key_updates,
+                active=active,
+                models=model_updates if model_updates else None,
+            )
         except UnknownProviderError as exc:
             return JSONResponse(
                 status_code=400, content={"error": "unsupported_provider", "detail": str(exc)}
             )
         except OSError as exc:
             return JSONResponse(status_code=500, content={"error": str(exc)})
-
-        # Persist any per-provider model overrides.
-        if model_updates:
-            from magi_agent.cli import providers as _prov2
-            import tomllib as _tomllib
-
-            cfg_path = _prov2._config_path()
-            try:
-                with open(cfg_path, "rb") as _fh:
-                    _raw: dict[str, object] = _tomllib.load(_fh)
-            except Exception:  # noqa: BLE001
-                _raw = {}
-            _raw = dict(_raw)
-            _providers_top = _raw.get("providers")
-            _providers_section: dict[str, object] = (
-                dict(_providers_top) if isinstance(_providers_top, dict) else {}
-            )
-            for pname, pmodel in model_updates.items():
-                _block = _providers_section.get(pname)
-                _pblock: dict[str, object] = dict(_block) if isinstance(_block, dict) else {}
-                _pblock["model"] = pmodel
-                _providers_section[pname] = _pblock
-            _raw["providers"] = _providers_section
-            _rendered = _prov2._render_toml(_raw)
-            _reparsed = _tomllib.loads(_rendered)
-            if _reparsed == _raw:
-                _tmp = cfg_path.with_suffix(".toml.tmp")
-                try:
-                    _tmp.write_text(_rendered, encoding="utf-8")
-                    _tmp.replace(cfg_path)
-                finally:
-                    if _tmp.exists():
-                        try:
-                            _tmp.unlink()
-                        except OSError:
-                            pass
 
         return JSONResponse(content=_providers_snapshot())
 

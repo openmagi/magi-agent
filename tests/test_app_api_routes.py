@@ -797,3 +797,78 @@ def test_persist_provider_keys_0600_permissions(tmp_path) -> None:
     mode = config_path.stat().st_mode
     # Owner read+write (0o600), nothing else.
     assert mode & 0o777 == _stat.S_IRUSR | _stat.S_IWUSR
+
+
+# C1 — PUT /v1/app/config with apiKey must produce a 0600 file
+def test_config_put_with_api_key_produces_0600_file(tmp_path, monkeypatch) -> None:
+    """PUT /v1/app/config containing an apiKey → config.toml is 0600, not world-readable."""
+    import stat as _stat
+
+    client = _client(tmp_path, monkeypatch)
+    res = client.put(
+        "/v1/app/config",
+        json={"llm": {"provider": "openai", "model": "gpt-5.5", "apiKey": "sk-secret-c1"}},
+    )
+    assert res.status_code == 200
+    config_path = tmp_path / "config.toml"
+    assert config_path.exists(), "config.toml was not written"
+    mode = config_path.stat().st_mode
+    assert mode & 0o777 == _stat.S_IRUSR | _stat.S_IWUSR, (
+        f"Expected 0o600 but got {oct(mode & 0o777)}"
+    )
+
+
+# C2 — PUT /v1/app/providers with BOTH apiKey AND model must produce 0600
+#       AND persist both values correctly.
+def test_providers_put_with_key_and_model_produces_0600_file(
+    tmp_path, monkeypatch
+) -> None:
+    """PUT /v1/app/providers with apiKey+model → file is 0600, key and model both stored."""
+    import stat as _stat
+    import tomllib
+
+    client = _client(tmp_path, monkeypatch)
+    res = client.put(
+        "/v1/app/providers",
+        json={
+            "providers": {
+                "openai": {"apiKey": "sk-oai-c2", "model": "gpt-5.5"},
+            }
+        },
+    )
+    assert res.status_code == 200
+
+    config_path = tmp_path / "config.toml"
+    assert config_path.exists(), "config.toml was not written"
+
+    # File-mode check (the main security invariant).
+    mode = config_path.stat().st_mode
+    assert mode & 0o777 == _stat.S_IRUSR | _stat.S_IWUSR, (
+        f"Expected 0o600 but got {oct(mode & 0o777)}"
+    )
+
+    # Both values must be persisted.
+    with open(config_path, "rb") as fh:
+        raw = tomllib.load(fh)
+    assert raw["providers"]["openai"]["api_key"] == "sk-oai-c2"
+    assert raw["providers"]["openai"]["model"] == "gpt-5.5"
+
+
+def test_providers_put_with_key_and_model_get_shows_configured_and_model(
+    tmp_path, monkeypatch
+) -> None:
+    """After PUT with apiKey+model, GET /v1/app/providers shows configured:true and the model."""
+    client = _client(tmp_path, monkeypatch)
+    client.put(
+        "/v1/app/providers",
+        json={
+            "providers": {
+                "openai": {"apiKey": "sk-oai-c2b", "model": "gpt-5.5"},
+            }
+        },
+    )
+    res = client.get("/v1/app/providers")
+    assert res.status_code == 200
+    by_name = {p["name"]: p for p in res.json()["providers"]}
+    assert by_name["openai"]["configured"] is True
+    assert by_name["openai"]["model"] == "gpt-5.5"

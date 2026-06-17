@@ -435,13 +435,18 @@ def persist_provider_keys(
     updates: Mapping[str, str | None],
     *,
     active: str | None = None,
+    models: Mapping[str, str | None] | None = None,
     path: Path | None = None,
 ) -> None:
-    """Write per-provider API keys to ``[providers.<name>].api_key`` in the config file.
+    """Write per-provider API keys (and optionally per-provider models) to the config file.
 
     - ``updates`` maps provider name to key value.  A non-empty cleaned value
       sets ``[providers.<name>].api_key = value``; an empty string or ``None``
       deletes that key (and drops the empty ``[providers.<name>]`` table).
+    - ``models`` maps provider name to model string.  A non-empty value sets
+      ``[providers.<name>].model = value``; ``None`` or empty string deletes it.
+      Both keys and models are written in the SAME single atomic write so the
+      file is always left at ``0600``.
     - Provider names are validated against ``SUPPORTED_PROVIDERS``; ``"google"``
       is canonicalized to ``"gemini"`` (mirror :func:`_canonical_provider`).
       Unknown names raise :class:`UnknownProviderError`.
@@ -517,6 +522,31 @@ def persist_provider_keys(
             else:
                 providers_section.pop(provider, None)
 
+    # Apply per-provider model overrides in the SAME write (no chmod race).
+    if models:
+        for raw_pname, pmodel in models.items():
+            normalized_pname = raw_pname.strip().lower() if isinstance(raw_pname, str) else ""
+            if normalized_pname == "google":
+                normalized_pname = "gemini"
+            if normalized_pname not in SUPPORTED_PROVIDERS:
+                raise UnknownProviderError(
+                    f"Unsupported provider {raw_pname!r}. "
+                    f"Supported: {', '.join(SUPPORTED_PROVIDERS)}."
+                )
+            cleaned_model = _clean(pmodel)
+            existing_block = providers_section.get(normalized_pname)
+            m_block: dict[str, object] = (
+                dict(existing_block) if isinstance(existing_block, dict) else {}
+            )
+            if cleaned_model:
+                m_block["model"] = cleaned_model
+            else:
+                m_block.pop("model", None)
+            if m_block:
+                providers_section[normalized_pname] = m_block
+            else:
+                providers_section.pop(normalized_pname, None)
+
     if providers_section:
         raw["providers"] = providers_section
     else:
@@ -540,12 +570,20 @@ def persist_provider_keys(
             "re-parse to the intended dict. Aborting to preserve the original file."
         )
 
-    # Atomic write: temp file in same dir then os.replace + chmod 0600.
+    # Atomic write: create temp file with 0600 from the start (M3 defense-in-depth:
+    # secret is never briefly world-readable at the default umask), then replace.
     config_path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = config_path.with_suffix(".toml.tmp")
     try:
-        tmp_path.write_text(rendered, encoding="utf-8")
-        os.chmod(tmp_path, stat.S_IRUSR | stat.S_IWUSR)
+        fd = os.open(
+            tmp_path,
+            os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
+            stat.S_IRUSR | stat.S_IWUSR,  # 0o600
+        )
+        try:
+            os.write(fd, rendered.encode("utf-8"))
+        finally:
+            os.close(fd)
         tmp_path.replace(config_path)
     finally:
         # Clean up temp if replace failed.
