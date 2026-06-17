@@ -43,25 +43,73 @@ that does not support the claim. It can skip an approval step, write to the
 wrong channel, carry an unsupported intermediate summary into the next step, or
 produce something that looks plausible but is hard to trust.
 
-Coding agents worked because the coding loop is unusually structured: read
-files, edit, diff, typecheck, test, and commit. The workflow itself gives the
-agent deterministic checkpoints. Most research, operations, finance, document
-review, and general automation work does not have that structure by default.
+Coding agents worked first for a specific reason: the coding loop ships with a
+free **oracle**. Tests, typecheck, the compiler, and CI give a cheap,
+deterministic verdict on whether the work is correct. The agent runs them, sees
+red, and self-corrects; a human reviews the diff. Most research, finance,
+operations, legal, and document work has no such oracle. There is no "run the
+tests" for "is this analysis right" or "does this claim hold." That is the gap
+Magi closes.
+
+## Two Jobs of a Harness
+
+The scaffolding around a model does two different jobs:
+
+1. **Capability** makes the model *do the work* better: edit matching, format and
+   error recovery, context management, the affordances and reliability machinery
+   that fill in for a model's mistakes.
+2. **Policy enforcement** keeps the work *within rules*: what the agent is allowed
+   to do, what must be proven before an answer ships, what is recorded for audit.
+
+Today's coding agents are heavy on (1). They could afford to be light on (2)
+because coding's free oracle, plus a human reviewing the diff, already did the
+checking.
+
+## What Changes as Models Improve
+
+Two things happen at once, pulling in opposite directions:
+
+- **Capability migrates into the model.** Better models produce precise edits,
+  valid tool calls, and hold longer context on their own. The reliability
+  machinery that compensates for model mistakes thins out, the way prompt
+  engineering and chain-of-thought scaffolding did before it.
+- **Policy enforcement becomes the hard part.** When agents run autonomously the
+  human leaves the loop, so no person gates each step. When they move past coding
+  into knowledge work, there is no free oracle to lean on. In both cases the
+  verification has to be *authored* into the runtime, not borrowed from the
+  domain or the reviewer.
+
+So the harness does not get lighter. Its weight shifts from *compensating for the
+model* to *governing an autonomous one*.
+
+## Why It Must Be Programmable
+
+Policy is not universal. What counts as "allowed", "proven", and "recorded"
+varies by domain, task, organization, user, risk appetite, and jurisdiction, and
+none of it lives in the model's weights. A single model cannot know your
+compliance regime or invent an oracle for your domain. You supply that as
+configuration.
+
+So one hardcoded, opinionated harness cannot fit every workflow. The control
+surface has to be composable: attach a source-verification policy, an approval
+policy, a coding-verification policy, or a reconciliation policy, per task,
+without rewriting the agent core. Capability scaffolding, by contrast, is largely
+domain-agnostic, which is why one harness could serve every task; policy is
+domain-specific, which is why it cannot.
 
 ## The Solution: Programmable Determinism
 
-Magi adds that missing structure at runtime: a control plane you program. It has
-two properties. It is **deterministic**, and it is **programmable**. Both carry
-weight.
+Magi adds the missing structure at runtime, as a control plane you program. It
+has two properties, and both carry weight.
 
-**Deterministic: we do not make the *model* deterministic.** The model stays
-creative, and can be incomplete or wrong. We make the *control around it*
-deterministic: which of the model's proposals become state, evidence, side
-effects, or user-visible output. The component that decides is plain code reading
-an append-only evidence record, with zero model calls in the gate. The model
+**Deterministic.** We do not make the *model* deterministic; it stays creative,
+and can be incomplete or wrong. We make the *control around it* deterministic:
+which of the model's proposals become state, evidence, side effects, or
+user-visible output. The component that decides is plain code reading an
+append-only evidence record, with zero model calls in the gate. The model
 proposes; the control plane disposes.
 
-Concretely, a workflow defines:
+Concretely, a policy defines:
 
 - what context is visible to the model;
 - which tools are allowed and which require approval;
@@ -73,25 +121,17 @@ Concretely, a workflow defines:
 - what becomes user-visible output;
 - what is recorded in the audit ledger.
 
-**Programmable: the right control is not universal.** It varies with what a
-domain lets you verify (coding has tests,
-research has sources, finance has reconciliations) and with how much an operator
-wants to enforce (loose vs strict, a source allowlist, a mandatory approval).
-Neither lives in the model's weights. A single model cannot know your policy,
-risk appetite, or jurisdiction. You supply that as configuration: same engine,
-different rails per task. So the behavior is composable: attach a
-source-verification harness, an approval harness, a coding-verification harness,
-or a reconciliation harness without rewriting the agent core for each workflow.
+**Programmable.** Because that policy is plural and lives outside the weights, it
+is composed and configured per task, not hardcoded. The same engine becomes a
+strict coding agent or an audit-grade research agent by changing the policy, not
+the core.
 
-**This matters more as models improve, not less.** Capability scaffolding
-(prompts, planning crutches) gets absorbed by better models, and should. But
-verification against ground truth, authority over side effects, and an audit
-trail are *trust* problems, orthogonal to intelligence. A more capable, more
-autonomous agent raises the cost of a confident mistake, so external,
-deterministic control becomes more necessary, not less. A model checking its own
-work is marking its own homework. Magi is not trying to make the model smart. It
-is the control, trust, and verification plane between a powerful model and the
-systems and people that depend on it.
+What this buys you, stated honestly: in a domain with no free oracle, Magi does
+not guarantee the answer is *correct* (no gate can; that is the model's job). It
+guarantees the answer was produced *under your policy* and can prove it: only
+approved sources used, every citation real, no prohibited action taken, a
+complete audit trail. It moves trust from "the model is smart" to "the
+constraints were met, and here is the proof."
 
 ## Install
 
@@ -214,8 +254,11 @@ will only see permission prompts when you explicitly choose a prompting mode.
 ## Architecture
 
 Magi controls the loop around ADK. The model sees a bounded context packet and
-proposes work; a runtime-only control plane decides which proposals become
-state, evidence, side effects, or user-visible output.
+proposes work; a runtime-only control plane enforces your policy on those
+proposals, deciding which become state, evidence, side effects, or user-visible
+output. This is the policy-enforcement machinery, not a capability layer: it does
+not make the model smarter, it governs what the model's output is allowed to
+become.
 
 ### The stack
 
@@ -364,9 +407,12 @@ task that stage is never selected. *Same engine, different plan.*
 
 ## First-Party Harnesses
 
-These are pre-built **Recipe** bundles that wire **Harness**-layer primitives for
-a common work class, so you do not assemble one from scratch. Magi ships
-first-party harness contracts for the work classes that need deterministic
+These are pre-built **policy** bundles (Recipes wiring Harness-layer primitives)
+for a common work class, so you do not assemble one from scratch. They differ by
+what each domain makes verifiable: coding's checkpoints (read-before-edit,
+diff/test evidence) lean on the domain's free oracle, while research, general
+automation, and authority boundaries are verification Magi has to author. Magi
+ships first-party policy for the work classes that need deterministic
 checkpoints:
 
 - research-first source inspection, citation, verifier, rule-check, and final
@@ -441,7 +487,8 @@ swappable, non-privileged pack loaded through the same path as yours. What you
 may only *add* constraints, never weaken or bypass a verdict), and the set of
 lifecycle **hook points**. That immutable core is the trusted base. It is exactly
 what lets the runtime load anyone's pack and still keep its guarantees: an
-external check can make a task stricter, never neuter it.
+external check can make a task stricter, never neuter it. This is the closed floor
+under the open seam: programmable policy on top, fixed enforcement underneath.
 
 ## Example: One Task, Up the Stack
 
@@ -497,10 +544,23 @@ domain work (legal, finance, research, operations) lives in rungs 1–4.
 
 ### Example: Verify Source Before Claim
 
-Rung 4's evidence machinery also backs Magi's flagship governance example: a
-research task instructed to answer only from inspected sources, with each claim
-linked to a source span before it can reach the final answer. Be precise about
-how strong that enforcement is today:
+Rung 4's evidence machinery backs Magi's flagship governance example: a research
+task answering only from inspected sources, each claim linked to a source span.
+This is also where the honest ceiling of oracle-free verification shows. Three
+tiers:
+
+- **Deterministic, hard:** every *cited* source is real and was actually
+  inspected (anti-fabrication); only approved sources were fetched (provenance);
+  the full chain is in the audit ledger. Zero model calls.
+- **Probabilistic, soft:** whether an *un-cited* factual claim slipped in
+  (coverage), or whether a citation actually supports its claim (semantics).
+  These need an LLM judge: the gate fires deterministically, the judgment does
+  not.
+- **Out of reach:** whether the agent read a correct source *correctly*. No gate
+  guarantees reasoning; that is the model's job.
+
+So the guarantee is provenance and process, not truth. Be precise, too, about how
+strong the *implementation* is today:
 
 > **Status:** this is the evidence-governance *model*, not a fresh-install hard
 > block. The research final projection gate is **audit-only** (default-OFF): it
