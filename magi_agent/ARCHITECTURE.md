@@ -157,6 +157,7 @@ graph LR
     meta_orchestration --> harness
     meta_orchestration --> runtime
     missions --> runtime
+    missions --> storage
     observability --> config
     observability --> transport
     ops --> gateway
@@ -1144,6 +1145,14 @@ graph LR
 | schedule_grammar.py | A1 — ScheduleSpec: once / interval / cron grammar (preview-only). | cron_policy | harness/scheduler_executor.py |
 | scheduler_adapter.py | — | cron_policy | — |
 
+### missions/work_queue/
+
+| Module | Purpose | Depends On | Depended By |
+|---|---|---|---|
+| __init__.py | — | models | — |
+| models.py | — | — | missions/work_queue/__init__.py, missions/work_queue/store.py |
+| store.py | — | migrations, models | — |
+
 ### observability/
 
 | Module | Purpose | Depends On | Depended By |
@@ -1597,7 +1606,7 @@ graph LR
 | content_addressed.py | — | durable_store | storage/__init__.py, storage/memory_store.py |
 | durable_store.py | — | — | artifacts/delivery_receipts.py, artifacts/render_verification.py, connectors/credential_lease.py, credentials_admin/vault_local.py, storage/__init__.py, storage/content_addressed.py, storage/memory_store.py, storage/sqlite_store.py, transport/credentials.py |
 | memory_store.py | — | content_addressed, durable_store | storage/__init__.py |
-| migrations.py | — | — | harness/goal_state.py, harness/scheduler_job_store.py, storage/session_store.py |
+| migrations.py | — | — | harness/goal_state.py, harness/scheduler_job_store.py, missions/work_queue/store.py, storage/session_store.py |
 | session_store.py | — | migrations | adk_bridge/session_service.py, learning/bootstrap.py, transport/app_api.py, transport/streaming_chat_route.py |
 | sqlite_store.py | — | durable_store | storage/__init__.py |
 
