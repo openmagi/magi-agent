@@ -37,6 +37,7 @@ __all__ = [
     # specialized runners
     "_FunctionCallOnlyRunner",
     "_FunctionCallThenFinalRunner",
+    "_NativeToolRoundtripRunner",
     "_DuplicateTextAndFunctionCallRunner",
     "_EventCapTextAndFunctionCallRunner",
     "_AutoToolLoopAgent",
@@ -262,6 +263,43 @@ class _FunctionCallThenFinalRunner(_FakeRunner):
         assert isinstance(message, _FakeContent)
         assert "Tool execution results" in message.parts[0].text
         yield _FakeEvent("final answer after manual tool execution")
+
+
+class _NativeToolRoundtripRunner(_FakeRunner):
+    """ADK-native function_call → function_response round-trip in ONE run_async.
+
+    Call 1 (main turn): yields a function_call event immediately followed by a
+    function_response event in the same ``run_async``.  The boundary's native
+    response-handling path processes both events, sets ``function_responses_seen``
+    and ``tool_only_events_seen``, then exits the inner loop — with no text
+    output.  Because ``output_text is None`` and ``tool_only_events_seen`` the
+    boundary invokes ``_run_no_tool_finalizer``, which calls ``run_async`` again.
+
+    Call 2 (finalizer): yields a plain final-text event.
+
+    This is distinct from every other golden scenario:
+    - Unlike ``text_only`` / ``readonly_text``: involves tool events.
+    - Unlike ``tool_then_final``: uses ADK-native function_response (not manual
+      tool continuation injected by the boundary).
+    - Unlike ``function_call_only``: includes a matching function_response in
+      the same stream, so the boundary exits via ``function_responses_seen``
+      rather than exhausting manual continuations.
+    - Unlike ``duplicate_text_and_call`` / ``event_cap``: no preamble text and
+      not triggering dedup or cap logic.
+    """
+
+    calls: list[dict[str, object]] = []
+
+    async def run_async(self, **kwargs: object) -> object:  # type: ignore[override]
+        type(self).run_kwargs = kwargs
+        type(self).calls.append(kwargs)
+        if len(type(self).calls) == 1:
+            # Main turn: ADK-native roundtrip — function_call then function_response.
+            yield _FunctionCallOnlyEvent()
+            yield _FunctionResponseOnlyEvent()
+            return
+        # Finalizer turn (called by _run_no_tool_finalizer): emit the text answer.
+        yield _FakeEvent("final answer after native tool roundtrip")
 
 
 class _DuplicateTextAndFunctionCallRunner(_FakeRunner):

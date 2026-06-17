@@ -31,6 +31,16 @@ invocation, causing the boundary to loop until ``max_steps`` is exhausted.
 from "emit function call" to "emit final answer" on the second invocation —
 which is the production-representative two-round-trip flow.
 
+The ``native_tool_roundtrip`` scenario uses ``_NativeToolRoundtripRunner``,
+which emits a function_call event immediately followed by a function_response
+event in a SINGLE ``run_async`` invocation (ADK-native roundtrip).  The
+boundary processes both events in one pass (setting ``function_responses_seen``
+and ``tool_only_events_seen``), then invokes ``_run_no_tool_finalizer`` because
+no text was produced.  The second ``run_async`` call (finalizer) yields the
+final text.  This path is distinct from ``tool_then_final`` (which uses manual
+tool injection) and from ``function_call_only`` (which never supplies a
+function_response in the same stream).
+
 The ``readonly_text`` scenario requires a non-empty ``adk_tools`` to satisfy
 the ``shadow_readonly`` tool policy check (the boundary drops with
 ``tool_policy_mismatch`` when ``tools_enabled=True`` but ``adk_tools`` is
@@ -59,6 +69,7 @@ from tests.support.gate5b4c3_fakes import (
     _FunctionCallOnlyRunner,
     _FunctionCallThenFinalRunner,
     _ManualCalculationTool,
+    _NativeToolRoundtripRunner,
     final_event,
 )
 from tests.test_gate5b4c3_live_runner_boundary import (
@@ -102,6 +113,8 @@ def _scenarios() -> dict[str, tuple[Any, Any, dict[str, Any]]]:
     _FunctionCallThenFinalRunner.event_factory = _FunctionCallOnlyEvent
     _DuplicateTextAndFunctionCallRunner.calls = []
     _AutoToolLoopRunner.calls = []
+    _NativeToolRoundtripRunner.calls = []
+    _ManualCalculationTool.calls = []
 
     return {
         # Plain text response — no tools.
@@ -123,12 +136,15 @@ def _scenarios() -> dict[str, tuple[Any, Any, dict[str, Any]]]:
             # A non-empty adk_tools is required to satisfy shadow_readonly policy.
             {"adk_tools": (object(),)},
         ),
-        # ADK runner with no tools on the agent: exercises the no-tool finalizer
-        # branch where the runner yields a final text answer directly (agent has
-        # no attached tools so getattr(agent, "tools", ()) is falsy).
-        "auto_tool_loop": (
+        # ADK-native function_call → function_response in a single run_async:
+        # exercises the boundary's native response-handling path where both events
+        # appear in the same stream, ``function_responses_seen`` is set, and the
+        # boundary invokes ``_run_no_tool_finalizer`` to produce the final text
+        # (distinct from ``tool_then_final`` which uses manual tool injection, and
+        # from ``function_call_only`` which never supplies a matching response).
+        "native_tool_roundtrip": (
             _selected_full_toolhost_request(),
-            _AutoToolLoopRunner(agent=_FakeAgent()),
+            _NativeToolRoundtripRunner(),
             {"adk_tools": (_ManualCalculationTool,)},
         ),
         # Runner emits the same text+function_call event twice: exercises the
@@ -164,7 +180,7 @@ def _scenarios() -> dict[str, tuple[Any, Any, dict[str, Any]]]:
         "text_only",
         "tool_then_final",
         "readonly_text",
-        "auto_tool_loop",
+        "native_tool_roundtrip",
         "duplicate_text_and_call",
         "event_cap",
         "function_call_only",
