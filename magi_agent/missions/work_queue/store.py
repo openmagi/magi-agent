@@ -227,6 +227,66 @@ class SqliteWorkQueueStore:
         conn.commit()
         return reclaimed
 
+    def find_by_idempotency_key(self, key: str) -> WorkTask | None:
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT * FROM work_queue_tasks WHERE idempotency_key = ? LIMIT 1",
+            (key,),
+        ).fetchone()
+        return self._row_to_task(row) if row else None
+
+    def record_failure(
+        self,
+        task_id: str,
+        *,
+        outcome: str,
+        error: str | None = None,
+        failure_limit: int = DEFAULT_FAILURE_LIMIT,
+    ) -> WorkTask:
+        conn = self._get_conn()
+        conn.execute(
+            "UPDATE work_queue_tasks "
+            "SET consecutive_failures = consecutive_failures + 1, last_failure_error = ? "
+            "WHERE id = ?",
+            (error, task_id),
+        )
+        row = conn.execute(
+            "SELECT consecutive_failures FROM work_queue_tasks WHERE id = ?",
+            (task_id,),
+        ).fetchone()
+        new_failures = row["consecutive_failures"]
+        if new_failures >= failure_limit:
+            conn.execute(
+                "UPDATE work_queue_tasks SET status = 'blocked' WHERE id = ?",
+                (task_id,),
+            )
+            self._append_event(conn, task_id, "blocked", {"outcome": outcome})
+        else:
+            conn.execute(
+                "UPDATE work_queue_tasks SET status = 'ready' WHERE id = ?",
+                (task_id,),
+            )
+            self._append_event(conn, task_id, "failed", {"outcome": outcome})
+        conn.commit()
+        result = self.get(task_id)
+        assert result is not None
+        return result
+
+    def complete(self, task_id: str, *, result: str | None = None) -> WorkTask:
+        now = int(time.time())
+        conn = self._get_conn()
+        conn.execute(
+            "UPDATE work_queue_tasks "
+            "SET status = 'completed', result = ?, completed_at = ?, consecutive_failures = 0 "
+            "WHERE id = ?",
+            (result, now, task_id),
+        )
+        self._append_event(conn, task_id, "completed", None)
+        conn.commit()
+        task = self.get(task_id)
+        assert task is not None
+        return task
+
     def _append_event(self, conn, task_id, kind, payload):
         conn.execute(
             "INSERT INTO work_queue_task_events (task_id, run_id, kind, payload, created_at) "

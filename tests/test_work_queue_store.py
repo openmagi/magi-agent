@@ -72,3 +72,25 @@ def test_stale_claim_extended_when_worker_alive_and_fresh(tmp_path):
     n = s.release_stale_claims(now=1000 + CLAIM_TTL_SECONDS + 1, pid_alive=lambda pid: True)
     assert n == 0                                  # extended, not reclaimed
     assert s.get("t").status == "running"
+
+
+def test_idempotency_lookup(tmp_path):
+    from magi_agent.missions.work_queue.store import SqliteWorkQueueStore
+    from magi_agent.missions.work_queue.models import WorkTask
+    s = SqliteWorkQueueStore(tmp_path / "wq.db")
+    s.create(WorkTask(id="t", title="x", status="todo", created_at=1, idempotency_key="abc"))
+    assert s.find_by_idempotency_key("abc").id == "t"
+    assert s.find_by_idempotency_key("nope") is None
+
+
+def test_circuit_breaker_blocks_after_limit(tmp_path):
+    from magi_agent.missions.work_queue.store import SqliteWorkQueueStore
+    from magi_agent.missions.work_queue.models import WorkTask
+    s = SqliteWorkQueueStore(tmp_path / "wq.db")
+    s.create(WorkTask(id="t", title="x", status="running", created_at=1))
+    s.record_failure("t", outcome="crashed", failure_limit=2)
+    assert s.get("t").status == "ready"            # 1st failure -> retry
+    s.create(WorkTask(id="t2", title="y", status="running", created_at=1))
+    s._set_status("t", "running")
+    s.record_failure("t", outcome="crashed", failure_limit=2)
+    assert s.get("t").status == "blocked"          # 2nd consecutive -> blocked
