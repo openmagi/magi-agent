@@ -1,0 +1,28 @@
+{
+  "events": [
+    {
+      "payload": {
+        "delta": "hello ",
+        "type": "text_delta"
+      },
+      "turn_id": "t1",
+      "type": "token"
+    },
+    {
+      "payload": {
+        "delta": "world",
+        "type": "text_delta"
+      },
+      "turn_id": "t1",
+      "type": "token"
+    }
+  ],
+  "terminal": {
+    "cost_usd": 0.0,
+    "error": null,
+    "session_id": "s-text",
+    "terminal": "completed",
+    "turn_id": "t1",
+    "usage": {}
+  }
+}

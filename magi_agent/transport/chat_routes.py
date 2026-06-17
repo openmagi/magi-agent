@@ -63,7 +63,9 @@ from magi_agent.research.research_first_canary import (
     build_research_first_selected_response,
     research_first_selected_canary_active,
 )
+from magi_agent.runtime.governed_turn import run_governed_turn
 from magi_agent.runtime.openmagi_runtime import OpenMagiRuntime
+from magi_agent.runtime.turn_context import TurnContext
 from magi_agent.runtime.public_events import (
     tool_end_event,
     tool_progress_event,
@@ -356,17 +358,22 @@ async def _local_adk_chat_sse(
         owner_user_id=serve_owner_user_id,
         learning_live_readiness=learning_live_readiness,
     )
-    cancel = asyncio.Event()
-    stream = headless.engine.run_turn_stream(
-        None,
-        {
-            "prompt": prompt,
-            "session_id": session_id,
-            "turn_id": turn_id,
-        },
-        cancel=cancel,
-        gate=headless.gate,
+    # Route the top-level serve turn through the single ``run_governed_turn``
+    # primitive (Phase 1). ``runtime=headless`` reuses the SAME runner/gate/
+    # driver assembly built above — the primitive does not rebuild it — so this
+    # is behavior-preserving. ``to_turn_input()`` adds ``harness_state=ctx``;
+    # output neutrality holds because (a) ``_extract_task_types`` treats any
+    # non-Mapping as ``()`` and (b) even the ``effective_harness_state`` that
+    # runner-policy assembly computes (adding ``resolvedHarnessStateType``) is
+    # passed only as ``harnessState=`` to the ADK runner adapter, which drops
+    # it via its kwargs allowlist — nothing reaches the model or any event.
+    ctx = TurnContext(
+        prompt=prompt,
+        session_id=session_id,
+        turn_id=turn_id,
+        model=model_override,
     )
+    stream = run_governed_turn(ctx, runtime=headless)
     # Accumulate the assistant text + a tool-use signal so the turn-end memory
     # hook (below) can flush a concise daily entry and skip trivial turns. This
     # mirrors data we already stream, so it adds no extra engine work.
