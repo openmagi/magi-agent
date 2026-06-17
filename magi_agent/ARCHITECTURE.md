@@ -684,11 +684,13 @@ graph LR
 |---|---|---|---|
 | __init__.py | — | apply, store | — |
 | apply.py | — | flags, verification_policy | customize/__init__.py, runtime/openmagi_runtime.py, transport/customize.py |
-| catalog.py | — | app_api, preset_map, presets | transport/customize.py |
+| catalog.py | — | app_api, preset_map, presets, what_menu | transport/customize.py |
+| custom_rules.py | Custom verification-rule schema + validation (spec §9.1). | what_menu | transport/customize.py |
 | preset_map.py | Canonical preset id → runtime-seam map for the Customize verification tab. | — | cli/real_runner.py, customize/catalog.py |
 | runtime_gate.py | Runtime-side query for Customize verification preset state. | flags, store, verification_policy | cli/engine.py |
 | store.py | — | — | cli/real_runner.py, customize/__init__.py, customize/runtime_gate.py, runtime/message_builder.py, runtime/openmagi_runtime.py, transport/customize.py |
 | verification_policy.py | — | — | cli/real_runner.py, customize/apply.py, customize/runtime_gate.py |
+| what_menu.py | WHAT-menu for deterministic custom rules. | — | customize/catalog.py, customize/custom_rules.py |
 
 ### discovery/
 
@@ -1722,7 +1724,7 @@ graph LR
 | chat_shared.py | Shared primitives for the decomposed Gate5B chat serving stack. | child_runner_live, env, gate1a_readonly_tools, gate5b4c3_live_runner_boundary, gate5b_full_toolhost, openmagi_runtime, shadow_generations, user_visible_model_routing | transport/chat.py, transport/chat_routes.py, transport/gate2_sandbox_canary.py, transport/generation_request.py |
 | control_requests.py | Control-request REST surface consumed by the restored web dashboard. | openmagi_runtime | (root)/app.py |
 | credentials.py | Dashboard "Credentials" admin routes. | credentials_admin, durable_store, openmagi_runtime, tools | (root)/app.py |
-| customize.py | — | apply, catalog, openmagi_runtime, store, tools | (root)/app.py |
+| customize.py | — | apply, catalog, custom_rules, openmagi_runtime, store, tools | (root)/app.py |
 | debug_trace.py | Debug endpoint exposing the current turn's execution trace. | trace_context | (root)/app.py |
 | egress_critic.py | Egress critic gate and live evidence projection for the chat serving path. | egress_gate, gate1a_readonly_tools, gate5b_full_toolhost, generation_request, mapping, projection, providers, readonly_classifier, reason_safety, user_visible_model_routing | transport/chat.py, transport/chat_routes.py |
 | gate2_sandbox_canary.py | Gate2 sandbox workspace canary chat + delivery-receipt logic. | chat_shared, gate2_activation_loop_a, gate2_durable_evidence, gate2_readiness, openmagi_runtime, user_visible_model_routing | transport/chat.py, transport/chat_routes.py |
