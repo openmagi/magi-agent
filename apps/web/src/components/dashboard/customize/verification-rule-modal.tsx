@@ -160,12 +160,13 @@ function CustomRulesSection({
   onDelete: (id: string) => void;
 }) {
   const [adding, setAdding] = useState(false);
-  const [kind, setKind] = useState<"deterministic_ref" | "tool_perm">("deterministic_ref");
+  const [kind, setKind] = useState<"deterministic_ref" | "tool_perm" | "llm_criterion">("deterministic_ref");
   const [ref, setRef] = useState(menu[0]?.ref ?? "");
   const [scope, setScope] = useState<string>("coding");
   const [matchType, setMatchType] = useState<"tool" | "domain" | "domainAllowlist">("tool");
   const [matchValue, setMatchValue] = useState("");
   const [decision, setDecision] = useState<"deny" | "ask">("deny");
+  const [criterion, setCriterion] = useState("");
 
   const menuLabel = (r: string) => menu.find((m) => m.ref === r)?.label ?? r;
 
@@ -179,10 +180,14 @@ function CustomRulesSection({
       if (Array.isArray(m.domainAllowlist)) return `${verb} fetches outside [${m.domainAllowlist.join(", ")}]`;
       return verb;
     }
+    if (rule.what?.kind === "llm_criterion") {
+      return `LLM check: "${String(p.criterion ?? "")}"`;
+    }
     return menuLabel(String(p.ref ?? ""));
   };
 
-  const canAdd = kind === "deterministic_ref" ? !!ref : !!matchValue.trim();
+  const canAdd =
+    kind === "deterministic_ref" ? !!ref : kind === "llm_criterion" ? !!criterion.trim() : !!matchValue.trim();
 
   const buildRule = (): CustomRule => {
     if (kind === "tool_perm") {
@@ -197,6 +202,15 @@ function CustomRulesSection({
         what: { kind: "tool_perm", payload: { match, decision } },
         firesAt: "before_tool_use",
         action,
+      };
+    }
+    if (kind === "llm_criterion") {
+      return {
+        scope,
+        enabled: true,
+        what: { kind: "llm_criterion", payload: { criterion: criterion.trim() } },
+        firesAt: "pre_final",
+        action: "block",
       };
     }
     return {
@@ -265,6 +279,7 @@ function CustomRulesSection({
                 Deterministic evidence check{menu.length === 0 ? " (none available)" : ""}
               </option>
               <option value="tool_perm">Tool permission (deny / approval)</option>
+              <option value="llm_criterion">LLM criterion check (final answer)</option>
             </select>
           </label>
 
@@ -276,6 +291,20 @@ function CustomRulesSection({
                   <option key={m.ref} value={m.ref}>{m.label}</option>
                 ))}
               </select>
+            </label>
+          ) : kind === "llm_criterion" ? (
+            <label className="block text-[11px] font-medium text-secondary">
+              Criterion (LLM judges the final answer; blocks if not met)
+              <textarea
+                value={criterion}
+                onChange={(e) => setCriterion(e.target.value)}
+                rows={3}
+                placeholder="e.g. Every factual claim is backed by a cited source."
+                className={`${selectCls} resize-y`}
+              />
+              <span className="mt-1 block text-[10px] text-amber-600">
+                Requires the egress gate (MAGI_EGRESS_GATE_ENABLED); otherwise saved but inactive.
+              </span>
             </label>
           ) : (
             <>
@@ -328,6 +357,7 @@ function CustomRulesSection({
               onClick={() => {
                 onAdd(buildRule());
                 setMatchValue("");
+                setCriterion("");
                 setAdding(false);
               }}
               className="rounded-lg bg-primary px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-40"

@@ -117,4 +117,10 @@ describe("custom-rule builder (deterministic)", () => {
     expect(modalSrc).toContain('firesAt: "before_tool_use"');
     expect(modalSrc).toContain("Require approval");
   });
+
+  it("builder supports llm_criterion rules with honest egress-gate label", () => {
+    expect(modalSrc).toContain('kind: "llm_criterion"');
+    expect(modalSrc).toContain("criterion");
+    expect(modalSrc).toContain("MAGI_EGRESS_GATE_ENABLED");
+  });
 });
