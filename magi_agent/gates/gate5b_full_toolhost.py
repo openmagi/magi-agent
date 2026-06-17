@@ -1577,6 +1577,9 @@ class Gate5BFullToolHost:
                 # parent+1 and the child_runner_boundary depth cap protects
                 # NESTED spawns on the serve path (default 0 => top-level depth 1).
                 spawnDepth=self._spawn_depth,
+                # Carry the parent's effective tool names so the tighten-only
+                # producer (Task 2B.2) can pass them to ChildTaskRequest metadata.
+                parentToolNames=tuple(sorted(self.exposed_tool_names)),
                 permissionScope={
                     "mode": "selected_full_toolhost",
                     "source": "selected_full_toolhost",

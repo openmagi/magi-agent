@@ -652,6 +652,13 @@ def _build_first_party_adk_tools(
         )
     )
 
+    # Capture parent tool names once at factory-build time (mirrors spawn_depth
+    # threading: a stable value known at construction is closed over and threaded
+    # into every ToolContext built by this factory).  ``exposed_tool_names`` is
+    # the set of tools the parent agent actually advertises — the right source for
+    # the tighten-only producer (Task 2B.2).
+    parent_tool_names_snapshot: tuple[str, ...] = tuple(sorted(exposed_tool_names))
+
     def tool_context_factory(adk_tool_context: object) -> ToolContext:
         function_call = _context_lookup(adk_tool_context, "function_call")
         tool_name = _context_lookup(function_call, "name")
@@ -685,6 +692,7 @@ def _build_first_party_adk_tools(
             adk_context=adk_tool_context,
             tool_use_id=tool_use_id if isinstance(tool_use_id, str) else None,
             plugin_id=tool_name if isinstance(tool_name, str) else None,
+            parent_tool_names=parent_tool_names_snapshot,
         )
 
     tools = build_adk_function_tools_for_registry(

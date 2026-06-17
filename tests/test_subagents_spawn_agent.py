@@ -749,3 +749,80 @@ def test_spawn_agent_runs_child_inside_running_event_loop(monkeypatch) -> None:
     # The child actually ran — NOT the blocked degrade path.
     assert result.output["liveChildRunnerAttached"] is True
     assert "Fake child" in str(result.output.get("summary", ""))
+
+
+# ---------------------------------------------------------------------------
+# T10: parent_tool_names producer (Task 2B.2) — ToolContext carrying
+# parent_tool_names flows through spawn_agent into ChildTaskRequest.metadata
+# ---------------------------------------------------------------------------
+
+
+def test_spawn_agent_parent_tool_names_carried_to_child_request_gate_off(
+    monkeypatch,
+) -> None:
+    """Gate OFF path: parent_tool_names on ToolContext lands in the output
+    payload's spawnDepth field and does not crash.  The not-attached blocked
+    result is byte-identical to before (no new output keys from the gate-OFF
+    branch) — the producer only writes to the ChildTaskRequest metadata on the
+    live path."""
+    monkeypatch.delenv("MAGI_CHILD_RUNNER_LIVE_ENABLED", raising=False)
+    monkeypatch.delenv("MAGI_CHILD_RUNNER_LIVE_KILL_SWITCH", raising=False)
+
+    from magi_agent.plugins.native.subagents import spawn_agent
+
+    ctx = _context(spawnDepth=0, parentToolNames=("Bash", "FileRead"))
+    result = asyncio.run(spawn_agent({"prompt": "gate-off parent-cap test"}, ctx))
+
+    assert result.status == "blocked"
+    assert result.error_code == "live_child_runner_disabled"
+    # Gate-OFF output is byte-identical — no parentToolNames key in the output dict.
+    assert "parentToolNames" not in result.output
+
+
+def test_spawn_agent_parent_tool_names_carried_to_child_request_gate_on(
+    monkeypatch,
+) -> None:
+    """Gate ON: ToolContext.parent_tool_names is forwarded into the ChildTaskRequest
+    metadata as ``parentToolNames`` — mirroring how spawnDepth flows.
+
+    Uses an object-form monkeypatch on the imported module object (not string-form
+    setattr) to avoid the PEP 562 __getattr__ guard on magi_agent.runtime.
+    """
+    monkeypatch.setenv("MAGI_CHILD_RUNNER_LIVE_ENABLED", "1")
+    monkeypatch.delenv("MAGI_CHILD_RUNNER_LIVE_KILL_SWITCH", raising=False)
+
+    import magi_agent.runtime.child_runner_live as _live_mod
+
+    captured_request: list[object] = []
+
+    class _CapturingParentNamesRunner:
+        openmagi_live_provider = True
+
+        def __init__(self, *, tools: list[object] | None = None, **kwargs: object) -> None:
+            pass
+
+        async def run_child(self, request: object) -> dict[str, object]:
+            captured_request.append(request)
+            return {
+                "childExecutionId": "child-exec-parent-names",
+                "status": "completed",
+                "summary": "parent names captured",
+                "evidenceRefs": (),
+                "artifactRefs": (),
+                "auditEventRefs": (),
+            }
+
+    # Patch the imported module object directly (avoids PEP 562 __getattr__ guard).
+    monkeypatch.setattr(_live_mod, "RealLocalChildRunner", _CapturingParentNamesRunner)
+
+    from magi_agent.plugins.native.subagents import spawn_agent
+
+    ctx = _context(spawnDepth=0, parentToolNames=("FileRead", "Bash"))
+    asyncio.run(spawn_agent({"prompt": "parent-tool-names test"}, ctx))
+
+    assert len(captured_request) == 1
+    req = captured_request[0]
+    metadata = getattr(req, "metadata", {})
+    assert "parentToolNames" in metadata
+    # The value must match what was set on the ToolContext (order-preserving).
+    assert tuple(metadata["parentToolNames"]) == ("FileRead", "Bash")
