@@ -29,12 +29,15 @@ from magi_agent.evidence.types import (
     EvidenceSpawnDepthRange,
 )
 from magi_agent.harness.evidence_scope import (
-    AgentRole,
     EvidenceContractScope,
     EvidenceScopeContext,
     EvidenceScopeDecision,
     RunOn,
     resolve_evidence_scope,
+)
+from magi_agent.harness.kernel_roles import (
+    FIRST_PARTY_AGENT_ROLE_IDS,
+    known_agent_role_ids,
 )
 
 if TYPE_CHECKING:
@@ -62,10 +65,27 @@ _RESOLVED_MODEL_CONFIG = ConfigDict(
 _ResolvedModelT = TypeVar("_ResolvedModelT", bound=BaseModel)
 
 
+def _validate_agent_role_value(value: str) -> str:
+    """Accept a first-party role, or — when the kernel role-provides flag is ON —
+    a discovered ``ext.<name>`` role. With the flag OFF this admits exactly the
+    three first-party roles, so validation is byte-identical to the prior
+    ``AgentRole`` Literal.
+    """
+
+    if value not in known_agent_role_ids():
+        raise ValueError(f"unknown agent role: {value!r}")
+    return value
+
+
 class _ResolvedAgentRoleInput(BaseModel):
     model_config = ConfigDict(frozen=True, populate_by_name=True)
 
-    agent_role: AgentRole = Field(alias="agentRole")
+    agent_role: str = Field(alias="agentRole")
+
+    @field_validator("agent_role")
+    @classmethod
+    def _check_agent_role(cls, value: str) -> str:
+        return _validate_agent_role_value(value)
 
 
 class _ResolvedHarnessModel(BaseModel):
@@ -230,7 +250,7 @@ class ResolvedEvidenceContractSnapshot(_ResolvedHarnessModel):
 class ResolvedHarnessPresetState(_ResolvedHarnessModel):
     profile_name: str = Field(alias="profileName")
     run_on: RunOn = Field(default="main", alias="runOn")
-    agent_role: AgentRole = Field(default="general", alias="agentRole")
+    agent_role: str = Field(default="general", alias="agentRole")
     spawn_depth: int = Field(default=0, alias="spawnDepth")
     general: ResolvedHarnessPack
     coding: ResolvedHarnessPack
@@ -297,6 +317,11 @@ class ResolvedHarnessPresetState(_ResolvedHarnessModel):
         value: EvidenceVerdictReadinessMetadata,
     ) -> EvidenceVerdictReadinessMetadata:
         return _revalidate_nested_model(value, EvidenceVerdictReadinessMetadata)
+
+    @field_validator("agent_role")
+    @classmethod
+    def _check_agent_role(cls, value: str) -> str:
+        return _validate_agent_role_value(value)
 
     def hook_scope_context(self) -> HookScopeContext:
         from magi_agent.hooks.scope import HookScopeContext
@@ -417,13 +442,17 @@ def build_default_resolved_harness_state(
     )
 
 
-def _validate_resolved_agent_role(agent_role: str) -> AgentRole:
+def _validate_resolved_agent_role(agent_role: str) -> str:
     return _ResolvedAgentRoleInput(agentRole=agent_role).agent_role
 
 
-def _default_effective_harness_packs(*, run_on: RunOn, agent_role: AgentRole) -> tuple[str, ...]:
+def _default_effective_harness_packs(*, run_on: RunOn, agent_role: str) -> tuple[str, ...]:
     if run_on == "child":
-        if agent_role in {"coding", "research", "general"}:
+        # Data-driven over the kernel role registry: a known role (first-party, or
+        # an external ext.<name> role when the flag is ON) gets its own scope
+        # bucket; hard-safety is ALWAYS appended so an external role can never
+        # shed it.
+        if agent_role in known_agent_role_ids():
             return (agent_role, "hard-safety")
         return ("hard-safety",)
     return ("general", "coding", "research", "verification", "hard-safety")
@@ -558,7 +587,13 @@ def _build_evidence_scope_context(
     run_on: RunOn,
     spawn_depth: int,
 ) -> EvidenceScopeContext | None:
-    if agent_role not in {"general", "coding", "research"}:
+    # Contained scope (PR2): evidence contracts stay first-party-role-scoped. An
+    # external ext.<name> role gets no scope context, so it matches no first-party
+    # contract (none declare ext roles) — the same skip outcome as a first-party
+    # role a contract does not target. Hard-safety GATES are unconditional
+    # (protected_gates + the always-appended "hard-safety" pack), so this is not
+    # an enforcement escape. Widening contracts to ext roles is a separate change.
+    if agent_role not in FIRST_PARTY_AGENT_ROLE_IDS:
         return None
     return EvidenceScopeContext(
         agentRole=agent_role,

@@ -427,6 +427,21 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
     ),
     _b(
+        "MAGI_KERNEL_ROLE_PROVIDES_ENABLED",
+        stage="stage2",
+        summary=(
+            "Recognise kernel `role` provides (pack.toml [[provides]] type='role'; "
+            "a declarative RoleManifest scope label) in the harness preset "
+            "resolution. First-party roles (general/coding/research) plus validated "
+            "`ext.<name>` external roles; an external role cannot impersonate a "
+            "first-party role or claim hard-safety, and the harness always keeps "
+            "hard-safety in its effective packs. Contained: the engine/parallel/"
+            "inference/evidence AgentRole literals are NOT widened, so an external "
+            "role is a scope label only. Strict default-OFF (OFF is byte-identical "
+            "to today)."
+        ),
+    ),
+    _b(
         "MAGI_WORKER_ROUTING_LLM_ENABLED",
         stage="stage2",
         summary=(

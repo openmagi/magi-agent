@@ -18,7 +18,7 @@ from magi_agent.adk_bridge.control_plane import ToolDecision
 
 
 class PrimitiveType(str, Enum):
-    """The 8 unified ``provides`` types (D2) + the 3 Pack-C policy types."""
+    """The unified ``provides`` types (D2) + the 3 Pack-C policy types."""
 
     TOOL = "tool"
     CALLBACK = "callback"
@@ -28,6 +28,8 @@ class PrimitiveType(str, Enum):
     EVIDENCE_PRODUCER = "evidence_producer"
     RECIPE = "recipe"
     CONNECTOR = "connector"
+    # Declarative scope-label type: a namespaced agent role (D2 extension).
+    ROLE = "role"
     # Pack C policy types (decomposed-subsystem policies; same loader, no privilege)
     LOOP_POLICY = "loop_policy"
     SCHEDULE_POLICY = "schedule_policy"
@@ -425,6 +427,17 @@ class RecipeProvideContext:
 
 
 @dataclass(frozen=True)
+class RoleProvideContext:
+    """D5 typed context a ``role`` impl receives: ``register(ref, manifest)``.
+
+    A ``role`` is a declarative scope label (a ``RoleManifest``), not executable
+    code. It buckets which harness packs / hooks / contracts apply; it does not
+    itself enforce anything."""
+
+    register: Callable[[str, Any], None]
+
+
+@dataclass(frozen=True)
 class ConnectorProvideContext:
     """D5 typed context a ``connector`` impl receives: ``register(ref, spec)``."""
 
@@ -729,6 +742,7 @@ __all__ = [
     "ContextDispatcher", "GatePositionViolation",
     "ProducerSpec", "ConnectorSpec",
     "ToolProvideContext", "EvidenceProducerProvideContext", "RecipeProvideContext",
+    "RoleProvideContext",
     "ConnectorProvideContext", "HarnessProvideContext", "CallbackProvideContext",
     "LoopPolicyProvideContext", "SchedulePolicyProvideContext",
     "MemoryStrategyProvideContext", "WorkspaceHostView",

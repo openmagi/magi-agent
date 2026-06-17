@@ -178,6 +178,7 @@ class PackRegistries:
         self.hooks = HookRegistry()
         self.evidence_producers = KeyedRefRegistry()
         self.recipes = KeyedRefRegistry()
+        self.roles = KeyedRefRegistry()
         self.connectors = KeyedRefRegistry()
         self.harnesses = KeyedRefRegistry()
         # Pack C policy registries (same KeyedRefRegistry shape as harnesses).
@@ -291,6 +292,15 @@ def project_into_registries(
                     _raw = _tomllib.load(_fh)
                 registries.recipes.replace(ref, RecipePackManifest.model_validate(_raw))
                 registered.append(ref)
+            elif ptype == "role" and spec_path is not None:
+                # Declarative scope label: parse the RoleManifest via the shared
+                # harness-side parser (same schema the harness reader uses).
+                from magi_agent.harness.kernel_roles import parse_role_manifest
+
+                manifest = parse_role_manifest(spec_path)
+                if manifest is not None:
+                    registries.roles.replace(ref, manifest)
+                    registered.append(ref)
             continue
         if ptype == "tool":
             impl(_ctx.ToolProvideContext(
