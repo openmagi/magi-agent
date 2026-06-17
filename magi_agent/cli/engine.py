@@ -706,14 +706,33 @@ def _pre_final_gate_applies(
     blocked, even when the prompt classifier would otherwise flag it as coding.
     """
 
-    selected = set(assembly.selected_pack_ids) | set(live_selected_pack_ids)
-    if "openmagi.dev-coding" not in selected:
+    dev_coding_pack_id = "openmagi.dev-coding"
+    base_selected = set(assembly.selected_pack_ids)
+    selected = base_selected | set(live_selected_pack_ids)
+    if dev_coding_pack_id not in selected:
         return True
 
     # Mutation-scope: the coding evidence gate only applies to turns that
-    # actually changed code. No file mutation ⇒ nothing to verify ⇒ no block.
+    # actually changed code. No file mutation ⇒ nothing coding to verify.
     if not coding_mutation_observed:
-        return False
+        # If dev-coding is part of the PROFILE baseline, preserve main's exact
+        # behavior: a no-mutation turn produces nothing to verify ⇒ no gate.
+        # (When live_selected_pack_ids is empty this branch is always taken,
+        # so the OFF-path stays byte-identical to main.)
+        if dev_coding_pack_id in base_selected:
+            return False
+        # dev-coding arrived PURELY via live selection. Its (mutation-scoped)
+        # coding obligation has nothing to verify on a no-mutation turn, but we
+        # must NOT suppress the gate — that would drop the non-coding profile
+        # baseline obligations. Defer to the baseline's own applies-decision
+        # (i.e. what the gate would decide without the live dev-coding pack).
+        return _pre_final_gate_applies(
+            assembly=assembly,
+            prompt=prompt,
+            harness_state=harness_state,
+            coding_mutation_observed=coding_mutation_observed,
+            live_selected_pack_ids=(),
+        )
 
     task_types = _extract_task_types(harness_state)
     if task_types:
@@ -2807,10 +2826,20 @@ class MagiEngineDriver:
                 from magi_agent.config.env import recipe_routing_llm_enabled  # noqa: PLC0415
                 if recipe_routing_llm_enabled():
                     from magi_agent.recipes.kernel_recipe_packs import build_runtime_pack_registry  # noqa: PLC0415
-                    from magi_agent.recipes.recipe_routing import build_recipe_obligation_scope  # noqa: PLC0415
-                    extra_validators, extra_evidence = build_recipe_obligation_scope(
+                    from magi_agent.recipes import recipe_routing as _recipe_routing  # noqa: PLC0415
+                    extra_validators, extra_evidence = _recipe_routing.build_recipe_obligation_scope(
                         build_runtime_pack_registry()
                     ).obligations_for(live_selected_pack_ids)
+                    # Mutation-scope: dev-coding's test-evidence validator only
+                    # has something to verify when code was actually mutated. On
+                    # a no-mutation turn drop it so the (non-coding) baseline
+                    # stays enforced without falsely requiring coding evidence.
+                    if not coding_mutation_observed:
+                        extra_validators = tuple(
+                            ref
+                            for ref in extra_validators
+                            if ref != _recipe_routing._DEV_CODING_EVIDENCE_VALIDATOR
+                        )
             except Exception:  # noqa: BLE001
                 extra_validators, extra_evidence = (), ()
         effective_required_validators = tuple(

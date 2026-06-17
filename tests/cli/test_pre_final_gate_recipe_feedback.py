@@ -17,6 +17,8 @@ from magi_agent.cli.engine import MagiEngineDriver, RunnerPolicyAssembly
 
 
 _DEV_CODING_TEST_EVIDENCE_REF = "verifier:dev-coding:test-evidence"
+_RESEARCH_VALIDATOR_REF = "verifier:sourceOpened@1"
+_RESEARCH_EVIDENCE_REF = "evidence:research:sourceQuote"
 
 
 def _non_coding_assembly() -> RunnerPolicyAssembly:
@@ -27,6 +29,23 @@ def _non_coding_assembly() -> RunnerPolicyAssembly:
         selectedPackIds=("openmagi.general-automation",),  # NOT dev-coding
         evidenceRequirements=(),
         requiredValidators=(),
+        missingEvidenceAction="audit",
+    )
+
+
+def _research_assembly() -> RunnerPolicyAssembly:
+    """A POPULATED non-coding baseline: a research validator + evidence ref.
+
+    Exercises the suppression scenario the empty baseline never could: when the
+    model live-selects dev-coding on a no-mutation turn, the union must NOT drop
+    these research obligations (the binding "additive union only" constraint).
+    """
+    return RunnerPolicyAssembly(
+        modelProvider="local",
+        modelLabel="local-dev",
+        selectedPackIds=("openmagi.deep-research",),  # NOT dev-coding
+        evidenceRequirements=(_RESEARCH_EVIDENCE_REF,),
+        requiredValidators=(_RESEARCH_VALIDATOR_REF,),
         missingEvidenceAction="audit",
     )
 
@@ -111,3 +130,117 @@ def test_flag_off_no_live_selection_injected(monkeypatch: pytest.MonkeyPatch) ->
         assert payload["decision"] == "pass", (
             f"Flag OFF: live selection must not inject obligations; got: {payload['decision']}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Issue-1 regression: POPULATED non-coding (research) baseline. The empty
+# baseline above never exercised the suppression path; these do.
+# ---------------------------------------------------------------------------
+
+
+def test_research_baseline_live_coding_no_mutation_enforces_research_not_coding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Row: research baseline + LIVE dev-coding + NO mutation.
+
+    The live dev-coding selection must NOT suppress the gate (which would drop
+    the research baseline). The gate stays applied and BLOCKS on the unmet
+    research obligation — but the dev-coding test-evidence validator must NOT be
+    listed (no code was mutated ⇒ nothing coding to verify).
+    """
+    monkeypatch.setenv("MAGI_RECIPE_ROUTING_LLM_ENABLED", "true")
+
+    driver = MagiEngineDriver(
+        runner=None,
+        runner_policy_assembly=_research_assembly(),
+        evidence_collector=lambda _turn: (),  # nothing observed ⇒ research unmet
+    )
+    payload = driver._pre_final_gate_payload(
+        session_id="s1",
+        turn_id="t1",
+        prompt="research the market landscape",  # non-coding prompt
+        harness_state=None,
+        observed_public_refs=set(),
+        coding_mutation_observed=False,
+        live_selected_pack_ids=("openmagi.dev-coding",),
+    )
+    assert payload is not None, "Research baseline must keep the gate applied"
+    assert payload["decision"] == "block", (
+        f"Expected block on unmet research obligation, got: {payload['decision']}"
+    )
+    missing = list(payload["missingValidators"]) + list(payload["missingEvidence"])
+    assert _RESEARCH_VALIDATOR_REF in payload["missingValidators"], (
+        f"Research validator must still be enforced; missing={payload['missingValidators']}"
+    )
+    assert _RESEARCH_EVIDENCE_REF in payload["missingEvidence"], (
+        f"Research evidence must still be enforced; missing={payload['missingEvidence']}"
+    )
+    assert _DEV_CODING_TEST_EVIDENCE_REF not in missing, (
+        f"No-mutation turn must NOT require dev-coding validator; missing={missing}"
+    )
+
+
+def test_research_baseline_live_coding_with_mutation_requires_both(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Row: research baseline + LIVE dev-coding + mutation.
+
+    Blocks AND requires the dev-coding test-evidence validator (additive union):
+    the research obligation is still enforced too.
+    """
+    monkeypatch.setenv("MAGI_RECIPE_ROUTING_LLM_ENABLED", "true")
+
+    driver = MagiEngineDriver(
+        runner=None,
+        runner_policy_assembly=_research_assembly(),
+        evidence_collector=lambda _turn: (),
+    )
+    payload = driver._pre_final_gate_payload(
+        session_id="s1",
+        turn_id="t1",
+        prompt="implement the fix",  # coding prompt + mutation ⇒ gate applies
+        harness_state=None,
+        observed_public_refs=set(),
+        coding_mutation_observed=True,
+        live_selected_pack_ids=("openmagi.dev-coding",),
+    )
+    assert payload is not None
+    assert payload["decision"] == "block", f"Expected block, got: {payload['decision']}"
+    assert _DEV_CODING_TEST_EVIDENCE_REF in payload["missingValidators"], (
+        f"Mutation turn must require dev-coding validator; missing={payload['missingValidators']}"
+    )
+    assert _RESEARCH_VALIDATOR_REF in payload["missingValidators"], (
+        "Research baseline must remain enforced (additive union)"
+    )
+
+
+def test_research_baseline_no_live_selection_unchanged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Row: research baseline + empty live selection → only research enforced.
+
+    Confirms the OFF-path / empty-selection profile path is unchanged: blocks on
+    research, never injects the dev-coding validator.
+    """
+    monkeypatch.setenv("MAGI_RECIPE_ROUTING_LLM_ENABLED", "true")
+
+    driver = MagiEngineDriver(
+        runner=None,
+        runner_policy_assembly=_research_assembly(),
+        evidence_collector=lambda _turn: (),
+    )
+    payload = driver._pre_final_gate_payload(
+        session_id="s1",
+        turn_id="t1",
+        prompt="research the market landscape",
+        harness_state=None,
+        observed_public_refs=set(),
+        coding_mutation_observed=False,
+        live_selected_pack_ids=(),
+    )
+    assert payload is not None
+    assert payload["decision"] == "block", "Research obligation unmet ⇒ block"
+    assert _RESEARCH_VALIDATOR_REF in payload["missingValidators"]
+    assert _DEV_CODING_TEST_EVIDENCE_REF not in payload["missingValidators"], (
+        "Empty live selection must not inject dev-coding validator"
+    )
