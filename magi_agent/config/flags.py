@@ -816,6 +816,23 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
         kind="int",
     ),
+    # --- Subagent / child-runner --------------------------------------------
+    _b(
+        "MAGI_SUBAGENT_GOVERNED_TURN_ENABLED",
+        summary=(
+            "Route spawned subagents through run_governed_turn (governed "
+            "turn-loop) instead of the bare run_async child loop. Default OFF "
+            "keeps the legacy child path byte-identical."
+        ),
+    ),
+    _b(
+        "MAGI_CHILD_MEMORY_INHERIT_ENABLED",
+        summary=(
+            "When ON, a normal-mode parent yields a read_only child memory mode "
+            "(child reads parent workspace memory, never writes back). Default "
+            "OFF keeps children incognito."
+        ),
+    ),
     # --- Surfaces -----------------------------------------------------------
     # NOTE: flat default-ON, NOT profile-aware. cli/headless.py:_cli_enabled
     # reads MAGI_CLI_ENABLED directly (unset => True regardless of
