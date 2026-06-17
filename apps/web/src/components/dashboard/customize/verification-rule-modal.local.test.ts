@@ -88,4 +88,26 @@ describe("customize-api — new contract surface", () => {
     expect(apiSrc).toContain("export async function patchVerificationOverride");
     expect(apiSrc).toContain("export async function putRules");
   });
+
+  it("exposes custom-rule builder surface (menu + CRUD)", () => {
+    expect(apiSrc).toContain("customRuleMenu");
+    expect(apiSrc).toContain("CustomRule");
+    expect(apiSrc).toContain("export async function putCustomRule");
+    expect(apiSrc).toContain("export async function deleteCustomRule");
+  });
+});
+
+describe("custom-rule builder (deterministic)", () => {
+  it("modal renders a deterministic custom-rule builder from the WHAT-menu", () => {
+    expect(modalSrc).toContain("CustomRulesSection");
+    expect(modalSrc).toContain("catalog.customRuleMenu");
+    expect(modalSrc).toContain('kind: "deterministic_ref"');
+    expect(modalSrc).toContain('firesAt: "pre_final"');
+  });
+
+  it("tab persists custom rules via putCustomRule/deleteCustomRule", () => {
+    expect(tabSrc).toContain("putCustomRule");
+    expect(tabSrc).toContain("deleteCustomRule");
+    expect(tabSrc).toContain("custom_rules");
+  });
 });

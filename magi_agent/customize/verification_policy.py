@@ -24,6 +24,9 @@ class CustomizeVerificationPolicy:
     # Explicit per-preset enable state (tri-state: True/False/absent). Source of
     # truth for opt-out of default-on gates.
     preset_overrides: dict[str, bool] = field(default_factory=dict)
+    # Structured custom rules (verification.custom_rules[]). Raw dicts as stored;
+    # compilation/validation lives in customize.custom_rules + real_runner.
+    custom_rules: tuple[dict[str, Any], ...] = ()
 
     @classmethod
     def from_overrides(cls, overrides: dict[str, Any]) -> "CustomizeVerificationPolicy":
@@ -47,10 +50,32 @@ class CustomizeVerificationPolicy:
         }
         raw_rules = (overrides or {}).get("user_rules", "")
         rules = raw_rules if isinstance(raw_rules, str) else ""
-        return cls(presets, recipes, hooks, modes, rules, preset_overrides)
+        custom_rules = tuple(
+            r for r in v.get("custom_rules", []) if isinstance(r, dict)
+        )
+        return cls(presets, recipes, hooks, modes, rules, preset_overrides, custom_rules)
 
     def is_enabled(self, preset_id: str) -> bool:
         return preset_id in self.enabled_presets
+
+    def enabled_deterministic_refs(self) -> list[str]:
+        """Refs contributed by ENABLED deterministic_ref custom rules (P1 compile).
+
+        Only ``deterministic_ref`` kind compiles in P1; tool_perm/llm_criterion
+        persist but are inert until their phase. Malformed rules are skipped.
+        """
+        refs: list[str] = []
+        for rule in self.custom_rules:
+            if not rule.get("enabled", False):
+                continue
+            what = rule.get("what")
+            if not isinstance(what, dict) or what.get("kind") != "deterministic_ref":
+                continue
+            payload = what.get("payload")
+            ref = payload.get("ref") if isinstance(payload, dict) else None
+            if isinstance(ref, str) and ref:
+                refs.append(ref)
+        return refs
 
     def explicit_preset(self, preset_id: str) -> bool | None:
         """Explicit per-preset enable state, or None if the user never set it."""

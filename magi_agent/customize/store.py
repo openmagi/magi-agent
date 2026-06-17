@@ -146,3 +146,36 @@ def set_user_rules(text: str, path: Path | None = None) -> dict[str, Any]:
     overrides["user_rules"] = (text or "")[:_USER_RULES_MAX]
     save_overrides(overrides, target)
     return overrides
+
+
+def set_custom_rule(rule: dict[str, Any], path: Path | None = None) -> dict[str, Any]:
+    """Upsert one custom verification rule into ``verification.custom_rules[]``.
+
+    Matches on ``id`` (replace) or appends. Caller is responsible for validating
+    the rule first (``custom_rules.validate_custom_rule``). Returns the overrides.
+    """
+    target = path or customize_path()
+    overrides = load_overrides(target)
+    rules = overrides["verification"]["custom_rules"]
+    rid = rule.get("id")
+    for i, existing in enumerate(rules):
+        if isinstance(existing, dict) and existing.get("id") == rid:
+            rules[i] = rule
+            break
+    else:
+        rules.append(rule)
+    save_overrides(overrides, target)
+    return overrides
+
+
+def delete_custom_rule(rule_id: str, path: Path | None = None) -> dict[str, Any]:
+    """Remove a custom rule by id. Returns the overrides (no-op if absent)."""
+    target = path or customize_path()
+    overrides = load_overrides(target)
+    verification = overrides["verification"]
+    verification["custom_rules"] = [
+        r for r in verification["custom_rules"]
+        if not (isinstance(r, dict) and r.get("id") == rule_id)
+    ]
+    save_overrides(overrides, target)
+    return overrides

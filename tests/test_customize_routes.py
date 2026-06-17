@@ -172,6 +172,58 @@ def test_put_rules_requires_auth(tmp_path, monkeypatch):
     assert resp.status_code == 401
 
 
+def _valid_custom_rule():
+    return {
+        "scope": "coding",
+        "enabled": True,
+        "what": {"kind": "deterministic_ref", "payload": {"ref": "evidence:test-run"}},
+        "firesAt": "pre_final",
+        "action": "block",
+    }
+
+
+def test_put_custom_rule_valid_persists_and_assigns_id(tmp_path, monkeypatch):
+    cfile = tmp_path / "customize.json"
+    monkeypatch.setenv("MAGI_CUSTOMIZE", str(cfile))
+    client = _client(tmp_path)
+    client.headers.update({"x-gateway-token": _TOKEN})
+    resp = client.put("/v1/app/customize/custom-rules", json=_valid_custom_rule())
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["id"].startswith("cr_")
+    rules = body["overrides"]["verification"]["custom_rules"]
+    assert len(rules) == 1 and rules[0]["id"] == body["id"]
+
+
+def test_put_custom_rule_invalid_returns_400(tmp_path, monkeypatch):
+    monkeypatch.setenv("MAGI_CUSTOMIZE", str(tmp_path / "customize.json"))
+    client = _client(tmp_path)
+    client.headers.update({"x-gateway-token": _TOKEN})
+    bad = _valid_custom_rule()
+    bad["action"] = "ask_approval"  # illegal for deterministic_ref
+    resp = client.put("/v1/app/customize/custom-rules", json=bad)
+    assert resp.status_code == 400
+    assert resp.json()["error"] == "invalid_custom_rule"
+
+
+def test_put_custom_rule_requires_auth(tmp_path, monkeypatch):
+    monkeypatch.setenv("MAGI_CUSTOMIZE", str(tmp_path / "customize.json"))
+    client = _client(tmp_path)  # no token
+    resp = client.put("/v1/app/customize/custom-rules", json=_valid_custom_rule())
+    assert resp.status_code == 401
+
+
+def test_delete_custom_rule_route(tmp_path, monkeypatch):
+    cfile = tmp_path / "customize.json"
+    monkeypatch.setenv("MAGI_CUSTOMIZE", str(cfile))
+    client = _client(tmp_path)
+    client.headers.update({"x-gateway-token": _TOKEN})
+    rid = client.put("/v1/app/customize/custom-rules", json=_valid_custom_rule()).json()["id"]
+    resp = client.delete(f"/v1/app/customize/custom-rules/{rid}")
+    assert resp.status_code == 200
+    assert resp.json()["overrides"]["verification"]["custom_rules"] == []
+
+
 def test_put_rules_bad_body(tmp_path, monkeypatch):
     monkeypatch.setenv("MAGI_CUSTOMIZE", str(tmp_path / "customize.json"))
     client = _client(tmp_path)
@@ -194,6 +246,7 @@ def test_customize_returns_catalog_and_overrides(tmp_path, monkeypatch) -> None:
         "recipes",
         "harnessPresets",
         "hooks",
+        "customRuleMenu",
     }
     # No customize.json → tools overrides default to empty dict
     assert body["overrides"]["tools"] == {}

@@ -513,6 +513,16 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
     ),
     _b(
+        "MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED",
+        stage="stage2",
+        summary=(
+            "Load and compile dashboard Customize *custom rules* "
+            "(~/.magi/customize.json verification.custom_rules). Requires "
+            "MAGI_CUSTOMIZE_VERIFICATION_ENABLED. default-OFF = byte-identical "
+            "(rules persist but are not compiled into the pre-final gate)."
+        ),
+    ),
+    _b(
         "MAGI_EGRESS_GATE_ENABLED",
         summary="Run the evidence-grounded critic gate before chat egress.",
     ),

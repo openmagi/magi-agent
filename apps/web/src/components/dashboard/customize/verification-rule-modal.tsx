@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Lock } from "lucide-react";
+import { Lock, Trash2 } from "lucide-react";
 import { Modal } from "@/components/ui/modal";
-import type { CustomizeCatalog, HarnessPresetItem } from "@/lib/customize-api";
+import type { CustomizeCatalog, CustomRule, HarnessPresetItem } from "@/lib/customize-api";
 
 interface VerificationRuleModalProps {
   open: boolean;
@@ -14,6 +14,12 @@ interface VerificationRuleModalProps {
   /** Preset ids with an in-flight PATCH. */
   pendingPresets: Set<string>;
   onTogglePreset: (id: string, enabled: boolean) => void;
+  /** Structured custom rules (deterministic in P1). */
+  customRules: CustomRule[];
+  onAddCustomRule: (rule: CustomRule) => void;
+  onToggleCustomRule: (rule: CustomRule, enabled: boolean) => void;
+  onDeleteCustomRule: (id: string) => void;
+  customRuleBusy: boolean;
   /** USER-RULES.md body + save handler. */
   userRules: string;
   rulesSaving: boolean;
@@ -133,6 +139,146 @@ function PresetRow({
   );
 }
 
+// Structured custom-rule builder (P1: deterministic_ref only). The user picks a
+// producer-backed WHAT-menu check + a scope; firesAt/tier are fixed (pre-final,
+// deterministic) and action is block. Saved rules render as toggle/delete rows.
+const SCOPES = ["always", "coding", "research", "delivery", "memory", "task"] as const;
+
+function CustomRulesSection({
+  menu,
+  rules,
+  busy,
+  onAdd,
+  onToggle,
+  onDelete,
+}: {
+  menu: CustomizeCatalog["verification"]["customRuleMenu"];
+  rules: CustomRule[];
+  busy: boolean;
+  onAdd: (rule: CustomRule) => void;
+  onToggle: (rule: CustomRule, enabled: boolean) => void;
+  onDelete: (id: string) => void;
+}) {
+  const [adding, setAdding] = useState(false);
+  const [ref, setRef] = useState(menu[0]?.ref ?? "");
+  const [scope, setScope] = useState<string>("coding");
+
+  const menuLabel = (r: string) => menu.find((m) => m.ref === r)?.label ?? r;
+
+  return (
+    <section>
+      <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-secondary/70">
+        Custom Rules
+      </h3>
+      <p className="mb-2 text-xs leading-relaxed text-secondary">
+        Build a deterministic gate from a producer-backed check. It blocks the final
+        answer when the required evidence is missing (no prompt injection).
+      </p>
+
+      {rules.length > 0 ? (
+        <div className="mb-2 space-y-2">
+          {rules.map((rule) => (
+            <div
+              key={rule.id}
+              className="flex items-center justify-between gap-3 rounded-xl border border-black/[0.06] bg-white px-4 py-2.5"
+            >
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium text-foreground">
+                  {menuLabel(String((rule.what?.payload as { ref?: string })?.ref ?? ""))}
+                </p>
+                <p className="mt-0.5 text-[11px] text-secondary/80">
+                  {rule.scope} · {rule.firesAt} · {rule.action}
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Toggle
+                  checked={rule.enabled}
+                  disabled={busy}
+                  onChange={(next) => onToggle(rule, next)}
+                  label={`Toggle custom rule ${rule.id}`}
+                />
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => rule.id && onDelete(rule.id)}
+                  className="p-1 text-secondary transition-colors hover:text-red-600 disabled:opacity-40"
+                  aria-label={`Delete custom rule ${rule.id}`}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      {adding && menu.length > 0 ? (
+        <div className="space-y-2 rounded-xl border border-black/[0.08] bg-gray-50/60 p-3">
+          <label className="block text-[11px] font-medium text-secondary">
+            Require
+            <select
+              value={ref}
+              onChange={(e) => setRef(e.target.value)}
+              className="mt-1 w-full rounded-lg border border-black/[0.12] bg-white px-2 py-1.5 text-sm"
+            >
+              {menu.map((m) => (
+                <option key={m.ref} value={m.ref}>{m.label}</option>
+              ))}
+            </select>
+          </label>
+          <label className="block text-[11px] font-medium text-secondary">
+            When (scope)
+            <select
+              value={scope}
+              onChange={(e) => setScope(e.target.value)}
+              className="mt-1 w-full rounded-lg border border-black/[0.12] bg-white px-2 py-1.5 text-sm"
+            >
+              {SCOPES.map((s) => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
+          </label>
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setAdding(false)}
+              className="rounded-lg px-3 py-1.5 text-sm text-secondary hover:text-foreground"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              disabled={busy || !ref}
+              onClick={() => {
+                onAdd({
+                  scope,
+                  enabled: true,
+                  what: { kind: "deterministic_ref", payload: { ref } },
+                  firesAt: "pre_final",
+                  action: "block",
+                });
+                setAdding(false);
+              }}
+              className="rounded-lg bg-primary px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-40"
+            >
+              Add rule
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          type="button"
+          disabled={menu.length === 0}
+          onClick={() => setAdding(true)}
+          className="w-full rounded-xl border border-dashed border-black/[0.12] px-4 py-2.5 text-sm font-medium text-secondary transition-colors hover:border-primary/30 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {menu.length === 0 ? "No deterministic checks available" : "+ Add custom rule"}
+        </button>
+      )}
+    </section>
+  );
+}
+
 export function VerificationRuleModal({
   open,
   onClose,
@@ -140,6 +286,11 @@ export function VerificationRuleModal({
   presetOverrides,
   pendingPresets,
   onTogglePreset,
+  customRules,
+  onAddCustomRule,
+  onToggleCustomRule,
+  onDeleteCustomRule,
+  customRuleBusy,
   userRules,
   rulesSaving,
   onSaveRules,
@@ -243,10 +394,20 @@ export function VerificationRuleModal({
             </details>
           ) : null}
 
-          {/* Custom rules (USER-RULES.md) */}
+          {/* Structured custom rules (deterministic) */}
+          <CustomRulesSection
+            menu={catalog.customRuleMenu}
+            rules={customRules}
+            busy={customRuleBusy}
+            onAdd={onAddCustomRule}
+            onToggle={onToggleCustomRule}
+            onDelete={onDeleteCustomRule}
+          />
+
+          {/* Freeform prompt guidance (USER-RULES.md) */}
           <section>
             <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-secondary/70">
-              Custom Rules
+              Freeform guidance
             </h3>
             <p className="mb-2 text-xs leading-relaxed text-secondary">
               Free-text instructions injected into your agent&apos;s system prompt every turn.

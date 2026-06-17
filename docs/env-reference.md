@@ -217,6 +217,7 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 - `MAGI_CONFIG` (no default) — Path to the Magi config.toml file; empty uses ~/.magi/config.toml.
 - `MAGI_CONTEXT_COMPACTION_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Compact the working context when the token threshold is hit (default-ON full profile).
 - `MAGI_CROSS_VERIFY_ENABLED` (default off) — Enable the cross-verification gate over spawned-agent results.
+- `MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED` (default off) — Load and compile dashboard Customize *custom rules* (~/.magi/customize.json verification.custom_rules). Requires MAGI_CUSTOMIZE_VERIFICATION_ENABLED. default-OFF = byte-identical (rules persist but are not compiled into the pre-final gate).
 - `MAGI_CUSTOMIZE_VERIFICATION_ENABLED` (default off) — Master switch for the dashboard Customize tab's verification presets/rules. When on, persisted verification overrides (~/.magi/customize.json) translate into the recipe-driven pre-final evidence gate; default-OFF keeps presets preview-only.
 - `MAGI_DEEP_WEB_RESEARCH_ENABLED` (default off) — Enable the live deep web-research harness (search + fetch + verify).
 - `MAGI_DEFERRED_TOOLS_ENABLED` (default off) — Enable deferred (lazily-loaded) tool schemas.

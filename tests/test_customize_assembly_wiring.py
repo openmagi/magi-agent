@@ -14,9 +14,20 @@ from pathlib import Path
 import pytest
 
 from magi_agent.cli.real_runner import _build_default_runner_policy_assembly
-from magi_agent.customize.store import set_verification_override
+from magi_agent.customize.store import set_custom_rule, set_verification_override
 
 _CODING_REF = "verifier:dev-coding:test-evidence"
+
+
+def _det_rule(ref: str, rid: str = "cr_test"):
+    return {
+        "id": rid,
+        "scope": "coding",
+        "enabled": True,
+        "what": {"kind": "deterministic_ref", "payload": {"ref": ref}},
+        "firesAt": "pre_final",
+        "action": "block",
+    }
 
 
 def _build():
@@ -70,3 +81,44 @@ def test_unrelated_opt_out_does_not_remove_coding_ref(gate_on, monkeypatch):
     assembly = _build()
     assert assembly is not None
     assert _CODING_REF in assembly.required_validators
+
+
+# --- Custom deterministic_ref rule compilation (P1) ---
+# Tested at the _apply_customize_verification seam directly: the 3 producer-backed
+# menu refs are ALL already in the default assembly, so a controlled input list
+# is the only way to observe the add discriminatingly.
+from magi_agent.cli.real_runner import _apply_customize_verification  # noqa: E402
+
+
+def test_custom_det_rule_adds_ref_when_both_flags_on(gate_on, monkeypatch):
+    monkeypatch.setenv("MAGI_CUSTOMIZE_VERIFICATION_ENABLED", "1")
+    monkeypatch.setenv("MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED", "1")
+    set_custom_rule(_det_rule("evidence:git-diff"), path=gate_on)
+    out = _apply_customize_verification(["seed:ref"])
+    assert "evidence:git-diff" in out
+
+
+def test_custom_det_rule_inert_when_custom_flag_off(gate_on, monkeypatch):
+    # master ON but custom-rules flag OFF → rule persists but does NOT compile.
+    monkeypatch.setenv("MAGI_CUSTOMIZE_VERIFICATION_ENABLED", "1")
+    monkeypatch.delenv("MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED", raising=False)
+    set_custom_rule(_det_rule("evidence:git-diff"), path=gate_on)
+    out = _apply_customize_verification(["seed:ref"])
+    assert "evidence:git-diff" not in out
+
+
+def test_custom_det_rule_inert_when_master_flag_off(gate_on, monkeypatch):
+    monkeypatch.delenv("MAGI_CUSTOMIZE_VERIFICATION_ENABLED", raising=False)
+    monkeypatch.setenv("MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED", "1")
+    set_custom_rule(_det_rule("evidence:git-diff"), path=gate_on)
+    assert _apply_customize_verification(["seed:ref"]) == ["seed:ref"]
+
+
+def test_disabled_custom_det_rule_not_added(gate_on, monkeypatch):
+    monkeypatch.setenv("MAGI_CUSTOMIZE_VERIFICATION_ENABLED", "1")
+    monkeypatch.setenv("MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED", "1")
+    rule = _det_rule("evidence:git-diff")
+    rule["enabled"] = False
+    set_custom_rule(rule, path=gate_on)
+    out = _apply_customize_verification(["seed:ref"])
+    assert "evidence:git-diff" not in out

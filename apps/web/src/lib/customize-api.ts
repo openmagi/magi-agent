@@ -69,13 +69,35 @@ export interface ToolItem {
   dangerous: boolean;
 }
 
+/** Producer-backed deterministic check a custom rule may require (WHAT-menu). */
+export interface CustomRuleMenuItem {
+  ref: string;
+  label: string;
+  evidenceType: string;
+  tier: string;
+  firesAt: string;
+  allowedActions: string[];
+}
+
 export interface CustomizeCatalog {
   verification: {
     recipes: RecipeItem[];
     harnessPresets: HarnessPresetItem[];
     hooks: HookItem[];
+    customRuleMenu: CustomRuleMenuItem[];
   };
   tools: ToolItem[];
+}
+
+/** A structured custom verification rule (spec §9.1). P1 builds deterministic_ref. */
+export interface CustomRule {
+  id?: string;
+  scope: string;
+  enabled: boolean;
+  what: { kind: string; payload: Record<string, unknown> };
+  firesAt: string;
+  action: string;
+  projection?: string[];
 }
 
 export interface CustomizeOverrides {
@@ -86,7 +108,7 @@ export interface CustomizeOverrides {
     preset_overrides: Record<string, boolean>;
     hooks: Record<string, boolean>;
     modes: Record<string, string>;
-    custom_rules: unknown[];
+    custom_rules: CustomRule[];
   };
   tools: Record<string, boolean>;
   /** Free-text USER-RULES.md body injected into the system prompt. */
@@ -171,6 +193,41 @@ export async function putRules(
     body: JSON.stringify({ text }),
   });
   if (!res.ok) throw new Error(`Failed to save rules (${res.status})`);
+  const data = (await res.json()) as { overrides: CustomizeOverrides };
+  return data.overrides;
+}
+
+/**
+ * Creates/updates a structured custom rule via `PUT /v1/app/customize/custom-rules`.
+ * The server validates (400 on bad shape) and assigns an id. Returns overrides.
+ */
+export async function putCustomRule(
+  fetch: (path: string, init?: RequestInit) => Promise<Response>,
+  rule: CustomRule,
+): Promise<CustomizeOverrides> {
+  const res = await fetch(`/v1/app/customize/custom-rules`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(rule),
+  });
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({}));
+    const msg = Array.isArray(detail?.details) ? detail.details.join("; ") : `(${res.status})`;
+    throw new Error(`Failed to save custom rule ${msg}`);
+  }
+  const data = (await res.json()) as { overrides: CustomizeOverrides };
+  return data.overrides;
+}
+
+/** Deletes a custom rule by id via `DELETE /v1/app/customize/custom-rules/{id}`. */
+export async function deleteCustomRule(
+  fetch: (path: string, init?: RequestInit) => Promise<Response>,
+  id: string,
+): Promise<CustomizeOverrides> {
+  const res = await fetch(`/v1/app/customize/custom-rules/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error(`Failed to delete custom rule (${res.status})`);
   const data = (await res.json()) as { overrides: CustomizeOverrides };
   return data.overrides;
 }

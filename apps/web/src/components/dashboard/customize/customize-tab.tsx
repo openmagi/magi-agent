@@ -7,7 +7,10 @@ import {
   patchToolOverride,
   patchVerificationOverride,
   putRules,
+  putCustomRule,
+  deleteCustomRule,
 } from "@/lib/customize-api";
+import type { CustomRule } from "@/lib/customize-api";
 import { useAgentFetch } from "@/lib/local-api";
 import { VerificationRuleModal } from "./verification-rule-modal";
 import { CustomToolModal } from "./custom-tool-modal";
@@ -65,6 +68,10 @@ export function CustomizeRuntimeConsole({ botId }: CustomizeRuntimeConsoleProps)
   const [presetPending, setPresetPending] = useState<Set<string>>(new Set());
   const [toolPending, setToolPending] = useState<Set<string>>(new Set());
 
+  // Structured custom rules.
+  const [customRules, setCustomRules] = useState<CustomRule[]>([]);
+  const [customRuleBusy, setCustomRuleBusy] = useState(false);
+
   // USER-RULES.md editor state.
   const [userRules, setUserRules] = useState("");
   const [rulesSaving, setRulesSaving] = useState(false);
@@ -75,10 +82,41 @@ export function CustomizeRuntimeConsole({ botId }: CustomizeRuntimeConsoleProps)
 
   const openRuleModal = useCallback(() => {
     setPresetOverrides(data?.overrides.verification.preset_overrides ?? {});
+    setCustomRules(data?.overrides.verification.custom_rules ?? []);
     setUserRules(data?.overrides.user_rules ?? "");
     setRuleError(null);
     setRuleModalOpen(true);
   }, [data]);
+
+  const runCustomRuleOp = useCallback(
+    (op: () => Promise<{ verification: { custom_rules: CustomRule[] } }>) => {
+      setCustomRuleBusy(true);
+      setRuleError(null);
+      op()
+        .then((overrides) => setCustomRules(overrides.verification.custom_rules))
+        .catch((err: unknown) =>
+          setRuleError(err instanceof Error ? err.message : "Custom rule failed"),
+        )
+        .finally(() => setCustomRuleBusy(false));
+    },
+    [],
+  );
+
+  const handleAddCustomRule = useCallback(
+    (rule: CustomRule) => runCustomRuleOp(() => putCustomRule(agentFetch, rule)),
+    [agentFetch, runCustomRuleOp],
+  );
+
+  const handleToggleCustomRule = useCallback(
+    (rule: CustomRule, enabled: boolean) =>
+      runCustomRuleOp(() => putCustomRule(agentFetch, { ...rule, enabled })),
+    [agentFetch, runCustomRuleOp],
+  );
+
+  const handleDeleteCustomRule = useCallback(
+    (id: string) => runCustomRuleOp(() => deleteCustomRule(agentFetch, id)),
+    [agentFetch, runCustomRuleOp],
+  );
 
   const openToolModal = useCallback(() => {
     setToolOverrides(data?.overrides.tools ?? {});
@@ -216,6 +254,11 @@ export function CustomizeRuntimeConsole({ botId }: CustomizeRuntimeConsoleProps)
             presetOverrides={presetOverrides}
             pendingPresets={presetPending}
             onTogglePreset={handleTogglePreset}
+            customRules={customRules}
+            onAddCustomRule={handleAddCustomRule}
+            onToggleCustomRule={handleToggleCustomRule}
+            onDeleteCustomRule={handleDeleteCustomRule}
+            customRuleBusy={customRuleBusy}
             userRules={userRules}
             rulesSaving={rulesSaving}
             onSaveRules={handleSaveRules}
