@@ -28,69 +28,25 @@ import pytest
 from magi_agent.cli.contracts import EngineResult, RuntimeEvent, Terminal
 from magi_agent.cli.engine import MagiEngineDriver
 from magi_agent.cli.headless import drain, run_headless
+from tests.support.engine_fakes import MockRunner, text_event, call_event, response_event
 
 # Heavy ADK imports are allowed in the TEST module (not in engine.py).
 from google.adk.events import Event  # noqa: E402
-from google.genai import types  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
-# Fake-event + mock-runner helpers (real ADK objects)
+# Local aliases so existing tests keep their private-underscore names.
 # ---------------------------------------------------------------------------
-def _text_event(
-    text: str,
-    *,
-    partial: bool = True,
-    turn_complete: bool = False,
-) -> Event:
-    return Event(
-        author="model",
-        partial=partial,
-        turn_complete=turn_complete,
-        content=types.Content(role="model", parts=[types.Part(text=text)]),
-    )
+def _text_event(text: str, *, partial: bool = True, turn_complete: bool = False) -> Event:
+    return text_event(text, partial=partial, turn_complete=turn_complete)
 
 
 def _call_event(name: str, args: dict, call_id: str) -> Event:
-    return Event(
-        author="model",
-        content=types.Content(
-            role="model",
-            parts=[
-                types.Part(
-                    function_call=types.FunctionCall(name=name, args=args, id=call_id)
-                )
-            ],
-        ),
-    )
+    return call_event(name, args, call_id)
 
 
 def _response_event(name: str, response: dict, call_id: str) -> Event:
-    return Event(
-        author="user",
-        content=types.Content(
-            role="user",
-            parts=[
-                types.Part(
-                    function_response=types.FunctionResponse(
-                        name=name, response=response, id=call_id
-                    )
-                )
-            ],
-        ),
-    )
-
-
-class MockRunner:
-    """Yields a fixed list of ADK events. Matches the ``run_async`` signature
-    the OpenMagiRunnerAdapter calls."""
-
-    def __init__(self, events: list[Event]) -> None:
-        self._events = events
-
-    async def run_async(self, **_kwargs: object):
-        for event in self._events:
-            yield event
+    return response_event(name, response, call_id)
 
 
 class GatedRunner:
