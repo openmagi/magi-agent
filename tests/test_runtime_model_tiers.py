@@ -249,6 +249,66 @@ def test_advertised_routes_invariant_gate_off() -> None:
 
 
 # Test 7 — operator allowlist still appends under gate ON
+# ---------------------------------------------------------------------------
+# C4 regression: original fireworks-only bug — local overlay turns gate ON
+# ---------------------------------------------------------------------------
+
+def test_c4_regression_fireworks_only_local_overlay_applies_key_aware_filter() -> None:
+    """Regression: bot configured provider=fireworks with only FIREWORKS_API_KEY set.
+
+    Previously, without MAGI_KEY_AWARE_MODEL_ROUTES_ENABLED, the agent advertised
+    anthropic:claude-sonnet-4-6 and openai:gpt-5.5 (keyless → unusable) and never
+    surfaced its usable fireworks route.
+
+    This test applies the local overlay via apply_local_full_runtime_defaults (the
+    REAL production entry point — uses setdefault semantics, so explicit values win)
+    onto a fireworks-only env and asserts the key-aware filter kicks in.
+    """
+    import tempfile
+
+    from magi_agent.runtime.local_defaults import apply_local_full_runtime_defaults
+
+    tmp = tempfile.mktemp(suffix=".toml")
+    open(tmp, "w").close()
+
+    # Fireworks-only env: the operator only set FIREWORKS_API_KEY.
+    env: dict[str, str] = {"FIREWORKS_API_KEY": "fk", "MAGI_CONFIG": tmp}
+    # Apply overlay the same way production does (setdefault: explicit values win).
+    apply_local_full_runtime_defaults(env)
+
+    # The overlay must have set the flag (the test env did NOT set it explicitly).
+    assert env.get("MAGI_KEY_AWARE_MODEL_ROUTES_ENABLED") == "1", (
+        "overlay must set MAGI_KEY_AWARE_MODEL_ROUTES_ENABLED=1 via setdefault"
+    )
+
+    routes = available_child_model_routes(env)
+    route_names = [r.split(" ")[0] for r in routes]
+
+    # Must advertise the usable fireworks route.
+    assert any(r.startswith("fireworks:") for r in route_names), (
+        f"fireworks route must be advertised after overlay; got: {routes}"
+    )
+    # Must NOT advertise keyless anthropic or openai routes.
+    assert not any(r.startswith("anthropic:") for r in route_names), (
+        f"anthropic route must be suppressed (keyless); got: {routes}"
+    )
+    assert not any(r.startswith("openai:") for r in route_names), (
+        f"openai route must be suppressed (keyless); got: {routes}"
+    )
+
+    # Keyless anthropic route must be rejected by the resolver.
+    assert resolve_child_route("anthropic", "claude-sonnet-4-6", env) is None, (
+        "anthropic route must be rejected when only FIREWORKS_API_KEY is set"
+    )
+
+    # Fireworks kimi route must be accepted.
+    assert resolve_child_route(
+        "fireworks", "accounts/fireworks/models/kimi-k2-instruct", env
+    ) is not None, (
+        "fireworks kimi-k2-instruct route must be accepted with FIREWORKS_API_KEY"
+    )
+
+
 def test_gate_on_operator_allowlist_appended_regardless_of_keys() -> None:
     env = _isolated_env(
         **{
