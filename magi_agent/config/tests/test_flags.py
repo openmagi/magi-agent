@@ -219,6 +219,12 @@ def test_customize_verification_flag_defaults_off() -> None:
     assert flag_bool("MAGI_CUSTOMIZE_VERIFICATION_ENABLED", env={"MAGI_CUSTOMIZE_VERIFICATION_ENABLED": "1"}) is True
 
 
+def test_customize_custom_rules_flag_defaults_off() -> None:
+    # Custom-rule load/compile gate — strict default-OFF (byte-identical when off).
+    assert flag_bool("MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED", env={}) is False
+    assert flag_bool("MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED", env={"MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED": "1"}) is True
+
+
 def test_flag_bool_rejects_non_bool_kind() -> None:
     # flag_str-typed entries must not be read as bool.
     str_specs = [s for s in FLAGS if s.kind == "str"]
