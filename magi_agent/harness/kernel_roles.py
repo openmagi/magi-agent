@@ -20,6 +20,18 @@ only the harness *preset* resolution consults this. Downstream strict-typed
 ``evidence``) are NOT widened — an external role is a harness-pack + hook scope
 label, not an end-to-end engine invocation role.
 
+Flag-ON reachability (traced 2026-06-16): an external role is honoured ONLY as
+``ResolvedHarnessPresetState.agent_role`` (a scope label). No live serve or CLI
+path routes an external role end-to-end — every live ``agent_role`` source is
+first-party (the harness state defaults to ``"general"``; subagent roles are the
+first-party ``ChildRole`` literal clamped to general/coding/research), and the
+still-``AgentRole``-Literal models (``HarnessResolutionRequest`` /
+``ParallelExecutionScope`` / ``InferenceScalingScope``) have no live constructor
+while ``EvidenceScopeContext`` is guarded to first-party roles. So turning the
+flag ON cannot crash those Literal fields. End-to-end routing of an external role
+(its own engine invocation / parallel / inference / evidence scope) is
+unsupported until those contracts are deliberately widened.
+
 Trust boundary:
 
 * **default-OFF** — ``MAGI_KERNEL_ROLE_PROVIDES_ENABLED``. With the flag unset,
