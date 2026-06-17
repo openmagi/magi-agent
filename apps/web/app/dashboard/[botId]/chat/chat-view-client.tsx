@@ -39,7 +39,7 @@ import {
 import {
   channelStateFromActiveSnapshot,
   isLiveActiveSnapshot,
-} from "@/lib/chat/active-snapshot";
+} from "@/chat-core";
 import { shouldHandlePageFileDrop } from "@/chat-core";
 import type {
   Channel,

@@ -1,6 +1,7 @@
 "use client";
 
 import type {
+  ActiveSnapshot,
   BrowserFrame,
   Channel,
   ChannelState,
@@ -26,7 +27,6 @@ import type {
   ResponseUsage,
   RuntimeTrace,
 } from "@/chat-core";
-import type { ActiveSnapshot } from "./active-snapshot";
 import { getResetCounter } from "@/chat-core";
 import { getLocalAgentBaseUrl } from "../local-auth";
 
