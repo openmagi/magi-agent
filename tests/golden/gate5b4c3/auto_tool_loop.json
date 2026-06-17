@@ -1,0 +1,44 @@
+{
+  "public_events": [
+    {
+      "delta": "final answer after no-tool finalizer",
+      "type": "text_delta"
+    }
+  ],
+  "result": {
+    "event_count": 1,
+    "reason": "runner_completed",
+    "selected_model": "claude-3-5-sonnet-latest",
+    "selected_provider": "anthropic",
+    "status": "completed"
+  },
+  "transcript_records": [
+    {
+      "model": "claude-3-5-sonnet-latest",
+      "prompt": "Please summarize the approved redacted note.",
+      "provider": "anthropic",
+      "sessionId": "gate5b4c3-shadow-ffffffffffffffffffffffff",
+      "turnId": "turn_opaque_001",
+      "type": "turn_start"
+    },
+    {
+      "content": "final answer after no-tool finalizer",
+      "role": "assistant",
+      "sessionId": "gate5b4c3-shadow-ffffffffffffffffffffffff",
+      "turnId": "turn_opaque_001",
+      "type": "message"
+    },
+    {
+      "event_count": 1,
+      "latency_ms": "<normalized>",
+      "model": "claude-3-5-sonnet-latest",
+      "provider": "anthropic",
+      "reason": "runner_completed",
+      "sessionId": "gate5b4c3-shadow-ffffffffffffffffffffffff",
+      "terminal": "completed",
+      "turnId": "turn_opaque_001",
+      "type": "turn_end",
+      "usage": null
+    }
+  ]
+}

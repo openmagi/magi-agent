@@ -50,8 +50,13 @@ import pytest
 
 from tests.support.gate5b4c3_capture import capture_boundary
 from tests.support.gate5b4c3_fakes import (
+    _AutoToolLoopRunner,
+    _DuplicateTextAndFunctionCallRunner,
+    _EventCapTextAndFunctionCallRunner,
+    _FakeAgent,
     _FakeRunner,
     _FunctionCallOnlyEvent,
+    _FunctionCallOnlyRunner,
     _FunctionCallThenFinalRunner,
     _ManualCalculationTool,
     final_event,
@@ -92,9 +97,11 @@ def _normalize(snap: dict[str, Any]) -> dict[str, Any]:
 
 
 def _scenarios() -> dict[str, tuple[Any, Any, dict[str, Any]]]:
-    """Return the three base golden scenarios as (request, runner, capture_kwargs)."""
+    """Return all golden scenarios as (request, runner, capture_kwargs)."""
     _FunctionCallThenFinalRunner.calls = []
     _FunctionCallThenFinalRunner.event_factory = _FunctionCallOnlyEvent
+    _DuplicateTextAndFunctionCallRunner.calls = []
+    _AutoToolLoopRunner.calls = []
 
     return {
         # Plain text response — no tools.
@@ -116,10 +123,53 @@ def _scenarios() -> dict[str, tuple[Any, Any, dict[str, Any]]]:
             # A non-empty adk_tools is required to satisfy shadow_readonly policy.
             {"adk_tools": (object(),)},
         ),
+        # ADK runner with no tools on the agent: exercises the no-tool finalizer
+        # branch where the runner yields a final text answer directly (agent has
+        # no attached tools so getattr(agent, "tools", ()) is falsy).
+        "auto_tool_loop": (
+            _selected_full_toolhost_request(),
+            _AutoToolLoopRunner(agent=_FakeAgent()),
+            {"adk_tools": (_ManualCalculationTool,)},
+        ),
+        # Runner emits the same text+function_call event twice: exercises the
+        # deduplication gate that collapses identical pending tool calls so the
+        # downstream tool is invoked only once.
+        "duplicate_text_and_call": (
+            _selected_full_toolhost_request(),
+            _DuplicateTextAndFunctionCallRunner(),
+            {"adk_tools": (_ManualCalculationTool,)},
+        ),
+        # Runner emits 63 blank events then a text+function_call event at the
+        # event-cap boundary (event_count == 64): exercises the path where tool
+        # execution is suppressed because the cap is reached mid-stream.
+        "event_cap": (
+            _selected_full_toolhost_request(),
+            _EventCapTextAndFunctionCallRunner(),
+            {"adk_tools": (_ManualCalculationTool,)},
+        ),
+        # Runner emits only a function-call event and never a text answer:
+        # exercises the no-final / _run_no_tool_finalizer path where the boundary
+        # falls back to a finalizer run after exhausting manual tool continuations.
+        "function_call_only": (
+            _selected_full_toolhost_request(),
+            _FunctionCallOnlyRunner(),
+            {"adk_tools": (_ManualCalculationTool,)},
+        ),
     }
 
 
-@pytest.mark.parametrize("name", ["text_only", "tool_then_final", "readonly_text"])
+@pytest.mark.parametrize(
+    "name",
+    [
+        "text_only",
+        "tool_then_final",
+        "readonly_text",
+        "auto_tool_loop",
+        "duplicate_text_and_call",
+        "event_cap",
+        "function_call_only",
+    ],
+)
 def test_gate5b4c3_output_matches_golden(name: str) -> None:
     """Compare live boundary output to a stored golden snapshot.
 
