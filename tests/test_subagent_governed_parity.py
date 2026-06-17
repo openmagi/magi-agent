@@ -27,6 +27,14 @@ from magi_agent.runtime.child_runner_boundary import ChildTaskRequest
 from magi_agent.runtime.child_runner_live import RealLocalChildRunner
 from magi_agent.runtime.child_toolset import READONLY_TOOL_NAMES
 
+# Register the ``governed_turn`` submodule as an attribute of ``magi_agent.runtime``
+# so the string-form ``monkeypatch.setattr("...governed_turn.run_governed_turn", ...)``
+# targets below resolve regardless of test execution order. ``magi_agent.runtime``
+# uses a PEP 562 ``__getattr__`` that exposes only curated symbols (not submodules),
+# so without this import the patch target raises ``AttributeError`` whenever no
+# earlier test happened to import the submodule first (order-dependent CI failure).
+import magi_agent.runtime.governed_turn  # noqa: F401
+
 # ---------------------------------------------------------------------------
 # Constants used in assertions (read from canonical source at import time)
 # ---------------------------------------------------------------------------
