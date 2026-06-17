@@ -383,7 +383,7 @@ graph LR
 | __init__.py | Traffic-free OpenMagi channel contract metadata. | contract | transport/integrations.py |
 | contract.py | — | — | artifacts/_file_delivery_fakes.py, artifacts/delivery_boundary.py, artifacts/delivery_receipts.py, artifacts/file_delivery.py, artifacts/file_delivery_live.py, channels/__init__.py, channels/discord_adapter.py, channels/discord_live.py, channels/dispatcher.py, channels/push_delivery.py, channels/runtime_boundary.py, channels/telegram_adapter.py, channels/telegram_live.py, harness/cron_runtime.py, harness/scheduler_runtime.py, plugins/native/documents.py, shadow/artifact_channel_delivery_contract.py |
 | discord_adapter.py | — | contract, dispatcher, provider_execution, provider_receipts | channels/discord_live.py |
-| discord_live.py | E3 — Gated live Discord adapter. | contract, discord_adapter, scheduler_delivery | — |
+| discord_live.py | E3 — Gated live Discord adapter. | contract, discord_adapter, scheduler_delivery, turn_bridge | — |
 | dispatcher.py | — | contract, provider_execution, provider_receipts, runtime_boundary, workflow_routing | channels/discord_adapter.py, channels/runtime_boundary.py, channels/telegram_adapter.py, harness/scheduler_runtime.py |
 | email_live.py | E4 — Gated live email adapter. | platform_registry, scheduler_delivery | — |
 | platform_registry.py | E1 — Platform Registry: self-registration seam for channel platforms. | — | channels/email_live.py, channels/slack_live.py |
@@ -396,8 +396,9 @@ graph LR
 | telegram_credentials.py | Resolve the Telegram bot token from the local vault, then the environment. | credentials_admin, local_vault | gateway/channel_watchers.py |
 | telegram_easy.py | Telegram "easy setup": phone number → MTProto user session → automated | — | channels/telegram_easy_telethon.py, transport/integrations.py |
 | telegram_easy_telethon.py | Telethon adapter for the Telegram "easy setup" path. | telegram_easy | transport/integrations.py |
-| telegram_live.py | E2 — Gated live Telegram polling adapter. | contract, scheduler_delivery, telegram_adapter | gateway/channel_watchers.py |
+| telegram_live.py | E2 — Gated live Telegram polling adapter. | contract, scheduler_delivery, telegram_adapter, turn_bridge | gateway/channel_watchers.py |
 | telegram_validate.py | Bot-token validation for the dashboard Telegram integration. | — | transport/integrations.py |
+| turn_bridge.py | Shared channel turn bridge — inbound message -> agent turn -> reply (PR1). | — | channels/discord_live.py, channels/telegram_live.py, gateway/channel_watchers.py |
 | workflow_routing.py | — | — | channels/dispatcher.py |
 
 ### channels/providers/
@@ -914,7 +915,7 @@ graph LR
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
 | __init__.py | Track F — the ``magi gateway`` always-on daemon package. | — | — |
-| channel_watchers.py | Operator wiring: tie a concrete channel provider to a gateway poll watcher. | daemon, scheduler_delivery, telegram_adapter, telegram_credentials, telegram_httpx, telegram_live, watchers | gateway/watchers.py |
+| channel_watchers.py | Operator wiring: tie a concrete channel provider to a gateway poll watcher. | daemon, scheduler_delivery, telegram_adapter, telegram_credentials, telegram_httpx, telegram_live, turn_bridge, watchers | gateway/watchers.py |
 | daemon.py | GatewayDaemon — the supervised asyncio watcher fleet (Track F). | health, watchers | cli/app.py, gateway/channel_watchers.py, gateway/watchers.py, ops/health.py |
 | service_install.py | OS service install for the ``magi gateway`` daemon (Track F). | — | cli/app.py |
 | watchers.py | Watcher-fleet builders — COMPOSE the existing always-on blocks (Track F). | channel_watchers, daemon, scheduler_job_execution, scheduler_job_store, scheduler_loop_driver | cli/app.py, gateway/channel_watchers.py, gateway/daemon.py |

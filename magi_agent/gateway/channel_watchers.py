@@ -38,7 +38,9 @@ from magi_agent.channels.telegram_adapter import TelegramInboundUpdate
 from magi_agent.channels.telegram_live import (
     TelegramLivePollState,
     is_live_telegram_enabled,
+    to_channel_inbound,
 )
+from magi_agent.channels.turn_bridge import Deliver, RunTurn, make_inbound_handler
 from magi_agent.gateway.daemon import GatewayWatcher
 from magi_agent.gateway.watchers import build_channel_poll_watcher
 from magi_agent.harness.scheduler_delivery import is_silent_output
@@ -322,6 +324,44 @@ def live_deliver(
 
 
 # ---------------------------------------------------------------------------
+# Turn-bridge wiring (inbound update -> agent turn -> live deliver)
+# ---------------------------------------------------------------------------
+
+def make_telegram_deliver(provider: Any) -> Deliver:
+    """Adapt the telegram ``live_deliver`` to the shared bridge ``Deliver`` shape."""
+
+    def deliver(channel_id: str, text: str, reply_to_message_id: str | None) -> bool:
+        return live_deliver(
+            provider, channel_id, text, reply_to_message_id=reply_to_message_id
+        )
+
+    return deliver
+
+
+def build_telegram_bridge_on_inbound(
+    *,
+    provider: Any,
+    run_turn: RunTurn,
+    evidence: dict[str, object] | None = None,
+) -> OnInbound:
+    """Compose the full telegram inbound path: project the update into the shared
+    ``ChannelInbound``, drive the (injected) turn, and deliver the reply via the
+    live provider.  This replaces the log-only ``_default_on_inbound`` whenever an
+    operator supplies a ``run_turn``."""
+    handler = make_inbound_handler(
+        channel_type="telegram",
+        run_turn=run_turn,
+        deliver=make_telegram_deliver(provider),
+        evidence=evidence if evidence is not None else {},
+    )
+
+    def on_inbound(update: TelegramInboundUpdate) -> None:
+        handler(to_channel_inbound(update))
+
+    return on_inbound
+
+
+# ---------------------------------------------------------------------------
 # Watcher builder (fail-closed)
 # ---------------------------------------------------------------------------
 
@@ -381,9 +421,11 @@ def _default_on_inbound(update: TelegramInboundUpdate) -> None:
 __all__ = [
     "DEFAULT_TELEGRAM_POLL_INTERVAL_SECONDS",
     "TelegramSupervisor",
+    "build_telegram_bridge_on_inbound",
     "build_telegram_channel_watcher",
     "build_telegram_poll_once",
     "build_telegram_supervisor_watcher",
     "is_dashboard_telegram_enabled",
     "live_deliver",
+    "make_telegram_deliver",
 ]

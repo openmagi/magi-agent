@@ -54,6 +54,10 @@ from __future__ import annotations
 import hashlib
 import os
 from collections.abc import Callable
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from magi_agent.channels.turn_bridge import ChannelInbound
 
 from magi_agent.channels.discord_adapter import (
     DiscordAdapterBoundary,
@@ -140,6 +144,23 @@ def _make_boundary(provider_name: str) -> DiscordAdapterBoundary:
                 "providerAllowlist": (provider_name,),
             }
         )
+    )
+
+
+# ---------------------------------------------------------------------------
+# Projection into the shared ChannelInbound (turn bridge seam)
+# ---------------------------------------------------------------------------
+
+def to_channel_inbound(event: DiscordInboundEvent) -> "ChannelInbound":
+    """Project a Discord boundary event into the channel-agnostic inbound type."""
+    from magi_agent.channels.turn_bridge import ChannelInbound
+
+    return ChannelInbound(
+        channel_type="discord",
+        channel_id=event.channel_id,
+        text=event.text,
+        message_id=event.message_id,
+        user_id=event.user_id,
     )
 
 
@@ -287,4 +308,5 @@ __all__ = [
     "deliver",
     "is_live_discord_enabled",
     "read_and_dispatch",
+    "to_channel_inbound",
 ]
