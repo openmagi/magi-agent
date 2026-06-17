@@ -634,3 +634,48 @@ def test_obligation_scope_two_packs_union_is_additive():
     # (it cannot shrink obligations).
     assert len(union_validators) >= max(len(research_validators), len(coding_validators))
     assert len(union_evidence) >= max(len(research_evidence), len(coding_evidence))
+
+
+# ---------------------------------------------------------------------------
+# Task 1: normalize_pinned_recipe_pack_ids — validation helper
+#
+# Keeps only ids that exist in the registry and are NOT hard_safety;
+# de-duped, input-order-preserving; non-str / unknown / hard_safety dropped
+# silently (fail-open).
+# ---------------------------------------------------------------------------
+
+
+def test_normalize_keeps_known_routable_dedup_ordered():
+    from magi_agent.recipes.kernel_recipe_packs import build_runtime_pack_registry
+    from magi_agent.recipes.recipe_routing import normalize_pinned_recipe_pack_ids
+
+    reg = build_runtime_pack_registry()
+    out = normalize_pinned_recipe_pack_ids(
+        ["openmagi.dev-coding", "openmagi.research", "openmagi.dev-coding"], reg
+    )
+    assert out == ("openmagi.dev-coding", "openmagi.research")
+
+
+def test_normalize_drops_unknown_and_nonstr():
+    from magi_agent.recipes.kernel_recipe_packs import build_runtime_pack_registry
+    from magi_agent.recipes.recipe_routing import normalize_pinned_recipe_pack_ids
+
+    reg = build_runtime_pack_registry()
+    assert normalize_pinned_recipe_pack_ids(["does.not.exist", 5, ""], reg) == ()
+
+
+def test_normalize_drops_hard_safety_packs():
+    from magi_agent.recipes.kernel_recipe_packs import build_runtime_pack_registry
+    from magi_agent.recipes.recipe_routing import normalize_pinned_recipe_pack_ids
+
+    reg = build_runtime_pack_registry()
+    hard = [p.pack_id for p in reg.values() if p.hard_safety]
+    assert hard, "fixture expects at least one hard_safety pack"
+    assert normalize_pinned_recipe_pack_ids(hard, reg) == ()
+
+
+def test_normalize_empty_is_empty():
+    from magi_agent.recipes.kernel_recipe_packs import build_runtime_pack_registry
+    from magi_agent.recipes.recipe_routing import normalize_pinned_recipe_pack_ids
+
+    assert normalize_pinned_recipe_pack_ids([], build_runtime_pack_registry()) == ()
