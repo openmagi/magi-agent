@@ -202,6 +202,141 @@ def test_recall_leads_snapshot_follows_when_both_present(
     assert instruction.index("<memory-recall") < instruction.index("<memory-context")
 
 
+def test_serve_recall_is_background_tagged_fenced_block_not_a_turn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A2: the SERVE per-turn recall must be a clearly BACKGROUND-tagged FENCED
+    block — ``<memory-recall ... continuity="background">`` — and must NOT be
+    shaped as a normal user/assistant conversation turn (no ADK role wrappers,
+    no chat-turn markers around the recalled content)."""
+    from magi_agent.cli.tool_runtime import build_cli_instruction
+
+    _on(monkeypatch)
+    _write(
+        tmp_path,
+        "memory/daily/2026-06-01.md",
+        "decision: adopt zebraquux for the billing rollout next sprint",
+    )
+
+    instruction = build_cli_instruction(
+        session_id="s1",
+        model="claude-sonnet-4-6",
+        workspace_root=str(tmp_path),
+        recall_query="what did we decide about zebraquux",
+    )
+
+    # Fenced + background-tagged.
+    assert '<memory-recall hidden="true" continuity="background">' in instruction
+    assert "</memory-recall>" in instruction
+    assert "zebraquux" in instruction
+
+    # The recalled content lives strictly INSIDE the fence — never emitted as a
+    # standalone conversation turn.
+    recall = instruction.split('<memory-recall hidden="true" continuity="background">')[1]
+    recall = recall.split("</memory-recall>")[0]
+    assert "zebraquux" in recall
+    # Not shaped as a user/assistant turn: no ADK content-role envelopes leaking
+    # the recall as dialogue.
+    for marker in ('"role": "user"', '"role": "assistant"', "role='user'", "role='assistant'"):
+        assert marker not in recall
+
+
+def test_serve_recall_continuity_policy_present_once_with_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A2: when BOTH the static snapshot AND the per-turn recall are present, the
+    continuity-policy block PRECEDES the recalled memory and appears EXACTLY
+    ONCE (no duplication between the snapshot preamble and the recall preamble)."""
+    from magi_agent.cli.tool_runtime import build_cli_instruction
+    from magi_agent.memory.continuity_policy import (
+        MEMORY_CONTINUITY_POLICY_OPEN,
+        build_continuity_policy_block,
+    )
+
+    _on(monkeypatch)
+    monkeypatch.setenv("MAGI_MEMORY_PROJECTION_ENABLED", "1")
+    _write(tmp_path, "MEMORY.md", "curated snapshot marker snapshotonlymarker")
+    _write(
+        tmp_path,
+        "memory/daily/2026-06-01.md",
+        "decision: adopt zebraquux for the billing rollout",
+    )
+
+    instruction = build_cli_instruction(
+        session_id="s1",
+        model="claude-sonnet-4-6",
+        workspace_root=str(tmp_path),
+        recall_query="what did we decide about zebraquux",
+    )
+
+    # Both memory blocks present.
+    assert "<memory-recall" in instruction
+    assert "<memory-context" in instruction
+    # Exactly one continuity-policy block — never duplicated.
+    assert instruction.count(MEMORY_CONTINUITY_POLICY_OPEN) == 1
+    assert instruction.count(build_continuity_policy_block()) == 1
+    # The policy PRECEDES the recalled memory (background reference framing).
+    assert instruction.index(MEMORY_CONTINUITY_POLICY_OPEN) < instruction.index(
+        "<memory-recall"
+    )
+
+
+def test_serve_recall_continuity_policy_present_without_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A2: even when the static snapshot is OFF (so it emits no policy preamble),
+    a present per-turn recall block is still led by the continuity-policy block
+    exactly once — recalled memory is always framed as background reference."""
+    from magi_agent.cli.tool_runtime import build_cli_instruction
+    from magi_agent.memory.continuity_policy import MEMORY_CONTINUITY_POLICY_OPEN
+
+    _on(monkeypatch)
+    # Snapshot projection OFF (default): no <memory-context>, no policy from it.
+    monkeypatch.delenv("MAGI_MEMORY_PROJECTION_ENABLED", raising=False)
+    _write(
+        tmp_path,
+        "memory/daily/2026-06-01.md",
+        "decision: adopt zebraquux for the billing rollout",
+    )
+
+    instruction = build_cli_instruction(
+        session_id="s1",
+        model="claude-sonnet-4-6",
+        workspace_root=str(tmp_path),
+        recall_query="what did we decide about zebraquux",
+    )
+
+    assert "<memory-recall" in instruction
+    assert instruction.count(MEMORY_CONTINUITY_POLICY_OPEN) == 1
+    assert instruction.index(MEMORY_CONTINUITY_POLICY_OPEN) < instruction.index(
+        "<memory-recall"
+    )
+
+
+def test_serve_recall_incognito_emits_no_block_and_no_policy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A2: incognito fully suppresses recall — no recall block, and (with the
+    snapshot also incognito-suppressed) no orphan continuity-policy preamble."""
+    from magi_agent.cli.tool_runtime import build_cli_instruction
+    from magi_agent.memory.continuity_policy import MEMORY_CONTINUITY_POLICY_OPEN
+
+    _on(monkeypatch)
+    monkeypatch.setenv("MAGI_MEMORY_PROJECTION_ENABLED", "1")
+    _write(tmp_path, "MEMORY.md", "curated snapshot marker")
+    _write(tmp_path, "memory/daily/2026-06-01.md", "decision about zebraquux here")
+
+    instruction = build_cli_instruction(
+        session_id="s1",
+        model="claude-sonnet-4-6",
+        workspace_root=str(tmp_path),
+        memory_mode="incognito",
+        recall_query="zebraquux",
+    )
+    assert "<memory-recall" not in instruction
+    assert MEMORY_CONTINUITY_POLICY_OPEN not in instruction
+
+
 def test_build_cli_instruction_recall_blocked_in_incognito(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

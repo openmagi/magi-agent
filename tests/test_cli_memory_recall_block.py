@@ -78,6 +78,26 @@ def test_on_returns_fenced_block_with_matching_hit(
     assert "grocery" not in block
 
 
+def test_recall_block_is_background_tagged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A2: the emitted block must carry a ``continuity="background"`` attribute
+    so the model treats recalled memory as background reference, not as the
+    current conversation."""
+    _on_env(monkeypatch)
+    _write(
+        tmp_path,
+        "memory/daily/2026-06-01.md",
+        "decision: we will adopt zebraquux for the billing rollout",
+    )
+    block = build_cli_memory_recall_block(
+        workspace_root=str(tmp_path), query="zebraquux", memory_mode="normal"
+    )
+    assert block
+    assert block.startswith('<memory-recall hidden="true" continuity="background">')
+    assert block.endswith("</memory-recall>")
+
+
 def test_master_only_produces_recall_block_after_dual_gate_fix(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
