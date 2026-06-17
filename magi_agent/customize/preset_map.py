@@ -141,6 +141,19 @@ PRESET_SEAMS: dict[str, PresetSeam] = {
         supported_modes=("deterministic",),
         wiring="opt_in",
     ),
+    # Opt-in for the 3-mode document-authoring-coverage gate. Enabling the preset
+    # promotes the gate to ``block`` for the runtime even when
+    # MAGI_DOCUMENT_AUTHORING_COVERAGE is off/default (engine-layer: resolve the
+    # mode, then upgrade off→block when the preset is enabled). controls_refs is
+    # documentation-only for opt_in seams (the gate is a coverage-mode flip, not
+    # a required-validator ref add/remove).
+    "document-authoring-coverage": PresetSeam(
+        preset_id="document-authoring-coverage",
+        controls_refs=("document-authoring-coverage",),
+        runtime_default_on=False,
+        supported_modes=("deterministic",),
+        wiring="opt_in",
+    ),
 }
 
 
