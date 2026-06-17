@@ -19,9 +19,9 @@ def preset_enabled(preset_id: str, *, default: bool) -> bool:
     explicit override). Returns ``False`` unless
     ``MAGI_CUSTOMIZE_VERIFICATION_ENABLED`` is on.
     """
-    from magi_agent.config.flags import flag_bool
+    from magi_agent.config.flags import flag_profile_bool
 
-    if not flag_bool("MAGI_CUSTOMIZE_VERIFICATION_ENABLED"):
+    if not flag_profile_bool("MAGI_CUSTOMIZE_VERIFICATION_ENABLED"):
         return False
     try:
         from magi_agent.customize.store import load_overrides

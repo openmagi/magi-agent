@@ -567,9 +567,9 @@ def _apply_customize_verification(required_validators: list[str]) -> list[str]:
     present when it resolves enabled. Fail-open: any error returns the input
     unchanged so the live gate is never wedged by a bad overrides file.
     """
-    from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+    from magi_agent.config.flags import flag_profile_bool  # noqa: PLC0415
 
-    if not flag_bool("MAGI_CUSTOMIZE_VERIFICATION_ENABLED"):
+    if not flag_profile_bool("MAGI_CUSTOMIZE_VERIFICATION_ENABLED"):
         return required_validators
     try:
         from magi_agent.customize.preset_map import PRESET_SEAMS  # noqa: PLC0415
@@ -581,24 +581,27 @@ def _apply_customize_verification(required_validators: list[str]) -> list[str]:
         policy = CustomizeVerificationPolicy.from_overrides(load_overrides())
         result = list(required_validators)
         for preset_id, seam in PRESET_SEAMS.items():
-            # Only opt-out seams are assembly-layer ref add/remove. opt-in seams
-            # are activated at the engine-satisfier layer
+            # Only opt-out seams are assembly-layer refs. opt-in seams are
+            # activated at the engine-satisfier layer
             # (customize.runtime_gate.preset_enabled), not here.
             if seam.wiring != "opt_out":
                 continue
+            # opt_out is REMOVE-ONLY: an enabled (default) seam is a no-op because
+            # its ref is already contributed by the recipe/pack path for the turns
+            # it applies to (e.g. coding turns add verifier:dev-coding:test-evidence
+            # in _build_default_runner_policy_assembly). Adding it here would inject
+            # the ref into UNRELATED turns (e.g. a non-coding chat answer), so the
+            # gate would block on a ref no producer can satisfy. Only an explicit
+            # opt-OUT subtracts.
             enabled = policy.resolve_enabled(
                 preset_id, default=seam.runtime_default_on
             )
-            if enabled:
-                for ref in seam.controls_refs:
-                    if ref not in result:
-                        result.append(ref)
-            else:
+            if not enabled:
                 result = [r for r in result if r not in seam.controls_refs]
         # Custom deterministic_ref rules (P1) compile as opt-out adds: an enabled
         # rule REQUIRES its ref in the pre-final gate. Separate flag so it stays
         # byte-identical until explicitly enabled.
-        if flag_bool("MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED"):
+        if flag_profile_bool("MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED"):
             for ref in policy.enabled_deterministic_refs():
                 if ref not in result:
                     result.append(ref)
@@ -615,11 +618,11 @@ def _build_customize_after_tool_controls() -> list:
     ``None`` while ``MAGI_EGRESS_GATE_ENABLED`` is off, so ``criterion`` rules stay
     deterministic-only/inert). Fail-soft to ``[]``.
     """
-    from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+    from magi_agent.config.flags import flag_profile_bool  # noqa: PLC0415
 
     if not (
-        flag_bool("MAGI_CUSTOMIZE_VERIFICATION_ENABLED")
-        and flag_bool("MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED")
+        flag_profile_bool("MAGI_CUSTOMIZE_VERIFICATION_ENABLED")
+        and flag_profile_bool("MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED")
     ):
         return []
     try:

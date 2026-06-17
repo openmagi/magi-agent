@@ -29,7 +29,8 @@ def _tool_rule(match: dict, decision: str = "deny", rid: str = "cr_t", enabled: 
 
 
 def test_inert_when_flags_off(monkeypatch, tmp_path):
-    monkeypatch.delenv("MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED", raising=False)
+    # Profile-aware default-ON, so OFF is explicit "0".
+    monkeypatch.setenv("MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED", "0")
     cfile = tmp_path / "customize.json"
     monkeypatch.setenv("MAGI_CUSTOMIZE", str(cfile))
     set_custom_rule(_tool_rule({"tool": "web_fetch"}), path=cfile)

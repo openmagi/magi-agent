@@ -75,7 +75,7 @@ def test_custom_tool_ask(cfg):
 def test_inert_when_flags_off(monkeypatch, tmp_path):
     # rule on disk but custom-rules flag OFF → byte-identical (allow)
     monkeypatch.setenv("MAGI_CUSTOMIZE_VERIFICATION_ENABLED", "1")
-    monkeypatch.delenv("MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED", raising=False)
+    monkeypatch.setenv("MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED", "0")
     cfile = tmp_path / "customize.json"
     monkeypatch.setenv("MAGI_CUSTOMIZE", str(cfile))
     set_custom_rule(_tool_rule({"tool": "Fetcher"}, "deny"), path=cfile)

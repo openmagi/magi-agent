@@ -46,7 +46,8 @@ class _Bare:
 
 
 def test_apply_verification_noop_when_flag_off(monkeypatch):
-    monkeypatch.delenv("MAGI_CUSTOMIZE_VERIFICATION_ENABLED", raising=False)
+    # Profile-aware default-ON, so OFF is explicit "0".
+    monkeypatch.setenv("MAGI_CUSTOMIZE_VERIFICATION_ENABLED", "0")
     rt = _Bare()
     apply_verification_overrides(
         rt, {"verification": {"harness_presets": ["answer_quality"]}}

@@ -5,7 +5,8 @@ from magi_agent.customize.store import set_verification_override
 
 
 def test_preset_enabled_false_when_flag_off(monkeypatch, tmp_path):
-    monkeypatch.delenv("MAGI_CUSTOMIZE_VERIFICATION_ENABLED", raising=False)
+    # Profile-aware default-ON, so OFF is explicit "0".
+    monkeypatch.setenv("MAGI_CUSTOMIZE_VERIFICATION_ENABLED", "0")
     cfile = tmp_path / "customize.json"
     monkeypatch.setenv("MAGI_CUSTOMIZE", str(cfile))
     set_verification_override("harness_presets", "fact-grounding", True, path=cfile)

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from magi_agent.config.flags import flag_bool
+from magi_agent.config.flags import flag_profile_bool
 
 
 def apply_tool_overrides(runtime: Any, overrides: dict[str, Any]) -> None:
@@ -35,7 +35,7 @@ def apply_verification_overrides(runtime: Any, overrides: dict[str, Any] | None)
     (Phases 2-4) can read which preset gates to contribute. No-op (sets nothing)
     unless ``MAGI_CUSTOMIZE_VERIFICATION_ENABLED`` is on. Never raises.
     """
-    if not flag_bool("MAGI_CUSTOMIZE_VERIFICATION_ENABLED"):
+    if not flag_profile_bool("MAGI_CUSTOMIZE_VERIFICATION_ENABLED"):
         return
     from magi_agent.customize.verification_policy import CustomizeVerificationPolicy
 

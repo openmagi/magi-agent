@@ -19,6 +19,7 @@ from magi_agent.config.flags import FLAGS, flag_bool
 from magi_agent.runtime.local_defaults import (
     EVAL_RUNTIME_ENV_DEFAULTS,
     LAB_EXPERIMENTAL_FLAGS,
+    LAB_EXPERIMENTAL_MODE_FLAGS,
     LAB_RUNTIME_ENV_DEFAULTS,
     LOCAL_FULL_RUNTIME_ENV_DEFAULTS,
     SAFE_RUNTIME_PROFILES,
@@ -117,5 +118,26 @@ def test_lab_seed_is_setdefault_and_preserves_explicit_profile_env() -> None:
 
 def test_lab_defaults_mapping_matches_experimental_flag_list() -> None:
     seeded = {k for k in LAB_RUNTIME_ENV_DEFAULTS if k != "MAGI_RUNTIME_PROFILE"}
-    assert seeded == set(LAB_EXPERIMENTAL_FLAGS)
+    # Lab seeds the strict-bool experimental flags (all "1") plus the few
+    # non-bool mode flags (e.g. document-authoring "advisory").
+    assert seeded == set(LAB_EXPERIMENTAL_FLAGS) | set(LAB_EXPERIMENTAL_MODE_FLAGS)
     assert all(LAB_RUNTIME_ENV_DEFAULTS[name] == "1" for name in LAB_EXPERIMENTAL_FLAGS)
+    for name, value in LAB_EXPERIMENTAL_MODE_FLAGS.items():
+        assert LAB_RUNTIME_ENV_DEFAULTS[name] == value
+
+
+def test_lab_profile_enables_document_authoring_advisory() -> None:
+    env: dict[str, str] = {}
+    apply_lab_runtime_defaults(env)
+    assert env["MAGI_DOCUMENT_AUTHORING_COVERAGE"] == "advisory"
+
+
+def test_lab_profile_enables_customize_via_profile_awareness() -> None:
+    # The customize master/custom-rules flags are profile-aware default-ON (_pb),
+    # not in the experimental flat-flag list, yet resolve ON under lab.
+    from magi_agent.config.flags import flag_profile_bool
+
+    env: dict[str, str] = {}
+    apply_lab_runtime_defaults(env)
+    assert flag_profile_bool("MAGI_CUSTOMIZE_VERIFICATION_ENABLED", env=env) is True
+    assert flag_profile_bool("MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED", env=env) is True

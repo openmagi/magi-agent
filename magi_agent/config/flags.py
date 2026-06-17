@@ -515,24 +515,29 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
     ),
     # --- Evidence / verification gates -------------------------------------
-    _b(
+    _pb(
         "MAGI_CUSTOMIZE_VERIFICATION_ENABLED",
         stage="stage2",
         summary=(
             "Master switch for the dashboard Customize tab's verification "
-            "presets/rules. When on, persisted verification overrides "
-            "(~/.magi/customize.json) translate into the recipe-driven "
-            "pre-final evidence gate; default-OFF keeps presets preview-only."
+            "presets/rules. Profile-aware default-ON (full runtime profile; OFF "
+            "under safe/eval). When on, persisted verification overrides "
+            "(~/.magi/customize.json) translate into the recipe-driven pre-final "
+            "evidence gate. With NO overrides this is byte-identical (opt_out "
+            "seams are remove-only; opt-in seams + custom rules add nothing until "
+            "the user configures them)."
         ),
     ),
-    _b(
+    _pb(
         "MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED",
         stage="stage2",
         summary=(
             "Load and compile dashboard Customize *custom rules* "
-            "(~/.magi/customize.json verification.custom_rules). Requires "
-            "MAGI_CUSTOMIZE_VERIFICATION_ENABLED. default-OFF = byte-identical "
-            "(rules persist but are not compiled into the pre-final gate)."
+            "(~/.magi/customize.json verification.custom_rules). Profile-aware "
+            "default-ON (full profile; OFF under safe/eval). Requires "
+            "MAGI_CUSTOMIZE_VERIFICATION_ENABLED. With no custom rules this is "
+            "byte-identical (rules persist but add nothing until the user builds "
+            "them)."
         ),
     ),
     _b(

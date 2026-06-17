@@ -5,14 +5,15 @@ from magi_agent.customize.after_tool_gate import CustomizeAfterToolControl
 
 
 def test_no_controls_when_flags_off(monkeypatch):
-    monkeypatch.delenv("MAGI_CUSTOMIZE_VERIFICATION_ENABLED", raising=False)
-    monkeypatch.delenv("MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED", raising=False)
+    # Flags are profile-aware default-ON, so the OFF path is now explicit "0".
+    monkeypatch.setenv("MAGI_CUSTOMIZE_VERIFICATION_ENABLED", "0")
+    monkeypatch.setenv("MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED", "0")
     assert _build_customize_after_tool_controls() == []
 
 
 def test_no_controls_when_only_verification_on(monkeypatch):
     monkeypatch.setenv("MAGI_CUSTOMIZE_VERIFICATION_ENABLED", "1")
-    monkeypatch.delenv("MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED", raising=False)
+    monkeypatch.setenv("MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED", "0")
     assert _build_customize_after_tool_controls() == []
 
 

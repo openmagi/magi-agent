@@ -6,7 +6,8 @@ from magi_agent.runtime.message_builder import _user_rules_block
 
 
 def test_block_empty_when_flag_off(monkeypatch, tmp_path):
-    monkeypatch.delenv("MAGI_CUSTOMIZE_VERIFICATION_ENABLED", raising=False)
+    # Profile-aware default-ON, so OFF is explicit "0".
+    monkeypatch.setenv("MAGI_CUSTOMIZE_VERIFICATION_ENABLED", "0")
     cfile = tmp_path / "customize.json"
     monkeypatch.setenv("MAGI_CUSTOMIZE", str(cfile))
     set_user_rules("Always cite sources.", path=cfile)

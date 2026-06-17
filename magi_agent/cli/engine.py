@@ -1161,11 +1161,11 @@ class MagiEngineDriver:
         Only ``action == "block"`` rules can block here (P3); other actions are
         recorded by validation but not enforced at pre-final in this phase.
         """
-        from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+        from magi_agent.config.flags import flag_bool, flag_profile_bool  # noqa: PLC0415
 
         if not (
             flag_bool("MAGI_EGRESS_GATE_ENABLED")
-            and flag_bool("MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED")
+            and flag_profile_bool("MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED")
         ):
             return None
         try:
