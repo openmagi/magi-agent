@@ -110,4 +110,37 @@ describe("ChatModelPicker", () => {
     expect(html).toContain("shadow-none");
     expect(html).not.toContain("bg-black/[0.03]");
   });
+
+  it("renders a single flat model dropdown for local (BYOK) serve", () => {
+    const html = renderToStaticMarkup(
+      <ChatModelPicker
+        botId="local"
+        modelSelection="kimi_k2_5"
+        apiKeyMode="byok"
+        subscriptionPlan={null}
+        persistMode="local"
+      />,
+    );
+
+    expect(html).toContain('data-chat-model-picker="true"');
+    expect(html).toContain("aria-label=\"Model\"");
+    expect(html).toContain("Kimi K2.6 (Fireworks AI)");
+    // Local serve has no platform router tiers, so only the model dropdown shows.
+    expect(html).not.toContain("aria-label=\"Router tier\"");
+  });
+
+  it("labels the default smart-routing selection in local mode", () => {
+    const html = renderToStaticMarkup(
+      <ChatModelPicker
+        botId="local"
+        modelSelection="clawy_smart_routing"
+        apiKeyMode="byok"
+        subscriptionPlan={null}
+        persistMode="local"
+      />,
+    );
+
+    expect(html).toContain("Smart Routing");
+    expect(html).not.toContain("clawy_smart_routing");
+  });
 });
