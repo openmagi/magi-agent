@@ -91,12 +91,28 @@ def test_dashboard_deep_link_prerendered_route() -> None:
 
 
 def test_dashboard_deep_link_falls_back_to_app_shell() -> None:
-    # A not-prerendered deep link still serves the SPA shell (never blanks);
-    # client-side routing resolves the rest.
-    response = _client().get("/dashboard/local/chat/some-unbuilt-channel")
+    # A not-prerendered, non-chat deep link still serves the SPA shell (never
+    # blanks); client-side routing resolves the rest.
+    response = _client().get("/dashboard/settings/unknown-section")
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/html")
     assert "/_next/static/" in response.text
+
+
+def test_dashboard_chat_channel_deep_link_serves_chat_shell() -> None:
+    # A user-created (not-prerendered) channel must get the chat shell, not the
+    # dashboard index. The index redirects to /chat/general, which would bounce
+    # the user straight back out of the channel they just opened.
+    response = _client().get("/dashboard/local/chat/some-unbuilt-channel")
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
+
+    shell = (
+        web_dashboard.BUNDLE_ROOT / "dashboard/local/chat/general.html"
+    ).read_text()
+    index = (web_dashboard.BUNDLE_ROOT / "dashboard.html").read_text()
+    assert response.text == shell
+    assert response.text != index
 
 
 def test_dashboard_serves_hashed_next_assets() -> None:
