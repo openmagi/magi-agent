@@ -20,7 +20,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import type { Channel, ChannelMemoryMode } from "@/chat-core";
-import { useChatStore } from "@/lib/chat/chat-store";
+import { useChatStore } from "@/chat-core";
 import { useI18n } from "@/lib/i18n";
 import { localizeCategory, localizeChannel, DEFAULT_CHANNELS } from "@/chat-core";
 import {

@@ -27,7 +27,7 @@ import type {
   RuntimeTrace,
 } from "@/chat-core";
 import type { ActiveSnapshot } from "./active-snapshot";
-import { getResetCounter } from "./chat-store";
+import { getResetCounter } from "@/chat-core";
 import { getLocalAgentBaseUrl } from "../local-auth";
 
 type LiveTurnPhase = NonNullable<ChannelState["turnPhase"]>;
