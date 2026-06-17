@@ -481,6 +481,15 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
     ),
     _b(
+        "MAGI_KEY_AWARE_MODEL_ROUTES_ENABLED",
+        stage="stage2",
+        summary=(
+            "Filter advertised and accepted child-spawn model routes to only those "
+            "whose provider has a configured API key; strict default-OFF (OFF is "
+            "byte-identical to today; no-key setups always fail-open to legacy routes)."
+        ),
+    ),
+    _b(
         "MAGI_COMPUTE_VIA_CODE_ENABLED",
         summary=(
             "Append a general prompt directive to compute arithmetic, conversions, "

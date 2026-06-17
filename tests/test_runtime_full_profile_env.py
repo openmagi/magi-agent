@@ -125,3 +125,16 @@ def test_browser_tool_kill_switch_overrides_full_runtime_default() -> None:
         )
         is False
     )
+
+
+# ---------------------------------------------------------------------------
+# C4: key-aware model routes enabled in local overlay
+# ---------------------------------------------------------------------------
+
+def test_local_overlay_enables_key_aware_model_routes() -> None:
+    """LOCAL_FULL_RUNTIME_ENV_DEFAULTS must include MAGI_KEY_AWARE_MODEL_ROUTES_ENABLED=1."""
+    from magi_agent.runtime.local_defaults import LOCAL_FULL_RUNTIME_ENV_DEFAULTS
+
+    assert LOCAL_FULL_RUNTIME_ENV_DEFAULTS.get("MAGI_KEY_AWARE_MODEL_ROUTES_ENABLED") == "1", (
+        "MAGI_KEY_AWARE_MODEL_ROUTES_ENABLED must be '1' in LOCAL_FULL_RUNTIME_ENV_DEFAULTS"
+    )

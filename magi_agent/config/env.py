@@ -2177,6 +2177,21 @@ def worker_routing_llm_enabled(env: Mapping[str, str] | None = None) -> bool:
     return _is_true(source.get(MAGI_WORKER_ROUTING_LLM_ENABLED_ENV))
 
 
+MAGI_KEY_AWARE_MODEL_ROUTES_ENABLED_ENV = "MAGI_KEY_AWARE_MODEL_ROUTES_ENABLED"
+
+
+def is_key_aware_model_routes_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Gate for key-aware child-spawn model route filtering.
+
+    Default OFF (strict truthy opt-in). When ON, :func:`available_child_model_routes`
+    and :func:`resolve_child_route` filter routes to only those whose provider
+    has a configured API key. OFF (or no keys at all, or any error) is
+    byte-identical to today (fail-open).
+    """
+    source = os.environ if env is None else env
+    return _is_true(source.get(MAGI_KEY_AWARE_MODEL_ROUTES_ENABLED_ENV))
+
+
 MAGI_TOOL_USAGE_GUIDANCE_ENABLED_ENV = "MAGI_TOOL_USAGE_GUIDANCE_ENABLED"
 
 

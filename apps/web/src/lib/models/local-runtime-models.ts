@@ -11,7 +11,7 @@
 // Model ids drift; these are a best-effort starting point. The Settings form
 // always offers a "Custom…" option so any id the provider supports can be typed.
 
-export type LocalRuntimeProvider = "anthropic" | "openai" | "gemini" | "fireworks";
+export type LocalRuntimeProvider = "anthropic" | "openai" | "gemini" | "fireworks" | "openrouter";
 
 export interface LocalRuntimeModelOption {
   value: string;
@@ -45,6 +45,10 @@ export const LOCAL_RUNTIME_MODEL_PRESETS: Record<
     { value: "accounts/fireworks/models/kimi-k2-instruct", label: "Kimi K2 Instruct" },
     { value: "accounts/fireworks/models/llama-v3p1-70b-instruct", label: "Llama 3.1 70B Instruct" },
   ],
+  openrouter: [
+    { value: "openai/gpt-5.5", label: "GPT-5.5 (via OpenRouter)" },
+    { value: "anthropic/claude-sonnet-4-6", label: "Claude Sonnet 4.6 (via OpenRouter)" },
+  ],
 };
 
 /** Per-provider default model (mirrors magi_agent/cli/providers.py _DEFAULT_MODEL). */
@@ -53,6 +57,7 @@ export const LOCAL_RUNTIME_DEFAULT_MODEL: Record<LocalRuntimeProvider, string> =
   openai: "gpt-5.5",
   gemini: "gemini-3.5-flash",
   fireworks: "accounts/fireworks/models/kimi-k2-instruct",
+  openrouter: "openai/gpt-5.5",
 };
 
 export function isPresetModel(provider: LocalRuntimeProvider, model: string): boolean {

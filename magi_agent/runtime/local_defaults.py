@@ -14,6 +14,9 @@ LOCAL_FULL_RUNTIME_ENV_DEFAULTS: Mapping[str, str] = {
     # Route denial is useful audit metadata, but hard-blocking it breaks live
     # turns when the materialized budget/capability estimate is conservative.
     "MAGI_RUNNER_POLICY_ROUTE_BLOCKING_ENABLED": "0",
+    # Subagent routes reflect configured provider keys so a fireworks-only bot
+    # never advertises keyless anthropic/openai routes it cannot use.
+    "MAGI_KEY_AWARE_MODEL_ROUTES_ENABLED": "1",
     "MAGI_EDIT_RETRY_REFLECTION_ENABLED": "1",
     "MAGI_LOOP_GUARD_ENABLED": "1",
     "MAGI_ERROR_RECOVERY_ENABLED": "1",

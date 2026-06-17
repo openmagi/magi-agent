@@ -16,12 +16,13 @@ describe("SettingsForm local runtime wiring", () => {
     const source = readFileSync(new URL("./settings-form.tsx", import.meta.url), "utf8");
 
     expect(source).toContain(
-      'type ProviderName = "anthropic" | "openai" | "gemini" | "fireworks"',
+      'type ProviderName = "anthropic" | "openai" | "gemini" | "fireworks" | "openrouter"',
     );
     expect(source).toContain('{ value: "anthropic", label: "Anthropic" }');
     expect(source).toContain('{ value: "openai", label: "OpenAI" }');
     expect(source).toContain('{ value: "gemini", label: "Gemini" }');
     expect(source).toContain('{ value: "fireworks", label: "Fireworks" }');
+    expect(source).toContain('{ value: "openrouter", label: "OpenRouter" }');
     expect(source).not.toContain('"google"');
     expect(source).not.toContain('"openai-compatible"');
     expect(source).not.toContain("OpenAI-Compatible");

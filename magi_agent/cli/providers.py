@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import math
 import os
+import stat
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -247,6 +248,49 @@ def _section(config: Mapping[str, object], name: str) -> dict[str, object]:
     return section if isinstance(section, dict) else {}
 
 
+def _resolve_provider_key(
+    provider: str,
+    *,
+    env: Mapping[str, str],
+    providers_section: Mapping[str, object],
+) -> str | None:
+    """Return the API key for *provider* using the canonical precedence:
+    ``[providers.<name>].api_key`` in config first, then each env var in
+    ``_PROVIDER_ENV_KEYS[provider]``.  Returns ``None`` if no usable key is found.
+
+    This is the single source of truth shared by :func:`resolve_provider_config`
+    and :func:`configured_providers` so precedence cannot drift.
+    """
+    provider_block = providers_section.get(provider)
+    if isinstance(provider_block, dict):
+        configured = _clean(provider_block.get("api_key"))
+        if configured:
+            return configured
+    for env_name in _PROVIDER_ENV_KEYS[provider]:
+        from_env = _clean(env.get(env_name))
+        if from_env:
+            return from_env
+    return None
+
+
+def configured_providers(
+    *,
+    env: Mapping[str, str] | None = None,
+    config: Mapping[str, object] | None = None,
+) -> list[str]:
+    """All SUPPORTED_PROVIDERS that have a resolvable key (config or env),
+    in SUPPORTED_PROVIDERS order."""
+    env = os.environ if env is None else env
+    config = _load_config_file() if config is None else config
+
+    providers_section = _section(config, "providers")
+    return [
+        provider
+        for provider in SUPPORTED_PROVIDERS
+        if _resolve_provider_key(provider, env=env, providers_section=providers_section)
+    ]
+
+
 def default_model_for(provider: str) -> str:
     """Return the best-effort default model id for ``provider``.
 
@@ -283,16 +327,7 @@ def resolve_provider_config(
     providers_section = _section(config, "providers")
 
     def key_for(provider: str) -> str | None:
-        provider_block = providers_section.get(provider)
-        if isinstance(provider_block, dict):
-            configured = _clean(provider_block.get("api_key"))
-            if configured:
-                return configured
-        for env_name in _PROVIDER_ENV_KEYS[provider]:
-            from_env = _clean(env.get(env_name))
-            if from_env:
-                return from_env
-        return None
+        return _resolve_provider_key(provider, env=env, providers_section=providers_section)
 
     def model_for(provider: str) -> str:
         return (
@@ -396,6 +431,169 @@ def model_choices_from_config(current: str | None = None) -> list[str]:
     return model_choices(current)
 
 
+def persist_provider_keys(
+    updates: Mapping[str, str | None],
+    *,
+    active: str | None = None,
+    models: Mapping[str, str | None] | None = None,
+    path: Path | None = None,
+) -> None:
+    """Write per-provider API keys (and optionally per-provider models) to the config file.
+
+    - ``updates`` maps provider name to key value.  A non-empty cleaned value
+      sets ``[providers.<name>].api_key = value``; an empty string or ``None``
+      deletes that key (and drops the empty ``[providers.<name>]`` table).
+    - ``models`` maps provider name to model string.  A non-empty value sets
+      ``[providers.<name>].model = value``; ``None`` or empty string deletes it.
+      Both keys and models are written in the SAME single atomic write so the
+      file is always left at ``0600``.
+    - Provider names are validated against ``SUPPORTED_PROVIDERS``; ``"google"``
+      is canonicalized to ``"gemini"`` (mirror :func:`_canonical_provider`).
+      Unknown names raise :class:`UnknownProviderError`.
+    - If ``active`` is given and valid, also writes ``[model].provider = active``.
+    - NEVER clobbers unrelated sections/keys.  Round-trip self-check before
+      writing.  ``path`` overrides the default config path for tests.
+    - File is written with ``0600`` permissions (owner read/write only).
+    """
+    # --- canonicalize and validate provider names ---
+    canonical_updates: dict[str, str | None] = {}
+    for raw_name, key_value in updates.items():
+        normalized = raw_name.strip().lower() if isinstance(raw_name, str) else ""
+        if normalized == "google":
+            normalized = "gemini"
+        if normalized not in SUPPORTED_PROVIDERS:
+            raise UnknownProviderError(
+                f"Unsupported provider {raw_name!r}. "
+                f"Supported: {', '.join(SUPPORTED_PROVIDERS)}."
+            )
+        canonical_updates[normalized] = key_value
+
+    canonical_active: str | None = None
+    if active is not None:
+        norm_active = active.strip().lower() if isinstance(active, str) else ""
+        if norm_active == "google":
+            norm_active = "gemini"
+        if norm_active not in SUPPORTED_PROVIDERS:
+            raise UnknownProviderError(
+                f"Unsupported provider {active!r}. "
+                f"Supported: {', '.join(SUPPORTED_PROVIDERS)}."
+            )
+        canonical_active = norm_active
+
+    config_path = path if path is not None else _config_path()
+
+    # Load existing config (tolerate missing/garbled → {}).
+    try:
+        with open(config_path, "rb") as fh:
+            raw: dict[str, object] = tomllib.load(fh)
+    except (FileNotFoundError, NotADirectoryError, IsADirectoryError):
+        raw = {}
+    except (OSError, tomllib.TOMLDecodeError):
+        raw = {}
+
+    raw = dict(raw)  # shallow copy top-level
+
+    # Mutate [providers.<name>] for each update.
+    providers_top = raw.get("providers")
+    providers_section: dict[str, object] = (
+        dict(providers_top) if isinstance(providers_top, dict) else {}
+    )
+
+    for provider, key_value in canonical_updates.items():
+        cleaned = _clean(key_value)
+        if cleaned:
+            # Set the api_key in this provider's sub-table.
+            existing_block = providers_section.get(provider)
+            block: dict[str, object] = (
+                dict(existing_block) if isinstance(existing_block, dict) else {}
+            )
+            block["api_key"] = cleaned
+            providers_section[provider] = block
+        else:
+            # Empty/None → remove the key and drop the empty table.
+            existing_block = providers_section.get(provider)
+            if isinstance(existing_block, dict):
+                block = dict(existing_block)
+                block.pop("api_key", None)
+                if block:
+                    providers_section[provider] = block
+                else:
+                    providers_section.pop(provider, None)
+            else:
+                providers_section.pop(provider, None)
+
+    # Apply per-provider model overrides in the SAME write (no chmod race).
+    if models:
+        for raw_pname, pmodel in models.items():
+            normalized_pname = raw_pname.strip().lower() if isinstance(raw_pname, str) else ""
+            if normalized_pname == "google":
+                normalized_pname = "gemini"
+            if normalized_pname not in SUPPORTED_PROVIDERS:
+                raise UnknownProviderError(
+                    f"Unsupported provider {raw_pname!r}. "
+                    f"Supported: {', '.join(SUPPORTED_PROVIDERS)}."
+                )
+            cleaned_model = _clean(pmodel)
+            existing_block = providers_section.get(normalized_pname)
+            m_block: dict[str, object] = (
+                dict(existing_block) if isinstance(existing_block, dict) else {}
+            )
+            if cleaned_model:
+                m_block["model"] = cleaned_model
+            else:
+                m_block.pop("model", None)
+            if m_block:
+                providers_section[normalized_pname] = m_block
+            else:
+                providers_section.pop(normalized_pname, None)
+
+    if providers_section:
+        raw["providers"] = providers_section
+    else:
+        raw.pop("providers", None)
+
+    # Optionally set [model].provider.
+    if canonical_active is not None:
+        model_section = raw.get("model")
+        model_dict: dict[str, object] = (
+            dict(model_section) if isinstance(model_section, dict) else {}
+        )
+        model_dict["provider"] = canonical_active
+        raw["model"] = model_dict
+
+    # Round-trip self-check: render → re-parse and assert equality BEFORE writing.
+    rendered = _render_toml(raw)  # may raise ValueError for unrenderable types
+    reparsed = tomllib.loads(rendered)
+    if reparsed != raw:
+        raise ValueError(
+            "TOML round-trip self-check failed: the rendered config does not "
+            "re-parse to the intended dict. Aborting to preserve the original file."
+        )
+
+    # Atomic write: create temp file with 0600 from the start (M3 defense-in-depth:
+    # secret is never briefly world-readable at the default umask), then replace.
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = config_path.with_suffix(".toml.tmp")
+    try:
+        fd = os.open(
+            tmp_path,
+            os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
+            stat.S_IRUSR | stat.S_IWUSR,  # 0o600
+        )
+        try:
+            os.write(fd, rendered.encode("utf-8"))
+        finally:
+            os.close(fd)
+        tmp_path.replace(config_path)
+    finally:
+        # Clean up temp if replace failed.
+        if tmp_path.exists():
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
+
+
 def persist_model(model_id: str, *, path: Path | None = None) -> None:
     """Write ``model_id`` to ``[model].model`` in the magi config file.
 
@@ -453,11 +651,14 @@ def persist_model(model_id: str, *, path: Path | None = None) -> None:
 
 __all__ = [
     "SUPPORTED_PROVIDERS",
+    "_PROVIDER_ENV_KEYS",
     "ProviderConfig",
     "UnknownProviderError",
+    "configured_providers",
     "default_model_for",
     "resolve_provider_config",
     "resolve_vision_provider_config",
     "persist_model",
+    "persist_provider_keys",
     "model_choices_from_config",
 ]

@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import os
 import re
+import stat
 from importlib import resources
 from importlib.resources.abc import Traversable
 from pathlib import Path
@@ -488,6 +489,15 @@ def _canonical_provider(value: object, *, strict: bool = True) -> str | None:
 
 
 def _write_config(payload: dict[str, Any]) -> None:
+    """Write model-selection keys to config.toml in a merge-preserving way.
+
+    Loads the existing config, updates ONLY the ``[model]`` keys it manages
+    (provider/model/base_url/api_key/api_key_env), and leaves ``[providers.*]``
+    and any other sections untouched.  Uses the same round-trip self-check +
+    atomic temp-file pattern as :func:`~magi_agent.cli.providers.persist_model`.
+    """
+    import tomllib
+
     from magi_agent.cli import providers
 
     llm = payload.get("llm") if isinstance(payload.get("llm"), dict) else {}
@@ -499,24 +509,94 @@ def _write_config(payload: dict[str, Any]) -> None:
     if next_api_key is None and next_provider == existing_provider:
         next_api_key = providers._clean(existing_model.get("api_key"))
 
-    model_lines: list[str] = []
-    for key, value in (
+    # Build the new [model] section by updating only the managed keys.
+    new_model: dict[str, object] = dict(existing_model)  # preserve unmanaged keys
+    managed: list[tuple[str, object]] = [
         ("provider", next_provider),
         ("model", llm.get("model")),
         ("base_url", llm.get("baseUrl")),
         ("api_key", next_api_key),
         ("api_key_env", llm.get("apiKeyEnvVar")),
-    ):
+    ]
+    for key, value in managed:
         if isinstance(value, str) and value.strip():
-            model_lines.append(f'{key} = "{_toml_escape(value.strip())}"')
+            new_model[key] = value.strip()
+        else:
+            new_model.pop(key, None)
 
-    body = ""
-    if model_lines:
-        body += "[model]\n" + "\n".join(model_lines) + "\n"
+    # Merge into the full config dict, preserving all other sections.
+    raw = dict(existing)  # shallow copy top level
+    if new_model:
+        raw["model"] = new_model
+    else:
+        raw.pop("model", None)
+
+    # Round-trip self-check before writing (mirrors persist_model).
+    rendered = providers._render_toml(raw)
+    reparsed = tomllib.loads(rendered)
+    if reparsed != raw:
+        raise ValueError(
+            "TOML round-trip self-check failed: the rendered config does not "
+            "re-parse to the intended dict. Aborting to preserve the original file."
+        )
 
     path = providers._config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(body, encoding="utf-8")
+    tmp_path = path.with_suffix(".toml.tmp")
+    try:
+        # Create the temp file with 0600 from the start so the secret is never
+        # briefly world-readable at the default umask (M3 defense-in-depth).
+        fd = os.open(
+            tmp_path,
+            os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
+            stat.S_IRUSR | stat.S_IWUSR,  # 0o600
+        )
+        try:
+            os.write(fd, rendered.encode("utf-8"))
+        finally:
+            os.close(fd)
+        tmp_path.replace(path)
+    finally:
+        if tmp_path.exists():
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
+
+
+# --------------------------------------------------------------------------- #
+# Providers
+# --------------------------------------------------------------------------- #
+def _providers_snapshot() -> dict[str, Any]:
+    """Build the GET /v1/app/providers response — NEVER leaks key values."""
+    from magi_agent.cli import providers
+
+    raw = providers._load_config_file()
+    providers_cfg = providers._section(raw, "providers")
+    model_section = providers._section(raw, "model")
+    active = _canonical_provider(model_section.get("provider"), strict=False)
+
+    # configured_providers reads both env and config (config passed explicitly,
+    # env defaults to os.environ), so the dashboard reflects env-configured
+    # providers too. Only a boolean is surfaced — never a key value.
+    configured = set(providers.configured_providers(config=raw))
+
+    items: list[dict[str, Any]] = []
+    for name in providers.SUPPORTED_PROVIDERS:
+        provider_block = providers_cfg.get(name)
+        stored_model: str | None = None
+        if isinstance(provider_block, dict):
+            stored_model = providers._clean(provider_block.get("model"))
+        env_keys = providers._PROVIDER_ENV_KEYS.get(name, ())
+        items.append(
+            {
+                "name": name,
+                "configured": name in configured,
+                "model": stored_model or providers.default_model_for(name),
+                "envVar": env_keys[0] if env_keys else None,
+            }
+        )
+    return {"providers": items, "active": active}
 
 
 # --------------------------------------------------------------------------- #
@@ -621,6 +701,72 @@ def register_app_api_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
         except OSError as exc:
             return JSONResponse(status_code=500, content={"error": str(exc)})
         return JSONResponse(content=_config_snapshot(runtime))
+
+    # ---- providers ------------------------------------------------------ #
+    @app.get("/v1/app/providers")
+    def app_providers_get(request: Request) -> JSONResponse:
+        denied = guard(request)
+        if denied is not None:
+            return denied
+        return JSONResponse(content=_providers_snapshot())
+
+    @app.put("/v1/app/providers")
+    async def app_providers_put(request: Request) -> JSONResponse:
+        from magi_agent.cli import providers as _providers
+        from magi_agent.cli.providers import UnknownProviderError
+
+        denied = guard(request)
+        if denied is not None:
+            return denied
+        try:
+            payload = await request.json()
+        except Exception:  # noqa: BLE001
+            return JSONResponse(status_code=400, content={"error": "invalid_json"})
+
+        if not isinstance(payload, dict):
+            payload = {}
+
+        raw_providers = payload.get("providers")
+        raw_active = payload.get("active")
+
+        if not isinstance(raw_providers, dict):
+            raw_providers = {}
+
+        # Build key-update map and per-provider model updates.
+        key_updates: dict[str, str | None] = {}
+        model_updates: dict[str, str] = {}  # provider → model
+        for name, block in raw_providers.items():
+            if not isinstance(block, dict):
+                continue
+            api_key = block.get("apiKey")
+            key_updates[name] = api_key if isinstance(api_key, str) else None
+            model_val = _providers._clean(block.get("model"))
+            if model_val:
+                model_updates[name] = model_val
+
+        active: str | None = None
+        if isinstance(raw_active, str) and raw_active.strip():
+            try:
+                active = _canonical_provider(raw_active)
+            except _ConfigValidationError as exc:
+                return JSONResponse(status_code=400, content={"error": exc.error})
+
+        try:
+            # Pass model_updates through persist_provider_keys so keys AND models
+            # are written in a single atomic 0600 write (fixes C2/M1/M2).
+            _providers.persist_provider_keys(
+                key_updates,
+                active=active,
+                models=model_updates if model_updates else None,
+            )
+        except UnknownProviderError as exc:
+            return JSONResponse(
+                status_code=400, content={"error": "unsupported_provider", "detail": str(exc)}
+            )
+        except OSError as exc:
+            return JSONResponse(status_code=500, content={"error": str(exc)})
+
+        return JSONResponse(content=_providers_snapshot())
 
     # ---- skills --------------------------------------------------------- #
     @app.get("/v1/app/skills")

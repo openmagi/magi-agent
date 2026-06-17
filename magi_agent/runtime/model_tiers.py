@@ -324,6 +324,61 @@ class ChildRoute(NamedTuple):
     model: str
 
 
+# Registry provider labels for the gemini/google dual-alias pair.  The CLI
+# provider is "gemini"; the registry stores records under BOTH "gemini" and
+# "google".  This map expands a cli-provider name to all registry labels it covers.
+_PROVIDER_REGISTRY_ALIASES: dict[str, frozenset[str]] = {
+    "gemini": frozenset({"gemini", "google"}),
+}
+
+
+def _keyed_registry_providers(
+    env: Mapping[str, str],
+) -> set[str] | None:
+    """Registry-provider labels whose API key is configured, or ``None`` to mean
+    'do not filter' (fail-open: gate OFF, no keys at all, or any error).
+
+    Returns a ``set[str]`` of registry provider labels when gate ON + at least
+    one key is found, else ``None``.  Callers treat ``None`` as "skip filtering".
+    """
+    try:
+        from magi_agent.cli.providers import (  # noqa: PLC0415
+            configured_providers,
+            resolve_provider_config,
+        )
+        from magi_agent.config.env import (  # noqa: PLC0415
+            is_key_aware_model_routes_enabled,
+        )
+
+        if not is_key_aware_model_routes_enabled(env):
+            return None
+
+        keyed = configured_providers(env=env)
+        if not keyed:
+            # No keys at all — fail-open to legacy behavior.
+            return None
+
+        # Map cli-provider names → registry provider labels.
+        registry_set: set[str] = set()
+        for p in keyed:
+            registry_set |= _PROVIDER_REGISTRY_ALIASES.get(p, frozenset({p}))
+
+        # Also include the *selected* provider's registry label so the configured
+        # bot can always route on its own model even if it only has cheap-tier records.
+        try:
+            sel = resolve_provider_config(env=env)
+            if sel:
+                registry_set |= _PROVIDER_REGISTRY_ALIASES.get(
+                    sel.provider, frozenset({sel.provider})
+                )
+        except Exception:  # noqa: BLE001 — fail-soft: selected provider is best-effort
+            pass
+
+        return registry_set
+    except Exception:  # noqa: BLE001 — any error → fail-open (never filter)
+        return None
+
+
 def resolve_child_route(
     provider: str, model: str, env: Mapping[str, str]
 ) -> ChildRoute | None:
@@ -334,11 +389,34 @@ def resolve_child_route(
     without an ``unknown_model_*`` reason code — returned canonical/normalised —
     OR (b) is in the operator's deployment route allowlist — returned as given.
 
+    When ``MAGI_KEY_AWARE_MODEL_ROUTES_ENABLED`` is ON and at least one provider
+    key is configured, registry-resolved routes whose provider is NOT in the keyed
+    set are treated as not accepted (fall through to allowlist), unless the route
+    matches the currently selected provider/model (fail-open for the configured
+    bot's own route).
+
     This is the SINGLE function ``child_runner_live._validate_route`` delegates to
     and that :func:`available_child_model_routes` enumerates against, so the
     routes the model is TOLD about (prompt/tool guidance) can never drift from the
     routes the runner ACCEPTS. Never raises.
     """
+    # Compute keyed providers once; None means "do not filter".
+    keyed = _keyed_registry_providers(env)
+
+    # Determine the selected provider/model for the fail-open "own route" check.
+    sel_provider: str | None = None
+    sel_model: str | None = None
+    if keyed is not None:
+        try:
+            from magi_agent.cli.providers import resolve_provider_config  # noqa: PLC0415
+
+            sel = resolve_provider_config(env=env)
+            if sel:
+                sel_provider = sel.provider.strip().casefold()
+                sel_model = sel.model.strip().casefold()
+        except Exception:  # noqa: BLE001 — fail-soft
+            pass
+
     try:
         resolved = ModelTierRegistry.with_defaults().resolve(
             provider=provider, model=model
@@ -348,10 +426,31 @@ def resolve_child_route(
     if resolved is not None:
         reason_codes = tuple(getattr(resolved, "reason_codes", ()) or ())
         if not any("unknown_model" in code for code in reason_codes):
-            return ChildRoute(
-                str(getattr(resolved, "provider", provider)),
-                str(getattr(resolved, "model", model)),
-            )
+            resolved_provider = str(getattr(resolved, "provider", provider))
+            resolved_model = str(getattr(resolved, "model", model))
+            # Key-aware filter: if keyed is not None, only accept when the
+            # resolved provider is in the keyed set OR it is the selected route.
+            if keyed is None or resolved_provider in keyed:
+                return ChildRoute(resolved_provider, resolved_model)
+            # Not in keyed set — check if it is the selected (configured) route.
+            if (
+                sel_provider is not None
+                and sel_model is not None
+                and resolved_provider == sel_provider
+                and resolved_model == sel_model
+            ):
+                return ChildRoute(resolved_provider, resolved_model)
+            # Fall through to allowlist / selected check below.
+
+    # Always accept if the (provider, model) matches the selected route
+    # (handles custom model ids not in the static registry).
+    if keyed is not None and sel_provider is not None and sel_model is not None:
+        if (
+            provider.strip().casefold() == sel_provider
+            and model.strip().casefold() == sel_model
+        ):
+            return ChildRoute(provider, model)
+
     try:
         from magi_agent.config.env import (  # noqa: PLC0415
             operator_allowed_model_routes,
@@ -373,14 +472,38 @@ def available_child_model_routes(env: Mapping[str, str]) -> list[str]:
     allowlist. Single source of truth for both the SpawnAgent tool guidance and
     the system-prompt capability block, so the model is told exactly the routes
     that pass validation. A consistency test asserts every listed route resolves.
-    Fail-soft: any error contributes nothing.
+
+    When ``MAGI_KEY_AWARE_MODEL_ROUTES_ENABLED`` is ON and at least one provider
+    key is configured, only routes whose provider is in the keyed set are included
+    from the built-in registry (the operator allowlist is always included in full).
+    The selected provider's own model is always included even if it is a custom id
+    not present in the static registry.  When OFF or no keys are found, output is
+    byte-identical to today (fail-open).  Fail-soft: any error contributes nothing.
     """
+    # Compute keyed providers; None means "do not filter".
+    keyed = _keyed_registry_providers(env)
+
     tiers: dict[str, str] = {}
     try:
         for (provider, model), record in ModelTierRegistry.with_defaults()._records.items():
+            if keyed is not None and provider not in keyed:
+                continue
             tiers[f"{provider}:{model}"] = str(getattr(record, "tier", "") or "")
     except Exception:  # noqa: BLE001 — registry read must never raise here.
         pass
+
+    # When gate is ON, also ensure the selected provider's own model is present
+    # (handles custom model ids not in the static registry).
+    if keyed is not None:
+        try:
+            from magi_agent.cli.providers import resolve_provider_config  # noqa: PLC0415
+
+            sel = resolve_provider_config(env=env)
+            if sel:
+                tiers.setdefault(f"{sel.provider}:{sel.model}", "")
+        except Exception:  # noqa: BLE001 — fail-soft: selected provider is best-effort
+            pass
+
     try:
         from magi_agent.config.env import (  # noqa: PLC0415
             operator_allowed_model_routes,

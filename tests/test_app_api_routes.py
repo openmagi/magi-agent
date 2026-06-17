@@ -515,3 +515,360 @@ def test_requires_gateway_token(tmp_path, monkeypatch) -> None:
         monkeypatch.delenv(name, raising=False)
     client = TestClient(create_app(_runtime()))  # no token header
     assert client.get("/v1/app/runtime").status_code == 401
+
+
+# --------------------------------------------------------------------------- #
+# D1a: /v1/app/providers GET + PUT + persist_provider_keys
+# --------------------------------------------------------------------------- #
+
+def test_providers_get_lists_all_supported_providers(tmp_path, monkeypatch) -> None:
+    """GET /v1/app/providers lists every SUPPORTED_PROVIDER entry."""
+    from magi_agent.cli.providers import SUPPORTED_PROVIDERS
+
+    client = _client(tmp_path, monkeypatch)
+    res = client.get("/v1/app/providers")
+    assert res.status_code == 200
+    body = res.json()
+    assert "providers" in body
+    names = [p["name"] for p in body["providers"]]
+    assert names == list(SUPPORTED_PROVIDERS)
+
+
+def test_providers_get_configured_flag_reflects_only_keyed_providers(
+    tmp_path, monkeypatch
+) -> None:
+    """With FIREWORKS_API_KEY in config, exactly fireworks is configured:true."""
+    (tmp_path / "config.toml").write_text(
+        '[providers.fireworks]\napi_key = "fw-secret"\n',
+        encoding="utf-8",
+    )
+    client = _client(tmp_path, monkeypatch)
+    res = client.get("/v1/app/providers")
+    assert res.status_code == 200
+    body = res.json()
+    by_name = {p["name"]: p for p in body["providers"]}
+    assert by_name["fireworks"]["configured"] is True
+    for name, info in by_name.items():
+        if name != "fireworks":
+            assert info["configured"] is False
+
+
+def test_providers_get_does_not_leak_api_key(tmp_path, monkeypatch) -> None:
+    """GET /v1/app/providers never serializes a raw API key value."""
+    (tmp_path / "config.toml").write_text(
+        '[providers.anthropic]\napi_key = "sk-ant-secret"\n',
+        encoding="utf-8",
+    )
+    client = _client(tmp_path, monkeypatch)
+    res = client.get("/v1/app/providers")
+    assert res.status_code == 200
+    assert "sk-ant-secret" not in res.text
+
+
+def test_providers_put_writes_two_provider_keys(tmp_path, monkeypatch) -> None:
+    """PUT with two providers' keys writes both to config.toml."""
+    client = _client(tmp_path, monkeypatch)
+    res = client.put(
+        "/v1/app/providers",
+        json={
+            "providers": {
+                "anthropic": {"apiKey": "sk-ant-new"},
+                "openai": {"apiKey": "sk-oai-new"},
+            }
+        },
+    )
+    assert res.status_code == 200
+    written = (tmp_path / "config.toml").read_text(encoding="utf-8")
+    assert "sk-ant-new" in written
+    assert "sk-oai-new" in written
+
+
+def test_providers_put_then_get_shows_both_configured(tmp_path, monkeypatch) -> None:
+    """After PUT sets two keys, GET shows both as configured:true."""
+    client = _client(tmp_path, monkeypatch)
+    client.put(
+        "/v1/app/providers",
+        json={
+            "providers": {
+                "anthropic": {"apiKey": "sk-ant-abc"},
+                "fireworks": {"apiKey": "fw-key-abc"},
+            }
+        },
+    )
+    res = client.get("/v1/app/providers")
+    body = res.json()
+    by_name = {p["name"]: p for p in body["providers"]}
+    assert by_name["anthropic"]["configured"] is True
+    assert by_name["fireworks"]["configured"] is True
+
+
+def test_providers_put_then_configured_providers_returns_both(tmp_path, monkeypatch) -> None:
+    """After PUT, configured_providers() on the written config returns both names."""
+    import tomllib
+    from magi_agent.cli.providers import configured_providers
+
+    client = _client(tmp_path, monkeypatch)
+    client.put(
+        "/v1/app/providers",
+        json={
+            "providers": {
+                "anthropic": {"apiKey": "sk-ant-abc"},
+                "openai": {"apiKey": "sk-oai-abc"},
+            }
+        },
+    )
+    config_path = tmp_path / "config.toml"
+    with open(config_path, "rb") as fh:
+        raw = tomllib.load(fh)
+    result = configured_providers(env={}, config=raw)
+    assert "anthropic" in result
+    assert "openai" in result
+
+
+def test_providers_put_active_sets_model_provider(tmp_path, monkeypatch) -> None:
+    """PUT with active sets [model].provider in config.toml."""
+    client = _client(tmp_path, monkeypatch)
+    res = client.put(
+        "/v1/app/providers",
+        json={
+            "providers": {"fireworks": {"apiKey": "fw-key"}},
+            "active": "fireworks",
+        },
+    )
+    assert res.status_code == 200
+    written = (tmp_path / "config.toml").read_text(encoding="utf-8")
+    assert 'provider = "fireworks"' in written
+
+
+def test_providers_put_empty_api_key_deletes_stored_key(tmp_path, monkeypatch) -> None:
+    """PUT with apiKey:'' removes a previously stored provider key."""
+    (tmp_path / "config.toml").write_text(
+        '[providers.anthropic]\napi_key = "sk-ant-existing"\n',
+        encoding="utf-8",
+    )
+    client = _client(tmp_path, monkeypatch)
+    res = client.put(
+        "/v1/app/providers",
+        json={"providers": {"anthropic": {"apiKey": ""}}},
+    )
+    assert res.status_code == 200
+    body = res.json()
+    by_name = {p["name"]: p for p in body["providers"]}
+    assert by_name["anthropic"]["configured"] is False
+
+
+def test_providers_put_unknown_provider_returns_400(tmp_path, monkeypatch) -> None:
+    """PUT with an unknown provider name → 400 unsupported_provider."""
+    client = _client(tmp_path, monkeypatch)
+    res = client.put(
+        "/v1/app/providers",
+        json={"providers": {"nonexistent-llm": {"apiKey": "key"}}},
+    )
+    assert res.status_code == 400
+    assert res.json()["error"] == "unsupported_provider"
+
+
+def test_providers_put_coexists_with_config_put_model_selection(
+    tmp_path, monkeypatch
+) -> None:
+    """PUT /v1/app/providers key, then PUT /v1/app/config selecting a model — key survives."""
+    client = _client(tmp_path, monkeypatch)
+    # Step 1: store a fireworks key via the providers endpoint.
+    client.put(
+        "/v1/app/providers",
+        json={"providers": {"fireworks": {"apiKey": "fw-secret-coexist"}}},
+    )
+    # Step 2: update the model selection via /v1/app/config.
+    client.put(
+        "/v1/app/config",
+        json={"llm": {"provider": "openai", "model": "gpt-5.5", "apiKey": "sk-oai"}},
+    )
+    # Verify the fireworks key was NOT clobbered.
+    written = (tmp_path / "config.toml").read_text(encoding="utf-8")
+    assert "fw-secret-coexist" in written
+    assert 'provider = "openai"' in written
+
+
+def test_providers_get_requires_gateway_token(tmp_path, monkeypatch) -> None:
+    """GET /v1/app/providers without auth → 401."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("MAGI_CONFIG", str(tmp_path / "config.toml"))
+    for name in _WORKSPACE_ENV_VARS:
+        monkeypatch.delenv(name, raising=False)
+    client = TestClient(create_app(_runtime()))  # no token header
+    assert client.get("/v1/app/providers").status_code == 401
+
+
+def test_providers_put_requires_gateway_token(tmp_path, monkeypatch) -> None:
+    """PUT /v1/app/providers without auth → 401."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("MAGI_CONFIG", str(tmp_path / "config.toml"))
+    for name in _WORKSPACE_ENV_VARS:
+        monkeypatch.delenv(name, raising=False)
+    client = TestClient(create_app(_runtime()))  # no token header
+    res = client.put("/v1/app/providers", json={"providers": {}})
+    assert res.status_code == 401
+
+
+# --------------------------------------------------------------------------- #
+# D1a: persist_provider_keys unit tests
+# --------------------------------------------------------------------------- #
+
+def test_persist_provider_keys_round_trip_preserves_unrelated_sections(
+    tmp_path,
+) -> None:
+    """persist_provider_keys preserves [model] and other existing sections."""
+    import tomllib
+    from magi_agent.cli.providers import persist_provider_keys
+
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        '[model]\nprovider = "anthropic"\nmodel = "claude-x"\n\n'
+        '[custom_section]\nfoo = "bar"\n',
+        encoding="utf-8",
+    )
+    persist_provider_keys({"openai": "sk-oai-test"}, path=config_path)
+
+    with open(config_path, "rb") as fh:
+        raw = tomllib.load(fh)
+
+    # The new key was written.
+    assert raw["providers"]["openai"]["api_key"] == "sk-oai-test"
+    # Existing [model] section preserved.
+    assert raw["model"]["provider"] == "anthropic"
+    assert raw["model"]["model"] == "claude-x"
+    # Unrelated [custom_section] preserved.
+    assert raw["custom_section"]["foo"] == "bar"
+
+
+def test_persist_provider_keys_delete_semantics(tmp_path) -> None:
+    """Passing None or '' removes a provider key and drops the empty table."""
+    import tomllib
+    from magi_agent.cli.providers import persist_provider_keys
+
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        '[providers.anthropic]\napi_key = "sk-ant-existing"\n',
+        encoding="utf-8",
+    )
+    persist_provider_keys({"anthropic": None}, path=config_path)
+
+    with open(config_path, "rb") as fh:
+        raw = tomllib.load(fh)
+
+    assert "providers" not in raw or "anthropic" not in raw.get("providers", {})
+
+
+def test_persist_provider_keys_delete_empty_string(tmp_path) -> None:
+    """Passing '' also removes a provider key."""
+    import tomllib
+    from magi_agent.cli.providers import persist_provider_keys
+
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        '[providers.openai]\napi_key = "sk-oai-existing"\n',
+        encoding="utf-8",
+    )
+    persist_provider_keys({"openai": ""}, path=config_path)
+
+    with open(config_path, "rb") as fh:
+        raw = tomllib.load(fh)
+
+    assert "providers" not in raw or "openai" not in raw.get("providers", {})
+
+
+def test_persist_provider_keys_unknown_provider_raises(tmp_path) -> None:
+    """Unknown provider name raises UnknownProviderError."""
+    from magi_agent.cli.providers import UnknownProviderError, persist_provider_keys
+
+    config_path = tmp_path / "config.toml"
+    with pytest.raises(UnknownProviderError):
+        persist_provider_keys({"nonexistent": "key"}, path=config_path)
+
+
+def test_persist_provider_keys_0600_permissions(tmp_path) -> None:
+    """Written config.toml has 0600 permissions."""
+    import stat as _stat
+    from magi_agent.cli.providers import persist_provider_keys
+
+    config_path = tmp_path / "config.toml"
+    persist_provider_keys({"anthropic": "sk-ant-test"}, path=config_path)
+
+    mode = config_path.stat().st_mode
+    # Owner read+write (0o600), nothing else.
+    assert mode & 0o777 == _stat.S_IRUSR | _stat.S_IWUSR
+
+
+# C1 — PUT /v1/app/config with apiKey must produce a 0600 file
+def test_config_put_with_api_key_produces_0600_file(tmp_path, monkeypatch) -> None:
+    """PUT /v1/app/config containing an apiKey → config.toml is 0600, not world-readable."""
+    import stat as _stat
+
+    client = _client(tmp_path, monkeypatch)
+    res = client.put(
+        "/v1/app/config",
+        json={"llm": {"provider": "openai", "model": "gpt-5.5", "apiKey": "sk-secret-c1"}},
+    )
+    assert res.status_code == 200
+    config_path = tmp_path / "config.toml"
+    assert config_path.exists(), "config.toml was not written"
+    mode = config_path.stat().st_mode
+    assert mode & 0o777 == _stat.S_IRUSR | _stat.S_IWUSR, (
+        f"Expected 0o600 but got {oct(mode & 0o777)}"
+    )
+
+
+# C2 — PUT /v1/app/providers with BOTH apiKey AND model must produce 0600
+#       AND persist both values correctly.
+def test_providers_put_with_key_and_model_produces_0600_file(
+    tmp_path, monkeypatch
+) -> None:
+    """PUT /v1/app/providers with apiKey+model → file is 0600, key and model both stored."""
+    import stat as _stat
+    import tomllib
+
+    client = _client(tmp_path, monkeypatch)
+    res = client.put(
+        "/v1/app/providers",
+        json={
+            "providers": {
+                "openai": {"apiKey": "sk-oai-c2", "model": "gpt-5.5"},
+            }
+        },
+    )
+    assert res.status_code == 200
+
+    config_path = tmp_path / "config.toml"
+    assert config_path.exists(), "config.toml was not written"
+
+    # File-mode check (the main security invariant).
+    mode = config_path.stat().st_mode
+    assert mode & 0o777 == _stat.S_IRUSR | _stat.S_IWUSR, (
+        f"Expected 0o600 but got {oct(mode & 0o777)}"
+    )
+
+    # Both values must be persisted.
+    with open(config_path, "rb") as fh:
+        raw = tomllib.load(fh)
+    assert raw["providers"]["openai"]["api_key"] == "sk-oai-c2"
+    assert raw["providers"]["openai"]["model"] == "gpt-5.5"
+
+
+def test_providers_put_with_key_and_model_get_shows_configured_and_model(
+    tmp_path, monkeypatch
+) -> None:
+    """After PUT with apiKey+model, GET /v1/app/providers shows configured:true and the model."""
+    client = _client(tmp_path, monkeypatch)
+    client.put(
+        "/v1/app/providers",
+        json={
+            "providers": {
+                "openai": {"apiKey": "sk-oai-c2b", "model": "gpt-5.5"},
+            }
+        },
+    )
+    res = client.get("/v1/app/providers")
+    assert res.status_code == 200
+    by_name = {p["name"]: p for p in res.json()["providers"]}
+    assert by_name["openai"]["configured"] is True
+    assert by_name["openai"]["model"] == "gpt-5.5"
