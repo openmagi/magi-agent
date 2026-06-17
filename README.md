@@ -52,17 +52,15 @@ Magi adds that structure at runtime.
 
 ## Why Programmable Determinism
 
-A capable model in a loop can do impressive work — and still hand you something
-plausible but hard to trust. Coding agents worked early because the coding loop
-has *built-in checkpoints*: read, edit, diff, typecheck, test, commit. Research,
-finance, operations, legal, and document work have no such structure by default.
-Magi adds that structure at runtime — and lets you program it.
+That structure has two properties — it is **deterministic**, and it is
+**programmable**. Both carry weight.
 
-**We do not make the model deterministic.** The model stays creative, and can be
-incomplete or wrong. We make the *control around it* deterministic: which of the
-model's proposals become state, evidence, side effects, or user-visible output.
-The component that decides is plain code reading an append-only evidence record —
-zero model calls in the gate. The model proposes; the control plane disposes.
+**Deterministic — we do not make the *model* deterministic.** The model stays
+creative, and can be incomplete or wrong. We make the *control around it*
+deterministic: which of the model's proposals become state, evidence, side
+effects, or user-visible output. The component that decides is plain code reading
+an append-only evidence record — zero model calls in the gate. The model
+proposes; the control plane disposes.
 
 Concretely, a workflow defines:
 
@@ -76,8 +74,8 @@ Concretely, a workflow defines:
 - what becomes user-visible output;
 - what is recorded in the audit ledger.
 
-**Why this must be programmable, not fixed.** The *right* control is not
-universal. It varies with what a domain lets you verify (coding has tests,
+**Programmable — the right control is not universal.** It varies with what a
+domain lets you verify (coding has tests,
 research has sources, finance has reconciliations) and with how much an operator
 wants to enforce (loose vs strict, a source allowlist, a mandatory approval).
 Neither lives in the model's weights — a single model cannot know your policy,
@@ -395,6 +393,21 @@ same format, loaded through the same path as yours: a user pack can add a new
 primitive, override a first-party ref, or remove a first-party pack entirely.
 Each implementation receives the same narrow typed context first-party receives —
 there is no privileged handle.
+
+At a glance — what you can change, how, and what is live today:
+
+| To change…                                                              | How (compose = author a pack · configure = set a value) | Status |
+| ----------------------------------------------------------------------- | ------------------------------------------------------- | ------ |
+| Procedure, format, tone                                                 | drop a `SKILL.md`                                       | ✅ live |
+| A tool, validator, evidence producer, callback, control_plane, connector | author a `pack.toml` (+ `impl.py` for code-bearing types) | ✅ live |
+| A harness preset (a named bundle of the above)                          | author a `pack.toml` `type="harness"`                  | ✅ live |
+| Which packs are on; enforcement strength                                | `~/.magi/config.toml` or a flag                        | ✅ live |
+| A recipe — the per-task assembly of tools/evidence/validators           | author a `pack.toml` `type="recipe"`                   | 🚧 authored & discovered today; runtime selection landing (default-OFF) |
+| An agent role — a scope label for packs/hooks                           | author a `pack.toml` `type="role"`                     | 🚧 landing (default-OFF) |
+| A new verifier stage or lifecycle hook point                            | first-party / upstream change                          | — fixed core, by design |
+
+Legend: ✅ live · 🚧 implemented, landing behind a default-OFF flag · — part of the
+fixed core (see [What stays first-party](#what-stays-first-party--and-why-thats-the-point)).
 
 Scaffold a pack with the CLI:
 
