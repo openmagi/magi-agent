@@ -6,7 +6,13 @@ packId = "openmagi.authoring-static"
 version = "1"
 displayName = "Authoring (static)"
 description = "Read-only source authoring recipe: open source + exact-quote validators."
-defaultEnabled = true
+# defaultEnabled MUST stay false: a defaultEnabled pack is auto-selected
+# *globally* on every turn (see promote_as_default in compiler.py). This pack is
+# NOT in the in-code _first_party_packs() baseline, so with the kernel recipe
+# flag ON a defaultEnabled here would auto-select a read-only authoring recipe on
+# coding/chat turns and drop their verification wiring. It is opt-in (explicit
+# selection / authorizedRecipeRefs).
+defaultEnabled = false
 toolRefs = ["FileRead", "SourceOpen"]
 validatorRefs = ["verifier:sourceOpened@1", "verifier:quoteExactMatch@1"]
 evidenceRefs = ["evidence:openedSourceSnapshot@1", "evidence:quoteDigest@1"]
