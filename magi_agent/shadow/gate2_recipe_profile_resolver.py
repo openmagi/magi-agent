@@ -121,7 +121,9 @@ def resolve_gate2_recipe_profile(profile_ref: str) -> Gate2RecipeProfile:
             toolsPolicy="disabled",
             resolutionSource="blocked",
         )
-    snapshot = AgentRecipeCompiler(PackRegistry.with_first_party_packs()).compile(
+    from magi_agent.recipes.kernel_recipe_packs import build_runtime_pack_registry
+
+    snapshot = AgentRecipeCompiler(build_runtime_pack_registry()).compile(
         ProfileResolutionRequest(
             taskProfile={
                 "taskTypes": ("coding",),

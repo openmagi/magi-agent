@@ -299,7 +299,9 @@ def register_select_recipe_tool(
     if registry.resolve_registration(SELECT_RECIPE_TOOL_NAME) is not None:
         return False
 
-    resolved_registry = pack_registry or PackRegistry.with_first_party_packs()
+    from magi_agent.recipes.kernel_recipe_packs import build_runtime_pack_registry
+
+    resolved_registry = pack_registry or build_runtime_pack_registry()
 
     def _handler(arguments: dict[str, object], context: ToolContext) -> ToolResult:
         return select_recipe_handler(

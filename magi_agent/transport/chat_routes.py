@@ -2193,7 +2193,9 @@ def _first_party_harness_metadata(
     pack_ids = _first_party_recipe_pack_ids_from_payload(payload)
     if not pack_ids:
         return None
-    registry = PackRegistry.with_first_party_packs()
+    from magi_agent.recipes.kernel_recipe_packs import build_runtime_pack_registry
+
+    registry = build_runtime_pack_registry()
     try:
         snapshot = AgentRecipeCompiler(registry).compile(
             ProfileResolutionRequest(

@@ -34,6 +34,8 @@ ProvidesType = Literal[
     "evidence_producer",
     "recipe",
     "connector",
+    # Declarative scope-label type: a namespaced agent role (D2 extension).
+    "role",
     # Pack C policy types (decomposed-subsystem policies; same loader, no privilege)
     "loop_policy",
     "schedule_policy",
@@ -41,7 +43,7 @@ ProvidesType = Literal[
 ]
 
 # Types whose impl is a declarative spec file (relpath) rather than code.
-_SPEC_TYPES: frozenset[str] = frozenset({"recipe"})
+_SPEC_TYPES: frozenset[str] = frozenset({"recipe", "role"})
 # Types that participate in an ordered fan-out (carry priority + phase).
 _ORDERED_TYPES: frozenset[str] = frozenset({"callback", "control_plane"})
 # Only control_plane may pin a gate_position.

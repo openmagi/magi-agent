@@ -413,6 +413,35 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
     ),
     _b(
+        "MAGI_KERNEL_RECIPE_PACKS_ENABLED",
+        stage="stage2",
+        summary=(
+            "Fold kernel-loaded `recipe` provides (pack.toml [[provides]] "
+            "type='recipe'; bundled first-party + ~/.magi/packs + <cwd>/.magi/packs) "
+            "into the recipe-compile PackRegistry. The kernel already materialises a "
+            "recipe spec into a genuine RecipePackManifest; this flag makes the "
+            "compiler consume them. First-party packs register first and win on a "
+            "colliding pack_id (a kernel pack cannot shadow first-party); discovery "
+            "failures fail closed to the first-party-only registry. Strict "
+            "default-OFF (OFF is byte-identical to today)."
+        ),
+    ),
+    _b(
+        "MAGI_KERNEL_ROLE_PROVIDES_ENABLED",
+        stage="stage2",
+        summary=(
+            "Recognise kernel `role` provides (pack.toml [[provides]] type='role'; "
+            "a declarative RoleManifest scope label) in the harness preset "
+            "resolution. First-party roles (general/coding/research) plus validated "
+            "`ext.<name>` external roles; an external role cannot impersonate a "
+            "first-party role or claim hard-safety, and the harness always keeps "
+            "hard-safety in its effective packs. Contained: the engine/parallel/"
+            "inference/evidence AgentRole literals are NOT widened, so an external "
+            "role is a scope label only. Strict default-OFF (OFF is byte-identical "
+            "to today)."
+        ),
+    ),
+    _b(
         "MAGI_WORKER_ROUTING_LLM_ENABLED",
         stage="stage2",
         summary=(
