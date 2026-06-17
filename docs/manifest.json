@@ -119,6 +119,12 @@
       "group": "Core Concepts"
     },
     {
+      "slug": "why-the-harness",
+      "title": "Why the Harness, Not Just Hooks",
+      "path": "docs/why-the-harness.md",
+      "group": "Core Concepts"
+    },
+    {
       "slug": "reference",
       "title": "Reference",
       "path": "docs/reference.md",
