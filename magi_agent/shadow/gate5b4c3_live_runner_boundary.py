@@ -853,10 +853,16 @@ class Gate5B4C3LiveRunnerBoundary:
                                 ids_by_adk_id=live_tool_event_ids_by_adk_id,
                                 pending_ids_by_name=pending_live_tool_event_ids_by_name,
                             )
-                            self._emit_record(
-                                _transcript_tool_call_record(
-                                    function_call, call_id=tool_event_id
-                                ),
+                            _tool_call_record = _transcript_tool_call_record(
+                                function_call, call_id=tool_event_id
+                            )
+                            self._emit_record(_tool_call_record, request=request)
+                            self._emit_evidence(
+                                {
+                                    "toolCallId": tool_event_id,
+                                    "toolName": str(function_call.get("name", "")),
+                                    "record": _tool_call_record,
+                                },
                                 request=request,
                             )
                             subagent_record = _transcript_subagent_record(function_call)
@@ -911,10 +917,17 @@ class Gate5B4C3LiveRunnerBoundary:
                             response_payload = normalized_response.get("response")
                             result_digest = _digest(response_payload)
                             status = _manual_tool_status(response_payload)
-                            self._emit_record(
-                                _transcript_tool_result_record(
-                                    normalized_response, call_id=tool_event_id
-                                ),
+                            _tool_result_record = _transcript_tool_result_record(
+                                normalized_response, call_id=tool_event_id
+                            )
+                            self._emit_record(_tool_result_record, request=request)
+                            self._emit_evidence(
+                                {
+                                    "toolCallId": tool_event_id,
+                                    "toolName": str(normalized_response.get("name", "")),
+                                    "status": status,
+                                    "record": _tool_result_record,
+                                },
                                 request=request,
                             )
                             self._emit_public_event(
@@ -1312,6 +1325,41 @@ class Gate5B4C3LiveRunnerBoundary:
             sink(dict(event), _shadow_session_id(request), request.turn.turn_id)
         except Exception:
             logger.debug("gate5b transcript record failed", exc_info=True)
+
+    def _emit_evidence(
+        self, record: dict, *, request: Gate5B4C3ShadowGenerationRequest
+    ) -> None:
+        """Append one tool evidence record to the durable per-session JSONL.
+
+        Disk side-effect only — never touches the SSE event stream or the
+        transcript sink, so the boundary result and observable output are
+        completely unaffected.  Fully fail-open: any error is debug-logged and
+        silently swallowed; a serving turn must never fail because of evidence
+        persistence."""
+        try:
+            from magi_agent.config.flags import flag_bool
+
+            if not flag_bool("MAGI_SERVE_EVIDENCE_ENABLED"):
+                return
+            from magi_agent.evidence.ledger_store import (
+                serve_evidence_ledger_dir,
+                write_evidence_records,
+            )
+            from magi_agent.observability.integration import resolve_observability_home
+
+            evidence_dir = serve_evidence_ledger_dir(
+                default_dir=resolve_observability_home() / "evidence"
+            )
+            if evidence_dir is None:
+                return
+            write_evidence_records(
+                evidence_dir,
+                session_id=_shadow_session_id(request),
+                turn_id=request.turn.turn_id,
+                records=[record],
+            )
+        except Exception:
+            logger.debug("gate5b evidence emit failed", exc_info=True)
 
     def _emit_turn_completion(
         self,
