@@ -21,7 +21,7 @@ needs the optional ``litellm`` dependency; if it is missing we raise
 from __future__ import annotations
 
 import os
-from collections.abc import Coroutine, Mapping
+from collections.abc import Coroutine, Mapping, Sequence
 from datetime import datetime
 from typing import Any, AsyncGenerator, Callable
 
@@ -162,6 +162,7 @@ def build_cli_model_runner(
     self_review_config: object | None = None,
     self_review_now: datetime | None = None,
     self_review_scheduler: Callable[[Coroutine[Any, Any, None]], None] | None = None,
+    pinned_recipe_pack_ids: Sequence[str] = (),
 ) -> CliModelRunner:
     """Build a real, model-backed CLI runner from a resolved provider config.
 
@@ -245,6 +246,7 @@ def build_cli_model_runner(
         model_label=config.litellm_model,
         live_policy_callback_attached=True,
         task_profile=task_profile,
+        pinned_recipe_pack_ids=pinned_recipe_pack_ids,
     )
     _attach_first_party_policy_callback(agent, runner_policy_assembly)
     session_service = WorkspaceSessionService(app_name=app_name)
@@ -639,6 +641,7 @@ def _build_default_runner_policy_assembly(
     model_label: str,
     live_policy_callback_attached: bool,
     task_profile: Mapping[str, object] | None = None,
+    pinned_recipe_pack_ids: Sequence[str] = (),
 ) -> RunnerPolicyAssembly | None:
     from magi_agent.config.env import parse_evidence_completion_gate_enabled  # noqa: PLC0415
 
@@ -666,21 +669,32 @@ def _build_default_runner_policy_assembly(
     # ``explicitRecipeSelection`` block the hosted surface uses). Unset/blank ⇒
     # no key added ⇒ automatic selection is byte-identical to today.
     forced_recipe = os.environ.get("MAGI_FORCE_RECIPE", "").strip()
+    from magi_agent.recipes.kernel_recipe_packs import (  # noqa: PLC0415
+        build_runtime_pack_registry,
+    )
+    _pin_registry = build_runtime_pack_registry()
+    from magi_agent.recipes.recipe_routing import (  # noqa: PLC0415
+        normalize_pinned_recipe_pack_ids,
+    )
+    validated_pins = normalize_pinned_recipe_pack_ids(
+        pinned_recipe_pack_ids, _pin_registry
+    )
+    required_refs: list[dict[str, str]] = []
     if forced_recipe:
+        required_refs.append({"recipeId": forced_recipe})
+    required_refs.extend(
+        {"recipeId": pid} for pid in validated_pins if pid != forced_recipe
+    )
+    if required_refs:
         runtime_context["explicitRecipeSelection"] = {
             "mode": "this_turn",
-            "requiredRecipeRefs": [{"recipeId": forced_recipe}],
-            # Pin to ONLY the forced recipe: auto-selecting other packs (e.g.
-            # dev-coding) would short-circuit _pre_final_gate_applies and skip
-            # the gate. A forced recipe means "this and nothing else".
-            "allowAdditionalAutoRecipes": False,
+            "requiredRecipeRefs": required_refs,
+            # MAGI_FORCE_RECIPE keeps "only these" (False); a user pin ADDS to
+            # auto-selection (True). When both are present, forced dominates.
+            "allowAdditionalAutoRecipes": not forced_recipe,
         }
     try:
-        from magi_agent.recipes.kernel_recipe_packs import (  # noqa: PLC0415
-            build_runtime_pack_registry,
-        )
-
-        snapshot = AgentRecipeCompiler(build_runtime_pack_registry()).compile(
+        snapshot = AgentRecipeCompiler(_pin_registry).compile(
             ProfileResolutionRequest(
                 taskProfile=effective_task_profile,
                 runtimeContext=runtime_context,
