@@ -51,7 +51,10 @@ from __future__ import annotations
 import hashlib
 import os
 from collections.abc import Callable, Mapping, Sequence
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
+
+if TYPE_CHECKING:
+    from magi_agent.channels.turn_bridge import ChannelInbound
 
 from magi_agent.channels.telegram_adapter import (
     TelegramAdapterBoundary,
@@ -410,6 +413,23 @@ def deliver(
 
 
 # ---------------------------------------------------------------------------
+# Projection into the shared ChannelInbound (turn bridge seam)
+# ---------------------------------------------------------------------------
+
+def to_channel_inbound(update: TelegramInboundUpdate) -> "ChannelInbound":
+    """Project a Telegram boundary update into the channel-agnostic inbound type."""
+    from magi_agent.channels.turn_bridge import ChannelInbound
+
+    return ChannelInbound(
+        channel_type="telegram",
+        channel_id=update.chat_id,
+        text=update.text,
+        message_id=update.message_id,
+        user_id=update.user_id,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Public exports
 # ---------------------------------------------------------------------------
 
@@ -420,4 +440,5 @@ __all__ = [
     "is_live_telegram_enabled",
     "poll_and_dispatch",
     "startup_delete_webhook",
+    "to_channel_inbound",
 ]
