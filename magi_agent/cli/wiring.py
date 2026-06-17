@@ -109,11 +109,11 @@ def _build_criterion_model_factory() -> object | None:
     Haiku-class factory (``resolve_provider_config`` → ``_build_litellm_for_config``).
     Fail-soft to None.
     """
-    from magi_agent.config.flags import flag_bool
+    from magi_agent.config.flags import flag_bool, flag_profile_bool
 
     if not (
         flag_bool("MAGI_EGRESS_GATE_ENABLED")
-        and flag_bool("MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED")
+        and flag_profile_bool("MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED")
     ):
         return None
     try:

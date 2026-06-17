@@ -213,16 +213,22 @@ def test_flag_bool_unknown_flag_raises() -> None:
         flag_bool("MAGI_UNREGISTERED", env={})
 
 
-def test_customize_verification_flag_defaults_off() -> None:
-    # Master switch for Customize verification presets — strict default-OFF.
-    assert flag_bool("MAGI_CUSTOMIZE_VERIFICATION_ENABLED", env={}) is False
-    assert flag_bool("MAGI_CUSTOMIZE_VERIFICATION_ENABLED", env={"MAGI_CUSTOMIZE_VERIFICATION_ENABLED": "1"}) is True
+def test_customize_verification_flag_profile_aware_default_on() -> None:
+    # Master switch for Customize verification presets — profile-aware default-ON
+    # (full runtime profile; OFF under safe/eval; explicit "0" always wins).
+    name = "MAGI_CUSTOMIZE_VERIFICATION_ENABLED"
+    assert flag_profile_bool(name, env={}) is True  # full profile default
+    assert flag_profile_bool(name, env={"MAGI_RUNTIME_PROFILE": "safe"}) is False
+    assert flag_profile_bool(name, env={name: "0"}) is False
+    assert flag_profile_bool(name, env={name: "1", "MAGI_RUNTIME_PROFILE": "safe"}) is True
 
 
-def test_customize_custom_rules_flag_defaults_off() -> None:
-    # Custom-rule load/compile gate — strict default-OFF (byte-identical when off).
-    assert flag_bool("MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED", env={}) is False
-    assert flag_bool("MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED", env={"MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED": "1"}) is True
+def test_customize_custom_rules_flag_profile_aware_default_on() -> None:
+    # Custom-rule load/compile gate — profile-aware default-ON.
+    name = "MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED"
+    assert flag_profile_bool(name, env={}) is True
+    assert flag_profile_bool(name, env={"MAGI_RUNTIME_PROFILE": "eval"}) is False
+    assert flag_profile_bool(name, env={name: "0"}) is False
 
 
 def test_flag_bool_rejects_non_bool_kind() -> None:

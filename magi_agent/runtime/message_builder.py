@@ -446,9 +446,9 @@ def _user_rules_block() -> str:
     Flag-gated by ``MAGI_CUSTOMIZE_VERIFICATION_ENABLED``: empty (no section) when
     off or unset, so the prompt is byte-identical to main. Fail-soft to "".
     """
-    from magi_agent.config.flags import flag_bool
+    from magi_agent.config.flags import flag_profile_bool
 
-    if not flag_bool("MAGI_CUSTOMIZE_VERIFICATION_ENABLED"):
+    if not flag_profile_bool("MAGI_CUSTOMIZE_VERIFICATION_ENABLED"):
         return ""
     try:
         from magi_agent.customize.store import load_overrides

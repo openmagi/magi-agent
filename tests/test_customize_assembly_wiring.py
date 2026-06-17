@@ -66,9 +66,10 @@ def test_opt_out_removes_ref_when_flag_on(gate_on, monkeypatch):
 
 
 def test_opt_out_has_no_effect_when_flag_off(gate_on, monkeypatch):
-    """Regression: with the customize flag OFF, an opt-out in customize.json must
-    NOT change the assembled policy (byte-identical to baseline)."""
-    monkeypatch.delenv("MAGI_CUSTOMIZE_VERIFICATION_ENABLED", raising=False)
+    """Regression: with the customize flag explicitly OFF, an opt-out in
+    customize.json must NOT change the assembled policy (byte-identical). The flag
+    is profile-aware default-ON, so OFF is now an explicit "0"."""
+    monkeypatch.setenv("MAGI_CUSTOMIZE_VERIFICATION_ENABLED", "0")
     _set(gate_on, "coding-verification", False)
     assembly = _build()
     assert assembly is not None
@@ -90,6 +91,15 @@ def test_unrelated_opt_out_does_not_remove_coding_ref(gate_on, monkeypatch):
 from magi_agent.cli.real_runner import _apply_customize_verification  # noqa: E402
 
 
+def test_master_on_empty_config_does_not_inject_coding_ref(gate_on, monkeypatch):
+    """Regression (default-ON safety): master flag ON but NO customize overrides
+    must be a NO-OP — the opt_out seam must NOT inject the coding ref into an
+    unrelated (non-coding) validator list. opt_out is remove-only; the coding ref
+    only ever comes from the recipe/pack path for coding turns."""
+    monkeypatch.setenv("MAGI_CUSTOMIZE_VERIFICATION_ENABLED", "1")
+    assert _apply_customize_verification(["seed:ref"]) == ["seed:ref"]
+
+
 def test_custom_det_rule_adds_ref_when_both_flags_on(gate_on, monkeypatch):
     monkeypatch.setenv("MAGI_CUSTOMIZE_VERIFICATION_ENABLED", "1")
     monkeypatch.setenv("MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED", "1")
@@ -101,14 +111,14 @@ def test_custom_det_rule_adds_ref_when_both_flags_on(gate_on, monkeypatch):
 def test_custom_det_rule_inert_when_custom_flag_off(gate_on, monkeypatch):
     # master ON but custom-rules flag OFF → rule persists but does NOT compile.
     monkeypatch.setenv("MAGI_CUSTOMIZE_VERIFICATION_ENABLED", "1")
-    monkeypatch.delenv("MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED", raising=False)
+    monkeypatch.setenv("MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED", "0")
     set_custom_rule(_det_rule("evidence:git-diff"), path=gate_on)
     out = _apply_customize_verification(["seed:ref"])
     assert "evidence:git-diff" not in out
 
 
 def test_custom_det_rule_inert_when_master_flag_off(gate_on, monkeypatch):
-    monkeypatch.delenv("MAGI_CUSTOMIZE_VERIFICATION_ENABLED", raising=False)
+    monkeypatch.setenv("MAGI_CUSTOMIZE_VERIFICATION_ENABLED", "0")
     monkeypatch.setenv("MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED", "1")
     set_custom_rule(_det_rule("evidence:git-diff"), path=gate_on)
     assert _apply_customize_verification(["seed:ref"]) == ["seed:ref"]

@@ -117,6 +117,10 @@ def test_both_runners_register_same_controls_when_edit_retry_on(
     """With MAGI_EDIT_RETRY_REFLECTION_ENABLED=1, both runners have the same controls."""
     monkeypatch.setenv("CORE_AGENT_PYTHON_LOCAL_ADK_RUNNER", "1")
     monkeypatch.setenv("MAGI_EDIT_RETRY_REFLECTION_ENABLED", "1")
+    # Compare CORE control parity only: the customize after-tool control is a
+    # real_runner-only extra (profile-aware default-ON), so pin it off here.
+    monkeypatch.setenv("MAGI_CUSTOMIZE_VERIFICATION_ENABLED", "0")
+    monkeypatch.setenv("MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED", "0")
     for k in [
         "MAGI_LOOP_GUARD_ENABLED",
         "MAGI_ERROR_RECOVERY_ENABLED",
@@ -158,6 +162,10 @@ def test_both_runners_register_same_default_controls(
 ) -> None:
     """With the local full profile, both runners register the same default controls."""
     monkeypatch.setenv("CORE_AGENT_PYTHON_LOCAL_ADK_RUNNER", "1")
+    # Compare CORE control parity only: the customize after-tool control is a
+    # real_runner-only extra (profile-aware default-ON), so pin it off here.
+    monkeypatch.setenv("MAGI_CUSTOMIZE_VERIFICATION_ENABLED", "0")
+    monkeypatch.setenv("MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED", "0")
     for k in [
         "MAGI_EDIT_RETRY_REFLECTION_ENABLED",
         "MAGI_LOOP_GUARD_ENABLED",

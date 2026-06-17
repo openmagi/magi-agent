@@ -117,11 +117,11 @@ class CustomizeAfterToolControl(BaseLoopControl):
 
     async def _decide(self, *, tool: Any, result: Any) -> dict[str, Any] | None:
         try:
-            from magi_agent.config.flags import flag_bool
+            from magi_agent.config.flags import flag_profile_bool
 
             if not (
-                flag_bool("MAGI_CUSTOMIZE_VERIFICATION_ENABLED")
-                and flag_bool("MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED")
+                flag_profile_bool("MAGI_CUSTOMIZE_VERIFICATION_ENABLED")
+                and flag_profile_bool("MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED")
             ):
                 return None
             policy = self._policy_loader()

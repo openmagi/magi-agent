@@ -35,7 +35,8 @@ def test_startup_applies_verification_policy_when_flag_on(tmp_path, monkeypatch)
 
 
 def test_startup_skips_verification_policy_when_flag_off(tmp_path, monkeypatch):
-    monkeypatch.delenv("MAGI_CUSTOMIZE_VERIFICATION_ENABLED", raising=False)
+    # Profile-aware default-ON, so OFF is explicit "0".
+    monkeypatch.setenv("MAGI_CUSTOMIZE_VERIFICATION_ENABLED", "0")
     cfile = tmp_path / "customize.json"
     monkeypatch.setenv("MAGI_CUSTOMIZE", str(cfile))
     from magi_agent.customize.store import set_verification_override

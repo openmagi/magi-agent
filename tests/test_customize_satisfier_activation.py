@@ -59,9 +59,10 @@ def test_fact_grounding_activated_by_customize_toggle(monkeypatch, tmp_path):
 
 
 def test_fact_grounding_not_activated_when_master_flag_off(monkeypatch, tmp_path):
-    # preset enabled in file but MASTER flag off → still inert
+    # preset enabled in file but MASTER flag explicitly off → still inert.
+    # (Master is profile-aware default-ON, so OFF is explicit "0".)
     monkeypatch.delenv("MAGI_FACT_GROUNDING_VERIFICATION_ENABLED", raising=False)
-    monkeypatch.delenv("MAGI_CUSTOMIZE_VERIFICATION_ENABLED", raising=False)
+    monkeypatch.setenv("MAGI_CUSTOMIZE_VERIFICATION_ENABLED", "0")
     cfile = tmp_path / "customize.json"
     monkeypatch.setenv("MAGI_CUSTOMIZE", str(cfile))
     set_verification_override("harness_presets", "fact-grounding", True, path=cfile)

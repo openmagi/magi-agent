@@ -171,8 +171,11 @@ LAB_EXPERIMENTAL_FLAGS: tuple[str, ...] = (
     "MAGI_COMPACTION_TOOL_PRUNE_ENABLED",
     "MAGI_COMPUTE_VIA_CODE_ENABLED",
     "MAGI_CROSS_VERIFY_ENABLED",
-    "MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED",
-    "MAGI_CUSTOMIZE_VERIFICATION_ENABLED",
+    # NOTE: MAGI_CUSTOMIZE_VERIFICATION_ENABLED / MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED
+    # are NOT here: they are profile-aware default-ON (``_pb``), so they resolve ON
+    # in every non-safe profile (full AND lab) on their own. The lab seed only
+    # forces the strict-truthy ``_b`` experimental flags whose registry default is
+    # OFF.
     "MAGI_DEEP_WEB_RESEARCH_ENABLED",
     "MAGI_DEFERRED_TOOLS_ENABLED",
     "MAGI_DOCUMENT_QA_ENABLED",
@@ -213,8 +216,17 @@ LAB_EXPERIMENTAL_FLAGS: tuple[str, ...] = (
     "MAGI_WORKER_ROUTING_LLM_ENABLED",
 )
 
+# Lab seed for the few experimental flags that are NOT plain "1" booleans.
+# MAGI_DOCUMENT_AUTHORING_COVERAGE is a 3-mode flag (off/advisory/block); lab
+# enables the non-blocking ``advisory`` tier (turning on the document-coverage
+# verification config without hard-blocking turns).
+LAB_EXPERIMENTAL_MODE_FLAGS: Mapping[str, str] = {
+    "MAGI_DOCUMENT_AUTHORING_COVERAGE": "advisory",
+}
+
 LAB_RUNTIME_ENV_DEFAULTS: Mapping[str, str] = {
     "MAGI_RUNTIME_PROFILE": "lab",
+    **LAB_EXPERIMENTAL_MODE_FLAGS,
     **{name: "1" for name in LAB_EXPERIMENTAL_FLAGS},
 }
 
