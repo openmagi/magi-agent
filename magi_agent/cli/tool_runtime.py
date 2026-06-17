@@ -804,12 +804,14 @@ def recipe_listing_block(env: Mapping[str, str] | None = None) -> str:
         if not recipe_routing_llm_enabled(source):
             return ""
 
-        from magi_agent.recipes.compiler import PackRegistry  # noqa: PLC0415
+        from magi_agent.recipes.kernel_recipe_packs import (  # noqa: PLC0415
+            build_runtime_pack_registry,
+        )
         from magi_agent.recipes.recipe_routing import (  # noqa: PLC0415
             build_recipe_listing_section,
         )
 
-        return build_recipe_listing_section(PackRegistry.with_first_party_packs())
+        return build_recipe_listing_section(build_runtime_pack_registry())
     except Exception:  # noqa: BLE001
         return ""
 

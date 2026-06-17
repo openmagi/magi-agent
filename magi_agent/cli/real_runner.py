@@ -637,7 +637,11 @@ def _build_default_runner_policy_assembly(
             "allowAdditionalAutoRecipes": False,
         }
     try:
-        snapshot = AgentRecipeCompiler(PackRegistry.with_first_party_packs()).compile(
+        from magi_agent.recipes.kernel_recipe_packs import (  # noqa: PLC0415
+            build_runtime_pack_registry,
+        )
+
+        snapshot = AgentRecipeCompiler(build_runtime_pack_registry()).compile(
             ProfileResolutionRequest(
                 taskProfile=effective_task_profile,
                 runtimeContext=runtime_context,
@@ -728,13 +732,15 @@ def _attach_first_party_policy_callback(
         from magi_agent.config.env import recipe_routing_llm_enabled  # noqa: PLC0415
 
         if recipe_routing_llm_enabled(env):
-            from magi_agent.recipes.compiler import PackRegistry  # noqa: PLC0415
+            from magi_agent.recipes.kernel_recipe_packs import (  # noqa: PLC0415
+                build_runtime_pack_registry,
+            )
             from magi_agent.recipes.recipe_routing import (  # noqa: PLC0415
                 SELECTED_RECIPE_PACK_IDS_STATE_KEY,
                 build_recipe_tool_scope,
             )
 
-            resolved_registry = pack_registry or PackRegistry.with_first_party_packs()
+            resolved_registry = pack_registry or build_runtime_pack_registry()
             scope = build_recipe_tool_scope(resolved_registry)
             state_key = SELECTED_RECIPE_PACK_IDS_STATE_KEY
     except Exception:

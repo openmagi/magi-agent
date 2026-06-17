@@ -426,7 +426,9 @@ def build_deep_research_workflow(
     Citations come later from :func:`assemble_cited_synthesis` over the
     executor result's surviving (cross-checked) claim refs.
     """
-    snapshot = AgentRecipeCompiler(PackRegistry.with_first_party_packs()).compile(
+    from magi_agent.recipes.kernel_recipe_packs import build_runtime_pack_registry
+
+    snapshot = AgentRecipeCompiler(build_runtime_pack_registry()).compile(
         ProfileResolutionRequest(taskProfile={"taskType": "research"})
     )
     entry = SavedWorkflowEntry.from_recipe(
