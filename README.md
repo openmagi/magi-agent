@@ -132,6 +132,11 @@ falls back to a model-free stub. You can persist the key and model in
 Claude-Code-style permission modes (`--permission-mode default` to approve each
 tool, `--mode plan` for read-only planning).
 
+The **Local web dashboard** runs at http://localhost:8080/dashboard; run
+`magi-agent serve --help` for serve options. If Homebrew tries to build from
+source instead of using the prebuilt bottle, reinstall it:
+`brew reinstall openmagi/tap/magi-agent --force-bottle`.
+
 Full setup, config resolution, and CLI flags:
 [Getting started](docs/getting-started.md) · [CLI reference](docs/cli/magi.md).
 
@@ -202,16 +207,22 @@ checkpoints:
 
 You can enable these surfaces explicitly for the workflows you want to run. Local
 development can run the contracts and fixture suites without granting live tool
-authority.
-
-**Honest status.** The flagship research example (answer only from inspected
-sources, every claim linked to a source span) is the evidence-governance *model*,
-not a fresh-install hard block: the research final-projection gate is audit-only
-(default-OFF) and records claims without blocking the answer. The gate that
-*blocks* today is the coding-domain pre-final evidence gate (default-ON for coding
-turns). Full walkthrough and the three-tier guarantee ceiling:
-[Source-verified research](docs/source-verified-research.md). Pack list:
+authority. For the full pack list see
 [First-party packs](docs/first-party-packs.md).
+
+## Verify Source Before Claim
+
+The flagship governance example is a research task that answers only from
+inspected sources, each claim linked to a source span. It illustrates the
+evidence-governance model; the full walkthrough and the three-tier guarantee
+ceiling live in [Source-verified research](docs/source-verified-research.md).
+
+> **Status:** this is the evidence-governance *model*, not a fresh-install hard
+> block. The research final-projection gate is **audit-only** (default-OFF): it
+> records claims but **does not block the final answer**. The gate that *does*
+> block today is the coding-domain **pre-final** completion/evidence gate
+> (default-ON for coding turns). Treat the research rungs as the governance
+> model, not as out-of-the-box research blocking.
 
 ## Extending the runtime
 
