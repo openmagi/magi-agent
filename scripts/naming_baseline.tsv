@@ -148,6 +148,7 @@ openmagi	magi_agent/recipes/first_party/learning_usage.py	10
 openmagi	magi_agent/recipes/first_party/memory_recall.py	1
 openmagi	magi_agent/recipes/kernel_recipe_packs.py	1
 openmagi	magi_agent/recipes/materializer.py	26
+openmagi	magi_agent/recipes/recipe_routing.py	1
 openmagi	magi_agent/recipes/reliability_policy.py	18
 openmagi	magi_agent/recipes/workflow_recipe.py	1
 openmagi	magi_agent/research/action_claims.py	5

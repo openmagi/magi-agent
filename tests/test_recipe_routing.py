@@ -598,3 +598,39 @@ def test_obligation_scope_unknown_pack_ignored():
 
     scope = build_recipe_obligation_scope(build_runtime_pack_registry())
     assert scope.obligations_for(["does.not.exist"]) == ((), ())
+
+
+def test_obligation_scope_two_packs_union_is_additive():
+    """M4: obligations_for(research + dev-coding) == union of each pack's obligations.
+
+    Locks the additive-union property Task 2 relies on: selecting BOTH packs must
+    produce a result containing every validator from the research pack AND the
+    dev-coding test-evidence validator, plus every evidence ref from both packs.
+    No validator or evidence from either single-pack call may be dropped.
+    """
+    from magi_agent.recipes.kernel_recipe_packs import build_runtime_pack_registry
+    from magi_agent.recipes.recipe_routing import build_recipe_obligation_scope
+
+    scope = build_recipe_obligation_scope(build_runtime_pack_registry())
+    research_validators, research_evidence = scope.obligations_for(["openmagi.research"])
+    coding_validators, coding_evidence = scope.obligations_for(["openmagi.dev-coding"])
+    union_validators, union_evidence = scope.obligations_for(
+        ["openmagi.research", "openmagi.dev-coding"]
+    )
+
+    # Every single-pack validator must appear in the two-pack union.
+    for v in research_validators:
+        assert v in union_validators, f"research validator {v!r} missing from union"
+    for v in coding_validators:
+        assert v in union_validators, f"dev-coding validator {v!r} missing from union"
+
+    # Every single-pack evidence ref must appear in the two-pack union.
+    for e in research_evidence:
+        assert e in union_evidence, f"research evidence {e!r} missing from union"
+    for e in coding_evidence:
+        assert e in union_evidence, f"dev-coding evidence {e!r} missing from union"
+
+    # The union must be strictly at least as large as either single-pack result
+    # (it cannot shrink obligations).
+    assert len(union_validators) >= max(len(research_validators), len(coding_validators))
+    assert len(union_evidence) >= max(len(research_evidence), len(coding_evidence))
