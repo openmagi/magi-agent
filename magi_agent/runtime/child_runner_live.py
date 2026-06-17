@@ -397,7 +397,8 @@ class RealLocalChildRunner:
         # _resolve_turn_toolset returns the SAME restricted toolset the legacy
         # path builds; we pass it directly to build_headless_runtime so the
         # governed runner is also restricted to the child's profile.
-        tools, _evidence_collector = self._resolve_turn_toolset(session_id)
+        # request is forwarded for Task 2B.3 tighten-only parent_cap filtering.
+        tools, _evidence_collector = self._resolve_turn_toolset(session_id, request=request)
 
         # --- Resolve memory mode + depth from request metadata ---------------
         # parent_memory_mode: not yet threaded to this call site; default to
@@ -466,7 +467,8 @@ class RealLocalChildRunner:
         runner = self._injected_runner
         # PR1: resolve the toolset (and tool-call evidence collector) ONCE so the
         # same collector instance is wired into the builder and queried after.
-        tools, evidence_collector = self._resolve_turn_toolset(session_id)
+        # request is forwarded for Task 2B.3 tighten-only parent_cap filtering.
+        tools, evidence_collector = self._resolve_turn_toolset(session_id, request=request)
         if runner is None:
             workspace = self._workspace_root or tempfile.mkdtemp()
             runner = build_cli_model_runner(
@@ -527,7 +529,9 @@ class RealLocalChildRunner:
     # PR1: toolset resolution + tool-call evidence promotion              #
     # ------------------------------------------------------------------ #
 
-    def _resolve_turn_toolset(self, session_id: str) -> tuple[list[object], object | None]:
+    def _resolve_turn_toolset(
+        self, session_id: str, request: object = None
+    ) -> tuple[list[object], object | None]:
         """Resolve the child's toolset + evidence collector for this turn.
 
         Precedence:
@@ -541,7 +545,16 @@ class RealLocalChildRunner:
         For tool-enabled profiles a ``LocalToolEvidenceCollector`` is created (or
         the injected one reused) and threaded into ``build_cli_adk_tools`` so
         each tool-call records a public ``evidence:`` ref.
+
+        Task 2B.3 — tighten-only intersection (MAGI_SUBAGENT_TOOL_TIGHTEN_ONLY_ENABLED):
+        When the flag is ON and ``request.metadata["parentToolNames"]`` is non-empty,
+        the resolved profile tools are filtered to those whose name is in parent_cap.
+        When the flag is OFF or parent_cap is empty, the profile tools are returned
+        UNCHANGED (byte-identical to pre-2B.3).
+        # NOTE: this governs FIRST-PARTY tools only; Composio MCP is a separate
+        # default-OFF attachment seam and is out of scope here.
         """
+        from magi_agent.config.flags import flag_bool  # noqa: PLC0415
         from magi_agent.runtime.child_toolset import (  # noqa: PLC0415
             toolset_allowlist,
         )
@@ -563,11 +576,24 @@ class RealLocalChildRunner:
         tools = self._build_core_tools(session_id, collector)
         if allowlist is None:
             # ``full`` profile — forward the whole toolset.
-            return list(tools), collector
-        # ``readonly`` profile — filter to the read-only allowlist by tool name.
-        allowed = set(allowlist)
-        filtered = [tool for tool in tools if _tool_name(tool) in allowed]
-        return filtered, collector
+            profile_tools: list[object] = list(tools)
+        else:
+            # ``readonly`` profile — filter to the read-only allowlist by tool name.
+            allowed = set(allowlist)
+            profile_tools = [tool for tool in tools if _tool_name(tool) in allowed]
+
+        # Task 2B.3: tighten-only intersection — apply AFTER profile filtering.
+        # When the flag is ON and parent_cap is non-empty, intersect with the
+        # parent's tool names so the child never exceeds the parent's capability.
+        # When the flag is OFF or parent_cap is empty, return profile_tools unchanged.
+        if flag_bool("MAGI_SUBAGENT_TOOL_TIGHTEN_ONLY_ENABLED", env=self._env):
+            metadata = getattr(request, "metadata", None) or {}
+            raw_cap = metadata.get("parentToolNames") if isinstance(metadata, dict) else None
+            parent_cap = frozenset(raw_cap) if raw_cap else frozenset()
+            if parent_cap:
+                profile_tools = [t for t in profile_tools if _tool_name(t) in parent_cap]
+
+        return profile_tools, collector
 
     @staticmethod
     def _build_evidence_collector() -> object | None:
