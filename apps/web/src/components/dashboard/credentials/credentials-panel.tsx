@@ -4,7 +4,8 @@ import { useCallback, useState } from "react";
 import { KeyRound, ShieldAlert, ShieldCheck } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input, Select } from "@/components/ui/input";
+import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 import { useAgentFetch } from "@/lib/local-api";
 import {
   registerCredential,
@@ -203,15 +204,10 @@ export function CredentialsPanel({ botId }: CredentialsPanelProps): React.JSX.El
           <Select
             label="Auth scheme"
             value={authScheme}
-            onChange={(e) => setAuthScheme(e.target.value)}
+            options={AUTH_SCHEMES.map((scheme) => ({ value: scheme, label: scheme }))}
+            onChange={setAuthScheme}
             disabled={!vaultReady || submitting}
-          >
-            {AUTH_SCHEMES.map((scheme) => (
-              <option key={scheme} value={scheme}>
-                {scheme}
-              </option>
-            ))}
-          </Select>
+          />
         </div>
         <Input
           label="Secret (write-only)"

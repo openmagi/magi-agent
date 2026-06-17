@@ -17,6 +17,7 @@ import {
   type KnowledgeScope,
 } from "@/lib/knowledge/console-model";
 import { KB_UPLOAD_ACCEPT } from "@/lib/knowledge/upload-mime";
+import { Select } from "@/components/ui/select";
 
 const COLLECTION_PAGE_SIZE = 40;
 const DOCUMENT_PAGE_SIZE = 50;
@@ -627,34 +628,38 @@ export function KnowledgeConsole({
                 placeholder={selectedCollectionName ? `Search ${documents.length} files...` : "Select a collection first"}
                 className="min-h-[38px] rounded-lg border border-black/10 bg-white px-3 text-sm outline-none focus:border-primary/50"
               />
-              <select
+              <Select
+                aria-label="Filter by status"
                 value={statusFilter}
-                onChange={(event) => {
-                  setStatusFilter(event.target.value as KnowledgeDocumentStatusFilter);
+                options={[
+                  { value: "all", label: "Any status" },
+                  { value: "ready", label: "Indexed" },
+                  { value: "processing", label: "Indexing" },
+                  { value: "error", label: "Failed" },
+                  { value: "pending", label: "Pending" },
+                ]}
+                onChange={(next) => {
+                  setStatusFilter(next as KnowledgeDocumentStatusFilter);
                   setDocumentPage(0);
                 }}
-                className="min-h-[38px] rounded-lg border border-black/10 bg-white px-3 text-sm"
-              >
-                <option value="all">Any status</option>
-                <option value="ready">Indexed</option>
-                <option value="processing">Indexing</option>
-                <option value="error">Failed</option>
-                <option value="pending">Pending</option>
-              </select>
-              <select
+                className="min-h-[38px] rounded-lg px-3 py-0 text-sm font-normal"
+              />
+              <Select
+                aria-label="Filter by source"
                 value={sourceFilter}
-                onChange={(event) => {
-                  setSourceFilter(event.target.value as KnowledgeDocumentSourceFilter);
+                options={[
+                  { value: "all", label: "Any source" },
+                  { value: "file", label: "Files" },
+                  { value: "notion", label: "Notion" },
+                  { value: "zip", label: "Zip" },
+                  { value: "other", label: "Other" },
+                ]}
+                onChange={(next) => {
+                  setSourceFilter(next as KnowledgeDocumentSourceFilter);
                   setDocumentPage(0);
                 }}
-                className="min-h-[38px] rounded-lg border border-black/10 bg-white px-3 text-sm"
-              >
-                <option value="all">Any source</option>
-                <option value="file">Files</option>
-                <option value="notion">Notion</option>
-                <option value="zip">Zip</option>
-                <option value="other">Other</option>
-              </select>
+                className="min-h-[38px] rounded-lg px-3 py-0 text-sm font-normal"
+              />
             </div>
           </div>
           <div className="grid grid-cols-[36px_minmax(220px,1fr)_88px_76px_132px_220px] border-b border-black/10 px-3 py-2 text-xs font-semibold text-secondary">
