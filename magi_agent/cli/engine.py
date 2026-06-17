@@ -3083,15 +3083,26 @@ class MagiEngineDriver:
         Missing ⇒ ``["ga_deliverable:artifactRef"]``, a blocked-reason the
         model can act on (produce the artifact and emit its receipt). Reuses
         the previously-dormant Track 19 PR3 verifier logic; no new policy is
-        invented here. Default OFF ⇒ ``[]`` ⇒ byte-identical to main.
+        invented here.
+
+        Gated by ``MAGI_GA_DELIVERABLE_GATE_ENABLED`` OR an enabled
+        ``artifact-delivery`` Customize preset — the SAME activeness gate as the
+        deliverable satisfier (``_ga_deliverable_matched_requirement_labels``),
+        so toggling the preset wires BOTH halves of the seam: the satisfier (can
+        clear the deliverable label) and this completion check (adds the owed
+        ``ga_deliverable:`` reason). Both OFF ⇒ ``[]`` ⇒ byte-identical to main.
         """
         import os  # noqa: PLC0415
 
         from magi_agent.config.env import (  # noqa: PLC0415
             parse_ga_deliverable_gate_enabled,
         )
+        from magi_agent.customize.runtime_gate import preset_enabled  # noqa: PLC0415
 
-        if not parse_ga_deliverable_gate_enabled(os.environ):
+        if not (
+            parse_ga_deliverable_gate_enabled(os.environ)
+            or preset_enabled("artifact-delivery", default=False)
+        ):
             return []
         assembly = self._runner_policy_assembly
         if assembly is None:
