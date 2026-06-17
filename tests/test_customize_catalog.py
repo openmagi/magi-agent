@@ -171,6 +171,32 @@ def test_preset_entries_carry_enforcement_and_modes() -> None:
     assert presets["answer-quality"]["enforcement"] == "preview"
 
 
+def test_preset_entries_carry_when_group_and_badges() -> None:
+    runtime = _FakeRuntime(tools=[])
+    presets = {p["id"]: p for p in build_catalog(runtime)["verification"]["harnessPresets"]}
+    cv = presets["coding-verification"]
+    # WHEN-group domain + raw fire-at points
+    assert cv["domain"] == "coding"
+    assert isinstance(cv["hookPoints"], list)
+    # badge data: tier + opt-method + description
+    assert cv["tier"] == "deterministic"
+    assert cv["optMethod"] == "opt-out"
+    assert cv["description"] and "parity" not in cv["description"].lower()
+    # opt-in wired preset
+    assert presets["fact-grounding"]["optMethod"] == "opt-in"
+    assert presets["fact-grounding"]["domain"] == "research"
+    # security → always-on tier + always-on domain
+    sec = presets["dangerous-patterns"]
+    assert sec["tier"] == "always-on"
+    assert sec["domain"] == "always-on"
+    # preview preset → no tier / no opt-method, honest description present
+    aq = presets["answer-quality"]
+    assert aq["tier"] is None
+    assert aq["optMethod"] is None
+    assert aq["domain"] == "delivery"
+    assert aq["description"]
+
+
 # ---------------------------------------------------------------------------
 # Tool tests
 # ---------------------------------------------------------------------------
