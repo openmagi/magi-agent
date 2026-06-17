@@ -180,6 +180,7 @@ class MagiContextCompactionPlugin(BasePlugin):
         summary_timeout: float = _SUMMARY_TIMEOUT_DEFAULT,
         anchored_summary_enabled: bool = False,
         summary_max_failures: int = 3,
+        manual_enabled: bool = False,
     ) -> None:
         super().__init__(name)
         if token_threshold < 1:
@@ -227,6 +228,11 @@ class MagiContextCompactionPlugin(BasePlugin):
         # max > 0). OFF / default => Phase-3 behaviour byte-identical.
         self._anchored_enabled = bool(anchored_summary_enabled)
         self._summary_breaker_max = summary_max_failures
+        # G7 manual /compact force (default-OFF). When OFF ``_trim_request`` never
+        # imports/calls ``consume_manual_compaction`` and is byte-identical to the
+        # Phase-4 path. When ON, a pending one-shot signal forces a tail-drop on
+        # this model turn regardless of threshold.
+        self._manual_enabled = bool(manual_enabled)
         # READ-side stash (mirrors the G2 real-token stash): the prior anchor body
         # + consecutive-failure count read off ``callback_context.state`` at the
         # start of ``before_model_callback`` and consumed by ``_trim_request``.
@@ -407,7 +413,26 @@ class MagiContextCompactionPlugin(BasePlugin):
             contents = list(getattr(llm_request, "contents", None) or [])
             if len(contents) <= self.tail_events:
                 # Nothing to trim even in the worst case; skip the boundary call.
+                # NOTE (G7): this early-return stays BEFORE the manual consume()
+                # below, so a forced /compact on a trivially-small context does
+                # NOT burn the one-shot — the pending request survives until a
+                # later turn that actually has something to compact.
                 return None
+
+            # G7: manual /compact force. When the manual path is ON and a one-shot
+            # request is pending, force the tail-drop for THIS model turn regardless
+            # of the token threshold (consume() returns True at most once, so the
+            # force applies to exactly one model call). When OFF, ``consume_manual_
+            # compaction`` is never imported/called and this is byte-identical to
+            # Phase-4. Placed AFTER the ``<= tail_events`` no-op return (above) so a
+            # tiny context does not consume the pending request.
+            forced = False
+            if self._manual_enabled:
+                from magi_agent.runtime.manual_compaction_context import (
+                    consume_manual_compaction,
+                )
+
+                forced = consume_manual_compaction()
 
             # G4: deterministic tool-output prune pre-tier (default-OFF). When ON,
             # content-clear OLD function_response payloads (cheaper, lower-loss
@@ -430,6 +455,17 @@ class MagiContextCompactionPlugin(BasePlugin):
             # (compacting only beyond the last cache breakpoint) is deferred to G5.
             if self._tool_prune_enabled:
                 self._maybe_prune_tool_outputs(contents)
+
+            # G7: a pending manual /compact forces the tail-drop here, bypassing
+            # BOTH the G2 real-token short-circuit and the boundary threshold
+            # decision below. The G4 prune (above) still runs as an orthogonal
+            # pre-tier. ``_apply_tail_trim`` reuses the existing G1 summary / G5
+            # anchored / G8 protected-tool machinery; a split_index <= 0 inside it
+            # is a safe no-op. Placed BEFORE ``_real_token_decision`` so a
+            # non-breach ``decided is False`` cannot early-return and cancel the
+            # forced compaction.
+            if forced:
+                return await self._apply_tail_trim(llm_request, contents)
 
             # G2: real-token pre-check. When the real-token path is ON and a real
             # prompt-token count is present (stashed by the prior turn's
@@ -1302,6 +1338,7 @@ def build_context_compaction_plugin(
     summary_timeout: float = _SUMMARY_TIMEOUT_DEFAULT,
     anchored_summary_enabled: bool = False,
     summary_max_failures: int = 3,
+    manual_enabled: bool = False,
 ) -> MagiContextCompactionPlugin | None:
     """Return a configured plugin, or ``None`` when the feature is disabled.
 
@@ -1326,6 +1363,7 @@ def build_context_compaction_plugin(
         summary_timeout=summary_timeout,
         anchored_summary_enabled=anchored_summary_enabled,
         summary_max_failures=summary_max_failures,
+        manual_enabled=manual_enabled,
     )
 
 

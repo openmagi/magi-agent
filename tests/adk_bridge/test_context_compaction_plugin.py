@@ -1516,3 +1516,138 @@ def test_g6_ctor_rejects_negative_max_failures() -> None:
         MagiContextCompactionPlugin(
             token_threshold=1, tail_events=1, summary_max_failures=-1
         )
+
+
+# ---------------------------------------------------------------------------
+# G7 — manual /compact force-compaction (default-OFF)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def _reset_manual_signal():
+    from magi_agent.runtime.manual_compaction_context import (
+        reset_manual_compaction,
+    )
+
+    reset_manual_compaction()
+    yield
+    reset_manual_compaction()
+
+
+def test_manual_force_compacts_under_threshold(_reset_manual_signal) -> None:
+    from magi_agent.runtime.manual_compaction_context import (
+        request_manual_compaction,
+    )
+
+    # Huge threshold: the automatic path would NOT compact (under threshold).
+    plugin = MagiContextCompactionPlugin(
+        token_threshold=1_000_000, tail_events=16, manual_enabled=True
+    )
+    req = _big_request(40)
+    original_last = req.contents[-1].parts[0].text
+
+    request_manual_compaction()
+    result = _run(
+        plugin.before_model_callback(callback_context=None, llm_request=req)
+    )
+
+    assert result is None
+    assert len(req.contents) == 16  # forced tail-drop despite under threshold
+    assert req.contents[-1].parts[0].text == original_last
+
+
+def test_manual_force_is_one_shot(_reset_manual_signal) -> None:
+    from magi_agent.runtime.manual_compaction_context import (
+        request_manual_compaction,
+    )
+
+    plugin = MagiContextCompactionPlugin(
+        token_threshold=1_000_000, tail_events=16, manual_enabled=True
+    )
+    request_manual_compaction()
+
+    req1 = _big_request(40)
+    _run(plugin.before_model_callback(callback_context=None, llm_request=req1))
+    assert len(req1.contents) == 16  # forced
+
+    # No new request -> the next call takes the normal threshold path (untouched).
+    req2 = _big_request(40)
+    before = list(req2.contents)
+    _run(plugin.before_model_callback(callback_context=None, llm_request=req2))
+    assert req2.contents == before
+    assert len(req2.contents) == 40
+
+
+def test_manual_enabled_no_signal_is_automatic(_reset_manual_signal) -> None:
+    # manual_enabled=True but NO pending request: byte-identical to automatic
+    # under-threshold behaviour (contents untouched).
+    plugin = MagiContextCompactionPlugin(
+        token_threshold=1_000_000, tail_events=16, manual_enabled=True
+    )
+    req = _big_request(40)
+    before = list(req.contents)
+    _run(plugin.before_model_callback(callback_context=None, llm_request=req))
+    assert req.contents == before
+    assert len(req.contents) == 40
+
+
+def test_manual_flag_off_never_consumes_signal(_reset_manual_signal) -> None:
+    from magi_agent.runtime.manual_compaction_context import (
+        consume_manual_compaction,
+        request_manual_compaction,
+    )
+
+    # Flag OFF (default): even with a pending request, the plugin never consumes
+    # it and under-threshold contents stay untouched (Phase-4 byte-identical).
+    plugin = MagiContextCompactionPlugin(
+        token_threshold=1_000_000, tail_events=16
+    )
+    request_manual_compaction()
+    req = _big_request(40)
+    before = list(req.contents)
+    _run(plugin.before_model_callback(callback_context=None, llm_request=req))
+
+    assert req.contents == before
+    assert len(req.contents) == 40
+    # The pending request was NOT consumed by the OFF plugin.
+    assert consume_manual_compaction() is True
+
+
+def test_manual_force_tiny_context_is_noop_and_preserves_signal(
+    _reset_manual_signal,
+) -> None:
+    from magi_agent.runtime.manual_compaction_context import (
+        consume_manual_compaction,
+        request_manual_compaction,
+    )
+
+    # contents <= tail_events: forced /compact is a safe no-op AND the one-shot is
+    # NOT consumed (the early return fires before consume()).
+    plugin = MagiContextCompactionPlugin(
+        token_threshold=1, tail_events=16, manual_enabled=True
+    )
+    request_manual_compaction()
+    req = _big_request(10)
+    before = list(req.contents)
+    _run(plugin.before_model_callback(callback_context=None, llm_request=req))
+
+    assert req.contents == before
+    assert len(req.contents) == 10
+    # The pending request survived (not burned on a tiny context).
+    assert consume_manual_compaction() is True
+
+
+def test_build_plugin_manual_enabled_defaults_false() -> None:
+    plugin = build_context_compaction_plugin(
+        enabled=True, token_threshold=2_000, tail_events=16
+    )
+    assert plugin is not None
+    assert plugin._manual_enabled is False
+
+
+def test_build_plugin_manual_enabled_forwarded() -> None:
+    plugin = build_context_compaction_plugin(
+        enabled=True, token_threshold=2_000, tail_events=16, manual_enabled=True
+    )
+    assert plugin is not None
+    assert plugin._manual_enabled is True

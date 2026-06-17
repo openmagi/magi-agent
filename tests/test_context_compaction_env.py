@@ -271,3 +271,18 @@ def test_rejects_negative_summary_max_failures() -> None:
         parse_context_compaction_env(
             {"MAGI_COMPACTION_SUMMARY_MAX_FAILURES": "-1"}
         )
+
+
+def test_manual_enabled_default_off() -> None:
+    assert parse_context_compaction_env({}).manual_enabled is False
+
+
+@pytest.mark.parametrize("value", ["1", "true", "yes", "on"])
+def test_manual_enabled_strict_truthy(value: str) -> None:
+    cfg = parse_context_compaction_env({"MAGI_COMPACTION_MANUAL_ENABLED": value})
+    assert cfg.manual_enabled is True
+
+
+def test_manual_enabled_falsy_garbage() -> None:
+    cfg = parse_context_compaction_env({"MAGI_COMPACTION_MANUAL_ENABLED": "nope"})
+    assert cfg.manual_enabled is False

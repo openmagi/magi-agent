@@ -1529,8 +1529,26 @@ class MagiTuiApp(App[None]):
         self.controller.commit_block(text)
 
     def request_compact(self) -> None:
-        """Acknowledge a ``Compact()`` result (real compaction is gated B/E)."""
+        """Acknowledge a ``Compact()`` result.
 
+        G7: when ``MAGI_COMPACTION_MANUAL_ENABLED`` is on, set the cross-turn
+        one-shot signal so the compaction plugin forces a tail-drop on the next
+        model turn, and give honest feedback. When OFF, keep the byte-identical
+        stub acknowledgement (real compaction stays gated to the manual flag).
+        """
+
+        from magi_agent.runtime.manual_compaction_context import (  # noqa: PLC0415
+            manual_compaction_enabled,
+            request_manual_compaction,
+        )
+
+        if manual_compaction_enabled():
+            request_manual_compaction()
+            self.compact_requests += 1
+            self.controller.commit_block(
+                "[compact] context compaction will run on the next message"
+            )
+            return
         self.compact_requests += 1
         self.controller.commit_block("[compact requested]")
 

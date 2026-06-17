@@ -1545,6 +1545,7 @@ def build_core_default_plane(
         summary_timeout=compaction_env.summary_timeout,
         anchored_summary_enabled=compaction_env.anchored_summary_enabled,
         summary_max_failures=compaction_env.summary_max_failures,
+        manual_enabled=compaction_env.manual_enabled,
     )
     if compaction_plugin is not None:
         plane.register(_CompactionLoopControl(compaction_plugin))
