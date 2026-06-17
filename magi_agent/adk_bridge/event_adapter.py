@@ -24,6 +24,7 @@ from magi_agent.runtime.transcript import (
     TurnAbortedEntry,
 )
 from magi_agent.transport import tool_preview as _tool_preview
+from magi_agent.adk_bridge.wire_profile import WireProfile
 
 
 _PRODUCTION_PATH_RE = re.compile(
@@ -260,8 +261,9 @@ class EventProjection:
 
 
 class OpenMagiEventBridge:
-    def __init__(self, *, live_compatible: bool = False) -> None:
+    def __init__(self, *, live_compatible: bool = False, wire_profile: WireProfile | None = None) -> None:
         self.live_compatible = live_compatible
+        self._wire_profile = wire_profile   # None = CLI path, existing code UNCHANGED
         # True once this turn has streamed partial `text_delta` events whose
         # non-partial aggregate has not yet been seen — used to drop the duplicate
         # aggregate that arrives alongside a trailing tool call. See
@@ -455,6 +457,7 @@ class OpenMagiEventBridge:
             live_compatible=self.live_compatible,
             partial_run=partial_run,
             partial_public_text=partial_public_text,
+            wire_profile=self._wire_profile,
         )
         self._streamed_partial_text = partial_run[0]
         self._streamed_partial_public_text = partial_public_text[0]
@@ -669,6 +672,7 @@ def _project_content_parts(
     live_compatible: bool,
     partial_run: list[bool],
     partial_public_text: list[str],
+    wire_profile: WireProfile | None = None,
 ) -> EventProjection:
     agent_events: list[dict[str, object]] = []
     legacy_deltas: list[str] = []
@@ -794,6 +798,7 @@ def _project_content_parts(
                 function_call=function_call,
                 index=index,
                 live_compatible=live_compatible,
+                wire_profile=wire_profile,
             )
             agent_events.extend(tool_projection.agent_events)
             transcript_entries.extend(tool_projection.transcript_entries)
@@ -810,6 +815,7 @@ def _project_content_parts(
                 function_response=function_response,
                 index=index,
                 live_compatible=live_compatible,
+                wire_profile=wire_profile,
             )
             agent_events.extend(tool_projection.agent_events)
             transcript_entries.extend(tool_projection.transcript_entries)
@@ -839,31 +845,40 @@ def _project_function_call_part(
     function_call: object,
     index: int,
     live_compatible: bool,
+    wire_profile: WireProfile | None = None,
 ) -> EventProjection:
-    tool_use_id = _tool_use_id(
-        event,
-        turn_id=turn_id,
-        name=getattr(function_call, "name", None) or "unknown_tool",
-        index=index,
-        adk_id=getattr(function_call, "id", None),
-        kind="call",
-    )
-    args = getattr(function_call, "args", None) or {}
     name = getattr(function_call, "name", None) or "unknown_tool"
+    args = getattr(function_call, "args", None) or {}
+    adk_id = getattr(function_call, "id", None)
     public_name = _public_tool_name(name)
     input_digest = metadata_digest(args)
-    agent_event: dict[str, object] = {
-        "type": "tool_start",
-        "id": tool_use_id,
-        "name": public_name,
-        "input_preview": _public_preview(args),
-    }
-    if live_compatible:
-        agent_event["eventId"] = _public_event_id(
+
+    if wire_profile is not None:
+        tool_use_id = wire_profile.tool_id(name, args, adk_id, index)
+        agent_event = wire_profile.build_tool_start(tool_use_id, public_name, _public_preview(args))
+    else:
+        # EXISTING code, byte-for-byte unchanged
+        tool_use_id = _tool_use_id(
             event,
-            suffix=f"tool-start-{index}",
+            turn_id=turn_id,
+            name=name,
+            index=index,
+            adk_id=adk_id,
+            kind="call",
         )
-        agent_event["inputDigest"] = input_digest
+        agent_event = {
+            "type": "tool_start",
+            "id": tool_use_id,
+            "name": public_name,
+            "input_preview": _public_preview(args),
+        }
+        if live_compatible:
+            agent_event["eventId"] = _public_event_id(
+                event,
+                suffix=f"tool-start-{index}",
+            )
+            agent_event["inputDigest"] = input_digest
+
     return EventProjection(
         agent_events=[agent_event],
         transcript_entries=[
@@ -898,21 +913,15 @@ def _project_function_response_part(
     function_response: object,
     index: int,
     live_compatible: bool,
+    wire_profile: WireProfile | None = None,
 ) -> EventProjection:
-    tool_use_id = _tool_use_id(
-        event,
-        turn_id=turn_id,
-        name=getattr(function_response, "name", None) or "unknown_tool",
-        index=index,
-        adk_id=getattr(function_response, "id", None),
-        kind="response",
-    )
+    name = getattr(function_response, "name", None) or "unknown_tool"
+    adk_id = getattr(function_response, "id", None)
     response = getattr(function_response, "response", None) or {}
     is_error = _is_error_response(response)
     status = "error" if is_error else "ok"
     output = _preview(response)
     normalized_type = "tool.call.failed" if is_error else "tool.call.completed"
-    name = getattr(function_response, "name", None) or "unknown_tool"
     public_name = _public_tool_name(name)
     normalized_metadata: dict[str, object] = {
         "outputDigest": metadata_digest(response),
@@ -923,22 +932,41 @@ def _project_function_response_part(
     source_refs = _source_refs(response)
     if source_refs:
         normalized_metadata["sourceRefs"] = list(source_refs)
-    agent_event: dict[str, object] = {
-        "type": "tool_end",
-        "id": tool_use_id,
-        "status": status,
-        "output_preview": _public_preview(response),
-        "durationMs": 0,
-    }
-    if live_compatible:
-        agent_event["eventId"] = _public_event_id(
-            event,
-            suffix=f"tool-end-{index}",
+
+    if wire_profile is not None:
+        # Response side: we need args to compute tool_id, but FunctionResponse has none.
+        # Use empty dict for args (response-side id, consistent with call-side convention).
+        tool_use_id = wire_profile.tool_id(name, {}, adk_id, index)
+        agent_event: dict[str, object] = wire_profile.build_tool_end(
+            tool_use_id, status, _public_preview(response)
         )
-        agent_event["outputDigest"] = normalized_metadata["outputDigest"]
-        transcript_refs = public_terminal_refs([*tool_result_refs, *source_refs])
-        if transcript_refs:
-            agent_event["transcriptRefs"] = list(transcript_refs)
+    else:
+        # EXISTING code, byte-for-byte unchanged
+        tool_use_id = _tool_use_id(
+            event,
+            turn_id=turn_id,
+            name=name,
+            index=index,
+            adk_id=adk_id,
+            kind="response",
+        )
+        agent_event = {
+            "type": "tool_end",
+            "id": tool_use_id,
+            "status": status,
+            "output_preview": _public_preview(response),
+            "durationMs": 0,
+        }
+        if live_compatible:
+            agent_event["eventId"] = _public_event_id(
+                event,
+                suffix=f"tool-end-{index}",
+            )
+            agent_event["outputDigest"] = normalized_metadata["outputDigest"]
+            transcript_refs = public_terminal_refs([*tool_result_refs, *source_refs])
+            if transcript_refs:
+                agent_event["transcriptRefs"] = list(transcript_refs)
+
     return EventProjection(
         agent_events=[agent_event],
         transcript_entries=[

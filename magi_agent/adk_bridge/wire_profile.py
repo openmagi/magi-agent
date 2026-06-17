@@ -32,7 +32,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from typing import Callable
+from typing import Callable, get_args
 
 
 # ---------------------------------------------------------------------------
@@ -168,6 +168,8 @@ def _default_build_turn_phase(turn_id: str, phase: str) -> dict:
     return {"type": "turn_phase", "turnId": turn_id, "phase": phase}
 
 
+# NOTE: DEFAULT_PROFILE is test-only documentation of the CLI event shape and is
+# NOT used by OpenMagiEventBridge — the None path calls the existing helpers directly.
 DEFAULT_PROFILE = WireProfile(
     tool_id=_default_tool_id,
     build_tool_start=_default_build_tool_start,
@@ -248,7 +250,7 @@ def _hosted_build_turn_phase(turn_id: str, phase: str) -> dict:
     )
 
     # Validate phase is a known TurnPhase literal value; fall back to "pending".
-    _valid_phases = {"pending", "planning", "executing", "verifying", "committing", "committed", "aborted"}
+    _valid_phases = set(get_args(TurnPhase))
     safe_phase: TurnPhase = phase if phase in _valid_phases else "pending"  # type: ignore[assignment]
     return turn_phase_event(
         turn_id=turn_id,
