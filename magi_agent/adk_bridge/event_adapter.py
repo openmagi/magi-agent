@@ -270,6 +270,14 @@ class OpenMagiEventBridge:
         # ``_project_content_parts``.
         self._streamed_partial_text = False
         self._streamed_partial_public_text = ""
+        # HOSTED call/response correlation — mirrors gate5b4c3's
+        # ``live_tool_event_ids_by_adk_id`` / ``pending_live_tool_event_ids_by_name``.
+        # Populated on tool_start (HOSTED path only); consumed on tool_end so the
+        # response-side id always equals the call-side id for the same tool call.
+        # These dicts are ONLY used when wire_profile is not None (HOSTED path);
+        # the CLI (None) path is byte-for-byte unchanged.
+        self._hosted_tool_ids_by_adk_id: dict[str, str] = {}
+        self._pending_hosted_ids_by_name: dict[str, list[str]] = {}
 
     def project_runner_start_event(
         self,
@@ -458,6 +466,12 @@ class OpenMagiEventBridge:
             partial_run=partial_run,
             partial_public_text=partial_public_text,
             wire_profile=self._wire_profile,
+            hosted_tool_ids_by_adk_id=(
+                self._hosted_tool_ids_by_adk_id if self._wire_profile is not None else None
+            ),
+            pending_hosted_ids_by_name=(
+                self._pending_hosted_ids_by_name if self._wire_profile is not None else None
+            ),
         )
         self._streamed_partial_text = partial_run[0]
         self._streamed_partial_public_text = partial_public_text[0]
@@ -673,6 +687,8 @@ def _project_content_parts(
     partial_run: list[bool],
     partial_public_text: list[str],
     wire_profile: WireProfile | None = None,
+    hosted_tool_ids_by_adk_id: dict[str, str] | None = None,
+    pending_hosted_ids_by_name: dict[str, list[str]] | None = None,
 ) -> EventProjection:
     agent_events: list[dict[str, object]] = []
     legacy_deltas: list[str] = []
@@ -799,6 +815,8 @@ def _project_content_parts(
                 index=index,
                 live_compatible=live_compatible,
                 wire_profile=wire_profile,
+                hosted_tool_ids_by_adk_id=hosted_tool_ids_by_adk_id,
+                pending_hosted_ids_by_name=pending_hosted_ids_by_name,
             )
             agent_events.extend(tool_projection.agent_events)
             transcript_entries.extend(tool_projection.transcript_entries)
@@ -816,6 +834,8 @@ def _project_content_parts(
                 index=index,
                 live_compatible=live_compatible,
                 wire_profile=wire_profile,
+                hosted_tool_ids_by_adk_id=hosted_tool_ids_by_adk_id,
+                pending_hosted_ids_by_name=pending_hosted_ids_by_name,
             )
             agent_events.extend(tool_projection.agent_events)
             transcript_entries.extend(tool_projection.transcript_entries)
@@ -846,6 +866,8 @@ def _project_function_call_part(
     index: int,
     live_compatible: bool,
     wire_profile: WireProfile | None = None,
+    hosted_tool_ids_by_adk_id: dict[str, str] | None = None,
+    pending_hosted_ids_by_name: dict[str, list[str]] | None = None,
 ) -> EventProjection:
     name = getattr(function_call, "name", None) or "unknown_tool"
     args = getattr(function_call, "args", None) or {}
@@ -856,6 +878,14 @@ def _project_function_call_part(
     if wire_profile is not None:
         tool_use_id = wire_profile.tool_id(name, args, adk_id, index)
         agent_event = wire_profile.build_tool_start(tool_use_id, public_name, _public_preview(args))
+        # Record the call-side id for correlation on the response side.
+        # Mirrors gate5b4c3's ``_remember_live_tool_event_id`` pattern.
+        if hosted_tool_ids_by_adk_id is not None and pending_hosted_ids_by_name is not None:
+            call_id_str = str(adk_id or "")
+            if call_id_str:
+                hosted_tool_ids_by_adk_id.setdefault(call_id_str, tool_use_id)
+            if name:
+                pending_hosted_ids_by_name.setdefault(name, []).append(tool_use_id)
     else:
         # EXISTING code, byte-for-byte unchanged
         tool_use_id = _tool_use_id(
@@ -914,6 +944,8 @@ def _project_function_response_part(
     index: int,
     live_compatible: bool,
     wire_profile: WireProfile | None = None,
+    hosted_tool_ids_by_adk_id: dict[str, str] | None = None,
+    pending_hosted_ids_by_name: dict[str, list[str]] | None = None,
 ) -> EventProjection:
     name = getattr(function_response, "name", None) or "unknown_tool"
     adk_id = getattr(function_response, "id", None)
@@ -934,9 +966,28 @@ def _project_function_response_part(
         normalized_metadata["sourceRefs"] = list(source_refs)
 
     if wire_profile is not None:
-        # Response side: we need args to compute tool_id, but FunctionResponse has none.
-        # Use empty dict for args (response-side id, consistent with call-side convention).
-        tool_use_id = wire_profile.tool_id(name, {}, adk_id, index)
+        # Response side: look up the call-side id for correlation.
+        # Mirrors gate5b4c3's ``_live_tool_event_id_for_function_response`` pattern:
+        # 1. Try adk_id → ids_by_adk_id first (exact match).
+        # 2. Fall back to pending-by-name (FIFO pop).
+        # 3. Only if neither matches, recompute (avoids id mismatch).
+        tool_use_id: str | None = None
+        response_id_str = str(adk_id or "")
+        if hosted_tool_ids_by_adk_id is not None and pending_hosted_ids_by_name is not None:
+            if response_id_str:
+                matched = hosted_tool_ids_by_adk_id.get(response_id_str)
+                if matched is not None:
+                    pending = pending_hosted_ids_by_name.get(name)
+                    if pending and matched in pending:
+                        pending.remove(matched)
+                    tool_use_id = matched
+            if tool_use_id is None:
+                pending = pending_hosted_ids_by_name.get(name)
+                if pending:
+                    tool_use_id = pending.pop(0)
+        if tool_use_id is None:
+            # No correlation found — recompute (should not happen in normal flow).
+            tool_use_id = wire_profile.tool_id(name, {}, adk_id, index)
         agent_event: dict[str, object] = wire_profile.build_tool_end(
             tool_use_id, status, _public_preview(response)
         )
