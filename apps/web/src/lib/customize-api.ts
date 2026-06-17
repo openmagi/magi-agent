@@ -27,6 +27,16 @@ export interface HarnessPresetItem {
   id: string;
   title: string;
   category: string;
+  /** WHEN-group for the modal: always-on | coding | research | delivery. */
+  domain: string;
+  /** Raw runtime fire-at points (beforeToolUse / afterTurnEnd / ...). */
+  hookPoints: string[];
+  /** Concrete one-line description of what the gate checks. */
+  description: string;
+  /** Enforcement mechanism tier: `deterministic` | `always-on` | null (preview). */
+  tier: "deterministic" | "always-on" | null;
+  /** How the toggle acts: `opt-out` | `opt-in` | null (not wired). */
+  optMethod: "opt-out" | "opt-in" | null;
   /** Catalog default state in the live runtime. */
   defaultEnabled: boolean;
   /**
