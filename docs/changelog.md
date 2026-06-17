@@ -15,6 +15,28 @@ Versions follow the tags published on GitHub Releases.
 
 ### Fixed
 
+## 0.1.48
+
+### Added
+- Customize Verification Rules — full custom-rule surface (all default-OFF):
+  pre-final LLM-criterion rules (#642) and an after-tool-use ingestion gate that
+  strips a tool result by deterministic `contentMatch` and/or a gated LLM
+  criterion (#648). Both fail-open; the LLM sub-mode is inert without the egress
+  gate.
+- Harness convergence Phase 2A: subagents can run through the shared
+  `run_governed_turn` primitive (governed turn-loop, multi-turn, memory-mode,
+  evidence) while preserving their restricted toolset — gated, default-OFF, with
+  a verified no-escalation invariant (#644).
+
+### Fixed
+- Restore README-contract guarantees (Homebrew install, `magi-agent serve`,
+  local web dashboard, flagship example status) that the README trim had
+  dropped (#643).
+
+### Changed
+- Docs: clarify the no-fork pack-kernel seam (kernel recipe/role packs stay
+  default-OFF) in what-works-today (#641).
+
 ## 0.1.47
 
 ### Added
