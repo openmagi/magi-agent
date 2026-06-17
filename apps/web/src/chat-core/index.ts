@@ -2,6 +2,7 @@
 // Pure, framework-agnostic. No react/next/supabase/privy/@-app imports.
 // Populated as files are ported. Vendored to clawy/src/lib/chat-core.
 export * from "./accepted-injections";
+export * from "./active-snapshot";
 export * from "./agent-activity";
 export * from "./assistant-dedupe";
 export * from "./attachment-marker";
