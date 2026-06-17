@@ -66,6 +66,68 @@ MIGRATIONS: Sequence[tuple[int, str]] = (
             ON scheduled_jobs(next_run_utc);
         """,
     ),
+    (
+        5,
+        """
+        CREATE TABLE IF NOT EXISTS work_queue_tasks (
+            id                   TEXT PRIMARY KEY,
+            title                TEXT NOT NULL,
+            body                 TEXT,
+            assignee             TEXT,
+            status               TEXT NOT NULL,
+            priority             INTEGER NOT NULL DEFAULT 0,
+            tenant               TEXT,
+            session_id           TEXT,
+            idempotency_key      TEXT,
+            claim_lock           TEXT,
+            claim_expires        INTEGER,
+            worker_pid           INTEGER,
+            last_heartbeat_at    INTEGER,
+            current_run_id       INTEGER,
+            consecutive_failures INTEGER NOT NULL DEFAULT 0,
+            max_retries          INTEGER,
+            goal_mode            INTEGER NOT NULL DEFAULT 0,
+            goal_max_turns       INTEGER,
+            result               TEXT,
+            last_failure_error   TEXT,
+            created_at           INTEGER NOT NULL,
+            started_at           INTEGER,
+            completed_at         INTEGER
+        );
+        CREATE TABLE IF NOT EXISTS work_queue_task_links (
+            parent_id TEXT NOT NULL,
+            child_id  TEXT NOT NULL,
+            PRIMARY KEY (parent_id, child_id)
+        );
+        CREATE TABLE IF NOT EXISTS work_queue_task_events (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id    TEXT NOT NULL,
+            run_id     INTEGER,
+            kind       TEXT NOT NULL,
+            payload    TEXT,
+            created_at INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS work_queue_task_runs (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            task_id             TEXT NOT NULL,
+            status              TEXT NOT NULL,
+            claim_lock          TEXT,
+            claim_expires       INTEGER,
+            worker_pid          INTEGER,
+            last_heartbeat_at   INTEGER,
+            started_at          INTEGER NOT NULL,
+            ended_at            INTEGER,
+            outcome             TEXT,
+            summary             TEXT,
+            error               TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_wq_status ON work_queue_tasks(status);
+        CREATE INDEX IF NOT EXISTS idx_wq_idem   ON work_queue_tasks(idempotency_key);
+        CREATE INDEX IF NOT EXISTS idx_wq_links_child  ON work_queue_task_links(child_id);
+        CREATE INDEX IF NOT EXISTS idx_wq_events_task  ON work_queue_task_events(task_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_wq_runs_task    ON work_queue_task_runs(task_id, started_at);
+        """,
+    ),
 )
 
 
