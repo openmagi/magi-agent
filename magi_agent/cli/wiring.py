@@ -27,6 +27,7 @@ Importing ``cli.wiring`` is therefore safe on any cold path.
 from __future__ import annotations
 
 import os
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -186,6 +187,7 @@ def build_headless_runtime(
     owner_user_id: str = "local",
     learning_live_readiness: object | None = None,
     tools: list[object] | None = None,
+    pinned_recipe_pack_ids: Sequence[str] = (),
 ) -> HeadlessRuntime:
     """Construct the complete headless dependency set.
 
@@ -243,6 +245,7 @@ def build_headless_runtime(
             learning_live_readiness=learning_live_readiness,
             permission_mode=permission_mode,
             tools=tools,
+            pinned_recipe_pack_ids=pinned_recipe_pack_ids,
         )
     )
     composio_bundle, composio_attached = _build_composio_bundle_for_mode(
@@ -454,6 +457,7 @@ def _build_default_runner(
     learning_live_readiness: object | None = None,
     permission_mode: "PermissionMode" = "default",
     tools: list[object] | None = None,
+    pinned_recipe_pack_ids: Sequence[str] = (),
 ) -> object:
     """Build the CLI's default runner.
 
@@ -520,6 +524,7 @@ def _build_default_runner(
             learning_live_readiness=learning_live_readiness,
             general_automation_receipts=general_automation_receipts,
             local_tool_evidence_collector=local_tool_evidence,
+            pinned_recipe_pack_ids=pinned_recipe_pack_ids,
         )
     except CliProviderDependencyError as exc:
         # Key configured but the provider dependency is missing: keep the CLI
