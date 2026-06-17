@@ -361,10 +361,12 @@ async def _local_adk_chat_sse(
     # Route the top-level serve turn through the single ``run_governed_turn``
     # primitive (Phase 1). ``runtime=headless`` reuses the SAME runner/gate/
     # driver assembly built above — the primitive does not rebuild it — so this
-    # is behavior-preserving. ``to_turn_input()`` adds ``harness_state=ctx``,
-    # which the engine only reads for (inert) task-type/runner-policy metadata
-    # (a non-Mapping yields ``()`` and is never forwarded to ADK), leaving the
-    # observable event stream byte-identical to the prior inline dict call.
+    # is behavior-preserving. ``to_turn_input()`` adds ``harness_state=ctx``;
+    # output neutrality holds because (a) ``_extract_task_types`` treats any
+    # non-Mapping as ``()`` and (b) even the ``effective_harness_state`` that
+    # runner-policy assembly computes (adding ``resolvedHarnessStateType``) is
+    # passed only as ``harnessState=`` to the ADK runner adapter, which drops
+    # it via its kwargs allowlist — nothing reaches the model or any event.
     ctx = TurnContext(
         prompt=prompt,
         session_id=session_id,

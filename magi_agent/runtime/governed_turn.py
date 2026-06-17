@@ -9,7 +9,7 @@ turns without rebuilding it per call.  The serve path and child paths pass
 from __future__ import annotations
 
 import asyncio
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
 
 from magi_agent.runtime.turn_context import TurnContext
 
@@ -18,7 +18,7 @@ async def run_governed_turn(
     ctx: TurnContext,
     *,
     runtime: object | None = None,
-) -> AsyncGenerator[object, object]:
+) -> AsyncGenerator[object, None]:
     """Yield every event produced by one governed turn.
 
     Parameters
