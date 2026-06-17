@@ -160,10 +160,55 @@ function CustomRulesSection({
   onDelete: (id: string) => void;
 }) {
   const [adding, setAdding] = useState(false);
+  const [kind, setKind] = useState<"deterministic_ref" | "tool_perm">("deterministic_ref");
   const [ref, setRef] = useState(menu[0]?.ref ?? "");
   const [scope, setScope] = useState<string>("coding");
+  const [matchType, setMatchType] = useState<"tool" | "domain" | "domainAllowlist">("tool");
+  const [matchValue, setMatchValue] = useState("");
+  const [decision, setDecision] = useState<"deny" | "ask">("deny");
 
   const menuLabel = (r: string) => menu.find((m) => m.ref === r)?.label ?? r;
+
+  const describe = (rule: CustomRule): string => {
+    const p = (rule.what?.payload ?? {}) as Record<string, unknown>;
+    if (rule.what?.kind === "tool_perm") {
+      const m = (p.match ?? {}) as Record<string, unknown>;
+      const verb = p.decision === "ask" ? "Require approval for" : "Deny";
+      if (typeof m.tool === "string") return `${verb} tool "${m.tool}"`;
+      if (typeof m.domain === "string") return `${verb} fetches to ${m.domain}`;
+      if (Array.isArray(m.domainAllowlist)) return `${verb} fetches outside [${m.domainAllowlist.join(", ")}]`;
+      return verb;
+    }
+    return menuLabel(String(p.ref ?? ""));
+  };
+
+  const canAdd = kind === "deterministic_ref" ? !!ref : !!matchValue.trim();
+
+  const buildRule = (): CustomRule => {
+    if (kind === "tool_perm") {
+      const action = decision === "deny" ? "block" : "ask_approval";
+      let match: Record<string, unknown>;
+      if (matchType === "tool") match = { tool: matchValue.trim() };
+      else if (matchType === "domain") match = { domain: matchValue.trim() };
+      else match = { domainAllowlist: matchValue.split(",").map((s) => s.trim()).filter(Boolean) };
+      return {
+        scope,
+        enabled: true,
+        what: { kind: "tool_perm", payload: { match, decision } },
+        firesAt: "before_tool_use",
+        action,
+      };
+    }
+    return {
+      scope,
+      enabled: true,
+      what: { kind: "deterministic_ref", payload: { ref } },
+      firesAt: "pre_final",
+      action: "block",
+    };
+  };
+
+  const selectCls = "mt-1 w-full rounded-lg border border-black/[0.12] bg-white px-2 py-1.5 text-sm";
 
   return (
     <section>
@@ -171,8 +216,9 @@ function CustomRulesSection({
         Custom Rules
       </h3>
       <p className="mb-2 text-xs leading-relaxed text-secondary">
-        Build a deterministic gate from a producer-backed check. It blocks the final
-        answer when the required evidence is missing (no prompt injection).
+        Build a real gate: a deterministic evidence check (blocks the final answer)
+        or a tool-permission rule (deny / require approval for a tool or source
+        domain). No prompt injection.
       </p>
 
       {rules.length > 0 ? (
@@ -183,9 +229,7 @@ function CustomRulesSection({
               className="flex items-center justify-between gap-3 rounded-xl border border-black/[0.06] bg-white px-4 py-2.5"
             >
               <div className="min-w-0">
-                <p className="truncate text-sm font-medium text-foreground">
-                  {menuLabel(String((rule.what?.payload as { ref?: string })?.ref ?? ""))}
-                </p>
+                <p className="truncate text-sm font-medium text-foreground">{describe(rule)}</p>
                 <p className="mt-0.5 text-[11px] text-secondary/80">
                   {rule.scope} · {rule.firesAt} · {rule.action}
                 </p>
@@ -212,27 +256,59 @@ function CustomRulesSection({
         </div>
       ) : null}
 
-      {adding && menu.length > 0 ? (
+      {adding ? (
         <div className="space-y-2 rounded-xl border border-black/[0.08] bg-gray-50/60 p-3">
           <label className="block text-[11px] font-medium text-secondary">
-            Require
-            <select
-              value={ref}
-              onChange={(e) => setRef(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-black/[0.12] bg-white px-2 py-1.5 text-sm"
-            >
-              {menu.map((m) => (
-                <option key={m.ref} value={m.ref}>{m.label}</option>
-              ))}
+            Rule type
+            <select value={kind} onChange={(e) => setKind(e.target.value as typeof kind)} className={selectCls}>
+              <option value="deterministic_ref" disabled={menu.length === 0}>
+                Deterministic evidence check{menu.length === 0 ? " (none available)" : ""}
+              </option>
+              <option value="tool_perm">Tool permission (deny / approval)</option>
             </select>
           </label>
+
+          {kind === "deterministic_ref" ? (
+            <label className="block text-[11px] font-medium text-secondary">
+              Require
+              <select value={ref} onChange={(e) => setRef(e.target.value)} className={selectCls}>
+                {menu.map((m) => (
+                  <option key={m.ref} value={m.ref}>{m.label}</option>
+                ))}
+              </select>
+            </label>
+          ) : (
+            <>
+              <label className="block text-[11px] font-medium text-secondary">
+                Match by
+                <select value={matchType} onChange={(e) => setMatchType(e.target.value as typeof matchType)} className={selectCls}>
+                  <option value="tool">Tool name</option>
+                  <option value="domain">Source domain (denylist)</option>
+                  <option value="domainAllowlist">Source domain allowlist (only these)</option>
+                </select>
+              </label>
+              <label className="block text-[11px] font-medium text-secondary">
+                {matchType === "tool" ? "Tool name" : matchType === "domain" ? "Domain to block" : "Allowed domains (comma-separated)"}
+                <input
+                  value={matchValue}
+                  onChange={(e) => setMatchValue(e.target.value)}
+                  placeholder={matchType === "domainAllowlist" ? "sec.gov, ecfr.gov" : matchType === "tool" ? "web_fetch" : "evil.com"}
+                  className={selectCls}
+                />
+              </label>
+              <label className="block text-[11px] font-medium text-secondary">
+                Then
+                <select value={decision} onChange={(e) => setDecision(e.target.value as typeof decision)} className={selectCls}>
+                  <option value="deny">Deny</option>
+                  <option value="ask">Require approval</option>
+                </select>
+              </label>
+            </>
+          )}
+
           <label className="block text-[11px] font-medium text-secondary">
             When (scope)
-            <select
-              value={scope}
-              onChange={(e) => setScope(e.target.value)}
-              className="mt-1 w-full rounded-lg border border-black/[0.12] bg-white px-2 py-1.5 text-sm"
-            >
+            <select value={scope} onChange={(e) => setScope(e.target.value)} className={selectCls}>
               {SCOPES.map((s) => (
                 <option key={s} value={s}>{s}</option>
               ))}
@@ -248,15 +324,10 @@ function CustomRulesSection({
             </button>
             <button
               type="button"
-              disabled={busy || !ref}
+              disabled={busy || !canAdd}
               onClick={() => {
-                onAdd({
-                  scope,
-                  enabled: true,
-                  what: { kind: "deterministic_ref", payload: { ref } },
-                  firesAt: "pre_final",
-                  action: "block",
-                });
+                onAdd(buildRule());
+                setMatchValue("");
                 setAdding(false);
               }}
               className="rounded-lg bg-primary px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-40"
@@ -268,11 +339,10 @@ function CustomRulesSection({
       ) : (
         <button
           type="button"
-          disabled={menu.length === 0}
           onClick={() => setAdding(true)}
-          className="w-full rounded-xl border border-dashed border-black/[0.12] px-4 py-2.5 text-sm font-medium text-secondary transition-colors hover:border-primary/30 hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+          className="w-full rounded-xl border border-dashed border-black/[0.12] px-4 py-2.5 text-sm font-medium text-secondary transition-colors hover:border-primary/30 hover:text-foreground"
         >
-          {menu.length === 0 ? "No deterministic checks available" : "+ Add custom rule"}
+          + Add custom rule
         </button>
       )}
     </section>

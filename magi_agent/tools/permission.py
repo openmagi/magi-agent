@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Literal
 from uuid import uuid4
 
+from magi_agent.customize.tool_perm import matched_decision
 from magi_agent.runtime.control import ControlRequest
 
 from .context import ToolContext
@@ -83,6 +84,23 @@ class ToolPermissionPolicy:
                 reason=safety_decision.reason,
                 metadata=metadata,
             )
+
+        # Custom tool_perm rules (P2) layer on top of immutable safety: they can
+        # deny/ask a call safety would allow, but never loosen a safety deny/ask
+        # (handled above). No-op (returns None) unless both customize flags are on.
+        custom = matched_decision(tool_name=manifest.name, arguments=arguments)
+        if custom is not None:
+            custom_action, rule_id = custom
+            reason = f"custom rule {rule_id}"
+            metadata = base_tool_metadata(manifest, mode=mode, reason=reason)
+            metadata["customRuleId"] = rule_id
+            if custom_action == "deny":
+                return ToolPermissionDecision(action="deny", reason=reason, metadata=metadata)
+            metadata["controlRequest"] = make_control_request(
+                manifest, arguments, context, reason=reason
+            ).model_dump(by_alias=True)
+            return ToolPermissionDecision(action="ask", reason=reason, metadata=metadata)
+
         if safety_decision.metadata.get("policyHandled") is True:
             return ToolPermissionDecision(
                 action="allow",

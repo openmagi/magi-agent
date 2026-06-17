@@ -48,6 +48,28 @@ def test_valid_tool_perm_rule():
     assert validate_custom_rule(_tool()) == []
 
 
+def test_valid_tool_perm_domain_allowlist():
+    rule = _tool(
+        what={
+            "kind": "tool_perm",
+            "payload": {"match": {"domainAllowlist": ["sec.gov"]}, "decision": "deny"},
+        }
+    )
+    assert validate_custom_rule(rule) == []
+
+
+def test_tool_perm_empty_match_rejected():
+    rule = _tool(what={"kind": "tool_perm", "payload": {"match": {}, "decision": "deny"}})
+    assert validate_custom_rule(rule)
+
+
+def test_tool_perm_bad_allowlist_rejected():
+    rule = _tool(
+        what={"kind": "tool_perm", "payload": {"match": {"domainAllowlist": []}, "decision": "deny"}}
+    )
+    assert validate_custom_rule(rule)
+
+
 def test_valid_llm_pre_final():
     assert validate_custom_rule(_llm()) == []
 

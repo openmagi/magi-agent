@@ -90,8 +90,20 @@ def validate_custom_rule(rule: Any) -> list[str]:
             errors.append(f"action {action!r} not allowed for ref {ref!r}")
     elif kind == "tool_perm":
         match = payload.get("match")
-        if not isinstance(match, dict) or not ({"tool", "domain"} & set(match)):
-            errors.append("tool_perm.payload.match must specify tool and/or domain")
+        if not isinstance(match, dict) or not (
+            {"tool", "domain", "domainAllowlist"} & set(match)
+        ):
+            errors.append(
+                "tool_perm.payload.match must specify tool, domain, or domainAllowlist"
+            )
+        elif "domainAllowlist" in match and (
+            not isinstance(match["domainAllowlist"], list)
+            or not match["domainAllowlist"]
+            or not all(isinstance(d, str) for d in match["domainAllowlist"])
+        ):
+            errors.append(
+                "tool_perm.payload.match.domainAllowlist must be a non-empty string list"
+            )
         if payload.get("decision") not in {"deny", "ask"}:
             errors.append("tool_perm.payload.decision must be 'deny' or 'ask'")
     elif kind == "llm_criterion":
