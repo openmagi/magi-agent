@@ -283,7 +283,7 @@ class InMemoryWorkQueueStore:
                 and not hb_stale
             )
             if alive:
-                self._update(task_id, claim_expires=now + CLAIM_TTL_SECONDS)
+                self._update(task_id, claim_expires=now + CLAIM_TTL_SECONDS, last_heartbeat_at=now)
                 continue
             self._update(
                 task_id,
@@ -318,9 +318,14 @@ class InMemoryWorkQueueStore:
             consecutive_failures=new_failures,
             last_failure_error=error,
             status=new_status,
+            current_run_id=None,
         )
 
     def complete(self, task_id: str, *, result: str | None = None) -> WorkTask:
+        task = self._tasks[task_id]
+        # Source-state guard: if already terminal, return unchanged (no duplicate events).
+        if task.status in ("completed", "archived"):
+            return task
         now = int(time.time())
         return self._update(
             task_id,
@@ -328,6 +333,7 @@ class InMemoryWorkQueueStore:
             result=result,
             completed_at=now,
             consecutive_failures=0,
+            current_run_id=None,
         )
 
 
@@ -503,8 +509,9 @@ class SqliteWorkQueueStore:
             alive = r["worker_pid"] is not None and pid_alive(r["worker_pid"]) and not hb_stale
             if alive:
                 conn.execute(
-                    "UPDATE work_queue_tasks SET claim_expires=? WHERE id=? AND status='running'",
-                    (now + CLAIM_TTL_SECONDS, r["id"]),
+                    "UPDATE work_queue_tasks SET claim_expires=?, last_heartbeat_at=? "
+                    "WHERE id=? AND status='running'",
+                    (now + CLAIM_TTL_SECONDS, now, r["id"]),
                 )
                 self._append_event(conn, r["id"], "claim_extended", None)
                 continue
@@ -540,12 +547,20 @@ class SqliteWorkQueueStore:
         error: str | None = None,
         failure_limit: int = DEFAULT_FAILURE_LIMIT,
     ) -> WorkTask:
+        now = int(time.time())
         conn = self._get_conn()
         conn.execute(
             "UPDATE work_queue_tasks "
-            "SET consecutive_failures = consecutive_failures + 1, last_failure_error = ? "
+            "SET consecutive_failures = consecutive_failures + 1, last_failure_error = ?, "
+            "    current_run_id = NULL "
             "WHERE id = ?",
             (error, task_id),
+        )
+        # Close any open run row for this task so it does not strand.
+        conn.execute(
+            "UPDATE work_queue_task_runs SET status=?, outcome=?, ended_at=? "
+            "WHERE task_id=? AND ended_at IS NULL",
+            ("failed", outcome, now, task_id),
         )
         row = conn.execute(
             "SELECT consecutive_failures FROM work_queue_tasks WHERE id = ?",
@@ -570,11 +585,23 @@ class SqliteWorkQueueStore:
         return result
 
     def complete(self, task_id: str, *, result: str | None = None) -> WorkTask:
+        # Source-state guard: if already terminal, return unchanged (no duplicate events).
+        existing = self.get(task_id)
+        assert existing is not None
+        if existing.status in ("completed", "archived"):
+            return existing
         now = int(time.time())
         conn = self._get_conn()
+        # Close any open run row for this task.
+        conn.execute(
+            "UPDATE work_queue_task_runs SET status='done', outcome='completed', ended_at=? "
+            "WHERE task_id=? AND ended_at IS NULL",
+            (now, task_id),
+        )
         conn.execute(
             "UPDATE work_queue_tasks "
-            "SET status = 'completed', result = ?, completed_at = ?, consecutive_failures = 0 "
+            "SET status = 'completed', result = ?, completed_at = ?, consecutive_failures = 0, "
+            "    current_run_id = NULL "
             "WHERE id = ?",
             (result, now, task_id),
         )
