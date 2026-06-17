@@ -87,6 +87,17 @@ class CustomizeVerificationPolicy:
             and rule["what"].get("kind") == "tool_perm"
         ]
 
+    def enabled_llm_criterion_rules(self, *, fires_at: str) -> list[dict[str, Any]]:
+        """Enabled ``llm_criterion`` custom rules for a fire-at point (P3/P4)."""
+        return [
+            rule
+            for rule in self.custom_rules
+            if rule.get("enabled", False)
+            and rule.get("firesAt") == fires_at
+            and isinstance(rule.get("what"), dict)
+            and rule["what"].get("kind") == "llm_criterion"
+        ]
+
     def explicit_preset(self, preset_id: str) -> bool | None:
         """Explicit per-preset enable state, or None if the user never set it."""
         return self.preset_overrides.get(preset_id)

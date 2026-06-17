@@ -100,6 +100,32 @@ def _build_user_hook_bus_for_headless(*, workspace_root: str) -> object | None:
     return build_user_hook_bus(workspace_root=workspace_root)
 
 
+def _build_criterion_model_factory() -> object | None:
+    """Model factory for custom llm_criterion rules (P3 pre-final judge).
+
+    None unless BOTH ``MAGI_EGRESS_GATE_ENABLED`` and
+    ``MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED`` are set → llm rules stay inert and the
+    engine is byte-identical. Reuses the egress critic's provider-resolved
+    Haiku-class factory (``resolve_provider_config`` → ``_build_litellm_for_config``).
+    Fail-soft to None.
+    """
+    from magi_agent.config.flags import flag_bool
+
+    if not (
+        flag_bool("MAGI_EGRESS_GATE_ENABLED")
+        and flag_bool("MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED")
+    ):
+        return None
+    try:
+        from magi_agent.transport.egress_critic import (
+            _production_egress_critic_model_factory,
+        )
+
+        return _production_egress_critic_model_factory()
+    except Exception:
+        return None
+
+
 @dataclass
 class HeadlessRuntime:
     """Dependency set for the headless path.
@@ -273,6 +299,10 @@ def build_headless_runtime(
         # ~/.magi/settings.json + <cwd>/.magi/settings.json command hooks are
         # bridged onto the before/after-tool callbacks.
         user_hook_bus=_build_user_hook_bus_for_headless(workspace_root=effective_cwd),
+        # P3: LLM criterion judge model for custom llm_criterion rules at
+        # pre-final. None unless MAGI_EGRESS_GATE_ENABLED + custom-rules flag →
+        # llm rules stay inert (fail-open) and the turn is byte-identical.
+        criterion_model_factory=_build_criterion_model_factory(),
     )
 
     # (C) Permission gate — default stays sink-less and therefore fail-safe on

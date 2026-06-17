@@ -55,3 +55,23 @@ def test_policy_enabled_deterministic_refs():
     }
     policy = CustomizeVerificationPolicy.from_overrides(overrides)
     assert policy.enabled_deterministic_refs() == ["evidence:test-run"]
+
+
+def test_policy_enabled_llm_criterion_rules_by_firesat():
+    overrides = {
+        "verification": {
+            "custom_rules": [
+                {"id": "a", "enabled": True, "firesAt": "pre_final",
+                 "what": {"kind": "llm_criterion", "payload": {"criterion": "x"}}},
+                {"id": "b", "enabled": True, "firesAt": "after_tool_use",
+                 "what": {"kind": "llm_criterion", "payload": {"criterion": "y"}}},
+                {"id": "c", "enabled": False, "firesAt": "pre_final",
+                 "what": {"kind": "llm_criterion", "payload": {"criterion": "z"}}},
+            ]
+        }
+    }
+    policy = CustomizeVerificationPolicy.from_overrides(overrides)
+    pre = policy.enabled_llm_criterion_rules(fires_at="pre_final")
+    assert [r["id"] for r in pre] == ["a"]
+    after = policy.enabled_llm_criterion_rules(fires_at="after_tool_use")
+    assert [r["id"] for r in after] == ["b"]
