@@ -160,13 +160,18 @@ function CustomRulesSection({
   onDelete: (id: string) => void;
 }) {
   const [adding, setAdding] = useState(false);
-  const [kind, setKind] = useState<"deterministic_ref" | "tool_perm" | "llm_criterion">("deterministic_ref");
+  const [kind, setKind] = useState<"deterministic_ref" | "tool_perm" | "llm_criterion" | "after_tool">("deterministic_ref");
   const [ref, setRef] = useState(menu[0]?.ref ?? "");
   const [scope, setScope] = useState<string>("coding");
   const [matchType, setMatchType] = useState<"tool" | "domain" | "domainAllowlist">("tool");
   const [matchValue, setMatchValue] = useState("");
   const [decision, setDecision] = useState<"deny" | "ask">("deny");
   const [criterion, setCriterion] = useState("");
+  // P4 after-tool ingestion gate fields.
+  const [toolMatch, setToolMatch] = useState("");
+  const [contentPattern, setContentPattern] = useState("");
+  const [contentIsRegex, setContentIsRegex] = useState(false);
+  const [contentNegate, setContentNegate] = useState(false);
 
   const menuLabel = (r: string) => menu.find((m) => m.ref === r)?.label ?? r;
 
@@ -181,13 +186,26 @@ function CustomRulesSection({
       return verb;
     }
     if (rule.what?.kind === "llm_criterion") {
+      if (rule.firesAt === "after_tool_use") {
+        const tools = Array.isArray(p.toolMatch) ? (p.toolMatch as string[]).join(", ") : "";
+        const cm = (p.contentMatch ?? {}) as Record<string, unknown>;
+        const detail =
+          typeof cm.pattern === "string" ? `pattern "${String(cm.pattern)}"` : `"${String(p.criterion ?? "")}"`;
+        return `After-tool gate on [${tools}]: ${detail}`;
+      }
       return `LLM check: "${String(p.criterion ?? "")}"`;
     }
     return menuLabel(String(p.ref ?? ""));
   };
 
   const canAdd =
-    kind === "deterministic_ref" ? !!ref : kind === "llm_criterion" ? !!criterion.trim() : !!matchValue.trim();
+    kind === "deterministic_ref"
+      ? !!ref
+      : kind === "llm_criterion"
+        ? !!criterion.trim()
+        : kind === "after_tool"
+          ? !!toolMatch.trim() && (!!contentPattern.trim() || !!criterion.trim())
+          : !!matchValue.trim();
 
   const buildRule = (): CustomRule => {
     if (kind === "tool_perm") {
@@ -213,6 +231,22 @@ function CustomRulesSection({
         action: "block",
       };
     }
+    if (kind === "after_tool") {
+      const payload: Record<string, unknown> = {
+        toolMatch: toolMatch.split(",").map((s) => s.trim()).filter(Boolean),
+      };
+      if (contentPattern.trim()) {
+        payload.contentMatch = { pattern: contentPattern.trim(), isRegex: contentIsRegex, negate: contentNegate };
+      }
+      if (criterion.trim()) payload.criterion = criterion.trim();
+      return {
+        scope,
+        enabled: true,
+        what: { kind: "llm_criterion", payload },
+        firesAt: "after_tool_use",
+        action: "override",
+      };
+    }
     return {
       scope,
       enabled: true,
@@ -230,9 +264,10 @@ function CustomRulesSection({
         Custom Rules
       </h3>
       <p className="mb-2 text-xs leading-relaxed text-secondary">
-        Build a real gate: a deterministic evidence check (blocks the final answer)
-        or a tool-permission rule (deny / require approval for a tool or source
-        domain). No prompt injection.
+        Build a real gate: a deterministic evidence check (blocks the final answer),
+        a tool-permission rule (deny / require approval for a tool or source domain),
+        or a tool-result ingestion gate (strip an after-tool result by pattern or LLM
+        check). No prompt injection.
       </p>
 
       {rules.length > 0 ? (
@@ -280,6 +315,7 @@ function CustomRulesSection({
               </option>
               <option value="tool_perm">Tool permission (deny / approval)</option>
               <option value="llm_criterion">LLM criterion check (final answer)</option>
+              <option value="after_tool">Tool-result ingestion gate (after-tool)</option>
             </select>
           </label>
 
@@ -306,6 +342,51 @@ function CustomRulesSection({
                 Requires the egress gate (MAGI_EGRESS_GATE_ENABLED); otherwise saved but inactive.
               </span>
             </label>
+          ) : kind === "after_tool" ? (
+            <>
+              <label className="block text-[11px] font-medium text-secondary">
+                Tool(s) to inspect (comma-separated)
+                <input
+                  value={toolMatch}
+                  onChange={(e) => setToolMatch(e.target.value)}
+                  placeholder="web_search, web_fetch"
+                  className={selectCls}
+                />
+              </label>
+              <label className="block text-[11px] font-medium text-secondary">
+                Block when the result matches (deterministic pre-filter)
+                <input
+                  value={contentPattern}
+                  onChange={(e) => setContentPattern(e.target.value)}
+                  placeholder="ssn:  or  \d{3}-\d{2}-\d{4}"
+                  className={selectCls}
+                />
+              </label>
+              <div className="flex gap-4">
+                <label className="flex items-center gap-1.5 text-[11px] font-medium text-secondary">
+                  <input type="checkbox" checked={contentIsRegex} onChange={(e) => setContentIsRegex(e.target.checked)} />
+                  Regex
+                </label>
+                <label className="flex items-center gap-1.5 text-[11px] font-medium text-secondary">
+                  <input type="checkbox" checked={contentNegate} onChange={(e) => setContentNegate(e.target.checked)} />
+                  Block when it does NOT match
+                </label>
+              </div>
+              <label className="block text-[11px] font-medium text-secondary">
+                Optional LLM criterion (judged only when the pre-filter matches)
+                <textarea
+                  value={criterion}
+                  onChange={(e) => setCriterion(e.target.value)}
+                  rows={2}
+                  placeholder="e.g. The result is a 10-K filing."
+                  className={`${selectCls} resize-y`}
+                />
+                <span className="mt-1 block text-[10px] text-amber-600">
+                  The LLM sub-mode requires the egress gate (MAGI_EGRESS_GATE_ENABLED); without it only the
+                  deterministic pre-filter runs.
+                </span>
+              </label>
+            </>
           ) : (
             <>
               <label className="block text-[11px] font-medium text-secondary">
@@ -358,6 +439,10 @@ function CustomRulesSection({
                 onAdd(buildRule());
                 setMatchValue("");
                 setCriterion("");
+                setToolMatch("");
+                setContentPattern("");
+                setContentIsRegex(false);
+                setContentNegate(false);
                 setAdding(false);
               }}
               className="rounded-lg bg-primary px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-40"

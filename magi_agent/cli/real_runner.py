@@ -267,6 +267,10 @@ def build_cli_model_runner(
         # happen inside build_default_plane; passing the label alone changes
         # nothing while MAGI_TOOL_SYNTHESIS_NUDGE_ENABLED is unset.
         tool_synthesis_model_label=config.litellm_model,
+        # Customize after-tool ingestion gate (P4). Empty list (byte-identical)
+        # unless the customize custom-rules flags are on; registers after the
+        # bundled controls so it only rides on results no other control replaced.
+        extra_controls=_build_customize_after_tool_controls(),
     )
     app = App(name=_app_identifier(app_name), root_agent=agent, plugins=[plane_plugin])
     runner = Runner(
@@ -599,6 +603,34 @@ def _apply_customize_verification(required_validators: list[str]) -> list[str]:
         return result
     except Exception:
         return required_validators
+
+
+def _build_customize_after_tool_controls() -> list:
+    """After-tool ingestion-gate control for enabled customize ``after_tool_use``
+    rules (P4). Returns an EMPTY list (byte-identical control plane) unless
+    ``MAGI_CUSTOMIZE_VERIFICATION_ENABLED`` + ``MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED``
+    are both set. The LLM sub-mode reuses the P3 criterion model factory (which is
+    ``None`` while ``MAGI_EGRESS_GATE_ENABLED`` is off, so ``criterion`` rules stay
+    deterministic-only/inert). Fail-soft to ``[]``.
+    """
+    from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+
+    if not (
+        flag_bool("MAGI_CUSTOMIZE_VERIFICATION_ENABLED")
+        and flag_bool("MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED")
+    ):
+        return []
+    try:
+        from magi_agent.cli.wiring import _build_criterion_model_factory  # noqa: PLC0415
+        from magi_agent.customize.after_tool_gate import (  # noqa: PLC0415
+            CustomizeAfterToolControl,
+        )
+
+        return [
+            CustomizeAfterToolControl(model_factory=_build_criterion_model_factory())
+        ]
+    except Exception:
+        return []
 
 
 def _build_default_runner_policy_assembly(

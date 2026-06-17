@@ -136,3 +136,92 @@ def test_criterion_length_cap():
     rule = _llm(what={"kind": "llm_criterion", "payload": {"criterion": "x" * (CRITERION_MAX + 1)}})
     errs = validate_custom_rule(rule)
     assert any("criterion" in e.lower() for e in errs)
+
+
+# --- P4: after-tool contentMatch pre-filter (deterministic) ---
+def test_valid_after_tool_content_match_only():
+    # Pure-deterministic ingestion gate: contentMatch, no criterion.
+    rule = _llm(
+        firesAt="after_tool_use",
+        action="override",
+        what={
+            "kind": "llm_criterion",
+            "payload": {
+                "toolMatch": ["web_search"],
+                "contentMatch": {"pattern": "ssn:", "isRegex": False},
+            },
+        },
+    )
+    assert validate_custom_rule(rule) == []
+
+
+def test_valid_after_tool_content_match_plus_criterion():
+    rule = _llm(
+        firesAt="after_tool_use",
+        action="override",
+        what={
+            "kind": "llm_criterion",
+            "payload": {
+                "toolMatch": ["web_search"],
+                "criterion": "block non-10K filings",
+                "contentMatch": {"pattern": r"\d{4}", "isRegex": True},
+            },
+        },
+    )
+    assert validate_custom_rule(rule) == []
+
+
+def test_after_tool_requires_criterion_or_content():
+    rule = _llm(
+        firesAt="after_tool_use",
+        action="override",
+        what={"kind": "llm_criterion", "payload": {"toolMatch": ["web_search"]}},
+    )
+    errs = validate_custom_rule(rule)
+    assert any("criterion or a contentMatch" in e for e in errs)
+
+
+def test_content_match_missing_pattern_rejected():
+    rule = _llm(
+        firesAt="after_tool_use",
+        action="override",
+        what={
+            "kind": "llm_criterion",
+            "payload": {"toolMatch": ["web_search"], "contentMatch": {"isRegex": True}},
+        },
+    )
+    errs = validate_custom_rule(rule)
+    assert any("contentMatch.pattern" in e for e in errs)
+
+
+def test_content_match_bad_regex_rejected():
+    rule = _llm(
+        firesAt="after_tool_use",
+        action="override",
+        what={
+            "kind": "llm_criterion",
+            "payload": {
+                "toolMatch": ["web_search"],
+                "contentMatch": {"pattern": "([unclosed", "isRegex": True},
+            },
+        },
+    )
+    errs = validate_custom_rule(rule)
+    assert any("valid regex" in e for e in errs)
+
+
+def test_content_match_forbidden_at_pre_final():
+    rule = _llm(
+        what={
+            "kind": "llm_criterion",
+            "payload": {"criterion": "c", "contentMatch": {"pattern": "x"}},
+        }
+    )
+    errs = validate_custom_rule(rule)
+    assert any("after_tool_use" in e for e in errs)
+
+
+def test_pre_final_llm_still_requires_criterion():
+    rule = _llm(what={"kind": "llm_criterion", "payload": {}})
+    errs = validate_custom_rule(rule)
+    assert any("criterion is required" in e for e in errs)
