@@ -826,3 +826,66 @@ def test_spawn_agent_parent_tool_names_carried_to_child_request_gate_on(
     assert "parentToolNames" in metadata
     # The value must match what was set on the ToolContext (order-preserving).
     assert tuple(metadata["parentToolNames"]) == ("FileRead", "Bash")
+
+
+# ---------------------------------------------------------------------------
+# T10c/T10d: build_cli_tool_runtime / build_cli_adk_tools path (Task 2B.2 fix)
+# The third live tool-factory site must populate parent_tool_names on the
+# ToolContext it produces.  These tests use object-form monkeypatch on the
+# imported module objects to avoid PEP 562 __getattr__ guards.
+# ---------------------------------------------------------------------------
+
+
+def test_build_cli_tool_runtime_populates_parent_tool_names(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """T10c: build_cli_tool_runtime must close parent_tool_names over the
+    tool_context_factory it returns — the snapshot is non-empty (core tools
+    are always registered) and every name in it is a non-empty string.
+
+    Uses object-form monkeypatch on magi_agent.cli.tool_runtime to intercept
+    the ToolRegistry.list_available call without pulling google.adk.
+    """
+    import magi_agent.cli.tool_runtime as _rt_mod
+
+    # Stub _build_first_party_adk_tools dependency only if present in scope.
+    # The key seam is build_cli_tool_runtime itself — just call it and inspect.
+    runtime = _rt_mod.build_cli_tool_runtime(workspace_root=str(tmp_path))
+
+    # Call the factory with a plain object standing in for the ADK tool context.
+    ctx = runtime.tool_context_factory(object())
+
+    # parent_tool_names must be a non-empty tuple of strings (core tools always
+    # registered) — the third factory is now populated like the other two sites.
+    assert isinstance(ctx.parent_tool_names, tuple), (
+        "parent_tool_names must be a tuple"
+    )
+    assert len(ctx.parent_tool_names) > 0, (
+        "build_cli_tool_runtime must produce a non-empty parent_tool_names "
+        "(core tools are always registered)"
+    )
+    for name in ctx.parent_tool_names:
+        assert isinstance(name, str) and name, (
+            f"every parent_tool_names entry must be a non-empty string; got {name!r}"
+        )
+
+
+def test_build_cli_tool_runtime_parent_tool_names_sorted(
+    tmp_path: Path,
+) -> None:
+    """T10d: parent_tool_names snapshot must be sorted (mirrors wiring.py).
+
+    The intersection in Task 2B.3 relies on stable ordering; a non-sorted
+    tuple would not break correctness but would diverge from the contract
+    established by the other two producer sites.
+    """
+    import magi_agent.cli.tool_runtime as _rt_mod
+
+    runtime = _rt_mod.build_cli_tool_runtime(workspace_root=str(tmp_path))
+    ctx = runtime.tool_context_factory(object())
+
+    names = list(ctx.parent_tool_names)
+    assert names == sorted(names), (
+        "parent_tool_names must be sorted (mirrors wiring.py contract)"
+    )

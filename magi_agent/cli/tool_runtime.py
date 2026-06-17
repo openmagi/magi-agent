@@ -56,6 +56,7 @@ def build_cli_tool_runtime(
     *,
     workspace_root: str,
     session_id: str = "cli-session",
+    mode: "RuntimeMode" = "act",
     memory_mode: "MemoryMode | str" = "normal",
     permission_mode: str = "default",
     general_automation_receipts: "GeneralAutomationReceiptLedgerStore | None" = None,
@@ -181,6 +182,27 @@ def build_cli_tool_runtime(
         memory_mode.value if isinstance(memory_mode, MemoryMode) else str(memory_mode)
     )
 
+    # Capture parent tool names once at factory-build time (mirrors wiring.py
+    # _build_first_party_adk_tools and gates/gate5b_full_toolhost.py).  The
+    # snapshot is closed over into every ToolContext built by this factory —
+    # identical to how spawn_depth is threaded.  Only tools with a bound handler
+    # are included; manifest-only entries that cannot be dispatched are excluded.
+    # When the registry or list_available raises for any reason, fall back to ()
+    # so the factory remains non-fatal and behaviour is byte-identical to before.
+    try:
+        parent_tool_names_snapshot: tuple[str, ...] = tuple(
+            sorted(
+                registration.manifest.name
+                for registration in (
+                    registry.resolve_registration(manifest.name)
+                    for manifest in registry.list_available(mode=mode)
+                )
+                if registration is not None and registration.handler is not None
+            )
+        )
+    except Exception:  # noqa: BLE001 — producer is best-effort, never fatal
+        parent_tool_names_snapshot = ()
+
     def tool_context_factory(adk_tool_context: object) -> ToolContext:
         return ToolContext(
             bot_id=CLI_BOT_ID,
@@ -204,6 +226,7 @@ def build_cli_tool_runtime(
             ),
             adk_tool_context=adk_tool_context,
             adk_context=adk_tool_context,
+            parent_tool_names=parent_tool_names_snapshot,
         )
 
     return CliToolRuntime(
@@ -234,6 +257,7 @@ def build_cli_adk_tools(
     runtime = build_cli_tool_runtime(
         workspace_root=workspace_root,
         session_id=session_id,
+        mode=mode,
         memory_mode=memory_mode,
         permission_mode=permission_mode,
         general_automation_receipts=general_automation_receipts,
