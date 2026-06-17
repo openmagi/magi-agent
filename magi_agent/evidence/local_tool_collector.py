@@ -300,11 +300,9 @@ class LocalToolEvidenceCollector:
         to relocate, or to ``off``/``0``/``false``/``none`` to disable.
         Fail-soft: persistence problems never break the tool path.
         """
-        import json as _json  # noqa: PLC0415
-        import os as _os  # noqa: PLC0415
-
         from magi_agent.evidence.ledger_store import (  # noqa: PLC0415
             evidence_ledger_path,
+            write_evidence_records,
         )
 
         # Shared resolver with the reader (EvidenceLedgerReader) so writer and
@@ -312,32 +310,19 @@ class LocalToolEvidenceCollector:
         path = evidence_ledger_path(session_id)
         if path is None:
             return
-        try:
-            target_dir = path.parent
-            target_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-            try:
-                target_dir.chmod(0o700)
-            except OSError:
-                pass
-            flags = _os.O_WRONLY | _os.O_CREAT | _os.O_APPEND
-            fd = _os.open(path, flags, 0o600)
-            try:
-                _os.chmod(path, 0o600)
-            except OSError:
-                pass
-            with _os.fdopen(fd, "a", encoding="utf-8") as handle:
-                for record in records:
-                    entry = {
-                        "sessionId": session_id,
-                        "turnId": turn_id,
-                        "toolCallId": tool_call_id,
-                        "toolName": tool_name,
-                        "status": status,
-                        "record": _public_record_projection(record),
-                    }
-                    handle.write(_json.dumps(entry, sort_keys=True, default=str) + "\n")
-        except OSError:
-            return
+        # Build the per-record flat dicts (same shape as before: toolCallId,
+        # toolName, status, record) and delegate byte-writing to the shared
+        # writer so the hosted runner can reuse the same sink.
+        flat_records = [
+            {
+                "toolCallId": tool_call_id,
+                "toolName": tool_name,
+                "status": status,
+                "record": _public_record_projection(record),
+            }
+            for record in records
+        ]
+        write_evidence_records(path.parent, session_id=session_id, turn_id=turn_id, records=flat_records)
 
     def evidence_ledgers_for_session(
         self,

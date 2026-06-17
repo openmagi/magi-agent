@@ -32,6 +32,8 @@ __all__ = [
     "resolve_evidence_ledger_dir",
     "evidence_ledger_path",
     "evidence_ledger_filename",
+    "write_evidence_records",
+    "serve_evidence_ledger_dir",
     "EvidenceLedgerReader",
 ]
 
@@ -72,6 +74,85 @@ def evidence_ledger_path(
     if base is None:
         return None
     return base / evidence_ledger_filename(session_id)
+
+
+def write_evidence_records(
+    base_dir: str | os.PathLike[str],
+    *,
+    session_id: str,
+    turn_id: str,
+    records: list[dict],
+) -> None:
+    """Append one JSONL line per record to ``<base_dir>/<session>.jsonl``.
+
+    Each line has the shape ``{sessionId, turnId, toolCallId, toolName, status,
+    record}`` derived from the input record dict (keys missing from the dict are
+    omitted). Owner-only permissions: directory 0o700, file 0o600. Fail-open:
+    never raises; any I/O or serialization error is silently swallowed.
+
+    This is the shared writer extracted from
+    ``local_tool_collector._maybe_persist_records`` so the CLI path and the
+    hosted gate5b4c3 path can both call it without duplicating the
+    byte-writing loop.
+    """
+    if not records:
+        return
+    try:
+        target_dir = Path(base_dir)
+        target_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+        try:
+            target_dir.chmod(0o700)
+        except OSError:
+            pass
+        path = target_dir / evidence_ledger_filename(session_id)
+        flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND
+        fd = os.open(path, flags, 0o600)
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
+        with os.fdopen(fd, "a", encoding="utf-8") as handle:
+            for rec in records:
+                entry: dict[str, object] = {
+                    "sessionId": session_id,
+                    "turnId": turn_id,
+                }
+                for key in ("toolCallId", "toolName", "status", "record"):
+                    if key in rec:
+                        entry[key] = rec[key]
+                handle.write(json.dumps(entry, sort_keys=True, default=str) + "\n")
+    except OSError:
+        return
+    except Exception:
+        logger.debug("write_evidence_records failed", exc_info=True)
+
+
+def serve_evidence_ledger_dir(
+    *,
+    default_dir: Path,
+    env: Mapping[str, str] | None = None,
+) -> Path | None:
+    """Resolve the durable evidence directory for a *serve* context.
+
+    Like :func:`resolve_evidence_ledger_dir` but uses *default_dir* (a
+    ``Path`` supplied by the caller) instead of ``<cwd>/.magi/evidence`` when
+    ``MAGI_EVIDENCE_LEDGER_DIR`` is unset. The caller supplies the home path so
+    this module stays free of any ``observability`` import.
+
+    Returns ``None`` on a disable token (``off``/``0``/``false``/``none``/
+    ``disable``/``disabled``). An explicit ``MAGI_EVIDENCE_LEDGER_DIR`` path
+    overrides *default_dir*. When the env var is unset or empty, *default_dir*
+    is returned as-is. Fail-open: never raises.
+    """
+    try:
+        source: Mapping[str, str] = env if env is not None else os.environ
+        raw = (source.get(EVIDENCE_LEDGER_DIR_ENV) or "").strip()
+        if raw.lower() in _DISABLE_TOKENS:
+            return None
+        return Path(raw) if raw else default_dir
+    except Exception:
+        logger.debug("serve_evidence_ledger_dir failed", exc_info=True)
+        return default_dir
 
 
 class EvidenceLedgerReader:
