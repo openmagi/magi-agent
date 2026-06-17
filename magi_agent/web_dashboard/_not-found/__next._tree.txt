@@ -1,3 +1,7 @@
 :HL["/_next/static/chunks/0syb5rblw8rw-.css","style"]
-:HL["/_next/static/chunks/0huhg8ocgcjxy.css","style"]
+<<<<<<< HEAD
+:HL["/_next/static/chunks/352ut4xfovy6b.css","style"]
+=======
+:HL["/_next/static/chunks/44ly8-e9jl7fp.css","style"]
+>>>>>>> b40efb30 (feat(dashboard): local Models & Keys multi-provider panel (Track D1b))
 0:{"tree":{"name":"","param":null,"prefetchHints":16,"slots":{"children":{"name":"/_not-found","param":null,"prefetchHints":0,"slots":{"children":{"name":"__PAGE__","param":null,"prefetchHints":0,"slots":null}}}}},"staleTime":300,"buildId":"magi-agent-local-dashboard"}
