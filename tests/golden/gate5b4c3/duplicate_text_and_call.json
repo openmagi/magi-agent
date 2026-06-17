@@ -1,0 +1,90 @@
+{
+  "public_events": [
+    {
+      "delta": "\uc7ac\ubb34\uc81c\ud45c \ubd84\uc11d\uc744 \uc9c4\ud589\ud558\uaca0\uc2b5\ub2c8\ub2e4.",
+      "type": "text_delta"
+    },
+    {
+      "id": "tu_77fcf1e39894",
+      "name": "Calculation",
+      "type": "tool_start"
+    },
+    {
+      "id": "tu_77fcf1e39894",
+      "label": "Calculation",
+      "message": "Tool execution started",
+      "status": "in_progress",
+      "type": "tool_progress"
+    },
+    {
+      "phase": "executing",
+      "turnId": "turn_opaque_001",
+      "type": "turn_phase"
+    },
+    {
+      "durationMs": "<normalized>",
+      "id": "tu_77fcf1e39894",
+      "output_preview": "result:sha256:eb12fd085d249a4e9b46e24d52f49311d38bfbf24fe91335d3c307c581eb575a",
+      "status": "ok",
+      "transcriptRefs": [
+        "result:sha256:eb12fd085d249a4e9b46e24d52f49311d38bfbf24fe91335d3c307c581eb575a"
+      ],
+      "type": "tool_end"
+    },
+    {
+      "phase": "committing",
+      "turnId": "turn_opaque_001",
+      "type": "turn_phase"
+    },
+    {
+      "delta": "final answer after one manual tool execution",
+      "type": "text_delta"
+    }
+  ],
+  "result": {
+    "event_count": 3,
+    "reason": "runner_completed",
+    "selected_model": "claude-3-5-sonnet-latest",
+    "selected_provider": "anthropic",
+    "status": "completed"
+  },
+  "transcript_records": [
+    {
+      "model": "claude-3-5-sonnet-latest",
+      "prompt": "Please summarize the approved redacted note.",
+      "provider": "anthropic",
+      "sessionId": "gate5b4c3-shadow-ffffffffffffffffffffffff",
+      "turnId": "turn_opaque_001",
+      "type": "turn_start"
+    },
+    {
+      "args": {
+        "expression": "1 + 1"
+      },
+      "call_id": "tu_77fcf1e39894",
+      "sessionId": "gate5b4c3-shadow-ffffffffffffffffffffffff",
+      "tool_name": "Calculation",
+      "turnId": "turn_opaque_001",
+      "type": "tool_call"
+    },
+    {
+      "content": "\uc7ac\ubb34\uc81c\ud45c \ubd84\uc11d\uc744 \uc9c4\ud589\ud558\uaca0\uc2b5\ub2c8\ub2e4.final answer after one manual tool execution",
+      "role": "assistant",
+      "sessionId": "gate5b4c3-shadow-ffffffffffffffffffffffff",
+      "turnId": "turn_opaque_001",
+      "type": "message"
+    },
+    {
+      "event_count": 3,
+      "latency_ms": "<normalized>",
+      "model": "claude-3-5-sonnet-latest",
+      "provider": "anthropic",
+      "reason": "runner_completed",
+      "sessionId": "gate5b4c3-shadow-ffffffffffffffffffffffff",
+      "terminal": "completed",
+      "turnId": "turn_opaque_001",
+      "type": "turn_end",
+      "usage": null
+    }
+  ]
+}

@@ -1,0 +1,175 @@
+{
+  "public_events": [
+    {
+      "id": "tu_77fcf1e39894",
+      "name": "Calculation",
+      "type": "tool_start"
+    },
+    {
+      "id": "tu_77fcf1e39894",
+      "label": "Calculation",
+      "message": "Tool execution started",
+      "status": "in_progress",
+      "type": "tool_progress"
+    },
+    {
+      "phase": "executing",
+      "turnId": "turn_opaque_001",
+      "type": "turn_phase"
+    },
+    {
+      "durationMs": "<normalized>",
+      "id": "tu_77fcf1e39894",
+      "output_preview": "result:sha256:eb12fd085d249a4e9b46e24d52f49311d38bfbf24fe91335d3c307c581eb575a",
+      "status": "ok",
+      "transcriptRefs": [
+        "result:sha256:eb12fd085d249a4e9b46e24d52f49311d38bfbf24fe91335d3c307c581eb575a"
+      ],
+      "type": "tool_end"
+    },
+    {
+      "phase": "committing",
+      "turnId": "turn_opaque_001",
+      "type": "turn_phase"
+    },
+    {
+      "phase": "executing",
+      "turnId": "turn_opaque_001",
+      "type": "turn_phase"
+    },
+    {
+      "durationMs": "<normalized>",
+      "id": "tu_77fcf1e39894",
+      "output_preview": "result:sha256:eb12fd085d249a4e9b46e24d52f49311d38bfbf24fe91335d3c307c581eb575a",
+      "status": "ok",
+      "transcriptRefs": [
+        "result:sha256:eb12fd085d249a4e9b46e24d52f49311d38bfbf24fe91335d3c307c581eb575a"
+      ],
+      "type": "tool_end"
+    },
+    {
+      "phase": "committing",
+      "turnId": "turn_opaque_001",
+      "type": "turn_phase"
+    },
+    {
+      "phase": "executing",
+      "turnId": "turn_opaque_001",
+      "type": "turn_phase"
+    },
+    {
+      "durationMs": "<normalized>",
+      "id": "tu_77fcf1e39894",
+      "output_preview": "result:sha256:eb12fd085d249a4e9b46e24d52f49311d38bfbf24fe91335d3c307c581eb575a",
+      "status": "ok",
+      "transcriptRefs": [
+        "result:sha256:eb12fd085d249a4e9b46e24d52f49311d38bfbf24fe91335d3c307c581eb575a"
+      ],
+      "type": "tool_end"
+    },
+    {
+      "phase": "committing",
+      "turnId": "turn_opaque_001",
+      "type": "turn_phase"
+    },
+    {
+      "phase": "executing",
+      "turnId": "turn_opaque_001",
+      "type": "turn_phase"
+    },
+    {
+      "durationMs": "<normalized>",
+      "id": "tu_77fcf1e39894",
+      "output_preview": "result:sha256:eb12fd085d249a4e9b46e24d52f49311d38bfbf24fe91335d3c307c581eb575a",
+      "status": "ok",
+      "transcriptRefs": [
+        "result:sha256:eb12fd085d249a4e9b46e24d52f49311d38bfbf24fe91335d3c307c581eb575a"
+      ],
+      "type": "tool_end"
+    },
+    {
+      "phase": "committing",
+      "turnId": "turn_opaque_001",
+      "type": "turn_phase"
+    }
+  ],
+  "result": {
+    "event_count": 6,
+    "reason": "runner_output_missing",
+    "selected_model": "claude-3-5-sonnet-latest",
+    "selected_provider": "anthropic",
+    "status": "error"
+  },
+  "transcript_records": [
+    {
+      "model": "claude-3-5-sonnet-latest",
+      "prompt": "Please summarize the approved redacted note.",
+      "provider": "anthropic",
+      "sessionId": "gate5b4c3-shadow-ffffffffffffffffffffffff",
+      "turnId": "turn_opaque_001",
+      "type": "turn_start"
+    },
+    {
+      "args": {
+        "expression": "1 + 1"
+      },
+      "call_id": "tu_77fcf1e39894",
+      "sessionId": "gate5b4c3-shadow-ffffffffffffffffffffffff",
+      "tool_name": "Calculation",
+      "turnId": "turn_opaque_001",
+      "type": "tool_call"
+    },
+    {
+      "args": {
+        "expression": "1 + 1"
+      },
+      "call_id": "tu_77fcf1e39894",
+      "sessionId": "gate5b4c3-shadow-ffffffffffffffffffffffff",
+      "tool_name": "Calculation",
+      "turnId": "turn_opaque_001",
+      "type": "tool_call"
+    },
+    {
+      "args": {
+        "expression": "1 + 1"
+      },
+      "call_id": "tu_77fcf1e39894",
+      "sessionId": "gate5b4c3-shadow-ffffffffffffffffffffffff",
+      "tool_name": "Calculation",
+      "turnId": "turn_opaque_001",
+      "type": "tool_call"
+    },
+    {
+      "args": {
+        "expression": "1 + 1"
+      },
+      "call_id": "tu_77fcf1e39894",
+      "sessionId": "gate5b4c3-shadow-ffffffffffffffffffffffff",
+      "tool_name": "Calculation",
+      "turnId": "turn_opaque_001",
+      "type": "tool_call"
+    },
+    {
+      "args": {
+        "expression": "1 + 1"
+      },
+      "call_id": "tu_77fcf1e39894",
+      "sessionId": "gate5b4c3-shadow-ffffffffffffffffffffffff",
+      "tool_name": "Calculation",
+      "turnId": "turn_opaque_001",
+      "type": "tool_call"
+    },
+    {
+      "event_count": 6,
+      "latency_ms": "<normalized>",
+      "model": "claude-3-5-sonnet-latest",
+      "provider": "anthropic",
+      "reason": "runner_output_missing",
+      "sessionId": "gate5b4c3-shadow-ffffffffffffffffffffffff",
+      "terminal": "error",
+      "turnId": "turn_opaque_001",
+      "type": "turn_end",
+      "usage": null
+    }
+  ]
+}
