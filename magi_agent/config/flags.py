@@ -228,6 +228,14 @@ FLAGS: tuple[FlagSpec, ...] = (
             "calls, subagent spawns, messages) under the observability home."
         ),
     ),
+    _b(
+        "MAGI_SERVE_EVIDENCE_ENABLED",
+        summary=(
+            "Write per-turn tool evidence JSONL from the hosted gate5b4c3 "
+            "serving runner (default-OFF; default dir = observability "
+            "home/evidence, overridable via MAGI_EVIDENCE_LEDGER_DIR)."
+        ),
+    ),
     FlagSpec(
         name="MAGI_SESSION_TRANSCRIPT_RETENTION_DAYS",
         default=14,
