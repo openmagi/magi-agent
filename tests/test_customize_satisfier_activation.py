@@ -36,7 +36,9 @@ _GROUNDED_TEXT = "The system works well overall."
 
 
 def test_fact_grounding_inert_when_all_off(monkeypatch, tmp_path):
-    monkeypatch.delenv("MAGI_FACT_GROUNDING_VERIFICATION_ENABLED", raising=False)
+    # Profile-aware default-ON ⇒ explicit "0" to exercise the env-OFF path and
+    # isolate the customize toggle as the only possible activator.
+    monkeypatch.setenv("MAGI_FACT_GROUNDING_VERIFICATION_ENABLED", "0")
     monkeypatch.delenv("MAGI_CUSTOMIZE_VERIFICATION_ENABLED", raising=False)
     monkeypatch.setenv("MAGI_CUSTOMIZE", str(tmp_path / "customize.json"))
     out = _driver()._fact_grounding_matched_requirement_labels(
@@ -47,7 +49,9 @@ def test_fact_grounding_inert_when_all_off(monkeypatch, tmp_path):
 
 def test_fact_grounding_activated_by_customize_toggle(monkeypatch, tmp_path):
     # env flag OFF, but customize enables the preset (+ master flag on)
-    monkeypatch.delenv("MAGI_FACT_GROUNDING_VERIFICATION_ENABLED", raising=False)
+    # Profile-aware default-ON ⇒ explicit "0" to exercise the env-OFF path and
+    # isolate the customize toggle as the only possible activator.
+    monkeypatch.setenv("MAGI_FACT_GROUNDING_VERIFICATION_ENABLED", "0")
     monkeypatch.setenv("MAGI_CUSTOMIZE_VERIFICATION_ENABLED", "1")
     cfile = tmp_path / "customize.json"
     monkeypatch.setenv("MAGI_CUSTOMIZE", str(cfile))
@@ -60,7 +64,9 @@ def test_fact_grounding_activated_by_customize_toggle(monkeypatch, tmp_path):
 
 def test_fact_grounding_not_activated_when_master_flag_off(monkeypatch, tmp_path):
     # preset enabled in file but MASTER flag off → still inert
-    monkeypatch.delenv("MAGI_FACT_GROUNDING_VERIFICATION_ENABLED", raising=False)
+    # Profile-aware default-ON ⇒ explicit "0" to exercise the env-OFF path and
+    # isolate the customize toggle as the only possible activator.
+    monkeypatch.setenv("MAGI_FACT_GROUNDING_VERIFICATION_ENABLED", "0")
     monkeypatch.delenv("MAGI_CUSTOMIZE_VERIFICATION_ENABLED", raising=False)
     cfile = tmp_path / "customize.json"
     monkeypatch.setenv("MAGI_CUSTOMIZE", str(cfile))

@@ -4,12 +4,13 @@ The deterministic ``evaluate_answer_grounding`` detector
 (``magi_agent.research.grounded_answer_guard``) had ZERO live callers: a
 research answer that asserted a specific numeric/identifier value NOT present in
 the opened-source corpus was never blocked. This suite covers the wiring that
-makes it block, behind the strict default-OFF
-``MAGI_FACT_GROUNDING_VERIFICATION_ENABLED`` flag:
+makes it block, behind the profile-aware default-ON
+``MAGI_FACT_GROUNDING_VERIFICATION_ENABLED`` flag (ON in the full profile, OFF
+under safe/eval):
 
-* Flag default-OFF -> the satisfier is inert; the engine gate is byte-identical
-  to main (the bare ``fact_grounding`` required-validator behaves exactly as it
-  does today).
+* Flag OFF (explicit, or safe/eval profile) -> the satisfier is inert; the
+  engine gate is byte-identical to main (the bare ``fact_grounding``
+  required-validator behaves exactly as it does today).
 * Flag ON + a fabricated specific value (not in the corpus) -> ``guess`` ->
   the ``fact_grounding`` requirement stays missing -> gate ``block`` ->
   ``pre_final_evidence_gate_blocked``.
@@ -32,24 +33,30 @@ from magi_agent.evidence.types import EvidenceRecord
 
 
 # ---------------------------------------------------------------------------
-# Flag — strict default OFF
+# Flag — profile-aware default-ON (full profile; OFF under safe/eval).
+# The satisfier is fail-open, so defaulting it ON can only turn an
+# always-blocking research turn into a pass when grounded — never wedge a
+# previously-passing turn (see test_fact_grounding_gate_wiring).
 # ---------------------------------------------------------------------------
 
 
-def test_flag_default_off() -> None:
-    assert parse_fact_grounding_verification_enabled({}) is False
+def test_flag_defaults_on_in_full_profile() -> None:
+    # Unset resolves ON in the default (full) runtime profile.
+    assert parse_fact_grounding_verification_enabled({}) is True
     assert (
-        parse_fact_grounding_verification_enabled(
-            {"MAGI_FACT_GROUNDING_VERIFICATION_ENABLED": ""}
-        )
-        is False
+        parse_fact_grounding_verification_enabled({"MAGI_RUNTIME_PROFILE": "full"})
+        is True
     )
-    assert (
-        parse_fact_grounding_verification_enabled(
-            {"MAGI_FACT_GROUNDING_VERIFICATION_ENABLED": "0"}
+
+
+def test_flag_explicit_off_always_wins() -> None:
+    for value in ("", "0", "false", "off"):
+        assert (
+            parse_fact_grounding_verification_enabled(
+                {"MAGI_FACT_GROUNDING_VERIFICATION_ENABLED": value}
+            )
+            is False
         )
-        is False
-    )
 
 
 def test_flag_explicit_on() -> None:
@@ -61,11 +68,23 @@ def test_flag_explicit_on() -> None:
     )
 
 
-def test_flag_never_defaults_on_in_full_profile() -> None:
-    # Strict default-OFF: the full runtime profile must NOT flip it on.
+def test_flag_off_under_safe_and_eval_profiles() -> None:
+    for profile in ("safe", "eval", "off", "minimal", "conservative"):
+        assert (
+            parse_fact_grounding_verification_enabled(
+                {"MAGI_RUNTIME_PROFILE": profile}
+            )
+            is False
+        )
+    # An explicit ON still wins even under a safe profile.
     assert (
-        parse_fact_grounding_verification_enabled({"MAGI_RUNTIME_PROFILE": "full"})
-        is False
+        parse_fact_grounding_verification_enabled(
+            {
+                "MAGI_RUNTIME_PROFILE": "safe",
+                "MAGI_FACT_GROUNDING_VERIFICATION_ENABLED": "1",
+            }
+        )
+        is True
     )
 
 

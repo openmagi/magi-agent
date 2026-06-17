@@ -114,7 +114,6 @@ def test_unset_env_keeps_live_subagents_off_on_serve() -> None:
 # ---------------------------------------------------------------------------
 _STRICT_BOOL_FLAGS_ENABLED = (
     "MAGI_GATE5B_GOVERNANCE_ENABLED",
-    "MAGI_FACT_GROUNDING_VERIFICATION_ENABLED",
     "MAGI_GA_DELIVERABLE_GATE_ENABLED",
     "MAGI_EGRESS_GATE_ENABLED",
     "MAGI_FACTS_REPLAN_ENABLED",
@@ -180,6 +179,9 @@ _PROFILE_BOOL_FLAGS_ENABLED = (
     "MAGI_SELF_INTROSPECTION_ENABLED",
     "MAGI_EVIDENCE_LEDGER_LIFECYCLE_ENABLED",
     "MAGI_EVIDENCE_COMPLETION_GATE_ENABLED",
+    # Fail-open semantic-grounding satisfier: profile-aware default-ON (full
+    # profile). Can only REMOVE a block, so defaulting it on is safe.
+    "MAGI_FACT_GROUNDING_VERIFICATION_ENABLED",
 )
 
 
@@ -245,7 +247,6 @@ def test_unset_env_is_default_off_for_strict_gates() -> None:
     empty: dict[str, str] = {}
     # A representative spread of the strict opt-in gates the profile turns on.
     assert cfg_env.is_gate5b_governance_enabled(empty) is False
-    assert cfg_env.parse_fact_grounding_verification_enabled(empty) is False
     assert cfg_env.parse_ga_deliverable_gate_enabled(empty) is False
     assert cfg_env.is_egress_gate_enabled(empty) is False
     assert flag_bool("MAGI_FACTS_REPLAN_ENABLED", env=empty) is False

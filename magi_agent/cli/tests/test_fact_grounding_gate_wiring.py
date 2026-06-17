@@ -134,9 +134,11 @@ def _drive(driver: MagiEngineDriver, *, prompt: str) -> list[object]:
 
 
 def test_flag_off_research_gate_blocks_on_missing_fact_grounding(monkeypatch) -> None:
-    # Byte-identical to today: with the satisfier OFF the bare fact_grounding
-    # required-validator is never satisfied, so the research gate blocks.
-    monkeypatch.delenv("MAGI_FACT_GROUNDING_VERIFICATION_ENABLED", raising=False)
+    # Byte-identical to today: with the satisfier explicitly OFF the bare
+    # fact_grounding required-validator is never satisfied, so the research gate
+    # blocks. (The flag is profile-aware default-ON, so an explicit "0" is needed
+    # to exercise the OFF path under the full profile.)
+    monkeypatch.setenv("MAGI_FACT_GROUNDING_VERIFICATION_ENABLED", "0")
     monkeypatch.setenv("MAGI_CODING_REPAIR_LOOP_ENABLED", "0")
     monkeypatch.setattr(engine_module, "_lazy_engine_deps", _engine_deps)
     records = (_source_record("The channel reported 776,665 subscribers."),)

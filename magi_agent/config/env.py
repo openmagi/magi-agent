@@ -2783,15 +2783,17 @@ def parse_fact_grounding_verification_enabled(env: Mapping[str, str]) -> bool:
     pre-final evidence gate in ``cli.engine``: when ON, a research answer that
     asserts a specific numeric/identifier value NOT present in the opened-source
     corpus stays ungrounded and the bare ``fact_grounding`` required-validator is
-    left unsatisfied, so the gate blocks. This is a **strict default-OFF** gate:
-    it never defaults ON in any runtime profile and only flips for an explicit
-    truthy value, so flag-OFF behavior stays byte-identical to ``main`` (the
-    satisfier is inert and the existing ``fact_grounding`` label behaves exactly
-    as it does today).
+    left unsatisfied, so the gate blocks. **Profile-aware default-ON** (ON in the
+    full runtime profile, OFF under ``MAGI_RUNTIME_PROFILE=safe|eval|...``). The
+    satisfier is fail-open — a grounded answer CLEARS the bare ``fact_grounding``
+    validator and an ungrounded answer leaves it missing exactly as a flag-OFF
+    turn does — so defaulting it ON can only turn an always-blocking research turn
+    into a pass when grounded, never wedge a previously-passing turn. An explicit
+    ``"0"`` always wins.
     """
-    from .flags import flag_bool
+    from .flags import flag_profile_bool
 
-    return flag_bool("MAGI_FACT_GROUNDING_VERIFICATION_ENABLED", env=env)
+    return flag_profile_bool("MAGI_FACT_GROUNDING_VERIFICATION_ENABLED", env=env)
 
 
 def parse_source_ledger_evidence_gate_enabled(env: Mapping[str, str]) -> bool:

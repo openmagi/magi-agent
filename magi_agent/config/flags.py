@@ -542,14 +542,17 @@ FLAGS: tuple[FlagSpec, ...] = (
             "default-OFF and inert unless explicitly set."
         ),
     ),
-    _b(
+    _pb(
         "MAGI_FACT_GROUNDING_VERIFICATION_ENABLED",
         stage="stage2",
         summary=(
             "Run semantic grounding verification on the live evidence gate: a "
             "research answer asserting a specific numeric/identifier value not "
             "present in the opened-source corpus stays ungrounded and blocks. "
-            "Strict default-OFF and inert unless explicitly set."
+            "Profile-aware default-ON (full profile; OFF under safe/eval). The "
+            "satisfier is fail-open — it can only REMOVE a block (a grounded "
+            "answer clears the bare fact_grounding validator), never add one — so "
+            "turning it on by default cannot wedge a previously-passing turn."
         ),
     ),
     _b(
