@@ -60,7 +60,6 @@ import pytest
 
 from tests.support.gate5b4c3_capture import capture_boundary
 from tests.support.gate5b4c3_fakes import (
-    _AutoToolLoopRunner,
     _DuplicateTextAndFunctionCallRunner,
     _EventCapTextAndFunctionCallRunner,
     _FakeAgent,
@@ -112,7 +111,6 @@ def _scenarios() -> dict[str, tuple[Any, Any, dict[str, Any]]]:
     _FunctionCallThenFinalRunner.calls = []
     _FunctionCallThenFinalRunner.event_factory = _FunctionCallOnlyEvent
     _DuplicateTextAndFunctionCallRunner.calls = []
-    _AutoToolLoopRunner.calls = []
     _NativeToolRoundtripRunner.calls = []
     _ManualCalculationTool.calls = []
 

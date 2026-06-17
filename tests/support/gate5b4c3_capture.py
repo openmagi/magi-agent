@@ -22,7 +22,10 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
-from magi_agent.observability.transcript import set_active_transcript_sink
+from magi_agent.observability.transcript import (
+    get_active_transcript_sink,
+    set_active_transcript_sink,
+)
 from magi_agent.shadow.gate5b4c3_live_runner_boundary import (
     run_gate5b4c3_live_runner_boundary_async,
 )
@@ -83,6 +86,7 @@ async def capture_boundary(
             {"sessionId": session_id, "turnId": turn_id, **dict(event)}
         )
 
+    _prior = get_active_transcript_sink()
     set_active_transcript_sink(_transcript_sink)
     try:
         result = await run_gate5b4c3_live_runner_boundary_async(
@@ -93,7 +97,7 @@ async def capture_boundary(
             public_event_sink=_public_sink,
         )
     finally:
-        set_active_transcript_sink(None)
+        set_active_transcript_sink(_prior)
 
     return {
         "public_events": public_events,
