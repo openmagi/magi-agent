@@ -1081,6 +1081,7 @@ class MagiEngineDriver:
         empty_response_recovery: "EmptyResponseRecoveryConfig | None" = None,
         evidence_collector: Callable[[str], Sequence[object]] | None = None,
         user_hook_bus: object | None = None,
+        criterion_model_factory: Callable[[], object] | None = None,
     ) -> None:
         self._runner = runner
         self._max_event_count = max(1, int(max_event_count))
@@ -1144,6 +1145,55 @@ class MagiEngineDriver:
         # the production wiring via ``cli.hook_wiring.build_user_hook_bus`` and
         # injected here; local CLI / self-host only (never hosted multi-tenant).
         self._user_hook_bus: object | None = user_hook_bus
+        # P3: factory for the LLM criterion judge model (custom llm_criterion
+        # rules at pre-final). ``None`` (default) -> llm_criterion rules are inert
+        # (fail-open) so the turn is byte-identical. Built by the wiring from the
+        # provider config when MAGI_EGRESS_GATE_ENABLED.
+        self._criterion_model_factory: Callable[[], object] | None = (
+            criterion_model_factory
+        )
+
+    async def _maybe_llm_criterion_block(self, *, final_text: str) -> str | None:
+        """Reason string if an enabled pre-final llm_criterion rule BLOCKS, else None.
+
+        Flag-gated by ``MAGI_EGRESS_GATE_ENABLED`` + ``MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED``;
+        returns ``None`` (no block) when off, no rules, or on any error (fail-open).
+        Only ``action == "block"`` rules can block here (P3); other actions are
+        recorded by validation but not enforced at pre-final in this phase.
+        """
+        from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+
+        if not (
+            flag_bool("MAGI_EGRESS_GATE_ENABLED")
+            and flag_bool("MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED")
+        ):
+            return None
+        try:
+            from magi_agent.customize.criterion_engine import evaluate_criterion
+            from magi_agent.customize.store import load_overrides
+            from magi_agent.customize.verification_policy import (
+                CustomizeVerificationPolicy,
+            )
+
+            policy = CustomizeVerificationPolicy.from_overrides(load_overrides())
+            rules = policy.enabled_llm_criterion_rules(fires_at="pre_final")
+            for rule in rules:
+                if rule.get("action") != "block":
+                    continue
+                payload = rule.get("what", {}).get("payload", {})
+                criterion = payload.get("criterion") if isinstance(payload, dict) else None
+                if not isinstance(criterion, str) or not criterion.strip():
+                    continue
+                passed, reason = await evaluate_criterion(
+                    criterion=criterion,
+                    draft_text=final_text,
+                    model_factory=self._criterion_model_factory,
+                )
+                if not passed:
+                    return reason or "custom criterion not satisfied"
+            return None
+        except Exception:
+            return None
 
     @property
     def runner(self) -> object | None:
@@ -2036,6 +2086,33 @@ class MagiEngineDriver:
         # the synthetic repair continuation) — leaking it concatenated the whole
         # exchange into the user-visible reply.
         live_selected = await self._read_live_selected_recipe_pack_ids(session_id)
+
+        # P3: custom llm_criterion gate (pre-final). Independent of the
+        # deterministic verifier-bus loop below + the coding-repair loop. A clear
+        # FAIL verdict from an enabled block rule aborts the turn with a custom
+        # error (mirrors the deterministic block-error return). Flag-gated +
+        # fail-open → byte-identical when off.
+        llm_block_reason = await self._maybe_llm_criterion_block(final_text=emitted_text)
+        if llm_block_reason is not None:
+            yield RuntimeEvent(
+                type="status",
+                payload={
+                    "type": "custom_llm_criterion_blocked",
+                    "turnId": turn_id,
+                    "reason": llm_block_reason,
+                },
+                turn_id=turn_id,
+            )
+            yield EngineResult(  # type: ignore[misc]
+                terminal=Terminal.error,
+                usage=usage,
+                cost_usd=0.0,
+                error="custom_llm_criterion_blocked",
+                session_id=session_id,
+                turn_id=turn_id,
+            )
+            return
+
         repair_token_buffer: list[RuntimeEvent] = []
         while True:
             pre_final_gate = self._pre_final_gate_payload(
