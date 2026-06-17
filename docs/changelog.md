@@ -15,6 +15,25 @@ Versions follow the tags published on GitHub Releases.
 
 ### Fixed
 
+## 0.1.49
+
+### Added
+- A `lab` runtime profile (`MAGI_RUNTIME_PROFILE=lab`): an opt-in dogfood tier
+  that enables the full experimental feature set (all default-OFF flat flags) on
+  top of the non-safe profile defaults. Registry defaults and the
+  safe/eval/minimal/conservative profiles are unchanged; each flag is still
+  individually reversible with `MAGI_X=0` (#652).
+
+### Changed
+- Dashboard: native `<select>` elements replaced with a styled, keyboard- and
+  ARIA-friendly Select component across the OSS dashboard (#654).
+
+### Fixed
+- Recipes: the bundled `authoring-static` recipe pack is no longer
+  `defaultEnabled`, so enabling the kernel recipe flag (e.g. via the `lab`
+  profile) does not globally auto-select a read-only authoring recipe that would
+  hijack coding/chat turns and drop their verification wiring (#655).
+
 ## 0.1.48
 
 ### Added
