@@ -65,7 +65,7 @@ from tests.test_gate5b4c3_live_runner_boundary import (
 
 _GOLDEN_DIR = Path(__file__).parent / "golden" / "gate5b4c3"
 
-# Sentinel value substituted for volatile ``latency_ms`` values.
+# Sentinel value substituted for volatile timing values.
 _LATENCY_SENTINEL = "<normalized>"
 
 
@@ -74,6 +74,7 @@ def _normalize(snap: dict[str, Any]) -> dict[str, Any]:
 
     Currently normalises:
     - ``latency_ms`` in transcript records (wall-clock timing, always volatile)
+    - ``durationMs`` in public_events (wall-clock tool-execution duration, always volatile)
     """
     records = []
     for rec in snap.get("transcript_records", []):
@@ -81,7 +82,13 @@ def _normalize(snap: dict[str, Any]) -> dict[str, Any]:
         if "latency_ms" in rec:
             rec["latency_ms"] = _LATENCY_SENTINEL
         records.append(rec)
-    return {**snap, "transcript_records": records}
+    public_events = []
+    for evt in snap.get("public_events", []):
+        evt = dict(evt)
+        if "durationMs" in evt:
+            evt["durationMs"] = _LATENCY_SENTINEL
+        public_events.append(evt)
+    return {**snap, "transcript_records": records, "public_events": public_events}
 
 
 def _scenarios() -> dict[str, tuple[Any, Any, dict[str, Any]]]:

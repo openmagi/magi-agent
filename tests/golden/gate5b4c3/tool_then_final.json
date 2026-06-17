@@ -18,7 +18,7 @@
       "type": "turn_phase"
     },
     {
-      "durationMs": 0,
+      "durationMs": "<normalized>",
       "id": "tu_77fcf1e39894",
       "output_preview": "result:sha256:eb12fd085d249a4e9b46e24d52f49311d38bfbf24fe91335d3c307c581eb575a",
       "status": "ok",
