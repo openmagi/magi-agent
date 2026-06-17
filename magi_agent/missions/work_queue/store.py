@@ -124,6 +124,49 @@ class SqliteWorkQueueStore:
         conn.commit()
         return promoted
 
+    def claim(self, task_id, *, claimer, ttl=CLAIM_TTL_SECONDS, now=None, worker_pid=None):
+        import time
+        now = int(time.time()) if now is None else now
+        conn = self._get_conn()
+        # Parent-gate (mirror Hermes): never run while a parent is undone.
+        undone = conn.execute(
+            "SELECT 1 FROM work_queue_task_links l "
+            "JOIN work_queue_tasks p ON p.id = l.parent_id "
+            "WHERE l.child_id = ? AND p.status NOT IN ('completed','archived') LIMIT 1",
+            (task_id,),
+        ).fetchone()
+        if undone:
+            conn.execute(
+                "UPDATE work_queue_tasks SET status='todo' WHERE id=? AND status='ready'",
+                (task_id,),
+            )
+            self._append_event(conn, task_id, "claim_rejected", {"reason": "parents_not_done"})
+            conn.commit()
+            return None
+        cur = conn.execute(
+            "UPDATE work_queue_tasks "
+            "SET status='running', claim_lock=?, claim_expires=?, worker_pid=?, "
+            "    last_heartbeat_at=?, started_at=COALESCE(started_at, ?) "
+            "WHERE id=? AND status='ready' AND claim_lock IS NULL",
+            (claimer, now + ttl, worker_pid, now, now, task_id),
+        )
+        if cur.rowcount != 1:
+            conn.commit()
+            return None
+        run_cur = conn.execute(
+            "INSERT INTO work_queue_task_runs "
+            "(task_id, status, claim_lock, claim_expires, worker_pid, last_heartbeat_at, started_at) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (task_id, "running", claimer, now + ttl, worker_pid, now, now),
+        )
+        conn.execute(
+            "UPDATE work_queue_tasks SET current_run_id=? WHERE id=?",
+            (run_cur.lastrowid, task_id),
+        )
+        self._append_event(conn, task_id, "claimed", {"claimer": claimer})
+        conn.commit()
+        return self.get(task_id)
+
     def _append_event(self, conn, task_id, kind, payload):
         conn.execute(
             "INSERT INTO work_queue_task_events (task_id, run_id, kind, payload, created_at) "
