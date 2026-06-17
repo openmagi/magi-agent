@@ -30,6 +30,7 @@ from magi_agent.runtime.output_continuation import (
 )
 from magi_agent.runtime.public_events import (
     tool_end_event,
+    tool_event_id as _shared_tool_event_id,
     tool_input_preview,
     tool_progress_event,
     tool_start_event,
@@ -2658,14 +2659,11 @@ def _manual_tool_event_id(
     call_id: object,
     index: int,
 ) -> str:
-    return "tu_" + _digest(
-        {
-            "name": name,
-            "args": _bounded_json_value(args, max_bytes=512),
-            "id": str(call_id or ""),
-            "index": index,
-        }
-    )[7:19]
+    """Delegates to the shared runtime.public_events.tool_event_id.
+
+    Kept as a thin wrapper so existing internal call-sites are unchanged.
+    """
+    return _shared_tool_event_id(name=name, args=args, call_id=call_id, index=index)
 
 
 async def _invoke_manual_tool(tool: object, args: Mapping[str, object]) -> object:
