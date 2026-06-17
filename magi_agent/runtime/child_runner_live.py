@@ -358,6 +358,97 @@ class RealLocalChildRunner:
     async def _collect_turn_text(
         self, config: object, request: object
     ) -> tuple[str, tuple[str, ...]]:
+        # Task 2A.6: when MAGI_SUBAGENT_GOVERNED_TURN_ENABLED is ON, drive the
+        # governed-turn primitive instead of the bare run_async loop.  When OFF
+        # the existing path runs unchanged (byte-identical).
+        from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+
+        if flag_bool("MAGI_SUBAGENT_GOVERNED_TURN_ENABLED", env=self._env):
+            return await self._collect_turn_text_governed(config, request)
+        return await self._collect_turn_text_legacy(config, request)
+
+    async def _collect_turn_text_governed(
+        self, config: object, request: object
+    ) -> tuple[str, tuple[str, ...]]:
+        """Governed-turn branch (MAGI_SUBAGENT_GOVERNED_TURN_ENABLED=1).
+
+        Security invariant: the child's RESTRICTED toolset (from
+        ``_resolve_turn_toolset``) is always forwarded to
+        ``build_headless_runtime(tools=...)`` so the governed runner never
+        receives the full default toolset.
+
+        The 600s wait_for ceiling is preserved: this method is called from
+        ``_collect_turn_text`` which is in turn called from ``_drive_one_turn``
+        which wraps the whole call in ``asyncio.wait_for``.
+        """
+        import tempfile  # noqa: PLC0415
+
+        from magi_agent.cli.wiring import build_headless_runtime  # noqa: PLC0415
+        from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+        from magi_agent.runtime.child_derive import derive  # noqa: PLC0415
+        from magi_agent.runtime.child_governed_collector import (  # noqa: PLC0415
+            collect_governed_child_turn,
+        )
+        from magi_agent.runtime.governed_turn import run_governed_turn  # noqa: PLC0415
+
+        session_id = self._child_session_id(request)
+
+        # --- Restricted toolset (security invariant) -------------------------
+        # _resolve_turn_toolset returns the SAME restricted toolset the legacy
+        # path builds; we pass it directly to build_headless_runtime so the
+        # governed runner is also restricted to the child's profile.
+        tools, _evidence_collector = self._resolve_turn_toolset(session_id)
+
+        # --- Resolve memory mode + depth from request metadata ---------------
+        # parent_memory_mode: not yet threaded to this call site; default to
+        # "incognito" (non-load-bearing until MAGI_CHILD_MEMORY_INHERIT_ENABLED
+        # is flipped ON — with it OFF, _child_memory_mode always returns
+        # "incognito" regardless of parent_memory_mode).
+        parent_memory_mode = "incognito"
+        memory_inherit_enabled = flag_bool(
+            "MAGI_CHILD_MEMORY_INHERIT_ENABLED", env=self._env
+        )
+
+        # spawnDepth in request.metadata becomes parent_depth for derive().
+        metadata = getattr(request, "metadata", None) or {}
+        raw_depth = metadata.get("spawnDepth") if isinstance(metadata, dict) else None
+        parent_depth = int(raw_depth) if isinstance(raw_depth, int) and not isinstance(raw_depth, bool) else 0
+
+        # --- Build the child's governed runtime (restricted toolset) ---------
+        workspace = self._workspace_root or tempfile.mkdtemp()
+        # ``config`` carries the resolved model string so we extract it for the
+        # ``model`` kwarg; build_headless_runtime accepts it for future
+        # model-selection wiring.
+        route_model = _clean_str(getattr(config, "model", None))
+        rt = build_headless_runtime(
+            cwd=workspace,
+            session_id=session_id,
+            model=route_model,
+            tools=tools,
+            memory_mode=parent_memory_mode if not memory_inherit_enabled else "normal",
+            permission_mode="bypassPermissions",
+        )
+
+        # --- Derive the child TurnContext ------------------------------------
+        ctx = derive(
+            request,
+            parent_memory_mode=parent_memory_mode,
+            parent_depth=parent_depth,
+            memory_inherit_enabled=memory_inherit_enabled,
+            child_session_id=session_id,
+        )
+
+        # --- Drive the governed turn + collect summary + evidence_refs -------
+        cancel = asyncio.Event()
+        summary, evidence_refs, _status = await collect_governed_child_turn(
+            run_governed_turn(ctx, runtime=rt, cancel=cancel)
+        )
+        return summary, evidence_refs
+
+    async def _collect_turn_text_legacy(
+        self, config: object, request: object
+    ) -> tuple[str, tuple[str, ...]]:
+        """Legacy bare run_async path (flag OFF — byte-identical to pre-2A.6)."""
         import tempfile  # noqa: PLC0415
 
         from google.genai import types  # noqa: PLC0415
