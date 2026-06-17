@@ -111,6 +111,22 @@ _PRUNED_TOOL_OUTPUT_PLACEHOLDER: dict[str, str] = {
 # minimum total freed tokens to commit a prune (no churn for tiny savings).
 _PRUNE_PROTECT_DEFAULT = 40_000
 _PRUNE_MINIMUM_DEFAULT = 20_000
+
+# G1 default summarize timeout (seconds) for the session-model summary call.
+_SUMMARY_TIMEOUT_DEFAULT = 30.0
+
+# G1 transcript cap: the rendered dropped-prefix transcript is bounded to this
+# many chars before being formatted into the summary prompt, so the summary call
+# stays sane regardless of how large the dropped prefix is.
+_SUMMARY_TRANSCRIPT_MAX_CHARS = 24_000
+# Per-Content segment cap (mirrors AutoCompactionEngine._format_conversation's
+# per-message 2000-char cap).
+_SUMMARY_SEGMENT_MAX_CHARS = 2_000
+# Per-result payload cap inside a rendered [tool_result ...] descriptor.
+_SUMMARY_RESULT_PAYLOAD_MAX_CHARS = 500
+# Per-call args cap inside a rendered [tool_call ...] descriptor.
+_SUMMARY_CALL_ARGS_MAX_CHARS = 200
+
 # Per-result minimum (LOWER clear threshold): only OLD function_response
 # payloads larger than this (in estimated tokens) are worth clearing — clearing
 # a trivial output frees nothing once the placeholder is counted, so they are
@@ -140,6 +156,9 @@ class MagiContextCompactionPlugin(BasePlugin):
         tool_prune_enabled: bool = False,
         prune_protect: int = _PRUNE_PROTECT_DEFAULT,
         prune_minimum: int = _PRUNE_MINIMUM_DEFAULT,
+        summarize_enabled: bool = False,
+        summary_model: str | None = None,
+        summary_timeout: float = _SUMMARY_TIMEOUT_DEFAULT,
     ) -> None:
         super().__init__(name)
         if token_threshold < 1:
@@ -156,6 +175,8 @@ class MagiContextCompactionPlugin(BasePlugin):
             raise ValueError("prune_protect must be >= 1")
         if prune_minimum < 1:
             raise ValueError("prune_minimum must be >= 1")
+        if summarize_enabled and summary_timeout <= 0:
+            raise ValueError("summary_timeout must be > 0")
         self.token_threshold = token_threshold
         self.tail_events = tail_events
         self.event_count_threshold = event_count_threshold
@@ -170,6 +191,13 @@ class MagiContextCompactionPlugin(BasePlugin):
         self._real_tokens_enabled = bool(real_tokens_enabled)
         self._real_tokens_pct = real_tokens_pct
         self._output_reserve = output_reserve
+        # G1 LLM summary injection on the tail-drop (default-OFF). When OFF the
+        # new summary block in ``_apply_tail_trim`` is skipped entirely and the
+        # existing pure tail-drop runs verbatim (no provider/model resolution, no
+        # LLM call).
+        self._summarize_enabled = bool(summarize_enabled)
+        self._summary_model_override = summary_model or None
+        self._summary_timeout = summary_timeout
         # Per-before-model stash of the real prompt-token count + model id, read
         # off ``callback_context.state`` and threaded to ``_trim_request`` without
         # touching the ``CompactionCapability.trim(llm_request)`` signature. Set at
@@ -325,7 +353,7 @@ class MagiContextCompactionPlugin(BasePlugin):
             # cleared in the finally so it never leaks to a later call.
             decided = self._real_token_decision()
             if decided is True:
-                return self._apply_tail_trim(llm_request, contents)
+                return await self._apply_tail_trim(llm_request, contents)
             if decided is False:
                 return None
 
@@ -350,7 +378,7 @@ class MagiContextCompactionPlugin(BasePlugin):
             if decision.status != "compacted":
                 return None
 
-            return self._apply_tail_trim(llm_request, contents)
+            return await self._apply_tail_trim(llm_request, contents)
         except Exception:
             # Fail-open: compaction must never break a live model turn. Leaving
             # contents untouched is the no-plugin behaviour.
@@ -385,13 +413,27 @@ class MagiContextCompactionPlugin(BasePlugin):
             return True
         return False
 
-    def _apply_tail_trim(self, llm_request: Any, contents: list[Any]) -> None:
+    async def _apply_tail_trim(self, llm_request: Any, contents: list[Any]) -> None:
         """Reduce ``llm_request.contents`` to the orphan-adjusted recent tail.
 
-        Lifted verbatim from the post-decision body so both the real-token
-        short-circuit and the boundary-decision path share one tail-trim
-        implementation (byte-identical reduction). The caller wraps this in the
-        fail-open try/except, so this body may assume well-formed inputs.
+        Lifted from the post-decision body so both the real-token short-circuit
+        and the boundary-decision path share one tail-trim implementation. The
+        caller wraps this in the fail-open try/except, so this body may assume
+        well-formed inputs.
+
+        G1: when ``_summarize_enabled`` is ON and a real tail-drop is about to
+        occur (split_index > 0, non-empty dropped prefix), the dropped prefix is
+        replaced by a session-model summary head (plus G8 protected-tool-output
+        text) instead of being silently dropped. Fail-open: any failure resolving
+        the provider/model, generating, or timing out falls back to the EXISTING
+        pure tail-drop below, so behaviour never regresses below today.
+
+        CACHE TRADEOFF (documented, not solved here): injecting a fresh summary
+        head changes the prompt prefix, so when ``MAGI_MESSAGE_CACHE_ENABLED`` is
+        ON the provider prompt-cache is invalidated from the first content forward
+        — the same class of cost as today's tail-drop (and the G4 prune). True
+        cache-preserving (anchored / stable-prefix) summarization is deferred to
+        G5.
         """
         keep = min(self.tail_events, len(contents))
         split_index = len(contents) - keep
@@ -411,8 +453,48 @@ class MagiContextCompactionPlugin(BasePlugin):
                 self.tail_events,
                 len(contents),
             )
+        if self._summarize_enabled and split_index > 0:
+            dropped = contents[:split_index]
+            if dropped:
+                head = await self._build_summary_head(llm_request, dropped)
+                if head is not None:
+                    llm_request.contents = head + contents[split_index:]
+                    return None
+        # Fall through to the EXISTING pure tail-drop (byte-identical to today).
         llm_request.contents = contents[split_index:]
         return None
+
+    async def _build_summary_head(
+        self, llm_request: Any, dropped: list[Any]
+    ) -> list[Any] | None:
+        """Build the injected head for a tail-drop: ``[summary_content, *protected]``.
+
+        Renders the dropped prefix to a bounded transcript, summarizes it via the
+        session model (G1), and converts any protected-tool results in the dropped
+        region to plain text user Contents (G8). Returns ``None`` (caller falls
+        through to the pure drop) when the summary cannot be produced. Fail-open:
+        any error returns ``None``.
+        """
+        try:
+            from google.genai import types
+
+            transcript = _render_dropped_transcript(dropped)
+            model_id = self._summary_model_override or _resolve_model_id(llm_request)
+            summary = await _summarize_dropped_prefix(
+                model_id, transcript, timeout=self._summary_timeout
+            )
+            if not summary:
+                return None
+            summary_content = types.Content(
+                role="user",
+                parts=[
+                    types.Part(text="[Previous conversation summary]\n\n" + summary)
+                ],
+            )
+            protected = _protected_text_contents(dropped)
+            return [summary_content, *protected]
+        except Exception:
+            return None
 
     def _maybe_prune_tool_outputs(self, contents: list[Any]) -> None:
         """G4 deterministic tool-output prune (in-place mutator).
@@ -615,6 +697,217 @@ def _window_for_model(model: str | None) -> int:
     return _KNOWN_TOKEN_LIMITS.get(model, _DEFAULT_CONTEXT_WINDOW)
 
 
+def _serialize_response_payload(payload: Any) -> str:
+    """Compactly serialize a ``function_response.response`` payload to text.
+
+    Mirrors ``_response_payload_tokens``'s JSON basis (model_dump_json / json dump
+    with ``default=str``) so the rendered descriptor matches the budget basis.
+    Returns ``""`` for a ``None`` payload. Never raises (falls back to ``str``).
+    """
+    if payload is None:
+        return ""
+    try:
+        dump_json = getattr(payload, "model_dump_json", None)
+        if callable(dump_json):
+            return dump_json()
+        import json
+
+        return json.dumps(payload, default=str, sort_keys=True)
+    except Exception:
+        try:
+            return str(payload)
+        except Exception:
+            return ""
+
+
+def _render_dropped_transcript(dropped: list[Any]) -> str:
+    """Render the dropped prefix Contents to a bounded plain-text transcript.
+
+    Modeled on ``AutoCompactionEngine._format_conversation`` but adapted to ADK
+    ``types.Content`` / ``Part``: text parts contribute their text; function_call
+    parts render a concise ``[tool_call <name>]`` descriptor; function_response
+    parts render ``[tool_result <name>]: <payload>``. Each part segment and each
+    Content line is capped, and the whole transcript is capped to
+    :data:`_SUMMARY_TRANSCRIPT_MAX_CHARS` (with a truncation marker) so the
+    summary prompt stays sane regardless of how large the dropped prefix is.
+
+    Fully duck-typed and fail-soft: a malformed part contributes nothing rather
+    than raising (the outer summarize path is fail-open anyway).
+    """
+    lines: list[str] = []
+    used = 0
+    truncated = False
+    for content in dropped:
+        try:
+            role = getattr(content, "role", None) or "unknown"
+            parts = getattr(content, "parts", None) or []
+            segments: list[str] = []
+            for part in parts:
+                try:
+                    text = getattr(part, "text", None)
+                    if isinstance(text, str) and text:
+                        segments.append(text[:_SUMMARY_SEGMENT_MAX_CHARS])
+                        continue
+                    fc = getattr(part, "function_call", None)
+                    if fc is not None:
+                        name = getattr(fc, "name", None) or "?"
+                        args = getattr(fc, "args", None)
+                        if args:
+                            segments.append(
+                                f"[tool_call {name} "
+                                f"{str(args)[:_SUMMARY_CALL_ARGS_MAX_CHARS]}]"
+                            )
+                        else:
+                            segments.append(f"[tool_call {name}]")
+                        continue
+                    fr = getattr(part, "function_response", None)
+                    if fr is not None:
+                        name = getattr(fr, "name", None) or "?"
+                        payload = _serialize_response_payload(
+                            getattr(fr, "response", None)
+                        )
+                        segments.append(
+                            f"[tool_result {name}]: "
+                            f"{payload[:_SUMMARY_RESULT_PAYLOAD_MAX_CHARS]}"
+                        )
+                except Exception:
+                    continue
+            if not segments:
+                continue
+            line = f"[{role}]: {' '.join(segments)}"
+        except Exception:
+            continue
+        if used + len(line) > _SUMMARY_TRANSCRIPT_MAX_CHARS:
+            truncated = True
+            break
+        lines.append(line)
+        used += len(line)
+    transcript = "\n\n".join(lines)
+    if truncated:
+        transcript += "\n…[older context truncated]"
+    return transcript
+
+
+def _protected_text_contents(dropped: list[Any]) -> list[Any]:
+    """G8: convert protected-tool results in the dropped region to text Contents.
+
+    For each ``function_response`` whose ``.name`` is in ``PRUNE_PROTECTED_TOOLS``,
+    build a plain ``role='user'`` Content carrying a single text Part
+    ``[Preserved tool output: <name>]\\n<payload>`` (payload compactly serialized,
+    length-capped). Re-attaching the raw ``FunctionResponse`` would create an
+    orphan tool_result (no preceding tool_use in the kept window), so the
+    user-decided TEXT-CONVERSION removes the function_response part entirely —
+    no tool_use/tool_result pairing constraint applies. Fail-soft per part.
+    """
+    from google.genai import types
+
+    from magi_agent.context.protected_tools import PRUNE_PROTECTED_TOOLS
+
+    out: list[Any] = []
+    for content in dropped:
+        try:
+            parts = getattr(content, "parts", None) or []
+            for part in parts:
+                fr = getattr(part, "function_response", None)
+                if fr is None:
+                    continue
+                name = getattr(fr, "name", None)
+                if not (isinstance(name, str) and name in PRUNE_PROTECTED_TOOLS):
+                    continue
+                payload = _serialize_response_payload(getattr(fr, "response", None))
+                payload = payload[:_SUMMARY_TRANSCRIPT_MAX_CHARS]
+                out.append(
+                    types.Content(
+                        role="user",
+                        parts=[
+                            types.Part(
+                                text=f"[Preserved tool output: {name}]\n{payload}"
+                            )
+                        ],
+                    )
+                )
+        except Exception:
+            continue
+    return out
+
+
+async def _summarize_dropped_prefix(
+    model_id: str | None, transcript: str, *, timeout: float
+) -> str | None:
+    """Summarize ``transcript`` via the session model, or return ``None``.
+
+    Reuses the proven shared seam: ``resolve_provider_config()`` discovers the
+    active provider/key and ``_build_litellm_for_config(model_override=...)``
+    builds the ADK ``LiteLlm`` (EXACTLY the egress-critic factory body). The model
+    is invoked via the ADK async-generator contract — MIRRORING
+    ``ReadOnlyClassifier._invoke_llm`` (kept a private staticmethod; mirrored here
+    rather than imported so the live model-loop module does not couple to the
+    classifier's import surface). Fully fail-open: no provider/key, no litellm
+    dependency, a generate error, or a timeout all return ``None`` so the caller
+    falls back to the pure tail-drop.
+    """
+    import asyncio
+
+    try:
+        from magi_agent.cli.providers import resolve_provider_config
+
+        provider_config = resolve_provider_config()
+    except Exception:
+        return None
+    if provider_config is None:
+        return None
+
+    try:
+        from magi_agent.cli.readonly_classifier import _build_litellm_for_config
+        from magi_agent.context.auto_compact import AutoCompactionEngine
+
+        provider_default = getattr(provider_config, "litellm_model", None)
+        candidate = (model_id or "").strip()
+        # A bare model id (e.g. the native-Anthropic path's ``claude-sonnet-4-6``,
+        # read off ``llm_request.model``) is not litellm-routable without its
+        # ``provider/`` prefix. Prefer the provider config's properly-prefixed
+        # model (the configured session model) in that case so the summary build
+        # actually succeeds; only use ``candidate`` verbatim when it already
+        # carries a provider prefix. Still fail-open if neither is usable.
+        override = candidate if "/" in candidate else (provider_default or candidate or None)
+        model = _build_litellm_for_config(provider_config, model_override=override)
+        prompt = AutoCompactionEngine.SUMMARY_PROMPT.format(conversation=transcript)
+        return await asyncio.wait_for(
+            _invoke_summary_model(model, prompt), timeout=timeout
+        )
+    except Exception:
+        return None
+
+
+async def _invoke_summary_model(model: Any, prompt: str) -> str:
+    """Invoke ``model`` via the ADK async-generator contract, collecting text.
+
+    Mirrors ``magi_agent.cli.readonly_classifier.ReadOnlyClassifier._invoke_llm``
+    (the canonical reference) — kept private there, so this duplicates the ~15-line
+    contract rather than importing the classifier's class machinery onto the live
+    model path. If ADK's ``generate_content_async`` contract changes, both sites
+    must update.
+    """
+    from google.adk.models.llm_request import LlmRequest
+    from google.genai import types
+
+    llm_request = LlmRequest(
+        config=types.GenerateContentConfig(
+            system_instruction="Summarize concisely; reply with prose only.",
+        ),
+        contents=[
+            types.Content(role="user", parts=[types.Part.from_text(text=prompt)])
+        ],
+    )
+    collected: list[str] = []
+    async for resp in model.generate_content_async(llm_request, stream=False):
+        if resp.content and resp.content.parts:
+            for part in resp.content.parts:
+                if part.text:
+                    collected.append(part.text)
+    return "".join(collected)
+
+
 def _content_event_ref(index: int) -> str:
     # Must satisfy ``validate_safe_ref`` (^[A-Za-z][A-Za-z0-9_.:-]{1,220}$).
     return f"event:before-model:{index:06d}"
@@ -750,6 +1043,9 @@ def build_context_compaction_plugin(
     tool_prune_enabled: bool = False,
     prune_protect: int = _PRUNE_PROTECT_DEFAULT,
     prune_minimum: int = _PRUNE_MINIMUM_DEFAULT,
+    summarize_enabled: bool = False,
+    summary_model: str | None = None,
+    summary_timeout: float = _SUMMARY_TIMEOUT_DEFAULT,
 ) -> MagiContextCompactionPlugin | None:
     """Return a configured plugin, or ``None`` when the feature is disabled.
 
@@ -769,6 +1065,9 @@ def build_context_compaction_plugin(
         tool_prune_enabled=tool_prune_enabled,
         prune_protect=prune_protect,
         prune_minimum=prune_minimum,
+        summarize_enabled=summarize_enabled,
+        summary_model=summary_model,
+        summary_timeout=summary_timeout,
     )
 
 

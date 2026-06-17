@@ -628,6 +628,44 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
         kind="int",
     ),
+    # Strict default-OFF (flat _b, NOT profile-resolved): G1 LLM summary injection
+    # on the context-compaction tail-drop. When ON, the dropped prefix is replaced
+    # by a session-model summary head (plus protected-tool-output text) instead of
+    # being silently dropped. OFF is byte-identical to today (no LLM call).
+    _b(
+        "MAGI_COMPACTION_SUMMARIZE_ENABLED",
+        stage="stage2",
+        summary=(
+            "Inject an LLM summary (session model) of the dropped prefix plus "
+            "protected-tool-output text on a context-compaction tail-drop, instead "
+            "of silently dropping. Strict default-OFF (OFF is byte-identical to "
+            "today)."
+        ),
+    ),
+    FlagSpec(
+        name="MAGI_COMPACTION_SUMMARY_MODEL",
+        default="",
+        scope="public",
+        stage="stage2",
+        summary=(
+            "Optional model override for the G1 compaction summary; empty uses the "
+            "session model (llm_request.model). Only consulted when "
+            "MAGI_COMPACTION_SUMMARIZE_ENABLED is on."
+        ),
+        kind="str",
+    ),
+    FlagSpec(
+        name="MAGI_COMPACTION_SUMMARY_TIMEOUT",
+        default="30",
+        scope="public",
+        stage="stage2",
+        summary=(
+            "Timeout in seconds for the G1 compaction summary model call (> 0); on "
+            "timeout the tail-drop falls back to the pure prefix drop. Only "
+            "consulted when MAGI_COMPACTION_SUMMARIZE_ENABLED is on."
+        ),
+        kind="str",
+    ),
     # --- In-context replanning ----------------------------------------------
     # Strict default-OFF (flat _b, NOT profile-resolved): MAGI_RUNTIME_PROFILE
     # never auto-enables the facts-survey injection.

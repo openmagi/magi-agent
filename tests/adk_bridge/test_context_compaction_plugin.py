@@ -961,3 +961,332 @@ def test_g4_rejects_invalid_prune_bounds() -> None:
         MagiContextCompactionPlugin(
             token_threshold=1, tail_events=1, tool_prune_enabled=True, prune_minimum=0
         )
+
+
+# ---------------------------------------------------------------------------
+# G1 — summary injection + G8 protected-tool-as-text preserve (default-OFF)
+# ---------------------------------------------------------------------------
+
+import magi_agent.adk_bridge.context_compaction as _cc  # noqa: E402
+
+
+class _FakeProviderConfig:
+    litellm_model = "anthropic/claude-haiku-4-5"
+    api_key = "test-key"
+
+
+class _FakeLlmResponse:
+    def __init__(self, text: str) -> None:
+        self.content = types.Content(role="model", parts=[types.Part(text=text)])
+
+
+class _FakeSummaryModel:
+    """Async-generator model mirroring the ADK generate_content_async contract."""
+
+    def __init__(self, text: str = "SUMMARY", *, sleep: float = 0.0, raises: bool = False) -> None:
+        self._text = text
+        self._sleep = sleep
+        self._raises = raises
+        self.calls = 0
+
+    async def generate_content_async(self, llm_request, stream=False):  # noqa: ANN001
+        self.calls += 1
+        self.captured_request = llm_request
+        if self._raises:
+            raise RuntimeError("boom")
+        if self._sleep:
+            await asyncio.sleep(self._sleep)
+        yield _FakeLlmResponse(self._text)
+
+
+def _patch_summarizer(
+    monkeypatch,
+    *,
+    provider=_FakeProviderConfig(),
+    model=None,
+):
+    """Patch resolve_provider_config + _build_litellm_for_config in context_compaction.
+
+    The two helpers are function-local imports inside context_compaction, so we
+    patch them at their SOURCE modules. Returns the fake model so tests can assert
+    call counts / captured prompts.
+    """
+    import magi_agent.cli.providers as providers_mod
+    import magi_agent.cli.readonly_classifier as roc_mod
+
+    fake_model = model if model is not None else _FakeSummaryModel()
+
+    def _resolve():  # noqa: ANN202
+        return provider
+
+    def _build(provider_config, *, model_override=None):  # noqa: ANN001, ANN202
+        fake_model.last_model_override = model_override
+        return fake_model
+
+    monkeypatch.setattr(providers_mod, "resolve_provider_config", _resolve)
+    monkeypatch.setattr(roc_mod, "_build_litellm_for_config", _build)
+    return fake_model
+
+
+def _summary_plugin(**kw) -> MagiContextCompactionPlugin:  # noqa: ANN003
+    defaults: dict = dict(
+        token_threshold=2_000,
+        tail_events=16,
+        summarize_enabled=True,
+    )
+    defaults.update(kw)
+    return MagiContextCompactionPlugin(**defaults)
+
+
+def test_g1_off_byte_identical_pure_drop_no_llm_call(monkeypatch) -> None:  # noqa: ANN001
+    # Flag OFF (default ctor): over-threshold request reduces to the pure-drop
+    # tail, byte-identical to today, and the summary model is NEVER built.
+    def _fail_build(*a, **k):  # noqa: ANN002, ANN003
+        raise AssertionError("summary model must not be built when flag is OFF")
+
+    import magi_agent.cli.readonly_classifier as roc_mod
+
+    monkeypatch.setattr(roc_mod, "_build_litellm_for_config", _fail_build)
+
+    plugin = MagiContextCompactionPlugin(token_threshold=2_000, tail_events=16)
+    req = _big_request(40)
+    original_last = req.contents[-1].parts[0].text
+    original_split = req.contents[24].parts[0].text  # 40 - 16 == 24
+
+    _run(plugin.before_model_callback(callback_context=None, llm_request=req))
+
+    assert len(req.contents) == 16
+    assert req.contents[-1].parts[0].text == original_last
+    assert req.contents[0].parts[0].text == original_split
+
+
+def test_g1_summary_injected_happy_path(monkeypatch) -> None:  # noqa: ANN001
+    fake = _patch_summarizer(monkeypatch, model=_FakeSummaryModel("SUMMARY"))
+    plugin = _summary_plugin()
+    req = _big_request(40)
+    original_last = req.contents[-1].parts[0].text
+    original_split = req.contents[24].parts[0].text
+
+    _run(plugin.before_model_callback(callback_context=None, llm_request=req))
+
+    # Head: summary content + kept tail (no protected tools -> len == 1 + 16).
+    assert len(req.contents) == 1 + 16
+    assert req.contents[0].role == "user"
+    assert req.contents[0].parts[0].text.startswith(
+        "[Previous conversation summary]\n\nSUMMARY"
+    )
+    # Kept tail byte-identical to the pure-drop tail.
+    tail = req.contents[-16:]
+    assert tail[-1].parts[0].text == original_last
+    assert tail[0].parts[0].text == original_split
+    assert fake.calls == 1
+
+
+def test_g1_fail_open_no_provider(monkeypatch) -> None:  # noqa: ANN001
+    _patch_summarizer(monkeypatch, provider=None)
+    plugin = _summary_plugin()
+    req = _big_request(40)
+    original_split = req.contents[24].parts[0].text
+
+    _run(plugin.before_model_callback(callback_context=None, llm_request=req))
+
+    # Pure tail-drop: no summary head.
+    assert len(req.contents) == 16
+    assert req.contents[0].parts[0].text == original_split
+
+
+def test_g1_fail_open_timeout(monkeypatch) -> None:  # noqa: ANN001
+    _patch_summarizer(monkeypatch, model=_FakeSummaryModel(sleep=1.0))
+    plugin = _summary_plugin(summary_timeout=0.01)
+    req = _big_request(40)
+    original_split = req.contents[24].parts[0].text
+
+    _run(plugin.before_model_callback(callback_context=None, llm_request=req))
+
+    assert len(req.contents) == 16
+    assert req.contents[0].parts[0].text == original_split
+
+
+def test_g1_fail_open_generate_error(monkeypatch) -> None:  # noqa: ANN001
+    _patch_summarizer(monkeypatch, model=_FakeSummaryModel(raises=True))
+    plugin = _summary_plugin()
+    req = _big_request(40)
+    original_split = req.contents[24].parts[0].text
+
+    out = _run(
+        plugin.before_model_callback(callback_context=None, llm_request=req)
+    )
+    assert out is None
+    assert len(req.contents) == 16
+    assert req.contents[0].parts[0].text == original_split
+
+
+def test_g8_protected_tool_preserved_as_text(monkeypatch) -> None:  # noqa: ANN001
+    from magi_agent.harness.general_automation.constants import (
+        LOAD_GA_RECIPE_TOOL_NAME,
+    )
+
+    _patch_summarizer(monkeypatch, model=_FakeSummaryModel("S"))
+    plugin = _summary_plugin(tail_events=4)
+    req = LlmRequest()
+    # Dropped region: a protected tool result + filler; tail = last 4 text.
+    contents = [_content(i, "x" * 1600) for i in range(10)]
+    contents.insert(0, _fn_response_content(LOAD_GA_RECIPE_TOOL_NAME, chars=4_000))
+    req.contents = contents
+
+    _run(plugin.before_model_callback(callback_context=None, llm_request=req))
+
+    # [summary, protected_text, *tail(4)].
+    assert len(req.contents) == 1 + 1 + 4
+    summary_c, protected_c = req.contents[0], req.contents[1]
+    assert summary_c.parts[0].text.startswith("[Previous conversation summary]")
+    assert protected_c.role == "user"
+    assert protected_c.parts[0].text.startswith(
+        f"[Preserved tool output: {LOAD_GA_RECIPE_TOOL_NAME}]"
+    )
+    # NO function_response part anywhere in the injected head (protocol-valid).
+    for c in (summary_c, protected_c):
+        for p in c.parts or []:
+            assert getattr(p, "function_response", None) is None
+
+
+def test_g8_non_protected_not_preserved(monkeypatch) -> None:  # noqa: ANN001
+    _patch_summarizer(monkeypatch, model=_FakeSummaryModel("S"))
+    plugin = _summary_plugin(tail_events=4)
+    req = LlmRequest()
+    contents = [_content(i, "x" * 1600) for i in range(10)]
+    # A non-protected function_response in the dropped region.
+    contents.insert(0, _fn_response_content("Bash", chars=4_000))
+    req.contents = contents
+
+    _run(plugin.before_model_callback(callback_context=None, llm_request=req))
+
+    # Only summary head + tail (no preserved-text Content for Bash).
+    assert len(req.contents) == 1 + 4
+    assert not any(
+        (c.parts and c.parts[0].text or "").startswith("[Preserved tool output:")
+        for c in req.contents
+    )
+
+
+def test_g1_summarizer_not_called_on_no_op_turn(monkeypatch) -> None:  # noqa: ANN001
+    # Under-threshold (no compaction) must NOT resolve/build the summary model.
+    import magi_agent.cli.providers as providers_mod
+    import magi_agent.cli.readonly_classifier as roc_mod
+
+    def _fail_resolve():  # noqa: ANN202
+        raise AssertionError("resolve_provider_config must not run on a no-op turn")
+
+    def _fail_build(*a, **k):  # noqa: ANN002, ANN003
+        raise AssertionError("_build_litellm_for_config must not run on a no-op turn")
+
+    monkeypatch.setattr(providers_mod, "resolve_provider_config", _fail_resolve)
+    monkeypatch.setattr(roc_mod, "_build_litellm_for_config", _fail_build)
+
+    plugin = _summary_plugin(token_threshold=1_000_000)
+    req = _big_request(40)
+    before = list(req.contents)
+
+    _run(plugin.before_model_callback(callback_context=None, llm_request=req))
+
+    assert req.contents == before  # untouched (no compaction)
+
+
+def test_g1_protocol_no_orphan_after_injection(monkeypatch) -> None:  # noqa: ANN001
+    # After ON-summary injection on a request whose naive tail begins with an
+    # orphaned function_response, the FIRST content has no function_response part
+    # and the kept tail still begins on a non-orphan boundary.
+    _patch_summarizer(monkeypatch, model=_FakeSummaryModel("S"))
+    plugin = MagiContextCompactionPlugin(
+        token_threshold=2_000, tail_events=4, summarize_enabled=True
+    )
+    req = LlmRequest()
+    contents = [_content(i, "x" * 1600) for i in range(15)]
+    contents.append(  # index 15 — the call
+        types.Content(
+            role="model",
+            parts=[types.Part(function_call=types.FunctionCall(name="Read", args={}))],
+        )
+    )
+    contents.append(  # index 16 — the response (naive split lands here)
+        types.Content(
+            role="user",
+            parts=[
+                types.Part(
+                    function_response=types.FunctionResponse(name="Read", response={"ok": 1})
+                )
+            ],
+        )
+    )
+    contents.extend(_content(i, "x" * 1600) for i in range(17, 20))
+    req.contents = contents
+
+    _run(plugin.before_model_callback(callback_context=None, llm_request=req))
+
+    # First content is the summary head (no function_response part).
+    first = req.contents[0]
+    assert not any(
+        getattr(p, "function_response", None) is not None for p in (first.parts or [])
+    )
+    # The originating call survived in the kept tail (orphan-widened before head).
+    assert any(
+        getattr(p, "function_call", None) is not None
+        for c in req.contents
+        for p in (c.parts or [])
+    )
+
+
+def test_g1_transcript_bounded(monkeypatch) -> None:  # noqa: ANN001
+    fake = _patch_summarizer(monkeypatch, model=_FakeSummaryModel("S"))
+    plugin = _summary_plugin(tail_events=2)
+    req = LlmRequest()
+    # Put the tool parts FIRST (within the cap) so their descriptors are rendered,
+    # then append a huge tail of text that overflows the transcript cap.
+    contents: list = [
+        _fn_response_content("Bash", chars=200),
+        types.Content(
+            role="model",
+            parts=[types.Part(function_call=types.FunctionCall(name="Read"))],
+        ),
+    ]
+    contents += [_content(i, "z" * 5_000) for i in range(20)]
+    contents.append(_content(98, "x" * 10))
+    contents.append(_content(99, "x" * 10))
+    req.contents = contents
+
+    _run(plugin.before_model_callback(callback_context=None, llm_request=req))
+
+    # The prompt passed to the fake model contains the SUMMARY_PROMPT-formatted
+    # transcript; its length must be bounded by the transcript cap (+ slack for
+    # the surrounding prompt template + truncation marker).
+    captured = fake.captured_request
+    prompt_text = "".join(
+        p.text or "" for c in captured.contents for p in (c.parts or [])
+    )
+    assert len(prompt_text) <= _cc._SUMMARY_TRANSCRIPT_MAX_CHARS + 2_000
+    assert "…[older context truncated]" in prompt_text
+    assert "[tool_call Read]" in prompt_text
+    assert "[tool_result Bash]" in prompt_text
+
+
+def test_g1_builder_additive_default_off() -> None:
+    plugin = build_context_compaction_plugin(
+        enabled=True, token_threshold=24_000, tail_events=16
+    )
+    assert isinstance(plugin, MagiContextCompactionPlugin)
+    assert plugin._summarize_enabled is False
+
+
+def test_g1_builder_forwards_summary_kwargs() -> None:
+    plugin = build_context_compaction_plugin(
+        enabled=True,
+        token_threshold=24_000,
+        tail_events=16,
+        summarize_enabled=True,
+        summary_model="anthropic/claude-haiku-4-5",
+        summary_timeout=12.5,
+    )
+    assert isinstance(plugin, MagiContextCompactionPlugin)
+    assert plugin._summarize_enabled is True
+    assert plugin._summary_model_override == "anthropic/claude-haiku-4-5"
+    assert plugin._summary_timeout == 12.5

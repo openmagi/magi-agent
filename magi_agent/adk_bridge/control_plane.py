@@ -1540,6 +1540,9 @@ def build_core_default_plane(
         tool_prune_enabled=compaction_env.tool_prune_enabled,
         prune_protect=compaction_env.prune_protect,
         prune_minimum=compaction_env.prune_minimum,
+        summarize_enabled=compaction_env.summarize_enabled,
+        summary_model=compaction_env.summary_model,
+        summary_timeout=compaction_env.summary_timeout,
     )
     if compaction_plugin is not None:
         plane.register(_CompactionLoopControl(compaction_plugin))
