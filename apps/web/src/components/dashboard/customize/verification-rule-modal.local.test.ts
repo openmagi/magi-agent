@@ -110,4 +110,11 @@ describe("custom-rule builder (deterministic)", () => {
     expect(tabSrc).toContain("deleteCustomRule");
     expect(tabSrc).toContain("custom_rules");
   });
+
+  it("builder supports tool_perm rules (deny/approval, domain allowlist)", () => {
+    expect(modalSrc).toContain('kind: "tool_perm"');
+    expect(modalSrc).toContain("domainAllowlist");
+    expect(modalSrc).toContain('firesAt: "before_tool_use"');
+    expect(modalSrc).toContain("Require approval");
+  });
 });
