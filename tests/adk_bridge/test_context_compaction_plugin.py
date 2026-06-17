@@ -429,3 +429,221 @@ def test_build_context_compaction_plugin_enabled_returns_plugin() -> None:
     assert isinstance(plugin, MagiContextCompactionPlugin)
     assert plugin.token_threshold == 24_000
     assert plugin.tail_events == 16
+
+
+# ---------------------------------------------------------------------------
+# G2 — real-token accounting (%-of-window threshold), default-OFF
+# ---------------------------------------------------------------------------
+
+
+class _State:
+    """Minimal CallbackContext.state stand-in (dict-backed get/set)."""
+
+    def __init__(self) -> None:
+        self._d: dict = {}
+
+    def get(self, key, default=None):  # noqa: ANN001
+        return self._d.get(key, default)
+
+    def __setitem__(self, key, value) -> None:  # noqa: ANN001
+        self._d[key] = value
+
+    def __getitem__(self, key):  # noqa: ANN001
+        return self._d[key]
+
+    def __contains__(self, key) -> bool:  # noqa: ANN001
+        return key in self._d
+
+
+class _CbCtx:
+    def __init__(self) -> None:
+        self.state = _State()
+
+
+def _g2_plugin(**kw) -> MagiContextCompactionPlugin:  # noqa: ANN003
+    defaults: dict = dict(
+        token_threshold=24_000,
+        tail_events=16,
+        real_tokens_enabled=True,
+        real_tokens_pct=0.75,
+        output_reserve=8_000,
+    )
+    defaults.update(kw)
+    return MagiContextCompactionPlugin(**defaults)
+
+
+def _model_request(count: int, *, chars: int, model: str | None) -> LlmRequest:
+    req = LlmRequest()
+    req.contents = [_content(i, "x" * chars) for i in range(count)]
+    if model is not None:
+        req.model = model
+    return req
+
+
+def test_after_model_stashes_real_prompt_tokens_on_state() -> None:
+    plugin = _g2_plugin()
+    ctx = _CbCtx()
+
+    class _Resp:
+        usage_metadata = type("U", (), {"prompt_token_count": 120_000})()
+
+    _run(plugin.after_model_callback(callback_context=ctx, llm_response=_Resp()))
+
+    from magi_agent.adk_bridge.context_compaction import (
+        REAL_PROMPT_TOKENS_STATE_KEY,
+    )
+
+    assert ctx.state.get(REAL_PROMPT_TOKENS_STATE_KEY) == 120_000
+
+
+def test_flag_off_after_model_is_noop() -> None:
+    # The after-model capture writes NOTHING to state when the real-token path
+    # is OFF, so the state key is absent.
+    plugin = MagiContextCompactionPlugin(
+        token_threshold=24_000, tail_events=16, real_tokens_enabled=False
+    )
+    ctx = _CbCtx()
+
+    class _Resp:
+        usage_metadata = type("U", (), {"prompt_token_count": 120_000})()
+
+    _run(plugin.after_model_callback(callback_context=ctx, llm_response=_Resp()))
+
+    from magi_agent.adk_bridge.context_compaction import (
+        REAL_PROMPT_TOKENS_STATE_KEY,
+    )
+
+    assert REAL_PROMPT_TOKENS_STATE_KEY not in ctx.state
+
+
+def test_real_tokens_above_pct_threshold_compacts() -> None:
+    # window 150_000, reserve 8_000, pct 0.75 -> threshold 106_500.
+    # 120_000 real prompt tokens > threshold -> trim, even though the
+    # char-estimate of these few small contents is UNDER the fixed 24k.
+    plugin = _g2_plugin()
+    ctx = _CbCtx()
+
+    class _Resp:
+        usage_metadata = type("U", (), {"prompt_token_count": 120_000})()
+
+    _run(plugin.after_model_callback(callback_context=ctx, llm_response=_Resp()))
+
+    # Small contents (tiny char-estimate) but many of them.
+    req = _model_request(40, chars=10, model="claude-sonnet-4-6")
+    out = _run(
+        plugin.before_model_callback(callback_context=ctx, llm_request=req)
+    )
+    assert out is None
+    assert len(req.contents) == 16  # real-token signal forced the tail-trim
+
+
+def test_real_tokens_below_pct_threshold_no_compact() -> None:
+    # 50_000 < 106_500 -> contents untouched even with a large content count.
+    plugin = _g2_plugin()
+    ctx = _CbCtx()
+
+    class _Resp:
+        usage_metadata = type("U", (), {"prompt_token_count": 50_000})()
+
+    _run(plugin.after_model_callback(callback_context=ctx, llm_response=_Resp()))
+
+    req = _model_request(40, chars=10, model="claude-sonnet-4-6")
+    before = list(req.contents)
+    out = _run(
+        plugin.before_model_callback(callback_context=ctx, llm_request=req)
+    )
+    assert out is None
+    assert req.contents == before
+    assert len(req.contents) == 40
+
+
+def test_fail_open_when_tokens_missing() -> None:
+    # Flag ON but no usage_metadata ever stashed -> falls back to the estimate +
+    # fixed-threshold path; identical to flag-OFF for the same request.
+    plugin = _g2_plugin(token_threshold=2_000)
+    ctx = _CbCtx()  # state never populated (no after_model call)
+
+    req = _model_request(40, chars=1600, model="claude-sonnet-4-6")
+    original_last = req.contents[-1].parts[0].text
+    out = _run(
+        plugin.before_model_callback(callback_context=ctx, llm_request=req)
+    )
+    assert out is None
+    # estimate path with token_threshold=2000 over-budget -> tail-trim to 16.
+    assert len(req.contents) == 16
+    assert req.contents[-1].parts[0].text == original_last
+
+
+def test_unknown_model_uses_default_window() -> None:
+    # Unknown model id -> window resolves to the 150_000 default; threshold
+    # computed from it (106_500). 120_000 > threshold -> compact, no crash.
+    plugin = _g2_plugin()
+    ctx = _CbCtx()
+
+    class _Resp:
+        usage_metadata = type("U", (), {"prompt_token_count": 120_000})()
+
+    _run(plugin.after_model_callback(callback_context=ctx, llm_response=_Resp()))
+
+    req = _model_request(40, chars=10, model="something/unknown")
+    out = _run(
+        plugin.before_model_callback(callback_context=ctx, llm_request=req)
+    )
+    assert out is None
+    assert len(req.contents) == 16
+
+
+def test_zero_or_negative_effective_window_falls_back() -> None:
+    # output_reserve >= window -> (window - reserve) < 1 -> fall back to the
+    # fixed token_threshold (fail-open; no ZeroDivision / negative threshold).
+    plugin = _g2_plugin(token_threshold=2_000, output_reserve=200_000)
+    ctx = _CbCtx()
+
+    class _Resp:
+        usage_metadata = type("U", (), {"prompt_token_count": 120_000})()
+
+    _run(plugin.after_model_callback(callback_context=ctx, llm_response=_Resp()))
+
+    # Big char contents so the FIXED 2_000 estimate path breaches and trims.
+    req = _model_request(40, chars=1600, model="claude-sonnet-4-6")
+    out = _run(
+        plugin.before_model_callback(callback_context=ctx, llm_request=req)
+    )
+    assert out is None
+    assert len(req.contents) == 16
+
+
+def test_flag_off_is_byte_identical() -> None:
+    # With the real-token path OFF, a 40-content over-fixed-threshold request
+    # trims to exactly tail_events via the estimate path — same shape as
+    # test_over_threshold_context_is_compacted_to_recent_tail.
+    plugin = MagiContextCompactionPlugin(
+        token_threshold=2_000, tail_events=16, real_tokens_enabled=False
+    )
+    ctx = _CbCtx()
+
+    # Even if a value somehow lands on state, the OFF guard must ignore it.
+    from magi_agent.adk_bridge.context_compaction import (
+        REAL_PROMPT_TOKENS_STATE_KEY,
+    )
+
+    ctx.state[REAL_PROMPT_TOKENS_STATE_KEY] = 50_000  # would be UNDER threshold
+
+    req = _big_request(40)
+    original_last = req.contents[-1].parts[0].text
+    original_split = req.contents[24].parts[0].text
+
+    out = _run(
+        plugin.before_model_callback(callback_context=ctx, llm_request=req)
+    )
+    assert out is None
+    assert len(req.contents) == 16
+    assert req.contents[-1].parts[0].text == original_last
+    assert req.contents[0].parts[0].text == original_split
+
+
+def test_real_tokens_default_constructor_is_off() -> None:
+    # Constructing without the new kwargs keeps the real-token path OFF, so the
+    # legacy two-arg construction stays byte-identical.
+    plugin = MagiContextCompactionPlugin(token_threshold=24_000, tail_events=16)
+    assert plugin._real_tokens_enabled is False

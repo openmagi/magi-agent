@@ -61,3 +61,69 @@ def test_rejects_non_positive_tail_events() -> None:
 def test_rejects_non_integer_threshold() -> None:
     with pytest.raises(RuntimeEnvError):
         parse_context_compaction_env({"MAGI_COMPACTION_TOKEN_THRESHOLD": "abc"})
+
+
+# ---------------------------------------------------------------------------
+# G2 — real-token accounting fields (additive; default-OFF)
+# ---------------------------------------------------------------------------
+
+
+def test_pct_and_reserve_env_parse_defaults() -> None:
+    cfg = parse_context_compaction_env({})
+    # Additive G2 fields default to the conservative, flag-OFF shape.
+    assert cfg.real_tokens_enabled is False
+    assert cfg.real_tokens_pct == 0.75
+    assert cfg.output_reserve == 8_000
+
+
+def test_real_tokens_enabled_strict_truthy() -> None:
+    # Strict default-OFF bool flag (NOT profile-aware): unset/false stays OFF
+    # even in the full runtime profile.
+    assert parse_context_compaction_env({}).real_tokens_enabled is False
+    assert (
+        parse_context_compaction_env(
+            {"MAGI_COMPACTION_REAL_TOKENS_ENABLED": "1"}
+        ).real_tokens_enabled
+        is True
+    )
+    assert (
+        parse_context_compaction_env(
+            {"MAGI_COMPACTION_REAL_TOKENS_ENABLED": "0"}
+        ).real_tokens_enabled
+        is False
+    )
+
+
+def test_pct_and_reserve_explicit_values() -> None:
+    cfg = parse_context_compaction_env(
+        {
+            "MAGI_COMPACTION_REAL_TOKENS_ENABLED": "1",
+            "MAGI_COMPACTION_REAL_TOKENS_PCT": "0.5",
+            "MAGI_COMPACTION_OUTPUT_RESERVE": "12000",
+        }
+    )
+    assert cfg.real_tokens_enabled is True
+    assert cfg.real_tokens_pct == 0.5
+    assert cfg.output_reserve == 12_000
+
+
+@pytest.mark.parametrize("value", ["0", "0.0", "-0.1", "1.5", "abc"])
+def test_rejects_out_of_range_pct(value: str) -> None:
+    # pct must be in (0, 1]; non-numeric or out-of-range raises.
+    with pytest.raises(RuntimeEnvError):
+        parse_context_compaction_env({"MAGI_COMPACTION_REAL_TOKENS_PCT": value})
+
+
+def test_pct_upper_bound_one_is_allowed() -> None:
+    cfg = parse_context_compaction_env({"MAGI_COMPACTION_REAL_TOKENS_PCT": "1"})
+    assert cfg.real_tokens_pct == 1.0
+
+
+def test_rejects_negative_output_reserve() -> None:
+    with pytest.raises(RuntimeEnvError):
+        parse_context_compaction_env({"MAGI_COMPACTION_OUTPUT_RESERVE": "-1"})
+
+
+def test_zero_output_reserve_allowed() -> None:
+    cfg = parse_context_compaction_env({"MAGI_COMPACTION_OUTPUT_RESERVE": "0"})
+    assert cfg.output_reserve == 0

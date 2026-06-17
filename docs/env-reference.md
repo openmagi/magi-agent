@@ -201,6 +201,9 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 - `MAGI_CODE_ACTION_MAX_OUTPUT_BYTES` (default `8192`) — Head+tail output cap per stream (bytes) for PythonExec results; clamped to 1024-65536.
 - `MAGI_CODE_ACTION_TIMEOUT_MS` (default `30000`) — Per-call wall-clock timeout (ms) for the PythonExec tool; clamped to 1000-120000.
 - `MAGI_CODING_REPAIR_LOOP_ENABLED` (default off) — Enable the iterative coding repair loop on failing edits.
+- `MAGI_COMPACTION_OUTPUT_RESERVE` (default `8000`) — Tokens reserved for model output, subtracted from the context window before applying the real-token compaction percentage (>= 0); only consulted when MAGI_COMPACTION_REAL_TOKENS_ENABLED is on.
+- `MAGI_COMPACTION_REAL_TOKENS_ENABLED` (default off) — Use the real prompt-token count of the prior model call against a percentage of the model's context window as the compaction budget signal, instead of the char-estimate + fixed token threshold. Strict default-OFF (OFF is byte-identical to today).
+- `MAGI_COMPACTION_REAL_TOKENS_PCT` (default `0.75`) — Fraction (0,1] of the model's effective context window (window - output reserve) at which real-token compaction fires; only consulted when MAGI_COMPACTION_REAL_TOKENS_ENABLED is on.
 - `MAGI_COMPUTE_VIA_CODE_ENABLED` (default off) — Append a general prompt directive to compute arithmetic, conversions, statistics, and checksums by running code instead of mental math.
 - `MAGI_CONFIG` (no default) — Path to the Magi config.toml file; empty uses ~/.magi/config.toml.
 - `MAGI_CONTEXT_COMPACTION_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Compact the working context when the token threshold is hit (default-ON full profile).

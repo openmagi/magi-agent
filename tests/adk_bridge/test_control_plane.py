@@ -477,3 +477,127 @@ def test_four_default_controls_register_without_guard_trip() -> None:
     plane.register(MaxStepsBrakeControl(max_iterations=10, iteration=0))
 
     assert len(plane._controls) == 4
+
+
+# ---------------------------------------------------------------------------
+# G2 — after-model dispatch seam (real-token capture)
+# ---------------------------------------------------------------------------
+
+
+def test_base_loop_control_on_after_model_is_noop() -> None:
+    class _MinimalControl(BaseLoopControl):
+        name = "minimal_after_model"
+
+    ctrl = _MinimalControl()
+    assert (
+        _run(ctrl.on_after_model(callback_context=None, llm_response={})) is None
+    )
+
+
+def test_plane_after_model_fans_out_to_all_controls() -> None:
+    class _AfterModelObserver(BaseLoopControl):
+        def __init__(self, key: str) -> None:
+            self.name = key
+            self._key = key
+
+        async def on_after_model(self, *, callback_context, llm_response) -> None:
+            callback_context[self._key] = True
+            return None
+
+    plane = (
+        ControlPlane()
+        .register(_AfterModelObserver("a"))
+        .register(_AfterModelObserver("b"))
+    )
+    seen: dict = {}
+    result = _run(plane._after_model(callback_context=seen, llm_response=object()))
+    assert result is None
+    assert seen == {"a": True, "b": True}
+
+
+def test_plane_after_model_empty_plane_returns_none() -> None:
+    plane = ControlPlane()
+    assert _run(plane._after_model(callback_context=None, llm_response={})) is None
+
+
+def test_control_plane_plugin_after_model_callback_forwards_to_plane() -> None:
+    from magi_agent.adk_bridge.control_plane import ControlPlanePlugin
+
+    class _Observer(BaseLoopControl):
+        name = "observer"
+
+        async def on_after_model(self, *, callback_context, llm_response) -> None:
+            callback_context["fired"] = llm_response
+            return None
+
+    plane = ControlPlane().register(_Observer())
+    plugin = ControlPlanePlugin(plane)
+    state: dict = {}
+    sentinel = object()
+    out = _run(
+        plugin.after_model_callback(callback_context=state, llm_response=sentinel)
+    )
+    assert out is None
+    assert state["fired"] is sentinel
+
+
+def test_after_model_dispatched_through_real_adk_plugin_manager(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Drive ``ControlPlanePlugin.after_model_callback`` through the REAL ADK
+    PluginManager.run_after_model_callback and assert the compaction control
+    stashes the real prompt-token count under the stable state key — proving the
+    new dispatch seam is live, not just unit-level.
+    """
+    import asyncio
+
+    from google.adk.agents.callback_context import CallbackContext
+    from google.adk.agents.invocation_context import InvocationContext
+    from google.adk.plugins.plugin_manager import PluginManager
+    from google.adk.models import LlmResponse
+    from google.genai import types
+
+    from magi_agent.adk_bridge import local_runner
+    from magi_agent.adk_bridge.context_compaction import (
+        MagiContextCompactionPlugin,
+        REAL_PROMPT_TOKENS_STATE_KEY,
+    )
+    from magi_agent.adk_bridge.control_plane import (
+        ControlPlane,
+        ControlPlanePlugin,
+        _CompactionLoopControl,
+    )
+
+    monkeypatch.setenv("CORE_AGENT_PYTHON_LOCAL_ADK_RUNNER", "1")
+    bundle = local_runner.build_local_adk_runner()
+
+    plugin = MagiContextCompactionPlugin(
+        token_threshold=24_000,
+        tail_events=16,
+        real_tokens_enabled=True,
+    )
+    plane = ControlPlane().register(_CompactionLoopControl(plugin))
+    pm = PluginManager(plugins=[ControlPlanePlugin(plane)])
+
+    async def _drive() -> CallbackContext:
+        session = await bundle.session_service.create_session(
+            app_name="magi-agent-local", user_id="u", session_id="s-after-model"
+        )
+        ic = InvocationContext(
+            session_service=bundle.session_service,
+            invocation_id="inv-g2",
+            agent=bundle.agent,
+            session=session,
+            plugin_manager=pm,
+        )
+        cc = CallbackContext(ic)
+        resp = LlmResponse(
+            usage_metadata=types.GenerateContentResponseUsageMetadata(
+                prompt_token_count=98_765
+            )
+        )
+        await pm.run_after_model_callback(callback_context=cc, llm_response=resp)
+        return cc
+
+    cc = asyncio.run(_drive())
+    assert cc.state.get(REAL_PROMPT_TOKENS_STATE_KEY) == 98_765

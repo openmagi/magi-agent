@@ -171,6 +171,23 @@ def test_get_flag_unknown_raises_keyerror() -> None:
         get_flag("MAGI_DEFINITELY_NOT_A_REGISTERED_FLAG")
 
 
+def test_compaction_real_tokens_flag_registered_default_off() -> None:
+    # G2 governance gate: the new real-token compaction master switch must be a
+    # registered strict default-OFF public bool flag (NOT profile-aware).
+    spec = get_flag("MAGI_COMPACTION_REAL_TOKENS_ENABLED")
+    assert spec.scope == "public"
+    assert spec.kind == "bool"
+    assert spec.default is False
+    assert flag_bool("MAGI_COMPACTION_REAL_TOKENS_ENABLED", env={}) is False
+    assert (
+        flag_bool(
+            "MAGI_COMPACTION_REAL_TOKENS_ENABLED",
+            env={"MAGI_COMPACTION_REAL_TOKENS_ENABLED": "1"},
+        )
+        is True
+    )
+
+
 # ---------------------------------------------------------------------------
 # flag_bool truthy / falsey parsing
 # ---------------------------------------------------------------------------
