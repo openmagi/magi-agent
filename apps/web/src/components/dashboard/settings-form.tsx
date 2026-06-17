@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useAgentFetch } from "@/lib/local-api";
 import { GlassCard } from "@/components/ui/glass-card";
 import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import {
   CUSTOM_MODEL_VALUE,
@@ -194,50 +195,35 @@ export function SettingsForm(_props: SettingsFormProps) {
         </div>
 
         <div className="space-y-4">
-          <label className="block">
-            <span className="mb-1.5 block text-sm font-medium text-secondary">Provider</span>
-            <select
-              value={provider}
-              onChange={(event) => {
-                const nextProvider = event.target.value as ProviderName;
-                setProvider(nextProvider);
-                // Reset to the new provider's default so the model stays valid.
-                setModel(LOCAL_RUNTIME_DEFAULT_MODEL[nextProvider]);
-                setCustomModel(false);
-              }}
-              className="min-h-11 w-full cursor-pointer rounded-xl border border-black/10 bg-white px-4 py-3 text-sm font-medium text-foreground outline-none transition-colors focus:border-primary/45 focus:ring-4 focus:ring-primary/10"
-            >
-              {PROVIDER_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
+          <Select
+            label="Provider"
+            value={provider}
+            options={PROVIDER_OPTIONS}
+            onChange={(next) => {
+              const nextProvider = next as ProviderName;
+              setProvider(nextProvider);
+              // Reset to the new provider's default so the model stays valid.
+              setModel(LOCAL_RUNTIME_DEFAULT_MODEL[nextProvider]);
+              setCustomModel(false);
+            }}
+          />
 
-          <label className="block">
-            <span className="mb-1.5 block text-sm font-medium text-secondary">Model</span>
-            <select
-              value={customModel ? CUSTOM_MODEL_VALUE : model}
-              onChange={(event) => {
-                const next = event.target.value;
-                if (next === CUSTOM_MODEL_VALUE) {
-                  setCustomModel(true);
-                  return;
-                }
-                setCustomModel(false);
-                setModel(next);
-              }}
-              className="min-h-11 w-full cursor-pointer rounded-xl border border-black/10 bg-white px-4 py-3 text-sm font-medium text-foreground outline-none transition-colors focus:border-primary/45 focus:ring-4 focus:ring-primary/10"
-            >
-              {LOCAL_RUNTIME_MODEL_PRESETS[provider].map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-              <option value={CUSTOM_MODEL_VALUE}>Custom… (enter model id)</option>
-            </select>
-          </label>
+          <Select
+            label="Model"
+            value={customModel ? CUSTOM_MODEL_VALUE : model}
+            options={[
+              ...LOCAL_RUNTIME_MODEL_PRESETS[provider],
+              { value: CUSTOM_MODEL_VALUE, label: "Custom… (enter model id)" },
+            ]}
+            onChange={(next) => {
+              if (next === CUSTOM_MODEL_VALUE) {
+                setCustomModel(true);
+                return;
+              }
+              setCustomModel(false);
+              setModel(next);
+            }}
+          />
 
           {customModel ? (
             <Input

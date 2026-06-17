@@ -14,6 +14,7 @@ import { normalizeTelegramPhoneInput } from "@/lib/telegram/phone";
 import type { BotCardData } from "@/types/entities";
 import { AgentWalletSection } from "./agent-wallet-section";
 import { Modal } from "@/components/ui/modal";
+import { Select } from "@/components/ui/select";
 
 interface BotStatusCardProps {
   bot: BotCardData;
@@ -873,12 +874,12 @@ export function BotStatusCard({ bot, subscriptionPlan }: BotStatusCardProps) {
 
                       <label className="text-xs text-secondary font-medium mb-1.5 block">{t.onboarding.telegramPhoneLabel}</label>
                       <div className="flex gap-2 mb-3">
-                        <select
+                        <Select
+                          aria-label="Country code"
                           value={countryCode}
-                          onChange={(e) => setCountryCode(e.target.value)}
-                          className="w-[90px] bg-white border border-gray-300 rounded-xl px-2 py-3 text-sm focus:outline-none focus:border-primary/50 cursor-pointer"
-                        >
-                          {[
+                          onChange={setCountryCode}
+                          className="w-[90px] px-2 py-3 text-sm font-normal"
+                          options={[
                             { code: "+82", flag: "\u{1F1F0}\u{1F1F7}" }, { code: "+1", flag: "\u{1F1FA}\u{1F1F8}" },
                             { code: "+81", flag: "\u{1F1EF}\u{1F1F5}" }, { code: "+86", flag: "\u{1F1E8}\u{1F1F3}" },
                             { code: "+44", flag: "\u{1F1EC}\u{1F1E7}" }, { code: "+49", flag: "\u{1F1E9}\u{1F1EA}" },
@@ -887,10 +888,8 @@ export function BotStatusCard({ bot, subscriptionPlan }: BotStatusCardProps) {
                             { code: "+55", flag: "\u{1F1E7}\u{1F1F7}" }, { code: "+34", flag: "\u{1F1EA}\u{1F1F8}" },
                             { code: "+852", flag: "\u{1F1ED}\u{1F1F0}" }, { code: "+886", flag: "\u{1F1F9}\u{1F1FC}" },
                             { code: "+66", flag: "\u{1F1F9}\u{1F1ED}" }, { code: "+84", flag: "\u{1F1FB}\u{1F1F3}" },
-                          ].map((c) => (
-                            <option key={c.code} value={c.code}>{c.flag} {c.code}</option>
-                          ))}
-                        </select>
+                          ].map((c) => ({ value: c.code, label: `${c.flag} ${c.code}` }))}
+                        />
                         <input
                           type="tel"
                           inputMode="numeric"

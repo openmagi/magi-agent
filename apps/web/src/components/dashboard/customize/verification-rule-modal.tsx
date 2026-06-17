@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Lock, Trash2 } from "lucide-react";
 import { Modal } from "@/components/ui/modal";
+import { Select } from "@/components/ui/select";
 import type { CustomizeCatalog, CustomRule, HarnessPresetItem } from "@/lib/customize-api";
 
 interface VerificationRuleModalProps {
@@ -257,6 +258,7 @@ function CustomRulesSection({
   };
 
   const selectCls = "mt-1 w-full rounded-lg border border-black/[0.12] bg-white px-2 py-1.5 text-sm";
+  const selectTriggerCls = "mt-1 rounded-lg px-2 py-1.5 text-sm font-normal";
 
   return (
     <section>
@@ -309,24 +311,32 @@ function CustomRulesSection({
         <div className="space-y-2 rounded-xl border border-black/[0.08] bg-gray-50/60 p-3">
           <label className="block text-[11px] font-medium text-secondary">
             Rule type
-            <select value={kind} onChange={(e) => setKind(e.target.value as typeof kind)} className={selectCls}>
-              <option value="deterministic_ref" disabled={menu.length === 0}>
-                Deterministic evidence check{menu.length === 0 ? " (none available)" : ""}
-              </option>
-              <option value="tool_perm">Tool permission (deny / approval)</option>
-              <option value="llm_criterion">LLM criterion check (final answer)</option>
-              <option value="after_tool">Tool-result ingestion gate (after-tool)</option>
-            </select>
+            <Select
+              value={kind}
+              onChange={(v) => setKind(v as typeof kind)}
+              className={selectTriggerCls}
+              options={[
+                {
+                  value: "deterministic_ref",
+                  label: `Deterministic evidence check${menu.length === 0 ? " (none available)" : ""}`,
+                  disabled: menu.length === 0,
+                },
+                { value: "tool_perm", label: "Tool permission (deny / approval)" },
+                { value: "llm_criterion", label: "LLM criterion check (final answer)" },
+                { value: "after_tool", label: "Tool-result ingestion gate (after-tool)" },
+              ]}
+            />
           </label>
 
           {kind === "deterministic_ref" ? (
             <label className="block text-[11px] font-medium text-secondary">
               Require
-              <select value={ref} onChange={(e) => setRef(e.target.value)} className={selectCls}>
-                {menu.map((m) => (
-                  <option key={m.ref} value={m.ref}>{m.label}</option>
-                ))}
-              </select>
+              <Select
+                value={ref}
+                onChange={setRef}
+                className={selectTriggerCls}
+                options={menu.map((m) => ({ value: m.ref, label: m.label }))}
+              />
             </label>
           ) : kind === "llm_criterion" ? (
             <label className="block text-[11px] font-medium text-secondary">
@@ -391,11 +401,16 @@ function CustomRulesSection({
             <>
               <label className="block text-[11px] font-medium text-secondary">
                 Match by
-                <select value={matchType} onChange={(e) => setMatchType(e.target.value as typeof matchType)} className={selectCls}>
-                  <option value="tool">Tool name</option>
-                  <option value="domain">Source domain (denylist)</option>
-                  <option value="domainAllowlist">Source domain allowlist (only these)</option>
-                </select>
+                <Select
+                  value={matchType}
+                  onChange={(v) => setMatchType(v as typeof matchType)}
+                  className={selectTriggerCls}
+                  options={[
+                    { value: "tool", label: "Tool name" },
+                    { value: "domain", label: "Source domain (denylist)" },
+                    { value: "domainAllowlist", label: "Source domain allowlist (only these)" },
+                  ]}
+                />
               </label>
               <label className="block text-[11px] font-medium text-secondary">
                 {matchType === "tool" ? "Tool name" : matchType === "domain" ? "Domain to block" : "Allowed domains (comma-separated)"}
@@ -408,21 +423,27 @@ function CustomRulesSection({
               </label>
               <label className="block text-[11px] font-medium text-secondary">
                 Then
-                <select value={decision} onChange={(e) => setDecision(e.target.value as typeof decision)} className={selectCls}>
-                  <option value="deny">Deny</option>
-                  <option value="ask">Require approval</option>
-                </select>
+                <Select
+                  value={decision}
+                  onChange={(v) => setDecision(v as typeof decision)}
+                  className={selectTriggerCls}
+                  options={[
+                    { value: "deny", label: "Deny" },
+                    { value: "ask", label: "Require approval" },
+                  ]}
+                />
               </label>
             </>
           )}
 
           <label className="block text-[11px] font-medium text-secondary">
             When (scope)
-            <select value={scope} onChange={(e) => setScope(e.target.value)} className={selectCls}>
-              {SCOPES.map((s) => (
-                <option key={s} value={s}>{s}</option>
-              ))}
-            </select>
+            <Select
+              value={scope}
+              onChange={setScope}
+              className={selectTriggerCls}
+              options={SCOPES.map((s) => ({ value: s, label: s }))}
+            />
           </label>
           <div className="flex justify-end gap-2">
             <button

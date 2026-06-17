@@ -125,7 +125,7 @@ describe("custom-rule builder (deterministic)", () => {
   });
 
   it("builder supports after-tool ingestion gate (override, toolMatch + contentMatch)", () => {
-    expect(modalSrc).toContain('value="after_tool"');
+    expect(modalSrc).toContain('value: "after_tool"');
     expect(modalSrc).toContain('firesAt: "after_tool_use"');
     expect(modalSrc).toContain('action: "override"');
     expect(modalSrc).toContain("toolMatch");

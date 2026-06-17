@@ -9,6 +9,7 @@ import {
   Search,
   Send,
 } from "lucide-react";
+import { Select } from "@/components/ui/select";
 import { useAgentFetch } from "@/lib/local-api";
 import {
   clearComposioKey,
@@ -776,17 +777,16 @@ function TelegramEasyWizard({
 
       {step === "phone" && (
         <div className="flex gap-2">
-          <select
+          <Select
+            aria-label="Country code"
             value={countryCode}
-            onChange={(e) => setCountryCode(e.target.value)}
-            className="w-20 text-xs px-2 py-1.5 rounded-lg bg-white border border-gray-300 text-foreground focus:outline-none focus:border-primary/40 cursor-pointer"
-          >
-            {COUNTRY_CODES.map((c) => (
-              <option key={c.code} value={c.code}>
-                {c.flag} {c.code}
-              </option>
-            ))}
-          </select>
+            onChange={setCountryCode}
+            className="w-20 px-2 py-1.5 text-xs font-normal rounded-lg"
+            options={COUNTRY_CODES.map((c) => ({
+              value: c.code,
+              label: `${c.flag} ${c.code}`,
+            }))}
+          />
           <input
             type="tel"
             inputMode="numeric"
