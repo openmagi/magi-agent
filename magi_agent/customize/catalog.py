@@ -7,7 +7,14 @@ from typing import Any
 # only tool_registry. Hook manifests are not surfaced via any runtime accessor;
 # the /v1/app/skills endpoint (app_api._RUNTIME_HOOK_POINTS) uses this same
 # hardcoded list. We source from there via import so both surfaces stay in sync.
-from magi_agent.customize.preset_map import enforcement_for, supported_modes_for
+from magi_agent.customize.preset_map import (
+    description_for,
+    domain_for,
+    enforcement_for,
+    opt_method_for,
+    supported_modes_for,
+    tier_for,
+)
 from magi_agent.harness.presets import builtin_preset_catalog
 from magi_agent.transport.app_api import _RUNTIME_HOOK_POINTS as _HOOK_POINTS
 
@@ -55,10 +62,18 @@ def _build_harness_presets() -> list[dict[str, Any]]:
                 "id": preset.key,
                 "title": _title_from_key(preset.key),
                 "category": category,
+                # WHEN-group + raw fire-at points so the modal can group by
+                # condition rather than semantic category (spec §7).
+                "domain": domain_for(category),
+                "hookPoints": list(preset.hook_points),
                 "defaultEnabled": bool(preset.default_on),
                 "enforcement": enforcement_for(
                     preset.key, category=category, is_security=is_security
                 ),
+                # Badge data: enforcement mechanism + opt-out/opt-in method.
+                "tier": tier_for(preset.key, is_security=is_security),
+                "optMethod": opt_method_for(preset.key),
+                "description": description_for(preset.key),
                 "supportedModes": list(supported_modes_for(preset.key)),
             }
         )

@@ -15,16 +15,25 @@ const apiSrc = readFileSync(
 );
 
 describe("verification modal — honest enforcement surface", () => {
-  it("groups presets by category", () => {
-    expect(modalSrc).toContain("CATEGORY_ORDER");
-    expect(modalSrc).toContain("byCategory");
-    expect(modalSrc).toContain("preset.category");
+  it("groups presets by WHEN-domain, not semantic category", () => {
+    expect(modalSrc).toContain("DOMAIN_ORDER");
+    expect(modalSrc).toContain("byDomain");
+    expect(modalSrc).toContain("preset.domain");
+    expect(modalSrc).not.toContain("byCategory");
   });
 
-  it("renders enforcement badges (preview / always-on)", () => {
-    expect(modalSrc).toContain("EnforcementBadge");
-    expect(modalSrc).toContain("Preview");
+  it("separates preview presets into their own section", () => {
+    expect(modalSrc).toContain("previewPresets");
+    expect(modalSrc).toContain('p.enforcement === "preview"');
+  });
+
+  it("renders tier / opt-method / wiring badges + descriptions", () => {
+    expect(modalSrc).toContain("Badges");
+    expect(modalSrc).toContain("preset.tier");
+    expect(modalSrc).toContain("preset.optMethod");
+    expect(modalSrc).toContain("preset.description");
     expect(modalSrc).toContain("Always on");
+    expect(modalSrc).toContain("Preview");
   });
 
   it("only enforcing presets get a live toggle", () => {
@@ -60,6 +69,14 @@ describe("customize-api — new contract surface", () => {
     expect(apiSrc).toContain("enforcement");
     expect(apiSrc).toContain("defaultEnabled");
     expect(apiSrc).toContain("supportedModes");
+  });
+
+  it("exposes domain/hookPoints/tier/optMethod/description on presets", () => {
+    expect(apiSrc).toContain("domain");
+    expect(apiSrc).toContain("hookPoints");
+    expect(apiSrc).toContain("tier");
+    expect(apiSrc).toContain("optMethod");
+    expect(apiSrc).toContain("description");
   });
 
   it("exposes preset_overrides + user_rules in overrides", () => {

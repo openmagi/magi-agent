@@ -21,27 +21,16 @@ interface VerificationRuleModalProps {
   error: string | null;
 }
 
-// Category display order + labels (matches harness/presets.py PresetCategory).
-const CATEGORY_ORDER = [
-  "answer",
-  "fact",
-  "coding",
-  "task",
-  "output",
-  "research",
-  "memory",
-  "security",
-] as const;
+// WHEN-group (domain) order + labels — the modal groups by *when a gate fires*
+// rather than by semantic category (spec §7). Preview presets are pulled into
+// their own collapsed section regardless of domain.
+const DOMAIN_ORDER = ["always-on", "coding", "research", "delivery"] as const;
 
-const CATEGORY_LABELS: Record<string, string> = {
-  answer: "Answer Quality",
-  fact: "Factual Grounding",
-  coding: "Coding",
-  task: "Task & Goals",
-  output: "Output & Delivery",
-  research: "Research",
-  memory: "Memory",
-  security: "Security",
+const DOMAIN_LABELS: Record<string, string> = {
+  "always-on": "Always-on (security)",
+  coding: "Coding tasks",
+  research: "Research tasks",
+  delivery: "Delivery / General",
 };
 
 function Toggle({
@@ -76,23 +65,37 @@ function Toggle({
   );
 }
 
-function EnforcementBadge({ enforcement }: { enforcement: HarnessPresetItem["enforcement"] }) {
-  if (enforcement === "always-on") {
-    return (
-      <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2.5 py-1 text-[11px] font-medium text-emerald-600">
-        <Lock className="h-3 w-3" />
-        Always on
-      </span>
-    );
+function Pill({ text, tone }: { text: string; tone: "neutral" | "live" | "lock" | "preview" }) {
+  const cls = {
+    neutral: "bg-black/[0.05] text-secondary",
+    live: "bg-emerald-500/10 text-emerald-600",
+    lock: "bg-emerald-500/10 text-emerald-600",
+    preview: "bg-amber-500/10 text-amber-600",
+  }[tone];
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ${cls}`}>
+      {tone === "lock" ? <Lock className="h-3 w-3" /> : null}
+      {text}
+    </span>
+  );
+}
+
+// Tier · opt-method · wiring-state badges (spec §7: e.g. "det · opt-out · live").
+function Badges({ preset }: { preset: HarnessPresetItem }) {
+  if (preset.enforcement === "always-on") {
+    return <Pill text="Always on" tone="lock" />;
   }
-  if (enforcement === "preview") {
-    return (
-      <span className="inline-flex items-center rounded-full bg-amber-500/10 px-2.5 py-1 text-[11px] font-medium text-amber-600">
-        Preview
-      </span>
-    );
+  if (preset.enforcement === "preview") {
+    return <Pill text="Preview" tone="preview" />;
   }
-  return null; // enforcing → the live toggle is the affordance
+  // enforcing
+  return (
+    <div className="flex items-center gap-1.5">
+      {preset.tier === "deterministic" ? <Pill text="det" tone="neutral" /> : null}
+      {preset.optMethod ? <Pill text={preset.optMethod} tone="neutral" /> : null}
+      <Pill text="live" tone="live" />
+    </div>
+  );
 }
 
 function PresetRow({
@@ -110,26 +113,22 @@ function PresetRow({
   return (
     <div className="flex items-center justify-between gap-4 rounded-xl border border-black/[0.06] bg-white px-4 py-3">
       <div className="min-w-0">
-        <p className="truncate text-sm font-semibold text-foreground">{preset.title}</p>
-        {!togglable ? (
-          <p className="mt-0.5 text-[11px] leading-relaxed text-secondary/80">
-            {preset.enforcement === "always-on"
-              ? "Enforced by the runtime — not configurable here."
-              : "Surfaced for parity; no runtime gate yet."}
-          </p>
+        <div className="flex items-center gap-2">
+          <p className="truncate text-sm font-semibold text-foreground">{preset.title}</p>
+          <Badges preset={preset} />
+        </div>
+        {preset.description ? (
+          <p className="mt-1 text-[11px] leading-relaxed text-secondary/80">{preset.description}</p>
         ) : null}
       </div>
-      <div className="flex items-center gap-3">
-        {togglable ? null : <EnforcementBadge enforcement={preset.enforcement} />}
-        {togglable ? (
-          <Toggle
-            checked={checked}
-            disabled={pending}
-            onChange={(next) => onToggle(preset.id, next)}
-            label={`Toggle preset ${preset.title}`}
-          />
-        ) : null}
-      </div>
+      {togglable ? (
+        <Toggle
+          checked={checked}
+          disabled={pending}
+          onChange={(next) => onToggle(preset.id, next)}
+          label={`Toggle preset ${preset.title}`}
+        />
+      ) : null}
     </div>
   );
 }
@@ -154,15 +153,19 @@ export function VerificationRuleModal({
 
   if (!open) return null;
 
-  const byCategory = new Map<string, HarnessPresetItem[]>();
+  // Preview presets are pulled out into their own collapsed section regardless of
+  // domain; everything else groups by WHEN (domain).
+  const previewPresets = catalog.harnessPresets.filter((p) => p.enforcement === "preview");
+  const byDomain = new Map<string, HarnessPresetItem[]>();
   for (const preset of catalog.harnessPresets) {
-    const list = byCategory.get(preset.category) ?? [];
+    if (preset.enforcement === "preview") continue;
+    const list = byDomain.get(preset.domain) ?? [];
     list.push(preset);
-    byCategory.set(preset.category, list);
+    byDomain.set(preset.domain, list);
   }
-  const orderedCategories = [
-    ...CATEGORY_ORDER.filter((c) => byCategory.has(c)),
-    ...[...byCategory.keys()].filter((c) => !CATEGORY_ORDER.includes(c as never)),
+  const orderedDomains = [
+    ...DOMAIN_ORDER.filter((d) => byDomain.has(d)),
+    ...[...byDomain.keys()].filter((d) => !DOMAIN_ORDER.includes(d as never)),
   ];
 
   const rulesDirty = rulesDraft !== userRules;
@@ -197,13 +200,13 @@ export function VerificationRuleModal({
         ) : null}
 
         <div className="space-y-6">
-          {orderedCategories.map((category) => {
-            const presets = byCategory.get(category) ?? [];
+          {orderedDomains.map((domain) => {
+            const presets = byDomain.get(domain) ?? [];
             if (presets.length === 0) return null;
             return (
-              <section key={category}>
+              <section key={domain}>
                 <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-secondary/70">
-                  {CATEGORY_LABELS[category] ?? category}
+                  {DOMAIN_LABELS[domain] ?? domain}
                 </h3>
                 <div className="space-y-2">
                   {presets.map((preset) => (
@@ -219,6 +222,26 @@ export function VerificationRuleModal({
               </section>
             );
           })}
+
+          {/* Preview (not yet wired) — collapsed, non-toggle */}
+          {previewPresets.length > 0 ? (
+            <details className="rounded-xl border border-black/[0.06] bg-gray-50/60">
+              <summary className="cursor-pointer px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-secondary/70">
+                Not yet wired — preview ({previewPresets.length})
+              </summary>
+              <div className="space-y-2 px-3 pb-3">
+                {previewPresets.map((preset) => (
+                  <PresetRow
+                    key={preset.id}
+                    preset={preset}
+                    checked={false}
+                    pending={false}
+                    onToggle={onTogglePreset}
+                  />
+                ))}
+              </div>
+            </details>
+          ) : null}
 
           {/* Custom rules (USER-RULES.md) */}
           <section>
