@@ -321,6 +321,11 @@ _BUILTIN_PRESETS: tuple[BuiltinHarnessPreset, ...] = tuple(
             # the redaction Customize preset (see cli/engine
             # _hard_redaction_matched_requirement_labels).
             _preset("redaction", PresetCategory.OUTPUT, default_on=False, hook_points=("afterLLMCall",), verifier_gates=("redaction",)),
+            # Opt-in satisfier for the mandatory evidence pack's refs (runtime
+            # issued >=1 evidence record this turn + audit-mode invariant).
+            # default-OFF; enabled via env flag OR the evidence-pack Customize
+            # preset (see cli/engine _evidence_pack_matched_requirement_labels).
+            _preset("evidence-pack", PresetCategory.OUTPUT, default_on=False, hook_points=("afterLLMCall",), verifier_gates=("evidence-pack",)),
             # Task C — OPTIONAL BLOCKING document-authoring coverage gate. Default
             # OFF and env-gated (``MAGI_DOCUMENT_AUTHORING_COVERAGE``); when off the
             # ``DocumentCoverage`` evidence from ``docx_write`` (Task B) stays
