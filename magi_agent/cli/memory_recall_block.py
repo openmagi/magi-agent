@@ -38,7 +38,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-MEMORY_RECALL_OPEN = '<memory-recall hidden="true">'
+# A2: the recall fence carries ``continuity="background"`` so recalled long-term
+# memory is presented to the model as BACKGROUND reference material, not as the
+# user's current request / a conversation turn (mirrors the snapshot-path
+# continuity policy in ``memory/continuity_policy.py``).
+MEMORY_RECALL_OPEN = '<memory-recall hidden="true" continuity="background">'
 MEMORY_RECALL_CLOSE = "</memory-recall>"
 
 

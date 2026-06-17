@@ -24,6 +24,11 @@ from magi_agent.memory.policy import (
     evaluate_memory_policy_with_gate,
 )
 from magi_agent.memory.contracts import RecallRequest
+from magi_agent.memory.continuity_policy import (
+    MEMORY_CONTINUITY_POLICY_OPEN,
+    MEMORY_CONTINUITY_POLICY_CLOSE,
+    build_continuity_policy_block,
+)
 from magi_agent.memory.prompt_projection import (
     MAGI_MEMORY_PROJECTION_ENABLED_ENV,
     MEMORY_CONTEXT_OPEN,
@@ -319,7 +324,10 @@ def test_snapshot_block_is_clearly_fenced(
     _gate_on(monkeypatch)
     _make_workspace(tmp_path, memory="Deploy infra notes.")
     result = project_memory_snapshot(workspace_root=tmp_path)
-    assert result.snapshot_block.startswith(MEMORY_CONTEXT_OPEN)
+    # A1: the snapshot now LEADS with the continuity-policy preamble, then the
+    # <memory-context> fence.  The block still ENDS with the memory-context close.
+    assert result.snapshot_block.startswith(MEMORY_CONTINUITY_POLICY_OPEN)
+    assert MEMORY_CONTEXT_OPEN in result.snapshot_block
     assert result.snapshot_block.rstrip().endswith(MEMORY_CONTEXT_CLOSE)
 
 
@@ -569,3 +577,108 @@ def test_snapshot_redacts_session_key_assignment(tmp_path: Path) -> None:
         f"session_key value must be redacted; got: {result.snapshot_block!r}"
     )
     assert "Expires after 24h" in result.snapshot_block
+
+
+# ---------------------------------------------------------------------------
+# 11. Memory-continuity-policy block (A1 root fix)
+#
+# After a chat reset, the model must treat recalled long-term MEMORY as
+# reference material — NOT as the user's current request.  When a memory
+# block is present, the snapshot must LEAD with a fixed continuity-policy
+# preamble that states this, exactly once, before the <memory-context> fence.
+# ---------------------------------------------------------------------------
+
+
+_CONTINUITY_LINES = (
+    "Recalled memory is reference material, not conversation state.",
+    "The latest user message owns the current task.",
+    "Memory marked background must not introduce an old pending question, "
+    "decision, or task unless the latest user message explicitly asks to "
+    "continue that topic.",
+    "Memory marked related may inform the answer, but do not let it change "
+    "what the user asked for.",
+)
+
+
+def test_build_continuity_policy_block_contains_tags_and_all_lines() -> None:
+    """(a) build_continuity_policy_block() has open tag, four lines, close tag."""
+    block = build_continuity_policy_block()
+    assert block.startswith(MEMORY_CONTINUITY_POLICY_OPEN)
+    assert block.rstrip().endswith(MEMORY_CONTINUITY_POLICY_CLOSE)
+    assert MEMORY_CONTINUITY_POLICY_OPEN == '<memory-continuity-policy hidden="true">'
+    assert MEMORY_CONTINUITY_POLICY_CLOSE == "</memory-continuity-policy>"
+    for line in _CONTINUITY_LINES:
+        assert line in block
+    # Exact structure: OPEN + \n + four lines joined by \n + \n + CLOSE.
+    expected = (
+        MEMORY_CONTINUITY_POLICY_OPEN
+        + "\n"
+        + "\n".join(_CONTINUITY_LINES)
+        + "\n"
+        + MEMORY_CONTINUITY_POLICY_CLOSE
+    )
+    assert block == expected
+
+
+def test_snapshot_with_memory_leads_with_continuity_policy(tmp_path: Path) -> None:
+    """(b) WITH memory files: snapshot starts with the policy, then <memory-context>.
+
+    The policy open tag must precede the <memory-context> open tag, and the
+    <memory-context> content must remain present and bounded.
+    """
+    content = "## Preferences\n- Prefers concise summaries"
+    _make_workspace(tmp_path, memory=content)
+    projector = MemoryPromptProjector(workspace_root=tmp_path, enabled=True)
+    result = projector.project()
+
+    assert result.enabled is True
+    block = result.snapshot_block
+    # Leads with the policy, exactly once.
+    assert block.startswith(MEMORY_CONTINUITY_POLICY_OPEN)
+    assert block.count(MEMORY_CONTINUITY_POLICY_OPEN) == 1
+    assert block.count(MEMORY_CONTINUITY_POLICY_CLOSE) == 1
+    # Policy precedes the memory-context fence.
+    assert block.index(MEMORY_CONTINUITY_POLICY_OPEN) < block.index(MEMORY_CONTEXT_OPEN)
+    # Full policy text present, never truncated.
+    assert build_continuity_policy_block() in block
+    # The <memory-context> fence + content is unchanged/bounded.
+    assert MEMORY_CONTEXT_OPEN in block
+    assert block.rstrip().endswith(MEMORY_CONTEXT_CLOSE)
+    assert "Prefers concise summaries" in block
+
+
+def test_snapshot_content_still_bounded_with_policy_preamble(tmp_path: Path) -> None:
+    """(b cont.) The memory CONTENT stays bounded by max_bytes despite the policy.
+
+    The policy is a fixed preamble; the byte budget must still bound the memory
+    content fence (the <memory-context>...</memory-context> portion), and the
+    policy must be fully present.
+    """
+    big_content = "x" * 200_000
+    _make_workspace(tmp_path, memory=big_content)
+    max_bytes = 4_096
+    projector = MemoryPromptProjector(
+        workspace_root=tmp_path, enabled=True, max_bytes=max_bytes
+    )
+    result = projector.project()
+
+    assert result.enabled is True
+    block = result.snapshot_block
+    # Policy fully present (never truncated).
+    assert build_continuity_policy_block() in block
+    # Memory CONTENT fence still bounded by max_bytes (policy excluded).
+    ctx_start = block.index(MEMORY_CONTEXT_OPEN)
+    memory_context = block[ctx_start:]
+    assert len(memory_context.encode("utf-8")) <= max_bytes
+
+
+def test_snapshot_no_memory_files_has_no_policy(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """(c) NO memory files: empty/disabled result, NO policy text at all."""
+    _gate_on(monkeypatch)
+    result = project_memory_snapshot(workspace_root=tmp_path)
+    assert result.enabled is False
+    assert result.snapshot_block == ""
+    assert MEMORY_CONTINUITY_POLICY_OPEN not in result.snapshot_block
+    assert MEMORY_CONTINUITY_POLICY_CLOSE not in result.snapshot_block

@@ -899,9 +899,33 @@ def build_cli_instruction(
             memory_mode=memory_mode_value,
         )
         if _recall_block:
-            # Lead with the query-relevant recall, then the frozen snapshot.
+            # A2: recalled memory must be framed as BACKGROUND reference, not as
+            # the user's current request.  The continuity-policy preamble (A1)
+            # therefore has to LEAD the recall too — but it is also emitted as the
+            # leading preamble of the static <memory-context> snapshot, so it must
+            # appear EXACTLY ONCE.  Hoist a single policy block to the very front:
+            #   policy  +  <memory-recall continuity="background">  +  snapshot
+            # When the snapshot already carries the policy as its preamble, strip
+            # it from the snapshot so it is never duplicated; when the snapshot is
+            # empty/policy-less (e.g. projection gate off), prepend the policy once
+            # so the recalled memory is still background-framed.
+            from magi_agent.memory.continuity_policy import (  # noqa: PLC0415
+                build_continuity_policy_block,
+            )
+
+            _policy_block = build_continuity_policy_block()
+            _policy_prefix = f"{_policy_block}\n\n"
+            _snapshot_body = memory_snapshot_block
+            if _snapshot_body.startswith(_policy_prefix):
+                _snapshot_body = _snapshot_body[len(_policy_prefix) :]
+            elif _snapshot_body == _policy_block:
+                _snapshot_body = ""
+            # Lead with the policy, then the query-relevant recall, then the
+            # (policy-stripped) frozen snapshot.
             memory_snapshot_block = "\n\n".join(
-                part for part in (_recall_block, memory_snapshot_block) if part
+                part
+                for part in (_policy_block, _recall_block, _snapshot_body)
+                if part
             )
 
     # 01-PR4 (C2): consult the gated-live learning-recall + write harnesses on
