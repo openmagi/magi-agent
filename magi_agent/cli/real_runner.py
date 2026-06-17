@@ -589,6 +589,13 @@ def _apply_customize_verification(required_validators: list[str]) -> list[str]:
                         result.append(ref)
             else:
                 result = [r for r in result if r not in seam.controls_refs]
+        # Custom deterministic_ref rules (P1) compile as opt-out adds: an enabled
+        # rule REQUIRES its ref in the pre-final gate. Separate flag so it stays
+        # byte-identical until explicitly enabled.
+        if flag_bool("MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED"):
+            for ref in policy.enabled_deterministic_refs():
+                if ref not in result:
+                    result.append(ref)
         return result
     except Exception:
         return required_validators

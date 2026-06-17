@@ -15,6 +15,7 @@ from magi_agent.customize.preset_map import (
     supported_modes_for,
     tier_for,
 )
+from magi_agent.customize.what_menu import what_menu
 from magi_agent.harness.presets import builtin_preset_catalog
 from magi_agent.transport.app_api import _RUNTIME_HOOK_POINTS as _HOOK_POINTS
 
@@ -146,6 +147,9 @@ def build_catalog(runtime: Any) -> dict[str, Any]:
             "recipes": _recipe_entries(),
             "harnessPresets": _preset_entries(),
             "hooks": _hook_entries(runtime),
+            # Producer-backed deterministic checks the custom-rule builder may
+            # require (spec §9.1 / §12). Empty-safe.
+            "customRuleMenu": what_menu(),
         },
         "tools": _tool_entries(runtime),
     }

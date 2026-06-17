@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import uuid
+
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from magi_agent.customize.apply import apply_tool_overrides, apply_verification_overrides
 from magi_agent.customize.catalog import build_catalog
+from magi_agent.customize.custom_rules import validate_custom_rule
 from magi_agent.customize.store import (
+    delete_custom_rule,
     load_overrides,
+    set_custom_rule,
     set_tool_override,
     set_user_rules,
     set_verification_override,
@@ -81,5 +86,37 @@ def register_customize_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
         if not isinstance(body, dict) or not isinstance(body.get("text"), str):
             return JSONResponse(status_code=400, content={"error": "text_required"})
         overrides = set_user_rules(body["text"])
+        apply_verification_overrides(runtime, overrides)
+        return JSONResponse(content={"overrides": overrides})
+
+    @app.put("/v1/app/customize/custom-rules")
+    async def put_custom_rule(request: Request) -> JSONResponse:
+        unauthorized = _unauthorized_response(request, runtime)
+        if unauthorized is not None:
+            return unauthorized
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse(status_code=400, content={"error": "invalid_json"})
+        if not isinstance(body, dict):
+            return JSONResponse(status_code=400, content={"error": "object_required"})
+        errors = validate_custom_rule(body)
+        if errors:
+            return JSONResponse(
+                status_code=400, content={"error": "invalid_custom_rule", "details": errors}
+            )
+        rule = dict(body)
+        if not isinstance(rule.get("id"), str) or not rule["id"]:
+            rule["id"] = f"cr_{uuid.uuid4().hex}"
+        overrides = set_custom_rule(rule)
+        apply_verification_overrides(runtime, overrides)
+        return JSONResponse(content={"overrides": overrides, "id": rule["id"]})
+
+    @app.delete("/v1/app/customize/custom-rules/{rule_id}")
+    async def delete_custom_rule_route(rule_id: str, request: Request) -> JSONResponse:
+        unauthorized = _unauthorized_response(request, runtime)
+        if unauthorized is not None:
+            return unauthorized
+        overrides = delete_custom_rule(rule_id)
         apply_verification_overrides(runtime, overrides)
         return JSONResponse(content={"overrides": overrides})
