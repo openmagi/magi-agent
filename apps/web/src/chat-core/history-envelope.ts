@@ -1,5 +1,6 @@
-import type { ChatMessage, ResearchEvidenceSnapshot, ResponseUsage } from "@/chat-core";
-import { normalizeResearchEvidenceSnapshot } from "@/chat-core";
+import type { ChatMessage, ResearchEvidenceSnapshot, ResponseUsage } from "./types";
+import { normalizeResearchEvidenceSnapshot } from "./research-evidence";
+import { normalizeResponseUsage } from "./response-usage";
 
 export interface HistoryPlaintextInput {
   role: "user" | "assistant";
@@ -25,29 +26,6 @@ interface AssistantHistoryEnvelope {
   thinkingDuration?: unknown;
   researchEvidence?: unknown;
   usage?: unknown;
-}
-
-function normalizeResponseUsage(value: unknown): ResponseUsage | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
-  const record = value as Record<string, unknown>;
-  const inputTokens = record.inputTokens;
-  const outputTokens = record.outputTokens;
-  const costUsd = record.costUsd;
-  if (
-    typeof inputTokens !== "number" ||
-    typeof outputTokens !== "number" ||
-    typeof costUsd !== "number" ||
-    !Number.isFinite(inputTokens) ||
-    !Number.isFinite(outputTokens) ||
-    !Number.isFinite(costUsd)
-  ) {
-    return undefined;
-  }
-  return {
-    inputTokens: Math.max(0, Math.floor(inputTokens)),
-    outputTokens: Math.max(0, Math.floor(outputTokens)),
-    costUsd: Math.max(0, costUsd),
-  };
 }
 
 export function encodeHistoryPlaintext(message: HistoryPlaintextInput): string {

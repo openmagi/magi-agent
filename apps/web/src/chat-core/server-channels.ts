@@ -1,4 +1,4 @@
-import { mergeChannelsWithHistory, type DeletedChannelRow, type VisibleChannel } from "@/chat-core";
+import { mergeChannelsWithHistory, type DeletedChannelRow, type VisibleChannel } from "./history-backed-channels";
 
 interface SupabaseLike {
   from: (table: string) => SupabaseQuery;

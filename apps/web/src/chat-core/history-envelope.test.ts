@@ -77,6 +77,22 @@ describe("chat history plaintext envelopes", () => {
     });
   });
 
+  it("drops incomplete output-only zero-cost usage metadata from encrypted history", () => {
+    const plaintext = JSON.stringify({
+      _v: 3,
+      content: "final answer",
+      usage: {
+        inputTokens: 0,
+        outputTokens: 3048,
+        costUsd: 0,
+      },
+    });
+
+    expect(decodeHistoryPlaintext("assistant", plaintext)).toEqual({
+      content: "final answer",
+    });
+  });
+
   it("continues to decode existing v2 thinking envelopes", () => {
     const plaintext = JSON.stringify({
       _v: 2,

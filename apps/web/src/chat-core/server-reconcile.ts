@@ -1,14 +1,25 @@
-import type { ChatMessage, ServerMessage } from "@/chat-core";
+import type { ChatMessage, ServerMessage } from "./types";
+import { stripResearchEvidenceMarker } from "./research-evidence";
+import { stripAssistantMetadataPreamble } from "./visible-content";
 
 const REPLACEMENT_CHAR = "\uFFFD";
 const SERVER_PATCH_EXTRA_CHARS = 20;
+
+function normalizedVisibleAssistantText(content: string): string {
+  return stripResearchEvidenceMarker(stripAssistantMetadataPreamble(content))
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
 export function shouldPatchAssistantTextFromServer(
   localContent: string,
   serverContent: string,
 ): boolean {
   if (!serverContent || serverContent === localContent) return false;
-  if (serverContent.length > localContent.length + SERVER_PATCH_EXTRA_CHARS) return true;
+  const localVisible = normalizedVisibleAssistantText(localContent);
+  const serverVisible = normalizedVisibleAssistantText(serverContent);
+  if (serverVisible && serverVisible === localVisible) return false;
+  if (serverVisible.length > localVisible.length + SERVER_PATCH_EXTRA_CHARS) return true;
   return localContent.includes(REPLACEMENT_CHAR) && !serverContent.includes(REPLACEMENT_CHAR);
 }
 

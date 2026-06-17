@@ -1,6 +1,8 @@
 import type {
   ChannelState,
   ControlRequestRecord,
+  AppliedRecipeSummary,
+  RecipeSelectionSummary,
   MissionActivity,
   QueuedMessage,
   PatchPreviewFile,
@@ -9,8 +11,8 @@ import type {
   TaskBoardTask,
   ToolActivity,
   ChatResponseLanguage,
-} from "@/chat-core";
-import { derivePublicToolPreview } from "@/chat-core";
+} from "./types";
+import { derivePublicToolPreview } from "./public-tool-preview";
 
 export type WorkConsoleRowGroup =
   | "status"
@@ -225,6 +227,183 @@ function runtimeTraceRow(
   };
 }
 
+function shortDigest(value?: string): string | undefined {
+  if (!value) return undefined;
+  return value.length > 24 ? `${value.slice(0, 13)}…${value.slice(-6)}` : value;
+}
+
+function guardrailStatus(status: string): WorkConsoleRowStatus {
+  if (status === "blocked") return "error";
+  if (status === "passed") return "done";
+  if (status === "abstained") return "info";
+  return "waiting";
+}
+
+function recipeDetail(
+  recipe: AppliedRecipeSummary,
+): string {
+  return [recipe.version, recipe.role, recipe.governed ? "governed" : "ungoverned"]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+function recipeSelectionStatusDetail(selection: RecipeSelectionSummary): string {
+  const status = selection.status.replaceAll("_", " ");
+  return [
+    status,
+    selection.selectionSource,
+    ...selection.omissionReasons,
+    selection.turnBlocked ? "turn blocked" : undefined,
+    selection.fallbackUsed ? "fell back" : undefined,
+    selection.nextAction,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+function recipeSelectionRowStatus(selection: RecipeSelectionSummary): WorkConsoleRowStatus {
+  if (
+    selection.status === "explicit_blocked" ||
+    selection.status === "explicit_incompatible" ||
+    selection.status === "explicit_unavailable"
+  ) return "error";
+  if (selection.status === "explicit_requested") return "waiting";
+  return "done";
+}
+
+function deterministicPolicyDetail(
+  determinism: NonNullable<ChannelState["determinism"]>,
+): string | undefined {
+  const workflow = [determinism.workflowId, determinism.workflowVersion ? `v${determinism.workflowVersion}` : undefined]
+    .filter(Boolean)
+    .join(" ");
+  const governed = determinism.governed === true
+    ? "governed"
+    : determinism.governed === false
+      ? "ungoverned"
+      : undefined;
+  return [workflow || undefined, governed, shortDigest(determinism.effectivePolicySnapshotDigest)]
+    .filter(Boolean)
+    .join(" · ") || undefined;
+}
+
+function deterministicProjectionDetail(
+  determinism: NonNullable<ChannelState["determinism"]>,
+): string | undefined {
+  if (!determinism.projectionMode) return undefined;
+  if (determinism.outputAllowed === false) {
+    const reasons = determinism.blockedReasonCodes?.join(", ");
+    return reasons
+      ? `${determinism.projectionMode} blocked: ${reasons}`
+      : `${determinism.projectionMode} blocked`;
+  }
+  const counts = typeof determinism.claimCount === "number" || typeof determinism.renderedClaimCount === "number"
+    ? `claims ${determinism.renderedClaimCount ?? 0}/${determinism.claimCount ?? 0}`
+    : undefined;
+  return [determinism.projectionMode, counts].filter(Boolean).join(" · ");
+}
+
+function deterministicRows(
+  channelState: ChannelState,
+): WorkConsoleRow[] {
+  const determinism = channelState.determinism;
+  if (!determinism) return [];
+  const rows: WorkConsoleRow[] = [];
+  const policyDetail = deterministicPolicyDetail(determinism);
+
+  if (determinism.effectivePolicySnapshotDigest) {
+    rows.push({
+      id: "determinism:policy",
+      group: "trace",
+      label: "Policy snapshot",
+      ...(policyDetail ? { detail: policyDetail } : {}),
+      status: "info",
+    });
+  }
+  if (determinism.ledgerHeadDigest) {
+    rows.push({
+      id: "determinism:ledger",
+      group: "trace",
+      label: "Evidence ledger",
+      detail: shortDigest(determinism.ledgerHeadDigest),
+      status: "info",
+    });
+  }
+  if (determinism.checkpointId) {
+    rows.push({
+      id: "determinism:checkpoint",
+      group: "trace",
+      label: "Checkpoint",
+      detail: determinism.checkpointId,
+      status: "info",
+    });
+  }
+  if (determinism.projectionMode) {
+    rows.push({
+      id: "determinism:projection",
+      group: "trace",
+      label: "Projection",
+      detail: deterministicProjectionDetail(determinism),
+      status: determinism.outputAllowed === false ? "waiting" : "info",
+    });
+  }
+  if (determinism.recipeSelection) {
+    rows.push({
+      id: "determinism:recipe-selection",
+      group: "trace",
+      label: "Recipe request",
+      detail: recipeSelectionStatusDetail(determinism.recipeSelection),
+      status: recipeSelectionRowStatus(determinism.recipeSelection),
+      ...(determinism.recipeSelection.policySnapshotDigest
+        ? { meta: shortDigest(determinism.recipeSelection.policySnapshotDigest) }
+        : {}),
+    });
+  }
+  for (const recipe of determinism.appliedRecipes ?? []) {
+    rows.push({
+      id: `determinism:recipe:${recipe.recipeId}`,
+      group: "trace",
+      label: `Recipe: ${recipe.recipeId}`,
+      detail: recipeDetail(recipe),
+      status: "info",
+      ...(recipe.sourceDigest ? { meta: shortDigest(recipe.sourceDigest) } : {}),
+    });
+  }
+  for (const gate of determinism.verificationGates ?? []) {
+    const meta = [gate.validatorTrustClass, gate.policyDecisionId].filter(Boolean).join(" · ");
+    rows.push({
+      id: `determinism:verification:${gate.gateId}`,
+      group: "trace",
+      label: `Verification: ${gate.gateId}`,
+      detail: gate.reasonCodes.join(", ") || gate.stage,
+      status: guardrailStatus(gate.status),
+      ...(meta ? { meta } : {}),
+    });
+  }
+  for (const guardrail of determinism.guardrails ?? []) {
+    const meta = [guardrail.stage, guardrail.validatorTrustClass].filter(Boolean).join(" · ");
+    rows.push({
+      id: `determinism:guardrail:${guardrail.guardrailId}:${guardrail.policyDecisionId}`,
+      group: "trace",
+      label: `Guardrail: ${guardrail.guardrailId}`,
+      detail: guardrail.reasonCodes.join(", ") || guardrail.stage,
+      status: guardrailStatus(guardrail.status),
+      ...(meta ? { meta } : {}),
+    });
+  }
+  if (determinism.fallbackReasonCode) {
+    rows.push({
+      id: "determinism:fallback",
+      group: "trace",
+      label: "Fallback",
+      detail: determinism.fallbackReasonCode,
+      status: "waiting",
+      ...(determinism.fallbackAuthority ? { meta: determinism.fallbackAuthority } : {}),
+    });
+  }
+  return rows;
+}
+
 function taskMeta(task: TaskBoardTask, language?: ChatResponseLanguage): string {
   switch (task.status) {
     case "in_progress":
@@ -254,6 +433,29 @@ function formatSubagentElapsed(startedAt: number): string | undefined {
 
 function subagentName(index: number): string {
   return SUBAGENT_NAMES[index % SUBAGENT_NAMES.length] ?? `Agent ${index + 1}`;
+}
+
+const SAFE_HELPER_TASK_ID_RE = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,47}$/;
+const UNSAFE_HELPER_TASK_ID_RE =
+  /api[._-]?key|auth(?:orization)?|bearer|cookie|prompt|raw|secret|session|token|transcript|spawn[._-]?dir|[:/\\\s]/i;
+
+function safeHelperTaskId(taskId: string, index: number): string {
+  const trimmed = taskId.trim();
+  if (SAFE_HELPER_TASK_ID_RE.test(trimmed) && !UNSAFE_HELPER_TASK_ID_RE.test(trimmed)) {
+    return trimmed;
+  }
+  return `agent-${index + 1}`;
+}
+
+function subagentRowLabel(
+  index: number,
+  role: string,
+  language?: ChatResponseLanguage,
+): string {
+  if (role === "bash" || role === "background") {
+    return t(language, "Background task", "백그라운드 작업");
+  }
+  return subagentName(index);
 }
 
 function normalizeRole(role: string): string {
@@ -448,17 +650,20 @@ export function deriveWorkConsoleRows({
     rows.push(runtimeTraceRow(trace, language));
   }
 
+  rows.push(...deterministicRows(channelState));
+
   for (const [index, subagent] of (channelState.subagents ?? []).entries()) {
     const elapsed = subagent.status === "running" || subagent.status === "waiting"
       ? formatSubagentElapsed(subagent.startedAt)
       : undefined;
+    const role = normalizeRole(subagent.role);
     rows.push({
-      id: `subagent:${subagent.taskId}`,
+      id: `subagent:${safeHelperTaskId(subagent.taskId, index)}`,
       group: "subagent",
-      label: subagentName(index),
+      label: subagentRowLabel(index, role, language),
       detail: subagentDetail(subagent, language),
       status: statusFromSubagent(subagent),
-      meta: [normalizeRole(subagent.role), elapsed].filter(Boolean).join(" · "),
+      meta: [role, elapsed].filter(Boolean).join(" · "),
     });
   }
 

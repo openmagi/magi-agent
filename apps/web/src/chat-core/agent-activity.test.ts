@@ -4,7 +4,7 @@ import {
   formatActivityDuration,
   getAgentActivitySummary,
 } from "./agent-activity";
-import type { TaskBoardSnapshot, ToolActivity } from "@/chat-core";
+import type { TaskBoardSnapshot, ToolActivity } from "./types";
 
 function activity(
   label: string,
@@ -106,7 +106,7 @@ describe("deriveAgentActivityItems", () => {
     });
   });
 
-  it("groups completed command and read activities", () => {
+  it("keeps completed activity rows visible after finalization", () => {
     const rows = deriveAgentActivityItems({
       activities: [
         activity("exec_command npm test"),
@@ -117,8 +117,10 @@ describe("deriveAgentActivityItems", () => {
     });
 
     expect(rows.map((r) => r.label)).toEqual([
-      "Ran 2 commands",
-      "Read 2 files",
+      "exec_command npm test",
+      "exec_command git status",
+      "rg chat",
+      "fetch_file chat-view-client.tsx",
     ]);
     expect(rows.every((r) => r.status === "done")).toBe(true);
   });
@@ -152,12 +154,12 @@ describe("deriveAgentActivityItems", () => {
 
     expect(rows.map((r) => [r.label, r.status])).toEqual([
       ["Running exec_command npm run build", "running"],
-      ["knowledge-search failed", "error"],
+      ["Searching knowledge base failed", "error"],
       ["shell rm -rf denied", "denied"],
     ]);
   });
 
-  it("propagates input/output previews for running and error tool rows", () => {
+  it("uses public previews for running and error tool rows", () => {
     const rows = deriveAgentActivityItems({
       live: true,
       activities: [
@@ -181,13 +183,14 @@ describe("deriveAgentActivityItems", () => {
     });
 
     expect(rows.map((r) => [r.id, r.label, r.status])).toEqual([
-      ["tool-1", "Running exec_command", "running"],
-      ["tool-2", "knowledge-search failed", "error"],
+      ["tool-1", "Running Working", "running"],
+      ["tool-2", "Searching knowledge base failed", "error"],
     ]);
-    expect(rows[0]?.inputPreview).toBe("raw command input");
+    expect(rows[0]?.detail).toBe("raw command input");
+    expect(rows[0]?.inputPreview).toBe("raw command output");
     expect(rows[0]?.outputPreview).toBeUndefined();
     expect(rows[1]?.inputPreview).toBeUndefined();
-    expect(rows[1]?.outputPreview).toBe("raw result");
+    expect(rows[1]?.outputPreview).toBeUndefined();
   });
 
   it("does not render archived run metadata as still in progress", () => {
@@ -220,8 +223,8 @@ describe("deriveAgentActivityItems", () => {
       ["Running current step", "running"],
       ["DocumentWrite failed", "error"],
       ["Bash denied", "denied"],
-      ["Ran 1 command", "done"],
-      ["Read 1 file", "done"],
+      ["exec_command npm test", "done"],
+      ["fetch_file run-inspector-dock.tsx", "done"],
     ]);
     expect(getAgentActivitySummary(rows)).toBe("5 actions in progress");
   });

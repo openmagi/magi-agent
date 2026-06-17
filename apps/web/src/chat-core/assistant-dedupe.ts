@@ -1,18 +1,78 @@
-import type { ChatMessage } from "@/chat-core";
-import { stripResearchEvidenceMarker } from "@/chat-core";
-import { stripAssistantMetadataPreamble } from "@/chat-core";
+import type { ChatMessage } from "./types";
+import { stripResearchEvidenceMarker } from "./research-evidence";
+import { stripAssistantMetadataPreamble } from "./visible-content";
 
 export const ASSISTANT_DEDUPE_WINDOW_MS = 5 * 60_000;
 export const ASSISTANT_DEDUPE_MIN_CHARS = 80;
 
+const ATTACHMENT_MARKER_RE = /\[attachment:([0-9a-f-]{36}):([^\]]+)\]/gi;
 const REPLACEMENT_CHAR_RE = /\uFFFD+/g;
 const MIN_REPLACEMENT_CHUNK_CHARS = 8;
 
-export function normalizedAssistantDedupeContent(message: ChatMessage): string | null {
+function normalizedAssistantVisibleContent(message: ChatMessage): string | null {
   if (message.role !== "assistant") return null;
   const content = stripResearchEvidenceMarker(stripAssistantMetadataPreamble(message.content));
   const normalized = content.replace(/\s+/g, " ").trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
+export function normalizedAssistantDedupeContent(message: ChatMessage): string | null {
+  const normalized = normalizedAssistantVisibleContent(message);
+  if (!normalized) return null;
   return normalized.length >= ASSISTANT_DEDUPE_MIN_CHARS ? normalized : null;
+}
+
+function normalizedAssistantArtifactContent(message: ChatMessage): string | null {
+  if (message.role !== "assistant") return null;
+  const content = stripResearchEvidenceMarker(stripAssistantMetadataPreamble(message.content))
+    .replace(ATTACHMENT_MARKER_RE, (_match, _id: string, filename: string) => (
+      `[attachment:${filename.trim().toLowerCase()}]`
+    ));
+  const normalized = content.replace(/\s+/g, " ").trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
+function attachmentFilenameKeys(message: ChatMessage): string[] {
+  const keys: string[] = [];
+  const re = new RegExp(ATTACHMENT_MARKER_RE.source, ATTACHMENT_MARKER_RE.flags);
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(message.content)) !== null) {
+    const filename = match[2]?.trim().toLowerCase();
+    if (filename) keys.push(`attachment:${filename}`);
+  }
+  return keys;
+}
+
+function evidenceSourceKeys(message: ChatMessage): string[] {
+  return (message.researchEvidence?.inspectedSources ?? [])
+    .map((source) => source.uri.trim().toLowerCase())
+    .filter((uri) => uri.length > 0)
+    .map((uri) => `source:${uri}`);
+}
+
+function artifactReferenceKeys(message: ChatMessage): Set<string> {
+  return new Set([
+    ...attachmentFilenameKeys(message),
+    ...evidenceSourceKeys(message),
+  ]);
+}
+
+function shareArtifactReference(first: ChatMessage, second: ChatMessage): boolean {
+  const firstKeys = artifactReferenceKeys(first);
+  if (firstKeys.size === 0) return false;
+  for (const key of artifactReferenceKeys(second)) {
+    if (firstKeys.has(key)) return true;
+  }
+  return false;
+}
+
+export function assistantMessagesExactlyMatch(
+  first: ChatMessage,
+  second: ChatMessage,
+): boolean {
+  const firstContent = normalizedAssistantVisibleContent(first);
+  const secondContent = normalizedAssistantVisibleContent(second);
+  return !!firstContent && firstContent === secondContent;
 }
 
 function commonPrefixLength(a: string, b: string): number {
@@ -65,6 +125,21 @@ export function assistantContentsSubstantiallyOverlap(
   const sharedPrefix = commonPrefixLength(firstContent, secondContent);
   const shorterLength = Math.min(firstContent.length, secondContent.length);
   return sharedPrefix >= 120 && sharedPrefix / shorterLength >= 0.72;
+}
+
+export function assistantArtifactCopiesSubstantiallyOverlap(
+  first: ChatMessage,
+  second: ChatMessage,
+): boolean {
+  if (first.role !== "assistant" || second.role !== "assistant") return false;
+  if (!shareArtifactReference(first, second)) return false;
+  const firstContent = normalizedAssistantArtifactContent(first);
+  const secondContent = normalizedAssistantArtifactContent(second);
+  if (!firstContent || !secondContent) return false;
+  if (firstContent === secondContent) return true;
+  const shorter = firstContent.length <= secondContent.length ? firstContent : secondContent;
+  const longer = firstContent.length > secondContent.length ? firstContent : secondContent;
+  return longer.includes(shorter);
 }
 
 export function assistantMessagesSubstantiallyOverlap(

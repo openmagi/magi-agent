@@ -3,7 +3,7 @@ import type {
   ChatResponseLanguage,
   LiveTranscriptItem,
   LiveTranscriptWorkItem,
-} from "@/chat-core";
+} from "./types";
 import { deriveWorkConsoleRows } from "./work-console";
 import type { WorkConsoleRow } from "./work-console";
 
@@ -11,7 +11,22 @@ const MAX_LIVE_TRANSCRIPT_ITEMS = 120;
 const LIVE_TRANSCRIPT_WORK_ROW_LIMIT = 6;
 
 function trimLiveTranscript(items: LiveTranscriptItem[]): LiveTranscriptItem[] {
-  return items.slice(-MAX_LIVE_TRANSCRIPT_ITEMS);
+  if (items.length <= MAX_LIVE_TRANSCRIPT_ITEMS) return items;
+  // The turn's text item is anchored at its original (early) position while work
+  // rows accumulate after it, so a plain tail slice could drop the text and
+  // leave an orphan work-only transcript. Always preserve text items and trim
+  // only the oldest work rows down to the cap.
+  const textCount = items.reduce((n, item) => (item.kind === "text" ? n + 1 : n), 0);
+  const workBudget = Math.max(0, MAX_LIVE_TRANSCRIPT_ITEMS - textCount);
+  let workSeen = 0;
+  const totalWork = items.length - textCount;
+  const dropWorkBefore = totalWork - workBudget;
+  return items.filter((item) => {
+    if (item.kind === "text") return true;
+    const keep = workSeen >= dropWorkBefore;
+    workSeen += 1;
+    return keep;
+  });
 }
 
 export function appendLiveTranscriptText(
@@ -21,13 +36,27 @@ export function appendLiveTranscriptText(
 ): LiveTranscriptItem[] {
   if (!content) return items ?? [];
   const next = [...(items ?? [])];
-  const last = next[next.length - 1];
-  if (last?.kind === "text") {
-    next[next.length - 1] = {
-      ...last,
-      content: `${last.content}${content}`,
+  // Merge into the turn's existing text item wherever it sits, then float it to
+  // the tail. Work rows (e.g. runtime traces with timestamped rowIds) get pushed
+  // between tokens during tool-heavy phases; without coalescing a turn's text
+  // shatters into one item per token and renders one word per line. Keeping the
+  // single text block at the tail also keeps the streaming cursor at the bottom
+  // edge of the live output, below the work rows.
+  let lastTextIndex = -1;
+  for (let i = next.length - 1; i >= 0; i -= 1) {
+    if (next[i].kind === "text") {
+      lastTextIndex = i;
+      break;
+    }
+  }
+  const lastText = lastTextIndex >= 0 ? next[lastTextIndex] : undefined;
+  if (lastText?.kind === "text") {
+    next.splice(lastTextIndex, 1);
+    next.push({
+      ...lastText,
+      content: `${lastText.content}${content}`,
       receivedAt,
-    };
+    });
   } else {
     next.push({
       id: `text:${receivedAt}:${Math.random().toString(36).slice(2, 8)}`,

@@ -1,4 +1,5 @@
-import type { ChatResponseLanguage, TaskBoardSnapshot, ToolActivity } from "@/chat-core";
+import type { ChatResponseLanguage, TaskBoardSnapshot, ToolActivity } from "./types";
+import { derivePublicToolPreview } from "./public-tool-preview";
 
 export type AgentActivityStatus = "running" | "done" | "error" | "denied";
 
@@ -27,8 +28,6 @@ export interface DeriveAgentActivityInput {
   taskBoard?: TaskBoardSnapshot | null;
   responseLanguage?: ChatResponseLanguage;
 }
-
-type ActivityCategory = "command" | "read" | "knowledge" | "other";
 
 function plural(count: number, singular: string, pluralText: string): string {
   return count === 1 ? singular : pluralText;
@@ -103,33 +102,6 @@ function describePhase(
   }
 }
 
-function categorizeActivity(label: string): ActivityCategory {
-  const normalized = label.toLowerCase();
-  if (
-    /\b(rg|grep|sed|cat|ls|find)\b/.test(normalized) ||
-    normalized.includes("fetch_file") ||
-    normalized.includes("read")
-  ) {
-    return "read";
-  }
-  if (
-    normalized.includes("exec") ||
-    normalized.includes("command") ||
-    normalized.includes("shell") ||
-    /\b(npm|git|kubectl|vercel|bash|zsh)\b/.test(normalized)
-  ) {
-    return "command";
-  }
-  if (
-    normalized.includes("kb") ||
-    normalized.includes("knowledge") ||
-    normalized.includes("document")
-  ) {
-    return "knowledge";
-  }
-  return "other";
-}
-
 function summarizeTaskBoard(
   taskBoard: TaskBoardSnapshot,
   live: boolean,
@@ -161,63 +133,56 @@ function summarizeTaskBoard(
   };
 }
 
-function groupCompletedActivities(
-  activities: ToolActivity[],
+function activityItemFromTool(
+  activity: ToolActivity,
+  status: AgentActivityStatus,
   language?: ChatResponseLanguage,
-): AgentActivityItem[] {
-  const counts: Record<ActivityCategory, number> = {
-    command: 0,
-    read: 0,
-    knowledge: 0,
-    other: 0,
+): AgentActivityItem {
+  const preview = derivePublicToolPreview({
+    label: activity.label,
+    inputPreview: activity.inputPreview,
+    outputPreview: activity.outputPreview,
+    language,
+  });
+  const action = preview?.action ?? activity.label;
+
+  if (status === "running") {
+    return {
+      id: activity.id,
+      label: isKorean(language) ? `${action} 실행 중` : `Running ${action}`,
+      status: "running",
+      durationMs: activity.durationMs,
+      detail: preview?.target,
+      inputPreview: preview?.snippet,
+    };
+  }
+  if (status === "error") {
+    return {
+      id: activity.id,
+      label: isKorean(language) ? `${action} 실패` : `${action} failed`,
+      status: "error",
+      durationMs: activity.durationMs,
+      detail: preview?.target,
+      outputPreview: preview?.snippet,
+    };
+  }
+  if (status === "denied") {
+    return {
+      id: activity.id,
+      label: isKorean(language) ? `${action} 거부됨` : `${action} denied`,
+      status: "denied",
+      durationMs: activity.durationMs,
+      detail: preview?.target,
+    };
+  }
+  return {
+    id: activity.id,
+    label: action,
+    status: "done",
+    durationMs: activity.durationMs,
+    detail: preview?.target,
+    outputPreview: preview?.snippet,
   };
-
-  for (const activity of activities) {
-    counts[categorizeActivity(activity.label)] += 1;
-  }
-
-  const rows: AgentActivityItem[] = [];
-  if (counts.command > 0) {
-    rows.push({
-      id: "completed-command",
-      label: isKorean(language)
-        ? `${counts.command}개 명령 실행`
-        : `Ran ${counts.command} ${plural(counts.command, "command", "commands")}`,
-      status: "done",
-      actionCount: counts.command,
-    });
-  }
-  if (counts.read > 0) {
-    rows.push({
-      id: "completed-read",
-      label: isKorean(language)
-        ? `${counts.read}개 파일 읽음`
-        : `Read ${counts.read} ${plural(counts.read, "file", "files")}`,
-      status: "done",
-      actionCount: counts.read,
-    });
-  }
-  if (counts.knowledge > 0) {
-    rows.push({
-      id: "completed-knowledge",
-      label: isKorean(language)
-        ? `지식 ${counts.knowledge}회 사용`
-        : `Used knowledge ${counts.knowledge} ${plural(counts.knowledge, "time", "times")}`,
-      status: "done",
-      actionCount: counts.knowledge,
-    });
-  }
-  if (counts.other > 0) {
-    rows.push({
-      id: "completed-other",
-      label: isKorean(language)
-        ? `${counts.other}개 작업 완료`
-        : `Completed ${counts.other} ${plural(counts.other, "action", "actions")}`,
-      status: "done",
-      actionCount: counts.other,
-    });
-  }
-  return rows;
 }
 
 export function deriveAgentActivityItems(input: DeriveAgentActivityInput): AgentActivityItem[] {
@@ -296,40 +261,13 @@ export function deriveAgentActivityItems(input: DeriveAgentActivityInput): Agent
 
   const activities = input.activities ?? [];
   const explicitRows: AgentActivityItem[] = [];
-  const completed: ToolActivity[] = [];
 
   for (const activity of activities) {
     const status = input.live === true || activity.status !== "running" ? activity.status : "done";
-    if (status === "running") {
-      explicitRows.push({
-        id: activity.id,
-        label: isKorean(language) ? `${activity.label} 실행 중` : `Running ${activity.label}`,
-        status: "running",
-        durationMs: activity.durationMs,
-        inputPreview: activity.inputPreview,
-      });
-    } else if (status === "error") {
-      explicitRows.push({
-        id: activity.id,
-        label: isKorean(language) ? `${activity.label} 실패` : `${activity.label} failed`,
-        status: "error",
-        durationMs: activity.durationMs,
-        outputPreview: activity.outputPreview,
-      });
-    } else if (status === "denied") {
-      explicitRows.push({
-        id: activity.id,
-        label: isKorean(language) ? `${activity.label} 거부됨` : `${activity.label} denied`,
-        status: "denied",
-        durationMs: activity.durationMs,
-      });
-    } else {
-      completed.push(activity);
-    }
+    explicitRows.push(activityItemFromTool(activity, status, language));
   }
 
   rows.push(...explicitRows);
-  rows.push(...groupCompletedActivities(completed, language));
   return rows;
 }
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { deriveWorkConsoleRows } from "./work-console";
+import { pythonAdkForbiddenPrivateMarkers } from "./fixtures/python-adk-public-events";
 import type {
   ChannelState,
   ControlRequestRecord,
@@ -8,7 +9,7 @@ import type {
   SubagentActivity,
   TaskBoardSnapshot,
   ToolActivity,
-} from "@/chat-core";
+} from "./types";
 
 function channelState(overrides: Partial<ChannelState> = {}): ChannelState {
   return {
@@ -128,6 +129,30 @@ describe("deriveWorkConsoleRows", () => {
     expect(rows.find((row) => row.label === "Needs approval")?.detail).toBe("Allow Bash?");
   });
 
+  it("labels detached background shell work as a background task", () => {
+    const rows = deriveWorkConsoleRows({
+      channelState: channelState({
+        subagents: [{
+          taskId: "shell_bg_1",
+          role: "bash",
+          status: "running",
+          detail: "Background command running",
+          startedAt: Date.now() - 10_000,
+          updatedAt: Date.now(),
+        }],
+      }),
+    });
+
+    expect(rows).toContainEqual(expect.objectContaining({
+      id: "subagent:shell_bg_1",
+      group: "subagent",
+      label: "Background task",
+      detail: "Background command running",
+      status: "running",
+      meta: expect.stringContaining("bash"),
+    }));
+  });
+
   it("localizes live progress labels to the current response language", () => {
     const rows = deriveWorkConsoleRows({
       channelState: channelState({
@@ -211,6 +236,23 @@ describe("deriveWorkConsoleRows", () => {
     );
     expect(rows.find((row) => row.label === "Running")?.detail).toBe("81s elapsed");
     expect(JSON.stringify(rows)).not.toContain("실행 중");
+  });
+
+  it("keeps committed-but-live turns running until the terminal event settles the stream", () => {
+    const rows = deriveWorkConsoleRows({
+      channelState: channelState({
+        streaming: true,
+        turnPhase: "committed",
+        heartbeatElapsedMs: 12_000,
+      }),
+    });
+
+    expect(rows).toContainEqual(expect.objectContaining({
+      id: "phase",
+      label: "Finalizing",
+      status: "running",
+      detail: "12s elapsed",
+    }));
   });
 
   it("derives durable mission rows before short-lived task-board rows", () => {
@@ -351,6 +393,54 @@ describe("deriveWorkConsoleRows", () => {
     );
     expect(rows.find((row) => row.label === "Creating document")?.meta).toBeUndefined();
     expect(rows.find((row) => row.label === "Updating document")?.meta).toBeUndefined();
+  });
+
+  it("derives safe host/path web progress details without leaking URL secrets", () => {
+    const rows = deriveWorkConsoleRows({
+      channelState: channelState({
+        streaming: true,
+        activeTools: [
+          {
+            id: "web-1",
+            label: "WebSearch",
+            status: "running",
+            startedAt: 1,
+            inputPreview: JSON.stringify({
+              query: "openmagi docs",
+              progress: {
+                sourceUrl:
+                  "https://docs.example.test/research/openmagi/2026/details?session=fixture#raw",
+              },
+            }),
+            outputPreview: JSON.stringify({
+              results: [
+                {
+                  title: "Safe result",
+                  sourceUrl:
+                    "https://docs.example.test/research/openmagi/2026/details?token=fixture",
+                },
+              ],
+              detail:
+                "Checking https://docs.example.test/research/openmagi/2026/details?token=fixture",
+            }),
+          },
+        ],
+      }),
+    });
+
+    const action = rows.find((row) => row.group === "tool");
+
+    expect(action).toEqual(
+      expect.objectContaining({
+        label: "Searching the web",
+        detail: "docs.example.test/research/openmagi/2026",
+        snippet:
+          "Query: openmagi docs\nURL: docs.example.test/research/openmagi/2026\nDetail: Checking docs.example.test/research/openmagi/2026\n1 result",
+      }),
+    );
+    expect(JSON.stringify(rows)).not.toContain("session=fixture");
+    expect(JSON.stringify(rows)).not.toContain("token=fixture");
+    expect(JSON.stringify(rows)).not.toContain("https://docs.example.test");
   });
 
   it("renders structured patch previews as file-level change summaries", () => {
@@ -498,6 +588,34 @@ describe("deriveWorkConsoleRows", () => {
     expect(JSON.stringify(rows)).not.toContain("allow");
   });
 
+  it("does not expose unsafe helper task ids in row ids", () => {
+    const rows = deriveWorkConsoleRows({
+      channelState: channelState({
+        streaming: true,
+        subagents: [
+          {
+            taskId: "agent:main:app:ch-moi9105m:24:spawn_secret_token",
+            role: "reviewer",
+            status: "running",
+            detail: "Reviewing sources",
+            startedAt: Date.now() - 10_000,
+            updatedAt: Date.now(),
+          },
+        ],
+      }),
+    });
+
+    expect(rows).toContainEqual(
+      expect.objectContaining({
+        id: "subagent:agent-1",
+        label: "Halley",
+        detail: "Reviewing sources",
+      }),
+    );
+    expect(JSON.stringify(rows)).not.toContain("agent:main:app");
+    expect(JSON.stringify(rows)).not.toContain("spawn_secret_token");
+  });
+
   it("does not repeat generic action previews in both detail and snippet", () => {
     const rows = deriveWorkConsoleRows({
       channelState: channelState({
@@ -627,7 +745,7 @@ describe("deriveWorkConsoleRows", () => {
               status: "ok",
               finalText:
                 "MODEL: gpt-5.5-pro\nRESULT: 2\nREASONING: Deterministic sum of 1 and 1 via Calculation tool yields 2.",
-              spawnDir: "/home/ocuser/.magi-agent/spawns/spawn_motzdgo9_mzbmo5cy",
+              spawnDir: "/home/ocuser/.openclaw/spawns/spawn_motzdgo9_mzbmo5cy",
             }),
           },
         ],
@@ -684,6 +802,126 @@ describe("deriveWorkConsoleRows", () => {
     );
     expect(JSON.stringify(rows)).not.toContain('"operation"');
     expect(JSON.stringify(rows)).not.toContain('"numericCount"');
+  });
+
+  it("derives deterministic rows from Python ADK replay state without private payloads", () => {
+    const rows = deriveWorkConsoleRows({
+      channelState: channelState({
+        streaming: true,
+        turnPhase: "executing",
+        heartbeatElapsedMs: 1_200,
+        runtimeTraces: [{
+          turnId: "turn-python-public-1",
+          phase: "retry_scheduled",
+          severity: "warning",
+          title: "Retry scheduled",
+          detail: "Retry after bounded failure",
+          reasonCode: "provider_transient_failure",
+          attempt: 2,
+          maxAttempts: 3,
+          retryable: true,
+          receivedAt: 1,
+        }],
+        activeTools: [
+          {
+            id: "py_tool_clock",
+            label: "Clock running",
+            status: "done",
+            startedAt: 1,
+            inputPreview: "timezone: UTC",
+            outputPreview: "Public time checked",
+            durationMs: 8,
+          },
+          {
+            id: "py_tool_patch",
+            label: "PatchApply",
+            status: "done",
+            startedAt: 2,
+            outputPreview: "Patch preview ready",
+            patchPreview: {
+              dryRun: true,
+              changedFiles: ["src/public.ts"],
+              createdFiles: [],
+              deletedFiles: [],
+              files: [{
+                path: "src/public.ts",
+                operation: "update",
+                hunks: 1,
+                addedLines: 2,
+                removedLines: 0,
+              }],
+            },
+          },
+        ],
+        subagents: [{
+          taskId: "child-python-ok",
+          role: "reviewer",
+          status: "done",
+          detail: "Searching",
+          startedAt: 1,
+          updatedAt: 2,
+        }],
+        taskBoard: {
+          receivedAt: 1,
+          tasks: [{
+            id: "task-python-1",
+            title: "Check Python parity",
+            description: "Replay public event rows",
+            status: "in_progress",
+          }],
+        },
+      }),
+      controlRequests: [{
+        requestId: "req-python-tool",
+        kind: "tool_permission",
+        state: "pending",
+        sessionKey: "agent:main:app:general",
+        channelName: "general",
+        source: "turn",
+        prompt: "Approve patch preview?",
+        createdAt: 11,
+        expiresAt: 71,
+      }],
+    });
+
+    expect(rows).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: "trace:turn-python-public-1:1:retry_scheduled",
+        label: "Retrying with verifier guidance",
+        detail: "Retry after bounded failure",
+        status: "running",
+        meta: "provider_transient_failure 2/3",
+      }),
+      expect.objectContaining({
+        id: "tool:py_tool_clock",
+        label: "Clock running",
+        snippet: "Public time checked",
+        status: "done",
+      }),
+      expect.objectContaining({
+        id: "tool:py_tool_patch",
+        label: "Previewing patch",
+        detail: "1 file: src/public.ts",
+        snippet: "Update src/public.ts (+2/-0)",
+      }),
+      expect.objectContaining({
+        id: "subagent:child-python-ok",
+        group: "subagent",
+        status: "done",
+      }),
+      expect.objectContaining({
+        id: "task:task-python-1",
+        label: "Check Python parity",
+      }),
+      expect.objectContaining({
+        id: "control:req-python-tool",
+        label: "Needs approval",
+      }),
+    ]));
+    const renderedRows = JSON.stringify(rows);
+    for (const marker of pythonAdkForbiddenPrivateMarkers) {
+      expect(renderedRows).not.toContain(marker);
+    }
   });
 
   it("renders miscellaneous structured tool output as plain facts instead of raw JSON", () => {
@@ -770,5 +1008,158 @@ describe("deriveWorkConsoleRows", () => {
         status: "info",
       },
     ]);
+  });
+
+  it("shows deterministic runtime status rows from sanitized public state", () => {
+    const rows = deriveWorkConsoleRows({
+      channelState: channelState({
+        streaming: true,
+        determinism: {
+          workflowId: "workflow.public",
+          workflowVersion: "1.0.0",
+          governed: true,
+          effectivePolicySnapshotDigest: `sha256:${"1".repeat(64)}`,
+          ledgerHeadDigest: `sha256:${"2".repeat(64)}`,
+          checkpointId: "checkpoint-1",
+          projectionMode: "structured_claims_only",
+          outputAllowed: false,
+          blockedReasonCodes: ["unsupported_claim"],
+          appliedRecipes: [{
+            recipeId: "invoice.cited-brief",
+            version: "1.0.0",
+            role: "primary",
+            governed: true,
+            sourceDigest: `sha256:${"3".repeat(64)}`,
+          }],
+          recipeSelection: {
+            status: "explicit_applied",
+            selectionSource: "explicit",
+            requestedRecipeRefs: [{ recipeId: "invoice.cited-brief", version: "1.0.0" }],
+            appliedRecipeRefs: [{ recipeId: "invoice.cited-brief", version: "1.0.0" }],
+            omittedRecipeRefs: [],
+            omissionReasons: [],
+            policySnapshotDigest: `sha256:${"3".repeat(64)}`,
+            turnBlocked: false,
+            fallbackUsed: false,
+          },
+          verificationGates: [{
+            gateId: "citation.opened_snapshot",
+            stage: "before_output_projection",
+            status: "passed",
+            validatorTrustClass: "deterministic",
+            reasonCodes: [],
+            evidenceRefs: [`evidence:sha256:${"4".repeat(64)}`],
+            policyDecisionId: "policy-2",
+            checkedAt: 1760000000000,
+          }],
+          guardrails: [{
+            guardrailId: "claim-citation-gate",
+            stage: "before_output_projection",
+            status: "blocked",
+            reasonCodes: ["unsupported_claim"],
+            validatorTrustClass: "deterministic",
+            policyDecisionId: "policy-1",
+            evidenceRefs: [],
+          }],
+          fallbackReasonCode: "projection_blocked",
+          fallbackAuthority: "typescript",
+        },
+      }),
+    });
+
+    expect(rows).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "determinism:policy",
+          group: "trace",
+          label: "Policy snapshot",
+          detail: "workflow.public v1.0.0 · governed · sha256:111111…111111",
+          status: "info",
+        }),
+        expect.objectContaining({
+          id: "determinism:ledger",
+          label: "Evidence ledger",
+          detail: "sha256:222222…222222",
+          status: "info",
+        }),
+        expect.objectContaining({
+          id: "determinism:checkpoint",
+          label: "Checkpoint",
+          detail: "checkpoint-1",
+        }),
+        expect.objectContaining({
+          id: "determinism:projection",
+          label: "Projection",
+          detail: "structured_claims_only blocked: unsupported_claim",
+          status: "waiting",
+        }),
+        expect.objectContaining({
+          id: "determinism:recipe-selection",
+          label: "Recipe request",
+          detail: "explicit applied · explicit",
+          status: "done",
+        }),
+        expect.objectContaining({
+          id: "determinism:recipe:invoice.cited-brief",
+          label: "Recipe: invoice.cited-brief",
+          detail: "1.0.0 · primary · governed",
+          status: "info",
+          meta: "sha256:333333…333333",
+        }),
+        expect.objectContaining({
+          id: "determinism:verification:citation.opened_snapshot",
+          label: "Verification: citation.opened_snapshot",
+          detail: "before_output_projection",
+          status: "done",
+          meta: "deterministic · policy-2",
+        }),
+        expect.objectContaining({
+          id: "determinism:guardrail:claim-citation-gate:policy-1",
+          label: "Guardrail: claim-citation-gate",
+          detail: "unsupported_claim",
+          status: "error",
+          meta: "before_output_projection · deterministic",
+        }),
+        expect.objectContaining({
+          id: "determinism:fallback",
+          label: "Fallback",
+          detail: "projection_blocked",
+          status: "waiting",
+          meta: "typescript",
+        }),
+      ]),
+    );
+    expect(JSON.stringify(rows)).not.toContain("evidence:sha256");
+  });
+
+  it("renders blocked explicit recipe selection as a visible failure row", () => {
+    const rows = deriveWorkConsoleRows({
+      channelState: channelState({
+        streaming: true,
+        determinism: {
+          recipeSelection: {
+            status: "explicit_blocked",
+            selectionSource: "explicit",
+            requestedRecipeRefs: [{ recipeId: "openmagi.research", version: "1" }],
+            appliedRecipeRefs: [],
+            omittedRecipeRefs: [{ recipeId: "openmagi.research", version: "1" }],
+            omissionReasons: ["recipe_policy_blocked"],
+            policySnapshotDigest: `sha256:${"5".repeat(64)}`,
+            turnBlocked: true,
+            fallbackUsed: false,
+            nextAction: "choose_available_recipe",
+          },
+        },
+      }),
+    });
+
+    expect(rows).toContainEqual(expect.objectContaining({
+      id: "determinism:recipe-selection",
+      label: "Recipe request",
+      detail: "explicit blocked · explicit · recipe_policy_blocked · turn blocked · choose_available_recipe",
+      status: "error",
+      meta: "sha256:555555…555555",
+    }));
+    expect(JSON.stringify(rows)).not.toMatch(/general_chat.*success/i);
   });
 });
