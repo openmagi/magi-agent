@@ -149,6 +149,112 @@ EVAL_RUNTIME_ENV_DEFAULTS: Mapping[str, str] = {
 }
 
 
+# Lab (experimental) runtime tier. ``MAGI_RUNTIME_PROFILE=lab`` is a single
+# opt-in dogfood switch that turns ON the full experimental flat-flag set on top
+# of the local-full overlay. ``lab`` is intentionally NOT in
+# ``SAFE_RUNTIME_PROFILES``, so it already inherits every profile-aware
+# default-ON (``profile_bool``) seam and the LOCAL_FULL seed; this mapping only
+# adds the remaining strict-truthy ``_b`` experimental flags whose registry
+# default is OFF. Registry defaults in ``config/flags.py`` are unchanged: a
+# fresh install (or any safe/eval profile) stays conservative. Every entry is
+# applied with ``setdefault`` so an explicit ``MAGI_X=0`` walks the feature back
+# per-flag.
+LAB_EXPERIMENTAL_FLAGS: tuple[str, ...] = (
+    "MAGI_BROWSER_TOOL_ENABLED",
+    "MAGI_CHILD_MEMORY_INHERIT_ENABLED",
+    "MAGI_CODE_ACTION_ENABLED",
+    "MAGI_CODING_REPAIR_LOOP_ENABLED",
+    "MAGI_COMPACTION_ANCHORED_SUMMARY_ENABLED",
+    "MAGI_COMPACTION_MANUAL_ENABLED",
+    "MAGI_COMPACTION_REAL_TOKENS_ENABLED",
+    "MAGI_COMPACTION_SUMMARIZE_ENABLED",
+    "MAGI_COMPACTION_TOOL_PRUNE_ENABLED",
+    "MAGI_COMPUTE_VIA_CODE_ENABLED",
+    "MAGI_CROSS_VERIFY_ENABLED",
+    "MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED",
+    "MAGI_CUSTOMIZE_VERIFICATION_ENABLED",
+    "MAGI_DEEP_WEB_RESEARCH_ENABLED",
+    "MAGI_DEFERRED_TOOLS_ENABLED",
+    "MAGI_DOCUMENT_QA_ENABLED",
+    "MAGI_EDIT_RETRY_REFLECTION_ENABLED",
+    "MAGI_EGRESS_GATE_ENABLED",
+    "MAGI_FACTS_REPLAN_ENABLED",
+    "MAGI_FACT_GROUNDING_VERIFICATION_ENABLED",
+    "MAGI_FILE_DELIVERY_LIVE_ENABLED",
+    "MAGI_FORMAT_ADHERENCE_ENABLED",
+    "MAGI_GATE5B_GOVERNANCE_ENABLED",
+    "MAGI_GA_DELIVERABLE_GATE_ENABLED",
+    "MAGI_GOAL_LOOP_ENABLED",
+    "MAGI_HEADTAIL_TRUNCATION_ENABLED",
+    "MAGI_KERNEL_RECIPE_PACKS_ENABLED",
+    "MAGI_KERNEL_ROLE_PROVIDES_ENABLED",
+    "MAGI_LEARNING_ENABLED",
+    "MAGI_LEARNING_INJECTION_ENABLED",
+    "MAGI_LEARNING_LIVE_ENABLED",
+    "MAGI_LEARNING_REFLECTION_ENABLED",
+    "MAGI_MEMORY_COMPACTION_ENABLED",
+    "MAGI_MEMORY_ENABLED",
+    "MAGI_MEMORY_MODE_ROUTING_ENABLED",
+    "MAGI_MEMORY_PROJECTION_ENABLED",
+    "MAGI_MEMORY_QMD_LIVE_ENABLED",
+    "MAGI_MEMORY_RECALL_ENABLED",
+    "MAGI_MEMORY_WRITE_ENABLED",
+    "MAGI_MULTI_FILE_JOIN_ENABLED",
+    "MAGI_OBSERVABILITY_ENABLED",
+    "MAGI_PERSISTENT_PYTHON_ENABLED",
+    "MAGI_RECIPE_ROUTING_LLM_ENABLED",
+    "MAGI_RESEARCH_FACT_GUIDANCE_ENABLED",
+    "MAGI_SERVE_EVIDENCE_ENABLED",
+    "MAGI_SESSION_TRANSCRIPT_ENABLED",
+    "MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED",
+    "MAGI_STEP_DECOMPOSITION_ENABLED",
+    "MAGI_SUBAGENT_GOVERNED_TURN_ENABLED",
+    "MAGI_TOOL_SYNTHESIS_NUDGE_ENABLED",
+    "MAGI_WORKER_ROUTING_LLM_ENABLED",
+)
+
+LAB_RUNTIME_ENV_DEFAULTS: Mapping[str, str] = {
+    "MAGI_RUNTIME_PROFILE": "lab",
+    **{name: "1" for name in LAB_EXPERIMENTAL_FLAGS},
+}
+
+
+def apply_lab_runtime_defaults(environ: MutableMapping[str, str]) -> None:
+    """Apply the lab (experimental) profile (``MAGI_RUNTIME_PROFILE=lab``).
+
+    ``lab`` is ``local-full`` plus the full experimental flat-flag set: it first
+    layers the local-full overlay (so every profile-aware default-ON seam, the
+    keyless web path, child-runner, etc. are seeded exactly as ``full``) and
+    then ``setdefault``s the remaining strict-truthy experimental ``_b`` flags
+    ON. ``setdefault`` semantics mean explicit operator env always wins, so a
+    per-flag ``MAGI_X=0`` walks any feature back. Registry defaults in
+    ``config/flags.py`` are NOT changed — a fresh install and the
+    safe/eval/minimal/conservative profiles stay conservative.
+    """
+
+    # Stamp the profile identity FIRST so the local-full overlay's own
+    # ``setdefault("MAGI_RUNTIME_PROFILE", "full")`` no-ops and the env reports
+    # ``lab`` rather than ``full``. ``lab`` is not a safe profile, so the
+    # local-full overlay still activates (it gates on
+    # ``local_full_runtime_defaults_enabled``, which only excludes the safe
+    # profiles) and seeds the profile_bool seams + LOCAL_FULL flat flags. An
+    # explicit operator profile still wins via setdefault.
+    environ.setdefault("MAGI_RUNTIME_PROFILE", "lab")
+    # Reuse the local-full overlay verbatim so ``lab`` never drifts from
+    # ``full`` for the shared seams.
+    apply_local_full_runtime_defaults(environ)
+    # Fail-safe defense in depth: only seed the experimental flat flags when the
+    # runtime defaults are enabled (same predicate as the local-full overlay).
+    # In normal dispatch this applier is reached only when MAGI_RUNTIME_PROFILE
+    # is ``lab`` (non-safe), but if an operator has explicitly pinned a safe
+    # profile or MAGI_AGENT_LOCAL_FULL_RUNTIME_DEFAULTS=0 we must NOT widen the
+    # experimental surface.
+    if not local_full_runtime_defaults_enabled(environ):
+        return
+    for key, value in LAB_RUNTIME_ENV_DEFAULTS.items():
+        environ.setdefault(key, value)
+
+
 def apply_local_eval_runtime_defaults(environ: MutableMapping[str, str]) -> None:
     """Apply the one-shot eval profile (MAGI_RUNTIME_PROFILE=eval). setdefault
     semantics: explicit operator env always wins."""

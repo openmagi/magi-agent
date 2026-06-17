@@ -258,6 +258,10 @@ def agent(
         from magi_agent.runtime.local_defaults import apply_local_eval_runtime_defaults  # noqa: PLC0415
 
         apply_local_eval_runtime_defaults(os.environ)
+    elif runtime_profile == "lab":
+        from magi_agent.runtime.local_defaults import apply_lab_runtime_defaults  # noqa: PLC0415
+
+        apply_lab_runtime_defaults(os.environ)
     else:
         apply_local_full_runtime_defaults(os.environ)
     runner_policy_routing_enabled = local_runner_policy_routing_enabled_from_env()

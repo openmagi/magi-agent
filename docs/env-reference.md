@@ -266,7 +266,7 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 - `MAGI_RESEARCH_FACT_GUIDANCE_ENABLED` (default off) — Enable research_fact cross-check guidance: consolidated brief header/footer plus the <web_research> system-prompt block (requires BRAVE_API_KEY + FIRECRAWL_API_KEY).
 - `MAGI_RESEARCH_GOVERNANCE_MODE` (default `off`) — Research governance mode. `off` is inert; `audit` records source/citation mismatches without blocking.
 - `MAGI_RIPGREP_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Use ripgrep for fast in-repo search when available (default-ON full profile).
-- `MAGI_RUNTIME_PROFILE` (no default) — Runtime profile selector (safe/off/minimal/conservative/eval). Safe profiles disable default-ON resilience seams.
+- `MAGI_RUNTIME_PROFILE` (no default) — Runtime profile selector (safe/off/minimal/conservative/eval/lab). Safe profiles disable default-ON resilience seams; lab opts into the full experimental flat-flag tier (local-full + experimental extras).
 - `MAGI_SELF_INTROSPECTION_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Advertise the InspectSelfEvidence tool (default-ON full profile).
 - `MAGI_SERVE_EVIDENCE_ENABLED` (default off) — Write per-turn tool evidence JSONL from the hosted gate5b4c3 serving runner (default-OFF; default dir = observability home/evidence, overridable via MAGI_EVIDENCE_LEDGER_DIR).
 - `MAGI_SESSION_TRANSCRIPT_ENABLED` (default off) — Write per-session JSONL debug transcripts (turn stages, tool calls, subagent spawns, messages) under the observability home.

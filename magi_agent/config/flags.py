@@ -882,8 +882,9 @@ FLAGS: tuple[FlagSpec, ...] = (
         scope="public",
         stage="stage2",
         summary=(
-            "Runtime profile selector (safe/off/minimal/conservative/eval). "
-            "Safe profiles disable default-ON resilience seams."
+            "Runtime profile selector (safe/off/minimal/conservative/eval/lab). "
+            "Safe profiles disable default-ON resilience seams; lab opts into the "
+            "full experimental flat-flag tier (local-full + experimental extras)."
         ),
         kind="str",
     ),
