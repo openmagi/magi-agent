@@ -889,3 +889,65 @@ def test_build_cli_tool_runtime_parent_tool_names_sorted(
     assert names == sorted(names), (
         "parent_tool_names must be sorted (mirrors wiring.py contract)"
     )
+
+
+# ---------------------------------------------------------------------------
+# T11: parentMemoryMode producer (Task F1) — ToolContext.memory_mode flows
+# into ChildTaskRequest.metadata["parentMemoryMode"] as the .value string.
+# ---------------------------------------------------------------------------
+
+
+def test_spawn_agent_parent_memory_mode_carried_to_child_request_gate_on(
+    monkeypatch,
+) -> None:
+    """Gate ON: ToolContext.memory_mode is forwarded into ChildTaskRequest.metadata
+    as ``parentMemoryMode`` (the enum's .value string, e.g. ``"normal"``).
+
+    Mirrors how ``parentToolNames``/``spawnDepth`` flow (Task 2B.2/T10).
+    Uses object-form monkeypatch on the imported module object to avoid the
+    PEP 562 __getattr__ guard on magi_agent.runtime.
+    """
+    monkeypatch.setenv("MAGI_CHILD_RUNNER_LIVE_ENABLED", "1")
+    monkeypatch.delenv("MAGI_CHILD_RUNNER_LIVE_KILL_SWITCH", raising=False)
+
+    import magi_agent.runtime.child_runner_live as _live_mod
+
+    captured_request: list[object] = []
+
+    class _CapturingMemoryModeRunner:
+        openmagi_live_provider = True
+
+        def __init__(self, *, tools: list[object] | None = None, **kwargs: object) -> None:
+            pass
+
+        async def run_child(self, request: object) -> dict[str, object]:
+            captured_request.append(request)
+            return {
+                "childExecutionId": "child-exec-memory-mode",
+                "status": "completed",
+                "summary": "memory mode captured",
+                "evidenceRefs": (),
+                "artifactRefs": (),
+                "auditEventRefs": (),
+            }
+
+    # Patch the imported module object directly (avoids PEP 562 __getattr__ guard).
+    monkeypatch.setattr(_live_mod, "RealLocalChildRunner", _CapturingMemoryModeRunner)
+
+    from magi_agent.runtime.session_identity import MemoryMode
+    from magi_agent.plugins.native.subagents import spawn_agent
+
+    # ToolContext with memory_mode = NORMAL (the most important case to verify).
+    ctx = _context(spawnDepth=0, memoryMode=MemoryMode.NORMAL)
+    asyncio.run(spawn_agent({"prompt": "memory-mode producer test"}, ctx))
+
+    assert len(captured_request) == 1
+    req = captured_request[0]
+    metadata = getattr(req, "metadata", {})
+    assert "parentMemoryMode" in metadata, (
+        f"expected 'parentMemoryMode' key in metadata; got keys: {list(metadata.keys())}"
+    )
+    # Must be the .value string ("normal"), NOT "MemoryMode.NORMAL"
+    assert metadata["parentMemoryMode"] == "normal", (
+        f"expected 'normal' (the .value), got {metadata['parentMemoryMode']!r}"
+    )

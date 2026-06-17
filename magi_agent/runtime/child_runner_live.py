@@ -401,11 +401,10 @@ class RealLocalChildRunner:
         tools, _evidence_collector = self._resolve_turn_toolset(session_id, request=request)
 
         # --- Resolve memory mode + depth from request metadata ---------------
-        # parent_memory_mode: not yet threaded to this call site; default to
-        # "incognito" (non-load-bearing until MAGI_CHILD_MEMORY_INHERIT_ENABLED
-        # is flipped ON — with it OFF, _child_memory_mode always returns
-        # "incognito" regardless of parent_memory_mode).
-        parent_memory_mode = "incognito"
+        # parent_memory_mode: read from request.metadata["parentMemoryMode"]
+        # (written by the producer in subagents.py, Task F1).  Absent or falsy
+        # ⇒ "incognito" (safe default; byte-identical to today when the producer
+        # did not set it, i.e. gate-OFF spawn paths).
         memory_inherit_enabled = flag_bool(
             "MAGI_CHILD_MEMORY_INHERIT_ENABLED", env=self._env
         )
@@ -414,6 +413,9 @@ class RealLocalChildRunner:
         metadata = getattr(request, "metadata", None) or {}
         raw_depth = metadata.get("spawnDepth") if isinstance(metadata, dict) else None
         parent_depth = int(raw_depth) if isinstance(raw_depth, int) and not isinstance(raw_depth, bool) else 0
+        parent_memory_mode: str = str(
+            metadata.get("parentMemoryMode") or "incognito"
+        ) if isinstance(metadata, dict) else "incognito"
 
         # --- Derive the child TurnContext FIRST (single source of memory_mode) -
         # derive() → _child_memory_mode() is the canonical authority for the
