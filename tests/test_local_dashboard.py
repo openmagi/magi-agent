@@ -203,6 +203,26 @@ def test_bundle_missing_root_still_redirects_to_dashboard(monkeypatch) -> None:
 def test_local_dashboard_chat_route_streams_local_adk_events(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("MAGI_STREAMING_CHAT", "on")
     monkeypatch.setenv("MAGI_CONFIG", str(tmp_path / "missing-config.toml"))
+    # Hermetic: this test asserts the STUB-runner marker ("Local ADK runtime
+    # ready"), which is emitted only when NO model provider resolves. Any
+    # ambient provider key in the env (CI, dev shells) would otherwise make the
+    # runner build a real model and attempt a live call (401/timeout → retries,
+    # no marker). Clear every provider-selecting env var so resolution
+    # deterministically yields the local stub regardless of the host env.
+    for _provider_env in (
+        "MAGI_PROVIDER",
+        "MAGI_MODEL",
+        "MAGI_VISION_PROVIDER",
+        "MAGI_VISION_MODEL",
+        "MAGI_LLM_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "OPENAI_API_KEY",
+        "GEMINI_API_KEY",
+        "GOOGLE_API_KEY",
+        "FIREWORKS_API_KEY",
+        "OPENROUTER_API_KEY",
+    ):
+        monkeypatch.delenv(_provider_env, raising=False)
     client = _client()
 
     response = client.post(
