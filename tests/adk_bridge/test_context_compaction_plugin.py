@@ -1290,3 +1290,229 @@ def test_g1_builder_forwards_summary_kwargs() -> None:
     assert plugin._summarize_enabled is True
     assert plugin._summary_model_override == "anthropic/claude-haiku-4-5"
     assert plugin._summary_timeout == 12.5
+
+
+# ---------------------------------------------------------------------------
+# G5 — anchored/incremental summary + G6 — circuit breaker (default-OFF)
+# ---------------------------------------------------------------------------
+
+from magi_agent.adk_bridge.context_compaction import (  # noqa: E402
+    ANCHOR_SUMMARY_STATE_KEY,
+    SUMMARY_FAILURE_COUNT_STATE_KEY,
+)
+
+
+class _FailingSummaryModel:
+    """Async-generator model that yields empty text (-> summary == '')."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def generate_content_async(self, llm_request, stream=False):  # noqa: ANN001
+        self.calls += 1
+        self.captured_request = llm_request
+        yield _FakeLlmResponse("")
+
+
+def _captured_prompt(fake) -> str:  # noqa: ANN001
+    cap = fake.captured_request
+    return "".join(p.text or "" for c in cap.contents for p in (c.parts or []))
+
+
+def _anchored_plugin(**kw) -> MagiContextCompactionPlugin:  # noqa: ANN003
+    defaults: dict = dict(
+        token_threshold=2_000,
+        tail_events=16,
+        summarize_enabled=True,
+        anchored_summary_enabled=True,
+    )
+    defaults.update(kw)
+    return MagiContextCompactionPlugin(**defaults)
+
+
+def test_g5_off_no_state_touched() -> None:
+    # anchored OFF + summarize OFF: state dict remains EMPTY after a tail-drop.
+    plugin = MagiContextCompactionPlugin(token_threshold=2_000, tail_events=16)
+    ctx = _CbCtx()
+    req = _big_request(40)
+    _run(plugin.before_model_callback(callback_context=ctx, llm_request=req))
+    assert ANCHOR_SUMMARY_STATE_KEY not in ctx.state
+    assert SUMMARY_FAILURE_COUNT_STATE_KEY not in ctx.state
+    assert len(req.contents) == 16
+
+
+def test_g5_anchored_off_summarize_on_plain_prompt(monkeypatch) -> None:  # noqa: ANN001
+    # summarize ON but anchored OFF: the prompt is the plain Phase-3 SUMMARY_PROMPT
+    # (no <previous_summary> wording), even across turns.
+    fake = _patch_summarizer(monkeypatch, model=_FakeSummaryModel("S1"))
+    plugin = _summary_plugin()  # anchored OFF
+    ctx = _CbCtx()
+    _run(
+        plugin.before_model_callback(
+            callback_context=ctx, llm_request=_big_request(40)
+        )
+    )
+    _run(
+        plugin.before_model_callback(
+            callback_context=ctx, llm_request=_big_request(40)
+        )
+    )
+    prompt = _captured_prompt(fake)
+    assert "<previous_summary>" not in prompt
+    assert "anchored summary" not in prompt
+
+
+def test_g5_anchor_persisted_then_fed(monkeypatch) -> None:  # noqa: ANN001
+    fake = _patch_summarizer(monkeypatch, model=_FakeSummaryModel("S1"))
+    plugin = _anchored_plugin()
+    ctx = _CbCtx()
+    # Turn 1: produces summary 'S1', stored marker-stripped, failures reset to 0.
+    _run(
+        plugin.before_model_callback(
+            callback_context=ctx, llm_request=_big_request(40)
+        )
+    )
+    assert ctx.state.get(ANCHOR_SUMMARY_STATE_KEY) == "S1"
+    assert ctx.state.get(SUMMARY_FAILURE_COUNT_STATE_KEY) == 0
+    # Turn 2: prior anchor 'S1' fed into the anchored prompt.
+    _run(
+        plugin.before_model_callback(
+            callback_context=ctx, llm_request=_big_request(40)
+        )
+    )
+    prompt = _captured_prompt(fake)
+    assert "<previous_summary>\nS1" in prompt
+    assert "anchored summary" in prompt
+
+
+def test_g5_prior_summary_not_rerendered(monkeypatch) -> None:  # noqa: ANN001
+    # A dropped prefix that itself contains an injected '[Previous conversation
+    # summary]\n\nOLD' Content: with anchored ON, OLD is used as the anchor and
+    # NOT re-rendered as raw transcript (excluded from <new_history>).
+    fake = _patch_summarizer(monkeypatch, model=_FakeSummaryModel("NEW"))
+    plugin = _anchored_plugin(tail_events=4)
+    req = LlmRequest()
+    contents = [
+        types.Content(
+            role="user",
+            parts=[types.Part(text="[Previous conversation summary]\n\nOLD")],
+        )
+    ]
+    contents += [_content(i + 1, "x" * 1600) for i in range(10)]
+    req.contents = contents
+    _run(plugin.before_model_callback(callback_context=None, llm_request=req))
+    prompt = _captured_prompt(fake)
+    # The OLD anchor body is fed as the previous-summary anchor...
+    assert "<previous_summary>\nOLD" in prompt
+    # ...but NOT re-rendered into the raw <new_history> transcript.
+    history = prompt.split("<new_history>", 1)[1]
+    assert "OLD" not in history
+    assert "[Previous conversation summary]" not in history
+
+
+def test_g6_breaker_trips_after_max(monkeypatch) -> None:  # noqa: ANN001
+    fake = _patch_summarizer(monkeypatch, model=_FailingSummaryModel())
+    plugin = _anchored_plugin(summary_max_failures=2)
+    ctx = _CbCtx()
+    # turn1 -> failures=1 (model called), turn2 -> failures=2 (model called).
+    _run(plugin.before_model_callback(callback_context=ctx, llm_request=_big_request(40)))
+    assert ctx.state.get(SUMMARY_FAILURE_COUNT_STATE_KEY) == 1
+    _run(plugin.before_model_callback(callback_context=ctx, llm_request=_big_request(40)))
+    assert ctx.state.get(SUMMARY_FAILURE_COUNT_STATE_KEY) == 2
+    assert fake.calls == 2
+    # turn3 -> short-circuits: model NOT called, pure tail-drop.
+    req3 = _big_request(40)
+    original_split = req3.contents[24].parts[0].text
+    _run(plugin.before_model_callback(callback_context=ctx, llm_request=req3))
+    assert fake.calls == 2
+    assert len(req3.contents) == 16
+    assert req3.contents[0].parts[0].text == original_split
+
+
+def test_g6_breaker_resets_on_success(monkeypatch) -> None:  # noqa: ANN001
+    # Custom model: fail twice, then succeed, then fail again.
+    class _Seq:
+        def __init__(self) -> None:
+            self.calls = 0
+            self._texts = ["", "", "OK", ""]
+
+        async def generate_content_async(self, llm_request, stream=False):  # noqa: ANN001
+            self.captured_request = llm_request
+            text = self._texts[self.calls]
+            self.calls += 1
+            yield _FakeLlmResponse(text)
+
+    fake = _Seq()
+    _patch_summarizer(monkeypatch, model=fake)
+    plugin = _anchored_plugin(summary_max_failures=3)
+    ctx = _CbCtx()
+    _run(plugin.before_model_callback(callback_context=ctx, llm_request=_big_request(40)))
+    assert ctx.state.get(SUMMARY_FAILURE_COUNT_STATE_KEY) == 1
+    _run(plugin.before_model_callback(callback_context=ctx, llm_request=_big_request(40)))
+    assert ctx.state.get(SUMMARY_FAILURE_COUNT_STATE_KEY) == 2
+    # Success resets counter to 0 and stores the anchor.
+    _run(plugin.before_model_callback(callback_context=ctx, llm_request=_big_request(40)))
+    assert ctx.state.get(SUMMARY_FAILURE_COUNT_STATE_KEY) == 0
+    assert ctx.state.get(ANCHOR_SUMMARY_STATE_KEY) == "OK"
+    # Later failure starts counting from 1 again.
+    _run(plugin.before_model_callback(callback_context=ctx, llm_request=_big_request(40)))
+    assert ctx.state.get(SUMMARY_FAILURE_COUNT_STATE_KEY) == 1
+
+
+def test_g6_breaker_disabled_when_max_zero(monkeypatch) -> None:  # noqa: ANN001
+    fake = _patch_summarizer(monkeypatch, model=_FailingSummaryModel())
+    plugin = _anchored_plugin(summary_max_failures=0)
+    ctx = _CbCtx()
+    # Many consecutive failures never short-circuit (model called every turn).
+    for _ in range(5):
+        _run(
+            plugin.before_model_callback(
+                callback_context=ctx, llm_request=_big_request(40)
+            )
+        )
+    assert fake.calls == 5
+
+
+def test_g5_fail_open_no_provider(monkeypatch) -> None:  # noqa: ANN001
+    # anchored ON but no provider -> pure tail-drop, never raises; state breaker
+    # increments (a failed attempt).
+    _patch_summarizer(monkeypatch, provider=None)
+    plugin = _anchored_plugin()
+    ctx = _CbCtx()
+    req = _big_request(40)
+    original_split = req.contents[24].parts[0].text
+    out = _run(
+        plugin.before_model_callback(callback_context=ctx, llm_request=req)
+    )
+    assert out is None
+    assert len(req.contents) == 16
+    assert req.contents[0].parts[0].text == original_split
+
+
+def test_g5_builder_forwards_anchor_kwargs() -> None:
+    plugin = build_context_compaction_plugin(
+        enabled=True,
+        token_threshold=24_000,
+        tail_events=16,
+        summarize_enabled=True,
+        anchored_summary_enabled=True,
+        summary_max_failures=5,
+    )
+    assert isinstance(plugin, MagiContextCompactionPlugin)
+    assert plugin._anchored_enabled is True
+    assert plugin._summary_breaker_max == 5
+
+
+def test_g5_builder_default_off() -> None:
+    plugin = build_context_compaction_plugin(
+        enabled=True, token_threshold=24_000, tail_events=16
+    )
+    assert plugin._anchored_enabled is False
+    assert plugin._summary_breaker_max == 3
+
+
+def test_g6_ctor_rejects_negative_max_failures() -> None:
+    with pytest.raises(ValueError):
+        MagiContextCompactionPlugin(
+            token_threshold=1, tail_events=1, summary_max_failures=-1
+        )

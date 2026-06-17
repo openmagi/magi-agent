@@ -225,3 +225,49 @@ def test_summarize_model_and_timeout_parsed() -> None:
 def test_rejects_invalid_summary_timeout(value: str) -> None:
     with pytest.raises(RuntimeEnvError):
         parse_context_compaction_env({"MAGI_COMPACTION_SUMMARY_TIMEOUT": value})
+
+
+# ---------------------------------------------------------------------------
+# G5/G6 — anchored summary + circuit breaker (strict default-OFF / default-3)
+# ---------------------------------------------------------------------------
+
+
+def test_anchored_and_max_failures_defaults() -> None:
+    cfg = parse_context_compaction_env({})
+    assert cfg.anchored_summary_enabled is False
+    assert cfg.summary_max_failures == 3
+
+
+@pytest.mark.parametrize("value", ["1", "true", "yes", "on", "TRUE", "On"])
+def test_anchored_enabled_strict_truthy(value: str) -> None:
+    # STRICT truthy parse (NOT profile-aware), matching summarize.
+    cfg = parse_context_compaction_env(
+        {"MAGI_COMPACTION_ANCHORED_SUMMARY_ENABLED": value}
+    )
+    assert cfg.anchored_summary_enabled is True
+
+
+def test_anchored_not_profile_aware() -> None:
+    cfg = parse_context_compaction_env({"MAGI_RUNTIME_PROFILE": "full"})
+    assert cfg.anchored_summary_enabled is False
+
+
+def test_summary_max_failures_parsed() -> None:
+    cfg = parse_context_compaction_env(
+        {"MAGI_COMPACTION_SUMMARY_MAX_FAILURES": "5"}
+    )
+    assert cfg.summary_max_failures == 5
+
+
+def test_summary_max_failures_zero_disables_breaker() -> None:
+    cfg = parse_context_compaction_env(
+        {"MAGI_COMPACTION_SUMMARY_MAX_FAILURES": "0"}
+    )
+    assert cfg.summary_max_failures == 0
+
+
+def test_rejects_negative_summary_max_failures() -> None:
+    with pytest.raises(RuntimeEnvError):
+        parse_context_compaction_env(
+            {"MAGI_COMPACTION_SUMMARY_MAX_FAILURES": "-1"}
+        )
