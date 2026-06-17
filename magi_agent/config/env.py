@@ -433,6 +433,15 @@ COMPACTION_OUTPUT_RESERVE_ENV = "MAGI_COMPACTION_OUTPUT_RESERVE"
 _COMPACTION_REAL_TOKENS_PCT_DEFAULT = 0.75
 _COMPACTION_OUTPUT_RESERVE_DEFAULT = 8_000
 
+# G4: deterministic tool-output prune pre-tier. Strict default-OFF master switch
+# plus two int knobs. When OFF the parser returns the same triple as before with
+# the additive prune fields at their defaults, so compaction is byte-identical.
+COMPACTION_TOOL_PRUNE_ENABLED_ENV = "MAGI_COMPACTION_TOOL_PRUNE_ENABLED"
+COMPACTION_PRUNE_PROTECT_ENV = "MAGI_COMPACTION_PRUNE_PROTECT"
+COMPACTION_PRUNE_MINIMUM_ENV = "MAGI_COMPACTION_PRUNE_MINIMUM"
+_COMPACTION_PRUNE_PROTECT_DEFAULT = 40_000
+_COMPACTION_PRUNE_MINIMUM_DEFAULT = 20_000
+
 
 @dataclass(frozen=True)
 class ContextCompactionEnv:
@@ -442,6 +451,9 @@ class ContextCompactionEnv:
     real_tokens_enabled: bool = False
     real_tokens_pct: float = _COMPACTION_REAL_TOKENS_PCT_DEFAULT
     output_reserve: int = _COMPACTION_OUTPUT_RESERVE_DEFAULT
+    tool_prune_enabled: bool = False
+    prune_protect: int = _COMPACTION_PRUNE_PROTECT_DEFAULT
+    prune_minimum: int = _COMPACTION_PRUNE_MINIMUM_DEFAULT
 
 
 def parse_context_compaction_env(env: Mapping[str, str]) -> ContextCompactionEnv:
@@ -479,6 +491,23 @@ def parse_context_compaction_env(env: Mapping[str, str]) -> ContextCompactionEnv
     )
     if output_reserve < 0:
         raise RuntimeEnvError(f"{COMPACTION_OUTPUT_RESERVE_ENV} must be >= 0")
+    # G4: strict default-OFF tool-output prune pre-tier (NOT profile-aware,
+    # matching the real-tokens master switch convention above).
+    tool_prune_enabled = _is_true(env.get(COMPACTION_TOOL_PRUNE_ENABLED_ENV))
+    prune_protect = _int_env(
+        env,
+        COMPACTION_PRUNE_PROTECT_ENV,
+        _COMPACTION_PRUNE_PROTECT_DEFAULT,
+    )
+    if prune_protect < 1:
+        raise RuntimeEnvError(f"{COMPACTION_PRUNE_PROTECT_ENV} must be >= 1")
+    prune_minimum = _int_env(
+        env,
+        COMPACTION_PRUNE_MINIMUM_ENV,
+        _COMPACTION_PRUNE_MINIMUM_DEFAULT,
+    )
+    if prune_minimum < 1:
+        raise RuntimeEnvError(f"{COMPACTION_PRUNE_MINIMUM_ENV} must be >= 1")
     return ContextCompactionEnv(
         enabled=enabled,
         token_threshold=token_threshold,
@@ -486,6 +515,9 @@ def parse_context_compaction_env(env: Mapping[str, str]) -> ContextCompactionEnv
         real_tokens_enabled=real_tokens_enabled,
         real_tokens_pct=real_tokens_pct,
         output_reserve=output_reserve,
+        tool_prune_enabled=tool_prune_enabled,
+        prune_protect=prune_protect,
+        prune_minimum=prune_minimum,
     )
 
 

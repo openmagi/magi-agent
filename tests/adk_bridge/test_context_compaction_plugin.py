@@ -647,3 +647,317 @@ def test_real_tokens_default_constructor_is_off() -> None:
     # legacy two-arg construction stays byte-identical.
     plugin = MagiContextCompactionPlugin(token_threshold=24_000, tail_events=16)
     assert plugin._real_tokens_enabled is False
+
+
+# ---------------------------------------------------------------------------
+# G4 — deterministic tool-output prune pre-tier, default-OFF
+# ---------------------------------------------------------------------------
+
+from magi_agent.adk_bridge.context_compaction import (  # noqa: E402
+    _PRUNED_TOOL_OUTPUT_PLACEHOLDER,
+)
+
+
+def _fn_response_content(name: str, *, chars: int, role: str = "user") -> types.Content:
+    """One Content carrying a single function_response with a large payload."""
+    return types.Content(
+        role=role,
+        parts=[
+            types.Part(
+                function_response=types.FunctionResponse(
+                    name=name, response={"data": "y" * chars}
+                )
+            )
+        ],
+    )
+
+
+def _prune_plugin(**kw) -> MagiContextCompactionPlugin:  # noqa: ANN003
+    defaults: dict = dict(
+        token_threshold=1_000_000,  # estimate path never trips by default
+        tail_events=2,
+        tool_prune_enabled=True,
+        prune_protect=40_000,
+        prune_minimum=20_000,
+    )
+    defaults.update(kw)
+    return MagiContextCompactionPlugin(**defaults)
+
+
+def _response_payload(content: types.Content) -> object:
+    return content.parts[0].function_response.response
+
+
+def _is_pruned(content: types.Content) -> bool:
+    return _response_payload(content) == _PRUNED_TOOL_OUTPUT_PLACEHOLDER
+
+
+def test_g4_off_byte_identical_no_prune() -> None:
+    # Flag OFF: a request with large OLD function_response payloads is reduced
+    # EXACTLY as Phase-1 (estimate path), with NO payload mutation. Compared to a
+    # flag-OFF baseline run on identical inputs.
+    def _build() -> LlmRequest:
+        req = LlmRequest()
+        contents = [_fn_response_content("Read", chars=8_000) for _ in range(20)]
+        req.contents = contents
+        return req
+
+    # Baseline: prune flag OFF, estimate path trips (token_threshold low).
+    baseline = MagiContextCompactionPlugin(token_threshold=2_000, tail_events=4)
+    req_base = _build()
+    _run(baseline.before_model_callback(callback_context=None, llm_request=req_base))
+
+    candidate = MagiContextCompactionPlugin(
+        token_threshold=2_000,
+        tail_events=4,
+        tool_prune_enabled=False,
+    )
+    req_cand = _build()
+    _run(candidate.before_model_callback(callback_context=None, llm_request=req_cand))
+
+    assert len(req_cand.contents) == len(req_base.contents)
+    for a, b in zip(req_cand.contents, req_base.contents):
+        assert _response_payload(a) == _response_payload(b)
+    # No payload was ever cleared (OFF path mutates nothing).
+    assert not any(_is_pruned(c) for c in req_cand.contents)
+
+
+def test_g4_protected_tool_not_pruned() -> None:
+    from magi_agent.harness.general_automation.constants import (
+        LOAD_GA_RECIPE_TOOL_NAME,
+    )
+
+    plugin = _prune_plugin(prune_protect=1, prune_minimum=1)
+    req = LlmRequest()
+    contents = [_fn_response_content("Read", chars=40_000) for _ in range(3)]
+    # A protected tool result in the OLD (prune-eligible) region.
+    contents.insert(0, _fn_response_content(LOAD_GA_RECIPE_TOOL_NAME, chars=40_000))
+    # Tail (last 2) — protected by count layer; add filler so old region exists.
+    contents.append(_content(98, "x" * 10))
+    contents.append(_content(99, "x" * 10))
+    req.contents = contents
+
+    _run(plugin.before_model_callback(callback_context=None, llm_request=req))
+
+    # The protected tool's payload is intact even though other olds were cleared.
+    assert _response_payload(req.contents[0]) == {"data": "y" * 40_000}
+
+
+def test_g4_recent_tail_not_pruned_count_layer() -> None:
+    # Last tail_events Contents' function_responses are never cleared even with a
+    # tiny prune_protect (count-layer protection).
+    plugin = _prune_plugin(tail_events=3, prune_protect=1, prune_minimum=1)
+    req = LlmRequest()
+    contents = [_fn_response_content("Read", chars=40_000) for _ in range(6)]
+    req.contents = contents
+
+    _run(plugin.before_model_callback(callback_context=None, llm_request=req))
+
+    # Last 3 (count-protected) keep full payloads.
+    for c in req.contents[-3:]:
+        assert not _is_pruned(c)
+
+
+def test_g4_recent_tail_not_pruned_token_layer() -> None:
+    # prune_protect large enough that the most-recent outputs (beyond the count
+    # tail) are token-protected and keep payloads, while older ones are cleared.
+    plugin = _prune_plugin(tail_events=1, prune_protect=40_000, prune_minimum=1)
+    req = LlmRequest()
+    # 8 results each ~big; the most-recent ~40k tokens of output are protected.
+    contents = [_fn_response_content("Read", chars=40_000) for _ in range(8)]
+    req.contents = contents
+
+    _run(plugin.before_model_callback(callback_context=None, llm_request=req))
+
+    # The newest results stay; the oldest get cleared.
+    assert not _is_pruned(req.contents[-1])
+    assert _is_pruned(req.contents[0])
+
+
+def test_g4_freed_below_minimum_is_noop() -> None:
+    # Old outputs sum to < PRUNE_MINIMUM freed tokens -> contents returned
+    # unchanged (same object identity), and downstream Phase-1 still runs.
+    plugin = _prune_plugin(prune_minimum=1_000_000, prune_protect=1, tail_events=2)
+    req = LlmRequest()
+    contents = [_fn_response_content("Read", chars=8_000) for _ in range(10)]
+    original = list(contents)
+    req.contents = contents
+
+    _run(plugin.before_model_callback(callback_context=None, llm_request=req))
+
+    # Nothing cleared (freed < minimum).
+    assert req.contents == original
+    assert not any(_is_pruned(c) for c in req.contents)
+
+
+def test_g4_prune_avoids_tail_drop() -> None:
+    # A request that WOULD trip the estimate path before pruning falls under the
+    # threshold after the prune frees >= minimum, so _apply_tail_trim is NOT
+    # invoked: contents length is unchanged, only old payloads cleared.
+    # Build: many large OLD tool outputs. token_threshold sized so that AFTER
+    # clearing the old payloads the total estimate is under threshold.
+    plugin = _prune_plugin(
+        token_threshold=80_000,  # over before prune, under after
+        tail_events=2,
+        prune_protect=8_000,
+        prune_minimum=20_000,
+    )
+    req = LlmRequest()
+    # 10 old big results (~10k tokens each) + 2 tiny tail contents.
+    contents = [_fn_response_content("Read", chars=40_000) for _ in range(10)]
+    contents.append(_content(98, "x" * 10))
+    contents.append(_content(99, "x" * 10))
+    req.contents = contents
+    n_before = len(contents)
+
+    _run(plugin.before_model_callback(callback_context=None, llm_request=req))
+
+    # Tail-drop NOT invoked: count unchanged.
+    assert len(req.contents) == n_before
+    # But old payloads were cleared.
+    assert any(_is_pruned(c) for c in req.contents[:-2])
+
+
+def test_g4_prune_commits_but_still_over_budget() -> None:
+    # Prune frees >= minimum yet the request remains over threshold -> Phase-1
+    # tail-drop still runs on the pruned contents (composition correctness).
+    # Large protected-tail TEXT contents keep the estimate over threshold even
+    # after the old tool outputs are cleared.
+    plugin = _prune_plugin(
+        token_threshold=2_000,
+        tail_events=4,
+        prune_protect=8_000,
+        prune_minimum=20_000,
+    )
+    req = LlmRequest()
+    contents = [_fn_response_content("Read", chars=40_000) for _ in range(20)]
+    # Append big TEXT tail contents (not function_responses, so never pruned);
+    # their estimate alone keeps the request over the 2_000 threshold.
+    for i in range(4):
+        contents.append(_content(i, "x" * 40_000))
+    req.contents = contents
+
+    _run(plugin.before_model_callback(callback_context=None, llm_request=req))
+
+    # Tail-drop ran on the pruned contents: reduced to tail_events.
+    assert len(req.contents) == 4
+    # And the kept tail is the big text contents (never pruned).
+    assert req.contents[-1].parts[0].text == "x" * 40_000
+
+
+def test_g4_placeholder_shape_and_pairing_intact() -> None:
+    plugin = _prune_plugin(
+        tail_events=2, prune_protect=8_000, prune_minimum=20_000
+    )
+    req = LlmRequest()
+    contents = [_fn_response_content("Read", chars=40_000) for _ in range(10)]
+    req.contents = contents
+    n_before = len(contents)
+    n_parts_before = [len(c.parts) for c in contents]
+
+    _run(plugin.before_model_callback(callback_context=None, llm_request=req))
+
+    assert len(req.contents) == n_before
+    for c, n in zip(req.contents, n_parts_before):
+        assert len(c.parts) == n  # part count unchanged (no deletion)
+    # A cleared result keeps function_response, same .name, placeholder payload.
+    cleared = next(c for c in req.contents if _is_pruned(c))
+    fr = cleared.parts[0].function_response
+    assert fr is not None
+    assert fr.name == "Read"
+    assert fr.response == {"pruned": "[old tool output cleared to save context]"}
+
+
+def test_g4_per_result_minimum_skips_trivial_outputs() -> None:
+    # A small old function_response below the per-result minimum is left untouched
+    # (avoid clearing trivial outputs), even when other results meet the budget.
+    plugin = _prune_plugin(
+        tail_events=2, prune_protect=8_000, prune_minimum=20_000
+    )
+    req = LlmRequest()
+    contents = [_fn_response_content("Read", chars=40_000) for _ in range(8)]
+    # A trivial old result at index 0.
+    contents.insert(0, _fn_response_content("Read", chars=10))
+    req.contents = contents
+
+    _run(plugin.before_model_callback(callback_context=None, llm_request=req))
+
+    # The trivial old output is NOT cleared.
+    assert _response_payload(req.contents[0]) == {"data": "y" * 10}
+
+
+def test_g4_fail_open_on_malformed_content() -> None:
+    # A malformed part during prune (model_dump_json raises) leaves all contents
+    # untouched and the turn proceeds (no raise).
+    plugin = _prune_plugin(
+        tail_events=2, prune_protect=1, prune_minimum=1, token_threshold=1_000_000
+    )
+
+    class _BadResponse:
+        name = "Read"
+
+        @property
+        def response(self):  # noqa: ANN001
+            raise RuntimeError("boom")
+
+    class _BadPart:
+        function_response = _BadResponse()
+        text = None
+        function_call = None
+
+    class _BadContent:
+        role = "user"
+        parts = [_BadPart()]
+
+    req = LlmRequest()
+    good = [_fn_response_content("Read", chars=40_000) for _ in range(5)]
+    # Mix a malformed content into the old region.
+    req.contents = [_BadContent()] + good  # type: ignore[list-item]
+
+    out = _run(
+        plugin.before_model_callback(callback_context=None, llm_request=req)
+    )
+    assert out is None  # never raises
+    # Good function_responses untouched (fail-open leaves contents as-is).
+    # Skip the malformed sentinel content (index 0) whose .response raises.
+    for c in req.contents[1:]:
+        fr = getattr(c.parts[0], "function_response", None)
+        assert fr is not None
+        assert fr.response == {"data": "y" * 40_000}
+
+
+def test_g4_builder_additive_default_off() -> None:
+    # build_context_compaction_plugin without the new kwargs keeps prune OFF.
+    plugin = build_context_compaction_plugin(
+        enabled=True, token_threshold=24_000, tail_events=16
+    )
+    assert isinstance(plugin, MagiContextCompactionPlugin)
+    assert plugin._tool_prune_enabled is False
+    assert plugin._prune_protect == 40_000
+    assert plugin._prune_minimum == 20_000
+
+
+def test_g4_builder_forwards_prune_kwargs() -> None:
+    plugin = build_context_compaction_plugin(
+        enabled=True,
+        token_threshold=24_000,
+        tail_events=16,
+        tool_prune_enabled=True,
+        prune_protect=50_000,
+        prune_minimum=10_000,
+    )
+    assert isinstance(plugin, MagiContextCompactionPlugin)
+    assert plugin._tool_prune_enabled is True
+    assert plugin._prune_protect == 50_000
+    assert plugin._prune_minimum == 10_000
+
+
+def test_g4_rejects_invalid_prune_bounds() -> None:
+    with pytest.raises(ValueError):
+        MagiContextCompactionPlugin(
+            token_threshold=1, tail_events=1, tool_prune_enabled=True, prune_protect=0
+        )
+    with pytest.raises(ValueError):
+        MagiContextCompactionPlugin(
+            token_threshold=1, tail_events=1, tool_prune_enabled=True, prune_minimum=0
+        )
