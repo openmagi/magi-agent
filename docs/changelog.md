@@ -15,6 +15,37 @@ Versions follow the tags published on GitHub Releases.
 
 ### Fixed
 
+## 0.1.47
+
+### Added
+- Context compaction (all default-OFF): real-token accounting (#616),
+  deterministic tool-output prune tier (#623), summary injection + protected-tool
+  preserve on tail-drop (#618), anchored summary + summary circuit breaker (#619),
+  manual `/compact` force-compaction (#620).
+- Customize Verification Rules redesign (default-OFF): WHEN-domain modal grouping
+  with honest tier/opt badges (#633), deterministic custom-rule builder (#636),
+  tool-permission custom rules layered over immutable safety (#639).
+- Evidence: hosted gate5b4c3 serving runner produces durable per-turn evidence
+  (#634, flag-gated); evidence-ledger reader + retention prune over the existing
+  sink (#629).
+- Kernel completion: no-fork recipe + role packs are now consumable (#626,
+  default-OFF).
+- Recipe-routing feedback hook: live `select_recipe` choices drive the
+  completion-gate obligations (#637, default-OFF).
+- Harness convergence Phase 0/1: a single `run_governed_turn` primitive shared by
+  the CLI and serving paths, plus golden regression safety-nets (#638, #628).
+
+### Changed
+- Memory: recalled memory is framed as a background reference led by a
+  continuity policy, so a reset no longer bleeds prior context into the answer
+  (#630).
+- README narrative realigned around the capability-vs-governance thesis and
+  trimmed (#622, #624, #625, #635, #640).
+
+### Fixed
+- Usage dashboard runtime cost: price by the provider-qualified litellm model id,
+  with a manual per-MTok override for models absent from litellm's map (#627).
+
 ## 0.1.46
 
 ### Added
