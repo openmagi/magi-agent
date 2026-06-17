@@ -6,6 +6,13 @@ The engine already folds per-turn token usage into a snake_case mapping
 dollar figure using litellm's maintained per-model price map, so callers never
 hand-maintain a pricing table.
 
+Two pricing sources, in precedence order:
+
+1. Explicit per-million-token rates (``price_in_per_mtok`` / ``price_out_per_mtok``)
+   when the caller supplies them — for models litellm does not have in its price
+   map (newer/custom/self-hosted ids), the operator declares the rate.
+2. litellm's maintained price map, keyed by a provider-qualified model id.
+
 Hard rules:
 
 * Never raise — an unknown model, missing usage, or an absent/old litellm all
@@ -48,26 +55,46 @@ def compute_cost_usd(
     usage: Mapping[str, object] | None,
     *,
     cost_per_token: CostPerToken | None = None,
+    price_in_per_mtok: float | None = None,
+    price_out_per_mtok: float | None = None,
 ) -> float:
     """Return the USD cost for ``usage`` under ``model``, or ``0.0``.
 
     Args:
-        model: The model identifier (bare like ``"claude-sonnet-4-5"`` or
-            provider-prefixed like ``"anthropic/claude-..."``; litellm accepts
-            both). ``None``/empty resolves to ``0.0``.
+        model: The model identifier. For the litellm path this should be a
+            provider-qualified id (e.g. ``"anthropic/claude-sonnet-4-6"`` or
+            ``"fireworks_ai/accounts/..."``) so litellm resolves the price;
+            bare ids work only for providers litellm infers. ``None``/empty
+            disables the litellm path (the override path still applies).
         usage: A token-usage mapping using the engine's snake_case keys
             (``input_tokens``, ``output_tokens``). ``None``/empty or all-zero
             token counts resolve to ``0.0``.
         cost_per_token: Optional pricing function (injected for tests). Defaults
             to litellm's ``cost_per_token``; when litellm is unavailable the
-            result is ``0.0``.
+            litellm path resolves to ``0.0``.
+        price_in_per_mtok / price_out_per_mtok: Optional explicit USD rates per
+            one million input/output tokens. When EITHER is set the override
+            path is used (litellm is bypassed) — for models litellm cannot
+            price. An unset side counts as ``0.0``.
     """
-    if not model or not usage:
+    if not usage:
         return 0.0
 
     tokens_in = _non_negative_int(usage.get("input_tokens"))
     tokens_out = _non_negative_int(usage.get("output_tokens"))
     if tokens_in <= 0 and tokens_out <= 0:
+        return 0.0
+
+    # 1) Explicit operator-declared rates win (for litellm-unmapped models).
+    if price_in_per_mtok is not None or price_out_per_mtok is not None:
+        total = (
+            tokens_in / 1_000_000 * (price_in_per_mtok or 0.0)
+            + tokens_out / 1_000_000 * (price_out_per_mtok or 0.0)
+        )
+        return total if total > 0 else 0.0
+
+    # 2) litellm's maintained price map.
+    if not model:
         return 0.0
 
     pricer = cost_per_token if cost_per_token is not None else _litellm_cost_per_token()
