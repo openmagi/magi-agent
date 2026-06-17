@@ -50,13 +50,21 @@ review, and general automation work does not have that structure by default.
 
 Magi adds that structure at runtime.
 
-## The Solution: Composable Determinism
+## Why Programmable Determinism
 
-Magi does not make the model deterministic. The model can still be creative,
-incomplete, or wrong. Magi makes the state transitions around the model
-deterministic.
+A capable model in a loop can do impressive work — and still hand you something
+plausible but hard to trust. Coding agents worked early because the coding loop
+has *built-in checkpoints*: read, edit, diff, typecheck, test, commit. Research,
+finance, operations, legal, and document work have no such structure by default.
+Magi adds that structure at runtime — and lets you program it.
 
-A workflow can define:
+**We do not make the model deterministic.** The model stays creative, and can be
+incomplete or wrong. We make the *control around it* deterministic: which of the
+model's proposals become state, evidence, side effects, or user-visible output.
+The component that decides is plain code reading an append-only evidence record —
+zero model calls in the gate. The model proposes; the control plane disposes.
+
+Concretely, a workflow defines:
 
 - what context is visible to the model;
 - which tools are allowed and which require approval;
@@ -68,10 +76,25 @@ A workflow can define:
 - what becomes user-visible output;
 - what is recorded in the audit ledger.
 
-The important part is that this behavior is composable. A user or project team
-can attach a source-verification harness, an approval harness, a coding
-verification harness, a spreadsheet reconciliation harness, or a meta-agent
-inspection harness without rewriting the agent core for every workflow.
+**Why this must be programmable, not fixed.** The *right* control is not
+universal. It varies with what a domain lets you verify (coding has tests,
+research has sources, finance has reconciliations) and with how much an operator
+wants to enforce (loose vs strict, a source allowlist, a mandatory approval).
+Neither lives in the model's weights — a single model cannot know your policy,
+risk appetite, or jurisdiction. You supply that as configuration: same engine,
+different rails per task. So the behavior is composable — attach a
+source-verification harness, an approval harness, a coding-verification harness,
+or a reconciliation harness without rewriting the agent core for each workflow.
+
+**This matters more as models improve, not less.** Capability scaffolding —
+prompts, planning crutches — gets absorbed by better models, and should. But
+verification against ground truth, authority over side effects, and an audit
+trail are *trust* problems, orthogonal to intelligence. A more capable, more
+autonomous agent raises the cost of a confident mistake, so external,
+deterministic control becomes more necessary, not less. A model checking its own
+work is marking its own homework. Magi is not trying to make the model smart — it
+is the control, trust, and verification plane between a powerful model and the
+systems and people that depend on it.
 
 ## Install
 
@@ -287,6 +310,61 @@ User-visible projection   <-------- Output projector + audit checkpoint
 | Output projector | Renders only public-safe, policy-compliant output |
 | Audit/checkpoint | Preserves digest-safe evidence for review and replay |
 
+### One task, end to end
+
+A concrete trace of the same flow. Read it as: **left = the model proposes
+(stochastic); right = the control plane disposes (deterministic).** Every arrow
+crossing the line is a controlled handoff.
+
+```text
+USER INPUT:  "Research 2024 EU AI Act penalties, deliver a sourced brief.docx"
+
+  MODEL-VISIBLE LOOP                  | RUNTIME-ONLY CONTROL PLANE
+ ------------------------------------ + -----------------------------------------
+                                      | (1) ROUTE + COMPILE  (per task)
+                                      |     task profile -> recipe selection
+                                      |     -> a frozen plan: tool / evidence /
+                                      |        validator / stage refs  [Recipe]
+                                      | (2) RESOLVE HARNESS  (per run context)
+                                      |     agent_role / spawn_depth / run_on ->
+                                      |     scoped hooks + active contracts  [Harness]
+ (3) CONTEXT PACKET  <------------------  built here = the context boundary
+     prompt + skills + project ctx    |  (decides what the model may see)
+     + ONLY granted tool schemas      |  [Skill] [recipe-scoped Tools]
+ (4) MODEL PROPOSES  -------------->   |  text + a tool call (web_search)
+     (stochastic)                     |
+                                      | (5) PRE-TOOL GATE
+                                      |     callbacks/validators check permission;
+                                      |     deny, or require approval  [Boundary: tool-perm]
+                                      | (6) DISPATCH + PRODUCE EVIDENCE
+                                      |     tool runs; at the tool-dispatch boundary
+                                      |     an evidence record is appended
+                                      |     [Evidence ledger]  default-on, redacted
+ (7) ... loop 4-6 ...  <----------->   |  fetch sources, write brief.docx
+                                      |
+ (8) MODEL: "done"  --------------->   | (9) PRE-FINAL VERIFIER BUS = the gate
+                                      |     DETERMINISTIC pure-read over records
+                                      |     -- zero model calls --
+                                      |       schema ............. pass
+                                      |       tool_evidence ...... pass
+                                      |       file_artifact ...... pass (brief.docx)
+                                      |       source_claim_link .. BLOCK
+                                      |            (a claim with no cited source)
+                                      |       security_policy .... pass
+                                      |       llm_critic ......... (optional, gated)
+                                      |     [Stage] [Evidence gate]
+                                      | (10) ACTION: block_final_answer
+                                      |      -> repair / retry  [Harness loop]
+ (11) MODEL re-answers  ----------->   |      (adds the citation) -> re-run 9 -> pass
+                                      | (12) PROJECT OUTPUT  (what becomes visible)
+ (13) USER SEES brief.docx  <--------  | (14) AUDIT LEDGER  (receipts, verifier events)
+```
+
+The gate at step 9 is a pure read over recorded evidence with **no model calls**
+— that is what "deterministic control" means in practice. And
+`source_claim_link` only fires because this is a *research* plan; on a coding
+task that stage is never selected. *Same engine, different plan.*
+
 ## First-Party Harnesses
 
 These are pre-built **Recipe** bundles that wire **Harness**-layer primitives for
@@ -337,6 +415,19 @@ disable = ["openmagi.source-opened"]
 - [Write your first pack](docs/pack-authoring.md)
 - [Pack manifest reference](docs/pack-manifest-reference.md)
 - [Typed-context API reference](docs/pack-context-reference.md)
+
+For most needs you never write code: **change a config value** (`config.toml` /
+a flag), **author a doc** (a `SKILL.md` or a `pack.toml`), or **swap a file** (a
+pack's `impl.py`) only when a manifest cannot express the behavior.
+
+### What stays first-party — and why that's the point
+
+Packs extend the runtime *because* a small core does not. The **engine loop**,
+the **hard-safety gates** and their priority floor, the **monotonicity rule** (a
+pack may only *add* constraints, never weaken or bypass a verdict), and the set
+of lifecycle **hook points** are fixed and first-party. That fixed core is the
+trusted base — it is exactly what lets the runtime load anyone's pack and still
+keep its guarantees: an external check can make a task stricter, never neuter it.
 
 ## Example: One Task, Up the Stack
 
