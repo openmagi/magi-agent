@@ -43,6 +43,13 @@ _VOLATILE_KEYS = frozenset(
         "observed_at",
         "emittedAt",
         "lastActivityAt",
+        # Wall-clock epoch fields emitted by magi_agent/runtime/events.py
+        "checkedAt",
+        "decidedAt",
+        "elapsedMs",
+        "lastEventAt",
+        "createdAt",
+        "inspectedAt",
     }
 )
 
@@ -81,7 +88,7 @@ def _normalize(value: object) -> object:
             k: "<normalized>" if k in _VOLATILE_KEYS else _normalize(v)
             for k, v in value.items()
         }
-    if isinstance(value, list):
+    if isinstance(value, (list, tuple)):
         return [_normalize(v) for v in value]
     return value
 
