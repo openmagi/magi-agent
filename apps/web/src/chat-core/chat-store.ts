@@ -10,11 +10,17 @@ import type {
   ControlRequestRecord,
   MissionActivity,
   SubagentActivity,
-} from "@/chat-core";
-import { INTERRUPTED_SUFFIX, MAX_QUEUED_MESSAGES } from "@/chat-core";
-import { compareChatMessages } from "@/chat-core";
-import { hasNonTextTurnWork } from "@/chat-core";
-import { researchEvidenceFromChannelState } from "@/chat-core";
+  ToolActivity,
+} from "./types";
+import { INTERRUPTED_SUFFIX, MAX_QUEUED_MESSAGES } from "./queue-constants";
+import { compareChatMessages } from "./message-order";
+import { hasNonTextTurnWork } from "./empty-response";
+import { researchEvidenceFromChannelState } from "./research-evidence";
+import {
+  assistantMessagesExactlyMatch,
+  mergeAssistantMessageCopies,
+  shouldMergeAssistantMessageCopies,
+} from "./assistant-dedupe";
 
 const DEFAULT_CHANNEL_STATE: ChannelState = {
   streaming: false,
@@ -31,6 +37,7 @@ const DEFAULT_CHANNEL_STATE: ChannelState = {
   browserFrame: null,
   documentDraft: null,
   subagents: [],
+  subagentProgress: {},
   taskBoard: null,
   missions: [],
   activeGoalMissionId: null,
@@ -40,6 +47,8 @@ const DEFAULT_CHANNEL_STATE: ChannelState = {
   inspectedSources: [],
   citationGate: null,
   runtimeTraces: [],
+  determinism: undefined,
+  recipeSelection: undefined,
   turnUsage: undefined,
   liveTranscriptItems: [],
   fileProcessing: false,
@@ -59,11 +68,14 @@ const RESET_LIVE_RUN_STATE: Partial<ChannelState> = {
   browserFrame: null,
   documentDraft: null,
   subagents: [],
+  subagentProgress: {},
   taskBoard: null,
   pendingGoalMissionTitle: null,
   inspectedSources: [],
   citationGate: null,
   runtimeTraces: [],
+  determinism: undefined,
+  recipeSelection: undefined,
   turnUsage: undefined,
   liveTranscriptItems: [],
   fileProcessing: false,
@@ -71,12 +83,21 @@ const RESET_LIVE_RUN_STATE: Partial<ChannelState> = {
 };
 
 const MAX_LOCAL_MESSAGES = 200;
+const SERVER_READABLE_USER_TURN_MARKER_RE =
+  /^\s*<!-- openmagi:server-readable-user-turn:v1:[A-Za-z0-9_-]+ -->\s*$/;
 const TRANSIENT_CONNECTION_ERROR_RE = /^Connecting to bot\.\.\. \(\d+\/\d+\)$/;
 const SILENT_VERIFIER_META_ERROR_RE =
   /source-verified final answer|inspected-source context|claim[-_\s]?citation|research proof|runtime verifier stopped|promised work without completing|GOAL_PROGRESS_EXECUTE_NEXT|INTERACTIVE_TOOL_REQUIRED/i;
-const MESSAGES_CACHE_KEY = (botId: string) => `magi:messages:${botId}`;
-const RESET_COUNTERS_KEY = (botId: string) => `magi:resetCounters:${botId}`;
-const LAST_READ_KEY = (botId: string) => `magi:lastRead:${botId}`;
+const MESSAGES_CACHE_KEY = (botId: string) => `clawy:messages:${botId}`;
+const RESET_COUNTERS_KEY = (botId: string) => `clawy:resetCounters:${botId}`;
+const LAST_READ_KEY = (botId: string) => `clawy:lastRead:${botId}`;
+
+interface ResetCounterEntry {
+  count: number;
+  updatedAt?: number;
+}
+
+type ResetCounterStorageValue = number | ResetCounterEntry;
 
 interface BotScope {
   botId?: string | null;
@@ -91,8 +112,15 @@ function mergeChannelState(
   partial: Partial<ChannelState>,
 ): ChannelState {
   const startsFreshRun = partial.streaming === true && current.streaming === false;
+  const startsFreshAttempt =
+    current.streaming === true &&
+    partial.turnPhase === "pending" &&
+    partial.determinism === undefined &&
+    partial.hasTextContent === false &&
+    partial.streamingText === "" &&
+    partial.thinkingText === "";
   const endsRun = partial.streaming === false;
-  const reset = startsFreshRun
+  const reset = startsFreshRun || startsFreshAttempt
     ? RESET_LIVE_RUN_STATE
     : endsRun
       ? terminalLiveRunReset(current, partial)
@@ -107,10 +135,117 @@ function mergeChannelState(
   return next;
 }
 
+function previewRecord(value?: string): Record<string, unknown> | null {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function backgroundTaskIdFromTool(activity: ToolActivity): string | null {
+  const output = previewRecord(activity.outputPreview);
+  if (output?.background !== true) return null;
+  const taskId = output.backgroundTaskId;
+  return typeof taskId === "string" && taskId.trim() ? taskId.trim() : null;
+}
+
+function backgroundSubagentFromTool(activity: ToolActivity): SubagentActivity | null {
+  const taskId = backgroundTaskIdFromTool(activity);
+  if (!taskId) return null;
+  const now = Date.now();
+  const role = activity.label.toLowerCase().includes("bash") ? "bash" : "background";
+  return {
+    taskId,
+    role,
+    status: "running",
+    detail: role === "bash" ? "Background command running" : "Background task running",
+    startedAt: activity.startedAt,
+    updatedAt: now,
+  };
+}
+
 function activeBackgroundSubagents(channelState: ChannelState): SubagentActivity[] {
-  return (channelState.subagents ?? []).filter(
+  const active = (channelState.subagents ?? []).filter(
     (subagent) => subagent.status === "running" || subagent.status === "waiting",
   );
+  const seen = new Set(active.map((subagent) => subagent.taskId));
+  for (const activity of channelState.activeTools ?? []) {
+    const background = backgroundSubagentFromTool(activity);
+    if (!background || seen.has(background.taskId)) continue;
+    active.push(background);
+    seen.add(background.taskId);
+  }
+  return active;
+}
+
+function isExplicitBackgroundSubagent(subagent: SubagentActivity): boolean {
+  const role = subagent.role.trim().toLowerCase();
+  return role === "bash" || role === "background";
+}
+
+function activeSubagentsAfterLocalCancel(channelState: ChannelState): SubagentActivity[] {
+  const active = (channelState.subagents ?? []).filter(
+    (subagent) =>
+      (subagent.status === "running" || subagent.status === "waiting") &&
+      isExplicitBackgroundSubagent(subagent),
+  );
+  const seen = new Set(active.map((subagent) => subagent.taskId));
+  for (const activity of channelState.activeTools ?? []) {
+    const background = backgroundSubagentFromTool(activity);
+    if (!background || seen.has(background.taskId)) continue;
+    active.push(background);
+    seen.add(background.taskId);
+  }
+  return active;
+}
+
+function shouldMergePushedAssistant(existing: ChatMessage, incoming: ChatMessage): boolean {
+  if (existing.role !== "assistant" || incoming.role !== "assistant") return false;
+  if (existing.serverId || !incoming.serverId) return false;
+  return shouldMergeAssistantMessageCopies(existing, incoming);
+}
+
+function latestUserTimestampBeforeOrAt(messages: ChatMessage[], timestamp: number): number | null {
+  let latest: number | null = null;
+  for (const message of messages) {
+    if (message.role !== "user") continue;
+    const messageTimestamp = message.timestamp ?? 0;
+    if (messageTimestamp > timestamp) continue;
+    if (latest === null || messageTimestamp > latest) latest = messageTimestamp;
+  }
+  return latest;
+}
+
+function assistantMessagesShareLatestUserTurn(
+  messages: ChatMessage[],
+  first: ChatMessage,
+  second: ChatMessage,
+): boolean {
+  const firstTimestamp = first.timestamp ?? 0;
+  const secondTimestamp = second.timestamp ?? 0;
+  const boundary = latestUserTimestampBeforeOrAt(
+    messages,
+    Math.max(firstTimestamp, secondTimestamp),
+  );
+  if (boundary === null) return false;
+  return firstTimestamp >= boundary && secondTimestamp >= boundary;
+}
+
+function shouldMergeAssistantMessageInChannel(
+  messages: ChatMessage[],
+  existing: ChatMessage,
+  incoming: ChatMessage,
+): boolean {
+  if (shouldMergeAssistantMessageCopies(existing, incoming)) return true;
+  if (existing.role !== "assistant" || incoming.role !== "assistant") return false;
+  if (existing.serverId && incoming.serverId) return false;
+  if (!assistantMessagesExactlyMatch(existing, incoming)) return false;
+  return assistantMessagesShareLatestUserTurn(messages, existing, incoming);
 }
 
 function compactErrorDetail(message: string): string {
@@ -196,6 +331,10 @@ function terminalLiveRunReset(
     const detachedSubagents = activeBackgroundSubagents(current);
     if (detachedSubagents.length > 0) {
       reset.subagents = detachedSubagents;
+      const activeTaskIds = new Set(detachedSubagents.map((subagent) => subagent.taskId));
+      reset.subagentProgress = Object.fromEntries(
+        Object.entries(current.subagentProgress ?? {}).filter(([taskId]) => activeTaskIds.has(taskId)),
+      );
     }
   }
   if (
@@ -233,6 +372,7 @@ function isLiveStreamProgress(partial: Partial<ChannelState>): boolean {
     !!partial.browserFrame ||
     !!partial.documentDraft ||
     (partial.subagents?.length ?? 0) > 0 ||
+    Object.keys(partial.subagentProgress ?? {}).length > 0 ||
     (partial.missions?.length ?? 0) > 0 ||
     !!partial.taskBoard?.tasks.length ||
     (partial.inspectedSources?.length ?? 0) > 0 ||
@@ -248,24 +388,98 @@ function isLiveStreamProgress(partial: Partial<ChannelState>): boolean {
 
 /** Get the reset counter for a channel (used by chat-client for session key) */
 export function getResetCounter(botId: string, channel: string): number {
+  return readLocalResetCounters(botId)[channel]?.count ?? 0;
+}
+
+export function getResetBoundaryTimestamp(botId: string, channel: string): number | null {
+  return readLocalResetCounters(botId)[channel]?.updatedAt ?? null;
+}
+
+function normalizedResetCounterEntry(value: unknown): ResetCounterEntry {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return { count: Math.max(0, Math.floor(value)) };
+  }
+  if (value && typeof value === "object") {
+    const record = value as Partial<ResetCounterEntry>;
+    const count = typeof record.count === "number" && Number.isFinite(record.count)
+      ? Math.max(0, Math.floor(record.count))
+      : 0;
+    const updatedAt = typeof record.updatedAt === "number" && Number.isFinite(record.updatedAt) && record.updatedAt > 0
+      ? Math.floor(record.updatedAt)
+      : undefined;
+    return updatedAt === undefined ? { count } : { count, updatedAt };
+  }
+  return { count: 0 };
+}
+
+function readLocalResetCounters(botId: string): Record<string, ResetCounterEntry> {
   try {
     const raw = localStorage.getItem(RESET_COUNTERS_KEY(botId));
     if (raw) {
-      const counters = JSON.parse(raw) as Record<string, number>;
-      return counters[channel] ?? 0;
+      const counters = JSON.parse(raw) as Record<string, ResetCounterStorageValue>;
+      return Object.fromEntries(
+        Object.entries(counters).map(([name, value]) => [
+          name,
+          normalizedResetCounterEntry(value),
+        ]),
+      );
     }
   } catch { /* ignore */ }
-  return 0;
+  return {};
 }
 
-function setLocalResetCounter(botId: string, channel: string, value: number): void {
+function writeLocalResetCounters(
+  botId: string,
+  counters: Record<string, ResetCounterEntry>,
+): void {
   try {
-    const key = RESET_COUNTERS_KEY(botId);
-    const raw = localStorage.getItem(key);
-    const counters = raw ? (JSON.parse(raw) as Record<string, number>) : {};
-    counters[channel] = value;
-    localStorage.setItem(key, JSON.stringify(counters));
+    localStorage.setItem(RESET_COUNTERS_KEY(botId), JSON.stringify(counters));
   } catch { /* ignore */ }
+}
+
+function setLocalResetCounter(
+  botId: string,
+  channel: string,
+  value: number,
+  updatedAt?: number | null,
+): void {
+  const counters = readLocalResetCounters(botId);
+  const existing = counters[channel];
+  const normalizedUpdatedAt =
+    typeof updatedAt === "number" && Number.isFinite(updatedAt) && updatedAt > 0
+      ? Math.floor(updatedAt)
+      : existing?.updatedAt;
+  counters[channel] = normalizedUpdatedAt === undefined
+    ? { count: Math.max(0, Math.floor(value)) }
+    : { count: Math.max(0, Math.floor(value)), updatedAt: normalizedUpdatedAt };
+  writeLocalResetCounters(botId, counters);
+}
+
+function mergeResetCounterFromServer(
+  local: Record<string, ResetCounterEntry>,
+  channel: string,
+  serverCount: number,
+  serverUpdatedAt?: number,
+): boolean {
+  if (!Number.isFinite(serverCount)) return false;
+  const localEntry = local[channel] ?? { count: 0 };
+  const normalizedServerCount = Math.max(0, Math.floor(serverCount));
+  const normalizedServerUpdatedAt =
+    typeof serverUpdatedAt === "number" && Number.isFinite(serverUpdatedAt) && serverUpdatedAt > 0
+      ? Math.floor(serverUpdatedAt)
+      : undefined;
+  const shouldAdopt =
+    normalizedServerCount > localEntry.count ||
+    (
+      normalizedServerCount === localEntry.count &&
+      normalizedServerUpdatedAt !== undefined &&
+      normalizedServerUpdatedAt > (localEntry.updatedAt ?? 0)
+    );
+  if (!shouldAdopt) return false;
+  local[channel] = normalizedServerUpdatedAt === undefined
+    ? { count: normalizedServerCount, updatedAt: localEntry.updatedAt }
+    : { count: normalizedServerCount, updatedAt: normalizedServerUpdatedAt };
+  return true;
 }
 
 /** Sync reset counters from server — merges with local (take max) */
@@ -273,31 +487,26 @@ export async function syncResetCounters(
   botId: string,
   getToken: () => Promise<string | null>,
 ): Promise<void> {
-  if (botId === "local") return;
   try {
     const token = await getToken();
     if (!token) return;
-    const res = await fetch(`/api/chat/reset-counters?botId=${botId}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    const res = await fetch(
+      `/api/chat/reset-counters?botId=${encodeURIComponent(botId)}`,
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
     if (!res.ok) return;
-    const { counters: serverCounters } = (await res.json()) as {
+    const { counters: serverCounters, resetAt } = (await res.json()) as {
       counters: Record<string, number>;
+      resetAt?: Record<string, number>;
     };
     // Merge: take max of local and server for each channel
-    const key = RESET_COUNTERS_KEY(botId);
-    const raw = localStorage.getItem(key);
-    const local = raw ? (JSON.parse(raw) as Record<string, number>) : {};
+    const local = readLocalResetCounters(botId);
     let changed = false;
     for (const [ch, serverVal] of Object.entries(serverCounters)) {
-      const localVal = local[ch] ?? 0;
-      if (serverVal > localVal) {
-        local[ch] = serverVal;
-        changed = true;
-      }
+      changed = mergeResetCounterFromServer(local, ch, serverVal, resetAt?.[ch]) || changed;
     }
     if (changed) {
-      localStorage.setItem(key, JSON.stringify(local));
+      writeLocalResetCounters(botId, local);
     }
   } catch { /* ignore — local counters remain authoritative */ }
 }
@@ -310,7 +519,8 @@ async function incrementResetCounter(
 ): Promise<void> {
   // Optimistic local increment
   const current = getResetCounter(botId, channel);
-  setLocalResetCounter(botId, channel, current + 1);
+  const optimisticResetAt = Date.now();
+  setLocalResetCounter(botId, channel, current + 1, optimisticResetAt);
 
   // Sync to server (fire-and-forget)
   try {
@@ -325,10 +535,14 @@ async function incrementResetCounter(
       body: JSON.stringify({ botId, channelName: channel }),
     });
     if (res.ok) {
-      const { resetCount } = (await res.json()) as { resetCount: number };
+      const { resetCount, resetAt } = (await res.json()) as {
+        resetCount: number;
+        resetAt?: number;
+      };
       // Server is authoritative — update local if server is higher
-      if (resetCount > current + 1) {
-        setLocalResetCounter(botId, channel, resetCount);
+      const local = readLocalResetCounters(botId);
+      if (mergeResetCounterFromServer(local, channel, resetCount, resetAt)) {
+        writeLocalResetCounters(botId, local);
       }
     }
   } catch { /* ignore */ }
@@ -424,7 +638,7 @@ interface ChatState {
   /**
    * Client-side outbound queue — messages the user hit Enter on while a
    * stream was in flight. Drained FIFO by the view-client's `onDone`
-   * handler; never persisted. See `src/chat-core/queue-constants.ts`.
+   * handler; never persisted. See `src/lib/chat-core/queue-constants.ts`.
    */
   queuedMessages: Record<string, QueuedMessage[]>;
   controlRequests: Record<string, ControlRequestRecord[]>;
@@ -441,6 +655,7 @@ interface ChatState {
   setAbortController: (channel: string, controller: AbortController, scope?: BotScope) => void;
   finalizeStream: (channel: string, msgId?: string, scope?: BotScope) => void;
   resetSession: (channel: string, getToken?: () => Promise<string | null>) => void;
+  clearSession: (channel: string, getToken?: () => Promise<string | null>) => void;
   markChannelRead: (channel: string) => void;
   hasUnread: (channel: string) => boolean;
 
@@ -452,6 +667,7 @@ interface ChatState {
   selectAllMessages: (channel: string) => void;
   deselectAllMessages: (channel: string) => void;
   removeMessages: (channel: string, msgIds: Set<string>, scope?: BotScope) => void;
+  removeLocalMessages: (channel: string, msgIds: Set<string>, scope?: BotScope) => void;
   isDeleted: (channel: string, msgId: string) => boolean;
   clearDeletedIds: (channel: string) => void;
 
@@ -540,8 +756,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
         (!!candidate.id && !!message.id && candidate.id === message.id) ||
         (!!candidate.serverId && !!message.serverId && candidate.serverId === message.serverId)
       ));
+      const assistantCopyIndex = idx >= 0
+        ? -1
+        : existing.findIndex((candidate) =>
+            shouldMergeAssistantMessageInChannel(existing, candidate, message),
+          );
       const merged = idx >= 0
         ? existing.map((candidate, i) => (i === idx ? { ...candidate, ...message } : candidate))
+        : assistantCopyIndex >= 0
+          ? existing.map((candidate, i) =>
+              i === assistantCopyIndex ? mergeAssistantMessageCopies(candidate, message) : candidate,
+            )
         : [...existing, message];
       const updated = merged.sort(compareChatMessages).slice(-MAX_LOCAL_MESSAGES);
       const newMessages = { ...state.messages, [channel]: updated };
@@ -622,10 +847,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
       if (!options?.preserveQueue) {
         delete nextQueued[ch];
       }
+      const detachedSubagents = activeSubagentsAfterLocalCancel(state);
+      const missions = durableMissionState(state);
       return {
         channelStates: {
           ...s.channelStates,
-          [ch]: { ...DEFAULT_CHANNEL_STATE, ...durableMissionState(state) },
+          [ch]: detachedSubagents.length > 0
+            ? { ...DEFAULT_CHANNEL_STATE, ...missions, subagents: detachedSubagents }
+            : { ...DEFAULT_CHANNEL_STATE, ...missions },
         },
         queuedMessages: nextQueued,
       };
@@ -718,6 +947,41 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     set({
       messages: newMessages,
+      serverMessages: {
+        ...state.serverMessages,
+        [channel]: [],
+      },
+      channelStates: {
+        ...state.channelStates,
+        [channel]: { ...DEFAULT_CHANNEL_STATE },
+      },
+      controlRequests: {
+        ...state.controlRequests,
+        [channel]: [],
+      },
+    });
+  },
+
+  clearSession: (channel, getToken) => {
+    // Abort any in-flight stream
+    const controller = get().abortControllers[channel];
+    if (controller) controller.abort();
+
+    const state = get();
+
+    // New session key so the next turn starts a fresh conversation
+    if (state.botId) {
+      incrementResetCounter(state.botId, channel, getToken ?? (() => Promise.resolve(null)));
+    }
+
+    // Unlike resetSession (which keeps history behind a divider), this fully
+    // wipes the channel transcript for callers that want a blank slate.
+    const newMessages = { ...state.messages, [channel]: [] };
+    persistMessages(state.botId, newMessages);
+
+    set({
+      messages: newMessages,
+      serverMessages: { ...state.serverMessages, [channel]: [] },
       channelStates: {
         ...state.channelStates,
         [channel]: { ...DEFAULT_CHANNEL_STATE },
@@ -732,7 +996,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   markChannelRead: (channel) => {
     try {
       const botId = get().botId;
-      const key = botId ? LAST_READ_KEY(botId) : "magi:lastRead";
+      const key = botId ? LAST_READ_KEY(botId) : "clawy:lastRead";
       const raw = localStorage.getItem(key);
       const data = raw ? (JSON.parse(raw) as Record<string, number>) : {};
       data[channel] = Date.now();
@@ -745,8 +1009,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
     try {
       const botId = get().botId;
       const raw = botId
-        ? (localStorage.getItem(LAST_READ_KEY(botId)) ?? localStorage.getItem("magi:lastRead"))
-        : localStorage.getItem("magi:lastRead");
+        ? (localStorage.getItem(LAST_READ_KEY(botId)) ?? localStorage.getItem("clawy:lastRead"))
+        : localStorage.getItem("clawy:lastRead");
       if (raw) {
         const data = JSON.parse(raw) as Record<string, number>;
         lastRead = data[channel] ?? 0;
@@ -830,6 +1094,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
         selectionMode: newSelectionMode,
         selectedMessages: newSelectedMessages,
       };
+    }),
+
+  removeLocalMessages: (channel, msgIds, scope) =>
+    set((state) => {
+      if (!matchesBotScope(state.botId, scope)) return {};
+      const localMsgs = (state.messages[channel] ?? []).filter((m) => !msgIds.has(m.id));
+      const newMessages = { ...state.messages, [channel]: localMsgs };
+      persistMessages(state.botId, newMessages);
+      return { messages: newMessages };
     }),
 
   isDeleted: (channel, msgId) => {
@@ -977,6 +1250,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   receivePushMessage: (channel, row, scope) =>
     set((state) => {
       if (!matchesBotScope(state.botId, scope)) return {};
+      if (SERVER_READABLE_USER_TURN_MARKER_RE.test(row.content)) return {};
       const serverId = row.server_id;
       if (!serverId) return {};
       // Dedupe against local + server buckets. Also suppress if the
@@ -993,14 +1267,23 @@ export const useChatStore = create<ChatState>((set, get) => ({
         return {};
       }
       const ts = Date.parse(row.created_at);
+      const timestamp = Number.isFinite(ts) ? ts : Date.now();
       const msg: ChatMessage = {
         id: row.id || serverId,
         role: row.role === "system" ? "system" : "assistant",
         content: row.content,
-        timestamp: Number.isFinite(ts) ? ts : Date.now(),
+        timestamp,
         serverId,
       };
-      const updated = [...existingLocal, msg].slice(-MAX_LOCAL_MESSAGES);
+      const optimisticIndex = existingLocal.findIndex((candidate) =>
+        shouldMergePushedAssistant(candidate, msg),
+      );
+      const updated = (optimisticIndex >= 0
+        ? existingLocal.map((candidate, index) =>
+            index === optimisticIndex ? mergeAssistantMessageCopies(candidate, msg) : candidate,
+          )
+        : [...existingLocal, msg]
+      ).slice(-MAX_LOCAL_MESSAGES);
       const newMessages = { ...state.messages, [channel]: updated };
       persistMessages(state.botId, newMessages);
       return { messages: newMessages };

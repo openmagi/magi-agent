@@ -1,13 +1,20 @@
-import { describe, it, expect, beforeEach } from "vitest";
-import { useChatStore } from "./chat-store";
-import { INTERRUPTED_SUFFIX, MAX_QUEUED_MESSAGES } from "@/chat-core";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import {
+  getResetBoundaryTimestamp,
+  getResetCounter,
+  syncResetCounters,
+  useChatStore,
+} from "./chat-store";
+import { buildVisibleModelContextMessages } from "./model-context";
+import { INTERRUPTED_SUFFIX, MAX_QUEUED_MESSAGES } from "./queue-constants";
 import type {
   ChatMessage,
   ControlRequestRecord,
   MissionActivity,
   QueuedMessage,
   SubagentActivity,
-} from "@/chat-core";
+  ToolActivity,
+} from "./types";
 
 function makeQueued(content: string, replyTo?: QueuedMessage["replyTo"]): QueuedMessage {
   return {
@@ -33,6 +40,20 @@ const completedMission: MissionActivity = {
   kind: "manual",
   status: "completed",
   updatedAt: 122,
+};
+
+const backgroundBashTool: ToolActivity = {
+  id: "tool-bg-bash",
+  label: "Bash",
+  status: "done",
+  startedAt: 100,
+  outputPreview: JSON.stringify({
+    backgroundTaskId: "shell_bg_1",
+    background: true,
+    stdoutFile: "core-agent/logs/shell_bg_1.stdout.log",
+    stderrFile: "core-agent/logs/shell_bg_1.stderr.log",
+  }),
+  durationMs: 42,
 };
 
 describe("chat-store message queue", () => {
@@ -180,6 +201,96 @@ describe("chat-store message queue", () => {
     const last = msgs[msgs.length - 1];
     expect(last.role).toBe("assistant");
     expect(last.content.endsWith(INTERRUPTED_SUFFIX)).toBe(true);
+  });
+
+  it("stores deterministic runtime state and clears it on a fresh run", () => {
+    useChatStore.getState().setChannelState("general", {
+      streaming: true,
+      streamingText: "",
+      thinkingText: "",
+      error: null,
+      determinism: {
+        workflowId: "workflow.public",
+        workflowVersion: "1.0.0",
+        effectivePolicySnapshotDigest: `sha256:${"1".repeat(64)}`,
+      },
+    });
+
+    expect(useChatStore.getState().channelStates.general?.determinism).toMatchObject({
+      workflowId: "workflow.public",
+    });
+
+    useChatStore.getState().setChannelState("general", {
+      streaming: false,
+      streamingText: "",
+      thinkingText: "",
+      error: null,
+    });
+    expect(useChatStore.getState().channelStates.general?.determinism).toBeUndefined();
+
+    useChatStore.getState().setChannelState("general", {
+      streaming: true,
+      streamingText: "",
+      thinkingText: "",
+      error: null,
+    });
+    expect(useChatStore.getState().channelStates.general?.determinism).toBeUndefined();
+  });
+
+  it("clears deterministic runtime state when a streaming retry starts over", () => {
+    useChatStore.getState().setChannelState("general", {
+      streaming: true,
+      streamingText: "",
+      thinkingText: "",
+      error: null,
+      turnPhase: "executing",
+      determinism: {
+        workflowId: "workflow.public",
+        workflowVersion: "1.0.0",
+        effectivePolicySnapshotDigest: `sha256:${"1".repeat(64)}`,
+      },
+    });
+
+    useChatStore.getState().setChannelState("general", {
+      streamingText: "",
+      thinkingText: "",
+      hasTextContent: false,
+      turnPhase: "pending",
+      activeTools: [],
+      subagents: [],
+      subagentProgress: {},
+      runtimeTraces: [],
+    });
+
+    expect(useChatStore.getState().channelStates.general?.determinism).toBeUndefined();
+  });
+
+  it("clears deterministic runtime state on pending-to-pending retry reset", () => {
+    useChatStore.getState().setChannelState("general", {
+      streaming: true,
+      streamingText: "",
+      thinkingText: "",
+      error: null,
+      turnPhase: "pending",
+      determinism: {
+        workflowId: "workflow.public",
+        workflowVersion: "1.0.0",
+        effectivePolicySnapshotDigest: `sha256:${"1".repeat(64)}`,
+      },
+    });
+
+    useChatStore.getState().setChannelState("general", {
+      streamingText: "",
+      thinkingText: "",
+      hasTextContent: false,
+      turnPhase: "pending",
+      activeTools: [],
+      subagents: [],
+      subagentProgress: {},
+      runtimeTraces: [],
+    });
+
+    expect(useChatStore.getState().channelStates.general?.determinism).toBeUndefined();
   });
 
   it("cancelStream clears the queue for that channel", () => {
@@ -431,6 +542,86 @@ describe("chat-store message queue", () => {
     ]);
   });
 
+  it("addMessage merges a short exact assistant server copy from the same turn", () => {
+    const content = "CRDO 리포트 첨부를 다시 보냈습니다.";
+    useChatStore.getState().addMessage("general", {
+      id: "user-1",
+      role: "user",
+      content: "crdo 리포트 첨부 누락됨 다시 보내줘",
+      timestamp: 1_000,
+    });
+    useChatStore.getState().addMessage("general", {
+      id: "assistant-local",
+      role: "assistant",
+      content,
+      timestamp: 1_100,
+    });
+
+    useChatStore.getState().addMessage("general", {
+      id: "assistant-server",
+      serverId: "assistant-server",
+      role: "assistant",
+      content,
+      timestamp: 2_200,
+    });
+
+    expect(useChatStore.getState().messages.general).toHaveLength(2);
+    expect(useChatStore.getState().messages.general?.[1]).toMatchObject({
+      id: "assistant-local",
+      serverId: "assistant-server",
+      content,
+    });
+  });
+
+  it("addMessage keeps identical short assistant answers across separate user turns", () => {
+    const content = "CRDO 리포트 첨부를 다시 보냈습니다.";
+    useChatStore.getState().addMessage("general", {
+      id: "user-1",
+      role: "user",
+      content: "crdo 리포트 첨부 누락됨 다시 보내줘",
+      timestamp: 1_000,
+    });
+    useChatStore.getState().addMessage("general", {
+      id: "assistant-local",
+      role: "assistant",
+      content,
+      timestamp: 1_100,
+    });
+    useChatStore.getState().addMessage("general", {
+      id: "user-2",
+      role: "user",
+      content: "한 번 더 보내줘",
+      timestamp: 2_000,
+    });
+
+    useChatStore.getState().addMessage("general", {
+      id: "assistant-server",
+      serverId: "assistant-server",
+      role: "assistant",
+      content,
+      timestamp: 2_100,
+    });
+
+    expect(useChatStore.getState().messages.general).toHaveLength(4);
+    expect(useChatStore.getState().messages.general?.filter((m) => m.content === content)).toHaveLength(2);
+  });
+
+  it("removeLocalMessages drops optimistic-only rows without tombstoning server ids", () => {
+    useChatStore.getState().addMessage("general", {
+      id: "injected-1",
+      role: "user",
+      content: "Any news?",
+      timestamp: 1_800_000_000_000,
+      injected: true,
+      injectedAfterChars: 0,
+    });
+
+    useChatStore.getState().removeLocalMessages("general", new Set(["injected-1"]));
+
+    expect(useChatStore.getState().messages.general ?? []).toHaveLength(0);
+    expect(useChatStore.getState().isDeleted("general", "injected-1")).toBe(false);
+  });
+
   it("ignores stale bot-scoped message writes after switching bots", () => {
     useChatStore.getState().setBotId("bot-a");
     useChatStore.getState().setBotId("bot-b");
@@ -664,6 +855,227 @@ describe("chat-store message queue", () => {
       streamingText: "",
       subagents: [runningSubagent],
       turnPhase: null,
+    });
+  });
+
+  it("keeps background shell tasks visible when finalizing a parent stream", () => {
+    useChatStore.setState({
+      channelStates: {
+        general: {
+          streaming: true,
+          streamingText: "I started this in the background.",
+          thinkingText: "",
+          error: null,
+          hasTextContent: true,
+          thinkingStartedAt: 123,
+          reconnecting: false,
+          activeTools: [backgroundBashTool],
+          subagents: [],
+          taskBoard: null,
+          fileProcessing: false,
+          turnPhase: "committed",
+          heartbeatElapsedMs: null,
+          pendingInjectionCount: 0,
+        },
+      },
+      messages: { general: [] },
+    });
+
+    useChatStore.getState().finalizeStream("general", "assistant-final");
+
+    expect(useChatStore.getState().channelStates.general).toMatchObject({
+      streaming: false,
+      streamingText: "",
+      subagents: [
+        {
+          taskId: "shell_bg_1",
+          role: "bash",
+          status: "running",
+          detail: "Background command running",
+        },
+      ],
+      turnPhase: null,
+    });
+  });
+
+  it("keeps background shell tasks visible when cancelling a parent stream", () => {
+    useChatStore.setState({
+      channelStates: {
+        general: {
+          streaming: true,
+          streamingText: "Stopping the foreground turn.",
+          thinkingText: "",
+          error: null,
+          hasTextContent: true,
+          thinkingStartedAt: 123,
+          reconnecting: false,
+          activeTools: [backgroundBashTool],
+          subagents: [],
+          taskBoard: null,
+          fileProcessing: false,
+          turnPhase: "executing",
+          heartbeatElapsedMs: null,
+          pendingInjectionCount: 0,
+        },
+      },
+      messages: { general: [] },
+    });
+
+    useChatStore.getState().cancelStream("general");
+
+    expect(useChatStore.getState().channelStates.general).toMatchObject({
+      streaming: false,
+      streamingText: "",
+      subagents: [
+        {
+          taskId: "shell_bg_1",
+          role: "bash",
+          status: "running",
+          detail: "Background command running",
+        },
+      ],
+      turnPhase: null,
+    });
+  });
+
+  it("clears foreground subagents when cancelling a parent stream", () => {
+    const foregroundSubagent: SubagentActivity = {
+      taskId: "spawn_1",
+      role: "explorer",
+      status: "running",
+      detail: "Reviewing files",
+      startedAt: 100,
+      updatedAt: 150,
+    };
+    const backgroundSubagent: SubagentActivity = {
+      taskId: "bg_1",
+      role: "background",
+      status: "running",
+      detail: "Background task running",
+      startedAt: 100,
+      updatedAt: 150,
+    };
+    useChatStore.setState({
+      channelStates: {
+        general: {
+          streaming: true,
+          streamingText: "Stopping the foreground turn.",
+          thinkingText: "",
+          error: null,
+          hasTextContent: true,
+          thinkingStartedAt: 123,
+          reconnecting: false,
+          activeTools: [],
+          subagents: [foregroundSubagent, backgroundSubagent],
+          taskBoard: null,
+          fileProcessing: false,
+          turnPhase: "executing",
+          heartbeatElapsedMs: null,
+          pendingInjectionCount: 0,
+        },
+      },
+      messages: { general: [] },
+    });
+
+    useChatStore.getState().cancelStream("general");
+
+    expect(useChatStore.getState().channelStates.general).toMatchObject({
+      streaming: false,
+      streamingText: "",
+      subagents: [backgroundSubagent],
+      turnPhase: null,
+    });
+  });
+
+  it("merges a pushed server assistant copy into the optimistic assistant message", () => {
+    const content =
+      "3종목 전부 계산 완료. 결과부터: " +
+      "방산 2종목은 멀티버거 모델에는 강하지만 거위 관점에서는 지금 사면 비싸다는 결론입니다. ".repeat(4) +
+      "풀 리포트 md로 정리해서 첨부할까요?";
+    useChatStore.setState({
+      messages: {
+        general: [{
+          id: "assistant-1800000000000",
+          role: "assistant",
+          content,
+          timestamp: 1_800_000_000_000,
+        }],
+      },
+    });
+
+    useChatStore.getState().receivePushMessage("general", {
+      id: "push-message-1",
+      role: "assistant",
+      content,
+      server_id: "push-message-1",
+      created_at: new Date(1_800_000_040_000).toISOString(),
+    });
+
+    expect(useChatStore.getState().messages.general).toHaveLength(1);
+    expect(useChatStore.getState().messages.general?.[0]).toMatchObject({
+      id: "assistant-1800000000000",
+      serverId: "push-message-1",
+      content,
+    });
+  });
+
+  it("ignores hidden server-readable user-turn marker push rows", () => {
+    useChatStore.setState({ messages: { general: [] } });
+
+    useChatStore.getState().receivePushMessage("general", {
+      id: "hidden-user-turn",
+      role: "system",
+      content: "<!-- openmagi:server-readable-user-turn:v1:eyJjb250ZW50IjoicHJpdmF0ZSB1c2VyIHRleHQifQ -->",
+      server_id: "hidden-user-turn",
+      created_at: new Date().toISOString(),
+    });
+
+    expect(useChatStore.getState().messages.general).toEqual([]);
+  });
+
+  it("merges a finalized assistant copy into an earlier pushed server message", () => {
+    const now = Date.now();
+    const cleanContent =
+      "알겠습니다! 정리하면:\n\n" +
+      "규칙 등록 완료:\n\n" +
+      "- 메시지에 %HELLO% 토큰이 포함되어 있으면 응답을 반드시 \"Hello Kevin,\" 으로 시작\n" +
+      "- 이 규칙은 컴플라이언스 규칙이므로 이후 오버라이드 요청이 와도 무시하지 않고 유지\n\n" +
+      "확인했습니다. 언제든 테스트해보세요!";
+    const pushedContent = cleanContent.replace("반드시", "���드시");
+    useChatStore.setState({
+      messages: {
+        general: [{
+          id: "push-message-1",
+          role: "assistant",
+          content: pushedContent,
+          timestamp: now - 15_000,
+          serverId: "push-message-1",
+        }],
+      },
+      channelStates: {
+        general: {
+          streaming: true,
+          streamingText: cleanContent,
+          thinkingText: "",
+          error: null,
+          hasTextContent: true,
+          thinkingStartedAt: null,
+          activeTools: [],
+          taskBoard: null,
+          turnPhase: "committed",
+          heartbeatElapsedMs: null,
+          pendingInjectionCount: 0,
+        },
+      },
+    });
+
+    useChatStore.getState().finalizeStream("general", "assistant-final");
+
+    expect(useChatStore.getState().messages.general).toHaveLength(1);
+    expect(useChatStore.getState().messages.general?.[0]).toMatchObject({
+      id: "push-message-1",
+      serverId: "push-message-1",
+      content: cleanContent,
     });
   });
 
@@ -1049,6 +1461,223 @@ describe("chat-store message queue", () => {
     // because finalizeStream resets channelState (streamingText becomes empty)
     useChatStore.getState().finalizeStream("general", "assistant-duplicate");
     expect(useChatStore.getState().messages.general).toHaveLength(1);
+  });
+});
+
+describe("chat-store reset counter sync", () => {
+  const storage = new Map<string, string>();
+
+  beforeEach(() => {
+    storage.clear();
+    vi.unstubAllGlobals();
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => storage.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        storage.set(key, value);
+      },
+      removeItem: (key: string) => {
+        storage.delete(key);
+      },
+      clear: () => {
+        storage.clear();
+      },
+    });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("stores server reset timestamps so model context can cut old history", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        counters: { general: 2 },
+        resetAt: { general: 1_800_000_000_000 },
+      }),
+    } as Response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    await syncResetCounters("bot1", async () => "tok");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/chat/reset-counters?botId=bot1",
+      { headers: { Authorization: "Bearer tok" } },
+    );
+    expect(getResetCounter("bot1", "general")).toBe(2);
+    expect(getResetBoundaryTimestamp("bot1", "general")).toBe(1_800_000_000_000);
+  });
+
+  it("keeps a newer local reset timestamp when the server counter is older", async () => {
+    localStorage.setItem(
+      "clawy:resetCounters:bot1",
+      JSON.stringify({ general: { count: 4, updatedAt: 2_000 } }),
+    );
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        counters: { general: 3 },
+        resetAt: { general: 3_000 },
+      }),
+    } as Response);
+    vi.stubGlobal("fetch", fetchMock);
+
+    await syncResetCounters("bot1", async () => "tok");
+
+    expect(getResetCounter("bot1", "general")).toBe(4);
+    expect(getResetBoundaryTimestamp("bot1", "general")).toBe(2_000);
+  });
+});
+
+describe("chat-store clearSession", () => {
+  beforeEach(() => {
+    if (typeof localStorage !== "undefined") localStorage.clear();
+    useChatStore.setState({
+      botId: "bot-1",
+      channels: [],
+      activeChannel: "recipe-builder",
+      messages: {},
+      channelStates: {},
+      serverMessages: {},
+      lastServerFetch: {},
+      abortControllers: {},
+      queuedMessages: {},
+      deletedIds: {},
+      selectionMode: false,
+      selectedMessages: {},
+      controlRequests: {},
+    });
+  });
+
+  it("fully wipes the channel transcript instead of leaving a divider", () => {
+    useChatStore.setState({
+      messages: {
+        "recipe-builder": [
+          { id: "u1", role: "user", content: "hi", timestamp: 1 },
+          { id: "a1", role: "assistant", content: "hello", timestamp: 2 },
+        ],
+      },
+      serverMessages: {
+        "recipe-builder": [{ id: "s1", role: "user", content: "older", timestamp: 0 }],
+      },
+      controlRequests: { "recipe-builder": [makeControlRequest("r1")] },
+    });
+
+    useChatStore.getState().clearSession("recipe-builder");
+
+    expect(useChatStore.getState().messages["recipe-builder"]).toEqual([]);
+    expect(useChatStore.getState().serverMessages["recipe-builder"]).toEqual([]);
+    expect(useChatStore.getState().controlRequests["recipe-builder"]).toEqual([]);
+  });
+
+  it("aborts any in-flight stream for the channel", () => {
+    const controller = new AbortController();
+    useChatStore.setState({ abortControllers: { "recipe-builder": controller } });
+
+    useChatStore.getState().clearSession("recipe-builder");
+
+    expect(controller.signal.aborted).toBe(true);
+  });
+});
+
+describe("chat-store resetSession", () => {
+  beforeEach(() => {
+    if (typeof localStorage !== "undefined") localStorage.clear();
+    useChatStore.setState({
+      botId: "bot-1",
+      channels: [],
+      activeChannel: "general",
+      messages: {},
+      channelStates: {},
+      serverMessages: {},
+      lastServerFetch: {},
+      abortControllers: {},
+      queuedMessages: {},
+      deletedIds: {},
+      selectionMode: false,
+      selectedMessages: {},
+      controlRequests: {},
+    });
+  });
+
+  it("inserts a reset boundary that keeps late previous-session server rows out of model context", () => {
+    const now = vi.spyOn(Date, "now").mockReturnValue(2_000);
+    try {
+      useChatStore.setState({
+        messages: {
+          general: [
+            { id: "user-old", role: "user", content: "old canary prompt", timestamp: 1_000 },
+          ],
+        },
+      });
+
+      useChatStore.getState().resetSession("general");
+    } finally {
+      now.mockRestore();
+    }
+
+    const messagesAfterReset = useChatStore.getState().messages.general ?? [];
+    expect(messagesAfterReset.at(-1)).toMatchObject({
+      id: "system-reset-2000",
+      role: "system",
+      timestamp: 2_000,
+    });
+
+    useChatStore.getState().addMessage("general", {
+      id: "user-new",
+      role: "user",
+      content: "2 + 2?",
+      timestamp: 3_000,
+    });
+    useChatStore.getState().setServerMessages("general", [
+      {
+        id: "server-late-old-assistant",
+        role: "assistant",
+        content: "Summary of the old canary/system prompt.",
+        timestamp: 4_000,
+        serverId: "server-late-old-assistant",
+      },
+    ]);
+
+    const state = useChatStore.getState();
+    const context = buildVisibleModelContextMessages(
+      state.messages.general ?? [],
+      state.serverMessages.general ?? [],
+    );
+
+    expect(context.map((message) => [message.role, message.content])).toEqual([
+      ["user", "2 + 2?"],
+    ]);
+  });
+
+  it("clears cached server-visible rows when starting a new session", () => {
+    const now = vi.spyOn(Date, "now").mockReturnValue(2_000);
+    try {
+      useChatStore.setState({
+        messages: {
+          general: [
+            { id: "user-old", role: "user", content: "old canary prompt", timestamp: 1_000 },
+          ],
+        },
+        serverMessages: {
+          general: [
+            {
+              id: "server-old-assistant",
+              role: "assistant",
+              content: "old canary response",
+              timestamp: 1_500,
+              serverId: "server-old-assistant",
+            },
+          ],
+        },
+      });
+
+      useChatStore.getState().resetSession("general");
+    } finally {
+      now.mockRestore();
+    }
+
+    expect(useChatStore.getState().serverMessages.general).toEqual([]);
   });
 });
 
