@@ -212,11 +212,38 @@ def test_validate_external_recipe_pack_units() -> None:
 # Flag ON — a TRUSTED bundled first-party recipe pack bypasses the boundary
 # --------------------------------------------------------------------------- #
 def test_bundled_first_party_recipe_pack_is_trusted(monkeypatch: pytest.MonkeyPatch) -> None:
-    # The bundled recipe_authoring_static pack uses the openmagi.* namespace AND
-    # defaultEnabled=true — both would be dropped by R1/R7 if it were untrusted.
-    # Discovered from the bundled base it is trusted and joins as-is.
+    # The bundled recipe_authoring_static pack uses the openmagi.* (first-party)
+    # namespace, which R1 would reject for an untrusted pack. Discovered from the
+    # bundled base it is trusted and joins as-is. (It ships defaultEnabled=false so
+    # turning the kernel flag on does not auto-select it globally; see the spec and
+    # test_flag_on_introduces_no_new_default_enabled_recipe below.)
     from magi_agent.packs.discovery import _bundled_firstparty_base
 
     monkeypatch.setenv(FLAG, "1")
     _patch_bases(monkeypatch, [_bundled_firstparty_base()])
     assert "openmagi.authoring-static" in build_runtime_pack_registry().pack_ids
+
+
+def test_flag_on_introduces_no_new_default_enabled_recipe(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Turning the kernel recipe flag ON must not add a globally-auto-selected
+    (``defaultEnabled``) recipe that the first-party baseline does not already
+    have. A bundled pack that is ``defaultEnabled`` but absent from
+    ``_first_party_packs()`` would be promoted globally (``promote_as_default``)
+    and hijack every turn, dropping coding/chat verification wiring. This guards
+    that invariant against any future bundled recipe pack (regression: the
+    bundled ``authoring-static`` pack once shipped ``defaultEnabled=true``).
+    """
+    monkeypatch.setenv(FLAG, "1")
+
+    baseline = PackRegistry.with_first_party_packs()
+    on_registry = build_runtime_pack_registry()
+
+    baseline_defaults = {
+        pid for pid in baseline.pack_ids if baseline.get(pid).default_enabled
+    }
+    on_defaults = {
+        pid for pid in on_registry.pack_ids if on_registry.get(pid).default_enabled
+    }
+    assert on_defaults == baseline_defaults
