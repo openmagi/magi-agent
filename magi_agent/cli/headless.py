@@ -28,6 +28,7 @@ import sys
 import threading
 import uuid as _uuid
 from collections.abc import AsyncGenerator
+from types import SimpleNamespace
 from typing import IO, TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
@@ -66,6 +67,8 @@ from magi_agent.cli.protocol import (
 # importing it at module top here does NOT pull google-adk / textual into the
 # headless import graph.
 from magi_agent.cli.engine import MagiEngineDriver
+from magi_agent.runtime.governed_turn import run_governed_turn
+from magi_agent.runtime.turn_context import TurnContext
 
 _FALSY = {"0", "false", "no", "off"}
 
@@ -446,6 +449,31 @@ def _partial_event_payload(event: RuntimeEvent) -> dict[str, object]:
 # Slash-command dispatch (headless)
 # ---------------------------------------------------------------------------
 _HEADLESS_SURFACE = CommandSurface(tui=False, headless=True)
+
+
+def _turn_context_from_input(turn_input: dict[str, object]) -> TurnContext:
+    """Build a :class:`TurnContext` from a ``run_headless`` ``turn_input`` dict.
+
+    ``run_headless`` assembles a dict carrying ``prompt`` (always), an optional
+    ``initial_messages`` (resume rehydration), and — on the slash-command path —
+    an inert ``content`` key the engine never reads. The dict carries NO
+    ``session_id``/``turn_id``, so :class:`MagiEngineDriver` derives the literal
+    defaults ``cli-session``/``cli-turn``; we pass those same literals so the
+    routed turn's engine-derived identity is byte-identical. Only the engine-read
+    fields are threaded; the inert ``content`` key is intentionally dropped.
+    """
+
+    prompt = turn_input.get("prompt")
+    raw_initial = turn_input.get("initial_messages")
+    initial_messages: tuple[dict[str, str], ...] = (
+        tuple(raw_initial) if isinstance(raw_initial, list) else ()
+    )
+    return TurnContext(
+        prompt=prompt if isinstance(prompt, str) else "",
+        session_id="cli-session",
+        turn_id="cli-turn",
+        initial_messages=initial_messages,
+    )
 
 
 def _parse_slash(prompt: str) -> tuple[str, str]:
@@ -901,8 +929,19 @@ async def run_headless(
             active_gate,
             permission_mode=permission_mode,
         )
-        gen = active_driver.run_turn_stream(
-            None, turn_input, cancel=cancel, gate=active_gate
+        # Route this one-shot turn through the shared ``run_governed_turn``
+        # primitive (Phase 1). The text/json branch never starts the inbound
+        # reader, so ``cancel`` is inert here — the primitive's own fresh,
+        # never-set cancel event is observationally identical. We reconstruct the
+        # engine's derived turn identity exactly: ``run_headless`` passes a dict
+        # with no ``session_id``/``turn_id``, so the engine defaults them to
+        # ``cli-session``/``cli-turn`` — we pass those literals so
+        # ``to_turn_input`` reproduces the same identity. ``initial_messages`` is
+        # carried through (resume rehydration); the inert slash-command
+        # ``content`` key is dropped because the engine never reads it.
+        turn_ctx = _turn_context_from_input(turn_input)
+        gen = run_governed_turn(
+            turn_ctx, runtime=SimpleNamespace(engine=active_driver, gate=active_gate)
         )
         if write_session_log:
             assert session_log is not None
