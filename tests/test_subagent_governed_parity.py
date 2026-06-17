@@ -27,13 +27,14 @@ from magi_agent.runtime.child_runner_boundary import ChildTaskRequest
 from magi_agent.runtime.child_runner_live import RealLocalChildRunner
 from magi_agent.runtime.child_toolset import READONLY_TOOL_NAMES
 
-# Register the ``governed_turn`` submodule as an attribute of ``magi_agent.runtime``
-# so the string-form ``monkeypatch.setattr("...governed_turn.run_governed_turn", ...)``
-# targets below resolve regardless of test execution order. ``magi_agent.runtime``
-# uses a PEP 562 ``__getattr__`` that exposes only curated symbols (not submodules),
-# so without this import the patch target raises ``AttributeError`` whenever no
-# earlier test happened to import the submodule first (order-dependent CI failure).
-import magi_agent.runtime.governed_turn  # noqa: F401
+# Import the ``governed_turn`` submodule under an alias and patch the module OBJECT
+# below (not a dotted string). String-form
+# ``monkeypatch.setattr("magi_agent.runtime.governed_turn.run_governed_turn", ...)``
+# resolves via ``getattr(magi_agent.runtime, "governed_turn")``, but
+# ``magi_agent.runtime`` uses a PEP 562 ``__getattr__`` that exposes only curated
+# symbols (not submodules), so that resolution fails with ``AttributeError`` under
+# CI import order/mode. Object-form patching bypasses the package ``__getattr__``.
+import magi_agent.runtime.governed_turn as governed_turn_mod
 
 # ---------------------------------------------------------------------------
 # Constants used in assertions (read from canonical source at import time)
@@ -201,7 +202,8 @@ def test_readonly_profile_no_escalation_tools_forwarded_to_governed_runtime(
         _recording_build_headless_runtime,
     )
     monkeypatch.setattr(
-        "magi_agent.runtime.governed_turn.run_governed_turn",
+        governed_turn_mod,
+        "run_governed_turn",
         _completed_governed_turn,
     )
 
@@ -279,7 +281,8 @@ def test_readonly_profile_no_escalation_env_driven(
         _recording_build_headless_runtime,
     )
     monkeypatch.setattr(
-        "magi_agent.runtime.governed_turn.run_governed_turn",
+        governed_turn_mod,
+        "run_governed_turn",
         _completed_governed_turn,
     )
 
@@ -358,7 +361,8 @@ def test_governed_envelope_shape_parity_flag_on_vs_flag_off(
         _fake_build_headless_runtime,
     )
     monkeypatch.setattr(
-        "magi_agent.runtime.governed_turn.run_governed_turn",
+        governed_turn_mod,
+        "run_governed_turn",
         _completed_governed_turn,
     )
 
@@ -436,7 +440,8 @@ def test_governed_envelope_completed_terminal_maps_to_completed_status(
         yield EngineResult(terminal=Terminal.completed)
 
     monkeypatch.setattr(
-        "magi_agent.runtime.governed_turn.run_governed_turn",
+        governed_turn_mod,
+        "run_governed_turn",
         _explicit_completed_turn,
     )
 

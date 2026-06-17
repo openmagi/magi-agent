@@ -21,13 +21,14 @@ from magi_agent.runtime.child_runner_live import (
     RealLocalChildRunner,
 )
 
-# Register the ``governed_turn`` submodule as an attribute of ``magi_agent.runtime``
-# so the string-form ``monkeypatch.setattr("...governed_turn.run_governed_turn", ...)``
-# targets below resolve regardless of test execution order. ``magi_agent.runtime``
-# uses a PEP 562 ``__getattr__`` that exposes only curated symbols (not submodules),
-# so without this import the patch target raises ``AttributeError`` whenever no
-# earlier test happened to import the submodule first (order-dependent CI failure).
-import magi_agent.runtime.governed_turn  # noqa: F401
+# Import the ``governed_turn`` submodule under an alias and patch the module OBJECT
+# below (not a dotted string). String-form
+# ``monkeypatch.setattr("magi_agent.runtime.governed_turn.run_governed_turn", ...)``
+# resolves via ``getattr(magi_agent.runtime, "governed_turn")``, but
+# ``magi_agent.runtime`` uses a PEP 562 ``__getattr__`` that exposes only curated
+# symbols (not submodules), so that resolution fails with ``AttributeError`` under
+# CI import order/mode. Object-form patching bypasses the package ``__getattr__``.
+import magi_agent.runtime.governed_turn as governed_turn_mod
 
 
 # ---------------------------------------------------------------------------
@@ -169,7 +170,8 @@ def test_flag_off_uses_injected_runner_not_governed_primitives(
         _fake_build_headless_runtime,
     )
     monkeypatch.setattr(
-        "magi_agent.runtime.governed_turn.run_governed_turn",
+        governed_turn_mod,
+        "run_governed_turn",
         _fake_run_governed_turn,
     )
 
@@ -236,7 +238,8 @@ def test_flag_on_drives_run_governed_turn_and_returns_completed_envelope(
         _fake_build_headless_runtime,
     )
     monkeypatch.setattr(
-        "magi_agent.runtime.governed_turn.run_governed_turn",
+        governed_turn_mod,
+        "run_governed_turn",
         _fake_run_governed_turn,
     )
 
@@ -294,7 +297,8 @@ def test_flag_on_passes_restricted_toolset_not_full_default(
         _fake_build_headless_runtime,
     )
     monkeypatch.setattr(
-        "magi_agent.runtime.governed_turn.run_governed_turn",
+        governed_turn_mod,
+        "run_governed_turn",
         _fake_run_governed_turn,
     )
 
@@ -329,7 +333,8 @@ def test_flag_on_600s_ceiling_still_applies_to_governed_path(
         yield EngineResult(terminal=Terminal.completed)
 
     monkeypatch.setattr(
-        "magi_agent.runtime.governed_turn.run_governed_turn",
+        governed_turn_mod,
+        "run_governed_turn",
         _slow_governed_turn,
     )
 
@@ -375,7 +380,8 @@ def test_flag_on_failed_terminal_maps_to_completed_envelope(
         yield EngineResult(terminal=Terminal.aborted)
 
     monkeypatch.setattr(
-        "magi_agent.runtime.governed_turn.run_governed_turn",
+        governed_turn_mod,
+        "run_governed_turn",
         _aborted_governed_turn,
     )
 
@@ -450,7 +456,8 @@ def test_flag_on_with_spawn_depth_in_metadata(
         _fake_build_headless_runtime,
     )
     monkeypatch.setattr(
-        "magi_agent.runtime.governed_turn.run_governed_turn",
+        governed_turn_mod,
+        "run_governed_turn",
         _recording_governed_turn,
     )
 
@@ -501,7 +508,8 @@ def test_flag_on_with_inherit_on_runtime_memory_mode_matches_derived_and_is_neve
         _recording_build_headless_runtime,
     )
     monkeypatch.setattr(
-        "magi_agent.runtime.governed_turn.run_governed_turn",
+        governed_turn_mod,
+        "run_governed_turn",
         _fake_run_governed_turn,
     )
 
