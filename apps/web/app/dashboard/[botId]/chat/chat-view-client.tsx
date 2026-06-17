@@ -16,7 +16,7 @@ import type {
 import { ChatModelPicker } from "@/components/chat/chat-model-picker";
 import { KbContextBar } from "@/components/chat/kb-context-bar";
 import { KbSidePanel } from "@/components/chat/kb-side-panel";
-import { useChatStore, syncResetCounters } from "@/lib/chat/chat-store";
+import { useChatStore, syncResetCounters } from "@/chat-core";
 import { subscribeToPushMessages, type PushSubscriptionHandle } from "@/lib/chat/push-realtime";
 import * as chatApi from "@/lib/chat/chat-client";
 import { setChatTokenGetter } from "@/lib/chat/chat-client";

@@ -15,7 +15,7 @@ import type {
   ChatInputSendOptions,
 } from "@/components/chat/chat-input";
 import { ChatModelPicker } from "@/components/chat/chat-model-picker";
-import { useChatStore, syncResetCounters } from "@/lib/chat/chat-store";
+import { useChatStore, syncResetCounters } from "@/chat-core";
 import * as chatApi from "@/lib/chat/chat-client";
 import { setChatTokenGetter } from "@/lib/chat/chat-client";
 import { setAttachmentTokenGetter } from "@/chat-core";
