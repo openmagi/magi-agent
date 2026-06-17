@@ -247,6 +247,49 @@ def _section(config: Mapping[str, object], name: str) -> dict[str, object]:
     return section if isinstance(section, dict) else {}
 
 
+def _resolve_provider_key(
+    provider: str,
+    *,
+    env: Mapping[str, str],
+    providers_section: Mapping[str, object],
+) -> str | None:
+    """Return the API key for *provider* using the canonical precedence:
+    ``[providers.<name>].api_key`` in config first, then each env var in
+    ``_PROVIDER_ENV_KEYS[provider]``.  Returns ``None`` if no usable key is found.
+
+    This is the single source of truth shared by :func:`resolve_provider_config`
+    and :func:`configured_providers` so precedence cannot drift.
+    """
+    provider_block = providers_section.get(provider)
+    if isinstance(provider_block, dict):
+        configured = _clean(provider_block.get("api_key"))
+        if configured:
+            return configured
+    for env_name in _PROVIDER_ENV_KEYS[provider]:
+        from_env = _clean(env.get(env_name))
+        if from_env:
+            return from_env
+    return None
+
+
+def configured_providers(
+    *,
+    env: Mapping[str, str] | None = None,
+    config: Mapping[str, object] | None = None,
+) -> list[str]:
+    """All SUPPORTED_PROVIDERS that have a resolvable key (config or env),
+    in SUPPORTED_PROVIDERS order."""
+    env = os.environ if env is None else env
+    config = _load_config_file() if config is None else config
+
+    providers_section = _section(config, "providers")
+    return [
+        provider
+        for provider in SUPPORTED_PROVIDERS
+        if _resolve_provider_key(provider, env=env, providers_section=providers_section)
+    ]
+
+
 def default_model_for(provider: str) -> str:
     """Return the best-effort default model id for ``provider``.
 
@@ -283,16 +326,7 @@ def resolve_provider_config(
     providers_section = _section(config, "providers")
 
     def key_for(provider: str) -> str | None:
-        provider_block = providers_section.get(provider)
-        if isinstance(provider_block, dict):
-            configured = _clean(provider_block.get("api_key"))
-            if configured:
-                return configured
-        for env_name in _PROVIDER_ENV_KEYS[provider]:
-            from_env = _clean(env.get(env_name))
-            if from_env:
-                return from_env
-        return None
+        return _resolve_provider_key(provider, env=env, providers_section=providers_section)
 
     def model_for(provider: str) -> str:
         return (
@@ -455,6 +489,7 @@ __all__ = [
     "SUPPORTED_PROVIDERS",
     "ProviderConfig",
     "UnknownProviderError",
+    "configured_providers",
     "default_model_for",
     "resolve_provider_config",
     "resolve_vision_provider_config",
