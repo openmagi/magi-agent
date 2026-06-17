@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Plus_Jakarta_Sans, Geist_Mono } from "next/font/google";
 import { I18nProvider } from "@/lib/i18n";
 import { PUBLIC_BRAND } from "@/lib/brand";
+import "katex/dist/katex.min.css";
 import "./globals.css";
 
 const plusJakarta = Plus_Jakarta_Sans({
