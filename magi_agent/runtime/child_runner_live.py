@@ -414,6 +414,19 @@ class RealLocalChildRunner:
         raw_depth = metadata.get("spawnDepth") if isinstance(metadata, dict) else None
         parent_depth = int(raw_depth) if isinstance(raw_depth, int) and not isinstance(raw_depth, bool) else 0
 
+        # --- Derive the child TurnContext FIRST (single source of memory_mode) -
+        # derive() → _child_memory_mode() is the canonical authority for the
+        # child's memory_mode.  We call it before build_headless_runtime so the
+        # runtime receives the SAME value the TurnContext carries — eliminating
+        # any divergence (e.g. the old "normal" expression when inherit is ON).
+        ctx = derive(
+            request,
+            parent_memory_mode=parent_memory_mode,
+            parent_depth=parent_depth,
+            memory_inherit_enabled=memory_inherit_enabled,
+            child_session_id=session_id,
+        )
+
         # --- Build the child's governed runtime (restricted toolset) ---------
         workspace = self._workspace_root or tempfile.mkdtemp()
         # ``config`` carries the resolved model string so we extract it for the
@@ -425,17 +438,8 @@ class RealLocalChildRunner:
             session_id=session_id,
             model=route_model,
             tools=tools,
-            memory_mode=parent_memory_mode if not memory_inherit_enabled else "normal",
+            memory_mode=ctx.memory_mode,  # single source: derived TurnContext
             permission_mode="bypassPermissions",
-        )
-
-        # --- Derive the child TurnContext ------------------------------------
-        ctx = derive(
-            request,
-            parent_memory_mode=parent_memory_mode,
-            parent_depth=parent_depth,
-            memory_inherit_enabled=memory_inherit_enabled,
-            child_session_id=session_id,
         )
 
         # --- Drive the governed turn + collect summary + evidence_refs -------

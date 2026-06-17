@@ -455,3 +455,60 @@ def test_flag_on_with_spawn_depth_in_metadata(
     assert len(captured_ctx) == 1
     ctx = captured_ctx[0]
     assert getattr(ctx, "depth", None) == 3
+
+
+def test_flag_on_with_inherit_on_runtime_memory_mode_matches_derived_and_is_never_normal(
+    monkeypatch,
+) -> None:
+    """Regression: when MAGI_SUBAGENT_GOVERNED_TURN_ENABLED=1 AND
+    MAGI_CHILD_MEMORY_INHERIT_ENABLED=1, build_headless_runtime must receive the
+    DERIVED child memory_mode (i.e. NOT ``"normal"`` for a ``normal`` parent).
+
+    derive() → _child_memory_mode maps ``normal`` parent + inherit-ON to
+    ``"read_only"``.  The old code passed ``"normal"`` directly (divergence bug).
+    """
+    monkeypatch.setenv("MAGI_SUBAGENT_GOVERNED_TURN_ENABLED", "1")
+    monkeypatch.setenv("MAGI_CHILD_MEMORY_INHERIT_ENABLED", "1")
+
+    captured_runtime_kwargs: list[dict[str, object]] = []
+
+    def _recording_build_headless_runtime(**kwargs: object) -> object:
+        captured_runtime_kwargs.append(dict(kwargs))
+        return object()
+
+    async def _fake_run_governed_turn(
+        ctx: object, *, runtime: object | None = None, cancel: object | None = None
+    ) -> AsyncGenerator[Any, None]:
+        from magi_agent.cli.contracts import EngineResult, Terminal
+        from magi_agent.runtime.events import RuntimeEvent
+
+        yield RuntimeEvent(
+            type="token",
+            payload={"type": "text_delta", "delta": "inherit test done"},
+        )
+        yield EngineResult(terminal=Terminal.completed)
+
+    monkeypatch.setattr(
+        "magi_agent.cli.wiring.build_headless_runtime",
+        _recording_build_headless_runtime,
+    )
+    monkeypatch.setattr(
+        "magi_agent.runtime.governed_turn.run_governed_turn",
+        _fake_run_governed_turn,
+    )
+
+    runner = RealLocalChildRunner(provider_config=_provider_config())
+    output = asyncio.run(runner.run_child(_request()))
+
+    assert output["status"] == "completed"
+    assert len(captured_runtime_kwargs) == 1
+    runtime_memory_mode = captured_runtime_kwargs[0].get("memory_mode")
+
+    # The runtime must NEVER receive "normal" — that is the parent mode, not the
+    # child's contracted mode.  With a "incognito" parent (the current default
+    # when parent_memory_mode is not yet threaded) + inherit=ON, derive() returns
+    # "incognito" (incognito propagates as-is).  Either way, "normal" is invalid.
+    assert runtime_memory_mode != "normal", (
+        f"build_headless_runtime received memory_mode='normal' — "
+        f"this diverges from the derived TurnContext (bug). Got: {runtime_memory_mode!r}"
+    )
