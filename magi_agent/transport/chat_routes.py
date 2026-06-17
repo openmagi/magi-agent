@@ -347,6 +347,7 @@ async def _local_adk_chat_sse(
     runtime_config = getattr(runtime, "config", None)
     serve_bot_id = str(getattr(runtime_config, "bot_id", None) or "local")
     serve_owner_user_id = str(getattr(runtime_config, "user_id", None) or "local")
+    pinned_recipe_pack_ids = _pinned_recipe_pack_ids_from_payload(payload)
     headless = build_headless_runtime(
         cwd=workspace_root,
         permission_mode="bypassPermissions",
@@ -357,6 +358,7 @@ async def _local_adk_chat_sse(
         bot_id=serve_bot_id,
         owner_user_id=serve_owner_user_id,
         learning_live_readiness=learning_live_readiness,
+        pinned_recipe_pack_ids=pinned_recipe_pack_ids,
     )
     # Route the top-level serve turn through the single ``run_governed_turn``
     # primitive (Phase 1). ``runtime=headless`` reuses the SAME runner/gate/
@@ -2159,6 +2161,25 @@ def _first_party_recipe_pack_ids_from_payload(payload: object) -> tuple[str, ...
         if isinstance(value, str) and value in allowed and value not in selected:
             selected.append(value)
     return tuple(selected)
+
+
+def _pinned_recipe_pack_ids_from_payload(payload: object) -> tuple[str, ...]:
+    """Read user-explicit recipe pin from the request payload.
+
+    Reads ``pinnedRecipePackIds`` (camelCase) or ``pinned_recipe_pack_ids``
+    (snake_case) from *payload* and returns a tuple of non-empty strings.
+    Validation (registry lookup, hard-limit) is downstream in
+    ``normalize_pinned_recipe_pack_ids``; this reader is a thin string filter.
+    Returns ``()`` for any non-list value or absent key.
+    """
+    if not isinstance(payload, Mapping):
+        return ()
+    values = payload.get("pinnedRecipePackIds")
+    if not isinstance(values, Sequence) or isinstance(values, (str, bytes, bytearray)):
+        values = payload.get("pinned_recipe_pack_ids")
+    if not isinstance(values, Sequence) or isinstance(values, (str, bytes, bytearray)):
+        return ()
+    return tuple(v for v in values if isinstance(v, str) and v)
 
 
 def _first_party_harness_families(pack_ids: Sequence[str]) -> tuple[str, ...]:

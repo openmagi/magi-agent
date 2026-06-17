@@ -194,6 +194,38 @@ def build_recipe_obligation_scope(registry: PackRegistry) -> RecipeObligationSco
     )
 
 
+def normalize_pinned_recipe_pack_ids(
+    pack_ids: "Sequence[str]", registry: "PackRegistry"
+) -> tuple[str, ...]:
+    """Keep only known, routable (non-hard_safety) pack ids; dedupe, preserve order.
+
+    Fail-open: unknown / non-str / hard_safety entries are dropped silently so a
+    bad pin degrades to "no pin" rather than an error.
+
+    Args:
+        pack_ids: sequence of pack IDs to validate and normalize.
+        registry: the pack registry to check membership and hard_safety flag.
+
+    Returns:
+        A tuple of valid, routable pack IDs in input order, de-duped.
+    """
+    out: list[str] = []
+    for pid in pack_ids:
+        if not isinstance(pid, str) or not pid.strip():
+            continue
+        pid = pid.strip()
+        if pid in out:
+            continue
+        try:
+            pack = registry.get(pid)
+        except KeyError:
+            continue
+        if getattr(pack, "hard_safety", False):
+            continue
+        out.append(pid)
+    return tuple(out)
+
+
 def select_recipe_body(pack: RecipePackManifest) -> str:
     """Render the on-demand body for a selected recipe pack.
 
@@ -506,6 +538,7 @@ __all__ = [
     "build_recipe_listing_section",
     "build_recipe_obligation_scope",
     "build_recipe_tool_scope",
+    "normalize_pinned_recipe_pack_ids",
     "project_recipe_route_decided_event",
     "register_select_recipe_tool",
     "select_recipe_body",
