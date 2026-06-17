@@ -143,7 +143,7 @@ def test_main_serve_help_does_not_require_runtime_environment(
     assert "usage: magi-agent" in capsys.readouterr().out
 
 
-def test_main_uses_local_full_runtime_defaults_when_env_is_absent(
+def test_main_uses_lab_runtime_defaults_when_env_is_absent(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
@@ -151,6 +151,7 @@ def test_main_uses_local_full_runtime_defaults_when_env_is_absent(
 
     for key in EXPECTED_LOCAL_FULL_RUNTIME_DEFAULTS:
         monkeypatch.delenv(key, raising=False)
+    monkeypatch.delenv("MAGI_CODE_ACTION_ENABLED", raising=False)
     monkeypatch.delenv(main_module.LOCAL_FULL_RUNTIME_DEFAULTS_ENABLED_ENV, raising=False)
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(main_module.uvicorn, "run", lambda app, **kwargs: captured.update(kwargs))
@@ -158,8 +159,13 @@ def test_main_uses_local_full_runtime_defaults_when_env_is_absent(
 
     assert captured["host"] == "0.0.0.0"
     assert captured["port"] == 9093
+    # The default (no profile set) is the lab dogfood tier — a strict superset of
+    # the local-full overlay, so every full default is present, the profile
+    # identity is ``lab``, and the experimental capability flags are ON.
     for key, value in EXPECTED_LOCAL_FULL_RUNTIME_DEFAULTS.items():
-        assert main_module.os.environ[key] == value
+        expected = "lab" if key == "MAGI_RUNTIME_PROFILE" else value
+        assert main_module.os.environ[key] == expected
+    assert main_module.os.environ["MAGI_CODE_ACTION_ENABLED"] == "1"
 
 
 def test_main_local_full_runtime_defaults_respect_safe_profile(

@@ -316,6 +316,30 @@ def apply_local_full_runtime_defaults(environ: MutableMapping[str, str]) -> None
         environ.setdefault(key, "1")
 
 
+def apply_local_runtime_profile_defaults(environ: MutableMapping[str, str]) -> None:
+    """Apply the local overlay chosen by ``MAGI_RUNTIME_PROFILE``.
+
+    The DEFAULT (unset profile) and an explicit ``lab`` both get the experimental
+    dogfood tier, so a fresh local ``magi-agent serve`` / ``magi`` is maximally
+    capable out of the box (PythonExec, deep web, memory recall, etc.). Opting
+    into the conservative overlay with an explicit ``MAGI_RUNTIME_PROFILE=full``
+    still works. ``setdefault`` semantics mean explicit operator env always wins,
+    so a per-flag ``MAGI_X=0`` walks any feature back. The ``eval`` profile is
+    dispatched by callers BEFORE this helper.
+    """
+    # Honor the opt-out / safe-profile gate up front so neither overlay (and in
+    # particular ``apply_lab_runtime_defaults``, which stamps the profile before
+    # its own internal gate) leaves a profile stamped when the runtime defaults
+    # are disabled. Mirrors the predicate both overlays gate on.
+    if not local_full_runtime_defaults_enabled(environ):
+        return
+    profile = (environ.get("MAGI_RUNTIME_PROFILE") or "").strip().lower()
+    if profile == "full":
+        apply_local_full_runtime_defaults(environ)
+    else:
+        apply_lab_runtime_defaults(environ)
+
+
 def local_full_runtime_defaults_enabled(environ: Mapping[str, str]) -> bool:
     raw = environ.get(LOCAL_FULL_RUNTIME_DEFAULTS_ENABLED_ENV)
     if raw is not None and not _env_enabled(raw):

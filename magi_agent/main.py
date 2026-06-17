@@ -99,14 +99,9 @@ def main(argv: Sequence[str] | None = None) -> None:
         # Mirror the cli/app.py dispatch so a local ``magi-agent serve`` under the
         # lab profile gets the same opt-in dogfood tier. Both paths are
         # setdefault-based, so explicit env (incl. per-flag MAGI_X=0) still wins.
-        from .config.flags import flag_str
+        from .runtime.local_defaults import apply_local_runtime_profile_defaults
 
-        if (flag_str("MAGI_RUNTIME_PROFILE", env=os.environ) or "").strip().lower() == "lab":
-            from .runtime.local_defaults import apply_lab_runtime_defaults
-
-            apply_lab_runtime_defaults(os.environ)
-        else:
-            apply_local_full_runtime_defaults(os.environ)
+        apply_local_runtime_profile_defaults(os.environ)
         _maybe_start_local_vault_proxy(os.environ)
         _print_local_startup_notice(port)
     else:

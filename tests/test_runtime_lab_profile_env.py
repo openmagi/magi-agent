@@ -31,6 +31,28 @@ from magi_agent.runtime.local_defaults import (
 _BY_NAME = {spec.name: spec for spec in FLAGS}
 
 
+def test_default_unset_profile_applies_lab_dogfood_tier() -> None:
+    # A fresh local serve/CLI (no MAGI_RUNTIME_PROFILE) defaults to the lab
+    # dogfood tier so it is maximally capable out of the box.
+    from magi_agent.runtime.local_defaults import apply_local_runtime_profile_defaults
+
+    env: dict[str, str] = {}
+    apply_local_runtime_profile_defaults(env)
+    assert env.get("MAGI_RUNTIME_PROFILE") == "lab"
+    assert env.get("MAGI_CODE_ACTION_ENABLED") == "1"
+
+
+def test_explicit_full_profile_stays_conservative() -> None:
+    # Opting into the conservative local-full overlay still works: lab-only
+    # experimental flags stay OFF.
+    from magi_agent.runtime.local_defaults import apply_local_runtime_profile_defaults
+
+    env = {"MAGI_RUNTIME_PROFILE": "full"}
+    apply_local_runtime_profile_defaults(env)
+    assert env.get("MAGI_RUNTIME_PROFILE") == "full"
+    assert env.get("MAGI_CODE_ACTION_ENABLED") is None
+
+
 def test_lab_experimental_flags_are_registered_strict_bool_default_off() -> None:
     # Guard against drift: every flag the lab seed forces ON must be a flat
     # strict-truthy ``_b`` flag whose registry default is OFF, otherwise the
