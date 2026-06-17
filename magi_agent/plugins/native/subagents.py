@@ -370,14 +370,20 @@ async def spawn_agent(arguments: dict[str, object], context: ToolContext) -> Too
         else:
             budget_ms = 0
 
+        # Build the metadata dict: carry spawn_depth (boundary cap) and
+        # parent_tool_names (tighten-only producer, Task 2B.2).  When
+        # parent_tool_names is empty the key is still present as () so the
+        # downstream consumer can distinguish "not provided" vs "no tools".
+        request_metadata: dict[str, object] = {
+            "spawnDepth": context.spawn_depth + 1,
+            "parentToolNames": context.parent_tool_names,
+        }
         request = ChildTaskRequest(
             parentExecutionId=parent_exec_id,
             turnId=turn_id,
             taskId=task_id,
             objective=prompt or "Complete the delegated subtask.",
-            # Carry the caller's spawn_depth into the request metadata so the
-            # boundary's spawn-depth cap can enforce it correctly.
-            metadata={"spawnDepth": context.spawn_depth + 1},
+            metadata=request_metadata,
             provider=req_provider,
             model=req_model,
             budgetMs=budget_ms,

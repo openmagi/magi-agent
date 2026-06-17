@@ -749,3 +749,143 @@ def test_spawn_agent_runs_child_inside_running_event_loop(monkeypatch) -> None:
     # The child actually ran — NOT the blocked degrade path.
     assert result.output["liveChildRunnerAttached"] is True
     assert "Fake child" in str(result.output.get("summary", ""))
+
+
+# ---------------------------------------------------------------------------
+# T10: parent_tool_names producer (Task 2B.2) — ToolContext carrying
+# parent_tool_names flows through spawn_agent into ChildTaskRequest.metadata
+# ---------------------------------------------------------------------------
+
+
+def test_spawn_agent_parent_tool_names_carried_to_child_request_gate_off(
+    monkeypatch,
+) -> None:
+    """Gate OFF path: parent_tool_names on ToolContext lands in the output
+    payload's spawnDepth field and does not crash.  The not-attached blocked
+    result is byte-identical to before (no new output keys from the gate-OFF
+    branch) — the producer only writes to the ChildTaskRequest metadata on the
+    live path."""
+    monkeypatch.delenv("MAGI_CHILD_RUNNER_LIVE_ENABLED", raising=False)
+    monkeypatch.delenv("MAGI_CHILD_RUNNER_LIVE_KILL_SWITCH", raising=False)
+
+    from magi_agent.plugins.native.subagents import spawn_agent
+
+    ctx = _context(spawnDepth=0, parentToolNames=("Bash", "FileRead"))
+    result = asyncio.run(spawn_agent({"prompt": "gate-off parent-cap test"}, ctx))
+
+    assert result.status == "blocked"
+    assert result.error_code == "live_child_runner_disabled"
+    # Gate-OFF output is byte-identical — no parentToolNames key in the output dict.
+    assert "parentToolNames" not in result.output
+
+
+def test_spawn_agent_parent_tool_names_carried_to_child_request_gate_on(
+    monkeypatch,
+) -> None:
+    """Gate ON: ToolContext.parent_tool_names is forwarded into the ChildTaskRequest
+    metadata as ``parentToolNames`` — mirroring how spawnDepth flows.
+
+    Uses an object-form monkeypatch on the imported module object (not string-form
+    setattr) to avoid the PEP 562 __getattr__ guard on magi_agent.runtime.
+    """
+    monkeypatch.setenv("MAGI_CHILD_RUNNER_LIVE_ENABLED", "1")
+    monkeypatch.delenv("MAGI_CHILD_RUNNER_LIVE_KILL_SWITCH", raising=False)
+
+    import magi_agent.runtime.child_runner_live as _live_mod
+
+    captured_request: list[object] = []
+
+    class _CapturingParentNamesRunner:
+        openmagi_live_provider = True
+
+        def __init__(self, *, tools: list[object] | None = None, **kwargs: object) -> None:
+            pass
+
+        async def run_child(self, request: object) -> dict[str, object]:
+            captured_request.append(request)
+            return {
+                "childExecutionId": "child-exec-parent-names",
+                "status": "completed",
+                "summary": "parent names captured",
+                "evidenceRefs": (),
+                "artifactRefs": (),
+                "auditEventRefs": (),
+            }
+
+    # Patch the imported module object directly (avoids PEP 562 __getattr__ guard).
+    monkeypatch.setattr(_live_mod, "RealLocalChildRunner", _CapturingParentNamesRunner)
+
+    from magi_agent.plugins.native.subagents import spawn_agent
+
+    ctx = _context(spawnDepth=0, parentToolNames=("FileRead", "Bash"))
+    asyncio.run(spawn_agent({"prompt": "parent-tool-names test"}, ctx))
+
+    assert len(captured_request) == 1
+    req = captured_request[0]
+    metadata = getattr(req, "metadata", {})
+    assert "parentToolNames" in metadata
+    # The value must match what was set on the ToolContext (order-preserving).
+    assert tuple(metadata["parentToolNames"]) == ("FileRead", "Bash")
+
+
+# ---------------------------------------------------------------------------
+# T10c/T10d: build_cli_tool_runtime / build_cli_adk_tools path (Task 2B.2 fix)
+# The third live tool-factory site must populate parent_tool_names on the
+# ToolContext it produces.  These tests use object-form monkeypatch on the
+# imported module objects to avoid PEP 562 __getattr__ guards.
+# ---------------------------------------------------------------------------
+
+
+def test_build_cli_tool_runtime_populates_parent_tool_names(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """T10c: build_cli_tool_runtime must close parent_tool_names over the
+    tool_context_factory it returns — the snapshot is non-empty (core tools
+    are always registered) and every name in it is a non-empty string.
+
+    Uses object-form monkeypatch on magi_agent.cli.tool_runtime to intercept
+    the ToolRegistry.list_available call without pulling google.adk.
+    """
+    import magi_agent.cli.tool_runtime as _rt_mod
+
+    # Stub _build_first_party_adk_tools dependency only if present in scope.
+    # The key seam is build_cli_tool_runtime itself — just call it and inspect.
+    runtime = _rt_mod.build_cli_tool_runtime(workspace_root=str(tmp_path))
+
+    # Call the factory with a plain object standing in for the ADK tool context.
+    ctx = runtime.tool_context_factory(object())
+
+    # parent_tool_names must be a non-empty tuple of strings (core tools always
+    # registered) — the third factory is now populated like the other two sites.
+    assert isinstance(ctx.parent_tool_names, tuple), (
+        "parent_tool_names must be a tuple"
+    )
+    assert len(ctx.parent_tool_names) > 0, (
+        "build_cli_tool_runtime must produce a non-empty parent_tool_names "
+        "(core tools are always registered)"
+    )
+    for name in ctx.parent_tool_names:
+        assert isinstance(name, str) and name, (
+            f"every parent_tool_names entry must be a non-empty string; got {name!r}"
+        )
+
+
+def test_build_cli_tool_runtime_parent_tool_names_sorted(
+    tmp_path: Path,
+) -> None:
+    """T10d: parent_tool_names snapshot must be sorted (mirrors wiring.py).
+
+    The intersection in Task 2B.3 relies on stable ordering; a non-sorted
+    tuple would not break correctness but would diverge from the contract
+    established by the other two producer sites.
+    """
+    import magi_agent.cli.tool_runtime as _rt_mod
+
+    runtime = _rt_mod.build_cli_tool_runtime(workspace_root=str(tmp_path))
+    ctx = runtime.tool_context_factory(object())
+
+    names = list(ctx.parent_tool_names)
+    assert names == sorted(names), (
+        "parent_tool_names must be sorted (mirrors wiring.py contract)"
+    )

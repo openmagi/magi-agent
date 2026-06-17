@@ -77,6 +77,7 @@ class ToolContext(BaseModel):
     staging: object | None = None
     commit_handle: object | None = Field(default=None, alias="commitHandle")
     spawn_depth: int = Field(default=0, ge=0, alias="spawnDepth")
+    parent_tool_names: tuple[str, ...] = Field(default=(), alias="parentToolNames")
     spawn_workspace: str | None = Field(default=None, alias="spawnWorkspace")
     plugin_id: str | None = Field(default=None, alias="pluginId")
     secret_scope: str | None = Field(default=None, alias="secretScope")
@@ -92,6 +93,10 @@ class ToolContext(BaseModel):
     @classmethod
     def freeze_source_ledger(cls, value: object) -> object:
         return _freeze_nested(value)
+
+    @field_serializer("parent_tool_names")
+    def serialize_parent_tool_names(self, value: tuple[str, ...]) -> list[str]:
+        return list(value)
 
     @field_serializer("files_read")
     def serialize_files_read(self, value: tuple[str, ...]) -> list[str]:
