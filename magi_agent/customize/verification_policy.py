@@ -77,6 +77,16 @@ class CustomizeVerificationPolicy:
                 refs.append(ref)
         return refs
 
+    def enabled_tool_perm_rules(self) -> list[dict[str, Any]]:
+        """Enabled ``tool_perm`` custom rules (P2 before-tool-use deny/ask)."""
+        return [
+            rule
+            for rule in self.custom_rules
+            if rule.get("enabled", False)
+            and isinstance(rule.get("what"), dict)
+            and rule["what"].get("kind") == "tool_perm"
+        ]
+
     def explicit_preset(self, preset_id: str) -> bool | None:
         """Explicit per-preset enable state, or None if the user never set it."""
         return self.preset_overrides.get(preset_id)
