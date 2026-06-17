@@ -155,18 +155,25 @@ def build_default_watchers() -> tuple[GatewayWatcher, ...]:
     # Live channel watchers (self-host only; fail-closed). Lazy import avoids a
     # module-level cycle (channel_watchers imports build_channel_poll_watcher
     # from here) and keeps this module import-clean.
+    from magi_agent.channels.turn_engine import make_engine_run_turn  # noqa: PLC0415
     from magi_agent.gateway.channel_watchers import (  # noqa: PLC0415
         build_telegram_channel_watcher,
         build_telegram_supervisor_watcher,
         is_dashboard_telegram_enabled,
     )
 
+    # Engine-backed turn driver shared by every live channel watcher: an inbound
+    # message drives one governed turn and the reply is delivered on the same
+    # channel. Constructing the closure is cheap (no engine execution) and the
+    # watchers self-gate, so with all channel gates OFF the fleet is unchanged.
+    run_turn = make_engine_run_turn()
+
     if is_dashboard_telegram_enabled():
         # Dashboard-managed: long-lived supervisor that hot-reloads the token
         # from the vault. Mutually exclusive with the legacy env-only watcher.
-        watchers.append(build_telegram_supervisor_watcher())
+        watchers.append(build_telegram_supervisor_watcher(run_turn=run_turn))
     else:
-        telegram_watcher = build_telegram_channel_watcher()
+        telegram_watcher = build_telegram_channel_watcher(run_turn=run_turn)
         if telegram_watcher is not None:
             watchers.append(telegram_watcher)
 

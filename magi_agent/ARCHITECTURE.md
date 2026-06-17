@@ -398,7 +398,8 @@ graph LR
 | telegram_easy_telethon.py | Telethon adapter for the Telegram "easy setup" path. | telegram_easy | transport/integrations.py |
 | telegram_live.py | E2 — Gated live Telegram polling adapter. | contract, scheduler_delivery, telegram_adapter, turn_bridge | gateway/channel_watchers.py |
 | telegram_validate.py | Bot-token validation for the dashboard Telegram integration. | — | transport/integrations.py |
-| turn_bridge.py | Shared channel turn bridge — inbound message -> agent turn -> reply (PR1). | — | channels/discord_live.py, channels/telegram_live.py, gateway/channel_watchers.py |
+| turn_bridge.py | Shared channel turn bridge — inbound message -> agent turn -> reply (PR1). | — | channels/discord_live.py, channels/telegram_live.py, channels/turn_engine.py, gateway/channel_watchers.py |
+| turn_engine.py | Engine-backed ``run_turn`` for the channel turn bridge (PR1.5). | child_governed_collector, governed_turn, turn_bridge, turn_context | gateway/watchers.py |
 | workflow_routing.py | — | — | channels/dispatcher.py |
 
 ### channels/providers/
@@ -918,7 +919,7 @@ graph LR
 | channel_watchers.py | Operator wiring: tie a concrete channel provider to a gateway poll watcher. | daemon, scheduler_delivery, telegram_adapter, telegram_credentials, telegram_httpx, telegram_live, turn_bridge, watchers | gateway/watchers.py |
 | daemon.py | GatewayDaemon — the supervised asyncio watcher fleet (Track F). | health, watchers | cli/app.py, gateway/channel_watchers.py, gateway/watchers.py, ops/health.py |
 | service_install.py | OS service install for the ``magi gateway`` daemon (Track F). | — | cli/app.py |
-| watchers.py | Watcher-fleet builders — COMPOSE the existing always-on blocks (Track F). | channel_watchers, daemon, scheduler_job_execution, scheduler_job_store, scheduler_loop_driver | cli/app.py, gateway/channel_watchers.py, gateway/daemon.py |
+| watchers.py | Watcher-fleet builders — COMPOSE the existing always-on blocks (Track F). | channel_watchers, daemon, scheduler_job_execution, scheduler_job_store, scheduler_loop_driver, turn_engine | cli/app.py, gateway/channel_watchers.py, gateway/daemon.py |
 
 ### harness/
 
@@ -1381,7 +1382,7 @@ graph LR
 | checkpointing.py | — | — | — |
 | child_derive.py | Derive a child TurnContext from a ChildTaskRequest (spawn = recursion). | child_runner_live, turn_context | runtime/child_runner_live.py |
 | child_event_projection.py | — | child_runner_boundary, child_runtime_envelope, tool_preview | — |
-| child_governed_collector.py | Governed-stream → child-envelope adapter. | child_runner_live, contracts, events | runtime/child_runner_live.py |
+| child_governed_collector.py | Governed-stream → child-envelope adapter. | child_runner_live, contracts, events | channels/turn_engine.py, runtime/child_runner_live.py |
 | child_runner_boundary.py | — | adk_turn_runner, child_acceptance, child_runtime_envelope, model_tiers, runtime_issuance, subagent | harness/workflow_executor.py, plugins/native/subagents.py, runtime/child_event_projection.py |
 | child_runner_live.py | A REAL, model-backed local child runner for the Child Runner boundary. | child_derive, child_governed_collector, child_toolset, flags, governed_turn, local_tool_collector, model_tiers, providers, real_runner, tool_runtime, wiring | harness/workflow_executor.py, plugins/native/subagents.py, runtime/child_derive.py, runtime/child_governed_collector.py, runtime/child_runner_status.py, runtime/message_builder.py, transport/chat_shared.py |
 | child_runner_status.py | — | child_runner_live, child_toolset | transport/chat_routes.py, transport/health.py |
@@ -1407,7 +1408,7 @@ graph LR
 | fork_runner.py | — | fork_messages, prompt_snapshot | adk_bridge/control_plane.py, cli/tests/test_real_runner.py |
 | goal_nudge.py | PR4 — Lightweight goal-nudge continuation primitive. | final_output_gate | cli/engine.py, cli/goal_nudge_wiring.py |
 | governed_projection.py | — | — | — |
-| governed_turn.py | The single primitive every governed turn flows through. | turn_context, wiring | cli/headless.py, runtime/child_runner_live.py, transport/chat_routes.py |
+| governed_turn.py | The single primitive every governed turn flows through. | turn_context, wiring | channels/turn_engine.py, cli/headless.py, runtime/child_runner_live.py, transport/chat_routes.py |
 | heartbeat_boundary.py | — | heartbeat_contract, heartbeat_store | — |
 | heartbeat_contract.py | — | safety | runtime/events.py, runtime/heartbeat_boundary.py, runtime/heartbeat_store.py, runtime/resume_decision.py, runtime/stale_run_detector.py |
 | heartbeat_store.py | — | heartbeat_contract | runtime/heartbeat_boundary.py, runtime/stale_run_detector.py |
@@ -1452,7 +1453,7 @@ graph LR
 | structured_output_boundary.py | — | — | — |
 | tool_synthesis.py | Live-SWE-style tool-synthesis activation + recipe block (default OFF). | env, model_tiers | adk_bridge/control_plane.py, adk_bridge/tool_synthesis_nudge.py, cli/tool_runtime.py |
 | transcript.py | — | — | adk_bridge/event_adapter.py, cli/session_log.py, evidence/extraction.py, runtime/events.py, runtime/session_continuity_projection.py, shadow/fixture_runner.py, shadow/ts_parity_replay.py |
-| turn_context.py | Single value object describing one governed turn (top-level or child). | — | cli/headless.py, runtime/child_derive.py, runtime/governed_turn.py, transport/chat_routes.py |
+| turn_context.py | Single value object describing one governed turn (top-level or child). | — | channels/turn_engine.py, cli/headless.py, runtime/child_derive.py, runtime/governed_turn.py, transport/chat_routes.py |
 | turn_maintenance.py | — | — | — |
 | turn_policy.py | — | — | adk_bridge/control_plane.py, harness/general_automation/task_completion.py |
 | turn_utilities.py | — | — | adk_bridge/edit_retry_reflection.py, recipes/retry_repair_policies.py, runtime/commit_boundary.py |

@@ -12,7 +12,11 @@ import pytest
 
 from magi_agent.channels.telegram_adapter import TelegramInboundUpdate
 from magi_agent.channels.turn_bridge import ChannelInbound
-from magi_agent.gateway.channel_watchers import build_telegram_bridge_on_inbound
+from magi_agent.gateway.channel_watchers import (
+    _default_on_inbound,
+    _resolve_dispatch,
+    build_telegram_bridge_on_inbound,
+)
 
 _LIVE_ENV = "MAGI_CHANNEL_LIVE_TELEGRAM"
 
@@ -67,3 +71,34 @@ def test_bridge_does_not_send_when_gate_off(monkeypatch: pytest.MonkeyPatch) -> 
     on_inbound(_update())
 
     assert provider.sent == []
+
+
+def test_resolve_dispatch_prefers_explicit_on_inbound() -> None:
+    def sentinel(_u: TelegramInboundUpdate) -> None:
+        return None
+
+    resolved = _resolve_dispatch(provider=object(), on_inbound=sentinel, run_turn=None)
+    assert resolved is sentinel
+
+
+def test_resolve_dispatch_defaults_to_log_only_when_nothing_given() -> None:
+    resolved = _resolve_dispatch(provider=object(), on_inbound=None, run_turn=None)
+    assert resolved is _default_on_inbound
+
+
+def test_resolve_dispatch_builds_bridge_when_run_turn_given(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(_LIVE_ENV, "1")
+    provider = _FakeTelegramProvider()
+    captured: dict[str, object] = {}
+
+    def run_turn(session_key: str, inbound: ChannelInbound) -> str:
+        captured["session_key"] = session_key
+        return "pong"
+
+    dispatch = _resolve_dispatch(provider=provider, on_inbound=None, run_turn=run_turn)
+    dispatch(_update("ping"))
+
+    assert captured["session_key"] == "agent:main:telegram:42"
+    assert provider.sent[0].text == "pong"

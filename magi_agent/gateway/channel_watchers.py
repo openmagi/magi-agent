@@ -113,18 +113,25 @@ class TelegramSupervisor:
         resolve_token: Callable[[], str | None],
         provider_factory: ProviderFactory | None = None,
         on_inbound: OnInbound | None = None,
+        run_turn: RunTurn | None = None,
         poll_once_factory: Callable[[Any], Callable[[], Any]] | None = None,
     ) -> None:
         self._resolve_token = resolve_token
         self._provider_factory = provider_factory or _default_telegram_provider_factory
-        self._on_inbound = on_inbound or _default_on_inbound
+        # Stored raw (not coerced): the dispatcher is resolved per provider build
+        # so a run_turn-backed bridge binds to the CURRENT (hot-reloaded) provider.
+        self._on_inbound = on_inbound
+        self._run_turn = run_turn
         self._poll_once_factory = poll_once_factory or self._build_poll_once
         self._token: str | None = None
         self._provider: Any | None = None
         self._poll_once: Callable[[], Any] | None = None
 
     def _build_poll_once(self, provider: Any) -> Callable[[], Any]:
-        return build_telegram_poll_once(provider=provider, on_inbound=self._on_inbound)
+        dispatch = _resolve_dispatch(
+            provider=provider, on_inbound=self._on_inbound, run_turn=self._run_turn
+        )
+        return build_telegram_poll_once(provider=provider, on_inbound=dispatch)
 
     def tick(self) -> str:
         token = self._resolve_token()
@@ -161,6 +168,7 @@ def build_telegram_supervisor_watcher(
     resolve_token: Callable[[], str | None] | None = None,
     provider_factory: ProviderFactory | None = None,
     on_inbound: OnInbound | None = None,
+    run_turn: RunTurn | None = None,
     interval_seconds: float = DEFAULT_TELEGRAM_POLL_INTERVAL_SECONDS,
 ) -> GatewayWatcher:
     """Long-lived supervisor watcher for dashboard-managed Telegram.
@@ -173,6 +181,7 @@ def build_telegram_supervisor_watcher(
         resolve_token=resolve_token or _default_resolve_telegram_token,
         provider_factory=provider_factory,
         on_inbound=on_inbound,
+        run_turn=run_turn,
     )
 
     async def run(stop_event: asyncio.Event) -> None:
@@ -361,6 +370,25 @@ def build_telegram_bridge_on_inbound(
     return on_inbound
 
 
+def _resolve_dispatch(
+    *,
+    provider: Any,
+    on_inbound: OnInbound | None,
+    run_turn: RunTurn | None,
+) -> OnInbound:
+    """Pick the inbound dispatcher for a provider.
+
+    Precedence: an explicit ``on_inbound`` (operator override) wins; otherwise a
+    ``run_turn`` builds the full engine-backed bridge; otherwise we fall back to
+    the log-only sink (no agent turn) so the watcher stays observable but inert.
+    """
+    if on_inbound is not None:
+        return on_inbound
+    if run_turn is not None:
+        return build_telegram_bridge_on_inbound(provider=provider, run_turn=run_turn)
+    return _default_on_inbound
+
+
 # ---------------------------------------------------------------------------
 # Watcher builder (fail-closed)
 # ---------------------------------------------------------------------------
@@ -369,6 +397,7 @@ def build_telegram_channel_watcher(
     *,
     provider_factory: ProviderFactory | None = None,
     on_inbound: OnInbound | None = None,
+    run_turn: RunTurn | None = None,
     interval_seconds: float = DEFAULT_TELEGRAM_POLL_INTERVAL_SECONDS,
 ) -> GatewayWatcher | None:
     """Build the live Telegram channel watcher, or None if not fully configured.
@@ -394,7 +423,9 @@ def build_telegram_channel_watcher(
 
     factory = provider_factory or _default_telegram_provider_factory
     provider = factory(token)
-    dispatch = on_inbound or _default_on_inbound
+    dispatch = _resolve_dispatch(
+        provider=provider, on_inbound=on_inbound, run_turn=run_turn
+    )
     poll_once = build_telegram_poll_once(provider=provider, on_inbound=dispatch)
 
     return build_channel_poll_watcher(
