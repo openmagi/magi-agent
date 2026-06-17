@@ -50,6 +50,9 @@ _VOLATILE_KEYS = frozenset(
         "lastEventAt",
         "createdAt",
         "inspectedAt",
+        # eventId in tool_start / tool_end payloads is derived from ADK Event.id,
+        # which is an auto-generated UUID4 (non-deterministic across runs).
+        "eventId",
     }
 )
 

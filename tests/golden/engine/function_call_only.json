@@ -1,0 +1,24 @@
+{
+  "events": [
+    {
+      "payload": {
+        "eventId": "<normalized>",
+        "id": "c1",
+        "inputDigest": "sha256:a908494c958996ec8cebfa2e10728536e84904384b2497a4fbba9f48d99215ba",
+        "input_preview": "{\"cmd\": \"ls\"}",
+        "name": "Bash",
+        "type": "tool_start"
+      },
+      "turn_id": "t1",
+      "type": "tool"
+    }
+  ],
+  "terminal": {
+    "cost_usd": 0.0,
+    "error": null,
+    "session_id": "s-call",
+    "terminal": "completed",
+    "turn_id": "t1",
+    "usage": {}
+  }
+}

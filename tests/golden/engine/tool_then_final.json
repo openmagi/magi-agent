@@ -1,0 +1,53 @@
+{
+  "events": [
+    {
+      "payload": {
+        "delta": "working ",
+        "type": "text_delta"
+      },
+      "turn_id": "t1",
+      "type": "token"
+    },
+    {
+      "payload": {
+        "eventId": "<normalized>",
+        "id": "c1",
+        "inputDigest": "sha256:a908494c958996ec8cebfa2e10728536e84904384b2497a4fbba9f48d99215ba",
+        "input_preview": "{\"cmd\": \"ls\"}",
+        "name": "Bash",
+        "type": "tool_start"
+      },
+      "turn_id": "t1",
+      "type": "tool"
+    },
+    {
+      "payload": {
+        "durationMs": "<normalized>",
+        "eventId": "<normalized>",
+        "id": "c1",
+        "outputDigest": "sha256:3c7d0bd859c4a5bb252c312a64236ffb6adbee4e848686c61096bc56fc104fc9",
+        "output_preview": "{\"out\": \"file.txt\"}",
+        "status": "ok",
+        "type": "tool_end"
+      },
+      "turn_id": "t1",
+      "type": "tool"
+    },
+    {
+      "payload": {
+        "delta": "done",
+        "type": "text_delta"
+      },
+      "turn_id": "t1",
+      "type": "token"
+    }
+  ],
+  "terminal": {
+    "cost_usd": 0.0,
+    "error": null,
+    "session_id": "s-tool",
+    "terminal": "completed",
+    "turn_id": "t1",
+    "usage": {}
+  }
+}
