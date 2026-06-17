@@ -233,6 +233,7 @@ graph LR
     tools --> cli
     tools --> coding
     tools --> config
+    tools --> customize
     tools --> evidence
     tools --> firstparty
     tools --> gates
@@ -632,7 +633,7 @@ graph LR
 |---|---|---|---|
 | __init__.py | — | env, models | config/tests/test_flags.py |
 | env.py | — | facts_replan, flags, gate3a_replay, gate5b4c3_shadow_counter_store, gate5b4c3_shadow_generation_contract, hosted_defaults, models, pregate8_continuity_canary, shadow_generations | (root)/main.py, adk_bridge/anthropic_cache_model.py, adk_bridge/control_plane.py, adk_bridge/tool_adapter.py, browser/autonomous/config.py, cli/app.py, cli/engine.py, cli/goal_nudge_wiring.py, cli/headless.py, cli/hook_wiring.py, cli/permissions.py, cli/providers.py, cli/real_runner.py, cli/tests/test_app.py, cli/tool_runtime.py, cli/wiring.py, config/__init__.py, config/flags.py, evidence/local_tool_collector.py, firstparty/packs/workspace_tools_default/impl.py, gates/gate5b_full_toolhost.py, gates/tool_usage_guidance.py, harness/general_automation/constraint_reinjection.py, harness/general_automation/delegation.py, harness/general_automation/live_gate.py, harness/general_automation/plan_act_switch.py, harness/general_automation/question_tool.py, harness/general_automation/recipe_disclosure.py, harness/general_automation/task_completion.py, introspection/tool.py, plugins/native/missions.py, plugins/native/scheduled_work.py, plugins/native/skills.py, plugins/native/taskboard.py, recipes/coding_mutation.py, recipes/compiler.py, recipes/ledger_workforce.py, recipes/recipe_routing.py, runtime/facts_replan.py, runtime/message_builder.py, runtime/model_tiers.py, runtime/openmagi_runtime.py, runtime/prompt_guidance.py, runtime/tool_synthesis.py, shadow/gate5b4c3_live_runner_boundary.py, shadow/gate5b4c3_runner_input_adapter.py, shadow/session_service_registry.py, tools/ask_user_question_toolhost.py, tools/core_toolhost.py, tools/dispatcher.py, tools/document_tools.py, tools/file_tool_manifests.py, tools/file_toolhost.py, tools/image_tools.py, tools/local_readonly.py, tools/plan_mode_toolhost.py, tools/safety.py, tools/web_search_tools.py, transport/chat.py, transport/chat_routes.py, transport/chat_shared.py, transport/gate5b_governance.py, transport/streaming_chat_route.py |
-| flags.py | Canonical feature-flag registry + typed reader (single source of truth). | env | cli/real_runner.py, config/env.py, config/tests/test_flags.py, customize/apply.py, customize/runtime_gate.py, harness/kernel_roles.py, observability/transcript.py, packs/discovery.py, recipes/kernel_recipe_packs.py, runtime/message_builder.py, shadow/gate5b4c3_live_runner_boundary.py, tools/document_qa_tools.py, tools/image_tools.py, tools/python_exec.py, transport/streaming_chat_route.py |
+| flags.py | Canonical feature-flag registry + typed reader (single source of truth). | env | cli/real_runner.py, config/env.py, config/tests/test_flags.py, customize/apply.py, customize/runtime_gate.py, customize/tool_perm.py, harness/kernel_roles.py, observability/transcript.py, packs/discovery.py, recipes/kernel_recipe_packs.py, runtime/message_builder.py, shadow/gate5b4c3_live_runner_boundary.py, tools/document_qa_tools.py, tools/image_tools.py, tools/python_exec.py, transport/streaming_chat_route.py |
 | models.py | — | pregate8_continuity_canary | (root)/main.py, config/__init__.py, config/env.py, gates/gate2_readiness.py, gates/gate3_readiness.py, gates/gate4_readiness.py, gates/gate5_readiness.py, gates/gate7_readiness.py, gates/gate8_readiness.py, runtime/openmagi_runtime.py |
 
 ### config/tests/
@@ -688,8 +689,9 @@ graph LR
 | custom_rules.py | Custom verification-rule schema + validation (spec §9.1). | what_menu | transport/customize.py |
 | preset_map.py | Canonical preset id → runtime-seam map for the Customize verification tab. | — | cli/real_runner.py, customize/catalog.py |
 | runtime_gate.py | Runtime-side query for Customize verification preset state. | flags, store, verification_policy | cli/engine.py |
-| store.py | — | — | cli/real_runner.py, customize/__init__.py, customize/runtime_gate.py, runtime/message_builder.py, runtime/openmagi_runtime.py, transport/customize.py |
-| verification_policy.py | — | — | cli/real_runner.py, customize/apply.py, customize/runtime_gate.py |
+| store.py | — | — | cli/real_runner.py, customize/__init__.py, customize/runtime_gate.py, customize/tool_perm.py, runtime/message_builder.py, runtime/openmagi_runtime.py, transport/customize.py |
+| tool_perm.py | Custom tool-permission rule matching (P2). | flags, store, verification_policy | tools/permission.py |
+| verification_policy.py | — | — | cli/real_runner.py, customize/apply.py, customize/runtime_gate.py, customize/tool_perm.py |
 | what_menu.py | WHAT-menu for deterministic custom rules. | — | customize/catalog.py, customize/custom_rules.py |
 
 ### discovery/
@@ -1648,7 +1650,7 @@ graph LR
 | memory_mode_guard.py | Tool-level memory-mode hard enforcement. | patch_apply, session_identity | cli/learning_recall.py, cli/memory_recall_block.py, cli/wiring.py, firstparty/packs/gates_policy_default/impl.py, gates/gate5b_full_toolhost.py, tools/core_toolhost.py, tools/local_readonly.py |
 | music_tools.py | MusicNotation tool — read musical notation from an image via vision model. | context, image_tools, result, spreadsheet_tools | tools/file_toolhost.py |
 | output_budget.py | — | manifest, result | artifacts/local_result_store.py, plugins/mcp_adapter.py, tools/kernel.py |
-| permission.py | — | context, control, manifest, safety | firstparty/packs/gates_policy_default/impl.py, gates/gate5b_full_toolhost.py, tools/__init__.py, tools/dispatcher.py, tools/kernel.py |
+| permission.py | — | context, control, manifest, safety, tool_perm | firstparty/packs/gates_policy_default/impl.py, gates/gate5b_full_toolhost.py, tools/__init__.py, tools/dispatcher.py, tools/kernel.py |
 | permission_scope.py | Mode-derived permission scope resolution (cluster 09 PR1). | manifest | cli/tool_runtime.py, cli/wiring.py |
 | persistent_python_toolhost.py | Additive first-party toolhost binder for the ``PersistentPython`` tool. | context, discovery, impl, registry, result | cli/tool_runtime.py, runtime/openmagi_runtime.py |
 | plan_mode_toolhost.py | Route the catalog Enter/ExitPlanMode tools to the GA plan-act flow. | context, control_projection, env, registry, result | cli/tool_runtime.py, tools/tests/test_plan_mode_toolhost.py |
