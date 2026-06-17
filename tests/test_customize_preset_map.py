@@ -2,10 +2,56 @@ from __future__ import annotations
 
 from magi_agent.customize.preset_map import (
     PRESET_SEAMS,
+    description_for,
+    domain_for,
     enforcement_for,
+    opt_method_for,
     seam_for,
     supported_modes_for,
+    tier_for,
 )
+
+
+def test_domain_for_maps_category_to_when_group():
+    assert domain_for("security") == "always-on"
+    assert domain_for("coding") == "coding"
+    assert domain_for("research") == "research"
+    assert domain_for("fact") == "research"
+    # answer/output/task/memory collapse into delivery·general
+    for c in ("answer", "output", "task", "memory"):
+        assert domain_for(c) == "delivery", c
+    # unknown → delivery (safe default)
+    assert domain_for("totally-unknown") == "delivery"
+
+
+def test_tier_for_classifies_enforcement_mechanism():
+    # all 4 wired seams are deterministic today
+    for pid in ("coding-verification", "fact-grounding", "source-authority", "artifact-delivery"):
+        assert tier_for(pid, is_security=False) == "deterministic", pid
+    assert tier_for("dangerous-patterns", is_security=True) == "always-on"
+    assert tier_for("answer-quality", is_security=False) is None  # preview → no tier
+
+
+def test_opt_method_for_reads_seam_wiring():
+    assert opt_method_for("coding-verification") == "opt-out"
+    assert opt_method_for("fact-grounding") == "opt-in"
+    assert opt_method_for("answer-quality") is None
+
+
+def test_description_for_uses_accurate_text_for_wired_presets():
+    # source-authority must reflect OSS anti-fabrication reality, NOT the hosted
+    # "memory vs real-time priority" copy (spec §4.3).
+    sa = description_for("source-authority")
+    assert "anti-fab" in sa.lower() or "inspected source" in sa.lower()
+    # every wired/security preset has a non-empty, specific description
+    for pid in ("coding-verification", "fact-grounding", "artifact-delivery", "dangerous-patterns"):
+        assert description_for(pid)
+        assert "parity" not in description_for(pid).lower()
+
+
+def test_description_for_unknown_has_honest_fallback():
+    d = description_for("totally-unknown-preset")
+    assert d  # non-empty honest fallback
 
 
 def test_coding_verification_seam_is_opt_out():

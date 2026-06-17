@@ -115,3 +115,94 @@ def enforcement_for(preset_id: str, *, category: str, is_security: bool) -> str:
     if is_security or category == "security":
         return "always-on"
     return "preview"
+
+
+# WHEN-group (domain) for the modal, mapped from PresetCategory. The modal groups
+# presets by *when they fire* rather than by semantic category (spec §7/D3).
+_CATEGORY_TO_DOMAIN: dict[str, str] = {
+    "security": "always-on",
+    "coding": "coding",
+    "research": "research",
+    "fact": "research",
+    "answer": "delivery",
+    "output": "delivery",
+    "task": "delivery",
+    "memory": "delivery",
+}
+
+
+def domain_for(category: str) -> str:
+    """Map a PresetCategory to a modal WHEN-group (always-on/coding/research/delivery)."""
+    return _CATEGORY_TO_DOMAIN.get(category, "delivery")
+
+
+def tier_for(preset_id: str, *, is_security: bool) -> str | None:
+    """Enforcement mechanism tier for the badge.
+
+    ``deterministic`` — a wired pre-final ref check (all current seams).
+    ``always-on``     — security/PermissionGate, immutable.
+    ``None``          — preview (no runtime gate yet).
+    """
+    if preset_id in PRESET_SEAMS:
+        return "deterministic"
+    if is_security:
+        return "always-on"
+    return None
+
+
+def opt_method_for(preset_id: str) -> str | None:
+    """``opt-out`` / ``opt-in`` from the seam wiring, or None if not wired."""
+    seam = PRESET_SEAMS.get(preset_id)
+    if seam is None:
+        return None
+    return "opt-out" if seam.wiring == "opt_out" else "opt-in"
+
+
+# Concrete one-line descriptions. The 4 WIRED presets use OSS-accurate wording
+# (spec §4.3/§5 — e.g. source-authority is anti-fabrication, NOT the hosted
+# "memory vs real-time" copy). Security presets describe the always-on guardrail.
+# Remaining (preview) presets reuse the hosted intent copy so the UI explains what
+# each WOULD check — they stay honestly badged as preview elsewhere.
+_DESCRIPTIONS: dict[str, str] = {
+    # --- wired (OSS-accurate) ---
+    "coding-verification": "Require fresh test-pass evidence before the final answer when code is mutated.",
+    "fact-grounding": "Block a specific factual value in the answer that isn't grounded in opened sources.",
+    "source-authority": "Require declared citations to point at actually-inspected sources (anti-fab).",
+    "artifact-delivery": "Require real delivery evidence for promised artifacts before completion.",
+    # --- always-on security ---
+    "dangerous-patterns": "Block dangerous shell commands. Always-on safety.",
+    "path-escape": "Block file access outside the workspace. Always-on safety.",
+    "secret-exposure": "Block commands that would expose secrets or credentials. Always-on safety.",
+    "git-safety": "Block destructive git operations. Always-on safety.",
+    "sealed-files": "Protect sealed files from modification. Always-on safety.",
+    "arity-permission": "Require permission for high-impact tool actions. Always-on safety.",
+    # --- preview (hosted intent copy; honestly badged preview in the catalog) ---
+    "answer-quality": "Verifies the response actually answers the question.",
+    "completion-evidence": "Checks completion claims have actual evidence.",
+    "pre-refusal": "Prevents rushing to refuse tasks it can handle.",
+    "output-purity": "Blocks raw JSON or internal data from appearing in responses.",
+    "deferral-blocker": "Forces completion now instead of promising future delivery.",
+    "self-claim": "Blocks claiming file contents without reading first.",
+    "resource-existence": "Verifies referenced files actually exist.",
+    "claim-citation": "Ensures factual claims include sources.",
+    "deterministic-evidence": "Checks numbers and dates are backed by tool evidence.",
+    "coding-context": "Auto-injects repo map and symbols for code tasks.",
+    "coding-workspace-lock": "Prevents unrelated file changes during coding.",
+    "coding-child-review": "Auto-reviews sub-agent code output.",
+    "benchmark-verifier": "Detects and blocks performance regressions.",
+    "task-contract": "Enforces a goal to plan to evidence lifecycle.",
+    "goal-progress": "Blocks completion claims without actual actions.",
+    "task-board-completion": "Blocks completion when tasks remain incomplete.",
+    "output-delivery": "Verifies created files are actually delivered.",
+    "response-language": "Enforces the configured language policy.",
+    "parallel-research": "Verifies and cross-checks research sources.",
+    "memory-continuity": "Maintains cross-session memory consistency.",
+    "document-authoring-coverage": "Checks authored documents cover the requested scope.",
+}
+
+_DESCRIPTION_FALLBACK = "Surfaced for parity; not yet wired to a runtime gate."
+
+
+def description_for(preset_id: str) -> str:
+    """Concrete one-line description for a preset (honest fallback if unknown)."""
+    return _DESCRIPTIONS.get(preset_id, _DESCRIPTION_FALLBACK)
