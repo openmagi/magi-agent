@@ -90,6 +90,23 @@ PRESET_SEAMS: dict[str, PresetSeam] = {
         supported_modes=("deterministic",),
         wiring="opt_in",
     ),
+    # Opt-in for the hard-redaction satisfier (credential-clean scan of the final
+    # answer + the no-production-attachment invariant). Enabling the preset turns
+    # on the engine satisfier (cli/engine _hard_redaction_matched_requirement_labels)
+    # for the runtime even when MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED is off.
+    # controls_refs is documentation-only for opt_in seams.
+    "redaction": PresetSeam(
+        preset_id="redaction",
+        controls_refs=(
+            "public_redaction",
+            "no_production_attachment",
+            "redaction_audit",
+            "no_raw_evidence_payload",
+        ),
+        runtime_default_on=False,
+        supported_modes=("deterministic",),
+        wiring="opt_in",
+    ),
 }
 
 
@@ -169,6 +186,7 @@ _DESCRIPTIONS: dict[str, str] = {
     "fact-grounding": "Block a specific factual value in the answer that isn't grounded in opened sources.",
     "source-authority": "Require declared citations to point at actually-inspected sources (anti-fab).",
     "artifact-delivery": "Require real delivery evidence for promised artifacts before completion.",
+    "redaction": "Block a final answer that leaks a credential and require the no-production-attachment invariant.",
     # --- always-on security ---
     "dangerous-patterns": "Block dangerous shell commands. Always-on safety.",
     "path-escape": "Block file access outside the workspace. Always-on safety.",

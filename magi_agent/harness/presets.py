@@ -315,6 +315,12 @@ _BUILTIN_PRESETS: tuple[BuiltinHarnessPreset, ...] = tuple(
             ),
             _preset("output-delivery", PresetCategory.OUTPUT, hook_points=("afterLLMCall",), verifier_gates=("output-delivery",)),
             _preset("artifact-delivery", PresetCategory.OUTPUT, hook_points=("onArtifactCreated", "afterTurnEnd"), verifier_gates=("artifact-delivery",)),
+            # Opt-in pre-final redaction satisfier: the credential-clean scan of
+            # the final answer + the no-production-attachment invariant that emit
+            # the context-safety hard refs. default-OFF; enabled via env flag OR
+            # the redaction Customize preset (see cli/engine
+            # _hard_redaction_matched_requirement_labels).
+            _preset("redaction", PresetCategory.OUTPUT, default_on=False, hook_points=("afterLLMCall",), verifier_gates=("redaction",)),
             # Task C — OPTIONAL BLOCKING document-authoring coverage gate. Default
             # OFF and env-gated (``MAGI_DOCUMENT_AUTHORING_COVERAGE``); when off the
             # ``DocumentCoverage`` evidence from ``docx_write`` (Task B) stays

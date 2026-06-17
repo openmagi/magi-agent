@@ -3365,14 +3365,21 @@ class MagiEngineDriver:
 
         Fail-open per label: any error emits nothing, so the satisfier can only
         REMOVE a block, never add one.
+
+        Activeness gate: ``MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED`` OR an enabled
+        ``redaction`` Customize preset (opt-in seam).
         """
         import os  # noqa: PLC0415
 
         from magi_agent.config.env import (  # noqa: PLC0415
             parse_source_ledger_evidence_gate_enabled,
         )
+        from magi_agent.customize.runtime_gate import preset_enabled  # noqa: PLC0415
 
-        if not parse_source_ledger_evidence_gate_enabled(os.environ):
+        if not (
+            parse_source_ledger_evidence_gate_enabled(os.environ)
+            or preset_enabled("redaction", default=False)
+        ):
             return []
         assembly = self._runner_policy_assembly
         if assembly is None:
