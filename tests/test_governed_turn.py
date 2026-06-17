@@ -100,3 +100,24 @@ def test_harness_state_reaches_run_turn_stream() -> None:
     assert ti["prompt"] == ctx.prompt, (
         f"prompt mismatch: got {ti['prompt']!r}, expected {ctx.prompt!r}"
     )
+
+
+def test_external_cancel_is_threaded_to_run_turn_stream() -> None:
+    """When an external cancel event is provided, it is threaded to run_turn_stream."""
+    seen = {}
+
+    class _RecordingEngineForCancel:
+        async def run_turn_stream(self, runtime, turn_input, *, cancel, gate):
+            seen["cancel"] = cancel
+            yield "evt"
+
+    rt = SimpleNamespace(engine=_RecordingEngineForCancel(), gate=None)
+    ctx = TurnContext(prompt="go", session_id="s1", turn_id="t1")
+    my_cancel = asyncio.Event()
+
+    async def _run():
+        return [x async for x in run_governed_turn(ctx, runtime=rt, cancel=my_cancel)]
+
+    out = asyncio.run(_run())
+    assert out == ["evt"]
+    assert seen["cancel"] is my_cancel

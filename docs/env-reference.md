@@ -196,6 +196,7 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 
 - `MAGI_APPLY_PATCH_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Enable the apply-patch tool for multi-file edits (default-ON full profile).
 - `MAGI_BROWSER_TOOL_ENABLED` (default off) — Expose the browser-use autonomous vision BrowserTask tool.
+- `MAGI_CHILD_MEMORY_INHERIT_ENABLED` (default off) — When ON, a normal-mode parent yields a read_only child memory mode (child reads parent workspace memory, never writes back). Default OFF keeps children incognito.
 - `MAGI_CLI_ENABLED` (default on) — Enable the magi CLI surface (headless NDJSON + Textual TUI); flat default-ON.
 - `MAGI_CODE_ACTION_ENABLED` (default off) — Expose the persistent PythonExec code-execution tool.
 - `MAGI_CODE_ACTION_MAX_OUTPUT_BYTES` (default `8192`) — Head+tail output cap per stream (bytes) for PythonExec results; clamped to 1024-65536.
@@ -273,6 +274,7 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 - `MAGI_SESSION_TRANSCRIPT_RETENTION_DAYS` (default `14`) — Session-transcript retention in days; older files are pruned.
 - `MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED` (default off) — Project the live turn's inspected-source ledger into the engine's harvested public refs as the named ref 'verifier:research-source-evidence' so a recipe can require source grounding: a turn that read >=1 source passes, a turn that read none blocks. Strict default-OFF and inert unless explicitly set.
 - `MAGI_STEP_DECOMPOSITION_ENABLED` (default off) — Inject a light first-pass guidance asking the agent to enumerate dependent sub-steps up front and confirm each before proceeding (prompt-only nudge; reuses existing planning seams).
+- `MAGI_SUBAGENT_GOVERNED_TURN_ENABLED` (default off) — Route spawned subagents through run_governed_turn (governed turn-loop) instead of the bare run_async child loop. Default OFF keeps the legacy child path byte-identical.
 - `MAGI_TOOL_SYNTHESIS_NUDGE_ENABLED` (default off) — Live-SWE-style tool-synthesis: per-step reflection nudge + 'create your own tools' recipe block (frontier-tier models only).
 - `MAGI_USAGE_PRICE_IN_PER_MTOK` (no default) — Local Usage dashboard: USD per 1M INPUT tokens for the active model. Set this (and the OUT counterpart) to price models litellm does not have in its map; overrides litellm pricing when set.
 - `MAGI_USAGE_PRICE_OUT_PER_MTOK` (no default) — Local Usage dashboard: USD per 1M OUTPUT tokens for the active model. Pairs with MAGI_USAGE_PRICE_IN_PER_MTOK.

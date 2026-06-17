@@ -185,6 +185,7 @@ def build_headless_runtime(
     bot_id: str = "local",
     owner_user_id: str = "local",
     learning_live_readiness: object | None = None,
+    tools: list[object] | None = None,
 ) -> HeadlessRuntime:
     """Construct the complete headless dependency set.
 
@@ -207,6 +208,13 @@ def build_headless_runtime(
     mode:
         ``"act"`` (default) exposes the full tool set; ``"plan"`` exposes only
         read-only tools (mutating tools are excluded) for plan-mode turns.
+    tools:
+        Optional explicit tool list forwarded to ``build_cli_model_runner``
+        when building the default runner (i.e. when ``runner`` is ``None``).
+        When ``None`` (the default) the full first-party toolset is built as
+        normal — behavior is byte-identical to pre-patch callers.  Pass an
+        explicit list (including ``[]``) to restrict the toolset; the primary
+        use-case is child-agent privilege containment.
 
     Returns
     -------
@@ -234,6 +242,7 @@ def build_headless_runtime(
             owner_user_id=owner_user_id,
             learning_live_readiness=learning_live_readiness,
             permission_mode=permission_mode,
+            tools=tools,
         )
     )
     composio_bundle, composio_attached = _build_composio_bundle_for_mode(
@@ -444,6 +453,7 @@ def _build_default_runner(
     owner_user_id: str = "local",
     learning_live_readiness: object | None = None,
     permission_mode: "PermissionMode" = "default",
+    tools: list[object] | None = None,
 ) -> object:
     """Build the CLI's default runner.
 
@@ -481,18 +491,23 @@ def _build_default_runner(
     local_tool_evidence = LocalToolEvidenceCollector(
         general_automation_receipts=general_automation_receipts,
     )
+    effective_tools = (
+        tools
+        if tools is not None
+        else _build_first_party_adk_tools(
+            cwd=cwd,
+            session_id=session_id,
+            mode=mode,
+            memory_mode=memory_mode,
+            permission_mode=permission_mode,
+            general_automation_receipts=general_automation_receipts,
+            local_tool_evidence_collector=local_tool_evidence,
+        )
+    )
     try:
         return build_cli_model_runner(
             config,
-            tools=_build_first_party_adk_tools(
-                cwd=cwd,
-                session_id=session_id,
-                mode=mode,
-                memory_mode=memory_mode,
-                permission_mode=permission_mode,
-                general_automation_receipts=general_automation_receipts,
-                local_tool_evidence_collector=local_tool_evidence,
-            ),
+            tools=effective_tools,
             workspace_root=workspace_root,
             memory_mode=memory_mode,
             recall_query=recall_query,

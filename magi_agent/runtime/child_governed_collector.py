@@ -1,0 +1,115 @@
+"""Governed-stream → child-envelope adapter.
+
+Consumes the ``run_governed_turn`` async-generator and produces the
+``(summary, evidence_refs, status)`` tuple the child boundary expects.
+
+Design notes
+------------
+- ``_collect_public_refs`` is re-implemented locally (identical logic to
+  ``MagiEngineDriver._collect_public_refs`` in ``cli.engine``) to avoid
+  importing the heavyweight engine module from a ``runtime`` submodule, which
+  would introduce an unwanted ``runtime`` → ``cli.engine`` dependency.
+- ``_public_evidence_refs`` is imported from ``child_runner_live`` because it
+  lives in the same ``runtime`` package and carries no circular-import risk.
+- ``_MAX_SUMMARY_CHARS`` is re-exported from ``child_runner_live`` so the
+  constant stays single-source.
+"""
+from __future__ import annotations
+
+from collections.abc import AsyncGenerator, Mapping
+from typing import Union
+
+from magi_agent.cli.contracts import EngineResult, Terminal
+from magi_agent.runtime.child_runner_live import (
+    _MAX_SUMMARY_CHARS as _MAX_SUMMARY_CHARS,
+    _public_evidence_refs,
+)
+from magi_agent.runtime.events import RuntimeEvent
+
+__all__ = [
+    "collect_governed_child_turn",
+    "_MAX_SUMMARY_CHARS",
+]
+
+
+def _collect_public_refs(value: object, refs: set[str]) -> None:
+    """Recursively harvest public ref strings from an event payload.
+
+    Mirrors ``MagiEngineDriver._collect_public_refs`` exactly; kept local to
+    avoid a heavy ``cli.engine`` import from within the ``runtime`` package.
+    """
+    if isinstance(value, str):
+        if value.startswith(
+            ("evidence:", "verifier:", "receipt:sha256:", "sha256:")
+        ):
+            refs.add(value)
+        return
+    if isinstance(value, Mapping):
+        for nested in value.values():
+            _collect_public_refs(nested, refs)
+        return
+    if isinstance(value, (list, tuple)):
+        for nested in value:
+            _collect_public_refs(nested, refs)
+
+
+async def collect_governed_child_turn(
+    stream: AsyncGenerator[Union[RuntimeEvent, EngineResult], None],
+) -> tuple[str, tuple[str, ...], str]:
+    """Consume *stream* and return ``(summary, evidence_refs, status)``.
+
+    Parameters
+    ----------
+    stream:
+        Async-generator yielding :class:`~magi_agent.runtime.events.RuntimeEvent`
+        objects followed by a terminal :class:`~magi_agent.cli.contracts.EngineResult`
+        as its final item.  This matches the ``EngineDriver.run_turn_stream``
+        consumption convention defined in ``cli.contracts``.
+
+    Returns
+    -------
+    summary:
+        Concatenation of all ``event.payload["delta"]`` values for every
+        ``RuntimeEvent`` whose ``payload["type"] == "text_delta"``, trimmed to
+        ``_MAX_SUMMARY_CHARS``.
+    evidence_refs:
+        Tuple of deduplicated ``evidence:``-namespaced ref strings harvested
+        from every event payload.
+    status:
+        ``"completed"`` when the terminal ``EngineResult`` carries
+        ``Terminal.completed``; ``"failed"`` for any other terminal value.
+
+    Raises
+    ------
+    ValueError
+        If the stream ends without yielding an ``EngineResult`` terminal.
+    """
+    text_chunks: list[str] = []
+    raw_refs: set[str] = set()
+    terminal: EngineResult | None = None
+
+    async for item in stream:
+        if isinstance(item, EngineResult):
+            terminal = item
+            # Convention: EngineResult is the FINAL item — stop consuming.
+            break
+
+        # item is a RuntimeEvent
+        payload = item.payload
+        _collect_public_refs(payload, raw_refs)
+
+        if payload.get("type") == "text_delta":
+            delta = payload.get("delta")
+            if isinstance(delta, str) and delta:
+                text_chunks.append(delta)
+
+    if terminal is None:
+        raise ValueError(
+            "collect_governed_child_turn: stream ended with no terminal EngineResult"
+        )
+
+    summary = "".join(text_chunks)[:_MAX_SUMMARY_CHARS]
+    evidence_refs = _public_evidence_refs(list(raw_refs))
+    status = "completed" if terminal.terminal is Terminal.completed else "failed"
+
+    return summary, evidence_refs, status

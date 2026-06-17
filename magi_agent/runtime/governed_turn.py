@@ -18,6 +18,7 @@ async def run_governed_turn(
     ctx: TurnContext,
     *,
     runtime: object | None = None,
+    cancel: asyncio.Event | None = None,
 ) -> AsyncGenerator[object, None]:
     """Yield every event produced by one governed turn.
 
@@ -31,9 +32,14 @@ async def run_governed_turn(
         (a ``MagiEngineDriver``) and ``.gate``.  When provided it is **reused
         as-is** (the CLI REPL keeps one runtime alive across turns).  When
         ``None`` a fresh runtime is built from *ctx* via ``_build_runtime``.
+    cancel:
+        An optional external ``asyncio.Event`` for cancellation signaling.
+        When provided, it is threaded into ``run_turn_stream`` so the caller
+        can cancel the turn externally.  When ``None`` a fresh event is created
+        (today's behavior).
     """
     rt = runtime if runtime is not None else _build_runtime(ctx)
-    cancel = asyncio.Event()
+    cancel = cancel if cancel is not None else asyncio.Event()
     stream = rt.engine.run_turn_stream(  # type: ignore[union-attr]
         None,
         ctx.to_turn_input(),
