@@ -693,6 +693,7 @@ def _pre_final_gate_applies(
     prompt: str,
     harness_state: object | None,
     coding_mutation_observed: bool,
+    live_selected_pack_ids: Sequence[str] = (),
 ) -> bool:
     """Return whether the assembled policy should enforce the final gate.
 
@@ -705,14 +706,33 @@ def _pre_final_gate_applies(
     blocked, even when the prompt classifier would otherwise flag it as coding.
     """
 
-    selected = set(assembly.selected_pack_ids)
-    if "openmagi.dev-coding" not in selected:
+    dev_coding_pack_id = "openmagi.dev-coding"
+    base_selected = set(assembly.selected_pack_ids)
+    selected = base_selected | set(live_selected_pack_ids)
+    if dev_coding_pack_id not in selected:
         return True
 
     # Mutation-scope: the coding evidence gate only applies to turns that
-    # actually changed code. No file mutation ⇒ nothing to verify ⇒ no block.
+    # actually changed code. No file mutation ⇒ nothing coding to verify.
     if not coding_mutation_observed:
-        return False
+        # If dev-coding is part of the PROFILE baseline, preserve main's exact
+        # behavior: a no-mutation turn produces nothing to verify ⇒ no gate.
+        # (When live_selected_pack_ids is empty this branch is always taken,
+        # so the OFF-path stays byte-identical to main.)
+        if dev_coding_pack_id in base_selected:
+            return False
+        # dev-coding arrived PURELY via live selection. Its (mutation-scoped)
+        # coding obligation has nothing to verify on a no-mutation turn, but we
+        # must NOT suppress the gate — that would drop the non-coding profile
+        # baseline obligations. Defer to the baseline's own applies-decision
+        # (i.e. what the gate would decide without the live dev-coding pack).
+        return _pre_final_gate_applies(
+            assembly=assembly,
+            prompt=prompt,
+            harness_state=harness_state,
+            coding_mutation_observed=coding_mutation_observed,
+            live_selected_pack_ids=(),
+        )
 
     task_types = _extract_task_types(harness_state)
     if task_types:
@@ -2015,6 +2035,7 @@ class MagiEngineDriver:
         # attempt's text is internal repair dialogue (often the model refusing
         # the synthetic repair continuation) — leaking it concatenated the whole
         # exchange into the user-visible reply.
+        live_selected = await self._read_live_selected_recipe_pack_ids(session_id)
         repair_token_buffer: list[RuntimeEvent] = []
         while True:
             pre_final_gate = self._pre_final_gate_payload(
@@ -2026,6 +2047,7 @@ class MagiEngineDriver:
                 coding_mutation_observed=file_edit_calls > 0,
                 repair_attempt_count=repair_attempts,
                 final_text=emitted_text,
+                live_selected_pack_ids=live_selected,
             )
             if pre_final_gate is None:
                 break
@@ -2742,6 +2764,34 @@ class MagiEngineDriver:
             attachment.original_runner_route,
         )
 
+    async def _read_live_selected_recipe_pack_ids(self, session_id: str) -> tuple[str, ...]:
+        """Read accumulated select_recipe picks from ADK session state. Fail-open → ()."""
+        try:
+            from magi_agent.config.env import recipe_routing_llm_enabled  # noqa: PLC0415
+            if not recipe_routing_llm_enabled():
+                return ()
+            from magi_agent.recipes.recipe_routing import (  # noqa: PLC0415
+                SELECTED_RECIPE_PACK_IDS_STATE_KEY,
+            )
+            runner = self._runner
+            svc = getattr(runner, "_session_service", None)
+            app_name = getattr(runner, "_app_name", None)
+            user_id = getattr(runner, "_default_user_id", "cli-user")
+            if svc is None or app_name is None:
+                return ()
+            session = await svc.get_session(
+                app_name=app_name, user_id=user_id, session_id=session_id
+            )
+            state = getattr(session, "state", None)
+            if state is None or not hasattr(state, "get"):
+                return ()
+            existing = state.get(SELECTED_RECIPE_PACK_IDS_STATE_KEY)
+            if isinstance(existing, (tuple, list)):
+                return tuple(str(item) for item in existing)
+        except Exception:  # noqa: BLE001
+            return ()
+        return ()
+
     def _pre_final_gate_payload(
         self,
         *,
@@ -2753,6 +2803,7 @@ class MagiEngineDriver:
         coding_mutation_observed: bool = False,
         repair_attempt_count: int = 0,
         final_text: str = "",
+        live_selected_pack_ids: tuple[str, ...] = (),
     ) -> dict[str, object] | None:
         assembly = self._runner_policy_assembly
         if assembly is None:
@@ -2762,8 +2813,41 @@ class MagiEngineDriver:
             prompt=prompt,
             harness_state=harness_state,
             coding_mutation_observed=coding_mutation_observed,
+            live_selected_pack_ids=live_selected_pack_ids,
         ):
             return None
+        # Union live-selected recipe obligations into the baseline gate requirements.
+        # Fail-open: any error resolving the registry keeps extra_* as () so the
+        # effective sets equal the baseline (byte-identical OFF-path behavior).
+        extra_validators: tuple[str, ...] = ()
+        extra_evidence: tuple[str, ...] = ()
+        if live_selected_pack_ids:
+            try:
+                from magi_agent.config.env import recipe_routing_llm_enabled  # noqa: PLC0415
+                if recipe_routing_llm_enabled():
+                    from magi_agent.recipes.kernel_recipe_packs import build_runtime_pack_registry  # noqa: PLC0415
+                    from magi_agent.recipes import recipe_routing as _recipe_routing  # noqa: PLC0415
+                    extra_validators, extra_evidence = _recipe_routing.build_recipe_obligation_scope(
+                        build_runtime_pack_registry()
+                    ).obligations_for(live_selected_pack_ids)
+                    # Mutation-scope: dev-coding's test-evidence validator only
+                    # has something to verify when code was actually mutated. On
+                    # a no-mutation turn drop it so the (non-coding) baseline
+                    # stays enforced without falsely requiring coding evidence.
+                    if not coding_mutation_observed:
+                        extra_validators = tuple(
+                            ref
+                            for ref in extra_validators
+                            if ref != _recipe_routing._DEV_CODING_EVIDENCE_VALIDATOR
+                        )
+            except Exception:  # noqa: BLE001
+                extra_validators, extra_evidence = (), ()
+        effective_required_validators = tuple(
+            dict.fromkeys((*assembly.required_validators, *extra_validators))
+        )
+        effective_required_evidence = tuple(
+            dict.fromkeys((*assembly.evidence_requirements, *extra_evidence))
+        )
         evidence_records: tuple[object, ...] = ()
         verifier_bus: dict[str, object] | None = None
         # Task C — OPTIONAL BLOCKING document-authoring coverage gate. Default OFF
@@ -2782,8 +2866,8 @@ class MagiEngineDriver:
 
             evidence_records = self._collect_evidence(turn_id)
             verifier_bus = execute_pre_final_verifier_bus(
-                required_evidence=assembly.evidence_requirements,
-                required_validators=assembly.required_validators,
+                required_evidence=effective_required_evidence,
+                required_validators=effective_required_validators,
                 observed_public_refs=tuple(sorted(observed_public_refs)),
                 evidence_records=evidence_records,
                 document_coverage_gate_enabled=document_coverage_gate_enabled,
@@ -2818,10 +2902,10 @@ class MagiEngineDriver:
             self._evidence_pack_matched_requirement_labels(evidence_records)
         )
         missing_evidence = [
-            ref for ref in assembly.evidence_requirements if ref not in observed_public_refs
+            ref for ref in effective_required_evidence if ref not in observed_public_refs
         ]
         missing_validators = [
-            ref for ref in assembly.required_validators if ref not in observed_public_refs
+            ref for ref in effective_required_validators if ref not in observed_public_refs
         ]
         # A4 — flag-gated GA deliverable completion gate. Promotes the Track 19
         # PR3 receipt-grounded check (an artifact deliverable receipt must

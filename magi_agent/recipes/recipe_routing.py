@@ -7,7 +7,7 @@ registry. The resolver-drain wiring (reading the accumulated selections back int
 a ``ProfileResolutionRequest``) lands in a later task."""
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping, MutableMapping
+from collections.abc import Iterable, Mapping, MutableMapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -120,6 +120,77 @@ def build_recipe_tool_scope(registry: PackRegistry) -> RecipeToolScope:
         owning_packs={tool: tuple(packs) for tool, packs in owning_packs.items()},
         scoped_tools=frozenset(owning_packs),
         _granted_by_pack=granted_by_pack,
+    )
+
+
+_DEV_CODING_PACK_ID = "openmagi.dev-coding"
+_DEV_CODING_EVIDENCE_VALIDATOR = "verifier:dev-coding:test-evidence"
+
+
+@dataclass(frozen=True)
+class RecipeObligationScope:
+    """Maps each routable pack to the completion-gate obligations it imposes.
+
+    Completion gates read the model's live ``select_recipe`` choices from the
+    session state and enforce the selected packs' obligations on the turn
+    output: validators (raters) + evidence (required answer structure).
+
+    "Obligation" = a (validator_ref, evidence_ref) pair the completion gate
+    asserts must be satisfied when a pack is selected. Each pack contributes
+    its authored ``validator_refs`` + ``evidence_refs`` (except ``hard_safety``
+    packs, which stay in the profile baseline, never routed). The dev-coding
+    pack has a special case: ``verifier:dev-coding:test-evidence`` is appended
+    outside the pack's static validator_refs to mirror real_runner.py behavior.
+
+    Pure data + a pure predicate; no I/O, no flag gating.
+    """
+
+    validators_by_pack: Mapping[str, frozenset[str]]
+    evidence_by_pack: Mapping[str, frozenset[str]]
+
+    def obligations_for(
+        self, selected_pack_ids: Sequence[str]
+    ) -> tuple[tuple[str, ...], tuple[str, ...]]:
+        """Return the union of (validators, evidence) from selected packs.
+
+        Args:
+            selected_pack_ids: sequence of pack IDs (those in the registry).
+                Unknown packs are silently ignored.
+
+        Returns:
+            A tuple ``(validators, evidence)`` where each is a sorted,
+            deduplicated tuple of refs. Empty selection yields ``((), ())``.
+        """
+        validators: set[str] = set()
+        evidence: set[str] = set()
+        for pid in selected_pack_ids:
+            validators |= self.validators_by_pack.get(pid, frozenset())
+            evidence |= self.evidence_by_pack.get(pid, frozenset())
+            if pid == _DEV_CODING_PACK_ID:
+                # Mirror real_runner.py: dev-coding's test-evidence validator is
+                # appended outside the pack's static validator_refs.
+                validators.add(_DEV_CODING_EVIDENCE_VALIDATOR)
+        return tuple(sorted(validators)), tuple(sorted(evidence))
+
+
+def build_recipe_obligation_scope(registry: PackRegistry) -> RecipeObligationScope:
+    """Compute the completion-gate obligations from the pack registry.
+
+    Iterates ``registry.values()`` in order, skipping ``hard_safety`` packs
+    (which never impose routing obligations, staying in the profile baseline),
+    and accumulates the per-pack validator and evidence ref mappings. Pure:
+    no I/O, no flag gating.
+    """
+    validators_by_pack: dict[str, frozenset[str]] = {}
+    evidence_by_pack: dict[str, frozenset[str]] = {}
+    for pack in registry.values():
+        if pack.hard_safety:
+            continue  # always-on floor stays in the profile baseline, never routed
+        validators_by_pack[pack.pack_id] = frozenset(pack.validator_refs)
+        evidence_by_pack[pack.pack_id] = frozenset(pack.evidence_refs)
+    return RecipeObligationScope(
+        validators_by_pack=validators_by_pack,
+        evidence_by_pack=evidence_by_pack,
     )
 
 
@@ -430,8 +501,10 @@ def _adk_state(context: ToolContext) -> MutableMapping[str, object] | None:
 __all__ = [
     "SELECTED_RECIPE_PACK_IDS_STATE_KEY",
     "SELECT_RECIPE_TOOL_NAME",
+    "RecipeObligationScope",
     "RecipeToolScope",
     "build_recipe_listing_section",
+    "build_recipe_obligation_scope",
     "build_recipe_tool_scope",
     "project_recipe_route_decided_event",
     "register_select_recipe_tool",
