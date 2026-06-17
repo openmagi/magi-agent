@@ -559,6 +559,7 @@ def _sanitize_synthetic_local_context(context: ToolContext) -> ToolContext:
         files_read=context.files_read,
         source_ledger=context.source_ledger,
         spawn_depth=context.spawn_depth,
+        parent_tool_names=context.parent_tool_names,
         spawn_workspace=None,
         plugin_id=context.plugin_id,
         secret_scope=None,
