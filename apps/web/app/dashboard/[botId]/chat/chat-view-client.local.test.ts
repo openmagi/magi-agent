@@ -25,4 +25,12 @@ describe("local OSS chat dashboard", () => {
     expect(chatClientSource).toContain("/v1/chat/cancel");
     expect(chatClientSource).not.toContain('localRuntimeFetch("/v1/chat/completions"');
   });
+
+  it("resolves the channel from the live URL so non-prerendered channels render", () => {
+    // The static export only prerenders `general`; every other local channel
+    // is served the chat shell, so the channel must come from the URL at
+    // runtime rather than the build-time `initialChannel` prop.
+    expect(source).toContain("usePathname");
+    expect(source).toContain("channelFromChatPathname(pathname) ?? initialChannelProp");
+  });
 });

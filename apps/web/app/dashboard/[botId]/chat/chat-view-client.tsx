@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useCallback, useLayoutEffect, useMemo, useState, useRef } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { useLocalPrivy } from "@/lib/local-auth";
 const usePrivy = useLocalPrivy;
 import { ChatSidebar } from "@/components/chat/chat-sidebar";
@@ -198,6 +198,21 @@ function mergeFetchedServerMessages(botId: string, channel: string, msgs: Server
     .setLastServerFetch(channel, last.created_at, { botId });
 }
 
+/**
+ * Extract the channel name from a `/dashboard/<botId>/chat/<channel>` pathname.
+ *
+ * The local dashboard is a static export (`output: "export"`) that only
+ * prerenders the `general` channel, so any other channel is served the chat
+ * shell via the runtime SPA fallback. The baked-in `initialChannel` prop is
+ * therefore always `general` for non-prerendered channels — the live URL is
+ * the source of truth, so we resolve the channel from it at runtime.
+ */
+export function channelFromChatPathname(pathname: string | null | undefined): string | null {
+  if (!pathname) return null;
+  const match = pathname.match(/\/dashboard\/[^/]+\/chat\/([^/?#]+)/);
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
 export function ChatViewClient({
   botId,
   botName,
@@ -208,11 +223,15 @@ export function ChatViewClient({
   subscriptionPlan,
   bots,
   maxBots,
-  initialChannel,
+  initialChannel: initialChannelProp,
   telegramBotUsername,
   telegramOwnerId,
 }: ChatViewClientProps) {
   const router = useRouter();
+  const pathname = usePathname();
+  // Prefer the live URL over the build-time static param so non-prerendered
+  // channels (anything but `general`) render the channel actually requested.
+  const initialChannel = channelFromChatPathname(pathname) ?? initialChannelProp;
   const { getAccessToken, ready, authenticated, logout } = usePrivy();
   const { locale } = useI18n();
   const t = useMessages();

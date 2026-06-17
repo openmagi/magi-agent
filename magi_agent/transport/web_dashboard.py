@@ -144,8 +144,19 @@ def register_web_dashboard_routes(app: FastAPI, runtime: OpenMagiRuntime) -> Non
         html = _resolve_within_bundle(f"dashboard/{path}.html")
         if html and html.is_file():
             return _serve_file(html)
-        # 3) SPA fallback — client routing resolves the rest (deep links,
-        #    not-prerendered channels). Never blanks: serves the app shell.
+        # 3) Chat channel deep link with no prerendered html (a user-created
+        #    channel). Serve the chat shell — which resolves the channel from
+        #    the live URL client-side — instead of the dashboard index, which
+        #    would redirect back to /chat/general (bouncing the user out).
+        segments = path.strip("/").split("/")
+        if len(segments) >= 3 and segments[1] == "chat":
+            shell = _resolve_within_bundle(
+                f"dashboard/{segments[0]}/chat/general.html"
+            )
+            if shell and shell.is_file():
+                return _serve_file(shell)
+        # 4) SPA fallback — client routing resolves the rest. Never blanks:
+        #    serves the app shell.
         return _serve_file(BUNDLE_ROOT / "dashboard.html")
 
     # Root-level static assets (favicons, manifest, logos, sw.js, landing
