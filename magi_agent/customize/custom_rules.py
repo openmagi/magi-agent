@@ -12,6 +12,7 @@ until their phase wires them.
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from magi_agent.customize.what_menu import allowed_actions_for, is_known_ref
@@ -30,6 +31,27 @@ _PROJECTION_BASE = frozenset({"result", "args", "scope"})
 
 def _projection_slice_ok(slice_: str) -> bool:
     return slice_ in _PROJECTION_BASE or slice_.startswith("evidence:")
+
+
+def _validate_content_match(content_match: Any, fires_at: Any) -> list[str]:
+    """Validate a P4 after-tool ``contentMatch`` pre-filter payload."""
+    errs: list[str] = []
+    if fires_at != "after_tool_use":
+        errs.append("contentMatch is only valid for after_tool_use rules")
+    if not isinstance(content_match, dict):
+        return [*errs, "contentMatch must be an object"]
+    pattern = content_match.get("pattern")
+    if not isinstance(pattern, str) or not pattern.strip():
+        errs.append("contentMatch.pattern is required")
+    for key in ("isRegex", "negate"):
+        if key in content_match and not isinstance(content_match[key], bool):
+            errs.append(f"contentMatch.{key} must be a boolean")
+    if content_match.get("isRegex") and isinstance(pattern, str) and pattern.strip():
+        try:
+            re.compile(pattern)
+        except re.error:
+            errs.append("contentMatch.pattern is not a valid regex")
+    return errs
 
 
 # Legal (kind -> firesAt -> allowed actions) matrix (spec §9.1 table).
@@ -108,14 +130,34 @@ def validate_custom_rule(rule: Any) -> list[str]:
             errors.append("tool_perm.payload.decision must be 'deny' or 'ask'")
     elif kind == "llm_criterion":
         criterion = payload.get("criterion")
-        if not isinstance(criterion, str) or not criterion.strip():
-            errors.append("llm_criterion.payload.criterion is required")
-        elif len(criterion) > CRITERION_MAX:
+        has_criterion = isinstance(criterion, str) and bool(criterion.strip())
+        if has_criterion and len(criterion) > CRITERION_MAX:
             errors.append(f"criterion exceeds the {CRITERION_MAX}-char cap")
+
+        # P4: an after-tool rule may carry a deterministic contentMatch pre-filter
+        # (substring/regex on the tool result). With contentMatch present the
+        # criterion is optional — contentMatch alone is a cheap, model-free
+        # ingestion gate; with both, contentMatch gates the (costly) LLM call.
+        content_match = payload.get("contentMatch")
+        has_content = False
+        if content_match is not None:
+            errors.extend(_validate_content_match(content_match, fires_at))
+            has_content = (
+                isinstance(content_match, dict)
+                and isinstance(content_match.get("pattern"), str)
+                and bool(content_match["pattern"].strip())
+            )
+
         if fires_at == "after_tool_use":
             tool_match = payload.get("toolMatch")
             if not isinstance(tool_match, list) or not tool_match:
                 errors.append("after_tool_use llm_criterion requires a non-empty toolMatch")
+            if not has_criterion and not has_content:
+                errors.append(
+                    "after_tool_use llm_criterion requires a criterion or a contentMatch pre-filter"
+                )
+        elif not has_criterion:
+            errors.append("llm_criterion.payload.criterion is required")
 
     # (f) projection ⊆ whitelist (conversation rejected)
     projection = rule.get("projection")
