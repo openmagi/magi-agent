@@ -238,25 +238,12 @@ At a glance: what you can change, how, and what is live today:
 Legend: ✅ live · 🚧 implemented, landing behind a default-OFF flag. Items marked
 "immutable core" are part of the fixed core (see [The immutable core](#the-immutable-core)).
 
-Scaffold a pack with the CLI:
-
-```bash
-magi pack new validator my-check
-```
-
-This writes a `pack.toml`, an impl stub, and a generated smoke test under
-`<cwd>/.magi/packs/` and prints their paths. Packs are discovered from
-`~/.magi/packs/` and `<cwd>/.magi/packs/` with no environment setup. Override or
-disable any first-party pack in `~/.magi/config.toml`:
-
-```toml
-[packs]
-disable = ["openmagi.source-opened"]
-```
-
-- [Write your first pack](docs/pack-authoring.md)
-- [Pack manifest reference](docs/pack-manifest-reference.md)
-- [Typed-context API reference](docs/pack-context-reference.md)
+Scaffolding (`magi pack new`), discovery (`~/.magi/packs/`, `<cwd>/.magi/packs/`),
+and overriding or disabling a first-party pack (`[packs] disable` in
+`~/.magi/config.toml`) are covered in
+[Write your first pack](docs/pack-authoring.md), with the
+[manifest](docs/pack-manifest-reference.md) and
+[typed-context](docs/pack-context-reference.md) references.
 
 For most needs you never write code: **change a config value** (`config.toml` /
 a flag), **author a doc** (a `SKILL.md` or a `pack.toml`), or **swap a file** (a
