@@ -47,3 +47,28 @@ def test_claim_is_atomic_single_winner(tmp_path):
     assert first is not None and first.status == "running" and first.claim_lock == "w1"
     assert second is None                         # CAS loser
     assert s.get("t").claim_lock == "w1"
+
+
+def test_stale_claim_reclaimed_when_worker_dead(tmp_path):
+    from magi_agent.missions.work_queue.store import SqliteWorkQueueStore, CLAIM_TTL_SECONDS
+    from magi_agent.missions.work_queue.models import WorkTask
+    s = SqliteWorkQueueStore(tmp_path / "wq.db")
+    s.create(WorkTask(id="t", title="x", status="ready", created_at=1))
+    s.claim("t", claimer="w1", now=1000, worker_pid=111)
+    # TTL expired, worker dead -> reclaim to ready
+    n = s.release_stale_claims(now=1000 + CLAIM_TTL_SECONDS + 1, pid_alive=lambda pid: False)
+    assert n == 1
+    t = s.get("t")
+    assert t.status == "ready" and t.claim_lock is None
+
+
+def test_stale_claim_extended_when_worker_alive_and_fresh(tmp_path):
+    from magi_agent.missions.work_queue.store import SqliteWorkQueueStore, CLAIM_TTL_SECONDS
+    from magi_agent.missions.work_queue.models import WorkTask
+    s = SqliteWorkQueueStore(tmp_path / "wq.db")
+    s.create(WorkTask(id="t", title="x", status="ready", created_at=1))
+    s.claim("t", claimer="w1", now=1000, worker_pid=111)
+    s.heartbeat("t", claimer="w1", now=1000 + CLAIM_TTL_SECONDS - 1)  # fresh heartbeat
+    n = s.release_stale_claims(now=1000 + CLAIM_TTL_SECONDS + 1, pid_alive=lambda pid: True)
+    assert n == 0                                  # extended, not reclaimed
+    assert s.get("t").status == "running"

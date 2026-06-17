@@ -170,6 +170,63 @@ class SqliteWorkQueueStore:
         conn.commit()
         return self.get(task_id)
 
+    def heartbeat(self, task_id, *, claimer, now=None, ttl=CLAIM_TTL_SECONDS) -> bool:
+        now = int(time.time()) if now is None else now
+        conn = self._get_conn()
+        cur = conn.execute(
+            "UPDATE work_queue_tasks SET claim_expires=?, last_heartbeat_at=? "
+            "WHERE id=? AND status='running' AND claim_lock=?",
+            (now + ttl, now, task_id, claimer),
+        )
+        conn.commit()
+        return cur.rowcount == 1
+
+    def release_stale_claims(self, *, now=None, pid_alive=None) -> int:
+        import os
+
+        now = int(time.time()) if now is None else now
+        if pid_alive is None:
+            def pid_alive(pid):
+                try:
+                    os.kill(pid, 0)
+                    return True
+                except (OSError, TypeError):
+                    return False
+        conn = self._get_conn()
+        rows = conn.execute(
+            "SELECT id, claim_lock, worker_pid, last_heartbeat_at "
+            "FROM work_queue_tasks WHERE status='running' "
+            "AND claim_expires IS NOT NULL AND claim_expires < ?",
+            (now,),
+        ).fetchall()
+        reclaimed = 0
+        for r in rows:
+            hb = r["last_heartbeat_at"]
+            hb_stale = hb is not None and (now - int(hb)) > CLAIM_HEARTBEAT_MAX_STALE_SECONDS
+            alive = r["worker_pid"] is not None and pid_alive(r["worker_pid"]) and not hb_stale
+            if alive:
+                conn.execute(
+                    "UPDATE work_queue_tasks SET claim_expires=? WHERE id=? AND status='running'",
+                    (now + CLAIM_TTL_SECONDS, r["id"]),
+                )
+                self._append_event(conn, r["id"], "claim_extended", None)
+                continue
+            conn.execute(
+                "UPDATE work_queue_task_runs SET status='released', outcome='reclaimed', ended_at=? "
+                "WHERE task_id=? AND ended_at IS NULL",
+                (now, r["id"]),
+            )
+            conn.execute(
+                "UPDATE work_queue_tasks "
+                "SET status='ready', claim_lock=NULL, claim_expires=NULL, worker_pid=NULL, current_run_id=NULL "
+                "WHERE id=? AND status='running'",
+                (r["id"],),
+            )
+            self._append_event(conn, r["id"], "reclaimed", None)
+            reclaimed += 1
+        conn.commit()
+        return reclaimed
+
     def _append_event(self, conn, task_id, kind, payload):
         conn.execute(
             "INSERT INTO work_queue_task_events (task_id, run_id, kind, payload, created_at) "
