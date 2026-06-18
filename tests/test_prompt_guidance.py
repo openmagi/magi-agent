@@ -6,6 +6,8 @@ import pytest
 from magi_agent.runtime.prompt_guidance import (
     action_discipline_examples_block,
     anti_rationalization_block,
+    automation_methodology_block,
+    research_methodology_block,
     search_decision_block,
 )
 
@@ -43,11 +45,33 @@ def test_redflags_block_matrix() -> None:
     assert "->" in block
 
 
+def test_research_methodology_block_matrix() -> None:
+    assert research_methodology_block({}) == ""
+    assert research_methodology_block({"MAGI_RESEARCH_METHODOLOGY_ENABLED": "0"}) == ""
+    block = research_methodology_block({"MAGI_RESEARCH_METHODOLOGY_ENABLED": "1"})
+    assert block.startswith("<research_methodology>")
+    assert block.endswith("</research_methodology>")
+    assert "two independent sources" in block
+    assert "primary sources" in block
+
+
+def test_automation_methodology_block_matrix() -> None:
+    assert automation_methodology_block({}) == ""
+    assert automation_methodology_block({"MAGI_AUTOMATION_METHODOLOGY_ENABLED": "0"}) == ""
+    block = automation_methodology_block({"MAGI_AUTOMATION_METHODOLOGY_ENABLED": "1"})
+    assert block.startswith("<automation_methodology>")
+    assert block.endswith("</automation_methodology>")
+    assert "deliverable" in block
+    assert "evidence produced this turn" in block
+
+
 def test_blocks_are_lean() -> None:
     blocks = (
         action_discipline_examples_block({"MAGI_PROMPT_EXAMPLES_ENABLED": "1"}),
         search_decision_block({"MAGI_PROMPT_SEARCH_RULES_ENABLED": "1", **_KEYS}),
         anti_rationalization_block({"MAGI_PROMPT_REDFLAGS_ENABLED": "1"}),
+        research_methodology_block({"MAGI_RESEARCH_METHODOLOGY_ENABLED": "1"}),
+        automation_methodology_block({"MAGI_AUTOMATION_METHODOLOGY_ENABLED": "1"}),
     )
     for block in blocks:
         assert 0 < len(block) <= 800  # tag overhead on top of ~600-char budget
@@ -71,6 +95,16 @@ def test_blocks_are_lean() -> None:
             "is_prompt_redflags_enabled",
             {"MAGI_PROMPT_REDFLAGS_ENABLED": "1"},
         ),
+        (
+            research_methodology_block,
+            "is_research_methodology_enabled",
+            {"MAGI_RESEARCH_METHODOLOGY_ENABLED": "1"},
+        ),
+        (
+            automation_methodology_block,
+            "is_automation_methodology_enabled",
+            {"MAGI_AUTOMATION_METHODOLOGY_ENABLED": "1"},
+        ),
     ),
 )
 def test_builders_fail_open(monkeypatch, builder, helper_name, enabled_env) -> None:
@@ -86,6 +120,8 @@ def test_cli_instruction_off_by_default(monkeypatch) -> None:
         "MAGI_PROMPT_EXAMPLES_ENABLED",
         "MAGI_PROMPT_SEARCH_RULES_ENABLED",
         "MAGI_PROMPT_REDFLAGS_ENABLED",
+        "MAGI_RESEARCH_METHODOLOGY_ENABLED",
+        "MAGI_AUTOMATION_METHODOLOGY_ENABLED",
     ):
         monkeypatch.delenv(name, raising=False)
     from magi_agent.cli.tool_runtime import build_cli_instruction
@@ -94,6 +130,29 @@ def test_cli_instruction_off_by_default(monkeypatch) -> None:
     assert "<action_discipline_examples>" not in prompt
     assert "<search_decision>" not in prompt
     assert "<red_flags>" not in prompt
+    assert "<research_methodology>" not in prompt
+    assert "<automation_methodology>" not in prompt
+
+
+def test_cli_instruction_injects_methodology_blocks(monkeypatch) -> None:
+    monkeypatch.setenv("MAGI_RESEARCH_METHODOLOGY_ENABLED", "1")
+    monkeypatch.setenv("MAGI_AUTOMATION_METHODOLOGY_ENABLED", "1")
+    from magi_agent.cli.tool_runtime import build_cli_instruction
+
+    prompt = build_cli_instruction(session_id="s")
+    assert "<research_methodology>" in prompt
+    assert "<automation_methodology>" in prompt
+
+
+def test_cli_instruction_methodology_blocks_independent(monkeypatch) -> None:
+    # Each flag is independent: research on, automation off.
+    monkeypatch.setenv("MAGI_RESEARCH_METHODOLOGY_ENABLED", "1")
+    monkeypatch.delenv("MAGI_AUTOMATION_METHODOLOGY_ENABLED", raising=False)
+    from magi_agent.cli.tool_runtime import build_cli_instruction
+
+    prompt = build_cli_instruction(session_id="s")
+    assert "<research_methodology>" in prompt
+    assert "<automation_methodology>" not in prompt
 
 
 def test_cli_instruction_injects_enabled_blocks(monkeypatch) -> None:

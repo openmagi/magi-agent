@@ -2246,6 +2246,34 @@ def is_prompt_redflags_enabled(env: Mapping[str, str] | None = None) -> bool:
     return _is_true(source.get(MAGI_PROMPT_REDFLAGS_ENABLED_ENV))
 
 
+MAGI_RESEARCH_METHODOLOGY_ENABLED_ENV = "MAGI_RESEARCH_METHODOLOGY_ENABLED"
+
+
+def is_research_methodology_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Gate for the research-methodology prompt block.
+
+    Default OFF. ON appends ``<research_methodology>`` (multi-source
+    cross-check / grounding-first / primary-source preference / citation
+    discipline) in ``build_cli_instruction``. Guidance only, not enforcing.
+    """
+    source = os.environ if env is None else env
+    return _is_true(source.get(MAGI_RESEARCH_METHODOLOGY_ENABLED_ENV))
+
+
+MAGI_AUTOMATION_METHODOLOGY_ENABLED_ENV = "MAGI_AUTOMATION_METHODOLOGY_ENABLED"
+
+
+def is_automation_methodology_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Gate for the automation-methodology prompt block.
+
+    Default OFF. ON appends ``<automation_methodology>`` (deliverable up
+    front / goal->plan->evidence lifecycle / step confirmation) in
+    ``build_cli_instruction``. Guidance only, not enforcing.
+    """
+    source = os.environ if env is None else env
+    return _is_true(source.get(MAGI_AUTOMATION_METHODOLOGY_ENABLED_ENV))
+
+
 MAGI_DOCUMENT_AUTHORING_COVERAGE_ENV = "MAGI_DOCUMENT_AUTHORING_COVERAGE"
 
 

@@ -1082,12 +1082,22 @@ def build_cli_instruction(
     from magi_agent.runtime.prompt_guidance import (  # noqa: PLC0415
         action_discipline_examples_block,
         anti_rationalization_block,
+        automation_methodology_block,
+        research_methodology_block,
         search_decision_block,
     )
 
     _examples_block = action_discipline_examples_block()
     _search_rules_block = search_decision_block()
     _redflags_block = anti_rationalization_block()
+
+    # Research / automation methodology guidance (H1, §6) — default-OFF
+    # (MAGI_RESEARCH_METHODOLOGY_ENABLED / MAGI_AUTOMATION_METHODOLOGY_ENABLED).
+    # Each returns "" when off so prompt assembly stays byte-identical. Gives the
+    # research and automation harnesses a domain workflow parallel to the coding
+    # blocks; guidance, not enforcement.
+    _research_methodology_block = research_methodology_block()
+    _automation_methodology_block = automation_methodology_block()
 
     # Cross-family recipe listing (default-OFF: MAGI_RECIPE_ROUTING_LLM_ENABLED).
     # Returns "" when the gate is off so the assembled prompt is byte-identical to
@@ -1131,6 +1141,10 @@ def build_cli_instruction(
         parts.append(_examples_block)
     if _search_rules_block:
         parts.append(_search_rules_block)
+    if _research_methodology_block:
+        parts.append(_research_methodology_block)
+    if _automation_methodology_block:
+        parts.append(_automation_methodology_block)
     if _redflags_block:
         parts.append(_redflags_block)
     if _recipe_listing_block:
