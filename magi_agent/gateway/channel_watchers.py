@@ -486,16 +486,16 @@ _DiscordOnInbound = Callable[[Any], None]
 def _discord_bot_token_from_env() -> str | None:
     """Return the configured Discord bot token or None (never logs the value).
 
-    ``MAGI_DISCORD_BOT_TOKEN`` is read through the typed flag registry; the
-    non-namespaced ``DISCORD_BOT_TOKEN`` is accepted as a convenience fallback.
+    Vault first (dashboard-connected token, hot-reloaded each tick), then env
+    (``MAGI_DISCORD_BOT_TOKEN`` / ``DISCORD_BOT_TOKEN``).
     """
-    from magi_agent.config.flags import flag_str
+    from magi_agent.channels.channel_credentials import resolve_channel_credential
 
-    token = flag_str("MAGI_DISCORD_BOT_TOKEN")
-    if token and token.strip():
-        return token.strip()
-    fallback = os.environ.get("DISCORD_BOT_TOKEN", "")
-    return fallback.strip() or None
+    return resolve_channel_credential(
+        service="discord",
+        auth_scheme="bot_token",
+        env_keys=("MAGI_DISCORD_BOT_TOKEN", "DISCORD_BOT_TOKEN"),
+    )
 
 
 def _default_discord_provider_factory(token: str) -> Any:
@@ -702,25 +702,31 @@ _SlackOnInbound = Callable[[ChannelInbound], None]
 
 
 def _slack_app_token_from_env() -> str | None:
-    """Slack app-level token (xapp-) for the Socket Mode websocket."""
-    from magi_agent.config.flags import flag_str
+    """Slack app-level token (xapp-) for the Socket Mode websocket.
 
-    token = flag_str("MAGI_SLACK_APP_TOKEN")
-    if token and token.strip():
-        return token.strip()
-    fallback = os.environ.get("SLACK_APP_TOKEN", "")
-    return fallback.strip() or None
+    Vault first (dashboard-connected), then env.
+    """
+    from magi_agent.channels.channel_credentials import resolve_channel_credential
+
+    return resolve_channel_credential(
+        service="slack",
+        auth_scheme="app_token",
+        env_keys=("MAGI_SLACK_APP_TOKEN", "SLACK_APP_TOKEN"),
+    )
 
 
 def _slack_bot_token_from_env() -> str | None:
-    """Slack bot token (xoxb-) for outbound chat.postMessage."""
-    from magi_agent.config.flags import flag_str
+    """Slack bot token (xoxb-) for outbound chat.postMessage.
 
-    token = flag_str("MAGI_SLACK_BOT_TOKEN")
-    if token and token.strip():
-        return token.strip()
-    fallback = os.environ.get("SLACK_BOT_TOKEN", "")
-    return fallback.strip() or None
+    Vault first (dashboard-connected), then env.
+    """
+    from magi_agent.channels.channel_credentials import resolve_channel_credential
+
+    return resolve_channel_credential(
+        service="slack",
+        auth_scheme="bot_token",
+        env_keys=("MAGI_SLACK_BOT_TOKEN", "SLACK_BOT_TOKEN"),
+    )
 
 
 def slack_live_deliver(

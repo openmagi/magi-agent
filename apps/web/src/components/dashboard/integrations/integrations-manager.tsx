@@ -5,14 +5,18 @@ import {
   ArrowLeft,
   Loader2,
   Lock,
+  MessageCircle,
   Plug,
   Search,
   Send,
+  Slack,
 } from "lucide-react";
 import { Select } from "@/components/ui/select";
 import { useAgentFetch } from "@/lib/local-api";
 import {
   clearComposioKey,
+  clearDiscordToken,
+  clearSlackTokens,
   clearTelegramToken,
   composioConnect,
   composioConnectStatus,
@@ -24,6 +28,8 @@ import {
   fetchComposioCatalog,
   fetchComposioConnections,
   setComposioKey,
+  setDiscordToken,
+  setSlackTokens,
   setTelegramToken,
   useIntegrations,
   type CatalogItem,
@@ -31,6 +37,8 @@ import {
 } from "@/lib/integrations-api";
 
 const TG_BLUE = "#2AABEE";
+const DISCORD_BLURPLE = "#5865F2";
+const SLACK_AUBERGINE = "#611f69";
 
 // Display-only preview so users can browse/search before adding a Composio key.
 // Connecting always goes through the live catalog (which requires the key), so
@@ -134,6 +142,16 @@ export function IntegrationsManager() {
             configured={data.telegram.configured}
             label={data.telegram.label}
             easyAvailable={data.telegram.easy_available ?? false}
+            onChange={reload}
+          />
+          <DiscordSection
+            configured={data.discord?.configured ?? false}
+            label={data.discord?.label ?? null}
+            onChange={reload}
+          />
+          <SlackSection
+            configured={data.slack?.configured ?? false}
+            label={data.slack?.label ?? null}
             onChange={reload}
           />
         </>
@@ -531,6 +549,283 @@ function TelegramSection({
           ) : (
             <TelegramAdvancedForm onConnected={onChange} setError={setErr} />
           )}
+        </div>
+      )}
+    </SectionCard>
+  );
+}
+
+function ConnectedRow({
+  label,
+  onDisconnect,
+  busy,
+}: {
+  label: string | null;
+  onDisconnect: () => void;
+  busy: boolean;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <span className="flex items-center gap-2 text-xs text-foreground">
+        <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
+          Connected
+        </span>
+        {label}
+      </span>
+      <button
+        onClick={onDisconnect}
+        disabled={busy}
+        className="text-[11px] text-red-400 hover:text-red-300 transition-colors disabled:opacity-40"
+      >
+        Disconnect
+      </button>
+    </div>
+  );
+}
+
+function DiscordSection({
+  configured,
+  label,
+  onChange,
+}: {
+  configured: boolean;
+  label: string | null;
+  onChange: () => void;
+}) {
+  const agentFetch = useAgentFetch();
+  const [token, setToken] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function save() {
+    if (!token.trim()) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      await setDiscordToken(agentFetch, token.trim());
+      setToken("");
+      onChange();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Failed to save token");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remove() {
+    setBusy(true);
+    try {
+      await clearDiscordToken(agentFetch);
+      onChange();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <SectionCard
+      icon={<MessageCircle className="w-5 h-5" style={{ color: DISCORD_BLURPLE }} />}
+      title="Discord bot"
+      description="Run your agent as a Discord bot (replies to mentions & DMs)."
+    >
+      {err && (
+        <div className="p-2.5 rounded-lg bg-red-500/10 border border-red-500/20 text-xs text-red-400">
+          {err}
+        </div>
+      )}
+      {configured ? (
+        <ConnectedRow label={label} onDisconnect={remove} busy={busy} />
+      ) : (
+        <div className="space-y-3">
+          <div className="rounded-xl border border-gray-100 bg-gray-50 p-3 space-y-2">
+            <p className="text-xs font-medium text-foreground">How to get a token</p>
+            <a
+              href="https://discord.com/developers/applications"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-2.5 px-3 py-2 rounded-lg transition-colors"
+              style={{
+                backgroundColor: `${DISCORD_BLURPLE}1A`,
+                border: `1px solid ${DISCORD_BLURPLE}33`,
+              }}
+            >
+              <span className="text-base">🛠️</span>
+              <span className="flex-1 min-w-0">
+                <span
+                  className="block text-xs font-semibold"
+                  style={{ color: DISCORD_BLURPLE }}
+                >
+                  Open the Discord Developer Portal
+                </span>
+                <span className="block text-[10px] text-secondary">
+                  Create an application, then a bot
+                </span>
+              </span>
+              <span className="text-secondary text-xs">↗</span>
+            </a>
+            <ol className="list-decimal list-inside space-y-1 text-[11px] text-secondary">
+              <li>New Application → Bot → Add Bot</li>
+              <li>
+                Under Bot → Privileged Gateway Intents, enable{" "}
+                <span className="font-medium">Message Content Intent</span>
+              </li>
+              <li>Reset Token and copy it</li>
+              <li>
+                OAuth2 → URL Generator: scopes <code>bot</code>, then invite the
+                bot to your server
+              </li>
+              <li>Paste the bot token below</li>
+            </ol>
+          </div>
+          <div className="flex gap-2">
+            <input
+              type="password"
+              value={token}
+              onChange={(e) => setToken(e.target.value)}
+              placeholder="Bot token…"
+              className={`${INPUT} font-mono`}
+            />
+            <button
+              onClick={save}
+              disabled={busy || !token.trim()}
+              className="text-xs px-3 py-1.5 rounded-lg text-white transition-colors disabled:opacity-40"
+              style={{ backgroundColor: DISCORD_BLURPLE }}
+            >
+              {busy ? "Connecting…" : "Connect"}
+            </button>
+          </div>
+        </div>
+      )}
+    </SectionCard>
+  );
+}
+
+function SlackSection({
+  configured,
+  label,
+  onChange,
+}: {
+  configured: boolean;
+  label: string | null;
+  onChange: () => void;
+}) {
+  const agentFetch = useAgentFetch();
+  const [botToken, setBotToken] = useState("");
+  const [appToken, setAppToken] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function save() {
+    if (!botToken.trim() || !appToken.trim()) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      await setSlackTokens(agentFetch, botToken.trim(), appToken.trim());
+      setBotToken("");
+      setAppToken("");
+      onChange();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Failed to save tokens");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function remove() {
+    setBusy(true);
+    try {
+      await clearSlackTokens(agentFetch);
+      onChange();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <SectionCard
+      icon={<Slack className="w-5 h-5" style={{ color: SLACK_AUBERGINE }} />}
+      title="Slack bot"
+      description="Run your agent as a Slack bot via Socket Mode (no public URL needed)."
+    >
+      {err && (
+        <div className="p-2.5 rounded-lg bg-red-500/10 border border-red-500/20 text-xs text-red-400">
+          {err}
+        </div>
+      )}
+      {configured ? (
+        <ConnectedRow label={label} onDisconnect={remove} busy={busy} />
+      ) : (
+        <div className="space-y-3">
+          <div className="rounded-xl border border-gray-100 bg-gray-50 p-3 space-y-2">
+            <p className="text-xs font-medium text-foreground">How to get tokens</p>
+            <a
+              href="https://api.slack.com/apps"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-2.5 px-3 py-2 rounded-lg transition-colors"
+              style={{
+                backgroundColor: `${SLACK_AUBERGINE}1A`,
+                border: `1px solid ${SLACK_AUBERGINE}33`,
+              }}
+            >
+              <span className="text-base">⚡</span>
+              <span className="flex-1 min-w-0">
+                <span
+                  className="block text-xs font-semibold"
+                  style={{ color: SLACK_AUBERGINE }}
+                >
+                  Open Slack API → Your Apps
+                </span>
+                <span className="block text-[10px] text-secondary">
+                  Create an app from scratch
+                </span>
+              </span>
+              <span className="text-secondary text-xs">↗</span>
+            </a>
+            <ol className="list-decimal list-inside space-y-1 text-[11px] text-secondary">
+              <li>
+                Enable <span className="font-medium">Socket Mode</span> → generate an
+                app-level token (<code>xapp-</code>) with <code>connections:write</code>
+              </li>
+              <li>
+                Event Subscriptions → subscribe to <code>message.channels</code>,{" "}
+                <code>message.im</code>, <code>app_mention</code>
+              </li>
+              <li>
+                OAuth &amp; Permissions → bot scopes <code>chat:write</code>,{" "}
+                <code>app_mentions:read</code>, <code>channels:history</code>,{" "}
+                <code>im:history</code>
+              </li>
+              <li>
+                Install to workspace → copy the bot token (<code>xoxb-</code>)
+              </li>
+              <li>Paste both tokens below</li>
+            </ol>
+          </div>
+          <input
+            type="password"
+            value={appToken}
+            onChange={(e) => setAppToken(e.target.value)}
+            placeholder="App-level token (xapp-…)"
+            className={`${INPUT} font-mono w-full`}
+          />
+          <div className="flex gap-2">
+            <input
+              type="password"
+              value={botToken}
+              onChange={(e) => setBotToken(e.target.value)}
+              placeholder="Bot token (xoxb-…)"
+              className={`${INPUT} font-mono`}
+            />
+            <button
+              onClick={save}
+              disabled={busy || !botToken.trim() || !appToken.trim()}
+              className="text-xs px-3 py-1.5 rounded-lg text-white transition-colors disabled:opacity-40"
+              style={{ backgroundColor: SLACK_AUBERGINE }}
+            >
+              {busy ? "Connecting…" : "Connect"}
+            </button>
+          </div>
         </div>
       )}
     </SectionCard>

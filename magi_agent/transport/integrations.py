@@ -39,6 +39,14 @@ from magi_agent.channels.telegram_easy import (
     EasySessionStore,
     TelegramUserAuthPort,
 )
+from magi_agent.channels.channel_validate import (
+    ChannelFetchJson,
+    validate_discord_bot_token,
+    validate_slack_bot_token,
+)
+from magi_agent.channels.channel_validate import (
+    InvalidBotToken as ChannelInvalidBotToken,
+)
 from magi_agent.channels.telegram_validate import InvalidBotToken, validate_bot_token
 from magi_agent.composio import connections as composio_connections
 from magi_agent.composio.config import resolve_composio_config
@@ -72,9 +80,13 @@ def register_integrations_routes(
     telegram_auth_port_provider: TelegramAuthPortProvider | None = None,
     easy_session_store: EasySessionStore | None = None,
     now_fn: Callable[[], float] | None = None,
+    discord_fetch_json: ChannelFetchJson | None = None,
+    slack_fetch_json: ChannelFetchJson | None = None,
 ) -> None:
     provide_composio = composio_client_provider or _default_composio_client_provider
     fetch_json = telegram_fetch_json or _default_telegram_fetch_json
+    discord_fetch = discord_fetch_json or _default_discord_fetch_json
+    slack_fetch = slack_fetch_json or _default_slack_fetch_json
     provide_auth_port = telegram_auth_port_provider or _default_telegram_auth_port
     easy_store = easy_session_store or EasySessionStore()
     clock = now_fn or time.time
@@ -96,6 +108,8 @@ def register_integrations_routes(
             content={
                 "composio": _composio_status(),
                 "telegram": _telegram_status(),
+                "discord": _discord_status(),
+                "slack": _slack_status(),
                 "vault_status": vault_local.vault_status(),
             }
         )
@@ -368,6 +382,84 @@ def register_integrations_routes(
         _revoke_service_credentials(service="telegram", auth_scheme="bot_token")
         return JSONResponse(content={"telegram": _telegram_status()})
 
+    # -- discord: bot token -------------------------------------------------
+    @app.put("/v1/admin/integrations/discord/token")
+    @app.put("/api/integrations/discord/token")
+    async def put_discord_token(request: Request) -> JSONResponse:
+        unauthorized = _unauthorized_response(request, runtime)
+        if unauthorized is not None:
+            return unauthorized
+        value = await _read_secret_field(request, "token")
+        if isinstance(value, JSONResponse):
+            return value
+        try:
+            identity = validate_discord_bot_token(value, fetch_json=discord_fetch)
+        except ChannelInvalidBotToken:
+            return JSONResponse(status_code=400, content={"error": "invalid_bot_token"})
+        except Exception:
+            return JSONResponse(status_code=502, content={"error": "discord_unreachable"})
+        label = identity.get("username") or "Discord bot"
+        _revoke_service_credentials(service="discord", auth_scheme="bot_token")
+        result = _store_secret(
+            service="discord", label=label, auth_scheme="bot_token", secret=value
+        )
+        if isinstance(result, JSONResponse):
+            return result
+        return JSONResponse(content={"discord": _discord_status()})
+
+    @app.delete("/v1/admin/integrations/discord/token")
+    @app.delete("/api/integrations/discord/token")
+    async def delete_discord_token(request: Request) -> JSONResponse:
+        unauthorized = _unauthorized_response(request, runtime)
+        if unauthorized is not None:
+            return unauthorized
+        _revoke_service_credentials(service="discord", auth_scheme="bot_token")
+        return JSONResponse(content={"discord": _discord_status()})
+
+    # -- slack: bot token (xoxb) + app token (xapp) -------------------------
+    @app.put("/v1/admin/integrations/slack/token")
+    @app.put("/api/integrations/slack/token")
+    async def put_slack_token(request: Request) -> JSONResponse:
+        unauthorized = _unauthorized_response(request, runtime)
+        if unauthorized is not None:
+            return unauthorized
+        bot_token = await _read_secret_field(request, "bot_token")
+        if isinstance(bot_token, JSONResponse):
+            return bot_token
+        app_token = await _read_secret_field(request, "app_token")
+        if isinstance(app_token, JSONResponse):
+            return app_token
+        try:
+            identity = validate_slack_bot_token(bot_token, fetch_json=slack_fetch)
+        except ChannelInvalidBotToken:
+            return JSONResponse(status_code=400, content={"error": "invalid_bot_token"})
+        except Exception:
+            return JSONResponse(status_code=502, content={"error": "slack_unreachable"})
+        label = identity.get("team") or "Slack workspace"
+        _revoke_service_credentials(service="slack", auth_scheme="bot_token")
+        _revoke_service_credentials(service="slack", auth_scheme="app_token")
+        bot_result = _store_secret(
+            service="slack", label=label, auth_scheme="bot_token", secret=bot_token
+        )
+        if isinstance(bot_result, JSONResponse):
+            return bot_result
+        app_result = _store_secret(
+            service="slack", label=label, auth_scheme="app_token", secret=app_token
+        )
+        if isinstance(app_result, JSONResponse):
+            return app_result
+        return JSONResponse(content={"slack": _slack_status()})
+
+    @app.delete("/v1/admin/integrations/slack/token")
+    @app.delete("/api/integrations/slack/token")
+    async def delete_slack_token(request: Request) -> JSONResponse:
+        unauthorized = _unauthorized_response(request, runtime)
+        if unauthorized is not None:
+            return unauthorized
+        _revoke_service_credentials(service="slack", auth_scheme="bot_token")
+        _revoke_service_credentials(service="slack", auth_scheme="app_token")
+        return JSONResponse(content={"slack": _slack_status()})
+
 
 # ---------------------------------------------------------------------------
 # Status projections (non-secret, no network)
@@ -387,6 +479,23 @@ def _telegram_status() -> dict[str, Any]:
         "label": item.get("label") or None,
         "easy_available": easy_available,
     }
+
+
+def _discord_status() -> dict[str, Any]:
+    item = _active_credential(service="discord", auth_scheme="bot_token")
+    if item is None:
+        return {"configured": False, "label": None}
+    return {"configured": True, "label": item.get("label") or None}
+
+
+def _slack_status() -> dict[str, Any]:
+    # Slack needs BOTH a bot token (outbound) and an app token (inbound Socket
+    # Mode) to function as a channel; report configured only when both exist.
+    bot = _active_credential(service="slack", auth_scheme="bot_token")
+    app = _active_credential(service="slack", auth_scheme="app_token")
+    if bot is None or app is None:
+        return {"configured": False, "label": None}
+    return {"configured": True, "label": bot.get("label") or None}
 
 
 def is_telegram_easy_enabled(env: dict[str, str] | None = None) -> bool:
@@ -539,6 +648,20 @@ def _default_telegram_fetch_json(url: str) -> dict[str, Any]:
     import httpx
 
     response = httpx.get(url, timeout=15.0)
+    return response.json()
+
+
+def _default_discord_fetch_json(url: str, token: str) -> dict[str, Any]:
+    import httpx
+
+    response = httpx.get(url, headers={"Authorization": f"Bot {token}"}, timeout=15.0)
+    return response.json()
+
+
+def _default_slack_fetch_json(url: str, token: str) -> dict[str, Any]:
+    import httpx
+
+    response = httpx.get(url, headers={"Authorization": f"Bearer {token}"}, timeout=15.0)
     return response.json()
 
 
