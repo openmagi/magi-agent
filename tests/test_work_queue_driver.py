@@ -229,3 +229,58 @@ def test_build_default_watchers_includes_self_gated_work_queue() -> None:
     # The work-queue watcher must self-gate as disabled by default
     wq_watcher = next(w for w in watchers if w.name == "work_queue_executor")
     assert wq_watcher.is_enabled() is False
+
+
+# ---------------------------------------------------------------------------
+# GoalModeRunner end-to-end via WorkQueueDriver (Task 2 — P3 goal_mode fusion)
+# ---------------------------------------------------------------------------
+
+
+def test_goal_mode_task_end_to_end_via_driver() -> None:
+    """Prove the driver drives a GoalModeRunner with no driver changes.
+
+    Uses a fake inner runner that returns completed with incrementing summaries
+    and a fake judge satisfied once the transcript contains 'turn2'.
+    The driver must report the task as completed and the inner runner must have
+    been invoked exactly 2 turns.
+    """
+    from magi_agent.missions.work_queue.runner import GoalModeRunner
+    from magi_agent.harness.goal_judge import JudgeVerdict
+
+    call_count = 0
+
+    class _IncrementalRunner:
+        async def run_task(self, task: WorkTask) -> WorkTaskRunResult:
+            nonlocal call_count
+            call_count += 1
+            return WorkTaskRunResult(outcome="completed", summary=f"turn{call_count}")
+
+    class _SatisfyOnTurn2:
+        def judge(self, goal: str, transcript_excerpt: str) -> JudgeVerdict:
+            return JudgeVerdict(
+                satisfied=("turn2" in transcript_excerpt),
+                raw="x",
+            )
+
+    inner = _IncrementalRunner()
+    judge = _SatisfyOnTurn2()
+    goal_runner = GoalModeRunner(inner, judge)
+
+    s = InMemoryWorkQueueStore()
+    s.create(
+        WorkTask(
+            id="g",
+            title="do something",
+            status="ready",
+            created_at=1,
+            goal_mode=True,
+            goal_max_turns=5,
+        )
+    )
+    d = WorkQueueDriver(s, goal_runner, claimer="d")
+    res = d.run_once(now=1000)
+
+    assert res.completed == 1, f"expected completed=1, got {res}"
+    assert res.failed == 0, f"expected failed=0, got {res}"
+    assert s.get("g").status == "completed", f"expected task completed, got {s.get('g').status}"
+    assert call_count == 2, f"expected inner called 2 times, got {call_count}"

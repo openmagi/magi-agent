@@ -169,20 +169,42 @@ def _work_queue_claimer_from_env() -> str:
     return f"gateway:{hostname}"
 
 
+class _SafeLocalGoalJudge:
+    """GoalJudge stub: never satisfies, constructs no network/ADK authority.
+
+    Mirrors ``_SafeLocalCronTurnRunner``.  ``JudgeVerdict`` is imported lazily
+    inside the method so importing ``watchers`` never pulls ``harness.goal_judge``
+    at module level (keeping this module import-clean for the boundary tests).
+
+    This is a seam for future live wiring: the current inner
+    ``SafeLocalWorkTaskRunner`` always returns ``failed`` on turn 1, so
+    ``GoalModeRunner`` bails immediately and never calls this judge.
+    """
+
+    def judge(self, goal: str, transcript_excerpt: str) -> Any:
+        from magi_agent.harness.goal_judge import JudgeVerdict  # noqa: PLC0415
+
+        return JudgeVerdict(satisfied=False, raw="")
+
+
 def build_local_work_queue_driver() -> Any:
     """Build the local work-queue driver used by ``magi gateway start``.
 
-    Composes ``SqliteWorkQueueStore`` and ``SafeLocalWorkTaskRunner``.  The
-    runner is a safe stub: no ADK authority or network client is constructed.
+    Composes ``SqliteWorkQueueStore``, ``SafeLocalWorkTaskRunner`` (inner), and
+    ``GoalModeRunner`` (outer wrapper).  The runner is a safe stub: no ADK
+    authority or network client is constructed.  The ``GoalModeRunner`` is
+    inert by default because the inner runner returns ``failed`` on turn 1 so
+    the goal loop bails immediately and never calls the judge.
+
     Live execution requires explicit operator wiring in a future phase.
     """
     from magi_agent.missions.work_queue.store import SqliteWorkQueueStore  # noqa: PLC0415
-    from magi_agent.missions.work_queue.runner import SafeLocalWorkTaskRunner  # noqa: PLC0415
+    from magi_agent.missions.work_queue.runner import SafeLocalWorkTaskRunner, GoalModeRunner  # noqa: PLC0415
     from magi_agent.missions.work_queue.driver import WorkQueueDriver  # noqa: PLC0415
 
     return WorkQueueDriver(
         store=SqliteWorkQueueStore(_work_queue_db_path_from_env()),
-        runner=SafeLocalWorkTaskRunner(),
+        runner=GoalModeRunner(SafeLocalWorkTaskRunner(), _SafeLocalGoalJudge()),
         claimer=_work_queue_claimer_from_env(),
     )
 
