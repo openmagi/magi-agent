@@ -2248,3 +2248,67 @@ def test_session_reuse_flag_on_without_session_key_never_touches_registry(
     assert result.status == "completed"
     assert isinstance(service, _FakeSessionService)
     assert _HISTORY_MARKER in text
+
+
+class _EmptyThenFinalizerRunner(_FakeRunner):
+    """Main run yields NOTHING (no text, no tool calls); finalizer yields text.
+
+    Models the "thinking-only / empty" turn: the model emitted no visible final
+    answer and called no tool, so the no-tool finalizer must still run (there are
+    no tool-only events to key off) and produce the final answer.
+    """
+
+    calls: list[dict[str, object]] = []
+
+    def __init__(self, **kwargs: object) -> None:
+        self.agent = kwargs["agent"]
+
+    async def run_async(self, **kwargs: object) -> object:
+        type(self).run_kwargs = kwargs
+        type(self).calls.append(
+            {"toolsAttached": bool(getattr(self.agent, "tools", ()))}
+        )
+        if getattr(self.agent, "tools", ()):
+            return  # empty main run — no events at all
+            yield  # pragma: no cover - marks this coroutine as a generator
+        yield _FakeEvent("final answer after empty-turn finalizer")
+
+
+def _empty_then_finalizer_primitives() -> Gate5B4C3LiveAdkPrimitives:
+    _AutoToolLoopAgent.created_kwargs = []
+    _EmptyThenFinalizerRunner.created_kwargs = {}
+    _EmptyThenFinalizerRunner.run_kwargs = {}
+    _EmptyThenFinalizerRunner.calls = []
+    _FakeGenerateContentConfig.created_kwargs = {}
+    return Gate5B4C3LiveAdkPrimitives(
+        Agent=_AutoToolLoopAgent,
+        Runner=_EmptyThenFinalizerRunner,
+        InMemorySessionService=_FakeSessionService,
+        Content=_FakeContent,
+        Part=_FakePart,
+        GenerateContentConfig=_FakeGenerateContentConfig,
+    )
+
+
+def test_live_boundary_runs_finalizer_after_empty_no_tool_turn() -> None:
+    # The model ended the turn with no visible final answer AND no tool call
+    # (thinking-only / empty). There are no tool-only events to key off, but the
+    # finalizer must still run so the turn yields a final answer instead of a
+    # bare runner_output_missing empty turn.
+    primitives = _empty_then_finalizer_primitives()
+
+    result = Gate5B4C3LiveRunnerBoundary(
+        lambda: primitives,
+        adk_tools=(_ManualCalculationTool,),
+    ).invoke(_selected_full_toolhost_request(), config=_enabled_config())
+
+    assert result.status == "completed"
+    assert result.reason == "runner_completed"
+    assert result.output_text_internal == "final answer after empty-turn finalizer"
+    # Two runs: the empty main run (tools attached) then the finalizer (no tools).
+    assert [call["toolsAttached"] for call in _EmptyThenFinalizerRunner.calls] == [
+        True,
+        False,
+    ]
+
+
