@@ -26,9 +26,16 @@ export interface TelegramStatus {
   easy_available?: boolean;
 }
 
+export interface ChannelStatus {
+  configured: boolean;
+  label: string | null;
+}
+
 export interface IntegrationsStatus {
   composio: ComposioStatus;
   telegram: TelegramStatus;
+  discord?: ChannelStatus;
+  slack?: ChannelStatus;
   vault_status: VaultStatus;
 }
 
@@ -193,6 +200,48 @@ export async function clearTelegramToken(fetch: AgentFetch): Promise<TelegramSta
   const res = await fetch(`${BASE}/telegram/token`, { method: "DELETE" });
   await expectOk(res, "Failed to clear Telegram token");
   return ((await res.json()) as { telegram: TelegramStatus }).telegram;
+}
+
+// --- Discord channel (bot token) ---
+
+export async function setDiscordToken(fetch: AgentFetch, token: string): Promise<ChannelStatus> {
+  const res = await fetch(`${BASE}/discord/token`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token }),
+  });
+  if (res.status === 400) throw new Error("Discord rejected that bot token.");
+  await expectOk(res, "Failed to save Discord token");
+  return ((await res.json()) as { discord: ChannelStatus }).discord;
+}
+
+export async function clearDiscordToken(fetch: AgentFetch): Promise<ChannelStatus> {
+  const res = await fetch(`${BASE}/discord/token`, { method: "DELETE" });
+  await expectOk(res, "Failed to clear Discord token");
+  return ((await res.json()) as { discord: ChannelStatus }).discord;
+}
+
+// --- Slack channel (bot token xoxb- + app token xapp-) ---
+
+export async function setSlackTokens(
+  fetch: AgentFetch,
+  botToken: string,
+  appToken: string,
+): Promise<ChannelStatus> {
+  const res = await fetch(`${BASE}/slack/token`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ bot_token: botToken, app_token: appToken }),
+  });
+  if (res.status === 400) throw new Error("Slack rejected those tokens.");
+  await expectOk(res, "Failed to save Slack tokens");
+  return ((await res.json()) as { slack: ChannelStatus }).slack;
+}
+
+export async function clearSlackTokens(fetch: AgentFetch): Promise<ChannelStatus> {
+  const res = await fetch(`${BASE}/slack/token`, { method: "DELETE" });
+  await expectOk(res, "Failed to clear Slack tokens");
+  return ((await res.json()) as { slack: ChannelStatus }).slack;
 }
 
 // --- Telegram easy setup (phone → BotFather), gated ---
