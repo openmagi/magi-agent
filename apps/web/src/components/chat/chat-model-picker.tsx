@@ -30,6 +30,24 @@ function ensureSelectedOption(options: ModelOption[], value: string): ModelOptio
   return [{ value, label: value }, ...options];
 }
 
+// Friendly labels for selections that map to a router rather than a concrete
+// model, so the local flat picker never surfaces a raw routing token.
+const LOCAL_FLAT_FALLBACK_LABELS: Record<string, string> = {
+  clawy_smart_routing: "Smart Routing",
+};
+
+function localFlatOptions(
+  subscriptionPlan: string | null | undefined,
+  selectedModel: string,
+): ModelOption[] {
+  const options = getModelOptions(subscriptionPlan);
+  if (options.some((option) => option.value === selectedModel)) return options;
+  return [
+    { value: selectedModel, label: LOCAL_FLAT_FALLBACK_LABELS[selectedModel] ?? selectedModel },
+    ...options,
+  ];
+}
+
 function Dropdown({
   label,
   options,
@@ -181,6 +199,40 @@ export function ChatModelPicker({
     },
     [authFetch, botId, onModelSelectionChange, persistMode, selectedModel, currentRouterType],
   );
+
+  // Local serve runs in BYOK mode and has no platform router tiers, so it gets a
+  // single flat model dropdown matching the deployed hosted picker.
+  if (persistMode === "local") {
+    return (
+      <div
+        className="relative flex w-full max-w-[calc(100vw-2rem)] min-w-0 flex-nowrap items-center gap-1 rounded-md border border-transparent bg-transparent p-0 shadow-none sm:w-auto sm:max-w-full"
+        data-chat-model-picker="true"
+      >
+        <Dropdown
+          label="Model"
+          options={localFlatOptions(subscriptionPlan, selectedModel)}
+          value={selectedModel}
+          onChange={(value) => void saveModel(value, "standard")}
+          disabled={saving}
+          menuPlacement={menuPlacement}
+        />
+        {saving && (
+          <span
+            className="pointer-events-none h-3 w-3 rounded-full border border-primary/30 border-t-primary animate-spin"
+            aria-hidden="true"
+          />
+        )}
+        {error && (
+          <span
+            className="pointer-events-none absolute left-0 top-full mt-1 whitespace-nowrap rounded-md border border-red-500/15 bg-white px-2 py-1 text-[11px] text-red-500 shadow-sm"
+            role="status"
+          >
+            {error}
+          </span>
+        )}
+      </div>
+    );
+  }
 
   if (apiKeyMode !== "platform_credits") return null;
 
