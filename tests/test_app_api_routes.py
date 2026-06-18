@@ -32,6 +32,23 @@ _WORKSPACE_ENV_VARS = (
     "CORE_AGENT_WORKSPACE_ROOT",
 )
 
+# The providers API reports `configured`/`apiKeySet` by resolving a key from the
+# config file OR the provider's env var (app_api.py reads os.environ). These
+# tests assert configured-state purely from the tmp config file, so any ambient
+# provider key in the env (CI, dev shells) would make a provider read as
+# configured even after its stored key is deleted. Clear them for hermetic runs.
+_PROVIDER_KEY_ENV_VARS = (
+    "MAGI_PROVIDER",
+    "MAGI_MODEL",
+    "MAGI_LLM_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "OPENAI_API_KEY",
+    "GEMINI_API_KEY",
+    "GOOGLE_API_KEY",
+    "FIREWORKS_API_KEY",
+    "OPENROUTER_API_KEY",
+)
+
 
 def _runtime() -> OpenMagiRuntime:
     return OpenMagiRuntime(
@@ -53,7 +70,7 @@ def _client(tmp_path, monkeypatch) -> TestClient:
     # read or write the developer's real ~/.magi/config.toml.
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("MAGI_CONFIG", str(tmp_path / "config.toml"))
-    for name in _WORKSPACE_ENV_VARS:
+    for name in (*_WORKSPACE_ENV_VARS, *_PROVIDER_KEY_ENV_VARS):
         monkeypatch.delenv(name, raising=False)
     client = TestClient(create_app(_runtime()))
     client.headers.update({"x-gateway-token": _TOKEN})
@@ -65,7 +82,7 @@ def _client_with_workspace_env(tmp_path, monkeypatch, env_name: str, workspace) 
     app_cwd.mkdir()
     monkeypatch.chdir(app_cwd)
     monkeypatch.setenv("MAGI_CONFIG", str(tmp_path / "config.toml"))
-    for name in _WORKSPACE_ENV_VARS:
+    for name in (*_WORKSPACE_ENV_VARS, *_PROVIDER_KEY_ENV_VARS):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv(env_name, str(workspace))
     client = TestClient(create_app(_runtime()))
@@ -511,7 +528,7 @@ def test_knowledge_index_empty_is_valid(tmp_path, monkeypatch) -> None:
 def test_requires_gateway_token(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("MAGI_CONFIG", str(tmp_path / "config.toml"))
-    for name in _WORKSPACE_ENV_VARS:
+    for name in (*_WORKSPACE_ENV_VARS, *_PROVIDER_KEY_ENV_VARS):
         monkeypatch.delenv(name, raising=False)
     client = TestClient(create_app(_runtime()))  # no token header
     assert client.get("/v1/app/runtime").status_code == 401
@@ -693,7 +710,7 @@ def test_providers_get_requires_gateway_token(tmp_path, monkeypatch) -> None:
     """GET /v1/app/providers without auth → 401."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("MAGI_CONFIG", str(tmp_path / "config.toml"))
-    for name in _WORKSPACE_ENV_VARS:
+    for name in (*_WORKSPACE_ENV_VARS, *_PROVIDER_KEY_ENV_VARS):
         monkeypatch.delenv(name, raising=False)
     client = TestClient(create_app(_runtime()))  # no token header
     assert client.get("/v1/app/providers").status_code == 401
@@ -703,7 +720,7 @@ def test_providers_put_requires_gateway_token(tmp_path, monkeypatch) -> None:
     """PUT /v1/app/providers without auth → 401."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("MAGI_CONFIG", str(tmp_path / "config.toml"))
-    for name in _WORKSPACE_ENV_VARS:
+    for name in (*_WORKSPACE_ENV_VARS, *_PROVIDER_KEY_ENV_VARS):
         monkeypatch.delenv(name, raising=False)
     client = TestClient(create_app(_runtime()))  # no token header
     res = client.put("/v1/app/providers", json={"providers": {}})

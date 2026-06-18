@@ -643,6 +643,14 @@ def test_real_runner_self_review_after_turn_stays_off_by_default(
 
 
 def test_missing_litellm_raises_actionable_error(monkeypatch) -> None:
+    # This asserts the LiteLlm-dependency path. ``_config()`` is anthropic, and
+    # when message-caching is enabled AND the optional ``anthropic`` package is
+    # installed, ``_build_litellm_model`` short-circuits to the cache-aware
+    # Claude model (which uses the anthropic SDK, not litellm) and never reaches
+    # the litellm import. Disable message-caching here so the cache-aware branch
+    # is skipped and the litellm-missing path is exercised deterministically,
+    # regardless of whether ``anthropic`` is present in the env.
+    monkeypatch.setattr(real_runner, "is_message_cache_enabled", lambda env=None: False)
     # Force ``import google.adk.models.lite_llm`` to fail.
     monkeypatch.setitem(sys.modules, "google.adk.models.lite_llm", None)
     with pytest.raises(CliProviderDependencyError) as excinfo:

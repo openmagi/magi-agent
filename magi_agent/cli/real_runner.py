@@ -25,8 +25,10 @@ from collections.abc import Coroutine, Mapping, Sequence
 from datetime import datetime
 from typing import Any, AsyncGenerator, Callable
 
+from magi_agent.adk_bridge.anthropic_cache_model import build_cache_aware_claude
 from magi_agent.cli.engine import RunnerPolicyAssembly
 from magi_agent.cli.providers import ProviderConfig
+from magi_agent.config.env import is_message_cache_enabled
 from magi_agent.runtime.session_identity import MemoryMode
 
 # Type of the model-construction hook (injectable for tests).
@@ -393,9 +395,40 @@ def _model_api_base_kwargs(env: Mapping[str, str] | None = None) -> dict[str, ob
     return kwargs
 
 
+def _maybe_build_cache_aware_anthropic(
+    config: ProviderConfig, env: Mapping[str, str] | None = None
+) -> object | None:
+    """Cache-aware ADK Anthropic model for the anthropic provider, or None.
+
+    None signals "use the standard LiteLlm path". Never raises — every unsafe
+    or disabled condition falls back so the worst case is today's behavior.
+    Conditions for None: non-anthropic provider; message cache disabled; a
+    custom anthropic endpoint configured (the native client may not honor it);
+    or the cache-aware build raises (incl. the optional ``anthropic`` package
+    being absent).
+    """
+    if config.provider != "anthropic":
+        return None
+    try:
+        if not is_message_cache_enabled(env):
+            return None
+        if _model_api_base_kwargs(env).get("api_base"):
+            return None
+        if config.api_key and not os.environ.get("ANTHROPIC_API_KEY"):
+            os.environ["ANTHROPIC_API_KEY"] = config.api_key
+        return build_cache_aware_claude(config.model)
+    except Exception:
+        # Robust fallback: any failure (missing anthropic pkg, ADK import,
+        # builder error) means use the standard LiteLlm path.
+        return None
+
+
 def _build_litellm_model(
     config: ProviderConfig, env: Mapping[str, str] | None = None
 ) -> object:
+    cache_aware = _maybe_build_cache_aware_anthropic(config, env)
+    if cache_aware is not None:
+        return cache_aware
     try:
         from google.adk.models.lite_llm import LiteLlm  # noqa: PLC0415
     except Exception as exc:  # ImportError or downstream litellm import errors.
