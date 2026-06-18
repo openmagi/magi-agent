@@ -946,7 +946,14 @@ def _shell_decision(
             scope=scope,
             public_preview=_preview_command(command),
         )
-    if _has_inline_interpreter_code(command):
+    if _has_inline_interpreter_code(command) and _scope_mode(scope) != "bypass":
+        # Inline interpreters (``python3 -c ...``) are hard-denied in the default
+        # (hosted/strict) posture because the shell-level guards cannot inspect
+        # what the embedded code does. In an explicit ``bypass`` (YOLO) scope the
+        # operator is running on their OWN local machine and has opted out of
+        # permission prompts, so running inline code is their own capability and
+        # must not be silently killed. Catastrophic shell (destructive, network
+        # exfiltration, curl|sh) is still denied above regardless of scope.
         return _decision(
             "deny",
             manifest,

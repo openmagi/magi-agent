@@ -73,6 +73,25 @@ def decide(
     return decision.action, decision.metadata
 
 
+def test_inline_interpreter_code_allowed_in_bypass_but_denied_in_default() -> None:
+    # YOLO/bypass is the local dashboard's own-machine posture: running an inline
+    # interpreter (python3 -c "...") is the user's own capability, so it must NOT
+    # be hard-killed. The default (hosted/strict) scope still denies it.
+    benign = {"command": 'python3 -c "print(1+1)"'}
+
+    action_bypass, meta_bypass = decide(
+        "Bash", benign, permission_scope={"mode": "bypass"}, permission="execute"
+    )
+    assert action_bypass != "deny"
+    assert "interpreter_inline_code_denied" not in (meta_bypass.get("reasonCodes") or ())
+
+    action_default, meta_default = decide(
+        "Bash", benign, permission_scope={"mode": "default"}, permission="execute"
+    )
+    assert action_default == "deny"
+    assert "interpreter_inline_code_denied" in (meta_default.get("reasonCodes") or ())
+
+
 @pytest.mark.parametrize(
     ("case_id", "tool_name", "arguments", "mode", "permission_scope", "permission", "dangerous", "mutates_workspace", "expected_action", "reason_code"),
     (
