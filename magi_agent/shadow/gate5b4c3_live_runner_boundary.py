@@ -1210,7 +1210,15 @@ class Gate5B4C3LiveRunnerBoundary:
             )
 
         output_text = _joined_output(output_chunks)
-        if output_text is None and selected_full_toolhost and tool_only_events_seen:
+        # Run-until-done backstop: any full-toolhost turn that ends with no final
+        # answer text gets ONE finalizer pass. This covers BOTH the tool-only
+        # turn (model ran tools then stopped before summarizing) AND the
+        # thinking-only / empty turn (no visible text, no tool call) — the latter
+        # would otherwise surface as a bare runner_output_missing empty turn that
+        # the user sees as "작업은 진행됐지만 최종 답변이 없음". Bounded to a single
+        # extra invocation; if the finalizer also yields nothing the turn still
+        # ends as runner_output_missing (no regression).
+        if output_text is None and selected_full_toolhost:
             finalizer_output, finalizer_events = await _run_no_tool_finalizer(
                 primitives=primitives,
                 session_service=session_service,
