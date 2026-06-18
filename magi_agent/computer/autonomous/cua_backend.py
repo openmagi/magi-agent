@@ -20,6 +20,16 @@ class CuaCapture:
     elements: list[UIElement]
 
 
+def _as_int(value: object, default: int) -> int:
+    """Coerce an untyped tool-result value to int, falling back on default."""
+    if isinstance(value, (int, float, str)):
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+    return default
+
+
 def _unwrap(result: object) -> Mapping[str, object]:
     """Normalize a tool result to a mapping.
 
@@ -68,9 +78,11 @@ class CuaDriverBackend:
         windows = _unwrap(
             await self._session.call_tool("list_windows", {"on_screen_only": True})  # type: ignore[attr-defined]
         )
-        first = (windows.get("windows") or [{}])[0]
-        pid = int(first.get("pid", 0))
-        window_id = int(first.get("window_id", 0))
+        window_list = windows.get("windows")
+        entries = window_list if isinstance(window_list, (list, tuple)) else []
+        first: Mapping[str, object] = entries[0] if entries else {}
+        pid = _as_int(first.get("pid", 0), 0)
+        window_id = _as_int(first.get("window_id", 0), 0)
         state = _unwrap(
             await self._session.call_tool(  # type: ignore[attr-defined]
                 "get_window_state",
@@ -79,8 +91,8 @@ class CuaDriverBackend:
         )
         ax_tree = str(state.get("data", ""))
         return CuaCapture(
-            pid=int(state.get("pid", pid)),
-            window_id=int(state.get("window_id", window_id)),
+            pid=_as_int(state.get("pid", pid), pid),
+            window_id=_as_int(state.get("window_id", window_id), window_id),
             screenshot_b64=str(state.get("screenshot_b64", "")),
             ax_tree=ax_tree,
             elements=parse_window_state(ax_tree),

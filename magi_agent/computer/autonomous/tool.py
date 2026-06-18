@@ -10,12 +10,12 @@ from __future__ import annotations
 
 import shutil
 from collections.abc import Awaitable, Callable, Mapping
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from magi_agent.tools.catalog import CORE_TOOL_SOURCE
 from magi_agent.tools.context import ToolContext
 from magi_agent.tools.manifest import ToolManifest
-from magi_agent.tools.result import ToolResult
+from magi_agent.tools.result import ToolResult, ToolStatus
 
 if TYPE_CHECKING:
     from magi_agent.tools.registry import ToolRegistry
@@ -107,7 +107,11 @@ async def _computer_task_handler(
             status="blocked", error_code="no_provider", error_message=str(exc)
         )
 
-    max_steps = int(arguments.get("max_steps") or ComputerToolConfig().max_steps)
+    raw_max_steps = arguments.get("max_steps")
+    if isinstance(raw_max_steps, (int, float, str)) and raw_max_steps:
+        max_steps = int(raw_max_steps)
+    else:
+        max_steps = ComputerToolConfig().max_steps
 
     from magi_agent.computer.autonomous.cua_backend import CuaDriverBackend  # noqa: PLC0415
 
@@ -120,7 +124,7 @@ async def _computer_task_handler(
 
     if run.status != "ok":
         return ToolResult(
-            status=run.status,
+            status=cast(ToolStatus, run.status),
             error_code=run.error_code,
             error_message=run.summary or None,
         )

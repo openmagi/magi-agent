@@ -81,16 +81,19 @@ def action_to_cua_call(
             args["element_index"] = action["element_index"]
         return "type_text", args
     if kind == "key":
+        raw_keys = action.get("keys", [])
+        keys = list(raw_keys) if isinstance(raw_keys, (list, tuple)) else []
         return "hotkey", {
             "pid": pid,
-            "keys": list(action.get("keys", [])),
+            "keys": keys,
             "window_id": window_id,
         }
     if kind == "scroll":
+        amount = action.get("amount", 1)
         return "scroll", {
             "pid": pid,
             "direction": str(action.get("direction", "down")),
-            "amount": int(action.get("amount", 1)),
+            "amount": int(amount) if isinstance(amount, (int, float, str)) else 1,
             "window_id": window_id,
         }
     raise ValueError(f"unknown action: {kind!r}")
