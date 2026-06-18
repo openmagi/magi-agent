@@ -354,3 +354,256 @@ async def test_review_compilation_fail_open_no_factory() -> None:
     assert result.get("confidence") == 0.0, (
         f"Expected confidence=0.0, got: {result.get('confidence')!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Test 7 — system-instruction-flow: compile sends COMPILE instruction, not critic
+#
+# This test is the one that would have caught the original defect:
+# the compiler was importing egress_gate._invoke_llm which hardcodes the
+# "_CRITIC_SYSTEM_INSTRUCTION" ("You are an answer-grounding critic...").
+# With the fix, the compiler's local _invoke_llm receives system_instruction
+# as a parameter; this test asserts the COMPILE instruction reaches the model.
+# ---------------------------------------------------------------------------
+
+
+def _make_system_instruction_capturing_model(
+    response_text: str,
+    *,
+    sys_instruction_capture: list[str],
+) -> object:
+    """Return a fake ADK model that captures the system_instruction from LlmRequest.
+
+    The fake inspects ``llm_request.config.system_instruction`` (the field that
+    ``_invoke_llm`` populates from its ``system_instruction`` parameter) and
+    appends it to ``sys_instruction_capture``.  This lets tests assert that the
+    correct system persona reached the model call.
+    """
+    class _CapturingModel:
+        model = "fake-capturing-model"
+
+        async def generate_content_async(
+            self, llm_request: Any, stream: bool = False
+        ) -> AsyncGenerator:
+            try:
+                # LlmRequest.config is a GenerateContentConfig; .system_instruction
+                # is the field populated by our local _invoke_llm helper.
+                si = getattr(
+                    getattr(llm_request, "config", None),
+                    "system_instruction",
+                    None,
+                )
+                if si is not None:
+                    sys_instruction_capture.append(str(si))
+            except Exception:  # noqa: BLE001
+                pass
+            yield _FakeLlmResponse(response_text)
+
+    return _CapturingModel()
+
+
+def _factory_capturing_sys_instruction(
+    response_text: str, sys_instruction_capture: list[str]
+):
+    """Return a model_factory that captures the system_instruction on each call."""
+    def _factory() -> object:
+        return _make_system_instruction_capturing_model(
+            response_text, sys_instruction_capture=sys_instruction_capture
+        )
+    return _factory
+
+
+@pytest.mark.asyncio
+async def test_compile_sends_compile_system_instruction_not_critic() -> None:
+    """compile_nl_to_shacl sends the COMPILE system instruction (not the egress critic's).
+
+    This is the regression test that would have caught the original defect:
+    - Before fix: compiler imported egress_gate._invoke_llm which hardcodes
+      _CRITIC_SYSTEM_INSTRUCTION ("You are an answer-grounding critic...").
+      All three compiler constants (_COMPILE_/_EXPLAIN_/_REVIEW_SYSTEM_INSTRUCTION)
+      were dead code — the model always received the critic persona.
+    - After fix: compiler's own _invoke_llm takes system_instruction as a
+      parameter; compile_nl_to_shacl passes _COMPILE_SYSTEM_INSTRUCTION.
+
+    Asserts:
+      1. The system_instruction that reaches the model contains compiler-specific
+         wording ("SHACL constraint compiler").
+      2. It does NOT contain the critic persona wording
+         ("answer-grounding critic").
+    """
+    from magi_agent.customize.shacl_compiler import (
+        compile_nl_to_shacl,
+        _COMPILE_SYSTEM_INSTRUCTION,
+    )
+
+    sys_instruction_capture: list[str] = []
+    factory = _factory_capturing_sys_instruction(
+        _VALID_TTL_RESPONSE, sys_instruction_capture
+    )
+
+    result = await compile_nl_to_shacl(_NL_TEXT, _FIELDS, model_factory=factory)
+
+    assert result["ok"] is True, f"Expected ok=True, got: {result}"
+    assert sys_instruction_capture, (
+        "system_instruction was not captured — the fake model may not have been called, "
+        "or LlmRequest.config.system_instruction is not set"
+    )
+
+    captured_si = sys_instruction_capture[0]
+
+    # Must contain the compiler-specific persona.
+    assert "SHACL constraint compiler" in captured_si, (
+        f"Expected 'SHACL constraint compiler' in system_instruction, got: {captured_si!r}. "
+        f"The _COMPILE_SYSTEM_INSTRUCTION is not reaching the model — "
+        f"check that _invoke_llm in shacl_compiler.py uses the system_instruction parameter."
+    )
+
+    # Must NOT contain the egress critic persona (the bug: sharing egress_gate._invoke_llm).
+    assert "answer-grounding critic" not in captured_si, (
+        f"'answer-grounding critic' found in system_instruction: {captured_si!r}. "
+        f"This is the egress critic persona — the compiler is incorrectly inheriting it. "
+        f"Ensure shacl_compiler._invoke_llm is NOT egress_gate._invoke_llm."
+    )
+
+    # The captured instruction must match the module constant exactly.
+    assert captured_si == _COMPILE_SYSTEM_INSTRUCTION, (
+        f"system_instruction mismatch. Expected:\n  {_COMPILE_SYSTEM_INSTRUCTION!r}\n"
+        f"Got:\n  {captured_si!r}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_explain_sends_explain_system_instruction() -> None:
+    """explain_shape sends _EXPLAIN_SYSTEM_INSTRUCTION to the model."""
+    from magi_agent.customize.shacl_compiler import (
+        explain_shape,
+        _EXPLAIN_SYSTEM_INSTRUCTION,
+    )
+
+    sys_instruction_capture: list[str] = []
+    factory = _factory_capturing_sys_instruction(
+        "This shape checks that amount <= 3000.", sys_instruction_capture
+    )
+
+    result = await explain_shape(_VALID_TTL, model_factory=factory)
+
+    assert isinstance(result, str) and result.strip(), f"Expected non-empty explanation, got: {result!r}"
+    assert sys_instruction_capture, "system_instruction was not captured"
+
+    captured_si = sys_instruction_capture[0]
+    assert "SHACL shape explainer" in captured_si, (
+        f"Expected 'SHACL shape explainer' in system_instruction, got: {captured_si!r}"
+    )
+    assert "answer-grounding critic" not in captured_si, (
+        f"explain_shape must not use the critic persona, got: {captured_si!r}"
+    )
+    assert captured_si == _EXPLAIN_SYSTEM_INSTRUCTION
+
+
+@pytest.mark.asyncio
+async def test_review_sends_review_system_instruction() -> None:
+    """review_compilation sends _REVIEW_SYSTEM_INSTRUCTION to the model."""
+    from magi_agent.customize.shacl_compiler import (
+        review_compilation,
+        _REVIEW_SYSTEM_INSTRUCTION,
+    )
+
+    structured_response = json.dumps({"verdict": "aligned", "issues": [], "confidence": 0.95})
+    sys_instruction_capture: list[str] = []
+    factory = _factory_capturing_sys_instruction(structured_response, sys_instruction_capture)
+
+    result = await review_compilation(_NL_TEXT, _VALID_TTL, _FIELDS, model_factory=factory)
+
+    assert result["verdict"] == "aligned", f"Expected verdict='aligned', got: {result}"
+    assert sys_instruction_capture, "system_instruction was not captured"
+
+    captured_si = sys_instruction_capture[0]
+    assert "SHACL shape reviewer" in captured_si, (
+        f"Expected 'SHACL shape reviewer' in system_instruction, got: {captured_si!r}"
+    )
+    assert "answer-grounding critic" not in captured_si, (
+        f"review_compilation must not use the critic persona, got: {captured_si!r}"
+    )
+    assert captured_si == _REVIEW_SYSTEM_INSTRUCTION
+
+
+# ---------------------------------------------------------------------------
+# Test 8 — model raises (simulates network error): all three functions fail-open
+# ---------------------------------------------------------------------------
+
+
+def _make_raising_model() -> object:
+    """Return a fake ADK model whose generate_content_async raises RuntimeError."""
+    class _RaisingModel:
+        model = "fake-raising-model"
+
+        async def generate_content_async(
+            self, llm_request: Any, stream: bool = False
+        ) -> AsyncGenerator:
+            raise RuntimeError("simulated network error")
+            yield  # make this an async generator  # noqa: unreachable
+
+    return _RaisingModel()
+
+
+def _raising_factory():
+    """model_factory that always returns a model that raises on generate_content_async."""
+    def _factory() -> object:
+        return _make_raising_model()
+    return _factory
+
+
+@pytest.mark.asyncio
+async def test_compile_model_raises_fail_open() -> None:
+    """If the model raises (e.g. network error), compile_nl_to_shacl returns ok=False, never raises."""
+    from magi_agent.customize.shacl_compiler import compile_nl_to_shacl
+
+    try:
+        result = await compile_nl_to_shacl(_NL_TEXT, _FIELDS, model_factory=_raising_factory())
+    except Exception as exc:  # noqa: BLE001
+        pytest.fail(
+            f"compile_nl_to_shacl must not raise when model raises, but raised: {exc!r}"
+        )
+
+    assert result["ok"] is False, f"Expected ok=False when model raises, got: {result}"
+    assert "error" in result and result["error"], f"Expected non-empty error, got: {result}"
+    assert result.get("shapeTtl") is None, f"Expected shapeTtl=None, got: {result}"
+
+
+@pytest.mark.asyncio
+async def test_explain_model_raises_fail_open() -> None:
+    """If the model raises (e.g. network error), explain_shape returns fallback string, never raises."""
+    from magi_agent.customize.shacl_compiler import explain_shape
+
+    try:
+        result = await explain_shape(_VALID_TTL, model_factory=_raising_factory())
+    except Exception as exc:  # noqa: BLE001
+        pytest.fail(
+            f"explain_shape must not raise when model raises, but raised: {exc!r}"
+        )
+
+    assert isinstance(result, str), f"Expected str fallback, got {type(result)}"
+    assert result.strip(), "explain_shape must return a non-empty fallback string when model raises"
+    # Must NOT be the success path — should be a fallback/error string.
+    assert "unavailable" in result.lower() or "error" in result.lower(), (
+        f"Expected fallback string mentioning unavailability/error, got: {result!r}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_review_model_raises_fail_open() -> None:
+    """If the model raises (e.g. network error), review_compilation returns conservative result, never raises."""
+    from magi_agent.customize.shacl_compiler import review_compilation
+
+    try:
+        result = await review_compilation(_NL_TEXT, _VALID_TTL, _FIELDS, model_factory=_raising_factory())
+    except Exception as exc:  # noqa: BLE001
+        pytest.fail(
+            f"review_compilation must not raise when model raises, but raised: {exc!r}"
+        )
+
+    assert isinstance(result, dict), f"Expected dict, got {type(result)}"
+    # Conservative result on error: mismatch (safer than aligned).
+    assert result["verdict"] in {"mismatch", "unknown"}, (
+        f"Expected conservative verdict (mismatch or unknown) when model raises, got: {result['verdict']!r}"
+    )

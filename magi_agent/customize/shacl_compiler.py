@@ -432,11 +432,6 @@ async def compile_nl_to_shacl(
     if model_factory is None:
         return {"ok": False, "error": "compiler unavailable", "shapeTtl": None}
 
-    try:
-        from magi_agent.introspection.egress_gate import _invoke_llm  # noqa: PLC0415
-    except Exception as exc:  # noqa: BLE001
-        return {"ok": False, "error": f"compiler unavailable: {exc}", "shapeTtl": None}
-
     fields_menu = _render_fields_menu(fields)
     _MAX_ATTEMPTS = 2
     last_errors: list[str] = []
@@ -459,7 +454,9 @@ async def compile_nl_to_shacl(
                     nl_text=nl_text,
                 )
 
-            raw_text = await _invoke_llm(model, prompt)
+            raw_text = await _invoke_llm(
+                model, prompt, system_instruction=_COMPILE_SYSTEM_INSTRUCTION
+            )
             ttl = _extract_ttl_from_response(raw_text)
             errors = validate_shape_ttl(ttl)
             if not errors:
@@ -522,14 +519,14 @@ async def explain_shape(
         return "(explanation unavailable — no compiler model configured)"
 
     try:
-        from magi_agent.introspection.egress_gate import _invoke_llm  # noqa: PLC0415
-
         model = model_factory()
         if model is None:
             return "(explanation unavailable — factory returned None)"
 
         prompt = _EXPLAIN_PROMPT_TEMPLATE.format(shape_ttl=shape_ttl)
-        raw_text = await _invoke_llm(model, prompt)
+        raw_text = await _invoke_llm(
+            model, prompt, system_instruction=_EXPLAIN_SYSTEM_INSTRUCTION
+        )
         return raw_text.strip() if raw_text.strip() else "(explanation unavailable — empty model response)"
     except Exception:  # noqa: BLE001 — fail-open
         return "(explanation unavailable — model error)"
@@ -567,11 +564,58 @@ Reply with ONLY a JSON object (no prose):
 {{"verdict": "aligned"|"mismatch"|"overbroad"|"underbroad", "issues": ["<issue>", ...], "confidence": <0.0-1.0>}}
 """
 
-_CONSERVATIVE_REVIEW_RESULT: dict = {
+_CONSERVATIVE_REVIEW_RESULT: dict[str, object] = {
     "verdict": "mismatch",
     "issues": ["review model returned an unparseable response"],
     "confidence": 0.0,
 }
+
+
+async def _invoke_llm(model: object, prompt: str, *, system_instruction: str) -> str:
+    """Invoke an ADK model using the async-generator contract.
+
+    This is the COMPILER's own helper — it takes ``system_instruction`` as an
+    explicit parameter so each of the three compiler functions (compile / explain /
+    review) sends its OWN system persona to the model.
+
+    This is intentionally NOT imported from ``egress_gate._invoke_llm`` because
+    that helper hardcodes the critic persona (``_CRITIC_SYSTEM_INSTRUCTION``).
+    Sharing it would mean all three compiler calls silently use the critic persona
+    regardless of the ``_COMPILE_/_EXPLAIN_/_REVIEW_SYSTEM_INSTRUCTION`` constants
+    defined here (making those constants dead code and producing garbage in
+    production).
+
+    The ADK contract (mirrors egress_gate._invoke_llm):
+      1. Build an ``LlmRequest`` with the given system_instruction and a single
+         user-role Content containing the prompt text.
+      2. Drive ``model.generate_content_async(llm_request, stream=False)`` as an
+         async generator.
+      3. Collect and join all ``part.text`` values from ``resp.content.parts``.
+
+    TODO (Task 3.3): ``_production_shacl_compiler_model_factory`` — wire a
+    real provider via ``resolve_provider_config``; this helper is the call site.
+    """
+    from google.adk.models.llm_request import LlmRequest  # noqa: PLC0415
+    from google.genai import types  # noqa: PLC0415
+
+    llm_request = LlmRequest(
+        config=types.GenerateContentConfig(
+            system_instruction=system_instruction,
+        ),
+        contents=[
+            types.Content(
+                role="user",
+                parts=[types.Part.from_text(text=prompt)],
+            )
+        ],
+    )
+    collected: list[str] = []
+    async for resp in model.generate_content_async(llm_request, stream=False):  # type: ignore[union-attr]
+        if resp.content and resp.content.parts:
+            for part in resp.content.parts:
+                if part.text:
+                    collected.append(part.text)
+    return "".join(collected)
 
 
 def _parse_review_response(text: str) -> dict | None:
@@ -654,8 +698,6 @@ async def review_compilation(
         return {"verdict": "unknown", "issues": [], "confidence": 0.0}
 
     try:
-        from magi_agent.introspection.egress_gate import _invoke_llm  # noqa: PLC0415
-
         model = model_factory()
         if model is None:
             return {"verdict": "unknown", "issues": [], "confidence": 0.0}
@@ -666,7 +708,9 @@ async def review_compilation(
             fields_menu=fields_menu,
             shape_ttl=shape_ttl,
         )
-        raw_text = await _invoke_llm(model, prompt)
+        raw_text = await _invoke_llm(
+            model, prompt, system_instruction=_REVIEW_SYSTEM_INSTRUCTION
+        )
         parsed = _parse_review_response(raw_text)
         if parsed is None:
             # Parse failure → conservative mismatch (safer than flagging as aligned).
