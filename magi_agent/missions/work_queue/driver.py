@@ -113,6 +113,12 @@ class WorkQueueDriver:
 
             claimed += 1
 
+            # Exactly-once at dispatch: keyed tasks must be enqueued via
+            # store.create_idempotent (unique idempotency_key constraint).
+            # Bypassing that allows two same-key ready tasks to be claimed
+            # and run in a single tick before either is marked 'completed',
+            # causing both side effects to fire. P6 real-runner enqueue seam
+            # MUST route all keyed enqueues through create_idempotent.
             key = claimed_task.idempotency_key
             if key is not None:
                 prior = self._store.completed_task_for_key(key, exclude_task_id=claimed_task.id)
