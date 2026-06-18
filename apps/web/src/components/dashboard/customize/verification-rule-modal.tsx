@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Lock, Trash2 } from "lucide-react";
+import { SHACL_EXAMPLE_TEMPLATE } from "./shacl-example-template";
 import { Modal } from "@/components/ui/modal";
 import { Select } from "@/components/ui/select";
 import type {
@@ -536,8 +537,17 @@ function CustomRulesSection({
                 </>
               ) : (
                 /* raw .ttl mode */
-                <label className="block text-[11px] font-medium text-secondary">
-                  SHACL .ttl 직접 입력
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-medium text-secondary">SHACL .ttl 직접 입력</span>
+                    <button
+                      type="button"
+                      onClick={() => setRawTtl(SHACL_EXAMPLE_TEMPLATE)}
+                      className="rounded px-2 py-0.5 text-[10px] font-medium text-secondary hover:bg-black/[0.06] hover:text-foreground"
+                    >
+                      예시 불러오기
+                    </button>
+                  </div>
                   <textarea
                     aria-label="SHACL TTL 입력"
                     value={rawTtl}
@@ -546,7 +556,7 @@ function CustomRulesSection({
                     placeholder="@prefix sh: <http://www.w3.org/ns/shacl#> ."
                     className={`${selectCls} resize-y font-mono text-[11px]`}
                   />
-                </label>
+                </div>
               )}
             </div>
           ) : kind === "deterministic_ref" ? (
