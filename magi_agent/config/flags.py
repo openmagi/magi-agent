@@ -239,6 +239,39 @@ FLAGS: tuple[FlagSpec, ...] = (
         kind="str",
     ),
     _b(
+        "MAGI_CHANNEL_LIVE_SLACK",
+        stage="stage3",
+        summary=(
+            "Enable the live Slack channel watcher (self-host only): inbound "
+            "Socket Mode messages drive a governed turn and the reply is "
+            "delivered back to the same channel/thread. Requires "
+            "MAGI_SLACK_APP_TOKEN + MAGI_SLACK_BOT_TOKEN and the slack extra "
+            "(pip install magi-agent[slack])."
+        ),
+    ),
+    FlagSpec(
+        name="MAGI_SLACK_APP_TOKEN",
+        default="",
+        scope="public",
+        stage="stage3",
+        summary=(
+            "Slack app-level token (xapp-) authorising the Socket Mode inbound "
+            "websocket; unset keeps the watcher fail-closed. Never logged."
+        ),
+        kind="str",
+    ),
+    FlagSpec(
+        name="MAGI_SLACK_BOT_TOKEN",
+        default="",
+        scope="public",
+        stage="stage3",
+        summary=(
+            "Slack bot token (xoxb-) for outbound replies (chat.postMessage); "
+            "unset keeps the watcher fail-closed. Never logged or persisted."
+        ),
+        kind="str",
+    ),
+    _b(
         "MAGI_OBSERVABILITY_ENABLED",
         summary="Enable the hook-tap observability module (bot-activity visibility).",
     ),
