@@ -600,6 +600,15 @@ class RealLocalChildRunner:
             if parent_cap:
                 profile_tools = [t for t in profile_tools if _tool_name(t) in parent_cap]
 
+        # Seam P2-T3: allowedTools is the orchestrator's explicit per-task grant.
+        # Apply after parent-cap, before spawn_cap. Gated by same default-OFF flag.
+        if flag_bool("MAGI_SPAWN_RECIPE_CAP_ENABLED", env=self._env):
+            metadata = getattr(request, "metadata", None) or {}
+            raw_allowed = metadata.get("allowedTools") if isinstance(metadata, dict) else None
+            allowed = frozenset(raw_allowed) if raw_allowed else frozenset()
+            if allowed:
+                profile_tools = [t for t in profile_tools if _tool_name(t) in allowed]
+
         # Seam 4: spawn_cap is the orchestrator's hard grant ceiling. Apply as the
         # innermost cap, after profile and parent-cap. Gated default-OFF.
         if self._spawn_cap and flag_bool("MAGI_SPAWN_RECIPE_CAP_ENABLED", env=self._env):
