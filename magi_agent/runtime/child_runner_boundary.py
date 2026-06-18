@@ -251,6 +251,11 @@ class ChildTaskRequest(BaseModel):
     #: ``ModelTierRegistry``. ``None`` inherits the ``ChildRunnerConfig`` route.
     provider: str | None = None
     model: str | None = None
+    #: Optional tool-name ceiling carried from a parent orchestrator. When set,
+    #: the tuple lists the tool names the orchestrator may grant to this child.
+    #: A future task (Seam 4) will consume this for intersection/enforcement.
+    #: ``None`` means no orchestrator-imposed ceiling (default behaviour).
+    spawn_cap: tuple[str, ...] | None = Field(default=None, alias="spawnCap")
 
     @field_validator("parent_execution_id", "turn_id", "task_id", "objective")
     @classmethod

@@ -407,6 +407,7 @@ async def spawn_agent(arguments: dict[str, object], context: ToolContext) -> Too
             provider=req_provider,
             model=req_model,
             budgetMs=budget_ms,
+            spawnCap=context.spawn_cap,
         )
 
         toolset_profile = resolve_child_toolset_profile()
