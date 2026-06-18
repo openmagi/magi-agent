@@ -68,7 +68,7 @@ _ALLOWLIST = set()
 
 def _guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
     top = str(name).split(".")[0]
-    if level == 0 and top not in _ALLOWLIST:
+    if level == 0 and "*" not in _ALLOWLIST and top not in _ALLOWLIST:
         raise ImportError("import_not_allowed: " + top)
     return _builtins.__import__(name, globals, locals, fromlist, level)
 
@@ -83,6 +83,8 @@ def _ensure_namespace():
 
 
 def _blocked_import(tree):
+    if "*" in _ALLOWLIST:
+        return None
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
