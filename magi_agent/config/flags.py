@@ -948,6 +948,14 @@ FLAGS: tuple[FlagSpec, ...] = (
             "parent cap is a no-op."
         ),
     ),
+    _b(
+        "MAGI_SPAWN_RECIPE_CAP_ENABLED",
+        summary=(
+            "Apply the orchestrator's spawn_cap as the innermost tool-name ceiling "
+            "in _resolve_turn_toolset, after profile and parent-cap filtering. "
+            "Default OFF / None spawn_cap is a no-op (byte-identical)."
+        ),
+    ),
     # --- Surfaces -----------------------------------------------------------
     # NOTE: flat default-ON, NOT profile-aware. cli/headless.py:_cli_enabled
     # reads MAGI_CLI_ENABLED directly (unset => True regardless of

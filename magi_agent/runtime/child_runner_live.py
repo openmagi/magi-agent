@@ -600,6 +600,12 @@ class RealLocalChildRunner:
             if parent_cap:
                 profile_tools = [t for t in profile_tools if _tool_name(t) in parent_cap]
 
+        # Seam 4: spawn_cap is the orchestrator's hard grant ceiling. Apply as the
+        # innermost cap, after profile and parent-cap. Gated default-OFF.
+        if self._spawn_cap and flag_bool("MAGI_SPAWN_RECIPE_CAP_ENABLED", env=self._env):
+            cap = frozenset(self._spawn_cap)
+            profile_tools = [t for t in profile_tools if _tool_name(t) in cap]
+
         return profile_tools, collector
 
     @staticmethod
