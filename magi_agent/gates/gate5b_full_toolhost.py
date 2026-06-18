@@ -2179,6 +2179,11 @@ def build_gate5b_full_toolhost_bundle(
     # None cap), byte-identical to today.  The ceiling uses the same complete
     # final tool-name set we filter against — one source of truth.
     main_agent_exposed, _serve_spawn_cap = _apply_orchestrator_profile_serve(exposed)
+    # Intentional split: host.exposed_tool_names receives the FULL `exposed` set
+    # so children inherit the full grant ceiling via parentToolNames + spawn_cap
+    # (delegation must not be capped at the orchestrator's own restricted hands).
+    # The ADK tools / exposedToolNames / bashCommandAllowed below use the RESTRICTED
+    # `main_agent_exposed` — what the orchestrator's own hands can directly touch.
     host = Gate5BFullToolHost(
         config=safe_config,
         workspace_root=workspace,

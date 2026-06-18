@@ -256,26 +256,11 @@ class TestBuildGate5BFullToolhostBundleOrchestratorFilter:
 
         # Capture the ToolContext built during a dispatch by intercepting it.
         # We dispatch a read-only tool that will succeed regardless of workspace.
-        import magi_agent.gates.gate5b_full_toolhost as _g5b_mod  # noqa: PLC0415
         from magi_agent.tools.context import ToolContext  # noqa: PLC0415
 
         captured: list[ToolContext] = []
 
-        original_dispatch_registry = bundle.host._dispatch_registry_tool.__func__  # type: ignore[attr-defined]
-
-        async def spy_dispatch(
-            self_host: object,
-            tool_name: str,
-            args: object,
-            *,
-            tool_call_id: str,
-        ) -> object:
-            # Capture the ToolContext by patching ToolContext.__init__
-            return await original_dispatch_registry(
-                self_host, tool_name, args, tool_call_id=tool_call_id
-            )
-
-        # Instead, capture via ToolContext construction intercept
+        # Capture via ToolContext construction intercept
         original_tc_init = ToolContext.__init__
 
         def capturing_init(self_tc: ToolContext, **kwargs: object) -> None:
@@ -418,4 +403,57 @@ class TestBuildGate5BFullToolhostBundleOrchestratorFilter:
         assert captured
         ctx = captured[0]
         assert ctx.spawn_cap is None, f"spawn_cap should be None, got {ctx.spawn_cap!r}"
+        bundle.host.shutdown()
+
+    def test_orchestrator_full_ceiling_restricted_hands_invariant(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Invariant: orchestrator main-agent gets restricted hands, children get full ceiling.
+
+        (a) bundle.tools / bundle.exposed_tool_names are the RESTRICTED set — no Bash.
+        (b) host.exposed_tool_names and host._spawn_cap are the FULL set — Bash present.
+
+        This locks the intentional split: the host keeps the full ceiling so
+        parentToolNames + tighten-only inheritance gives children the complete
+        grant ceiling, while the orchestrator's own ADK tools are restricted.
+        """
+        monkeypatch.setenv("MAGI_MAIN_AGENT_PROFILE", "orchestrator")
+        monkeypatch.delenv("MAGI_CHILD_RUNNER_LIVE_KILL_SWITCH", raising=False)
+
+        runtime = _runtime()
+        env = {
+            "MAGI_GATE5B_LIVE_SUBAGENTS_ENABLED": "1",
+            "MAGI_CHILD_RUNNER_LIVE_ENABLED": "1",
+        }
+        _install_full_toolhost_config(runtime, env)
+
+        bundle = _gate5b_full_toolhost_bundle(runtime, _serve_route_config())
+        assert bundle.status == "ready"
+
+        # (a) Main-agent hands are RESTRICTED — mutation tools absent
+        adk_names = {getattr(t, "name", None) for t in bundle.tools}
+        assert "Bash" not in adk_names, "Bash must not be in orchestrator's own ADK tools"
+        assert "FileWrite" not in adk_names
+        assert set(bundle.exposed_tool_names) == adk_names, (
+            "bundle.exposed_tool_names must match the ADK tool names"
+        )
+
+        # (b) Child-facing ceiling is FULL — host keeps the complete grant set
+        assert "Bash" in set(bundle.host.exposed_tool_names), (
+            "host.exposed_tool_names must be the FULL set (children inherit this as ceiling)"
+        )
+        assert bundle.host._spawn_cap is not None, "spawn_cap must be set for orchestrator"
+        assert "Bash" in set(bundle.host._spawn_cap), (
+            "host._spawn_cap must be the FULL set so children can receive Bash via delegation"
+        )
+
+        # (c) The two sides of the split are consistent: full ceiling > restricted hands
+        assert adk_names < set(bundle.host.exposed_tool_names), (
+            "restricted hands must be a strict subset of the full ceiling"
+        )
+        assert set(bundle.host._spawn_cap) == set(bundle.host.exposed_tool_names), (
+            "spawn_cap and host.exposed_tool_names must both reflect the full ceiling"
+        )
         bundle.host.shutdown()
