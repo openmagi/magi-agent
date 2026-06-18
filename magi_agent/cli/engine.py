@@ -907,6 +907,60 @@ def _resolve_document_coverage_mode_with_preset() -> str:
     return mode
 
 
+def _run_shacl_rules_for_turn(
+    policy: object,
+    evidence_records: "Sequence[object]",
+    *,
+    enabled: bool,
+    observed_at: int,
+) -> tuple[object, ...]:
+    """Run enabled SHACL rules against turn evidence and return constraint-check records.
+
+    Pure module-level helper for testability (mirrors the document-coverage
+    pattern). Returns a tuple of ``EvidenceRecord`` objects — one per enabled
+    ``shacl_constraint`` rule in ``policy``.
+
+    Returns ``()`` when:
+    - ``enabled`` is ``False`` (flag OFF → byte-identical to before),
+    - ``policy`` is ``None`` (no policy set / MAGI_CUSTOMIZE_VERIFICATION_ENABLED OFF),
+    - ``policy`` has no enabled shacl rules.
+
+    Never raises: any per-rule exception is caught and skipped so a bad rule
+    cannot break a turn. The ``run_shacl_rule`` producer is itself fail-safe
+    (returns ``status="unknown"`` on any internal error), so the belt-and-suspenders
+    guard here only catches unexpected attribute / type errors on policy access.
+    """
+    if not enabled:
+        return ()
+    if policy is None:
+        return ()
+    try:
+        rules = policy.enabled_shacl_rules()  # type: ignore[union-attr]
+    except Exception:  # noqa: BLE001
+        return ()
+    if not rules:
+        return ()
+    from magi_agent.evidence.shacl_verifier import run_shacl_rule  # noqa: PLC0415
+
+    results: list[object] = []
+    for rule in rules:
+        try:
+            shape_ttl = rule.get("shapeTtl") if isinstance(rule, dict) else None
+            rule_id = rule.get("ruleId") if isinstance(rule, dict) else None
+            if not shape_ttl or not rule_id:
+                continue
+            record = run_shacl_rule(
+                evidence_records,
+                shape_ttl,
+                rule_id,
+                observed_at=observed_at,
+            )
+            results.append(record)
+        except Exception:  # noqa: BLE001
+            continue
+    return tuple(results)
+
+
 def _coding_repair_max_attempts(repair_policy: Mapping[str, object]) -> int:
     from magi_agent.coding.repair_loop import repair_max_attempts
 
@@ -2974,17 +3028,54 @@ class MagiEngineDriver:
         # ``block`` flips the pre-final decision.
         document_coverage_mode = _resolve_document_coverage_mode_with_preset()
         document_coverage_gate_enabled = document_coverage_mode != "off"
+        # Task 2.3 — OPTIONAL BLOCKING SHACL constraint gate (default-OFF).
+        # Mirror of the document-coverage pattern: when OFF (shacl_enabled=False),
+        # shacl_records=() and shacl_gate_enabled=False → the bus call is
+        # byte-identical to before; existing callers/tests are unaffected.
+        # The policy is loaded fresh from the store (same pattern as
+        # _resolve_document_coverage_mode_with_preset / runtime_gate.preset_enabled)
+        # so the engine does not need a runtime reference here.
+        # Guard: flag_bool import is lazy-local to keep this method import-clean.
+        shacl_enabled: bool = False
+        _shacl_policy: object = None
+        try:
+            from magi_agent.config.flags import flag_bool as _flag_bool  # noqa: PLC0415
+
+            shacl_enabled = _flag_bool("MAGI_SHACL_VERIFIER_ENABLED")
+            if shacl_enabled:
+                from magi_agent.customize.store import load_overrides as _load_overrides  # noqa: PLC0415
+                from magi_agent.customize.verification_policy import (  # noqa: PLC0415
+                    CustomizeVerificationPolicy as _CVP,
+                )
+
+                _shacl_policy = _CVP.from_overrides(_load_overrides())
+        except Exception:  # noqa: BLE001
+            shacl_enabled = False
+            _shacl_policy = None
         failed_document_coverage = 0
         if self._evidence_collector is not None:
             from magi_agent.harness.verifier_bus import execute_pre_final_verifier_bus
 
             evidence_records = self._collect_evidence(turn_id)
+            # Run enabled SHACL rules against the turn's evidence (belt-and-suspenders:
+            # _run_shacl_rules_for_turn is itself fail-safe and never raises).
+            import time as _time  # noqa: PLC0415  # only import once per turn block
+
+            _shacl_observed_at = int(_time.time() * 1000)
+            shacl_records = _run_shacl_rules_for_turn(
+                _shacl_policy,
+                evidence_records,
+                enabled=shacl_enabled,
+                observed_at=_shacl_observed_at,
+            )
+            shacl_gate_enabled = shacl_enabled and bool(shacl_records)
             verifier_bus = execute_pre_final_verifier_bus(
                 required_evidence=effective_required_evidence,
                 required_validators=effective_required_validators,
                 observed_public_refs=tuple(sorted(observed_public_refs)),
-                evidence_records=evidence_records,
+                evidence_records=(*evidence_records, *shacl_records),
                 document_coverage_gate_enabled=document_coverage_gate_enabled,
+                shacl_gate_enabled=shacl_gate_enabled,
             )
             matched_refs = verifier_bus.get("matchedRefs")
             if isinstance(matched_refs, list):
