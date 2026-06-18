@@ -752,3 +752,120 @@ class TestPersistModelFailSafe:
         assert data["mcp"]["servers"] == ["server-a", "server-b"]
         assert data["model"]["model"] == "claude-opus-4"
         assert data["model"]["provider"] == "anthropic"
+
+
+# ---------------------------------------------------------------------------
+# J-1 — local dashboard /v1/chat/stream "model" reaches resolve_provider_config
+#
+# End-to-end seam test (per the remediation plan): a stream body carrying
+# ``model: "test-model"`` must build the local headless runtime with that model,
+# which forwards into ``resolve_provider_config(model_override="test-model")``.
+# Proves the override reaches the runner (not just the display path).
+# ---------------------------------------------------------------------------
+
+
+class TestStreamModelReachesResolveProviderConfig:
+    def _make_app_and_runtime(self):
+        from magi_agent.config.models import (
+            BuildInfo,
+            PythonRuntimeAuthorityConfig,
+            RuntimeConfig,
+        )
+        from magi_agent.runtime.openmagi_runtime import OpenMagiRuntime
+        from magi_agent.transport.streaming_chat_route import (
+            register_streaming_chat_routes,
+        )
+
+        try:
+            from fastapi import FastAPI
+        except ImportError:  # pragma: no cover - fastapi is a runtime dep
+            pytest.skip("fastapi not installed")
+
+        runtime = OpenMagiRuntime(
+            config=RuntimeConfig(
+                bot_id="bot-model-seam",
+                user_id="user-model-seam",
+                gateway_token="seam-token",
+                api_proxy_url="http://api-proxy.local",
+                chat_proxy_url="http://chat-proxy.local",
+                redis_url="redis://redis.local:6379/0",
+                model="config-default-model",
+                build=BuildInfo(version="0.1.0-test", build_sha="sha-test"),
+                authority=PythonRuntimeAuthorityConfig(),
+            )
+        )
+        app = FastAPI(title="model-seam-test")
+        register_streaming_chat_routes(app, runtime)
+        return app, runtime
+
+    def test_stream_model_threads_to_resolve_provider_config(
+        self, monkeypatch
+    ) -> None:
+        from fastapi.testclient import TestClient
+
+        monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
+        monkeypatch.delenv("CORE_AGENT_PYTHON_CHAT_ROUTE", raising=False)
+
+        seen: list[object] = []
+
+        from magi_agent.cli import providers as providers_mod
+
+        def _fake_resolve(model_override=None, **kwargs):  # noqa: ANN001
+            seen.append(model_override)
+            return None  # None → model-free stub runner (no provider key needed)
+
+        monkeypatch.setattr(providers_mod, "resolve_provider_config", _fake_resolve)
+
+        app, _runtime = self._make_app_and_runtime()
+        client = TestClient(app)
+
+        response = client.post(
+            "/v1/chat/stream",
+            headers={"authorization": "Bearer seam-token"},
+            json={
+                "sessionId": "s-seam",
+                "turnId": "t-seam",
+                "model": "test-model",
+                "messages": [{"role": "user", "content": "hi"}],
+            },
+        )
+
+        # The build may fail downstream (no real provider), but it must occur
+        # AFTER resolve_provider_config saw the override.
+        assert "test-model" in seen, (
+            "selected model never reached resolve_provider_config "
+            f"(saw {seen!r})"
+        )
+
+    def test_stream_no_model_uses_config_default(self, monkeypatch) -> None:
+        from fastapi.testclient import TestClient
+
+        monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
+        monkeypatch.delenv("CORE_AGENT_PYTHON_CHAT_ROUTE", raising=False)
+
+        seen: list[object] = []
+
+        from magi_agent.cli import providers as providers_mod
+
+        def _fake_resolve(model_override=None, **kwargs):  # noqa: ANN001
+            seen.append(model_override)
+            return None
+
+        monkeypatch.setattr(providers_mod, "resolve_provider_config", _fake_resolve)
+
+        app, _runtime = self._make_app_and_runtime()
+        client = TestClient(app)
+
+        client.post(
+            "/v1/chat/stream",
+            headers={"authorization": "Bearer seam-token"},
+            json={
+                "sessionId": "s-seam",
+                "turnId": "t-seam",
+                "messages": [{"role": "user", "content": "hi"}],
+            },
+        )
+
+        assert "config-default-model" in seen, (
+            f"serve-config model fallback not used (saw {seen!r})"
+        )

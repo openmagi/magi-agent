@@ -689,7 +689,8 @@ def register_streaming_chat_routes(
     app: FastAPI,
     runtime: object,
     *,
-    engine_builder: Callable[[str, object], tuple[object, object]] | None = None,
+    engine_builder: Callable[[str, object, str | None], tuple[object, object]]
+    | None = None,
 ) -> None:
     """Mount the three streaming-chat routes on *app*.
 
@@ -698,16 +699,24 @@ def register_streaming_chat_routes(
     app:
         The FastAPI application instance.
     runtime:
-        The ``OpenMagiRuntime`` (or compatible duck-typed stub). Used only for
-        ``runtime.config.gateway_token`` and ``runtime.config.model``.
+        The ``OpenMagiRuntime`` (or compatible duck-typed stub). Used for
+        ``runtime.config.gateway_token`` and as the fallback for
+        ``runtime.config.model`` when a request carries no ``model`` override
+        (see ``engine_builder``).
     engine_builder:
-        Optional factory ``(session_id: str, sink) -> (engine, gate)``.
-        When omitted the default uses :func:`~magi_agent.cli.wiring.build_headless_runtime`
-        with ``permission_mode="default"`` and ``MAGI_AGENT_WORKSPACE`` or
+        Optional factory ``(session_id: str, sink, model_override) -> (engine, gate)``.
+        ``model_override`` is the model selected by the dashboard (the
+        ``/v1/chat/stream`` body ``model`` field); it wins over
+        ``runtime.config.model`` and falls back to it when ``None``. When the
+        factory is omitted the default uses
+        :func:`~magi_agent.cli.wiring.build_headless_runtime` with
+        ``permission_mode="default"`` and ``MAGI_AGENT_WORKSPACE`` or
         ``os.getcwd()`` as ``cwd``.
     """
 
-    def _default_engine_builder(session_id: str, sink: object) -> tuple[object, object]:
+    def _default_engine_builder(
+        session_id: str, sink: object, model_override: str | None
+    ) -> tuple[object, object]:
         # NOTE: build_headless_runtime(prompt_sink=...) wires a RulesPermissionGate
         # backed by an EMPTY RulesEngine, so the engine's `updated_input`
         # re-validation (which would re-check a rewritten tool's args against deny
@@ -721,7 +730,12 @@ def register_streaming_chat_routes(
             local_runner_policy_routing_enabled_from_env,
         )
 
-        model = getattr(getattr(runtime, "config", None), "model", None)
+        # The dashboard-selected model (when present) wins over the process
+        # serve config; ``None``/absent falls back to ``runtime.config.model``
+        # (byte-identical to the pre-J-1 behavior when no override is sent).
+        model = model_override or getattr(
+            getattr(runtime, "config", None), "model", None
+        )
         cwd = os.environ.get("MAGI_AGENT_WORKSPACE") or os.getcwd()
         local_full_access = _local_full_access(runtime)
         permission_mode = "bypassPermissions" if local_full_access else "default"
@@ -778,6 +792,13 @@ def register_streaming_chat_routes(
             session_id = uuid.uuid4().hex
         turn_id = _body_string(body, "turnId", f"{session_id}:turn")
         prompt = _extract_prompt_text(body)
+        # J-1: the dashboard sends the selected model in the body. Thread it into
+        # the local headless builder as an override-with-fallback. The web client
+        # default sentinel ``"auto"`` means "no override" (fall back to the serve
+        # config), keeping behavior byte-identical for default callers.
+        model_override = _body_string(body, "model", "") or None
+        if model_override == "auto":
+            model_override = None
 
         if hosted_serve:
             # Hosted serving mode (08-PR3, default-OFF): the selected gate5b
@@ -816,7 +837,7 @@ def register_streaming_chat_routes(
         # here is safe (the client has not started consuming an event stream).
         try:
             with memory_mode_request_scope(request.headers):
-                engine, gate = builder(session_id, sink)
+                engine, gate = builder(session_id, sink, model_override)
         except Exception:
             return JSONResponse(status_code=500, content={"error": "engine_build_failed"})
         cancel = asyncio.Event()

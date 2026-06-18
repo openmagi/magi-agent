@@ -418,6 +418,37 @@ describe("sendMessage local runtime", () => {
     });
     expect(deltas.join("")).toBe("ok");
   });
+
+  it("forwards the selected model in the local stream request body (J-1)", async () => {
+    const fetchMock = mockSseFetch("event: agent\ndata: {\"type\":\"text_delta\",\"delta\":\"ok\"}\n\ndata: [DONE]\n\n");
+
+    await sendMessage("local", "general", [{ role: "user", content: "hello" }], {
+      model: "anthropic/claude-opus-4-8",
+      onDelta: vi.fn(),
+      onDone: vi.fn(),
+      onError: vi.fn(),
+    });
+
+    const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(JSON.parse(request.body as string)).toMatchObject({
+      model: "anthropic/claude-opus-4-8",
+      sessionId: "agent:main:app:general",
+      stream: true,
+    });
+  });
+
+  it("defaults the local stream model to 'auto' when none is selected (J-1)", async () => {
+    const fetchMock = mockSseFetch("event: agent\ndata: {\"type\":\"text_delta\",\"delta\":\"ok\"}\n\ndata: [DONE]\n\n");
+
+    await sendMessage("local", "general", [{ role: "user", content: "hello" }], {
+      onDelta: vi.fn(),
+      onDone: vi.fn(),
+      onError: vi.fn(),
+    });
+
+    const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(JSON.parse(request.body as string)).toMatchObject({ model: "auto" });
+  });
 });
 
 describe("deleteChannel", () => {
