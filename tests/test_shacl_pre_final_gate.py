@@ -186,3 +186,28 @@ def test_magi_shacl_verifier_enabled_default_is_false(
     spec = get_flag("MAGI_SHACL_VERIFIER_ENABLED")
     assert spec.kind == "bool"
     assert spec.default is False
+
+
+# ---------------------------------------------------------------------------
+# Test M3 — calling without shacl_gate_enabled kwarg does NOT block a failed record
+# ---------------------------------------------------------------------------
+
+
+def test_omitting_shacl_gate_kwarg_does_not_block() -> None:
+    """M3: calling execute_pre_final_verifier_bus WITHOUT the shacl_gate_enabled
+    kwarg (relies on default=False) while injecting a failed SHACL record must
+    NOT block. This proves the default is False via omission, mirroring
+    document_coverage's analogous test."""
+    bus = execute_pre_final_verifier_bus(
+        required_evidence=(),
+        required_validators=(),
+        observed_public_refs=(),
+        evidence_records=(_shacl_record("failed"),),
+        # shacl_gate_enabled intentionally omitted — must default to False
+    )
+
+    assert bus["decision"] == "pass", (
+        f"M3 FAIL: omitting shacl_gate_enabled kwarg caused a block. "
+        f"Default must be False. decision={bus['decision']!r}"
+    )
+    assert bus["failedShaclConstraints"] == 0

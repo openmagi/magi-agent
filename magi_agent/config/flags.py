@@ -718,7 +718,9 @@ FLAGS: tuple[FlagSpec, ...] = (
             "verifier bus. When ON, any ShaclConstraintCheck evidence record with "
             "top-level status='failed' flips the pre-final decision to 'block'. "
             "Strict default-OFF; OFF is byte-identical to before (fail-safe 'unknown' "
-            "records and 'ok' records never block)."
+            "records and 'ok' records never block). "
+            "Enabling this flag without an active SHACL producer wired (PR1 state) "
+            "has no effect: no ShaclConstraintCheck records are emitted until PR2."
         ),
         scope="public",
         stage="stage2",

@@ -225,3 +225,54 @@ def test_unsafe_field_key_characters_handled_deterministically() -> None:
         "Implementation must escape keys, not drop them."
     )
     assert str(dot_vals[0]) == "val3"
+
+
+# ---------------------------------------------------------------------------
+# Test M2 — digit-starting field key is prefixed (not dropped), carries value
+# ---------------------------------------------------------------------------
+
+
+def test_digit_starting_field_key_is_prefixed_and_carries_value() -> None:
+    """M2: a field key that starts with a digit (e.g. '1amount') must be sanitised
+    with a prefix so the predicate is a valid XML local name, and the value must
+    be preserved in the graph.
+
+    The _sanitise_field_key implementation prefixes a leading underscore when the
+    key starts with a digit, yielding e.g. 'field__1amount' or 'field_1amount'.
+    This test only asserts that:
+      (a) no exception is raised,
+      (b) the value 5 IS present in the graph (the key is not dropped),
+      (c) the stored predicate local-name does NOT start with a digit.
+    """
+    record = _make_record(fields={"1amount": 5})
+    g = evidence_records_to_graph([record])
+
+    # Must not raise — already implied by the call above
+    subjects = list(set(g.subjects()))
+    assert len(subjects) == 1
+    node = subjects[0]
+
+    # Find any predicate whose local name contains "1amount"
+    matching_predicates = [
+        pred
+        for pred in g.predicates(node)
+        if "1amount" in str(pred)
+    ]
+    assert matching_predicates, (
+        "M2 FAIL: no predicate containing '1amount' found in graph. "
+        "Digit-starting keys must be prefixed and stored, not silently dropped."
+    )
+
+    # The predicate local name must NOT start with a digit (XML validity)
+    for pred in matching_predicates:
+        local_name = str(pred).rsplit("#", 1)[-1]  # extract after #
+        assert not local_name[0].isdigit(), (
+            f"M2 FAIL: predicate local name {local_name!r} starts with a digit — "
+            "invalid XML local name."
+        )
+
+    # The value 5 must be stored
+    all_values = [str(o) for pred in matching_predicates for o in g.objects(node, pred)]
+    assert "5" in all_values, (
+        f"M2 FAIL: expected value '5' for digit-prefixed key, got: {all_values}"
+    )
