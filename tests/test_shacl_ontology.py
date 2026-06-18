@@ -9,14 +9,8 @@ import rdflib
 import rdflib.compare
 from rdflib.namespace import XSD
 
-from magi_agent.evidence.shacl_ontology import MAGI_NS, evidence_records_to_graph
+from magi_agent.evidence.shacl_ontology import MAGI, MAGI_NS, evidence_records_to_graph
 from magi_agent.evidence.types import EvidenceRecord, EvidenceSource
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-MAGI = rdflib.Namespace(MAGI_NS)
 
 
 def _make_record(
@@ -28,7 +22,7 @@ def _make_record(
 ) -> EvidenceRecord:
     return EvidenceRecord(
         type=type,
-        status=status,  # type: ignore[arg-type]
+        status=status,  # type: ignore[arg-type]  # helper uses str, EvidenceRecord expects EvidenceStatus literal
         observedAt=observed_at,
         source=EvidenceSource(kind="verifier"),
         fields=fields or {},
@@ -206,3 +200,28 @@ def test_unsafe_field_key_characters_handled_deterministically() -> None:
     normal_vals = list(g1.objects(node, MAGI.field_normal_key))
     assert len(normal_vals) == 1
     assert str(normal_vals[0]) == "val4"
+
+    # Unsafe keys must be ESCAPED (not dropped) — assert sanitised predicates carry values
+    # "key with spaces" → field_key_with_spaces
+    spaces_vals = list(g1.objects(node, MAGI.field_key_with_spaces))
+    assert len(spaces_vals) == 1, (
+        f"Expected escaped predicate field_key_with_spaces in graph, got {spaces_vals}. "
+        "Implementation must escape keys, not drop them."
+    )
+    assert str(spaces_vals[0]) == "val1"
+
+    # "key/with/slash" → field_key_with_slash
+    slash_vals = list(g1.objects(node, MAGI.field_key_with_slash))
+    assert len(slash_vals) == 1, (
+        f"Expected escaped predicate field_key_with_slash in graph, got {slash_vals}. "
+        "Implementation must escape keys, not drop them."
+    )
+    assert str(slash_vals[0]) == "val2"
+
+    # "key.with.dot" → field_key_with_dot
+    dot_vals = list(g1.objects(node, MAGI.field_key_with_dot))
+    assert len(dot_vals) == 1, (
+        f"Expected escaped predicate field_key_with_dot in graph, got {dot_vals}. "
+        "Implementation must escape keys, not drop them."
+    )
+    assert str(dot_vals[0]) == "val3"

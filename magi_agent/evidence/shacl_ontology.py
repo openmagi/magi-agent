@@ -45,9 +45,8 @@ def _sanitise_field_key(key: str) -> str | None:
     identical outputs.
     """
     sanitised = _UNSAFE_CHAR_RE.sub("_", key)
-    # Collapse multiple consecutive underscores to one
-    while "__" in sanitised:
-        sanitised = sanitised.replace("__", "_")
+    # Collapse multiple consecutive underscores to one (O(n), not O(n²))
+    sanitised = re.sub(r"_+", "_", sanitised)
     # Strip leading/trailing underscores for cleanliness, but keep at least one char
     sanitised = sanitised.strip("_")
     if not sanitised:
