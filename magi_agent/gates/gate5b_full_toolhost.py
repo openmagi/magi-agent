@@ -2500,7 +2500,7 @@ def _build_adk_tool(host: Gate5BFullToolHost, name: str) -> FunctionTool:
             provider: str = "",
             model: str = "",
             budgetMs: int = 0,
-            allowedTools: list[str] | None = None,
+            allowedTools: list[str] = [],  # noqa: B006 — ADK schema introspection only, never mutated; `list[str] | None` emits a Google-schema-incompatible anyOf
             tool_context: object | None = None,
         ) -> dict[str, object]:
             """Delegate a bounded readonly subtask to a child Magi Agent.
