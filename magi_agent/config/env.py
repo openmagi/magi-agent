@@ -2361,6 +2361,24 @@ def is_hosted_deployment(env: Mapping[str, str] | None = None) -> bool:
     return _is_hosted(source)
 
 
+MAGI_MAIN_AGENT_PROFILE_ENV = "MAGI_MAIN_AGENT_PROFILE"
+_MAIN_AGENT_ORCHESTRATOR = "orchestrator"
+
+
+def main_agent_profile(env: Mapping[str, str] | None = None) -> str:
+    """Read ``MAGI_MAIN_AGENT_PROFILE`` and normalise to a known profile string.
+
+    Returns ``"orchestrator"`` when the env var is set to that value
+    (case-insensitive, stripped). Returns ``""`` for unset, empty, or any
+    unrecognised value — fail-safe: unknown profile never silently elevates.
+    """
+    source = os.environ if env is None else env
+    raw = (source.get(MAGI_MAIN_AGENT_PROFILE_ENV) or "").strip().lower()
+    if raw == _MAIN_AGENT_ORCHESTRATOR:
+        return _MAIN_AGENT_ORCHESTRATOR
+    return ""
+
+
 MAGI_HOSTED_STREAMING_SERVE_ENV = "MAGI_HOSTED_STREAMING_SERVE"
 
 
