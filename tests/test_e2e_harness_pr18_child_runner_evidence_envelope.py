@@ -242,6 +242,13 @@ def test_pr18_child_runner_composes_generic_evidence_envelope_for_all_roles(
     assert projection.authority_flags.production_authority is False
     assert result_projection["authorityFlags"]["childRunnerAttached"] is False
     assert result_projection["authorityFlags"]["realChildRunnerExecuted"] is False
+    # The child's sanitized summary (its actual answer) MUST be surfaced to the
+    # parent model as a top-level, human-readable field — not buried as
+    # opaque refs only. Without this the parent cannot read what the child
+    # produced and re-runs the same work (observed: SpawnAgent x3 repeated).
+    assert "childSummary" in result_projection
+    assert result_projection["childSummary"] == result_projection["childEnvelope"]["summary"]
+    assert "child completed metadata-only work" in result_projection["childSummary"]
     assert result_projection["parentOutputRefs"][0] == result_projection["childEnvelope"]["childRef"]
     assert result_projection["parentOutputRefs"][0] != result.envelope.child_ref
     assert _is_runtime_ref(result_projection["parentOutputRefs"][0], "child")

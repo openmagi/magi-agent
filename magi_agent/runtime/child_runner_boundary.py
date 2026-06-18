@@ -432,6 +432,12 @@ class ChildRunnerResult(BaseModel):
                 else safe_envelope.model_dump(by_alias=True, mode="python", warnings=False)
             ),
             "parentOutputRefs": _parent_refs(safe_envelope),
+            # Surface the child's sanitized summary (its actual answer text) as a
+            # top-level, model-readable field. The summary is already bounded +
+            # redacted (no secrets/paths/raw transcript); without exposing it the
+            # parent only sees opaque refs and cannot read what the child
+            # produced, so it re-runs the same delegated work.
+            "childSummary": (safe_envelope.summary if safe_envelope is not None else ""),
             "errorCode": self.error_code,
             "errorMessage": _sanitize_public_text(self.error_message or "", max_chars=240) or None,
             "diagnosticMetadata": _safe_metadata(self.diagnostic_metadata),
