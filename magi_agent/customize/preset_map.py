@@ -119,18 +119,42 @@ def supported_modes_for(preset_id: str) -> tuple[str, ...]:
     return seam.supported_modes if seam is not None else ("deterministic",)
 
 
+# Presets backed by a real runtime CAPABILITY (a behavior the runtime can run),
+# gated by an env flag rather than a pre-final verification gate — so the
+# Customize tab surfaces them honestly as a capability, not a togglable gate and
+# not an unimplemented preview.
+#
+# coding-child-review is the cross-verify/cross-review multi-model capability
+# (recipes/cross_verify.py + harness/cross_review.py, gated by
+# MAGI_CROSS_VERIFY_ENABLED). It runs adversarial peer review of sub-agent output;
+# it is NOT a pre-final gate satisfier, so it can't be a verification seam (that
+# would be a fake toggle). Enable it via the env flag.
+_CAPABILITY_PRESETS: dict[str, str] = {
+    "coding-child-review": "MAGI_CROSS_VERIFY_ENABLED",
+}
+
+
+def capability_flag_for(preset_id: str) -> str | None:
+    """The env flag that enables a capability preset, or None if not a capability."""
+    return _CAPABILITY_PRESETS.get(preset_id)
+
+
 def enforcement_for(preset_id: str, *, category: str, is_security: bool) -> str:
     """Honest enforcement status for the catalog UI.
 
     ``enforcing``  — toggling this preset changes runtime behavior now.
     ``always-on``  — enforced by the runtime elsewhere (security/PermissionGate),
                      not controllable from this tab.
+    ``capability`` — a real runtime capability gated by an env flag (not a
+                     pre-final verification gate, so not a Customize toggle).
     ``preview``    — surfaced for parity but not yet wired to a runtime gate.
     """
     if preset_id in PRESET_SEAMS:
         return "enforcing"
     if is_security or category == "security":
         return "always-on"
+    if preset_id in _CAPABILITY_PRESETS:
+        return "capability"
     return "preview"
 
 
@@ -206,7 +230,7 @@ _DESCRIPTIONS: dict[str, str] = {
     "deterministic-evidence": "Checks numbers and dates are backed by tool evidence.",
     "coding-context": "Auto-injects repo map and symbols for code tasks.",
     "coding-workspace-lock": "Prevents unrelated file changes during coding.",
-    "coding-child-review": "Auto-reviews sub-agent code output.",
+    "coding-child-review": "Adversarial multi-model review of sub-agent output. Capability — enable with MAGI_CROSS_VERIFY_ENABLED.",
     "benchmark-verifier": "Detects and blocks performance regressions.",
     "task-contract": "Enforces a goal to plan to evidence lifecycle.",
     "goal-progress": "Blocks completion claims without actual actions.",

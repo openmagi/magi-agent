@@ -43,9 +43,11 @@ export interface HarnessPresetItem {
    * Honest enforcement status:
    * - `enforcing`  — toggling this preset changes runtime behavior now.
    * - `always-on`  — enforced elsewhere (security/PermissionGate); not togglable here.
+   * - `capability` — a real runtime capability gated by an env flag (not a
+   *                  pre-final verification gate, so not a Customize toggle).
    * - `preview`    — surfaced for parity but not yet wired to a runtime gate.
    */
-  enforcement: "enforcing" | "always-on" | "preview";
+  enforcement: "enforcing" | "always-on" | "capability" | "preview";
   /** Evaluation strategies the runtime supports for this preset. */
   supportedModes: string[];
   /** Legacy field kept for back-compat; prefer `defaultEnabled`. */
