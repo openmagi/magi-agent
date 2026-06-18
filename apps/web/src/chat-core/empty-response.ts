@@ -61,3 +61,21 @@ export function shouldRetryEmptyCompletion(
   if (state?.streamingText?.trim()) return false;
   return !hasNonTextTurnWork(state);
 }
+
+/**
+ * Decide whether to drain the next queued message after a turn finalizes.
+ *
+ * Drain only when the turn actually produced a final answer (or was a truly
+ * empty turn with no work, so there is nothing to continue). A turn that ended
+ * with work in progress but no final answer text is a mid-task stop — draining
+ * would feed the next (newer) queued message into the SAME unfinished backend
+ * task, so the old work surfaces as a reply to the new message. Hold the queue
+ * instead and let the user retry / the run continue.
+ */
+export function shouldDrainQueueAfterTurn(
+  state: Partial<ChannelState> | null | undefined,
+): boolean {
+  if (state?.streamingText?.trim()) return true;
+  if (state?.hasTextContent) return true;
+  return !hasNonTextTurnWork(state);
+}
