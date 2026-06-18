@@ -149,6 +149,7 @@ class RealLocalChildRunner:
         workspace_root: str | None = None,
         progress_sink: Callable[[Mapping[str, object]], object] | None = None,
         env: Mapping[str, str] | None = None,
+        spawn_cap: tuple[str, ...] | None = None,
     ) -> None:
         #: Optional pre-resolved provider config (a ``ProviderConfig``). When
         #: supplied AND it carries a key, it short-circuits key resolution.
@@ -170,12 +171,16 @@ class RealLocalChildRunner:
         #: ``_collect_turn_text`` ONLY when no toolset/runner is injected.
         self._toolset_profile = toolset_profile
         #: PR1: optional tool-call evidence collector. When supplied it is wired
-        #: into the built toolset so each child tool-call records a public
+        #: into the built toolset so each tool-call records a public
         #: ``evidence:`` ref that is promoted onto the child's ``evidenceRefs``.
         self._evidence_collector = evidence_collector
         self._workspace_root = workspace_root
         self._progress_sink = progress_sink
         self._env: Mapping[str, str] = os.environ if env is None else env
+        #: Orchestrator-imposed tool-name ceiling (Seam 2b). Stored for a future
+        #: task (Seam 4) that will intersect the child's toolset against it.
+        #: ``None`` means no ceiling — default behaviour is byte-identical.
+        self._spawn_cap: tuple[str, ...] | None = spawn_cap
 
     async def run_child(self, request: object) -> Mapping[str, object]:
         """Drive ONE model-backed child turn; NEVER raise.

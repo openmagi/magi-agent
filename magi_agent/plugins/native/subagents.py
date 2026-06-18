@@ -441,6 +441,7 @@ async def spawn_agent(arguments: dict[str, object], context: ToolContext) -> Too
             toolset_profile=toolset_profile,
             workspace_root=child_workspace,
             progress_sink=_emit_live_child_progress,
+            spawn_cap=request.spawn_cap,
         )
 
         config = ChildRunnerConfig(
