@@ -3483,15 +3483,20 @@ class MagiEngineDriver:
           config invariant on ``CitationAuditResult`` (``citation_audit.py:88``);
           if that invariant ever flips to True the ref is NOT emitted.
 
-        Behind the same strict default-OFF flag. Fail-open per ref.
+        Activeness gate: ``MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED`` OR an enabled
+        ``evidence-pack`` Customize preset (opt-in seam). Fail-open per ref.
         """
         import os  # noqa: PLC0415
 
         from magi_agent.config.env import (  # noqa: PLC0415
             parse_source_ledger_evidence_gate_enabled,
         )
+        from magi_agent.customize.runtime_gate import preset_enabled  # noqa: PLC0415
 
-        if not parse_source_ledger_evidence_gate_enabled(os.environ):
+        if not (
+            parse_source_ledger_evidence_gate_enabled(os.environ)
+            or preset_enabled("evidence-pack", default=False)
+        ):
             return []
         assembly = self._runner_policy_assembly
         if assembly is None:

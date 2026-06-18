@@ -125,6 +125,22 @@ PRESET_SEAMS: dict[str, PresetSeam] = {
         supported_modes=("deterministic",),
         wiring="opt_in",
     ),
+    # Opt-in for the mandatory evidence-pack satisfier (cli/engine
+    # _evidence_pack_matched_requirement_labels): the runtime issued >=1 evidence
+    # record this turn + the audit-mode invariant. Enabling the preset turns on
+    # the satisfier even when MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED is off.
+    # controls_refs is documentation-only for opt_in seams.
+    "evidence-pack": PresetSeam(
+        preset_id="evidence-pack",
+        controls_refs=(
+            "runtime_evidence_record",
+            "evidence:runtime-issued-record",
+            "validator:evidence:no-block-mode",
+        ),
+        runtime_default_on=False,
+        supported_modes=("deterministic",),
+        wiring="opt_in",
+    ),
 }
 
 
@@ -229,6 +245,7 @@ _DESCRIPTIONS: dict[str, str] = {
     "source-authority": "Require declared citations to point at actually-inspected sources (anti-fab).",
     "artifact-delivery": "Require real delivery evidence for promised artifacts before completion.",
     "redaction": "Block a final answer that leaks a credential and require the no-production-attachment invariant.",
+    "evidence-pack": "Require the runtime to have issued at least one evidence record this turn (audit-mode).",
     # --- always-on security ---
     "dangerous-patterns": "Block dangerous shell commands. Always-on safety.",
     "path-escape": "Block file access outside the workspace. Always-on safety.",

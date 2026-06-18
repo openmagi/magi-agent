@@ -37,6 +37,7 @@ REQUIRED_PRESET_KEYS = {
     "output-delivery",
     "artifact-delivery",
     "redaction",
+    "evidence-pack",
     "document-authoring-coverage",
     "response-language",
     "parallel-research",
