@@ -82,8 +82,9 @@ def test_activated_by_customize_toggle_passes_when_receipt_present(monkeypatch, 
 
 def test_not_activated_when_master_flag_off(monkeypatch, cfile):
     # Preset enabled in the file but the customize MASTER flag is off → inert.
+    # (Master is profile-aware default-ON, so OFF is explicit "0".)
     monkeypatch.setenv("MAGI_GA_DELIVERABLE_GATE_ENABLED", "0")
-    monkeypatch.delenv("MAGI_CUSTOMIZE_VERIFICATION_ENABLED", raising=False)
+    monkeypatch.setenv("MAGI_CUSTOMIZE_VERIFICATION_ENABLED", "0")
     _enable_preset(cfile)
     assert _driver()._ga_deliverable_missing_labels(evidence_records=()) == []
 

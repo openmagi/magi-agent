@@ -90,8 +90,9 @@ def test_preset_toggle_blocks_on_credential_leak(monkeypatch, cfile):
 
 
 def test_not_activated_when_master_flag_off(monkeypatch, cfile):
+    # (Master is profile-aware default-ON, so OFF is explicit "0".)
     monkeypatch.setenv("MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED", "0")
-    monkeypatch.delenv("MAGI_CUSTOMIZE_VERIFICATION_ENABLED", raising=False)
+    monkeypatch.setenv("MAGI_CUSTOMIZE_VERIFICATION_ENABLED", "0")
     _enable(cfile)
     assert _matched(_CLEAN) == []
 
