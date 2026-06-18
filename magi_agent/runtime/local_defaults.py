@@ -17,6 +17,13 @@ LOCAL_FULL_RUNTIME_ENV_DEFAULTS: Mapping[str, str] = {
     # Subagent routes reflect configured provider keys so a fireworks-only bot
     # never advertises keyless anthropic/openai routes it cannot use.
     "MAGI_KEY_AWARE_MODEL_ROUTES_ENABLED": "1",
+    # Show the model's reasoning in the dashboard's collapsible thinking block
+    # instead of dropping it (or letting it bleed into the body): ask the model
+    # to reason AND forward thought parts on the thinking_delta channel. Both are
+    # needed — REASONING_EFFORT makes the model think, STREAM_THINKING surfaces
+    # the thought parts (otherwise the projection layer drops them).
+    "MAGI_MODEL_REASONING_EFFORT": "max",
+    "MAGI_STREAM_THINKING": "1",
     "MAGI_EDIT_RETRY_REFLECTION_ENABLED": "1",
     "MAGI_LOOP_GUARD_ENABLED": "1",
     "MAGI_ERROR_RECOVERY_ENABLED": "1",
