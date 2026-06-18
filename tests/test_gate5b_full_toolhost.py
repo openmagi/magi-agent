@@ -349,7 +349,13 @@ async def test_selected_registry_spawn_agent_emits_live_child_events(
     output = preview["output"]
     llm_output = preview["llmOutput"]
     assert isinstance(output, dict)
-    assert output == llm_output
+    # `output` keeps the full bookkeeping envelope for the evidence layer; the
+    # LLM-facing `llmOutput` is the answer-forward projection (no bookkeeping).
+    assert isinstance(llm_output, dict)
+    assert output != llm_output
+    assert llm_output["status"] == "ok"
+    assert llm_output["result"] == "Delegated child completed."
+    assert "liveChildRunnerAttached" not in llm_output
     assert output["status"] == "ok"
     assert output["liveChildRunnerAttached"] is True
     assert output["summary"] == "Delegated child completed."
