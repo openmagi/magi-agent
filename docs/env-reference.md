@@ -6,6 +6,7 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 - `MAGI_APPLY_PATCH_ENABLED` (default-ON (full runtime profile; OFF under safe/eval)) — Enable the apply-patch tool for multi-file edits (default-ON full profile).
 - `MAGI_BROWSER_TOOL_ENABLED` (default off) — Expose the browser-use autonomous vision BrowserTask tool.
 - `MAGI_CHANNEL_LIVE_DISCORD` (default off) — Enable the live Discord channel watcher (self-host only): inbound gateway messages drive a governed turn and the reply is delivered back to the same channel. Requires MAGI_DISCORD_BOT_TOKEN and the discord extra (pip install magi-agent[discord]).
+- `MAGI_CHANNEL_LIVE_SLACK` (default off) — Enable the live Slack channel watcher (self-host only): inbound Socket Mode messages drive a governed turn and the reply is delivered back to the same channel/thread. Requires MAGI_SLACK_APP_TOKEN + MAGI_SLACK_BOT_TOKEN and the slack extra (pip install magi-agent[slack]).
 - `MAGI_CHILD_MEMORY_INHERIT_ENABLED` (default off) — When ON, a normal-mode parent yields a read_only child memory mode (child reads parent workspace memory, never writes back). Default OFF keeps children incognito.
 - `MAGI_CLI_ENABLED` (default on) — Enable the magi CLI surface (headless NDJSON + Textual TUI); flat default-ON.
 - `MAGI_CODE_ACTION_ENABLED` (default off) — Expose the persistent PythonExec code-execution tool.
@@ -84,6 +85,8 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 - `MAGI_SESSION_TRANSCRIPT_ENABLED` (default off) — Write per-session JSONL debug transcripts (turn stages, tool calls, subagent spawns, messages) under the observability home.
 - `MAGI_SESSION_TRANSCRIPT_MAX_FILES` (default `500`) — Max session-transcript files kept; oldest beyond this are pruned.
 - `MAGI_SESSION_TRANSCRIPT_RETENTION_DAYS` (default `14`) — Session-transcript retention in days; older files are pruned.
+- `MAGI_SLACK_APP_TOKEN` (no default) — Slack app-level token (xapp-) authorising the Socket Mode inbound websocket; unset keeps the watcher fail-closed. Never logged.
+- `MAGI_SLACK_BOT_TOKEN` (no default) — Slack bot token (xoxb-) for outbound replies (chat.postMessage); unset keeps the watcher fail-closed. Never logged or persisted.
 - `MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED` (default off) — Project the live turn's inspected-source ledger into the engine's harvested public refs as the named ref 'verifier:research-source-evidence' so a recipe can require source grounding: a turn that read >=1 source passes, a turn that read none blocks. Strict default-OFF and inert unless explicitly set.
 - `MAGI_STEP_DECOMPOSITION_ENABLED` (default off) — Inject a light first-pass guidance asking the agent to enumerate dependent sub-steps up front and confirm each before proceeding (prompt-only nudge; reuses existing planning seams).
 - `MAGI_SUBAGENT_GOVERNED_TURN_ENABLED` (default off) — Route spawned subagents through run_governed_turn (governed turn-loop) instead of the bare run_async child loop. Default OFF keeps the legacy child path byte-identical.

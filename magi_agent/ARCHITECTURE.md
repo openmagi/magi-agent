@@ -391,7 +391,7 @@ graph LR
 | platform_registry.py | E1 — Platform Registry: self-registration seam for channel platforms. | — | channels/email_live.py, channels/slack_live.py |
 | push_delivery.py | — | contract, provider_execution, provider_receipts, runtime_boundary | — |
 | runtime_boundary.py | — | contract, dispatcher | channels/dispatcher.py, channels/push_delivery.py, channels/telegram_adapter.py, harness/scheduler_runtime.py |
-| slack_live.py | E4 — Gated live Slack adapter. | platform_registry, scheduler_delivery, slack_urllib | channels/providers/slack_urllib.py |
+| slack_live.py | E4 — Gated live Slack adapter. | platform_registry, scheduler_delivery, slack_urllib, turn_bridge | channels/providers/slack_urllib.py, gateway/channel_watchers.py |
 | taskkind_classifier.py | — | inference_scaling | — |
 | telegram_adapter.py | — | contract, dispatcher, provider_execution, provider_receipts, runtime_boundary | channels/providers/telegram_httpx.py, channels/telegram_live.py, gateway/channel_watchers.py |
 | telegram_boundary.py | — | — | — |
@@ -400,7 +400,7 @@ graph LR
 | telegram_easy_telethon.py | Telethon adapter for the Telegram "easy setup" path. | telegram_easy | transport/integrations.py |
 | telegram_live.py | E2 — Gated live Telegram polling adapter. | contract, scheduler_delivery, telegram_adapter, turn_bridge | gateway/channel_watchers.py |
 | telegram_validate.py | Bot-token validation for the dashboard Telegram integration. | — | transport/integrations.py |
-| turn_bridge.py | Shared channel turn bridge — inbound message -> agent turn -> reply (PR1). | — | channels/discord_live.py, channels/telegram_live.py, channels/turn_engine.py, gateway/channel_watchers.py |
+| turn_bridge.py | Shared channel turn bridge — inbound message -> agent turn -> reply (PR1). | — | channels/discord_live.py, channels/slack_live.py, channels/telegram_live.py, channels/turn_engine.py, gateway/channel_watchers.py |
 | turn_engine.py | Engine-backed ``run_turn`` for the channel turn bridge (PR1.5). | child_governed_collector, governed_turn, turn_bridge, turn_context | gateway/watchers.py |
 | workflow_routing.py | — | — | channels/dispatcher.py |
 
@@ -410,7 +410,8 @@ graph LR
 |---|---|---|---|
 | __init__.py | Concrete channel provider implementations (the ONLY place a real network | — | — |
 | discord_gateway.py | Concrete live Discord provider over ``discord.py`` (PR2). | — | gateway/channel_watchers.py |
-| slack_urllib.py | Concrete out-of-box Slack provider over stdlib ``urllib`` (B1). | config, slack_live | channels/slack_live.py |
+| slack_socketmode.py | Concrete live Slack inbound provider over ``slack_sdk`` Socket Mode (PR3). | — | gateway/channel_watchers.py |
+| slack_urllib.py | Concrete out-of-box Slack provider over stdlib ``urllib`` (B1). | config, slack_live | channels/slack_live.py, gateway/channel_watchers.py |
 | telegram_httpx.py | Concrete live Telegram provider over ``httpx`` (B17). | telegram_adapter | gateway/channel_watchers.py |
 
 ### cli/
@@ -919,7 +920,7 @@ graph LR
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
 | __init__.py | Track F — the ``magi gateway`` always-on daemon package. | — | — |
-| channel_watchers.py | Operator wiring: tie a concrete channel provider to a gateway poll watcher. | daemon, discord_adapter, discord_gateway, discord_live, flags, scheduler_delivery, telegram_adapter, telegram_credentials, telegram_httpx, telegram_live, turn_bridge, watchers | gateway/watchers.py |
+| channel_watchers.py | Operator wiring: tie a concrete channel provider to a gateway poll watcher. | daemon, discord_adapter, discord_gateway, discord_live, flags, scheduler_delivery, slack_live, slack_socketmode, slack_urllib, telegram_adapter, telegram_credentials, telegram_httpx, telegram_live, turn_bridge, watchers | gateway/watchers.py |
 | daemon.py | GatewayDaemon — the supervised asyncio watcher fleet (Track F). | health, watchers | cli/app.py, gateway/channel_watchers.py, gateway/watchers.py, ops/health.py |
 | service_install.py | OS service install for the ``magi gateway`` daemon (Track F). | — | cli/app.py |
 | watchers.py | Watcher-fleet builders — COMPOSE the existing always-on blocks (Track F). | channel_watchers, daemon, scheduler_job_execution, scheduler_job_store, scheduler_loop_driver, turn_engine | cli/app.py, gateway/channel_watchers.py, gateway/daemon.py |
