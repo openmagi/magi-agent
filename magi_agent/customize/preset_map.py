@@ -52,6 +52,10 @@ class PresetSeam:
     runtime_default_on: bool = True
     supported_modes: tuple[str, ...] = ("deterministic",)
     wiring: str = "opt_out"
+    #: Which assembled ref list an ``opt_out`` seam subtracts from: ``"validator"``
+    #: (required_validators, the default) or ``"evidence"`` (required_evidence).
+    #: Ignored for ``opt_in`` seams (those activate an engine satisfier instead).
+    controls_kind: str = "validator"
 
 
 # Presets with a genuine runtime seam.
@@ -68,6 +72,20 @@ PRESET_SEAMS: dict[str, PresetSeam] = {
         runtime_default_on=True,
         supported_modes=("deterministic",),
         wiring="opt_out",
+    ),
+    # Opt-out of the recorded git-diff / test-run EVIDENCE the dev-coding pack
+    # requires on coding turns (emitted by _inferred_refs). default-ON: disabling
+    # the preset removes those evidence refs from the assembled required_evidence
+    # (assembly-layer, controls_kind="evidence"), so the gate no longer blocks a
+    # coding turn that recorded no git-diff/test-run. Remove-only, like
+    # coding-verification; byte-identical with no override.
+    "deterministic-evidence": PresetSeam(
+        preset_id="deterministic-evidence",
+        controls_refs=("evidence:git-diff", "evidence:test-run"),
+        runtime_default_on=True,
+        supported_modes=("deterministic",),
+        wiring="opt_out",
+        controls_kind="evidence",
     ),
     "fact-grounding": PresetSeam(
         preset_id="fact-grounding",
@@ -203,7 +221,7 @@ _DESCRIPTIONS: dict[str, str] = {
     "self-claim": "Blocks claiming file contents without reading first.",
     "resource-existence": "Verifies referenced files actually exist.",
     "claim-citation": "Ensures factual claims include sources.",
-    "deterministic-evidence": "Checks numbers and dates are backed by tool evidence.",
+    "deterministic-evidence": "Require recorded git-diff and test-run evidence on coding turns (disable to opt out).",
     "coding-context": "Auto-injects repo map and symbols for code tasks.",
     "coding-workspace-lock": "Prevents unrelated file changes during coding.",
     "coding-child-review": "Auto-reviews sub-agent code output.",
