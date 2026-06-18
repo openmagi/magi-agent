@@ -6,6 +6,8 @@ TDD: written before implementation.  Tests cover:
      passing record → conforms=True / status='ok'.
   3. preview_cases deterministic (two calls equal).
   4. preview_cases fail-safe: malformed shape → each case status='unknown', no exception.
+  5. Field-hint correctness: verified types have only real producer keys (subset check).
+  6. Honest-but-sparse: types with no confident hint must return fields: [].
 
 Zero model/LLM calls.  Spec: docs/plans/2026-06-18-shacl-PR3-compiler-tasks.md Task 3.1
 """
@@ -208,4 +210,108 @@ def test_preview_cases_failsafe_malformed_shape() -> None:
     for i, case in enumerate(results):
         assert case["status"] == "unknown", (
             f"Case {i}: expected status='unknown' for malformed shape, got {case['status']!r}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Test 5 — field-hint correctness: verified types emit only real producer keys
+# ---------------------------------------------------------------------------
+
+
+def _field_hints_for(evidence_type: str) -> list[str]:
+    from magi_agent.customize.shacl_compiler import available_fields
+    menu = available_fields()
+    for item in menu:
+        if item["evidenceType"] == evidence_type:
+            return list(item["fields"])
+    raise KeyError(f"{evidence_type!r} not found in available_fields()")
+
+
+def test_edit_match_field_hints_are_real_producer_keys() -> None:
+    """EditMatch hints must be a subset of EditMatchReceiptRecord.public_projection() keys.
+
+    Verified source: magi_agent/evidence/edit_match_receipts.py
+    public_projection() → {type, tier, tierIndex, confidence, ambiguous, fileDigest, spanDigest}
+    """
+    real_producer_keys = {"type", "tier", "tierIndex", "confidence", "ambiguous", "fileDigest", "spanDigest"}
+    hinted = set(_field_hints_for("EditMatch"))
+    assert hinted, "EditMatch must have non-empty verified hints"
+    non_real = hinted - real_producer_keys
+    assert not non_real, (
+        f"EditMatch hints contain keys not emitted by public_projection(): {non_real!r}. "
+        "Every hinted key must be verified against the real producer."
+    )
+
+
+def test_document_coverage_field_hints_are_real_producer_keys() -> None:
+    """DocumentCoverage hints must be a subset of DocumentCoverageRecord.public_projection() keys.
+
+    Verified source: magi_agent/evidence/document_coverage.py
+    public_projection() → {type, totalUnits, coveredUnits, coverageRatio, threshold,
+                            missingUnitDigests, sourceDigest, docDigest, status}
+    """
+    real_producer_keys = {
+        "type", "totalUnits", "coveredUnits", "coverageRatio", "threshold",
+        "missingUnitDigests", "sourceDigest", "docDigest", "status",
+    }
+    hinted = set(_field_hints_for("DocumentCoverage"))
+    assert hinted, "DocumentCoverage must have non-empty verified hints"
+    non_real = hinted - real_producer_keys
+    assert not non_real, (
+        f"DocumentCoverage hints contain keys not emitted by public_projection(): {non_real!r}. "
+        "Every hinted key must be verified against the real producer."
+    )
+
+
+def test_deterministic_evidence_verifier_field_hints_are_real_producer_keys() -> None:
+    """DeterministicEvidenceVerifier hints must be a subset of _audit_evidence() fields.
+
+    Verified source: magi_agent/evidence/coding_verification.py _audit_evidence()
+    fields dict keys: verdictOk, verdictState, enforcement, matchedEvidenceTypes,
+    missingRequirementTypes, failureCodes, requiredEvidenceTypes, blockModeEnabled,
+    finalAnswerBlocked
+    """
+    real_producer_keys = {
+        "verdictOk", "verdictState", "enforcement", "matchedEvidenceTypes",
+        "missingRequirementTypes", "failureCodes", "requiredEvidenceTypes",
+        "blockModeEnabled", "finalAnswerBlocked",
+    }
+    hinted = set(_field_hints_for("DeterministicEvidenceVerifier"))
+    assert hinted, "DeterministicEvidenceVerifier must have non-empty verified hints"
+    non_real = hinted - real_producer_keys
+    assert not non_real, (
+        f"DeterministicEvidenceVerifier hints contain keys not emitted by _audit_evidence(): "
+        f"{non_real!r}. Every hinted key must be verified against the real producer."
+    )
+
+
+# ---------------------------------------------------------------------------
+# Test 6 — honest-but-sparse: types with no confident producer return fields: []
+# ---------------------------------------------------------------------------
+
+
+def test_types_without_confident_producer_have_empty_field_hints() -> None:
+    """Types where the real EvidenceRecord producer could not be located must return fields: [].
+
+    This test locks in the honest-but-sparse invariant: any type not verified against
+    a real producer MUST return an empty fields list.  An empty honest hint is safer
+    than a non-empty guessed one (wrong keys cause SHACL shapes to silently never fire).
+    """
+    # These types have no confirmed EvidenceRecord producer in the codebase.
+    # Verified by audit — no public_projection() / fields= dict found for these.
+    types_without_confident_producer = {
+        "GitDiff",        # gate produces tool output not EvidenceRecord.fields
+        "FileDeliver",    # delivery metadata lives in ToolResult, not EvidenceRecord.fields
+        "ArtifactVerify", # no EvidenceRecord field producer found
+        "PlanVerifier",   # catalog type only; no concrete EvidenceRecord producer
+        "Calculation",    # tool returns raw {"value": ...}, not EvidenceRecord.fields
+        "DateRange",      # shadow contract ref only; no concrete producer found
+        "TelegramDeliveryAck",  # no EvidenceRecord field producer found
+    }
+
+    for evidence_type in types_without_confident_producer:
+        hints = _field_hints_for(evidence_type)
+        assert hints == [], (
+            f"{evidence_type!r}: expected fields=[] (no confident producer), "
+            f"but got {hints!r}. Remove unverified field hints."
         )

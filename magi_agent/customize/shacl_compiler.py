@@ -8,22 +8,25 @@ This module provides two pure functions for the NL→SHACL compiler pipeline:
   * ``preview_cases()``     — deterministic SHACL preview: calls ``run_shacl_rule``
     for each sample record and returns structured results.
 
-Field-level detail note (DESIGN DEVIATION / CONCERN)
------------------------------------------------------
-``BUILTIN_EVIDENCE_TYPES`` (and ``builtin_evidence_catalog()``) expose *metadata*
-about each evidence type (description, producer_surfaces, source_kinds) but do NOT
-include a static list of ``fields`` keys.  Field keys are attached to
-``EvidenceRecord.fields`` at runtime by producers — they are not declared in the
-catalog schema.  ``BuiltInEvidenceType`` has no ``fields`` attribute.
+Field-level detail
+------------------
+``_BUILTIN_FIELD_HINTS`` is a best-effort, honest-but-sparse registry of the field
+keys that real evidence producers actually emit into ``EvidenceRecord.fields``.
 
-As a result, ``available_fields()`` returns ``"fields": []`` for all builtin types.
-A richer field menu would require either:
-  (a) a hand-authored ``BUILTIN_FIELD_HINTS`` mapping (type → [field, ...]), or
-  (b) scanning live EvidenceRecord samples from the ledger at request time.
+Policy:
+  * Every key listed here was verified against the real producer's source code
+    (``public_projection()``, ``to_evidence_record()``, or the concrete
+    ``fields={}`` dict assigned at emission time).
+  * Types whose real producer could NOT be located, or whose field schema could
+    not be confirmed with confidence, are listed as ``[]`` (empty).
+  * An empty, honest hint is REQUIRED over a guessed or incorrect one — feeding
+    wrong field names into the NL compiler generates ``magi:field_<wrong_key>``
+    predicates in SHACL shapes that silently never fire (determinism failure).
 
-The compiler prompt can still use the evidenceType names to guide shape targeting
-(``sh:targetClass``, ``magi:type`` filter).  The ``fields`` list will be populated
-once a field-hints registry is added (Task 3.1 follow-up).
+``preview_cases()`` running a real shape against sample records is the authoritative
+backstop that will surface shapes referencing non-existent fields (violations never
+fire → shape always "passes" even when it shouldn't).  Field hints are a
+compile-time aid, not a runtime guarantee.
 
 Spec: docs/plans/2026-06-18-shacl-PR3-compiler-tasks.md Task 3.1
 """
@@ -36,31 +39,98 @@ from magi_agent.evidence.shacl_verifier import run_shacl_rule
 from magi_agent.evidence.types import EvidenceRecord
 
 # ---------------------------------------------------------------------------
-# Optional hand-authored field hints per evidence type.
-# These represent the COMMON keys producers emit into EvidenceRecord.fields.
-# They are best-effort / illustrative — not exhaustive.  Extend as producers
-# are documented.  The compiler uses them to suggest valid magi:field_<key>
-# predicate names in generated SHACL shapes.
+# Hand-authored field hints per evidence type — HONEST-BUT-SPARSE.
+#
+# Policy (see module docstring):
+#   - Every key is verified against the real producer's source.
+#   - [] means: producer not found or fields not confidently verifiable.
+#   - DO NOT add guessed keys.  Wrong keys silently break NL-compiled shapes.
+#
+# Producer sources verified:
+#   GitDiff      — gate5b_full_toolhost._handle_git_diff() returns
+#                  {isGitRepo, status, numstat}; gate1a returns
+#                  {status, workspaceLooksLikeGit}.  Neither matches the
+#                  former hints (command/diffSummary/filesChanged).
+#                  contracts.py matches on "changedFiles" but that key comes
+#                  from tool metadata, not EvidenceRecord.fields.  → []
+#   TestRun      — extraction.py _test_fields_from_projected_event() builds
+#                  fields from "command" and "exitCode" keys.  Contracts also
+#                  validate exitCode.  "passed"/"failed"/"duration" not found.
+#   CodeDiagnostics — code_diagnostics_receipts.py CodeDiagnosticsRecord
+#                  .public_projection() → checker, fileDigest, errorCount,
+#                  capped, diagnosticsDigest, entries.  diagnosticCount and
+#                  zeroDiagnostics never emitted.
+#   CommitCheckpoint — plugins/native/coding.py commit_checkpoint() emits
+#                  {checkpointDigest, pathRef}.  Former hints (commitSha/
+#                  message/filesChanged) never emitted.
+#   FileDeliver  — no EvidenceRecord field emission found; delivery metadata
+#                  lives in ToolResult, not EvidenceRecord.fields.  → []
+#   ArtifactVerify — no EvidenceRecord field emission found.  → []
+#   DeterministicEvidenceVerifier — coding_verification.py _audit_evidence()
+#                  builds fields={verdictOk, verdictState, enforcement,
+#                  matchedEvidenceTypes, missingRequirementTypes, failureCodes,
+#                  requiredEvidenceTypes, blockModeEnabled, finalAnswerBlocked}.
+#                  Former hints (ruleId/passed/details) never emitted.
+#   WebSearch    — source_ledger.py SourceLedgerRecord.to_evidence_record()
+#                  emits {sourceId, sourceIds, sourceKind, inspected}.
+#                  shadow/research_source_evidence_contract.py also validates
+#                  query and resultCount.  "engine" not found.
+#   KnowledgeSearch — same source_ledger path as WebSearch.  "knowledgeBase"
+#                  not found in any producer.
+#   SourceInspection — source_ledger.py SourceLedgerRecord.to_evidence_record()
+#                  emits {sourceId, sourceIds, sourceKind, inspected}.
+#                  Former "uri"/"kind" not emitted (uri is redacted; kind is
+#                  only in SourceLedgerRecord, not EvidenceRecord.fields).
+#   PlanVerifier — found only as a catalog type and verifier_bus ref; no
+#                  concrete EvidenceRecord producer located.  → []
+#   Calculation  — gate1a returns {"value": ...} as raw tool output, not
+#                  EvidenceRecord.fields.  expression/result/unit not found.  → []
+#   DateRange    — referenced in shadow contract but no concrete producer
+#                  found.  → []
+#   Clock        — source_ledger kind=clock: to_evidence_record() emits
+#                  {sourceId, sourceIds, sourceKind, inspected}.
+#                  shadow/research_source_evidence_contract.py also requires
+#                  "date" field.  Former hints (timestamp/timezone) not emitted.
+#   TelegramDeliveryAck — no real EvidenceRecord field producer found.  → []
+#   PromptTransform — runtime/message_builder.py _apply_prompt_transform()
+#                  emits {hook_name, sections_modified, tokens_before,
+#                  tokens_after} (snake_case, not camelCase).
+#                  Former hints (hookName/sectionCount) never emitted.
+#   EditMatch    — edit_match_receipts.py EditMatchReceiptRecord.public_projection()
+#                  → {type, tier, tierIndex, confidence, ambiguous, fileDigest,
+#                  spanDigest}.  Former hints (filePath/matchScore/matchedSpan)
+#                  never emitted.
+#   DocumentCoverage — document_coverage.py DocumentCoverageRecord.public_projection()
+#                  → {type, totalUnits, coveredUnits, coverageRatio, threshold,
+#                  missingUnitDigests, sourceDigest, docDigest, status}.
+#                  Former hint "documentId" never emitted; "coverage"→coverageRatio.
 # ---------------------------------------------------------------------------
 _BUILTIN_FIELD_HINTS: dict[str, list[str]] = {
-    "GitDiff":                     ["command", "diffSummary", "filesChanged"],
-    "TestRun":                     ["command", "exitCode", "passed", "failed", "duration"],
-    "CodeDiagnostics":             ["checker", "diagnosticCount", "zeroDiagnostics"],
-    "CommitCheckpoint":            ["commitSha", "message", "filesChanged"],
-    "FileDeliver":                 ["fileName", "mimeType", "sizeBytes", "artifactRef"],
-    "ArtifactVerify":              ["artifactRef", "verified", "digest"],
-    "DeterministicEvidenceVerifier": ["ruleId", "passed", "details"],
-    "WebSearch":                   ["query", "resultCount", "engine"],
-    "KnowledgeSearch":             ["query", "resultCount", "knowledgeBase"],
-    "SourceInspection":            ["sourceId", "uri", "kind", "inspected"],
-    "PlanVerifier":                ["planId", "passed", "details"],
-    "Calculation":                 ["expression", "result", "unit"],
-    "DateRange":                   ["startDate", "endDate", "durationDays"],
-    "Clock":                       ["timestamp", "timezone"],
-    "TelegramDeliveryAck":         ["messageId", "chatId", "deliveredAt"],
-    "PromptTransform":             ["hookName", "sectionCount"],
-    "EditMatch":                   ["filePath", "matchScore", "matchedSpan"],
-    "DocumentCoverage":            ["documentId", "coveredUnits", "totalUnits", "coverage"],
+    # Verified against real producers — keys are actually emitted.
+    "TestRun":                     ["command", "exitCode"],
+    "CodeDiagnostics":             ["checker", "errorCount", "fileDigest", "diagnosticsDigest"],
+    "CommitCheckpoint":            ["checkpointDigest", "pathRef"],
+    "DeterministicEvidenceVerifier": [
+        "verdictOk", "verdictState", "enforcement",
+        "matchedEvidenceTypes", "missingRequirementTypes",
+        "failureCodes", "requiredEvidenceTypes",
+        "blockModeEnabled", "finalAnswerBlocked",
+    ],
+    "WebSearch":                   ["query", "resultCount", "sourceKind", "sourceIds"],
+    "KnowledgeSearch":             ["query", "resultCount", "sourceKind", "sourceIds"],
+    "SourceInspection":            ["sourceId", "sourceIds", "sourceKind", "inspected"],
+    "Clock":                       ["sourceKind", "date"],
+    "PromptTransform":             ["hook_name", "sections_modified", "tokens_before", "tokens_after"],
+    "EditMatch":                   ["tier", "tierIndex", "confidence", "ambiguous", "fileDigest", "spanDigest"],
+    "DocumentCoverage":            ["totalUnits", "coveredUnits", "coverageRatio", "threshold", "status", "sourceDigest", "docDigest"],
+    # Producer not found or fields not confidently verifiable — honest empty hint.
+    "GitDiff":                     [],
+    "FileDeliver":                 [],
+    "ArtifactVerify":              [],
+    "PlanVerifier":                [],
+    "Calculation":                 [],
+    "DateRange":                   [],
+    "TelegramDeliveryAck":         [],
 }
 
 
@@ -72,16 +142,20 @@ def available_fields() -> list[dict]:
         {"evidenceType": <str>, "fields": [<field_key>, ...]}
 
     The list is derived from ``BUILTIN_EVIDENCE_TYPES`` (via
-    ``builtin_evidence_catalog()``) and augmented with best-effort field hints
-    from ``_BUILTIN_FIELD_HINTS``.
+    ``builtin_evidence_catalog()``) and augmented with field hints from
+    ``_BUILTIN_FIELD_HINTS``.
 
     DESIGN NOTE — field-level detail
     ---------------------------------
-    ``BuiltInEvidenceType`` does not carry a static field-key schema; field keys
-    are runtime-attached by producers.  ``_BUILTIN_FIELD_HINTS`` is a hand-authored
-    best-effort registry of common keys.  Items with no entry have ``fields: []``.
-    A richer field menu requires a field-hints registry or live ledger sampling
-    (Task 3.1 follow-up — see module docstring).
+    ``_BUILTIN_FIELD_HINTS`` is an honest-but-sparse registry: every key listed
+    was verified against the real producer's source code.  Types whose real
+    producer could not be located, or whose field schema could not be confirmed,
+    are listed with ``fields: []``.  An empty, honest hint is REQUIRED over a
+    guessed one — wrong field names cause the NL→SHACL compiler to generate
+    ``magi:field_<wrong_key>`` predicates that silently never fire.
+
+    ``preview_cases()`` (running the real shape against sample records) is the
+    authoritative backstop that catches shapes referencing non-existent fields.
 
     Returns
     -------
