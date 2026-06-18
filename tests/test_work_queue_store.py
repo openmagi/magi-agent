@@ -324,3 +324,96 @@ def test_parity_ready_tasks_orders_and_limits(store):
     out = store.ready_tasks(limit=10)
     assert [t.id for t in out] == ["b", "a"]      # b: higher priority; c excluded (todo)
     assert [t.id for t in store.ready_tasks(limit=1)] == ["b"]
+
+
+# ---------------------------------------------------------------------------
+# BEGIN IMMEDIATE transaction hardening — Task 5
+# ---------------------------------------------------------------------------
+
+
+def test_claim_uses_immediate_transaction(tmp_path):
+    """claim() must issue BEGIN IMMEDIATE before the CAS UPDATE.
+
+    Subclasses SqliteWorkQueueStore to wrap _get_conn() with a recording
+    proxy connection so we can observe every SQL string executed during
+    claim() without monkeypatching the read-only C-extension attribute.
+
+    Asserts:
+      1. A 'BEGIN IMMEDIATE' statement was issued during claim().
+      2. It was issued BEFORE the CAS UPDATE that sets status='running'.
+    """
+    import sqlite3
+    from magi_agent.missions.work_queue.store import SqliteWorkQueueStore
+
+    recorded: list[str] = []
+
+    class RecordingConnection:
+        """Thin proxy around sqlite3.Connection that records every SQL string."""
+
+        def __init__(self, real_conn: sqlite3.Connection) -> None:
+            self._conn = real_conn
+
+        def execute(self, sql: str, params: object = ()) -> object:
+            recorded.append(sql.strip())
+            return self._conn.execute(sql, params)  # type: ignore[arg-type]
+
+        def commit(self) -> None:
+            self._conn.commit()
+
+        def close(self) -> None:
+            self._conn.close()
+
+        # Delegate everything else (row_factory, etc.) to the real conn.
+        def __getattr__(self, name: str) -> object:
+            return getattr(self._conn, name)
+
+        def __setattr__(self, name: str, value: object) -> None:
+            if name in ("_conn",):
+                super().__setattr__(name, value)
+            else:
+                setattr(self._conn, name, value)
+
+    class SpyStore(SqliteWorkQueueStore):
+        """Store that wraps its connection in RecordingConnection after init."""
+
+        def _get_conn(self) -> object:  # type: ignore[override]
+            conn = super()._get_conn()
+            # Replace the cached connection with a recording proxy on first access.
+            if not isinstance(conn, RecordingConnection):
+                proxy = RecordingConnection(conn)
+                self._conn = proxy  # type: ignore[assignment]
+                return proxy
+            return conn
+
+    s = SpyStore(tmp_path / "wq.db")
+    s.create(WorkTask(id="t", title="x", status="ready", created_at=1))
+
+    # Reset recording so only claim() SQL is captured.
+    recorded.clear()
+
+    result = s.claim("t", claimer="w1", now=1000, worker_pid=1)
+
+    # Claim must succeed on a ready task.
+    assert result is not None, "claim should have succeeded"
+
+    upper = [sql.upper() for sql in recorded]
+
+    begin_idxs = [i for i, sql in enumerate(upper) if sql.startswith("BEGIN IMMEDIATE")]
+    cas_idxs = [
+        i for i, sql in enumerate(upper)
+        if "UPDATE" in sql and "STATUS='RUNNING'" in sql.replace(" ", "")
+    ]
+
+    assert begin_idxs, (
+        "BEGIN IMMEDIATE was never issued during claim(). "
+        f"SQL issued: {recorded}"
+    )
+    assert cas_idxs, (
+        "CAS UPDATE setting status='running' was never issued. "
+        f"SQL issued: {recorded}"
+    )
+    # The first BEGIN IMMEDIATE must precede the first CAS UPDATE.
+    assert begin_idxs[0] < cas_idxs[0], (
+        f"BEGIN IMMEDIATE (index {begin_idxs[0]}) must come before "
+        f"CAS UPDATE (index {cas_idxs[0]}). SQL issued: {recorded}"
+    )

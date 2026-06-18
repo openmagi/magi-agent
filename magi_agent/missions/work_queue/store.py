@@ -439,11 +439,9 @@ class SqliteWorkQueueStore:
     def claim(self, task_id, *, claimer, ttl=CLAIM_TTL_SECONDS, now=None, worker_pid=None):
         now = int(time.time()) if now is None else now
         conn = self._get_conn()
-        # Parent-gate (mirror Hermes): never run while a parent is undone.
-        # NOTE: The parent-gate SELECT and the CAS UPDATE below are NOT wrapped in a single
-        # BEGIN IMMEDIATE transaction. This is safe under the intended single-dispatcher-writer
-        # model (one dispatcher per board), but if multi-process writers are introduced, wrap
-        # both in an EXCLUSIVE/IMMEDIATE transaction to close the parent-status TOCTOU window.
+        # Parent-gate + CAS UPDATE are wrapped in a single BEGIN IMMEDIATE transaction so
+        # no other writer can interleave between the gate read and the CAS write.
+        conn.execute("BEGIN IMMEDIATE")
         undone = conn.execute(
             "SELECT 1 FROM work_queue_task_links l "
             "JOIN work_queue_tasks p ON p.id = l.parent_id "
