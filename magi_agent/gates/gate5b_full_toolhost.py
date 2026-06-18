@@ -2500,6 +2500,7 @@ def _build_adk_tool(host: Gate5BFullToolHost, name: str) -> FunctionTool:
             provider: str = "",
             model: str = "",
             budgetMs: int = 0,
+            allowedTools: list[str] | None = None,
             tool_context: object | None = None,
         ) -> dict[str, object]:
             """Delegate a bounded readonly subtask to a child Magi Agent.
@@ -2511,6 +2512,7 @@ def _build_adk_tool(host: Gate5BFullToolHost, name: str) -> FunctionTool:
                 provider: Optional explicit child provider route.
                 model: Optional explicit child model route.
                 budgetMs: Optional child runtime budget in milliseconds.
+                allowedTools: Optional explicit allow-list of tool NAMES to grant this child (a per-task narrowing; the child's tools are also capped by the session ceiling). Omit to inherit the default toolset.
             """
             arguments = _registry_adk_arguments(
                 prompt=prompt,
@@ -2521,6 +2523,8 @@ def _build_adk_tool(host: Gate5BFullToolHost, name: str) -> FunctionTool:
             )
             if isinstance(budgetMs, int) and budgetMs > 0:
                 arguments["budgetMs"] = budgetMs
+            if allowedTools:
+                arguments["allowedTools"] = [t for t in allowedTools if isinstance(t, str) and t.strip()]
             return await _dispatch_adk_tool(host, "SpawnAgent", arguments, tool_context)
 
         return function_tool(

@@ -398,6 +398,12 @@ async def spawn_agent(arguments: dict[str, object], context: ToolContext) -> Too
             "parentToolNames": context.parent_tool_names,
             "parentMemoryMode": parent_memory_mode_value,
         }
+        raw_allowed = arguments.get("allowedTools") or arguments.get("allowed_tools")
+        allowed_tools = tuple(
+            a for a in (raw_allowed or ()) if isinstance(a, str) and a.strip()
+        )
+        if allowed_tools:
+            request_metadata["allowedTools"] = allowed_tools
         request = ChildTaskRequest(
             parentExecutionId=parent_exec_id,
             turnId=turn_id,
