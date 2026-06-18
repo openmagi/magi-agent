@@ -137,6 +137,11 @@ The **Local web dashboard** runs at http://localhost:8080/dashboard; run
 source instead of using the prebuilt bottle, reinstall it:
 `brew reinstall openmagi/tap/magi-agent --force-bottle`.
 
+Runtime profiles are selected by `MAGI_RUNTIME_PROFILE`. To dogfood the full
+experimental feature set, run with `MAGI_RUNTIME_PROFILE=lab` (or persist it as
+the only line in `~/.magi/profile.env`); it survives `brew upgrade`. See
+[Getting started → Runtime profiles](docs/getting-started.md#runtime-profiles).
+
 Full setup, config resolution, and CLI flags:
 [Getting started](docs/getting-started.md) · [CLI reference](docs/cli/magi.md).
 
