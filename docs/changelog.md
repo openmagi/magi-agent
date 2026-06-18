@@ -15,6 +15,35 @@ Versions follow the tags published on GitHub Releases.
 
 ### Fixed
 
+## 0.1.51
+
+### Added
+- CLI Anthropic prompt caching: the anthropic provider routes through a
+  cache-aware Claude model when message caching is enabled, with a fail-safe
+  fallback to the standard path (#650).
+- Subagent answer-forwarding: `SpawnAgent` surfaces the child's actual result
+  and model attribution to the parent instead of an opaque envelope (#681), and
+  the child-runner boundary projection exposes the child's sanitized summary
+  (#683).
+- Work-queue P3 goal_mode fusion (Ralph loop), default-OFF and inert (#679).
+- Research + automation methodology prompt guidance blocks, default-OFF (#678).
+- Channels: dashboard connect UI + auth-gated admin token routes for Discord &
+  Slack, reusing the encrypted credential store (#677).
+- Documented runtime profiles and the `lab` dogfood profile on the install page
+  (#675).
+
+### Changed
+- Dashboard bundle rebuilt to pick up the key-aware chat model picker (#680),
+  LaTeX/KaTeX math rendering (#676), and the channel connect UI (#677).
+
+### Fixed
+- Serve: finalize empty/thinking-only turns even without tool-only events, and
+  hold the chat queue when a turn ends with work but no final answer so a
+  mid-task stop does not feed the next queued message into the unfinished run
+  (#686).
+- Inline interpreter code (`python3 -c`) is allowed under an explicit bypass
+  (YOLO) scope while staying denied in the default strict scope (#676).
+
 ## 0.1.50
 
 ### Added
