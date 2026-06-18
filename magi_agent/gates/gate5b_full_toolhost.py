@@ -848,6 +848,10 @@ class Gate5BFullToolHost:
         # C1 seams (dual-load: empty/None preserves legacy behavior exactly).
         workspace_handlers: Mapping[str, object] | None = None,
         dispatch_policies: Sequence[object] | None = None,
+        # Seam 1b (serve): orchestrator profile grant ceiling threaded into
+        # every ToolContext so SpawnAgent can pass it to spawned children.
+        # None => flag unset => byte-identical to today.
+        spawn_cap: tuple[str, ...] | None = None,
     ) -> None:
         self.config = config
         self.workspace_root = workspace_root.resolve()
@@ -856,6 +860,7 @@ class Gate5BFullToolHost:
         self.memory_mode = normalize_memory_mode(memory_mode)
         self._session_id = session_id
         self._spawn_depth = max(0, int(spawn_depth))
+        self._spawn_cap = spawn_cap
         self.counter = Gate5BFullToolCounter(config)
         self._tool_registry = tool_registry
         # First-party activity capture: pass ONLY the bundled producer pack's
@@ -1584,6 +1589,9 @@ class Gate5BFullToolHost:
                     "mode": "selected_full_toolhost",
                     "source": "selected_full_toolhost",
                 },
+                # Seam 1b (serve): orchestrator profile grant ceiling — None
+                # when the flag is unset (byte-identical to before).
+                spawnCap=self._spawn_cap,
                 emitAgentEvent=(
                     self._emit_public_event
                     if self._public_event_sink is not None
@@ -2104,6 +2112,31 @@ def _pack_loaded_workspace_runtime() -> tuple[Mapping[str, object], tuple[object
     return build_tool_host_runtime_from_packs()
 
 
+def _apply_orchestrator_profile_serve(
+    full_names: tuple[str, ...],
+    env: Mapping[str, str] | None = None,
+) -> tuple[tuple[str, ...], tuple[str, ...] | None]:
+    """Apply the orchestrator main-agent profile filter to a tool-name tuple.
+
+    When ``MAGI_MAIN_AGENT_PROFILE`` is unset (default): returns
+    ``(full_names, None)`` — the SAME tuple object, byte-identical path.
+
+    When ``"orchestrator"``: returns ``(restricted_names, spawn_cap_names)``
+    where ``restricted_names`` is the intersection of ``full_names`` with the
+    orchestrator-allowed set (order preserved) and ``spawn_cap_names`` is the
+    full bundle tuple — the grant ceiling for spawned children.
+    """
+    from magi_agent.config.env import main_agent_profile as _main_agent_profile  # noqa: PLC0415
+    from magi_agent.runtime.main_agent_profile import (  # noqa: PLC0415
+        apply_orchestrator_filter as _apply_filter,
+    )
+
+    if _main_agent_profile(env) != "orchestrator":
+        return full_names, None
+    restricted, spawn_cap = _apply_filter(full_names)
+    return restricted, spawn_cap
+
+
 def build_gate5b_full_toolhost_bundle(
     *,
     config: Gate5BFullToolHostConfig | Mapping[str, object] | None = None,
@@ -2140,6 +2173,12 @@ def build_gate5b_full_toolhost_bundle(
     )
     if read_ledger_enabled is None:
         read_ledger_enabled = _read_ledger_enabled_from_env()
+    # Seam 1b (serve): when MAGI_MAIN_AGENT_PROFILE=orchestrator, derive the
+    # spawn_cap ceiling from the full exposed set and restrict the ADK tools
+    # given to the main agent.  When the flag is unset: no-op (same tuple,
+    # None cap), byte-identical to today.  The ceiling uses the same complete
+    # final tool-name set we filter against — one source of truth.
+    main_agent_exposed, _serve_spawn_cap = _apply_orchestrator_profile_serve(exposed)
     host = Gate5BFullToolHost(
         config=safe_config,
         workspace_root=workspace,
@@ -2154,6 +2193,7 @@ def build_gate5b_full_toolhost_bundle(
         spawn_depth=spawn_depth,
         workspace_handlers=workspace_handlers,
         dispatch_policies=dispatch_policies,
+        spawn_cap=_serve_spawn_cap,
     )
     if selected_scope_error is not None:
         return Gate5BFullToolBundle(
@@ -2165,19 +2205,19 @@ def build_gate5b_full_toolhost_bundle(
             attachmentFlags=Gate5BFullToolAttachmentFlags(),
             workspaceRootDigest=_digest(str(host.workspace_root)),
         )
-    tools = tuple(_build_adk_tool(host, name) for name in exposed)
+    tools = tuple(_build_adk_tool(host, name) for name in main_agent_exposed)
     return Gate5BFullToolBundle(
         status="ready",
         reason="selected_full_toolhost_ready",
         host=host,
         tools=tools,
-        exposedToolNames=exposed,
+        exposedToolNames=main_agent_exposed,
         attachmentFlags=Gate5BFullToolAttachmentFlags(
             selectedFullToolhostAttached=True,
             adkFunctionToolsBuilt=bool(tools),
             routeAttached=safe_config.route_attachment_enabled,
             workspaceMutationAllowed=True,
-            bashCommandAllowed="Bash" in exposed,
+            bashCommandAllowed="Bash" in main_agent_exposed,
         ),
         workspaceRootDigest=_digest(str(host.workspace_root)),
     )
