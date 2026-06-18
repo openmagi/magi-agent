@@ -158,6 +158,7 @@ graph LR
     meta_orchestration --> evidence
     meta_orchestration --> harness
     meta_orchestration --> runtime
+    missions --> harness
     missions --> runtime
     missions --> storage
     observability --> config
@@ -925,7 +926,7 @@ graph LR
 | channel_watchers.py | Operator wiring: tie a concrete channel provider to a gateway poll watcher. | daemon, discord_adapter, discord_gateway, discord_live, flags, scheduler_delivery, slack_live, slack_socketmode, slack_urllib, telegram_adapter, telegram_credentials, telegram_httpx, telegram_live, turn_bridge, watchers | gateway/watchers.py |
 | daemon.py | GatewayDaemon — the supervised asyncio watcher fleet (Track F). | health, watchers | cli/app.py, gateway/channel_watchers.py, gateway/watchers.py, ops/health.py |
 | service_install.py | OS service install for the ``magi gateway`` daemon (Track F). | — | cli/app.py |
-| watchers.py | Watcher-fleet builders — COMPOSE the existing always-on blocks (Track F). | channel_watchers, daemon, driver, runner, scheduler_job_execution, scheduler_job_store, scheduler_loop_driver, store, turn_engine | cli/app.py, gateway/channel_watchers.py, gateway/daemon.py |
+| watchers.py | Watcher-fleet builders — COMPOSE the existing always-on blocks (Track F). | channel_watchers, daemon, driver, goal_judge, runner, scheduler_job_execution, scheduler_job_store, scheduler_loop_driver, store, turn_engine | cli/app.py, gateway/channel_watchers.py, gateway/daemon.py |
 
 ### harness/
 
@@ -942,7 +943,7 @@ graph LR
 | e2e_readiness.py | — | — | — |
 | engine.py | — | evidence_scope, manifest, resolved, trace_context | — |
 | evidence_scope.py | — | — | harness/engine.py, harness/resolved.py |
-| goal_judge.py | B2 — GoalJudge: goal-satisfaction judge (parse + fail-open + parse-failure budget, | types | harness/goal_loop_control.py |
+| goal_judge.py | B2 — GoalJudge: goal-satisfaction judge (parse + fail-open + parse-failure budget, | types | gateway/watchers.py, harness/goal_loop_control.py, missions/work_queue/runner.py |
 | goal_loop.py | — | — | harness/general_automation/delegation.py, harness/goal_state.py, shadow/mission_lifecycle_contract.py |
 | goal_loop_control.py | B3/B4 — Continuation loop control + after-turn hook (the Ralph loop). | context, discovery, goal_judge, goal_state, manifest, registries, result, types | firstparty/packs/goal_loop_default/impl.py |
 | goal_state.py | B1 — GoalState: persistent session-scoped goal state layer. | goal_loop, migrations | harness/goal_loop_control.py |
@@ -1159,7 +1160,7 @@ graph LR
 | __init__.py | — | models | — |
 | driver.py | WorkQueueDriver — the periodic dispatcher tick for the durable work-queue. | runner, store | gateway/watchers.py |
 | models.py | — | — | missions/work_queue/__init__.py, missions/work_queue/runner.py, missions/work_queue/store.py |
-| runner.py | — | models | gateway/watchers.py, missions/work_queue/driver.py |
+| runner.py | — | goal_judge, models | gateway/watchers.py, missions/work_queue/driver.py |
 | store.py | — | migrations, models | gateway/watchers.py, missions/work_queue/driver.py |
 
 ### observability/
