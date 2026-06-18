@@ -619,6 +619,16 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
     ),
     _b(
+        "MAGI_VERIFY_TASKBOARD_COMPLETION",
+        stage="stage2",
+        summary=(
+            "Block turn completion while the workspace .magi/taskboard.jsonl "
+            "still has a task in a non-terminal status; strict default-OFF and "
+            "inert unless explicitly set (or the task-board-completion Customize "
+            "preset is enabled)."
+        ),
+    ),
+    _b(
         "MAGI_FACT_GROUNDING_VERIFICATION_ENABLED",
         stage="stage2",
         summary=(

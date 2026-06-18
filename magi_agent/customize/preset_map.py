@@ -154,6 +154,18 @@ PRESET_SEAMS: dict[str, PresetSeam] = {
         supported_modes=("deterministic",),
         wiring="opt_in",
     ),
+    # Opt-in for the C8 taskboard-completion gate (cli/engine
+    # _task_board_completion_block_labels): blocks completion while the workspace
+    # .magi/taskboard.jsonl still has a task in a non-terminal status. Enabling
+    # the preset turns the gate on even when MAGI_VERIFY_TASKBOARD_COMPLETION is
+    # off. controls_refs is documentation-only for opt_in seams.
+    "task-board-completion": PresetSeam(
+        preset_id="task-board-completion",
+        controls_refs=("task_board:incomplete_tasks",),
+        runtime_default_on=False,
+        supported_modes=("deterministic",),
+        wiring="opt_in",
+    ),
 }
 
 
