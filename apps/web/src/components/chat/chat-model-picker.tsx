@@ -7,6 +7,7 @@ import {
   normalizeModelSelectionForSettings,
   type ModelOption,
 } from "@/lib/models/model-options";
+import { filterModelOptionsByConfiguredProviders } from "@/lib/models/model-availability";
 import {
   applyRouterPickerMode,
   getRouterPickerMode,
@@ -138,6 +139,37 @@ export function ChatModelPicker({
   const [currentRouterType, setCurrentRouterType] = useState(routerType ?? "standard");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Local self-hosted bots: only advertise models whose provider has a key, so
+  // the picker never offers a model that fails with an empty response. `null`
+  // means "unknown yet" → fail open (show everything).
+  const [configuredProviders, setConfiguredProviders] = useState<ReadonlySet<string> | null>(null);
+
+  useEffect(() => {
+    if (persistMode !== "local") return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await authFetch("/v1/app/providers");
+        if (!res.ok) return;
+        const data = (await res.json()) as {
+          providers?: Array<{ name?: string; configured?: boolean }>;
+        };
+        if (cancelled || !Array.isArray(data.providers)) return;
+        setConfiguredProviders(
+          new Set(
+            data.providers
+              .filter((p) => p.configured && typeof p.name === "string")
+              .map((p) => p.name as string),
+          ),
+        );
+      } catch {
+        // Fail open: leave configuredProviders null so all options stay visible.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [authFetch, persistMode]);
 
   const pickerMode = useMemo(
     () => getRouterPickerMode(selectedModel, currentRouterType),
@@ -149,10 +181,14 @@ export function ChatModelPicker({
     setCurrentRouterType(routerType ?? "standard");
   }, [modelSelection, routerType]);
 
-  const advancedOptions = useMemo(
-    () => ensureSelectedOption(getModelOptions(subscriptionPlan), selectedModel),
-    [selectedModel, subscriptionPlan],
-  );
+  const advancedOptions = useMemo(() => {
+    const all = getModelOptions(subscriptionPlan);
+    const keyed =
+      persistMode === "local" && configuredProviders
+        ? filterModelOptionsByConfiguredProviders(all, configuredProviders, selectedModel)
+        : all;
+    return ensureSelectedOption(keyed, selectedModel);
+  }, [selectedModel, subscriptionPlan, persistMode, configuredProviders]);
 
   const saveModel = useCallback(
     async (nextModelSelection: string, nextRouterType: string) => {

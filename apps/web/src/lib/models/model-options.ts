@@ -29,6 +29,8 @@ export function normalizeModelSelectionForSettings(value: string): string {
   return value;
 }
 
+export { filterModelOptionsByConfiguredProviders } from "./model-availability";
+
 export function getModelOptions(subscriptionPlan: string | null | undefined): ModelOption[] {
   const baseOptions = [...BASE_MODEL_OPTIONS];
   if (!isLocalLlmEnabledPlan(subscriptionPlan)) return baseOptions;
