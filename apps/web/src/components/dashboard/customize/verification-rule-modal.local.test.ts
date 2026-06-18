@@ -36,6 +36,13 @@ describe("verification modal — honest enforcement surface", () => {
     expect(modalSrc).toContain("Preview");
   });
 
+  it("badges capability presets honestly (not as live/preview)", () => {
+    expect(modalSrc).toContain('preset.enforcement === "capability"');
+    expect(modalSrc).toContain("Capability");
+    // capability is a distinct enforcement status in the API contract.
+    expect(apiSrc).toContain('"capability"');
+  });
+
   it("only enforcing presets get a live toggle", () => {
     expect(modalSrc).toContain('preset.enforcement === "enforcing"');
   });

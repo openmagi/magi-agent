@@ -95,6 +95,9 @@ function Badges({ preset }: { preset: HarnessPresetItem }) {
   if (preset.enforcement === "preview") {
     return <Pill text="Preview" tone="preview" />;
   }
+  if (preset.enforcement === "capability") {
+    return <Pill text="Capability" tone="neutral" />;
+  }
   // enforcing
   return (
     <div className="flex items-center gap-1.5">
