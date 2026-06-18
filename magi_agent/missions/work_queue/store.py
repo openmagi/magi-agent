@@ -147,6 +147,24 @@ class WorkQueueStore(Protocol):
         """Return ready tasks ordered by priority DESC, created_at ASC, capped at *limit*."""
         ...
 
+    def list_tasks(
+        self,
+        *,
+        status: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[WorkTask]:
+        """Return tasks ordered by created_at DESC, id; optionally filtered by *status*."""
+        ...
+
+    def list_task_events(self, task_id: str, *, limit: int = 200) -> list[dict]:
+        """Return events for *task_id* ordered by id ASC, each dict with parsed payload."""
+        ...
+
+    def list_task_runs(self, task_id: str, *, limit: int = 100) -> list[dict]:
+        """Return run rows for *task_id* ordered by started_at ASC."""
+        ...
+
 
 # ---------------------------------------------------------------------------
 # InMemoryWorkQueueStore
@@ -367,6 +385,41 @@ class InMemoryWorkQueueStore:
         ready = [t for t in self._tasks.values() if t.status == "ready"]
         ready.sort(key=lambda t: (-t.priority, t.created_at))
         return ready[:limit]
+
+    def list_tasks(
+        self,
+        *,
+        status: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[WorkTask]:
+        """Filter, sort, and page tasks from the in-memory dict.
+
+        Mirrors SqliteWorkQueueStore ordering: created_at DESC, id (ascending tiebreak).
+        """
+        tasks = list(self._tasks.values())
+        if status is not None:
+            tasks = [t for t in tasks if t.status == status]
+        tasks.sort(key=lambda t: (-t.created_at, t.id))
+        return tasks[offset : offset + limit]
+
+    def list_task_events(self, task_id: str, *, limit: int = 200) -> list[dict]:
+        """Return [] — InMemory does not persist events.
+
+        InMemoryWorkQueueStore is a test double for task-state logic only.
+        The board API reads the durable Sqlite store in production where events
+        are persisted via _append_event().
+        """
+        return []
+
+    def list_task_runs(self, task_id: str, *, limit: int = 100) -> list[dict]:
+        """Return [] — InMemory does not persist run rows.
+
+        InMemoryWorkQueueStore is a test double for task-state logic only.
+        The board API reads the durable Sqlite store in production where run
+        rows are written by claim() / complete() / record_failure().
+        """
+        return []
 
 
 # ---------------------------------------------------------------------------
@@ -669,6 +722,88 @@ class SqliteWorkQueueStore:
             (limit,),
         ).fetchall()
         return [self._row_to_task(r) for r in rows]
+
+    def list_tasks(
+        self,
+        *,
+        status: str | None = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> list[WorkTask]:
+        """Return tasks ordered by created_at DESC, id; optionally filtered by *status*.
+
+        Uses a parameterized WHERE clause appended only when status is provided so that
+        callers may page through the full task list without a filter.
+        """
+        conn = self._get_conn()
+        if status is not None:
+            rows = conn.execute(
+                "SELECT * FROM work_queue_tasks WHERE status=? "
+                "ORDER BY created_at DESC, id LIMIT ? OFFSET ?",
+                (status, limit, offset),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM work_queue_tasks "
+                "ORDER BY created_at DESC, id LIMIT ? OFFSET ?",
+                (limit, offset),
+            ).fetchall()
+        return [self._row_to_task(r) for r in rows]
+
+    def list_task_events(self, task_id: str, *, limit: int = 200) -> list[dict]:
+        """Return event rows for *task_id* ordered by id ASC.
+
+        Each dict contains: id, task_id, run_id, kind, payload (JSON-parsed or None),
+        created_at.
+        """
+        conn = self._get_conn()
+        rows = conn.execute(
+            "SELECT id, task_id, run_id, kind, payload, created_at "
+            "FROM work_queue_task_events WHERE task_id=? ORDER BY id ASC LIMIT ?",
+            (task_id, limit),
+        ).fetchall()
+        result = []
+        for r in rows:
+            payload_raw = r["payload"]
+            result.append(
+                {
+                    "id": r["id"],
+                    "task_id": r["task_id"],
+                    "run_id": r["run_id"],
+                    "kind": r["kind"],
+                    "payload": json.loads(payload_raw) if payload_raw is not None else None,
+                    "created_at": r["created_at"],
+                }
+            )
+        return result
+
+    def list_task_runs(self, task_id: str, *, limit: int = 100) -> list[dict]:
+        """Return run rows for *task_id* ordered by started_at ASC.
+
+        Each dict contains: id, task_id, status, outcome, worker_pid, started_at,
+        ended_at, summary, error.
+        """
+        conn = self._get_conn()
+        rows = conn.execute(
+            "SELECT id, task_id, status, outcome, worker_pid, started_at, "
+            "ended_at, summary, error "
+            "FROM work_queue_task_runs WHERE task_id=? ORDER BY started_at ASC LIMIT ?",
+            (task_id, limit),
+        ).fetchall()
+        return [
+            {
+                "id": r["id"],
+                "task_id": r["task_id"],
+                "status": r["status"],
+                "outcome": r["outcome"],
+                "worker_pid": r["worker_pid"],
+                "started_at": r["started_at"],
+                "ended_at": r["ended_at"],
+                "summary": r["summary"],
+                "error": r["error"],
+            }
+            for r in rows
+        ]
 
     def _append_event(self, conn, task_id, kind, payload):
         conn.execute(

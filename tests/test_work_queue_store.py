@@ -446,6 +446,55 @@ def test_claim_uses_immediate_transaction(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# Task 1: read queries — list_tasks, list_task_events, list_task_runs
+# ---------------------------------------------------------------------------
+
+
+def test_list_tasks_filters_and_pages(store):
+    """list_tasks honours status filter, created_at DESC ordering, and limit/offset paging."""
+    store.create(WorkTask(id="a", title="a", status="ready",     created_at=1))
+    store.create(WorkTask(id="b", title="b", status="completed", created_at=2))
+    store.create(WorkTask(id="c", title="c", status="ready",     created_at=3))
+    allt = store.list_tasks(limit=100)
+    assert [t.id for t in allt] == ["c", "b", "a"]          # created_at DESC
+    ready = store.list_tasks(status="ready", limit=100)
+    assert {t.id for t in ready} == {"a", "c"}
+    assert [t.id for t in store.list_tasks(limit=1, offset=0)] == ["c"]
+    assert [t.id for t in store.list_tasks(limit=1, offset=1)] == ["b"]
+
+
+def test_list_task_events_and_runs(tmp_path):
+    """list_task_events / list_task_runs return persisted rows from Sqlite (events in id ASC order)."""
+    from magi_agent.missions.work_queue.store import SqliteWorkQueueStore
+
+    s = SqliteWorkQueueStore(tmp_path / "wq.db")
+    s.create(WorkTask(id="t", title="x", status="ready", created_at=1))
+    s.claim("t", claimer="w1", now=1000, worker_pid=1)   # emits 'claimed' event + a run row
+    s.complete("t", result="DONE")                        # emits 'completed', closes the run
+    events = s.list_task_events("t", limit=100)
+    kinds = [e["kind"] for e in events]
+    assert "claimed" in kinds and "completed" in kinds
+    runs = s.list_task_runs("t", limit=100)
+    assert len(runs) == 1 and runs[0]["outcome"] == "completed"
+
+
+def test_inmemory_events_runs_empty():
+    """InMemoryWorkQueueStore.list_task_events / list_task_runs always return [] by design.
+
+    InMemory is a test double for task-state logic only; the board API uses the durable
+    Sqlite store in production where events/runs are persisted.
+    """
+    from magi_agent.missions.work_queue.store import InMemoryWorkQueueStore
+
+    s = InMemoryWorkQueueStore()
+    s.create(WorkTask(id="t", title="x", status="ready", created_at=1))
+    s.claim("t", claimer="w1", now=1000, worker_pid=1)
+    s.complete("t", result="DONE")
+    assert s.list_task_events("t") == []
+    assert s.list_task_runs("t") == []
+
+
+# ---------------------------------------------------------------------------
 # Rollback guard on claim error — Task 6 Fix 1
 # ---------------------------------------------------------------------------
 
