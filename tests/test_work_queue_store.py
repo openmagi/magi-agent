@@ -314,3 +314,13 @@ def test_parity_find_by_idempotency_key(store):
     assert hit is not None and hit.id == "t"
     miss = store.find_by_idempotency_key("nope")
     assert miss is None
+
+
+# (g) ready_tasks: orders by priority DESC, created_at ASC; filters by status='ready'; respects limit
+def test_parity_ready_tasks_orders_and_limits(store):
+    store.create(WorkTask(id="a", title="a", status="ready", created_at=2, priority=0))
+    store.create(WorkTask(id="b", title="b", status="ready", created_at=1, priority=5))
+    store.create(WorkTask(id="c", title="c", status="todo",  created_at=1, priority=9))
+    out = store.ready_tasks(limit=10)
+    assert [t.id for t in out] == ["b", "a"]      # b: higher priority; c excluded (todo)
+    assert [t.id for t in store.ready_tasks(limit=1)] == ["b"]

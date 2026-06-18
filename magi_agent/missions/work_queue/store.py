@@ -133,6 +133,10 @@ class WorkQueueStore(Protocol):
         """Mark *task_id* completed and store *result*."""
         ...
 
+    def ready_tasks(self, limit: int) -> list[WorkTask]:
+        """Return ready tasks ordered by priority DESC, created_at ASC, capped at *limit*."""
+        ...
+
 
 # ---------------------------------------------------------------------------
 # InMemoryWorkQueueStore
@@ -335,6 +339,11 @@ class InMemoryWorkQueueStore:
             consecutive_failures=0,
             current_run_id=None,
         )
+
+    def ready_tasks(self, limit: int) -> list[WorkTask]:
+        ready = [t for t in self._tasks.values() if t.status == "ready"]
+        ready.sort(key=lambda t: (-t.priority, t.created_at))
+        return ready[:limit]
 
 
 # ---------------------------------------------------------------------------
@@ -610,6 +619,15 @@ class SqliteWorkQueueStore:
         task = self.get(task_id)
         assert task is not None
         return task
+
+    def ready_tasks(self, limit: int) -> list[WorkTask]:
+        conn = self._get_conn()
+        rows = conn.execute(
+            "SELECT * FROM work_queue_tasks WHERE status='ready' "
+            "ORDER BY priority DESC, created_at ASC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [self._row_to_task(r) for r in rows]
 
     def _append_event(self, conn, task_id, kind, payload):
         conn.execute(
