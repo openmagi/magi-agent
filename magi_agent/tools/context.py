@@ -78,6 +78,7 @@ class ToolContext(BaseModel):
     commit_handle: object | None = Field(default=None, alias="commitHandle")
     spawn_depth: int = Field(default=0, ge=0, alias="spawnDepth")
     parent_tool_names: tuple[str, ...] = Field(default=(), alias="parentToolNames")
+    spawn_cap: tuple[str, ...] | None = Field(default=None, alias="spawnCap")
     spawn_workspace: str | None = Field(default=None, alias="spawnWorkspace")
     plugin_id: str | None = Field(default=None, alias="pluginId")
     secret_scope: str | None = Field(default=None, alias="secretScope")

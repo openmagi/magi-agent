@@ -27,7 +27,7 @@ Importing ``cli.wiring`` is therefore safe on any cold path.
 from __future__ import annotations
 
 import os
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -664,6 +664,24 @@ def _build_first_party_adk_tools(
     # the tighten-only producer (Task 2B.2).
     parent_tool_names_snapshot: tuple[str, ...] = tuple(sorted(exposed_tool_names))
 
+    # Seam 1b (CLI): when MAGI_MAIN_AGENT_PROFILE=orchestrator, pre-compute the
+    # spawn_cap (full bundle names) to close over into every ToolContext so
+    # spawned children receive the correct grant ceiling.  When the flag is unset
+    # (default), spawn_cap_for_factory is None — byte-identical to before.
+    from magi_agent.config.env import main_agent_profile as _main_agent_profile  # noqa: PLC0415
+    from magi_agent.runtime.main_agent_profile import (  # noqa: PLC0415
+        apply_orchestrator_filter as _apply_filter,
+    )
+
+    # TODO(Seam 4): this ceiling is derived from ``exposed_tool_names``, which is
+    # captured BEFORE ``direct_web_tools`` are appended below. It therefore omits
+    # the direct web tools. Inert today (spawn_cap has no consumer), but before
+    # Seam 4 enforces the ceiling, derive it from the SAME complete final tool
+    # list used for filtering (one source of truth, as the serve path already does).
+    _spawn_cap_for_factory: tuple[str, ...] | None = None
+    if _main_agent_profile() == "orchestrator":
+        _, _spawn_cap_for_factory = _apply_filter(exposed_tool_names)
+
     def tool_context_factory(adk_tool_context: object) -> ToolContext:
         function_call = _context_lookup(adk_tool_context, "function_call")
         tool_name = _context_lookup(function_call, "name")
@@ -698,6 +716,7 @@ def _build_first_party_adk_tools(
             tool_use_id=tool_use_id if isinstance(tool_use_id, str) else None,
             plugin_id=tool_name if isinstance(tool_name, str) else None,
             parent_tool_names=parent_tool_names_snapshot,
+            spawn_cap=_spawn_cap_for_factory,
         )
 
     tools = build_adk_function_tools_for_registry(
@@ -710,6 +729,9 @@ def _build_first_party_adk_tools(
     )
     if direct_web_tools:
         tools = [*tools, *direct_web_tools]
+    # Seam 1b (CLI): apply orchestrator profile filter AFTER building the full
+    # toolset.  When the flag is unset this is a no-op (same list, None cap).
+    tools, _ = _apply_orchestrator_profile(tools)
     return wrap_cli_adk_tools_with_evidence_collector(
         tools,
         collector=local_tool_evidence_collector,
@@ -721,6 +743,38 @@ _LEGACY_FULL_TOOLHOST_SCOPE: dict[str, object] = {
     "mode": "selected_full_toolhost",
     "source": "selected_full_toolhost",
 }
+
+
+def _apply_orchestrator_profile(
+    full_tools: list[object],
+    env: Mapping[str, str] | None = None,
+) -> tuple[list[object], tuple[str, ...] | None]:
+    """Apply the orchestrator main-agent profile filter to a tools list.
+
+    When ``MAGI_MAIN_AGENT_PROFILE`` is unset (default): returns
+    ``(full_tools, None)`` — the SAME list object, byte-identical path.
+
+    When ``"orchestrator"``: returns ``(restricted_tools, spawn_cap_names)``
+    where ``restricted_tools`` keeps only orchestrator-allowed names (in the
+    original order) and ``spawn_cap_names`` is the full bundle tuple — the
+    grant ceiling the orchestrator may pass to spawned children.
+    """
+    from magi_agent.config.env import main_agent_profile  # noqa: PLC0415
+    from magi_agent.runtime.main_agent_profile import (  # noqa: PLC0415
+        apply_orchestrator_filter,
+    )
+
+    if main_agent_profile(env) != "orchestrator":
+        return full_tools, None
+    full_names = tuple(
+        n
+        for n in (getattr(t, "name", None) for t in full_tools)
+        if isinstance(n, str) and n
+    )
+    restricted_names, spawn_cap = apply_orchestrator_filter(full_names)
+    allowed = frozenset(restricted_names)
+    restricted_tools = [t for t in full_tools if getattr(t, "name", None) in allowed]
+    return restricted_tools, spawn_cap
 
 
 def _resolve_first_party_permission_scope(

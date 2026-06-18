@@ -398,6 +398,12 @@ async def spawn_agent(arguments: dict[str, object], context: ToolContext) -> Too
             "parentToolNames": context.parent_tool_names,
             "parentMemoryMode": parent_memory_mode_value,
         }
+        raw_allowed = arguments.get("allowedTools") or arguments.get("allowed_tools")
+        allowed_tools = tuple(
+            a for a in (raw_allowed or ()) if isinstance(a, str) and a.strip()
+        )
+        if allowed_tools:
+            request_metadata["allowedTools"] = allowed_tools
         request = ChildTaskRequest(
             parentExecutionId=parent_exec_id,
             turnId=turn_id,
@@ -407,6 +413,7 @@ async def spawn_agent(arguments: dict[str, object], context: ToolContext) -> Too
             provider=req_provider,
             model=req_model,
             budgetMs=budget_ms,
+            spawnCap=context.spawn_cap,
         )
 
         toolset_profile = resolve_child_toolset_profile()
@@ -440,6 +447,7 @@ async def spawn_agent(arguments: dict[str, object], context: ToolContext) -> Too
             toolset_profile=toolset_profile,
             workspace_root=child_workspace,
             progress_sink=_emit_live_child_progress,
+            spawn_cap=request.spawn_cap,
         )
 
         config = ChildRunnerConfig(

@@ -149,6 +149,7 @@ class RealLocalChildRunner:
         workspace_root: str | None = None,
         progress_sink: Callable[[Mapping[str, object]], object] | None = None,
         env: Mapping[str, str] | None = None,
+        spawn_cap: tuple[str, ...] | None = None,
     ) -> None:
         #: Optional pre-resolved provider config (a ``ProviderConfig``). When
         #: supplied AND it carries a key, it short-circuits key resolution.
@@ -170,12 +171,16 @@ class RealLocalChildRunner:
         #: ``_collect_turn_text`` ONLY when no toolset/runner is injected.
         self._toolset_profile = toolset_profile
         #: PR1: optional tool-call evidence collector. When supplied it is wired
-        #: into the built toolset so each child tool-call records a public
+        #: into the built toolset so each tool-call records a public
         #: ``evidence:`` ref that is promoted onto the child's ``evidenceRefs``.
         self._evidence_collector = evidence_collector
         self._workspace_root = workspace_root
         self._progress_sink = progress_sink
         self._env: Mapping[str, str] = os.environ if env is None else env
+        #: Orchestrator-imposed tool-name ceiling (Seam 2b). Stored for a future
+        #: task (Seam 4) that will intersect the child's toolset against it.
+        #: ``None`` means no ceiling — default behaviour is byte-identical.
+        self._spawn_cap: tuple[str, ...] | None = spawn_cap
 
     async def run_child(self, request: object) -> Mapping[str, object]:
         """Drive ONE model-backed child turn; NEVER raise.
@@ -594,6 +599,21 @@ class RealLocalChildRunner:
             parent_cap = frozenset(raw_cap) if raw_cap else frozenset()
             if parent_cap:
                 profile_tools = [t for t in profile_tools if _tool_name(t) in parent_cap]
+
+        # Seam P2-T3: allowedTools is the orchestrator's explicit per-task grant.
+        # Apply after parent-cap, before spawn_cap. Gated by same default-OFF flag.
+        if flag_bool("MAGI_SPAWN_RECIPE_CAP_ENABLED", env=self._env):
+            metadata = getattr(request, "metadata", None) or {}
+            raw_allowed = metadata.get("allowedTools") if isinstance(metadata, dict) else None
+            allowed = frozenset(raw_allowed) if raw_allowed else frozenset()
+            if allowed:
+                profile_tools = [t for t in profile_tools if _tool_name(t) in allowed]
+
+        # Seam 4: spawn_cap is the orchestrator's hard grant ceiling. Apply as the
+        # innermost cap, after profile and parent-cap. Gated default-OFF.
+        if self._spawn_cap and flag_bool("MAGI_SPAWN_RECIPE_CAP_ENABLED", env=self._env):
+            cap = frozenset(self._spawn_cap)
+            profile_tools = [t for t in profile_tools if _tool_name(t) in cap]
 
         return profile_tools, collector
 
