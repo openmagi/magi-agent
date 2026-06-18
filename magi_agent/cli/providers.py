@@ -180,7 +180,7 @@ _DEFAULT_MODEL: dict[str, str] = {
     "anthropic": "claude-sonnet-4-6",
     "openai": "gpt-5.5",
     "gemini": "gemini-3.5-flash",
-    "fireworks": "accounts/fireworks/models/kimi-k2-instruct",
+    "fireworks": "kimi-k2p6",
     "openrouter": "openai/gpt-5.5",
 }
 

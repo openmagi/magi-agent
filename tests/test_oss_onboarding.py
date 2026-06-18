@@ -31,7 +31,7 @@ def test_default_models_are_current_not_retired() -> None:
     assert _DEFAULT_MODEL["anthropic"] == "claude-sonnet-4-6"
     assert _DEFAULT_MODEL["openai"] == "gpt-5.5"
     assert _DEFAULT_MODEL["gemini"] == "gemini-3.5-flash"
-    assert _DEFAULT_MODEL["fireworks"] == "accounts/fireworks/models/kimi-k2-instruct"
+    assert _DEFAULT_MODEL["fireworks"] == "kimi-k2p6"
 
 
 def test_resolve_provider_uses_current_default_model_per_key() -> None:
