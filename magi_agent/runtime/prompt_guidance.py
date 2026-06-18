@@ -12,6 +12,13 @@ Flags (all default OFF, independent — see ``magi_agent.config.env``):
   * ``MAGI_PROMPT_SEARCH_RULES_ENABLED`` -> <search_decision> (also requires
     BRAVE_API_KEY + FIRECRAWL_API_KEY: never direct the model to absent tools)
   * ``MAGI_PROMPT_REDFLAGS_ENABLED``     -> <red_flags>
+  * ``MAGI_RESEARCH_METHODOLOGY_ENABLED``   -> <research_methodology>
+  * ``MAGI_AUTOMATION_METHODOLOGY_ENABLED`` -> <automation_methodology>
+
+The two methodology blocks give the research and automation harnesses the kind
+of domain workflow the coding harness already gets from
+``CODING_DISCIPLINE_BLOCK`` / ``CODING_WORKFLOW_BLOCK`` — but as opt-in guidance
+(the CLI is coding-first), not enforcement.
 """
 from __future__ import annotations
 
@@ -21,6 +28,8 @@ from collections.abc import Mapping
 __all__ = [
     "action_discipline_examples_block",
     "anti_rationalization_block",
+    "automation_methodology_block",
+    "research_methodology_block",
     "search_decision_block",
 ]
 
@@ -70,6 +79,40 @@ _RED_FLAGS = (
 )
 
 
+_RESEARCH_METHODOLOGY = (
+    "<research_methodology>\n"
+    "When the task is to research, investigate, or answer from sources:\n"
+    "- Ground every factual claim in a source you actually opened this turn; "
+    "do not answer fast-changing or specific factual questions from memory "
+    "alone.\n"
+    "- Corroborate load-bearing facts across at least two independent sources "
+    "before stating them; a single source is a lead, not a conclusion.\n"
+    "- Prefer primary sources (official docs, filings, the data itself) over "
+    "secondary commentary; trace a claim to its origin.\n"
+    "- Attribute each non-obvious fact to the source it came from, so the "
+    "reader can verify it.\n"
+    "- When sources conflict, report the disagreement instead of silently "
+    "picking one.\n"
+    "</research_methodology>"
+)
+
+_AUTOMATION_METHODOLOGY = (
+    "<automation_methodology>\n"
+    "When the task is a multi-step goal or automation:\n"
+    "- State the concrete deliverable up front: the artifact or outcome that "
+    "marks the task complete.\n"
+    "- Plan the steps before acting, then work the plan; confirm each step's "
+    "result before moving to the next.\n"
+    "- Back every completion claim with evidence produced this turn (a file, a "
+    "command output, a receipt) — not an assertion that it was done.\n"
+    "- If a step is blocked, report exactly what is blocking and what you need; "
+    "do not silently skip it or defer to later.\n"
+    "- Do not report partial work as complete: finish every step the goal "
+    "requires.\n"
+    "</automation_methodology>"
+)
+
+
 def action_discipline_examples_block(env: Mapping[str, str] | None = None) -> str:
     """Gated ``<action_discipline_examples>`` fragment (D2). ``""`` when off."""
     try:
@@ -113,5 +156,31 @@ def anti_rationalization_block(env: Mapping[str, str] | None = None) -> str:
         if not is_prompt_redflags_enabled(source):
             return ""
         return _RED_FLAGS
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def research_methodology_block(env: Mapping[str, str] | None = None) -> str:
+    """Gated ``<research_methodology>`` fragment (H1). ``""`` when off."""
+    try:
+        from magi_agent.config.env import is_research_methodology_enabled  # noqa: PLC0415
+
+        source: Mapping[str, str] = os.environ if env is None else env
+        if not is_research_methodology_enabled(source):
+            return ""
+        return _RESEARCH_METHODOLOGY
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def automation_methodology_block(env: Mapping[str, str] | None = None) -> str:
+    """Gated ``<automation_methodology>`` fragment (H1). ``""`` when off."""
+    try:
+        from magi_agent.config.env import is_automation_methodology_enabled  # noqa: PLC0415
+
+        source: Mapping[str, str] = os.environ if env is None else env
+        if not is_automation_methodology_enabled(source):
+            return ""
+        return _AUTOMATION_METHODOLOGY
     except Exception:  # noqa: BLE001
         return ""
