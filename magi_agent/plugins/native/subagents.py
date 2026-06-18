@@ -370,13 +370,18 @@ async def spawn_agent(arguments: dict[str, object], context: ToolContext) -> Too
         else:
             budget_ms = 0
 
-        # Build the metadata dict: carry spawn_depth (boundary cap) and
-        # parent_tool_names (tighten-only producer, Task 2B.2).  When
-        # parent_tool_names is empty the key is still present as () so the
-        # downstream consumer can distinguish "not provided" vs "no tools".
+        # Build the metadata dict: carry spawn_depth (boundary cap),
+        # parent_tool_names (tighten-only producer, Task 2B.2), and
+        # parentMemoryMode (memory-inherit producer, Task F1).
+        # MemoryMode is a str-subclass Enum — use .value to emit the canonical
+        # bare string ("normal"/"read_only"/"incognito"), never "MemoryMode.X".
+        parent_memory_mode_value: str = getattr(
+            context.memory_mode, "value", str(context.memory_mode)
+        )
         request_metadata: dict[str, object] = {
             "spawnDepth": context.spawn_depth + 1,
             "parentToolNames": context.parent_tool_names,
+            "parentMemoryMode": parent_memory_mode_value,
         }
         request = ChildTaskRequest(
             parentExecutionId=parent_exec_id,

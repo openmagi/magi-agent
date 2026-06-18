@@ -628,6 +628,39 @@ def test_synthetic_local_strips_spawn_workspace_before_dispatch(tmp_path: Path) 
     assert report.tool_result.output == {"spawnWorkspace": None}
 
 
+def test_synthetic_local_preserves_parent_tool_names_through_sanitizer(
+    tmp_path: Path,
+) -> None:
+    seen: dict[str, object] = {}
+
+    def handler(_arguments: dict[str, object], context: ToolContext) -> ToolResult:
+        seen["parentToolNames"] = context.parent_tool_names
+        return ToolResult(status="ok", output={"parentToolNames": list(context.parent_tool_names)})
+
+    registry = ToolRegistry()
+    registry.register(make_manifest("ParentToolNamesSafeRead"), handler=handler)
+    dispatcher = SpyDispatcher(registry)
+    live_context = ToolContext(
+        bot_id="gate2-shadow-bot",
+        turn_id="gate2-shadow-turn",
+        workspace_root=str(tmp_path),
+        parent_tool_names=("FileRead", "Bash"),
+    )
+
+    report = asyncio.run(
+        run_gate2_synthetic_local_tool(
+            dispatcher,
+            "ParentToolNamesSafeRead",
+            {},
+            live_context,
+            mode="act",
+        )
+    )
+
+    assert seen["parentToolNames"] == ("FileRead", "Bash")
+    assert report.tool_result.output == {"parentToolNames": ["FileRead", "Bash"]}
+
+
 @pytest.mark.parametrize(
     "manifest",
     (

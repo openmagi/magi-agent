@@ -45,6 +45,7 @@ _PROVIDER_ENV = (
     "MAGI_MODEL",
     "MAGI_SUBAGENT_GOVERNED_TURN_ENABLED",
     "MAGI_CHILD_MEMORY_INHERIT_ENABLED",
+    "MAGI_SUBAGENT_TOOL_TIGHTEN_ONLY_ENABLED",
 )
 
 
@@ -527,4 +528,170 @@ def test_flag_on_with_inherit_on_runtime_memory_mode_matches_derived_and_is_neve
     assert runtime_memory_mode != "normal", (
         f"build_headless_runtime received memory_mode='normal' — "
         f"this diverges from the derived TurnContext (bug). Got: {runtime_memory_mode!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Task F1: consumer tests — parentMemoryMode from metadata threads correctly
+# ---------------------------------------------------------------------------
+
+
+def test_flag_on_with_parent_memory_mode_normal_yields_read_only_child(
+    monkeypatch,
+) -> None:
+    """Consumer (F1): request.metadata["parentMemoryMode"]="normal" AND
+    MAGI_CHILD_MEMORY_INHERIT_ENABLED=1 → build_headless_runtime must
+    receive memory_mode="read_only"  (derive() maps normal+inherit→read_only).
+
+    This verifies the end-to-end threading from the metadata key to the
+    runtime parameter, which was broken before F1 (hardcoded "incognito").
+    """
+    monkeypatch.setenv("MAGI_SUBAGENT_GOVERNED_TURN_ENABLED", "1")
+    monkeypatch.setenv("MAGI_CHILD_MEMORY_INHERIT_ENABLED", "1")
+
+    captured_runtime_kwargs: list[dict[str, object]] = []
+
+    def _recording_build_headless_runtime(**kwargs: object) -> object:
+        captured_runtime_kwargs.append(dict(kwargs))
+        return object()
+
+    async def _fake_run_governed_turn(
+        ctx: object, *, runtime: object | None = None, cancel: object | None = None
+    ) -> "AsyncGenerator[Any, None]":
+        from magi_agent.cli.contracts import EngineResult, Terminal
+        from magi_agent.runtime.events import RuntimeEvent
+
+        yield RuntimeEvent(
+            type="token",
+            payload={"type": "text_delta", "delta": "f1 consumer test done"},
+        )
+        yield EngineResult(terminal=Terminal.completed)
+
+    monkeypatch.setattr(
+        "magi_agent.cli.wiring.build_headless_runtime",
+        _recording_build_headless_runtime,
+    )
+    monkeypatch.setattr(
+        governed_turn_mod,
+        "run_governed_turn",
+        _fake_run_governed_turn,
+    )
+
+    runner = RealLocalChildRunner(provider_config=_provider_config())
+    # parentMemoryMode="normal" in metadata → with inherit ON → child must be "read_only"
+    output = asyncio.run(
+        runner.run_child(_request(metadata={"parentMemoryMode": "normal"}))
+    )
+
+    assert output["status"] == "completed"
+    assert len(captured_runtime_kwargs) == 1
+    runtime_memory_mode = captured_runtime_kwargs[0].get("memory_mode")
+    assert runtime_memory_mode == "read_only", (
+        f"expected 'read_only' (normal parent + inherit ON → child read_only); "
+        f"got {runtime_memory_mode!r}"
+    )
+
+
+def test_flag_on_with_inherit_off_parent_memory_mode_normal_yields_incognito(
+    monkeypatch,
+) -> None:
+    """Consumer (F1): when MAGI_CHILD_MEMORY_INHERIT_ENABLED is OFF (default),
+    the child's memory mode is always 'incognito' regardless of parentMemoryMode.
+    This ensures the OFF path is byte-identical to today.
+    """
+    monkeypatch.setenv("MAGI_SUBAGENT_GOVERNED_TURN_ENABLED", "1")
+    # inherit flag explicitly OFF (default)
+    monkeypatch.delenv("MAGI_CHILD_MEMORY_INHERIT_ENABLED", raising=False)
+
+    captured_runtime_kwargs: list[dict[str, object]] = []
+
+    def _recording_build_headless_runtime(**kwargs: object) -> object:
+        captured_runtime_kwargs.append(dict(kwargs))
+        return object()
+
+    async def _fake_run_governed_turn(
+        ctx: object, *, runtime: object | None = None, cancel: object | None = None
+    ) -> "AsyncGenerator[Any, None]":
+        from magi_agent.cli.contracts import EngineResult, Terminal
+        from magi_agent.runtime.events import RuntimeEvent
+
+        yield RuntimeEvent(
+            type="token",
+            payload={"type": "text_delta", "delta": "f1 inherit-off test done"},
+        )
+        yield EngineResult(terminal=Terminal.completed)
+
+    monkeypatch.setattr(
+        "magi_agent.cli.wiring.build_headless_runtime",
+        _recording_build_headless_runtime,
+    )
+    monkeypatch.setattr(
+        governed_turn_mod,
+        "run_governed_turn",
+        _fake_run_governed_turn,
+    )
+
+    runner = RealLocalChildRunner(provider_config=_provider_config())
+    # Even with parentMemoryMode="normal" in metadata, flag OFF → always incognito
+    output = asyncio.run(
+        runner.run_child(_request(metadata={"parentMemoryMode": "normal"}))
+    )
+
+    assert output["status"] == "completed"
+    assert len(captured_runtime_kwargs) == 1
+    runtime_memory_mode = captured_runtime_kwargs[0].get("memory_mode")
+    assert runtime_memory_mode == "incognito", (
+        f"expected 'incognito' (inherit flag OFF → always incognito); "
+        f"got {runtime_memory_mode!r}"
+    )
+
+
+def test_flag_on_with_absent_parent_memory_mode_defaults_to_incognito(
+    monkeypatch,
+) -> None:
+    """Consumer (F1): when parentMemoryMode is absent from metadata (pre-F1
+    producer or gate-OFF spawn), the consumer defaults to 'incognito' — safe
+    backward-compatible default, byte-identical to today's hardcoded value.
+    """
+    monkeypatch.setenv("MAGI_SUBAGENT_GOVERNED_TURN_ENABLED", "1")
+    monkeypatch.setenv("MAGI_CHILD_MEMORY_INHERIT_ENABLED", "1")
+
+    captured_runtime_kwargs: list[dict[str, object]] = []
+
+    def _recording_build_headless_runtime(**kwargs: object) -> object:
+        captured_runtime_kwargs.append(dict(kwargs))
+        return object()
+
+    async def _fake_run_governed_turn(
+        ctx: object, *, runtime: object | None = None, cancel: object | None = None
+    ) -> "AsyncGenerator[Any, None]":
+        from magi_agent.cli.contracts import EngineResult, Terminal
+        from magi_agent.runtime.events import RuntimeEvent
+
+        yield RuntimeEvent(
+            type="token",
+            payload={"type": "text_delta", "delta": "f1 absent metadata test done"},
+        )
+        yield EngineResult(terminal=Terminal.completed)
+
+    monkeypatch.setattr(
+        "magi_agent.cli.wiring.build_headless_runtime",
+        _recording_build_headless_runtime,
+    )
+    monkeypatch.setattr(
+        governed_turn_mod,
+        "run_governed_turn",
+        _fake_run_governed_turn,
+    )
+
+    runner = RealLocalChildRunner(provider_config=_provider_config())
+    # No metadata at all → parentMemoryMode absent → defaults to incognito
+    output = asyncio.run(runner.run_child(_request()))
+
+    assert output["status"] == "completed"
+    assert len(captured_runtime_kwargs) == 1
+    runtime_memory_mode = captured_runtime_kwargs[0].get("memory_mode")
+    assert runtime_memory_mode == "incognito", (
+        f"expected 'incognito' (parentMemoryMode absent → safe default); "
+        f"got {runtime_memory_mode!r}"
     )
