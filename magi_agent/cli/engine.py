@@ -868,6 +868,13 @@ def _document_coverage_blocks(mode: str, failed_count: int) -> bool:
     return mode == "block" and failed_count > 0
 
 
+# C8 task-board-completion: taskboard statuses (lower-cased) that count as DONE.
+# Any latest-per-title status outside this set marks the board incomplete.
+_TASKBOARD_TERMINAL_STATUSES: frozenset[str] = frozenset(
+    {"done", "complete", "completed", "cancelled", "canceled", "skipped"}
+)
+
+
 def _resolve_document_coverage_mode_with_preset() -> str:
     """Resolve the document-coverage gate mode, honoring the Customize opt-in seam.
 
@@ -3012,6 +3019,11 @@ class MagiEngineDriver:
         missing_evidence.extend(
             self._ga_deliverable_missing_labels(evidence_records)
         )
+        # C8 — flag/preset-gated taskboard-completion gate (reads the workspace
+        # .magi/taskboard.jsonl). Default OFF ⇒ no file read ⇒ byte-identical.
+        missing_evidence.extend(
+            self._task_board_completion_block_labels()
+        )
         document_coverage_blocks = _document_coverage_blocks(
             document_coverage_mode, failed_document_coverage
         )
@@ -3142,6 +3154,71 @@ class MagiEngineDriver:
             f"ga_deliverable:{label}"
             for label in missing_deliverable_labels(required, evidence_records)
         ]
+
+    def _task_board_completion_block_labels(self) -> list[str]:
+        """C8 — block completion while the taskboard has incomplete tasks.
+
+        Behind strict default-OFF ``MAGI_VERIFY_TASKBOARD_COMPLETION`` OR an
+        enabled ``task-board-completion`` Customize preset. When active, reads the
+        workspace taskboard ledger ``<cwd>/.magi/taskboard.jsonl`` (where the
+        ``TaskBoard`` native tool appends ``{action,title,status}`` records),
+        folds by title to the latest status, and — if any title's latest status
+        is NON-terminal — returns the actionable reason
+        ``task_board:incomplete_tasks``.
+
+        DELIBERATE bus-contract deviation (founder sign-off): unlike every other
+        pre-final satisfier, this reads a workspace FILE rather than the collected
+        evidence corpus, because the ``TaskBoard`` tool emits no evidence record
+        and the per-item status lives only in the ledger. Scoped to the local
+        CLI's cwd workspace and FAIL-OPEN in the safe direction: a missing /
+        unreadable / empty ledger ⇒ ``[]`` (no block), so the worst case is
+        under-enforcement, never a false block. Both gates off ⇒ no file read ⇒
+        byte-identical to main.
+        """
+        import os  # noqa: PLC0415
+
+        from magi_agent.config.env import (  # noqa: PLC0415
+            parse_taskboard_completion_verification_enabled,
+        )
+        from magi_agent.customize.runtime_gate import preset_enabled  # noqa: PLC0415
+
+        if not (
+            parse_taskboard_completion_verification_enabled(os.environ)
+            or preset_enabled("task-board-completion", default=False)
+        ):
+            return []
+        try:
+            import json  # noqa: PLC0415
+            from pathlib import Path  # noqa: PLC0415
+
+            ledger = Path.cwd() / ".magi" / "taskboard.jsonl"
+            if not ledger.is_file():
+                return []
+            latest_status: dict[str, str] = {}
+            for line in ledger.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    record = json.loads(line)
+                except ValueError:
+                    continue
+                if not isinstance(record, dict):
+                    continue
+                title = record.get("title")
+                status = record.get("status")
+                if isinstance(title, str) and isinstance(status, str):
+                    latest_status[title] = status.strip().lower()
+            has_incomplete = any(
+                status not in _TASKBOARD_TERMINAL_STATUSES
+                for status in latest_status.values()
+            )
+            if has_incomplete:
+                return ["task_board:incomplete_tasks"]
+            return []
+        except Exception:
+            logger.debug("task-board completion check failed", exc_info=True)
+            return []
 
     def _ga_deliverable_matched_requirement_labels(
         self,

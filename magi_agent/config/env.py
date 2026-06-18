@@ -2856,6 +2856,20 @@ def parse_source_ledger_evidence_gate_enabled(env: Mapping[str, str]) -> bool:
     return flag_bool("MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED", env=env)
 
 
+def parse_taskboard_completion_verification_enabled(env: Mapping[str, str]) -> bool:
+    """MAGI_VERIFY_TASKBOARD_COMPLETION — block completion while tasks remain.
+
+    When ON, a turn whose workspace ``.magi/taskboard.jsonl`` still has a task in
+    a non-terminal status (the latest record per title) is blocked at the
+    pre-final gate. Strict **default-OFF**: inert unless explicitly set (or the
+    task-board-completion Customize preset is enabled), so flag-OFF behavior is
+    byte-identical (no taskboard read happens).
+    """
+    from .flags import flag_bool
+
+    return flag_bool("MAGI_VERIFY_TASKBOARD_COMPLETION", env=env)
+
+
 MAGI_GATE5B_GOVERNANCE_ENABLED_ENV = "MAGI_GATE5B_GOVERNANCE_ENABLED"
 
 
