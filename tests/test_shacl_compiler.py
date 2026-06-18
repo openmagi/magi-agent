@@ -271,8 +271,8 @@ async def test_explain_shape_returns_model_response() -> None:
 
     assert isinstance(result, str), f"explain_shape must return a str, got {type(result)}"
     assert result.strip(), "explain_shape must return a non-empty string"
-    # The returned string should contain the model's response (possibly stripped).
-    assert explanation_text.strip() in result or result.strip() in explanation_text.strip() or len(result) > 0, (
+    # The returned string should contain the model's injected response text.
+    assert explanation_text.strip() in result or result.strip() in explanation_text.strip(), (
         f"Expected explanation text in result. Got: {result!r}"
     )
 

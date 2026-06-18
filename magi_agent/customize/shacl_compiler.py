@@ -48,10 +48,13 @@ Policy:
     wrong field names into the NL compiler generates ``magi:field_<wrong_key>``
     predicates in SHACL shapes that silently never fire (determinism failure).
 
-``preview_cases()`` running a real shape against sample records is the authoritative
-backstop that will surface shapes referencing non-existent fields (violations never
-fire -- shape always "passes" even when it shouldn't).  Field hints are a
-compile-time aid, not a runtime guarantee.
+``preview_cases()`` running a real shape against sample records can surface shapes
+referencing non-existent fields — but ONLY when the sample records actually contain
+data for that field.  SHACL vacuous satisfaction means a shape targeting a
+non-existent field returns conforms=True (no violation) if no sample record has
+that field in its data.  ``preview_cases()`` is a useful sanity-check aid, NOT a
+guaranteed catch for missing-field bugs.  Field hints are a compile-time aid, not
+a runtime guarantee.
 
 Spec: docs/plans/2026-06-18-shacl-PR3-compiler-tasks.md Tasks 3.1 and 3.2
 """
@@ -182,8 +185,11 @@ def available_fields() -> list[dict]:
     guessed one — wrong field names cause the NL→SHACL compiler to generate
     ``magi:field_<wrong_key>`` predicates that silently never fire.
 
-    ``preview_cases()`` (running the real shape against sample records) is the
-    authoritative backstop that catches shapes referencing non-existent fields.
+    ``preview_cases()`` (running the real shape against sample records) can surface
+    shapes referencing non-existent fields, but only when the sample records contain
+    data for the targeted field.  SHACL vacuous satisfaction means a shape targeting
+    a non-existent field returns conforms=True when no sample record has that field —
+    preview is a sanity-check aid, not a guaranteed catch for missing-field bugs.
 
     Returns
     -------
@@ -758,7 +764,7 @@ def _production_shacl_compiler_model_factory() -> Callable[[], Any] | None:
     if provider_config is None:
         return None
 
-    import os  # noqa: PLC0415 (already imported at top — harmless re-import)
+    import os  # noqa: PLC0415 (intentional deferred/lazy import; os is not at module top)
     model_override = os.environ.get(_ENV_SHACL_COMPILER_MODEL, "").strip()
     if not model_override:
         provider_default = getattr(provider_config, "litellm_model", None)

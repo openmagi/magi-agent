@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import time
 import types
 import uuid
@@ -31,6 +32,14 @@ from magi_agent.runtime.openmagi_runtime import OpenMagiRuntime
 from magi_agent.transport.tools import _unauthorized_response
 
 _VERIFICATION_KINDS = {"recipes", "harness_presets", "hooks"}
+
+# DoS caps for the compile route.
+_MAX_PREVIEW_RECORDS = 50
+_MAX_NL_TEXT_BYTES = 20_000
+
+# LLM call timeout (seconds) — fires through asyncio.wait_for; the existing
+# except-Exception paths already degrade gracefully on timeout.
+_LLM_CALL_TIMEOUT_S = 30
 
 
 def _make_json_safe(obj: Any) -> Any:
@@ -167,16 +176,28 @@ def register_customize_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
 
         Request body (JSON):
           nlText        str   — Natural-language constraint description.
+                                Must be non-empty and ≤ _MAX_NL_TEXT_BYTES bytes.
           sampleRecords list  — Optional EvidenceRecord dicts for preview_cases.
+                                Capped at _MAX_PREVIEW_RECORDS entries; excess
+                                entries are dropped and previewTruncated=True is
+                                set in the response.
           _shaclModelFactory  — TEST-ONLY: inject a fake model factory; ignored
                                 in production (not a real JSON-serializable key
                                 in prod; tests inject via monkeypatch).
 
         Returns:
-          200 {ok:True, shapeTtl, review, explanation, previewCases?} on success.
-          200 {ok:False, error} on compile failure or unavailable model.
-          200 {ok:False, error:"compiler disabled"} when flag is OFF.
+          200 {ok:True, shapeTtl, review, explanation, previewCases, previewTruncated?}
+              on success.
+          200 {ok:False, error} on compile failure, invalid input, or unavailable model.
+          401 auth failure (always before the flag check).
+          200 {ok:False, error:"compiler disabled"} when flag is OFF (auth passes first).
         """
+        # Auth check FIRST — matches every other route in this file.
+        # An unauthenticated caller must never be able to probe flag state.
+        unauthorized = _unauthorized_response(request, runtime)
+        if unauthorized is not None:
+            return unauthorized
+
         # Guard: flag must be ON.
         try:
             from magi_agent.config.flags import flag_bool  # noqa: PLC0415
@@ -191,11 +212,6 @@ def register_customize_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
                 status_code=200,
             )
 
-        # Auth check (same pattern as other customize routes).
-        unauthorized = _unauthorized_response(request, runtime)
-        if unauthorized is not None:
-            return unauthorized
-
         # Parse body.
         try:
             body = await request.json()
@@ -209,16 +225,39 @@ def register_customize_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
             )
 
         nl_text: str = body["nlText"]
+
+        # I1: reject empty/whitespace-only nlText and enforce byte-length cap.
+        if not nl_text.strip():
+            return JSONResponse(
+                status_code=400,
+                content={"ok": False, "error": "nlText must not be empty"},
+            )
+        if len(nl_text.encode()) > _MAX_NL_TEXT_BYTES:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "ok": False,
+                    "error": f"nlText exceeds {_MAX_NL_TEXT_BYTES}-byte limit",
+                },
+            )
+
         sample_records_raw: list = body.get("sampleRecords") or []
+
+        # C1 part A: cap sampleRecords to _MAX_PREVIEW_RECORDS.
+        preview_truncated = False
+        if len(sample_records_raw) > _MAX_PREVIEW_RECORDS:
+            sample_records_raw = sample_records_raw[:_MAX_PREVIEW_RECORDS]
+            preview_truncated = True
 
         # Resolve the compiler model factory (test-injection → production → fail-open).
         factory = _resolve_shacl_compile_factory(body)
 
         try:
-            # Step 1: Compile NL → SHACL TTL.
+            # Step 1: Compile NL → SHACL TTL (with LLM timeout).
             fields = available_fields()
-            compile_result = await compile_nl_to_shacl(
-                nl_text, fields, model_factory=factory
+            compile_result = await asyncio.wait_for(
+                compile_nl_to_shacl(nl_text, fields, model_factory=factory),
+                timeout=_LLM_CALL_TIMEOUT_S,
             )
             if not compile_result.get("ok"):
                 return JSONResponse(
@@ -230,13 +269,19 @@ def register_customize_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
 
             shape_ttl: str = compile_result["shapeTtl"]
 
-            # Step 2: Review + explain (parallel-ish, sequential for simplicity).
-            review_result = await review_compilation(
-                nl_text, shape_ttl, fields, model_factory=factory
+            # Step 2: Review + explain (with LLM timeout each).
+            review_result = await asyncio.wait_for(
+                review_compilation(nl_text, shape_ttl, fields, model_factory=factory),
+                timeout=_LLM_CALL_TIMEOUT_S,
             )
-            explanation = await explain_shape(shape_ttl, model_factory=factory)
+            explanation = await asyncio.wait_for(
+                explain_shape(shape_ttl, model_factory=factory),
+                timeout=_LLM_CALL_TIMEOUT_S,
+            )
 
             # Step 3: preview_cases if sampleRecords provided.
+            # C1 part B: offload the blocking SHACL validation to a thread so the
+            # event loop is not blocked by run_shacl_rule's ThreadPoolExecutor calls.
             preview: list[dict] = []
             if sample_records_raw:
                 # Convert each raw dict to an EvidenceRecord.  The HTTP body uses
@@ -252,34 +297,58 @@ def register_customize_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
                     observed_at = int(time.time() * 1000)
                     _default_source = EvidenceSource(kind="verifier")
                     records = []
-                    for raw in sample_records_raw:
+                    invalid_indices: list[int] = []
+                    for idx, raw in enumerate(sample_records_raw):
                         if not isinstance(raw, dict):
+                            invalid_indices.append(idx)
                             continue
                         try:
                             rec = EvidenceRecord(
-                                type=str(raw.get("type", "unknown")),
+                                type=str(raw.get("type", "")),
                                 status=raw.get("status", "ok"),  # type: ignore[arg-type]
                                 observedAt=raw.get("observedAt", observed_at),
                                 source=_default_source,
                                 fields=raw.get("fields") or {},
                             )
-                            records.append(rec)
-                        except Exception:  # noqa: BLE001
-                            pass
+                            records.append((idx, rec))
+                        except Exception as rec_exc:  # noqa: BLE001
+                            # Include a per-case error entry so the caller knows
+                            # the record was skipped, rather than silently dropping.
+                            invalid_indices.append(idx)
+                            preview.append({
+                                "recordIndex": idx,
+                                "conforms": None,
+                                "status": "invalid_record",
+                                "error": str(rec_exc),
+                                "violations": [],
+                            })
                 except Exception:  # noqa: BLE001
                     records = []
-                if records:
-                    raw_preview = preview_cases(shape_ttl, records, observed_at=observed_at)
-                    # Convert MappingProxyType / Pydantic models to plain dicts.
-                    preview = [_make_json_safe(case) for case in raw_preview]
 
-            response_payload = {
+                if records:
+                    just_records = [rec for _idx, rec in records]
+                    # Offload blocking SHACL validation (ThreadPoolExecutor inside
+                    # run_shacl_rule) off the asyncio event loop.
+                    raw_preview = await asyncio.to_thread(
+                        preview_cases, shape_ttl, just_records, observed_at=observed_at
+                    )
+                    # Merge valid results with any per-case error entries from above.
+                    for (rec_idx, _rec), case in zip(records, raw_preview):
+                        safe_case = _make_json_safe(case)
+                        safe_case["recordIndex"] = rec_idx
+                        preview.append(safe_case)
+                    # Sort by recordIndex so the response ordering is stable.
+                    preview.sort(key=lambda c: c.get("recordIndex", 0))
+
+            response_payload: dict[str, Any] = {
                 "ok": True,
                 "shapeTtl": shape_ttl,
                 "review": _make_json_safe(review_result),
                 "explanation": explanation,
                 "previewCases": preview,
             }
+            if preview_truncated:
+                response_payload["previewTruncated"] = True
             return JSONResponse(content=response_payload)
 
         except Exception as exc:  # noqa: BLE001 — never raise from compile route
