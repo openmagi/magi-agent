@@ -3038,6 +3038,11 @@ class MagiEngineDriver:
         missing_evidence.extend(
             self._parallel_research_missing_labels(evidence_records)
         )
+        # C9 — flag/preset-gated response-language policy gate. Default OFF / no
+        # policy configured ⇒ empty ⇒ payload byte-identical to main.
+        missing_evidence.extend(
+            self._response_language_block_labels(final_text=final_text)
+        )
         document_coverage_blocks = _document_coverage_blocks(
             document_coverage_mode, failed_document_coverage
         )
@@ -3292,6 +3297,62 @@ class MagiEngineDriver:
             return []
         except Exception:
             logger.debug("parallel-research check failed", exc_info=True)
+            return []
+
+    def _response_language_block_labels(self, *, final_text: str) -> list[str]:
+        """C9 — block a final answer that violates the configured language policy.
+
+        Behind strict default-OFF ``MAGI_VERIFY_RESPONSE_LANGUAGE`` OR an enabled
+        ``response-language`` Customize preset. Wires the previously-dormant
+        ``discipline_boundary.response_language`` check (only ``harness/__init__``
+        imported it; no live consumer) to the live pre-final gate: when active AND
+        a policy is configured (``MAGI_RESPONSE_LANGUAGE``, e.g. ``"ko"``), the
+        boundary verdict on ``final_text`` decides. A ``blocked`` verdict yields
+        the actionable reason ``response_language:policy_violation``.
+
+        No policy configured ⇒ ``[]`` (no fake toggle: enforces only an
+        explicitly-set language). The boundary itself is diagnostic-only
+        (authority pinned False); this engine gate holds the blocking authority.
+        Both gates off / no policy ⇒ ``[]`` ⇒ byte-identical to main. Fail-open.
+        """
+        import os  # noqa: PLC0415
+
+        from magi_agent.config.env import (  # noqa: PLC0415
+            parse_response_language_verification_enabled,
+            response_language_policy,
+        )
+        from magi_agent.customize.runtime_gate import preset_enabled  # noqa: PLC0415
+
+        if not (
+            parse_response_language_verification_enabled(os.environ)
+            or preset_enabled("response-language", default=False)
+        ):
+            return []
+        policy = response_language_policy(os.environ)
+        if not policy:
+            return []
+        try:
+            from magi_agent.harness.discipline_boundary import (  # noqa: PLC0415
+                DisciplineBoundary,
+                DisciplineBoundaryConfig,
+                DisciplineRequest,
+            )
+
+            boundary = DisciplineBoundary(DisciplineBoundaryConfig(enabled=True))
+            decision = boundary.evaluate(
+                DisciplineRequest(
+                    requestId="response-language",
+                    turnId="pre-final",
+                    check="response_language",
+                    outputText=final_text,
+                    metadata={"expectedLanguage": policy},
+                )
+            )
+            if decision.status == "blocked":
+                return ["response_language:policy_violation"]
+            return []
+        except Exception:
+            logger.debug("response-language check failed", exc_info=True)
             return []
 
     def _ga_deliverable_matched_requirement_labels(
