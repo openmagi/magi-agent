@@ -182,8 +182,12 @@ def validate_shape_ttl(shape_ttl: str) -> list[str]:
     """
     errors: list[str] = []
 
-    # (a) non-empty
-    if not shape_ttl:
+    # (F2) type guard — non-str input raises AttributeError on .encode(); return early
+    if not isinstance(shape_ttl, str):
+        return ["shapeTtl must be a string"]
+
+    # (a / F3) non-empty and not whitespace-only
+    if not shape_ttl.strip():
         errors.append("shapeTtl must not be empty")
         return errors  # no point checking further
 

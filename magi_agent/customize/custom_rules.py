@@ -16,7 +16,6 @@ import re
 from typing import Any
 
 from magi_agent.customize.what_menu import allowed_actions_for, is_known_ref
-from magi_agent.evidence.shacl_verifier import validate_shape_ttl
 
 CRITERION_MAX = 2000
 
@@ -63,7 +62,9 @@ _LEGAL: dict[str, dict[str, frozenset[str]]] = {
         "pre_final": frozenset({"block", "retry", "audit"}),
         "after_tool_use": frozenset({"override"}),
     },
-    "shacl_constraint": {"pre_final": frozenset({"block", "retry", "audit"})},
+    # audit/retry deferred: runtime always blocks on a failed shacl record regardless
+    # of the stored action, so promising audit/retry here is a false contract.
+    "shacl_constraint": {"pre_final": frozenset({"block"})},
 }
 
 
@@ -161,8 +162,10 @@ def validate_custom_rule(rule: Any) -> list[str]:
         elif not has_criterion:
             errors.append("llm_criterion.payload.criterion is required")
     elif kind == "shacl_constraint":
+        from magi_agent.evidence.shacl_verifier import validate_shape_ttl  # noqa: PLC0415
+
         shape_ttl = payload.get("shapeTtl")
-        if not isinstance(shape_ttl, str) or not shape_ttl:
+        if not isinstance(shape_ttl, str) or not shape_ttl.strip():
             errors.append("shacl_constraint.payload.shapeTtl is required (non-empty string)")
         else:
             errors.extend(validate_shape_ttl(shape_ttl))

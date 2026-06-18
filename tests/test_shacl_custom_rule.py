@@ -215,3 +215,133 @@ class TestValidateShapeTtl:
                     f"validate_shape_ttl raised unexpectedly for input "
                     f"{case[:40]!r}...: {exc}"
                 )
+
+    # F2 — non-str inputs must not raise; return a non-empty error list
+    def test_none_input_returns_error_not_raise(self):
+        """F2: validate_shape_ttl(None) must return a non-empty error list, never raise."""
+        from magi_agent.evidence.shacl_verifier import validate_shape_ttl
+
+        result = validate_shape_ttl(None)  # type: ignore[arg-type]
+        assert result, "Expected errors for None input"
+        assert not isinstance(result, Exception)
+
+    def test_int_input_returns_error_not_raise(self):
+        """F2: validate_shape_ttl(42) must return a non-empty error list, never raise."""
+        from magi_agent.evidence.shacl_verifier import validate_shape_ttl
+
+        result = validate_shape_ttl(42)  # type: ignore[arg-type]
+        assert result, "Expected errors for int input"
+
+    # F3 — whitespace-only shapeTtl must be treated as empty
+    def test_whitespace_only_returns_error(self):
+        """F3: whitespace-only shapeTtl must return a non-empty error (same as empty)."""
+        from magi_agent.evidence.shacl_verifier import validate_shape_ttl
+
+        result = validate_shape_ttl("   ")
+        assert result, "Expected errors for whitespace-only shapeTtl"
+
+
+# ---------------------------------------------------------------------------
+# F1 — lazy import: validate_custom_rule works for non-shacl kinds without
+#       loading shacl_verifier at module import time
+# ---------------------------------------------------------------------------
+
+
+def test_deterministic_ref_rule_validates_without_shacl_import(monkeypatch: pytest.MonkeyPatch) -> None:
+    """F1: validate_custom_rule for deterministic_ref must NOT import shacl_verifier.
+
+    Asserts that validate_shape_ttl is NOT present at module scope in custom_rules
+    (i.e. the lazy import was applied), then validates a deterministic_ref rule
+    while blocking shacl_verifier in sys.modules — confirming no ImportError.
+    """
+    import sys
+    import magi_agent.customize.custom_rules as cr
+
+    # F1 core assertion: validate_shape_ttl must NOT be a module-level attribute
+    # (it's now imported lazily inside the elif branch).
+    assert not hasattr(cr, "validate_shape_ttl"), (
+        "F1 FAIL: validate_shape_ttl is still a module-level name in custom_rules — "
+        "the import must be lazy (inside the shacl_constraint branch only)"
+    )
+
+    # Additional robustness: block shacl_verifier in sys.modules and confirm
+    # that a non-shacl rule still validates without ImportError.
+    saved = sys.modules.pop("magi_agent.evidence.shacl_verifier", None)
+    try:
+        sys.modules["magi_agent.evidence.shacl_verifier"] = None  # type: ignore[assignment]
+
+        rule = {
+            "scope": "always",
+            "what": {
+                "kind": "deterministic_ref",
+                "payload": {"ref": "no-code-execution"},
+            },
+            "firesAt": "pre_final",
+            "action": "block",
+        }
+        # Must not raise even with shacl_verifier blocked
+        errors = cr.validate_custom_rule(rule)
+        # Errors about the ref value are fine; what matters is no ImportError.
+        assert not any("ImportError" in e for e in errors)
+    finally:
+        # Restore sys.modules
+        if saved is not None:
+            sys.modules["magi_agent.evidence.shacl_verifier"] = saved
+        else:
+            sys.modules.pop("magi_agent.evidence.shacl_verifier", None)
+
+
+# ---------------------------------------------------------------------------
+# F4 — _LEGAL["shacl_constraint"] restricts to block-only
+# ---------------------------------------------------------------------------
+
+
+def test_shacl_constraint_audit_action_fails_validation() -> None:
+    """F4: action='audit' for shacl_constraint must now fail validation (block-only)."""
+    from magi_agent.customize.custom_rules import validate_custom_rule
+
+    rule = _valid_rule(action="audit")
+    errors = validate_custom_rule(rule)
+    assert errors, "Expected errors for action='audit' on shacl_constraint (block-only)"
+    assert any("audit" in e or "block" in e for e in errors), (
+        f"Expected error mentioning 'audit' or 'block', got: {errors}"
+    )
+
+
+def test_shacl_constraint_retry_action_fails_validation() -> None:
+    """F4: action='retry' for shacl_constraint must now fail validation (block-only)."""
+    from magi_agent.customize.custom_rules import validate_custom_rule
+
+    rule = _valid_rule(action="retry")
+    errors = validate_custom_rule(rule)
+    assert errors, "Expected errors for action='retry' on shacl_constraint (block-only)"
+    assert any("retry" in e or "block" in e for e in errors), (
+        f"Expected error mentioning 'retry' or 'block', got: {errors}"
+    )
+
+
+def test_shacl_constraint_block_action_still_valid() -> None:
+    """F4 regression: action='block' must still be the one allowed action."""
+    from magi_agent.customize.custom_rules import validate_custom_rule
+
+    rule = _valid_rule(action="block")
+    errors = validate_custom_rule(rule)
+    assert errors == [], f"Expected no errors for action='block', got: {errors}"
+
+
+# ---------------------------------------------------------------------------
+# F3 (custom_rules level) — whitespace-only shapeTtl rejected by validate_custom_rule
+# ---------------------------------------------------------------------------
+
+
+def test_whitespace_only_shape_ttl_rejected_by_validate_custom_rule() -> None:
+    """F3: whitespace-only shapeTtl must produce an error from validate_custom_rule."""
+    from magi_agent.customize.custom_rules import validate_custom_rule
+
+    rule = _valid_rule()
+    rule["what"]["payload"]["shapeTtl"] = "   "
+    errors = validate_custom_rule(rule)
+    assert errors, "Expected errors for whitespace-only shapeTtl"
+    assert any("shapeTtl" in e for e in errors), (
+        f"Expected 'shapeTtl' mentioned in errors, got: {errors}"
+    )

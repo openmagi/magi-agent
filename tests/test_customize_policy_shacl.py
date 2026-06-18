@@ -121,3 +121,32 @@ def test_empty_and_malformed_custom_rules_returns_empty_no_exception() -> None:
         ]
     )
     assert policy_no_ttl.enabled_shacl_rules() == []
+
+
+# ---------------------------------------------------------------------------
+# F5 (dual-absent ruleId) — neither payload.ruleId nor top-level id
+# ---------------------------------------------------------------------------
+
+
+def test_dual_absent_rule_id_included_with_none() -> None:
+    """F5: A rule with neither payload.ruleId nor top-level id → included with ruleId=None."""
+    policy = _make_policy(
+        [
+            {
+                # No top-level "id"
+                "enabled": True,
+                "what": {
+                    "kind": "shacl_constraint",
+                    "payload": {
+                        # No "ruleId" in payload either
+                        "shapeTtl": "@prefix sh: <http://www.w3.org/ns/shacl#> .",
+                    },
+                },
+            }
+        ]
+    )
+    result = policy.enabled_shacl_rules()
+    assert len(result) == 1, f"Expected 1 result, got: {result}"
+    assert result[0]["ruleId"] is None, (
+        f"Expected ruleId=None for dual-absent rule, got: {result[0]['ruleId']!r}"
+    )

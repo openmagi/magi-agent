@@ -119,10 +119,13 @@ def _dummy_evidence_record() -> EvidenceRecord:
 # ---------------------------------------------------------------------------
 
 
-def test_flag_off_helper_returns_empty(monkeypatch: pytest.MonkeyPatch) -> None:
-    """When enabled=False (flag OFF), _run_shacl_rules_for_turn returns ()."""
-    monkeypatch.setenv("MAGI_SHACL_VERIFIER_ENABLED", "0")
+def test_flag_off_helper_returns_empty() -> None:
+    """When enabled=False, _run_shacl_rules_for_turn returns ().
 
+    F6 fix: removed misleading monkeypatch.setenv("MAGI_SHACL_VERIFIER_ENABLED").
+    The helper takes enabled:bool and never reads env — the env patch was dead
+    decoration that implied a contract that doesn't exist.
+    """
     policy = _policy_with_shacl_rule(_VALID_SHAPE_NO_VIOLATION)
     records = (_dummy_evidence_record(),)
 
@@ -423,3 +426,117 @@ def test_both_flags_on_enables_store_load(monkeypatch: pytest.MonkeyPatch) -> No
         f"called {call_count[0]} times"
     )
     assert policy is not None, "policy must not be None when both flags are ON"
+
+
+# ---------------------------------------------------------------------------
+# F5 — store-exception fail-safe: load_overrides raises → (False, None), no exception
+# ---------------------------------------------------------------------------
+
+
+def test_load_shacl_policy_store_exception_returns_false_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """F5 fail-safe: if load_overrides raises (e.g. store I/O error), _load_shacl_policy_if_enabled
+    must return (False, None) and must NOT propagate the exception.
+    """
+    monkeypatch.setenv("MAGI_SHACL_VERIFIER_ENABLED", "1")
+    monkeypatch.setenv("MAGI_CUSTOMIZE_VERIFICATION_ENABLED", "1")
+
+    import magi_agent.customize.store as _store_mod
+
+    def _exploding_load() -> dict:
+        raise RuntimeError("store I/O failure (F5 test)")
+
+    monkeypatch.setattr(_store_mod, "load_overrides", _exploding_load)
+
+    # Must not raise; must return (False, None) fail-safe
+    shacl_enabled, policy = _load_shacl_policy_if_enabled()
+
+    assert shacl_enabled is False, (
+        f"F5 FAIL: shacl_enabled must be False when load_overrides raises, got {shacl_enabled!r}"
+    )
+    assert policy is None, (
+        f"F5 FAIL: policy must be None when load_overrides raises, got {policy!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# F5 — dual-absent ruleId: rule without payload.ruleId or top-level id is
+#       skipped by _run_shacl_rules_for_turn (ruleId=None → falsy → continue)
+# ---------------------------------------------------------------------------
+
+
+def test_dual_absent_rule_id_skipped_by_engine_helper() -> None:
+    """F5: A rule with ruleId=None (dual-absent) is skipped by _run_shacl_rules_for_turn.
+
+    enabled_shacl_rules() includes such a rule with ruleId=None; the engine helper
+    must skip it (not call run_shacl_rule with rule_id=None) and return ().
+    """
+    from magi_agent.customize.verification_policy import CustomizeVerificationPolicy
+
+    # Build a policy whose only rule has no id at any level → ruleId=None
+    overrides = {
+        "verification": {
+            "custom_rules": [
+                {
+                    # No "id" key
+                    "enabled": True,
+                    "what": {
+                        "kind": "shacl_constraint",
+                        "payload": {
+                            # No "ruleId" in payload
+                            "shapeTtl": "@prefix sh: <http://www.w3.org/ns/shacl#> .",
+                        },
+                    },
+                }
+            ]
+        }
+    }
+    policy = CustomizeVerificationPolicy.from_overrides(overrides)
+
+    # Confirm the policy reports the rule with ruleId=None
+    rules = policy.enabled_shacl_rules()
+    assert len(rules) == 1
+    assert rules[0]["ruleId"] is None
+
+    # Engine helper must skip the rule (ruleId=None is falsy → continue branch)
+    result = _run_shacl_rules_for_turn(
+        policy,
+        (_dummy_evidence_record(),),
+        enabled=True,
+        observed_at=1_000_000,
+    )
+    assert result == (), (
+        f"Expected () when ruleId=None (no valid rule_id to run), got: {result}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# F6 — remove misleading monkeypatch from test_flag_off_helper_returns_empty
+#       The original test monkeypatched MAGI_SHACL_VERIFIER_ENABLED but the
+#       helper takes enabled:bool and never reads env. The test is rewritten
+#       below to pass enabled=False directly (honest coverage).
+#
+#       NOTE: The original test above (test_flag_off_helper_returns_empty) still
+#       passes enabled=False, so it is correct; the monkeypatch.setenv was just
+#       misleading decoration. We add a companion test without the env patch to
+#       make the contract explicit.
+# ---------------------------------------------------------------------------
+
+
+def test_flag_off_helper_returns_empty_no_env_dependency() -> None:
+    """F6: _run_shacl_rules_for_turn returns () when enabled=False — env is irrelevant.
+
+    This test passes enabled=False directly without setting any env var, asserting
+    that the helper's OFF-path is purely parameter-driven, not env-driven.
+    """
+    policy = _policy_with_shacl_rule(_VALID_SHAPE_NO_VIOLATION)
+    records = (_dummy_evidence_record(),)
+
+    result = _run_shacl_rules_for_turn(
+        policy,
+        records,
+        enabled=False,
+        observed_at=1_000_000,
+    )
+    assert result == ()
