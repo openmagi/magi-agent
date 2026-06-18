@@ -89,3 +89,68 @@ def test_tick_result_is_immutable() -> None:
     r = WorkQueueTickResult()
     with pytest.raises(Exception):
         r.claimed = 99  # type: ignore[misc]
+
+
+# ---------------------------------------------------------------------------
+# run_forever tests
+# ---------------------------------------------------------------------------
+
+import asyncio
+
+
+def test_run_forever_stops_on_event_and_ticks() -> None:
+    s = InMemoryWorkQueueStore()
+    s.create(WorkTask(id="t", title="x", status="ready", created_at=1))
+    d = WorkQueueDriver(s, _CompleteRunner(), claimer="disp")
+
+    async def go() -> int:
+        stop = asyncio.Event()
+
+        async def stopper() -> None:
+            await asyncio.sleep(0.05)
+            stop.set()
+
+        ticks, _ = await asyncio.gather(
+            d.run_forever(interval_seconds=0.01, stop_event=stop), stopper()
+        )
+        return ticks
+
+    ticks = asyncio.run(go())
+    assert ticks >= 1
+    assert s.get("t").status == "completed"
+
+
+def test_run_forever_raises_on_non_positive_interval() -> None:
+    import pytest
+
+    s = InMemoryWorkQueueStore()
+    d = WorkQueueDriver(s, _CompleteRunner(), claimer="disp")
+
+    async def go() -> None:
+        stop = asyncio.Event()
+        await d.run_forever(interval_seconds=0.0, stop_event=stop)
+
+    with pytest.raises(ValueError, match="interval_seconds"):
+        asyncio.run(go())
+
+
+def test_run_forever_returns_tick_count() -> None:
+    """Stop immediately after first tick; expect exactly 1 tick."""
+    s = InMemoryWorkQueueStore()
+    d = WorkQueueDriver(s, _CompleteRunner(), claimer="disp")
+
+    async def go() -> int:
+        stop = asyncio.Event()
+
+        async def stopper() -> None:
+            # Give one tick time to run then stop.
+            await asyncio.sleep(0.02)
+            stop.set()
+
+        ticks, _ = await asyncio.gather(
+            d.run_forever(interval_seconds=0.5, stop_event=stop), stopper()
+        )
+        return ticks
+
+    ticks = asyncio.run(go())
+    assert ticks >= 1

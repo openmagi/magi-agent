@@ -141,6 +141,39 @@ class WorkQueueDriver:
             failed=failed,
         )
 
+    async def run_forever(
+        self,
+        *,
+        interval_seconds: float,
+        stop_event: asyncio.Event,
+    ) -> int:
+        """Run ``run_once`` on a timer until *stop_event* is set.
+
+        Returns the number of ticks executed.  Cleanly stoppable: the loop
+        checks ``stop_event`` before each tick and uses ``asyncio.wait_for``
+        on the event for the inter-tick sleep so a set event interrupts the
+        wait immediately.  ``run_once`` is synchronous so it is offloaded to
+        a thread via ``asyncio.to_thread`` to keep the event loop responsive.
+        """
+        if interval_seconds <= 0:
+            raise ValueError("interval_seconds must be > 0")
+
+        ticks = 0
+        while not stop_event.is_set():
+            try:
+                await asyncio.to_thread(self.run_once)
+            except Exception:  # noqa: BLE001 — transient errors must not kill the loop
+                logger.warning("work-queue driver tick failed", exc_info=True)
+            ticks += 1
+            if stop_event.is_set():
+                break
+            try:
+                await asyncio.wait_for(stop_event.wait(), timeout=interval_seconds)
+            except asyncio.TimeoutError:
+                # Interval elapsed without a stop — loop again.
+                continue
+        return ticks
+
 
 __all__ = [
     "WorkQueueDriver",
