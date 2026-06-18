@@ -133,6 +133,10 @@ class WorkQueueStore(Protocol):
         """Mark *task_id* completed and store *result*."""
         ...
 
+    def ready_tasks(self, limit: int) -> list[WorkTask]:
+        """Return ready tasks ordered by priority DESC, created_at ASC, capped at *limit*."""
+        ...
+
 
 # ---------------------------------------------------------------------------
 # InMemoryWorkQueueStore
@@ -336,6 +340,11 @@ class InMemoryWorkQueueStore:
             current_run_id=None,
         )
 
+    def ready_tasks(self, limit: int) -> list[WorkTask]:
+        ready = [t for t in self._tasks.values() if t.status == "ready"]
+        ready.sort(key=lambda t: (-t.priority, t.created_at))
+        return ready[:limit]
+
 
 # ---------------------------------------------------------------------------
 # SqliteWorkQueueStore
@@ -430,48 +439,50 @@ class SqliteWorkQueueStore:
     def claim(self, task_id, *, claimer, ttl=CLAIM_TTL_SECONDS, now=None, worker_pid=None):
         now = int(time.time()) if now is None else now
         conn = self._get_conn()
-        # Parent-gate (mirror Hermes): never run while a parent is undone.
-        # NOTE: The parent-gate SELECT and the CAS UPDATE below are NOT wrapped in a single
-        # BEGIN IMMEDIATE transaction. This is safe under the intended single-dispatcher-writer
-        # model (one dispatcher per board), but if multi-process writers are introduced, wrap
-        # both in an EXCLUSIVE/IMMEDIATE transaction to close the parent-status TOCTOU window.
-        undone = conn.execute(
-            "SELECT 1 FROM work_queue_task_links l "
-            "JOIN work_queue_tasks p ON p.id = l.parent_id "
-            "WHERE l.child_id = ? AND p.status NOT IN ('completed','archived') LIMIT 1",
-            (task_id,),
-        ).fetchone()
-        if undone:
-            conn.execute(
-                "UPDATE work_queue_tasks SET status='todo' WHERE id=? AND status='ready'",
+        # Parent-gate + CAS UPDATE are wrapped in a single BEGIN IMMEDIATE transaction so
+        # no other writer can interleave between the gate read and the CAS write.
+        conn.execute("BEGIN IMMEDIATE")
+        try:
+            undone = conn.execute(
+                "SELECT 1 FROM work_queue_task_links l "
+                "JOIN work_queue_tasks p ON p.id = l.parent_id "
+                "WHERE l.child_id = ? AND p.status NOT IN ('completed','archived') LIMIT 1",
                 (task_id,),
+            ).fetchone()
+            if undone:
+                conn.execute(
+                    "UPDATE work_queue_tasks SET status='todo' WHERE id=? AND status='ready'",
+                    (task_id,),
+                )
+                self._append_event(conn, task_id, "claim_rejected", {"reason": "parents_not_done"})
+                conn.commit()
+                return None
+            cur = conn.execute(
+                "UPDATE work_queue_tasks "
+                "SET status='running', claim_lock=?, claim_expires=?, worker_pid=?, "
+                "    last_heartbeat_at=?, started_at=COALESCE(started_at, ?) "
+                "WHERE id=? AND status='ready' AND claim_lock IS NULL",
+                (claimer, now + ttl, worker_pid, now, now, task_id),
             )
-            self._append_event(conn, task_id, "claim_rejected", {"reason": "parents_not_done"})
+            if cur.rowcount != 1:
+                conn.commit()
+                return None
+            run_cur = conn.execute(
+                "INSERT INTO work_queue_task_runs "
+                "(task_id, status, claim_lock, claim_expires, worker_pid, last_heartbeat_at, started_at) "
+                "VALUES (?,?,?,?,?,?,?)",
+                (task_id, "running", claimer, now + ttl, worker_pid, now, now),
+            )
+            conn.execute(
+                "UPDATE work_queue_tasks SET current_run_id=? WHERE id=?",
+                (run_cur.lastrowid, task_id),
+            )
+            self._append_event(conn, task_id, "claimed", {"claimer": claimer})
             conn.commit()
-            return None
-        cur = conn.execute(
-            "UPDATE work_queue_tasks "
-            "SET status='running', claim_lock=?, claim_expires=?, worker_pid=?, "
-            "    last_heartbeat_at=?, started_at=COALESCE(started_at, ?) "
-            "WHERE id=? AND status='ready' AND claim_lock IS NULL",
-            (claimer, now + ttl, worker_pid, now, now, task_id),
-        )
-        if cur.rowcount != 1:
-            conn.commit()
-            return None
-        run_cur = conn.execute(
-            "INSERT INTO work_queue_task_runs "
-            "(task_id, status, claim_lock, claim_expires, worker_pid, last_heartbeat_at, started_at) "
-            "VALUES (?,?,?,?,?,?,?)",
-            (task_id, "running", claimer, now + ttl, worker_pid, now, now),
-        )
-        conn.execute(
-            "UPDATE work_queue_tasks SET current_run_id=? WHERE id=?",
-            (run_cur.lastrowid, task_id),
-        )
-        self._append_event(conn, task_id, "claimed", {"claimer": claimer})
-        conn.commit()
-        return self.get(task_id)
+            return self.get(task_id)
+        except Exception:
+            conn.rollback()
+            raise
 
     def heartbeat(self, task_id, *, claimer, now=None, ttl=CLAIM_TTL_SECONDS) -> bool:
         now = int(time.time()) if now is None else now
@@ -610,6 +621,15 @@ class SqliteWorkQueueStore:
         task = self.get(task_id)
         assert task is not None
         return task
+
+    def ready_tasks(self, limit: int) -> list[WorkTask]:
+        conn = self._get_conn()
+        rows = conn.execute(
+            "SELECT * FROM work_queue_tasks WHERE status='ready' "
+            "ORDER BY priority DESC, created_at ASC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [self._row_to_task(r) for r in rows]
 
     def _append_event(self, conn, task_id, kind, payload):
         conn.execute(

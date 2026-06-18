@@ -118,6 +118,7 @@ graph LR
     gateway --> channels
     gateway --> config
     gateway --> harness
+    gateway --> missions
     gateway --> ops
     harness --> adk_bridge
     harness --> channels
@@ -923,7 +924,7 @@ graph LR
 | channel_watchers.py | Operator wiring: tie a concrete channel provider to a gateway poll watcher. | daemon, discord_adapter, discord_gateway, discord_live, flags, scheduler_delivery, slack_live, slack_socketmode, slack_urllib, telegram_adapter, telegram_credentials, telegram_httpx, telegram_live, turn_bridge, watchers | gateway/watchers.py |
 | daemon.py | GatewayDaemon — the supervised asyncio watcher fleet (Track F). | health, watchers | cli/app.py, gateway/channel_watchers.py, gateway/watchers.py, ops/health.py |
 | service_install.py | OS service install for the ``magi gateway`` daemon (Track F). | — | cli/app.py |
-| watchers.py | Watcher-fleet builders — COMPOSE the existing always-on blocks (Track F). | channel_watchers, daemon, scheduler_job_execution, scheduler_job_store, scheduler_loop_driver, turn_engine | cli/app.py, gateway/channel_watchers.py, gateway/daemon.py |
+| watchers.py | Watcher-fleet builders — COMPOSE the existing always-on blocks (Track F). | channel_watchers, daemon, driver, runner, scheduler_job_execution, scheduler_job_store, scheduler_loop_driver, store, turn_engine | cli/app.py, gateway/channel_watchers.py, gateway/daemon.py |
 
 ### harness/
 
@@ -1155,8 +1156,10 @@ graph LR
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
 | __init__.py | — | models | — |
-| models.py | — | — | missions/work_queue/__init__.py, missions/work_queue/store.py |
-| store.py | — | migrations, models | — |
+| driver.py | WorkQueueDriver — the periodic dispatcher tick for the durable work-queue. | runner, store | gateway/watchers.py |
+| models.py | — | — | missions/work_queue/__init__.py, missions/work_queue/runner.py, missions/work_queue/store.py |
+| runner.py | — | models | gateway/watchers.py, missions/work_queue/driver.py |
+| store.py | — | migrations, models | gateway/watchers.py, missions/work_queue/driver.py |
 
 ### observability/
 

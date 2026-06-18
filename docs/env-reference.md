@@ -98,5 +98,6 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 - `MAGI_VISION_PROVIDER` (no default) — Optional provider for MAGI_VISION_MODEL (anthropic|openai|gemini|fireworks); unset inherits the main provider's credentials.
 - `MAGI_WORKER_ROUTING_LLM_ENABLED` (default off) — Honour a planner-emitted worker_role for subagent routing instead of keyword inference; strict default-OFF (OFF is byte-identical to today).
 - `MAGI_WORK_QUEUE_ENABLED` (default off) — Enable the durable multi-agent work-queue (task board + dispatcher).
+- `MAGI_WORK_QUEUE_EXECUTOR_ENABLED` (default off) — Enable the durable work-queue dispatcher tick loop.
 
 <!-- END GENERATED FLAGS -->'
