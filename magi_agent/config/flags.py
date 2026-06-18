@@ -629,6 +629,16 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
     ),
     _b(
+        "MAGI_VERIFY_PARALLEL_RESEARCH",
+        stage="stage2",
+        summary=(
+            "Block a research-recipe turn that synthesized from fewer than the "
+            "minimum number of inspected sources (cross-check requirement); "
+            "strict default-OFF and inert unless explicitly set (or the "
+            "parallel-research Customize preset is enabled)."
+        ),
+    ),
+    _b(
         "MAGI_FACT_GROUNDING_VERIFICATION_ENABLED",
         stage="stage2",
         summary=(

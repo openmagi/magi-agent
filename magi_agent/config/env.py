@@ -2870,6 +2870,21 @@ def parse_taskboard_completion_verification_enabled(env: Mapping[str, str]) -> b
     return flag_bool("MAGI_VERIFY_TASKBOARD_COMPLETION", env=env)
 
 
+def parse_parallel_research_verification_enabled(env: Mapping[str, str]) -> bool:
+    """MAGI_VERIFY_PARALLEL_RESEARCH — research cross-check source-count gate.
+
+    When ON (and a research recipe pack is selected), a research turn that
+    inspected fewer than ``_PARALLEL_RESEARCH_MIN_SOURCES`` sources before
+    synthesis is blocked with an actionable ``parallel_research:`` reason — so a
+    single-source synthesis cannot pass. Strict **default-OFF**: never defaults
+    ON in any runtime profile and only flips for an explicit truthy value, so
+    flag-OFF behavior is byte-identical to ``main`` (the check is inert).
+    """
+    from .flags import flag_bool
+
+    return flag_bool("MAGI_VERIFY_PARALLEL_RESEARCH", env=env)
+
+
 MAGI_GATE5B_GOVERNANCE_ENABLED_ENV = "MAGI_GATE5B_GOVERNANCE_ENABLED"
 
 

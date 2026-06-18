@@ -166,6 +166,18 @@ PRESET_SEAMS: dict[str, PresetSeam] = {
         supported_modes=("deterministic",),
         wiring="opt_in",
     ),
+    # Opt-in for the C6 parallel-research source-count cross-check (cli/engine
+    # _parallel_research_missing_labels): a research-recipe turn that synthesized
+    # from fewer than the minimum inspected sources is blocked. Enabling the
+    # preset turns on the check even when MAGI_VERIFY_PARALLEL_RESEARCH is off.
+    # controls_refs is documentation-only for opt_in seams.
+    "parallel-research": PresetSeam(
+        preset_id="parallel-research",
+        controls_refs=("parallel_research:insufficient_sources",),
+        runtime_default_on=False,
+        supported_modes=("deterministic",),
+        wiring="opt_in",
+    ),
 }
 
 
@@ -295,6 +307,7 @@ _DESCRIPTIONS: dict[str, str] = {
     "task-contract": "Enforces a goal to plan to evidence lifecycle.",
     "goal-progress": "Blocks completion claims without actual actions.",
     "task-board-completion": "Blocks completion when tasks remain incomplete.",
+    "parallel-research": "Block a research turn that synthesized from fewer than 2 inspected sources.",
     "output-delivery": "Verifies created files are actually delivered.",
     "response-language": "Enforces the configured language policy.",
     "parallel-research": "Verifies and cross-checks research sources.",

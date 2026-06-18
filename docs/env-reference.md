@@ -94,6 +94,7 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 - `MAGI_TOOL_SYNTHESIS_NUDGE_ENABLED` (default off) — Live-SWE-style tool-synthesis: per-step reflection nudge + 'create your own tools' recipe block (frontier-tier models only).
 - `MAGI_USAGE_PRICE_IN_PER_MTOK` (no default) — Local Usage dashboard: USD per 1M INPUT tokens for the active model. Set this (and the OUT counterpart) to price models litellm does not have in its map; overrides litellm pricing when set.
 - `MAGI_USAGE_PRICE_OUT_PER_MTOK` (no default) — Local Usage dashboard: USD per 1M OUTPUT tokens for the active model. Pairs with MAGI_USAGE_PRICE_IN_PER_MTOK.
+- `MAGI_VERIFY_PARALLEL_RESEARCH` (default off) — Block a research-recipe turn that synthesized from fewer than the minimum number of inspected sources (cross-check requirement); strict default-OFF and inert unless explicitly set (or the parallel-research Customize preset is enabled).
 - `MAGI_VERIFY_TASKBOARD_COMPLETION` (default off) — Block turn completion while the workspace .magi/taskboard.jsonl still has a task in a non-terminal status; strict default-OFF and inert unless explicitly set (or the task-board-completion Customize preset is enabled).
 - `MAGI_VISION_MODEL` (no default) — Vision-sidecar model override for image_understand (bare model id, same semantics as MAGI_MODEL); unset keeps the main provider/model.
 - `MAGI_VISION_PROVIDER` (no default) — Optional provider for MAGI_VISION_MODEL (anthropic|openai|gemini|fireworks); unset inherits the main provider's credentials.
