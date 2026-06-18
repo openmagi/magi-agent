@@ -868,6 +868,29 @@ def _document_coverage_blocks(mode: str, failed_count: int) -> bool:
     return mode == "block" and failed_count > 0
 
 
+def _resolve_document_coverage_mode_with_preset() -> str:
+    """Resolve the document-coverage gate mode, honoring the Customize opt-in seam.
+
+    The base mode comes from ``MAGI_DOCUMENT_AUTHORING_COVERAGE``
+    (``off``|``advisory``|``block``). An enabled ``document-authoring-coverage``
+    Customize preset promotes an otherwise-``off`` gate to ``block`` for the
+    runtime — the same opt-in pattern (env OR preset) as the other satisfier
+    seams. Byte-identical when the preset is unset/disabled: the env-resolved
+    mode is returned unchanged.
+    """
+    from magi_agent.config.env import (  # noqa: PLC0415
+        resolve_document_authoring_coverage_mode,
+    )
+
+    mode = resolve_document_authoring_coverage_mode()
+    if mode == "off":
+        from magi_agent.customize.runtime_gate import preset_enabled  # noqa: PLC0415
+
+        if preset_enabled("document-authoring-coverage", default=False):
+            return "block"
+    return mode
+
+
 def _coding_repair_max_attempts(repair_policy: Mapping[str, object]) -> int:
     from magi_agent.coding.repair_loop import repair_max_attempts
 
@@ -2933,9 +2956,7 @@ class MagiEngineDriver:
         # 3-state: ``advisory`` still computes the failed-coverage count (for
         # false-block-rate telemetry) but the engine does not block on it; only
         # ``block`` flips the pre-final decision.
-        from magi_agent.config.env import resolve_document_authoring_coverage_mode
-
-        document_coverage_mode = resolve_document_authoring_coverage_mode()
+        document_coverage_mode = _resolve_document_coverage_mode_with_preset()
         document_coverage_gate_enabled = document_coverage_mode != "off"
         failed_document_coverage = 0
         if self._evidence_collector is not None:
