@@ -132,3 +132,25 @@ def test_disabled_custom_det_rule_not_added(gate_on, monkeypatch):
     set_custom_rule(rule, path=gate_on)
     out = _apply_customize_verification(["seed:ref"])
     assert "evidence:git-diff" not in out
+
+
+# --- Config-gated custom-rule ref: compile guard (roadmap §6.5.2) ---
+# A rule may require a config-gated producer ref (e.g. ``fact_grounding``) only
+# while that producer is active. If the producer is later turned off, the rule
+# must go INERT, not unconditionally block, so the compile path drops the ref.
+def test_config_gated_custom_rule_inert_when_producer_off(gate_on, monkeypatch):
+    monkeypatch.setenv("MAGI_CUSTOMIZE_VERIFICATION_ENABLED", "1")
+    monkeypatch.setenv("MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED", "1")
+    monkeypatch.delenv("MAGI_FACT_GROUNDING_VERIFICATION_ENABLED", raising=False)
+    set_custom_rule(_det_rule("fact_grounding", rid="cr_fg"), path=gate_on)
+    out = _apply_customize_verification(["seed:ref"])
+    assert "fact_grounding" not in out  # producer inert → ref dropped
+
+
+def test_config_gated_custom_rule_compiles_when_producer_on(gate_on, monkeypatch):
+    monkeypatch.setenv("MAGI_CUSTOMIZE_VERIFICATION_ENABLED", "1")
+    monkeypatch.setenv("MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED", "1")
+    monkeypatch.setenv("MAGI_FACT_GROUNDING_VERIFICATION_ENABLED", "1")
+    set_custom_rule(_det_rule("fact_grounding", rid="cr_fg"), path=gate_on)
+    out = _apply_customize_verification(["seed:ref"])
+    assert "fact_grounding" in out  # producer active → ref required

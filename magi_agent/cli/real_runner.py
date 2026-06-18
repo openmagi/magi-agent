@@ -602,10 +602,16 @@ def _apply_customize_verification(required_validators: list[str]) -> list[str]:
                 result = [r for r in result if r not in seam.controls_refs]
         # Custom deterministic_ref rules (P1) compile as opt-out adds: an enabled
         # rule REQUIRES its ref in the pre-final gate. Separate flag so it stays
-        # byte-identical until explicitly enabled.
+        # byte-identical until explicitly enabled. A rule's ref is added only when
+        # its producer is currently active (``what_menu.is_known_ref`` reflects the
+        # live config-gated set): a rule persisted while a config-gated producer
+        # was ON must go inert — not unconditionally block — once that producer is
+        # turned off again. No fake toggles.
         if flag_profile_bool("MAGI_CUSTOMIZE_CUSTOM_RULES_ENABLED"):
+            from magi_agent.customize.what_menu import is_known_ref  # noqa: PLC0415
+
             for ref in policy.enabled_deterministic_refs():
-                if ref not in result:
+                if ref not in result and is_known_ref(ref):
                     result.append(ref)
         return result
     except Exception:
