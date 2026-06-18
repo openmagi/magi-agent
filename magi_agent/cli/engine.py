@@ -874,6 +874,15 @@ _TASKBOARD_TERMINAL_STATUSES: frozenset[str] = frozenset(
     {"done", "complete", "completed", "cancelled", "canceled", "skipped"}
 )
 
+# C6 parallel-research: the research recipe packs whose turns the source-count
+# cross-check applies to, and the minimum inspected sources required before
+# synthesis. Scoping to these packs keeps a coding/chat turn that incidentally
+# ran one search out of the check.
+_RESEARCH_RECIPE_PACK_IDS: frozenset[str] = frozenset(
+    {"openmagi.research", "openmagi.source-grounded", "openmagi.web-acquisition"}
+)
+_PARALLEL_RESEARCH_MIN_SOURCES = 2
+
 
 def _resolve_document_coverage_mode_with_preset() -> str:
     """Resolve the document-coverage gate mode, honoring the Customize opt-in seam.
@@ -3024,6 +3033,11 @@ class MagiEngineDriver:
         missing_evidence.extend(
             self._task_board_completion_block_labels()
         )
+        # C6 — flag/preset-gated parallel-research source-count cross-check.
+        # Default OFF / non-research turn ⇒ empty ⇒ payload byte-identical to main.
+        missing_evidence.extend(
+            self._parallel_research_missing_labels(evidence_records)
+        )
         document_coverage_blocks = _document_coverage_blocks(
             document_coverage_mode, failed_document_coverage
         )
@@ -3218,6 +3232,66 @@ class MagiEngineDriver:
             return []
         except Exception:
             logger.debug("task-board completion check failed", exc_info=True)
+            return []
+
+    def _parallel_research_missing_labels(
+        self,
+        evidence_records: Sequence[object],
+    ) -> list[str]:
+        """C6 — block a research turn that synthesized from too few sources.
+
+        Behind strict default-OFF ``MAGI_VERIFY_PARALLEL_RESEARCH`` OR an enabled
+        ``parallel-research`` Customize preset. When active AND a research recipe
+        pack is selected, the turn's inspected-source evidence records
+        (``SourceInspection`` / ``WebSearch`` / ``KnowledgeSearch`` — the same
+        types the source-ledger projector counts) are counted; fewer than
+        ``_PARALLEL_RESEARCH_MIN_SOURCES`` yields the actionable block reason
+        ``parallel_research:insufficient_sources``.
+
+        Scoped to research packs ONLY (``selected_pack_ids`` ∩ the research packs)
+        so a coding/chat turn that incidentally ran one search is never blocked —
+        the count heuristic is not a research signal on its own. Both gates OFF,
+        or a non-research turn ⇒ ``[]`` ⇒ byte-identical to main. Fail-open: any
+        error returns ``[]`` so the check can only ever ADD a block on a genuine
+        research turn, never wedge an unrelated one.
+        """
+        import os  # noqa: PLC0415
+
+        from magi_agent.config.env import (  # noqa: PLC0415
+            parse_parallel_research_verification_enabled,
+        )
+        from magi_agent.customize.runtime_gate import preset_enabled  # noqa: PLC0415
+
+        if not (
+            parse_parallel_research_verification_enabled(os.environ)
+            or preset_enabled("parallel-research", default=False)
+        ):
+            return []
+        assembly = self._runner_policy_assembly
+        if assembly is None:
+            return []
+        try:
+            selected = set(getattr(assembly, "selected_pack_ids", ()) or ())
+            if not (selected & _RESEARCH_RECIPE_PACK_IDS):
+                return []
+            from magi_agent.evidence.final_output_gate import (  # noqa: PLC0415
+                _SOURCE_EVIDENCE_TYPES,
+            )
+
+            source_count = 0
+            for record in evidence_records:
+                record_type = (
+                    record.get("type")
+                    if isinstance(record, Mapping)
+                    else getattr(record, "type", None)
+                )
+                if isinstance(record_type, str) and record_type in _SOURCE_EVIDENCE_TYPES:
+                    source_count += 1
+            if source_count < _PARALLEL_RESEARCH_MIN_SOURCES:
+                return ["parallel_research:insufficient_sources"]
+            return []
+        except Exception:
+            logger.debug("parallel-research check failed", exc_info=True)
             return []
 
     def _ga_deliverable_matched_requirement_labels(
