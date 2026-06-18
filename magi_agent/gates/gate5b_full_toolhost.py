@@ -29,6 +29,11 @@ from pydantic import (
     model_validator,
 )
 
+from magi_agent.gates._bounded_pipe import BoundedPipeCapture as _BoundedPipeCapture
+from magi_agent.gates.async_shell_runner import (
+    DEFAULT_MAX_CONCURRENT_SHELL_COMMANDS,
+    AsyncShellRunner,
+)
 from magi_agent.coding.lsp_client import (
     Diagnostic,
     DiagnosticsProvider,
@@ -123,10 +128,6 @@ def _build_bash_env(cfg: EgressProxyConfig | None = None) -> dict[str, str]:
     env.update(subprocess_env_overlay(cfg))
     return _apply_noninteractive_env_defaults(env)
 
-def _decode_capture_bytes(value: bytes) -> str:
-    return value.decode("utf-8", errors="replace")
-
-
 def _bounded_head_tail(text: str, max_bytes: int) -> str:
     """Cap ``text`` keeping BOTH ends.
 
@@ -146,58 +147,6 @@ def _bounded_head_tail(text: str, max_bytes: int) -> str:
         "head/tail/grep filters to see the elided region ...]\n"
     )
     return head + marker + tail
-
-
-class _BoundedPipeCapture:
-    """Bound subprocess pipe capture without buffering unbounded output."""
-
-    def __init__(self, max_bytes: int) -> None:
-        self.max_bytes = max(1, max_bytes)
-        self._raw_digest = hashlib.sha256()
-        self._buffer = bytearray()
-        self._tail = bytearray()
-        self.total_bytes = 0
-
-    @property
-    def _head_budget(self) -> int:
-        return max(1, (self.max_bytes * 3) // 5)
-
-    @property
-    def _tail_budget(self) -> int:
-        return max(0, self.max_bytes - self._head_budget)
-
-    def feed(self, chunk: bytes) -> None:
-        if not chunk:
-            return
-        self.total_bytes += len(chunk)
-        self._raw_digest.update(chunk)
-        remaining = self.max_bytes - len(self._buffer)
-        if remaining > 0:
-            self._buffer.extend(chunk[:remaining])
-        tail_budget = self._tail_budget
-        if tail_budget > 0:
-            self._tail.extend(chunk)
-            overflow = len(self._tail) - tail_budget
-            if overflow > 0:
-                del self._tail[:overflow]
-
-    def text(self) -> str:
-        if self.total_bytes <= self.max_bytes:
-            return _decode_capture_bytes(bytes(self._buffer))
-        head_bytes = bytes(self._buffer[: self._head_budget])
-        tail_budget = self._tail_budget
-        tail_bytes = bytes(self._tail[-tail_budget:]) if tail_budget else b""
-        elided = max(0, self.total_bytes - len(head_bytes) - len(tail_bytes))
-        marker = (
-            f"\n[... {elided} bytes elided - output truncated; re-run with "
-            "head/tail/grep filters to see the elided region ...]\n"
-        )
-        return _decode_capture_bytes(head_bytes) + marker + _decode_capture_bytes(tail_bytes)
-
-    def digest(self) -> str:
-        if self.total_bytes <= self.max_bytes:
-            return _digest(_decode_capture_bytes(bytes(self._buffer)))
-        return "sha256:" + self._raw_digest.hexdigest()
 
 
 def _drain_pipe(pipe: Any, capture: _BoundedPipeCapture) -> None:
@@ -592,6 +541,12 @@ class Gate5BFullToolHostConfig(_Gate5BFullModel):
         alias="maxPerToolOutputBytes",
     )
     command_timeout_ms: int = Field(default=5000, ge=250, le=600000, alias="commandTimeoutMs")
+    max_concurrent_shell_commands: int = Field(
+        default=DEFAULT_MAX_CONCURRENT_SHELL_COMMANDS,
+        ge=1,
+        le=64,
+        alias="maxConcurrentShellCommands",
+    )
     format_on_write_enabled: bool = Field(default=False, alias="formatOnWriteEnabled")
     lsp_diagnostics_enabled: bool = Field(default=False, alias="lspDiagnosticsEnabled")
     lsp_diagnostics_cap: int = Field(default=20, ge=1, le=100, alias="lspDiagnosticsCap")
@@ -911,6 +866,12 @@ class Gate5BFullToolHost:
         # and ctx-callable dispatch policies. Empty => legacy paths, byte-identical.
         self._workspace_handlers: dict[str, object] = dict(workspace_handlers or {})
         self._dispatch_policies: tuple[object, ...] = tuple(dispatch_policies or ())
+        # B-2: Bash/TestRun run off the event loop with a bounded concurrency
+        # cap. Created once per host so the semaphore bound is shared across the
+        # many dispatch() calls on this instance.
+        self._async_shell = AsyncShellRunner(
+            max_concurrent=config.max_concurrent_shell_commands
+        )
 
     def _resolve_diagnostics_provider(self) -> DiagnosticsProvider | None:
         if not self.config.lsp_diagnostics_enabled:
@@ -1440,7 +1401,7 @@ class Gate5BFullToolHost:
                 return self._apply_envelope_patch(patch_text)
             raise ValueError("unsupported_patch_shape")
         if tool_name == "Bash":
-            return self._run_shell_command(
+            return await self._run_shell_command_async(
                 str(args.get("command", "")),
                 timeout_s=self.config.command_timeout_ms / 1000,
             )
@@ -1449,13 +1410,67 @@ class Gate5BFullToolHost:
             # (safety.py treats {Bash, TestRun} via _shell_decision) but applies
             # the manifest's 300s verification timeout instead of the short Bash
             # command timeout.
-            return self._run_shell_command(
+            return await self._run_shell_command_async(
                 str(args.get("command", "")),
                 timeout_s=_TEST_RUN_TIMEOUT_S,
             )
         if tool_name == "GitDiff":
             return self._handle_git_diff()
         return await self._dispatch_registry_tool(tool_name, args, tool_call_id=tool_call_id)
+
+    async def _run_shell_command_async(
+        self, raw_command: str, *, timeout_s: float
+    ) -> dict[str, object]:
+        """Run Bash/TestRun off the event loop with bounded concurrency (B-2).
+
+        Behaviour-identical to the sync ``_run_shell_command`` (same result dict,
+        same redaction, digest, timeout shape, and ``deadlineNote``) but never
+        blocks the loop: heartbeats/SSE/cancel stay live while the command runs.
+        Cancelling the awaiting task tears down the child process group.
+        """
+
+        command = raw_command.strip()
+        if not command:
+            raise ValueError("empty_command")
+        cap = self.config.max_per_tool_output_bytes
+        run = await self._async_shell.run(
+            command,
+            cwd=self.workspace_root,
+            timeout_s=timeout_s,
+            env=_build_bash_env(),
+            cap=cap,
+        )
+        stdout = _redact(run.stdout)
+        stderr = _redact(run.stderr)
+        if run.timed_out:
+            result: dict[str, object] = {
+                "exitCode": None,
+                "timedOut": True,
+                "timeoutMs": int(timeout_s * 1000),
+                "note": (
+                    f"command timed out after {timeout_s:g}s; "
+                    "partial output captured below"
+                ),
+                "stdout": stdout,
+                "stderr": stderr,
+                "stdoutDigest": run.stdout_digest,
+                "stderrDigest": run.stderr_digest,
+            }
+            note = _deadline_note_safe()
+            if note:
+                result["deadlineNote"] = note
+            return result
+        result = {
+            "exitCode": run.exit_code,
+            "stdout": stdout,
+            "stderr": stderr,
+            "stdoutDigest": run.stdout_digest,
+            "stderrDigest": run.stderr_digest,
+        }
+        note = _deadline_note_safe()
+        if note:
+            result["deadlineNote"] = note
+        return result
 
     def _run_shell_command(self, raw_command: str, *, timeout_s: float) -> dict[str, object]:
         command = raw_command.strip()
