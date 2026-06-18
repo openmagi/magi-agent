@@ -154,3 +154,46 @@ def test_run_forever_returns_tick_count() -> None:
 
     ticks = asyncio.run(go())
     assert ticks >= 1
+
+
+# ---------------------------------------------------------------------------
+# Gateway wiring tests (Task 6)
+# ---------------------------------------------------------------------------
+
+import os
+
+
+def test_work_queue_executor_gate_default_off() -> None:
+    """is_work_queue_executor_enabled() is False by default; True when env=1."""
+    from magi_agent.gateway.watchers import is_work_queue_executor_enabled
+
+    # Ensure unset → False
+    os.environ.pop("MAGI_WORK_QUEUE_EXECUTOR_ENABLED", None)
+    assert is_work_queue_executor_enabled() is False
+
+    # Set → True
+    os.environ["MAGI_WORK_QUEUE_EXECUTOR_ENABLED"] = "1"
+    try:
+        assert is_work_queue_executor_enabled() is True
+    finally:
+        os.environ.pop("MAGI_WORK_QUEUE_EXECUTOR_ENABLED", None)
+
+    # Restore: unset → False again
+    assert is_work_queue_executor_enabled() is False
+
+
+def test_build_default_watchers_includes_self_gated_work_queue() -> None:
+    """build_default_watchers() constructs without error and the work-queue
+    watcher self-gates (is_enabled is False when env is unset)."""
+    from magi_agent.gateway.watchers import build_default_watchers
+
+    os.environ.pop("MAGI_WORK_QUEUE_EXECUTOR_ENABLED", None)
+    watchers = build_default_watchers()
+
+    # At least one watcher should be named "work_queue_executor"
+    names = [w.name for w in watchers]
+    assert "work_queue_executor" in names, f"Expected work_queue_executor in {names}"
+
+    # The work-queue watcher must self-gate as disabled by default
+    wq_watcher = next(w for w in watchers if w.name == "work_queue_executor")
+    assert wq_watcher.is_enabled() is False
