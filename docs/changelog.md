@@ -15,6 +15,32 @@ Versions follow the tags published on GitHub Releases.
 
 ### Fixed
 
+## 0.1.50
+
+### Added
+- `lab` runtime profile and customize verification activation: customize
+  verification + custom rules are profile-aware default-ON (full profile; OFF
+  under safe/eval), and a full first-party harness preset suite (artifact
+  delivery, redaction, evidence-pack, document-authoring, deterministic-evidence,
+  config-aware WHAT-menu, coding-child-review capability) is wired (#652, #664,
+  #645, #647, #649, #651, #653, #672, #673).
+- Live channel bridge: shared inbound->turn->reply with Telegram (bidirectional),
+  Discord (gateway), and Slack (Socket Mode) providers, all gated (#660, #667,
+  #669).
+- Durable multi-agent work-queue: SQLite task store + dispatcher, default-OFF
+  (#658, #674).
+- Key-aware sub-agent model routes + local dashboard multi-provider key config
+  (#632); user-explicit recipe pin backend seam (#663); subagent harness
+  convergence Phase 2A/2B (governed-turn + tighten-only tools) (#644, #656, #671).
+
+### Changed
+- Dashboard: styled Select component, per-turn model picker in local serve, and a
+  refreshed bundle (#654, #662, #661); model-tier catalog cleanup (#665).
+
+### Fixed
+- Local dashboard: user-created channels stay navigable in the static export
+  (#659). README-contract guarantees restored after the trim (#643).
+
 ## 0.1.49
 
 ### Added
