@@ -58,6 +58,38 @@ def test_run_once_returns_zero_tick_on_empty_store() -> None:
     assert res.failed == 0
 
 
+class _RaiseRunner:
+    """Runner whose run_task always raises instead of returning a result."""
+
+    async def run_task(self, task: WorkTask) -> WorkTaskRunResult:
+        raise RuntimeError("boom")
+
+
+def test_run_once_runner_raise_records_failure() -> None:
+    """run_once must NOT propagate runner exceptions; it must call record_failure.
+
+    When runner.run_task raises an unhandled exception the driver's except
+    branch must catch it, call store.record_failure, and return a tick result
+    with failed == 1.  The task must end in 'ready' or 'blocked' (i.e.
+    record_failure was called), not in 'running' or 'completed'.
+    """
+    s = InMemoryWorkQueueStore()
+    s.create(WorkTask(id="t", title="x", status="ready", created_at=1))
+    d = WorkQueueDriver(s, _RaiseRunner(), claimer="disp", max_spawn=4)
+
+    # run_once must NOT propagate the RuntimeError raised by the runner.
+    res = d.run_once(now=1000)
+
+    assert res.failed == 1, f"expected failed==1, got {res}"
+    assert res.completed == 0, f"expected completed==0, got {res}"
+
+    task = s.get("t")
+    assert task is not None
+    assert task.status in ("ready", "blocked"), (
+        f"task must be ready or blocked after runner raise, got {task.status!r}"
+    )
+
+
 def test_run_once_skips_cas_loser() -> None:
     """Simulate a CAS failure by pre-claiming the task before the driver tick."""
     s = InMemoryWorkQueueStore()
