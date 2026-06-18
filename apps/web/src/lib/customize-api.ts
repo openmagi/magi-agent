@@ -221,6 +221,72 @@ export async function putCustomRule(
   return data.overrides;
 }
 
+// ---------------------------------------------------------------------------
+// SHACL compile-preview API types and client
+// ---------------------------------------------------------------------------
+
+/** A single sample-record outcome from the SHACL compile preview. */
+export interface ShaclPreviewCase {
+  conforms: boolean | null;
+  status: string;
+  violations: unknown[];
+}
+
+/** LLM review of the compiled SHACL shape vs the natural-language intent. */
+export interface ShaclReview {
+  verdict: string;
+  issues: string[];
+  confidence: number;
+}
+
+/**
+ * Response from `POST /v1/app/customize/custom-rules/compile`.
+ * Preview-only — never saves; the caller must call `putCustomRule` after
+ * the user explicitly approves the compiled shape.
+ */
+export interface ShaclCompileResponse {
+  ok: boolean;
+  shapeTtl?: string;
+  review?: ShaclReview;
+  explanation?: string;
+  previewCases?: ShaclPreviewCase[];
+  previewTruncated?: boolean;
+  error?: string;
+}
+
+/**
+ * Sends a natural-language constraint description to the local runtime for
+ * SHACL compilation and preview.
+ *
+ * Mirrors the fetch + error-handling pattern of `putCustomRule`:
+ * - On non-OK HTTP status: returns `{ ok: false, error }` — does NOT throw.
+ * - On network error: returns `{ ok: false, error }` — does NOT throw.
+ * - On success: returns the `ShaclCompileResponse` from the server.
+ *
+ * The UI is responsible for displaying the error; this function is safe to
+ * await without a try/catch.
+ */
+export async function compileCustomRule(
+  fetch: (path: string, init?: RequestInit) => Promise<Response>,
+  nlText: string,
+  sampleRecords?: unknown[],
+): Promise<ShaclCompileResponse> {
+  try {
+    const res = await fetch(`/v1/app/customize/custom-rules/compile`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ nlText, sampleRecords }),
+    });
+    if (!res.ok) {
+      return { ok: false, error: `Compile request failed (${res.status})` };
+    }
+    return (await res.json()) as ShaclCompileResponse;
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "Network error";
+    return { ok: false, error: message };
+  }
+}
+
 /** Deletes a custom rule by id via `DELETE /v1/app/customize/custom-rules/{id}`. */
 export async function deleteCustomRule(
   fetch: (path: string, init?: RequestInit) => Promise<Response>,
