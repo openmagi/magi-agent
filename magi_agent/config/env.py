@@ -2885,6 +2885,33 @@ def parse_parallel_research_verification_enabled(env: Mapping[str, str]) -> bool
     return flag_bool("MAGI_VERIFY_PARALLEL_RESEARCH", env=env)
 
 
+def parse_response_language_verification_enabled(env: Mapping[str, str]) -> bool:
+    """MAGI_VERIFY_RESPONSE_LANGUAGE — configured-language policy gate.
+
+    When ON (and a language policy is configured via ``MAGI_RESPONSE_LANGUAGE``),
+    a final answer that violates the policy is blocked at the pre-final gate by
+    wiring the previously-dormant ``discipline_boundary.response_language`` check.
+    Strict **default-OFF**: inert unless explicitly set (or the response-language
+    Customize preset is enabled), so flag-OFF behavior is byte-identical.
+    """
+    from .flags import flag_bool
+
+    return flag_bool("MAGI_VERIFY_RESPONSE_LANGUAGE", env=env)
+
+
+MAGI_RESPONSE_LANGUAGE_ENV = "MAGI_RESPONSE_LANGUAGE"
+
+
+def response_language_policy(env: Mapping[str, str] | None = None) -> str:
+    """The configured response-language policy code (e.g. ``"ko"``), or ``""``.
+
+    Unset/blank ⇒ no policy ⇒ the C9 check never blocks (no fake toggle: the gate
+    enforces only an explicitly-configured language). Lower-cased + trimmed.
+    """
+    source = os.environ if env is None else env
+    return (source.get(MAGI_RESPONSE_LANGUAGE_ENV) or "").strip().lower()
+
+
 MAGI_GATE5B_GOVERNANCE_ENABLED_ENV = "MAGI_GATE5B_GOVERNANCE_ENABLED"
 
 

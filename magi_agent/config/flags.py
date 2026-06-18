@@ -639,6 +639,17 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
     ),
     _b(
+        "MAGI_VERIFY_RESPONSE_LANGUAGE",
+        stage="stage2",
+        summary=(
+            "Block a final answer that violates the configured language policy "
+            "(MAGI_RESPONSE_LANGUAGE, e.g. 'ko') by wiring the dormant "
+            "discipline_boundary.response_language check to the pre-final gate; "
+            "strict default-OFF and inert unless explicitly set (or the "
+            "response-language Customize preset is enabled) AND a policy is set."
+        ),
+    ),
+    _b(
         "MAGI_FACT_GROUNDING_VERIFICATION_ENABLED",
         stage="stage2",
         summary=(

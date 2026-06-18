@@ -178,6 +178,19 @@ PRESET_SEAMS: dict[str, PresetSeam] = {
         supported_modes=("deterministic",),
         wiring="opt_in",
     ),
+    # Opt-in for the C9 response-language policy gate (cli/engine
+    # _response_language_block_labels): when a language policy is configured
+    # (MAGI_RESPONSE_LANGUAGE), a final answer that violates it is blocked by
+    # wiring the dormant discipline_boundary.response_language check. Enabling the
+    # preset turns the gate on even when MAGI_VERIFY_RESPONSE_LANGUAGE is off.
+    # controls_refs is documentation-only for opt_in seams.
+    "response-language": PresetSeam(
+        preset_id="response-language",
+        controls_refs=("response_language:policy_violation",),
+        runtime_default_on=False,
+        supported_modes=("deterministic",),
+        wiring="opt_in",
+    ),
 }
 
 
@@ -309,7 +322,7 @@ _DESCRIPTIONS: dict[str, str] = {
     "task-board-completion": "Blocks completion when tasks remain incomplete.",
     "parallel-research": "Block a research turn that synthesized from fewer than 2 inspected sources.",
     "output-delivery": "Verifies created files are actually delivered.",
-    "response-language": "Enforces the configured language policy.",
+    "response-language": "Block a final answer that violates the configured language policy (MAGI_RESPONSE_LANGUAGE).",
     "parallel-research": "Verifies and cross-checks research sources.",
     "memory-continuity": "Maintains cross-session memory consistency.",
     "document-authoring-coverage": "Checks authored documents cover the requested scope.",
