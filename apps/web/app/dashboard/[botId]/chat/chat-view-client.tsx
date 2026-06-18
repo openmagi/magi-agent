@@ -62,7 +62,7 @@ import {
 } from "@/lib/chat/interrupt-handoff";
 import { buildMessageContentWithKbContext, mergeKbDocReferences } from "@/lib/chat/kb-send";
 import { detectMessageResponseLanguage } from "@/lib/chat/message-language";
-import { shouldRetryEmptyCompletion } from "@/lib/chat/empty-response";
+import { shouldDrainQueueAfterTurn, shouldRetryEmptyCompletion } from "@/lib/chat/empty-response";
 import {
   appendLiveTranscriptText,
   liveTranscriptRowsForState,
@@ -1145,8 +1145,15 @@ export function ChatViewClient({
                   } catch { /* best-effort */ }
                 })();
               }
-              // Drain the first queued message, if any (Claude Code CLI style).
-              drainQueueRef.current?.(channel);
+              // Drain the first queued message, if any (Claude Code CLI style)
+              // — but ONLY when this turn produced a final answer. A turn that
+              // ended with work in progress but no final text is a mid-task
+              // stop; draining would feed the next (newer) queued message into
+              // the SAME unfinished backend task, so old work surfaces as a
+              // reply to the new message. Hold the queue in that case.
+              if (shouldDrainQueueAfterTurn(s)) {
+                drainQueueRef.current?.(channel);
+              }
             },
             onError: async (err) => {
               if (!isCurrentBot()) return;
