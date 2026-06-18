@@ -583,8 +583,10 @@ def _apply_customize_verification(required_validators: list[str]) -> list[str]:
         for preset_id, seam in PRESET_SEAMS.items():
             # Only opt-out seams are assembly-layer refs. opt-in seams are
             # activated at the engine-satisfier layer
-            # (customize.runtime_gate.preset_enabled), not here.
-            if seam.wiring != "opt_out":
+            # (customize.runtime_gate.preset_enabled), not here. This pass owns the
+            # required_validators list; evidence-kind opt-out seams subtract from
+            # required_evidence in _apply_customize_evidence_overrides instead.
+            if seam.wiring != "opt_out" or seam.controls_kind != "validator":
                 continue
             # opt_out is REMOVE-ONLY: an enabled (default) seam is a no-op because
             # its ref is already contributed by the recipe/pack path for the turns
@@ -608,6 +610,39 @@ def _apply_customize_verification(required_validators: list[str]) -> list[str]:
         return result
     except Exception:
         return required_validators
+
+
+def _apply_customize_evidence_overrides(required_evidence: list[str]) -> list[str]:
+    """Apply evidence-kind opt-out seams to the assembled ``required_evidence``.
+
+    Mirror of the validator opt-out pass in ``_apply_customize_verification`` but
+    for ``controls_kind == "evidence"`` seams (e.g. ``deterministic-evidence``,
+    which subtracts the dev-coding ``evidence:git-diff`` / ``evidence:test-run``
+    requirements when disabled). REMOVE-ONLY: an enabled (default) seam is a
+    no-op, so with no overrides the evidence list is byte-identical. Flag-gated by
+    ``MAGI_CUSTOMIZE_VERIFICATION_ENABLED`` and fail-open.
+    """
+    from magi_agent.config.flags import flag_profile_bool  # noqa: PLC0415
+
+    if not flag_profile_bool("MAGI_CUSTOMIZE_VERIFICATION_ENABLED"):
+        return required_evidence
+    try:
+        from magi_agent.customize.preset_map import PRESET_SEAMS  # noqa: PLC0415
+        from magi_agent.customize.store import load_overrides  # noqa: PLC0415
+        from magi_agent.customize.verification_policy import (  # noqa: PLC0415
+            CustomizeVerificationPolicy,
+        )
+
+        policy = CustomizeVerificationPolicy.from_overrides(load_overrides())
+        result = list(required_evidence)
+        for preset_id, seam in PRESET_SEAMS.items():
+            if seam.wiring != "opt_out" or seam.controls_kind != "evidence":
+                continue
+            if not policy.resolve_enabled(preset_id, default=seam.runtime_default_on):
+                result = [r for r in result if r not in seam.controls_refs]
+        return result
+    except Exception:
+        return required_evidence
 
 
 def _build_customize_after_tool_controls() -> list:
@@ -727,6 +762,9 @@ def _build_default_runner_policy_assembly(
     )
     # Customize verification opt-out/opt-in (flag-gated; no-op when off).
     required_validators = _apply_customize_verification(required_validators)
+    required_evidence = _apply_customize_evidence_overrides(
+        list(plan.final_gate_policy.required_evidence)
+    )
     missing_action = _local_trust_missing_evidence_action(
         plan.final_gate_policy.missing_evidence_action
     )
@@ -736,7 +774,7 @@ def _build_default_runner_policy_assembly(
         modelProvider=model_provider,
         modelLabel=model_label,
         selectedPackIds=plan.selected_pack_ids,
-        evidenceRequirements=plan.final_gate_policy.required_evidence,
+        evidenceRequirements=tuple(dict.fromkeys(required_evidence)),
         requiredValidators=tuple(dict.fromkeys(required_validators)),
         missingEvidenceAction=missing_action,
         repairPolicy={
