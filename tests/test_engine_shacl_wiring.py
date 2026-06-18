@@ -11,6 +11,8 @@ Key contracts
 3. flag ON + passing rule → bus decision=="pass" (no block).
 4. flag ON + policy is None → helper returns (), no error.
 5. fail-safe: malformed shape → record status=="unknown"; bus does NOT block.
+6. real violation (amount=4200 > maxInclusive 3000) → status="failed" AND bus decision="block".
+7. MAGI_CUSTOMIZE_VERIFICATION_ENABLED OFF → wiring reads no store, produces no block.
 """
 from __future__ import annotations
 
@@ -235,3 +237,189 @@ def test_fail_safe_malformed_shape_no_block() -> None:
         shacl_gate_enabled=True,
     )
     assert bus_result["decision"] == "pass"
+
+
+# ---------------------------------------------------------------------------
+# Test 6 — real violation → status="failed" AND bus decision="block"
+# (Finding 2: genuine end-to-end integration test with a real violating record)
+# ---------------------------------------------------------------------------
+
+# Reuse the shape from test_shacl_verifier.py: sh:maxInclusive 3000 on magi:field_amount.
+# An EvidenceRecord with fields={"amount": 4200} violates this shape.
+_SHAPE_AMOUNT_MAX_3000 = """\
+@prefix sh: <http://www.w3.org/ns/shacl#> .
+@prefix magi: <https://openmagi.ai/ns/evidence#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+magi:AmountShape
+    a sh:NodeShape ;
+    sh:targetClass magi:Evidence ;
+    sh:property [
+        sh:path magi:field_amount ;
+        sh:maxInclusive 3000 ;
+        sh:message "amount must not exceed 3000" ;
+    ] .
+"""
+
+
+def _violating_evidence_record() -> EvidenceRecord:
+    """An EvidenceRecord with amount=4200 that violates sh:maxInclusive 3000."""
+    return EvidenceRecord(
+        type="Calculation",
+        status="ok",
+        observedAt=1_718_000_000,
+        source=EvidenceSource(kind="verifier"),
+        fields={"amount": 4200},
+    )
+
+
+def test_real_violation_status_failed_and_bus_blocks(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Finding 2 — genuine integration test:
+    A real violating record (amount=4200 > maxInclusive 3000) passed through
+    _run_shacl_rules_for_turn must produce a record with status='failed', and
+    feeding that into execute_pre_final_verifier_bus with shacl_gate_enabled=True
+    must produce decision='block'.
+    """
+    monkeypatch.setenv("MAGI_SHACL_VERIFIER_ENABLED", "1")
+
+    policy = _policy_with_shacl_rule(_SHAPE_AMOUNT_MAX_3000, rule_id="amount-max-rule")
+    records = (_violating_evidence_record(),)
+
+    shacl_records = _run_shacl_rules_for_turn(
+        policy,
+        records,
+        enabled=True,
+        observed_at=1_718_000_000,
+    )
+
+    # Must produce exactly one SHACL record
+    assert len(shacl_records) == 1, f"Expected 1 shacl record, got {len(shacl_records)}"
+    shacl_record = shacl_records[0]
+
+    # The record must report status="failed" (real violation, not unknown)
+    assert hasattr(shacl_record, "status"), "shacl_record must have a 'status' attribute"
+    assert shacl_record.status == "failed", (
+        f"Expected status='failed' for amount=4200 vs maxInclusive 3000, "
+        f"got status={shacl_record.status!r}"
+    )
+
+    # Feeding the violation into the bus with shacl_gate_enabled=True must block
+    bus_result = execute_pre_final_verifier_bus(
+        required_evidence=(),
+        required_validators=(),
+        observed_public_refs=(),
+        evidence_records=(*records, *shacl_records),
+        shacl_gate_enabled=True,
+    )
+    assert bus_result["decision"] == "block", (
+        f"Expected decision='block' when a shacl_record with status='failed' is present, "
+        f"got decision={bus_result['decision']!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Test 7 — MAGI_CUSTOMIZE_VERIFICATION_ENABLED OFF → no store load, no block
+# (Finding 1: the dual-gate guard added in the engine wiring)
+# ---------------------------------------------------------------------------
+
+# Import the engine-level helper that loads the SHACL policy.
+# This is extracted from _pre_final_gate_payload for testability (TDD: RED until implemented).
+from magi_agent.cli.engine import _load_shacl_policy_if_enabled  # noqa: E402  # TDD: RED F1
+
+
+def test_customize_verification_disabled_prevents_store_load(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Finding 1 — when MAGI_CUSTOMIZE_VERIFICATION_ENABLED is OFF, the engine wiring
+    must NOT load the store and must NOT produce any SHACL block, even if
+    MAGI_SHACL_VERIFIER_ENABLED is ON.
+
+    Calls _load_shacl_policy_if_enabled (the extracted engine helper) directly with:
+    (a) MAGI_SHACL_VERIFIER_ENABLED=1 (shacl flag ON)
+    (b) MAGI_CUSTOMIZE_VERIFICATION_ENABLED=0 (customize gate OFF)
+    (c) load_overrides patched to raise → assert it is never invoked
+    (d) Assert returned (shacl_enabled, policy) == (False, None) — no store load occurred
+    (e) Assert _run_shacl_rules_for_turn with enabled=False returns () → no block
+    """
+    monkeypatch.setenv("MAGI_SHACL_VERIFIER_ENABLED", "1")
+    monkeypatch.setenv("MAGI_CUSTOMIZE_VERIFICATION_ENABLED", "0")
+
+    # Patch load_overrides to explode if called — it must NOT be called
+    import magi_agent.customize.store as _store_mod
+
+    def _must_not_be_called(*args: object, **kwargs: object) -> object:
+        raise AssertionError(
+            "load_overrides was called even though MAGI_CUSTOMIZE_VERIFICATION_ENABLED is OFF. "
+            "The engine wiring must gate on BOTH flags before reading the store."
+        )
+
+    monkeypatch.setattr(_store_mod, "load_overrides", _must_not_be_called)
+
+    # Call the extracted engine wiring helper directly.
+    # With MAGI_CUSTOMIZE_VERIFICATION_ENABLED=0, it must return (False, None)
+    # WITHOUT calling load_overrides.
+    shacl_enabled, _shacl_policy = _load_shacl_policy_if_enabled()
+
+    assert shacl_enabled is False, (
+        f"Finding 1 FAIL: shacl_enabled must be False when MAGI_CUSTOMIZE_VERIFICATION_ENABLED=0, "
+        f"got shacl_enabled={shacl_enabled!r}. The engine wiring must gate on BOTH flags."
+    )
+    assert _shacl_policy is None, (
+        f"Finding 1 FAIL: policy must be None when customize gate is OFF, got {_shacl_policy!r}"
+    )
+
+    # With shacl_enabled=False, the helper returns () → no SHACL records → no block
+    records = (_violating_evidence_record(),)
+    shacl_records = _run_shacl_rules_for_turn(
+        _shacl_policy,
+        records,
+        enabled=shacl_enabled,
+        observed_at=1_718_000_000,
+    )
+    assert shacl_records == (), (
+        f"Expected () when MAGI_CUSTOMIZE_VERIFICATION_ENABLED is OFF, "
+        f"got {shacl_records!r}"
+    )
+
+    # Bus sees shacl_gate_enabled=False → no block even with a violating record
+    bus_result = execute_pre_final_verifier_bus(
+        required_evidence=(),
+        required_validators=(),
+        observed_public_refs=(),
+        evidence_records=records,
+        shacl_gate_enabled=False,
+    )
+    assert bus_result["decision"] == "pass", (
+        f"Expected decision='pass' when shacl_gate_enabled=False (customize gate OFF), "
+        f"got decision={bus_result['decision']!r}"
+    )
+
+
+def test_both_flags_on_enables_store_load(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Finding 1 (positive path) — when BOTH flags are ON, _load_shacl_policy_if_enabled
+    returns (True, policy) and load_overrides IS called (the positive case).
+    Uses an empty overrides dict (no rules) so no actual SHACL validation occurs.
+    """
+    monkeypatch.setenv("MAGI_SHACL_VERIFIER_ENABLED", "1")
+    monkeypatch.setenv("MAGI_CUSTOMIZE_VERIFICATION_ENABLED", "1")
+
+    # Patch load_overrides to return empty overrides (no SHACL rules — safe)
+    import magi_agent.customize.store as _store_mod
+
+    call_count = [0]
+
+    def _empty_overrides() -> dict:  # type: ignore[return]
+        call_count[0] += 1
+        return {}
+
+    monkeypatch.setattr(_store_mod, "load_overrides", _empty_overrides)
+
+    shacl_enabled, policy = _load_shacl_policy_if_enabled()
+
+    assert shacl_enabled is True, (
+        f"Finding 1 positive FAIL: shacl_enabled must be True when both flags are ON, "
+        f"got {shacl_enabled!r}"
+    )
+    assert call_count[0] == 1, (
+        f"load_overrides must be called exactly once when both flags are ON, "
+        f"called {call_count[0]} times"
+    )
+    assert policy is not None, "policy must not be None when both flags are ON"

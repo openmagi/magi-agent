@@ -961,6 +961,42 @@ def _run_shacl_rules_for_turn(
     return tuple(results)
 
 
+def _load_shacl_policy_if_enabled() -> tuple[bool, object]:
+    """Resolve the SHACL gate state and load the customize policy when enabled.
+
+    Returns ``(shacl_enabled, policy)`` where:
+    - ``shacl_enabled`` is ``True`` only when **both** flags are ON:
+      ``MAGI_SHACL_VERIFIER_ENABLED`` (``flag_bool``) AND
+      ``MAGI_CUSTOMIZE_VERIFICATION_ENABLED`` (``flag_profile_bool``).
+    - ``policy`` is a ``CustomizeVerificationPolicy`` loaded from the store
+      when ``shacl_enabled`` is ``True``, otherwise ``None``.
+
+    Mirrors the precedent in ``magi_agent/customize/apply.py``
+    (``apply_verification_overrides``) and ``magi_agent/customize/runtime_gate.py``
+    (``preset_enabled``): **both** gate on ``MAGI_CUSTOMIZE_VERIFICATION_ENABLED``
+    before reading the store.
+
+    Never raises: any exception → returns ``(False, None)`` (fail-safe).
+    """
+    try:
+        from magi_agent.config.flags import flag_bool as _flag_bool  # noqa: PLC0415
+        from magi_agent.config.flags import flag_profile_bool as _flag_profile_bool  # noqa: PLC0415
+
+        shacl_enabled: bool = _flag_bool("MAGI_SHACL_VERIFIER_ENABLED") and _flag_profile_bool(
+            "MAGI_CUSTOMIZE_VERIFICATION_ENABLED"
+        )
+        if shacl_enabled:
+            from magi_agent.customize.store import load_overrides as _load_overrides  # noqa: PLC0415
+            from magi_agent.customize.verification_policy import (  # noqa: PLC0415
+                CustomizeVerificationPolicy as _CVP,
+            )
+
+            return True, _CVP.from_overrides(_load_overrides())
+        return False, None
+    except Exception:  # noqa: BLE001
+        return False, None
+
+
 def _coding_repair_max_attempts(repair_policy: Mapping[str, object]) -> int:
     from magi_agent.coding.repair_loop import repair_max_attempts
 
@@ -3032,26 +3068,10 @@ class MagiEngineDriver:
         # Mirror of the document-coverage pattern: when OFF (shacl_enabled=False),
         # shacl_records=() and shacl_gate_enabled=False → the bus call is
         # byte-identical to before; existing callers/tests are unaffected.
-        # The policy is loaded fresh from the store (same pattern as
-        # _resolve_document_coverage_mode_with_preset / runtime_gate.preset_enabled)
-        # so the engine does not need a runtime reference here.
-        # Guard: flag_bool import is lazy-local to keep this method import-clean.
-        shacl_enabled: bool = False
-        _shacl_policy: object = None
-        try:
-            from magi_agent.config.flags import flag_bool as _flag_bool  # noqa: PLC0415
-
-            shacl_enabled = _flag_bool("MAGI_SHACL_VERIFIER_ENABLED")
-            if shacl_enabled:
-                from magi_agent.customize.store import load_overrides as _load_overrides  # noqa: PLC0415
-                from magi_agent.customize.verification_policy import (  # noqa: PLC0415
-                    CustomizeVerificationPolicy as _CVP,
-                )
-
-                _shacl_policy = _CVP.from_overrides(_load_overrides())
-        except Exception:  # noqa: BLE001
-            shacl_enabled = False
-            _shacl_policy = None
+        # Both flags are required (Finding 1 fix): MAGI_SHACL_VERIFIER_ENABLED AND
+        # MAGI_CUSTOMIZE_VERIFICATION_ENABLED must both be ON before the store is read.
+        # This mirrors apply_verification_overrides and runtime_gate.preset_enabled.
+        shacl_enabled, _shacl_policy = _load_shacl_policy_if_enabled()
         failed_document_coverage = 0
         if self._evidence_collector is not None:
             from magi_agent.harness.verifier_bus import execute_pre_final_verifier_bus
