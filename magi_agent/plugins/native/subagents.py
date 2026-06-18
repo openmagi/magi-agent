@@ -154,10 +154,25 @@ def _spawn_agent_result(
         metadata["childFailureReason"] = failure_reason
     if error_code:
         metadata["reason"] = error_code
+    # LLM-facing projection: answer-forward and free of bookkeeping noise
+    # (promptDigest/spawnDepth/liveChildRunnerAttached/childRunnerAvailability),
+    # so the caller reads the child's ACTUAL result instead of mistaking the
+    # envelope for "metadata only". The full safe_output stays on `output` for
+    # the evidence/observability layer (first_party_activity reads it).
+    llm_output: dict[str, object] = {"status": safe_output.get("status")}
+    model = safe_output.get("model")
+    if isinstance(model, str) and model.strip():
+        llm_output["model"] = model
+    result_text = safe_output.get("summary")
+    if isinstance(result_text, str) and result_text.strip():
+        llm_output["result"] = result_text
+    reason = error_code or (failure_reason if isinstance(failure_reason, str) else None)
+    if isinstance(reason, str) and reason.strip():
+        llm_output["reason"] = reason
     return ToolResult(
         status=status,
         output=safe_output,
-        llmOutput=safe_output,
+        llmOutput=llm_output,
         transcriptOutput={
             "toolName": "SpawnAgent",
             "outputDigest": output_digest,
@@ -473,6 +488,11 @@ async def spawn_agent(arguments: dict[str, object], context: ToolContext) -> Too
             # Sanitised summary from the envelope (already redacted by boundary).
             "summary": summary,
         }
+        # Model attribution (provider:model the parent requested) so the caller
+        # can tell which model produced which answer — essential for the
+        # cross-validation / panel-of-models use case.
+        if req_model:
+            output["model"] = f"{req_provider or 'anthropic'}:{req_model}"
         if tool_status != "ok" and error_code is not None:
             output["childFailureReason"] = error_code
         return _spawn_agent_result(tool_status, output, error_code=error_code)

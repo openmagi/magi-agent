@@ -175,6 +175,47 @@ def test_spawn_agent_live_gate_on_returns_live_attached(monkeypatch) -> None:
     assert "Fake child" in str(output.get("summary", ""))
 
 
+def test_spawn_agent_llm_output_is_answer_forward(monkeypatch) -> None:
+    """llmOutput leads with result + model attribution, free of bookkeeping noise;
+    the full output dict still carries everything for the evidence layer."""
+    monkeypatch.setenv("MAGI_CHILD_RUNNER_LIVE_ENABLED", "1")
+    monkeypatch.delenv("MAGI_CHILD_RUNNER_LIVE_KILL_SWITCH", raising=False)
+
+    import magi_agent.runtime.child_runner_live as _live_mod
+
+    monkeypatch.setattr(_live_mod, "RealLocalChildRunner", _FakeLiveChildRunner)
+
+    from magi_agent.plugins.native.subagents import spawn_agent
+
+    arguments: dict[str, object] = {
+        "prompt": "compute 1+1",
+        "provider": "anthropic",
+        "model": "claude-sonnet-4-6",
+    }
+    result = asyncio.run(spawn_agent(arguments, _context(spawnDepth=1)))
+
+    assert result.status == "ok"
+    llm = result.llm_output
+    assert isinstance(llm, Mapping)
+    # The child's actual answer is the prominent `result`, with model attribution.
+    assert llm["result"] == "Fake child completed the subtask."
+    assert llm["model"] == "anthropic:claude-sonnet-4-6"
+    assert llm["status"]
+    # Bookkeeping must NOT leak into the LLM-facing projection.
+    for noise in (
+        "promptDigest",
+        "spawnDepth",
+        "liveChildRunnerAttached",
+        "childRunnerAvailability",
+        "persona",
+    ):
+        assert noise not in llm, noise
+    # The full output dict still carries the bookkeeping for evidence/observability.
+    assert result.output["liveChildRunnerAttached"] is True
+    assert result.output["promptDigest"]
+    assert result.output["model"] == "anthropic:claude-sonnet-4-6"
+
+
 def test_spawn_agent_forwards_child_runner_progress_events(monkeypatch) -> None:
     monkeypatch.setenv("MAGI_CHILD_RUNNER_LIVE_ENABLED", "1")
     monkeypatch.delenv("MAGI_CHILD_RUNNER_LIVE_KILL_SWITCH", raising=False)
