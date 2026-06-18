@@ -47,10 +47,8 @@ def test_fireworks_uses_fireworks_ai_litellm_prefix() -> None:
     cfg = resolve_provider_config(env={"FIREWORKS_API_KEY": "f"}, config={})
     assert cfg is not None
     assert cfg.provider == "fireworks"
-    assert cfg.model == "accounts/fireworks/models/kimi-k2-instruct"
-    assert cfg.litellm_model == (
-        "fireworks_ai/accounts/fireworks/models/kimi-k2-instruct"
-    )
+    assert cfg.model == "kimi-k2p6"
+    assert cfg.litellm_model == "fireworks_ai/kimi-k2p6"
     assert cfg.litellm_model.startswith("fireworks_ai/")
 
 
@@ -131,10 +129,7 @@ def test_default_model_for_returns_provider_default() -> None:
     assert default_model_for("anthropic") == "claude-sonnet-4-6"
     assert default_model_for("openai") == "gpt-5.5"
     assert default_model_for("gemini") == "gemini-3.5-flash"
-    assert (
-        default_model_for("fireworks")
-        == "accounts/fireworks/models/kimi-k2-instruct"
-    )
+    assert default_model_for("fireworks") == "kimi-k2p6"
 
 
 def test_default_model_for_covers_every_supported_provider() -> None:

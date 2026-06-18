@@ -54,10 +54,13 @@ from __future__ import annotations
 import hashlib
 import os
 import re
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from magi_agent.harness.scheduler_delivery import is_silent_output
 from magi_agent.channels.platform_registry import PlatformEntry, get_default_registry
+
+if TYPE_CHECKING:
+    from magi_agent.channels.turn_bridge import ChannelInbound
 
 
 # ---------------------------------------------------------------------------
@@ -70,13 +73,50 @@ get_default_registry().register(
     PlatformEntry(
         channel_type="slack",
         display_name="Slack",
-        supports_inbound=False,   # inbound is out of scope for E4
+        supports_inbound=True,    # PR3: Socket Mode inbound channel
         supports_outbound=True,
         supports_cron_delivery=True,
         default_enabled=False,
         cron_deliver_env_var="MAGI_SLACK_CRON_TARGET",
     )
 )
+
+
+# ---------------------------------------------------------------------------
+# Inbound projection (Socket Mode raw event -> ChannelInbound)
+# ---------------------------------------------------------------------------
+
+def _project_slack_event(raw: dict[str, Any]) -> "ChannelInbound | None":
+    """Project a normalised Slack message event into the channel-agnostic inbound.
+
+    Drops non-message events, bot messages (``bot_id`` present) and empty text.
+    The reply target (``message_id``) is the thread root (``thread_ts``) when the
+    message is already in a thread, else its own ``ts`` — so the bot replies
+    in-thread.
+    """
+    if raw.get("type") != "message":
+        return None
+    if raw.get("bot_id"):
+        return None
+    text = raw.get("text")
+    if not isinstance(text, str) or not text.strip():
+        return None
+    channel = raw.get("channel")
+    user = raw.get("user")
+    ts = raw.get("ts")
+    if not channel or not user or not ts:
+        return None
+    from magi_agent.channels.turn_bridge import ChannelInbound
+
+    thread_ts = raw.get("thread_ts")
+    reply_target = thread_ts if isinstance(thread_ts, str) and thread_ts else ts
+    return ChannelInbound(
+        channel_type="slack",
+        channel_id=str(channel),
+        text=text,
+        message_id=str(reply_target),
+        user_id=str(user),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -233,6 +273,7 @@ def deliver(
 
 __all__ = [
     "SlackProviderPort",
+    "_project_slack_event",
     "deliver",
     "is_live_slack_enabled",
 ]
