@@ -186,7 +186,10 @@ function CustomRulesSection({
   const [shaclMode, setShaclMode] = useState<"nl" | "raw">("nl");
   const [nlText, setNlText] = useState("");
   const [rawTtl, setRawTtl] = useState("");
+  const [sampleRecordsText, setSampleRecordsText] = useState("");
+  const [sampleRecordsError, setSampleRecordsError] = useState<string | null>(null);
   const [compiling, setCompiling] = useState(false);
+  const [compileError, setCompileError] = useState<string | null>(null);
   const [shaclPreview, setShaclPreview] = useState<ShaclCompileResponse | null>(null);
   const [shaclError, setShaclError] = useState<string | null>(null);
   const [ref, setRef] = useState(menu[0]?.ref ?? "");
@@ -429,19 +432,63 @@ function CustomRulesSection({
                       className={`${selectCls} resize-y`}
                     />
                   </label>
+
+                  {/* F1: Sample records textarea — optional, enables deterministic preview */}
+                  <label className="block text-[11px] font-medium text-secondary">
+                    샘플 레코드 (JSON, 선택)
+                    <textarea
+                      aria-label="샘플 레코드 JSON 입력"
+                      value={sampleRecordsText}
+                      onChange={(e) => {
+                        setSampleRecordsText(e.target.value);
+                        setSampleRecordsError(null);
+                      }}
+                      rows={3}
+                      placeholder='[{"field_cost": 1000}, {"field_cost": null}]'
+                      className={`${selectCls} resize-y font-mono text-[11px]`}
+                    />
+                  </label>
+                  {sampleRecordsError ? (
+                    <div className="rounded-lg border border-amber-500/25 bg-amber-500/[0.06] px-3 py-2 text-[11px] text-amber-700">
+                      {sampleRecordsError}
+                    </div>
+                  ) : null}
+
                   <button
                     type="button"
                     disabled={!nlText.trim() || compiling}
                     onClick={async () => {
+                      // F1: parse sample records before compile
+                      let parsedSamples: unknown[] | undefined;
+                      if (sampleRecordsText.trim()) {
+                        try {
+                          const parsed: unknown = JSON.parse(sampleRecordsText);
+                          if (!Array.isArray(parsed)) {
+                            setSampleRecordsError("JSON 배열이어야 합니다 (예: [{...}, {...}])");
+                            return;
+                          }
+                          parsedSamples = parsed;
+                        } catch {
+                          setSampleRecordsError("유효하지 않은 JSON입니다 — 수정하거나 비워두세요.");
+                          return;
+                        }
+                      }
+                      // F4: try/finally so compiling is always cleared
                       setCompiling(true);
                       setShaclPreview(null);
                       setShaclError(null);
-                      const result = await onCompileShacl(nlText);
-                      setCompiling(false);
-                      if (result.ok) {
-                        setShaclPreview(result);
-                      } else {
-                        setShaclError(result.error ?? "컴파일 실패");
+                      setCompileError(null);
+                      try {
+                        const result = await onCompileShacl(nlText, parsedSamples);
+                        if (result.ok) {
+                          setShaclPreview(result);
+                        } else {
+                          setShaclError(result.error ?? "컴파일 실패");
+                        }
+                      } catch (err: unknown) {
+                        setCompileError(err instanceof Error ? err.message : "컴파일 중 오류가 발생했습니다.");
+                      } finally {
+                        setCompiling(false);
                       }
                     }}
                     className="rounded-lg bg-black/[0.07] px-3 py-1.5 text-[11px] font-semibold text-foreground disabled:opacity-40 hover:bg-black/[0.12]"
@@ -449,7 +496,14 @@ function CustomRulesSection({
                     {compiling ? "컴파일 중…" : "컴파일"}
                   </button>
 
-                  {/* Compile error */}
+                  {/* F4: catch-level compile error (thrown exception, not ok:false) */}
+                  {compileError ? (
+                    <div className="rounded-lg border border-red-500/25 bg-red-500/[0.06] px-3 py-2 text-[11px] text-red-600">
+                      {compileError}
+                    </div>
+                  ) : null}
+
+                  {/* Compile error (ok:false from backend) */}
                   {shaclError ? (
                     <div className="rounded-lg border border-red-500/25 bg-red-500/[0.06] px-3 py-2 text-[11px] text-red-600">
                       {shaclError}
@@ -459,7 +513,7 @@ function CustomRulesSection({
                   {/* Preview panel (ok:true) */}
                   {shaclPreview?.ok ? (
                     <div className="space-y-2 rounded-xl border border-emerald-500/20 bg-emerald-50/40 p-3">
-                      {/* Reviewer verdict */}
+                      {/* F2: Reviewer verdict — warn explicitly when absent */}
                       {shaclPreview.review ? (
                         <div className="text-[11px]">
                           <span className="font-semibold text-foreground">리뷰어 verdict: </span>
@@ -468,7 +522,11 @@ function CustomRulesSection({
                             (신뢰도 {Math.round((shaclPreview.review.confidence ?? 0) * 100)}%)
                           </span>
                         </div>
-                      ) : null}
+                      ) : (
+                        <div className="rounded-lg border border-amber-500/25 bg-amber-500/[0.06] px-3 py-2 text-[11px] text-amber-700">
+                          ⚠ 리뷰어 검증을 사용할 수 없습니다 — 직접 SHACL을 확인하세요
+                        </div>
+                      )}
 
                       {/* Reverse explanation */}
                       {shaclPreview.explanation ? (
@@ -478,7 +536,7 @@ function CustomRulesSection({
                         </p>
                       ) : null}
 
-                      {/* Sample PASS/FAIL list */}
+                      {/* F1: Sample PASS/FAIL list — with honest empty-state */}
                       {shaclPreview.previewCases && shaclPreview.previewCases.length > 0 ? (
                         <div>
                           <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-secondary/70">
@@ -487,15 +545,28 @@ function CustomRulesSection({
                           <div className="space-y-1">
                             {shaclPreview.previewCases.map((c: ShaclPreviewCase, i: number) => (
                               <div key={i} className="flex items-center gap-2 text-[11px]">
-                                <span className={c.conforms ? "text-emerald-600" : "text-red-500"}>
-                                  {c.conforms ? "PASS" : "FAIL"}
+                                {/* F3: null conforms → N/A in neutral color, not red FAIL */}
+                                <span
+                                  className={
+                                    c.conforms === null
+                                      ? "text-secondary"
+                                      : c.conforms
+                                        ? "text-emerald-600"
+                                        : "text-red-500"
+                                  }
+                                >
+                                  {c.conforms === null ? "N/A" : c.conforms ? "PASS" : "FAIL"}
                                 </span>
                                 <span className="text-secondary">{c.status}</span>
                               </div>
                             ))}
                           </div>
                         </div>
-                      ) : null}
+                      ) : (
+                        <p className="text-[11px] text-secondary/70">
+                          샘플 레코드를 입력하면 결정론적 PASS/FAIL 미리보기가 표시됩니다.
+                        </p>
+                      )}
 
                       {/* Collapsed: generated SHACL */}
                       <details className="mt-1">
@@ -518,6 +589,9 @@ function CustomRulesSection({
                             setShaclError(null);
                             setNlText("");
                             setRawTtl("");
+                            setSampleRecordsText("");
+                            setSampleRecordsError(null);
+                            setCompileError(null);
                             setAdding(false);
                           }}
                           className="rounded-lg bg-emerald-600 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-emerald-700"
@@ -683,8 +757,13 @@ function CustomRulesSection({
                 setAdding(false);
                 setShaclPreview(null);
                 setShaclError(null);
+                setCompileError(null);
                 setNlText("");
                 setRawTtl("");
+                setSampleRecordsText("");
+                setSampleRecordsError(null);
+                setShaclMode("nl");
+                setKind("deterministic_ref");
               }}
               className="rounded-lg px-3 py-1.5 text-sm text-secondary hover:text-foreground"
             >
@@ -864,6 +943,7 @@ export function VerificationRuleModal({
               Free-text instructions injected into your agent&apos;s system prompt every turn.
             </p>
             <textarea
+              aria-label="Freeform guidance"
               value={rulesDraft}
               onChange={(e) => setRulesDraft(e.target.value)}
               rows={5}

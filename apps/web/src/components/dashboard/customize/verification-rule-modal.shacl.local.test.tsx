@@ -188,3 +188,107 @@ describe("Test 7 — regression: deterministic_ref builder path unchanged", () =
     expect(apiSrc).toContain("ShaclPreviewCase");
   });
 });
+
+// ---------------------------------------------------------------------------
+// PR4 review fixes
+// ---------------------------------------------------------------------------
+
+// F1 — sampleRecords forwarded to onCompileShacl + honest empty-state message
+describe("F1 — sample records textarea and honest empty-state", () => {
+  it("renders a sample records textarea with aria-label", () => {
+    expect(modalSrc).toContain("샘플 레코드 (JSON, 선택)");
+    expect(modalSrc).toContain('"샘플 레코드 JSON 입력"');
+  });
+
+  it("parses sampleRecordsText and passes to onCompileShacl", () => {
+    expect(modalSrc).toContain("sampleRecordsText");
+    expect(modalSrc).toContain("parsedSamples");
+    expect(modalSrc).toContain("JSON.parse(sampleRecordsText)");
+    expect(modalSrc).toContain("onCompileShacl(nlText, parsedSamples)");
+  });
+
+  it("shows inline error when sample records JSON is invalid", () => {
+    expect(modalSrc).toContain("sampleRecordsError");
+    expect(modalSrc).toContain("유효하지 않은 JSON입니다");
+  });
+
+  it("shows inline error when sample records is not a JSON array", () => {
+    expect(modalSrc).toContain("JSON 배열이어야 합니다");
+  });
+
+  it("shows honest empty-state when previewCases is absent/empty", () => {
+    expect(modalSrc).toContain("샘플 레코드를 입력하면 결정론적 PASS/FAIL 미리보기가 표시됩니다.");
+  });
+
+  it("resets sample records state on cancel and on approval", () => {
+    expect(modalSrc).toContain("setSampleRecordsText");
+    expect(modalSrc).toContain("setSampleRecordsError");
+  });
+});
+
+// F2 — missing reviewer verdict warning
+describe("F2 — missing reviewer verdict is surfaced, not silent", () => {
+  it("renders a warning when shaclPreview.review is absent", () => {
+    expect(modalSrc).toContain("리뷰어 검증을 사용할 수 없습니다");
+    expect(modalSrc).toContain("직접 SHACL을 확인하세요");
+  });
+
+  it("shows the warning in an amber/warning style (not silently omitted)", () => {
+    // The warning element uses an amber colour class (visually distinguishable)
+    expect(modalSrc).toContain("text-amber-700");
+  });
+});
+
+// F3 — null conforms rendered as N/A (neutral), not red FAIL
+describe("F3 — null conforms renders as N/A in neutral color", () => {
+  it("has an explicit null branch for c.conforms", () => {
+    expect(modalSrc).toContain("c.conforms === null");
+  });
+
+  it("renders 'N/A' for null conforms", () => {
+    expect(modalSrc).toContain('"N/A"');
+  });
+
+  it("does NOT render null as red FAIL (null is neutral)", () => {
+    // Neutral class used for null; the ternary must include three branches
+    expect(modalSrc).toContain("text-secondary");
+    // The null branch must appear before the true/false branches in a ternary
+    expect(modalSrc).toMatch(/c\.conforms === null[\s\S]{0,60}N\/A/);
+  });
+});
+
+// F4 — compile button finally so compiling is always cleared
+describe("F4 — compile try/finally so compile button never stays stuck", () => {
+  it("wraps onCompileShacl in a try/finally block", () => {
+    expect(modalSrc).toContain("} finally {");
+    expect(modalSrc).toContain("setCompiling(false)");
+  });
+
+  it("catches thrown exceptions and sets a compileError message", () => {
+    expect(modalSrc).toContain("compileError");
+    expect(modalSrc).toContain("컴파일 중 오류가 발생했습니다");
+  });
+
+  it("setCompiling(false) appears inside a finally block", () => {
+    // Assert the finally keyword appears and setCompiling(false) follows
+    expect(modalSrc).toMatch(/finally\s*\{[\s\S]{0,60}setCompiling\(false\)/);
+  });
+});
+
+// F5 — freeform guidance textarea has aria-label
+describe("F5 — freeform guidance textarea has aria-label (a11y)", () => {
+  it("has aria-label on the freeform guidance textarea", () => {
+    expect(modalSrc).toContain('aria-label="Freeform guidance"');
+  });
+});
+
+// F6 — cancel resets shaclMode and kind to defaults
+describe("F6 — cancel resets shaclMode and kind to fresh defaults", () => {
+  it("cancel handler resets shaclMode to nl", () => {
+    expect(modalSrc).toContain('setShaclMode("nl")');
+  });
+
+  it("cancel handler resets kind to deterministic_ref", () => {
+    expect(modalSrc).toContain('setKind("deterministic_ref")');
+  });
+});
