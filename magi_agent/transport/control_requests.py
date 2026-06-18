@@ -20,11 +20,12 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from magi_agent.runtime.openmagi_runtime import OpenMagiRuntime
+from magi_agent.transport.chat_shared import bearer_auth_failed
 
 
 def _unauthorized(request: Request, runtime: OpenMagiRuntime) -> bool:
-    expected = f"Bearer {runtime.config.gateway_token}"
-    return request.headers.get("authorization", "") != expected
+    # A-9: constant-time gateway-token check via the shared helper.
+    return bearer_auth_failed(request, runtime)
 
 
 def register_control_request_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:

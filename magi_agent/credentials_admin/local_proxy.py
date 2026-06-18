@@ -284,8 +284,13 @@ def _resolve_bound_port(master, requested: int) -> int:  # noqa: ANN001
 
 
 def _harden_ca_key_perms(confdir: Path) -> None:
-    """chmod 0600 the mitmproxy CA private key material in ``confdir``."""
-    for name in ("mitmproxy-ca.pem", "mitmproxy-ca-key.pem"):
+    """chmod 0600 the mitmproxy CA private key material in ``confdir``.
+
+    Hardens every file that can hold the CA private key, including the
+    ``mitmproxy-ca.p12`` bundle (C-8). This is the single canonical helper;
+    ``vault_server`` imports it rather than re-listing the filenames.
+    """
+    for name in ("mitmproxy-ca.pem", "mitmproxy-ca-key.pem", "mitmproxy-ca.p12"):
         target = confdir / name
         if target.is_file():
             try:

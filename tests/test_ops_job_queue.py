@@ -12,12 +12,25 @@ from magi_agent.ops.job_queue import (
     JobQueueAuthorityFlags,
     JobQueueConfig,
     JobQueueReceipt,
+    _digest_payload,
     enqueue_job,
 )
 
 
 def _digest(character: str) -> str:
     return "sha256:" + character * 64
+
+
+def test_digest_payload_rejects_nan() -> None:
+    """C-5a: the canonical digest must refuse non-finite floats (NaN/Inf) rather
+    than silently emitting invalid JSON (``NaN``/``Infinity`` tokens)."""
+    with pytest.raises(ValueError):
+        _digest_payload({"score": float("nan")})
+
+
+def test_digest_payload_rejects_inf() -> None:
+    with pytest.raises(ValueError):
+        _digest_payload({"score": float("inf")})
 
 
 def test_disabled_queue_records_intent_without_enqueuing() -> None:

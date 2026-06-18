@@ -94,6 +94,7 @@ from magi_agent.transport.chat_shared import (
     Gate5BUserVisibleChatRouteConfig,
     _RUNNER_DIAGNOSTIC_PREVIEW_FORBIDDEN_RE,
     _bounded_public_text,
+    bearer_auth_failed,
     _context_continuity_chat_diagnostic,
     _fallback_response,
     _is_sha256_digest,
@@ -586,9 +587,7 @@ def _resolve_local_learning_live_readiness(runtime: OpenMagiRuntime) -> object |
 def register_chat_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
     @app.post("/v1/chat/completions")
     async def chat_completions(request: Request):
-        auth = request.headers.get("authorization", "")
-        expected = f"Bearer {runtime.config.gateway_token}"
-        if auth != expected:
+        if bearer_auth_failed(request, runtime):
             return JSONResponse(
                 status_code=401,
                 content={"error": "unauthorized"},
@@ -667,9 +666,7 @@ def register_chat_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
 
     @app.post("/v1/chat/inject")
     async def chat_inject(request: Request) -> JSONResponse:
-        auth = request.headers.get("authorization", "")
-        expected = f"Bearer {runtime.config.gateway_token}"
-        if auth != expected:
+        if bearer_auth_failed(request, runtime):
             return JSONResponse(
                 status_code=401,
                 content={"error": "unauthorized"},
@@ -729,9 +726,7 @@ def register_chat_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
 
     @app.post("/v1/chat/interrupt")
     async def chat_interrupt(request: Request) -> JSONResponse:
-        auth = request.headers.get("authorization", "")
-        expected = f"Bearer {runtime.config.gateway_token}"
-        if auth != expected:
+        if bearer_auth_failed(request, runtime):
             return JSONResponse(
                 status_code=401,
                 content={"error": "unauthorized"},
@@ -796,9 +791,7 @@ def register_chat_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
         request: Request,
         payload: Gate5BUserVisibleDeliveryReceiptPayload,
     ) -> JSONResponse:
-        auth = request.headers.get("authorization", "")
-        expected = f"Bearer {runtime.config.gateway_token}"
-        if auth != expected:
+        if bearer_auth_failed(request, runtime):
             return JSONResponse(
                 status_code=401,
                 content={"error": "unauthorized"},
@@ -980,9 +973,7 @@ def register_chat_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
         request: Request,
         payload: Gate1ASelectedAttemptPreflightPayload,
     ) -> JSONResponse:
-        auth = request.headers.get("authorization", "")
-        expected = f"Bearer {runtime.config.gateway_token}"
-        if auth != expected:
+        if bearer_auth_failed(request, runtime):
             return JSONResponse(
                 status_code=401,
                 content={"error": "unauthorized"},

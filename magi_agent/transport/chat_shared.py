@@ -14,6 +14,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 import hashlib
+import hmac
 import re
 from typing import Any
 
@@ -43,6 +44,19 @@ MockedChatRunner = Callable[[Mapping[str, Any]], Mapping[str, Any]]
 
 
 ClientDisconnectedProbe = Callable[[Request], bool | Awaitable[bool]]
+
+
+def bearer_auth_failed(request: Request, runtime: OpenMagiRuntime) -> bool:
+    """Return True when the request lacks the expected gateway bearer token.
+
+    A-9: the gateway-token check is performed with :func:`hmac.compare_digest`
+    so the comparison is constant-time and does not leak the token through a
+    timing side-channel. This is the single shared authorization predicate for
+    the ``Authorization: Bearer <gateway_token>`` chat/control routes.
+    """
+    expected = f"Bearer {runtime.config.gateway_token}"
+    presented = request.headers.get("authorization", "")
+    return not hmac.compare_digest(presented, expected)
 
 
 _RUNNER_DIAGNOSTIC_PREVIEW_FORBIDDEN_RE = re.compile(

@@ -47,10 +47,12 @@ _IDENTITY_SECTION_ORDER = (
     ("agents", "AGENTS"),
 )
 _KNOWN_TOKEN_LIMITS = {
+    "claude-opus-4-8": 150_000,
     "claude-opus-4-6": 150_000,
     "claude-sonnet-4-6": 150_000,
     "claude-haiku-4-5-20251001": 150_000,
     "claude-haiku-4-5": 150_000,
+    "anthropic/claude-opus-4-8": 150_000,
     "anthropic/claude-opus-4-6": 150_000,
     "anthropic/claude-sonnet-4-6": 150_000,
     "anthropic/claude-haiku-4-5": 150_000,
