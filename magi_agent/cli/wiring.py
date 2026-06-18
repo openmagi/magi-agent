@@ -673,6 +673,11 @@ def _build_first_party_adk_tools(
         apply_orchestrator_filter as _apply_filter,
     )
 
+    # TODO(Seam 4): this ceiling is derived from ``exposed_tool_names``, which is
+    # captured BEFORE ``direct_web_tools`` are appended below. It therefore omits
+    # the direct web tools. Inert today (spawn_cap has no consumer), but before
+    # Seam 4 enforces the ceiling, derive it from the SAME complete final tool
+    # list used for filtering (one source of truth, as the serve path already does).
     _spawn_cap_for_factory: tuple[str, ...] | None = None
     if _main_agent_profile() == "orchestrator":
         _, _spawn_cap_for_factory = _apply_filter(exposed_tool_names)
