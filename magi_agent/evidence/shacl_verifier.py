@@ -167,6 +167,53 @@ def _node_str(node: rdflib.term.Node | None) -> str | None:
 # ---------------------------------------------------------------------------
 
 
+def validate_shape_ttl(shape_ttl: str) -> list[str]:
+    """Validate operator-supplied SHACL shape TTL for storage (pure, never raises).
+
+    Applies the SAME DoS-guard rules as the runtime ``run_shacl_rule``:
+      (a) non-empty string,
+      (b) byte length <= ``_MAX_SHAPE_BYTES``,
+      (c) parses as Turtle via rdflib (parse exceptions → error string, no raise),
+      (d) no ``sh:sparql`` predicate.
+
+    Returns a list of human-readable error strings.  Empty list = valid.
+    This function NEVER raises; all exceptions from rdflib are caught and
+    converted to error messages.
+    """
+    errors: list[str] = []
+
+    # (a) non-empty
+    if not shape_ttl:
+        errors.append("shapeTtl must not be empty")
+        return errors  # no point checking further
+
+    # (b) byte-size cap
+    shape_bytes = len(shape_ttl.encode("utf-8"))
+    if shape_bytes > _MAX_SHAPE_BYTES:
+        errors.append(
+            f"shapeTtl too large: {shape_bytes} bytes exceeds "
+            f"_MAX_SHAPE_BYTES={_MAX_SHAPE_BYTES}"
+        )
+        return errors  # skip parse — would be slow on huge input
+
+    # (c) parse as Turtle
+    try:
+        g = rdflib.Graph()
+        g.parse(data=shape_ttl, format="turtle")
+    except Exception as exc:  # noqa: BLE001
+        errors.append(f"shapeTtl parse failed: {exc}")
+        return errors  # cannot check sh:sparql without a valid graph
+
+    # (d) reject sh:sparql
+    if any(True for _ in g.subject_objects(_SH.sparql)):
+        errors.append(
+            "shapeTtl contains sh:sparql constraints, which are not permitted "
+            "(only deterministic/bounded SHACL constraints are allowed)"
+        )
+
+    return errors
+
+
 def run_shacl_rule(
     records: Iterable[EvidenceRecord],
     shape_ttl: str,
@@ -371,4 +418,4 @@ def run_shacl_rule(
     )
 
 
-__all__ = ["run_shacl_rule"]
+__all__ = ["run_shacl_rule", "validate_shape_ttl"]
