@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import time
+import types
 import uuid
+from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -8,6 +11,14 @@ from fastapi.responses import JSONResponse
 from magi_agent.customize.apply import apply_tool_overrides, apply_verification_overrides
 from magi_agent.customize.catalog import build_catalog
 from magi_agent.customize.custom_rules import validate_custom_rule
+from magi_agent.customize.shacl_compiler import (
+    _resolve_shacl_compile_factory,
+    available_fields,
+    compile_nl_to_shacl,
+    explain_shape,
+    preview_cases,
+    review_compilation,
+)
 from magi_agent.customize.store import (
     delete_custom_rule,
     load_overrides,
@@ -20,6 +31,31 @@ from magi_agent.runtime.openmagi_runtime import OpenMagiRuntime
 from magi_agent.transport.tools import _unauthorized_response
 
 _VERIFICATION_KINDS = {"recipes", "harness_presets", "hooks"}
+
+
+def _make_json_safe(obj: Any) -> Any:
+    """Recursively convert non-JSON-serializable objects to plain Python primitives.
+
+    Specifically handles ``types.MappingProxyType`` (from ``EvidenceRecord.fields``
+    freezing) and Pydantic models with a ``model_dump`` method.  All other unknown
+    types are coerced to their string representation.
+    """
+    if isinstance(obj, types.MappingProxyType):
+        return {k: _make_json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, dict):
+        return {k: _make_json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_make_json_safe(item) for item in obj]
+    if hasattr(obj, "model_dump"):
+        # Pydantic v2 model (e.g. EvidenceRecord).
+        try:
+            return _make_json_safe(obj.model_dump(by_alias=True, mode="python"))
+        except Exception:  # noqa: BLE001
+            pass
+    if isinstance(obj, (str, int, float, bool)) or obj is None:
+        return obj
+    # Fallback: coerce unknown types to string.
+    return str(obj)
 
 
 def register_customize_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
@@ -120,3 +156,133 @@ def register_customize_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
         overrides = delete_custom_rule(rule_id)
         apply_verification_overrides(runtime, overrides)
         return JSONResponse(content={"overrides": overrides})
+
+    @app.post("/v1/app/customize/custom-rules/compile")
+    async def compile_custom_rule(request: Request) -> JSONResponse:
+        """Preview-only NL→SHACL compiler endpoint.
+
+        NEVER saves the compiled shape — saving is done by the caller via
+        PUT /custom-rules after the user reviews the preview.  This endpoint
+        is gated behind ``MAGI_SHACL_COMPILER_ENABLED`` (default OFF).
+
+        Request body (JSON):
+          nlText        str   — Natural-language constraint description.
+          sampleRecords list  — Optional EvidenceRecord dicts for preview_cases.
+          _shaclModelFactory  — TEST-ONLY: inject a fake model factory; ignored
+                                in production (not a real JSON-serializable key
+                                in prod; tests inject via monkeypatch).
+
+        Returns:
+          200 {ok:True, shapeTtl, review, explanation, previewCases?} on success.
+          200 {ok:False, error} on compile failure or unavailable model.
+          200 {ok:False, error:"compiler disabled"} when flag is OFF.
+        """
+        # Guard: flag must be ON.
+        try:
+            from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+
+            compiler_enabled = flag_bool("MAGI_SHACL_COMPILER_ENABLED")
+        except Exception:  # noqa: BLE001
+            compiler_enabled = False
+
+        if not compiler_enabled:
+            return JSONResponse(
+                content={"ok": False, "error": "compiler disabled"},
+                status_code=200,
+            )
+
+        # Auth check (same pattern as other customize routes).
+        unauthorized = _unauthorized_response(request, runtime)
+        if unauthorized is not None:
+            return unauthorized
+
+        # Parse body.
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse(
+                status_code=400, content={"ok": False, "error": "invalid_json"}
+            )
+        if not isinstance(body, dict) or not isinstance(body.get("nlText"), str):
+            return JSONResponse(
+                status_code=400, content={"ok": False, "error": "nlText_required"}
+            )
+
+        nl_text: str = body["nlText"]
+        sample_records_raw: list = body.get("sampleRecords") or []
+
+        # Resolve the compiler model factory (test-injection → production → fail-open).
+        factory = _resolve_shacl_compile_factory(body)
+
+        try:
+            # Step 1: Compile NL → SHACL TTL.
+            fields = available_fields()
+            compile_result = await compile_nl_to_shacl(
+                nl_text, fields, model_factory=factory
+            )
+            if not compile_result.get("ok"):
+                return JSONResponse(
+                    content={
+                        "ok": False,
+                        "error": compile_result.get("error", "compilation failed"),
+                    }
+                )
+
+            shape_ttl: str = compile_result["shapeTtl"]
+
+            # Step 2: Review + explain (parallel-ish, sequential for simplicity).
+            review_result = await review_compilation(
+                nl_text, shape_ttl, fields, model_factory=factory
+            )
+            explanation = await explain_shape(shape_ttl, model_factory=factory)
+
+            # Step 3: preview_cases if sampleRecords provided.
+            preview: list[dict] = []
+            if sample_records_raw:
+                # Convert each raw dict to an EvidenceRecord.  The HTTP body uses
+                # a simplified format: {type, status, fields?, ...}.  Required
+                # fields (observedAt, source) are filled in by the route from the
+                # request time; extra/unknown keys are ignored.
+                try:
+                    from magi_agent.evidence.types import (  # noqa: PLC0415
+                        EvidenceRecord,
+                        EvidenceSource,
+                    )
+
+                    observed_at = int(time.time() * 1000)
+                    _default_source = EvidenceSource(kind="verifier")
+                    records = []
+                    for raw in sample_records_raw:
+                        if not isinstance(raw, dict):
+                            continue
+                        try:
+                            rec = EvidenceRecord(
+                                type=str(raw.get("type", "unknown")),
+                                status=raw.get("status", "ok"),  # type: ignore[arg-type]
+                                observedAt=raw.get("observedAt", observed_at),
+                                source=_default_source,
+                                fields=raw.get("fields") or {},
+                            )
+                            records.append(rec)
+                        except Exception:  # noqa: BLE001
+                            pass
+                except Exception:  # noqa: BLE001
+                    records = []
+                if records:
+                    raw_preview = preview_cases(shape_ttl, records, observed_at=observed_at)
+                    # Convert MappingProxyType / Pydantic models to plain dicts.
+                    preview = [_make_json_safe(case) for case in raw_preview]
+
+            response_payload = {
+                "ok": True,
+                "shapeTtl": shape_ttl,
+                "review": _make_json_safe(review_result),
+                "explanation": explanation,
+                "previewCases": preview,
+            }
+            return JSONResponse(content=response_payload)
+
+        except Exception as exc:  # noqa: BLE001 — never raise from compile route
+            return JSONResponse(
+                content={"ok": False, "error": f"compile error: {exc}"}
+            )

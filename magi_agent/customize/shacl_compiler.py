@@ -720,10 +720,84 @@ async def review_compilation(
         return dict(_CONSERVATIVE_REVIEW_RESULT)
 
 
+# ---------------------------------------------------------------------------
+# Task 3.3 — production model-factory resolution (mirrors egress_critic pattern)
+# ---------------------------------------------------------------------------
+
+# Env var override for the SHACL compiler model (analogous to
+# MAGI_EGRESS_CRITIC_MODEL).  When unset the compiler uses the runtime's
+# configured provider model.
+_ENV_SHACL_COMPILER_MODEL = "MAGI_SHACL_COMPILER_MODEL"
+
+# Fixed sensible default used when the provider config has no own model string.
+_SHACL_COMPILER_DEFAULT_MODEL = "anthropic/claude-sonnet-4-6"
+
+
+def _production_shacl_compiler_model_factory() -> Callable[[], Any] | None:
+    """Build a provider-backed compiler model factory, or ``None`` (fail-open).
+
+    Mirrors ``_production_egress_critic_model_factory``:
+    ``resolve_provider_config()`` discovers the active provider/key; then
+    ``_build_litellm_for_config()`` constructs the ADK ``LiteLlm`` model.
+
+    Model resolution order (explicit, no cross-coupling with SmartApprove env):
+      1. ``MAGI_SHACL_COMPILER_MODEL`` env var (optional override), else
+      2. the resolved provider config's OWN default model, else
+      3. a fixed sensible default (``_SHACL_COMPILER_DEFAULT_MODEL``).
+
+    Fail-open: if no provider config/key can be resolved, returns ``None`` so
+    the compile route gracefully returns ``{ok: False}`` (never 500).
+    """
+    try:
+        from magi_agent.cli.providers import resolve_provider_config  # noqa: PLC0415
+
+        provider_config = resolve_provider_config()
+    except Exception:  # noqa: BLE001 — fail open
+        return None
+
+    if provider_config is None:
+        return None
+
+    import os  # noqa: PLC0415 (already imported at top — harmless re-import)
+    model_override = os.environ.get(_ENV_SHACL_COMPILER_MODEL, "").strip()
+    if not model_override:
+        provider_default = getattr(provider_config, "litellm_model", None)
+        model_override = (provider_default or "").strip() or _SHACL_COMPILER_DEFAULT_MODEL
+
+    def _factory() -> Any:
+        from magi_agent.cli.readonly_classifier import (  # noqa: PLC0415
+            _build_litellm_for_config,
+        )
+
+        return _build_litellm_for_config(provider_config, model_override=model_override)
+
+    return _factory
+
+
+def _resolve_shacl_compile_factory(body: dict) -> Callable[[], Any] | None:
+    """Resolve the SHACL compiler model factory for the compile route.
+
+    Resolution order (mirrors ``_egress_critic_model_factory``):
+      1. Test injection — ``body["_shaclModelFactory"]`` (test-only private key,
+         never surfaced externally) ALWAYS wins so tests stay hermetic.
+      2. Production — ``_production_shacl_compiler_model_factory()``.
+
+    Fail-open: returns ``None`` when no key/provider is available so callers
+    return ``{ok: False}`` gracefully rather than erroring.
+    """
+    if isinstance(body, dict):
+        factory = body.get("_shaclModelFactory")
+        if callable(factory):
+            return factory  # type: ignore[return-value]
+    return _production_shacl_compiler_model_factory()
+
+
 __all__ = [
     "available_fields",
     "preview_cases",
     "compile_nl_to_shacl",
     "explain_shape",
     "review_compilation",
+    "_production_shacl_compiler_model_factory",
+    "_resolve_shacl_compile_factory",
 ]
