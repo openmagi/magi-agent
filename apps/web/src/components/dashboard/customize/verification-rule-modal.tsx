@@ -4,7 +4,14 @@ import { useEffect, useState } from "react";
 import { Lock, Trash2 } from "lucide-react";
 import { Modal } from "@/components/ui/modal";
 import { Select } from "@/components/ui/select";
-import type { CustomizeCatalog, CustomRule, HarnessPresetItem } from "@/lib/customize-api";
+import type {
+  CustomizeCatalog,
+  CustomRule,
+  HarnessPresetItem,
+  ShaclCompileResponse,
+  ShaclPreviewCase,
+  ShaclReview,
+} from "@/lib/customize-api";
 
 interface VerificationRuleModalProps {
   open: boolean;
@@ -21,6 +28,12 @@ interface VerificationRuleModalProps {
   onToggleCustomRule: (rule: CustomRule, enabled: boolean) => void;
   onDeleteCustomRule: (id: string) => void;
   customRuleBusy: boolean;
+  /**
+   * Sends a natural-language constraint to the runtime for SHACL compilation
+   * and preview. Injected by the parent (customize-tab.tsx) so the modal
+   * doesn't call APIs directly.
+   */
+  onCompileShacl: (nlText: string, sampleRecords?: unknown[]) => Promise<ShaclCompileResponse>;
   /** USER-RULES.md body + save handler. */
   userRules: string;
   rulesSaving: boolean;
@@ -155,6 +168,7 @@ function CustomRulesSection({
   onAdd,
   onToggle,
   onDelete,
+  onCompileShacl,
 }: {
   menu: CustomizeCatalog["verification"]["customRuleMenu"];
   rules: CustomRule[];
@@ -162,9 +176,18 @@ function CustomRulesSection({
   onAdd: (rule: CustomRule) => void;
   onToggle: (rule: CustomRule, enabled: boolean) => void;
   onDelete: (id: string) => void;
+  onCompileShacl: (nlText: string, sampleRecords?: unknown[]) => Promise<ShaclCompileResponse>;
 }) {
   const [adding, setAdding] = useState(false);
-  const [kind, setKind] = useState<"deterministic_ref" | "tool_perm" | "llm_criterion" | "after_tool">("deterministic_ref");
+  const [kind, setKind] = useState<"deterministic_ref" | "tool_perm" | "llm_criterion" | "after_tool" | "shacl_constraint">("deterministic_ref");
+
+  // SHACL-specific state
+  const [shaclMode, setShaclMode] = useState<"nl" | "raw">("nl");
+  const [nlText, setNlText] = useState("");
+  const [rawTtl, setRawTtl] = useState("");
+  const [compiling, setCompiling] = useState(false);
+  const [shaclPreview, setShaclPreview] = useState<ShaclCompileResponse | null>(null);
+  const [shaclError, setShaclError] = useState<string | null>(null);
   const [ref, setRef] = useState(menu[0]?.ref ?? "");
   const [scope, setScope] = useState<string>("coding");
   const [matchType, setMatchType] = useState<"tool" | "domain" | "domainAllowlist">("tool");
@@ -181,6 +204,11 @@ function CustomRulesSection({
 
   const describe = (rule: CustomRule): string => {
     const p = (rule.what?.payload ?? {}) as Record<string, unknown>;
+    if (rule.what?.kind === "shacl_constraint") {
+      const ttl = typeof p.shapeTtl === "string" ? p.shapeTtl : "";
+      const snippet = ttl.slice(0, 40).replace(/\s+/g, " ");
+      return `SHACL constraint${snippet ? `: ${snippet}…` : ""}`;
+    }
     if (rule.what?.kind === "tool_perm") {
       const m = (p.match ?? {}) as Record<string, unknown>;
       const verb = p.decision === "ask" ? "Require approval for" : "Deny";
@@ -203,15 +231,29 @@ function CustomRulesSection({
   };
 
   const canAdd =
-    kind === "deterministic_ref"
-      ? !!ref
-      : kind === "llm_criterion"
-        ? !!criterion.trim()
-        : kind === "after_tool"
-          ? !!toolMatch.trim() && (!!contentPattern.trim() || !!criterion.trim())
-          : !!matchValue.trim();
+    kind === "shacl_constraint"
+      ? shaclMode === "nl"
+        ? !!shaclPreview?.ok && !shaclError
+        : !!rawTtl.trim()
+      : kind === "deterministic_ref"
+        ? !!ref
+        : kind === "llm_criterion"
+          ? !!criterion.trim()
+          : kind === "after_tool"
+            ? !!toolMatch.trim() && (!!contentPattern.trim() || !!criterion.trim())
+            : !!matchValue.trim();
 
   const buildRule = (): CustomRule => {
+    if (kind === "shacl_constraint") {
+      const shapeTtl = shaclMode === "raw" ? rawTtl.trim() : (shaclPreview?.shapeTtl ?? "");
+      return {
+        scope,
+        enabled: true,
+        what: { kind: "shacl_constraint", payload: { shapeTtl } },
+        firesAt: "pre_final",
+        action: "block",
+      };
+    }
     if (kind === "tool_perm") {
       const action = decision === "deny" ? "block" : "ask_approval";
       let match: Record<string, unknown>;
@@ -283,7 +325,14 @@ function CustomRulesSection({
               className="flex items-center justify-between gap-3 rounded-xl border border-black/[0.06] bg-white px-4 py-2.5"
             >
               <div className="min-w-0">
-                <p className="truncate text-sm font-medium text-foreground">{describe(rule)}</p>
+                <div className="flex items-center gap-2">
+                  <p className="truncate text-sm font-medium text-foreground">{describe(rule)}</p>
+                  {rule.what?.kind === "shacl_constraint" ? (
+                    <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-600">
+                      결정론 · SHACL · live
+                    </span>
+                  ) : null}
+                </div>
                 <p className="mt-0.5 text-[11px] text-secondary/80">
                   {rule.scope} · {rule.firesAt} · {rule.action}
                 </p>
@@ -316,7 +365,15 @@ function CustomRulesSection({
             Rule type
             <Select
               value={kind}
-              onChange={(v) => setKind(v as typeof kind)}
+              onChange={(v) => {
+                setKind(v as typeof kind);
+                // Reset SHACL sub-state on kind change
+                setShaclPreview(null);
+                setShaclError(null);
+                setNlText("");
+                setRawTtl("");
+                setShaclMode("nl");
+              }}
               className={selectTriggerCls}
               options={[
                 {
@@ -327,11 +384,172 @@ function CustomRulesSection({
                 { value: "tool_perm", label: "Tool permission (deny / approval)" },
                 { value: "llm_criterion", label: "LLM criterion check (final answer)" },
                 { value: "after_tool", label: "Tool-result ingestion gate (after-tool)" },
+                { value: "shacl_constraint", label: "결정론 제약 (SHACL)" },
               ]}
             />
           </label>
 
-          {kind === "deterministic_ref" ? (
+          {kind === "shacl_constraint" ? (
+            <div className="space-y-2">
+              {/* Input mode toggle: nl (자연어) | raw (.ttl 직접) */}
+              <div className="flex items-center gap-2">
+                <span className="text-[11px] font-medium text-secondary">입력 모드:</span>
+                <button
+                  type="button"
+                  onClick={() => { setShaclMode("nl"); setShaclPreview(null); setShaclError(null); }}
+                  className={`rounded px-2 py-0.5 text-[11px] font-medium transition-colors ${shaclMode === "nl" ? "bg-primary text-white" : "text-secondary hover:text-foreground"}`}
+                >
+                  자연어
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setShaclMode("raw"); setShaclPreview(null); setShaclError(null); }}
+                  className={`rounded px-2 py-0.5 text-[11px] font-medium transition-colors ${shaclMode === "raw" ? "bg-primary text-white" : "text-secondary hover:text-foreground"}`}
+                >
+                  .ttl 직접
+                </button>
+              </div>
+
+              {shaclMode === "nl" ? (
+                <>
+                  <label className="block text-[11px] font-medium text-secondary">
+                    자연어로 제약 설명
+                    <textarea
+                      aria-label="자연어 제약 입력"
+                      value={nlText}
+                      onChange={(e) => {
+                        setNlText(e.target.value);
+                        // Reset preview on text change
+                        setShaclPreview(null);
+                        setShaclError(null);
+                      }}
+                      rows={3}
+                      placeholder="e.g. 최종 답변에는 반드시 비용 항목의 금액이 포함되어야 한다."
+                      className={`${selectCls} resize-y`}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    disabled={!nlText.trim() || compiling}
+                    onClick={async () => {
+                      setCompiling(true);
+                      setShaclPreview(null);
+                      setShaclError(null);
+                      const result = await onCompileShacl(nlText);
+                      setCompiling(false);
+                      if (result.ok) {
+                        setShaclPreview(result);
+                      } else {
+                        setShaclError(result.error ?? "컴파일 실패");
+                      }
+                    }}
+                    className="rounded-lg bg-black/[0.07] px-3 py-1.5 text-[11px] font-semibold text-foreground disabled:opacity-40 hover:bg-black/[0.12]"
+                  >
+                    {compiling ? "컴파일 중…" : "컴파일"}
+                  </button>
+
+                  {/* Compile error */}
+                  {shaclError ? (
+                    <div className="rounded-lg border border-red-500/25 bg-red-500/[0.06] px-3 py-2 text-[11px] text-red-600">
+                      {shaclError}
+                    </div>
+                  ) : null}
+
+                  {/* Preview panel (ok:true) */}
+                  {shaclPreview?.ok ? (
+                    <div className="space-y-2 rounded-xl border border-emerald-500/20 bg-emerald-50/40 p-3">
+                      {/* Reviewer verdict */}
+                      {shaclPreview.review ? (
+                        <div className="text-[11px]">
+                          <span className="font-semibold text-foreground">리뷰어 verdict: </span>
+                          <span className="text-emerald-700">{shaclPreview.review.verdict}</span>
+                          <span className="ml-2 text-secondary">
+                            (신뢰도 {Math.round((shaclPreview.review.confidence ?? 0) * 100)}%)
+                          </span>
+                        </div>
+                      ) : null}
+
+                      {/* Reverse explanation */}
+                      {shaclPreview.explanation ? (
+                        <p className="text-[11px] leading-relaxed text-secondary">
+                          <span className="font-medium text-foreground">역설명: </span>
+                          {shaclPreview.explanation}
+                        </p>
+                      ) : null}
+
+                      {/* Sample PASS/FAIL list */}
+                      {shaclPreview.previewCases && shaclPreview.previewCases.length > 0 ? (
+                        <div>
+                          <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-secondary/70">
+                            샘플 결과
+                          </p>
+                          <div className="space-y-1">
+                            {shaclPreview.previewCases.map((c: ShaclPreviewCase, i: number) => (
+                              <div key={i} className="flex items-center gap-2 text-[11px]">
+                                <span className={c.conforms ? "text-emerald-600" : "text-red-500"}>
+                                  {c.conforms ? "PASS" : "FAIL"}
+                                </span>
+                                <span className="text-secondary">{c.status}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ) : null}
+
+                      {/* Collapsed: generated SHACL */}
+                      <details className="mt-1">
+                        <summary className="cursor-pointer text-[10px] font-medium text-secondary hover:text-foreground">
+                          생성된 SHACL 보기
+                        </summary>
+                        <pre className="mt-1 overflow-x-auto rounded bg-black/[0.04] p-2 text-[10px] text-foreground">
+                          {shaclPreview.shapeTtl}
+                        </pre>
+                      </details>
+
+                      {/* Approve / retry buttons */}
+                      <div className="mt-2 flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onAdd(buildRule());
+                            // Reset SHACL state after approval
+                            setShaclPreview(null);
+                            setShaclError(null);
+                            setNlText("");
+                            setRawTtl("");
+                            setAdding(false);
+                          }}
+                          className="rounded-lg bg-emerald-600 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-emerald-700"
+                        >
+                          ✓ 이게 맞습니다 — 활성화
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { setShaclPreview(null); setShaclError(null); }}
+                          className="rounded-lg px-3 py-1.5 text-[11px] text-secondary hover:text-foreground"
+                        >
+                          ✗ 다시
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+                </>
+              ) : (
+                /* raw .ttl mode */
+                <label className="block text-[11px] font-medium text-secondary">
+                  SHACL .ttl 직접 입력
+                  <textarea
+                    aria-label="SHACL TTL 입력"
+                    value={rawTtl}
+                    onChange={(e) => setRawTtl(e.target.value)}
+                    rows={6}
+                    placeholder="@prefix sh: <http://www.w3.org/ns/shacl#> ."
+                    className={`${selectCls} resize-y font-mono text-[11px]`}
+                  />
+                </label>
+              )}
+            </div>
+          ) : kind === "deterministic_ref" ? (
             <label className="block text-[11px] font-medium text-secondary">
               Require
               <Select
@@ -451,28 +669,40 @@ function CustomRulesSection({
           <div className="flex justify-end gap-2">
             <button
               type="button"
-              onClick={() => setAdding(false)}
+              onClick={() => {
+                setAdding(false);
+                setShaclPreview(null);
+                setShaclError(null);
+                setNlText("");
+                setRawTtl("");
+              }}
               className="rounded-lg px-3 py-1.5 text-sm text-secondary hover:text-foreground"
             >
               Cancel
             </button>
-            <button
-              type="button"
-              disabled={busy || !canAdd}
-              onClick={() => {
-                onAdd(buildRule());
-                setMatchValue("");
-                setCriterion("");
-                setToolMatch("");
-                setContentPattern("");
-                setContentIsRegex(false);
-                setContentNegate(false);
-                setAdding(false);
-              }}
-              className="rounded-lg bg-primary px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-40"
-            >
-              Add rule
-            </button>
+            {/* For SHACL nl mode the approve button (above) handles saving — hide generic Add rule. */}
+            {kind !== "shacl_constraint" || shaclMode === "raw" ? (
+              <button
+                type="button"
+                disabled={busy || !canAdd}
+                onClick={() => {
+                  onAdd(buildRule());
+                  setMatchValue("");
+                  setCriterion("");
+                  setToolMatch("");
+                  setContentPattern("");
+                  setContentIsRegex(false);
+                  setContentNegate(false);
+                  setRawTtl("");
+                  setShaclPreview(null);
+                  setShaclError(null);
+                  setAdding(false);
+                }}
+                className="rounded-lg bg-primary px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-40"
+              >
+                {kind === "shacl_constraint" ? "활성화" : "Add rule"}
+              </button>
+            ) : null}
           </div>
         </div>
       ) : (
@@ -503,6 +733,7 @@ export function VerificationRuleModal({
   userRules,
   rulesSaving,
   onSaveRules,
+  onCompileShacl,
   error,
 }: VerificationRuleModalProps): React.ReactElement | null {
   const [rulesDraft, setRulesDraft] = useState(userRules);
@@ -603,7 +834,7 @@ export function VerificationRuleModal({
             </details>
           ) : null}
 
-          {/* Structured custom rules (deterministic) */}
+          {/* Structured custom rules (deterministic + SHACL) */}
           <CustomRulesSection
             menu={catalog.customRuleMenu}
             rules={customRules}
@@ -611,6 +842,7 @@ export function VerificationRuleModal({
             onAdd={onAddCustomRule}
             onToggle={onToggleCustomRule}
             onDelete={onDeleteCustomRule}
+            onCompileShacl={onCompileShacl}
           />
 
           {/* Freeform prompt guidance (USER-RULES.md) */}
