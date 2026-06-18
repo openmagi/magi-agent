@@ -16,7 +16,7 @@ from collections.abc import Iterable
 
 import rdflib
 
-from magi_agent.evidence.shacl_ontology import MAGI, evidence_records_to_graph
+from magi_agent.evidence.shacl_ontology import evidence_records_to_graph
 from magi_agent.evidence.types import EvidenceRecord, EvidenceSource
 
 # ---------------------------------------------------------------------------
@@ -101,10 +101,6 @@ def _node_str(node: rdflib.term.Node | None) -> str | None:
     """Convert an RDF node to a stable string, or None if absent."""
     if node is None:
         return None
-    if isinstance(node, rdflib.Literal):
-        return str(node)
-    if isinstance(node, (rdflib.URIRef, rdflib.BNode)):
-        return str(node)
     return str(node)
 
 

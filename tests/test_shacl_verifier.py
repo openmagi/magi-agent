@@ -118,13 +118,16 @@ def test_violation_status_failed() -> None:
     v = violations[0]
     # EvidenceRecord freezes nested dicts to MappingProxyType; check Mapping (superset of dict)
     assert isinstance(v, collections.abc.Mapping), f"Each violation must be a Mapping, got {type(v)}"
-    # Must have path and message; value may be absent if pyshacl omits it
+    # Must have path and message
     assert "resultPath" in v, f"violation missing 'resultPath': {v}"
     assert "message" in v, f"violation missing 'message': {v}"
     # Message should reference the shape message
     assert "3000" in str(v["message"]) or "amount" in str(v["message"]).lower(), (
         f"Expected shape message content in violation message, got: {v['message']}"
     )
+    # pyshacl includes sh:value for sh:maxInclusive violations
+    assert "value" in v, f"violation missing 'value' (pyshacl sh:value): {v}"
+    assert v["value"] is not None, "violation 'value' must not be None for maxInclusive"
 
 
 # ---------------------------------------------------------------------------
@@ -206,29 +209,43 @@ def test_determinism_same_input_same_record() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Test 6 — inference="none": RDFS-only violations do NOT appear
+# Test 6 — inference="none" is always forwarded to _pyshacl_validate
 # ---------------------------------------------------------------------------
 
 
-def test_inference_none_rdfs_violation_absent() -> None:
-    """A shape that only fires under RDFS subclass inference must produce no violations
-    when inference='none' is used (which is the fixed setting)."""
+def test_inference_none_kwarg_forwarded(monkeypatch: pytest.MonkeyPatch) -> None:
+    """run_shacl_rule must always pass inference="none" to _pyshacl_validate.
+
+    Monkeypatches the module-level seam to capture the kwarg, then delegates
+    to the real validate so the result is a genuine (conforms, graph, text) tuple.
+    """
+    import magi_agent.evidence.shacl_verifier as mod
+
+    captured: dict[str, object] = {}
+    _real_validate = mod._pyshacl_validate  # noqa: SLF001
+
+    def _spy_validate(
+        data_graph: object,
+        shacl_graph: object,
+        inference: str,
+    ) -> object:
+        captured["inference"] = inference
+        return _real_validate(data_graph, shacl_graph, inference)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(mod, "_pyshacl_validate", _spy_validate)
+
     from magi_agent.evidence.shacl_verifier import run_shacl_rule
 
-    # The record has amount=4200 which would violate the subclass shape IF inference were active
-    records = [_make_record(fields={"amount": 4200})]
+    records = [_make_record(fields={"amount": 1000})]
+    result = run_shacl_rule(records, _SHAPE_AMOUNT_MAX_3000, "test-rule-inference", observed_at=_OBSERVED_AT)
 
-    result = run_shacl_rule(
-        records,
-        _SHAPE_RDFS_INFERENCE_ONLY,
-        "test-rule-rdfs",
-        observed_at=_OBSERVED_AT,
+    # The spy must have been called (i.e. no early bailout)
+    assert "inference" in captured, "spy was never called — early bailout before pyshacl?"
+    assert captured["inference"] == "none", (
+        f"INFERENCE KWARG BUG: expected 'none', got {captured['inference']!r}. "
+        "run_shacl_rule must always pass inference='none' to _pyshacl_validate."
     )
-
-    # With inference="none", magi:SubEvidence subclass is not inferred, so no violations
-    assert result.status == "ok", (
-        f"Expected 'ok' (no violations with inference=none), got '{result.status}'. "
-        f"violations={result.fields.get('violations')}"
+    # Validate still returned a real result (not a fail-safe unknown)
+    assert result.status in ("ok", "failed"), (
+        f"Expected ok/failed from real validate, got {result.status!r}"
     )
-    assert result.fields["conforms"] is True
-    assert result.fields["violations"] == ()
