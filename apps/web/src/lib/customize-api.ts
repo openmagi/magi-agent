@@ -240,9 +240,22 @@ export interface ShaclReview {
 }
 
 /**
+ * A single turn in a conversational compile session.
+ * Used to carry prior context to the compiler across multiple rounds.
+ */
+export interface ConversationTurn {
+  role: "user" | "assistant";
+  content: string;
+}
+
+/**
  * Response from `POST /v1/app/customize/custom-rules/compile`.
  * Preview-only — never saves; the caller must call `putCustomRule` after
  * the user explicitly approves the compiled shape.
+ *
+ * When the compiler needs clarification instead of returning a shape,
+ * `clarifyingQuestions` is present, `ok` is false, `shapeTtl` is null,
+ * and `error` is explicitly null (not undefined).
  */
 export interface ShaclCompileResponse {
   ok: boolean;
@@ -251,7 +264,10 @@ export interface ShaclCompileResponse {
   explanation?: string;
   previewCases?: ShaclPreviewCase[];
   previewTruncated?: boolean;
-  error?: string;
+  /** Present when the compiler asks for clarification instead of returning a shape. */
+  clarifyingQuestions?: string[];
+  /** Compile error message, or explicitly null on the clarifyingQuestions branch. */
+  error?: string | null;
 }
 
 /**
@@ -265,17 +281,31 @@ export interface ShaclCompileResponse {
  *
  * The UI is responsible for displaying the error; this function is safe to
  * await without a try/catch.
+ *
+ * When `priorTurns` is provided and non-empty, it is included in the POST body
+ * to carry conversational context to the compiler. When omitted or empty, the
+ * `priorTurns` key is NOT included in the body (existing callers are byte-identical
+ * at the wire level).
  */
 export async function compileCustomRule(
   fetch: (path: string, init?: RequestInit) => Promise<Response>,
   nlText: string,
   sampleRecords?: unknown[],
+  priorTurns?: ConversationTurn[],
 ): Promise<ShaclCompileResponse> {
   try {
+    const bodyPayload: {
+      nlText: string;
+      sampleRecords?: unknown[];
+      priorTurns?: ConversationTurn[];
+    } = { nlText, sampleRecords };
+    if (priorTurns !== undefined && priorTurns.length > 0) {
+      bodyPayload.priorTurns = priorTurns;
+    }
     const res = await fetch(`/v1/app/customize/custom-rules/compile`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ nlText, sampleRecords }),
+      body: JSON.stringify(bodyPayload),
     });
     if (!res.ok) {
       return { ok: false, error: `Compile request failed (${res.status})` };
