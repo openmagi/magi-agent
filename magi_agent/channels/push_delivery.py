@@ -5,10 +5,11 @@ import hashlib
 import re
 from typing import Any, Literal, Protocol, Self
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from magi_agent.channels.contract import ChannelRef, ChannelType
 from magi_agent.channels.runtime_boundary import ChannelRuntimeReceipt
+from magi_agent.ops.authority import FalseOnlyAuthorityModel
 from magi_agent.runtime.provider_execution import (
     ProviderExecutionBoundary,
     ProviderExecutionConfig,
@@ -65,9 +66,7 @@ class PushDeliveryProviderPort(Protocol):
     def push(self, request: PushDeliveryRequest) -> Mapping[str, object]: ...
 
 
-class PushDeliveryConfig(BaseModel):
-    model_config = _MODEL_CONFIG
-
+class PushDeliveryConfig(FalseOnlyAuthorityModel):
     enabled: bool = False
     local_fake_provider_enabled: bool = Field(default=False, alias="localFakeProviderEnabled")
     selected_channel_routes: tuple[ChannelType, ...] = Field(default=(), alias="selectedChannelRoutes")
@@ -78,25 +77,6 @@ class PushDeliveryConfig(BaseModel):
         alias="productionPushWritesEnabled",
     )
     route_attached: Literal[False] = Field(default=False, alias="routeAttached")
-
-    @classmethod
-    def model_construct(cls, _fields_set: set[str] | None = None, **values: Any) -> Self:
-        _ = _fields_set, values
-        return cls()
-
-    def model_copy(self, *, update: Mapping[str, Any] | None = None, deep: bool = False) -> Self:
-        data = self.model_dump(by_alias=False, mode="python", warnings=False)
-        if update:
-            alias_to_name = {
-                field.alias: name
-                for name, field in self.__class__.model_fields.items()
-                if field.alias is not None
-            }
-            data.update({alias_to_name.get(str(key), str(key)): value for key, value in update.items()})
-        data["production_push_writes_enabled"] = False
-        data["route_attached"] = False
-        _ = deep
-        return type(self).model_validate(data)
 
     @field_validator("selected_channel_routes", mode="before")
     @classmethod
@@ -121,31 +101,11 @@ class PushDeliveryConfig(BaseModel):
         return ()
 
 
-class PushDeliveryAuthorityFlags(BaseModel):
-    model_config = _MODEL_CONFIG
-
+class PushDeliveryAuthorityFlags(FalseOnlyAuthorityModel):
     provider_called: Literal[False] = Field(default=False, alias="providerCalled")
     production_push_write: Literal[False] = Field(default=False, alias="productionPushWrite")
     web_app_canary_attached: Literal[False] = Field(default=False, alias="webAppCanaryAttached")
     route_attached: Literal[False] = Field(default=False, alias="routeAttached")
-
-    @classmethod
-    def model_construct(cls, _fields_set: set[str] | None = None, **values: Any) -> Self:
-        _ = _fields_set, values
-        return cls()
-
-    def model_copy(self, *, update: Mapping[str, Any] | None = None, deep: bool = False) -> Self:
-        _ = update, deep
-        return type(self)()
-
-    @field_serializer(
-        "provider_called",
-        "production_push_write",
-        "web_app_canary_attached",
-        "route_attached",
-    )
-    def _serialize_false(self, _value: object) -> bool:
-        return False
 
 
 class PushDeliveryRequest(BaseModel):

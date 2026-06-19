@@ -12,7 +12,12 @@
     "webAppCanaryAttached": false
   },
   "model_construct_force_false_leaks": [],
-  "model_validate_dump": null,
+  "model_validate_dump": {
+    "productionPushWrite": false,
+    "providerCalled": false,
+    "routeAttached": false,
+    "webAppCanaryAttached": false
+  },
   "model_validate_force_false_leaks": [],
   "qualname": "magi_agent.channels.push_delivery.PushDeliveryAuthorityFlags"
 }

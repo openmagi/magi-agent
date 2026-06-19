@@ -24,10 +24,19 @@ def test_any_missing_precondition_blocks_routing():
     assert decide_workflow_route(eligible=False, confirmed=True, enabled=True).routed is False
 
 
-def test_model_construct_disabled():
-    import pytest
-    with pytest.raises(TypeError):
-        WorkflowRouteDecision.model_construct()
+def test_model_construct_force_falses_authority_flags():
+    # C-4 PR-E: WorkflowRouteDecision now inherits FalseOnlyAuthorityModel.
+    # The legacy ``model_construct`` raised TypeError (fail-CLOSED-via-raise).
+    # The kernel routes every construction surface through ``model_validate``,
+    # which force-falses Literal[False] fields on input (strictly-stronger
+    # fail-CLOSED-via-coerce). The security invariant ("authority flags cannot
+    # be turned on through construction") is preserved; only the failure mode
+    # changes (raise -> coerce).
+    d = WorkflowRouteDecision.model_construct(
+        routed=True, route_attached=True, execution_attached=True
+    )
+    assert d.route_attached is False
+    assert d.execution_attached is False
 
 
 def test_dispatcher_seam_defaults_to_none():

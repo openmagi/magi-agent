@@ -580,11 +580,23 @@ if loaded:
     assert completed.returncode == 0, completed.stderr
 
 
-def test_telegram_runtime_config_rejects_attached_flags() -> None:
-    with pytest.raises(ValueError):
-        TelegramRuntimeConfig.model_validate(
-            {
-                "enabled": True,
-                "telegramPollingAttached": True,
-            }
-        )
+def test_telegram_runtime_config_force_falses_attached_flags() -> None:
+    # C-4 PR-E: TelegramRuntimeConfig now inherits FalseOnlyAuthorityModel. The
+    # legacy bare-``BaseModel`` base let pydantic's ``Literal[False]`` raise on a
+    # malicious-True payload (fail-CLOSED-via-raise). The kernel's
+    # ``_force_false`` ``model_validator(mode="before")`` coerces malicious-True
+    # to False BEFORE the Literal type check, replacing the raise with a
+    # strictly-stronger coerce on every construction surface (also closes the
+    # ``model_construct`` escape hatch that the legacy bare-``BaseModel`` left
+    # open). The security invariant ("attached flags cannot be True") is
+    # preserved; only the failure mode (raise -> coerce) changes.
+    config = TelegramRuntimeConfig.model_validate(
+        {
+            "enabled": True,
+            "telegramPollingAttached": True,
+        }
+    )
+    assert config.telegram_polling_attached is False
+    assert config.telegram_attached is False
+    assert config.production_channel_write_enabled is False
+    assert config.route_attached is False

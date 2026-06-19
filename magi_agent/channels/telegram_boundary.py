@@ -4,7 +4,9 @@ from collections.abc import Mapping, Sequence
 import re
 from typing import Any, Literal, Protocol, Self
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from magi_agent.ops.authority import FalseOnlyAuthorityModel
 
 
 TelegramOperation = Literal[
@@ -121,9 +123,7 @@ class TelegramProviderPort(Protocol):
     ) -> Mapping[str, Any]: ...
 
 
-class TelegramRuntimeConfig(BaseModel):
-    model_config = _MODEL_CONFIG
-
+class TelegramRuntimeConfig(FalseOnlyAuthorityModel):
     enabled: bool = False
     local_fake_telegram_provider_enabled: bool = Field(
         default=False,
@@ -141,9 +141,7 @@ class TelegramRuntimeConfig(BaseModel):
     route_attached: Literal[False] = Field(default=False, alias="routeAttached")
 
 
-class TelegramRuntimeAuthorityFlags(BaseModel):
-    model_config = _MODEL_CONFIG
-
+class TelegramRuntimeAuthorityFlags(FalseOnlyAuthorityModel):
     telegram_polling_attached: Literal[False] = Field(
         default=False,
         alias="telegramPollingAttached",
@@ -158,34 +156,6 @@ class TelegramRuntimeAuthorityFlags(BaseModel):
         alias="productionChannelWrite",
     )
     route_attached: Literal[False] = Field(default=False, alias="routeAttached")
-
-    @classmethod
-    def model_construct(
-        cls,
-        _fields_set: set[str] | None = None,
-        **values: Any,
-    ) -> Self:
-        _ = _fields_set, values
-        return cls()
-
-    def model_copy(
-        self,
-        *,
-        update: Mapping[str, Any] | None = None,
-        deep: bool = False,
-    ) -> Self:
-        _ = update, deep
-        return type(self)()
-
-    @field_serializer(
-        "telegram_polling_attached",
-        "telegram_attached",
-        "channel_delivery_performed",
-        "production_channel_write",
-        "route_attached",
-    )
-    def _serialize_false(self, _value: object) -> bool:
-        return False
 
 
 class TelegramRuntimeRequest(BaseModel):

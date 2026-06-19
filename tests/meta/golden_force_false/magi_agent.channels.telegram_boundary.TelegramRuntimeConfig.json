@@ -8,18 +8,20 @@
   "model_construct_dump": {
     "enabled": false,
     "localFakeTelegramProviderEnabled": false,
-    "productionChannelWriteEnabled": true,
-    "routeAttached": true,
-    "telegramAttached": true,
-    "telegramPollingAttached": true
+    "productionChannelWriteEnabled": false,
+    "routeAttached": false,
+    "telegramAttached": false,
+    "telegramPollingAttached": false
   },
-  "model_construct_force_false_leaks": [
-    "production_channel_write_enabled",
-    "route_attached",
-    "telegram_attached",
-    "telegram_polling_attached"
-  ],
-  "model_validate_dump": null,
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": {
+    "enabled": false,
+    "localFakeTelegramProviderEnabled": false,
+    "productionChannelWriteEnabled": false,
+    "routeAttached": false,
+    "telegramAttached": false,
+    "telegramPollingAttached": false
+  },
   "model_validate_force_false_leaks": [],
   "qualname": "magi_agent.channels.telegram_boundary.TelegramRuntimeConfig"
 }

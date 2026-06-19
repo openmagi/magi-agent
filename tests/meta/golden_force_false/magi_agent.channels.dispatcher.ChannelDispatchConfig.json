@@ -13,7 +13,15 @@
     "webAppCanaryRouteEnabled": false
   },
   "model_construct_force_false_leaks": [],
-  "model_validate_dump": null,
+  "model_validate_dump": {
+    "enabled": false,
+    "localFakeProviderEnabled": false,
+    "productionChannelWritesEnabled": false,
+    "providerAllowlist": [],
+    "routeAttached": false,
+    "selectedChannelRoutes": [],
+    "webAppCanaryRouteEnabled": false
+  },
   "model_validate_force_false_leaks": [],
   "qualname": "magi_agent.channels.dispatcher.ChannelDispatchConfig"
 }

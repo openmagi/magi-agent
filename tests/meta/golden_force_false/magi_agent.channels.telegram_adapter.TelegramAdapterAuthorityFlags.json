@@ -20,7 +20,16 @@
     "webhookDeleted": false
   },
   "model_construct_force_false_leaks": [],
-  "model_validate_dump": null,
+  "model_validate_dump": {
+    "channelDeliveryPerformed": false,
+    "downloadPerformed": false,
+    "productionChannelWrite": false,
+    "providerCalled": false,
+    "routeAttached": false,
+    "telegramAttached": false,
+    "telegramPollingAttached": false,
+    "webhookDeleted": false
+  },
   "model_validate_force_false_leaks": [],
   "qualname": "magi_agent.channels.telegram_adapter.TelegramAdapterAuthorityFlags"
 }
