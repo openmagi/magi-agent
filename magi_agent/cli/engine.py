@@ -1592,10 +1592,14 @@ class MagiEngineDriver:
 
         types = deps["types"]
         adapter = deps["OpenMagiRunnerAdapter"](runner=runner)  # type: ignore[operator]
-        bridge = deps["OpenMagiEventBridge"](  # type: ignore[operator]
-            live_compatible=True,
-            wire_profile=self._wire_profile,
-        )
+        # Pass ``wire_profile`` ONLY when one is set (hosted path). On the CLI
+        # path (``None``) we omit the kwarg entirely so the construction is
+        # byte-identical to pre-wire-profile — and test doubles injected via the
+        # ``deps`` seam (whose ``__init__`` predates this kwarg) keep working.
+        bridge_kwargs: dict[str, object] = {"live_compatible": True}
+        if self._wire_profile is not None:
+            bridge_kwargs["wire_profile"] = self._wire_profile
+        bridge = deps["OpenMagiEventBridge"](**bridge_kwargs)  # type: ignore[operator]
         sanitize = deps["sanitize_agent_event"]
         runner_turn_input_cls = deps["RunnerTurnInput"]
         effective_harness_state = self._with_runner_policy_harness_state(
