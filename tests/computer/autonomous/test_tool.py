@@ -27,6 +27,16 @@ def test_binding_without_registration_returns_empty() -> None:
     assert bind_computer_toolhost_handler(ToolRegistry()) == ()
 
 
+def test_manifest_input_schema_declares_optional_app() -> None:
+    registry = ToolRegistry()
+    register_computer_tool_manifest(registry)
+    schema = registry.resolve_registration(COMPUTER_TOOL_NAME).manifest.input_schema
+    props = schema["properties"]
+    assert "app" in props
+    assert "task" in schema["required"]
+    assert "app" not in schema["required"]
+
+
 def test_handler_missing_binary_blocks(monkeypatch) -> None:
     monkeypatch.setattr("shutil.which", lambda _name: None)
     result = asyncio.run(

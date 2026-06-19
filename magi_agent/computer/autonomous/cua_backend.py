@@ -65,20 +65,53 @@ def _window_area(window: Mapping[str, object]) -> float:
     return 0.0
 
 
-def _select_window(windows: Sequence[Mapping[str, object]]) -> Mapping[str, object]:
+def _matches_app_hint(window: Mapping[str, object], hint: str) -> bool:
+    """Case-insensitive substring match against ``app_name`` or ``title``.
+
+    Substring rather than equality so a user can pass ``"chrome"`` and match
+    ``"Google Chrome"``, and so localized app names match (e.g. macOS shows
+    TextEdit as ``"텍스트 편집기"`` under a Korean locale — passing the bundle
+    id stem ``"textedit"`` still works because cua-driver's underlying app
+    metadata exposes it; for AppleScript-style scripting names the substring
+    catches partial overlaps).
+    """
+    needle = hint.casefold().strip()
+    if not needle:
+        return True
+    for key in ("app_name", "title"):
+        haystack = str(window.get(key, "") or "").casefold()
+        if needle in haystack:
+            return True
+    return False
+
+
+def _select_window(
+    windows: Sequence[Mapping[str, object]],
+    *,
+    app_hint: str | None = None,
+) -> Mapping[str, object]:
     """Pick the control target: the largest on-screen non-driver window.
+
+    When ``app_hint`` is given, narrow the candidate pool to windows whose
+    ``app_name``/``title`` match the hint (case-insensitive substring); also
+    consider off-screen matches in that case, since cua-driver launches apps
+    backgrounded with ``is_on_screen=False`` and we still want to target them.
 
     Falls back to the largest of whatever is available. ``windows[0]`` is wrong
     in practice — the driver's own window and tiny accessory strips can outrank
     the main content window in z-order.
     """
-    usable = [
+    non_driver = [
         w
         for w in windows
-        if w.get("is_on_screen", True)
-        and str(w.get("app_name", "")).casefold() not in _DRIVER_APP_NAMES
+        if str(w.get("app_name", "")).casefold() not in _DRIVER_APP_NAMES
     ]
-    pool = usable or list(windows)
+    if app_hint:
+        hinted = [w for w in non_driver if _matches_app_hint(w, app_hint)]
+        pool = hinted or non_driver
+    else:
+        pool = [w for w in non_driver if w.get("is_on_screen", True)] or non_driver
+    pool = pool or list(windows)
     if not pool:
         return {}
     return max(pool, key=_window_area)
@@ -121,13 +154,19 @@ class CuaDriverBackend:
             await sess.initialize()
             yield cls(session=sess)
 
-    async def capture(self) -> CuaCapture:
+    async def capture(self, *, app_hint: str | None = None) -> CuaCapture:
+        # When an app_hint is given the target may be backgrounded (cua-driver's
+        # launch_app sets self_activation_suppressed → is_on_screen=False); ask
+        # for all windows so off-screen hint matches are visible.
+        on_screen_only = app_hint is None
         windows = _unwrap(
-            await self._session.call_tool("list_windows", {"on_screen_only": True})  # type: ignore[attr-defined]
+            await self._session.call_tool(  # type: ignore[attr-defined]
+                "list_windows", {"on_screen_only": on_screen_only}
+            )
         )
         window_list = windows.get("windows")
         entries = window_list if isinstance(window_list, (list, tuple)) else []
-        first = _select_window(entries)
+        first = _select_window(entries, app_hint=app_hint)
         pid = _as_int(first.get("pid", 0), 0)
         window_id = _as_int(first.get("window_id", 0), 0)
 
