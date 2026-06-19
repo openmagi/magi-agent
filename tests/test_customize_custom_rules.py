@@ -70,6 +70,61 @@ def test_tool_perm_bad_allowlist_rejected():
     assert validate_custom_rule(rule)
 
 
+def test_valid_tool_perm_path():
+    rule = _tool(
+        what={
+            "kind": "tool_perm",
+            "payload": {"match": {"path": "/Users/me/secret"}, "decision": "deny"},
+        },
+    )
+    assert validate_custom_rule(rule) == []
+
+
+def test_valid_tool_perm_path_allowlist():
+    rule = _tool(
+        what={
+            "kind": "tool_perm",
+            "payload": {
+                "match": {"pathAllowlist": ["/Users/me/proj"]},
+                "decision": "deny",
+            },
+        },
+    )
+    assert validate_custom_rule(rule) == []
+
+
+def test_tool_perm_bad_path_rejected():
+    rule = _tool(
+        what={
+            "kind": "tool_perm",
+            "payload": {"match": {"path": ""}, "decision": "deny"},
+        },
+    )
+    assert validate_custom_rule(rule)
+
+
+def test_tool_perm_bad_path_allowlist_rejected():
+    # Empty list
+    rule = _tool(
+        what={
+            "kind": "tool_perm",
+            "payload": {"match": {"pathAllowlist": []}, "decision": "deny"},
+        },
+    )
+    assert validate_custom_rule(rule)
+    # Non-string entry
+    rule2 = _tool(
+        what={
+            "kind": "tool_perm",
+            "payload": {
+                "match": {"pathAllowlist": ["/Users/me/proj", 123]},
+                "decision": "deny",
+            },
+        },
+    )
+    assert validate_custom_rule(rule2)
+
+
 def test_valid_llm_pre_final():
     assert validate_custom_rule(_llm()) == []
 
