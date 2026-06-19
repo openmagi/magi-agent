@@ -31,7 +31,9 @@ from __future__ import annotations
 import logging
 import tomllib
 from collections.abc import Mapping
+from importlib import metadata as importlib_metadata
 from pathlib import Path
+from typing import Any
 
 from magi_agent.config.flags import flag_bool
 from magi_agent.recipes.compiler import PackRegistry, RecipePackManifest
@@ -39,11 +41,15 @@ from magi_agent.recipes.compiler import PackRegistry, RecipePackManifest
 logger = logging.getLogger(__name__)
 
 MAGI_KERNEL_RECIPE_PACKS_ENABLED_ENV = "MAGI_KERNEL_RECIPE_PACKS_ENABLED"
+MAGI_KERNEL_RECIPE_ENTRY_POINTS_ENABLED_ENV = "MAGI_KERNEL_RECIPE_ENTRY_POINTS_ENABLED"
 
 _EXTERNAL_RECIPE_NAMESPACE_PREFIX = "ext."
+RECIPE_ENTRY_POINT_GROUP = "magi.recipes"
 
 __all__ = [
+    "MAGI_KERNEL_RECIPE_ENTRY_POINTS_ENABLED_ENV",
     "MAGI_KERNEL_RECIPE_PACKS_ENABLED_ENV",
+    "RECIPE_ENTRY_POINT_GROUP",
     "build_runtime_pack_registry",
     "parse_recipe_manifest",
     "validate_external_recipe_pack",
@@ -87,6 +93,77 @@ def validate_external_recipe_pack(manifest: RecipePackManifest) -> str:
     if manifest.default_enabled:
         return "r7_default_enabled_blocked"
     return ""
+
+
+def _coerce_entry_point_payload(value: Any) -> dict | None:
+    """Coerce an ``entry_points`` payload to a recipe-manifest dict, or ``None``.
+
+    Honesty / security: ``EntryPoint.load()`` imports the publisher's module, which
+    runs its top-level code (the standard Python distribution-tool model — pip-
+    installed plugins are *installation-trusted*, like pytest plugins). We restrict
+    accepted payloads to inert DATA shapes (dict / Pydantic model with
+    ``model_dump``) and **skip callable / code-carrying payloads** so a published
+    plugin cannot smuggle a tool/control invocation through the recipe surface — it
+    can only contribute a declarative recipe manifest. This is intentionally
+    self-host-trust only and gated by a separate default-OFF flag.
+    """
+
+    if value is None or callable(value):
+        return None
+    if isinstance(value, dict):
+        return value
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        try:
+            dumped = model_dump(by_alias=True)
+        except TypeError:
+            dumped = model_dump()
+        return dumped if isinstance(dumped, dict) else None
+    return None
+
+
+def _entry_point_recipe_manifests(*, group: str) -> list[RecipePackManifest]:
+    """Discover external recipe manifests via Python ``entry_points``.
+
+    Each accepted manifest is parsed through ``RecipePackManifest.model_validate``
+    and otherwise dropped. Any per-entry failure (import error, validation error,
+    callable payload) is skipped with a warning; the whole boundary is fail-closed
+    so the rest of the registry build is never halted by a bad publisher.
+    """
+
+    manifests: list[RecipePackManifest] = []
+    try:
+        entry_points = tuple(importlib_metadata.entry_points(group=group))
+    except Exception:  # noqa: BLE001 - importlib_metadata absent/broken → empty
+        return manifests
+    for ep in entry_points:
+        loader = getattr(ep, "load", None)
+        if not callable(loader):
+            continue
+        try:
+            value = loader()
+        except Exception:  # noqa: BLE001 - a broken publisher never poisons others
+            logger.warning("recipe entry_point %r failed to load", getattr(ep, "name", "?"))
+            continue
+        payload = _coerce_entry_point_payload(value)
+        if payload is None:
+            # Callable / code-carrying / unknown-shape payloads are intentionally
+            # skipped: the recipe surface is declarative-only.
+            logger.warning(
+                "recipe entry_point %r skipped (non-data payload)",
+                getattr(ep, "name", "?"),
+            )
+            continue
+        try:
+            manifest = RecipePackManifest.model_validate(payload)
+        except Exception:  # noqa: BLE001 - a malformed manifest drops, never raises
+            logger.warning(
+                "recipe entry_point %r dropped (invalid manifest)",
+                getattr(ep, "name", "?"),
+            )
+            continue
+        manifests.append(manifest)
+    return manifests
 
 
 def _register_recipe_pack(
@@ -155,5 +232,18 @@ def build_runtime_pack_registry(env: Mapping[str, str] | None = None) -> PackReg
                     _register_recipe_pack(registry, manifest, trusted=trusted)
     except Exception:  # noqa: BLE001 - fail-closed: external packs never halt compile
         return PackRegistry.with_first_party_packs()
+
+    # Python ``entry_points`` source (pip-installed recipe publishers). Separate
+    # default-OFF flag (AND'd with the kernel-packs gate) because entry_points
+    # imports the publisher's module — the standard distribution-tool trust model
+    # (like pytest plugins). Self-host opt-in only; the hosted floor must never
+    # enable this. Untrusted (external publishers): same compose-only validation
+    # as FS user-dir packs (R1/R4/R6/R7).
+    if flag_bool(MAGI_KERNEL_RECIPE_ENTRY_POINTS_ENABLED_ENV, env=env):
+        try:
+            for manifest in _entry_point_recipe_manifests(group=RECIPE_ENTRY_POINT_GROUP):
+                _register_recipe_pack(registry, manifest, trusted=False)
+        except Exception:  # noqa: BLE001 - fail-closed: entry_points never halt compile
+            pass
 
     return registry
