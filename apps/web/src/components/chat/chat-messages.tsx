@@ -4,9 +4,16 @@ import { useRef, useEffect, useLayoutEffect, useMemo, useImperativeHandle, forwa
 import { MessageBubble } from "./message-bubble";
 import { TypingIndicator } from "./typing-indicator";
 import { ControlRequestCard } from "./control-request";
-import { compareChatMessages } from "@/chat-core";
+import { compareChatMessages } from "@/chat-core/message-order";
 import { shouldPreferServerAssistantMessage } from "@/chat-core";
 import {
+  controlQuestionText,
+  isControlRequestCardRequest,
+  isNaturalAnswerControlQuestion,
+} from "@/chat-core/control-questions";
+import {
+  assistantArtifactCopiesSubstantiallyOverlap,
+  assistantMessagesExactlyMatch,
   assistantContentsSubstantiallyOverlap,
   normalizedAssistantDedupeContent,
   shouldPreferIncomingAssistantMessageCopy,
@@ -57,6 +64,8 @@ interface ChatMessagesProps {
     response: ControlRequestResponse,
   ) => Promise<void> | void;
   uiLanguage?: ChatResponseLanguage;
+  /** Optional guidance shown under the empty-state placeholder (e.g. Recipe Builder flow). */
+  emptyStateHint?: string;
 }
 
 function writingAnswerLabel(language?: ChatResponseLanguage): string {
@@ -186,25 +195,32 @@ function preferredAssistantCopy(existing: ChatMessage, incoming: ChatMessage): C
 function shouldDedupeSameTurnAssistant(
   existing: ChatMessage,
   incoming: ChatMessage,
+  hasUserBoundary: boolean,
 ): boolean {
   if (existing.role !== "assistant" || incoming.role !== "assistant") return false;
   if (existing.serverId && incoming.serverId) return false;
-  return substantiallyOverlapsAssistantContent(existing, incoming);
+  if (substantiallyOverlapsAssistantContent(existing, incoming)) return true;
+  if (assistantArtifactCopiesSubstantiallyOverlap(existing, incoming)) return true;
+  return hasUserBoundary && assistantMessagesExactlyMatch(existing, incoming);
 }
 
 function dedupeOptimisticAssistantCopies(messages: ChatMessage[]): ChatMessage[] {
   const sorted = [...messages].sort(compareChatMessages);
   const deduped: ChatMessage[] = [];
   let currentTurnAssistantIndexes: number[] = [];
+  let currentTurnHasUser = false;
 
   for (const message of sorted) {
-    if (message.role === "user") currentTurnAssistantIndexes = [];
+    if (message.role === "user") {
+      currentTurnAssistantIndexes = [];
+      currentTurnHasUser = true;
+    }
 
     if (message.role === "assistant") {
       let duplicateIndex: number | null = null;
       for (const candidateIndex of currentTurnAssistantIndexes) {
         const candidate = deduped[candidateIndex];
-        if (candidate && shouldDedupeSameTurnAssistant(candidate, message)) {
+        if (candidate && shouldDedupeSameTurnAssistant(candidate, message, currentTurnHasUser)) {
           duplicateIndex = candidateIndex;
           break;
         }
@@ -224,13 +240,39 @@ function dedupeOptimisticAssistantCopies(messages: ChatMessage[]): ChatMessage[]
   return deduped.sort(compareChatMessages);
 }
 
+function liveAssistantReplaysPriorAnswer(
+  liveContent: string,
+  finalizedMessages: ChatMessage[],
+): boolean {
+  if (!liveContent.trim()) return false;
+  const latestUserTimestamp = finalizedMessages.reduce((latest, message) => {
+    if (message.role !== "user") return latest;
+    const timestamp = message.timestamp ?? 0;
+    return timestamp > latest ? timestamp : latest;
+  }, 0);
+  if (latestUserTimestamp <= 0) return false;
+
+  const liveMessage: ChatMessage = {
+    id: "live-assistant",
+    role: "assistant",
+    content: liveContent,
+    timestamp: latestUserTimestamp,
+  };
+
+  return finalizedMessages.some((message) => (
+    message.role === "assistant" &&
+    (message.timestamp ?? 0) < latestUserTimestamp &&
+    assistantContentsSubstantiallyOverlap(message, liveMessage)
+  ));
+}
+
 function injectedEchoContentKey(message: ChatMessage): string | null {
   if (message.role !== "user") return null;
   const normalized = message.content.replace(/\s+/g, " ").trim();
   return normalized ? `${message.role}\u0000${normalized}` : null;
 }
 
-export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(function ChatMessages({ messages, serverMessages, channelState, loading, botId, selectionMode, selectedMessages, onToggleSelect, onEnterSelectionMode, onSelectAll, onDeselectAll, onExportSelected, onDeleteSelected, onExitSelectionMode, onLoadOlder, hasOlderMessages, loadingOlder, onReplyTo, queuedMessages, controlRequests, onRespondControlRequest, uiLanguage }, ref) {
+export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(function ChatMessages({ messages, serverMessages, channelState, loading, botId, selectionMode, selectedMessages, onToggleSelect, onEnterSelectionMode, onSelectAll, onDeselectAll, onExportSelected, onDeleteSelected, onExitSelectionMode, onLoadOlder, hasOlderMessages, loadingOlder, onReplyTo, queuedMessages, controlRequests, onRespondControlRequest, uiLanguage, emptyStateHint }, ref) {
   const containerRef = useRef<HTMLDivElement>(null);
   const language = uiLanguage ?? channelState.responseLanguage;
   const [showScrollBtn, setShowScrollBtn] = useState(false);
@@ -332,14 +374,43 @@ export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(fu
       return true;
     });
 
-    return [...localMessages, ...filtered].sort(compareChatMessages);
+    return dedupeOptimisticAssistantCopies([...localMessages, ...filtered]);
   }, [messages, serverMessages]);
 
+  const pendingControlRequests = useMemo(
+    () => (controlRequests ?? []).filter((request) => request.state === "pending"),
+    [controlRequests],
+  );
+  const pendingQuestionRequests = useMemo(
+    () => pendingControlRequests.filter(isNaturalAnswerControlQuestion),
+    [pendingControlRequests],
+  );
+  const pendingCardControlRequests = useMemo(
+    () => pendingControlRequests.filter(isControlRequestCardRequest),
+    [pendingControlRequests],
+  );
+  const pendingQuestionMessages = useMemo<ChatMessage[]>(
+    () => pendingQuestionRequests.map((request) => ({
+      id: `control-question:${request.requestId}`,
+      role: "assistant",
+      content: controlQuestionText(request),
+      timestamp: request.createdAt,
+    })),
+    [pendingQuestionRequests],
+  );
+  const transcriptMessages = useMemo(
+    () => {
+      if (pendingQuestionMessages.length === 0) return allMessages;
+      return [...allMessages, ...pendingQuestionMessages].sort(compareChatMessages);
+    },
+    [allMessages, pendingQuestionMessages],
+  );
+
   // Track which messages should animate (only newly added ones)
-  if (allMessages.length > prevMsgCount.current) {
+  if (transcriptMessages.length > prevMsgCount.current) {
     animateFromRef.current = prevMsgCount.current;
   }
-  prevMsgCount.current = allMessages.length;
+  prevMsgCount.current = transcriptMessages.length;
 
   const scrollToBottom = useCallback(() => {
     userScrolledUp.current = false;
@@ -398,7 +469,7 @@ export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(fu
       el.scrollTop = el.scrollHeight;
     });
   }, [
-    allMessages.length,
+    transcriptMessages.length,
     channelState.streaming,
     channelState.streamingText,
     channelState.thinkingText,
@@ -407,10 +478,6 @@ export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(fu
     subagentCount,
   ]);
 
-  const pendingControlRequests = useMemo(
-    () => (controlRequests ?? []).filter((request) => request.state === "pending"),
-    [controlRequests],
-  );
   const activeRunVisible = hasActiveRunState(
     channelState,
     queuedMessages,
@@ -419,7 +486,10 @@ export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(fu
 
   // Public work progress belongs in the Work inspector. The transcript only
   // shows answer text, injected user messages, and explicit input requests.
-  const showTyping = channelState.streaming && !channelState.streamingText && !channelState.thinkingText && !channelState.thinkingStartedAt;
+  const showTyping =
+    channelState.streaming &&
+    !channelState.streamingText &&
+    !channelState.thinkingText;
 
   const selectableCount = useMemo(() => {
     return allMessages.filter((m) => m.role !== "system").length;
@@ -503,14 +573,19 @@ export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(fu
           <MessageSkeleton />
         )}
 
-        {!loading && allMessages.length === 0 && !activeRunVisible && (
+        {!loading && transcriptMessages.length === 0 && !activeRunVisible && (
           <div className="flex flex-col items-center justify-center h-full min-h-[200px] gap-2">
             <div className="w-10 h-10 rounded-full bg-black/[0.04] flex items-center justify-center">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-secondary/60">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M8.625 12a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H8.25m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0H12m4.125 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 0 1-2.555-.337A5.972 5.972 0 0 1 5.41 20.97a5.969 5.969 0 0 1-.474-.065 4.48 4.48 0 0 0 .978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25Z" />
               </svg>
             </div>
-            <p className="text-secondary/50 text-sm">Start a conversation</p>
+            <p className="text-secondary/70 text-sm">Start a conversation</p>
+            {emptyStateHint ? (
+              <p className="max-w-sm text-center text-xs leading-relaxed text-secondary">
+                {emptyStateHint}
+              </p>
+            ) : null}
           </div>
         )}
 
@@ -519,17 +594,17 @@ export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(fu
             answer in segments so the transcript chronology matches that. */}
         {!loading && (() => {
           const streamingNow = !!channelState.streaming;
-          let mainMessages = allMessages;
+          let mainMessages = transcriptMessages;
           let midTurnInjected: typeof allMessages = [];
           if (streamingNow) {
-            let splitAt = allMessages.length;
-            for (let i = allMessages.length - 1; i >= 0; i--) {
-              if (allMessages[i].injected) splitAt = i;
+            let splitAt = transcriptMessages.length;
+            for (let i = transcriptMessages.length - 1; i >= 0; i--) {
+              if (transcriptMessages[i].injected) splitAt = i;
               else break;
             }
-            if (splitAt < allMessages.length) {
-              mainMessages = allMessages.slice(0, splitAt);
-              midTurnInjected = allMessages.slice(splitAt);
+            if (splitAt < transcriptMessages.length) {
+              mainMessages = transcriptMessages.slice(0, splitAt);
+              midTurnInjected = transcriptMessages.slice(splitAt);
             }
           }
           const animationProps = (index: number) => ({
@@ -543,34 +618,39 @@ export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(fu
             i: number,
             offset: number,
             key = msg.id,
-          ) => (
-            <div
-              key={key}
-              {...animationProps(i + offset)}
-            >
-              <MessageBubble
-                role={msg.role}
-                content={msg.content}
-                timestamp={msg.timestamp}
-                thinkingContent={msg.thinkingContent}
-                thinkingDuration={msg.thinkingDuration}
-                activities={msg.activities}
-                taskBoard={msg.taskBoard}
-                researchEvidence={msg.researchEvidence}
-                usage={msg.usage}
-                botId={botId}
-                replyTo={msg.replyTo}
-                injected={msg.injected}
-                selectionMode={selectionMode}
-                selected={selectedMessages?.has(msg.id)}
-                onSelect={() => onToggleSelect?.(msg.id)}
-                onContextAction={(action) => {
-                  if (action === "select") onEnterSelectionMode?.(msg.id);
-                  else if (action === "reply") onReplyTo?.(msg);
-                }}
-              />
-            </div>
-          );
+          ) => {
+            const selectable = !msg.id.startsWith("control-question:");
+            return (
+              <div
+                key={key}
+                {...animationProps(i + offset)}
+              >
+                <MessageBubble
+                  role={msg.role}
+                  content={msg.content}
+                  timestamp={msg.timestamp}
+                  thinkingContent={msg.thinkingContent}
+                  thinkingDuration={msg.thinkingDuration}
+                  activities={msg.activities}
+                  taskBoard={msg.taskBoard}
+                  researchEvidence={msg.researchEvidence}
+                  usage={msg.usage}
+                  botId={botId}
+                  replyTo={msg.replyTo}
+                  injected={msg.injected}
+                  selectionMode={selectable ? selectionMode : undefined}
+                  selected={selectable ? selectedMessages?.has(msg.id) : undefined}
+                  onSelect={selectable ? () => onToggleSelect?.(msg.id) : undefined}
+                  onContextAction={selectable
+                    ? (action) => {
+                        if (action === "select") onEnterSelectionMode?.(msg.id);
+                        else if (action === "reply") onReplyTo?.(msg);
+                      }
+                    : undefined}
+                />
+              </div>
+            );
+          };
 
           const renderAssistantChunk = (
             key: string,
@@ -841,10 +921,17 @@ export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(fu
             (channelState.streaming && channelState.hasTextContent
               ? ""
               : "");
+          const staleLiveAssistantReplay = liveAssistantReplaysPriorAnswer(
+            liveAssistantContent,
+            transcriptMessages,
+          );
           const shouldRenderLiveAssistant =
-            !!channelState.streamingText ||
-            !!channelState.hasTextContent ||
-            hasLiveTranscriptText;
+            !staleLiveAssistantReplay &&
+            (
+              !!channelState.streamingText ||
+              !!channelState.hasTextContent ||
+              hasLiveTranscriptText
+            );
           const anchoredMidTurnRenderedInLiveAssistant =
             shouldRenderLiveAssistant &&
             (interleaveInjectedWithLiveTranscript || anchoredMidTurnInjected.length > 0);
@@ -913,9 +1000,9 @@ export const ChatMessages = forwardRef<ChatMessagesHandle, ChatMessagesProps>(fu
           );
         })()}
 
-        {!loading && pendingControlRequests.length > 0 && (
+        {!loading && pendingCardControlRequests.length > 0 && (
           <div className="mt-2">
-            {pendingControlRequests.map((request) => (
+            {pendingCardControlRequests.map((request) => (
               <ControlRequestCard
                 key={request.requestId}
                 request={request}

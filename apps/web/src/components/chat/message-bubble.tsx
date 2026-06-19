@@ -9,15 +9,17 @@ import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import { TaskBoard } from "./task-board";
 import { AgentActivityTimeline } from "./agent-activity-timeline";
+import { ThinkingBlock } from "./thinking-block";
 import { EChartRenderer } from "./echart-renderer";
 import { parseMarkers } from "@/chat-core";
 import { parseKbContextMarker } from "@/chat-core";
-import { buildMessageCopyText } from "@/chat-core";
-import { getAttachmentUrl, getKnowledgeDocumentUrl, fetchAttachmentBlob } from "@/chat-core";
+import { buildMessageCopyText } from "@/chat-core/message-copy";
+import { getAttachmentUrl, getKnowledgeDocumentUrl, fetchAttachmentBlob } from "@/chat-core/attachments";
 import {
   stripAssistantMetadataPreamble,
   stripStreamingAssistantMetadataPreamble,
 } from "@/chat-core";
+import { collapseLiveSoftWraps } from "@/chat-core";
 import type {
   InspectedSource,
   ReplyTo,
@@ -288,6 +290,12 @@ function citationEvidenceLabel(evidence: ResearchEvidenceSnapshot): string | nul
   }
 }
 
+function claimSupportLabel(
+  status: NonNullable<ResearchEvidenceSnapshot["claims"]>[number]["supportStatus"],
+): string {
+  return status.replace(/_/g, " ");
+}
+
 function sourceDisplayName(source: InspectedSource): string {
   if (source.title) return source.title;
   try {
@@ -431,20 +439,31 @@ function ResearchEvidenceSummary({
   const panelId = useId();
   const sources = evidence?.inspectedSources ?? [];
   const citationLabel = evidence ? citationEvidenceLabel(evidence) : null;
-  if (sources.length === 0 && !citationLabel) return null;
+  const claims = evidence?.claims ?? [];
+  const claimSummaryLabel = claims.length > 0 ? "Structured claims" : null;
+  if (sources.length === 0 && !citationLabel && claims.length === 0) return null;
   const primarySource = sources[0] ? sourceDisplayName(sources[0]) : null;
   const extraCount = Math.max(0, sources.length - 1);
+  const visibleClaims = claims.slice(0, 4);
   return (
     <div className="mt-1 max-w-full text-[11px] leading-snug text-secondary/70">
       <button
         type="button"
-        className="flex max-w-full flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border border-black/[0.06] bg-black/[0.025] px-2.5 py-1.5 text-left transition-colors hover:bg-black/[0.04]"
+        className="flex max-w-full cursor-pointer flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border border-black/[0.06] bg-black/[0.025] px-2.5 py-1.5 text-left transition-colors hover:bg-black/[0.04] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#7C3AED]/45"
         data-research-evidence-toggle="true"
         aria-expanded={expanded}
         aria-controls={panelId}
         onClick={() => setExpanded((value) => !value)}
       >
         <span className="font-medium text-foreground/65">Research evidence</span>
+        {claimSummaryLabel && (
+          <span
+            className="inline-flex min-w-0 items-center gap-1 text-secondary/65"
+            data-governed-claim-summary="true"
+          >
+            <span className="truncate">{claimSummaryLabel}</span>
+          </span>
+        )}
         {sources.length > 0 && (
           <span className="text-secondary/60">
             {sources.length} {sources.length === 1 ? "source" : "sources"}
@@ -465,6 +484,16 @@ function ResearchEvidenceSummary({
             {citationLabel}
           </span>
         )}
+        {visibleClaims.map((claim) => (
+          <span
+            key={claim.claimId}
+            className="inline-flex max-w-full min-w-0 items-center gap-1 rounded bg-black/[0.04] px-1.5 py-0.5 font-mono text-[10px] text-secondary/65"
+            translate="no"
+          >
+            <span className="truncate">{claim.claimType}</span>
+            <span>{claimSupportLabel(claim.supportStatus)}</span>
+          </span>
+        ))}
         {primarySource && (
           <span className="min-w-0 max-w-full truncate text-secondary/55">
             {primarySource}
@@ -494,6 +523,21 @@ function ResearchEvidenceSummary({
           ))}
           {sources.length === 0 && citationLabel && (
             <div className="text-secondary/55">{citationLabel}</div>
+          )}
+          {visibleClaims.length > 0 && (
+            <div className="space-y-1">
+              {visibleClaims.map((claim) => (
+                <div
+                  key={claim.claimId}
+                  className="flex min-w-0 items-center justify-between gap-2"
+                >
+                  <span className="min-w-0 truncate text-secondary/60">{claim.claimType}</span>
+                  <span className="shrink-0 rounded bg-black/[0.04] px-1.5 py-0.5 font-mono text-[10px] text-secondary/65">
+                    {claimSupportLabel(claim.supportStatus)}
+                  </span>
+                </div>
+              ))}
+            </div>
           )}
         </div>
       )}
@@ -564,18 +608,25 @@ function InlineLiveTranscript({
       {displayItems.map((item, index) => {
         const displayContent = item.displayContent ?? item.content;
         if (!displayContent) return null;
+        const renderPlainLiveText = isStreaming;
         return (
           <div
             key={item.id}
-            className="prose-chat"
+            className={renderPlainLiveText
+              ? "whitespace-pre-wrap text-sm leading-relaxed [overflow-wrap:break-word] [word-break:keep-all]"
+              : "prose-chat"}
             data-chat-live-transcript-item="text"
           >
-            <ReactMarkdown
-              remarkPlugins={[[remarkGfm, { singleTilde: false }], remarkMath]}
-              rehypePlugins={[rehypeKatex]}
-            >
-              {displayContent}
-            </ReactMarkdown>
+            {renderPlainLiveText ? (
+              collapseLiveSoftWraps(displayContent)
+            ) : (
+              <ReactMarkdown
+                remarkPlugins={[[remarkGfm, { singleTilde: false }], remarkMath]}
+                rehypePlugins={[rehypeKatex]}
+              >
+                {displayContent}
+              </ReactMarkdown>
+            )}
             {isStreaming && index === lastTextIndex && (
               <span className="ml-0.5 inline-block h-3.5 w-[3px] animate-pulse rounded-full bg-foreground/40 align-middle" />
             )}
@@ -699,15 +750,7 @@ export function MessageBubble({ role, content, timestamp, isStreaming, inlineBef
   const visibleTaskBoard = showLiveWorkDetails && !hasOpenArchivedTaskBoard ? taskBoard : null;
   const safeTextContent = textContent ?? "";
   const rawContent = isStreaming ? safeTextContent + "\u2588" : safeTextContent;
-  // Auto-link pipeline IDs → /dashboard/{botId}/pipelines/{id}
-  const displayContent = useMemo(() => {
-    if (!rawContent) return "";
-    if (!botId || isUser) return rawContent;
-    return rawContent.replace(
-      /(?<!\]\()\bpipeline-(\d{8}-\d{6})\b(?!\))/g,
-      (m) => `[${m}](/dashboard/${botId}/pipelines/${m})`,
-    );
-  }, [rawContent, botId, isUser]);
+  const displayContent = rawContent;
   const evidenceSources = researchEvidence?.inspectedSources ?? [];
   const hasInlineLiveContent = !!inlineBeforeContent || !!inlineAfterContent;
   const hasLiveTranscriptItems = !isUser && !!liveTranscriptItems && liveTranscriptItems.length > 0;
@@ -718,12 +761,17 @@ export function MessageBubble({ role, content, timestamp, isStreaming, inlineBef
   const hasMessageBody = hasDisplayContent || !!replyTo || hasInlineLiveContent || hasLiveTranscriptItems;
   const hasActivityTimeline =
     showLiveWorkDetails &&
-    ((activities && activities.length > 0) || taskBoard || thinkingContent || (thinkingDuration && thinkingDuration > 0));
+    ((activities && activities.length > 0) || taskBoard);
+  // Reasoning (extended thinking) renders as a collapsible block on BOTH live
+  // and finalized assistant messages — independent of showLiveWorkDetails so it
+  // persists after the turn ends.
+  const hasThinkingBlock = !isUser && !!thinkingContent;
   const hasVisiblePayload =
     hasMessageBody ||
     kbRefs.length > 0 ||
     attachments.length > 0 ||
     hasActivityTimeline ||
+    hasThinkingBlock ||
     !!visibleTaskBoard ||
     (!isUser && !!researchEvidence);
   const messageBodyClassName = isUser
@@ -768,11 +816,17 @@ export function MessageBubble({ role, content, timestamp, isStreaming, inlineBef
         </div>
       )}
       <div className={`min-w-0 ${isUser ? "max-w-[88%] sm:max-w-[75%] items-end" : "w-full max-w-full items-start"} flex flex-col gap-1`}>
+        {hasThinkingBlock && (
+          <ThinkingBlock
+            content={thinkingContent}
+            duration={thinkingDuration}
+            isLive={Boolean(isStreaming)}
+            activities={showLiveWorkDetails ? activities : undefined}
+          />
+        )}
         {!isUser && hasActivityTimeline && (
           <AgentActivityTimeline
             live={showLiveWorkDetails}
-            thinkingContent={thinkingContent}
-            thinkingDuration={thinkingDuration}
             activities={activities}
             taskBoard={taskBoard ?? null}
             collapsedByDefault={Boolean(isStreaming || liveAssistantTurn)}
@@ -828,6 +882,10 @@ export function MessageBubble({ role, content, timestamp, isStreaming, inlineBef
             </p>
           ) : !isUser && hasLiveTranscriptItems ? (
             <InlineLiveTranscript items={liveTranscriptItems} isStreaming={isStreaming} />
+          ) : !isUser && isStreaming && hasDisplayContent ? (
+            <p className="whitespace-pre-wrap text-sm leading-relaxed [overflow-wrap:break-word] [word-break:keep-all]">
+              {collapseLiveSoftWraps(displayContent)}
+            </p>
           ) : !isUser && hasDisplayContent ? (
             <div className="prose-chat">
               <ReactMarkdown

@@ -1,17 +1,24 @@
 "use client";
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode } from "react";
-import { CHAT_ATTACHMENT_ACCEPT, validateFile } from "@/chat-core";
+import { CHAT_ATTACHMENT_ACCEPT, validateFile } from "@/chat-core/attachments";
 import { isImageMimetype, formatFileSize } from "@/chat-core";
 import { extractClipboardImageFiles } from "@/chat-core";
-import { kbUploadKey } from "@/chat-core";
+import { kbUploadKey } from "@/chat-core/kb-uploads";
 import type { ChatResponseLanguage, ReplyTo, KbDocReference } from "@/chat-core";
 import { isStreamingComposerBlockedByQueue } from "@/chat-core";
-
-type StreamingComposerMode = "queue" | "steer";
 import { SKILLS } from "@/lib/skills-catalog";
 import type { KbDocEntry } from "@/hooks/use-kb-docs";
-import type { PendingKbUpload } from "@/chat-core";
+import type { PendingKbUpload } from "@/chat-core/kb-uploads";
+import {
+  buildExplicitRecipeSelection,
+  sanitizeChatRecipeOption,
+  type ChatRecipeOption,
+  type ChatRecipeSelectionMode,
+  type ExplicitRecipeSelectionRequest,
+} from "@/chat-core";
+
+export type { ChatRecipeOption, ChatRecipeSelectionMode };
 
 interface SlashEntry {
   command: string;
@@ -28,13 +35,12 @@ const BUILTIN_COMMANDS: SlashEntry[] = [
   { command: "help", label: "Show help", category: "system", builtin: true },
 ];
 
-const BUNDLED_SLASH: SlashEntry[] = (() => {
-  const entries: SlashEntry[] = [...BUILTIN_COMMANDS];
+const BUNDLED_SKILL_ENTRIES: SlashEntry[] = (() => {
+  const entries: SlashEntry[] = [];
   for (const skill of SKILLS) {
     if (!skill.commands?.length) continue;
-    entries.push({ command: skill.commands[0], label: skill.id, category: skill.category });
-    for (let i = 1; i < skill.commands.length; i++) {
-      entries.push({ command: skill.commands[i], label: skill.id, category: skill.category });
+    for (const command of skill.commands) {
+      entries.push({ command, label: skill.id, category: skill.category });
     }
   }
   return entries;
@@ -48,7 +54,10 @@ export interface ChatInputCustomSkill {
 }
 
 export function buildSlashEntries(customSkills: ChatInputCustomSkill[] = []): SlashEntry[] {
-  const entries: SlashEntry[] = [...BUNDLED_SLASH];
+  // Order: system builtins, then the user's own custom/learned skills, then
+  // bundled skills. Custom skills come before the bundled catalog so they
+  // surface in the bare "/" browse list, which is capped downstream.
+  const entries: SlashEntry[] = [...BUILTIN_COMMANDS];
   const seenCommands = new Set(entries.map((entry) => entry.command.toLowerCase()));
 
   for (const skill of customSkills) {
@@ -69,6 +78,11 @@ export function buildSlashEntries(customSkills: ChatInputCustomSkill[] = []): Sl
         ...(skill.tags ?? []),
       ].join(" "),
     });
+  }
+
+  for (const entry of BUNDLED_SKILL_ENTRIES) {
+    if (seenCommands.has(entry.command.toLowerCase())) continue;
+    entries.push(entry);
   }
 
   return entries;
@@ -101,18 +115,32 @@ export interface ChatInputHandle {
 
 export interface ChatInputSendOptions {
   goalMode?: boolean;
+  explicitRecipeSelection?: ExplicitRecipeSelectionRequest["explicitRecipeSelection"];
 }
 
-export function buildChatInputSendOptions(runUntilDone: boolean): ChatInputSendOptions | undefined {
-  return runUntilDone ? { goalMode: true } : undefined;
+export function buildChatInputSendOptions(
+  recipeMode: ChatRecipeSelectionMode = "auto",
+  recipe?: ChatRecipeOption,
+): ChatInputSendOptions {
+  const explicitRecipeSelection = buildExplicitRecipeSelection(
+    recipeMode,
+    recipe,
+  )?.explicitRecipeSelection;
+  // Run-until-done (goalMode) is always on — every send runs until the task
+  // completes. The per-send toggle was removed; there is no reason to run a
+  // task only partway.
+  return {
+    goalMode: true,
+    ...(explicitRecipeSelection ? { explicitRecipeSelection } : {}),
+  };
 }
 
-export function nextRunUntilDoneAfterSend(
-  current: boolean,
+export function nextRecipeModeAfterSend(
+  current: ChatRecipeSelectionMode,
   result: void | boolean,
-): boolean {
-  if (!current) return false;
-  return result === false;
+): ChatRecipeSelectionMode {
+  if (result === false) return current;
+  return current === "this_turn" ? "auto" : current;
 }
 
 interface ChatInputProps {
@@ -133,18 +161,10 @@ interface ChatInputProps {
   queuedCount?: number;
   /** Called when the user clicks the "Cancel queue" button. */
   onCancelQueue?: () => void;
-  /** Short status text shown next to the stop button. */
-  cancelHint?: string;
   /** True when the user has already reached `MAX_QUEUED_MESSAGES`. */
   queueFull?: boolean;
-  /** Composer behavior for text entered while a run is streaming. */
-  streamingMode?: StreamingComposerMode;
-  /** Called when the user switches between queueing and steering during a live run. */
-  onStreamingModeChange?: (mode: StreamingComposerMode) => void;
-  /** Force steering off when parent context cannot be injected safely. */
-  steeringDisabled?: boolean;
-  /** Short explanation shown when steering is unavailable. */
-  steeringDisabledReason?: string;
+  /** True when the current parent context allows a text-only mid-turn injection. */
+  canAttemptStreamingInject?: boolean;
   /** All KB documents available for @ autocomplete. */
   kbDocs?: KbDocEntry[];
   /** Called when user selects a KB doc via @ autocomplete. */
@@ -157,6 +177,8 @@ interface ChatInputProps {
   uiLanguage?: ChatResponseLanguage;
   /** Custom skills installed for the current bot and exposed via slash autocomplete. */
   customSkills?: ChatInputCustomSkill[];
+  /** Safe public recipe refs available for explicit per-turn/session requests. */
+  availableRecipes?: ChatRecipeOption[];
 }
 
 interface ComposerEnterEvent {
@@ -248,18 +270,15 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     onCancelReply,
     queuedCount = 0,
     onCancelQueue,
-    cancelHint: _cancelHint,
     queueFull = false,
-    streamingMode = "queue",
-    onStreamingModeChange,
-    steeringDisabled = false,
-    steeringDisabledReason,
+    canAttemptStreamingInject = true,
     kbDocs,
     onSelectKbDoc,
     uploadStates,
     composerAccessory,
     uiLanguage,
     customSkills,
+    availableRecipes = [],
   },
   ref,
 ) {
@@ -268,25 +287,24 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [slashIdx, setSlashIdx] = useState(0);
   const [kbIdx, setKbIdx] = useState(0);
-  const [runUntilDone, setRunUntilDone] = useState(false);
+  const [recipeMode, setRecipeMode] = useState<ChatRecipeSelectionMode>("auto");
+  const [selectedRecipeId, setSelectedRecipeId] = useState(
+    availableRecipes[0]?.recipeId ?? "",
+  );
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const slashRef = useRef<HTMLDivElement>(null);
   const stopPointerHandledRef = useRef(false);
   const stopPointerResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const language = uiLanguage;
-  const steeringUnavailable = steeringDisabled || pendingFiles.length > 0;
-  const effectiveStreamingMode: StreamingComposerMode =
-    streamingMode === "steer" && steeringUnavailable ? "queue" : streamingMode;
+  const canInjectCurrentComposer = !!streaming && canAttemptStreamingInject && pendingFiles.length === 0;
   const queueBlocked = isStreamingComposerBlockedByQueue({
     queueFull,
-    canAttemptInject: effectiveStreamingMode === "steer",
+    canAttemptInject: canInjectCurrentComposer,
   });
-  const steeringUnavailableReason =
-    pendingFiles.length > 0
-      ? t(language, "Attachments will send after the current run.", "첨부파일은 현재 실행 후 전송됩니다.")
-      : steeringDisabledReason
-        ?? t(language, "Selected context will send after the current run.", "선택한 컨텍스트는 현재 실행 후 전송됩니다.");
+  const liveRunModeLabel = canInjectCurrentComposer
+    ? t(language, "Auto-steers when possible", "가능하면 자동 조정")
+    : t(language, "Will queue after run", "현재 실행 후 대기");
 
   // Slash autocomplete: detect "/word" token at cursor position (works mid-sentence)
   const [cursorPos, setCursorPos] = useState(0);
@@ -303,6 +321,27 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   const slashQuery = slashToken?.query ?? null;
   const prevQueryRef = useRef(slashQuery);
   const slashEntries = useMemo(() => buildSlashEntries(customSkills), [customSkills]);
+  const safeRecipeOptions = useMemo(
+    () => availableRecipes.flatMap((recipe) => {
+      const safeRecipe = sanitizeChatRecipeOption(recipe);
+      return safeRecipe && !safeRecipe.disabled ? [safeRecipe] : [];
+    }),
+    [availableRecipes],
+  );
+  const selectedRecipe =
+    safeRecipeOptions.find((recipe) => recipe.recipeId === selectedRecipeId) ??
+    safeRecipeOptions[0];
+
+  useEffect(() => {
+    if (!safeRecipeOptions.length) {
+      setSelectedRecipeId("");
+      setRecipeMode("auto");
+      return;
+    }
+    if (!safeRecipeOptions.some((recipe) => recipe.recipeId === selectedRecipeId)) {
+      setSelectedRecipeId(safeRecipeOptions[0]?.recipeId ?? "");
+    }
+  }, [safeRecipeOptions, selectedRecipeId]);
   const slashMatches = useMemo(() => {
     if (slashQuery === null) return [];
     return getSlashMatches(slashEntries, slashQuery);
@@ -488,7 +527,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
       const result = await onSend(
         trimmed,
         pendingFiles.length > 0 ? pendingFiles.map((p) => p.file) : undefined,
-        buildChatInputSendOptions(runUntilDone),
+        buildChatInputSendOptions(recipeMode, selectedRecipe),
       );
       if (result === false) return;
       for (const p of pendingFiles) {
@@ -496,12 +535,12 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
       }
       setText("");
       setPendingFiles([]);
-      setRunUntilDone(nextRunUntilDoneAfterSend(runUntilDone, result));
+      setRecipeMode(nextRecipeModeAfterSend(recipeMode, result));
       if (textareaRef.current) textareaRef.current.style.height = "auto";
     } finally {
       setIsSubmitting(false);
     }
-  }, [text, pendingFiles, onSend, onReset, runUntilDone]);
+  }, [text, pendingFiles, onSend, onReset, recipeMode, selectedRecipe]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -651,51 +690,19 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
         >
           {streaming && (
             <div
-              className="flex items-center gap-2 border-b border-black/[0.05] px-3 py-1.5"
+              className="flex min-w-0 items-center gap-2 border-b border-black/[0.05] px-3 py-1.5"
               data-chat-composer-toolbar="true"
+              data-chat-live-run-toolbar="true"
             >
-              <div className="min-w-0" data-streaming-composer-controls="true">
-                <div
-                  className="inline-grid grid-cols-2 rounded-md bg-black/[0.04] p-0.5"
-                  role="group"
-                  aria-label={t(language, "Streaming send mode", "실행 중 전송 방식")}
-                >
-                  <button
-                    type="button"
-                    data-streaming-mode-option="queue"
-                    onClick={() => onStreamingModeChange?.("queue")}
-                    className={`min-h-7 touch-manipulation rounded-md px-2.5 text-[11px] font-semibold transition-all ${
-                      effectiveStreamingMode === "queue"
-                        ? "bg-white text-foreground shadow-[0_1px_3px_rgba(0,0,0,0.08)]"
-                        : "text-secondary/65 hover:text-foreground"
-                    }`}
-                    aria-pressed={effectiveStreamingMode === "queue"}
-                    title={t(language, "Send after the current run reaches a checkpoint", "현재 실행이 체크포인트에 도달한 뒤 전송")}
-                  >
-                    {t(language, "Queue", "대기")}
-                  </button>
-                  <button
-                    type="button"
-                    data-streaming-mode-option="steer"
-                    onClick={() => { if (!steeringUnavailable) onStreamingModeChange?.("steer"); }}
-                    disabled={steeringUnavailable}
-                    className={`min-h-7 touch-manipulation rounded-md px-2.5 text-[11px] font-semibold transition-all disabled:cursor-not-allowed disabled:opacity-40 ${
-                      effectiveStreamingMode === "steer"
-                        ? "bg-white text-foreground shadow-[0_1px_3px_rgba(0,0,0,0.08)]"
-                        : "text-secondary/65 hover:text-foreground"
-                    }`}
-                    aria-pressed={effectiveStreamingMode === "steer"}
-                    title={steeringUnavailable ? steeringUnavailableReason : t(language, "Send now as a text-only steering update", "텍스트 전용 조정 메시지를 지금 전송")}
-                  >
-                    {t(language, "Steer", "조정")}
-                  </button>
-                </div>
-              </div>
-              {steeringUnavailable && (
-                <span className="text-[10px] leading-snug text-secondary/50" aria-live="polite">
-                  {steeringUnavailableReason}
+              <div className="min-w-0" data-chat-live-run-status="true">
+                <span className="inline-flex min-h-7 touch-manipulation items-center gap-2 rounded-md bg-black/[0.04] px-2.5 text-[11px] font-medium text-secondary/70">
+                  <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" aria-hidden="true" />
+                  <span className="shrink-0 font-semibold text-foreground/75">
+                    {t(language, "Live run", "실행 중")}
+                  </span>
+                  <span className="truncate">{liveRunModeLabel}</span>
                 </span>
-              )}
+              </div>
             </div>
           )}
 
@@ -846,7 +853,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
                 rows={1}
                 disabled={disabled || isSubmitting}
                 data-chat-input-field="true"
-                className="block min-h-[44px] w-full resize-none bg-transparent py-2.5 text-[15px] leading-6 text-foreground placeholder-secondary/40 outline-none disabled:opacity-40"
+                className="block min-h-[44px] w-full resize-none bg-transparent py-2.5 text-base leading-6 text-foreground placeholder-secondary/40 outline-none disabled:opacity-40"
                 style={{ maxHeight: 160 }}
               />
             </div>
@@ -879,27 +886,45 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
               }}
             />
 
-            <button
-              type="button"
-              onClick={() => setRunUntilDone((value) => !value)}
-              disabled={disabled || isSubmitting}
-              aria-pressed={runUntilDone}
-              data-chat-goal-toggle="true"
-              className={`flex h-7 shrink-0 items-center gap-1 rounded-md px-2 text-[11px] font-medium transition-all touch-manipulation disabled:cursor-not-allowed disabled:opacity-30 ${
-                runUntilDone
-                  ? "bg-primary/[0.08] text-primary"
-                  : "text-secondary/45 hover:bg-black/[0.04] hover:text-secondary/70"
-              }`}
-              title={t(language, "Run the next message as a goal mission", "다음 메시지를 목표 미션으로 실행")}
-            >
-              <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                <circle cx="12" cy="12" r="6" />
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 3v3m0 12v3m9-9h-3M6 12H3" />
-              </svg>
-              <span className="hidden whitespace-nowrap sm:inline">
-                {t(language, "Run until done", "완료까지 실행")}
-              </span>
-            </button>
+            {safeRecipeOptions.length > 0 && (
+              <div
+                className="flex min-w-0 shrink items-center gap-1 rounded-md border border-black/[0.05] bg-black/[0.015] px-1 py-0.5"
+                data-chat-recipe-selector="true"
+              >
+                <span
+                  className="hidden shrink-0 px-1 text-[10px] font-semibold uppercase text-secondary/40 sm:inline"
+                  data-chat-recipe-label="true"
+                >
+                  {t(language, "Recipe", "레시피")}
+                </span>
+                <select
+                  value={recipeMode}
+                  onChange={(event) => setRecipeMode(event.target.value as ChatRecipeSelectionMode)}
+                  disabled={disabled || isSubmitting}
+                  aria-label={t(language, "Recipe mode", "레시피 모드")}
+                  data-chat-recipe-mode-selector="true"
+                  className="h-6 max-w-[8.5rem] truncate rounded bg-transparent px-1 text-[11px] font-medium text-secondary/60 outline-none transition-colors hover:text-secondary/80 focus-visible:ring-2 focus-visible:ring-primary/20 focus-visible:ring-offset-0 disabled:opacity-35"
+                >
+                  <option value="auto">{t(language, "Auto", "자동")}</option>
+                  <option value="this_turn">{t(language, "This turn only", "이번 턴만")}</option>
+                  <option value="session">{t(language, "Session default", "세션 기본값")}</option>
+                </select>
+                <select
+                  value={selectedRecipe?.recipeId ?? ""}
+                  onChange={(event) => setSelectedRecipeId(event.target.value)}
+                  disabled={disabled || isSubmitting || recipeMode === "auto"}
+                  aria-label={t(language, "Recipe", "레시피")}
+                  data-chat-recipe-ref-selector="true"
+                  className="h-6 max-w-[10rem] truncate rounded bg-transparent px-1 text-[11px] text-secondary/65 outline-none transition-colors hover:text-secondary/85 focus-visible:ring-2 focus-visible:ring-primary/20 focus-visible:ring-offset-0 disabled:opacity-35"
+                >
+                  {safeRecipeOptions.map((recipe) => (
+                    <option key={recipe.recipeId} value={recipe.recipeId}>
+                      {recipe.label ?? recipe.recipeId}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
 
             {composerAccessory && (
               <div className="flex min-w-0 items-center" data-composer-accessory="bottom-row">
@@ -919,8 +944,8 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
                   }`}
                   aria-label={
                     streaming
-                      ? effectiveStreamingMode === "steer"
-                        ? t(language, "Steer current run", "현재 실행 조정")
+                      ? canInjectCurrentComposer
+                        ? t(language, "Send to current run", "현재 실행에 전송")
                         : t(language, "Queue message", "메시지 대기")
                       : t(language, "Send", "전송")
                   }
@@ -928,8 +953,8 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
                     queueBlocked
                       ? t(language, "Queue full - wait for the bot to finish", "대기열이 가득 찼습니다 - 봇이 끝날 때까지 기다려 주세요")
                       : streaming
-                        ? effectiveStreamingMode === "steer"
-                          ? t(language, "Steer current run", "현재 실행 조정")
+                        ? canInjectCurrentComposer
+                          ? t(language, "Send to current run", "현재 실행에 전송")
                           : t(language, "Queue message (fires after current response)", "메시지 대기 (현재 응답 후 전송)")
                         : t(language, "Send", "전송")
                   }
