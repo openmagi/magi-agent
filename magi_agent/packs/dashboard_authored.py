@@ -1,15 +1,23 @@
 """Compile dashboard-authored custom checks into a single user pack.
 
-A "check" is a UI-friendly pair: an after-tool match condition (the *producer*
-half — what makes evidence appear) and the validator that requires that evidence
-to be absent (block) or merely audits it. The producer side lives in a sidecar
-``dashboard-checks.json`` read by ``DashboardProducerControl`` at runtime; the
-validator side rides through the standard pack path (a ``recipe`` provides entry
-whose ``RecipePackManifest.evidence_refs`` requires ``evidence:dashboard:<slug>``).
+A "check" is a UI-friendly after-tool match condition. Enforcement is
+**deny-on-present** (mirrors the SHACL constraint verifier):
 
-The pack `evidence_producer` provides type is impl-only (``packs/manifest.py``),
-so a declarative producer cannot be expressed as a pack provides entry — hence
-the sidecar split. R1/R4/R6/R7 still apply to the recipe pack.
+- ``DashboardProducerControl`` (after-tool) reads the sidecar
+  ``dashboard-checks.json`` and, on a match, emits an ``EvidenceRecord`` with
+  top-level ``status="failed"`` for ``block`` checks (a violation) or
+  ``status="ok"`` for ``audit`` checks (observability).
+- The pre-final verifier-bus dashboard gate blocks the final answer when a
+  failed dashboard record is present; no match / tool-not-run → no record → no
+  block.
+
+The recipe pack itself is declarative-only — a discoverable namespace artifact
+with EMPTY ``evidenceRefs``. The ``RecipePackManifest.evidence_refs``
+required-evidence path is inert here (a ``defaultEnabled=false`` pack is never
+auto-selected) AND would invert polarity if selected, so it is NOT used for
+enforcement. The pack `evidence_producer` provides type is impl-only
+(``packs/manifest.py``), so the declarative producer lives in the sidecar.
+R1/R4/R6/R7 still apply to the recipe pack.
 """
 from __future__ import annotations
 
@@ -179,24 +187,28 @@ def _evidence_ref(check_id: str) -> str:
 
 
 def compile_recipe(checks: list[DashboardCheck]) -> RecipePackManifest:
-    """Return the recipe pack manifest the validator side rides through.
+    """Return the recipe pack manifest — a declarative/discoverable namespace artifact.
 
-    Only enabled + ``action=block`` checks add a required evidence ref — audit
-    checks emit evidence via the producer side (sidecar) but never block the
-    pre-final gate.
+    The recipe pack carries NO required evidence refs. Enforcement is
+    **deny-on-present**: ``DashboardProducerControl`` (after-tool) emits an
+    ``EvidenceRecord`` with top-level ``status="failed"`` when a ``block`` check
+    matches, and the pre-final verifier-bus dashboard gate blocks the final
+    answer when such a record is present. ``audit`` checks emit ``status="ok"``
+    (observability, never blocks).
+
+    A required-evidence ref would be inert (a ``defaultEnabled=false`` pack is
+    never auto-selected) AND would invert polarity if ever selected, so
+    ``evidenceRefs`` is ALWAYS empty here. ``_evidence_ref`` /
+    ``DASHBOARD_EVIDENCE_REF_PREFIX`` survive — the producer stamps that ref into
+    each record's ``fields`` so the gate can surface ruleIds.
     """
-    refs = [
-        _evidence_ref(c.id)
-        for c in checks
-        if c.enabled and c.action == "block"
-    ]
     return RecipePackManifest(
         packId=DASHBOARD_PACK_ID,
         version=DASHBOARD_PACK_VERSION,
         displayName="Dashboard custom checks",
         description="User-authored custom evidence checks composed via the dashboard.",
         defaultEnabled=False,
-        evidenceRefs=tuple(refs),
+        evidenceRefs=(),
     )
 
 

@@ -6,7 +6,6 @@ from pathlib import Path
 import pytest
 
 from magi_agent.packs.dashboard_authored import (
-    DASHBOARD_EVIDENCE_REF_PREFIX,
     DASHBOARD_PACK_DIR_NAME,
     DASHBOARD_PACK_ID,
     DashboardCheck,
@@ -44,19 +43,23 @@ def test_dashboard_pack_appears_in_registry_when_kernel_flag_on(
     assert DASHBOARD_PACK_ID in registry.pack_ids
 
 
-def test_dashboard_pack_contributes_block_evidence_refs(
+def test_dashboard_pack_in_registry_with_empty_evidence_refs(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    # Enforcement is deny-on-present (producer+gate), so the discovered recipe
+    # pack appears in the registry but carries NO required evidence refs — for
+    # block or audit checks alike.
     monkeypatch.setenv(KERNEL_FLAG, "1")
     pack_root = tmp_path / DASHBOARD_PACK_DIR_NAME
     write_pack(pack_root, [_check("blocker"), _check("auditor", action="audit")])
     _patch_bases(monkeypatch, [tmp_path])
     registry = build_runtime_pack_registry()
+    assert DASHBOARD_PACK_ID in registry.pack_ids
     manifest = registry.get(DASHBOARD_PACK_ID)
-    refs = set(manifest.evidence_refs)
-    assert f"{DASHBOARD_EVIDENCE_REF_PREFIX}blocker" in refs
-    # audit action does NOT add a required ref (would always-block without evidence).
-    assert f"{DASHBOARD_EVIDENCE_REF_PREFIX}auditor" not in refs
+    assert tuple(manifest.evidence_refs) == ()
+    # first-party packs are not shadowed by the discovered dashboard pack
+    for fp in PackRegistry.with_first_party_packs().pack_ids:
+        assert fp in registry.pack_ids
 
 
 def test_dashboard_pack_absent_when_kernel_flag_off(

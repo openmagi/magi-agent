@@ -2147,6 +2147,34 @@ def is_user_hooks_enabled(env: Mapping[str, str] | None = None) -> bool:
     return _is_true(source.get(MAGI_USER_HOOKS_ENABLED_ENV))
 
 
+MAGI_DASHBOARD_PACK_AUTHORING_ENABLED_ENV = "MAGI_DASHBOARD_PACK_AUTHORING_ENABLED"
+
+
+def is_dashboard_pack_authoring_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Master gate for the self-host dashboard pack-builder + deny-on-present checks.
+
+    Default OFF (strict truthy opt-in: "1"/"true"/"yes"/"on"). When OFF, the
+    dashboard pack-builder UI/REST stays dormant, the after-tool
+    :class:`~magi_agent.adk_bridge.dashboard_producer_control.DashboardProducerControl`
+    is never registered, and the pre-final verifier-bus dashboard gate is not
+    armed, so a turn is byte-identical to today. When ON (self-host / local CLI
+    only — never hosted multi-tenant), the producer reads the on-disk
+    ``dashboard-checks.json`` sidecar and emits a ``custom:DashboardCheck``
+    evidence record (status='failed' for matched ``block`` checks, 'ok' for
+    ``audit`` checks); the verifier-bus gate blocks the final answer when a
+    failed record is present. With no dashboard checks authored the runtime is
+    byte-identical even when ON. The pre-final block is self-contained: this flag
+    ALSO arms the engine's invocation-id reconciliation fold
+    (``MagiEngineDriver._collect_evidence``), so the gate sees the producer's
+    record (keyed under the ADK ``invocation_id``) under the engine's static
+    turn id WITHOUT requiring ``MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED``. Like
+    ``is_user_hooks_enabled`` this is an additive, default-disabled seam and does
+    NOT follow the runtime-profile default-ON convention.
+    """
+    source = os.environ if env is None else env
+    return _is_true(source.get(MAGI_DASHBOARD_PACK_AUTHORING_ENABLED_ENV))
+
+
 MAGI_TOOL_SYNTHESIS_NUDGE_ENABLED_ENV = "MAGI_TOOL_SYNTHESIS_NUDGE_ENABLED"
 
 

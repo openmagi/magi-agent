@@ -274,7 +274,10 @@ def build_cli_model_runner(
         # Customize after-tool ingestion gate (P4). Empty list (byte-identical)
         # unless the customize custom-rules flags are on; registers after the
         # bundled controls so it only rides on results no other control replaced.
-        extra_controls=_build_customize_after_tool_controls(),
+        extra_controls=[
+            *_build_customize_after_tool_controls(),
+            *_build_dashboard_producer_controls(tool_evidence_collector),
+        ],
     )
     app = App(name=_app_identifier(app_name), root_agent=agent, plugins=[plane_plugin])
     runner = Runner(
@@ -738,6 +741,31 @@ def _build_customize_after_tool_controls() -> list:
         return [
             CustomizeAfterToolControl(model_factory=_build_criterion_model_factory())
         ]
+    except Exception:
+        return []
+
+
+def _build_dashboard_producer_controls(collector: object) -> list:
+    """After-tool deny-on-present producer for dashboard-authored custom checks.
+
+    Returns an EMPTY list (byte-identical control plane) unless
+    ``MAGI_DASHBOARD_PACK_AUTHORING_ENABLED`` is set. Registers after the bundled
+    controls (and after the customize gate) so it only rides on results no other
+    control replaced. Fail-soft to ``[]`` — a failed import or construction can
+    never break the runner build.
+    """
+    from magi_agent.config.env import (  # noqa: PLC0415
+        is_dashboard_pack_authoring_enabled,
+    )
+
+    if not is_dashboard_pack_authoring_enabled():
+        return []
+    try:
+        from magi_agent.adk_bridge.dashboard_producer_control import (  # noqa: PLC0415
+            DashboardProducerControl,
+        )
+
+        return [DashboardProducerControl(collector=collector)]
     except Exception:
         return []
 

@@ -989,6 +989,7 @@ def execute_pre_final_verifier_bus(
     evidence_records: Sequence[object],
     document_coverage_gate_enabled: bool = False,
     shacl_gate_enabled: bool = False,
+    dashboard_gate_enabled: bool = False,
 ) -> dict[str, object]:
     """Run the deterministic pre-final evidence verifier over public refs.
 
@@ -1047,9 +1048,21 @@ def execute_pre_final_verifier_bus(
         else ()
     )
 
+    failed_dashboard = (
+        _failed_dashboard_records(evidence_records)
+        if dashboard_gate_enabled
+        else ()
+    )
+
     decision = (
         "block"
-        if (missing_evidence or missing_validators or failed_coverage or failed_shacl)
+        if (
+            missing_evidence
+            or missing_validators
+            or failed_coverage
+            or failed_shacl
+            or failed_dashboard
+        )
         else "pass"
     )
 
@@ -1101,6 +1114,24 @@ def execute_pre_final_verifier_bus(
                 ),
             )
         )
+    if failed_dashboard:
+        # Surface the rule IDs from the failed records so operators know which
+        # dashboard check(s) fired.  Each DashboardCheck record carries
+        # fields["ruleId"] set by the producer (DashboardProducerControl).
+        dashboard_rule_ids = ", ".join(
+            _dashboard_rule_id(r) for r in failed_dashboard
+        )
+        results.append(
+            _live_verifier_result(
+                verifier_id="dashboard-custom-check",
+                status="failed",
+                public_summary=f"dashboard custom check violation: {dashboard_rule_ids}",
+                retry_message=(
+                    "address the dashboard custom check failure(s) before final "
+                    f"answer: {dashboard_rule_ids}"
+                ),
+            )
+        )
     if not results:
         results.append(
             _live_verifier_result(
@@ -1122,6 +1153,7 @@ def execute_pre_final_verifier_bus(
         "missingValidators": missing_validators,
         "failedDocumentCoverage": len(failed_coverage),
         "failedShaclConstraints": len(failed_shacl),
+        "failedDashboardChecks": len(failed_dashboard),
     }
 
 
@@ -1225,6 +1257,58 @@ def _failed_shacl_records(
                     except Exception:
                         pass
         # Only "failed" blocks; "unknown" (fail-safe) and "ok" are never blocking.
+        if top_status == "failed":
+            failed.append(record)
+    return tuple(failed)
+
+
+_DASHBOARD_EVIDENCE_TYPE = "custom:DashboardCheck"
+
+
+def _dashboard_rule_id(record: object) -> str:
+    """Return a DashboardCheck record's ``fields["ruleId"]`` (``"unknown"`` if absent).
+
+    Mirrors the ``fields`` access style of ``_failed_dashboard_records``: handles
+    both Mapping records (camel/snake corpora) and ``EvidenceRecord``-like objects
+    exposing a ``fields`` attribute, and never raises.
+    """
+    if isinstance(record, Mapping):
+        return str((record.get("fields") or {}).get("ruleId") or "unknown")
+    return str(getattr(record, "fields", {}).get("ruleId") or "unknown")
+
+
+def _failed_dashboard_records(
+    evidence_records: Sequence[object],
+) -> tuple[object, ...]:
+    """Return DashboardCheck records whose top-level ``status`` is "failed".
+
+    Mirrors ``_failed_shacl_records`` exactly: the DashboardProducerControl sets
+    ``status="failed"`` directly on the record for a matched ``block`` check, so
+    the gate keys off the **top-level** ``EvidenceRecord.status``. ``status="ok"``
+    (a matched ``audit`` check) and ``status="unknown"`` are never counted as
+    failures — this preserves the global fail-safe contract.
+
+    Deterministic and never raises: a malformed/non-dashboard record is silently
+    skipped so a non-dashboard turn yields an empty tuple and is never blocked.
+    """
+    failed: list[object] = []
+    for record in evidence_records:
+        evidence_type, _ = _document_coverage_view(record)
+        if evidence_type != _DASHBOARD_EVIDENCE_TYPE:
+            continue
+        if isinstance(record, Mapping):
+            top_status = record.get("status")
+        else:
+            top_status = getattr(record, "status", None)
+            if top_status is None:
+                model_dump = getattr(record, "model_dump", None)
+                if callable(model_dump):
+                    try:
+                        dumped = model_dump(by_alias=True, mode="python", warnings=False)
+                        if isinstance(dumped, Mapping):
+                            top_status = dumped.get("status")
+                    except Exception:
+                        pass
         if top_status == "failed":
             failed.append(record)
     return tuple(failed)
