@@ -325,7 +325,35 @@ def _model_retry_kwargs(env: Mapping[str, str] | None = None) -> dict[str, int]:
     }
 
 
-def _model_reasoning_kwargs(env: Mapping[str, str] | None = None) -> dict[str, object]:
+# Per-provider normalization of a literal ``reasoning_effort`` value before it
+# reaches litellm. The string ``max`` is provider-specific:
+#   * Anthropic accepts ``max`` (litellm maps it to adaptive thinking).
+#   * OpenAI rejects ``max`` ("Supported values are: 'none', 'low', 'medium',
+#     'high', 'xhigh'."); OpenRouter proxies the OpenAI API and rejects likewise.
+#   * Gemini rejects ``max`` ("Invalid reasoning effort: max").
+# Map ``max`` → the strongest accepted value per provider (``xhigh`` for
+# OpenAI/OpenRouter, ``high`` for Gemini) so the lab-overlay default
+# (``MAGI_MODEL_REASONING_EFFORT=max``) does not silently break every turn
+# (litellm retries 4× then returns BadRequest, surfacing as "최종 답변 텍스트가
+# 도착하지 않았습니다" in the dashboard).
+_REASONING_EFFORT_VALUE_MAP_BY_PROVIDER: dict[str, dict[str, str]] = {
+    "openai": {"max": "xhigh"},
+    "openrouter": {"max": "xhigh"},
+    "gemini": {"max": "high"},
+}
+
+
+def _normalize_reasoning_effort(value: str, provider: str | None) -> str:
+    if provider is None:
+        return value
+    return _REASONING_EFFORT_VALUE_MAP_BY_PROVIDER.get(provider, {}).get(value, value)
+
+
+def _model_reasoning_kwargs(
+    env: Mapping[str, str] | None = None,
+    *,
+    provider: str | None = None,
+) -> dict[str, object]:
     """Optional extended-thinking / reasoning kwargs for the LiteLlm build.
 
     Published frontier coding-benchmark numbers are measured with adaptive
@@ -346,7 +374,9 @@ def _model_reasoning_kwargs(env: Mapping[str, str] | None = None) -> dict[str, o
       ``reasoning_effort`` (``minimal``/``low``/``medium``/``high``/``xhigh``/
       ``max``); ``off``/``none`` disable. RECOMMENDED knob: litellm maps it
       per-model — adaptive models get ``thinking={"type": "adaptive"}`` plus
-      ``output_config.effort``, budget models get an enabled budget.
+      ``output_config.effort``, budget models get an enabled budget. When
+      ``provider`` is supplied, values are also normalized per-provider
+      (notably ``max`` → ``xhigh`` for OpenAI/OpenRouter, which reject ``max``).
 
     Unset ⇒ ``{}`` ⇒ build byte-identical to before (default OFF).
     """
@@ -365,7 +395,7 @@ def _model_reasoning_kwargs(env: Mapping[str, str] | None = None) -> dict[str, o
             return {"thinking": {"type": "enabled", "budget_tokens": budget}}
     effort = (source.get("MAGI_MODEL_REASONING_EFFORT") or "").strip().lower()
     if effort and effort not in {"off", "none", "0", "false", "disable", "disabled"}:
-        return {"reasoning_effort": effort}
+        return {"reasoning_effort": _normalize_reasoning_effort(effort, provider)}
     return {}
 
 
@@ -452,7 +482,7 @@ def _build_litellm_model(
         model=config.litellm_model,
         api_key=api_key,
         **_model_retry_kwargs(env),
-        **_model_reasoning_kwargs(env),
+        **_model_reasoning_kwargs(env, provider=config.provider),
         **api_base_kwargs,
     )
 

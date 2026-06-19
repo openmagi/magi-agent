@@ -89,3 +89,47 @@ def test_reasoning_kwargs_adaptive_thinking_type():
         {"MAGI_MODEL_THINKING_TYPE": "", "MAGI_MODEL_REASONING_EFFORT": "high"}
     )
     assert kw == {"reasoning_effort": "high"}
+
+
+def test_reasoning_effort_max_maps_to_xhigh_for_openai():
+    # OpenAI rejects reasoning_effort="max" with a 400 — supported values are
+    # none/low/medium/high/xhigh. Map "max" -> "xhigh" (the strongest OpenAI
+    # value) so the lab-overlay default (MAGI_MODEL_REASONING_EFFORT=max) does
+    # not silently break GPT-5 turns with a BadRequest after 4 retries.
+    kw = _model_reasoning_kwargs(
+        {"MAGI_MODEL_REASONING_EFFORT": "max"}, provider="openai"
+    )
+    assert kw == {"reasoning_effort": "xhigh"}
+
+    # Same normalization for openrouter (also proxies OpenAI's API).
+    kw = _model_reasoning_kwargs(
+        {"MAGI_MODEL_REASONING_EFFORT": "max"}, provider="openrouter"
+    )
+    assert kw == {"reasoning_effort": "xhigh"}
+
+
+def test_reasoning_effort_max_maps_to_high_for_gemini():
+    # Gemini also rejects "max" ("Invalid reasoning effort: max"); map to
+    # "high" (the strongest Gemini-accepted value short of provider-specific
+    # adaptive shapes that don't fit the cross-provider effort knob).
+    kw = _model_reasoning_kwargs(
+        {"MAGI_MODEL_REASONING_EFFORT": "max"}, provider="gemini"
+    )
+    assert kw == {"reasoning_effort": "high"}
+
+
+def test_reasoning_effort_max_passes_through_for_anthropic():
+    # Anthropic IS the provider that accepts "max" (litellm maps it to adaptive
+    # thinking). Keep it byte-identical for that provider.
+    kw = _model_reasoning_kwargs(
+        {"MAGI_MODEL_REASONING_EFFORT": "max"}, provider="anthropic"
+    )
+    assert kw == {"reasoning_effort": "max"}
+
+
+def test_reasoning_kwargs_provider_param_is_optional():
+    # Backward compatibility: callers that don't pass `provider` keep the
+    # historical pass-through behavior.
+    assert _model_reasoning_kwargs({"MAGI_MODEL_REASONING_EFFORT": "max"}) == {
+        "reasoning_effort": "max"
+    }
