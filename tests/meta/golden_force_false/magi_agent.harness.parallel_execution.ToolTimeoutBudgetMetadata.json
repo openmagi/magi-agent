@@ -4,19 +4,8 @@
     "scheduler_attached",
     "tool_execution_attached"
   ],
-  "model_construct_dump": {
-    "batchId": null,
-    "executionAttached": true,
-    "metadataOnly": true,
-    "schedulerAttached": true,
-    "toolClass": null,
-    "toolExecutionAttached": true
-  },
-  "model_construct_force_false_leaks": [
-    "execution_attached",
-    "scheduler_attached",
-    "tool_execution_attached"
-  ],
+  "model_construct_dump": null,
+  "model_construct_force_false_leaks": [],
   "model_validate_dump": null,
   "model_validate_force_false_leaks": [],
   "qualname": "magi_agent.harness.parallel_execution.ToolTimeoutBudgetMetadata"

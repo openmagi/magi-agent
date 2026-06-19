@@ -4,27 +4,8 @@
     "production_authority",
     "real_child_runner_executed"
   ],
-  "model_construct_dump": {
-    "adkRunnerAttached": true,
-    "childTasksDispatched": 0,
-    "crossReviewEscalatedVerifierIds": [],
-    "crossReviewEscalationEligible": false,
-    "crossReviewEscalationReason": null,
-    "crossReviewFilteredClaimRefs": [],
-    "crossReviewSurvivingClaimRefs": [],
-    "dryRunReport": null,
-    "executionMode": "disabled",
-    "productionAuthority": true,
-    "realChildRunnerExecuted": true,
-    "telemetrySnapshot": null,
-    "validationReasonCodes": [],
-    "workflowRunEvidenceRef": null
-  },
-  "model_construct_force_false_leaks": [
-    "adk_runner_attached",
-    "production_authority",
-    "real_child_runner_executed"
-  ],
+  "model_construct_dump": null,
+  "model_construct_force_false_leaks": [],
   "model_validate_dump": null,
   "model_validate_force_false_leaks": [],
   "qualname": "magi_agent.harness.workflow_executor.WorkflowExecutorResult"

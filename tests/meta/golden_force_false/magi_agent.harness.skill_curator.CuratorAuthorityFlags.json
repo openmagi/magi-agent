@@ -6,18 +6,18 @@
     "production_channel_write"
   ],
   "model_construct_dump": {
-    "agentSpawned": true,
-    "liveToolExecution": true,
-    "networkCallAllowed": true,
-    "productionChannelWrite": true
+    "agentSpawned": false,
+    "liveToolExecution": false,
+    "networkCallAllowed": false,
+    "productionChannelWrite": false
   },
-  "model_construct_force_false_leaks": [
-    "agent_spawned",
-    "live_tool_execution",
-    "network_call_allowed",
-    "production_channel_write"
-  ],
-  "model_validate_dump": null,
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": {
+    "agentSpawned": false,
+    "liveToolExecution": false,
+    "networkCallAllowed": false,
+    "productionChannelWrite": false
+  },
   "model_validate_force_false_leaks": [],
   "qualname": "magi_agent.harness.skill_curator.CuratorAuthorityFlags"
 }

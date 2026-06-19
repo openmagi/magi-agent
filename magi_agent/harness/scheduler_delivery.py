@@ -60,6 +60,7 @@ from typing import Literal, Protocol, runtime_checkable
 from pydantic import BaseModel, ConfigDict, Field
 
 from magi_agent.evidence.types import EvidenceRecord, EvidenceSource
+from magi_agent.ops.authority import FalseOnlyAuthorityModel
 
 # ---------------------------------------------------------------------------
 # Module constants
@@ -117,7 +118,7 @@ class DeliveryTarget(Protocol):
 DeliveryReceiptStatus = Literal["delivered", "suppressed_silent", "skipped"]
 
 
-class DeliveryReceipt(BaseModel):
+class DeliveryReceipt(FalseOnlyAuthorityModel):
     """Frozen audit receipt for one cron turn delivery attempt.
 
     Raw output text is never stored.  ``output_length`` and ``output_digest``
@@ -125,8 +126,6 @@ class DeliveryReceipt(BaseModel):
 
     Authority flags are Literal[False] — no live channel delivery in A4.
     """
-
-    model_config = _MODEL_CONFIG
 
     status: DeliveryReceiptStatus
     job_id: str = Field(alias="jobId")

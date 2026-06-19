@@ -33,11 +33,12 @@ from __future__ import annotations
 import hashlib
 import os
 from collections.abc import Callable
-from typing import Any, Literal, Self
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer
+from pydantic import BaseModel, ConfigDict, Field
 
 from magi_agent.memory.declarative_filter import is_declarative_result
+from magi_agent.ops.authority import FalseOnlyAuthorityModel
 from magi_agent.tools.context import ToolContext
 
 
@@ -45,13 +46,6 @@ from magi_agent.tools.context import ToolContext
 MAGI_MEMORY_REVIEW_ENABLED_ENV: str = "MAGI_MEMORY_REVIEW_ENABLED"
 
 _TRUE_STRINGS = frozenset({"1", "true", "yes", "on"})
-
-_MODEL_CONFIG = ConfigDict(
-    frozen=True,
-    populate_by_name=True,
-    extra="forbid",
-    validate_default=True,
-)
 
 #: Reviewer seam: returns candidate fact strings extracted from the transcript.
 #: A live model-backed extractor plugs in here later; this PR injects a fake.
@@ -66,20 +60,20 @@ def _review_env_enabled() -> bool:
     return os.environ.get(MAGI_MEMORY_REVIEW_ENABLED_ENV, "").lower() in _TRUE_STRINGS
 
 
-class MemoryReviewConfig(BaseModel):
+class MemoryReviewConfig(FalseOnlyAuthorityModel):
     """Default-off config for the background memory-review harness.
 
     ``enabled=False`` (default): ``review()`` short-circuits without calling the
     reviewer or attempting any write.
 
     The authority pins below are LOCKED to ``Literal[False]`` (mirroring
-    ``BackgroundTaskConfig``); a forged truthy value is coerced to False so the
-    harness can never claim to have attached a live runner / reviewer or to have
-    performed production writes. Real write authority is owned entirely by the
-    injected PR2 write-host's gate, never by this config.
+    ``BackgroundTaskConfig``) and force-false is owned by
+    FalseOnlyAuthorityModel's introspection-based validator/serializer/construct/copy.
+    A forged truthy value is coerced to False so the harness can never claim
+    to have attached a live runner / reviewer or to have performed production
+    writes. Real write authority is owned entirely by the injected PR2
+    write-host's gate, never by this config.
     """
-
-    model_config = _MODEL_CONFIG
 
     enabled: bool = False
     interval_turns: int = Field(default=10, ge=1, alias="intervalTurns")
@@ -92,40 +86,6 @@ class MemoryReviewConfig(BaseModel):
     production_writes_enabled: Literal[False] = Field(
         default=False, alias="productionWritesEnabled"
     )
-
-    @field_serializer(
-        "background_review_runner_attached",
-        "live_reviewer_attached",
-        "production_writes_enabled",
-    )
-    def _serialize_false(self, _value: object) -> bool:
-        return False
-
-    def model_copy(self, *, update: Any = None, deep: bool = False) -> Self:
-        data = self.model_dump(mode="python", by_alias=False, warnings=False)
-        if update:
-            alias_to_name = {
-                field.alias: name
-                for name, field in self.__class__.model_fields.items()
-                if field.alias is not None
-            }
-            data.update(
-                {alias_to_name.get(str(key), str(key)): value for key, value in dict(update).items()}
-            )
-        # Authority pins can never be lifted via copy/update.
-        data["background_review_runner_attached"] = False
-        data["live_reviewer_attached"] = False
-        data["production_writes_enabled"] = False
-        _ = deep
-        return type(self).model_validate(data)
-
-    @classmethod
-    def model_construct(cls, _fields_set: set[str] | None = None, **values: Any) -> Self:
-        model = super().model_construct(_fields_set=_fields_set, **values)
-        object.__setattr__(model, "background_review_runner_attached", False)
-        object.__setattr__(model, "live_reviewer_attached", False)
-        object.__setattr__(model, "production_writes_enabled", False)
-        return model
 
 
 class MemoryReviewWriteReceipt(BaseModel):

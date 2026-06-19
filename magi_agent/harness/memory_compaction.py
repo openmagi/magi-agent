@@ -4,7 +4,9 @@ import json
 from collections.abc import Callable, Mapping, Sequence
 from typing import Literal, Self, TypeAlias
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from magi_agent.ops.authority import FalseOnlyAuthorityModel
 
 from magi_agent.harness.memory_write import (
     MemoryHarnessEraseState,
@@ -42,7 +44,7 @@ _MODEL_CONFIG = ConfigDict(
 )
 
 
-class MemoryCompactionHarnessConfig(BaseModel):
+class MemoryCompactionHarnessConfig(FalseOnlyAuthorityModel):
     model_config = _MODEL_CONFIG
 
     enabled: bool = False
@@ -59,7 +61,8 @@ class MemoryCompactionHarnessConfig(BaseModel):
         alias="filesystemMutationAllowed",
     )
     # PERMANENTLY FROZEN: file-based Hipocampus never writes a DB or the ADK
-    # MemoryService — these stay Literal[False] for safety.
+    # MemoryService — these stay Literal[False] for safety. Force-false is
+    # owned by FalseOnlyAuthorityModel's introspection-based validator/serializer.
     database_mutation_allowed: Literal[False] = Field(
         default=False,
         alias="databaseMutationAllowed",
@@ -71,51 +74,8 @@ class MemoryCompactionHarnessConfig(BaseModel):
     )
     traffic_attached: Literal[False] = Field(default=False, alias="trafficAttached")
 
-    @model_validator(mode="before")
-    @classmethod
-    def _force_default_off_authority(cls, value: object) -> dict[str, object]:
-        # Only the permanently-frozen fields are coerced; the relaxed bool
-        # fields now accept their incoming value (engine-enable seam for PR3+).
-        payload = dict(value) if isinstance(value, Mapping) else {}
-        payload["databaseMutationAllowed"] = False
-        payload["adkMemoryServiceWriteEnabled"] = False
-        payload["trafficAttached"] = False
-        payload.pop("database_mutation_allowed", None)
-        payload.pop("adk_memory_service_write_enabled", None)
-        payload.pop("traffic_attached", None)
-        return payload
 
-    @classmethod
-    def model_construct(
-        cls,
-        _fields_set: set[str] | None = None,
-        **values: object,
-    ) -> Self:
-        _ = _fields_set
-        return cls.model_validate(values)
-
-    def model_copy(
-        self,
-        *,
-        update: Mapping[str, object] | None = None,
-        deep: bool = False,
-    ) -> Self:
-        payload = self.model_dump(by_alias=True, mode="python", warnings=False)
-        if update:
-            payload.update(dict(update))
-        _ = deep
-        return type(self).model_validate(payload)
-
-    @field_serializer(
-        "database_mutation_allowed",
-        "adk_memory_service_write_enabled",
-        "traffic_attached",
-    )
-    def _serialize_false(self, _value: object) -> bool:
-        return False
-
-
-class MemoryCompactionPolicy(BaseModel):
+class MemoryCompactionPolicy(FalseOnlyAuthorityModel):
     model_config = _MODEL_CONFIG
 
     policy_ref: str = Field(alias="policyRef")
@@ -135,45 +95,10 @@ class MemoryCompactionPolicy(BaseModel):
     )
     provider_call_allowed: Literal[False] = Field(default=False, alias="providerCallAllowed")
 
-    @model_validator(mode="before")
-    @classmethod
-    def _force_default_off_authority(cls, value: object) -> dict[str, object]:
-        payload = dict(value) if isinstance(value, Mapping) else {}
-        payload["productionWriteEnabled"] = False
-        payload["providerCallAllowed"] = False
-        payload.pop("production_write_enabled", None)
-        payload.pop("provider_call_allowed", None)
-        return payload
-
-    @classmethod
-    def model_construct(
-        cls,
-        _fields_set: set[str] | None = None,
-        **values: object,
-    ) -> Self:
-        _ = _fields_set
-        return cls.model_validate(values)
-
-    def model_copy(
-        self,
-        *,
-        update: Mapping[str, object] | None = None,
-        deep: bool = False,
-    ) -> Self:
-        payload = self.model_dump(by_alias=True, mode="python", warnings=False)
-        if update:
-            payload.update(dict(update))
-        _ = deep
-        return type(self).model_validate(payload)
-
     @field_validator("policy_ref", "policy_snapshot_ref", mode="before")
     @classmethod
     def _sanitize_refs(cls, value: object) -> str:
         return _sanitize_public_ref(str(value or "policy:memory-compaction"))
-
-    @field_serializer("production_write_enabled", "provider_call_allowed")
-    def _serialize_false(self, _value: object) -> bool:
-        return False
 
 
 class MemoryCompactionRequest(BaseModel):
@@ -220,7 +145,7 @@ class MemoryCompactionRequest(BaseModel):
         return type(self).model_validate(payload)
 
 
-class MemoryCompactionReceipt(BaseModel):
+class MemoryCompactionReceipt(FalseOnlyAuthorityModel):
     model_config = _MODEL_CONFIG
 
     schema_version: Literal["memoryCompactionReceipt.v1"] = Field(
@@ -259,22 +184,6 @@ class MemoryCompactionReceipt(BaseModel):
         alias="authorityFlags",
     )
 
-    @model_validator(mode="before")
-    @classmethod
-    def _force_default_off_authority(cls, value: object) -> dict[str, object]:
-        payload = dict(value) if isinstance(value, Mapping) else {}
-        payload["productionWriteEnabled"] = False
-        payload["providerCallAttempted"] = False
-        payload["filesystemMutationAttempted"] = False
-        payload["databaseMutationAttempted"] = False
-        payload["networkCallAttempted"] = False
-        payload.pop("production_write_enabled", None)
-        payload.pop("provider_call_attempted", None)
-        payload.pop("filesystem_mutation_attempted", None)
-        payload.pop("database_mutation_attempted", None)
-        payload.pop("network_call_attempted", None)
-        return payload
-
     @field_validator("receipt_id", "policy_snapshot_ref", mode="before")
     @classmethod
     def _sanitize_public_strings(cls, value: object) -> str:
@@ -294,16 +203,6 @@ class MemoryCompactionReceipt(BaseModel):
     @classmethod
     def _sanitize_reason_codes(cls, value: object) -> tuple[str, ...]:
         return tuple(_sanitize_reason_code(item) for item in _string_tuple(value))
-
-    @field_serializer(
-        "production_write_enabled",
-        "provider_call_attempted",
-        "filesystem_mutation_attempted",
-        "database_mutation_attempted",
-        "network_call_attempted",
-    )
-    def _serialize_false(self, _value: object) -> bool:
-        return False
 
     def public_projection(self) -> dict[str, object]:
         return {

@@ -14,7 +14,13 @@
     "userVisibleOutputBlocked": false
   },
   "model_construct_force_false_leaks": [],
-  "model_validate_dump": null,
+  "model_validate_dump": {
+    "adkCallbackInvoked": false,
+    "adkEvalInvoked": false,
+    "promptInjected": false,
+    "routeAttached": false,
+    "userVisibleOutputBlocked": false
+  },
   "model_validate_force_false_leaks": [],
   "qualname": "magi_agent.harness.discipline_boundary.DisciplineAuthorityFlags"
 }

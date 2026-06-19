@@ -478,11 +478,21 @@ def test_public_result_messages_are_redacted_and_truncated_without_chat_or_tool_
         "canaryAttached",
     ),
 )
-def test_bus_model_copy_rejects_runtime_attachment_flags(flag: str) -> None:
+def test_bus_model_copy_coerces_runtime_attachment_flags(flag: str) -> None:
+    """C-4 PR-G2 (raise-to-coerce): the introspection-based
+    :class:`FalseOnlyAuthorityModel` now coerces forged ``Literal[False]``
+    fields to ``False`` uniformly across construct/copy/validate, instead
+    of raising a ``ValidationError`` only on ``model_copy(update=...)``.
+
+    The end-result invariant is preserved: a caller cannot smuggle a
+    runtime-attachment flag through ``model_copy`` — the value still
+    reads ``False`` in the resulting bus.
+    """
     bus = build_default_verifier_bus_metadata()
 
-    with pytest.raises(ValidationError):
-        bus.model_copy(update={flag: True})
+    copied = bus.model_copy(update={flag: True})
+    dumped = copied.model_dump(by_alias=True, mode="python", warnings=False)
+    assert dumped[flag] is False
 
 
 def test_verifier_metadata_model_construct_cannot_forge_runtime_attachment_flags() -> None:

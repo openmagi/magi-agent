@@ -3,10 +3,11 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
+from pydantic import Field
 
 from magi_agent.memory.contracts import RecallRequest
 from magi_agent.memory.namespaces import MemoryNamespacePolicy
+from magi_agent.ops.authority import FalseOnlyAuthorityModel
 from magi_agent.recipes.first_party.memory_recall import (
     MemoryRecallProjectionPolicy,
     MemoryRecallRecipeResult,
@@ -14,18 +15,7 @@ from magi_agent.recipes.first_party.memory_recall import (
 )
 
 
-_MODEL_CONFIG = ConfigDict(
-    frozen=True,
-    populate_by_name=True,
-    extra="forbid",
-    validate_default=True,
-    hide_input_in_errors=True,
-)
-
-
-class MemoryRecallHarnessConfig(BaseModel):
-    model_config = _MODEL_CONFIG
-
+class MemoryRecallHarnessConfig(FalseOnlyAuthorityModel):
     enabled: bool = False
     local_fake_adapter_enabled: bool = Field(default=False, alias="localFakeAdapterEnabled")
     live_provider_enabled: Literal[False] = Field(default=False, alias="liveProviderEnabled")
@@ -39,27 +29,6 @@ class MemoryRecallHarnessConfig(BaseModel):
         default=False,
         alias="productionWriteAllowed",
     )
-
-    @model_validator(mode="before")
-    @classmethod
-    def _force_default_off_authority(cls, value: object) -> dict[str, object]:
-        payload = dict(value) if isinstance(value, Mapping) else {}
-        payload["liveProviderEnabled"] = False
-        payload["trafficAttached"] = False
-        payload["userVisibleOutputAllowed"] = False
-        payload["memoryWriteAllowed"] = False
-        payload["productionWriteAllowed"] = False
-        return payload
-
-    @field_serializer(
-        "live_provider_enabled",
-        "traffic_attached",
-        "user_visible_output_allowed",
-        "memory_write_allowed",
-        "production_write_allowed",
-    )
-    def _serialize_false(self, _value: object) -> bool:
-        return False
 
 
 class MemoryRecallHarness:

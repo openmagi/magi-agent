@@ -48,6 +48,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from magi_agent.gates.workflow_executor_readiness import WorkflowExecutionMode
+from magi_agent.ops.authority import FalseOnlyAuthorityModel
 from magi_agent.harness.cross_review import CrossReviewStep
 from magi_agent.harness.parallel_execution import ParallelToolPolicyDecision
 from magi_agent.harness.workflow_result_cache import (
@@ -253,15 +254,8 @@ def _workflow_run_evidence_ref(contract: CompiledWorkflowContract) -> str:
 # Config
 # ---------------------------------------------------------------------------
 
-class WorkflowExecutorConfig(BaseModel):
+class WorkflowExecutorConfig(FalseOnlyAuthorityModel):
     """Minimal configuration for the PR1 executor skeleton."""
-
-    model_config = ConfigDict(
-        frozen=True,
-        populate_by_name=True,
-        extra="forbid",
-        validate_default=True,
-    )
 
     enabled: bool = False
     local_fake_child_runner_enabled: bool = Field(
@@ -367,15 +361,8 @@ class WorkflowExecutorTelemetry:
         }
 
 
-class WorkflowExecutorResult(BaseModel):
+class WorkflowExecutorResult(FalseOnlyAuthorityModel):
     """Return value from execute_workflow()."""
-
-    model_config = ConfigDict(
-        frozen=True,
-        populate_by_name=True,
-        extra="forbid",
-        validate_default=True,
-    )
 
     status: WorkflowExecutorStatus
     workflow_id: str = Field(alias="workflowId")

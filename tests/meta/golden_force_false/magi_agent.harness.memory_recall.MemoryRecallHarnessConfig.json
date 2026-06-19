@@ -16,7 +16,15 @@
     "userVisibleOutputAllowed": false
   },
   "model_construct_force_false_leaks": [],
-  "model_validate_dump": null,
+  "model_validate_dump": {
+    "enabled": false,
+    "liveProviderEnabled": false,
+    "localFakeAdapterEnabled": false,
+    "memoryWriteAllowed": false,
+    "productionWriteAllowed": false,
+    "trafficAttached": false,
+    "userVisibleOutputAllowed": false
+  },
   "model_validate_force_false_leaks": [],
   "qualname": "magi_agent.harness.memory_recall.MemoryRecallHarnessConfig"
 }

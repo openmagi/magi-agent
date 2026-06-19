@@ -12,33 +12,8 @@
     "telemetry_attached",
     "traffic_attached"
   ],
-  "model_construct_dump": {
-    "apiProxyAttached": true,
-    "authAttached": true,
-    "billingAttached": true,
-    "canaryAttached": true,
-    "executionAttached": true,
-    "metadata": {},
-    "modelRoutingAttached": true,
-    "reasoningExposure": true,
-    "routeAttached": true,
-    "runnerAttached": true,
-    "telemetryAttached": true,
-    "trafficAttached": true
-  },
-  "model_construct_force_false_leaks": [
-    "api_proxy_attached",
-    "auth_attached",
-    "billing_attached",
-    "canary_attached",
-    "execution_attached",
-    "model_routing_attached",
-    "reasoning_exposure",
-    "route_attached",
-    "runner_attached",
-    "telemetry_attached",
-    "traffic_attached"
-  ],
+  "model_construct_dump": null,
+  "model_construct_force_false_leaks": [],
   "model_validate_dump": null,
   "model_validate_force_false_leaks": [],
   "qualname": "magi_agent.harness.inference_scaling.TelemetryMetadata"

@@ -6,10 +6,10 @@ import hashlib
 import logging
 import os
 import re
-from typing import Any, Literal, Self
+from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from magi_agent.channels.contract import ChannelRef
 from magi_agent.harness.learning_executor import (
@@ -17,6 +17,7 @@ from magi_agent.harness.learning_executor import (
     LearningReflectionResult,
     run_reflection,
 )
+from magi_agent.ops.authority import FalseOnlyAuthorityModel
 from magi_agent.runtime.provider_receipts import provider_digest
 
 
@@ -96,55 +97,18 @@ _SENSITIVE_KEY_MARKERS = (
 )
 
 
-class CronRuntimeConfig(BaseModel):
-    model_config = _MODEL_CONFIG
-
+class CronRuntimeConfig(FalseOnlyAuthorityModel):
     enabled: bool = False
     local_fake_cron_enabled: bool = Field(default=False, alias="localFakeCronEnabled")
     background_scheduler_attached: Literal[False] = Field(default=False, alias="backgroundSchedulerAttached")
     production_writes_enabled: Literal[False] = Field(default=False, alias="productionWritesEnabled")
     route_attached: Literal[False] = Field(default=False, alias="routeAttached")
 
-    @classmethod
-    def model_construct(cls, _fields_set: set[str] | None = None, **values: Any) -> Self:
-        _ = _fields_set, values
-        return cls()
 
-    def model_copy(self, *, update: Mapping[str, Any] | None = None, deep: bool = False) -> Self:
-        data = self.model_dump(mode="python", by_alias=False, warnings=False)
-        if update:
-            alias_to_name = {
-                field.alias: name
-                for name, field in self.__class__.model_fields.items()
-                if field.alias is not None
-            }
-            data.update({alias_to_name.get(str(key), str(key)): value for key, value in update.items()})
-        data["background_scheduler_attached"] = False
-        data["production_writes_enabled"] = False
-        data["route_attached"] = False
-        _ = deep
-        return type(self).model_validate(data)
-
-
-class CronAuthorityFlags(BaseModel):
-    model_config = _MODEL_CONFIG
-
+class CronAuthorityFlags(FalseOnlyAuthorityModel):
     background_scheduler_attached: Literal[False] = Field(default=False, alias="backgroundSchedulerAttached")
     production_writes_enabled: Literal[False] = Field(default=False, alias="productionWritesEnabled")
     route_attached: Literal[False] = Field(default=False, alias="routeAttached")
-
-    @classmethod
-    def model_construct(cls, _fields_set: set[str] | None = None, **values: Any) -> Self:
-        _ = _fields_set, values
-        return cls()
-
-    def model_copy(self, *, update: Mapping[str, Any] | None = None, deep: bool = False) -> Self:
-        _ = update, deep
-        return type(self)()
-
-    @field_serializer("background_scheduler_attached", "production_writes_enabled", "route_attached")
-    def _serialize_false(self, _value: object) -> bool:
-        return False
 
 
 class CronLease(BaseModel):
@@ -204,9 +168,7 @@ class CronDefinition(BaseModel):
         }
 
 
-class CronDueTurn(BaseModel):
-    model_config = _MODEL_CONFIG
-
+class CronDueTurn(FalseOnlyAuthorityModel):
     source_ref: str = Field(alias="sourceRef")
     turn_ref: str = Field(alias="turnRef")
     delivery_channel: ChannelRef = Field(alias="deliveryChannel")

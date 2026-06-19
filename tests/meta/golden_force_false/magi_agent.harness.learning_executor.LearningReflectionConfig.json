@@ -12,7 +12,13 @@
     "realTranscriptSourceAttached": false
   },
   "model_construct_force_false_leaks": [],
-  "model_validate_dump": null,
+  "model_validate_dump": {
+    "enabled": false,
+    "llmAttached": false,
+    "localFakeEnabled": true,
+    "productionWriteEnabled": false,
+    "realTranscriptSourceAttached": false
+  },
   "model_validate_force_false_leaks": [],
   "qualname": "magi_agent.harness.learning_executor.LearningReflectionConfig"
 }

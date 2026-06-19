@@ -1,16 +1,16 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import Any, Literal, Self, TypeVar, get_args, get_origin
+from typing import Any, Literal, Self, TypeVar
 
 from pydantic import Field, field_validator, model_validator
 
 from magi_agent.evidence.ledger import _redact_public_summary_text
 from magi_agent.evidence.types import (
     EvidenceFieldMatcher,
-    EvidenceMetadataModel,
     validate_evidence_type_name,
 )
+from magi_agent.ops.authority import FalseOnlyAuthorityModel
 
 
 VerifierStage = Literal[
@@ -58,53 +58,30 @@ _MAX_PUBLIC_TEXT_CHARS = 200
 _PUBLIC_REF_PREFIXES = ("evidence:", "verifier:", "receipt:sha256:", "sha256:")
 
 
-class VerifierBusModel(EvidenceMetadataModel):
-    @classmethod
-    def model_construct(
-        cls,
-        _fields_set: set[str] | None = None,
-        **values: Any,
-    ) -> Self:
-        data = _canonicalize_false_only_fields(cls, values)
-        return cls.model_validate(data)
+class VerifierBusModel(FalseOnlyAuthorityModel):
+    """Verifier-bus frozen base.
 
-    def model_copy(
-        self,
-        *,
-        update: Mapping[str, Any] | None = None,
-        deep: bool = False,
-    ) -> Self:
-        data = self.model_dump(by_alias=False, mode="python", warnings=False)
-        if update:
-            alias_to_name = {
-                field.alias: name
-                for name, field in self.__class__.model_fields.items()
-                if field.alias is not None
-            }
-            data.update({alias_to_name.get(key, key): value for key, value in update.items()})
-        return self.__class__.model_validate(data)
+    PR-G2 (C-4): re-parented onto :class:`FalseOnlyAuthorityModel` (a
+    dependency-free leaf under ``magi_agent.ops.authority``).  The kernel's
+    introspection-based ``_force_false`` validator + ``_ser`` serializer +
+    ``model_construct`` / ``model_copy`` route-through-validate own the
+    Literal[False] force-false invariant uniformly; the per-class
+    ``_canonicalize_false_only_fields`` helper and the hand-rolled
+    ``model_construct`` / ``model_copy`` overrides that previously lived here
+    were collapsed onto the kernel.
+
+    The evidence<->harness import cycle (D-15) is unaffected: ``ops.authority``
+    is a dependency-free leaf, so re-parenting introduces no new boundary
+    crossing.  The pre-existing imports from ``magi_agent.evidence.ledger`` /
+    ``magi_agent.evidence.types`` (``_redact_public_summary_text``,
+    ``EvidenceFieldMatcher``, ``validate_evidence_type_name``) stay; only
+    ``EvidenceMetadataModel`` was dropped because it is no longer the base
+    class (its sole purpose here was the alias-aware ``model_copy``, which the
+    kernel now owns).
+    """
 
 
 _VerifierBusModelT = TypeVar("_VerifierBusModelT", bound=VerifierBusModel)
-
-
-def _is_false_only_field(annotation: object) -> bool:
-    return get_origin(annotation) is Literal and get_args(annotation) == (False,)
-
-
-def _canonicalize_false_only_fields(
-    model_type: type[VerifierBusModel],
-    values: Mapping[str, Any],
-) -> dict[str, Any]:
-    data = dict(values)
-    for name, field in model_type.model_fields.items():
-        if not _is_false_only_field(field.annotation):
-            continue
-        if name in data:
-            data[name] = False
-        if field.alias is not None and field.alias in data:
-            data[field.alias] = False
-    return data
 
 
 def _revalidate_nested_model(

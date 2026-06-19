@@ -5,7 +5,9 @@ import re
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, Field, model_validator
+
+from magi_agent.ops.authority import FalseOnlyAuthorityModel
 
 
 AgentRole = Literal["general", "coding", "research"]
@@ -66,8 +68,15 @@ _PRIVATE_KEY_BLOCK_RE = re.compile(
 )
 
 
-class _StrictFrozenModel(BaseModel):
-    model_config = ConfigDict(frozen=True, populate_by_name=True, extra="forbid")
+class _StrictFrozenModel(FalseOnlyAuthorityModel):
+    """Parallel-execution frozen base.
+
+    Inherits force-false validator/serializer/construct/copy from
+    FalseOnlyAuthorityModel; preserves a per-class ``__getattr__`` shim that
+    permits looking up fields by their camelCase alias (defense-in-depth on
+    top of ``populate_by_name=True`` so any consumer fetching the
+    alias-named attribute keeps working).
+    """
 
     def __getattr__(self, item: str) -> Any:
         alias_to_name = {
@@ -78,23 +87,6 @@ class _StrictFrozenModel(BaseModel):
         if item in alias_to_name:
             return getattr(self, alias_to_name[item])
         return super().__getattr__(item)
-
-    def model_copy(self, *, update: Mapping[str, Any] | None = None, deep: bool = False) -> Self:
-        data = _canonical_model_data(self)
-        if update:
-            alias_by_input_key = {
-                field_name: field.alias or field_name
-                for field_name, field in self.__class__.model_fields.items()
-            }
-            alias_by_input_key.update(
-                {
-                    field.alias: field.alias
-                    for field in self.__class__.model_fields.values()
-                    if field.alias is not None
-                }
-            )
-            data.update({alias_by_input_key.get(key, key): value for key, value in update.items()})
-        return self.__class__.model_validate(data)
 
 
 class ParallelExecutionScope(_StrictFrozenModel):
