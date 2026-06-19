@@ -429,7 +429,9 @@ def test_sanitizer_redacts_private_text_in_emitted_payload() -> None:
 def test_sanitizer_drops_thinking_events(monkeypatch: pytest.MonkeyPatch) -> None:
     # Inject a thinking_delta projection; the sanitizer returns None => skipped.
     # We wrap the REAL bridge (via _lazy_engine_deps) so the sanitizer is still
-    # the real one being exercised.
+    # the real one being exercised. Pin MAGI_STREAM_THINKING OFF (hosted/default
+    # posture) so a leaked env default can't make the sanitizer forward thinking.
+    monkeypatch.delenv("MAGI_STREAM_THINKING", raising=False)
     import magi_agent.cli.engine as engine_mod
 
     runner = MockRunner([_text_event("visible")])

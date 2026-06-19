@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from magi_agent.transport.sse import InMemorySseWriter
 
 
@@ -183,7 +185,17 @@ def test_public_events_keep_private_payload_attempts_in_dropped_fields_only() ->
         assert path[-1] in PRIVATE_ONLY_KEYS, ".".join(path)
 
 
-def test_malicious_private_payload_attempts_are_explicitly_drop_only() -> None:
+def test_malicious_private_payload_attempts_are_explicitly_drop_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Hosted/default posture guard: with MAGI_STREAM_THINKING OFF malicious private
+    # payload attempts (incl. any thought parts) are drop-only on the public SSE
+    # path. Pin the flag OFF so the local-serve overlay default (streaming thinking
+    # on the user's own trusted machine) can't leak into this process and make the
+    # guard falsely fail; the ON path is covered by the dedicated thinking_delta
+    # tests. Raw private fields (rawPayload/rawToolUseInput/source snapshots/keys)
+    # are dropped regardless of the flag.
+    monkeypatch.delenv("MAGI_STREAM_THINKING", raising=False)
     fixture = _load_fixture()
     attempts = fixture["maliciousPrivatePayloadAttempts"]
 

@@ -1,6 +1,7 @@
 import json
 import math
 
+import pytest
 from google.adk.events import Event
 from google.genai import types
 
@@ -589,7 +590,15 @@ def test_runner_lifecycle_preview_digests_private_marker_key_variants() -> None:
     assert "account id customer-function-response" not in response_variant_preview
 
 
-def test_adk_text_projection_drops_thought_parts_and_redacts_private_markers() -> None:
+def test_adk_text_projection_drops_thought_parts_and_redacts_private_markers(
+    monkeypatch: "pytest.MonkeyPatch",
+) -> None:
+    # This guards the hosted/default posture: with MAGI_STREAM_THINKING OFF the
+    # projection must drop thought=True parts entirely (no thinking_delta on the
+    # public stream). Pin it OFF explicitly so a leaked env default (the local
+    # serve overlay enables it) can't turn this guard into a false failure — the
+    # ON path is covered separately (test_sanitizer_passes_thinking_when_flag_on).
+    monkeypatch.delenv("MAGI_STREAM_THINKING", raising=False)
     bridge = OpenMagiEventBridge()
     thought_event = Event(
         id="event-thought-text",
