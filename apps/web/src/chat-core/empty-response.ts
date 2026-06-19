@@ -77,5 +77,11 @@ export function shouldDrainQueueAfterTurn(
 ): boolean {
   if (state?.streamingText?.trim()) return true;
   if (state?.hasTextContent) return true;
+  // An errored turn (e.g. litellm BadRequest, provider auth failure) is a
+  // mid-task stop just like the tool-only case below: draining the queue would
+  // dispatch every backlogged user message against the SAME broken session,
+  // surfacing as the bot replying to an OLDER message — or replying to all
+  // queued messages at once. Hold the queue instead and let the user retry.
+  if (state?.error) return false;
   return !hasNonTextTurnWork(state);
 }
