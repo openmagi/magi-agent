@@ -1,4 +1,4 @@
-"""Parity harness — engine+HOSTED_PROFILE vs gate5b4c3 #628 goldens (Task 4B).
+"""Parity harness — engine+HOSTED_PROFILE vs gate5b4c3 #628 goldens (Task 4).
 
 Drives ``MagiEngineDriver`` (the engine loop) with engine-compatible fake ADK
 runners and ``wire_profile=HOSTED_PROFILE``.  Compares captured public events
@@ -22,57 +22,54 @@ are NOT compatible with the engine bridge. Instead, we build equivalent runners
 using ``tests.support.engine_fakes`` (real ``google.adk.events.Event`` objects).
 The scenarios are semantically identical to the gate5b4c3 golden scenarios.
 
-Parity results (see report for full details)
---------------------------------------------
+Parity status (T4 final — 4 of 5 divergences CLOSED)
+-----------------------------------------------------
 TEXT-DELTA parity: text_only — text_delta events match golden exactly.
   (The engine additionally emits lifecycle events absent from the golden;
    full public-events list equality is NOT asserted for text_only.)
 
-TOOL-EVENT-SHAPE parity (id + field set):
-  tool_then_final    — tool_start id ✓, shape ✓; tool_end DIVERGES (see below)
-  native_tool_roundtrip — same as tool_then_final
+TOOL-EVENT-SHAPE parity (after T1–T4):
+  tool_then_final    — tool_start ✓, tool_progress EQUALITY ✓, tool_end EQUALITY ✓
+  native_tool_roundtrip — same
   duplicate_text_and_call — same
-  event_cap          — tool_start only (no tool_end from engine for cap scenario)
-  function_call_only — tool_start only (no tool_end from engine; no manual loop)
+  event_cap          — tool_start ✓, tool_progress EQUALITY ✓, no tool_end (correct)
+  function_call_only — tool_start ✓, tool_progress EQUALITY ✓, no tool_end (correct)
 
-DIVERGENCE FINDINGS (tool_end shape):
-  1. ``tool_progress`` — NOT emitted by the engine bridge. gate5b4c3 emits it
-     explicitly from the boundary loop (outside the ADK event projection path).
-     The engine bridge processes ADK events; there is no ADK tool_progress event.
-     This is a lifecycle gap, not a wire shape issue.
+CLOSED DIVERGENCES (T3 wired, T4 proven):
+  1. ``tool_progress`` — CLOSED. T3 wires ``wire_profile.build_tool_progress`` on
+     the call-side of ``_project_function_call_part``; the engine now emits a
+     ``tool_progress`` event immediately after each ``tool_start`` on the HOSTED
+     path, matching gate5b4c3's ``{id, label, status="in_progress", message=…}``
+     shape exactly.
 
-  2. ``tool_end.durationMs`` — present in gate5b4c3 golden (gate5b4c3 times tool
-     execution via ``time.monotonic()``), absent from the engine's HOSTED path
-     (``_hosted_build_tool_end`` calls ``tool_end_event`` without ``duration_ms``).
-     This is EXPECTED: the engine bridge does not have access to per-tool timing.
+  2. ``tool_end.durationMs`` — CLOSED. T3 records ``time.monotonic()`` at
+     ``tool_start`` in ``_hosted_tool_started_at`` and passes ``_elapsed_ms(start)``
+     as ``duration_ms`` to ``build_tool_end``.  Volatile (real wall time) — harness
+     normalises both sides to ``"<normalized>"`` before comparison.
 
-  3. ``tool_end.transcriptRefs`` — present in gate5b4c3 golden (e.g.
-     ``"result:sha256:..."``).  The engine bridge's ``_project_function_response_part``
-     with HOSTED profile calls ``wire_profile.build_tool_end(id, status, preview)``
-     which does NOT include transcript refs.  The gate5b4c3 boundary passes
-     ``receipt_refs=(f"result:{result_digest}",)`` to ``tool_end_event`` directly.
-     This is a scope gap: the profile's ``build_tool_end`` signature does not
-     currently accept ``receipt_refs``.  NOT a blocker for T4 (scope is #628).
+  3. ``tool_end.transcriptRefs`` — CLOSED. T3 passes
+     ``receipt_refs=(f"result:{digest}",)`` to ``build_tool_end``; the HOSTED
+     ``_hosted_build_tool_end`` forwards it via ``tool_end_event(receipt_refs=…)``
+     which sets ``transcriptRefs`` in the wire dict.
 
-  4. ``tool_end.output_preview`` format — gate5b4c3 produces
-     ``"result:sha256:<hex>"`` (a content-addressed digest string); the engine
-     bridge produces a JSON-serialised preview of the response dict
-     (``_public_preview(response)``).  Different representations of the same
-     tool result.
+  4. ``tool_end.output_preview`` format — CLOSED. T3 computes
+     ``digest = result_digest(response)`` and passes
+     ``output_preview=f"result:{digest}"``; ``result_digest`` is byte-identical to
+     gate5b4c3's ``_digest``, and ``response`` (the function_response.response attr)
+     is the same value gate5b4c3 digests as ``response_payload``.
 
-  5. ``turn_phase`` events — the gate5b4c3 boundary emits phase transitions
-     (executing / committing) that the engine does NOT emit on the HOSTED path.
-     These come from gate5b4c3's own loop, not from ADK event projection. The
-     engine loop emits its own phase events via ``project_runner_phase_event``,
-     but at different points and with different granularity.
+REMAINING DOCUMENTED DIVERGENCE:
+  5. ``turn_phase`` events — gate5b4c3 emits ``executing`` / ``committing`` phase
+     transitions from its own boundary loop.  The engine bridge does not emit
+     these on the HOSTED path.  Deferred; out of scope for #702.
 
-CONCLUSION:
-  tool_start parity is PROVEN across all tool scenarios (id scheme + field set).
-  tool_end id parity is PROVEN (correlation fix from Part A).
-  tool_end field-set diverges (durationMs / transcriptRefs / output_preview).
-  tool_progress is not emitted by the engine bridge at all.
+CONCLUSION (T4):
+  tool_start parity: PROVEN (id + field set).
+  tool_progress parity: PROVEN (field-set equality vs golden, all scenarios).
+  tool_end parity: PROVEN (output_preview + transcriptRefs + durationMs match
+    after volatile normalization, all tool-end scenarios).
   Full-list parity: achieved for text_only.
-  Status: DONE_WITH_CONCERNS (tool_start proven, tool_end structural gap documented).
+  Status: DONE (4/5 divergences closed; turn_phase is the sole documented gap).
 """
 from __future__ import annotations
 
@@ -408,18 +405,52 @@ def test_function_call_only_tool_start_id_parity() -> None:
 def test_function_call_only_no_tool_end_from_engine() -> None:
     """function_call_only: engine does NOT emit tool_end (no function_response).
 
-    EXPECTED DIVERGENCE: the gate5b4c3 golden has NO tool_end either (the boundary
-    exits via runner_output_missing before any tool response arrives). The engine
-    also emits no tool_end since the runner yields only a function_call event.
+    The gate5b4c3 function_call_only golden has NO tool_end in its public_events
+    section (the boundary exits via runner_output_missing before any tool response
+    arrives). The engine also emits no tool_end since the runner yields only a
+    function_call event.
     """
     runner = MockRunner(
         [call_event("Calculation", {"expression": "1 + 1"}, "calculation-call-001")]
     )
     captured = asyncio.run(_capture(runner))
     tool_ends = [e for e in captured if e.get("type") == "tool_end"]
-    # No tool_end expected — documents the lack of manual tool loop in the engine.
+    # No tool_end expected — engine has no function_response event to project.
     assert tool_ends == [], (
         f"function_call_only should not emit tool_end (no response event); got {tool_ends}"
+    )
+
+
+def test_function_call_only_emits_tool_progress() -> None:
+    """function_call_only: engine emits tool_progress matching the golden's shape.
+
+    CLOSED (T3/T4): the engine now emits tool_progress immediately after tool_start
+    on the HOSTED path.  The function_call_only golden has one tool_progress event
+    with {id=tu_<hash>, label="Calculation", status="in_progress",
+    message="Tool execution started"}.  The engine must match this exactly.
+    """
+    runner = MockRunner(
+        [call_event("Calculation", {"expression": "1 + 1"}, "calculation-call-001")]
+    )
+    captured = asyncio.run(_capture(runner))
+
+    golden = _load_golden("function_call_only")
+    # Note: function_call_only golden's public_events section has only tool_start
+    # and tool_progress (no tool_end, no text_delta).
+    golden_progress = [
+        e for e in golden["public_events"] if e.get("type") == "tool_progress"
+    ]
+    engine_progress = [e for e in captured if e.get("type") == "tool_progress"]
+
+    assert len(engine_progress) >= 1, (
+        f"function_call_only: expected at least one tool_progress; "
+        f"got event types: {[e.get('type') for e in captured]}"
+    )
+    assert len(golden_progress) == 1, "function_call_only golden must have 1 tool_progress"
+    assert engine_progress[0] == golden_progress[0], (
+        f"function_call_only tool_progress mismatch.\n"
+        f"  engine: {engine_progress[0]}\n"
+        f"  golden: {golden_progress[0]}"
     )
 
 
@@ -493,9 +524,20 @@ def test_event_cap_tool_start_id_parity() -> None:
         f"function_response; got {tool_ends}"
     )
 
-    # DOCUMENTED DIVERGENCE: the golden has a tool_progress event; the engine
-    # bridge does not emit tool_progress (no ADK tool_progress event type).
-    # This is the same gap documented in test_engine_does_not_emit_tool_progress.
+    # CLOSED (T3/T4): the engine now emits tool_progress immediately after
+    # tool_start on the HOSTED path — the golden has exactly one tool_progress.
+    golden_progress = [e for e in golden["public_events"] if e.get("type") == "tool_progress"]
+    tool_progress = [e for e in captured if e.get("type") == "tool_progress"]
+    assert len(tool_progress) >= 1, (
+        f"event_cap: engine must emit at least one tool_progress (T3 closed); "
+        f"got {tool_progress}"
+    )
+    assert len(golden_progress) == 1, "event_cap golden must have 1 tool_progress"
+    assert tool_progress[0] == golden_progress[0], (
+        f"event_cap tool_progress mismatch.\n"
+        f"  engine: {tool_progress[0]}\n"
+        f"  golden: {golden_progress[0]}"
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -525,17 +567,17 @@ def test_tool_event_id_matches_golden_calculation_id() -> None:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Divergence documentation: tool_progress not emitted by engine
+# T4 EQUALITY: tool_progress and tool_end shape vs golden (4 divergences CLOSED)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def test_engine_does_not_emit_tool_progress() -> None:
-    """DOCUMENTED DIVERGENCE: engine bridge does not emit tool_progress events.
+def test_native_tool_roundtrip_tool_progress_equality() -> None:
+    """CLOSED (T3/T4): engine emits tool_progress matching the golden exactly.
 
-    gate5b4c3 golden includes tool_progress events (e.g. label + "in_progress" status).
-    These are emitted explicitly by the gate5b4c3 boundary loop, not by ADK event
-    projection. The engine bridge only projects ADK events through project_adk_event;
-    there is no ADK tool_progress event type. This is a lifecycle gap, not a wire
-    shape issue, and is out of scope for #628 wire-profile parity.
+    Divergence 1 is now CLOSED: the engine bridge emits a ``tool_progress`` event
+    immediately after ``tool_start`` on the HOSTED path.  The golden's
+    tool_progress is ``{type, id, label, status="in_progress", message}``.
+    The engine must emit an identical dict (no normalization needed — no volatile
+    fields in tool_progress).
     """
     runner = MockRunner(
         [
@@ -547,27 +589,29 @@ def test_engine_does_not_emit_tool_progress() -> None:
     captured = asyncio.run(_capture(runner))
     tool_progress = [e for e in captured if e.get("type") == "tool_progress"]
 
-    # Document: engine emits 0 tool_progress events (diverges from golden which has 1).
-    # This divergence is expected and documented — NOT a parity failure.
     golden = _load_golden("native_tool_roundtrip")
     golden_progress = [e for e in golden["public_events"] if e.get("type") == "tool_progress"]
-    assert len(golden_progress) == 1, "golden should have 1 tool_progress event"
-    assert len(tool_progress) == 0, (
-        f"Unexpected: engine emitted tool_progress events. "
-        f"Divergence doc may need update. Got: {tool_progress}"
+
+    assert len(golden_progress) == 1, "golden should have exactly 1 tool_progress event"
+    assert len(tool_progress) >= 1, (
+        f"Engine must emit tool_progress (T3 closed divergence 1). "
+        f"Got event types: {[e.get('type') for e in captured]}"
+    )
+    assert tool_progress[0] == golden_progress[0], (
+        f"tool_progress mismatch vs golden.\n"
+        f"  engine: {tool_progress[0]}\n"
+        f"  golden: {golden_progress[0]}"
     )
 
 
-def test_tool_end_field_set_divergence_documented() -> None:
-    """DOCUMENTED DIVERGENCE: tool_end field-set differences from golden.
+def test_native_tool_roundtrip_tool_end_equality() -> None:
+    """CLOSED (T3/T4): tool_end shape matches golden (divergences 2, 3, 4 closed).
 
-    Fields present in golden but absent from engine's HOSTED tool_end:
-      - durationMs (gate5b4c3 times execution; engine bridge has no timing)
-      - transcriptRefs (gate5b4c3 passes receipt_refs; profile's build_tool_end
-        does not accept receipt_refs in current scope)
-      - output_preview format differs (gate5b4c3: "result:sha256:...";
-        engine: JSON preview of response dict)
-    Fields matching: id (tu_<hash>), type, status.
+    Divergence 2 (durationMs), divergence 3 (transcriptRefs), divergence 4
+    (output_preview format) are all CLOSED.  This test asserts full equality of
+    the normalised tool_end dict — ``durationMs`` is volatile (real wall time) so
+    both sides are normalised to ``"<normalized>"`` before comparison; all other
+    fields must be byte-identical.
     """
     runner = MockRunner(
         [
@@ -584,34 +628,135 @@ def test_tool_end_field_set_divergence_documented() -> None:
     assert tool_ends, "engine must emit tool_end"
     assert golden_ends, "golden must have tool_end"
 
-    engine_end = tool_ends[0]
-    golden_end = golden_ends[0]
+    engine_norm = _normalize_duration(tool_ends)[0]
+    golden_norm = _normalize_duration(golden_ends)[0]
 
-    # What MATCHES: id and type and status.
-    assert engine_end["id"] == golden_end["id"], "id must match (correlation fix)"
-    assert engine_end["type"] == golden_end["type"] == "tool_end"
-    assert engine_end["status"] == golden_end["status"] == "ok"
-
-    # DOCUMENTED DIVERGENCES — assert the expected differences:
-
-    # (a) durationMs: absent from engine, present in golden
-    assert "durationMs" not in engine_end, (
-        "Unexpected: engine now emits durationMs; divergence doc needs update."
-    )
-    assert "durationMs" in golden_end or golden_end.get("durationMs") == "<normalized>", (
-        "golden should have durationMs (may be normalized)"
+    assert engine_norm == golden_norm, (
+        f"native_tool_roundtrip tool_end mismatch after durationMs normalization.\n"
+        f"  engine: {engine_norm}\n"
+        f"  golden: {golden_norm}"
     )
 
-    # (b) transcriptRefs: absent from engine, present in golden
-    assert "transcriptRefs" not in engine_end, (
-        "Unexpected: engine now emits transcriptRefs; divergence doc needs update."
+
+def test_tool_then_final_tool_end_equality() -> None:
+    """CLOSED (T3/T4): tool_then_final tool_end shape matches golden."""
+    runner = MockRunner(
+        [
+            call_event("Calculation", {"expression": "1 + 1"}, "calculation-call-001"),
+            response_event(
+                "Calculation",
+                {"status": "ok", "reason": "tool_completed", "outputPreview": {"value": 2}},
+                "calculation-call-001",
+            ),
+            text_event("final answer after manual tool execution", partial=True, turn_complete=True),
+        ]
     )
-    # (c) output_preview format: engine produces JSON dict preview;
-    #     golden has "result:sha256:..." digest.
-    engine_preview = engine_end.get("output_preview", "")
-    golden_preview = golden_end.get("output_preview", "")
-    assert engine_preview != golden_preview, (
-        "Unexpected: output_preview now matches; divergence doc needs update."
+    captured = asyncio.run(_capture(runner))
+    tool_ends = [e for e in captured if e.get("type") == "tool_end"]
+    golden = _load_golden("tool_then_final")
+    golden_ends = [e for e in golden["public_events"] if e.get("type") == "tool_end"]
+
+    assert tool_ends, "engine must emit tool_end for tool_then_final"
+    assert golden_ends, "tool_then_final golden must have tool_end"
+
+    engine_norm = _normalize_duration(tool_ends)[0]
+    golden_norm = _normalize_duration(golden_ends)[0]
+
+    assert engine_norm == golden_norm, (
+        f"tool_then_final tool_end mismatch after durationMs normalization.\n"
+        f"  engine: {engine_norm}\n"
+        f"  golden: {golden_norm}"
+    )
+
+
+def test_tool_then_final_tool_progress_equality() -> None:
+    """CLOSED (T3/T4): tool_then_final tool_progress matches golden."""
+    runner = MockRunner(
+        [
+            call_event("Calculation", {"expression": "1 + 1"}, "calculation-call-001"),
+            response_event(
+                "Calculation",
+                {"status": "ok", "reason": "tool_completed", "outputPreview": {"value": 2}},
+                "calculation-call-001",
+            ),
+            text_event("final answer after manual tool execution", partial=True, turn_complete=True),
+        ]
+    )
+    captured = asyncio.run(_capture(runner))
+    tool_progress = [e for e in captured if e.get("type") == "tool_progress"]
+    golden = _load_golden("tool_then_final")
+    golden_progress = [e for e in golden["public_events"] if e.get("type") == "tool_progress"]
+
+    assert golden_progress, "tool_then_final golden must have tool_progress"
+    assert tool_progress, (
+        f"engine must emit tool_progress for tool_then_final; "
+        f"got types: {[e.get('type') for e in captured]}"
+    )
+    assert tool_progress[0] == golden_progress[0], (
+        f"tool_then_final tool_progress mismatch.\n"
+        f"  engine: {tool_progress[0]}\n"
+        f"  golden: {golden_progress[0]}"
+    )
+
+
+def test_duplicate_text_and_call_tool_end_equality() -> None:
+    """CLOSED (T3/T4): duplicate_text_and_call tool_end shape matches golden."""
+    runner = MockRunner(
+        [
+            call_event("Calculation", {"expression": "1 + 1"}, "calculation-call-001"),
+            response_event(
+                "Calculation",
+                {"status": "ok", "reason": "tool_completed", "outputPreview": {"value": 2}},
+                "calculation-call-001",
+            ),
+            text_event("done", partial=True, turn_complete=True),
+        ]
+    )
+    captured = asyncio.run(_capture(runner))
+    tool_ends = [e for e in captured if e.get("type") == "tool_end"]
+    golden = _load_golden("duplicate_text_and_call")
+    golden_ends = [e for e in golden["public_events"] if e.get("type") == "tool_end"]
+
+    assert tool_ends, "engine must emit tool_end for duplicate_text_and_call"
+    assert golden_ends, "duplicate_text_and_call golden must have tool_end"
+
+    engine_norm = _normalize_duration(tool_ends)[0]
+    golden_norm = _normalize_duration(golden_ends)[0]
+
+    assert engine_norm == golden_norm, (
+        f"duplicate_text_and_call tool_end mismatch after durationMs normalization.\n"
+        f"  engine: {engine_norm}\n"
+        f"  golden: {golden_norm}"
+    )
+
+
+def test_duplicate_text_and_call_tool_progress_equality() -> None:
+    """CLOSED (T3/T4): duplicate_text_and_call tool_progress matches golden."""
+    runner = MockRunner(
+        [
+            call_event("Calculation", {"expression": "1 + 1"}, "calculation-call-001"),
+            response_event(
+                "Calculation",
+                {"status": "ok", "reason": "tool_completed", "outputPreview": {"value": 2}},
+                "calculation-call-001",
+            ),
+            text_event("done", partial=True, turn_complete=True),
+        ]
+    )
+    captured = asyncio.run(_capture(runner))
+    tool_progress = [e for e in captured if e.get("type") == "tool_progress"]
+    golden = _load_golden("duplicate_text_and_call")
+    golden_progress = [e for e in golden["public_events"] if e.get("type") == "tool_progress"]
+
+    assert golden_progress, "duplicate_text_and_call golden must have tool_progress"
+    assert tool_progress, (
+        f"engine must emit tool_progress for duplicate_text_and_call; "
+        f"got types: {[e.get('type') for e in captured]}"
+    )
+    assert tool_progress[0] == golden_progress[0], (
+        f"duplicate_text_and_call tool_progress mismatch.\n"
+        f"  engine: {tool_progress[0]}\n"
+        f"  golden: {golden_progress[0]}"
     )
 
 
