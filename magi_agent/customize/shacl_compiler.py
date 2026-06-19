@@ -362,7 +362,15 @@ _COMPILE_SYSTEM_INSTRUCTION = (
     "evidence types and fields, output a valid SHACL Turtle (.ttl) shape that "
     "expresses the constraint using the magi ontology predicates listed. "
     "Output ONLY the Turtle text, optionally in a ```turtle code fence. "
-    "Do not include any explanation or prose."
+    "Do not include any explanation or prose. "
+    "If you have HIGH confidence about (a) which evidence type/field this constraint "
+    "targets and (b) the constraint kind (numeric range / allowed values / pattern / "
+    "required field / cardinality), return the SHACL shape TTL. "
+    "If you genuinely need clarification (multiple plausible interpretations, ambiguous "
+    "field reference, missing scope info), instead of a shape return a JSON object "
+    'exactly like {"questions": ["...", "..."]} with AT MOST 2 focused questions. '
+    "Do not ask trivial questions; only ask when ambiguity would lead to a wrong shape. "
+    "Never both at once."
 )
 
 _COMPILE_PROMPT_TEMPLATE = """\
@@ -397,11 +405,51 @@ CONSTRAINT DESCRIPTION:
 """
 
 
+def _parse_clarifying_questions(raw_text: str) -> tuple[str, ...] | None:
+    """Try to parse the model response as a clarifying-questions JSON object.
+
+    Returns a normalized tuple of 1–2 non-empty question strings if the response
+    is a JSON object with a ``questions`` key containing a non-empty list of
+    strings (each trimmed, deduped, capped to 2).
+
+    Returns ``None`` if the response does not match the questions pattern
+    (including if ``questions`` is empty — an empty list is NOT a clarifying-
+    question response and falls through to the existing TTL/failure path).
+    """
+    text = raw_text.strip()
+    if not text.startswith("{"):
+        return None
+    try:
+        parsed = json.loads(text)
+    except (json.JSONDecodeError, ValueError):
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    questions = parsed.get("questions")
+    if not isinstance(questions, list) or len(questions) == 0:
+        # Empty list → NOT a clarifying-question response (spec §Fail-open).
+        return None
+    # Normalize: trim, filter empty, dedupe preserving order, cap to 2.
+    seen: set[str] = set()
+    normalized: list[str] = []
+    for q in questions:
+        q_str = str(q).strip()
+        if q_str and q_str not in seen:
+            seen.add(q_str)
+            normalized.append(q_str)
+        if len(normalized) == 2:
+            break
+    if not normalized:
+        return None
+    return tuple(normalized)
+
+
 async def compile_nl_to_shacl(
     nl_text: str,
     fields: list[dict],
     *,
     model_factory: Callable[[], Any] | None,
+    prior_turns: tuple[dict, ...] = (),
 ) -> dict:
     """Compile a natural-language constraint into a SHACL Turtle shape.
 
@@ -417,17 +465,32 @@ async def compile_nl_to_shacl(
     model_factory:
         Factory returning an ADK model.  When ``None`` → fail-open (compiler
         unavailable), never raises.
+    prior_turns:
+        Optional conversation history to prepend before the current ``nl_text``
+        turn (Task 5.1 conversational extension).  Each element is a dict with
+        keys ``role`` ("user" or "assistant") and ``content`` (str).  An empty
+        tuple (the default) means this is the first call — existing behavior is
+        fully preserved.
 
     Returns
     -------
     dict
         ``{"ok": True, "shapeTtl": <str>}`` on success.
+        ``{"ok": False, "clarifyingQuestions": tuple[str, ...], "shapeTtl": None, "confidenceLow": True}``
+            when the model returns a clarifying-questions JSON (no retry consumed).
         ``{"ok": False, "error": <str>, "shapeTtl": None}`` on failure.
 
     Retry policy
     ------------
     Max 2 total attempts.  On attempt-1 validation failure the errors are fed
     back into the retry prompt.  Persistent failure → ``ok=False``.
+
+    Clarifying-questions branch
+    ---------------------------
+    On each attempt, before TTL extraction, the raw model response is tested
+    against the questions pattern (JSON object with ``questions`` key containing
+    1–2 non-empty strings).  If matched, the result is returned immediately —
+    retry budget is NOT consumed (the model deliberately asked for more info).
 
     Plumbing-test note
     ------------------
@@ -461,8 +524,25 @@ async def compile_nl_to_shacl(
                 )
 
             raw_text = await _invoke_llm(
-                model, prompt, system_instruction=_COMPILE_SYSTEM_INSTRUCTION
+                model,
+                prompt,
+                system_instruction=_COMPILE_SYSTEM_INSTRUCTION,
+                prior_turns=prior_turns,
             )
+
+            # --- Branch 1: clarifying-questions response ---
+            # Parse before TTL extraction: if the model returned a questions JSON,
+            # return immediately without consuming retry budget.
+            questions = _parse_clarifying_questions(raw_text.strip())
+            if questions is not None:
+                return {
+                    "ok": False,
+                    "shapeTtl": None,
+                    "clarifyingQuestions": questions,
+                    "confidenceLow": True,
+                }
+
+            # --- Branch 2 + 3: existing TTL extraction and retry path ---
             ttl = _extract_ttl_from_response(raw_text)
             errors = validate_shape_ttl(ttl)
             if not errors:
@@ -577,7 +657,13 @@ _CONSERVATIVE_REVIEW_RESULT: dict[str, object] = {
 }
 
 
-async def _invoke_llm(model: object, prompt: str, *, system_instruction: str) -> str:
+async def _invoke_llm(
+    model: object,
+    prompt: str,
+    *,
+    system_instruction: str,
+    prior_turns: tuple[dict, ...] = (),
+) -> str:
     """Invoke an ADK model using the async-generator contract.
 
     This is the COMPILER's own helper — it takes ``system_instruction`` as an
@@ -592,11 +678,14 @@ async def _invoke_llm(model: object, prompt: str, *, system_instruction: str) ->
     production).
 
     The ADK contract (mirrors egress_gate._invoke_llm):
-      1. Build an ``LlmRequest`` with the given system_instruction and a single
-         user-role Content containing the prompt text.
-      2. Drive ``model.generate_content_async(llm_request, stream=False)`` as an
+      1. Build an ``LlmRequest`` with the given system_instruction.
+      2. Prepend ``prior_turns`` as multi-turn Content objects BEFORE the final
+         user prompt (approach a — faithful chat semantics via LlmRequest.contents).
+         ``prior_turns`` role "assistant" is mapped to ADK role "model".
+      3. Append the current user-role Content containing the prompt text.
+      4. Drive ``model.generate_content_async(llm_request, stream=False)`` as an
          async generator.
-      3. Collect and join all ``part.text`` values from ``resp.content.parts``.
+      5. Collect and join all ``part.text`` values from ``resp.content.parts``.
 
     TODO (Task 3.3): ``_production_shacl_compiler_model_factory`` — wire a
     real provider via ``resolve_provider_config``; this helper is the call site.
@@ -604,16 +693,32 @@ async def _invoke_llm(model: object, prompt: str, *, system_instruction: str) ->
     from google.adk.models.llm_request import LlmRequest  # noqa: PLC0415
     from google.genai import types  # noqa: PLC0415
 
+    # Build multi-turn contents: prior history first, then the current prompt.
+    contents: list[types.Content] = []
+    for turn in prior_turns:
+        role = turn.get("role", "user")
+        # ADK uses "model" for assistant turns; translate if needed.
+        adk_role = "model" if role == "assistant" else role
+        content_text = turn.get("content", "")
+        contents.append(
+            types.Content(
+                role=adk_role,
+                parts=[types.Part.from_text(text=content_text)],
+            )
+        )
+    # Append the current user prompt as the final turn.
+    contents.append(
+        types.Content(
+            role="user",
+            parts=[types.Part.from_text(text=prompt)],
+        )
+    )
+
     llm_request = LlmRequest(
         config=types.GenerateContentConfig(
             system_instruction=system_instruction,
         ),
-        contents=[
-            types.Content(
-                role="user",
-                parts=[types.Part.from_text(text=prompt)],
-            )
-        ],
+        contents=contents,
     )
     collected: list[str] = []
     async for resp in model.generate_content_async(llm_request, stream=False):  # type: ignore[union-attr]
@@ -804,6 +909,7 @@ __all__ = [
     "compile_nl_to_shacl",
     "explain_shape",
     "review_compilation",
+    "_parse_clarifying_questions",
     "_production_shacl_compiler_model_factory",
     "_resolve_shacl_compile_factory",
 ]
