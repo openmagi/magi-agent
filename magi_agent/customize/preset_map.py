@@ -216,6 +216,33 @@ PRESET_SEAMS: dict[str, PresetSeam] = {
         supported_modes=("llm",),
         wiring="opt_in",
     ),
+    # Opt-in for the C-MERGE-1 completion/promise-without-action LLM gate (cli/engine
+    # _completion_evidence_llm_block): blocks a final answer that claims completion
+    # or promises future delivery while the turn produced no action evidence. ONE
+    # producer covers all three concerns — enabling ANY of these presets activates
+    # it. LLM tier (needs a critic model, MAGI_EGRESS_GATE_ENABLED). controls_refs
+    # is documentation-only for opt_in seams.
+    "completion-evidence": PresetSeam(
+        preset_id="completion-evidence",
+        controls_refs=("completion_evidence:unsupported_claim",),
+        runtime_default_on=False,
+        supported_modes=("llm",),
+        wiring="opt_in",
+    ),
+    "goal-progress": PresetSeam(
+        preset_id="goal-progress",
+        controls_refs=("completion_evidence:unsupported_claim",),
+        runtime_default_on=False,
+        supported_modes=("llm",),
+        wiring="opt_in",
+    ),
+    "deferral-blocker": PresetSeam(
+        preset_id="deferral-blocker",
+        controls_refs=("completion_evidence:unsupported_claim",),
+        runtime_default_on=False,
+        supported_modes=("llm",),
+        wiring="opt_in",
+    ),
 }
 
 
@@ -335,10 +362,10 @@ _DESCRIPTIONS: dict[str, str] = {
     "arity-permission": "Require permission for high-impact tool actions. Always-on safety.",
     # --- preview (hosted intent copy; honestly badged preview in the catalog) ---
     "answer-quality": "Block a final answer that doesn't genuinely address the task (LLM judge; needs a critic model).",
-    "completion-evidence": "Checks completion claims have actual evidence.",
+    "completion-evidence": "Block a completion/promise claim made with no action evidence this turn (LLM judge; needs a critic model).",
     "pre-refusal": "Block a premature refusal of a doable task (LLM judge; needs a critic model).",
     "output-purity": "Blocks raw JSON or internal data from appearing in responses.",
-    "deferral-blocker": "Forces completion now instead of promising future delivery.",
+    "deferral-blocker": "Block a promise of future delivery made with no action evidence this turn (LLM judge; shares the completion-evidence gate).",
     "self-claim": "Blocks claiming file contents without reading first.",
     "resource-existence": "Verifies referenced files actually exist.",
     "claim-citation": "Ensures factual claims include sources.",
@@ -348,7 +375,7 @@ _DESCRIPTIONS: dict[str, str] = {
     "coding-child-review": "Adversarial multi-model review of sub-agent output. Capability — enable with MAGI_CROSS_VERIFY_ENABLED.",
     "benchmark-verifier": "Detects and blocks performance regressions.",
     "task-contract": "Enforces a goal to plan to evidence lifecycle.",
-    "goal-progress": "Blocks completion claims without actual actions.",
+    "goal-progress": "Block a completion claim made with no action evidence this turn (LLM judge; shares the completion-evidence gate).",
     "task-board-completion": "Blocks completion when tasks remain incomplete.",
     "parallel-research": "Block a research turn that synthesized from fewer than 2 inspected sources.",
     "output-delivery": "Verifies created files are actually delivered.",

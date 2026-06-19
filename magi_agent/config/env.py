@@ -2884,6 +2884,22 @@ def parse_pre_refusal_verification_enabled(env: Mapping[str, str]) -> bool:
     return flag_bool("MAGI_VERIFY_PRE_REFUSAL", env=env)
 
 
+def parse_completion_evidence_verification_enabled(env: Mapping[str, str]) -> bool:
+    """MAGI_VERIFY_COMPLETION_EVIDENCE — LLM completion/promise-claim gate.
+
+    When ON (and a critic model is available — MAGI_EGRESS_GATE_ENABLED), a final
+    answer that asserts a task is complete or promises future delivery while the
+    turn produced NO action/tool evidence is blocked at the pre-final gate via the
+    generic criterion judge. Covers the merged completion-evidence / goal-progress
+    / deferral-blocker concern. Strict **default-OFF**: inert unless explicitly
+    set (or one of those Customize presets is enabled), so flag-OFF behavior is
+    byte-identical (no evidence collection, no model call).
+    """
+    from .flags import flag_bool
+
+    return flag_bool("MAGI_VERIFY_COMPLETION_EVIDENCE", env=env)
+
+
 def parse_source_ledger_evidence_gate_enabled(env: Mapping[str, str]) -> bool:
     """MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED — live source-ledger evidence ref.
 
