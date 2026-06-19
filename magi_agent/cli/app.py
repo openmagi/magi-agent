@@ -773,6 +773,50 @@ app.add_typer(gateway_app, name="gateway")
 
 
 # ---------------------------------------------------------------------------
+# computer-use subcommand
+# ---------------------------------------------------------------------------
+
+computer_use_app = typer.Typer(
+    name="computer-use",
+    help="Manage the macOS computer-use tool.",
+    invoke_without_command=True,
+    no_args_is_help=False,
+)
+
+
+@computer_use_app.callback(invoke_without_command=True)
+def computer_use_root(ctx: typer.Context) -> None:
+    """Manage the macOS computer-use tool."""
+    if ctx.invoked_subcommand is None:
+        typer.echo("magi computer-use: use `magi computer-use install`.", err=False)
+
+
+@computer_use_app.command("install")
+def computer_use_install() -> None:
+    """Install the pinned cua-driver binary (checksum-verified)."""
+    import platform  # noqa: PLC0415
+
+    from magi_agent.computer.autonomous.installer import (  # noqa: PLC0415
+        CUA_DRIVER_VERSION,
+        gatekeeper_note,
+        release_asset_url,
+    )
+
+    arch = "arm64" if platform.machine() == "arm64" else "x86_64"
+    url = release_asset_url(CUA_DRIVER_VERSION, arch)
+    typer.echo(f"cua-driver v{CUA_DRIVER_VERSION} ({arch})")
+    typer.echo(f"Download: {url}")
+    typer.echo(
+        "Then verify its sha256 against the published checksum, extract "
+        "CuaDriver.app, and symlink `cua-driver` onto your PATH."
+    )
+    typer.echo(gatekeeper_note())
+
+
+app.add_typer(computer_use_app, name="computer-use")
+
+
+# ---------------------------------------------------------------------------
 # LegalBench evaluation subcommand
 # ---------------------------------------------------------------------------
 

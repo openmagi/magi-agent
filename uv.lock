@@ -3276,6 +3276,9 @@ cli = [
 composio = [
     { name = "composio" },
 ]
+computer = [
+    { name = "mcp" },
+]
 dev = [
     { name = "httpx" },
     { name = "mypy" },
@@ -3326,6 +3329,7 @@ requires-dist = [
     { name = "litellm", specifier = ">=1.74.0" },
     { name = "lxml", specifier = ">=6.0" },
     { name = "markdownify", specifier = "==1.2.2" },
+    { name = "mcp", marker = "extra == 'computer'", specifier = ">=1.27,<2" },
     { name = "mitmproxy", marker = "extra == 'vault'", specifier = ">=10" },
     { name = "mypy", marker = "extra == 'dev'", specifier = "==2.1.0" },
     { name = "openai", marker = "extra == 'audio'", specifier = ">=1.0" },
@@ -3349,7 +3353,7 @@ requires-dist = [
     { name = "uvicorn", specifier = "==0.47.0" },
     { name = "yt-dlp", marker = "extra == 'video'", specifier = ">=2024.1.0" },
 ]
-provides-extras = ["dev", "cli", "bench", "composio", "discord", "slack", "telegram-easy", "anthropic", "providers", "files", "audio", "video", "browser", "waf", "vault"]
+provides-extras = ["dev", "cli", "bench", "composio", "discord", "slack", "telegram-easy", "anthropic", "providers", "files", "audio", "video", "browser", "computer", "waf", "vault"]
 
 [[package]]
 name = "mako"

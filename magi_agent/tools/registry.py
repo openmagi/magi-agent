@@ -4,7 +4,7 @@ from .base import ToolHandler, ToolRegistration
 from .manifest import RuntimeMode, ToolManifest
 
 
-_APPROVAL_PERMISSION_CLASSES = {"write", "execute", "net"}
+_APPROVAL_PERMISSION_CLASSES = {"write", "execute", "net", "computer"}
 _APPROVAL_TAGS = {"requires-approval", "approval-required"}
 _BUDGET_LIMIT_FIELDS = (
     "max_calls_per_turn",

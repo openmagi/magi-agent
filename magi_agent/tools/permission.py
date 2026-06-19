@@ -13,7 +13,7 @@ from .safety import RuntimePermissionArbiter
 
 
 PermissionAction = Literal["allow", "deny", "ask"]
-APPROVAL_PERMISSION_CLASSES = {"write", "execute", "net"}
+APPROVAL_PERMISSION_CLASSES = {"write", "execute", "net", "computer"}
 APPROVAL_TAGS = {"requires-approval", "approval-required"}
 
 

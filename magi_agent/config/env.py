@@ -3048,6 +3048,23 @@ def browser_tool_enabled(env: Mapping[str, str] | None = None) -> bool:
     )
 
 
+def computer_tool_enabled(env: Mapping[str, str] | None = None) -> bool:
+    """Single source of truth for the autonomous macOS computer-use tool gate.
+
+    Strictly opt-in: True iff ``MAGI_COMPUTER_TOOL_ENABLED`` is truthy AND
+    ``MAGI_COMPUTER_TOOL_KILL_SWITCH`` is not. Unlike the browser tool this does
+    NOT consult the runtime profile — computer-use controls the user's real
+    desktop with no sandbox, so it must never be enabled by a profile default.
+    """
+    if env is None:
+        import os as _os
+
+        env = _os.environ
+    return _is_true(env.get("MAGI_COMPUTER_TOOL_ENABLED")) and not _is_true(
+        env.get("MAGI_COMPUTER_TOOL_KILL_SWITCH")
+    )
+
+
 MAGI_CODE_ACTION_ENABLED_ENV = "MAGI_CODE_ACTION_ENABLED"
 
 

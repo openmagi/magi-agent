@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from magi_agent.evidence.types import validate_evidence_type_name
 
-PermissionClass = Literal["read", "write", "execute", "net", "meta"]
+PermissionClass = Literal["read", "write", "execute", "net", "computer", "meta"]
 RuntimeMode = Literal["plan", "act"]
 ToolKind = Literal["core", "native", "custom", "external", "skill-compat"]
 ToolSourceKind = Literal["builtin", "native-plugin", "custom-plugin", "external", "skill", "runtime"]

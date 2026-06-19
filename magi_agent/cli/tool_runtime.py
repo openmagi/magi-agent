@@ -120,6 +120,18 @@ def build_cli_tool_runtime(
         register_browser_tool_manifest(registry)
         bind_browser_toolhost_handler(registry)
 
+    # Optional autonomous macOS computer-use tool (MAGI_COMPUTER_TOOL_ENABLED=true).
+    from magi_agent.config.env import computer_tool_enabled  # noqa: PLC0415
+
+    if computer_tool_enabled():
+        from magi_agent.computer.autonomous.tool import (  # noqa: PLC0415
+            register_computer_tool_manifest,
+            bind_computer_toolhost_handler,
+        )
+
+        register_computer_tool_manifest(registry)
+        bind_computer_toolhost_handler(registry)
+
     # Optional persistent Python code-execution tool (MAGI_CODE_ACTION_ENABLED=true).
     # Strict opt-in default-OFF: when unset the module is never imported and the
     # registry is byte-identical to before.
