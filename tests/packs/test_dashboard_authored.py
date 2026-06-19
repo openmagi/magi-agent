@@ -139,7 +139,6 @@ def test_slug_of_empty_label_falls_back() -> None:
 
 
 from magi_agent.packs.dashboard_authored import (
-    DASHBOARD_EVIDENCE_REF_PREFIX,
     compile_recipe,
 )
 
@@ -148,14 +147,13 @@ def _check(id_: str = "ssn-leak", *, action="block", enabled=True):
     return DashboardCheck.model_validate(_ok(id=id_, action=action, enabled=enabled))
 
 
-def test_compile_recipe_evidence_refs_namespaced_per_enabled_check() -> None:
+def test_compile_recipe_is_declarative_only_empty_evidence_refs() -> None:
+    # Enforcement moved to producer+gate (deny-on-present). The recipe pack is a
+    # declarative namespace artifact and carries NO required evidence refs — even
+    # for enabled block checks (a required ref would be inert AND invert polarity).
     checks = [_check("ssn-leak"), _check("api-key-leak"), _check("disabled-one", enabled=False)]
     manifest = compile_recipe(checks)
-    refs = set(manifest.evidence_refs)
-    assert f"{DASHBOARD_EVIDENCE_REF_PREFIX}ssn-leak" in refs
-    assert f"{DASHBOARD_EVIDENCE_REF_PREFIX}api-key-leak" in refs
-    # disabled checks do not require evidence (so they never block the gate)
-    assert f"{DASHBOARD_EVIDENCE_REF_PREFIX}disabled-one" not in refs
+    assert tuple(manifest.evidence_refs) == ()
 
 
 def test_compile_recipe_uses_dashboard_pack_id_and_not_default_enabled() -> None:
@@ -165,14 +163,12 @@ def test_compile_recipe_uses_dashboard_pack_id_and_not_default_enabled() -> None
     assert manifest.hard_safety is False
 
 
-def test_compile_recipe_only_block_action_adds_required_ref() -> None:
-    # 'audit' action SHOULD still emit the ref via producer, but MUST NOT block;
-    # validator side does not include audit-only refs in evidence_refs.
+def test_compile_recipe_block_and_audit_both_yield_no_required_refs() -> None:
+    # Neither block nor audit checks add required refs — enforcement is via the
+    # producer + verifier-bus deny-on-present gate, not required-evidence.
     checks = [_check("blocker", action="block"), _check("auditor", action="audit")]
     manifest = compile_recipe(checks)
-    refs = set(manifest.evidence_refs)
-    assert f"{DASHBOARD_EVIDENCE_REF_PREFIX}blocker" in refs
-    assert f"{DASHBOARD_EVIDENCE_REF_PREFIX}auditor" not in refs
+    assert tuple(manifest.evidence_refs) == ()
 
 
 def test_compile_recipe_empty_checks_returns_empty_evidence_refs() -> None:
@@ -331,5 +327,7 @@ def test_recipe_spec_round_trips_through_parse_recipe_manifest(tmp_path: Path) -
     assert parsed is not None
     assert parsed.pack_id == "ext.dashboard.checks"
     assert parsed.default_enabled is False
-    assert f"{DASHBOARD_EVIDENCE_REF_PREFIX}ssn-leak" in parsed.evidence_refs
+    # Declarative-only: enforcement is deny-on-present (producer+gate), so the
+    # recipe spec round-trips with empty evidenceRefs.
+    assert tuple(parsed.evidence_refs) == ()
     assert validate_external_recipe_pack(parsed) == ""
