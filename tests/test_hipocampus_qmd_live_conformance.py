@@ -34,12 +34,18 @@ def test_gate_on_field_true_but_parity_pin_stays_false(
 
 
 def test_parity_pin_is_pinned_false_literal() -> None:
-    # The parity pin must reject True even via direct construction.
-    with pytest.raises(Exception):
-        HipocampusQmdLiveRecallConformance(
-            hipocampusQmdLiveRecallGated=True,
-            hipocampusQmdCalls=True,  # type: ignore[arg-type]
-        )
+    # The parity pin must be force-falsed even when a caller asserts True
+    # via direct construction. Post C-4 PR-H the migration to
+    # ``FalseOnlyAuthorityModel`` converts the legacy raise-on-True semantic
+    # to a coerce-to-False semantic (the kernel's ``_force_false`` validator
+    # rewrites True->False BEFORE pydantic's Literal[False] validator runs).
+    # The end-state invariant is preserved: ``hipocampus_qmd_calls`` reads
+    # False on the constructed instance.
+    report = HipocampusQmdLiveRecallConformance(
+        hipocampusQmdLiveRecallGated=True,
+        hipocampusQmdCalls=True,  # type: ignore[arg-type]
+    )
+    assert report.hipocampus_qmd_calls is False
 
 
 def test_gated_field_can_be_true_while_pin_false_via_construction() -> None:

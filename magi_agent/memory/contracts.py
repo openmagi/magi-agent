@@ -3,9 +3,11 @@ from __future__ import annotations
 from collections.abc import Mapping
 import hashlib
 import re
-from typing import Any, Literal, Self
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from magi_agent.ops.authority import FalseOnlyAuthorityModel
 
 
 MemoryScope = Literal["user", "bot", "org", "project", "session", "task"]
@@ -174,9 +176,7 @@ class RecallRequest(BaseModel):
     min_score: float = Field(default=0.3, alias="minScore", ge=0)
 
 
-class RecallResult(BaseModel):
-    model_config = _MODEL_CONFIG
-
+class RecallResult(FalseOnlyAuthorityModel):
     provider_id: str = Field(alias="providerId")
     records: tuple[MemoryRecord, ...] = ()
     recall_allowed: bool = Field(alias="recallAllowed")
@@ -184,30 +184,6 @@ class RecallResult(BaseModel):
     prompt_projection_allowed: Literal[False] = Field(alias="promptProjectionAllowed")
     public_projection_allowed: bool = Field(alias="publicProjectionAllowed")
     reason_codes: tuple[str, ...] = Field(default=(), alias="reasonCodes")
-
-    @classmethod
-    def model_construct(
-        cls,
-        _fields_set: set[str] | None = None,
-        **values: Any,
-    ) -> Self:
-        _ = _fields_set
-        values["writeAllowed"] = False
-        values["promptProjectionAllowed"] = False
-        return cls.model_validate(values)
-
-    def model_copy(
-        self,
-        *,
-        update: Mapping[str, Any] | None = None,
-        deep: bool = False,
-    ) -> Self:
-        data = self.model_dump(by_alias=True, mode="python", warnings=False)
-        if update:
-            data.update(dict(update))
-        data["writeAllowed"] = False
-        data["promptProjectionAllowed"] = False
-        return type(self).model_validate(data)
 
     def public_projection(self) -> dict[str, object]:
         return {

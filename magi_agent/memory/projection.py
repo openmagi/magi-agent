@@ -16,6 +16,7 @@ from pydantic import (
     model_validator,
 )
 
+from magi_agent.ops.authority import FalseOnlyAuthorityModel
 from magi_agent.transport.tool_preview import sanitize_tool_preview
 from magi_agent.runtime.events import NormalizedEvent
 
@@ -320,9 +321,7 @@ class SanitizedMemoryReference(BaseModel):
         return self
 
 
-class MemoryProjectionDiagnostics(BaseModel):
-    model_config = _MODEL_CONFIG
-
+class MemoryProjectionDiagnostics(FalseOnlyAuthorityModel):
     schema_version: Literal["memoryProjectionDiagnostics.v1"] = Field(
         default="memoryProjectionDiagnostics.v1",
         alias="schemaVersion",
@@ -344,32 +343,8 @@ class MemoryProjectionDiagnostics(BaseModel):
     def _sanitize_diagnostic_reason_codes(cls, value: object) -> tuple[str, ...]:
         return _sanitize_reason_codes(value)
 
-    @classmethod
-    def model_construct(
-        cls,
-        _fields_set: set[str] | None = None,
-        **values: Any,
-    ) -> Self:
-        _ = _fields_set
-        values["promptProjectionEnabled"] = False
-        return cls.model_validate(values)
 
-    def model_copy(
-        self,
-        *,
-        update: Mapping[str, Any] | None = None,
-        deep: bool = False,
-    ) -> Self:
-        data = self.model_dump(by_alias=True, mode="python", warnings=False)
-        if update:
-            data.update(dict(update))
-        data["promptProjectionEnabled"] = False
-        return type(self).model_validate(data)
-
-
-class MemoryBoundaryProjection(BaseModel):
-    model_config = _MODEL_CONFIG
-
+class MemoryBoundaryProjection(FalseOnlyAuthorityModel):
     schema_version: Literal["memoryBoundaryProjection.v1"] = Field(
         default="memoryBoundaryProjection.v1",
         alias="schemaVersion",
@@ -378,6 +353,18 @@ class MemoryBoundaryProjection(BaseModel):
         default=False,
         alias="promptProjectionAllowed",
     )
+    # NOTE: ``prompt_text`` is a ``Literal[""]`` (string literal, not bool), so
+    # the kernel's introspection-based ``_force_false`` doesn't see it. The
+    # class contract has ALWAYS pinned it to ``""`` via the pre-C-4 inline
+    # ``model_construct``/``model_copy`` rewrites which SILENTLY normalized any
+    # attempted override back to ``""`` (NOT raised). We PRESERVE that
+    # silent-rewrite invariant with the inline
+    # ``_force_prompt_text_empty`` validator + ``_serialize_prompt_text_empty``
+    # serializer below -- same precedent as ``MemoryPolicyDecision.write_allowed``
+    # in ``policy.py``. Without these, pydantic's own ``Literal[""]`` validator
+    # would raise ``ValidationError`` on a malicious
+    # ``model_copy(update={"promptText": "..."})`` instead of silently
+    # rewriting, breaking the original byte-identical contract.
     prompt_text: Literal[""] = Field(default="", alias="promptText")
     session_injection_allowed: Literal[False] = Field(
         default=False,
@@ -388,31 +375,20 @@ class MemoryBoundaryProjection(BaseModel):
     diagnostics: MemoryProjectionDiagnostics
     source_authority: SourceAuthorityEnvelope = Field(alias="sourceAuthority")
 
+    @model_validator(mode="before")
     @classmethod
-    def model_construct(
-        cls,
-        _fields_set: set[str] | None = None,
-        **values: Any,
-    ) -> Self:
-        _ = _fields_set
-        values["promptProjectionAllowed"] = False
-        values["promptText"] = ""
-        values["sessionInjectionAllowed"] = False
-        return cls.model_validate(values)
+    def _force_prompt_text_empty(cls, value: object) -> object:
+        if not isinstance(value, Mapping):
+            return value
+        payload = dict(value)
+        if "prompt_text" in payload or "promptText" in payload:
+            payload.pop("prompt_text", None)
+            payload["promptText"] = ""
+        return payload
 
-    def model_copy(
-        self,
-        *,
-        update: Mapping[str, Any] | None = None,
-        deep: bool = False,
-    ) -> Self:
-        data = self.model_dump(by_alias=True, mode="python", warnings=False)
-        if update:
-            data.update(dict(update))
-        data["promptProjectionAllowed"] = False
-        data["promptText"] = ""
-        data["sessionInjectionAllowed"] = False
-        return type(self).model_validate(data)
+    @field_serializer("prompt_text")
+    def _serialize_prompt_text_empty(self, _value: object) -> str:
+        return ""
 
 
 class MemoryRecallRecord(BaseModel):
@@ -435,9 +411,7 @@ class StaleMemoryPromotionDecision(BaseModel):
     reason: str | None = None
 
 
-class TurnMemorySummaryProjection(BaseModel):
-    model_config = _MODEL_CONFIG
-
+class TurnMemorySummaryProjection(FalseOnlyAuthorityModel):
     schema_version: Literal["turnMemorySummaryProjection.v1"] = Field(
         default="turnMemorySummaryProjection.v1",
         alias="schemaVersion",
@@ -457,60 +431,6 @@ class TurnMemorySummaryProjection(BaseModel):
     tool_result_refs: tuple[str, ...] = Field(default=(), alias="toolResultRefs")
     source_refs: tuple[str, ...] = Field(default=(), alias="sourceRefs")
     transcript_refs: tuple[str, ...] = Field(default=(), alias="transcriptRefs")
-
-    @model_validator(mode="before")
-    @classmethod
-    def _force_no_memory_writes(cls, value: object) -> object:
-        if not isinstance(value, Mapping):
-            return value
-        payload = dict(value)
-        payload["memoryWritesEnabled"] = False
-        payload["productionWritesEnabled"] = False
-        payload.pop("memory_writes_enabled", None)
-        payload.pop("production_writes_enabled", None)
-        return payload
-
-    @classmethod
-    def model_construct(
-        cls,
-        _fields_set: set[str] | None = None,
-        **values: Any,
-    ) -> Self:
-        _ = _fields_set
-        values["memoryWritesEnabled"] = False
-        values["productionWritesEnabled"] = False
-        values.pop("memory_writes_enabled", None)
-        values.pop("production_writes_enabled", None)
-        return cls.model_validate(values)
-
-    def model_copy(
-        self,
-        *,
-        update: Mapping[str, Any] | None = None,
-        deep: bool = False,
-    ) -> Self:
-        _ = deep
-        payload = self.model_dump(by_alias=True, mode="python", warnings=False)
-        if update:
-            payload.update(dict(update))
-        payload["memoryWritesEnabled"] = False
-        payload["productionWritesEnabled"] = False
-        return type(self).model_validate(payload)
-
-    def copy(
-        self,
-        *,
-        include: Any = None,
-        exclude: Any = None,
-        update: Mapping[str, Any] | None = None,
-        deep: bool = False,
-    ) -> Self:
-        _ = include, exclude
-        return self.model_copy(update=update, deep=deep)
-
-    @field_serializer("memory_writes_enabled", "production_writes_enabled")
-    def _serialize_false(self, _value: object) -> bool:
-        return False
 
     @field_validator(
         "tool_result_refs",

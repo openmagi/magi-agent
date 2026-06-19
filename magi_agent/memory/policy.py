@@ -5,6 +5,8 @@ from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
 
+from magi_agent.ops.authority import FalseOnlyAuthorityModel
+
 from .contracts import RecallRequest
 
 
@@ -23,22 +25,7 @@ MemorySourceAuthority = Literal[
 _MODEL_CONFIG = ConfigDict(frozen=True, populate_by_name=True, extra="forbid")
 
 
-def _force_false_fields(
-    model_cls: type[BaseModel],
-    values: Mapping[str, Any] | None,
-    fields: tuple[str, ...],
-) -> dict[str, Any]:
-    payload = dict(values or {})
-    for field_name in fields:
-        field = model_cls.model_fields[field_name]
-        payload.pop(field_name, None)
-        payload[field.alias or field_name] = False
-    return payload
-
-
-class MemoryPolicy(BaseModel):
-    model_config = _MODEL_CONFIG
-
+class MemoryPolicy(FalseOnlyAuthorityModel):
     memory_mode: MemoryMode = Field(default="normal", alias="memoryMode")
     source_authority: MemorySourceAuthority = Field(
         default="long_term_disabled",
@@ -50,66 +37,16 @@ class MemoryPolicy(BaseModel):
     )
     writes_enabled: Literal[False] = Field(default=False, alias="writesEnabled")
 
-    @model_validator(mode="before")
-    @classmethod
-    def _force_false_only_fields(cls, value: object) -> object:
-        if not isinstance(value, Mapping):
-            return value
-        return _force_false_fields(
-            cls,
-            value,
-            ("prompt_projection_enabled", "writes_enabled"),
-        )
 
-    @classmethod
-    def model_construct(
-        cls,
-        _fields_set: set[str] | None = None,
-        **values: Any,
-    ) -> Self:
-        _ = _fields_set
-        return cls.model_validate(
-            _force_false_fields(cls, values, ("prompt_projection_enabled", "writes_enabled"))
-        )
-
-    def model_copy(
-        self,
-        *,
-        update: Mapping[str, Any] | None = None,
-        deep: bool = False,
-    ) -> Self:
-        _ = deep
-        payload = self.model_dump(by_alias=True, mode="python", warnings=False)
-        if update:
-            payload.update(dict(update))
-        return type(self).model_validate(
-            _force_false_fields(
-                type(self),
-                payload,
-                ("prompt_projection_enabled", "writes_enabled"),
-            )
-        )
-
-    def copy(
-        self,
-        *,
-        include: Any = None,
-        exclude: Any = None,
-        update: Mapping[str, Any] | None = None,
-        deep: bool = False,
-    ) -> Self:
-        _ = include, exclude
-        return self.model_copy(update=update, deep=deep)
-
-    @field_serializer("prompt_projection_enabled", "writes_enabled")
-    def _serialize_false(self, _value: object) -> bool:
-        return False
-
-
-class MemoryPolicyDecision(BaseModel):
-    model_config = _MODEL_CONFIG
-
+class MemoryPolicyDecision(FalseOnlyAuthorityModel):
     recall_allowed: bool = Field(alias="recallAllowed")
+    # NOTE: ``write_allowed`` is a plain ``bool`` (not Literal[False]) so the
+    # kernel's introspection-based ``_force_false`` doesn't see it. The class
+    # contract has ALWAYS pinned it to False (per the original
+    # ``_force_no_writes_or_prompt_projection`` validator) so we PRESERVE that
+    # invariant with the inline ``_force_write_allowed_false`` validator +
+    # ``_serialize_write_allowed_false`` serializer below. The kernel handles
+    # ``prompt_projection_allowed`` (Literal[False]) on top of that.
     write_allowed: bool = Field(alias="writeAllowed")
     prompt_projection_allowed: Literal[False] = Field(
         default=False,
@@ -120,61 +57,17 @@ class MemoryPolicyDecision(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def _force_no_writes_or_prompt_projection(cls, value: object) -> object:
+    def _force_write_allowed_false(cls, value: object) -> object:
         if not isinstance(value, Mapping):
             return value
-        return _force_false_fields(
-            cls,
-            value,
-            ("write_allowed", "prompt_projection_allowed"),
-        )
+        payload = dict(value)
+        if "write_allowed" in payload or "writeAllowed" in payload:
+            payload.pop("write_allowed", None)
+            payload["writeAllowed"] = False
+        return payload
 
-    @classmethod
-    def model_construct(
-        cls,
-        _fields_set: set[str] | None = None,
-        **values: Any,
-    ) -> Self:
-        _ = _fields_set
-        return cls.model_validate(
-            _force_false_fields(
-                cls,
-                values,
-                ("write_allowed", "prompt_projection_allowed"),
-            )
-        )
-
-    def model_copy(
-        self,
-        *,
-        update: Mapping[str, Any] | None = None,
-        deep: bool = False,
-    ) -> Self:
-        _ = deep
-        payload = self.model_dump(by_alias=True, mode="python", warnings=False)
-        if update:
-            payload.update(dict(update))
-        return type(self).model_validate(
-            _force_false_fields(
-                type(self),
-                payload,
-                ("write_allowed", "prompt_projection_allowed"),
-            )
-        )
-
-    def copy(
-        self,
-        *,
-        include: Any = None,
-        exclude: Any = None,
-        update: Mapping[str, Any] | None = None,
-        deep: bool = False,
-    ) -> Self:
-        _ = include, exclude
-        return self.model_copy(update=update, deep=deep)
-
-    @field_serializer("write_allowed", "prompt_projection_allowed")
-    def _serialize_decision_false(self, _value: object) -> bool:
+    @field_serializer("write_allowed")
+    def _serialize_write_allowed_false(self, _value: object) -> bool:
         return False
 
 

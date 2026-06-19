@@ -3,13 +3,14 @@
     "hipocampus_qmd_calls"
   ],
   "model_construct_dump": {
-    "hipocampusQmdCalls": true,
+    "hipocampusQmdCalls": false,
     "hipocampusQmdLiveRecallGated": false
   },
-  "model_construct_force_false_leaks": [
-    "hipocampus_qmd_calls"
-  ],
-  "model_validate_dump": null,
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": {
+    "hipocampusQmdCalls": false,
+    "hipocampusQmdLiveRecallGated": false
+  },
   "model_validate_force_false_leaks": [],
   "qualname": "magi_agent.memory.conformance.HipocampusQmdLiveRecallConformance"
 }

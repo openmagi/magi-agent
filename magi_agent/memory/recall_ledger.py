@@ -3,15 +3,24 @@ from __future__ import annotations
 import hashlib
 import re
 from collections.abc import Mapping, Sequence
-from typing import Literal, Self, TypeAlias
+from typing import Literal, TypeAlias
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
+from pydantic import BaseModel, ConfigDict, Field
+
+from magi_agent.ops.authority import FalseOnlyAuthorityModel
 
 
 MemoryRecallLedgerStatus: TypeAlias = Literal["disabled", "recorded"]
 MemoryRecallSource: TypeAlias = Literal["provider", "adk_memory_service"]
 MemoryRecallDecisionKind: TypeAlias = Literal["allowed", "suppressed"]
 
+#: Strict frozen config shared by the non-force-false ledger models. Adds
+#: ``revalidate_instances="always"`` on top of pydantic's defaults so a nested
+#: model passed in via ``model_validate`` is re-run through validation (the
+#: kernel's :class:`FalseOnlyAuthorityModel` config matches this except for the
+#: ``revalidate_instances`` knob, which the force-false model's ledger flags
+#: class :class:`MemoryRecallLedgerAuthorityFlags` does NOT need because it has
+#: no nested models).
 _MODEL_CONFIG = ConfigDict(
     frozen=True,
     populate_by_name=True,
@@ -68,10 +77,21 @@ _PRIVATE_BLOCK_RE = re.compile(
 
 
 class _RecallLedgerModel(BaseModel):
+    """Per-package frozen base for the non-force-false ledger models.
+
+    Carries route-through-validate ``model_construct`` / ``model_copy`` so a
+    caller cannot bypass the strict validation contract via either escape
+    hatch. The force-false :class:`MemoryRecallLedgerAuthorityFlags` does NOT
+    inherit from this base — it sits directly on :class:`FalseOnlyAuthorityModel`
+    so the kernel's introspection-based ``_force_false`` validator / ``_ser``
+    serializer / ``model_construct`` / ``model_copy`` own its invariant
+    uniformly.
+    """
+
     model_config = _MODEL_CONFIG
 
     @classmethod
-    def model_construct(cls, _fields_set: set[str] | None = None, **values: object) -> Self:
+    def model_construct(cls, _fields_set: set[str] | None = None, **values: object) -> "_RecallLedgerModel":
         _ = _fields_set
         return cls.model_validate(values)
 
@@ -80,7 +100,8 @@ class _RecallLedgerModel(BaseModel):
         *,
         update: Mapping[str, object] | None = None,
         deep: bool = False,
-    ) -> Self:
+    ) -> "_RecallLedgerModel":
+        _ = deep
         data = self.model_dump(by_alias=True, mode="python", warnings=False)
         if update:
             data.update(dict(update))
@@ -95,7 +116,7 @@ class MemoryRecallLedgerConfig(_RecallLedgerModel):
     )
 
 
-class MemoryRecallLedgerAuthorityFlags(_RecallLedgerModel):
+class MemoryRecallLedgerAuthorityFlags(FalseOnlyAuthorityModel):
     memory_provider_called: Literal[False] = Field(default=False, alias="memoryProviderCalled")
     adk_memory_service_called: Literal[False] = Field(
         default=False,
@@ -110,23 +131,6 @@ class MemoryRecallLedgerAuthorityFlags(_RecallLedgerModel):
         default=False,
         alias="productionWriteAllowed",
     )
-
-    @model_validator(mode="before")
-    @classmethod
-    def _force_false_inputs(cls, value: object) -> object:
-        if not isinstance(value, Mapping):
-            return value
-        return {field.alias or name: False for name, field in cls.model_fields.items()}
-
-    @field_serializer(
-        "memory_provider_called",
-        "adk_memory_service_called",
-        "prompt_injection_allowed",
-        "memory_write_allowed",
-        "production_write_allowed",
-    )
-    def _serialize_false(self, _value: object) -> bool:
-        return False
 
 
 class MemoryRecallRecordInput(_RecallLedgerModel):
