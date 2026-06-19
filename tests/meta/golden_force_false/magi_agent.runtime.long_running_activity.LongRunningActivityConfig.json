@@ -1,0 +1,37 @@
+{
+  "false_only_fields": [
+    "long_running_function_tool_attached",
+    "production_background_execution_enabled",
+    "production_writes_enabled",
+    "provider_call_allowed",
+    "traffic_attached",
+    "user_visible_output_enabled"
+  ],
+  "model_construct_dump": {
+    "adkLongRunningFunctionToolRef": "google.adk.tools.LongRunningFunctionTool",
+    "enabled": false,
+    "localFakeActivityEnabled": false,
+    "longRunningFunctionToolAttached": false,
+    "productionBackgroundExecutionEnabled": false,
+    "productionWritesEnabled": false,
+    "providerCallAllowed": false,
+    "trafficAttached": false,
+    "userVisibleOutputEnabled": false,
+    "wrapsAdkLongRunningFunctionTool": true
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": {
+    "adkLongRunningFunctionToolRef": "google.adk.tools.LongRunningFunctionTool",
+    "enabled": false,
+    "localFakeActivityEnabled": false,
+    "longRunningFunctionToolAttached": false,
+    "productionBackgroundExecutionEnabled": false,
+    "productionWritesEnabled": false,
+    "providerCallAllowed": false,
+    "trafficAttached": false,
+    "userVisibleOutputEnabled": false,
+    "wrapsAdkLongRunningFunctionTool": true
+  },
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.runtime.long_running_activity.LongRunningActivityConfig"
+}

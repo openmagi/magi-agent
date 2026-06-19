@@ -1,0 +1,39 @@
+{
+  "false_only_fields": [
+    "channel_delivery_enabled",
+    "cron_mutation_enabled",
+    "live_background_execution_enabled",
+    "memory_mutation_enabled",
+    "production_write_enabled",
+    "route_activation_enabled",
+    "user_visible_output_enabled",
+    "workspace_mutation_enabled"
+  ],
+  "model_construct_dump": {
+    "channelDeliveryEnabled": false,
+    "cronMutationEnabled": false,
+    "enabled": false,
+    "liveBackgroundExecutionEnabled": false,
+    "localFakeEventProjectionEnabled": false,
+    "memoryMutationEnabled": false,
+    "productionWriteEnabled": false,
+    "routeActivationEnabled": false,
+    "userVisibleOutputEnabled": false,
+    "workspaceMutationEnabled": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": {
+    "channelDeliveryEnabled": false,
+    "cronMutationEnabled": false,
+    "enabled": false,
+    "liveBackgroundExecutionEnabled": false,
+    "localFakeEventProjectionEnabled": false,
+    "memoryMutationEnabled": false,
+    "productionWriteEnabled": false,
+    "routeActivationEnabled": false,
+    "userVisibleOutputEnabled": false,
+    "workspaceMutationEnabled": false
+  },
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.missions.events.MissionEventProjectionConfig"
+}

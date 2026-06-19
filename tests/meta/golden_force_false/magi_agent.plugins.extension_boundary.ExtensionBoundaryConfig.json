@@ -1,0 +1,25 @@
+{
+  "false_only_fields": [
+    "external_code_execution_enabled",
+    "mcp_server_attached",
+    "protected_runtime_hook_loading_enabled",
+    "route_attached"
+  ],
+  "model_construct_dump": {
+    "enabled": false,
+    "externalCodeExecutionEnabled": true,
+    "localFakeExtensionProviderEnabled": false,
+    "mcpServerAttached": true,
+    "protectedRuntimeHookLoadingEnabled": true,
+    "routeAttached": true
+  },
+  "model_construct_force_false_leaks": [
+    "external_code_execution_enabled",
+    "mcp_server_attached",
+    "protected_runtime_hook_loading_enabled",
+    "route_attached"
+  ],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.plugins.extension_boundary.ExtensionBoundaryConfig"
+}

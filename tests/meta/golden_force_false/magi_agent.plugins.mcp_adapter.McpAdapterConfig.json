@@ -1,0 +1,21 @@
+{
+  "false_only_fields": [
+    "live_provider_attached",
+    "route_attached"
+  ],
+  "model_construct_dump": {
+    "enabled": false,
+    "liveProviderAttached": true,
+    "localFakeProviderEnabled": false,
+    "maxPrompts": 32,
+    "maxTools": 32,
+    "routeAttached": true
+  },
+  "model_construct_force_false_leaks": [
+    "live_provider_attached",
+    "route_attached"
+  ],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.plugins.mcp_adapter.McpAdapterConfig"
+}

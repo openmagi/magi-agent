@@ -1,0 +1,28 @@
+{
+  "false_only_fields": [
+    "adk_runner_invoked",
+    "function_tool_attached",
+    "live_git_clone_executed",
+    "live_tool_dispatched",
+    "production_network_enabled",
+    "raw_source_injected",
+    "toolhost_dispatched",
+    "user_visible_output_allowed",
+    "workspace_mutated"
+  ],
+  "model_construct_dump": {
+    "adkRunnerInvoked": false,
+    "functionToolAttached": false,
+    "liveGitCloneExecuted": false,
+    "liveToolDispatched": false,
+    "productionNetworkEnabled": false,
+    "rawSourceInjected": false,
+    "toolHostDispatched": false,
+    "userVisibleOutputAllowed": false,
+    "workspaceMutated": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.web_acquisition.repo_research_tools.RepoResearchAttachmentFlags"
+}

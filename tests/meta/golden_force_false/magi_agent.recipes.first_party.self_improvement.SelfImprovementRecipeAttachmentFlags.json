@@ -1,0 +1,35 @@
+{
+  "false_only_fields": [
+    "live_callback_attached",
+    "live_tool_attached",
+    "model_call_enabled",
+    "mutation_enabled",
+    "production_write_enabled",
+    "runner_attached",
+    "traffic_attached",
+    "user_visible_output_enabled"
+  ],
+  "model_construct_dump": {
+    "liveCallbackAttached": false,
+    "liveToolAttached": false,
+    "modelCallEnabled": false,
+    "mutationEnabled": false,
+    "productionWriteEnabled": false,
+    "runnerAttached": false,
+    "trafficAttached": false,
+    "userVisibleOutputEnabled": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": {
+    "liveCallbackAttached": false,
+    "liveToolAttached": false,
+    "modelCallEnabled": false,
+    "mutationEnabled": false,
+    "productionWriteEnabled": false,
+    "runnerAttached": false,
+    "trafficAttached": false,
+    "userVisibleOutputEnabled": false
+  },
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.recipes.first_party.self_improvement.SelfImprovementRecipeAttachmentFlags"
+}

@@ -1,0 +1,20 @@
+{
+  "false_only_fields": [
+    "production_channel_delivery_enabled",
+    "production_storage_writes_enabled",
+    "route_attached",
+    "user_visible_delivery_enabled"
+  ],
+  "model_construct_dump": {
+    "enabled": false,
+    "localFakeReceiptIndexEnabled": false,
+    "productionChannelDeliveryEnabled": false,
+    "productionStorageWritesEnabled": false,
+    "routeAttached": false,
+    "userVisibleDeliveryEnabled": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.artifacts.delivery_receipts.ArtifactDeliveryReceiptConfig"
+}

@@ -1,0 +1,26 @@
+{
+  "false_only_fields": [
+    "execution_attached",
+    "traffic_attached"
+  ],
+  "model_construct_dump": {
+    "auditBeforeBlock": true,
+    "enforcement": "off",
+    "executionAttached": true,
+    "failureChannel": "evidence_contract",
+    "hardSafety": false,
+    "optOutAllowed": true,
+    "spawnDepth": {
+      "maxDepth": null,
+      "minDepth": 0
+    },
+    "trafficAttached": true
+  },
+  "model_construct_force_false_leaks": [
+    "execution_attached",
+    "traffic_attached"
+  ],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.evidence.types.EvidenceContractScopeMetadata"
+}

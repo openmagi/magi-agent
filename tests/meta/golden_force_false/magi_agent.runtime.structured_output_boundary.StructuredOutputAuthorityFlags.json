@@ -1,0 +1,18 @@
+{
+  "false_only_fields": [
+    "model_called",
+    "production_output_committed",
+    "route_attached",
+    "runner_invoked"
+  ],
+  "model_construct_dump": {
+    "modelCalled": false,
+    "productionOutputCommitted": false,
+    "routeAttached": false,
+    "runnerInvoked": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.runtime.structured_output_boundary.StructuredOutputAuthorityFlags"
+}

@@ -1,0 +1,50 @@
+{
+  "false_only_fields": [
+    "artifact_delivery_allowed",
+    "canary_routing_allowed",
+    "channel_writes_allowed",
+    "child_execution_allowed",
+    "db_writes_allowed",
+    "evidence_block_mode_allowed",
+    "memory_provider_active",
+    "mission_runtime_allowed",
+    "sse_writes_allowed",
+    "toolhost_active",
+    "transcript_writes_allowed",
+    "user_visible_output_allowed",
+    "workspace_mutation_allowed"
+  ],
+  "model_construct_dump": {
+    "artifactDeliveryAllowed": false,
+    "canaryRoutingAllowed": false,
+    "channelWritesAllowed": false,
+    "childExecutionAllowed": false,
+    "dbWritesAllowed": false,
+    "evidenceBlockModeAllowed": false,
+    "memoryProviderActive": false,
+    "missionRuntimeAllowed": false,
+    "sseWritesAllowed": false,
+    "toolHostActive": false,
+    "transcriptWritesAllowed": false,
+    "userVisibleOutputAllowed": false,
+    "workspaceMutationAllowed": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": {
+    "artifactDeliveryAllowed": false,
+    "canaryRoutingAllowed": false,
+    "channelWritesAllowed": false,
+    "childExecutionAllowed": false,
+    "dbWritesAllowed": false,
+    "evidenceBlockModeAllowed": false,
+    "memoryProviderActive": false,
+    "missionRuntimeAllowed": false,
+    "sseWritesAllowed": false,
+    "toolHostActive": false,
+    "transcriptWritesAllowed": false,
+    "userVisibleOutputAllowed": false,
+    "workspaceMutationAllowed": false
+  },
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.runtime.readiness.PriorityAReadinessAuthorityFlags"
+}

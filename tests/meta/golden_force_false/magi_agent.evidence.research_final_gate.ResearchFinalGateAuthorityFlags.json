@@ -1,0 +1,20 @@
+{
+  "false_only_fields": [
+    "final_answer_blocked",
+    "final_answer_blocking_enabled",
+    "production_authority",
+    "route_attached",
+    "user_visible_output_blocked"
+  ],
+  "model_construct_dump": {
+    "finalAnswerBlocked": false,
+    "finalAnswerBlockingEnabled": false,
+    "productionAuthority": false,
+    "routeAttached": false,
+    "userVisibleOutputBlocked": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.evidence.research_final_gate.ResearchFinalGateAuthorityFlags"
+}

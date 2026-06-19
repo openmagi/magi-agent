@@ -1,0 +1,25 @@
+{
+  "false_only_fields": [
+    "filesystem_attempted",
+    "model_call_attempted",
+    "network_attempted",
+    "tool_call_attempted"
+  ],
+  "model_construct_dump": {
+    "approvalGates": [],
+    "filesystemAttempted": true,
+    "modelCallAttempted": true,
+    "networkAttempted": true,
+    "reasonCodes": [],
+    "toolCallAttempted": true
+  },
+  "model_construct_force_false_leaks": [
+    "filesystem_attempted",
+    "model_call_attempted",
+    "network_attempted",
+    "tool_call_attempted"
+  ],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.workflows.dry_run.WorkflowDryRunReport"
+}

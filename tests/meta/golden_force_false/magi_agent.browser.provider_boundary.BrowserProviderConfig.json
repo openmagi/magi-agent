@@ -1,0 +1,24 @@
+{
+  "false_only_fields": [
+    "production_browser_enabled",
+    "production_writes_enabled"
+  ],
+  "model_construct_dump": {
+    "enabled": false,
+    "localFakeProviderEnabled": false,
+    "productionBrowserEnabled": true,
+    "productionWritesEnabled": true,
+    "providerId": "openmagi.browser-provider.system",
+    "screenshotArtifactPolicy": "sanitized_artifact_ref_only",
+    "sessionIsolation": "ephemeral_per_turn",
+    "timeoutMs": 60000,
+    "workerBoundary": "CDP/browser-worker boundary"
+  },
+  "model_construct_force_false_leaks": [
+    "production_browser_enabled",
+    "production_writes_enabled"
+  ],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.browser.provider_boundary.BrowserProviderConfig"
+}

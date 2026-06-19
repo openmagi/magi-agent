@@ -1,0 +1,18 @@
+{
+  "false_only_fields": [
+    "polling_attached",
+    "production_channel_writes_enabled",
+    "route_attached"
+  ],
+  "model_construct_dump": {
+    "enabled": false,
+    "localFakeChannelProviderEnabled": false,
+    "pollingAttached": false,
+    "productionChannelWritesEnabled": false,
+    "routeAttached": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.channels.runtime_boundary.ChannelRuntimeConfig"
+}

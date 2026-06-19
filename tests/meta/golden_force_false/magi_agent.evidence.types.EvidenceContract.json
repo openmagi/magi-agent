@@ -1,0 +1,21 @@
+{
+  "false_only_fields": [
+    "execution_attached",
+    "traffic_attached"
+  ],
+  "model_construct_dump": {
+    "description": null,
+    "executionAttached": true,
+    "retryMessage": null,
+    "scope": null,
+    "trafficAttached": true,
+    "when": null
+  },
+  "model_construct_force_false_leaks": [
+    "execution_attached",
+    "traffic_attached"
+  ],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.evidence.types.EvidenceContract"
+}

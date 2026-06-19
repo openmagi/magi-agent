@@ -1,0 +1,24 @@
+{
+  "false_only_fields": [
+    "execution_allowed"
+  ],
+  "model_construct_dump": {
+    "attachmentFlags": {
+      "browserExecuted": false,
+      "browserWorkerAttached": false,
+      "cdpSessionAttached": false,
+      "parentContextInjected": false,
+      "productionAuthority": false,
+      "rawSnapshotInjected": false,
+      "rawToolLogInjected": false
+    },
+    "executionAllowed": true,
+    "nextLease": null
+  },
+  "model_construct_force_false_leaks": [
+    "execution_allowed"
+  ],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.browser.provider_boundary.BrowserSessionActionDecision"
+}

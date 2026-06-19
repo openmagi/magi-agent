@@ -1,0 +1,14 @@
+{
+  "false_only_fields": [
+    "child_execution_enabled",
+    "evidence_block_mode_enabled",
+    "memory_enabled",
+    "mission_runtime_enabled",
+    "workspace_enabled"
+  ],
+  "model_construct_dump": null,
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.shadow.gate5b4c3_runner_input_adapter.Gate5B4C3RunnerInput"
+}

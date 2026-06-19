@@ -1,0 +1,35 @@
+{
+  "false_only_fields": [
+    "live_tools_executed",
+    "memory_provider_calls_enabled",
+    "memory_writes_enabled",
+    "prompt_injection_enabled",
+    "toolhost_dispatch_attached",
+    "user_visible_output_attached"
+  ],
+  "model_construct_dump": {
+    "liveToolsExecuted": false,
+    "memoryMode": "disabled",
+    "memoryProviderCallsEnabled": false,
+    "memoryWritesEnabled": false,
+    "outputMode": "local_diagnostic_artifacts_only",
+    "promptInjectionEnabled": false,
+    "toolHostDispatchAttached": false,
+    "toolsMode": "disabled",
+    "userVisibleOutputAttached": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": {
+    "liveToolsExecuted": false,
+    "memoryMode": "disabled",
+    "memoryProviderCallsEnabled": false,
+    "memoryWritesEnabled": false,
+    "outputMode": "local_diagnostic_artifacts_only",
+    "promptInjectionEnabled": false,
+    "toolHostDispatchAttached": false,
+    "toolsMode": "disabled",
+    "userVisibleOutputAttached": false
+  },
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.shadow.gate5a_no_memory_shadow_canary.Gate5ANoMemoryShadowCanaryPolicy"
+}

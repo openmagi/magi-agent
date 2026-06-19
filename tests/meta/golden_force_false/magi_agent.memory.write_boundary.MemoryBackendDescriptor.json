@@ -1,0 +1,14 @@
+{
+  "false_only_fields": [
+    "enabled",
+    "memory_write_allowed",
+    "production_write_enabled",
+    "provider_calls_enabled",
+    "provider_sdk_import_allowed"
+  ],
+  "model_construct_dump": null,
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.memory.write_boundary.MemoryBackendDescriptor"
+}

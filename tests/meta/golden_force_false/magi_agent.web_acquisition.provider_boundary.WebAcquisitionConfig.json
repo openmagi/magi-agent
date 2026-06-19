@@ -1,0 +1,24 @@
+{
+  "false_only_fields": [
+    "production_network_enabled",
+    "production_writes_enabled"
+  ],
+  "model_construct_dump": {
+    "adkFunctionToolSurface": "future",
+    "enabled": false,
+    "localFakeProviderEnabled": false,
+    "maxContentBytes": 32768,
+    "maxResults": 5,
+    "productionNetworkEnabled": true,
+    "productionWritesEnabled": true,
+    "providerId": "openmagi.web-acquisition.system",
+    "timeoutMs": 30000
+  },
+  "model_construct_force_false_leaks": [
+    "production_network_enabled",
+    "production_writes_enabled"
+  ],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.web_acquisition.provider_boundary.WebAcquisitionConfig"
+}

@@ -1,0 +1,20 @@
+{
+  "false_only_fields": [
+    "channel_provider_called",
+    "file_download_performed",
+    "polling_attached",
+    "production_channel_write",
+    "route_attached"
+  ],
+  "model_construct_dump": {
+    "channelProviderCalled": false,
+    "fileDownloadPerformed": false,
+    "pollingAttached": false,
+    "productionChannelWrite": false,
+    "routeAttached": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.channels.runtime_boundary.ChannelRuntimeAuthorityFlags"
+}

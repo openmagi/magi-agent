@@ -1,0 +1,22 @@
+{
+  "false_only_fields": [
+    "function_tools_attached",
+    "live_toolhost_dispatch_attached",
+    "long_running_tools_attached"
+  ],
+  "model_construct_dump": {
+    "functionToolsAttached": false,
+    "longRunningToolsAttached": false,
+    "mode": "disabled",
+    "toolhostDispatchAttached": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": {
+    "functionToolsAttached": false,
+    "longRunningToolsAttached": false,
+    "mode": "disabled",
+    "toolhostDispatchAttached": false
+  },
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.shadow.gate4c0_shadow_config.Gate4C0ToolPolicy"
+}

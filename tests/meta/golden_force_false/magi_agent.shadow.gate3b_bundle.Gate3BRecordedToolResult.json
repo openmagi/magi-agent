@@ -1,0 +1,14 @@
+{
+  "false_only_fields": [
+    "dispatched_live"
+  ],
+  "model_construct_dump": {
+    "dispatchedLive": false,
+    "outputMetadata": {},
+    "status": "recorded"
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.shadow.gate3b_bundle.Gate3BRecordedToolResult"
+}

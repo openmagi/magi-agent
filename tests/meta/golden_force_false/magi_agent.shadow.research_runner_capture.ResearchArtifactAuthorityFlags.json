@@ -1,0 +1,28 @@
+{
+  "false_only_fields": [
+    "browser_executed",
+    "evidence_block_enabled",
+    "live_tool_dispatched",
+    "model_call",
+    "production_authority",
+    "production_storage_written",
+    "traffic_attached",
+    "user_visible_activation",
+    "web_search_executed"
+  ],
+  "model_construct_dump": {
+    "browserExecuted": false,
+    "evidenceBlockEnabled": false,
+    "liveToolDispatched": false,
+    "modelCall": false,
+    "productionAuthority": false,
+    "productionStorageWritten": false,
+    "trafficAttached": false,
+    "userVisibleActivation": false,
+    "webSearchExecuted": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.shadow.research_runner_capture.ResearchArtifactAuthorityFlags"
+}

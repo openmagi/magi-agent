@@ -1,0 +1,26 @@
+{
+  "false_only_fields": [
+    "core_runtime_touched",
+    "lsp_provider_attached",
+    "lsp_subprocess_started",
+    "mcp_or_browser_activated",
+    "model_provider_invoked",
+    "subprocess_started",
+    "tool_executed",
+    "workspace_mutated"
+  ],
+  "model_construct_dump": {
+    "coreRuntimeTouched": false,
+    "lspProviderAttached": false,
+    "lspSubprocessStarted": false,
+    "mcpOrBrowserActivated": false,
+    "modelProviderInvoked": false,
+    "subprocessStarted": false,
+    "toolExecuted": false,
+    "workspaceMutated": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.harness.coding.code_intelligence_contracts.CodeIntelligenceAuthorityFlags"
+}

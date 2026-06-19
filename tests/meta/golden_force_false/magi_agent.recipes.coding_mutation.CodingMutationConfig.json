@@ -1,0 +1,16 @@
+{
+  "false_only_fields": [
+    "production_workspace_mutation_enabled"
+  ],
+  "model_construct_dump": {
+    "enabled": false,
+    "localFakeApplyEnabled": false,
+    "productionWorkspaceMutationEnabled": true
+  },
+  "model_construct_force_false_leaks": [
+    "production_workspace_mutation_enabled"
+  ],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.recipes.coding_mutation.CodingMutationConfig"
+}

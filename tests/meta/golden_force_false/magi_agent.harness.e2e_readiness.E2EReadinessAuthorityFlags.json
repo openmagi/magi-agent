@@ -1,0 +1,53 @@
+{
+  "false_only_fields": [
+    "browser",
+    "channel_delivery",
+    "db_write",
+    "live_tool_execution",
+    "memory_write",
+    "model_call",
+    "network",
+    "production_authority",
+    "scheduler_mutation",
+    "sse_write",
+    "traffic",
+    "transcript_write",
+    "user_visible_output",
+    "workspace_mutation"
+  ],
+  "model_construct_dump": {
+    "browser": false,
+    "channelDelivery": false,
+    "dbWrite": false,
+    "liveToolExecution": false,
+    "memoryWrite": false,
+    "modelCall": false,
+    "network": false,
+    "productionAuthority": false,
+    "schedulerMutation": false,
+    "sseWrite": false,
+    "traffic": false,
+    "transcriptWrite": false,
+    "userVisibleOutput": false,
+    "workspaceMutation": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": {
+    "browser": false,
+    "channelDelivery": false,
+    "dbWrite": false,
+    "liveToolExecution": false,
+    "memoryWrite": false,
+    "modelCall": false,
+    "network": false,
+    "productionAuthority": false,
+    "schedulerMutation": false,
+    "sseWrite": false,
+    "traffic": false,
+    "transcriptWrite": false,
+    "userVisibleOutput": false,
+    "workspaceMutation": false
+  },
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.harness.e2e_readiness.E2EReadinessAuthorityFlags"
+}

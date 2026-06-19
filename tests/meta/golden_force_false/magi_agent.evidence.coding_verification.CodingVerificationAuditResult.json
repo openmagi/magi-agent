@@ -1,0 +1,50 @@
+{
+  "false_only_fields": [
+    "block_mode_enabled",
+    "canary_attached",
+    "execution_attached",
+    "final_answer_blocked",
+    "route_attached",
+    "runner_attached",
+    "traffic_attached"
+  ],
+  "model_construct_dump": {
+    "attachmentFlags": {
+      "adkRunnerInvoked": false,
+      "canaryAttached": false,
+      "evidenceBlockEnabled": false,
+      "executionAttached": false,
+      "fileMutated": false,
+      "finalAnswerBlocked": false,
+      "liveToolDispatched": false,
+      "productionAttached": false,
+      "routeAttached": false,
+      "runnerAttached": false,
+      "shellOrCodeExecuted": false,
+      "trafficAttached": false,
+      "vcsExecuted": false,
+      "verificationCommandExecuted": false,
+      "workspaceWritten": false
+    },
+    "auditOnly": true,
+    "blockModeEnabled": true,
+    "canaryAttached": true,
+    "executionAttached": true,
+    "finalAnswerBlocked": true,
+    "routeAttached": true,
+    "runnerAttached": true,
+    "trafficAttached": true
+  },
+  "model_construct_force_false_leaks": [
+    "block_mode_enabled",
+    "canary_attached",
+    "execution_attached",
+    "final_answer_blocked",
+    "route_attached",
+    "runner_attached",
+    "traffic_attached"
+  ],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.evidence.coding_verification.CodingVerificationAuditResult"
+}

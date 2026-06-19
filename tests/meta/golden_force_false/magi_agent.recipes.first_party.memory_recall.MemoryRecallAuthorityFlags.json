@@ -1,0 +1,43 @@
+{
+  "false_only_fields": [
+    "adk_memory_service_called",
+    "adk_runner_called",
+    "live_provider_called",
+    "memory_write_allowed",
+    "model_called",
+    "network_called",
+    "production_write_allowed",
+    "prompt_projection_allowed",
+    "traffic_attached",
+    "user_visible_output_allowed"
+  ],
+  "model_construct_dump": {
+    "adkMemoryServiceCalled": false,
+    "adkRunnerCalled": false,
+    "liveProviderCalled": false,
+    "localAdapterCalled": false,
+    "memoryWriteAllowed": false,
+    "modelCalled": false,
+    "networkCalled": false,
+    "productionWriteAllowed": false,
+    "promptProjectionAllowed": false,
+    "trafficAttached": false,
+    "userVisibleOutputAllowed": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": {
+    "adkMemoryServiceCalled": false,
+    "adkRunnerCalled": false,
+    "liveProviderCalled": false,
+    "localAdapterCalled": false,
+    "memoryWriteAllowed": false,
+    "modelCalled": false,
+    "networkCalled": false,
+    "productionWriteAllowed": false,
+    "promptProjectionAllowed": false,
+    "trafficAttached": false,
+    "userVisibleOutputAllowed": false
+  },
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.recipes.first_party.memory_recall.MemoryRecallAuthorityFlags"
+}

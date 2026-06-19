@@ -1,0 +1,24 @@
+{
+  "false_only_fields": [
+    "evidence_block_mode_attached",
+    "live_capture_attached",
+    "production_route_attached",
+    "production_storage_attached",
+    "telegram_attached",
+    "tool_side_effects_attached",
+    "user_visible_output_attached"
+  ],
+  "model_construct_dump": {
+    "evidenceBlockModeAttached": false,
+    "liveCaptureAttached": false,
+    "productionRouteAttached": false,
+    "productionStorageAttached": false,
+    "telegramAttached": false,
+    "toolSideEffectsAttached": false,
+    "userVisibleOutputAttached": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.shadow.gate3a_report.Gate3AAttachmentFlags"
+}

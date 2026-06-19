@@ -1,0 +1,29 @@
+{
+  "false_only_fields": [
+    "child_execution_attached",
+    "execution_attached",
+    "scheduler_attached",
+    "tool_execution_attached",
+    "workspace_attached"
+  ],
+  "model_construct_dump": {
+    "childExecutionAttached": true,
+    "executionAttached": true,
+    "metadataOnly": true,
+    "schedulerAttached": true,
+    "stableOrdering": true,
+    "timeoutBudgets": [],
+    "toolExecutionAttached": true,
+    "workspaceAttached": true
+  },
+  "model_construct_force_false_leaks": [
+    "child_execution_attached",
+    "execution_attached",
+    "scheduler_attached",
+    "tool_execution_attached",
+    "workspace_attached"
+  ],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.harness.parallel_execution.ParallelProgressSummaryMetadata"
+}

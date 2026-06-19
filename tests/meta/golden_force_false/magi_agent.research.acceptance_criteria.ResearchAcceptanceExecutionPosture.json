@@ -1,0 +1,13 @@
+{
+  "false_only_fields": [
+    "adk_runner_attached",
+    "function_tool_attached",
+    "live_execution_allowed",
+    "provider_calls_allowed"
+  ],
+  "model_construct_dump": null,
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.research.acceptance_criteria.ResearchAcceptanceExecutionPosture"
+}

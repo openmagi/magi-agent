@@ -1,0 +1,23 @@
+{
+  "false_only_fields": [
+    "active_snapshot_written",
+    "durable_store_written",
+    "production_sse_written",
+    "production_transcript_written"
+  ],
+  "model_construct_dump": {
+    "activeSnapshotWritten": true,
+    "durableStoreWritten": true,
+    "productionSseWritten": true,
+    "productionTranscriptWritten": true
+  },
+  "model_construct_force_false_leaks": [
+    "active_snapshot_written",
+    "durable_store_written",
+    "production_sse_written",
+    "production_transcript_written"
+  ],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.shadow.gate5b4d_stream_fixture_audit.Gate5B4DDurableWriteBoundary"
+}

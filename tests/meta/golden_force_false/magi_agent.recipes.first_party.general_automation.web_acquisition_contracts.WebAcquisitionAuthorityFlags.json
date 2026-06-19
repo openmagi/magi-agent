@@ -1,0 +1,18 @@
+{
+  "false_only_fields": [
+    "browser_started",
+    "network_accessed",
+    "provider_called",
+    "route_attached"
+  ],
+  "model_construct_dump": {
+    "browserStarted": false,
+    "networkAccessed": false,
+    "providerCalled": false,
+    "routeAttached": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.recipes.first_party.general_automation.web_acquisition_contracts.WebAcquisitionAuthorityFlags"
+}

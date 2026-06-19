@@ -1,0 +1,19 @@
+{
+  "false_only_fields": [
+    "artifact_write_attached"
+  ],
+  "model_construct_dump": {
+    "artifactKind": null,
+    "artifactRef": null,
+    "artifactServiceOwner": "adk-artifact-service",
+    "artifactWriteAttached": true,
+    "openmagiIndexOwner": "openmagi-artifact-index",
+    "openmagiIndexRecordsRef": false
+  },
+  "model_construct_force_false_leaks": [
+    "artifact_write_attached"
+  ],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.harness.plan_gate.PlanGateArtifactImpact"
+}

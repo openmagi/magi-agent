@@ -1,0 +1,41 @@
+{
+  "false_only_fields": [
+    "credential_read_enabled",
+    "live_secret_read",
+    "marketplace_live_sync_enabled",
+    "model_called",
+    "network_call_allowed",
+    "plugin_execution_enabled",
+    "production_authority",
+    "route_or_api_attached",
+    "runtime_activation_allowed",
+    "toolhost_dispatched"
+  ],
+  "model_construct_dump": {
+    "credentialReadEnabled": false,
+    "liveSecretRead": false,
+    "marketplaceLiveSyncEnabled": false,
+    "modelCalled": false,
+    "networkCallAllowed": false,
+    "pluginExecutionEnabled": false,
+    "productionAuthority": false,
+    "routeOrApiAttached": false,
+    "runtimeActivationAllowed": false,
+    "toolHostDispatched": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": {
+    "credentialReadEnabled": false,
+    "liveSecretRead": false,
+    "marketplaceLiveSyncEnabled": false,
+    "modelCalled": false,
+    "networkCallAllowed": false,
+    "pluginExecutionEnabled": false,
+    "productionAuthority": false,
+    "routeOrApiAttached": false,
+    "runtimeActivationAllowed": false,
+    "toolHostDispatched": false
+  },
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.connectors.marketplace.MarketplaceAuthorityFlags"
+}

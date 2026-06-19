@@ -1,0 +1,37 @@
+{
+  "false_only_fields": [
+    "canary_routed",
+    "channel_delivered",
+    "db_written",
+    "memory_written",
+    "production_sse_written",
+    "production_transcript_written",
+    "user_visible_output_attached",
+    "workspace_mutated"
+  ],
+  "model_construct_dump": {
+    "canaryRouted": false,
+    "channelDelivered": false,
+    "dbWritten": false,
+    "memoryWritten": false,
+    "outputMode": "local_diagnostic_artifacts_only",
+    "productionSseWritten": false,
+    "productionTranscriptWritten": false,
+    "userVisibleOutputAttached": false,
+    "workspaceMutated": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": {
+    "canaryRouted": false,
+    "channelDelivered": false,
+    "dbWritten": false,
+    "memoryWritten": false,
+    "outputMode": "local_diagnostic_artifacts_only",
+    "productionSseWritten": false,
+    "productionTranscriptWritten": false,
+    "userVisibleOutputAttached": false,
+    "workspaceMutated": false
+  },
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.shadow.gate4c0_shadow_config.Gate4C0OutputIsolationPolicy"
+}

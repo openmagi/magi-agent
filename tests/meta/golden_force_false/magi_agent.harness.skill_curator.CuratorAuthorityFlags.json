@@ -1,0 +1,23 @@
+{
+  "false_only_fields": [
+    "agent_spawned",
+    "live_tool_execution",
+    "network_call_allowed",
+    "production_channel_write"
+  ],
+  "model_construct_dump": {
+    "agentSpawned": true,
+    "liveToolExecution": true,
+    "networkCallAllowed": true,
+    "productionChannelWrite": true
+  },
+  "model_construct_force_false_leaks": [
+    "agent_spawned",
+    "live_tool_execution",
+    "network_call_allowed",
+    "production_channel_write"
+  ],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.harness.skill_curator.CuratorAuthorityFlags"
+}

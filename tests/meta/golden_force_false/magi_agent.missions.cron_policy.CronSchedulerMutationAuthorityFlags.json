@@ -1,0 +1,50 @@
+{
+  "false_only_fields": [
+    "background_execution_enabled",
+    "channel_delivery_enabled",
+    "database_mutation_allowed",
+    "filesystem_mutation_allowed",
+    "live_cron_mutation_enabled",
+    "memory_mutation_enabled",
+    "network_call_allowed",
+    "production_writes_enabled",
+    "provider_call_allowed",
+    "scheduler_attached",
+    "tool_host_dispatch_enabled",
+    "traffic_attached",
+    "workspace_mutation_enabled"
+  ],
+  "model_construct_dump": {
+    "backgroundExecutionEnabled": false,
+    "channelDeliveryEnabled": false,
+    "databaseMutationAllowed": false,
+    "filesystemMutationAllowed": false,
+    "liveCronMutationEnabled": false,
+    "memoryMutationEnabled": false,
+    "networkCallAllowed": false,
+    "productionWritesEnabled": false,
+    "providerCallAllowed": false,
+    "schedulerAttached": false,
+    "toolHostDispatchEnabled": false,
+    "trafficAttached": false,
+    "workspaceMutationEnabled": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": {
+    "backgroundExecutionEnabled": false,
+    "channelDeliveryEnabled": false,
+    "databaseMutationAllowed": false,
+    "filesystemMutationAllowed": false,
+    "liveCronMutationEnabled": false,
+    "memoryMutationEnabled": false,
+    "networkCallAllowed": false,
+    "productionWritesEnabled": false,
+    "providerCallAllowed": false,
+    "schedulerAttached": false,
+    "toolHostDispatchEnabled": false,
+    "trafficAttached": false,
+    "workspaceMutationEnabled": false
+  },
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.missions.cron_policy.CronSchedulerMutationAuthorityFlags"
+}

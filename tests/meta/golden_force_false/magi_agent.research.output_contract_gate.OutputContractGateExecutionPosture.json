@@ -1,0 +1,13 @@
+{
+  "false_only_fields": [
+    "adk_runner_attached",
+    "channel_delivery_allowed",
+    "live_execution_allowed",
+    "model_calls_allowed"
+  ],
+  "model_construct_dump": null,
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.research.output_contract_gate.OutputContractGateExecutionPosture"
+}

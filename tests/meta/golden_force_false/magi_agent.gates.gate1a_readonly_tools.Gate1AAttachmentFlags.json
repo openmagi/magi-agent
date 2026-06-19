@@ -1,0 +1,44 @@
+{
+  "false_only_fields": [
+    "artifact_channel_delivery_allowed",
+    "bash_command_allowed",
+    "browser_side_effect_allowed",
+    "memory_write_allowed",
+    "production_attached",
+    "production_transcript_sse_db_write_allowed",
+    "telegram_discord_send_allowed",
+    "user_visible_output_attached",
+    "write_mutation_allowed"
+  ],
+  "model_construct_dump": {
+    "adkFunctionToolsBuilt": false,
+    "artifactChannelDeliveryAllowed": false,
+    "bashCommandAllowed": false,
+    "browserSideEffectAllowed": false,
+    "localReadOnlyToolsAttached": false,
+    "memoryWriteAllowed": false,
+    "productionAttached": false,
+    "productionTranscriptSseDbWriteAllowed": false,
+    "routeAttached": false,
+    "telegramDiscordSendAllowed": false,
+    "userVisibleOutputAttached": false,
+    "writeMutationAllowed": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": {
+    "adkFunctionToolsBuilt": false,
+    "artifactChannelDeliveryAllowed": false,
+    "bashCommandAllowed": false,
+    "browserSideEffectAllowed": false,
+    "localReadOnlyToolsAttached": false,
+    "memoryWriteAllowed": false,
+    "productionAttached": false,
+    "productionTranscriptSseDbWriteAllowed": false,
+    "routeAttached": false,
+    "telegramDiscordSendAllowed": false,
+    "userVisibleOutputAttached": false,
+    "writeMutationAllowed": false
+  },
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.gates.gate1a_readonly_tools.Gate1AAttachmentFlags"
+}

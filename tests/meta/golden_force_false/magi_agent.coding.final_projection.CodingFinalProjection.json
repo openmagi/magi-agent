@@ -1,0 +1,15 @@
+{
+  "false_only_fields": [
+    "production_workspace_mutation_allowed"
+  ],
+  "model_construct_dump": {
+    "defaultOff": true,
+    "productionWorkspaceMutationAllowed": true
+  },
+  "model_construct_force_false_leaks": [
+    "production_workspace_mutation_allowed"
+  ],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.coding.final_projection.CodingFinalProjection"
+}

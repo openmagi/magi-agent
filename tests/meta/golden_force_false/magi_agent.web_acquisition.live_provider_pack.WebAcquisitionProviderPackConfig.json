@@ -1,0 +1,23 @@
+{
+  "false_only_fields": [
+    "production_network_enabled",
+    "production_writes_enabled",
+    "route_attached"
+  ],
+  "model_construct_dump": {
+    "browserFallbackEnabled": false,
+    "enabled": false,
+    "localFakeProviderEnabled": false,
+    "maxContentBytes": 131072,
+    "maxResults": 5,
+    "productionNetworkEnabled": false,
+    "productionWritesEnabled": false,
+    "providerAllowlist": [],
+    "routeAttached": false,
+    "timeoutMs": 30000
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.web_acquisition.live_provider_pack.WebAcquisitionProviderPackConfig"
+}

@@ -1,0 +1,22 @@
+{
+  "false_only_fields": [
+    "credential_used",
+    "external_code_executed",
+    "external_loader_attached",
+    "mcp_server_attached",
+    "route_attached",
+    "runtime_hook_attached"
+  ],
+  "model_construct_dump": {
+    "credentialUsed": false,
+    "externalCodeExecuted": false,
+    "externalLoaderAttached": false,
+    "mcpServerAttached": false,
+    "routeAttached": false,
+    "runtimeHookAttached": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.plugins.extension_boundary.ExtensionAuthorityFlags"
+}

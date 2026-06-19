@@ -1,0 +1,20 @@
+{
+  "false_only_fields": [
+    "artifact_service_attached",
+    "callback_attached",
+    "route_attached",
+    "source_provider_called",
+    "tool_dispatch_enabled"
+  ],
+  "model_construct_dump": {
+    "artifactServiceAttached": false,
+    "callbackAttached": false,
+    "routeAttached": false,
+    "sourceProviderCalled": false,
+    "toolDispatchEnabled": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.harness.general_automation.event_projection.GeneralAutomationEventAuthorityFlags"
+}

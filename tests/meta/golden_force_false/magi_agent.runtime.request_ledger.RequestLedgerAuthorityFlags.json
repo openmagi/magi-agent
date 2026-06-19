@@ -1,0 +1,38 @@
+{
+  "false_only_fields": [
+    "channel_write_allowed",
+    "child_execution_allowed",
+    "memory_provider_call_allowed",
+    "model_context_write_allowed",
+    "production_write_allowed",
+    "route_activation_allowed",
+    "tool_dispatch_allowed",
+    "user_visible_output_allowed",
+    "workspace_mutation_allowed"
+  ],
+  "model_construct_dump": {
+    "channelWriteAllowed": false,
+    "childExecutionAllowed": false,
+    "memoryProviderCallAllowed": false,
+    "modelContextWriteAllowed": false,
+    "productionWriteAllowed": false,
+    "routeActivationAllowed": false,
+    "toolDispatchAllowed": false,
+    "userVisibleOutputAllowed": false,
+    "workspaceMutationAllowed": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": {
+    "channelWriteAllowed": false,
+    "childExecutionAllowed": false,
+    "memoryProviderCallAllowed": false,
+    "modelContextWriteAllowed": false,
+    "productionWriteAllowed": false,
+    "routeActivationAllowed": false,
+    "toolDispatchAllowed": false,
+    "userVisibleOutputAllowed": false,
+    "workspaceMutationAllowed": false
+  },
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.runtime.request_ledger.RequestLedgerAuthorityFlags"
+}

@@ -1,0 +1,15 @@
+{
+  "false_only_fields": [
+    "browser_execution_allowed",
+    "channel_delivery_allowed",
+    "live_execution_allowed",
+    "provider_calls_allowed",
+    "tool_execution_allowed",
+    "user_visible_python_activation"
+  ],
+  "model_construct_dump": null,
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.research.source_proof.ResearchSourceExecutionPosture"
+}

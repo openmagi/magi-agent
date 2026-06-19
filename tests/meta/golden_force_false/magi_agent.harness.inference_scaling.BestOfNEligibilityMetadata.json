@@ -1,0 +1,18 @@
+{
+  "false_only_fields": [
+    "default_enabled"
+  ],
+  "model_construct_dump": {
+    "defaultEnabled": true,
+    "eligible": false,
+    "maxVariants": 1,
+    "metadataOnly": true,
+    "sideEffectClass": "none"
+  },
+  "model_construct_force_false_leaks": [
+    "default_enabled"
+  ],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.harness.inference_scaling.BestOfNEligibilityMetadata"
+}

@@ -1,0 +1,53 @@
+{
+  "false_only_fields": [
+    "adk_runner_imported",
+    "adk_runner_invoked",
+    "canary_routed",
+    "channel_delivered",
+    "db_written",
+    "live_tools_executed",
+    "memory_provider_called",
+    "model_called",
+    "production_sse_written",
+    "production_transcript_written",
+    "prompt_constructed",
+    "toolhost_dispatched",
+    "user_visible_output_attached",
+    "workspace_mutated"
+  ],
+  "model_construct_dump": {
+    "adkRunnerImported": false,
+    "adkRunnerInvoked": false,
+    "canaryRouted": false,
+    "channelDelivered": false,
+    "dbWritten": false,
+    "liveToolsExecuted": false,
+    "memoryProviderCalled": false,
+    "modelCalled": false,
+    "productionSseWritten": false,
+    "productionTranscriptWritten": false,
+    "promptConstructed": false,
+    "toolHostDispatched": false,
+    "userVisibleOutputAttached": false,
+    "workspaceMutated": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": {
+    "adkRunnerImported": false,
+    "adkRunnerInvoked": false,
+    "canaryRouted": false,
+    "channelDelivered": false,
+    "dbWritten": false,
+    "liveToolsExecuted": false,
+    "memoryProviderCalled": false,
+    "modelCalled": false,
+    "productionSseWritten": false,
+    "productionTranscriptWritten": false,
+    "promptConstructed": false,
+    "toolHostDispatched": false,
+    "userVisibleOutputAttached": false,
+    "workspaceMutated": false
+  },
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.shadow.gate4c1_dry_run_boundary.Gate4C1DryRunBoundaryFlags"
+}

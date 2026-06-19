@@ -1,0 +1,20 @@
+{
+  "false_only_fields": [
+    "wake_agent"
+  ],
+  "model_construct_dump": {
+    "durationMs": 0,
+    "exitCode": 0,
+    "metadata": {},
+    "recursiveSchedulerRequested": false,
+    "stdout": "",
+    "timedOut": false,
+    "wakeAgent": true
+  },
+  "model_construct_force_false_leaks": [
+    "wake_agent"
+  ],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.runtime.no_agent_watchdog.NoAgentWatchdogRequest"
+}

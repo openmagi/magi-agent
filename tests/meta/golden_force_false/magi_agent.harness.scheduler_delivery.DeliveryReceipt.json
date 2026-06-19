@@ -1,0 +1,18 @@
+{
+  "false_only_fields": [
+    "channel_delivery_enabled",
+    "network_call_attempted"
+  ],
+  "model_construct_dump": {
+    "channelDeliveryEnabled": true,
+    "evidence": null,
+    "networkCallAttempted": true
+  },
+  "model_construct_force_false_leaks": [
+    "channel_delivery_enabled",
+    "network_call_attempted"
+  ],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.harness.scheduler_delivery.DeliveryReceipt"
+}

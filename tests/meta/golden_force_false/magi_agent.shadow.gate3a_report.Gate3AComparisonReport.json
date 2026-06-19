@@ -1,0 +1,31 @@
+{
+  "false_only_fields": [
+    "custom_runtime_loop"
+  ],
+  "model_construct_dump": {
+    "adkPrimitives": [
+      "Agent",
+      "Runner",
+      "Event"
+    ],
+    "attachmentFlags": {
+      "evidenceBlockModeAttached": false,
+      "liveCaptureAttached": false,
+      "productionRouteAttached": false,
+      "productionStorageAttached": false,
+      "telegramAttached": false,
+      "toolSideEffectsAttached": false,
+      "userVisibleOutputAttached": false
+    },
+    "customRuntimeLoop": false,
+    "failures": [],
+    "schemaVersion": "gate3a.comparisonReport.v1",
+    "shadowRuntime": "python-adk",
+    "sourceRuntime": "typescript-core-agent",
+    "storageMode": "local_only"
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.shadow.gate3a_report.Gate3AComparisonReport"
+}

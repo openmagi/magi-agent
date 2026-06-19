@@ -1,0 +1,35 @@
+{
+  "false_only_fields": [
+    "database_write_allowed",
+    "filesystem_write_allowed",
+    "memory_delete_allowed",
+    "memory_redact_allowed",
+    "memory_write_allowed",
+    "network_call_allowed",
+    "production_write_enabled",
+    "provider_call_allowed"
+  ],
+  "model_construct_dump": {
+    "databaseWriteAllowed": false,
+    "filesystemWriteAllowed": false,
+    "memoryDeleteAllowed": false,
+    "memoryRedactAllowed": false,
+    "memoryWriteAllowed": false,
+    "networkCallAllowed": false,
+    "productionWriteEnabled": false,
+    "providerCallAllowed": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": {
+    "databaseWriteAllowed": false,
+    "filesystemWriteAllowed": false,
+    "memoryDeleteAllowed": false,
+    "memoryRedactAllowed": false,
+    "memoryWriteAllowed": false,
+    "networkCallAllowed": false,
+    "productionWriteEnabled": false,
+    "providerCallAllowed": false
+  },
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.memory.write_boundary.MemoryWriteAuthorityFlags"
+}

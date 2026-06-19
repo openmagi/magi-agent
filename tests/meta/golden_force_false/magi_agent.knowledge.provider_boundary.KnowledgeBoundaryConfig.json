@@ -1,0 +1,25 @@
+{
+  "false_only_fields": [
+    "production_provider_calls_enabled",
+    "production_writes_enabled",
+    "route_attached"
+  ],
+  "model_construct_dump": {
+    "enabled": false,
+    "localFakeProviderEnabled": false,
+    "maxPreviewChars": 1000,
+    "maxRecords": 5,
+    "productionProviderCallsEnabled": true,
+    "productionWritesEnabled": true,
+    "providerId": "openmagi.knowledge.local-fake",
+    "routeAttached": true
+  },
+  "model_construct_force_false_leaks": [
+    "production_provider_calls_enabled",
+    "production_writes_enabled",
+    "route_attached"
+  ],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.knowledge.provider_boundary.KnowledgeBoundaryConfig"
+}

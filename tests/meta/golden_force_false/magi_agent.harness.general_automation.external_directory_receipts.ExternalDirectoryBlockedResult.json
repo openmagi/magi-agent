@@ -1,0 +1,18 @@
+{
+  "false_only_fields": [
+    "approval_required"
+  ],
+  "model_construct_dump": {
+    "adkControlKind": "tool_callback_control_request",
+    "approvalRequired": true,
+    "errorCode": "external_directory_access_denied",
+    "modelVisible": true,
+    "status": "blocked"
+  },
+  "model_construct_force_false_leaks": [
+    "approval_required"
+  ],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.harness.general_automation.external_directory_receipts.ExternalDirectoryBlockedResult"
+}

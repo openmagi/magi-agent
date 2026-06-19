@@ -1,0 +1,24 @@
+{
+  "false_only_fields": [
+    "adk_artifact_service_attached",
+    "artifact_written",
+    "channel_delivery_performed",
+    "production_channel_write",
+    "production_storage_written",
+    "raw_content_injected",
+    "route_attached"
+  ],
+  "model_construct_dump": {
+    "adkArtifactServiceAttached": false,
+    "artifactWritten": false,
+    "channelDeliveryPerformed": false,
+    "productionChannelWrite": false,
+    "productionStorageWritten": false,
+    "rawContentInjected": false,
+    "routeAttached": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.artifacts.file_delivery.FileDeliveryAuthorityFlags"
+}

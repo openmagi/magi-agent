@@ -1,0 +1,34 @@
+{
+  "false_only_fields": [
+    "adk_runner_invoked",
+    "chat_proxy_route_attached",
+    "durable_store_written",
+    "frontend_switch_enabled",
+    "k8s_or_provisioning_touched",
+    "live_tool_dispatched",
+    "live_user_visible_streaming",
+    "memory_provider_called",
+    "production_sse_written",
+    "production_transcript_written",
+    "runtime_selector_activated",
+    "telegram_attached"
+  ],
+  "model_construct_dump": {
+    "adkRunnerInvoked": false,
+    "chatProxyRouteAttached": false,
+    "durableStoreWritten": false,
+    "frontendSwitchEnabled": false,
+    "k8sOrProvisioningTouched": false,
+    "liveToolDispatched": false,
+    "liveUserVisibleStreaming": false,
+    "memoryProviderCalled": false,
+    "productionSseWritten": false,
+    "productionTranscriptWritten": false,
+    "runtimeSelectorActivated": false,
+    "telegramAttached": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.shadow.gate5b4d_stream_fixture_audit.Gate5B4DLiveAuthorityFlags"
+}

@@ -1,0 +1,15 @@
+{
+  "false_only_fields": [
+    "browser_side_effect_allowed",
+    "channel_delivery_allowed",
+    "db_write_allowed",
+    "memory_write_allowed",
+    "production_attached",
+    "production_workspace_mutation_allowed"
+  ],
+  "model_construct_dump": null,
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.gates.gate5b_full_toolhost.Gate5BFullToolAttachmentFlags"
+}

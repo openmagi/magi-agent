@@ -1,0 +1,20 @@
+{
+  "false_only_fields": [
+    "adk_memory_service_attached",
+    "memory_write_allowed",
+    "prompt_projection_allowed"
+  ],
+  "model_construct_dump": {
+    "adkMemoryServiceAttached": false,
+    "memoryWriteAllowed": false,
+    "promptProjectionAllowed": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": {
+    "adkMemoryServiceAttached": false,
+    "memoryWriteAllowed": false,
+    "promptProjectionAllowed": false
+  },
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.adk_bridge.memory_service.MemoryAuthorityFlags"
+}

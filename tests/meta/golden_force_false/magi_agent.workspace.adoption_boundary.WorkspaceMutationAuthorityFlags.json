@@ -1,0 +1,20 @@
+{
+  "false_only_fields": [
+    "filesystem_write_attempted",
+    "git_apply_attempted",
+    "live_workspace_mutation_attached",
+    "production_authority",
+    "route_attached"
+  ],
+  "model_construct_dump": {
+    "filesystemWriteAttempted": false,
+    "gitApplyAttempted": false,
+    "liveWorkspaceMutationAttached": false,
+    "productionAuthority": false,
+    "routeAttached": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.workspace.adoption_boundary.WorkspaceMutationAuthorityFlags"
+}

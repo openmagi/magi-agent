@@ -1,0 +1,49 @@
+{
+  "false_only_fields": [
+    "db_write_allowed",
+    "production_authority_allowed",
+    "sse_write_allowed",
+    "transcript_write_allowed"
+  ],
+  "model_construct_dump": {
+    "canaryEvidenceSource": "none",
+    "canaryEvidenceVerified": false,
+    "canaryStatus": "missing",
+    "compactionApplied": false,
+    "dbWriteAllowed": false,
+    "enabled": false,
+    "fallbackStatus": "missing",
+    "importedEventCount": 0,
+    "mode": "disabled",
+    "modelVisibleDigestPresent": false,
+    "productionAuthorityAllowed": false,
+    "projectionDigestPresent": false,
+    "reasonCodes": [],
+    "rejectedEntryCount": 0,
+    "sourceTranscriptHeadDigestPresent": false,
+    "sseWriteAllowed": false,
+    "transcriptWriteAllowed": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": {
+    "canaryEvidenceSource": "none",
+    "canaryEvidenceVerified": false,
+    "canaryStatus": "missing",
+    "compactionApplied": false,
+    "dbWriteAllowed": false,
+    "enabled": false,
+    "fallbackStatus": "missing",
+    "importedEventCount": 0,
+    "mode": "disabled",
+    "modelVisibleDigestPresent": false,
+    "productionAuthorityAllowed": false,
+    "projectionDigestPresent": false,
+    "reasonCodes": [],
+    "rejectedEntryCount": 0,
+    "sourceTranscriptHeadDigestPresent": false,
+    "sseWriteAllowed": false,
+    "transcriptWriteAllowed": false
+  },
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.config.models.PythonContextContinuityConfig"
+}

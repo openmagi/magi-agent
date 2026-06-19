@@ -1,0 +1,17 @@
+{
+  "false_only_fields": [
+    "channel_delivery_allowed",
+    "memory_write_allowed",
+    "mutation_allowed"
+  ],
+  "model_construct_dump": {
+    "channelDeliveryAllowed": false,
+    "memoryWriteAllowed": false,
+    "mutationAllowed": false,
+    "readOnly": true
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.evidence.runtime_receipts.ReceiptAuthorityFlags"
+}

@@ -1,0 +1,16 @@
+{
+  "false_only_fields": [
+    "browser_action_allowed",
+    "child_workspace_mutation_allowed",
+    "execution_attempted",
+    "filesystem_mutation_allowed",
+    "network_call_allowed",
+    "process_spawn_allowed",
+    "production_authority"
+  ],
+  "model_construct_dump": null,
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.sandbox.policy.SandboxDecision"
+}

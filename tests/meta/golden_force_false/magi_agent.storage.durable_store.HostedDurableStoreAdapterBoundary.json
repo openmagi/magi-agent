@@ -1,0 +1,31 @@
+{
+  "false_only_fields": [
+    "enabled",
+    "stores_secret_material"
+  ],
+  "model_construct_dump": {
+    "activationBlockers": [
+      "hosted_adapter_not_available",
+      "requires_saas_db_contract",
+      "requires_secrets_binding"
+    ],
+    "enabled": false,
+    "kind": "postgres",
+    "requiresSeparateApproval": true,
+    "storesSecretMaterial": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": {
+    "activationBlockers": [
+      "hosted_adapter_not_available",
+      "requires_saas_db_contract",
+      "requires_secrets_binding"
+    ],
+    "enabled": false,
+    "kind": "postgres",
+    "requiresSeparateApproval": true,
+    "storesSecretMaterial": false
+  },
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.storage.durable_store.HostedDurableStoreAdapterBoundary"
+}

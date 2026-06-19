@@ -1,0 +1,30 @@
+{
+  "false_only_fields": [
+    "background_runtime_attached",
+    "child_execution_attached",
+    "evidence_block_enabled",
+    "memory_provider_called",
+    "mission_store_written",
+    "production_authority",
+    "route_attached",
+    "runner_attached",
+    "tool_host_dispatched",
+    "workspace_mutated"
+  ],
+  "model_construct_dump": {
+    "backgroundRuntimeAttached": false,
+    "childExecutionAttached": false,
+    "evidenceBlockEnabled": false,
+    "memoryProviderCalled": false,
+    "missionStoreWritten": false,
+    "productionAuthority": false,
+    "routeAttached": false,
+    "runnerAttached": false,
+    "toolHostDispatched": false,
+    "workspaceMutated": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.evidence.child_runtime_envelope.ChildRuntimeEnvelopeAuthorityFlags"
+}

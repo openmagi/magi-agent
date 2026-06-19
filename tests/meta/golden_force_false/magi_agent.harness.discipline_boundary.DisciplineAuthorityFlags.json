@@ -1,0 +1,20 @@
+{
+  "false_only_fields": [
+    "adk_callback_invoked",
+    "adk_eval_invoked",
+    "prompt_injected",
+    "route_attached",
+    "user_visible_output_blocked"
+  ],
+  "model_construct_dump": {
+    "adkCallbackInvoked": false,
+    "adkEvalInvoked": false,
+    "promptInjected": false,
+    "routeAttached": false,
+    "userVisibleOutputBlocked": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.harness.discipline_boundary.DisciplineAuthorityFlags"
+}

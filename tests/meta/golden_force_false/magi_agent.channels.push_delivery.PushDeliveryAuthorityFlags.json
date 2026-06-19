@@ -1,0 +1,18 @@
+{
+  "false_only_fields": [
+    "production_push_write",
+    "provider_called",
+    "route_attached",
+    "web_app_canary_attached"
+  ],
+  "model_construct_dump": {
+    "productionPushWrite": false,
+    "providerCalled": false,
+    "routeAttached": false,
+    "webAppCanaryAttached": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.channels.push_delivery.PushDeliveryAuthorityFlags"
+}
