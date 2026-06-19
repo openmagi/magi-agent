@@ -421,3 +421,64 @@ class TestStateRoundTrip:
         dumped = state.model_dump(by_alias=True, mode="python")
         restored = CodingRepairLoopState.model_validate(dumped)
         assert restored == state
+
+
+# ---------------------------------------------------------------------------
+# is_coding_turn scope (Phase 0 lab evidence-gate fix)
+# ---------------------------------------------------------------------------
+
+class TestIsCodingTurnScope:
+    def test_non_coding_turn_abstains_even_with_failing_evidence(self) -> None:
+        """A non-coding turn must NEVER trigger the coding repair loop.
+
+        Lab bug: ``MAGI_CODING_REPAIR_LOOP_ENABLED=1`` is default in the lab
+        profile. Without a coding-turn scope check, even a plain "Hi" chat with
+        no test evidence falls through ``continue_repair`` → engine injects the
+        "bounded repair attempt N/M" preamble into the model → Opus 4.6 refuses
+        as suspected prompt injection → "no final answer text" UX failure.
+        """
+        decision = evaluate_repair_decision(
+            config=CodingRepairLoopConfig(enabled=True, maxAttempts=3),
+            state=CodingRepairLoopState(
+                attemptCount=0, evidenceRefs=(), reasonCodes=()
+            ),
+            latest_test_evidence=_failing_test_evidence(),
+            is_coding_turn=False,
+        )
+        assert decision.action == "abstain"
+        assert "non_coding_turn" in decision.reason_codes
+
+    def test_non_coding_turn_abstains_when_no_evidence(self) -> None:
+        decision = evaluate_repair_decision(
+            config=CodingRepairLoopConfig(enabled=True, maxAttempts=3),
+            state=CodingRepairLoopState(
+                attemptCount=0, evidenceRefs=(), reasonCodes=()
+            ),
+            latest_test_evidence=None,
+            is_coding_turn=False,
+        )
+        assert decision.action == "abstain"
+        assert "non_coding_turn" in decision.reason_codes
+
+    def test_default_is_coding_turn_true_preserves_existing_behaviour(self) -> None:
+        """Backwards-compat: callers that do not pass ``is_coding_turn`` see
+        the historic continue-repair path on a failing test."""
+        decision = evaluate_repair_decision(
+            config=CodingRepairLoopConfig(enabled=True, maxAttempts=3),
+            state=CodingRepairLoopState(
+                attemptCount=0, evidenceRefs=(), reasonCodes=()
+            ),
+            latest_test_evidence=_failing_test_evidence(),
+        )
+        assert decision.action == "continue_repair"
+
+    def test_explicit_is_coding_turn_true_continues_repair(self) -> None:
+        decision = evaluate_repair_decision(
+            config=CodingRepairLoopConfig(enabled=True, maxAttempts=3),
+            state=CodingRepairLoopState(
+                attemptCount=0, evidenceRefs=(), reasonCodes=()
+            ),
+            latest_test_evidence=_failing_test_evidence(),
+            is_coding_turn=True,
+        )
+        assert decision.action == "continue_repair"

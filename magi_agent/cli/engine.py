@@ -752,6 +752,7 @@ def _build_coding_repair_decision_payload(
     *,
     attempt_count: int = 0,
     latest_test_evidence: Mapping[str, object] | None = None,
+    is_coding_turn: bool = True,
 ) -> dict[str, object]:
     from magi_agent.coding.repair_loop import (
         CodingRepairLoopConfig,
@@ -766,6 +767,7 @@ def _build_coding_repair_decision_payload(
         config=CodingRepairLoopConfig(enabled=True, maxAttempts=max_attempts),
         state=CodingRepairLoopState(attemptCount=attempt_count),
         latest_test_evidence=latest_test_evidence,
+        is_coding_turn=is_coding_turn,
     )
     return project_repair_decision_event(decision)
 
@@ -3707,10 +3709,25 @@ class MagiEngineDriver:
                 if _coding_repair_loop_enabled()
                 else None
             )
+            # Coding scope check (lab fix): the repair loop's "bounded repair
+            # attempt N/M" preamble must NEVER reach the model on a non-coding
+            # turn. The turn is coding only when dev-coding was actually engaged
+            # (baseline or live) AND a file-mutating tool ran. Otherwise the
+            # callee short-circuits to ``abstain`` so no repair preamble is
+            # injected into the next turn's prompt.
+            dev_coding_pack_id = "openmagi.dev-coding"
+            effective_selected = set(assembly.selected_pack_ids) | set(
+                live_selected_pack_ids
+            )
+            is_coding_turn = (
+                dev_coding_pack_id in effective_selected
+                and coding_mutation_observed
+            )
             payload["repairDecision"] = _build_coding_repair_decision_payload(
                 effective_repair_policy,
                 attempt_count=repair_attempt_count,
                 latest_test_evidence=latest_test_evidence,
+                is_coding_turn=is_coding_turn,
             )
         return payload
 

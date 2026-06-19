@@ -562,10 +562,29 @@ def _loaded_pack_validator_refs() -> tuple[str, ...]:
     return tuple(refs)
 
 
+_CODING_TASK_TYPES_FOR_LOCAL_TRUST = frozenset(
+    {"coding", "code", "dev-coding", "developer", "software", "workspace", "file-edit", "patch"}
+)
+
+
+def _profile_has_coding_signal(task_profile: Mapping[str, object]) -> bool:
+    """True iff ``taskTypes`` declares at least one coding-scope task type."""
+    raw = task_profile.get("taskTypes") or task_profile.get("task_types") or ()
+    if isinstance(raw, str):
+        raw = (raw,)
+    if not isinstance(raw, (list, tuple, set, frozenset)):
+        return False
+    for value in raw:
+        if isinstance(value, str) and value.strip().lower() in _CODING_TASK_TYPES_FOR_LOCAL_TRUST:
+            return True
+    return False
+
+
 def _local_trust_missing_evidence_action(
     materialized_action: str,
     *,
     env: Mapping[str, str] | None = None,
+    task_profile: Mapping[str, object] | None = None,
 ) -> str:
     """Local full-trust enforces authored rules by default (drop hosted staging).
 
@@ -577,6 +596,13 @@ def _local_trust_missing_evidence_action(
     posture. An explicit ``repair_required`` is never downgraded; any non-``audit``
     materialized action is passed through unchanged (only the conservative hosted
     ``audit`` default is flipped).
+
+    Phase 0 lab fix: when an explicit ``task_profile`` is provided, the upgrade
+    only fires for **coding-scope** profiles (any of ``_CODING_TASK_TYPES`` in
+    ``taskTypes``). A non-coding profile (e.g. ``chat`` only) keeps the
+    conservative audit posture so a chat turn cannot escalate to a hard block
+    that triggers the repair-loop preamble. ``task_profile=None`` preserves the
+    historic upgrade so existing call sites stay byte-identical.
     """
     from magi_agent.config.env import (  # noqa: PLC0415
         _runtime_profile_default_enabled,
@@ -586,6 +612,8 @@ def _local_trust_missing_evidence_action(
     if materialized_action == "repair_required":
         return "repair_required"
     if materialized_action == "audit" and _runtime_profile_default_enabled(source):
+        if task_profile is not None and not _profile_has_coding_signal(task_profile):
+            return "audit"
         return "repair_required"
     return materialized_action
 
@@ -805,7 +833,8 @@ def _build_default_runner_policy_assembly(
         list(plan.final_gate_policy.required_evidence)
     )
     missing_action = _local_trust_missing_evidence_action(
-        plan.final_gate_policy.missing_evidence_action
+        plan.final_gate_policy.missing_evidence_action,
+        task_profile=effective_task_profile,
     )
     attachment_flags = dict(plan.attachment_flags)
     attachment_flags["livePolicyCallbackAttached"] = live_policy_callback_attached
