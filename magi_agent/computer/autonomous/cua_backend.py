@@ -3,9 +3,13 @@ from __future__ import annotations
 import base64
 import os
 import tempfile
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+
+# cua-driver's own window (display name "Cua Driver") must never be the control
+# target — launching the driver raises it in front of the user's apps.
+_DRIVER_APP_NAMES = {"cua driver", "cuadriver"}
 
 from magi_agent.computer.autonomous.cua_pure import (
     UIElement,
@@ -48,6 +52,36 @@ def _unwrap(result: object) -> Mapping[str, object]:
     if isinstance(structured, Mapping):
         return structured
     return {}
+
+
+def _window_area(window: Mapping[str, object]) -> float:
+    bounds = window.get("bounds")
+    if not isinstance(bounds, Mapping):
+        return 0.0
+    width = bounds.get("width", 0)
+    height = bounds.get("height", 0)
+    if isinstance(width, (int, float)) and isinstance(height, (int, float)):
+        return float(width) * float(height)
+    return 0.0
+
+
+def _select_window(windows: Sequence[Mapping[str, object]]) -> Mapping[str, object]:
+    """Pick the control target: the largest on-screen non-driver window.
+
+    Falls back to the largest of whatever is available. ``windows[0]`` is wrong
+    in practice — the driver's own window and tiny accessory strips can outrank
+    the main content window in z-order.
+    """
+    usable = [
+        w
+        for w in windows
+        if w.get("is_on_screen", True)
+        and str(w.get("app_name", "")).casefold() not in _DRIVER_APP_NAMES
+    ]
+    pool = usable or list(windows)
+    if not pool:
+        return {}
+    return max(pool, key=_window_area)
 
 
 def _read_png_b64(path: str) -> str:
@@ -93,7 +127,7 @@ class CuaDriverBackend:
         )
         window_list = windows.get("windows")
         entries = window_list if isinstance(window_list, (list, tuple)) else []
-        first: Mapping[str, object] = entries[0] if entries else {}
+        first = _select_window(entries)
         pid = _as_int(first.get("pid", 0), 0)
         window_id = _as_int(first.get("window_id", 0), 0)
 

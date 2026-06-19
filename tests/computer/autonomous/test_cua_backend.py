@@ -3,8 +3,42 @@ import os
 
 import pytest
 
-from magi_agent.computer.autonomous.cua_backend import CuaCapture, CuaDriverBackend
+from magi_agent.computer.autonomous.cua_backend import (
+    CuaCapture,
+    CuaDriverBackend,
+    _select_window,
+)
 from magi_agent.computer.autonomous.cua_pure import UIElement
+
+
+def _win(app: str, wid: int, w: int, h: int, on_screen: bool = True) -> dict:
+    return {
+        "app_name": app,
+        "pid": 1,
+        "window_id": wid,
+        "is_on_screen": on_screen,
+        "bounds": {"width": w, "height": h},
+    }
+
+
+def test_select_window_prefers_largest_non_driver() -> None:
+    # Driver window is largest but must be skipped; among the rest pick by area,
+    # not list order (the small accessory strip comes first).
+    windows = [
+        _win("Cua Driver", 100, 1400, 900),
+        _win("Code", 101, 1500, 32),
+        _win("Code", 102, 1500, 900),
+    ]
+    assert _select_window(windows)["window_id"] == 102
+
+
+def test_select_window_falls_back_to_driver_only() -> None:
+    windows = [_win("Cua Driver", 100, 100, 100)]
+    assert _select_window(windows)["window_id"] == 100
+
+
+def test_select_window_empty() -> None:
+    assert _select_window([]) == {}
 
 # Real cua-driver 0.5.7 get_window_state returns `tree_markdown` (not `data`) and
 # writes the PNG to `screenshot_out_file` (no inline `screenshot_b64`).
