@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 # cua-driver 0.5.7 get_window_state markdown lines look like:
-#   - [0] AXWindow "clawy" [actions=[raise]]
+#   - [0] AXWindow "Safari" [actions=[raise]]
 #     - [6] AXMenuItem [actions=[cancel,press,pick]]   (label optional)
 # i.e. `[N]` (not `[element_index N]`), role token, optional quoted label.
 _ELEMENT_RE = re.compile(r'^\s*-\s*\[(\d+)\]\s+(\S+)(?:\s+"([^"]*)")?', re.MULTILINE)
