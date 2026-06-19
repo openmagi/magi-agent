@@ -293,8 +293,22 @@ def _build_real_adk_adapter() -> Any:
     Raises on construction failure — the caller wraps in try/except.
     """
     from magi_agent.adk_bridge.runner_adapter import OpenMagiRunnerAdapter  # noqa: PLC0415
+    from magi_agent.cli.providers import resolve_provider_config  # noqa: PLC0415
+    from magi_agent.cli.real_runner import build_cli_model_runner  # noqa: PLC0415
 
-    return OpenMagiRunnerAdapter()
+    config = resolve_provider_config()
+    if config is None:
+        raise RuntimeError(
+            "No provider configuration found — set a provider API key "
+            "(e.g. ANTHROPIC_API_KEY, OPENAI_API_KEY) before enabling "
+            "MAGI_WORK_QUEUE_ADK_RUNNER_ENABLED."
+        )
+    cli_runner = build_cli_model_runner(
+        config,
+        app_name="magi-work-queue",
+        agent_name="magi_work_queue_agent",
+    )
+    return OpenMagiRunnerAdapter(runner=cli_runner)
 
 
 def is_work_queue_notify_enabled() -> bool:
