@@ -4,8 +4,9 @@ from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 
+from magi_agent.ops.authority import FalseOnlyAuthorityModel
 from magi_agent.ops.safety import (
     canonical_digest,
     require_digest,
@@ -19,14 +20,6 @@ from magi_agent.ops.safety import (
 ConnectorPermissionKind = Literal["read", "write", "execute", "network", "metadata"]
 ConnectorSandboxMode = Literal["metadata_only", "local_fake", "hosted_disabled"]
 ConnectorRegistryStatus = Literal["registered", "missing", "blocked"]
-
-_MODEL_CONFIG = ConfigDict(
-    frozen=True,
-    populate_by_name=True,
-    extra="forbid",
-    validate_default=True,
-    hide_input_in_errors=True,
-)
 
 
 def _digest_payload(payload: Mapping[str, object]) -> str:
@@ -125,8 +118,26 @@ def connector_manifest_content_digest(value: Mapping[str, object]) -> str:
     )
 
 
-class _ConnectorModel(BaseModel):
-    model_config = _MODEL_CONFIG
+class _ConnectorModel(FalseOnlyAuthorityModel):
+    """Frozen connector base on the canonical ``FalseOnlyAuthorityModel`` (C-4
+    PR-C), with the pre-PR-C escape-hatch raising on ``model_construct`` /
+    ``model_copy(update=...)`` preserved.
+
+    Unlike ``_MarketplaceModel``, the connector / registry subclasses fail-loudly
+    on illegal escape-hatch construction or in-place mutation: any
+    ``model_construct`` call raises, and ``model_copy(update=...)`` raises. This
+    is asserted by the ``ConnectorAuthorityFlags`` golden
+    (``model_construct_dump: null``) and by sibling models that must rebuild
+    through ``model_validate`` (sandbox/policy invariants on
+    ``ConnectorManifest``, etc.). Per the C-4 PR-B precedent on per-class
+    raising semantics (``_UNSAFE_CONSTRUCT_COPY_FIELDS``), the raising shape is
+    preserved at this base via the two surface overrides rather than dropped.
+
+    The introspection-based force-false / serializer / ``public_projection``
+    behavior comes from ``FalseOnlyAuthorityModel``; the per-class
+    ``_FALSE_ONLY_FIELDS`` tuple, ``_force_false`` validator, and
+    ``field_serializer`` lists are no longer needed.
+    """
 
     @classmethod
     def model_construct(cls, _fields_set: set[str] | None = None, **values: object) -> Self:
@@ -156,36 +167,6 @@ class ConnectorAuthorityFlags(_ConnectorModel):
     live_secret_read: Literal[False] = Field(default=False, alias="liveSecretRead")
     network_call_allowed: Literal[False] = Field(default=False, alias="networkCallAllowed")
     production_authority: Literal[False] = Field(default=False, alias="productionAuthority")
-
-    @model_validator(mode="before")
-    @classmethod
-    def _force_false(cls, value: object) -> dict[str, object]:
-        payload = dict(value) if isinstance(value, Mapping) else {}
-        for field_name, field in cls.model_fields.items():
-            payload[field.alias or field_name] = False
-            payload.pop(field_name, None)
-        return payload
-
-    @field_serializer(
-        "registry_live_sync_enabled",
-        "plugin_execution_enabled",
-        "credential_read_enabled",
-        "live_secret_read",
-        "network_call_allowed",
-        "production_authority",
-    )
-    def _serialize_false(self, _value: object) -> bool:
-        return False
-
-    def public_projection(self) -> dict[str, bool]:
-        return {
-            "registryLiveSyncEnabled": False,
-            "pluginExecutionEnabled": False,
-            "credentialReadEnabled": False,
-            "liveSecretRead": False,
-            "networkCallAllowed": False,
-            "productionAuthority": False,
-        }
 
 
 class ConnectorPermission(_ConnectorModel):
