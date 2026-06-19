@@ -34,7 +34,23 @@
     "workspaceWritten": false
   },
   "model_construct_force_false_leaks": [],
-  "model_validate_dump": null,
+  "model_validate_dump": {
+    "adkRunnerInvoked": false,
+    "canaryAttached": false,
+    "evidenceBlockEnabled": false,
+    "executionAttached": false,
+    "fileMutated": false,
+    "finalAnswerBlocked": false,
+    "liveToolDispatched": false,
+    "productionAttached": false,
+    "routeAttached": false,
+    "runnerAttached": false,
+    "shellOrCodeExecuted": false,
+    "trafficAttached": false,
+    "vcsExecuted": false,
+    "verificationCommandExecuted": false,
+    "workspaceWritten": false
+  },
   "model_validate_force_false_leaks": [],
   "qualname": "magi_agent.evidence.coding_verification.CodingVerificationAuditAttachmentFlags"
 }

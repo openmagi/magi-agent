@@ -138,14 +138,18 @@ def test_direct_builtin_construction_rejects_custom_or_non_core_catalog_items() 
             core_owned=False,
         )
 
-    with pytest.raises(ValidationError):
-        BuiltInEvidenceType(
-            type="GitDiff",
-            description="Built-ins must remain non-customizable.",
-            producer_surfaces=("tool_host",),
-            source_kinds=("tool_trace",),
-            customizable=True,
-        )
+    # ``customizable`` is Literal[False] -- the C-4 ``FalseOnlyAuthorityModel``
+    # kernel coerces a True assertion to False (strictly stronger than the
+    # legacy raise; the security invariant "non-customizable" is preserved on
+    # every construction surface). Verify the coerce semantic explicitly.
+    coerced = BuiltInEvidenceType(
+        type="GitDiff",
+        description="Built-ins must remain non-customizable.",
+        producer_surfaces=("tool_host",),
+        source_kinds=("tool_trace",),
+        customizable=True,
+    )
+    assert coerced.customizable is False
 
 
 def test_builtin_catalog_rejects_non_catalog_pascal_case_items() -> None:
@@ -170,29 +174,33 @@ def test_model_copy_revalidates_protected_builtin_catalog_invariants() -> None:
     git_diff = builtin_evidence_by_type("GitDiff")
     assert git_diff is not None
 
+    # Literal[True] catalog invariants still raise on a False assertion.
     with pytest.raises(ValidationError):
         git_diff.model_copy(update={"coreOwned": False})
     with pytest.raises(ValidationError):
-        git_diff.model_copy(update={"customizable": True})
-    with pytest.raises(ValidationError):
         git_diff.model_copy(update={"metadataOnly": False})
-    with pytest.raises(ValidationError):
-        git_diff.model_copy(update={"traffic_attached": True})
-    with pytest.raises(ValidationError):
-        git_diff.model_copy(update={"executionAttached": True})
+
+    # Literal[False] catalog invariants are force-falsed by the C-4
+    # ``FalseOnlyAuthorityModel`` kernel on every construction surface; a True
+    # assertion via ``model_copy`` is coerced to False (strictly stronger than
+    # the legacy raise -- the security contract "non-customizable / no live
+    # traffic / no live execution" is preserved without an escape hatch).
+    coerced_customizable = git_diff.model_copy(update={"customizable": True})
+    assert coerced_customizable.customizable is False
+    coerced_traffic = git_diff.model_copy(update={"traffic_attached": True})
+    assert coerced_traffic.traffic_attached is False
+    coerced_execution = git_diff.model_copy(update={"executionAttached": True})
+    assert coerced_execution.execution_attached is False
 
 
 @pytest.mark.parametrize(
     ("field_name", "value"),
     (
         ("coreOwned", 1),
-        ("customizable", 0),
         ("metadataOnly", 1),
-        ("trafficAttached", 0),
-        ("executionAttached", 0),
     ),
 )
-def test_builtin_boolean_metadata_rejects_coerced_values(
+def test_builtin_literal_true_metadata_rejects_coerced_values(
     field_name: str,
     value: object,
 ) -> None:
@@ -206,6 +214,36 @@ def test_builtin_boolean_metadata_rejects_coerced_values(
                 field_name: value,
             }
         )
+
+
+@pytest.mark.parametrize(
+    ("field_name",),
+    (
+        ("customizable",),
+        ("trafficAttached",),
+        ("executionAttached",),
+    ),
+)
+def test_builtin_literal_false_metadata_force_false_coerces_any_value(
+    field_name: str,
+) -> None:
+    # ``Literal[False]`` fields are owned by the C-4
+    # ``FalseOnlyAuthorityModel`` kernel: any non-None caller assertion --
+    # including bool-coerced int values (0/1) -- is force-falsed BEFORE
+    # the Literal type check, replacing the legacy raise with the strictly-
+    # stronger coerce semantic on every construction surface.
+    for value in (0, 1, True, False):
+        coerced = BuiltInEvidenceType.model_validate(
+            {
+                "type": "GitDiff",
+                "description": "Workspace diff evidence observed after mutation.",
+                "producerSurfaces": ["tool_host"],
+                "sourceKinds": ["tool_trace"],
+                field_name: value,
+            }
+        )
+        dumped = coerced.model_dump(by_alias=True)
+        assert dumped[field_name] is False
 
 
 def test_custom_evidence_contracts_remain_declarative_metadata_only() -> None:

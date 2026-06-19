@@ -6,6 +6,8 @@ from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from magi_agent.ops.authority import FalseOnlyAuthorityModel
+
 
 ToolReceiptStatus = Literal["success", "error", "blocked", "timeout"]
 RedactionStatus = Literal["redacted", "no_redaction_needed", "blocked"]
@@ -42,9 +44,7 @@ _PRIVATE_TEXT_RE = re.compile(
 )
 
 
-class ReceiptAuthorityFlags(BaseModel):
-    model_config = _MODEL_CONFIG
-
+class ReceiptAuthorityFlags(FalseOnlyAuthorityModel):
     read_only: Literal[True] = Field(default=True, alias="readOnly")
     mutation_allowed: Literal[False] = Field(default=False, alias="mutationAllowed")
     channel_delivery_allowed: Literal[False] = Field(
@@ -52,15 +52,6 @@ class ReceiptAuthorityFlags(BaseModel):
         alias="channelDeliveryAllowed",
     )
     memory_write_allowed: Literal[False] = Field(default=False, alias="memoryWriteAllowed")
-
-    @classmethod
-    def model_construct(cls, _fields_set: set[str] | None = None, **values: Any) -> Self:
-        _ = _fields_set, values
-        return cls()
-
-    def model_copy(self, *, update: Mapping[str, Any] | None = None, deep: bool = False) -> Self:
-        _ = update, deep
-        return type(self)()
 
 
 class ToolExecutionReceipt(BaseModel):

@@ -16,6 +16,8 @@ from pydantic import (
     model_validator,
 )
 
+from magi_agent.ops.authority import FalseOnlyAuthorityModel
+
 
 EvidenceStatus = Literal["ok", "failed", "unknown"]
 EvidenceSourceKind = Literal[
@@ -749,7 +751,7 @@ class EvidenceSpawnDepthRange(EvidenceMetadataModel):
         return self
 
 
-class EvidenceContractScopeMetadata(EvidenceMetadataModel):
+class EvidenceContractScopeMetadata(FalseOnlyAuthorityModel):
     agent_roles: tuple[EvidenceAgentRole, ...] = Field(alias="agentRoles")
     run_on: tuple[EvidenceRunOn, ...] = Field(alias="runOn")
     spawn_depth: EvidenceSpawnDepthRange = Field(
@@ -808,7 +810,7 @@ class EvidenceContractScopeMetadata(EvidenceMetadataModel):
         return self
 
 
-class EvidenceContract(EvidenceMetadataModel):
+class EvidenceContract(FalseOnlyAuthorityModel):
     id: str
     description: str | None = None
     triggers: tuple[EvidenceTrigger, ...]
@@ -913,7 +915,7 @@ class EvidenceContractFailure(EvidenceMetadataModel):
         return _serialize_mapping(value) or {}
 
 
-class EvidenceContractVerdict(EvidenceMetadataModel):
+class EvidenceContractVerdict(FalseOnlyAuthorityModel):
     contract_id: str = Field(alias="contractId")
     ok: bool
     state: EvidenceVerdictState

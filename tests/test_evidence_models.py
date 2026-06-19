@@ -115,8 +115,6 @@ def test_evidence_record_and_contract_accept_aliases_and_dump_camel_case() -> No
     (
         {**_basic_contract_payload(), "id": " "},
         {**_basic_contract_payload(), "requirements": []},
-        {**_basic_contract_payload(), "trafficAttached": True},
-        {**_basic_contract_payload(), "executionAttached": True},
         {**_basic_contract_payload(), "routeAttached": False},
         {
             **_basic_contract_payload(),
@@ -135,6 +133,22 @@ def test_evidence_record_and_contract_accept_aliases_and_dump_camel_case() -> No
 def test_invalid_contracts_are_rejected(payload: dict[str, object]) -> None:
     with pytest.raises(ValidationError):
         EvidenceContract.model_validate(payload)
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    ("trafficAttached", "executionAttached"),
+)
+def test_contract_force_false_attachment_flags_coerce_true_to_false(field_name: str) -> None:
+    # ``Literal[False]`` attachment flags are owned by the C-4
+    # ``FalseOnlyAuthorityModel`` kernel: a caller asserting True is force-
+    # falsed on every construction surface (strictly stronger than the legacy
+    # raise -- the security contract "no live traffic / no live execution" is
+    # preserved without an escape hatch).
+    payload = {**_basic_contract_payload(), field_name: True}
+    contract = EvidenceContract.model_validate(payload)
+    dumped = contract.model_dump(by_alias=True)
+    assert dumped[field_name] is False
 
 
 def test_non_catalog_pascal_case_evidence_types_require_custom_prefix() -> None:
@@ -732,35 +746,46 @@ def test_model_copy_revalidates_protected_evidence_contract_invariants() -> None
         failures=(),
     )
 
-    with pytest.raises(ValidationError):
-        contract.model_copy(update={"traffic_attached": True})
-    with pytest.raises(ValidationError):
-        contract.model_copy(update={"executionAttached": True})
+    # ``Literal[False]`` attachment flags are owned by the C-4
+    # ``FalseOnlyAuthorityModel`` kernel: a caller asserting True via
+    # ``model_copy(update=...)`` is force-falsed (strictly stronger than the
+    # legacy raise -- the security invariant is preserved on every
+    # construction surface, including the ``model_copy`` escape hatch).
+    coerced_contract_traffic = contract.model_copy(update={"traffic_attached": True})
+    assert coerced_contract_traffic.traffic_attached is False
+    coerced_contract_exec = contract.model_copy(update={"executionAttached": True})
+    assert coerced_contract_exec.execution_attached is False
+
+    # Non-Literal[False] invariants still raise (e.g. empty ``requirements``).
     with pytest.raises(ValidationError):
         contract.model_copy(update={"requirements": ()})
     assert scope is not None
-    with pytest.raises(ValidationError):
-        scope.model_copy(update={"trafficAttached": True})
-    with pytest.raises(ValidationError):
-        scope.model_copy(update={"execution_attached": True})
-    with pytest.raises(ValidationError):
-        verdict.model_copy(update={"trafficAttached": True})
-    with pytest.raises(ValidationError):
-        verdict.model_copy(update={"execution_attached": True})
+    coerced_scope_traffic = scope.model_copy(update={"trafficAttached": True})
+    assert coerced_scope_traffic.traffic_attached is False
+    coerced_scope_exec = scope.model_copy(update={"execution_attached": True})
+    assert coerced_scope_exec.execution_attached is False
+    coerced_verdict_traffic = verdict.model_copy(update={"trafficAttached": True})
+    assert coerced_verdict_traffic.traffic_attached is False
+    coerced_verdict_exec = verdict.model_copy(update={"execution_attached": True})
+    assert coerced_verdict_exec.execution_attached is False
 
 
 @pytest.mark.parametrize(
-    "payload",
-    (
-        {**_basic_contract_payload(), "trafficAttached": 0},
-        {**_basic_contract_payload(), "executionAttached": 0},
-    ),
+    "field_name",
+    ("trafficAttached", "executionAttached"),
 )
-def test_contract_attachment_flags_reject_coerced_bool_values(
-    payload: dict[str, object],
-) -> None:
-    with pytest.raises(ValidationError):
-        EvidenceContract.model_validate(payload)
+def test_contract_attachment_flags_force_false_any_coerced_value(field_name: str) -> None:
+    # ``Literal[False]`` attachment flags are owned by the C-4
+    # ``FalseOnlyAuthorityModel`` kernel; any non-None caller assertion --
+    # including bool-coerced int values (0/1) and True -- is force-falsed
+    # BEFORE the Literal type check (strictly stronger than the legacy
+    # raise; the security contract is preserved on every construction
+    # surface).
+    for value in (0, 1, True, False):
+        payload = {**_basic_contract_payload(), field_name: value}
+        contract = EvidenceContract.model_validate(payload)
+        dumped = contract.model_dump(by_alias=True)
+        assert dumped[field_name] is False
 
 
 @pytest.mark.parametrize(
@@ -782,62 +807,85 @@ def test_contract_attachment_flags_reject_coerced_bool_values(
             "optOutAllowed": False,
             "hardSafety": "true",
         },
-        {
-            "agentRoles": ["coding"],
-            "runOn": ["main"],
-            "trafficAttached": 0,
-        },
-        {
-            "agentRoles": ["coding"],
-            "runOn": ["main"],
-            "executionAttached": 0,
-        },
     ),
 )
 def test_contract_scope_booleans_reject_coerced_values(
     payload: dict[str, object],
 ) -> None:
+    # Non-Literal[False] bool fields (auditBeforeBlock, optOutAllowed,
+    # hardSafety) still raise on non-bool coerced values via the strict-bool
+    # validator.
     with pytest.raises(ValidationError):
         EvidenceContractScopeMetadata.model_validate(payload)
 
 
 @pytest.mark.parametrize(
-    "payload",
-    (
-        {
-            "contractId": "coding-basic",
-            "ok": "false",
-            "state": "missing",
-            "enforcement": "audit",
-            "missingRequirements": (),
-            "matchedEvidence": (),
-            "failures": (),
-        },
-        {
-            "contractId": "coding-basic",
-            "ok": False,
-            "state": "missing",
-            "enforcement": "audit",
-            "missingRequirements": (),
-            "matchedEvidence": (),
-            "failures": (),
-            "trafficAttached": 0,
-        },
-        {
-            "contractId": "coding-basic",
-            "ok": False,
-            "state": "missing",
-            "enforcement": "audit",
-            "missingRequirements": (),
-            "matchedEvidence": (),
-            "failures": (),
-            "executionAttached": 0,
-        },
-    ),
+    "field_name",
+    ("trafficAttached", "executionAttached"),
 )
-def test_verdict_booleans_reject_coerced_values(payload: dict[str, object]) -> None:
+def test_contract_scope_force_false_attachment_flags_coerce_any_value(
+    field_name: str,
+) -> None:
+    # ``Literal[False]`` attachment flags on ``EvidenceContractScopeMetadata``
+    # are owned by the C-4 ``FalseOnlyAuthorityModel`` kernel; any non-None
+    # value is coerced to False (strictly stronger than the legacy raise).
+    for value in (0, 1, True, False):
+        payload = {
+            "agentRoles": ["coding"],
+            "runOn": ["main"],
+            field_name: value,
+        }
+        scope = EvidenceContractScopeMetadata.model_validate(payload)
+        dumped = scope.model_dump(by_alias=True)
+        assert dumped[field_name] is False
+
+
+def test_verdict_booleans_reject_coerced_values() -> None:
+    # Non-Literal[False] bool field ``ok`` still raises on a non-bool coerced
+    # string value via the strict-bool validator.
     with pytest.raises(ValidationError):
-        EvidenceContractVerdict.model_validate(payload)
+        EvidenceContractVerdict.model_validate(
+            {
+                "contractId": "coding-basic",
+                "ok": "false",
+                "state": "missing",
+                "enforcement": "audit",
+                "missingRequirements": (),
+                "matchedEvidence": (),
+                "failures": (),
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    ("trafficAttached", "executionAttached"),
+)
+def test_verdict_force_false_attachment_flags_coerce_any_value(field_name: str) -> None:
+    # ``Literal[False]`` attachment flags on ``EvidenceContractVerdict`` are
+    # owned by the C-4 ``FalseOnlyAuthorityModel`` kernel; any non-None value
+    # is coerced to False (strictly stronger than the legacy raise). Note:
+    # the per-class wrap serializer strips the attachment-flag keys from the
+    # public wire dump, so the security contract holds regardless.
+    for value in (0, 1, True, False):
+        payload = {
+            "contractId": "coding-basic",
+            "ok": False,
+            "state": "missing",
+            "enforcement": "audit",
+            "missingRequirements": (),
+            "matchedEvidence": (),
+            "failures": (),
+            field_name: value,
+        }
+        verdict = EvidenceContractVerdict.model_validate(payload)
+        # The Literal[False] fields are force-false on the instance; the
+        # public-wire serializer strips them entirely.
+        snake_name = {
+            "trafficAttached": "traffic_attached",
+            "executionAttached": "execution_attached",
+        }[field_name]
+        assert getattr(verdict, snake_name) is False
 
 
 def test_contract_revalidates_constructed_invalid_nested_requirement() -> None:

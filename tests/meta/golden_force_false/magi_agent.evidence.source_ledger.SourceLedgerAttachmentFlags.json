@@ -22,7 +22,17 @@
     "webSearchExecuted": false
   },
   "model_construct_force_false_leaks": [],
-  "model_validate_dump": null,
+  "model_validate_dump": {
+    "adkRunnerInvoked": false,
+    "browserExecuted": false,
+    "evidenceBlockEnabled": false,
+    "liveToolDispatched": false,
+    "memoryProviderCalled": false,
+    "productionAuthority": false,
+    "routeOrApiAttached": false,
+    "sourceFetched": false,
+    "webSearchExecuted": false
+  },
   "model_validate_force_false_leaks": [],
   "qualname": "magi_agent.evidence.source_ledger.SourceLedgerAttachmentFlags"
 }

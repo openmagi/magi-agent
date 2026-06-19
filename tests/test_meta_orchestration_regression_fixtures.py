@@ -550,6 +550,10 @@ def _guard_public_projection_leaks_raw_child_data() -> None:
 
 
 def _guard_authority_flag_forged_true() -> None:
+    # MetaTaskPlan/MetaProjectionActivationFlags live in
+    # ``meta_orchestration/*`` — out of C-4 PR-G1 scope (evidence/* only); they
+    # keep their own ``raise on non-False`` field validator and their legacy
+    # raise contract still applies.
     with pytest.raises(ValidationError):
         MetaTaskPlan.model_validate(
             {
@@ -557,10 +561,14 @@ def _guard_authority_flag_forged_true() -> None:
                 "authorityFlags": {"toolExecutionAllowed": True},
             }
         )
-    with pytest.raises(ValidationError):
-        ChildRuntimeEnvelope.model_validate(
-            _envelope_payload(authorityFlags={"productionAuthority": True})
-        )
+    # ``ChildRuntimeEnvelope.authority_flags`` IS in C-4 PR-G1 scope (re-parented
+    # onto ``FalseOnlyAuthorityModel``); the kernel coerces a forged True down
+    # to False before the Literal validator runs — strictly stronger.
+    envelope = ChildRuntimeEnvelope.model_validate(
+        _envelope_payload(authorityFlags={"productionAuthority": True})
+    )
+    assert envelope.authority_flags.model_dump(by_alias=True)["productionAuthority"] is False
+
     with pytest.raises(ValidationError):
         MetaProjectionActivationFlags.model_validate({"productionAuthority": True})
 

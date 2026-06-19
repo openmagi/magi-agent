@@ -838,23 +838,34 @@ def test_source_ledger_rejects_nan_inspected_at() -> None:
         )
 
 
-def test_source_ledger_rejects_forged_live_authority_flags() -> None:
-    with pytest.raises(ValidationError):
-        SourceLedgerAttachmentFlags.model_validate({"webSearchExecuted": True})
+def test_source_ledger_force_falses_forged_live_authority_flags() -> None:
+    # C-4: ``SourceLedgerAttachmentFlags`` is owned by the
+    # ``FalseOnlyAuthorityModel`` kernel; every Literal[False] flag is
+    # force-falsed on every construction surface (validate, construct, copy).
+    # The legacy ``_validate_false_flags`` raise validator is subsumed by the
+    # kernel's coerce-on-validate path (strictly stronger -- the security
+    # contract "live authority flags stay false" is preserved on every
+    # construction surface, including the construct/copy escape hatches).
+    coerced_validate = SourceLedgerAttachmentFlags.model_validate(
+        {"webSearchExecuted": True}
+    )
+    assert coerced_validate.web_search_executed is False
 
-    with pytest.raises(ValidationError):
-        SourceLedgerRecord.model_validate(
-            {
-                "sourceId": "src_1",
-                "turnId": "turn-1",
-                "toolName": "WebSearch",
-                "evidenceType": "WebSearch",
-                "kind": "web_search",
-                "uri": "search:example",
-                "inspectedAt": 1,
-                "attachmentFlags": {"liveToolDispatched": True},
-            }
-        )
+    # Nested attachment flags inside a SourceLedgerRecord payload are also
+    # force-falsed (the nested model is revalidated through the kernel).
+    record = SourceLedgerRecord.model_validate(
+        {
+            "sourceId": "src_1",
+            "turnId": "turn-1",
+            "toolName": "WebSearch",
+            "evidenceType": "WebSearch",
+            "kind": "web_search",
+            "uri": "search:example",
+            "inspectedAt": 1,
+            "attachmentFlags": {"liveToolDispatched": True},
+        }
+    )
+    assert record.attachment_flags.live_tool_dispatched is False
 
     constructed = SourceLedgerAttachmentFlags.model_construct(web_search_executed=True)
     assert set(constructed.model_dump(by_alias=True).values()) == {False}

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from hashlib import sha256
-from typing import Any, ClassVar, Literal, Self
+from typing import ClassVar, Literal, Self
 from weakref import finalize
 
 from pydantic import (
@@ -14,6 +14,8 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+
+from magi_agent.ops.authority import FalseOnlyAuthorityModel
 
 from .contracts import evaluate_evidence_contract
 from .reports import (
@@ -28,7 +30,6 @@ from .types import (
     EvidenceContract,
     EvidenceContractFailure,
     EvidenceContractVerdict,
-    EvidenceMetadataModel,
     EvidenceRecord,
     EvidenceRunOn,
     EvidenceSourceKind,
@@ -59,32 +60,6 @@ REQUIRED_SUBAGENT_EVIDENCE_WARNINGS = (
     "until child-ledger propagation and parent aggregation are represented and tested.",
 )
 
-_ATTACHMENT_FLAG_NAMES = (
-    "traffic_attached",
-    "execution_attached",
-    "runner_attached",
-    "child_execution_attached",
-    "session_runtime_attached",
-    "artifact_runtime_attached",
-    "enforcement_attached",
-    "route_attached",
-    "api_attached",
-    "dashboard_attached",
-    "canary_attached",
-)
-_ATTACHMENT_FLAG_ALIASES = (
-    "trafficAttached",
-    "executionAttached",
-    "runnerAttached",
-    "childExecutionAttached",
-    "sessionRuntimeAttached",
-    "artifactRuntimeAttached",
-    "enforcementAttached",
-    "routeAttached",
-    "apiAttached",
-    "dashboardAttached",
-    "canaryAttached",
-)
 _BLOCKING_STATES = frozenset(("missing", "failed", "block_ready"))
 _CHILD_EVIDENCE_ENVELOPE_OBJECT_IDS: set[int] = set()
 _CHILD_EVIDENCE_ENVELOPE_FINGERPRINTS: dict[int, object] = {}
@@ -95,30 +70,8 @@ _PARENT_AGGREGATION_FINGERPRINTS: dict[int, object] = {}
 _PARENT_AGGREGATION_FINALIZERS: dict[int, object] = {}
 
 
-class SubagentEvidenceMetadataModel(EvidenceMetadataModel):
-    def model_copy(
-        self,
-        *,
-        update: Mapping[str, Any] | None = None,
-        deep: bool = False,
-    ) -> Self:
-        data = self.model_dump(by_alias=False, mode="python", warnings=False)
-        if update:
-            alias_to_name = {
-                field.alias: name
-                for name, field in self.__class__.model_fields.items()
-                if field.alias is not None
-            }
-            normalized_update = {
-                alias_to_name.get(key, key): value for key, value in update.items()
-            }
-            for flag_name in _ATTACHMENT_FLAG_NAMES:
-                normalized_update.pop(flag_name, None)
-            data.update(normalized_update)
-        for flag_name in _ATTACHMENT_FLAG_NAMES:
-            if flag_name in self.__class__.model_fields:
-                data[flag_name] = False
-        return self.__class__.model_validate(data)
+class SubagentEvidenceMetadataModel(FalseOnlyAuthorityModel):
+    pass
 
 
 class _AttachmentFlagMixin:
@@ -142,11 +95,6 @@ class _AttachmentFlagMixin:
     api_attached: Literal[False] = Field(default=False, alias="apiAttached")
     dashboard_attached: Literal[False] = Field(default=False, alias="dashboardAttached")
     canary_attached: Literal[False] = Field(default=False, alias="canaryAttached")
-
-    @field_validator(*_ATTACHMENT_FLAG_NAMES, mode="before", check_fields=False)
-    @classmethod
-    def _validate_attachment_flags(cls, value: object, info: Any) -> object:
-        return _validate_strict_bool(value, info.field_name)
 
 
 class ExecutionBoundaryIdentity(_AttachmentFlagMixin, SubagentEvidenceMetadataModel):
@@ -654,16 +602,6 @@ class CustomChildEvidenceSchema(_AttachmentFlagMixin, SubagentEvidenceMetadataMo
             raise ValueError("custom child evidence must use custom:* declarative metadata")
         return validated
 
-    @field_validator(
-        "hard_safety",
-        "external_ack_ingestion_attached",
-        "live_extractor_execution_attached",
-        mode="before",
-    )
-    @classmethod
-    def _validate_false_flags(cls, value: object, info: Any) -> object:
-        return _validate_strict_bool(value, info.field_name)
-
     @field_validator("fields")
     @classmethod
     def _freeze_fields(cls, value: Mapping[str, object]) -> Mapping[str, object]:
@@ -703,9 +641,7 @@ class PublicChildEvidenceReport(BaseModel):
     evidence: tuple[PublicEvidenceRecordReport, ...]
 
 
-class PublicChildAggregateReport(BaseModel):
-    model_config = ConfigDict(frozen=True, populate_by_name=True)
-
+class PublicChildAggregateReport(FalseOnlyAuthorityModel):
     parent_execution_id: str = Field(alias="parentExecutionId")
     state: ParentEvidenceState
     children: tuple[PublicChildEvidenceReport, ...]
@@ -729,29 +665,6 @@ class PublicChildAggregateReport(BaseModel):
     api_attached: Literal[False] = Field(default=False, alias="apiAttached")
     dashboard_attached: Literal[False] = Field(default=False, alias="dashboardAttached")
     canary_attached: Literal[False] = Field(default=False, alias="canaryAttached")
-
-    def model_copy(
-        self,
-        *,
-        update: Mapping[str, Any] | None = None,
-        deep: bool = False,
-    ) -> Self:
-        data = self.model_dump(by_alias=False, mode="python", warnings=False)
-        if update:
-            alias_to_name = {
-                field.alias: name
-                for name, field in self.__class__.model_fields.items()
-                if field.alias is not None
-            }
-            normalized_update = {
-                alias_to_name.get(key, key): value for key, value in update.items()
-            }
-            for flag_name in _ATTACHMENT_FLAG_NAMES:
-                normalized_update.pop(flag_name, None)
-            data.update(normalized_update)
-        for flag_name in _ATTACHMENT_FLAG_NAMES:
-            data[flag_name] = False
-        return self.__class__.model_validate(data)
 
 
 def aggregate_child_evidence(

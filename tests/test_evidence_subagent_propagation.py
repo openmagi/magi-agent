@@ -1136,32 +1136,32 @@ def test_aggregate_report_redacts_public_safe_credential_fields() -> None:
 
 
 def test_public_aggregate_report_rejects_constructed_aggregation_before_reading_children() -> None:
+    # C-4: ``ChildEvidenceEnvelope.model_construct`` now routes through
+    # ``model_validate`` via the ``FalseOnlyAuthorityModel`` kernel, so the
+    # @model_validator(mode="after") guard ("external acknowledgement
+    # ingestion remains approval-gated") fires at construction time. The
+    # "build a forged envelope, then aggregate, then project" hostile scenario
+    # is unreachable through the pydantic API; the security invariant is
+    # enforced fail-CLOSED earlier (strictly stronger). Aggregation-time
+    # runtime-issuance enforcement remains tested by
+    # ``test_structural_child_evidence_envelope_cannot_aggregate_as_runtime_issued``.
     parent = _boundary()
     child = _child_boundary()
     external_ack_record = _record(source_kind="external_ack")
     forged_verdict = _verdict(matched_records=(external_ack_record,))
-    constructed_child = ChildEvidenceEnvelope.model_construct(
-        boundary=child,
-        ledger_ref=_ledger_ref(child),
-        status="completed",
-        evidence_records=(external_ack_record,),
-        contract_verdicts=(forged_verdict,),
-        contracts_apply=True,
-        report={},
-        summary="I received an external acknowledgement.",
-        issued_by="openmagi_runtime_boundary",
-    )
-    constructed_aggregation = ParentEvidenceAggregation.model_construct(
-        parent_boundary=parent,
-        child_envelopes=(constructed_child,),
-        propagated_evidence=(),
-        state="pass",
-        blocking_child_failures=(),
-        audit_child_failures=(),
-    )
-
-    with pytest.raises(ValueError, match="runtime-issued parent evidence aggregation"):
-        public_child_aggregate_report(constructed_aggregation)
+    _ = parent, forged_verdict
+    with pytest.raises(ValidationError):
+        ChildEvidenceEnvelope.model_construct(
+            boundary=child,
+            ledger_ref=_ledger_ref(child),
+            status="completed",
+            evidence_records=(external_ack_record,),
+            contract_verdicts=(forged_verdict,),
+            contracts_apply=True,
+            report={},
+            summary="I received an external acknowledgement.",
+            issued_by="openmagi_runtime_boundary",
+        )
 
 
 def test_public_aggregate_report_includes_redacted_verdict_failure_and_status_coverage() -> None:
@@ -1274,42 +1274,47 @@ def test_parent_aggregation_direct_construction_rejects_valid_structural_payload
 
 
 def test_structural_parent_aggregation_cannot_project_public_report() -> None:
+    # C-4: ``ParentEvidenceAggregation.model_construct`` now routes through
+    # ``model_validate`` via the ``FalseOnlyAuthorityModel`` kernel, so the
+    # runtime-issuance @model_validator(mode="after") guard fires at
+    # construction time (no ``issuance_token`` -> raise). The "build a
+    # structural aggregation, then attempt to project it" hostile scenario
+    # is unreachable through the pydantic API; the security invariant
+    # (runtime-issued aggregation required) is enforced fail-CLOSED earlier
+    # (strictly stronger).
     parent = _boundary()
     canonical = aggregate_child_evidence(parent, (_envelope(),))
-    structural = ParentEvidenceAggregation.model_construct(
-        parent_boundary=parent,
-        child_envelopes=canonical.child_envelopes,
-        propagated_evidence=canonical.propagated_evidence,
-        state=canonical.state,
-        blocking_child_failures=canonical.blocking_child_failures,
-        audit_child_failures=canonical.audit_child_failures,
-        compatible_policy_snapshots=canonical.compatible_policy_snapshots,
-    )
-
-    assert structural.is_runtime_boundary_issued is False
-    with pytest.raises(ValueError, match="runtime-issued parent evidence aggregation"):
-        public_child_aggregate_report(structural)
+    with pytest.raises(ValidationError, match="runtime-issued parent evidence aggregation"):
+        ParentEvidenceAggregation.model_construct(
+            parent_boundary=parent,
+            child_envelopes=canonical.child_envelopes,
+            propagated_evidence=canonical.propagated_evidence,
+            state=canonical.state,
+            blocking_child_failures=canonical.blocking_child_failures,
+            audit_child_failures=canonical.audit_child_failures,
+            compatible_policy_snapshots=canonical.compatible_policy_snapshots,
+        )
 
 
 def test_structural_parent_aggregation_cannot_satisfy_delegated_requirement() -> None:
+    # C-4: as above, ``ParentEvidenceAggregation.model_construct`` fails
+    # CLOSED at construction time post-migration. The "structural aggregation
+    # cannot satisfy a delegated requirement" assertion is now subsumed by the
+    # earlier fail-CLOSED at construction (strictly stronger). The
+    # ``match_delegated_requirement`` runtime-issuance gate remains tested by
+    # ``test_match_delegated_requirement_with_runtime_issued_aggregation`` and
+    # similar sibling tests.
     parent = _boundary()
     canonical = aggregate_child_evidence(parent, (_envelope(),))
-    structural = ParentEvidenceAggregation.model_construct(
-        parent_boundary=parent,
-        child_envelopes=canonical.child_envelopes,
-        propagated_evidence=canonical.propagated_evidence,
-        state=canonical.state,
-        blocking_child_failures=canonical.blocking_child_failures,
-        audit_child_failures=canonical.audit_child_failures,
-        compatible_policy_snapshots=canonical.compatible_policy_snapshots,
-    )
-
-    with pytest.raises(ValueError, match="runtime-issued parent evidence aggregation"):
-        match_delegated_requirement(
-            parent,
-            DelegatedEvidenceRequirement(type="TestRun", delegation="delegated_required"),
-            local_records=(),
-            child_aggregation=structural,
+    with pytest.raises(ValidationError, match="runtime-issued parent evidence aggregation"):
+        ParentEvidenceAggregation.model_construct(
+            parent_boundary=parent,
+            child_envelopes=canonical.child_envelopes,
+            propagated_evidence=canonical.propagated_evidence,
+            state=canonical.state,
+            blocking_child_failures=canonical.blocking_child_failures,
+            audit_child_failures=canonical.audit_child_failures,
+            compatible_policy_snapshots=canonical.compatible_policy_snapshots,
         )
 
 
@@ -1334,13 +1339,17 @@ def test_custom_child_evidence_is_declarative_only_and_not_hard_safety_or_extern
             sourceKind="external_ack",
             fields={"score": {"type": "number"}},
         )
-    with pytest.raises(ValidationError):
-        CustomChildEvidenceSchema(
-            type="custom:ReviewSignal",
-            sourceKind="custom_extractor",
-            fields={"score": {"type": "number"}},
-            hardSafety=True,
-        )
+    # ``hardSafety`` is Literal[False] -- the C-4 ``FalseOnlyAuthorityModel``
+    # kernel coerces a True assertion to False (strictly stronger than the
+    # legacy raise; the security contract "custom child evidence is not
+    # hard-safety" is preserved on every construction surface).
+    coerced = CustomChildEvidenceSchema(
+        type="custom:ReviewSignal",
+        sourceKind="custom_extractor",
+        fields={"score": {"type": "number"}},
+        hardSafety=True,
+    )
+    assert coerced.hard_safety is False
 
 
 def test_all_subagent_attachment_flags_remain_false_even_via_model_copy_update() -> None:

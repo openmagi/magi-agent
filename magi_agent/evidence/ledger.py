@@ -11,7 +11,6 @@ from magi_agent.evidence.types import (
     EvidenceAgentRole,
     EvidenceContractFailure,
     EvidenceContractVerdict,
-    EvidenceMetadataModel,
     EvidenceRecord,
     EvidenceRunOn,
     EvidenceSourceKind,
@@ -20,6 +19,7 @@ from magi_agent.evidence.types import (
     _serialize_mapping,
     _validate_strict_bool,
 )
+from magi_agent.ops.authority import FalseOnlyAuthorityModel
 
 
 _SECRET_FIELD_FRAGMENTS = (
@@ -161,7 +161,7 @@ _VERIFIER_VERDICT_PAYLOAD_KEYS = frozenset(
 )
 
 
-class EvidenceLedgerEntry(EvidenceMetadataModel):
+class EvidenceLedgerEntry(FalseOnlyAuthorityModel):
     kind: EvidenceLedgerEntryKind
     sequence: int
     evidence_ref: str = Field(alias="evidenceRef")
@@ -244,7 +244,7 @@ class EvidenceLedgerEntry(EvidenceMetadataModel):
         return _serialize_mapping(value) or {}
 
 
-class EvidenceLedger(EvidenceMetadataModel):
+class EvidenceLedger(FalseOnlyAuthorityModel):
     ledger_id: str = Field(alias="ledgerId")
     session_id: str = Field(alias="sessionId")
     turn_id: str = Field(alias="turnId")

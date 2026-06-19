@@ -4,19 +4,8 @@
     "route_attached",
     "traffic_attached"
   ],
-  "model_construct_dump": {
-    "executionAttached": true,
-    "metadata": {},
-    "payload": {},
-    "producerSurface": null,
-    "routeAttached": true,
-    "trafficAttached": true
-  },
-  "model_construct_force_false_leaks": [
-    "execution_attached",
-    "route_attached",
-    "traffic_attached"
-  ],
+  "model_construct_dump": null,
+  "model_construct_force_false_leaks": [],
   "model_validate_dump": null,
   "model_validate_force_false_leaks": [],
   "qualname": "magi_agent.evidence.ledger.EvidenceLedgerEntry"

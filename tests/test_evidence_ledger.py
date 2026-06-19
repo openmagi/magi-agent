@@ -1900,7 +1900,7 @@ def test_verifier_verdict_rejects_matched_refs_to_non_evidence_record_entries() 
         )
 
 
-def test_attachment_flags_stay_false_and_model_copy_rejects_true_flags() -> None:
+def test_attachment_flags_stay_false_and_model_copy_force_falses_true_flags() -> None:
     ledger = _ledger()
     entry = ledger.append_evidence_record(_record()).entries[0]
 
@@ -1911,10 +1911,15 @@ def test_attachment_flags_stay_false_and_model_copy_rejects_true_flags() -> None
     assert entry.execution_attached is False
     assert entry.route_attached is False
 
-    with pytest.raises(ValidationError):
-        ledger.model_copy(update={"trafficAttached": True})
-    with pytest.raises(ValidationError):
-        entry.model_copy(update={"routeAttached": True})
+    # C-4: ``Literal[False]`` attachment flags are owned by the
+    # ``FalseOnlyAuthorityModel`` kernel; a caller asserting True via
+    # ``model_copy(update=...)`` is force-falsed (strictly stronger than the
+    # legacy raise -- the security contract holds on every construction
+    # surface, including this escape hatch).
+    coerced_ledger = ledger.model_copy(update={"trafficAttached": True})
+    assert coerced_ledger.traffic_attached is False
+    coerced_entry = entry.model_copy(update={"routeAttached": True})
+    assert coerced_entry.route_attached is False
 
 
 def test_non_json_metadata_is_rejected() -> None:

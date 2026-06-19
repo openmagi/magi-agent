@@ -6,18 +6,21 @@
   ],
   "model_construct_dump": {
     "auditBeforeBlock": true,
-    "blockModeEnabledForLiveTraffic": true,
-    "executionAttached": true,
+    "blockModeEnabledForLiveTraffic": false,
+    "executionAttached": false,
     "mode": "audit",
     "scope": null,
-    "trafficAttached": true
+    "trafficAttached": false
   },
-  "model_construct_force_false_leaks": [
-    "block_mode_enabled_for_live_traffic",
-    "execution_attached",
-    "traffic_attached"
-  ],
-  "model_validate_dump": null,
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": {
+    "auditBeforeBlock": true,
+    "blockModeEnabledForLiveTraffic": false,
+    "executionAttached": false,
+    "mode": "audit",
+    "scope": null,
+    "trafficAttached": false
+  },
   "model_validate_force_false_leaks": [],
   "qualname": "magi_agent.evidence.rollout.EvidenceRolloutMetadata"
 }

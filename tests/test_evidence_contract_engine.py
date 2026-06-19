@@ -4,6 +4,9 @@ import subprocess
 import sys
 from collections.abc import Iterator, Mapping
 
+import pytest
+from pydantic import ValidationError
+
 from magi_agent.evidence import (
     EVIDENCE_REGEX_CANDIDATE_LIMIT,
     EvidenceContract,
@@ -726,44 +729,46 @@ def test_invalid_raw_block_config_returns_invalid_config_block_ready_verdict() -
 
 
 def test_constructed_invalid_contract_returns_block_ready_invalid_config_verdict() -> None:
-    contract = EvidenceContract.model_construct(
-        id="constructed-bad-block",
-        triggers=("beforeCommit",),
-        requirements=(EvidenceRequirement.model_construct(type="StripeWebhookAck"),),
-        on_missing="block_final_answer",
-        retry_message="Provide external acknowledgement evidence.",
-    )
-
-    verdict = evaluate_evidence_contract(contract, [_test_record()])
-
-    assert verdict.ok is False
-    assert verdict.state == "block_ready"
-    assert verdict.enforcement == "block_final_answer"
-    assert verdict.failures[0].code == "EVIDENCE_CONTRACT_INVALID_CONFIG"
-    assert verdict.failures[0].contract_id == "constructed-bad-block"
+    # C-4: ``EvidenceContract.model_construct`` no longer provides a bypass
+    # escape hatch -- it routes through ``model_validate`` via the
+    # ``FalseOnlyAuthorityModel`` kernel, so a structurally-invalid catalog
+    # type (StripeWebhookAck) fails CLOSED at construction time before the
+    # engine is ever asked to evaluate it. The "constructed-invalid block_ready
+    # verdict" scenario is therefore unreachable via the pydantic API; the
+    # invariant is now stricter (fail-CLOSED-on-construct rather than
+    # fail-CLOSED-on-evaluate). The engine's hostile-mapping path
+    # (``_RuntimeErrorMapping`` etc) still exercises the
+    # ``EVIDENCE_CONTRACT_INVALID_CONFIG`` verdict code path.
+    with pytest.raises(ValidationError):
+        EvidenceContract.model_construct(
+            id="constructed-bad-block",
+            triggers=("beforeCommit",),
+            requirements=(EvidenceRequirement.model_construct(type="StripeWebhookAck"),),
+            on_missing="block_final_answer",
+            retry_message="Provide external acknowledgement evidence.",
+        )
 
 
 def test_hostile_constructed_contract_attribute_error_after_validation_failure_returns_invalid_config() -> None:
+    # C-4: as with the sibling test above, ``model_construct`` on a force-false
+    # contract now routes through ``model_validate`` (kernel-owned). An
+    # UnknownEvidenceType requirement is fail-CLOSED at construction; the
+    # hostile __getattribute__ subclass path is no longer reachable through
+    # ``model_construct``. The engine's hostile-mapping path remains tested by
+    # ``test_hostile_raw_contract_mapping_runtime_error_returns_invalid_config``.
     class HostileContract(EvidenceContract):
         def __getattribute__(self, name: str) -> object:
             if name in {"id", "on_missing"}:
                 raise RuntimeError(f"hostile contract attribute access for {name}")
             return super().__getattribute__(name)
 
-    contract = HostileContract.model_construct(
-        id="constructed-hostile",
-        triggers=("beforeCommit",),
-        requirements=(EvidenceRequirement.model_construct(type="UnknownEvidenceType"),),
-        on_missing="block_final_answer",
-    )
-
-    verdict = evaluate_evidence_contract(contract, [_test_record()])
-
-    assert verdict.ok is False
-    assert verdict.state == "audit"
-    assert verdict.enforcement == "audit"
-    assert verdict.failures[0].code == "EVIDENCE_CONTRACT_INVALID_CONFIG"
-    assert verdict.failures[0].contract_id == "invalid-config"
+    with pytest.raises(ValidationError):
+        HostileContract.model_construct(
+            id="constructed-hostile",
+            triggers=("beforeCommit",),
+            requirements=(EvidenceRequirement.model_construct(type="UnknownEvidenceType"),),
+            on_missing="block_final_answer",
+        )
 
 
 def test_hostile_raw_contract_mapping_runtime_error_returns_invalid_config() -> None:

@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 import re
 from collections.abc import Mapping
-from typing import Any, Literal, Self
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_serializer, field_validator
 
@@ -18,6 +18,7 @@ from magi_agent.evidence.types import (
     _serialize_mapping,
     _validate_strict_bool,
 )
+from magi_agent.ops.authority import FalseOnlyAuthorityModel
 
 
 SourceLedgerKind = Literal[
@@ -152,9 +153,7 @@ _SOURCE_LOCATOR_TEXT_RE = re.compile(
 )
 
 
-class SourceLedgerAttachmentFlags(BaseModel):
-    model_config = _FROZEN_MODEL_CONFIG
-
+class SourceLedgerAttachmentFlags(FalseOnlyAuthorityModel):
     adk_runner_invoked: Literal[False] = Field(default=False, alias="adkRunnerInvoked")
     live_tool_dispatched: Literal[False] = Field(default=False, alias="liveToolDispatched")
     web_search_executed: Literal[False] = Field(default=False, alias="webSearchExecuted")
@@ -165,59 +164,8 @@ class SourceLedgerAttachmentFlags(BaseModel):
     route_or_api_attached: Literal[False] = Field(default=False, alias="routeOrApiAttached")
     evidence_block_enabled: Literal[False] = Field(default=False, alias="evidenceBlockEnabled")
 
-    @classmethod
-    def model_construct(
-        cls,
-        _fields_set: set[str] | None = None,
-        **values: Any,
-    ) -> Self:
-        return cls(**{name: False for name in cls.model_fields})
 
-    def model_copy(
-        self,
-        *,
-        update: Mapping[str, Any] | None = None,
-        deep: bool = False,
-    ) -> Self:
-        return type(self)()
-
-    @field_validator(
-        "adk_runner_invoked",
-        "live_tool_dispatched",
-        "web_search_executed",
-        "browser_executed",
-        "source_fetched",
-        "memory_provider_called",
-        "production_authority",
-        "route_or_api_attached",
-        "evidence_block_enabled",
-        mode="before",
-    )
-    @classmethod
-    def _validate_false_flags(cls, value: object, info: Any) -> object:
-        _validate_strict_bool(value, info.field_name)
-        if value is not False:
-            raise ValueError("source ledger attachment flags must remain false")
-        return value
-
-    @field_serializer(
-        "adk_runner_invoked",
-        "live_tool_dispatched",
-        "web_search_executed",
-        "browser_executed",
-        "source_fetched",
-        "memory_provider_called",
-        "production_authority",
-        "route_or_api_attached",
-        "evidence_block_enabled",
-    )
-    def _serialize_false(self, _value: object) -> bool:
-        return False
-
-
-class SourceLedgerScope(BaseModel):
-    model_config = _FROZEN_MODEL_CONFIG
-
+class SourceLedgerScope(FalseOnlyAuthorityModel):
     run_on: EvidenceRunOn = Field(default="main", alias="runOn")
     agent_role: EvidenceAgentRole = Field(default="general", alias="agentRole")
     spawn_depth: int = Field(default=0, alias="spawnDepth")
@@ -246,13 +194,6 @@ class SourceLedgerScope(BaseModel):
     def _reject_empty_optional_ids(cls, value: str | None) -> str | None:
         return _reject_empty_optional_string(value, "source scope identifiers")
 
-    @field_validator("child_execution_attached", mode="before")
-    @classmethod
-    def _validate_child_execution_flag(cls, value: object) -> object:
-        _validate_strict_bool(value, "childExecutionAttached")
-        if value is not False:
-            raise ValueError("child execution must not be attached in source ledger audit mode")
-        return value
 
 
 class SourceLedgerRecord(BaseModel):
@@ -576,9 +517,7 @@ class PublicSourceLedgerRecordReport(BaseModel):
         return dict(value)
 
 
-class PublicSourceLedgerReport(BaseModel):
-    model_config = _FROZEN_MODEL_CONFIG
-
+class PublicSourceLedgerReport(FalseOnlyAuthorityModel):
     ledger_id: str = Field(alias="ledgerId")
     session_id: str = Field(alias="sessionId")
     turn_id: str = Field(alias="turnId")

@@ -9,6 +9,7 @@ from magi_agent.evidence.reports import (
     PublicEvidenceVerdictReport,
     public_evidence_verdict_report,
 )
+from magi_agent.ops.authority import FalseOnlyAuthorityModel
 from magi_agent.evidence.source_ledger import (
     LocalResearchSourceLedger,
     SourceLedgerAttachmentFlags,
@@ -78,9 +79,7 @@ class CitationAuditItem(BaseModel):
         return _validate_strict_bool(value, "inspected")
 
 
-class CitationAuditResult(BaseModel):
-    model_config = _MODEL_CONFIG
-
+class CitationAuditResult(FalseOnlyAuthorityModel):
     contract_id: str = Field(alias="contractId")
     turn_id: str = Field(alias="turnId")
     ok: bool
@@ -116,9 +115,7 @@ class PublicCitationAuditItemReport(BaseModel):
     message: str | None = None
 
 
-class PublicCitationAuditReport(BaseModel):
-    model_config = _MODEL_CONFIG
-
+class PublicCitationAuditReport(FalseOnlyAuthorityModel):
     contract_id: str = Field(alias="contractId")
     turn_id: str = Field(alias="turnId")
     ok: bool

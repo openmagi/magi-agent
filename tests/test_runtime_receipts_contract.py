@@ -122,8 +122,15 @@ def test_authority_flags_cannot_be_forged_by_copy_or_construct() -> None:
 
 
 def test_receipts_reject_private_refs_and_unsafe_authority_flags() -> None:
-    with pytest.raises(ValidationError):
-        ReceiptAuthorityFlags.model_validate({"readOnly": True, "memoryWriteAllowed": True})
+    # C-4: ``ReceiptAuthorityFlags`` is owned by the
+    # ``FalseOnlyAuthorityModel`` kernel; the Literal[False]
+    # ``memoryWriteAllowed`` flag is force-falsed on every construction surface
+    # (strictly stronger than the legacy raise -- the security contract
+    # "memory writes not allowed" is preserved without an escape hatch).
+    coerced = ReceiptAuthorityFlags.model_validate(
+        {"readOnly": True, "memoryWriteAllowed": True}
+    )
+    assert coerced.memory_write_allowed is False
 
     with pytest.raises(ValidationError):
         SourceEvidenceReceipt.model_validate(

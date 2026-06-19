@@ -3,15 +3,8 @@
     "adoption_attached",
     "workspace_mutated"
   ],
-  "model_construct_dump": {
-    "adoptionAttached": true,
-    "privateNotes": [],
-    "workspaceMutated": true
-  },
-  "model_construct_force_false_leaks": [
-    "adoption_attached",
-    "workspace_mutated"
-  ],
+  "model_construct_dump": null,
+  "model_construct_force_false_leaks": [],
   "model_validate_dump": null,
   "model_validate_force_false_leaks": [],
   "qualname": "magi_agent.evidence.child_runtime_envelope.ChildRuntimeWorkspaceIsolationMetadata"

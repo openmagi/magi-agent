@@ -4,17 +4,23 @@
   ],
   "model_construct_dump": {
     "agentRole": "general",
-    "childExecutionAttached": true,
+    "childExecutionAttached": false,
     "childTurnId": null,
     "executionBoundary": "main",
     "parentTurnId": null,
     "runOn": "main",
     "spawnDepth": 0
   },
-  "model_construct_force_false_leaks": [
-    "child_execution_attached"
-  ],
-  "model_validate_dump": null,
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": {
+    "agentRole": "general",
+    "childExecutionAttached": false,
+    "childTurnId": null,
+    "executionBoundary": "main",
+    "parentTurnId": null,
+    "runOn": "main",
+    "spawnDepth": 0
+  },
   "model_validate_force_false_leaks": [],
   "qualname": "magi_agent.evidence.source_ledger.SourceLedgerScope"
 }

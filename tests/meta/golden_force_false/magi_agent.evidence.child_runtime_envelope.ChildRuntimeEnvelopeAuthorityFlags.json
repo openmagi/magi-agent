@@ -24,7 +24,18 @@
     "workspaceMutated": false
   },
   "model_construct_force_false_leaks": [],
-  "model_validate_dump": null,
+  "model_validate_dump": {
+    "backgroundRuntimeAttached": false,
+    "childExecutionAttached": false,
+    "evidenceBlockEnabled": false,
+    "memoryProviderCalled": false,
+    "missionStoreWritten": false,
+    "productionAuthority": false,
+    "routeAttached": false,
+    "runnerAttached": false,
+    "toolHostDispatched": false,
+    "workspaceMutated": false
+  },
   "model_validate_force_false_leaks": [],
   "qualname": "magi_agent.evidence.child_runtime_envelope.ChildRuntimeEnvelopeAuthorityFlags"
 }

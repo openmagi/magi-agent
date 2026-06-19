@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from typing import Any, Literal, Self
+from typing import Literal
 
-from pydantic import Field, field_serializer, field_validator
+from pydantic import Field, field_validator
 
 from magi_agent.coding.edit_matching import EditMatchResult
 from magi_agent.evidence.contracts import evaluate_evidence_contract
@@ -25,6 +25,7 @@ from magi_agent.evidence.types import (
     _validate_observed_at,
 )
 from magi_agent.harness.verifier_bus import VerifierResultMetadata
+from magi_agent.ops.authority import FalseOnlyAuthorityModel
 
 # ---------------------------------------------------------------------------
 # Low-confidence tier names (require post-edit verification when gating is on)
@@ -37,7 +38,7 @@ CODING_VERIFICATION_AUDIT_VERIFIER_ID = "dev-coding-verification-audit"
 CODING_VERIFICATION_AUDIT_CONTRACT_ID = "dev-coding-verification-audit"
 
 
-class CodingVerificationAuditAttachmentFlags(EvidenceMetadataModel):
+class CodingVerificationAuditAttachmentFlags(FalseOnlyAuthorityModel):
     adk_runner_invoked: Literal[False] = Field(default=False, alias="adkRunnerInvoked")
     live_tool_dispatched: Literal[False] = Field(default=False, alias="liveToolDispatched")
     shell_or_code_executed: Literal[False] = Field(
@@ -59,34 +60,6 @@ class CodingVerificationAuditAttachmentFlags(EvidenceMetadataModel):
     route_attached: Literal[False] = Field(default=False, alias="routeAttached")
     canary_attached: Literal[False] = Field(default=False, alias="canaryAttached")
     production_attached: Literal[False] = Field(default=False, alias="productionAttached")
-
-    @classmethod
-    def model_construct(
-        cls,
-        _fields_set: set[str] | None = None,
-        **values: Any,
-    ) -> Self:
-        return cls()
-
-    @field_serializer(
-        "adk_runner_invoked",
-        "live_tool_dispatched",
-        "shell_or_code_executed",
-        "vcs_executed",
-        "verification_command_executed",
-        "file_mutated",
-        "workspace_written",
-        "evidence_block_enabled",
-        "final_answer_blocked",
-        "traffic_attached",
-        "execution_attached",
-        "runner_attached",
-        "route_attached",
-        "canary_attached",
-        "production_attached",
-    )
-    def _serialize_false(self, _value: object) -> bool:
-        return False
 
 
 class CodingVerificationAuditRequest(EvidenceMetadataModel):
@@ -137,7 +110,7 @@ class CodingVerificationAuditRequest(EvidenceMetadataModel):
         return value
 
 
-class CodingVerificationAuditResult(EvidenceMetadataModel):
+class CodingVerificationAuditResult(FalseOnlyAuthorityModel):
     contract: EvidenceContract
     verdict: EvidenceContractVerdict
     verifier_result: VerifierResultMetadata = Field(alias="verifierResult")

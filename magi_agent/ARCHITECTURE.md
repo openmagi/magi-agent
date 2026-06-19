@@ -97,6 +97,7 @@ graph LR
     evidence --> coding
     evidence --> config
     evidence --> harness
+    evidence --> ops
     evidence --> packs
     evidence --> research
     evidence --> runtime
@@ -778,14 +779,14 @@ graph LR
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
 | __init__.py | — | builtin, contracts, extractors, ledger, types | testing/runtime_issuance_support.py |
-| builtin.py | — | types | customize/shacl_compiler.py, evidence/__init__.py, evidence/ledger.py |
+| builtin.py | — | authority, types | customize/shacl_compiler.py, evidence/__init__.py, evidence/ledger.py |
 | calculation_policy.py | — | — | evidence/final_output_gate.py |
-| child_runtime_envelope.py | — | runtime_issuance, subagent, tool_preview, types | harness/general_automation/delegation.py, meta_orchestration/child_acceptance.py, recipes/opencode_child_lifecycle.py, research/child_roles.py, research/evidence_graph.py, runtime/child_event_projection.py, runtime/child_runner_boundary.py |
-| citation_audit.py | — | reports, source_ledger, types | cli/engine.py, evidence/research_final_gate.py, research/event_projection.py |
+| child_runtime_envelope.py | — | authority, runtime_issuance, subagent, tool_preview, types | harness/general_automation/delegation.py, meta_orchestration/child_acceptance.py, recipes/opencode_child_lifecycle.py, research/child_roles.py, research/evidence_graph.py, runtime/child_event_projection.py, runtime/child_runner_boundary.py |
+| citation_audit.py | — | authority, reports, source_ledger, types | cli/engine.py, evidence/research_final_gate.py, research/event_projection.py |
 | claim_grounding.py | — | grounded_answer_guard | cli/engine.py |
 | code_diagnostics_receipts.py | PR5 — CodeDiagnostics evidence boundary for after-edit LSP diagnostics. | — | gates/gate5b_full_toolhost.py |
-| coding_tool_receipts.py | PR3 — ToolHost Coding Mutation Receipt Boundary. | result | gates/gate5b_full_toolhost.py, tools/dispatcher.py |
-| coding_verification.py | — | contracts, edit_matching, reports, types, verifier_bus | recipes/coding_evidence_gate.py |
+| coding_tool_receipts.py | PR3 — ToolHost Coding Mutation Receipt Boundary. | authority, result | gates/gate5b_full_toolhost.py, tools/dispatcher.py |
+| coding_verification.py | — | authority, contracts, edit_matching, reports, types, verifier_bus | recipes/coding_evidence_gate.py |
 | contracts.py | — | trace_context, types | evidence/__init__.py, evidence/coding_verification.py, evidence/subagent.py, harness/verifier_bus.py |
 | document_coverage.py | Task B — DocumentCoverage evidence boundary for authored documents. | types | tools/document_write_tools.py |
 | edit_match_receipts.py | PR1 — EditMatch evidence boundary for fuzzy file-edit matching. | edit_matching | gates/gate5b_full_toolhost.py |
@@ -797,22 +798,22 @@ graph LR
 | first_party_gate.py | Static gate for first-party activity capture. | discovery | cli/tool_runtime.py, cli/wiring.py, gates/gate5b_full_toolhost.py, tools/dispatcher.py |
 | gate1a_egress_correlation.py | — | — | evidence/observed_egress.py, gates/gate8_readiness.py, shadow/gate5b4c3_live_runner_boundary.py, transport/chat.py, transport/chat_routes.py |
 | gate2_durable_evidence.py | Durable evidence store for Gate 2 selected sandbox canary. | — | transport/chat.py, transport/gate2_sandbox_canary.py |
-| ledger.py | — | builtin, types | cli/engine.py, evidence/__init__.py, evidence/first_party_activity.py, evidence/local_tool_collector.py, harness/general_automation/constraint_reinjection.py, harness/general_automation/live_gate.py, harness/general_automation/task_completion.py, harness/verifier_bus.py, introspection/projection.py, introspection/tool.py, shadow/audit_reporter.py |
+| ledger.py | — | authority, builtin, types | cli/engine.py, evidence/__init__.py, evidence/first_party_activity.py, evidence/local_tool_collector.py, harness/general_automation/constraint_reinjection.py, harness/general_automation/live_gate.py, harness/general_automation/task_completion.py, harness/verifier_bus.py, introspection/projection.py, introspection/tool.py, shadow/audit_reporter.py |
 | ledger_semantics.py | — | — | — |
 | ledger_store.py | Reader + retention for the durable evidence-ledger files. | — | evidence/local_tool_collector.py, shadow/gate5b4c3_live_runner_boundary.py |
 | local_tool_collector.py | — | env, extraction, first_party_activity, ledger, ledger_store, result, source_ledger, types | cli/real_runner.py, cli/tests/test_evidence_turn_id_reconciliation.py, cli/tests/test_local_tool_evidence_wiring.py, cli/tests/test_real_runner.py, cli/tests/test_tool_runtime.py, cli/tool_runtime.py, cli/wiring.py, runtime/child_runner_live.py, tools/dispatcher.py, tools/tests/test_core_toolhost_source_projection.py |
 | observed_egress.py | — | gate1a_egress_correlation | (root)/main.py, transport/chat.py, transport/chat_routes.py, transport/health.py |
-| reports.py | — | tool_preview, types | evidence/citation_audit.py, evidence/coding_verification.py, evidence/event_projection.py, evidence/source_ledger.py, evidence/subagent.py, shadow/audit_reporter.py |
-| research_final_gate.py | — | citation_audit, source_ledger, types | research/research_first_canary.py |
-| rollout.py | — | types | harness/resolved.py |
+| reports.py | — | authority, tool_preview, types | evidence/citation_audit.py, evidence/coding_verification.py, evidence/event_projection.py, evidence/source_ledger.py, evidence/subagent.py, shadow/audit_reporter.py |
+| research_final_gate.py | — | authority, citation_audit, source_ledger, types | research/research_first_canary.py |
+| rollout.py | — | authority, types | harness/resolved.py |
 | runtime_issuance.py | — | — | evidence/child_runtime_envelope.py, evidence/event_projection.py, evidence/subagent.py, research/action_claims.py, research/boundary_enforcement.py, research/claim_graph.py, research/event_projection.py, research/source_proof.py, runtime/child_runner_boundary.py, testing/runtime_issuance_support.py, web_acquisition/cross_verifier.py, web_acquisition/deep_research.py, web_acquisition/tests/test_cross_verifier.py, web_acquisition/tests/test_deep_research_orchestrator.py |
-| runtime_receipts.py | — | — | tools/local_readonly.py |
+| runtime_receipts.py | — | authority | tools/local_readonly.py |
 | shacl_ontology.py | evidence → RDF ontology flattener. | types | evidence/shacl_verifier.py |
 | shacl_verifier.py | SHACL constraint verifier — pure function, zero model/LLM calls. | shacl_ontology, types | cli/engine.py, customize/custom_rules.py, customize/shacl_compiler.py |
-| source_ledger.py | — | reports, types | browser/source_tools.py, cli/tests/test_source_grounded_recipe_gate_integration.py, evidence/citation_audit.py, evidence/event_projection.py, evidence/local_tool_collector.py, evidence/research_final_gate.py, knowledge/source_tools.py, research/research_first_canary.py, tools/document_tools.py, tools/local_readonly.py, web_acquisition/repo_research_tools.py, web_acquisition/research_tools.py |
-| subagent.py | — | contracts, reports, runtime_issuance, types | evidence/child_runtime_envelope.py, recipes/opencode_child_lifecycle.py, runtime/child_runner_boundary.py |
+| source_ledger.py | — | authority, reports, types | browser/source_tools.py, cli/tests/test_source_grounded_recipe_gate_integration.py, evidence/citation_audit.py, evidence/event_projection.py, evidence/local_tool_collector.py, evidence/research_final_gate.py, knowledge/source_tools.py, research/research_first_canary.py, tools/document_tools.py, tools/local_readonly.py, web_acquisition/repo_research_tools.py, web_acquisition/research_tools.py |
+| subagent.py | — | authority, contracts, reports, runtime_issuance, types | evidence/child_runtime_envelope.py, recipes/opencode_child_lifecycle.py, runtime/child_runner_boundary.py |
 | tool_boundary.py | — | tool_preview | tools/event_projection.py, tools/kernel.py |
-| types.py | — | — | adk_bridge/dashboard_producer_control.py, customize/shacl_compiler.py, evidence/__init__.py, evidence/builtin.py, evidence/child_runtime_envelope.py, evidence/citation_audit.py, evidence/coding_verification.py, evidence/contracts.py, evidence/document_coverage.py, evidence/event_projection.py, evidence/extraction.py, evidence/extractors.py, evidence/first_party_activity.py, evidence/ledger.py, evidence/local_tool_collector.py, evidence/reports.py, evidence/research_final_gate.py, evidence/rollout.py, evidence/shacl_ontology.py, evidence/shacl_verifier.py, evidence/source_ledger.py, evidence/subagent.py, harness/goal_judge.py, harness/goal_loop_control.py, harness/resolved.py, harness/scheduler_delivery.py, harness/scheduler_job_execution.py, harness/self_review.py, harness/self_review_pipeline.py, harness/skill_curator.py, harness/verifier_bus.py, recipes/coding_evidence_gate.py, shadow/audit_reporter.py, tools/manifest.py, transport/customize.py |
+| types.py | — | authority | adk_bridge/dashboard_producer_control.py, customize/shacl_compiler.py, evidence/__init__.py, evidence/builtin.py, evidence/child_runtime_envelope.py, evidence/citation_audit.py, evidence/coding_verification.py, evidence/contracts.py, evidence/document_coverage.py, evidence/event_projection.py, evidence/extraction.py, evidence/extractors.py, evidence/first_party_activity.py, evidence/ledger.py, evidence/local_tool_collector.py, evidence/reports.py, evidence/research_final_gate.py, evidence/rollout.py, evidence/shacl_ontology.py, evidence/shacl_verifier.py, evidence/source_ledger.py, evidence/subagent.py, harness/goal_judge.py, harness/goal_loop_control.py, harness/resolved.py, harness/scheduler_delivery.py, harness/scheduler_job_execution.py, harness/self_review.py, harness/self_review_pipeline.py, harness/skill_curator.py, harness/verifier_bus.py, recipes/coding_evidence_gate.py, shadow/audit_reporter.py, tools/manifest.py, transport/customize.py |
 | validator_taxonomy.py | — | — | cli/engine.py |
 
 ### firstparty/
@@ -1232,7 +1233,7 @@ graph LR
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
 | __init__.py | — | — | transport/health.py, transport/product_admin.py |
-| authority.py | Frozen-contract / authority model bases (C-4 / C-5 shared home). | — | channels/discord_adapter.py, channels/dispatcher.py, channels/push_delivery.py, channels/runtime_boundary.py, channels/telegram_adapter.py, channels/telegram_boundary.py, channels/workflow_routing.py, config/models.py, connectors/credential_lease.py, connectors/marketplace.py, connectors/registry.py, memory/conformance.py, memory/contracts.py, memory/namespaces.py, memory/policy.py, memory/projection.py, memory/recall_ledger.py, memory/write_boundary.py, ops/safety.py, permissions/auto_control.py, tools/read_ledger.py, tools/scheduler.py |
+| authority.py | Frozen-contract / authority model bases (C-4 / C-5 shared home). | — | channels/discord_adapter.py, channels/dispatcher.py, channels/push_delivery.py, channels/runtime_boundary.py, channels/telegram_adapter.py, channels/telegram_boundary.py, channels/workflow_routing.py, config/models.py, connectors/credential_lease.py, connectors/marketplace.py, connectors/registry.py, evidence/builtin.py, evidence/child_runtime_envelope.py, evidence/citation_audit.py, evidence/coding_tool_receipts.py, evidence/coding_verification.py, evidence/ledger.py, evidence/reports.py, evidence/research_final_gate.py, evidence/rollout.py, evidence/runtime_receipts.py, evidence/source_ledger.py, evidence/subagent.py, evidence/types.py, memory/conformance.py, memory/contracts.py, memory/namespaces.py, memory/policy.py, memory/projection.py, memory/recall_ledger.py, memory/write_boundary.py, ops/safety.py, permissions/auto_control.py, tools/read_ledger.py, tools/scheduler.py |
 | health.py | — | daemon, scheduler_job_execution | adk_bridge/event_adapter.py, gateway/daemon.py, shadow/gate5b4c3_live_runner_boundary.py, transport/sse.py, transport/streaming_chat_route.py |
 | job_queue.py | — | safety | — |
 | metrics.py | — | safety | — |
