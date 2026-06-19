@@ -24,7 +24,9 @@ The scenarios are semantically identical to the gate5b4c3 golden scenarios.
 
 Parity results (see report for full details)
 --------------------------------------------
-FULL-LIST parity:  text_only (tool events only: N/A, all events match)
+TEXT-DELTA parity: text_only — text_delta events match golden exactly.
+  (The engine additionally emits lifecycle events absent from the golden;
+   full public-events list equality is NOT asserted for text_only.)
 
 TOOL-EVENT-SHAPE parity (id + field set):
   tool_then_final    — tool_start id ✓, shape ✓; tool_end DIVERGES (see below)
@@ -108,8 +110,23 @@ def _turn_input(prompt: str = "test") -> dict:
     return {"prompt": prompt, "session_id": _SESSION_ID, "turn_id": _TURN_ID}
 
 
-def _engine(runner: object) -> MagiEngineDriver:
-    return MagiEngineDriver(runner=runner, wire_profile=HOSTED_PROFILE)
+def _engine(runner: object, *, max_event_count: int | None = None) -> MagiEngineDriver:
+    kwargs: dict = {"runner": runner, "wire_profile": HOSTED_PROFILE}
+    if max_event_count is not None:
+        kwargs["max_event_count"] = max_event_count
+    return MagiEngineDriver(**kwargs)
+
+
+async def _capture_capped(
+    runner: object,
+    max_event_count: int,
+    prompt: str = "test",
+) -> list[dict]:
+    """Drive one turn with a custom event-cap and return public event dicts."""
+    driver = _engine(runner, max_event_count=max_event_count)
+    cancel = asyncio.Event()
+    events, _ = await drain(driver.run_turn_stream(None, _turn_input(prompt), cancel=cancel))
+    return [e.payload for e in events]  # type: ignore[union-attr]
 
 
 async def _capture(runner: object, prompt: str = "test") -> list[dict[str, Any]]:
@@ -118,6 +135,8 @@ async def _capture(runner: object, prompt: str = "test") -> list[dict[str, Any]]
     cancel = asyncio.Event()
     events, _ = await drain(driver.run_turn_stream(None, _turn_input(prompt), cancel=cancel))
     return [e.payload for e in events]  # type: ignore[union-attr]
+
+
 
 
 def _load_golden(name: str) -> dict[str, Any]:
@@ -149,22 +168,27 @@ def _text_and_turn_events(events: list[dict]) -> list[dict]:
 # Scenario: text_only
 # ─────────────────────────────────────────────────────────────────────────────
 
-def test_text_only_full_list_parity() -> None:
-    """text_only: engine emits exactly the same text_delta public event as the golden.
+def test_text_only_text_delta_parity() -> None:
+    """text_only: engine emits the same text_delta events as the golden.
 
-    The golden has one public event: {"delta": "done", "type": "text_delta"}.
-    The engine (with HOSTED_PROFILE) must emit the same.  This is the only
-    scenario where full public-events list equality is asserted.
+    Asserts that the text_delta events captured from the engine match the
+    text_delta events in the golden snapshot exactly (field-set equality).
+
+    NOTE: this test filters BOTH sides to text_delta events before comparing.
+    The engine additionally emits lifecycle/status events (turn_start, turn_end,
+    etc.) that are NOT present in the gate5b4c3 golden (which is recorded from
+    the boundary loop, not the engine loop).  Full public-events list equality
+    is NOT asserted here — only text_delta event equality is asserted.
     """
     runner = MockRunner([text_event("done", partial=True, turn_complete=True)])
     captured = asyncio.run(_capture(runner))
     golden = _load_golden("text_only")
 
-    # Extract text_delta events from both sides.
+    # Filter both sides to text_delta events only.
     engine_text = [e for e in captured if e.get("type") == "text_delta"]
     golden_text = [e for e in golden["public_events"] if e.get("type") == "text_delta"]
 
-    # Field-set parity for text events.
+    # Field-set parity for text_delta events.
     assert engine_text == golden_text, (
         f"text_only text_delta events differ from golden.\n"
         f"  engine: {engine_text}\n"
@@ -175,10 +199,9 @@ def test_text_only_full_list_parity() -> None:
     engine_tool = _tool_events(captured)
     assert engine_tool == [], f"text_only must emit no tool events; got {engine_tool}"
 
-    # EXPECTED DIVERGENCE: the engine emits additional status/turn events not in
-    # the golden (turn_start, turn_end etc. from run_turn_stream).  Those are
-    # lifecycle events absent from gate5b4c3 (which doesn't use the engine loop).
-    # Only text_delta equality is asserted here.
+    # The engine emits additional lifecycle events (turn_start, turn_end, etc.)
+    # that are absent from the gate5b4c3 golden — this is expected.  Only
+    # text_delta equality is asserted above.
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -398,6 +421,81 @@ def test_function_call_only_no_tool_end_from_engine() -> None:
     assert tool_ends == [], (
         f"function_call_only should not emit tool_end (no response event); got {tool_ends}"
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Scenario: event_cap
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_event_cap_tool_start_id_parity() -> None:
+    """event_cap: engine hits event cap mid-tool; tool_start id matches golden.
+
+    The gate5b4c3 event_cap golden records a scenario where the event stream
+    is exhausted (event_count reaches 64) after a function_call but before any
+    function_response arrives.  The golden public_events contain:
+      - text_delta (preamble text)
+      - tool_start with id=tu_77fcf1e39894
+      - tool_progress (NOT emitted by engine — documented divergence)
+    and result.reason="runner_incomplete".
+
+    This test drives the engine with max_event_count=1 so the cap fires after
+    consuming the single call_event, mirroring the cap-before-response pattern.
+    The runner yields exactly one function_call event; the engine cap fires at
+    event_count=1 before any response event arrives, so no tool_end is emitted.
+
+    Approach: deterministic — the engine's max_event_count=1 cap fires reliably
+    after the first ADK event (the function_call), breaking the inner loop
+    before any response event can arrive.  No mocking of internal counters;
+    this is the same knob the engine exposes for production budget enforcement.
+    """
+    # Runner yields one function_call event; no response follows.
+    # With max_event_count=1 the engine hits the budget after this one event.
+    runner = MockRunner(
+        [call_event("Calculation", {"expression": "1 + 1"}, "calculation-call-001")]
+    )
+    captured = asyncio.run(_capture_capped(runner, max_event_count=1))
+
+    golden = _load_golden("event_cap")
+    golden_starts = [e for e in golden["public_events"] if e.get("type") == "tool_start"]
+
+    # --- tool_start: id must match golden tu_<hash> ---
+    tool_starts = [e for e in captured if e.get("type") == "tool_start"]
+    assert tool_starts, (
+        f"event_cap: expected at least one tool_start; "
+        f"got event types: {[e.get('type') for e in captured]}"
+    )
+    ts = tool_starts[0]
+
+    assert len(golden_starts) >= 1, "event_cap golden must contain a tool_start"
+    assert ts["id"] == golden_starts[0]["id"] == _GOLDEN_TOOL_ID, (
+        f"event_cap tool_start id mismatch.\n"
+        f"  engine: {ts['id']!r}\n"
+        f"  golden: {golden_starts[0]['id']!r}"
+    )
+
+    # --- tool_start field-set matches golden ---
+    # type
+    assert ts["type"] == "tool_start"
+    # name
+    assert ts.get("name") == golden_starts[0].get("name") == "Calculation", (
+        f"event_cap tool_start name mismatch: engine={ts.get('name')!r}, "
+        f"golden={golden_starts[0].get('name')!r}"
+    )
+    # durationMs must NOT appear on tool_start (gate5b4c3 invariant)
+    assert "durationMs" not in ts, (
+        "event_cap tool_start must not have durationMs"
+    )
+
+    # --- no tool_end emitted (cap fires before response) ---
+    tool_ends = [e for e in captured if e.get("type") == "tool_end"]
+    assert tool_ends == [], (
+        f"event_cap: engine must not emit tool_end when cap fires before "
+        f"function_response; got {tool_ends}"
+    )
+
+    # DOCUMENTED DIVERGENCE: the golden has a tool_progress event; the engine
+    # bridge does not emit tool_progress (no ADK tool_progress event type).
+    # This is the same gap documented in test_engine_does_not_emit_tool_progress.
 
 
 # ─────────────────────────────────────────────────────────────────────────────
