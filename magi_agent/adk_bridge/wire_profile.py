@@ -72,7 +72,7 @@ class WireProfile:
     tool_id: Callable[[str, dict, object, int], str]
     build_tool_start: Callable[[str, str, str | None], dict]
     build_tool_progress: Callable[[str, str | None], dict]
-    build_tool_end: Callable[[str, str, str | None], dict]
+    build_tool_end: Callable[..., dict]
     build_text_delta: Callable[[str], dict]
     build_turn_phase: Callable[[str, str], dict]
 
