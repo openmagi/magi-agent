@@ -6,9 +6,10 @@ import inspect
 import re
 from typing import Any, Literal, Protocol, Self
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer
+from pydantic import BaseModel, ConfigDict, Field
 
 from magi_agent.channels.contract import ChannelRef, ChannelType
+from magi_agent.ops.authority import FalseOnlyAuthorityModel
 
 
 ChannelRuntimeOperation = Literal[
@@ -91,9 +92,7 @@ class ChannelRuntimeProviderPort(Protocol):
     def execute(self, request: ChannelRuntimeRequest) -> Mapping[str, object]: ...
 
 
-class ChannelRuntimeConfig(BaseModel):
-    model_config = _MODEL_CONFIG
-
+class ChannelRuntimeConfig(FalseOnlyAuthorityModel):
     enabled: bool = False
     local_fake_channel_provider_enabled: bool = Field(
         default=False,
@@ -106,54 +105,13 @@ class ChannelRuntimeConfig(BaseModel):
     polling_attached: Literal[False] = Field(default=False, alias="pollingAttached")
     route_attached: Literal[False] = Field(default=False, alias="routeAttached")
 
-    @classmethod
-    def model_construct(cls, _fields_set: set[str] | None = None, **values: Any) -> Self:
-        _ = _fields_set, values
-        return cls()
 
-    def model_copy(self, *, update: Mapping[str, Any] | None = None, deep: bool = False) -> Self:
-        data = self.model_dump(by_alias=False, mode="python", warnings=False)
-        if update:
-            alias_to_name = {
-                field.alias: name
-                for name, field in self.__class__.model_fields.items()
-                if field.alias is not None
-            }
-            data.update({alias_to_name.get(str(key), str(key)): value for key, value in update.items()})
-        data["production_channel_writes_enabled"] = False
-        data["polling_attached"] = False
-        data["route_attached"] = False
-        _ = deep
-        return type(self).model_validate(data)
-
-
-class ChannelRuntimeAuthorityFlags(BaseModel):
-    model_config = _MODEL_CONFIG
-
+class ChannelRuntimeAuthorityFlags(FalseOnlyAuthorityModel):
     channel_provider_called: Literal[False] = Field(default=False, alias="channelProviderCalled")
     production_channel_write: Literal[False] = Field(default=False, alias="productionChannelWrite")
     polling_attached: Literal[False] = Field(default=False, alias="pollingAttached")
     file_download_performed: Literal[False] = Field(default=False, alias="fileDownloadPerformed")
     route_attached: Literal[False] = Field(default=False, alias="routeAttached")
-
-    @classmethod
-    def model_construct(cls, _fields_set: set[str] | None = None, **values: Any) -> Self:
-        _ = _fields_set, values
-        return cls()
-
-    def model_copy(self, *, update: Mapping[str, Any] | None = None, deep: bool = False) -> Self:
-        _ = update, deep
-        return type(self)()
-
-    @field_serializer(
-        "channel_provider_called",
-        "production_channel_write",
-        "polling_attached",
-        "file_download_performed",
-        "route_attached",
-    )
-    def _serialize_false(self, _value: object) -> bool:
-        return False
 
 
 class ChannelRuntimeRequest(BaseModel):

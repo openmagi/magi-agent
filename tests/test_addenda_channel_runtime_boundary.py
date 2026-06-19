@@ -286,6 +286,17 @@ def test_channel_runtime_decision_model_copy_cannot_forge_authority_flags() -> N
 
 
 def test_channel_runtime_config_construct_and_copy_cannot_enable_production_flags() -> None:
+    # C-4 PR-E: ChannelRuntimeConfig now inherits FalseOnlyAuthorityModel. The
+    # security invariant ("Literal[False] authority flags cannot be turned on
+    # through construction/copy") is the same; the kernel's force-false validator
+    # coerces every Literal[False] field to False on EVERY construction surface
+    # (validate / model_construct / model_copy / copy). Regular bool fields
+    # (``enabled``, ``localFakeChannelProviderEnabled``) are preserved on these
+    # paths under the kernel -- the legacy ``model_construct`` ignored ALL inputs
+    # by returning ``cls()``, which was strictly more aggressive than what the
+    # security contract required. This test now asserts ONLY the Literal[False]
+    # invariant (the actual security contract); the bool fields are no longer
+    # part of the assertion because they aren't part of the contract.
     constructed = ChannelRuntimeConfig.model_construct(
         enabled=True,
         local_fake_channel_provider_enabled=True,
@@ -303,20 +314,13 @@ def test_channel_runtime_config_construct_and_copy_cannot_enable_production_flag
         }
     )
 
-    assert constructed.model_dump(by_alias=True) == {
-        "enabled": False,
-        "localFakeChannelProviderEnabled": False,
-        "productionChannelWritesEnabled": False,
-        "pollingAttached": False,
-        "routeAttached": False,
-    }
-    assert copied.model_dump(by_alias=True) == {
-        "enabled": True,
-        "localFakeChannelProviderEnabled": True,
-        "productionChannelWritesEnabled": False,
-        "pollingAttached": False,
-        "routeAttached": False,
-    }
+    # Literal[False] fields force-false on BOTH surfaces.
+    assert constructed.production_channel_writes_enabled is False
+    assert constructed.polling_attached is False
+    assert constructed.route_attached is False
+    assert copied.production_channel_writes_enabled is False
+    assert copied.polling_attached is False
+    assert copied.route_attached is False
 
 
 def test_channel_runtime_boundary_has_no_live_imports() -> None:
