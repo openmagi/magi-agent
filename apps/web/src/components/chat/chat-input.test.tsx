@@ -2,10 +2,11 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import {
   ChatInput,
+  type ChatRecipeSelectionMode,
   buildSlashEntries,
   buildChatInputSendOptions,
   getSlashMatches,
-  nextRunUntilDoneAfterSend,
+  nextRecipeModeAfterSend,
   shouldCancelStopOnPointerDown,
   shouldSendComposerOnEnter,
 } from "./chat-input";
@@ -22,43 +23,150 @@ describe("ChatInput", () => {
     expect(html).toContain(".xls");
   });
 
-  it("shows queue and steering modes while streaming", () => {
+  it("shows automatic live-run status while streaming", () => {
     const html = renderToStaticMarkup(<ChatInput onSend={() => {}} streaming />);
-    expect(html).toContain("Queue after run");
-    expect(html).toContain("Steer current run");
+    expect(html).toContain('data-chat-live-run-toolbar="true"');
+    expect(html).toContain("Live run");
+    expect(html).toContain("Auto-steers when possible");
+    expect(html).not.toContain('data-streaming-mode-option="queue"');
+    expect(html).not.toContain('data-streaming-mode-option="steer"');
   });
 
-  it("does not show queue and steering modes while idle", () => {
+  it("does not show live-run status while idle", () => {
     const html = renderToStaticMarkup(<ChatInput onSend={() => {}} />);
-    expect(html).not.toContain("Queue after run");
-    expect(html).not.toContain("Steer current run");
+    expect(html).not.toContain('data-chat-live-run-toolbar="true"');
+    expect(html).not.toContain("Auto-steers when possible");
   });
 
-  it("renders the Run until done toggle", () => {
+  it("no longer renders a Run until done toggle (always on)", () => {
     const html = renderToStaticMarkup(<ChatInput onSend={() => {}} />);
-    expect(html).toContain("Run until done");
-    expect(html).toContain('data-chat-goal-toggle="true"');
-    expect(html).toContain('aria-pressed="false"');
-    expect(html).not.toContain('type="checkbox"');
+    expect(html).not.toContain("Run until done");
+    expect(html).not.toContain('data-chat-goal-toggle="true"');
   });
 
-  it("builds goalMode send metadata only when toggled on", () => {
-    expect(buildChatInputSendOptions(false)).toBeUndefined();
-    expect(buildChatInputSendOptions(true)).toEqual({ goalMode: true });
+  it("does not render recipe selector or fixture recipe labels by default", () => {
+    const html = renderToStaticMarkup(<ChatInput onSend={() => {}} />);
+
+    expect(html).not.toContain('data-chat-recipe-selector="true"');
+    expect(html).not.toContain("Cited Source Preview");
+    expect(html).not.toContain("Office Draft Review");
   });
 
-  it("treats Run until done as a one-shot send option", () => {
-    expect(nextRunUntilDoneAfterSend(true, undefined)).toBe(false);
-    expect(nextRunUntilDoneAfterSend(true, true)).toBe(false);
-    expect(nextRunUntilDoneAfterSend(true, false)).toBe(true);
-    expect(nextRunUntilDoneAfterSend(false, undefined)).toBe(false);
-  });
-
-  it("keeps the steering selector available when the follow-up queue is full", () => {
+  it("renders a compact default-off recipe selector in the composer controls", () => {
     const html = renderToStaticMarkup(
-      <ChatInput onSend={() => {}} streaming streamingMode="steer" queueFull />,
+      <ChatInput
+        onSend={() => {}}
+        availableRecipes={[{
+          recipeId: "openmagi.research",
+          label: "Cited Source Preview",
+          version: "1",
+        }]}
+      />,
     );
-    expect(html).toContain('aria-pressed="true" title="Send now as a text-only steering update"');
+
+    expect(html).toContain('data-chat-recipe-selector="true"');
+    expect(html).toContain('data-chat-recipe-label="true"');
+    expect(html).toContain('data-chat-recipe-mode-selector="true"');
+    expect(html).toContain("Auto");
+    expect(html).toContain("This turn only");
+    expect(html).toContain("Session default");
+    expect(html).toContain("Cited Source Preview");
+  });
+
+  it("hides the recipe selector when availability has no enabled safe options", () => {
+    const disabledOnlyHtml = renderToStaticMarkup(
+      <ChatInput
+        onSend={() => {}}
+        availableRecipes={[{
+          recipeId: "openmagi.research",
+          label: "Cited Source Preview",
+          disabled: true,
+        }]}
+      />,
+    );
+    const unsafeOnlyHtml = renderToStaticMarkup(
+      <ChatInput
+        onSend={() => {}}
+        availableRecipes={[{
+          recipeId: "secret.recipe",
+          label: "Secret Recipe",
+        }]}
+      />,
+    );
+
+    expect(disabledOnlyHtml).not.toContain('data-chat-recipe-selector="true"');
+    expect(disabledOnlyHtml).not.toContain("Cited Source Preview");
+    expect(unsafeOnlyHtml).not.toContain('data-chat-recipe-selector="true"');
+    expect(unsafeOnlyHtml).not.toContain("Secret Recipe");
+  });
+
+  it("does not render unsafe recipe option labels", () => {
+    const html = renderToStaticMarkup(
+      <ChatInput
+        onSend={() => {}}
+        availableRecipes={[{
+          recipeId: "safe.recipe",
+          label: "Bearer secret-token",
+          description: "/srv/private/runtime.sqlite",
+        }]}
+      />,
+    );
+
+    expect(html).toContain("safe.recipe");
+    expect(html).not.toContain("Bearer secret-token");
+    expect(html).not.toContain("runtime.sqlite");
+  });
+
+  it("always builds goalMode send metadata (run-until-done is the default)", () => {
+    expect(buildChatInputSendOptions()).toEqual({ goalMode: true });
+    expect(buildChatInputSendOptions("auto")).toEqual({ goalMode: true });
+  });
+
+  it("includes explicit recipe metadata alongside the always-on goalMode", () => {
+    const recipe = {
+      recipeId: "openmagi.research",
+      label: "Cited Source Preview",
+      version: "1",
+    };
+
+    expect(buildChatInputSendOptions("auto", recipe)).toEqual({ goalMode: true });
+    expect(buildChatInputSendOptions("this_turn", recipe)).toEqual({
+      goalMode: true,
+      explicitRecipeSelection: {
+        mode: "this_turn",
+        requiredRecipeRefs: [{
+          recipeId: "openmagi.research",
+          version: "1",
+        }],
+        allowAdditionalAutoRecipes: true,
+      },
+    });
+    expect(buildChatInputSendOptions("session", recipe)).toEqual({
+      goalMode: true,
+      explicitRecipeSelection: {
+        mode: "session",
+        requiredRecipeRefs: [{
+          recipeId: "openmagi.research",
+          version: "1",
+        }],
+        allowAdditionalAutoRecipes: true,
+      },
+    });
+  });
+
+  it("keeps session recipe mode as persistent local composer state", () => {
+    const selectedMode: ChatRecipeSelectionMode = "session";
+    expect(nextRecipeModeAfterSend(selectedMode, undefined)).toBe("session");
+    expect(nextRecipeModeAfterSend("this_turn", undefined)).toBe("auto");
+    expect(nextRecipeModeAfterSend("this_turn", false)).toBe("this_turn");
+  });
+
+  it("keeps automatic text steering available when the follow-up queue is full", () => {
+    const html = renderToStaticMarkup(
+      <ChatInput onSend={() => {}} streaming queueFull canAttemptStreamingInject />,
+    );
+    expect(html).toContain("Auto-steers when possible");
+    expect(html).not.toContain("Queue full - wait for the bot to finish");
   });
 
   it("renders a prominent queued follow-up strip near the composer", () => {
@@ -97,10 +205,9 @@ describe("ChatInput", () => {
     expect(html).toContain("현재 실행 후 전송 대기");
     expect(html).toContain("2개 대기");
     expect(html).toContain("대기열 가득 참");
-    expect(html).toContain("실행 후 전송");
-    expect(html).toContain("현재 실행 조정");
+    expect(html).toContain("실행 중");
+    expect(html).toContain("가능하면 자동 조정");
     expect(html).toContain("답장 대상");
-    expect(html).toContain("완료까지 실행");
     expect(html).toContain('placeholder="메시지..."');
     expect(html).toContain('aria-label="중단"');
     expect(html).not.toContain("Queued after current run");
@@ -114,8 +221,8 @@ describe("ChatInput", () => {
     expect(html).toContain('data-chat-stop-button="true"');
     expect(html).toContain('type="button"');
     expect(html).toContain('aria-label="Stop"');
-    expect(html).toContain("min-h-11");
-    expect(html).toContain("min-w-11");
+    expect(html).toContain("h-8");
+    expect(html).toContain("w-8");
     expect(html).toContain("touch-manipulation");
   });
 
@@ -158,7 +265,7 @@ describe("ChatInput", () => {
     expect(html).not.toContain("backdrop-blur");
   });
 
-  it("keeps live-run composer controls inside a compact toolbar above the textarea", () => {
+  it("keeps model controls in the bottom row while streaming", () => {
     const html = renderToStaticMarkup(
       <ChatInput
         onSend={() => {}}
@@ -171,15 +278,16 @@ describe("ChatInput", () => {
     const panelIndex = html.indexOf('data-chat-composer-panel="true"');
     const toolbarIndex = html.indexOf('data-chat-composer-toolbar="true"');
     void html.indexOf('data-chat-composer-meta-row="true"');
-    const streamingControlsIndex = html.indexOf('data-streaming-composer-controls="true"');
+    const streamingControlsIndex = html.indexOf('data-chat-live-run-status="true"');
     const inputShellIndex = html.indexOf('data-chat-input-shell="true"');
     const actionsIndex = html.indexOf('data-chat-composer-actions="true"');
+    const bottomAccessoryIndex = html.indexOf('data-composer-accessory="bottom-row"');
 
     expect(panelIndex).toBeGreaterThanOrEqual(0);
     expect(toolbarIndex).toBeGreaterThan(panelIndex);
     expect(streamingControlsIndex).toBeGreaterThan(toolbarIndex);
-    expect(html).toContain('data-composer-accessory="streaming-toolbar"');
-    expect(html).not.toContain('data-composer-accessory="bottom-row"');
+    expect(html).not.toContain('data-composer-accessory="streaming-toolbar"');
+    expect(bottomAccessoryIndex).toBeGreaterThan(actionsIndex);
     expect(inputShellIndex).toBeGreaterThanOrEqual(0);
     expect(streamingControlsIndex).toBeLessThan(inputShellIndex);
     expect(actionsIndex).toBeGreaterThan(inputShellIndex);
@@ -196,17 +304,16 @@ describe("ChatInput", () => {
     );
 
     expect(html).toContain("bg-black/[0.04]");
-    expect(html).toContain("rounded-lg");
+    expect(html).toContain("rounded-md");
     expect(html).not.toContain("sm:min-w-[18rem]");
   });
 
-  it("uses mobile-first touch sizing for live-run mode buttons", () => {
+  it("does not render live-run mode buttons on mobile", () => {
     const html = renderToStaticMarkup(<ChatInput onSend={() => {}} streaming />);
 
-    expect(html).toContain('data-streaming-mode-option="queue"');
-    expect(html).toContain('data-streaming-mode-option="steer"');
-    expect(html).toContain("grid-cols-2");
-    expect(html).toContain("min-h-8");
+    expect(html).not.toContain('data-streaming-mode-option="queue"');
+    expect(html).not.toContain('data-streaming-mode-option="steer"');
+    expect(html).toContain('data-chat-live-run-status="true"');
     expect(html).toContain("touch-manipulation");
   });
 
@@ -219,7 +326,6 @@ describe("ChatInput", () => {
     );
 
     expect(html).toContain('data-chat-composer-controls="true"');
-    expect(html).toContain('data-chat-goal-toggle="true"');
   });
 
   it("does not send on bare Enter on mobile web", () => {
@@ -258,5 +364,21 @@ describe("ChatInput", () => {
 
     const byTag = getSlashMatches(entries, "tips");
     expect(byTag[0]?.command).toBe("custom-deal-review");
+  });
+
+  it("surfaces installed custom skills in the bare '/' browse dropdown", () => {
+    const entries = buildSlashEntries([
+      {
+        name: "custom-multibagger-screening",
+        title: "Multibagger screening",
+        description: "Screen stocks for multibagger potential.",
+        tags: ["stocks"],
+      },
+    ]);
+
+    const browse = getSlashMatches(entries, "");
+    expect(
+      browse.some((entry) => entry.command === "custom-multibagger-screening"),
+    ).toBe(true);
   });
 });

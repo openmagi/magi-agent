@@ -53,9 +53,8 @@ import type {
   ServerMessage,
 } from "@/chat-core";
 import { useKbDocs } from "@/hooks/use-kb-docs";
-import { MAX_QUEUED_MESSAGES, canInjectMidTurn } from "@/chat-core";
+import { MAX_QUEUED_MESSAGES, getStreamingSendMode } from "@/chat-core";
 
-type StreamingComposerMode = "queue" | "steer";
 import {
   buildEscCancelDecision,
   cancelActiveTurnWithQueueHandoff,
@@ -254,7 +253,6 @@ export function ChatViewClient({
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showTelegramGuide, setShowTelegramGuide] = useState(false);
   const [escArmedUntil, setEscArmedUntil] = useState<number | null>(null);
-  const [streamingComposerMode, setStreamingComposerMode] = useState<StreamingComposerMode>("queue");
   const [currentBotStatus, setCurrentBotStatus] = useState(botStatus);
   const [provisioningStep, setProvisioningStep] = useState<string | null>(null);
   const [provisioningPct, setProvisioningPct] = useState(0);
@@ -1372,12 +1370,14 @@ export function ChatViewClient({
       const messageKbDocs = mergeKbDocReferences(selectedKbDocs, uploadedKbDocs);
 
       if (isStreaming) {
-        const hasFiles = !!(files && files.length > 0);
-        const sendMode =
-          streamingComposerMode === "steer" &&
-          canInjectMidTurn({ hasFiles, hasKbContext: messageKbDocs.length > 0 })
-            ? "inject"
-            : "queue";
+        const sendMode = getStreamingSendMode({
+          hasFiles: (files?.length ?? 0) > 0,
+          hasKbContext:
+            messageKbDocs.length > 0 ||
+            !!activeReply ||
+            !!sendOptions?.goalMode ||
+            !!sendOptions?.explicitRecipeSelection,
+        });
         if (sendMode === "inject") {
           try {
             const sessionKey = chatApi.buildSessionKey(botId, channel);
@@ -1416,6 +1416,9 @@ export function ChatViewClient({
           queuedAt: Date.now(),
           modelOverride: resolveChannelRuntimeModel(channel),
           ...(sendOptions?.goalMode ? { goalMode: true } : {}),
+          ...(sendOptions?.explicitRecipeSelection
+            ? { explicitRecipeSelection: sendOptions.explicitRecipeSelection }
+            : {}),
           ...(activeReply ? { replyTo: activeReply } : {}),
           ...(messageKbDocs.length > 0 ? { kbDocs: messageKbDocs } : {}),
         };
@@ -1438,7 +1441,7 @@ export function ChatViewClient({
       return true;
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [botId, clearAcceptedKbContext, e2eeReady, handleUserHistorySaveError, isCurrentBot, replyingTo, resolveKbDocsForFiles, saveMessages, selectedKbDocs, streamingComposerMode, performSend],
+    [botId, clearAcceptedKbContext, e2eeReady, handleUserHistorySaveError, isCurrentBot, replyingTo, resolveKbDocsForFiles, saveMessages, selectedKbDocs, performSend],
   );
 
   // Rebind the drain ref on every render so the closure sees the freshest
@@ -1455,7 +1458,14 @@ export function ChatViewClient({
         next.replyTo ?? null,
         queuedKbDocs,
         next.modelOverride,
-        next.goalMode ? { goalMode: true } : undefined,
+        next.goalMode || next.explicitRecipeSelection
+          ? {
+              ...(next.goalMode ? { goalMode: true } : {}),
+              ...(next.explicitRecipeSelection
+                ? { explicitRecipeSelection: next.explicitRecipeSelection }
+                : {}),
+            }
+          : undefined,
       ).catch((err) => {
         console.error("[chat] drain queue send failed:", err);
       });
@@ -1526,10 +1536,6 @@ export function ChatViewClient({
   const anyStreaming = useChatStore(
     (s) => Object.values(s.channelStates).some((cs) => cs.streaming),
   );
-
-  useEffect(() => {
-    if (!anyStreaming) setStreamingComposerMode("queue");
-  }, [anyStreaming]);
 
   useEffect(() => {
     if (!botId || !store.activeChannel) return;
@@ -2258,12 +2264,8 @@ export function ChatViewClient({
               onCancelReply={handleCancelReply}
               queuedCount={(queuedMessages[activeChannel] ?? []).length}
               onCancelQueue={handleCancelQueue}
-              cancelHint={escArmedUntil === null ? undefined : t.chat.escAgainToStop}
               queueFull={(queuedMessages[activeChannel] ?? []).length >= MAX_QUEUED_MESSAGES}
-              streamingMode={streamingComposerMode}
-              onStreamingModeChange={setStreamingComposerMode}
-              steeringDisabled={selectedKbDocs.length > 0}
-              steeringDisabledReason={t.chat.selectedKnowledgeSendsAfterRun}
+              canAttemptStreamingInject={selectedKbDocs.length === 0}
               kbDocs={kbAllDocs}
               onSelectKbDoc={handleToggleKbDoc}
               uploadStates={uploadStates}

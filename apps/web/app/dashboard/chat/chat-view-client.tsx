@@ -42,9 +42,8 @@ import type {
   QueuedMessage,
   ServerMessage,
 } from "@/chat-core";
-import { MAX_QUEUED_MESSAGES, canInjectMidTurn } from "@/chat-core";
+import { MAX_QUEUED_MESSAGES, getStreamingSendMode } from "@/chat-core";
 
-type StreamingComposerMode = "queue" | "steer";
 import {
   buildEscCancelDecision,
   cancelActiveTurnWithQueueHandoff,
@@ -210,7 +209,6 @@ export function ChatViewClient({
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showTelegramGuide, setShowTelegramGuide] = useState(false);
   const [escArmedUntil, setEscArmedUntil] = useState<number | null>(null);
-  const [streamingComposerMode, setStreamingComposerMode] = useState<StreamingComposerMode>("queue");
   const [currentBotStatus, setCurrentBotStatus] = useState(botStatus);
   const [provisioningStep, setProvisioningStep] = useState<string | null>(null);
   const [provisioningPct, setProvisioningPct] = useState(0);
@@ -1114,12 +1112,13 @@ export function ChatViewClient({
       }
       if (!isCurrentBot()) return false;
       if (isStreaming) {
-        const hasFiles = !!(files && files.length > 0);
-        const sendMode =
-          streamingComposerMode === "steer" &&
-          canInjectMidTurn({ hasFiles, hasKbContext: uploadedKbDocs.length > 0 })
-            ? "inject"
-            : "queue";
+        const sendMode = getStreamingSendMode({
+          hasFiles: (files?.length ?? 0) > 0,
+          hasKbContext:
+            uploadedKbDocs.length > 0 ||
+            !!sendOptions?.goalMode ||
+            !!sendOptions?.explicitRecipeSelection,
+        });
         if (sendMode === "inject") {
           try {
             const sessionKey = chatApi.buildSessionKey(botId, channel);
@@ -1156,6 +1155,9 @@ export function ChatViewClient({
           queuedAt: Date.now(),
           modelOverride: resolveChannelRuntimeModel(channel),
           ...(sendOptions?.goalMode ? { goalMode: true } : {}),
+          ...(sendOptions?.explicitRecipeSelection
+            ? { explicitRecipeSelection: sendOptions.explicitRecipeSelection }
+            : {}),
           ...(uploadedKbDocs.length > 0 ? { kbDocs: uploadedKbDocs } : {}),
         };
         const ok = state.enqueueMessage(channel, queued, { botId });
@@ -1173,7 +1175,7 @@ export function ChatViewClient({
       return true;
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [performSend, botId, e2eeReady, handleUserHistorySaveError, isCurrentBot, resolveKbDocsForFiles, saveMessages, streamingComposerMode],
+    [performSend, botId, e2eeReady, handleUserHistorySaveError, isCurrentBot, resolveKbDocsForFiles, saveMessages],
   );
 
   drainQueueRef.current = (channel: string) => {
@@ -1184,7 +1186,14 @@ export function ChatViewClient({
         next.content,
         next.kbDocs ?? [],
         next.modelOverride,
-        next.goalMode ? { goalMode: true } : undefined,
+        next.goalMode || next.explicitRecipeSelection
+          ? {
+              ...(next.goalMode ? { goalMode: true } : {}),
+              ...(next.explicitRecipeSelection
+                ? { explicitRecipeSelection: next.explicitRecipeSelection }
+                : {}),
+            }
+          : undefined,
       ).catch((err) => {
         console.error("[chat] drain queue send failed:", err);
       });
@@ -1246,10 +1255,6 @@ export function ChatViewClient({
   const anyStreaming = useChatStore(
     (s) => Object.values(s.channelStates).some((cs) => cs.streaming),
   );
-
-  useEffect(() => {
-    if (!anyStreaming) setStreamingComposerMode("queue");
-  }, [anyStreaming]);
 
   useEffect(() => {
     if (!botId || !store.activeChannel) return;
@@ -1925,10 +1930,7 @@ export function ChatViewClient({
               disabled={currentBotStatus !== "active"}
               queuedCount={(queuedMessages[activeChannel] ?? []).length}
               onCancelQueue={handleCancelQueue}
-              cancelHint={escArmedUntil === null ? undefined : t.chat.escAgainToStop}
               queueFull={(queuedMessages[activeChannel] ?? []).length >= MAX_QUEUED_MESSAGES}
-              streamingMode={streamingComposerMode}
-              onStreamingModeChange={setStreamingComposerMode}
               uploadStates={uploadStates}
               customSkills={customSkills}
               composerAccessory={
