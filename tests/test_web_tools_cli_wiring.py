@@ -36,6 +36,69 @@ def test_cli_tools_exclude_web_tools_without_keys(tmp_path, monkeypatch):
     assert not {"web_search", "web_fetch", "research_fact"} & names
 
 
+def test_cli_web_tools_are_dispatcher_backed_not_bare_functiontools(tmp_path, monkeypatch):
+    """A-2: web tools must NOT be the bare ``FunctionTool(web_search)`` shape.
+
+    A dispatcher-backed tool wraps the registry/dispatch ladder; its underlying
+    callable is the generic ``invoke_openmagi_tool`` (renamed to the tool name),
+    never the raw ``web_search``/``web_fetch``/``research_fact`` function. RED
+    today: the direct-append path attaches the bare functions.
+    """
+    from magi_agent.cli.tool_runtime import build_cli_adk_tools
+    from magi_agent.tools import web_search_tools
+
+    monkeypatch.setenv("BRAVE_API_KEY", "k1")
+    monkeypatch.setenv("FIRECRAWL_API_KEY", "k2")
+    tools = build_cli_adk_tools(workspace_root=str(tmp_path))
+    by_name = {getattr(t, "name", ""): t for t in tools}
+
+    bare_callables = {
+        web_search_tools.web_search,
+        web_search_tools.web_fetch,
+        web_search_tools._research_fact_tool,
+    }
+    for name in ("web_search", "web_fetch", "research_fact"):
+        tool = by_name.get(name)
+        assert tool is not None, f"{name} missing from CLI tools"
+        func = getattr(tool, "func", None)
+        assert func not in bare_callables, (
+            f"{name} is a bare FunctionTool that bypasses the dispatcher"
+        )
+
+
+def test_invoking_cli_web_fetch_routes_through_tool_dispatcher(tmp_path, monkeypatch):
+    """A-2: invoking the ADK WebFetch tool crosses ToolDispatcher.dispatch."""
+    import asyncio
+
+    from magi_agent.cli import tool_runtime
+    from magi_agent.tools.dispatcher import ToolDispatcher
+
+    monkeypatch.setenv("BRAVE_API_KEY", "k1")
+    monkeypatch.setenv("FIRECRAWL_API_KEY", "k2")
+
+    dispatched: list[str] = []
+    original_dispatch = ToolDispatcher.dispatch
+
+    async def _spy_dispatch(self, name, arguments, context, **kwargs):
+        dispatched.append(name)
+        return await original_dispatch(self, name, arguments, context, **kwargs)
+
+    monkeypatch.setattr(ToolDispatcher, "dispatch", _spy_dispatch)
+
+    tools = tool_runtime.build_cli_adk_tools(workspace_root=str(tmp_path))
+    web_fetch_tool = next(t for t in tools if getattr(t, "name", "") == "web_fetch")
+
+    # Block the URL so no real network egress happens; the point is that the call
+    # is routed through the dispatcher at all.
+    asyncio.run(
+        web_fetch_tool.run_async(
+            args={"arguments": {"url": "http://169.254.169.254/"}},
+            tool_context=object(),
+        )
+    )
+    assert "web_fetch" in dispatched
+
+
 def test_full_profile_defaults_research_governance_to_audit():
     from magi_agent.runtime.local_defaults import LOCAL_FULL_RUNTIME_ENV_DEFAULTS
 

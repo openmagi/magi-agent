@@ -183,8 +183,11 @@ def test_web_search_returns_error_string_on_network_failure(
 
     result = web_search("query")
 
+    # A-4: the provider exception is mapped to a safe code; the raw ``repr(exc)``
+    # (which can carry the API key) never reaches model-visible output.
     assert result.startswith("search error:")
-    assert "refused" in result or "URLError" in result
+    assert "provider_error" in result or "provider_timeout" in result
+    assert "URLError(" not in result
 
 
 def test_web_search_returns_error_when_key_missing(
@@ -366,37 +369,40 @@ def test_build_web_search_tools_returns_empty_when_only_firecrawl_key_present(
     assert tools == []
 
 
-def test_build_web_search_tools_returns_three_tools_when_both_keys_present(
+def test_build_web_search_tools_is_deprecated_empty_even_with_both_keys(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Both keys present → returns a list of three FunctionTool objects (web_search, web_fetch, research_fact)."""
-    from magi_agent.tools.web_search_tools import build_web_search_tools
+    """A-2: the deprecated shim returns [] even with both keys present.
+
+    The direct web capability now flows through dispatcher-backed registry
+    manifests (``plugins.native.web.register_direct_web_tools`` +
+    ``bind_direct_web_handlers``), never bare FunctionTools appended outside the
+    dispatcher. ``build_web_search_tools`` is retained only as a no-op shim.
+    """
+    from magi_agent.tools.web_search_tools import (
+        build_web_search_tools,
+        direct_web_tools_available,
+    )
 
     monkeypatch.setenv("BRAVE_API_KEY", "brave-key")
     monkeypatch.setenv("FIRECRAWL_API_KEY", "fc-key")
 
-    tools = build_web_search_tools()
-
-    assert len(tools) == 3
-    from google.adk.tools import FunctionTool
-
-    assert all(isinstance(t, FunctionTool) for t in tools)
+    assert build_web_search_tools() == []
+    # The key-presence predicate that gates manifest registration is still True.
+    assert direct_web_tools_available() is True
 
 
-def test_build_web_search_tools_tool_names(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The two FunctionTools must be named 'web_search' and 'web_fetch'."""
-    from magi_agent.tools.web_search_tools import build_web_search_tools
+def test_direct_web_tools_available_key_gating(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The manifest-registration gate mirrors the old key-presence rule."""
+    from magi_agent.tools.web_search_tools import direct_web_tools_available
 
-    monkeypatch.setenv("BRAVE_API_KEY", "brave-key")
-    monkeypatch.setenv("FIRECRAWL_API_KEY", "fc-key")
-
-    tools = build_web_search_tools()
-    names = {getattr(t, "name", None) or getattr(t, "func", lambda: None).__name__ for t in tools}
-
-    assert "web_search" in names
-    assert "web_fetch" in names
+    assert direct_web_tools_available({}) is False
+    assert direct_web_tools_available({"BRAVE_API_KEY": "k"}) is False
+    assert direct_web_tools_available({"FIRECRAWL_API_KEY": "k"}) is False
+    assert (
+        direct_web_tools_available({"BRAVE_API_KEY": "k", "FIRECRAWL_API_KEY": "k"})
+        is True
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -575,16 +581,13 @@ def test_research_fact_parallel_fetch_called_once_per_url() -> None:
 def test_build_web_search_tools_includes_research_fact_when_keys_set(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Both keys present → research_fact tool must be in the returned list."""
+    """A-2: even with both keys, the deprecated shim attaches no tools."""
     from magi_agent.tools.web_search_tools import build_web_search_tools
 
     monkeypatch.setenv("BRAVE_API_KEY", "brave-key")
     monkeypatch.setenv("FIRECRAWL_API_KEY", "fc-key")
 
-    tools = build_web_search_tools()
-    names = {getattr(t, "name", None) or getattr(t, "func", lambda: None).__name__ for t in tools}
-
-    assert "research_fact" in names, f"research_fact not found in tool names: {names}"
+    assert build_web_search_tools() == []
 
 
 def test_build_web_search_tools_excludes_research_fact_when_keys_absent(
@@ -601,30 +604,49 @@ def test_build_web_search_tools_excludes_research_fact_when_keys_absent(
     assert tools == []
 
 
-def test_build_web_search_tools_declarations_build(
+def test_dispatcher_backed_web_tool_declarations_build(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """ADK must be able to build a function declaration for EVERY returned tool.
+    """ADK must build a declaration for EVERY dispatcher-backed web tool.
 
-    research_fact's injectable keyword-only callables (search_fn/fetch_fn) made
-    ``FunctionTool._get_declaration`` raise ValueError at agent-build time when
-    both keys were set — the live run produced empty answers. The registered
-    tool must expose only the model-facing ``question`` parameter.
+    The capability moved from bare FunctionTools to registry manifests (A-2).
+    The manifest ``input_schema`` is the model-facing contract: research_fact
+    must expose only ``question``; web_search ``query``; web_fetch ``url``.
     """
-    from magi_agent.tools.web_search_tools import build_web_search_tools
+    from magi_agent.adk_bridge.tool_adapter import (
+        build_adk_function_tools_for_registry,
+    )
+    from magi_agent.plugins.native.web import (
+        bind_direct_web_handlers,
+        register_direct_web_tools,
+    )
+    from magi_agent.tools.context import ToolContext
+    from magi_agent.tools.dispatcher import ToolDispatcher
+    from magi_agent.tools.registry import ToolRegistry
 
     monkeypatch.setenv("BRAVE_API_KEY", "brave-key")
     monkeypatch.setenv("FIRECRAWL_API_KEY", "fc-key")
 
-    tools = build_web_search_tools()
-    assert tools, "expected tools when both keys are set"
-    for tool in tools:
-        declaration = tool._get_declaration()
-        assert declaration is not None, f"no declaration for {tool}"
+    registry = ToolRegistry()
+    register_direct_web_tools(registry)
+    bind_direct_web_handlers(registry)
+    dispatcher = ToolDispatcher(registry)
 
-    research = next(t for t in tools if getattr(t, "name", "") == "research_fact")
-    params = research._get_declaration().parameters
-    assert set(params.properties.keys()) == {"question"}
+    tools = build_adk_function_tools_for_registry(
+        registry,
+        dispatcher,
+        mode="act",
+        tool_context_factory=lambda _ctx: ToolContext(bot_id="b", turn_id="t"),
+        attach_enabled=True,
+    )
+    by_name = {getattr(t, "name", ""): t for t in tools}
+    assert {"web_search", "web_fetch", "research_fact"}.issubset(by_name)
+    for tool in by_name.values():
+        assert tool._get_declaration() is not None
+
+    research_params = by_name["research_fact"]._get_declaration().parameters
+    arguments = research_params.properties["arguments"]
+    assert set(arguments.properties.keys()) == {"question"}
 
 
 # ---------------------------------------------------------------------------
@@ -929,8 +951,14 @@ def test_serpapi_search_raw_failsoft_on_network_error(
 
     data = serpapi_search_raw("q")
 
-    assert "error" in data
-    assert "refused" in str(data["error"]) or "URLError" in str(data["error"])
+    # A-4: mapped to a safe code; never the raw repr (which could carry the key).
+    assert str(data.get("error")) in {
+        "provider_error",
+        "provider_timeout",
+        "provider_unauthorized",
+        "provider_rate_limited",
+    }
+    assert "URLError(" not in str(data["error"])
 
 
 def test_serpapi_error_body_becomes_error_dict_and_error_string(
@@ -1009,19 +1037,23 @@ def test_web_search_raw_dispatches_to_brave_when_flag_points_elsewhere(
 def test_build_web_search_tools_serpapi_satisfies_search_side(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """SERPAPI key + provider flag + FIRECRAWL key, NO Brave key → 3 tools."""
-    from magi_agent.tools.web_search_tools import build_web_search_tools
+    """SERPAPI + provider flag + FIRECRAWL (NO Brave) satisfies the manifest gate.
+
+    A-2: the deprecated shim still returns []; the gate that drives
+    dispatcher-backed manifest registration is satisfied.
+    """
+    from magi_agent.tools.web_search_tools import (
+        build_web_search_tools,
+        direct_web_tools_available,
+    )
 
     _clear_item06_env(monkeypatch)
     monkeypatch.setenv("MAGI_WEB_SEARCH_PROVIDER", "serpapi")
     monkeypatch.setenv("SERPAPI_API_KEY", _FAKE_SERPAPI_KEY)
     monkeypatch.setenv("FIRECRAWL_API_KEY", "fc-key")
 
-    tools = build_web_search_tools()
-
-    assert len(tools) == 3
-    names = {getattr(t, "name", "") for t in tools}
-    assert names == {"web_search", "web_fetch", "research_fact"}
+    assert build_web_search_tools() == []
+    assert direct_web_tools_available() is True
 
 
 def test_build_web_search_tools_serpapi_without_firecrawl_returns_empty(
@@ -1501,3 +1533,179 @@ def test_web_research_guidance_block_matrix() -> None:
     assert web_research_guidance_block(
         {_GUIDANCE_FLAG: "garbage", "BRAVE_API_KEY": brave, "FIRECRAWL_API_KEY": firecrawl}
     ) == ""
+
+
+# ---------------------------------------------------------------------------
+# A-3: web_fetch applies the native url_policy_error SSRF firewall
+# ---------------------------------------------------------------------------
+
+_BLOCKED_URLS = [
+    "http://169.254.169.254/latest/meta-data/",
+    "http://localhost/admin",
+    "http://10.0.0.1/internal",
+    "file:///etc/passwd",
+    "http://user:pass@evil.example.com/",
+]
+
+
+@pytest.mark.parametrize("blocked_url", _BLOCKED_URLS)
+def test_web_fetch_blocks_ssrf_urls_without_calling_firecrawl(
+    blocked_url: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Blocked URLs return a ``url_policy_error`` and never reach Firecrawl."""
+    from magi_agent.tools import web_search_tools
+
+    monkeypatch.setenv("FIRECRAWL_API_KEY", "fc-key")
+
+    called = {"firecrawl": False}
+
+    def _spy_firecrawl(url: str) -> dict[str, object]:
+        called["firecrawl"] = True
+        return {"data": {"markdown": "should not happen"}}
+
+    monkeypatch.setattr(web_search_tools, "_firecrawl_fetch_raw", _spy_firecrawl)
+
+    raw = web_search_tools.web_fetch_raw(blocked_url)
+    assert raw.get("error") == "url_policy_error"
+    assert called["firecrawl"] is False
+
+    text = web_search_tools.web_fetch(blocked_url)
+    assert "url_policy_error" in text
+    assert called["firecrawl"] is False
+
+
+def test_web_fetch_allows_public_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Regression: a plain public URL still reaches Firecrawl and returns content."""
+    from magi_agent.tools import web_search_tools
+
+    monkeypatch.setenv("FIRECRAWL_API_KEY", "fc-key")
+    opener = _CapturingOpener(_firecrawl_response("hello public page"))
+    monkeypatch.setattr("urllib.request.urlopen", opener)
+
+    text = web_search_tools.web_fetch("https://example.com/article")
+    assert "hello public page" in text
+    assert opener.captured_requests  # firecrawl was actually called
+
+
+# ---------------------------------------------------------------------------
+# A-4: provider exceptions map to safe codes; secrets never surface
+# ---------------------------------------------------------------------------
+
+_SAFE_PROVIDER_CODES = {
+    "provider_error",
+    "provider_timeout",
+    "provider_unauthorized",
+    "provider_rate_limited",
+}
+
+
+def test_brave_exception_does_not_leak_secret_or_repr(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from magi_agent.tools import web_search_tools
+
+    monkeypatch.setenv("BRAVE_API_KEY", "brave-secret-xyz")
+
+    def _raise(*_a: object, **_k: object) -> object:
+        raise RuntimeError("boom token=brave-secret-xyz at 0x7f")
+
+    monkeypatch.setattr("urllib.request.urlopen", _raise)
+
+    data = web_search_tools._brave_search_raw("q")
+    error = str(data.get("error"))
+    assert "brave-secret-xyz" not in error
+    assert "RuntimeError(" not in error  # no repr(exc)
+    assert error in _SAFE_PROVIDER_CODES
+
+
+def test_firecrawl_exception_does_not_leak_secret_or_repr(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from magi_agent.tools import web_search_tools
+
+    monkeypatch.setenv("FIRECRAWL_API_KEY", "fc-secret-abc")
+
+    def _raise(*_a: object, **_k: object) -> object:
+        raise RuntimeError("fail Bearer fc-secret-abc")
+
+    monkeypatch.setattr("urllib.request.urlopen", _raise)
+
+    data = web_search_tools._firecrawl_fetch_raw("https://example.com/")
+    error = str(data.get("error"))
+    assert "fc-secret-abc" not in error
+    assert "RuntimeError(" not in error
+    assert error in _SAFE_PROVIDER_CODES
+
+
+def test_brave_http_error_maps_to_unauthorized_code(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from magi_agent.tools import web_search_tools
+
+    monkeypatch.setenv("BRAVE_API_KEY", "k")
+
+    def _raise(*_a: object, **_k: object) -> object:
+        raise urllib.error.HTTPError(
+            url="https://api.search.brave.com",
+            code=401,
+            msg="Unauthorized",
+            hdrs=None,  # type: ignore[arg-type]
+            fp=None,
+        )
+
+    monkeypatch.setattr("urllib.request.urlopen", _raise)
+    data = web_search_tools._brave_search_raw("q")
+    assert data.get("error") == "provider_unauthorized"
+
+
+def test_brave_http_error_maps_to_rate_limited_code(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from magi_agent.tools import web_search_tools
+
+    monkeypatch.setenv("BRAVE_API_KEY", "k")
+
+    def _raise(*_a: object, **_k: object) -> object:
+        raise urllib.error.HTTPError(
+            url="https://api.search.brave.com",
+            code=429,
+            msg="Too Many Requests",
+            hdrs=None,  # type: ignore[arg-type]
+            fp=None,
+        )
+
+    monkeypatch.setattr("urllib.request.urlopen", _raise)
+    data = web_search_tools._brave_search_raw("q")
+    assert data.get("error") == "provider_rate_limited"
+
+
+def test_serpapi_exception_does_not_leak_api_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from magi_agent.tools import web_search_tools
+
+    monkeypatch.setenv("SERPAPI_API_KEY", _FAKE_SERPAPI_KEY)
+
+    def _raise(*_a: object, **_k: object) -> object:
+        raise RuntimeError(f"upstream failed url=...&api_key={_FAKE_SERPAPI_KEY}")
+
+    monkeypatch.setattr("urllib.request.urlopen", _raise)
+
+    data = web_search_tools._serpapi_search_raw_impl("q")
+    # No value in the returned dict may contain the api key.
+    for value in data.values():
+        assert _FAKE_SERPAPI_KEY not in str(value)
+    assert str(data.get("error")) in _SAFE_PROVIDER_CODES
+
+
+def test_research_fact_search_failure_does_not_leak_repr(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from magi_agent.tools import web_search_tools
+
+    def _boom(_q: str) -> dict[str, object]:
+        raise RuntimeError("secret-leak-token-987")
+
+    out = web_search_tools.research_fact("q", search_fn=_boom)
+    assert "secret-leak-token-987" not in out
+    assert "RuntimeError(" not in out

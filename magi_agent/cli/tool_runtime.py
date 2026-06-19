@@ -162,6 +162,19 @@ def build_cli_tool_runtime(
 
     register_select_recipe_tool(registry)
 
+    # Direct Brave/SerpAPI + Firecrawl web tools, routed THROUGH the dispatcher
+    # (A-2). Key-gated to the same provider-key presence the old direct-append
+    # path used, so keyless installs are byte-identical (no manifest registered
+    # → no tool exposed). Replaces the previous bare-FunctionTool append that
+    # bypassed URL policy, egress accounting, receipts, and redaction.
+    from magi_agent.plugins.native.web import (  # noqa: PLC0415
+        bind_direct_web_handlers,
+        register_direct_web_tools,
+    )
+
+    if register_direct_web_tools(registry):
+        bind_direct_web_handlers(registry)
+
     receipt_store = general_automation_receipts or GeneralAutomationReceiptLedgerStore()
     # First-party activity capture: pass the bundled producer pack's static refs
     # (computed ONCE here at construction, never per-dispatch) plus the runtime's
@@ -271,13 +284,9 @@ def build_cli_adk_tools(
         tool_context_factory=runtime.tool_context_factory,
         attach_enabled=True,
     )
-    # Fast direct web tools auto-activate on provider-key presence (the builder
-    # is key-gated and returns [] without BRAVE+FIRECRAWL keys, so keyless
-    # installs are byte-identical). These previously existed with zero
-    # consumers — a fresh install with keys still had no live web capability.
-    from magi_agent.tools.web_search_tools import build_web_search_tools  # noqa: PLC0415
-
-    tools = [*tools, *build_web_search_tools()]
+    # Direct web tools (web_search/web_fetch/research_fact) are registered as
+    # dispatcher-backed manifests inside build_cli_tool_runtime (A-2), so they
+    # are already part of ``tools`` above — no out-of-dispatcher append here.
     return wrap_cli_adk_tools_with_evidence_collector(
         tools,
         collector=local_tool_evidence_collector,
@@ -558,18 +567,9 @@ def build_tool_advertisement_block(*, workspace_root: str | None = None) -> str:
             lines.append(f"  {manifest.name} [{manifest.permission}] — {desc}")
             seen_names.add(manifest.name)
 
-        from magi_agent.tools.web_search_tools import build_web_search_tools  # noqa: PLC0415
-
-        for tool in build_web_search_tools():
-            name = getattr(tool, "name", None)
-            if not isinstance(name, str) or not name or name in seen_names:
-                continue
-            func = getattr(tool, "func", None)
-            raw_doc = getattr(func, "__doc__", None)
-            desc = str(raw_doc or "Direct web research tool.").strip().split("\n")[0].rstrip()
-            lines.append(f"  {name} [net] — {desc}")
-            seen_names.add(name)
-
+        # Direct web tools (web_search/web_fetch/research_fact) are now registered
+        # as dispatcher-backed manifests in the registry (A-2), so they appear in
+        # the loop above — no separate out-of-dispatcher advertisement needed.
         if not lines:
             return ""
 
