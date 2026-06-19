@@ -56,18 +56,6 @@ def test_ledger_orchestrator_run_returns_none_when_disabled(
     )
 
 
-def test_ledger_orchestrator_config_default_off_literal() -> None:
-    """``LedgerOrchestratorConfig.default_off`` is the Literal[True] authority flag."""
-    from magi_agent.recipes.ledger_orchestrator import LedgerOrchestratorConfig
-    from magi_agent.recipes.ledger_budget import default_gaia_policy
-
-    config = LedgerOrchestratorConfig(budget_policy=default_gaia_policy(2))
-    assert config.default_off is True, (
-        "LedgerOrchestratorConfig.default_off must be Literal[True] — "
-        "it is the authority flag signalling this capability is default-OFF."
-    )
-
-
 # ---------------------------------------------------------------------------
 # DeepResearchConfig — default OFF
 # ---------------------------------------------------------------------------

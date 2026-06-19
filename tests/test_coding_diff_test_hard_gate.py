@@ -37,12 +37,6 @@ from magi_agent.recipes.coding_evidence_gate import (
     CodingEvidenceGateConfig,
     CodingEvidenceGateRequest,
 )
-from magi_agent.shadow.coding_verification_evidence_contract import (
-    CodingVerificationEvidenceCase,
-    CodingVerificationEvidenceFixture,
-    CodingVerificationEvidenceProjection,
-    project_coding_verification_evidence_fixture,
-)
 
 
 # ---------------------------------------------------------------------------

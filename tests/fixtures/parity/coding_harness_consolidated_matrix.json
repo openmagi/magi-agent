@@ -154,8 +154,7 @@
       "coveredByFiles": [
         "magi_agent/harness/general_automation/shell_policy.py",
         "magi_agent/harness/general_automation/shell_receipts.py",
-        "magi_agent/plugins/shell_testrun_safe_subset.py",
-        "magi_agent/shadow/path_shell_policy_contract.py"
+        "magi_agent/plugins/shell_testrun_safe_subset.py"
       ],
       "coveredByTests": [
         "tests/test_coding_bash_safe_subset.py",

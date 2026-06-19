@@ -422,10 +422,6 @@
           "state": "existing"
         },
         {
-          "path": "tests/test_patch_file_policy_contract_golden_fixtures.py",
-          "state": "existing"
-        },
-        {
           "path": "tests/test_priority_e_workspace_mutation_boundary.py",
           "state": "existing"
         },
@@ -522,10 +518,6 @@
           "state": "existing"
         },
         {
-          "path": "tests/test_path_shell_policy_contract_golden_fixtures.py",
-          "state": "existing"
-        },
-        {
           "path": "magi_agent/plugins/shell_testrun_safe_subset.py",
           "state": "existing"
         },
@@ -570,10 +562,6 @@
         },
         {
           "path": "tests/test_spreadsheet_tools.py",
-          "state": "existing"
-        },
-        {
-          "path": "tests/test_office_automation_contract_golden_fixtures.py",
           "state": "existing"
         },
         {

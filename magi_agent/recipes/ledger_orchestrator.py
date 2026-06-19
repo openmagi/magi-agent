@@ -142,9 +142,6 @@ class LedgerOrchestratorConfig(BaseModel):
     orchestration_mode: Literal["single_agent"] = "single_agent"
     """Orchestration mode.  Only ``"single_agent"`` is supported in Phase 3."""
 
-    default_off: Literal[True] = True
-    """Authority flag — this capability is default-OFF."""
-
 
 # ---------------------------------------------------------------------------
 # Orchestrator result
