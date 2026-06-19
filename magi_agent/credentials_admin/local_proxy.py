@@ -45,6 +45,53 @@ logger = logging.getLogger(__name__)
 
 _VAULT_INSTALL_HINT = "install magi-agent[vault]"
 
+# Process-local record of the most-recent credential-proxy fault. This is
+# redacted-by-construction (no vault ref, plaintext, exception text, body, or
+# full credential id) and surfaced read-only by ``/v1/vault/status`` for
+# admin/dashboard visibility. It is intentionally NOT durable: a single most-
+# recent fault in-memory is enough for an operator to notice a fail-closed block.
+_PROXY_FAULT_REASON_CODES = ("secret_missing", "secret_undecryptable")
+_last_proxy_fault: dict[str, str] | None = None
+_proxy_fault_lock = threading.Lock()
+
+
+def record_credential_proxy_fault(
+    *, credential_id: str, target_host: str, reason_code: str
+) -> None:
+    """Record (redacted) that the proxy fail-closed-blocked an egress request.
+
+    Keeps ONLY the last-4 chars of the credential id, the target host, the
+    reason code, and a UTC timestamp. NEVER the vault ref, plaintext, exception
+    text, request body, or full credential id.
+    """
+    from datetime import datetime, timezone
+
+    if reason_code not in _PROXY_FAULT_REASON_CODES:
+        reason_code = "secret_missing"
+    suffix = (credential_id or "")[-4:]
+    fault = {
+        "credentialIdSuffix": suffix,
+        "targetHost": target_host or "",
+        "reasonCode": reason_code,
+        "createdAt": datetime.now(timezone.utc).isoformat(),
+    }
+    global _last_proxy_fault
+    with _proxy_fault_lock:
+        _last_proxy_fault = fault
+
+
+def last_proxy_fault() -> dict[str, str] | None:
+    """Return the most-recent redacted proxy fault (or None). Read-only copy."""
+    with _proxy_fault_lock:
+        return dict(_last_proxy_fault) if _last_proxy_fault is not None else None
+
+
+def clear_proxy_faults() -> None:
+    """Clear the recorded fault (test seam / operator reset)."""
+    global _last_proxy_fault
+    with _proxy_fault_lock:
+        _last_proxy_fault = None
+
 
 class LocalProxyUnavailable(RuntimeError):
     """Raised when the local proxy is requested but mitmproxy is not installed."""
@@ -134,13 +181,31 @@ class CredentialInjectionAddon:
         # local expression, and drop the reference at the end of the frame. The
         # secret is never logged, returned, or attached to the decision/flow
         # metadata.
-        secret = self._vault.get_secret(decision.vault_ref)
+        try:
+            secret = self._vault.get_secret(decision.vault_ref)
+        except Exception:  # noqa: BLE001 - any vault/decrypt error → fail closed
+            # The secret is undecryptable (bad key, corrupt ciphertext, I/O).
+            # Fail CLOSED: block the request rather than forward it
+            # unauthenticated. Never surface the exception text (may carry
+            # ciphertext/path detail).
+            logger.warning("local proxy: vault decrypt raised; blocking egress")
+            self._block_missing_secret(
+                flow, decision.credential_id,
+                reason_code="secret_undecryptable",
+            )
+            return
         if not secret:
             # Active credential but the ciphertext is missing/undecryptable. Fail
-            # closed: do not inject, do not forward a request the user expected to
-            # be authenticated. Pass through untouched (no secret to leak).
+            # CLOSED: do not inject, and do NOT forward a request the user
+            # expected to be authenticated — block upstream with a 502 so an
+            # unauthenticated egress (with whatever body/query the bot sent)
+            # never leaves the proxy. No secret to leak in the block path.
             logger.warning(
-                "local proxy: vault_ref had no decryptable secret; passing through"
+                "local proxy: vault_ref had no decryptable secret; blocking egress"
+            )
+            self._block_missing_secret(
+                flow, decision.credential_id,
+                reason_code="secret_missing",
             )
             return
         try:
@@ -174,6 +239,32 @@ class CredentialInjectionAddon:
                     "credential_id": credential_id,
                 }
             ),
+            {"Content-Type": "application/json"},
+        )
+
+    def _block_missing_secret(  # noqa: ANN001
+        self, flow, credential_id: str, *, reason_code: str
+    ) -> None:
+        # Fail-closed block for a MATCHED credential whose secret is
+        # missing/undecryptable. The original request is NOT forwarded upstream;
+        # a 502 is returned instead. Record a redacted fault for admin
+        # visibility. The block body carries NO secret material or vault ref.
+        host = ""
+        try:
+            host = flow.request.pretty_host
+        except Exception:  # noqa: BLE001 - host is best-effort metadata only
+            host = ""
+        record_credential_proxy_fault(
+            credential_id=credential_id,
+            target_host=host,
+            reason_code=reason_code,
+        )
+
+        from mitmproxy import http  # lazy: only needed when actually blocking
+
+        flow.response = http.Response.make(
+            502,
+            json.dumps({"error": "credential_secret_unavailable"}),
             {"Content-Type": "application/json"},
         )
 

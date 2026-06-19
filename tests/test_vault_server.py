@@ -50,14 +50,46 @@ def test_status_requires_token(tmp_path: Path) -> None:
 
 
 def test_status_with_token(tmp_path: Path) -> None:
+    from magi_agent.credentials_admin import local_proxy
+
+    local_proxy.clear_proxy_faults()
     client = _make_client(tmp_path)
     resp = client.get(
         "/v1/vault/status", headers={"x-gateway-token": _TOKEN}
     )
     assert resp.status_code == 200
     body = resp.json()
-    assert set(body) == {"present", "healthy"}
+    # No fault recorded → lastProxyFault is absent (or null).
+    assert {"present", "healthy"} <= set(body)
+    assert body.get("lastProxyFault") is None
     assert body["present"] is True
+
+
+def test_status_surfaces_redacted_last_proxy_fault(tmp_path: Path) -> None:
+    """When the credential proxy hit a missing/undecryptable secret, the admin
+    status surfaces a REDACTED lastProxyFault (no secret material / vault ref)."""
+    from magi_agent.credentials_admin import local_proxy
+
+    local_proxy.clear_proxy_faults()
+    try:
+        local_proxy.record_credential_proxy_fault(
+            credential_id="cred-secret-9999",
+            target_host="api.notion.com",
+            reason_code="secret_missing",
+        )
+        client = _make_client(tmp_path)
+        resp = client.get(
+            "/v1/vault/status", headers={"x-gateway-token": _TOKEN}
+        )
+        assert resp.status_code == 200
+        fault = resp.json()["lastProxyFault"]
+        assert fault["reasonCode"] == "secret_missing"
+        assert fault["targetHost"] == "api.notion.com"
+        assert fault["credentialIdSuffix"] == "9999"
+        assert "cred-secret" not in str(fault)
+        assert "createdAt" in fault
+    finally:
+        local_proxy.clear_proxy_faults()
 
 
 def test_create_requires_token(tmp_path: Path) -> None:

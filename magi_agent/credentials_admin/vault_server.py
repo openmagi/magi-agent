@@ -165,7 +165,19 @@ def build_vault_admin_app(*, admin_token: str, store_dir: Path | str) -> FastAPI
         if unauthorized is not None:
             return unauthorized
         present = _vault(store_path).is_provisioned()
-        return JSONResponse(content={"present": present, "healthy": present})
+        # Surface the most-recent redacted credential-proxy fault (if any) so an
+        # operator can see when the proxy fail-closed-blocked an egress request
+        # because a matched credential's secret was missing/undecryptable. The
+        # recorder holds NO secret material (suffix + host + reason + timestamp).
+        from magi_agent.credentials_admin.local_proxy import last_proxy_fault
+
+        return JSONResponse(
+            content={
+                "present": present,
+                "healthy": present,
+                "lastProxyFault": last_proxy_fault(),
+            }
+        )
 
     @app.post("/v1/vault/credentials")
     async def create_credential(request: Request) -> JSONResponse:
