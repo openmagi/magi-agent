@@ -43,6 +43,40 @@ def test_events_and_runs_endpoints(tmp_path):
     assert rn["runs"][0]["outcome"] == "completed"
 
 
+def test_no_token_configured_denies_all(tmp_path):
+    """Security: when no gateway token is configured, all requests must be denied."""
+    class _NoTokenRuntime:
+        class config:
+            gateway_token = None
+
+    s = SqliteWorkQueueStore(tmp_path / "wq.db")
+    s.create(WorkTask(id="t", title="x", status="ready", created_at=1))
+    app = FastAPI()
+    app.include_router(build_work_queue_board_router(s, _NoTokenRuntime()))
+    client = TestClient(app)
+
+    # No Authorization header → 401
+    assert client.get("/api/work-queue/v1/tasks").status_code == 401
+
+    # With Authorization header (even with a token) → still 401 (fail-closed)
+    assert (
+        client.get(
+            "/api/work-queue/v1/tasks",
+            headers={"Authorization": "Bearer anything"},
+        ).status_code
+        == 401
+    )
+
+    # Same for task detail
+    assert (
+        client.get(
+            "/api/work-queue/v1/tasks/t",
+            headers={"Authorization": "Bearer anything"},
+        ).status_code
+        == 401
+    )
+
+
 def test_board_api_gate_default_off(monkeypatch):
     from magi_agent.missions.work_queue.board_api import is_work_queue_board_api_enabled
     monkeypatch.delenv("MAGI_WORK_QUEUE_BOARD_API_ENABLED", raising=False)
