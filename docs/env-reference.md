@@ -110,6 +110,7 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 - `MAGI_VISION_MODEL` (no default) — Vision-sidecar model override for image_understand (bare model id, same semantics as MAGI_MODEL); unset keeps the main provider/model.
 - `MAGI_VISION_PROVIDER` (no default) — Optional provider for MAGI_VISION_MODEL (anthropic|openai|gemini|fireworks); unset inherits the main provider's credentials.
 - `MAGI_WORKER_ROUTING_LLM_ENABLED` (default off) — Honour a planner-emitted worker_role for subagent routing instead of keyword inference; strict default-OFF (OFF is byte-identical to today).
+- `MAGI_WORK_QUEUE_ADK_RUNNER_ENABLED` (default off) — Enable the real AdkWorkTaskRunner inside the work-queue gateway watcher: drives each claimed task through the local ADK runner (OpenMagiRunnerAdapter) instead of the safe stub. Requires MAGI_WORK_QUEUE_EXECUTOR_ENABLED. Default-OFF; when off (or when the executor flag is off) the gateway keeps the SafeLocalWorkTaskRunner stub — byte-identical to today. Construction failure falls back to the stub with a logged warning (never crashes startup).
 - `MAGI_WORK_QUEUE_BOARD_API_ENABLED` (default off) — Mount the read-only work-queue board HTTP API.
 - `MAGI_WORK_QUEUE_ENABLED` (default off) — Enable the durable multi-agent work-queue (task board + dispatcher).
 - `MAGI_WORK_QUEUE_EXECUTOR_ENABLED` (default off) — Enable the durable work-queue dispatcher tick loop.

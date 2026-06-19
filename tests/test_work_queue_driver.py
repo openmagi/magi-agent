@@ -300,6 +300,112 @@ def test_run_once_no_key_never_short_circuits() -> None:
     assert runner.calls == 1 and res.short_circuited == 0
 
 
+# ---------------------------------------------------------------------------
+# ADK runner gate tests (Task 2 — P6a gateway wiring)
+# ---------------------------------------------------------------------------
+
+
+def test_adk_runner_gate_default_off() -> None:
+    """is_work_queue_adk_runner_enabled() is False by default; True when env=1."""
+    from magi_agent.gateway.watchers import is_work_queue_adk_runner_enabled
+
+    os.environ.pop("MAGI_WORK_QUEUE_ADK_RUNNER_ENABLED", None)
+    assert is_work_queue_adk_runner_enabled() is False
+
+    os.environ["MAGI_WORK_QUEUE_ADK_RUNNER_ENABLED"] = "1"
+    try:
+        assert is_work_queue_adk_runner_enabled() is True
+    finally:
+        os.environ.pop("MAGI_WORK_QUEUE_ADK_RUNNER_ENABLED", None)
+
+    assert is_work_queue_adk_runner_enabled() is False
+
+
+def test_build_local_work_queue_driver_uses_safe_stub_when_adk_flag_off() -> None:
+    """When MAGI_WORK_QUEUE_ADK_RUNNER_ENABLED is unset, the inner runner
+    must be SafeLocalWorkTaskRunner (not AdkWorkTaskRunner)."""
+    from magi_agent.gateway.watchers import build_local_work_queue_driver  # noqa: PLC0415
+    from magi_agent.missions.work_queue.runner import SafeLocalWorkTaskRunner
+
+    os.environ.pop("MAGI_WORK_QUEUE_ADK_RUNNER_ENABLED", None)
+    os.environ.pop("MAGI_WORK_QUEUE_EXECUTOR_ENABLED", None)
+    driver = build_local_work_queue_driver()
+    # GoalModeRunner._inner must be SafeLocalWorkTaskRunner
+    inner = driver._runner._inner
+    assert isinstance(inner, SafeLocalWorkTaskRunner), (
+        f"expected SafeLocalWorkTaskRunner, got {type(inner)}"
+    )
+
+
+def test_build_local_work_queue_driver_uses_adk_runner_when_both_flags_on(
+    monkeypatch,
+) -> None:
+    """When BOTH flags are on and OpenMagiRunnerAdapter construction succeeds,
+    the inner runner must be AdkWorkTaskRunner."""
+    import magi_agent.gateway.watchers as _watchers
+    from magi_agent.missions.work_queue.adk_work_task_runner import AdkWorkTaskRunner
+
+    class _FakeAdapter:
+        async def collect_events(self, turn_input):  # noqa: ANN001
+            return []
+
+    monkeypatch.setattr(
+        _watchers,
+        "_build_real_adk_adapter",
+        lambda: _FakeAdapter(),
+    )
+
+    os.environ["MAGI_WORK_QUEUE_EXECUTOR_ENABLED"] = "1"
+    os.environ["MAGI_WORK_QUEUE_ADK_RUNNER_ENABLED"] = "1"
+    try:
+        driver = _watchers.build_local_work_queue_driver()
+    finally:
+        os.environ.pop("MAGI_WORK_QUEUE_EXECUTOR_ENABLED", None)
+        os.environ.pop("MAGI_WORK_QUEUE_ADK_RUNNER_ENABLED", None)
+
+    inner = driver._runner._inner
+    assert isinstance(inner, AdkWorkTaskRunner), (
+        f"expected AdkWorkTaskRunner, got {type(inner)}"
+    )
+
+
+def test_adk_runner_construction_failure_falls_back_to_stub_with_warning(
+    monkeypatch, caplog
+) -> None:
+    """When OpenMagiRunnerAdapter construction raises, build_local_work_queue_driver
+    must NOT propagate the exception — it must log a warning and return a driver
+    backed by SafeLocalWorkTaskRunner."""
+    import logging
+    import magi_agent.gateway.watchers as _watchers
+    from magi_agent.missions.work_queue.runner import SafeLocalWorkTaskRunner
+
+    def _raising():
+        raise RuntimeError("no provider key configured")
+
+    monkeypatch.setattr(_watchers, "_build_real_adk_adapter", _raising)
+
+    os.environ["MAGI_WORK_QUEUE_EXECUTOR_ENABLED"] = "1"
+    os.environ["MAGI_WORK_QUEUE_ADK_RUNNER_ENABLED"] = "1"
+    try:
+        with caplog.at_level(logging.WARNING, logger="magi_agent.gateway.watchers"):
+            driver = _watchers.build_local_work_queue_driver()
+    finally:
+        os.environ.pop("MAGI_WORK_QUEUE_EXECUTOR_ENABLED", None)
+        os.environ.pop("MAGI_WORK_QUEUE_ADK_RUNNER_ENABLED", None)
+
+    # No exception must propagate
+    assert driver is not None
+    # Inner runner must be the safe stub
+    inner = driver._runner._inner
+    assert isinstance(inner, SafeLocalWorkTaskRunner), (
+        f"expected SafeLocalWorkTaskRunner after construction failure, got {type(inner)}"
+    )
+    # A warning must have been logged
+    assert any("MAGI_WORK_QUEUE_ADK_RUNNER_ENABLED" in r.message or "adk" in r.message.lower() for r in caplog.records), (
+        f"expected a warning about ADK runner fallback, got: {[r.message for r in caplog.records]}"
+    )
+
+
 def test_goal_mode_task_end_to_end_via_driver() -> None:
     """Prove the driver drives a GoalModeRunner with no driver changes.
 

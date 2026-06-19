@@ -185,21 +185,46 @@ class _SafeLocalGoalJudge:
 def build_local_work_queue_driver() -> Any:
     """Build the local work-queue driver used by ``magi gateway start``.
 
-    Composes ``SqliteWorkQueueStore``, ``SafeLocalWorkTaskRunner`` (inner), and
-    ``GoalModeRunner`` (outer wrapper).  The runner is a safe stub: no ADK
-    authority or network client is constructed.  The ``GoalModeRunner`` is
-    inert by default because the inner runner returns ``failed`` on turn 1 so
-    the goal loop bails immediately and never calls the judge.
+    Composes ``SqliteWorkQueueStore``, an inner ``WorkTaskRunner``, and
+    ``GoalModeRunner`` (outer wrapper).
 
-    Live execution requires explicit operator wiring in a future phase.
+    Runner selection
+    ----------------
+    * Default (either flag off): ``SafeLocalWorkTaskRunner`` — no ADK
+      authority or network client is constructed; ``GoalModeRunner`` is
+      inert because the stub returns ``failed`` on turn 1.
+    * When BOTH ``MAGI_WORK_QUEUE_EXECUTOR_ENABLED`` AND
+      ``MAGI_WORK_QUEUE_ADK_RUNNER_ENABLED`` are on: lazily construct the
+      real ``OpenMagiRunnerAdapter`` and wrap it in ``AdkWorkTaskRunner``.
+      Construction is attempted once; if it raises (e.g. no provider key)
+      a clear warning is logged and the safe stub is used instead — the
+      gateway never crashes on startup due to this fallback.
     """
     from magi_agent.missions.work_queue.store import SqliteWorkQueueStore  # noqa: PLC0415
     from magi_agent.missions.work_queue.runner import SafeLocalWorkTaskRunner, GoalModeRunner  # noqa: PLC0415
     from magi_agent.missions.work_queue.driver import WorkQueueDriver  # noqa: PLC0415
 
+    inner: Any = SafeLocalWorkTaskRunner()
+
+    if is_work_queue_executor_enabled() and is_work_queue_adk_runner_enabled():
+        try:
+            adapter = _build_real_adk_adapter()
+            from magi_agent.missions.work_queue.adk_work_task_runner import AdkWorkTaskRunner  # noqa: PLC0415
+
+            inner = AdkWorkTaskRunner(adapter)
+            _log.info("work-queue: AdkWorkTaskRunner active (MAGI_WORK_QUEUE_ADK_RUNNER_ENABLED=1)")
+        except Exception:  # noqa: BLE001 — soft failure; never crash gateway startup
+            _log.warning(
+                "work-queue: MAGI_WORK_QUEUE_ADK_RUNNER_ENABLED=1 but "
+                "OpenMagiRunnerAdapter construction failed — falling back to "
+                "SafeLocalWorkTaskRunner. Check provider key configuration.",
+                exc_info=True,
+            )
+            inner = SafeLocalWorkTaskRunner()
+
     return WorkQueueDriver(
         store=SqliteWorkQueueStore(_work_queue_db_path_from_env()),
-        runner=GoalModeRunner(SafeLocalWorkTaskRunner(), _SafeLocalGoalJudge()),
+        runner=GoalModeRunner(inner, _SafeLocalGoalJudge()),
         claimer=_work_queue_claimer_from_env(),
     )
 
@@ -249,6 +274,28 @@ def build_work_queue_watcher(
 # ---------------------------------------------------------------------------
 # Work-queue notify watcher — tails terminal events and pushes via injected sink
 # ---------------------------------------------------------------------------
+
+def is_work_queue_adk_runner_enabled() -> bool:
+    """Return True iff ``MAGI_WORK_QUEUE_ADK_RUNNER_ENABLED`` is set and truthy."""
+    from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+
+    return flag_bool("MAGI_WORK_QUEUE_ADK_RUNNER_ENABLED")
+
+
+def _build_real_adk_adapter() -> Any:
+    """Lazily construct an ``OpenMagiRunnerAdapter`` for the work-queue runner.
+
+    Imported and constructed inside this helper so that:
+    - ``watchers.py`` never imports ``google.adk`` at module top level.
+    - The builder is monkeypatch-able in tests (the test replaces this function
+      on the ``magi_agent.gateway.watchers`` module).
+
+    Raises on construction failure — the caller wraps in try/except.
+    """
+    from magi_agent.adk_bridge.runner_adapter import OpenMagiRunnerAdapter  # noqa: PLC0415
+
+    return OpenMagiRunnerAdapter()
+
 
 def is_work_queue_notify_enabled() -> bool:
     """Return True iff ``MAGI_WORK_QUEUE_NOTIFY_ENABLED`` is set and truthy."""
@@ -450,6 +497,7 @@ __all__ = [
     "build_work_queue_notify_watcher",
     "build_work_queue_watcher",
     "is_scheduler_executor_enabled",
+    "is_work_queue_adk_runner_enabled",
     "is_work_queue_executor_enabled",
     "is_work_queue_notify_enabled",
 ]

@@ -119,6 +119,7 @@ graph LR
     gates --> runtime
     gates --> shadow
     gates --> tools
+    gateway --> adk_bridge
     gateway --> channels
     gateway --> config
     gateway --> harness
@@ -162,6 +163,7 @@ graph LR
     meta_orchestration --> evidence
     meta_orchestration --> harness
     meta_orchestration --> runtime
+    missions --> adk_bridge
     missions --> config
     missions --> harness
     missions --> runtime
@@ -315,7 +317,7 @@ graph LR
 | policy_boundary.py | — | control | — |
 | primitives.py | — | — | runtime/openmagi_runtime.py |
 | resilience_plugin.py | Live ADK resilience plugin — loop guard + multi-strategy error recovery. | context, engine, error_recovery, loop_detectors, strategies | adk_bridge/control_plane.py |
-| runner_adapter.py | — | — | cli/engine.py, harness/cron_turn_runner_adapter.py, runtime/adk_turn_runner.py, shadow/fixture_runner.py |
+| runner_adapter.py | — | — | cli/engine.py, gateway/watchers.py, harness/cron_turn_runner_adapter.py, missions/work_queue/adk_work_task_runner.py, runtime/adk_turn_runner.py, shadow/fixture_runner.py |
 | schema_feedback.py | Schema-invalid argument feedback for the live ADK Runner (R3). | context, control_plane, edit_retry_reflection | adk_bridge/control_plane.py |
 | session_service.py | — | session_store | adk_bridge/context_compaction.py, adk_bridge/local_runner.py, cli/real_runner.py, cli/session_log.py |
 | tool_adapter.py | — | concurrency, concurrent_dispatcher, context, deferred, dispatcher, env, manifest, provider_adapter, registry | cli/tests/test_tool_runtime.py, cli/tool_runtime.py, cli/wiring.py |
@@ -959,7 +961,7 @@ graph LR
 | channel_watchers.py | Operator wiring: tie a concrete channel provider to a gateway poll watcher. | channel_credentials, daemon, discord_adapter, discord_gateway, discord_live, scheduler_delivery, slack_live, slack_socketmode, slack_urllib, telegram_adapter, telegram_credentials, telegram_httpx, telegram_live, turn_bridge, watchers | gateway/watchers.py |
 | daemon.py | GatewayDaemon — the supervised asyncio watcher fleet (Track F). | health, watchers | cli/app.py, gateway/channel_watchers.py, gateway/watchers.py, ops/health.py |
 | service_install.py | OS service install for the ``magi gateway`` daemon (Track F). | — | cli/app.py |
-| watchers.py | Watcher-fleet builders — COMPOSE the existing always-on blocks (Track F). | channel_watchers, daemon, driver, flags, goal_judge, notifier, runner, scheduler_job_execution, scheduler_job_store, scheduler_loop_driver, store, turn_engine | cli/app.py, gateway/channel_watchers.py, gateway/daemon.py |
+| watchers.py | Watcher-fleet builders — COMPOSE the existing always-on blocks (Track F). | adk_work_task_runner, channel_watchers, daemon, driver, flags, goal_judge, notifier, runner, runner_adapter, scheduler_job_execution, scheduler_job_store, scheduler_loop_driver, store, turn_engine | cli/app.py, gateway/channel_watchers.py, gateway/daemon.py |
 
 ### harness/
 
@@ -997,7 +999,7 @@ graph LR
 | profiles.py | — | presets | harness/__init__.py, harness/policy_state.py, runtime/openmagi_runtime.py |
 | repair_policy.py | — | — | harness/__init__.py |
 | research_routing.py | — | research_agents | — |
-| resolved.py | — | constraint_reinjection, evidence_scope, kernel_roles, manifest, question_tool, recipe_disclosure, rollout, scope, types | (root)/facades.py, adk_bridge/callback_adapter.py, cli/hook_wiring.py, firstparty/packs/harness_coding_lean/impl.py, firstparty/packs/harness_gaia_codeact/impl.py, harness/cron_turn_runner_adapter.py, harness/engine.py, hooks/bus.py, packs/harness_projection.py, runtime/message_builder.py |
+| resolved.py | — | constraint_reinjection, evidence_scope, kernel_roles, manifest, question_tool, recipe_disclosure, rollout, scope, types | (root)/facades.py, adk_bridge/callback_adapter.py, cli/hook_wiring.py, firstparty/packs/harness_coding_lean/impl.py, firstparty/packs/harness_gaia_codeact/impl.py, harness/cron_turn_runner_adapter.py, harness/engine.py, hooks/bus.py, missions/work_queue/adk_work_task_runner.py, packs/harness_projection.py, runtime/message_builder.py |
 | scheduler_delivery.py | A4 — Delivery boundary for cron turn output. | types | channels/discord_live.py, channels/email_live.py, channels/slack_live.py, channels/telegram_live.py, gateway/channel_watchers.py, harness/scheduler_job_execution.py |
 | scheduler_executor.py | A2 — SchedulerExecutor: file-lock lease holder + at-most-once tick. | discovery, registries, schedule_grammar, scheduler_runtime | firstparty/packs/scheduler_default/impl.py, harness/scheduler_job_execution.py, harness/scheduler_job_store.py, harness/scheduler_loop_driver.py |
 | scheduler_job_execution.py | A3 — Gated ADK turn execution for due scheduler jobs (shadow-first, default off). | auto_control, scheduler_delivery, scheduler_executor, scheduler_executor_readiness, scheduler_runtime, types | gateway/watchers.py, harness/cron_turn_runner_adapter.py, harness/scheduler_loop_driver.py, ops/health.py |
@@ -1191,11 +1193,12 @@ graph LR
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
 | __init__.py | — | models | — |
+| adk_work_task_runner.py | AdkWorkTaskRunner: OpenMagiRunnerAdapter -> WorkTaskRunner bridge. | models, resolved, runner, runner_adapter | gateway/watchers.py |
 | board_api.py | Read-only FastAPI board router for the durable work-queue. | flags, store | (root)/app.py |
 | driver.py | WorkQueueDriver — the periodic dispatcher tick for the durable work-queue. | runner, store | gateway/watchers.py |
-| models.py | — | — | missions/work_queue/__init__.py, missions/work_queue/runner.py, missions/work_queue/store.py |
+| models.py | — | — | missions/work_queue/__init__.py, missions/work_queue/adk_work_task_runner.py, missions/work_queue/runner.py, missions/work_queue/store.py |
 | notifier.py | Work-queue terminal-event notifier — tail-from-now delivery via injected sink. | — | gateway/watchers.py |
-| runner.py | — | goal_judge, models | gateway/watchers.py, missions/work_queue/driver.py |
+| runner.py | — | goal_judge, models | gateway/watchers.py, missions/work_queue/adk_work_task_runner.py, missions/work_queue/driver.py |
 | store.py | — | migrations, models | gateway/watchers.py, missions/work_queue/board_api.py, missions/work_queue/driver.py |
 
 ### observability/

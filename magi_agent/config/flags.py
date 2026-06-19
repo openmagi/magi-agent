@@ -315,6 +315,17 @@ FLAGS: tuple[FlagSpec, ...] = (
             "are wired in P6). Default-OFF; when off the daemon does not poll."
         ),
     ),
+    _b(
+        "MAGI_WORK_QUEUE_ADK_RUNNER_ENABLED",
+        summary=(
+            "Enable the real AdkWorkTaskRunner inside the work-queue gateway watcher: "
+            "drives each claimed task through the local ADK runner (OpenMagiRunnerAdapter) "
+            "instead of the safe stub. Requires MAGI_WORK_QUEUE_EXECUTOR_ENABLED. "
+            "Default-OFF; when off (or when the executor flag is off) the gateway keeps "
+            "the SafeLocalWorkTaskRunner stub — byte-identical to today. Construction "
+            "failure falls back to the stub with a logged warning (never crashes startup)."
+        ),
+    ),
     FlagSpec(
         name="MAGI_SESSION_TRANSCRIPT_RETENTION_DAYS",
         default=14,
