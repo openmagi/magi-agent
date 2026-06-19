@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import hmac
 import json
 import os
 import uuid
@@ -745,7 +746,9 @@ def register_streaming_chat_routes(
         token = getattr(getattr(runtime, "config", None), "gateway_token", None)
         if not token:  # None or empty string → refuse all requests
             return False
-        return request.headers.get("authorization", "") == f"Bearer {token}"
+        # A-9: constant-time compare to avoid a timing side-channel on the token.
+        presented = request.headers.get("authorization", "")
+        return hmac.compare_digest(presented, f"Bearer {token}")
 
     # ------------------------------------------------------------------
     # Route 1 — POST /v1/chat/stream

@@ -44,6 +44,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from magi_agent.credentials_admin import approvals_store, store
+from magi_agent.credentials_admin.local_proxy import _harden_ca_key_perms
 from magi_agent.credentials_admin.local_vault import LocalVault, LocalVaultError
 
 logger = logging.getLogger(__name__)
@@ -406,17 +407,6 @@ def bootstrap_ca(*, ca_dir: Path | str, confdir: Path | str) -> Path:
     except OSError:
         pass
     return dst_cert
-
-
-def _harden_ca_key_perms(confdir: Path) -> None:
-    """chmod 0600 the mitmproxy CA private-key material in ``confdir``."""
-    for name in ("mitmproxy-ca.pem", "mitmproxy-ca-key.pem", "mitmproxy-ca.p12"):
-        target = confdir / name
-        if target.is_file():
-            try:
-                os.chmod(target, 0o600)
-            except OSError:
-                logger.debug("could not chmod %s", name)
 
 
 # -- server entrypoint --------------------------------------------------------

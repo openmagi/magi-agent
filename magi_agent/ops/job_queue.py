@@ -51,6 +51,7 @@ def _digest_payload(payload: Mapping[str, object]) -> str:
         payload,
         sort_keys=True,
         separators=(",", ":"),
+        allow_nan=False,
         default=str,
     ).encode()
     return "sha256:" + hashlib.sha256(encoded).hexdigest()
