@@ -124,6 +124,7 @@ graph LR
     gateway --> harness
     gateway --> missions
     gateway --> ops
+    gateway --> runtime
     harness --> adk_bridge
     harness --> channels
     harness --> config
@@ -183,6 +184,7 @@ graph LR
     plugins --> channels
     plugins --> config
     plugins --> knowledge
+    plugins --> missions
     plugins --> runtime
     plugins --> tools
     plugins --> web_acquisition
@@ -959,7 +961,7 @@ graph LR
 | channel_watchers.py | Operator wiring: tie a concrete channel provider to a gateway poll watcher. | channel_credentials, daemon, discord_adapter, discord_gateway, discord_live, scheduler_delivery, slack_live, slack_socketmode, slack_urllib, telegram_adapter, telegram_credentials, telegram_httpx, telegram_live, turn_bridge, watchers | gateway/watchers.py |
 | daemon.py | GatewayDaemon — the supervised asyncio watcher fleet (Track F). | health, watchers | cli/app.py, gateway/channel_watchers.py, gateway/watchers.py, ops/health.py |
 | service_install.py | OS service install for the ``magi gateway`` daemon (Track F). | — | cli/app.py |
-| watchers.py | Watcher-fleet builders — COMPOSE the existing always-on blocks (Track F). | channel_watchers, daemon, driver, flags, goal_judge, notifier, runner, scheduler_job_execution, scheduler_job_store, scheduler_loop_driver, store, turn_engine | cli/app.py, gateway/channel_watchers.py, gateway/daemon.py |
+| watchers.py | Watcher-fleet builders — COMPOSE the existing always-on blocks (Track F). | channel_watchers, child_runner_live, daemon, driver, flags, goal_judge, notifier, runner, scheduler_job_execution, scheduler_job_store, scheduler_loop_driver, store, turn_engine | cli/app.py, gateway/channel_watchers.py, gateway/daemon.py |
 
 ### harness/
 
@@ -1190,13 +1192,14 @@ graph LR
 
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
-| __init__.py | — | models | — |
+| __init__.py | — | models | missions/work_queue/runner.py, transport/chat_routes.py |
 | board_api.py | Read-only FastAPI board router for the durable work-queue. | flags, store | (root)/app.py |
 | driver.py | WorkQueueDriver — the periodic dispatcher tick for the durable work-queue. | runner, store | gateway/watchers.py |
-| models.py | — | — | missions/work_queue/__init__.py, missions/work_queue/runner.py, missions/work_queue/store.py |
+| inject_buffer.py | Per-session inject buffer shared by chat-routes and the background-task sink. | — | — |
+| models.py | — | — | missions/work_queue/__init__.py, missions/work_queue/runner.py, missions/work_queue/store.py, plugins/native/scheduled_work.py |
 | notifier.py | Work-queue terminal-event notifier — tail-from-now delivery via injected sink. | — | gateway/watchers.py |
-| runner.py | — | goal_judge, models | gateway/watchers.py, missions/work_queue/driver.py |
-| store.py | — | migrations, models | gateway/watchers.py, missions/work_queue/board_api.py, missions/work_queue/driver.py |
+| runner.py | — | child_runner_boundary, goal_judge, models, work_queue | gateway/watchers.py, missions/work_queue/driver.py |
+| store.py | — | migrations, models | gateway/watchers.py, missions/work_queue/board_api.py, missions/work_queue/driver.py, plugins/native/scheduled_work.py |
 
 ### observability/
 
@@ -1294,7 +1297,7 @@ graph LR
 | documents.py | — | _common, _file_delivery_fakes, context, contract, file_delivery, file_delivery_live, orchestrator, result, spreadsheet_tools | — |
 | knowledge.py | — | _common, context, policy, provider_boundary, result, source_tools | — |
 | missions.py | — | _common, context, env, policy, result | — |
-| scheduled_work.py | — | _common, context, env, policy, result | — |
+| scheduled_work.py | — | _common, context, env, models, policy, result, store | — |
 | skills.py | — | _common, context, env, result | cli/commands/builtins.py, transport/app_api.py |
 | source_ledger.py | — | _common, context, result | — |
 | subagents.py | — | _common, child_runner_boundary, child_runner_live, child_toolset, context, public_events, result | — |
@@ -1429,8 +1432,8 @@ graph LR
 | child_derive.py | Derive a child TurnContext from a ChildTaskRequest (spawn = recursion). | child_runner_live, turn_context | runtime/child_runner_live.py |
 | child_event_projection.py | — | child_runner_boundary, child_runtime_envelope, tool_preview | — |
 | child_governed_collector.py | Governed-stream → child-envelope adapter. | child_runner_live, contracts, events | channels/turn_engine.py, runtime/child_runner_live.py |
-| child_runner_boundary.py | — | adk_turn_runner, child_acceptance, child_runtime_envelope, model_tiers, runtime_issuance, subagent | harness/workflow_executor.py, plugins/native/subagents.py, runtime/child_event_projection.py |
-| child_runner_live.py | A REAL, model-backed local child runner for the Child Runner boundary. | child_derive, child_governed_collector, child_toolset, flags, governed_turn, local_tool_collector, model_tiers, providers, real_runner, tool_runtime, wiring | harness/workflow_executor.py, plugins/native/subagents.py, runtime/child_derive.py, runtime/child_governed_collector.py, runtime/child_runner_status.py, runtime/message_builder.py, transport/chat_shared.py |
+| child_runner_boundary.py | — | adk_turn_runner, child_acceptance, child_runtime_envelope, model_tiers, runtime_issuance, subagent | harness/workflow_executor.py, missions/work_queue/runner.py, plugins/native/subagents.py, runtime/child_event_projection.py |
+| child_runner_live.py | A REAL, model-backed local child runner for the Child Runner boundary. | child_derive, child_governed_collector, child_toolset, flags, governed_turn, local_tool_collector, model_tiers, providers, real_runner, tool_runtime, wiring | gateway/watchers.py, harness/workflow_executor.py, plugins/native/subagents.py, runtime/child_derive.py, runtime/child_governed_collector.py, runtime/child_runner_status.py, runtime/message_builder.py, transport/chat_shared.py |
 | child_runner_status.py | — | child_runner_live, child_toolset | transport/chat_routes.py, transport/health.py |
 | child_toolset.py | Child-runner toolset profile resolution (PR1, doc 07). | local_readonly | harness/workflow_executor.py, plugins/native/subagents.py, runtime/child_runner_live.py, runtime/child_runner_status.py, runtime/main_agent_profile.py |
 | commit_boundary.py | — | turn_utilities | — |
@@ -1759,7 +1762,7 @@ graph LR
 | active_turn.py | Process-local registry of in-flight streaming-chat turns. | permissions | cli/tests/test_streaming_driver.py, transport/chat_routes.py, transport/streaming_chat_route.py, transport/streaming_driver.py |
 | app_api.py | Dashboard ``/v1/app/*`` API surface. | cli, openmagi_runtime, providers, session_store, skills, tools | (root)/app.py, customize/catalog.py, transport/streaming_chat_route.py |
 | chat.py | Re-export shim for the decomposed Gate5B chat serving stack (08-PR1). | chat_routes, chat_shared, compiler, egress_critic, egress_gate, env, gate1a_egress_correlation, gate1a_readonly_tools, gate2_activation_loop_a, gate2_durable_evidence, gate2_readiness, gate2_sandbox_canary, gate5b4c3_live_runner_boundary, gate5b4c3_shadow_counter_store, gate5b4c3_shadow_generation_contract, gate5b_full_toolhost, gate8_readiness, generation_request, materializer, message_builder, observed_egress, openmagi_runtime, public_events, research_first_canary, session_identity, shadow_generations, usage_receipt_emit, user_visible_model_routing | (root)/app.py, (root)/main.py, transport/health.py, transport/streaming_chat_route.py |
-| chat_routes.py | Chat route registration and the Gate5B user-visible serving engine. | active_turn, chat_shared, child_runner_status, compiler, contracts, egress_critic, egress_gate, env, gate1a_egress_correlation, gate1a_readonly_tools, gate2_sandbox_canary, gate5b4c3_live_runner_boundary, gate5b4c3_shadow_counter_store, gate5b4c3_shadow_generation_contract, gate5b_full_toolhost, gate5b_governance, gate8_readiness, generation_request, governed_turn, kernel_recipe_packs, learning_live_readiness, materializer, memory_mode_context, memory_turn_hook, observed_egress, openmagi_runtime, public_events, research_first_canary, session_identity, shadow_generations, turn_context, usage_receipt_emit, user_visible_model_routing, wiring | transport/chat.py |
+| chat_routes.py | Chat route registration and the Gate5B user-visible serving engine. | active_turn, chat_shared, child_runner_status, compiler, contracts, egress_critic, egress_gate, env, gate1a_egress_correlation, gate1a_readonly_tools, gate2_sandbox_canary, gate5b4c3_live_runner_boundary, gate5b4c3_shadow_counter_store, gate5b4c3_shadow_generation_contract, gate5b_full_toolhost, gate5b_governance, gate8_readiness, generation_request, governed_turn, kernel_recipe_packs, learning_live_readiness, materializer, memory_mode_context, memory_turn_hook, observed_egress, openmagi_runtime, public_events, research_first_canary, session_identity, shadow_generations, turn_context, usage_receipt_emit, user_visible_model_routing, wiring, work_queue | transport/chat.py |
 | chat_shared.py | Shared primitives for the decomposed Gate5B chat serving stack. | child_runner_live, env, gate1a_readonly_tools, gate5b4c3_live_runner_boundary, gate5b_full_toolhost, openmagi_runtime, shadow_generations, user_visible_model_routing | transport/chat.py, transport/chat_routes.py, transport/control_requests.py, transport/gate2_sandbox_canary.py, transport/generation_request.py |
 | control_requests.py | Control-request REST surface consumed by the restored web dashboard. | chat_shared, openmagi_runtime | (root)/app.py |
 | credentials.py | Dashboard "Credentials" admin routes. | credentials_admin, durable_store, openmagi_runtime, tools | (root)/app.py |
