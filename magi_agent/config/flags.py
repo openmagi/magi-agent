@@ -864,8 +864,11 @@ FLAGS: tuple[FlagSpec, ...] = (
             "after-tool result the producer emits a custom:DashboardCheck "
             "evidence record with top-level status='failed' and the verifier-bus "
             "gate flips the pre-final decision to 'block' (audit checks emit "
-            "status='ok' and never block). With no dashboard checks authored the "
-            "runtime is byte-identical to before. Strict default-OFF."
+            "status='ok' and never block). This flag also arms the engine's "
+            "invocation-id reconciliation fold, so the pre-final block is "
+            "self-contained and does NOT require "
+            "MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED. With no dashboard checks "
+            "authored the runtime is byte-identical to before. Strict default-OFF."
         ),
         scope="public",
         stage="stage2",

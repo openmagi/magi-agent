@@ -2163,9 +2163,13 @@ def is_dashboard_pack_authoring_enabled(env: Mapping[str, str] | None = None) ->
     evidence record (status='failed' for matched ``block`` checks, 'ok' for
     ``audit`` checks); the verifier-bus gate blocks the final answer when a
     failed record is present. With no dashboard checks authored the runtime is
-    byte-identical even when ON. Like ``is_user_hooks_enabled`` this is an
-    additive, default-disabled seam and does NOT follow the runtime-profile
-    default-ON convention.
+    byte-identical even when ON. The pre-final block is self-contained: this flag
+    ALSO arms the engine's invocation-id reconciliation fold
+    (``MagiEngineDriver._collect_evidence``), so the gate sees the producer's
+    record (keyed under the ADK ``invocation_id``) under the engine's static
+    turn id WITHOUT requiring ``MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED``. Like
+    ``is_user_hooks_enabled`` this is an additive, default-disabled seam and does
+    NOT follow the runtime-profile default-ON convention.
     """
     source = os.environ if env is None else env
     return _is_true(source.get(MAGI_DASHBOARD_PACK_AUTHORING_ENABLED_ENV))

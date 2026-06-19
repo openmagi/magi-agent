@@ -87,3 +87,54 @@ def test_producer_to_gate_blocks(
     )
     assert result["decision"] == "block"
     assert result["failedDashboardChecks"] == 1
+
+
+def test_producer_non_matching_result_no_false_block(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Negative path: a NON-matching after-tool result emits no record, so the
+    collector is empty for the turn AND the verifier-bus gate passes (no false
+    block) even with the dashboard gate enabled."""
+    monkeypatch.setenv("MAGI_DASHBOARD_PACK_AUTHORING_ENABLED", "1")
+    check = DashboardCheck.model_validate(
+        {
+            "id": "no-ssn",
+            "label": "no ssn",
+            "scope": "always",
+            "enabled": True,
+            "trigger": {
+                "tool": "web_fetch",
+                "match": {"pattern": "ssn", "isRegex": False},
+            },
+            "action": "block",
+        }
+    )
+    write_pack(tmp_path / DASHBOARD_PACK_DIR_NAME, [check])
+
+    collector = LocalToolEvidenceCollector()
+    control = DashboardProducerControl(
+        collector=collector, search_bases=lambda: [tmp_path]
+    )
+
+    out = asyncio.run(
+        control.on_after_tool(
+            tool=FakeTool("web_fetch"),
+            args={},
+            tool_context=FakeCtx(invocation_id="inv-2", session_id="s-2"),
+            result="totally clean content",
+        )
+    )
+    assert out is None
+
+    collected = collector.collect_for_turn("inv-2")
+    assert collected == ()
+
+    result = execute_pre_final_verifier_bus(
+        required_evidence=(),
+        required_validators=(),
+        observed_public_refs=(),
+        evidence_records=collected,
+        dashboard_gate_enabled=True,
+    )
+    assert result["decision"] == "pass"
+    assert result["failedDashboardChecks"] == 0

@@ -2977,11 +2977,13 @@ class MagiEngineDriver:
         import os as _recon_os  # noqa: PLC0415
 
         from magi_agent.config.env import (  # noqa: PLC0415
+            is_dashboard_pack_authoring_enabled,
             parse_source_ledger_evidence_gate_enabled,
         )
 
-        if self._observed_invocation_ids and parse_source_ledger_evidence_gate_enabled(
-            _recon_os.environ
+        if self._observed_invocation_ids and (
+            parse_source_ledger_evidence_gate_enabled(_recon_os.environ)
+            or is_dashboard_pack_authoring_enabled(_recon_os.environ)
         ):
             seen_ids: set[int] = {id(record) for record in records}
             for invocation_id in self._observed_invocation_ids:

@@ -1119,10 +1119,7 @@ def execute_pre_final_verifier_bus(
         # dashboard check(s) fired.  Each DashboardCheck record carries
         # fields["ruleId"] set by the producer (DashboardProducerControl).
         dashboard_rule_ids = ", ".join(
-            str(getattr(r, "fields", {}).get("ruleId") or "unknown")
-            if not isinstance(r, Mapping)
-            else str((r.get("fields") or {}).get("ruleId") or "unknown")
-            for r in failed_dashboard
+            _dashboard_rule_id(r) for r in failed_dashboard
         )
         results.append(
             _live_verifier_result(
@@ -1266,6 +1263,18 @@ def _failed_shacl_records(
 
 
 _DASHBOARD_EVIDENCE_TYPE = "custom:DashboardCheck"
+
+
+def _dashboard_rule_id(record: object) -> str:
+    """Return a DashboardCheck record's ``fields["ruleId"]`` (``"unknown"`` if absent).
+
+    Mirrors the ``fields`` access style of ``_failed_dashboard_records``: handles
+    both Mapping records (camel/snake corpora) and ``EvidenceRecord``-like objects
+    exposing a ``fields`` attribute, and never raises.
+    """
+    if isinstance(record, Mapping):
+        return str((record.get("fields") or {}).get("ruleId") or "unknown")
+    return str(getattr(record, "fields", {}).get("ruleId") or "unknown")
 
 
 def _failed_dashboard_records(
