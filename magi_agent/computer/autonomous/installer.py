@@ -3,13 +3,11 @@ from __future__ import annotations
 import hashlib
 
 # Pinned cua-driver release. Bump deliberately; never track "latest".
-# NOTE: the version + asset-URL shape below are UNVERIFIED against real trycua
-# releases (upstream installs via libs/cua-driver/scripts/install.sh and ships a
-# `CuaDriver.app` tarball). Before flag-on, confirm the actual tag + asset name
-# at https://github.com/trycua/cua/releases and the published sha256, then update
-# CUA_DRIVER_VERSION, release_asset_url(), and the bundled checksum. The unit
-# test only checks substrings, so a green test does NOT prove the URL resolves.
-CUA_DRIVER_VERSION = "0.5.0"
+# Verified against real trycua releases (cua-driver 0.5.7): the Rust driver ships
+# as tag `cua-driver-rs-v<version>` with darwin assets
+# `cua-driver-rs-<version>-darwin-{arm64,x86_64}.tar.gz` plus a `checksums.txt`
+# (`<sha256>  <asset>` lines). The asset extracts to `cua-driver` + `CuaDriver.app`.
+CUA_DRIVER_VERSION = "0.5.7"
 _RELEASE_BASE = "https://github.com/trycua/cua/releases/download"
 
 
@@ -17,12 +15,36 @@ class InstallError(RuntimeError):
     """Raised when the cua-driver download fails integrity verification."""
 
 
-def release_asset_url(version: str, arch: str) -> str:
-    """GitHub Releases URL for the cua-driver darwin tarball of ``arch``.
+def _release_tag(version: str) -> str:
+    return f"cua-driver-rs-v{version}"
 
-    UNVERIFIED shape — see module note; confirm against real releases.
+
+def asset_name(version: str, arch: str) -> str:
+    """The darwin tarball asset name for ``arch`` (``arm64`` or ``x86_64``)."""
+    return f"cua-driver-rs-{version}-darwin-{arch}.tar.gz"
+
+
+def release_asset_url(version: str, arch: str) -> str:
+    """GitHub Releases URL for the cua-driver darwin tarball of ``arch``."""
+    return f"{_RELEASE_BASE}/{_release_tag(version)}/{asset_name(version, arch)}"
+
+
+def checksums_url(version: str) -> str:
+    """GitHub Releases URL for the release's ``checksums.txt``."""
+    return f"{_RELEASE_BASE}/{_release_tag(version)}/checksums.txt"
+
+
+def parse_checksums(text: str, asset: str) -> str:
+    """Return the sha256 hex for ``asset`` from a ``checksums.txt`` body.
+
+    Lines are ``<sha256>  <asset-name>``. Raises InstallError if ``asset`` is
+    absent (never silently skip integrity verification).
     """
-    return f"{_RELEASE_BASE}/cua-driver-v{version}/cua-driver-{version}-darwin-{arch}.tar.gz"
+    for line in text.splitlines():
+        parts = line.split()
+        if len(parts) == 2 and parts[1] == asset:
+            return parts[0]
+    raise InstallError(f"no checksum for {asset!r} in checksums.txt")
 
 
 def verify_sha256(data: bytes, expected_hex: str) -> None:
