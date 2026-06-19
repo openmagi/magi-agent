@@ -344,7 +344,7 @@ def test_stream_returns_event_stream_and_done(monkeypatch) -> None:
                 turn_id="t-route",
             )
 
-    def fake_builder(session_id: str, sink: object) -> tuple[object, object]:
+    def fake_builder(session_id: str, sink: object, model_override: object = None) -> tuple[object, object]:
         return FakeEngine(), None
 
     client = TestClient(_make_app(engine_builder=fake_builder))
@@ -398,7 +398,7 @@ def test_stream_response_sets_sse_antibuffering_headers(monkeypatch) -> None:
                 turn_id="t-headers",
             )
 
-    def fake_builder(session_id: str, sink: object) -> tuple[object, object]:
+    def fake_builder(session_id: str, sink: object, model_override: object = None) -> tuple[object, object]:
         return FakeEngine(), None
 
     client = TestClient(_make_app(engine_builder=fake_builder))
@@ -436,7 +436,7 @@ def test_selected_full_toolhost_stream_uses_selected_canary_path(
                 turn_id="t-selected",
             )
 
-    def headless_builder(session_id: str, sink: object) -> tuple[object, object]:
+    def headless_builder(session_id: str, sink: object, model_override: object = None) -> tuple[object, object]:
         return HeadlessEngine(), None
 
     client = TestClient(
@@ -1274,7 +1274,7 @@ def test_selected_stream_failure_does_not_fall_back_to_headless_success(
                 turn_id="t-selected-fail",
             )
 
-    def headless_builder(session_id: str, sink: object) -> tuple[object, object]:
+    def headless_builder(session_id: str, sink: object, model_override: object = None) -> tuple[object, object]:
         return HeadlessEngine(), None
 
     client = TestClient(
@@ -1316,7 +1316,7 @@ def test_stream_selected_gate_off_uses_headless_engine(monkeypatch) -> None:
                 turn_id="t-headless",
             )
 
-    def headless_builder(session_id: str, sink: object) -> tuple[object, object]:
+    def headless_builder(session_id: str, sink: object, model_override: object = None) -> tuple[object, object]:
         return HeadlessEngine(), None
 
     client = TestClient(_make_app(engine_builder=headless_builder))
@@ -1358,7 +1358,7 @@ class _BypassCanaryEngine:
         )
 
 
-def _bypass_canary_builder(session_id: str, sink: object) -> tuple[object, object]:
+def _bypass_canary_builder(session_id: str, sink: object, model_override: object = None) -> tuple[object, object]:
     return _BypassCanaryEngine(), None
 
 
@@ -1876,7 +1876,7 @@ def test_hosted_serve_flag_off_gate_inactive_keeps_headless_fallthrough(
                 turn_id="t-legacy",
             )
 
-    def headless_builder(session_id: str, sink: object) -> tuple[object, object]:
+    def headless_builder(session_id: str, sink: object, model_override: object = None) -> tuple[object, object]:
         return HeadlessEngine(), None
 
     client = TestClient(_make_app(engine_builder=headless_builder))
@@ -2421,7 +2421,7 @@ def test_stream_session_id_from_header(monkeypatch) -> None:
                 turn_id=captured_ids["turn_id"],
             )
 
-    def fake_builder(session_id: str, sink: object) -> tuple[object, object]:
+    def fake_builder(session_id: str, sink: object, model_override: object = None) -> tuple[object, object]:
         return FakeEngine(), None
 
     client = TestClient(_make_app(engine_builder=fake_builder))
@@ -2565,7 +2565,7 @@ def test_stream_engine_build_failure_returns_500(monkeypatch) -> None:
     """
     monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
 
-    def boom_builder(session_id: str, sink: object) -> tuple[object, object]:
+    def boom_builder(session_id: str, sink: object, model_override: object = None) -> tuple[object, object]:
         raise RuntimeError("engine wiring blew up at /home/ocuser/.openclaw/secret")
 
     client = TestClient(_make_app(engine_builder=boom_builder))
@@ -2582,3 +2582,158 @@ def test_stream_engine_build_failure_returns_500(monkeypatch) -> None:
 
     assert response.status_code == 500
     assert response.json() == {"error": "engine_build_failed"}
+
+
+# ---------------------------------------------------------------------------
+# J-1 — local dashboard model picker honored by the stream runtime
+#
+# The web sends the selected ``model`` in the /v1/chat/stream body. The local
+# headless builder must be built with that model (override-with-fallback to the
+# serve config). ``"auto"`` (the web client default) means "no override".
+# ---------------------------------------------------------------------------
+
+
+class _ModelCaptureEngine:
+    async def run_turn_stream(self, runtime, turn_input, *, cancel, gate):
+        yield _ev("text_delta", delta="ok")
+        yield EngineResult(
+            terminal=Terminal.completed,
+            session_id="s-model",
+            turn_id="t-model",
+        )
+
+
+def _capturing_builder(captured: dict[str, object]):
+    """Arity-3 engine builder stub recording the model override it receives."""
+
+    def builder(
+        session_id: str, sink: object, model_override: object
+    ) -> tuple[object, object]:
+        captured["model_override"] = model_override
+        return _ModelCaptureEngine(), None
+
+    return builder
+
+
+def test_stream_request_model_threaded_to_builder(monkeypatch) -> None:
+    """A body ``model`` is parsed and threaded into the builder as the override."""
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
+    monkeypatch.delenv("CORE_AGENT_PYTHON_CHAT_ROUTE", raising=False)
+
+    captured: dict[str, object] = {}
+    client = TestClient(_make_app(engine_builder=_capturing_builder(captured)))
+
+    response = client.post(
+        "/v1/chat/stream",
+        headers=_auth_headers(),
+        json={
+            "sessionId": "s-model",
+            "turnId": "t-model",
+            "model": "anthropic/claude-opus-4-8",
+            "messages": [{"role": "user", "content": "hi"}],
+        },
+    )
+
+    assert response.status_code == 200
+    assert captured["model_override"] == "anthropic/claude-opus-4-8"
+
+
+def test_stream_request_model_absent_falls_back(monkeypatch) -> None:
+    """No body ``model`` → builder receives ``None`` (serve-config fallback)."""
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
+    monkeypatch.delenv("CORE_AGENT_PYTHON_CHAT_ROUTE", raising=False)
+
+    captured: dict[str, object] = {}
+    client = TestClient(_make_app(engine_builder=_capturing_builder(captured)))
+
+    response = client.post(
+        "/v1/chat/stream",
+        headers=_auth_headers(),
+        json={
+            "sessionId": "s-model",
+            "turnId": "t-model",
+            "messages": [{"role": "user", "content": "hi"}],
+        },
+    )
+
+    assert response.status_code == 200
+    assert captured["model_override"] is None
+
+
+def test_stream_request_model_auto_treated_as_no_override(monkeypatch) -> None:
+    """The web client default ``"auto"`` means "no override" → ``None``."""
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
+    monkeypatch.delenv("CORE_AGENT_PYTHON_CHAT_ROUTE", raising=False)
+
+    captured: dict[str, object] = {}
+    client = TestClient(_make_app(engine_builder=_capturing_builder(captured)))
+
+    response = client.post(
+        "/v1/chat/stream",
+        headers=_auth_headers(),
+        json={
+            "sessionId": "s-model",
+            "turnId": "t-model",
+            "model": "auto",
+            "messages": [{"role": "user", "content": "hi"}],
+        },
+    )
+
+    assert response.status_code == 200
+    assert captured["model_override"] is None
+
+
+def test_default_builder_prefers_override_over_config(monkeypatch) -> None:
+    """The default builder passes the override (or serve config) to wiring.
+
+    Proves the override reaches ``build_headless_runtime(model=...)``, which in
+    turn forwards into ``resolve_provider_config(model_override=...)``.
+    """
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
+    monkeypatch.delenv("CORE_AGENT_PYTHON_CHAT_ROUTE", raising=False)
+
+    seen: list[object] = []
+
+    class _RT:
+        engine = _ModelCaptureEngine()
+        gate = None
+
+    def _fake_build_headless_runtime(*, model=None, **kwargs):  # noqa: ANN001
+        seen.append(model)
+        return _RT()
+
+    import magi_agent.cli.wiring as wiring_mod
+
+    monkeypatch.setattr(
+        wiring_mod, "build_headless_runtime", _fake_build_headless_runtime
+    )
+
+    # runtime.config.model == "gpt-5.2" per _make_runtime().
+    client = TestClient(_make_app())  # default (real) builder path
+
+    # 1) override present → wiring receives the override
+    r1 = client.post(
+        "/v1/chat/stream",
+        headers=_auth_headers(),
+        json={
+            "sessionId": "s-model",
+            "turnId": "t-model",
+            "model": "X-override-model",
+            "messages": [{"role": "user", "content": "hi"}],
+        },
+    )
+    assert r1.status_code == 200
+    assert seen[-1] == "X-override-model"
+
+    # 2) override absent → wiring receives the serve config model
+    r2 = client.post(
+        "/v1/chat/stream",
+        headers=_auth_headers(),
+        json={
+            "sessionId": "s-model",
+            "turnId": "t-model",
+            "messages": [{"role": "user", "content": "hi"}],
+        },
+    )
+    assert r2.status_code == 200
+    assert seen[-1] == "gpt-5.2"

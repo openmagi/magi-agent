@@ -6,6 +6,7 @@
 CORE_AGENT_	magi_agent/adk_bridge/local_runner.py	1
 CORE_AGENT_	magi_agent/adk_bridge/tool_adapter.py	4
 CORE_AGENT_	magi_agent/cli/tests/test_app.py	5
+CORE_AGENT_	magi_agent/cli/tests/test_model_picker_wire.py	2
 CORE_AGENT_	magi_agent/config/env.py	242
 CORE_AGENT_	magi_agent/config/flags.py	2
 CORE_AGENT_	magi_agent/config/tests/test_flags.py	1
@@ -76,6 +77,7 @@ openmagi	magi_agent/cli/tests/test_engine_recovery.py	2
 openmagi	magi_agent/cli/tests/test_fact_grounding_gate_wiring.py	4
 openmagi	magi_agent/cli/tests/test_force_recipe_env_wiring.py	5
 openmagi	magi_agent/cli/tests/test_force_recipe_source_grounded_selection.py	5
+openmagi	magi_agent/cli/tests/test_model_picker_wire.py	2
 openmagi	magi_agent/cli/tests/test_phase_route_consumption.py	5
 openmagi	magi_agent/cli/tests/test_redaction_hard_gate_wiring.py	3
 openmagi	magi_agent/cli/tests/test_runtime_policy_wiring.py	20
