@@ -725,6 +725,19 @@ FLAGS: tuple[FlagSpec, ...] = (
         scope="public",
         stage="stage2",
     ),
+    _b(
+        "MAGI_SHACL_COMPILER_ENABLED",
+        summary=(
+            "Enable the POST /v1/app/customize/custom-rules/compile endpoint: "
+            "NL→SHACL Turtle compilation via LLM (registration-time only, never "
+            "on the runtime hot path). OFF keeps the compile route dormant and "
+            "all other customize routes byte-identical. Requires a configured "
+            "provider/key for LLM calls; fail-open (returns ok=False) when no "
+            "model is available. Strict default-OFF."
+        ),
+        scope="public",
+        stage="stage2",
+    ),
     # --- Resilience controls ------------------------------------------------
     # Profile-aware default-ON (env._runtime_feature_enabled): ON in the full
     # runtime profile, OFF under MAGI_RUNTIME_PROFILE=safe|eval.
