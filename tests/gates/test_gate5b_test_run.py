@@ -118,7 +118,7 @@ async def test_test_run_uses_300s_verification_timeout(tmp_path, monkeypatch):
     # command_timeout_ms.
     captured: dict[str, float] = {}
 
-    def fake_run_shell_command(
+    async def fake_run_shell_command(
         self: Gate5BFullToolHost,
         raw_command: str,
         *,
@@ -133,7 +133,9 @@ async def test_test_run_uses_300s_verification_timeout(tmp_path, monkeypatch):
             "stderrDigest": "sha256:test",
         }
 
-    monkeypatch.setattr(Gate5BFullToolHost, "_run_shell_command", fake_run_shell_command)
+    monkeypatch.setattr(
+        Gate5BFullToolHost, "_run_shell_command_async", fake_run_shell_command
+    )
     host = _host(tmp_path)
     await _run(host, "echo hi")
 
