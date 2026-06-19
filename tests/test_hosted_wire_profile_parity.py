@@ -32,8 +32,8 @@ TOOL-EVENT-SHAPE parity (after T1–T4):
   tool_then_final    — tool_start ✓, tool_progress EQUALITY ✓, tool_end EQUALITY ✓
   native_tool_roundtrip — same
   duplicate_text_and_call — same
-  event_cap          — tool_start ✓, tool_progress EQUALITY ✓, no tool_end (correct)
-  function_call_only — tool_start ✓, tool_progress EQUALITY ✓, no tool_end (correct)
+  event_cap          — tool_start ✓, tool_progress EQUALITY ✓, no tool_end from engine (correct; golden has retry-loop tool_end)
+  function_call_only — tool_start ✓, tool_progress EQUALITY ✓, no tool_end from engine (correct; golden has 4 retry-loop tool_end)
 
 CLOSED DIVERGENCES (T3 wired, T4 proven):
   1. ``tool_progress`` — CLOSED. T3 wires ``wire_profile.build_tool_progress`` on
@@ -405,10 +405,12 @@ def test_function_call_only_tool_start_id_parity() -> None:
 def test_function_call_only_no_tool_end_from_engine() -> None:
     """function_call_only: engine does NOT emit tool_end (no function_response).
 
-    The gate5b4c3 function_call_only golden has NO tool_end in its public_events
-    section (the boundary exits via runner_output_missing before any tool response
-    arrives). The engine also emits no tool_end since the runner yields only a
-    function_call event.
+    The gate5b4c3 function_call_only golden CONTAINS 4 tool_end events from
+    gate5b4c3's retry loop (result reason runner_output_missing). The engine
+    emits 0 tool_end because the fake runner provides no function_response event,
+    so the response-side projection never runs. This engine-vs-gate5b4c3 divergence
+    (golden has 4; engine has 0) is correct engine behavior — engine can only
+    project tool_end from function_response, which the runner never yields here.
     """
     runner = MockRunner(
         [call_event("Calculation", {"expression": "1 + 1"}, "calculation-call-001")]
@@ -435,8 +437,8 @@ def test_function_call_only_emits_tool_progress() -> None:
     captured = asyncio.run(_capture(runner))
 
     golden = _load_golden("function_call_only")
-    # Note: function_call_only golden's public_events section has only tool_start
-    # and tool_progress (no tool_end, no text_delta).
+    # Note: golden has tool_start + tool_progress + 4 tool_end events from
+    # gate5b4c3's retry loop; engine cannot produce tool_end (no function_response).
     golden_progress = [
         e for e in golden["public_events"] if e.get("type") == "tool_progress"
     ]
