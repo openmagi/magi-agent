@@ -6,9 +6,30 @@ import json
 from math import isfinite
 import re
 
+from typing import TYPE_CHECKING
+
 from pydantic import ValidationError
 
-from magi_agent.ops.authority import FrozenContractModel as FrozenContractModel
+if TYPE_CHECKING:  # type-checker only — keep the public symbol visible
+    from magi_agent.ops.authority import FrozenContractModel as FrozenContractModel
+
+
+def __getattr__(name: str) -> object:
+    """Lazy re-export of ``FrozenContractModel`` (C-5 + C-1 coexistence).
+
+    Importing ``magi_agent.ops.safety`` must NOT eagerly pull in
+    ``magi_agent.ops.authority``. The shadow runtime forbids importing the
+    authority leaf in its production-runtime import boundary
+    (``test_shadow_tool_policy_import_stays_production_runtime_free``), but
+    callers reaching the redaction kernel via ``ops.safety`` should still see
+    ``FrozenContractModel`` as a public attribute. Resolve it on first access.
+    """
+    if name == "FrozenContractModel":
+        from magi_agent.ops.authority import FrozenContractModel as _FrozenContractModel
+
+        globals()[name] = _FrozenContractModel
+        return _FrozenContractModel
+    raise AttributeError(f"module 'magi_agent.ops.safety' has no attribute {name!r}")
 
 
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
