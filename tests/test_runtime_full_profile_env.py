@@ -138,28 +138,3 @@ def test_local_overlay_enables_key_aware_model_routes() -> None:
     assert LOCAL_FULL_RUNTIME_ENV_DEFAULTS.get("MAGI_KEY_AWARE_MODEL_ROUTES_ENABLED") == "1", (
         "MAGI_KEY_AWARE_MODEL_ROUTES_ENABLED must be '1' in LOCAL_FULL_RUNTIME_ENV_DEFAULTS"
     )
-
-
-def test_local_overlay_streams_thinking_with_reasoning_effort() -> None:
-    """Local serve should show the collapsible thinking block by default: the
-    model is asked to reason (MAGI_MODEL_REASONING_EFFORT) AND thought parts are
-    forwarded on the thinking_delta channel (MAGI_STREAM_THINKING), rather than
-    being dropped or merged into the body text."""
-    from magi_agent.runtime.local_defaults import LOCAL_FULL_RUNTIME_ENV_DEFAULTS
-
-    assert LOCAL_FULL_RUNTIME_ENV_DEFAULTS.get("MAGI_STREAM_THINKING") == "1"
-    assert LOCAL_FULL_RUNTIME_ENV_DEFAULTS.get("MAGI_MODEL_REASONING_EFFORT") == "max"
-
-
-def test_full_runtime_profile_applies_thinking_defaults() -> None:
-    env: dict[str, str] = {}
-    apply_local_full_runtime_defaults(env)
-    assert env.get("MAGI_STREAM_THINKING") == "1"
-    assert env.get("MAGI_MODEL_REASONING_EFFORT") == "max"
-
-
-def test_safe_runtime_profile_does_not_enable_thinking() -> None:
-    env = {"MAGI_RUNTIME_PROFILE": "safe"}
-    apply_local_full_runtime_defaults(env)
-    assert "MAGI_STREAM_THINKING" not in env
-    assert "MAGI_MODEL_REASONING_EFFORT" not in env

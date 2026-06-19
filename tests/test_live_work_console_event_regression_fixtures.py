@@ -5,8 +5,6 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
-import pytest
-
 from magi_agent.runtime.work_console_snapshot import (
     build_work_console_snapshot,
 )
@@ -101,15 +99,7 @@ def test_regression_fixture_manifest_covers_required_cases() -> None:
     assert set(cases) == REQUIRED_CASE_IDS
 
 
-def test_regression_fixtures_do_not_project_private_or_raw_payloads(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # Hosted/default posture guard: with MAGI_STREAM_THINKING OFF no thought text
-    # (e.g. the SECRET_DO_NOT_PROJECT marker) may reach the public dump. Pin the
-    # flag OFF explicitly so a leaked env default (the local serve overlay enables
-    # streaming thinking on the user's own trusted machine) can't make this guard
-    # falsely fail; the ON path is covered by the dedicated thinking_delta tests.
-    monkeypatch.delenv("MAGI_STREAM_THINKING", raising=False)
+def test_regression_fixtures_do_not_project_private_or_raw_payloads() -> None:
     fixture = _load_fixture()
     blocked_fragments = tuple(fixture["blockedPublicFragments"])
 

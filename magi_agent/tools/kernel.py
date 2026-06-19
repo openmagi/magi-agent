@@ -18,6 +18,7 @@ from typing import Any, Literal, Self, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_serializer, model_validator
 
+from magi_agent.ops.safety import UNSAFE_TEXT_RE
 from magi_agent.artifacts.local_result_store import (
     LocalResultStore,
     is_trusted_local_result_store,
@@ -76,31 +77,11 @@ _DISABLED_METADATA = {
     "defaultOff": True,
     "handlerExecutionAllowed": False,
 }
-_PRIVATE_TEXT_RE = re.compile(
-    r"(?:"
-    r"authorization\s*:\s*[^\n\r,;}\"']+|"
-    r"\bbearer\s+[A-Za-z0-9._~+/=-]+|"
-    r"\bbasic\s+[A-Za-z0-9._~+/=-]+|"
-    r"\bcookie\s*:\s*[^\n\r]+|"
-    r"\bsid=[A-Za-z0-9._-]+|"
-    r"\bsk-[A-Za-z0-9._-]+|"
-    r"gh[opusr]_[A-Za-z0-9_]+|"
-    r"github_pat_[A-Za-z0-9_]+|"
-    r"xox[a-z]-[A-Za-z0-9._-]+|"
-    r"AKIA[0-9A-Z]{8,}|"
-    r"AIza[A-Za-z0-9_-]+|"
-    r"(?:(?:session(?:[_-]?(?:key|id)|key|id))\s*[:=]\s*|session\s*=\s*)"
-    r"[^\s,;}\"']+|"
-    r"/workspace(?:/[^\s,;}\"']*)?|"
-    r"/data/bots(?:/[^\s,;}\"']*)?|"
-    r"/Users(?:/[^\s,;}\"']*)?|"
-    r"/home(?:/[^\s,;}\"']*)?|"
-    r"/var/lib/kubelet(?:/[^\s,;}\"']*)?|"
-    r"raw[_ -]?(?:tool|child|prompt|transcript|output|result|log|args)|"
-    r"hidden[_ -]?reasoning|chain[_ -]?of[_ -]?thought"
-    r")",
-    re.IGNORECASE,
-)
+# C-1: single redaction kernel. The forked secret/private-text regex previously
+# declared here is replaced by the union denylist in ops/safety. Behavior is a
+# strict superset (catches more token shapes); local placeholder/clip preserved
+# by the wrappers below.
+_PRIVATE_TEXT_RE = UNSAFE_TEXT_RE
 _PUBLIC_REF_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]{1,180}$")
 
 
