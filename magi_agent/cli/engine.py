@@ -1211,8 +1211,15 @@ class MagiEngineDriver:
         evidence_collector: Callable[[str], Sequence[object]] | None = None,
         user_hook_bus: object | None = None,
         criterion_model_factory: Callable[[], object] | None = None,
+        wire_profile: object | None = None,
     ) -> None:
         self._runner = runner
+        # Optional wire profile for the HOSTED path (T4). ``None`` (default) keeps
+        # the CLI path byte-for-byte unchanged — bridge is constructed without
+        # wire_profile.  When set (e.g. HOSTED_PROFILE), each turn's bridge is
+        # constructed with ``wire_profile=self._wire_profile`` so projected events
+        # carry the hosted wire shape (tu_<hash> ids, public_events field shapes).
+        self._wire_profile = wire_profile
         self._max_event_count = max(1, int(max_event_count))
         self._user_id = user_id
         # Genuine error-recovery retry policy (PR12). ``None`` -> no retry
@@ -1675,7 +1682,14 @@ class MagiEngineDriver:
 
         types = deps["types"]
         adapter = deps["OpenMagiRunnerAdapter"](runner=runner)  # type: ignore[operator]
-        bridge = deps["OpenMagiEventBridge"](live_compatible=True)  # type: ignore[operator]
+        # Pass ``wire_profile`` ONLY when one is set (hosted path). On the CLI
+        # path (``None``) we omit the kwarg entirely so the construction is
+        # byte-identical to pre-wire-profile — and test doubles injected via the
+        # ``deps`` seam (whose ``__init__`` predates this kwarg) keep working.
+        bridge_kwargs: dict[str, object] = {"live_compatible": True}
+        if self._wire_profile is not None:
+            bridge_kwargs["wire_profile"] = self._wire_profile
+        bridge = deps["OpenMagiEventBridge"](**bridge_kwargs)  # type: ignore[operator]
         sanitize = deps["sanitize_agent_event"]
         runner_turn_input_cls = deps["RunnerTurnInput"]
         effective_harness_state = self._with_runner_policy_harness_state(

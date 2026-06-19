@@ -46,6 +46,7 @@ openmagi	magi_agent/adk_bridge/policy_boundary.py	3
 openmagi	magi_agent/adk_bridge/runner_adapter.py	62
 openmagi	magi_agent/adk_bridge/session_service.py	2
 openmagi	magi_agent/adk_bridge/tool_adapter.py	11
+openmagi	magi_agent/adk_bridge/wire_profile.py	3
 openmagi	magi_agent/app.py	3
 openmagi	magi_agent/artifacts/_file_delivery_fakes.py	4
 openmagi	magi_agent/artifacts/delivery_boundary.py	3

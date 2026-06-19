@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+import hashlib
 import json
 import math
 import re
@@ -512,6 +513,60 @@ def task_board_event(
             safe_task["dependsOn"] = depends_on
         safe_tasks.append(safe_task)
     return {"type": "task_board", "tasks": safe_tasks}
+
+
+# ---------------------------------------------------------------------------
+# Tool-event id — shared by gate5b4c3 and future wire-profile consumers
+# ---------------------------------------------------------------------------
+
+def _te_json_dumps(value: object) -> str:
+    """Canonical JSON serialisation for tool-event-id hashing.
+
+    Must stay byte-identical to gate5b4c3_live_runner_boundary._json_dumps.
+    """
+    return json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        default=repr,
+    )
+
+
+def _te_digest(value: object) -> str:
+    """sha256 digest string — byte-identical to gate5b4c3._digest."""
+    return "sha256:" + hashlib.sha256(_te_json_dumps(value).encode("utf-8")).hexdigest()
+
+
+def _te_bounded_json_value(value: object, *, max_bytes: int) -> object:
+    """Truncate value to max_bytes — byte-identical to gate5b4c3._bounded_json_value."""
+    encoded = _te_json_dumps(value).encode("utf-8")
+    if len(encoded) <= max_bytes:
+        return value
+    return {"truncated": True, "digest": _te_digest(value)}
+
+
+def tool_event_id(
+    *,
+    name: str,
+    args: Mapping[str, object],
+    call_id: object,
+    index: int,
+) -> str:
+    """Return the ``tu_<12-hex>`` tool-event id for a function call.
+
+    Byte-identical to ``gate5b4c3_live_runner_boundary._manual_tool_event_id``.
+    Both gate5b4c3 and the hosted wire-profile engine call this shared fn so
+    the id scheme is computed exactly once.
+    """
+    return "tu_" + _te_digest(
+        {
+            "name": name,
+            "args": _te_bounded_json_value(args, max_bytes=512),
+            "id": str(call_id or ""),
+            "index": index,
+        }
+    )[7:19]
 
 
 def _require_event_family(event_family: str, allowed: set[str]) -> None:
