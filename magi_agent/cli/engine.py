@@ -72,6 +72,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from collections.abc import AsyncGenerator, AsyncIterator, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -874,6 +875,19 @@ _TASKBOARD_TERMINAL_STATUSES: frozenset[str] = frozenset(
     {"done", "complete", "completed", "cancelled", "canceled", "skipped"}
 )
 
+
+# C3 output-purity: canonical private/reasoning keys (mirrors
+# shadow/gate3b_local_report._PRIVATE_KEYS) compiled as a JSON-KEY pattern so a
+# bare prose mention ("explain hidden_reasoning") is NEVER matched — only quoted
+# JSON-key appearances are. This is the conservative-pass pre-gate that skips
+# the LLM call on a clean final_text.
+_PRIVATE_KEY_JSON_RE = re.compile(
+    r'"(?:hidden_reasoning|chain_of_thought|private_reasoning|reasoning_trace|'
+    r"private_tool_preview|private_tool_input|private_tool_output|"
+    r"raw_tool_preview|raw_connector_credentials|child_private_records|"
+    r'private_preview)"\s*:'
+)
+
 # C6 parallel-research: the research recipe packs whose turns the source-count
 # cross-check applies to, and the minimum inspected sources required before
 # synthesis. Scoping to these packs keeps a coding/chat turn that incidentally
@@ -1668,6 +1682,79 @@ class MagiEngineDriver:
             )
             if not passed:
                 return reason or "factual claims are uncited"
+            return None
+        except Exception:
+            return None
+
+    async def _output_purity_llm_block(self, *, final_text: str) -> str | None:
+        """C3 — reason if the answer leaks internal data / reasoning, else None.
+
+        Det pre-gate (conservative pass): if ``final_text`` contains NO
+        canonical private/reasoning key in JSON shape (e.g. ``"hidden_reasoning":``
+        / ``"chain_of_thought":`` — patterns a clean answer never produces), skip
+        the model call. The bare key word matches in PROSE ("explain
+        chain-of-thought prompting") are not flagged — only quoted JSON-key
+        appearances are.
+
+        Suspicious answers reach the criterion judge with a fixed bilingual
+        (KR/EN) criterion designed to distinguish a legitimate JSON answer to the
+        user query from a raw internal-envelope leak. The criterion engine's
+        anti-over-flag ("if unsure, pass=true") protects against false-positives
+        on legitimate JSON outputs.
+
+        Gated by ``MAGI_VERIFY_OUTPUT_PURITY`` OR the ``output-purity`` Customize
+        preset, AND a critic model present (``MAGI_EGRESS_GATE_ENABLED`` — the
+        cost gate). Inactive / no model / any error ⇒ ``None`` (fail-open).
+        """
+        import os  # noqa: PLC0415
+
+        from magi_agent.config.env import (  # noqa: PLC0415
+            parse_output_purity_verification_enabled,
+        )
+        from magi_agent.customize.runtime_gate import preset_enabled  # noqa: PLC0415
+
+        if self._criterion_model_factory is None:
+            return None
+        if not (
+            parse_output_purity_verification_enabled(os.environ)
+            or preset_enabled("output-purity", default=False)
+        ):
+            return None
+        # Det pre-gate: skip the model when no canonical private/reasoning key
+        # appears as a JSON key in the answer. Pure prose mentions of these
+        # words ("explain hidden_reasoning") are NOT matched.
+        try:
+            if _PRIVATE_KEY_JSON_RE.search(final_text) is None:
+                return None
+        except Exception:
+            logger.debug("output-purity pre-gate failed", exc_info=True)
+            return None
+        try:
+            from magi_agent.customize.criterion_engine import (  # noqa: PLC0415
+                evaluate_criterion,
+            )
+
+            criterion = (
+                "The DRAFT contains one or more canonical internal-payload keys "
+                "in JSON-key form (e.g. \"hidden_reasoning\":, \"chain_of_thought\":, "
+                "\"raw_tool_preview\":). Judge whether this is an internal-data "
+                "LEAK. Pass=true if the JSON-keyed content is a LEGITIMATE answer "
+                "to the user's query — the user asked for or is reasonably shown "
+                "JSON describing such concepts (e.g. documenting an API schema, "
+                "answering 'what does hidden_reasoning look like?', or showing a "
+                "user's own data they pasted in). This holds in ANY language "
+                "including Korean. Pass=false ONLY if the DRAFT exposes a raw "
+                "tool-result envelope, an internal reasoning trace / scratchpad / "
+                "chain-of-thought, or other runtime-internal payload that should "
+                "have been sanitised out of the user-visible answer."
+            )
+            passed, reason = await evaluate_criterion(
+                criterion=criterion,
+                draft_text=final_text,
+                model_factory=self._criterion_model_factory,
+            )
+            if not passed:
+                return reason or "answer leaks internal data"
             return None
         except Exception:
             return None
@@ -2608,6 +2695,14 @@ class MagiEngineDriver:
         # that already cited sources skips the model call.
         if llm_block_reason is None:
             llm_block_reason = await self._claim_citation_llm_block(
+                final_text=emitted_text
+            )
+        # C3 — built-in output-purity llm gate. Det pre-gate skips the model call
+        # unless the answer contains a canonical private/reasoning key in JSON
+        # shape, then the criterion judge distinguishes a legitimate JSON answer
+        # from a raw internal-envelope leak.
+        if llm_block_reason is None:
+            llm_block_reason = await self._output_purity_llm_block(
                 final_text=emitted_text
             )
         if llm_block_reason is not None:

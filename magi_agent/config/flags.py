@@ -725,6 +725,17 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
     ),
     _b(
+        "MAGI_VERIFY_OUTPUT_PURITY",
+        stage="stage2",
+        summary=(
+            "Block a final answer that leaks internal data (raw tool-result "
+            "envelopes, internal reasoning traces, canonical private payload "
+            "keys in JSON shape) via the LLM criterion judge; requires a critic "
+            "model (MAGI_EGRESS_GATE_ENABLED). Strict default-OFF and inert "
+            "unless explicitly set (or the output-purity Customize preset is enabled)."
+        ),
+    ),
+    _b(
         "MAGI_VERIFY_TASKBOARD_COMPLETION",
         stage="stage2",
         summary=(
