@@ -847,3 +847,191 @@ class TestLayer5AllFlagsOFFContrast:
         assert req.spawn_cap is None, (
             f"Layer 2 OFF: expected spawn_cap=None, got {req.spawn_cap!r}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Layer 1b — factory-derived spawn_cap reaches ChildTaskRequest (origin gap)
+# ---------------------------------------------------------------------------
+
+
+class TestLayer1bFactorySpawnCapReachesChild:
+    """Close the spawn_cap origin gap: assert the factory-derived ceiling — the
+    value that actually crosses the spawn boundary — is the one ChildTaskRequest
+    carries, not just the value discarded by ``_apply_orchestrator_profile``.
+
+    Background
+    ----------
+    ``_build_first_party_adk_tools`` computes ``_spawn_cap_for_factory`` via
+    ``_apply_filter(exposed_tool_names)`` (line ~685 in wiring.py) and closes it
+    into every ``ToolContext`` produced by ``tool_context_factory``.  This is the
+    REAL boundary-crossing value.  A second call, ``tools, _ =
+    _apply_orchestrator_profile(tools)`` (line ~734), discards its spawn_cap
+    return; that discarded value is what the existing Layer-1 spy tests assert on.
+
+    In practice both derive from ``apply_orchestrator_filter`` applied to the same
+    source (``exposed_tool_names`` vs the names of the already-built ADK tools),
+    so they coincide for today's toolset.  However they can diverge when
+    direct_web_tools are appended AFTER ``exposed_tool_names`` is frozen — a
+    known in-tree TODO.
+
+    This test drives the REAL factory (captured via spy), extracts spawn_cap from
+    the REAL ``ToolContext``, and proves THAT value is what ``spawn_agent``
+    delivers into ``ChildTaskRequest.spawn_cap``.
+    """
+
+    def test_factory_derived_spawn_cap_reaches_child_request(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Any,
+    ) -> None:
+        """factory-derived ToolContext.spawn_cap == ChildTaskRequest.spawn_cap.
+
+        Drives the REAL ``_build_first_party_adk_tools`` with orchestrator
+        profile, captures the ``tool_context_factory`` closure via spy, invokes
+        the factory to obtain the real ``ToolContext.spawn_cap``, then runs
+        ``spawn_agent`` with a context carrying that value and asserts the
+        intercepted ``ChildTaskRequest.spawn_cap`` is identical.
+
+        Also compares against the spawn_cap returned by
+        ``_apply_orchestrator_profile`` (the discarded value in wiring.py) to
+        surface any divergence between the two derivations.
+        """
+        monkeypatch.setenv("MAGI_MAIN_AGENT_PROFILE", "orchestrator")
+        monkeypatch.setenv("MAGI_CHILD_RUNNER_LIVE_ENABLED", "1")
+        monkeypatch.delenv("MAGI_CHILD_RUNNER_LIVE_KILL_SWITCH", raising=False)
+
+        import magi_agent.adk_bridge.tool_adapter as ta  # noqa: PLC0415
+        import magi_agent.cli.wiring as wiring_mod  # noqa: PLC0415
+        import magi_agent.runtime.child_runner_live as _live_mod  # noqa: PLC0415
+
+        # --- Step 1: capture the real tool_context_factory from wiring ---
+
+        captured_factory: dict[str, object] = {}
+        real_build_adk = ta.build_adk_function_tools_for_registry
+
+        def spy_build_adk(
+            registry: object,
+            dispatcher: object,
+            mode: object = "act",
+            tool_context_factory: object = None,
+            attach_enabled: bool = True,
+            exposed_tool_names: object = None,
+            **kwargs: object,
+        ) -> list[object]:
+            captured_factory["factory"] = tool_context_factory
+            # Return empty list — we only need the factory, not the tools.
+            return []
+
+        monkeypatch.setattr(ta, "build_adk_function_tools_for_registry", spy_build_adk)
+
+        # --- Step 2: also capture the spawn_cap from _apply_orchestrator_profile
+        #             (the discarded value) so we can compare with the factory value ---
+
+        discarded_spawn_cap: dict[str, object] = {}
+        real_apply_profile = wiring_mod._apply_orchestrator_profile
+
+        def spy_apply_profile(
+            full_tools: list[object],
+            env: dict[str, str] | None = None,
+        ) -> tuple[list[object], tuple[str, ...] | None]:
+            result = real_apply_profile(full_tools, env=env)
+            discarded_spawn_cap["value"] = result[1]
+            return result
+
+        monkeypatch.setattr(wiring_mod, "_apply_orchestrator_profile", spy_apply_profile)
+
+        # --- Step 3: drive the REAL _build_first_party_adk_tools ---
+
+        wiring_mod._build_first_party_adk_tools(
+            cwd=str(tmp_path),
+            session_id="gl1b-factory-test",
+        )
+
+        assert "factory" in captured_factory, (
+            "build_adk_function_tools_for_registry spy was not called — "
+            "_build_first_party_adk_tools may have returned early"
+        )
+
+        factory = captured_factory["factory"]
+        assert factory is not None, "tool_context_factory is None — wiring did not set it"
+
+        # --- Step 4: invoke the REAL factory to obtain the factory-derived spawn_cap ---
+
+        from types import SimpleNamespace  # noqa: PLC0415
+
+        adk_ctx = SimpleNamespace(
+            function_call=SimpleNamespace(name="SpawnAgent", id="call-gl1b"),
+            state={},
+            session=SimpleNamespace(id="gl1b-factory-test"),
+        )
+        real_ctx: ToolContext = factory(adk_ctx)  # type: ignore[operator]
+        factory_spawn_cap = real_ctx.spawn_cap
+
+        assert factory_spawn_cap is not None, (
+            "MAGI_MAIN_AGENT_PROFILE=orchestrator: factory-derived spawn_cap must not be "
+            "None — the factory closure did not receive _spawn_cap_for_factory"
+        )
+        assert isinstance(factory_spawn_cap, tuple), (
+            f"factory_spawn_cap must be a tuple, got {type(factory_spawn_cap)}"
+        )
+
+        # --- Step 5: compare factory spawn_cap vs discarded spawn_cap ---
+        # Note divergence if they differ (documents origin gap behaviour).
+
+        discarded = discarded_spawn_cap.get("value")
+        _diverges = discarded != factory_spawn_cap
+        # Both values are recorded in this test's scope for the report.
+        # Divergence is NOT an assertion failure — it's the gap the TODO
+        # tracks.  What matters is the FACTORY value (not the discarded one)
+        # reaches the child.
+
+        # --- Step 6: run spawn_agent with the factory-derived spawn_cap and
+        #             intercept ChildTaskRequest at the runner boundary ---
+
+        captured_request: list[object] = []
+
+        class _CapturingRunner:
+            openmagi_live_provider = True
+
+            def __init__(self, *, tools: list[object] | None = None, **kwargs: object) -> None:
+                pass
+
+            async def run_child(self, request: object) -> dict[str, object]:
+                captured_request.append(request)
+                return {
+                    "childExecutionId": "gl1b-child-exec",
+                    "status": "completed",
+                    "summary": "captured",
+                    "evidenceRefs": (),
+                    "artifactRefs": (),
+                    "auditEventRefs": (),
+                }
+
+        monkeypatch.setattr(_live_mod, "RealLocalChildRunner", _CapturingRunner)
+
+        from magi_agent.plugins.native.subagents import spawn_agent  # noqa: PLC0415
+
+        # Use a context carrying the EXACT factory-derived spawn_cap.
+        spawn_ctx = _tool_context(spawnCap=factory_spawn_cap)
+        asyncio.run(
+            spawn_agent(
+                {
+                    "prompt": "gl1b factory spawn_cap origin test",
+                    "allowedTools": list(factory_spawn_cap[:3]) if factory_spawn_cap else [],
+                    "recipeRefs": ["openmagi.research"],
+                },
+                spawn_ctx,
+            )
+        )
+
+        assert len(captured_request) == 1, "CapturingRunner.run_child not called"
+        child_req = captured_request[0]
+
+        # --- Step 7: THE KEY ASSERTION — factory-derived value reaches child ---
+        assert child_req.spawn_cap == factory_spawn_cap, (
+            f"Factory-derived spawn_cap did not reach ChildTaskRequest.\n"
+            f"  factory spawn_cap : {factory_spawn_cap!r}\n"
+            f"  child req spawn_cap: {child_req.spawn_cap!r}\n"
+            f"  discarded spawn_cap: {discarded!r}\n"
+            f"  diverged: {_diverges}"
+        )
