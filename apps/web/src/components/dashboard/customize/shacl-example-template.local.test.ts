@@ -66,8 +66,8 @@ describe("verification-rule-modal — load-example affordance", () => {
     expect(modalSrc).toContain("shacl-example-template");
   });
 
-  it('renders a "예시 불러오기" button in raw mode', () => {
-    expect(modalSrc).toContain("예시 불러오기");
+  it('renders a "Load example" button in raw mode', () => {
+    expect(modalSrc).toContain("Load example");
   });
 
   it("the load-example button calls setRawTtl with SHACL_EXAMPLE_TEMPLATE", () => {

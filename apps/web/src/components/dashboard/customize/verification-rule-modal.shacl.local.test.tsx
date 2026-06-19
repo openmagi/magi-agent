@@ -32,7 +32,7 @@ describe("Test 1 — SHACL rule type option and nl/raw mode toggle", () => {
   });
 
   it("renders a SHACL option in the rule-type select", () => {
-    expect(modalSrc).toContain("결정론 제약 (SHACL)");
+    expect(modalSrc).toContain("Deterministic constraint (SHACL)");
   });
 
   it("renders an input-mode toggle with nl and raw options when SHACL is selected", () => {
@@ -42,9 +42,9 @@ describe("Test 1 — SHACL rule type option and nl/raw mode toggle", () => {
     expect(modalSrc).toContain('"raw"');
   });
 
-  it("shows nl mode (자연어) and raw mode (.ttl) labels", () => {
-    expect(modalSrc).toContain("자연어");
-    expect(modalSrc).toContain(".ttl");
+  it("shows nl mode (Natural language) and raw mode (Raw .ttl) labels", () => {
+    expect(modalSrc).toContain("Natural language");
+    expect(modalSrc).toContain("Raw .ttl");
   });
 });
 
@@ -54,7 +54,7 @@ describe("Test 1 — SHACL rule type option and nl/raw mode toggle", () => {
 describe("Test 2 — nl mode compile success shows preview panel", () => {
   it("renders a nlText textarea in nl mode", () => {
     expect(modalSrc).toContain("nlText");
-    expect(modalSrc).toContain("컴파일");
+    expect(modalSrc).toContain("Compile");
   });
 
   it("calls onCompileShacl when the compile button is clicked", () => {
@@ -69,7 +69,7 @@ describe("Test 2 — nl mode compile success shows preview panel", () => {
     expect(modalSrc).toContain("review.confidence");
     expect(modalSrc).toContain("explanation");
     expect(modalSrc).toContain("previewCases");
-    expect(modalSrc).toContain("생성된 SHACL 보기");
+    expect(modalSrc).toContain("View generated SHACL");
   });
 
   it("shows compile loading state", () => {
@@ -77,8 +77,8 @@ describe("Test 2 — nl mode compile success shows preview panel", () => {
   });
 
   it("renders approve and retry buttons after successful compile", () => {
-    expect(modalSrc).toContain("이게 맞습니다");
-    expect(modalSrc).toContain("다시");
+    expect(modalSrc).toContain("Looks right — activate");
+    expect(modalSrc).toContain("Retry");
   });
 });
 
@@ -117,10 +117,10 @@ describe("Test 4 — save only on approval, not before", () => {
   });
 
   it("approve only fires from the dedicated approve button, not the generic Add rule button", () => {
-    // The approve action (이게 맞습니다) should directly call onAdd; the generic
+    // The approve action (Looks right — activate) should directly call onAdd; the generic
     // "Add rule" button path must require kind !== shacl_constraint or is guarded.
     // We verify by checking that the approve button calls onAdd separately.
-    expect(modalSrc).toContain("이게 맞습니다");
+    expect(modalSrc).toContain("Looks right — activate");
     // Resetting after approval: state is cleared
     expect(modalSrc).toContain("setShaclPreview");
     expect(modalSrc).toContain("setNlText");
@@ -152,8 +152,8 @@ describe("Test 6 — saved shacl_constraint rule renders with SHACL badge", () =
     expect(modalSrc).toContain('rule.what?.kind === "shacl_constraint"');
   });
 
-  it("renders 결정론 · SHACL · live badge for shacl_constraint rules", () => {
-    expect(modalSrc).toContain("결정론 · SHACL · live");
+  it("renders Deterministic · SHACL · live badge for shacl_constraint rules", () => {
+    expect(modalSrc).toContain("Deterministic · SHACL · live");
   });
 });
 
@@ -196,28 +196,29 @@ describe("Test 7 — regression: deterministic_ref builder path unchanged", () =
 // F1 — sampleRecords forwarded to onCompileShacl + honest empty-state message
 describe("F1 — sample records textarea and honest empty-state", () => {
   it("renders a sample records textarea with aria-label", () => {
-    expect(modalSrc).toContain("샘플 레코드 (JSON, 선택)");
-    expect(modalSrc).toContain('"샘플 레코드 JSON 입력"');
+    expect(modalSrc).toContain("Sample records (JSON, optional)");
+    expect(modalSrc).toContain('"Sample records JSON input"');
   });
 
   it("parses sampleRecordsText and passes to onCompileShacl", () => {
     expect(modalSrc).toContain("sampleRecordsText");
     expect(modalSrc).toContain("parsedSamples");
     expect(modalSrc).toContain("JSON.parse(sampleRecordsText)");
-    expect(modalSrc).toContain("onCompileShacl(nlText, parsedSamples)");
+    // The call now passes a third arg (priorTurns / conversation)
+    expect(modalSrc).toContain("onCompileShacl(nlText, parsedSamples,");
   });
 
   it("shows inline error when sample records JSON is invalid", () => {
     expect(modalSrc).toContain("sampleRecordsError");
-    expect(modalSrc).toContain("유효하지 않은 JSON입니다");
+    expect(modalSrc).toContain("Invalid JSON");
   });
 
   it("shows inline error when sample records is not a JSON array", () => {
-    expect(modalSrc).toContain("JSON 배열이어야 합니다");
+    expect(modalSrc).toContain("Must be a JSON array");
   });
 
   it("shows honest empty-state when previewCases is absent/empty", () => {
-    expect(modalSrc).toContain("샘플 레코드를 입력하면 결정론적 PASS/FAIL 미리보기가 표시됩니다.");
+    expect(modalSrc).toContain("Add sample records to see deterministic PASS/FAIL preview.");
   });
 
   it("resets sample records state on cancel and on approval", () => {
@@ -229,8 +230,8 @@ describe("F1 — sample records textarea and honest empty-state", () => {
 // F2 — missing reviewer verdict warning
 describe("F2 — missing reviewer verdict is surfaced, not silent", () => {
   it("renders a warning when shaclPreview.review is absent", () => {
-    expect(modalSrc).toContain("리뷰어 검증을 사용할 수 없습니다");
-    expect(modalSrc).toContain("직접 SHACL을 확인하세요");
+    expect(modalSrc).toContain("Reviewer check unavailable");
+    expect(modalSrc).toContain("verify the SHACL manually");
   });
 
   it("shows the warning in an amber/warning style (not silently omitted)", () => {
@@ -266,7 +267,7 @@ describe("F4 — compile try/finally so compile button never stays stuck", () =>
 
   it("catches thrown exceptions and sets a compileError message", () => {
     expect(modalSrc).toContain("compileError");
-    expect(modalSrc).toContain("컴파일 중 오류가 발생했습니다");
+    expect(modalSrc).toContain("An error occurred during compilation.");
   });
 
   it("setCompiling(false) appears inside a finally block", () => {

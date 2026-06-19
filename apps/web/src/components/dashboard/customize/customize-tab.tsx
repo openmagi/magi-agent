@@ -11,7 +11,7 @@ import {
   deleteCustomRule,
   compileCustomRule,
 } from "@/lib/customize-api";
-import type { CustomRule, ShaclCompileResponse } from "@/lib/customize-api";
+import type { ConversationTurn, CustomRule, ShaclCompileResponse } from "@/lib/customize-api";
 import { useAgentFetch } from "@/lib/local-api";
 import { VerificationRuleModal } from "./verification-rule-modal";
 import { CustomToolModal } from "./custom-tool-modal";
@@ -151,8 +151,12 @@ export function CustomizeRuntimeConsole({ botId }: CustomizeRuntimeConsoleProps)
   );
 
   const handleCompileShacl = useCallback(
-    (nlText: string, sampleRecords?: unknown[]): Promise<ShaclCompileResponse> =>
-      compileCustomRule(agentFetch, nlText, sampleRecords),
+    (
+      nlText: string,
+      sampleRecords?: unknown[],
+      priorTurns?: ConversationTurn[],
+    ): Promise<ShaclCompileResponse> =>
+      compileCustomRule(agentFetch, nlText, sampleRecords, priorTurns),
     [agentFetch],
   );
 
