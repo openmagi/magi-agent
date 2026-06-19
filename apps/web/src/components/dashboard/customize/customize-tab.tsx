@@ -9,8 +9,9 @@ import {
   putRules,
   putCustomRule,
   deleteCustomRule,
+  compileCustomRule,
 } from "@/lib/customize-api";
-import type { CustomRule } from "@/lib/customize-api";
+import type { CustomRule, ShaclCompileResponse } from "@/lib/customize-api";
 import { useAgentFetch } from "@/lib/local-api";
 import { VerificationRuleModal } from "./verification-rule-modal";
 import { CustomToolModal } from "./custom-tool-modal";
@@ -149,6 +150,12 @@ export function CustomizeRuntimeConsole({ botId }: CustomizeRuntimeConsoleProps)
     [agentFetch],
   );
 
+  const handleCompileShacl = useCallback(
+    (nlText: string, sampleRecords?: unknown[]): Promise<ShaclCompileResponse> =>
+      compileCustomRule(agentFetch, nlText, sampleRecords),
+    [agentFetch],
+  );
+
   const handleSaveRules = useCallback(
     (text: string) => {
       setRulesSaving(true);
@@ -262,6 +269,7 @@ export function CustomizeRuntimeConsole({ botId }: CustomizeRuntimeConsoleProps)
             userRules={userRules}
             rulesSaving={rulesSaving}
             onSaveRules={handleSaveRules}
+            onCompileShacl={handleCompileShacl}
             error={ruleError}
           />
           <CustomToolModal
