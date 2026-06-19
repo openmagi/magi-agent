@@ -309,3 +309,124 @@ def test_bridge_default_wire_profile_is_none() -> None:
     """Default (no argument) must be None — NOT DEFAULT_PROFILE."""
     bridge = OpenMagiEventBridge()
     assert bridge._wire_profile is None
+
+
+# ---------------------------------------------------------------------------
+# Task 3 NEW tests (TDD red phase)
+# (a) HOSTED: function_call → tool_start + tool_progress
+# (b) HOSTED: function_response → tool_end with digest/refs/durationMs
+# (c) None/CLI: NO tool_progress; tool_end byte-identical
+# ---------------------------------------------------------------------------
+
+
+def test_t3_hosted_call_emits_tool_progress_after_tool_start() -> None:
+    """HOSTED bridge: project a function_call → tool_start AND a following
+    tool_progress with id=tu_<hash>, label=name, status='in_progress',
+    message='Tool execution started'."""
+    bridge = OpenMagiEventBridge(wire_profile=HOSTED_PROFILE)
+    event = _make_call_event(
+        adk_tool_id="fc-t3-prog-001",
+        name="Grep",
+        args={"pattern": "TODO", "path": "."},
+    )
+    projection = bridge.project_adk_event(event, turn_id="turn-t3-prog")
+
+    assert len(projection.agent_events) >= 2, (
+        f"Expected at least tool_start + tool_progress, got {len(projection.agent_events)}: "
+        f"{projection.agent_events}"
+    )
+    tool_start = projection.agent_events[0]
+    tool_progress = projection.agent_events[1]
+
+    assert tool_start["type"] == "tool_start"
+    assert tool_start["id"].startswith("tu_")
+
+    assert tool_progress["type"] == "tool_progress"
+    # id must match the tool_start id
+    assert tool_progress["id"] == tool_start["id"]
+    assert tool_progress.get("label") == "Grep"
+    assert tool_progress.get("status") == "in_progress"
+    assert tool_progress.get("message") == "Tool execution started"
+
+
+def test_t3_hosted_response_tool_end_has_digest_refs_duration() -> None:
+    """HOSTED bridge: project function_response → tool_end has
+    output_preview == 'result:<digest>', transcriptRefs == ['result:<digest>'],
+    and durationMs is an int."""
+    from magi_agent.runtime.public_events import result_digest
+
+    response_payload = {"results": ["alpha", "beta"]}
+    adk_tool_id = "fc-t3-end-001"
+    bridge = OpenMagiEventBridge(wire_profile=HOSTED_PROFILE)
+
+    # Project call first so start-time is recorded
+    call_event = _make_call_event(
+        adk_tool_id=adk_tool_id,
+        name="Search",
+        args={"query": "digest test"},
+    )
+    bridge.project_adk_event(call_event, turn_id="turn-t3-end")
+
+    response_event = _make_response_event(
+        adk_tool_id=adk_tool_id,
+        name="Search",
+        response=response_payload,
+    )
+    projection = bridge.project_adk_event(response_event, turn_id="turn-t3-end")
+
+    tool_end = projection.agent_events[0]
+    assert tool_end["type"] == "tool_end"
+
+    digest = result_digest(response_payload)
+    expected_preview = f"result:{digest}"
+    assert tool_end.get("output_preview") == expected_preview, (
+        f"output_preview mismatch: {tool_end.get('output_preview')!r} != {expected_preview!r}"
+    )
+    assert tool_end.get("transcriptRefs") == [expected_preview], (
+        f"transcriptRefs mismatch: {tool_end.get('transcriptRefs')!r}"
+    )
+    duration = tool_end.get("durationMs")
+    assert duration is not None and isinstance(duration, (int, float)), (
+        f"durationMs must be an int/float, got {duration!r}"
+    )
+
+
+def test_t3_cli_none_no_tool_progress_and_tool_end_byte_identical() -> None:
+    """None/CLI bridge: project call+response → NO tool_progress; tool_end
+    shape is byte-identical to current CLI output (durationMs=0, no transcriptRefs,
+    output_preview from _public_preview)."""
+    bridge = OpenMagiEventBridge()  # None path
+
+    adk_tool_id = "fc-cli-t3-001"
+    call_event = _make_call_event(
+        adk_tool_id=adk_tool_id,
+        name="Bash",
+        args={"command": "ls"},
+        invocation_id="turn-cli-t3",
+    )
+    response_payload = {"output": "file.txt"}
+    response_event = _make_response_event(
+        adk_tool_id=adk_tool_id,
+        name="Bash",
+        response=response_payload,
+        invocation_id="turn-cli-t3",
+    )
+
+    call_proj = bridge.project_adk_event(call_event, turn_id="turn-cli-t3")
+    resp_proj = bridge.project_adk_event(response_event, turn_id="turn-cli-t3")
+
+    # No tool_progress events in call projection
+    call_types = [e["type"] for e in call_proj.agent_events]
+    assert "tool_progress" not in call_types, (
+        f"CLI path must NOT emit tool_progress, got: {call_types}"
+    )
+
+    # tool_end shape: no transcriptRefs, durationMs=0
+    tool_end = resp_proj.agent_events[0]
+    assert tool_end["type"] == "tool_end"
+    assert "transcriptRefs" not in tool_end, (
+        f"CLI tool_end must NOT have transcriptRefs, got: {tool_end}"
+    )
+    assert tool_end.get("durationMs") == 0, (
+        f"CLI tool_end must have durationMs=0, got: {tool_end.get('durationMs')!r}"
+    )

@@ -4,6 +4,7 @@ import hashlib
 import json
 import math
 import re
+import time
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -278,6 +279,10 @@ class OpenMagiEventBridge:
         # the CLI (None) path is byte-for-byte unchanged.
         self._hosted_tool_ids_by_adk_id: dict[str, str] = {}
         self._pending_hosted_ids_by_name: dict[str, list[str]] = {}
+        # HOSTED-only: monotonic start time recorded at tool_start, consumed at
+        # tool_end to compute durationMs — mirrors gate5b4c3's
+        # ``live_tool_started_at_by_id``.  Never referenced in the CLI/None path.
+        self._hosted_tool_started_at: dict[str, float] = {}
 
     def project_runner_start_event(
         self,
@@ -471,6 +476,9 @@ class OpenMagiEventBridge:
             ),
             pending_hosted_ids_by_name=(
                 self._pending_hosted_ids_by_name if self._wire_profile is not None else None
+            ),
+            hosted_tool_started_at=(
+                self._hosted_tool_started_at if self._wire_profile is not None else None
             ),
         )
         self._streamed_partial_text = partial_run[0]
@@ -689,6 +697,7 @@ def _project_content_parts(
     wire_profile: WireProfile | None = None,
     hosted_tool_ids_by_adk_id: dict[str, str] | None = None,
     pending_hosted_ids_by_name: dict[str, list[str]] | None = None,
+    hosted_tool_started_at: dict[str, float] | None = None,
 ) -> EventProjection:
     agent_events: list[dict[str, object]] = []
     legacy_deltas: list[str] = []
@@ -817,6 +826,7 @@ def _project_content_parts(
                 wire_profile=wire_profile,
                 hosted_tool_ids_by_adk_id=hosted_tool_ids_by_adk_id,
                 pending_hosted_ids_by_name=pending_hosted_ids_by_name,
+                hosted_tool_started_at=hosted_tool_started_at,
             )
             agent_events.extend(tool_projection.agent_events)
             transcript_entries.extend(tool_projection.transcript_entries)
@@ -836,6 +846,7 @@ def _project_content_parts(
                 wire_profile=wire_profile,
                 hosted_tool_ids_by_adk_id=hosted_tool_ids_by_adk_id,
                 pending_hosted_ids_by_name=pending_hosted_ids_by_name,
+                hosted_tool_started_at=hosted_tool_started_at,
             )
             agent_events.extend(tool_projection.agent_events)
             transcript_entries.extend(tool_projection.transcript_entries)
@@ -868,6 +879,7 @@ def _project_function_call_part(
     wire_profile: WireProfile | None = None,
     hosted_tool_ids_by_adk_id: dict[str, str] | None = None,
     pending_hosted_ids_by_name: dict[str, list[str]] | None = None,
+    hosted_tool_started_at: dict[str, float] | None = None,
 ) -> EventProjection:
     name = getattr(function_call, "name", None) or "unknown_tool"
     args = getattr(function_call, "args", None) or {}
@@ -886,6 +898,10 @@ def _project_function_call_part(
                 hosted_tool_ids_by_adk_id.setdefault(call_id_str, tool_use_id)
             if name:
                 pending_hosted_ids_by_name.setdefault(name, []).append(tool_use_id)
+        # Record start time for durationMs on tool_end — mirrors gate5b4c3's
+        # ``live_tool_started_at_by_id[tool_event_id] = time.monotonic()``.
+        if hosted_tool_started_at is not None:
+            hosted_tool_started_at[tool_use_id] = time.monotonic()
     else:
         # EXISTING code, byte-for-byte unchanged
         tool_use_id = _tool_use_id(
@@ -909,8 +925,22 @@ def _project_function_call_part(
             )
             agent_event["inputDigest"] = input_digest
 
+    # HOSTED path: emit a tool_progress "in_progress" event immediately after
+    # tool_start — mirrors gate5b4c3's ``tool_progress_event(... status="in_progress",
+    # message="Tool execution started")`` call between tool_start and tool_end.
+    # CLI/None path: no tool_progress emitted (byte-identical guard).
+    call_agent_events: list[dict[str, object]] = [agent_event]
+    if wire_profile is not None:
+        progress_event = wire_profile.build_tool_progress(
+            tool_use_id,
+            public_name,
+            status="in_progress",
+            message="Tool execution started",
+        )
+        call_agent_events.append(progress_event)
+
     return EventProjection(
-        agent_events=[agent_event],
+        agent_events=call_agent_events,
         transcript_entries=[
             ToolCallEntry(
                 ts=_event_ts(event),
@@ -946,6 +976,7 @@ def _project_function_response_part(
     wire_profile: WireProfile | None = None,
     hosted_tool_ids_by_adk_id: dict[str, str] | None = None,
     pending_hosted_ids_by_name: dict[str, list[str]] | None = None,
+    hosted_tool_started_at: dict[str, float] | None = None,
 ) -> EventProjection:
     name = getattr(function_response, "name", None) or "unknown_tool"
     adk_id = getattr(function_response, "id", None)
@@ -988,8 +1019,17 @@ def _project_function_response_part(
         if tool_use_id is None:
             # No correlation found — recompute (should not happen in normal flow).
             tool_use_id = wire_profile.tool_id(name, {}, adk_id, index)
+        # HOSTED: pass result-digest as output_preview + receipt_refs + durationMs
+        # to match gate5b4c3's tool_end wire shape.
+        from magi_agent.runtime.public_events import result_digest as _result_digest  # noqa: PLC0415
+        digest = _result_digest(response)
+        start = hosted_tool_started_at.get(tool_use_id) if hosted_tool_started_at is not None else None
         agent_event: dict[str, object] = wire_profile.build_tool_end(
-            tool_use_id, status, _public_preview(response)
+            tool_use_id,
+            status,
+            output_preview=f"result:{digest}",
+            receipt_refs=(f"result:{digest}",),
+            duration_ms=_elapsed_ms(start),
         )
     else:
         # EXISTING code, byte-for-byte unchanged
@@ -1274,6 +1314,18 @@ def _public_usage(value: dict[str, object] | None) -> dict[str, int | float] | N
             return None
         usage[target_key] = item
     return usage or None
+
+
+def _elapsed_ms(start: float | None) -> int | None:
+    """Return elapsed milliseconds since *start* (``time.monotonic()``).
+
+    Returns ``None`` when *start* is ``None`` — mirrors gate5b4c3's
+    ``_elapsed_ms`` helper.  Used only in the HOSTED branch; the CLI/None
+    branch never calls this.
+    """
+    if start is None:
+        return None
+    return int((time.monotonic() - start) * 1000)
 
 
 def _tool_use_id(

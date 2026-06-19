@@ -54,7 +54,7 @@ class WireProfile:
         ``(tool_id, name, input_preview) -> dict``
         Builds the ``tool_start`` agent_event dict.
     build_tool_progress:
-        ``(tool_id, label) -> dict``
+        ``(tool_id, label, status=None, message=None) -> dict``
         Builds the ``tool_progress`` agent_event dict.
     build_tool_end:
         ``(tool_id, status, output_preview=None, *, receipt_refs=(), duration_ms=None) -> dict``
@@ -71,7 +71,7 @@ class WireProfile:
 
     tool_id: Callable[[str, dict, object, int], str]
     build_tool_start: Callable[[str, str, str | None], dict]
-    build_tool_progress: Callable[[str, str | None], dict]
+    build_tool_progress: Callable[..., dict]
     build_tool_end: Callable[..., dict]
     build_text_delta: Callable[[str], dict]
     build_turn_phase: Callable[[str, str], dict]
@@ -139,8 +139,14 @@ def _default_build_tool_start(
 def _default_build_tool_progress(
     tool_id: str,
     label: str | None,
+    status: str | None = None,
+    message: str | None = None,
 ) -> dict:
-    """Build tool_progress dict matching event_adapter's current shape."""
+    """Build tool_progress dict matching event_adapter's current shape.
+
+    ``status`` and ``message`` accepted for signature parity but ignored —
+    DEFAULT_PROFILE is test-only documentation of the CLI wire shape.
+    """
     event: dict = {"type": "tool_progress", "id": tool_id}
     if label is not None:
         event["label"] = label
@@ -224,12 +230,16 @@ def _hosted_build_tool_start(
 def _hosted_build_tool_progress(
     tool_id: str,
     label: str | None,
+    status: str | None = None,
+    message: str | None = None,
 ) -> dict:
     from magi_agent.runtime.public_events import tool_progress_event  # noqa: PLC0415
 
     return tool_progress_event(
         tool_id=tool_id,
         label=label,
+        status=status,
+        message=message,
         event_family="tool_progress",
     )
 
