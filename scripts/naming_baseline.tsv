@@ -144,7 +144,7 @@ openmagi	magi_agent/plugins/native/knowledge.py	1
 openmagi	magi_agent/plugins/native/web.py	3
 openmagi	magi_agent/plugins/native_catalog.py	51
 openmagi	magi_agent/plugins/shell_testrun_safe_subset.py	1
-openmagi	magi_agent/plugins/tool_projection.py	17
+openmagi	magi_agent/plugins/tool_projection.py	18
 openmagi	magi_agent/recipes/coding_evidence_gate.py	1
 openmagi	magi_agent/recipes/coding_mutation.py	1
 openmagi	magi_agent/recipes/compiler.py	86
