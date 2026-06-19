@@ -81,8 +81,13 @@ from magi_agent.runtime.user_visible_model_routing import (
     _SAFE_LABEL_RE,
     _safe_label_or_none,
 )
+from magi_agent.runtime.hosted_runtime import build_hosted_runtime
 from magi_agent.shadow.gate5b4c3_live_runner_boundary import (
+    _gate1a_correlated_model_or_label,
     run_gate5b4c3_live_runner_boundary_async,
+)
+from magi_agent.shadow.gate5b4c3_runner_input_adapter import (
+    build_gate5b4c3_runner_input,
 )
 from magi_agent.shadow.gate5b4c3_shadow_counter_store import (
     Gate5B4C3ShadowCounterReservation,
@@ -90,6 +95,8 @@ from magi_agent.shadow.gate5b4c3_shadow_counter_store import (
 from magi_agent.shadow.gate5b4c3_shadow_generation_contract import (
     build_gate5b4c3_shadow_generation_diagnostic,
 )
+from magi_agent.transport.hosted_engine_result import collect_engine_to_boundary_result
+from magi_agent.transport.hosted_turn_context import hosted_request_to_turn_context
 from magi_agent.transport.chat_shared import (
     Gate5BUserVisibleChatRouteConfig,
     _RUNNER_DIAGNOSTIC_PREVIEW_FORBIDDEN_RE,
@@ -1589,16 +1596,92 @@ async def _run_live_chat_runner(
         except Exception:  # noqa: BLE001 — registration must never break a turn
             active_turn_claim = None
     try:
-        boundary_result = await run_gate5b4c3_live_runner_boundary_async(
-            generation,
-            config=generation_config,
-            adk_primitives_loader=route_config.adk_primitives_loader,
-            adk_tools=gate1a_bundle.tools if gate1a_bundle.status == "ready" else (),
-            gate1a_egress_correlation_context=gate1a_egress_context,
-            gate1a_egress_proxy_url=gate1a_egress_proxy_url,
-            public_event_sink=governance_event_sink,
-            control_plane_plugins=control_plane_plugins,
-        )
+        # MAGI_HOSTED_GOVERNED_TURN_ENABLED (default-OFF, hosted scope):
+        # When ON, route through run_governed_turn → MagiEngineDriver (Phase 2
+        # flip) instead of gate5b4c3._invoke_async_turn. The result shim
+        # (collect_engine_to_boundary_result) produces a wire-compatible
+        # Gate5B4C3LiveRunnerBoundaryResult so all downstream code is unchanged.
+        # Flag-OFF (default) = byte-identical to today: the legacy boundary call
+        # is taken without any additional overhead.
+        from magi_agent.config.flags import flag_bool as _flag_bool  # noqa: PLC0415
+        if _flag_bool("MAGI_HOSTED_GOVERNED_TURN_ENABLED"):
+            # 1. Build the runner input (input adapter + policy checks).
+            runner_input_result = build_gate5b4c3_runner_input(generation)
+            if runner_input_result.status != "accepted" or runner_input_result.runner_input is None:
+                # Input adapter dropped the request — fall through to the legacy
+                # boundary so its error-result path handles the response exactly
+                # as today (the boundary emits the same error result for drops).
+                boundary_result = await run_gate5b4c3_live_runner_boundary_async(
+                    generation,
+                    config=generation_config,
+                    adk_primitives_loader=route_config.adk_primitives_loader,
+                    adk_tools=gate1a_bundle.tools if gate1a_bundle.status == "ready" else (),
+                    gate1a_egress_correlation_context=gate1a_egress_context,
+                    gate1a_egress_proxy_url=gate1a_egress_proxy_url,
+                    public_event_sink=governance_event_sink,
+                    control_plane_plugins=control_plane_plugins,
+                )
+            else:
+                runner_input = runner_input_result.runner_input
+                adk_tools = gate1a_bundle.tools if gate1a_bundle.status == "ready" else ()
+                # 2. Build model (gate1a-correlated — caller-responsibility per PR1).
+                model_for_agent = _gate1a_correlated_model_or_label(
+                    provider_label=runner_input.provider_label,
+                    model_label=runner_input.model_label,
+                    context=gate1a_egress_context,
+                    proxy_url=gate1a_egress_proxy_url,
+                )
+                # 3. Build generate_content_config via the ADK primitives loader
+                # (matches gate5b4c3's own construction path).
+                primitives = route_config.adk_primitives_loader()
+                generate_content_config = primitives.GenerateContentConfig(
+                    maxOutputTokens=runner_input.max_output_tokens,
+                )
+                # 4. Assemble HostedRuntime (PR1).
+                hosted_rt = build_hosted_runtime(
+                    adk_primitives_loader=route_config.adk_primitives_loader,
+                    adk_tools=adk_tools,
+                    model=model_for_agent,
+                    instruction=runner_input.system_instruction,
+                    generate_content_config=generate_content_config,
+                    control_plane_plugins=control_plane_plugins,
+                    public_event_sink=governance_event_sink,
+                    app_name="openmagi-hosted-governed-turn",
+                )
+                # 5. Build TurnContext (PR2).
+                ctx = hosted_request_to_turn_context(generation)
+                # 6. Reuse the already-built diagnostic (built earlier in the function;
+                # same object the legacy boundary would compute). Variable name: diagnostic.
+                # 7. Drive the turn via run_governed_turn.
+                started_at_monotonic = time.monotonic()
+                # Cancel event: the active_turn_claim holds the registered turn;
+                # look it up to get the cooperative cancel handle (None is safe —
+                # task-level CancelledError still aborts the turn).
+                cancel_event: asyncio.Event | None = None
+                if active_turn_claim is not None and active_session_id:
+                    registered = ACTIVE_TURNS.get(active_session_id, active_turn_id)
+                    cancel_event = registered.cancel if registered is not None else None
+                event_stream = run_governed_turn(ctx, runtime=hosted_rt, cancel=cancel_event)
+                # 8. Collect result (PR3).
+                boundary_result = await collect_engine_to_boundary_result(
+                    generation=generation,
+                    config=generation_config,
+                    diagnostic=diagnostic,  # the already-built diagnostic (pre-try-block)
+                    event_stream=event_stream,
+                    started_at_monotonic=started_at_monotonic,
+                    timeout_ms=getattr(generation.budgets, "python_runner_timeout_ms", 0),
+                )
+        else:
+            boundary_result = await run_gate5b4c3_live_runner_boundary_async(
+                generation,
+                config=generation_config,
+                adk_primitives_loader=route_config.adk_primitives_loader,
+                adk_tools=gate1a_bundle.tools if gate1a_bundle.status == "ready" else (),
+                gate1a_egress_correlation_context=gate1a_egress_context,
+                gate1a_egress_proxy_url=gate1a_egress_proxy_url,
+                public_event_sink=governance_event_sink,
+                control_plane_plugins=control_plane_plugins,
+            )
         model_call_window_end = _utc_now_iso()
         report_digest = _sha256_digest(
             "|".join(
