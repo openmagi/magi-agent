@@ -77,6 +77,36 @@ def test_safe_runtime_profile_does_not_enable_child_runner_defaults() -> None:
     assert is_live_child_runner_enabled(env) is False
 
 
+def test_full_runtime_profile_enables_user_hook_bus() -> None:
+    # CC-style user HookBus is ON for self-host (full) — a no-op until the user
+    # authors hooks. Self-host only; hosted does not apply this overlay.
+    from magi_agent.config.env import is_user_hooks_enabled
+
+    env: dict[str, str] = {}
+    apply_local_full_runtime_defaults(env)
+    assert env["MAGI_USER_HOOKS_ENABLED"] == "1"
+    assert is_user_hooks_enabled(env) is True
+
+
+def test_safe_runtime_profile_does_not_enable_user_hook_bus() -> None:
+    from magi_agent.config.env import is_user_hooks_enabled
+
+    env = {"MAGI_RUNTIME_PROFILE": "safe"}
+    apply_local_full_runtime_defaults(env)
+    assert "MAGI_USER_HOOKS_ENABLED" not in env
+    assert is_user_hooks_enabled(env) is False
+
+
+def test_explicit_user_hooks_off_overrides_full_profile() -> None:
+    # setdefault semantics: an explicit "0" wins (per-flag walk-back).
+    from magi_agent.config.env import is_user_hooks_enabled
+
+    env = {"MAGI_USER_HOOKS_ENABLED": "0"}
+    apply_local_full_runtime_defaults(env)
+    assert env["MAGI_USER_HOOKS_ENABLED"] == "0"
+    assert is_user_hooks_enabled(env) is False
+
+
 def test_full_runtime_profile_enables_keyless_web_acquisition_defaults() -> None:
     # The local overlay should give a fresh, keyless user a working web
     # fetch/reader path (jina-reader is keyless; insane-fetch is local

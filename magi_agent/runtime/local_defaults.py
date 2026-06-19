@@ -52,6 +52,13 @@ LOCAL_FULL_RUNTIME_ENV_DEFAULTS: Mapping[str, str] = {
     "MAGI_MEMORY_WRITE_ENABLED": "1",
     "MAGI_MEMORY_LOCAL_DEV": "1",
     "MAGI_PROMPT_TRANSFORM_HOOKS_ENABLED": "1",
+    # CC-style user HookBus (~/.magi/settings.json + <workspace>/.magi/settings.json).
+    # ON for self-host (full) and lab; a no-op unless the user authored hooks. This
+    # runs user-supplied bash/http/llm at lifecycle points, so it is SELF-HOST ONLY:
+    # hosted multi-tenant deployments do NOT apply this overlay (and must keep it
+    # OFF). Read via a raw env helper (not profile-aware), so test/import default
+    # stays OFF — only the CLI/serve startup overlay flips it on.
+    "MAGI_USER_HOOKS_ENABLED": "1",
     "MAGI_DEFERRED_TOOLS_ENABLED": "1",
     "MAGI_WORKFLOW_EXECUTOR_ENABLED": "1",
     "MAGI_CHILD_RUNNER_LIVE_ENABLED": "1",
