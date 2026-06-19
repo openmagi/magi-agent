@@ -1,7 +1,48 @@
+import base64
+import os
+
 import pytest
 
-from magi_agent.computer.autonomous.cua_backend import CuaCapture, CuaDriverBackend
+from magi_agent.computer.autonomous.cua_backend import (
+    CuaCapture,
+    CuaDriverBackend,
+    _select_window,
+)
 from magi_agent.computer.autonomous.cua_pure import UIElement
+
+
+def _win(app: str, wid: int, w: int, h: int, on_screen: bool = True) -> dict:
+    return {
+        "app_name": app,
+        "pid": 1,
+        "window_id": wid,
+        "is_on_screen": on_screen,
+        "bounds": {"width": w, "height": h},
+    }
+
+
+def test_select_window_prefers_largest_non_driver() -> None:
+    # Driver window is largest but must be skipped; among the rest pick by area,
+    # not list order (the small accessory strip comes first).
+    windows = [
+        _win("Cua Driver", 100, 1400, 900),
+        _win("Code", 101, 1500, 32),
+        _win("Code", 102, 1500, 900),
+    ]
+    assert _select_window(windows)["window_id"] == 102
+
+
+def test_select_window_falls_back_to_driver_only() -> None:
+    windows = [_win("Cua Driver", 100, 100, 100)]
+    assert _select_window(windows)["window_id"] == 100
+
+
+def test_select_window_empty() -> None:
+    assert _select_window([]) == {}
+
+# Real cua-driver 0.5.7 get_window_state returns `tree_markdown` (not `data`) and
+# writes the PNG to `screenshot_out_file` (no inline `screenshot_b64`).
+_PNG_BYTES = b"\x89PNG\r\n\x1a\nFAKE"
 
 
 class _FakeSession:
@@ -13,24 +54,38 @@ class _FakeSession:
         if name == "list_windows":
             return {"windows": [{"pid": 42, "window_id": 7}]}
         if name == "get_window_state":
+            out = args.get("screenshot_out_file")
+            if out:
+                with open(out, "wb") as handle:
+                    handle.write(_PNG_BYTES)
             return {
                 "pid": 42,
                 "window_id": 7,
-                "screenshot_b64": "QUJD",
-                "data": '[element_index 1] AXButton "OK"',
+                "element_count": 1,
+                "tree_markdown": '- [1] AXButton "OK" [actions=[press]]',
             }
         return {"ok": True}
 
 
 @pytest.mark.asyncio
 async def test_capture_returns_parsed_state() -> None:
-    backend = CuaDriverBackend(session=_FakeSession())
+    session = _FakeSession()
+    backend = CuaDriverBackend(session=session)
     cap = await backend.capture()
     assert isinstance(cap, CuaCapture)
     assert cap.pid == 42
     assert cap.window_id == 7
-    assert cap.screenshot_b64 == "QUJD"
+    assert cap.ax_tree == '- [1] AXButton "OK" [actions=[press]]'
+    assert cap.screenshot_b64 == base64.b64encode(_PNG_BYTES).decode("ascii")
     assert cap.elements == [UIElement(index=1, role="AXButton", label="OK")]
+
+
+@pytest.mark.asyncio
+async def test_capture_does_not_persist_screenshot() -> None:
+    session = _FakeSession()
+    await CuaDriverBackend(session=session).capture()
+    gws_args = next(a for n, a in session.calls if n == "get_window_state")
+    assert not os.path.exists(gws_args["screenshot_out_file"])
 
 
 @pytest.mark.asyncio

@@ -17,7 +17,6 @@ CORE_AGENT_	magi_agent/hooks/builtin/prompt_transforms.py	3
 CORE_AGENT_	magi_agent/main.py	6
 CORE_AGENT_	magi_agent/research/research_first_canary.py	2
 CORE_AGENT_	magi_agent/shadow/fixture_runner.py	1
-CORE_AGENT_	magi_agent/shadow/mission_lifecycle_contract.py	6
 CORE_AGENT_	magi_agent/transport/app_api.py	2
 CORE_AGENT_	magi_agent/transport/chat_routes.py	9
 CORE_AGENT_	magi_agent/transport/chat_shared.py	49
@@ -197,9 +196,6 @@ openmagi	magi_agent/security/compliance.py	4
 openmagi	magi_agent/security/context_guard.py	1
 openmagi	magi_agent/security/credentials.py	1
 openmagi	magi_agent/security/sandbox_preflight.py	1
-openmagi	magi_agent/shadow/adk_eval_fixture_contract.py	12
-openmagi	magi_agent/shadow/agent_methodology_contract.py	2
-openmagi	magi_agent/shadow/artifact_channel_delivery_contract.py	5
 openmagi	magi_agent/shadow/fixture_runner.py	5
 openmagi	magi_agent/shadow/gate2_activation_loop_a.py	1
 openmagi	magi_agent/shadow/gate2_recipe_profile_resolver.py	1
@@ -207,14 +203,8 @@ openmagi	magi_agent/shadow/gate3a_replay.py	1
 openmagi	magi_agent/shadow/gate4c1_runner_shadow_invoker.py	6
 openmagi	magi_agent/shadow/gate5b4c3_live_runner_boundary.py	5
 openmagi	magi_agent/shadow/gate5b4c3_runner_input_adapter.py	4
-openmagi	magi_agent/shadow/memory_source_authority_contract.py	6
-openmagi	magi_agent/shadow/mission_lifecycle_contract.py	4
-openmagi	magi_agent/shadow/office_automation_contract.py	7
-openmagi	magi_agent/shadow/office_recipe_tool_alias_contract.py	1
-openmagi	magi_agent/shadow/opencode_delta_contract.py	5
 openmagi	magi_agent/shadow/research_runner_capture.py	1
 openmagi	magi_agent/shadow/tool_policy.py	1
-openmagi	magi_agent/shadow/web_acquisition_browser_provider_contract.py	6
 openmagi	magi_agent/storage/content_addressed.py	7
 openmagi	magi_agent/storage/durable_store.py	11
 openmagi	magi_agent/storage/memory_store.py	1

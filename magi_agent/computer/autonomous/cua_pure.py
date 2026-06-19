@@ -5,7 +5,11 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-_ELEMENT_RE = re.compile(r"\[element_index\s+(\d+)\]\s+(\S+)\s+\"([^\"]*)\"")
+# cua-driver 0.5.7 get_window_state markdown lines look like:
+#   - [0] AXWindow "Safari" [actions=[raise]]
+#     - [6] AXMenuItem [actions=[cancel,press,pick]]   (label optional)
+# i.e. `[N]` (not `[element_index N]`), role token, optional quoted label.
+_ELEMENT_RE = re.compile(r'^\s*-\s*\[(\d+)\]\s+(\S+)(?:\s+"([^"]*)")?', re.MULTILINE)
 
 
 def _first_json_object(text: str) -> str | None:
@@ -38,12 +42,17 @@ class UIElement:
 def parse_window_state(markdown: str) -> list[UIElement]:
     """Parse cua-driver ``get_window_state`` markdown into UI elements.
 
-    Each actionable element is one line: ``[element_index N] AXRole "label"``.
+    Each actionable element is one (indented) line: ``- [N] AXRole "label"?``
+    followed by ``[id=…: actions=[…]]`` metadata. The label is optional.
     """
     out: list[UIElement] = []
     for match in _ELEMENT_RE.finditer(markdown):
         out.append(
-            UIElement(index=int(match.group(1)), role=match.group(2), label=match.group(3))
+            UIElement(
+                index=int(match.group(1)),
+                role=match.group(2),
+                label=match.group(3) or "",
+            )
         )
     return out
 
