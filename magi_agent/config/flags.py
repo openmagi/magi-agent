@@ -58,11 +58,15 @@ from dataclasses import dataclass
 import os
 from typing import Literal
 
-# Reuse the single truthy convention already established in env.py rather than
-# inventing a new one (the cluster's explicit "no new truthy set" rule). The
-# profile-aware reader delegates to env's _runtime_feature_enabled so there is
-# exactly one source of truth for the profile-default-ON resolution.
-from .env import _is_true, _runtime_feature_enabled
+# Reuse the single truthy convention. The shared primitives live in the
+# dependency-free leaf ``config/_truthy.py`` (I-3); ``env.py`` re-exports the
+# same callables under their historic private names. Importing the leaf
+# directly here keeps ``flags.py`` independent of ``env.py`` so the managed
+# import cycle stays broken — see tests/test_config_import_acyclic.py.
+from ._truthy import (
+    is_true as _is_true,
+    runtime_feature_enabled as _runtime_feature_enabled,
+)
 
 __all__ = [
     "FlagScope",

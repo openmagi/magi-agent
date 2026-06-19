@@ -58,10 +58,22 @@ REQUIRED_ENV = (
 # model applies instead of being clobbered by the placeholder.
 LOCAL_DEV_MODEL_SENTINEL = "local-dev"
 
-_TRUE_VALUES = frozenset({"1", "true", "yes", "on"})
-_FALSE_VALUES = frozenset({"0", "false", "no", "off", ""})
-RUNTIME_PROFILE_ENV = "MAGI_RUNTIME_PROFILE"
-_SAFE_RUNTIME_PROFILES = frozenset({"safe", "off", "minimal", "conservative", "eval"})
+# The shared truthy convention + profile defaults live in the dependency-free
+# ``config/_truthy.py`` leaf (I-3) so ``config/flags.py`` and ``config/env.py``
+# can both import them one-directionally instead of reaching into each other
+# (which forced ~13 deferred ``from .flags import …`` shims here). The historic
+# private aliases below keep ~88 internal call sites + 4 ``plugins/native/*``
+# importers byte-identical.
+from ._truthy import (
+    FALSE_VALUES as _FALSE_VALUES,
+    RUNTIME_PROFILE_ENV,
+    SAFE_RUNTIME_PROFILES as _SAFE_RUNTIME_PROFILES,
+    TRUE_VALUES as _TRUE_VALUES,
+    env_bool_default_true as _env_bool_default_true,
+    is_true as _is_true,
+    runtime_feature_enabled as _runtime_feature_enabled,
+    runtime_profile_default_enabled as _runtime_profile_default_enabled,
+)
 
 # ---------------------------------------------------------------------------
 # Coding: edit fuzzy-match flag
@@ -3260,10 +3272,6 @@ def composio_dispatch_enforced(env: Mapping[str, str] | None = None) -> bool:
     return _is_true(source.get(MAGI_COMPOSIO_DISPATCH_ENFORCED_ENV))
 
 
-def _is_true(value: str | None) -> bool:
-    return (value or "").strip().lower() in _TRUE_VALUES
-
-
 # ---------------------------------------------------------------------------
 # Native receipt honesty (cluster 13 D2)
 # ---------------------------------------------------------------------------
@@ -3273,6 +3281,13 @@ def _is_true(value: str | None) -> bool:
 # ``status: ok`` digest the model would mis-report as a real state change. Set
 # MAGI_NATIVE_RECEIPTS_HONEST=0 to restore the legacy fake-ok behaviour
 # (rollback safety valve).
+#
+# NOTE on truthy primitives: ``_is_true`` / ``_runtime_feature_enabled`` /
+# ``_runtime_profile_default_enabled`` / ``_env_bool_default_true`` are
+# imported from ``config/_truthy.py`` at the top of this module (I-3). The
+# historic standalone definitions that lived here used to anchor the
+# managed-import cycle with ``config/flags.py``; they are now thin re-export
+# aliases. Internal call sites stay unchanged.
 NATIVE_RECEIPTS_HONEST_ENV = "MAGI_NATIVE_RECEIPTS_HONEST"
 
 
@@ -3282,32 +3297,6 @@ def native_receipts_honest(env: Mapping[str, str] | None = None) -> bool:
 
         env = _os.environ
     return _env_bool_default_true(env.get(NATIVE_RECEIPTS_HONEST_ENV))
-
-
-def _runtime_profile_default_enabled(env: Mapping[str, str]) -> bool:
-    profile = (env.get(RUNTIME_PROFILE_ENV) or "").strip().lower()
-    return profile not in _SAFE_RUNTIME_PROFILES
-
-
-def _runtime_feature_enabled(env: Mapping[str, str], name: str) -> bool:
-    value = env.get(name)
-    if value is None:
-        return _runtime_profile_default_enabled(env)
-    normalized = value.strip().lower()
-    if normalized in _FALSE_VALUES:
-        return False
-    if normalized in _TRUE_VALUES:
-        return True
-    return _runtime_profile_default_enabled(env)
-
-
-def _env_bool_default_true(value: str | None) -> bool:
-    if value is None:
-        return True
-    normalized = (value or "").strip().lower()
-    if normalized in _FALSE_VALUES:
-        return False
-    return True
 
 
 def _trimmed(value: str | None) -> str | None:
