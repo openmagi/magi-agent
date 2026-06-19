@@ -17,6 +17,7 @@ import { ChatModelPicker } from "@/components/chat/chat-model-picker";
 import { KbContextBar } from "@/components/chat/kb-context-bar";
 import { KbSidePanel } from "@/components/chat/kb-side-panel";
 import { useChatStore, syncResetCounters } from "@/chat-core";
+import { clipMessagesAtResetBoundary, getResetBoundaryTimestamp } from "@/chat-core";
 import { subscribeToPushMessages, type PushSubscriptionHandle } from "@/lib/chat/push-realtime";
 import * as chatApi from "@/lib/chat/chat-client";
 import { setChatTokenGetter } from "@/lib/chat/chat-client";
@@ -905,7 +906,15 @@ export function ChatViewClient({
       }, { botId });
       if (!isCurrentBot()) return;
 
-      const allMessages = useChatStore.getState().messages[channel] ?? [];
+      // Drop messages from BEFORE the current reset boundary so a Reset truly
+      // starts a fresh conversation: the in-memory store keeps pre-reset history
+      // (for the divider/scroll-back UX) but we must NOT replay it to the
+      // backend, otherwise the bot resumes the old task on the next message —
+      // even on No-memory channels where it has nothing to do with hipocampus.
+      const allMessages = clipMessagesAtResetBoundary(
+        useChatStore.getState().messages[channel] ?? [],
+        getResetBoundaryTimestamp(botId, channel),
+      );
 
       const attempt = async (retryCount: number): Promise<void> => {
         const controller = new AbortController();

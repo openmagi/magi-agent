@@ -59,6 +59,7 @@ export {
   type SyncResetCountersOptions,
   incrementResetCounter,
 } from "./reset-counter";
+export * from "./clip-messages-at-reset-boundary";
 export * from "./response-usage";
 export * from "./send-policy";
 export * from "./server-channels";
