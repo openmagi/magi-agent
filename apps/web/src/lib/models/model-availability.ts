@@ -7,19 +7,17 @@ export interface ModelOptionLike {
 }
 
 // Map each model-selection option value to the provider whose API key it needs.
-// Provider-agnostic options (router tiers, local models) are intentionally
-// ABSENT — they are never filtered out by key availability.
+// Provider-agnostic options (e.g. router tokens persisted by chat-core) are
+// intentionally ABSENT — they are never filtered out by key availability and
+// will be normalised by the picker fallback labels.
 const OPTION_PROVIDER: Record<string, string> = {
   haiku: "anthropic",
   sonnet: "anthropic",
   opus: "anthropic",
-  smart_routing: "anthropic",
-  gpt_smart_routing: "openai",
   gpt_5_nano: "openai",
   gpt_5_mini: "openai",
   gpt_5_5: "openai",
   gpt_5_5_pro: "openai",
-  codex: "openai",
   kimi_k2_5: "fireworks",
   minimax_m2_7: "fireworks",
   gemini_3_1_flash_lite: "gemini",

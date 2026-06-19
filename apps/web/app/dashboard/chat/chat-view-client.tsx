@@ -86,12 +86,9 @@ interface ChatViewClientProps {
   botName: string;
   botStatus: string;
   modelSelection: string;
-  apiKeyMode: string;
-  subscriptionPlan: string | null;
   bots: { id: string; name: string; status: string }[];
   maxBots: number;
   initialChannel: string;
-  routerType: string | null;
   telegramBotUsername: string | null;
   telegramOwnerId: number | null;
 }
@@ -178,9 +175,6 @@ export function ChatViewClient({
   botName,
   botStatus,
   modelSelection,
-  apiKeyMode,
-  routerType,
-  subscriptionPlan,
   bots,
   maxBots,
   initialChannel,
@@ -223,10 +217,12 @@ export function ChatViewClient({
   const [uploadStates, setUploadStates] = useState<Record<string, PendingKbUpload>>({});
   const [preparedUploadRefs, setPreparedUploadRefs] = useState<Record<string, KbDocReference>>({});
   const currentChannels = store.channels;
+  // OSS has no smart-router backend, so `routerType` is always "standard" at
+  // rest. We keep the chat-core field for shape compatibility but never vary it.
   const fallbackChannelModelSelection = useMemo<ChannelModelSelection>(() => ({
     modelSelection,
-    routerType: routerType ?? "standard",
-  }), [modelSelection, routerType]);
+    routerType: "standard",
+  }), [modelSelection]);
   const [channelModelSelection, setChannelModelSelectionState] =
     useState<ChannelModelSelection>(fallbackChannelModelSelection);
   const serverBackedChannelModelSelection = useCallback(
@@ -241,6 +237,7 @@ export function ChatViewClient({
       if (queuedModelOverride) return queuedModelOverride;
       return channelModelSelectionToRuntimeModel(
         getChannelModelSelection(botId, channelName, serverBackedChannelModelSelection(channelName)),
+        { runtime: "oss-local" },
       );
     },
     [botId, serverBackedChannelModelSelection],
@@ -1699,17 +1696,17 @@ export function ChatViewClient({
   }, [activeChannel, botId, fallbackChannelModelSelection, serverBackedChannelModelSelection]);
 
   const handleChannelModelSelectionChange = useCallback(
-    (nextModelSelection: string, nextRouterType: string) => {
+    (nextModelSelection: string) => {
       if (!activeChannel) return;
       const next = {
         modelSelection: nextModelSelection,
-        routerType: nextRouterType,
+        routerType: "standard",
       };
       setChannelModelSelectionState(next);
       setChannelModelSelection(botId, activeChannel, next);
       void chatApi.updateChannel(botId, activeChannel, {
         model_selection: nextModelSelection,
-        router_type: nextRouterType,
+        router_type: "standard",
       }).catch((err) => {
         console.warn("[chat] failed to persist channel model selection:", err);
       });
@@ -1944,9 +1941,6 @@ export function ChatViewClient({
                 <ChatModelPicker
                   botId={botId}
                   modelSelection={channelModelSelection.modelSelection}
-                  routerType={channelModelSelection.routerType}
-                  apiKeyMode={apiKeyMode}
-                  subscriptionPlan={subscriptionPlan}
                   persistMode="local"
                   menuPlacement="top"
                   onModelSelectionChange={handleChannelModelSelectionChange}

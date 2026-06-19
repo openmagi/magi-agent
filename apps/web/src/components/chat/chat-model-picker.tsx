@@ -8,40 +8,27 @@ import {
   type ModelOption,
 } from "@/lib/models/model-options";
 import { filterModelOptionsByConfiguredProviders } from "@/lib/models/model-availability";
-import {
-  applyRouterPickerMode,
-  getRouterPickerMode,
-  ROUTER_PICKER_OPTIONS,
-  type RouterPickerMode,
-} from "@/lib/models/router-tier";
+import { UNRESOLVED_MODEL_SENTINEL } from "@/chat-core";
 
 interface ChatModelPickerProps {
   botId: string;
   modelSelection: string;
-  routerType?: string | null;
-  apiKeyMode: string;
-  subscriptionPlan?: string | null;
   persistMode?: "bot" | "local";
   menuPlacement?: "bottom" | "top";
-  onModelSelectionChange?: (modelSelection: string, routerType: string) => void;
-}
-
-function ensureSelectedOption(options: ModelOption[], value: string): ModelOption[] {
-  if (options.some((option) => option.value === value)) return options;
-  return [{ value, label: value }, ...options];
+  onModelSelectionChange?: (modelSelection: string) => void;
 }
 
 // Friendly labels for selections that map to a router rather than a concrete
-// model, so the local flat picker never surfaces a raw routing token.
+// model, so the local flat picker never surfaces a raw routing token. OSS does
+// not run a smart router, but chat-core's persisted channel default is still
+// `clawy_smart_routing`, so we display it as a human label until the user picks
+// a concrete model.
 const LOCAL_FLAT_FALLBACK_LABELS: Record<string, string> = {
   clawy_smart_routing: "Smart Routing",
 };
 
-function localFlatOptions(
-  subscriptionPlan: string | null | undefined,
-  selectedModel: string,
-): ModelOption[] {
-  const options = getModelOptions(subscriptionPlan);
+function localFlatOptions(selectedModel: string): ModelOption[] {
+  const options = getModelOptions(null);
   if (options.some((option) => option.value === selectedModel)) return options;
   return [
     { value: selectedModel, label: LOCAL_FLAT_FALLBACK_LABELS[selectedModel] ?? selectedModel },
@@ -125,9 +112,6 @@ function Dropdown({
 export function ChatModelPicker({
   botId,
   modelSelection,
-  routerType,
-  apiKeyMode,
-  subscriptionPlan,
   persistMode = "bot",
   menuPlacement = "bottom",
   onModelSelectionChange,
@@ -136,7 +120,6 @@ export function ChatModelPicker({
   const [selectedModel, setSelectedModel] = useState(() =>
     normalizeModelSelectionForSettings(modelSelection),
   );
-  const [currentRouterType, setCurrentRouterType] = useState(routerType ?? "standard");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Local self-hosted bots: only advertise models whose provider has a key, so
@@ -171,35 +154,24 @@ export function ChatModelPicker({
     };
   }, [authFetch, persistMode]);
 
-  const pickerMode = useMemo(
-    () => getRouterPickerMode(selectedModel, currentRouterType),
-    [selectedModel, currentRouterType],
-  );
-
   useEffect(() => {
     setSelectedModel(normalizeModelSelectionForSettings(modelSelection));
-    setCurrentRouterType(routerType ?? "standard");
-  }, [modelSelection, routerType]);
+  }, [modelSelection]);
 
-  const advancedOptions = useMemo(() => {
-    const all = getModelOptions(subscriptionPlan);
-    const keyed =
-      persistMode === "local" && configuredProviders
-        ? filterModelOptionsByConfiguredProviders(all, configuredProviders, selectedModel)
-        : all;
-    return ensureSelectedOption(keyed, selectedModel);
-  }, [selectedModel, subscriptionPlan, persistMode, configuredProviders]);
+  const visibleOptions = useMemo(() => {
+    const base = localFlatOptions(selectedModel);
+    if (persistMode !== "local" || !configuredProviders) return base;
+    return filterModelOptionsByConfiguredProviders(base, configuredProviders, selectedModel);
+  }, [selectedModel, persistMode, configuredProviders]);
 
   const saveModel = useCallback(
-    async (nextModelSelection: string, nextRouterType: string) => {
+    async (nextModelSelection: string) => {
       setError(null);
       const prevModel = selectedModel;
-      const prevRouter = currentRouterType;
       setSelectedModel(nextModelSelection);
-      setCurrentRouterType(nextRouterType);
 
       if (persistMode === "local") {
-        onModelSelectionChange?.(nextModelSelection, nextRouterType);
+        onModelSelectionChange?.(nextModelSelection);
         return;
       }
 
@@ -210,7 +182,6 @@ export function ChatModelPicker({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             model_selection: nextModelSelection,
-            router_type: nextRouterType,
           }),
         });
         const data = await res.json().catch(() => ({}));
@@ -224,53 +195,31 @@ export function ChatModelPicker({
             ? normalizeModelSelectionForSettings(data.model_selection)
             : nextModelSelection;
         setSelectedModel(savedModel);
-        onModelSelectionChange?.(savedModel, nextRouterType);
+        onModelSelectionChange?.(savedModel);
       } catch (err) {
         setSelectedModel(prevModel);
-        setCurrentRouterType(prevRouter);
         setError(err instanceof Error ? err.message : "Failed to update model");
       } finally {
         setSaving(false);
       }
     },
-    [authFetch, botId, onModelSelectionChange, persistMode, selectedModel, currentRouterType],
+    [authFetch, botId, onModelSelectionChange, persistMode, selectedModel],
   );
 
-  // Local serve runs in BYOK mode and has no platform router tiers, so it gets a
-  // single flat model dropdown matching the deployed hosted picker.
-  if (persistMode === "local") {
-    return (
-      <div
-        className="relative flex w-full max-w-[calc(100vw-2rem)] min-w-0 flex-nowrap items-center gap-1 rounded-md border border-transparent bg-transparent p-0 shadow-none sm:w-auto sm:max-w-full"
-        data-chat-model-picker="true"
-      >
-        <Dropdown
-          label="Model"
-          options={localFlatOptions(subscriptionPlan, selectedModel)}
-          value={selectedModel}
-          onChange={(value) => void saveModel(value, "standard")}
-          disabled={saving}
-          menuPlacement={menuPlacement}
-        />
-        {saving && (
-          <span
-            className="pointer-events-none h-3 w-3 rounded-full border border-primary/30 border-t-primary animate-spin"
-            aria-hidden="true"
-          />
-        )}
-        {error && (
-          <span
-            className="pointer-events-none absolute left-0 top-full mt-1 whitespace-nowrap rounded-md border border-red-500/15 bg-white px-2 py-1 text-[11px] text-red-500 shadow-sm"
-            role="status"
-          >
-            {error}
-          </span>
-        )}
-      </div>
+  // OSS local picker: when chat-core's persisted default sentinel is shown
+  // and the providers fetch has resolved, auto-pick the first concrete model
+  // the user can actually run, so the first turn doesn't hit a non-existent
+  // smart router. Skip when the user has already picked a concrete model.
+  useEffect(() => {
+    if (persistMode !== "local") return;
+    if (selectedModel !== UNRESOLVED_MODEL_SENTINEL) return;
+    if (!configuredProviders) return;
+    const firstConcrete = visibleOptions.find(
+      (option) => option.value !== UNRESOLVED_MODEL_SENTINEL,
     );
-  }
-
-  if (apiKeyMode !== "platform_credits") return null;
+    if (!firstConcrete) return;
+    void saveModel(firstConcrete.value);
+  }, [persistMode, selectedModel, configuredProviders, visibleOptions, saveModel]);
 
   return (
     <div
@@ -278,29 +227,13 @@ export function ChatModelPicker({
       data-chat-model-picker="true"
     >
       <Dropdown
-        label="Router tier"
-        options={ROUTER_PICKER_OPTIONS}
-        value={pickerMode}
-        onChange={(mode) => {
-          const { modelSelection: nextModel, routerType: nextRouter } = applyRouterPickerMode(
-            mode as RouterPickerMode,
-            selectedModel as Parameters<typeof applyRouterPickerMode>[1],
-          );
-          void saveModel(nextModel, nextRouter);
-        }}
+        label="Model"
+        options={visibleOptions}
+        value={selectedModel}
+        onChange={(value) => void saveModel(value)}
         disabled={saving}
         menuPlacement={menuPlacement}
       />
-      {pickerMode === "advanced" && (
-        <Dropdown
-          label="Model"
-          options={advancedOptions}
-          value={selectedModel}
-          onChange={(value) => void saveModel(value, "standard")}
-          disabled={saving}
-          menuPlacement={menuPlacement}
-        />
-      )}
       {saving && (
         <span
           className="pointer-events-none h-3 w-3 rounded-full border border-primary/30 border-t-primary animate-spin"

@@ -5,18 +5,19 @@ export interface ModelOption {
   label: string;
 }
 
+// Only concrete provider-backed models the local runtime can serve. Smart-routing
+// and Codex are hosted-only — OSS has no smart router backend, so surfacing them
+// would let the user pick a model that silently fails. They are deliberately
+// excluded here (rather than at the availability filter) so the source list
+// itself reflects what the local runtime can run.
 export const BASE_MODEL_OPTIONS = [
-  { value: "smart_routing", label: "Smart Routing" },
   { value: "haiku", label: "Claude Haiku 4.5" },
   { value: "sonnet", label: "Claude Sonnet 4.5" },
   { value: "opus", label: "Claude Opus 4.6" },
-  { value: "magi_smart_routing", label: "Open Magi Router" },
-  { value: "gpt_smart_routing", label: "GPT Smart Routing" },
   { value: "gpt_5_nano", label: "GPT-5.4 Nano" },
   { value: "gpt_5_mini", label: "GPT-5.4 Mini" },
   { value: "gpt_5_5", label: "GPT-5.5" },
   { value: "gpt_5_5_pro", label: "GPT-5.5 Pro" },
-  { value: "codex", label: "Codex (OAuth Required)" },
   { value: "kimi_k2_5", label: "Kimi K2.6 (Fireworks AI)" },
   { value: "minimax_m2_7", label: "MiniMax M2.7 (Fireworks AI)" },
   { value: "gemini_3_1_flash_lite", label: "Gemini 3.1 Flash Lite (Google)" },

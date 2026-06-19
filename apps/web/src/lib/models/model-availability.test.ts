@@ -4,10 +4,11 @@ import {
   type ModelOptionLike,
 } from "./model-availability";
 
-// Inline a representative slice of BASE_MODEL_OPTIONS so this test stays free of
-// the `@/`-aliased import chain that model-options.ts pulls in.
+// Inline a representative slice of BASE_MODEL_OPTIONS plus one provider-agnostic
+// token so this test stays free of the `@/`-aliased import chain that
+// model-options.ts pulls in.
 const OPTIONS: ModelOptionLike[] = [
-  { value: "magi_smart_routing", label: "Open Magi Router" },
+  { value: "clawy_smart_routing", label: "Smart Routing" },
   { value: "sonnet", label: "Claude Sonnet" },
   { value: "gpt_5_5", label: "GPT-5.5" },
   { value: "gemini_3_1_pro", label: "Gemini 3.1 Pro" },
@@ -37,12 +38,12 @@ describe("filterModelOptionsByConfiguredProviders", () => {
     expect(values).not.toContain("sonnet");
   });
 
-  it("always keeps provider-agnostic router options", () => {
+  it("always keeps provider-agnostic options", () => {
     const values = filterModelOptionsByConfiguredProviders(
       OPTIONS,
       new Set(["fireworks"]),
     ).map((o) => o.value);
-    expect(values).toContain("magi_smart_routing");
+    expect(values).toContain("clawy_smart_routing");
   });
 
   it("fails open: empty configured set returns all options unchanged", () => {

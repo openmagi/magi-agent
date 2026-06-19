@@ -77,6 +77,28 @@ describe("channel model selection", () => {
     })).toBe("google/gemini-3.1-flash-lite-preview");
   });
 
+  it("returns an empty string for the unresolved sentinel under oss-local context", () => {
+    // OSS runtime has no smart router; the picker substitutes a concrete model.
+    expect(channelModelSelectionToRuntimeModel(
+      { modelSelection: "clawy_smart_routing", routerType: "standard" },
+      { runtime: "oss-local" },
+    )).toBe("");
+    expect(channelModelSelectionToRuntimeModel(
+      { modelSelection: "clawy_smart_routing", routerType: "big_dic" },
+      { runtime: "oss-local" },
+    )).toBe("");
+    // Hosted runtime keeps the smart-router routing (default context).
+    expect(channelModelSelectionToRuntimeModel(
+      { modelSelection: "clawy_smart_routing", routerType: "standard" },
+      { runtime: "hosted" },
+    )).toBe("clawy-smart-router/auto");
+    // Concrete selections resolve identically regardless of context.
+    expect(channelModelSelectionToRuntimeModel(
+      { modelSelection: "opus", routerType: "standard" },
+      { runtime: "oss-local" },
+    )).toBe("anthropic/claude-opus-4-8");
+  });
+
   it("restores channel model selection from server channel preferences", () => {
     expect(channelModelSelectionFromChannel({
       model_selection: "kimi_k2_5",

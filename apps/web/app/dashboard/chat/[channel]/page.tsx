@@ -17,9 +17,6 @@ export default async function ChatChannelPage({ params }: ChatChannelPageProps) 
       botName="Local Agent"
       botStatus="active"
       modelSelection="claude-sonnet-4-20250514"
-      apiKeyMode="byok"
-      routerType={null}
-      subscriptionPlan={null}
       bots={[]}
       maxBots={1}
       initialChannel={channel}
