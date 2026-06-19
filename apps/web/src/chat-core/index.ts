@@ -7,6 +7,8 @@ export * from "./agent-activity";
 export * from "./assistant-dedupe";
 export * from "./attachment-marker";
 export * from "./attachments";
+export * from "./background-task-ack";
+export * from "./background-task-indicator";
 export * from "./build-channel-export";
 export * from "./build-plaintext-persist-rows";
 export * from "./channel-i18n";
