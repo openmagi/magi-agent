@@ -126,6 +126,10 @@ class AdkWorkTaskRunner:
 
         try:
             turn_input = self._build_turn_input(plan)
+            # Timeout is owned HERE (not by the caller), unlike CronTurnRunnerAdapter
+            # whose timeout is applied by the outer scheduler's _run_turn_sync wrapper.
+            # The work-queue driver calls `asyncio.run(runner.run_task(...))` with no
+            # outer wait_for, so the per-task timeout must be enforced inside this method.
             events = await asyncio.wait_for(
                 self._runner_adapter.collect_events(turn_input),
                 timeout=plan.timeout_seconds,

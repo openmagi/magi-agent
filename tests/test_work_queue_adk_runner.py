@@ -6,10 +6,7 @@ from __future__ import annotations
 
 import asyncio
 
-import pytest
-
 from magi_agent.missions.work_queue.adk_work_task_runner import AdkWorkTaskRunner
-from magi_agent.missions.work_queue.runner import WorkTaskRunResult
 from magi_agent.missions.work_queue.models import WorkTask
 
 
@@ -80,8 +77,6 @@ def test_adk_runner_build_turn_input_exception_is_caught():
     runner = AdkWorkTaskRunner(_BrokenAdapter())
 
     # Patch _build_turn_input to raise ImportError (simulates missing dep).
-    original = runner._build_turn_input
-
     def _raise(_plan):
         raise ImportError("google.genai not installed")
 
