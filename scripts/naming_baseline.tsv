@@ -176,6 +176,7 @@ openmagi	magi_agent/runtime/heartbeat_boundary.py	2
 openmagi	magi_agent/runtime/heartbeat_contract.py	17
 openmagi	magi_agent/runtime/heartbeat_store.py	6
 openmagi	magi_agent/runtime/hosted_defaults.py	2
+openmagi	magi_agent/runtime/hosted_runtime.py	3
 openmagi	magi_agent/runtime/llm_stream_reader.py	1
 openmagi	magi_agent/runtime/local_defaults.py	1
 openmagi	magi_agent/runtime/message_builder.py	1
