@@ -833,6 +833,7 @@ def execute_pre_final_verifier_bus(
     observed_public_refs: Sequence[str],
     evidence_records: Sequence[object],
     document_coverage_gate_enabled: bool = False,
+    shacl_gate_enabled: bool = False,
 ) -> dict[str, object]:
     """Run the deterministic pre-final evidence verifier over public refs.
 
@@ -852,6 +853,20 @@ def execute_pre_final_verifier_bus(
     ``evidence_from_tool_result`` path) — via an ``EvidenceFieldMatcher``. Absence
     of any ``DocumentCoverage`` record ⇒ pass, so a non-document turn is never
     blocked by this gate.
+
+    ``shacl_gate_enabled`` (Task 1.3 / PR1, default OFF) activates the SHACL
+    consume-side gate.  When OFF this function is behavior-identical to before:
+    ``custom:ShaclConstraintCheck`` evidence stays audit-only and never affects
+    the decision.  When ON, any ``custom:ShaclConstraintCheck`` record whose
+    top-level ``EvidenceRecord.status == "failed"`` (a constraint violation) flips
+    the decision to ``"block"`` with a ``shacl-constraint-verifier`` result.
+    Unlike the document-coverage gate, the match keys off the **top-level**
+    ``EvidenceRecord.status`` because the SHACL producer (PR1 Task 1.2) sets
+    ``status="failed"`` directly on the record for a violation — NOT via
+    ``fields["status"]``.  Records with ``status="unknown"`` (fail-safe: shape
+    parse/pyshacl exception) and ``status="ok"`` are never blocked.  Absence of
+    any ``custom:ShaclConstraintCheck`` record ⇒ no effect, so a non-SHACL turn
+    is never blocked by this gate.
     """
 
     matched_refs = set(_valid_public_refs(observed_public_refs))
@@ -871,9 +886,15 @@ def execute_pre_final_verifier_bus(
         else ()
     )
 
+    failed_shacl = (
+        _failed_shacl_records(evidence_records)
+        if shacl_gate_enabled
+        else ()
+    )
+
     decision = (
         "block"
-        if (missing_evidence or missing_validators or failed_coverage)
+        if (missing_evidence or missing_validators or failed_coverage or failed_shacl)
         else "pass"
     )
 
@@ -905,6 +926,26 @@ def execute_pre_final_verifier_bus(
                 retry_message="regenerate the document to cover the missing source content",
             )
         )
+    if failed_shacl:
+        # Surface the rule IDs from the failed records so operators know which
+        # constraint(s) fired.  Each ShaclConstraintCheck record carries
+        # fields["ruleId"] set by the producer (Task 1.2).
+        rule_ids = ", ".join(
+            str(getattr(r, "fields", {}).get("ruleId") or "unknown")
+            if not isinstance(r, Mapping)
+            else str((r.get("fields") or {}).get("ruleId") or "unknown")
+            for r in failed_shacl
+        )
+        results.append(
+            _live_verifier_result(
+                verifier_id="shacl-constraint-verifier",
+                status="failed",
+                public_summary=f"SHACL constraint violation: {rule_ids}",
+                retry_message=(
+                    f"address the SHACL constraint failure(s) before final answer: {rule_ids}"
+                ),
+            )
+        )
     if not results:
         results.append(
             _live_verifier_result(
@@ -925,6 +966,7 @@ def execute_pre_final_verifier_bus(
         "missingEvidence": missing_evidence,
         "missingValidators": missing_validators,
         "failedDocumentCoverage": len(failed_coverage),
+        "failedShaclConstraints": len(failed_shacl),
     }
 
 
@@ -981,6 +1023,54 @@ def _failed_document_coverage_records(
         # fields["status"] != "pass" (failed coverage). _document_field_fails_matcher
         # returns True when the field does not satisfy the matcher.
         if _document_field_fails_matcher(fields, "status", _DOCUMENT_COVERAGE_PASS_MATCHER):
+            failed.append(record)
+    return tuple(failed)
+
+
+_SHACL_EVIDENCE_TYPE = "custom:ShaclConstraintCheck"
+
+
+def _failed_shacl_records(
+    evidence_records: Sequence[object],
+) -> tuple[object, ...]:
+    """Return ShaclConstraintCheck records whose top-level ``status`` is "failed".
+
+    NOTE: Unlike ``_failed_document_coverage_records``, which keys off
+    ``fields["status"]`` (because DocumentCoverage arrives via the
+    ``evidence_from_tool_result`` path where top-level status follows the tool
+    status), SHACL records key off the **top-level** ``EvidenceRecord.status``.
+    The SHACL producer (Task 1.2) sets ``status="failed"`` directly on the record
+    for a constraint violation.  ``status="unknown"`` (fail-safe: parse/pyshacl
+    exception) and ``status="ok"`` (conforming) are never counted as failures —
+    this preserves the global fail-safe contract: a broken shape can never cause
+    a spurious block.
+
+    Deterministic and never raises: a malformed/non-SHACL record is silently
+    skipped so a non-SHACL turn yields an empty tuple and is never blocked.
+    """
+    failed: list[object] = []
+    for record in evidence_records:
+        evidence_type, _ = _document_coverage_view(record)
+        if evidence_type != _SHACL_EVIDENCE_TYPE:
+            continue
+        # Read top-level status from the record.  Prefer attribute access (works
+        # for EvidenceRecord Pydantic models); fall back to mapping key.
+        if isinstance(record, Mapping):
+            top_status = record.get("status")
+        else:
+            top_status = getattr(record, "status", None)
+            if top_status is None:
+                # Try model_dump path as a last resort (handles aliased fields).
+                model_dump = getattr(record, "model_dump", None)
+                if callable(model_dump):
+                    try:
+                        dumped = model_dump(by_alias=True, mode="python", warnings=False)
+                        if isinstance(dumped, Mapping):
+                            top_status = dumped.get("status")
+                    except Exception:
+                        pass
+        # Only "failed" blocks; "unknown" (fail-safe) and "ok" are never blocking.
+        if top_status == "failed":
             failed.append(record)
     return tuple(failed)
 

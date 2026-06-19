@@ -100,6 +100,7 @@ openmagi	magi_agent/evidence/contracts.py	1
 openmagi	magi_agent/evidence/local_tool_collector.py	2
 openmagi	magi_agent/evidence/observed_egress.py	2
 openmagi	magi_agent/evidence/runtime_issuance.py	1
+openmagi	magi_agent/evidence/shacl_ontology.py	1
 openmagi	magi_agent/evidence/subagent.py	6
 openmagi	magi_agent/evidence/tool_boundary.py	1
 openmagi	magi_agent/gates/api_canary_ladder.py	10

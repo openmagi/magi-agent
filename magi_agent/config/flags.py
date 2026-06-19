@@ -711,6 +711,20 @@ FLAGS: tuple[FlagSpec, ...] = (
         summary="Block document turns on failed DocumentCoverage (vs audit-only).",
         scope="public",
     ),
+    _b(
+        "MAGI_SHACL_VERIFIER_ENABLED",
+        summary=(
+            "Activate the SHACL constraint consume-side gate in the pre-final "
+            "verifier bus. When ON, any ShaclConstraintCheck evidence record with "
+            "top-level status='failed' flips the pre-final decision to 'block'. "
+            "Strict default-OFF; OFF is byte-identical to before (fail-safe 'unknown' "
+            "records and 'ok' records never block). "
+            "Enabling this flag without an active SHACL producer wired (PR1 state) "
+            "has no effect: no ShaclConstraintCheck records are emitted until PR2."
+        ),
+        scope="public",
+        stage="stage2",
+    ),
     # --- Resilience controls ------------------------------------------------
     # Profile-aware default-ON (env._runtime_feature_enabled): ON in the full
     # runtime profile, OFF under MAGI_RUNTIME_PROFILE=safe|eval.
