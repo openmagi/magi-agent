@@ -476,3 +476,35 @@ async def test_cancelled_error_propagates() -> None:
             event_stream=_cancelling_gen(),
             started_at_monotonic=time.monotonic(),
         )
+
+
+# ---------------------------------------------------------------------------
+# Test 9: RuntimeEvent unwrap regression lock (PR3 bug fix)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_runtime_event_text_aggregation() -> None:
+    """RuntimeEvent.payload is correctly unwrapped — regression lock for PR3 bug fix.
+
+    The PR5 shadow-comparison harness uncovered that ``collect_engine_to_boundary_result``
+    was using ``isinstance(evt, dict)`` to extract text deltas, but ``drain()`` returns
+    ``RuntimeEvent`` objects — so ``output_text_internal`` was silently always None on the
+    governed-turn path. This test exercises the corrected RuntimeEvent unwrap directly.
+    """
+    from magi_agent.runtime.events import RuntimeEvent  # noqa: PLC0415
+
+    generation = _request()
+    diag = _diagnostic(generation)
+    events = [
+        RuntimeEvent(type="token", payload={"type": "text_delta", "delta": "Hello "}),
+        RuntimeEvent(type="token", payload={"type": "text_delta", "delta": "world."}),
+    ]
+    result = await collect_engine_to_boundary_result(
+        generation=generation,
+        config=_config(),
+        diagnostic=diag,
+        event_stream=_fake_gen(events, _ok_terminal()),
+        started_at_monotonic=time.monotonic(),
+    )
+    assert result.output_text_internal == "Hello world."
