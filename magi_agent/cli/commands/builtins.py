@@ -78,6 +78,7 @@ __all__ = [
     "OnboardingCommand",
     "SuperpowersCommand",
     "SuperpowersRuntimeCommand",
+    "TasksCommand",
     "builtin_commands",
 ]
 
@@ -94,6 +95,7 @@ BUILTIN_COMMAND_NAMES: tuple[str, ...] = (
     "goal",
     "onboarding",
     "superpowers",
+    "tasks",
 )
 _SUPERPOWERS_RUNTIME_ENV = "MAGI_SUPERPOWERS_RUNTIME_ENABLED"
 _DEFAULT_SUPERPOWER_SKILL = "using-superpowers"
@@ -420,6 +422,56 @@ class SuperpowersRuntimeCommand(PromptCommand):
         return [ContentBlock(type="text", text=text)]
 
 
+@dataclass
+class TasksCommand(LocalCommand):
+    """``/tasks`` — list the work-queue's background tasks (active + recent done).
+
+    Reads the local SqliteWorkQueueStore directly so the TUI and headless
+    surfaces share one read model (the web dashboard reads the same store via
+    its board API). Read-only; never mutates the store. Returns a ``Text``
+    block grouped as ``Active`` (todo/ready/running) then ``Done`` (completed/
+    failed/blocked) with a row per task: ``<short-id>  <status>  <title>``.
+    """
+
+    async def call(self, args: object, ctx: CommandContext) -> LocalResult:  # type: ignore[override]
+        _ = (args, ctx)
+        from magi_agent.missions.work_queue.store import (
+            SqliteWorkQueueStore,
+            work_queue_db_path_from_env,
+        )
+
+        try:
+            store = SqliteWorkQueueStore(work_queue_db_path_from_env())
+            rows = list(store.list_tasks(limit=50))
+        except Exception as exc:  # noqa: BLE001 — read-only probe must never raise
+            return Text(text=f"tasks: unable to read work-queue store ({exc})")
+
+        if not rows:
+            return Text(text="tasks: no background tasks.")
+
+        active_states = {"triage", "todo", "ready", "running"}
+        done_states = {"completed", "failed", "blocked", "archived"}
+        active = [t for t in rows if t.status in active_states]
+        done = [t for t in rows if t.status in done_states]
+
+        def _line(t: object) -> str:
+            tid = (getattr(t, "id", "") or "")[:6] or "?"
+            return f"  {tid}  {getattr(t, 'status', '?'):<9}  {getattr(t, 'title', '') or ''}"
+
+        sections: list[str] = [f"Active ({len(active)})"]
+        if active:
+            sections.extend(_line(t) for t in active)
+        else:
+            sections.append("  (none)")
+        sections.append("")
+        sections.append(f"Done ({len(done)})")
+        if done:
+            sections.extend(_line(t) for t in done)
+        else:
+            sections.append("  (none)")
+        return Text(text="\n".join(sections))
+
+
 def builtin_commands() -> list[LocalCommand | PromptCommand]:
     """Return fresh instances of all eight builtins (both-surface).
 
@@ -442,4 +494,5 @@ def builtin_commands() -> list[LocalCommand | PromptCommand]:
         GoalCommand(name="goal", surface=BUILTIN_BOTH),
         OnboardingCommand(name="onboarding", surface=BUILTIN_BOTH),
         superpowers,
+        TasksCommand(name="tasks", surface=BUILTIN_BOTH),
     ]
