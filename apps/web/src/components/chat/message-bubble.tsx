@@ -5,6 +5,8 @@ import { createPortal } from "react-dom";
 import type { ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
 import { TaskBoard } from "./task-board";
 import { AgentActivityTimeline } from "./agent-activity-timeline";
 import { ThinkingBlock } from "./thinking-block";
@@ -618,7 +620,10 @@ function InlineLiveTranscript({
             {renderPlainLiveText ? (
               collapseLiveSoftWraps(displayContent)
             ) : (
-              <ReactMarkdown remarkPlugins={[[remarkGfm, { singleTilde: false }]]}>
+              <ReactMarkdown
+                remarkPlugins={[[remarkGfm, { singleTilde: false }], remarkMath]}
+                rehypePlugins={[rehypeKatex]}
+              >
                 {displayContent}
               </ReactMarkdown>
             )}
@@ -884,7 +889,8 @@ export function MessageBubble({ role, content, timestamp, isStreaming, inlineBef
           ) : !isUser && hasDisplayContent ? (
             <div className="prose-chat">
               <ReactMarkdown
-                remarkPlugins={[[remarkGfm, { singleTilde: false }]]}
+                remarkPlugins={[[remarkGfm, { singleTilde: false }], remarkMath]}
+                rehypePlugins={[rehypeKatex]}
                 components={{
                   del: ({ children }) => <>{children}</>,
                   pre: ({ children }) => {
