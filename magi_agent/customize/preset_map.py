@@ -204,6 +204,18 @@ PRESET_SEAMS: dict[str, PresetSeam] = {
         supported_modes=("llm",),
         wiring="opt_in",
     ),
+    # Opt-in for the C2 pre-refusal LLM gate (cli/engine _pre_refusal_llm_block):
+    # blocks a final answer that prematurely refuses a doable task without any
+    # attempt or a legitimate reason. LLM tier, so it also requires a critic model
+    # (MAGI_EGRESS_GATE_ENABLED). Enabling the preset turns the gate on even when
+    # MAGI_VERIFY_PRE_REFUSAL is off. controls_refs is documentation-only.
+    "pre-refusal": PresetSeam(
+        preset_id="pre-refusal",
+        controls_refs=("pre_refusal:premature_refusal",),
+        runtime_default_on=False,
+        supported_modes=("llm",),
+        wiring="opt_in",
+    ),
 }
 
 
@@ -324,7 +336,7 @@ _DESCRIPTIONS: dict[str, str] = {
     # --- preview (hosted intent copy; honestly badged preview in the catalog) ---
     "answer-quality": "Block a final answer that doesn't genuinely address the task (LLM judge; needs a critic model).",
     "completion-evidence": "Checks completion claims have actual evidence.",
-    "pre-refusal": "Prevents rushing to refuse tasks it can handle.",
+    "pre-refusal": "Block a premature refusal of a doable task (LLM judge; needs a critic model).",
     "output-purity": "Blocks raw JSON or internal data from appearing in responses.",
     "deferral-blocker": "Forces completion now instead of promising future delivery.",
     "self-claim": "Blocks claiming file contents without reading first.",

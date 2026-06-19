@@ -2870,6 +2870,20 @@ def parse_answer_quality_verification_enabled(env: Mapping[str, str]) -> bool:
     return flag_bool("MAGI_VERIFY_ANSWER_QUALITY", env=env)
 
 
+def parse_pre_refusal_verification_enabled(env: Mapping[str, str]) -> bool:
+    """MAGI_VERIFY_PRE_REFUSAL — LLM premature-refusal pre-final gate.
+
+    When ON (and a critic model is available — MAGI_EGRESS_GATE_ENABLED), a final
+    answer that refuses a doable task WITHOUT any attempt or a legitimate reason
+    is blocked at the pre-final gate via the generic criterion judge. Strict
+    **default-OFF**: inert unless explicitly set (or the pre-refusal Customize
+    preset is enabled), so flag-OFF behavior is byte-identical (no model call).
+    """
+    from .flags import flag_bool
+
+    return flag_bool("MAGI_VERIFY_PRE_REFUSAL", env=env)
+
+
 def parse_source_ledger_evidence_gate_enabled(env: Mapping[str, str]) -> bool:
     """MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED — live source-ledger evidence ref.
 
