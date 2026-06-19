@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import base64
+import os
+import tempfile
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -34,15 +37,25 @@ def _unwrap(result: object) -> Mapping[str, object]:
     """Normalize a tool result to a mapping.
 
     Fakes (and tests) return a plain mapping. The real ``mcp`` ``ClientSession``
-    returns a ``CallToolResult``; its ``structuredContent`` carries cua-driver's
-    JSON payload. Confirm this shape against the live binary before flag-on.
+    returns a ``CallToolResult`` whose ``structuredContent`` carries cua-driver's
+    JSON payload. Verified against cua-driver 0.5.7: ``list_apps`` →
+    ``{"apps": ...}``, ``get_window_state`` → ``{"tree_markdown", "pid",
+    "window_id", "element_count"}``.
     """
     if isinstance(result, Mapping):
         return result
-    structured = getattr(result, "structuredContent", None)  # pragma: no cover
-    if isinstance(structured, Mapping):  # pragma: no cover
+    structured = getattr(result, "structuredContent", None)
+    if isinstance(structured, Mapping):
         return structured
-    return {}  # pragma: no cover
+    return {}
+
+
+def _read_png_b64(path: str) -> str:
+    """Base64-encode a PNG written by cua-driver, or "" if absent."""
+    if not path or not os.path.exists(path):
+        return ""
+    with open(path, "rb") as handle:
+        return base64.b64encode(handle.read()).decode("ascii")
 
 
 class CuaDriverBackend:
@@ -83,17 +96,38 @@ class CuaDriverBackend:
         first: Mapping[str, object] = entries[0] if entries else {}
         pid = _as_int(first.get("pid", 0), 0)
         window_id = _as_int(first.get("window_id", 0), 0)
-        state = _unwrap(
-            await self._session.call_tool(  # type: ignore[attr-defined]
-                "get_window_state",
-                {"pid": pid, "window_id": window_id, "capture_mode": "som"},
+
+        # cua-driver embeds the PNG as base64 by default; with screenshot_out_file
+        # it instead writes the file and returns screenshot_file_path. We take the
+        # file path (smaller responses) and read+delete it — screenshots are never
+        # persisted to disk (visual-secret hygiene).
+        shot_fd, shot_path = tempfile.mkstemp(suffix=".png", prefix="magi-cua-")
+        os.close(shot_fd)
+        screenshot_path = shot_path
+        try:
+            state = _unwrap(
+                await self._session.call_tool(  # type: ignore[attr-defined]
+                    "get_window_state",
+                    {
+                        "pid": pid,
+                        "window_id": window_id,
+                        "capture_mode": "som",
+                        "screenshot_out_file": shot_path,
+                    },
+                )
             )
-        )
-        ax_tree = str(state.get("data", ""))
+            ax_tree = str(state.get("tree_markdown", ""))
+            screenshot_path = str(state.get("screenshot_file_path") or shot_path)
+            screenshot_b64 = _read_png_b64(screenshot_path)
+        finally:
+            for leftover in {shot_path, screenshot_path}:
+                if leftover and os.path.exists(leftover):
+                    os.unlink(leftover)
+
         return CuaCapture(
             pid=_as_int(state.get("pid", pid), pid),
             window_id=_as_int(state.get("window_id", window_id), window_id),
-            screenshot_b64=str(state.get("screenshot_b64", "")),
+            screenshot_b64=screenshot_b64,
             ax_tree=ax_tree,
             elements=parse_window_state(ax_tree),
         )
