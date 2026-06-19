@@ -1221,11 +1221,12 @@ graph LR
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
 | __init__.py | — | — | transport/health.py, transport/product_admin.py |
+| authority.py | Frozen-contract / authority model bases (C-4 / C-5 shared home). | — | ops/safety.py |
 | health.py | — | daemon, scheduler_job_execution | adk_bridge/event_adapter.py, gateway/daemon.py, shadow/gate5b4c3_live_runner_boundary.py, transport/sse.py, transport/streaming_chat_route.py |
 | job_queue.py | — | safety | — |
 | metrics.py | — | safety | — |
 | otel_noise.py | Suppress a benign OpenTelemetry teardown log line. | — | (root)/main.py, cli/app.py |
-| safety.py | — | — | artifacts/delivery_receipts.py, artifacts/render_verification.py, billing/quota.py, billing/spend_guard.py, connectors/credential_lease.py, connectors/marketplace.py, connectors/registry.py, gates/gate2_readiness.py, ops/job_queue.py, ops/metrics.py, permissions/auto_control.py, runtime/heartbeat_contract.py, runtime/no_agent_watchdog.py, runtime/resume_decision.py, security/compliance.py, shadow/gate2_recipe_profile_resolver.py, tenancy/context.py, transport/product_admin.py |
+| safety.py | — | authority | artifacts/delivery_receipts.py, artifacts/render_verification.py, billing/quota.py, billing/spend_guard.py, connectors/credential_lease.py, connectors/marketplace.py, connectors/registry.py, gates/gate2_readiness.py, ops/job_queue.py, ops/metrics.py, permissions/auto_control.py, runtime/heartbeat_contract.py, runtime/no_agent_watchdog.py, runtime/resume_decision.py, security/compliance.py, shadow/gate2_recipe_profile_resolver.py, tenancy/context.py, transport/product_admin.py |
 
 ### packs/
 
