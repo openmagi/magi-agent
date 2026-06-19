@@ -128,7 +128,11 @@ async def drive_streaming_chat(
         SSE frame chunks: zero or more ``event: agent`` frames, then a
         ``turn_result`` frame, then ``data: [DONE]``.
     """
-    registry.register(
+    # Claim the (session_id, turn_id) slot. ``try_register`` refuses to clobber a
+    # live turn already holding this key (single-flight per turn); on a duplicate
+    # we fall back to the existing claim guard via the positional unregister so
+    # teardown never evicts the turn that actually holds the slot.
+    claim = registry.try_register(
         ActiveTurn(
             session_id=session_id,
             turn_id=turn_id,
@@ -244,4 +248,10 @@ async def drive_streaming_chat(
             pass
         finally:
             # ALWAYS runs even if the await above raises an unexpected error.
-            registry.unregister(session_id, turn_id)
+            # Release via the claim when we acquired it (owner-guarded so a stale
+            # teardown cannot evict a newer turn); if the slot was already held
+            # (claim is None) fall back to the turn_id-guarded positional form.
+            if claim is not None:
+                registry.unregister(claim)
+            else:
+                registry.unregister(session_id, turn_id)

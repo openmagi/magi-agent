@@ -9,7 +9,14 @@ from __future__ import annotations
 
 import asyncio
 
-from magi_agent.transport.active_turn import ActiveTurn, ActiveTurnTable
+import pytest
+
+from magi_agent.transport.active_turn import (
+    ActiveTurn,
+    ActiveTurnClaim,
+    ActiveTurnExists,
+    ActiveTurnTable,
+)
 
 
 def _make_turn(session_id: str, turn_id: str) -> ActiveTurn:
@@ -101,3 +108,101 @@ def test_unregister_turn_id_guard_holds_with_task_field() -> None:
     table.register(newer)
     table.unregister("sess-f", "turn-1")  # stale teardown
     assert table.get("sess-f") is newer
+
+
+# ---------------------------------------------------------------------------
+# B-1 — claim semantics keyed by (session_id, turn_id)
+# ---------------------------------------------------------------------------
+def test_try_register_returns_claim_and_does_not_clobber_duplicate() -> None:
+    """Two registers for the SAME (session_id, turn_id) must not overwrite."""
+    table = ActiveTurnTable()
+    first = _make_turn("sess-dup", "turn-1")
+    claim = table.try_register(first)
+    assert isinstance(claim, ActiveTurnClaim)
+    assert claim.session_id == "sess-dup"
+    assert claim.turn_id == "turn-1"
+    assert claim.owner_id  # a fresh, non-empty owner id
+
+    # A second register for the same (session, turn) is refused.
+    second = _make_turn("sess-dup", "turn-1")
+    assert table.try_register(second) is None
+    # The ORIGINAL turn is still the stored one (no last-writer-wins clobber).
+    assert table.get("sess-dup", "turn-1") is first
+
+
+def test_two_turn_ids_one_session_both_registrable_and_ambiguous() -> None:
+    table = ActiveTurnTable()
+    t1 = _make_turn("sess-multi", "turn-a")
+    t2 = _make_turn("sess-multi", "turn-b")
+    assert table.try_register(t1) is not None
+    assert table.try_register(t2) is not None
+
+    assert table.get("sess-multi", "turn-a") is t1
+    assert table.get("sess-multi", "turn-b") is t2
+    # Session-only resolution is ambiguous when two turns are live.
+    assert table.get_single("sess-multi") == "ambiguous"
+
+
+def test_get_single_returns_lone_turn_or_none() -> None:
+    table = ActiveTurnTable()
+    assert table.get_single("nobody") is None
+    turn = _make_turn("sess-one", "turn-1")
+    table.try_register(turn)
+    assert table.get_single("sess-one") is turn
+
+
+def test_register_compat_shim_raises_on_duplicate() -> None:
+    table = ActiveTurnTable()
+    turn = _make_turn("sess-shim", "turn-1")
+    table.register(turn)
+    with pytest.raises(ActiveTurnExists):
+        table.register(_make_turn("sess-shim", "turn-1"))
+    # The original survives.
+    assert table.get("sess-shim", "turn-1") is turn
+
+
+def test_stale_claim_unregister_does_not_remove_newer_turn() -> None:
+    """A stale owner releasing must not evict a newer turn under a different id."""
+    table = ActiveTurnTable()
+    older = _make_turn("sess-stale", "turn-1")
+    older_claim = table.try_register(older)
+    assert older_claim is not None
+    # Older finishes and a newer turn registers under a DIFFERENT turn_id.
+    table.unregister(older_claim)
+    newer = _make_turn("sess-stale", "turn-2")
+    table.try_register(newer)
+    # Re-running the stale release must be a no-op (different turn_id).
+    table.unregister(older_claim)
+    assert table.get("sess-stale", "turn-2") is newer
+
+
+def test_unregister_with_mismatched_owner_is_noop() -> None:
+    """A claim whose owner_id does not match the stored turn must not evict."""
+    table = ActiveTurnTable()
+    turn = _make_turn("sess-owner", "turn-1")
+    table.try_register(turn)
+    forged = ActiveTurnClaim(
+        session_id="sess-owner", turn_id="turn-1", owner_id="not-the-real-owner"
+    )
+    table.unregister(forged)
+    assert table.get("sess-owner", "turn-1") is turn
+
+
+def test_unregister_tuple_form_still_supported() -> None:
+    """Back-compat: (session_id, turn_id) positional unregister still works."""
+    table = ActiveTurnTable()
+    turn = _make_turn("sess-tuple", "turn-1")
+    table.try_register(turn)
+    table.unregister("sess-tuple", "turn-1")
+    assert table.get("sess-tuple", "turn-1") is None
+
+
+def test_table_is_keyed_by_two_tuple() -> None:
+    """Regression guard: the table must NOT collapse to session-only keying."""
+    table = ActiveTurnTable()
+    table.try_register(_make_turn("sess-key", "turn-1"))
+    table.try_register(_make_turn("sess-key", "turn-2"))
+    # Two distinct turns under one session => two entries (not 1).
+    assert len(table._turns) == 2
+    # And the keys are 2-tuples.
+    assert all(isinstance(k, tuple) and len(k) == 2 for k in table._turns)

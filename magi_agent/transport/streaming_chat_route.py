@@ -875,7 +875,17 @@ def register_streaming_chat_routes(
         if len(json.dumps(response_dict)) > _MAX_CONTROL_RESPONSE_BYTES:
             return JSONResponse(status_code=400, content={"error": "response_too_large"})
 
-        turn = ACTIVE_TURNS.get(session_id)
+        turn_id = _body_string(body, "turnId", "")
+        if turn_id:
+            turn = ACTIVE_TURNS.get(session_id, turn_id)
+        else:
+            resolved = ACTIVE_TURNS.get_single(session_id)
+            if resolved == "ambiguous":
+                return JSONResponse(
+                    status_code=409,
+                    content={"error": "ambiguous_active_turn"},
+                )
+            turn = resolved
         if turn is None:
             return JSONResponse(
                 status_code=404,
@@ -917,7 +927,21 @@ def register_streaming_chat_routes(
 
         handoff = bool(body.get("handoffRequested")) if isinstance(body, Mapping) else False
 
-        turn = ACTIVE_TURNS.get(session_id)
+        turn_id = _body_string(body, "turnId", "")
+        if turn_id:
+            turn = ACTIVE_TURNS.get(session_id, turn_id)
+        else:
+            resolved = ACTIVE_TURNS.get_single(session_id)
+            if resolved == "ambiguous":
+                return JSONResponse(
+                    status_code=409,
+                    content={
+                        "error": "ambiguous_active_turn",
+                        "activeTurnCompatible": False,
+                        "handoffRequested": handoff,
+                    },
+                )
+            turn = resolved
         if turn is None:
             return JSONResponse(
                 status_code=409,

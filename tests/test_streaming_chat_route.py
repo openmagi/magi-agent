@@ -2075,6 +2075,104 @@ def test_cancel_unknown_session_409(monkeypatch) -> None:
 
 
 # ---------------------------------------------------------------------------
+# B-1 — turnId-targeted control/cancel + ambiguity 409
+# ---------------------------------------------------------------------------
+def _register_turn(session_id: str, turn_id: str) -> tuple[ActiveTurn, object]:
+    queue: asyncio.Queue[object] = asyncio.Queue()
+    sink = build_streaming_prompt_sink(queue, turn_id=turn_id)
+    turn = ActiveTurn(
+        session_id=session_id,
+        turn_id=turn_id,
+        cancel=asyncio.Event(),
+        sink=sink,
+    )
+    claim = ACTIVE_TURNS.try_register(turn)
+    assert claim is not None
+    return turn, claim
+
+
+def test_cancel_with_turn_id_targets_specific_turn(monkeypatch) -> None:
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
+    session_id = "s-cancel-multi"
+    turn_a, claim_a = _register_turn(session_id, "turn-a")
+    turn_b, claim_b = _register_turn(session_id, "turn-b")
+    try:
+        client = TestClient(_make_app())
+        response = client.post(
+            "/v1/chat/cancel",
+            headers=_auth_headers(),
+            json={"sessionId": session_id, "turnId": "turn-b"},
+        )
+        assert response.status_code == 200
+        # Only turn-b was cancelled; turn-a is untouched.
+        assert turn_b.cancel.is_set()
+        assert not turn_a.cancel.is_set()
+    finally:
+        ACTIVE_TURNS.unregister(claim_a)
+        ACTIVE_TURNS.unregister(claim_b)
+
+
+def test_cancel_ambiguous_without_turn_id_returns_409(monkeypatch) -> None:
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
+    session_id = "s-cancel-ambig"
+    _turn_a, claim_a = _register_turn(session_id, "turn-a")
+    _turn_b, claim_b = _register_turn(session_id, "turn-b")
+    try:
+        client = TestClient(_make_app())
+        response = client.post(
+            "/v1/chat/cancel",
+            headers=_auth_headers(),
+            json={"sessionId": session_id},
+        )
+        assert response.status_code == 409
+        assert response.json()["error"] == "ambiguous_active_turn"
+    finally:
+        ACTIVE_TURNS.unregister(claim_a)
+        ACTIVE_TURNS.unregister(claim_b)
+
+
+def test_cancel_single_turn_session_only_fallback_still_works(monkeypatch) -> None:
+    """Back-compat: one active turn, no turnId => session-only fallback cancels."""
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
+    session_id = "s-cancel-single"
+    turn, claim = _register_turn(session_id, "turn-only")
+    try:
+        client = TestClient(_make_app())
+        response = client.post(
+            "/v1/chat/cancel",
+            headers=_auth_headers(),
+            json={"sessionId": session_id},
+        )
+        assert response.status_code == 200
+        assert turn.cancel.is_set()
+    finally:
+        ACTIVE_TURNS.unregister(claim)
+
+
+def test_control_response_ambiguous_without_turn_id_returns_409(monkeypatch) -> None:
+    monkeypatch.setenv("MAGI_STREAMING_CHAT", "1")
+    session_id = "s-ctrl-ambig"
+    _turn_a, claim_a = _register_turn(session_id, "turn-a")
+    _turn_b, claim_b = _register_turn(session_id, "turn-b")
+    try:
+        client = TestClient(_make_app())
+        response = client.post(
+            "/v1/chat/control-response",
+            headers=_auth_headers(),
+            json={
+                "sessionId": session_id,
+                "request_id": "req-x",
+                "response": {"decision": "allow"},
+            },
+        )
+        assert response.status_code == 409
+        assert response.json()["error"] == "ambiguous_active_turn"
+    finally:
+        ACTIVE_TURNS.unregister(claim_a)
+        ACTIVE_TURNS.unregister(claim_b)
+
+
+# ---------------------------------------------------------------------------
 # Test 7 — prompt extraction helper
 # ---------------------------------------------------------------------------
 def test_extract_prompt_text_string_content() -> None:

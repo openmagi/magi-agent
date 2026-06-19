@@ -586,6 +586,70 @@ def test_usage_recorder_called_with_terminal():
     assert recorded[0].usage == {"input_tokens": 10, "output_tokens": 4}
 
 
+def test_driver_register_claims_turn_and_blocks_duplicate_concurrent():
+    """The driver claims (session_id, turn_id); a second concurrent driver for
+    the SAME session+turn cannot displace the first while it is live."""
+    from magi_agent.transport.active_turn import ActiveTurn
+
+    registry = ActiveTurnTable()
+    queue: asyncio.Queue[object] = asyncio.Queue()
+    sink = build_streaming_prompt_sink(queue, turn_id="t-turn")
+    cancel = asyncio.Event()
+
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    class SlowEngine:
+        async def run_turn_stream(self, runtime, turn_input, *, cancel, gate):
+            yield _ev("text_delta", delta="hi")
+            started.set()
+            await release.wait()
+            yield EngineResult(
+                terminal=Terminal.completed,
+                session_id="s1",
+                turn_id="t-turn",
+            )
+
+    async def _run() -> None:
+        gen = drive_streaming_chat(
+            SlowEngine(),
+            None,
+            {"prompt": "hi", "session_id": "s1", "turn_id": "t-turn"},
+            cancel=cancel,
+            queue=queue,
+            sink=sink,
+            registry=registry,
+            session_id="s1",
+            turn_id="t-turn",
+        )
+
+        async def _drain() -> None:
+            async for _chunk in gen:
+                pass
+
+        drain_task = asyncio.ensure_future(_drain())
+        try:
+            await asyncio.wait_for(started.wait(), timeout=2)
+            # The first turn holds the claim — a duplicate (session, turn) cannot
+            # be claimed concurrently.
+            assert registry.get("s1", "t-turn") is not None
+            duplicate = ActiveTurn(
+                session_id="s1",
+                turn_id="t-turn",
+                cancel=asyncio.Event(),
+                sink=object(),  # type: ignore[arg-type]
+            )
+            assert registry.try_register(duplicate) is None
+        finally:
+            release.set()
+            await asyncio.wait_for(drain_task, timeout=5)
+
+        # After the turn completes, the claim is released (claim-keyed unregister).
+        assert registry.get("s1", "t-turn") is None
+
+    asyncio.run(asyncio.wait_for(_run(), timeout=10))
+
+
 def test_usage_recorder_exception_does_not_break_stream():
     registry = ActiveTurnTable()
     queue: asyncio.Queue[object] = asyncio.Queue()

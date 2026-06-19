@@ -106,7 +106,7 @@ from magi_agent.transport.chat_shared import (
     _sha256_digest,
     _shadow_generation_route_config,
 )
-from magi_agent.transport.active_turn import ACTIVE_TURNS, ActiveTurn
+from magi_agent.transport.active_turn import ACTIVE_TURNS, ActiveTurn, ActiveTurnClaim
 from magi_agent.runtime.session_identity import session_key_from_headers
 from magi_agent.transport.egress_critic import _maybe_run_egress_critic_gate
 from magi_agent.transport.gate5b_governance import (
@@ -687,7 +687,25 @@ def register_chat_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
         except (JSONDecodeError, ValueError):
             payload = {}
         session_id = _resolve_session_key(payload, request)
-        turn = ACTIVE_TURNS.get(session_id) if session_id else None
+        turn_id = _local_chat_string(payload, "turnId", "")
+        if not session_id:
+            turn = None
+        elif turn_id:
+            turn = ACTIVE_TURNS.get(session_id, turn_id)
+        else:
+            resolved = ACTIVE_TURNS.get_single(session_id)
+            if resolved == "ambiguous":
+                return JSONResponse(
+                    status_code=409,
+                    content={
+                        "error": "ambiguous_active_turn",
+                        "reason": "python_inject_unsupported",
+                        "fallback": "queue_to_completions",
+                        "activeTurnCompatible": False,
+                        "responseAuthority": "typescript",
+                    },
+                )
+            turn = resolved
         if turn is None:
             # No in-flight turn: the caller falls back to queue_to_completions,
             # which is the correct behaviour — there is nothing to inject into.
@@ -752,7 +770,27 @@ def register_chat_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
             isinstance(payload, Mapping) and payload.get("handoffRequested") is True
         )
         session_id = _resolve_session_key(payload, request)
-        turn = ACTIVE_TURNS.get(session_id) if session_id else None
+        turn_id = _local_chat_string(payload, "turnId", "")
+        if not session_id:
+            turn = None
+        elif turn_id:
+            turn = ACTIVE_TURNS.get(session_id, turn_id)
+        else:
+            resolved = ACTIVE_TURNS.get_single(session_id)
+            if resolved == "ambiguous":
+                return JSONResponse(
+                    status_code=409,
+                    content={
+                        "error": "ambiguous_active_turn",
+                        "reason": "python_interrupt_unsupported",
+                        "fallback": "typescript_interrupt_required",
+                        "activeTurnCompatible": False,
+                        "handoffRequested": handoff_requested,
+                        "gateStateOpen": False,
+                        "responseAuthority": "typescript",
+                    },
+                )
+            turn = resolved
         if turn is None:
             return JSONResponse(
                 status_code=409,
@@ -1462,10 +1500,13 @@ async def _run_live_chat_runner(
     # carry the same value in the body, so both resolve to one canonical key.
     active_session_id = _resolve_session_key(payload, request)
     active_turn_id = generation.shadow_generation_id
-    active_turn_registered = False
+    active_turn_claim: ActiveTurnClaim | None = None
     if active_session_id:
         try:
-            ACTIVE_TURNS.register(
+            # Claim the (session, turn) slot; ``try_register`` refuses to clobber
+            # a live turn already holding the key (no last-writer-wins). A None
+            # return means the slot is held — leave it untouched.
+            active_turn_claim = ACTIVE_TURNS.try_register(
                 ActiveTurn(
                     session_id=active_session_id,
                     turn_id=active_turn_id,
@@ -1474,9 +1515,8 @@ async def _run_live_chat_runner(
                     task=asyncio.current_task(),
                 )
             )
-            active_turn_registered = True
         except Exception:  # noqa: BLE001 — registration must never break a turn
-            active_turn_registered = False
+            active_turn_claim = None
     try:
         boundary_result = await run_gate5b4c3_live_runner_boundary_async(
             generation,
@@ -1568,12 +1608,12 @@ async def _run_live_chat_runner(
         )
     finally:
         # Turn is no longer in flight at the runner boundary; drop it from the
-        # interrupt-addressable registry. turn_id-guarded so a NEWER turn that
-        # already replaced this one under the same session is not evicted.
-        # Fail-soft: never let teardown break the response.
-        if active_turn_registered:
+        # interrupt-addressable registry. Release via the claim (owner-guarded so
+        # a NEWER turn that already replaced this one under the same session is
+        # not evicted). Fail-soft: never let teardown break the response.
+        if active_turn_claim is not None:
             try:
-                ACTIVE_TURNS.unregister(active_session_id, active_turn_id)
+                ACTIVE_TURNS.unregister(active_turn_claim)
             except Exception:  # noqa: BLE001 — teardown must never break a response
                 pass
     if (
