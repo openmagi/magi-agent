@@ -489,6 +489,20 @@ class LocalToolEvidenceCollector:
         for key in session_keys[:-_MAX_SESSION_LEDGERS]:
             self._ledgers.pop(key, None)
 
+    def append_evidence_record_for_turn(
+        self, *, session_id: str, turn_id: str, record: object
+    ) -> None:
+        """Append a pre-built evidence record under ``(session_id, turn_id)``.
+
+        Used by declarative producers (e.g. ``DashboardProducerControl``) that
+        synthesize their own :class:`EvidenceRecord` rather than going through
+        the tool-receipt or first-party-activity paths. The record lands in the
+        same ``_records`` corpus that ``collect_for_turn`` (and thus the
+        pre-final verifier-bus gate) reads, so it is NOT gated on any lifecycle
+        flag — it must always be collectible by the gate.
+        """
+        self._records.setdefault((session_id, turn_id), []).append(record)
+
     def collect_for_turn(self, turn_id: str) -> tuple[object, ...]:
         local = tuple(
             record

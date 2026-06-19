@@ -394,3 +394,25 @@ def test_mixed_origin_tool_receipts_survive_first_party_flood(tmp_path, monkeypa
     # Assertion B: first-party turn count across the session is ≤ 25.
     fp_turn_keys = [key for key in collector._first_party_turns if key[0] == session]
     assert len(fp_turn_keys) <= 25, f"first-party turns not capped: {len(fp_turn_keys)} > 25"
+
+
+def test_append_evidence_record_for_turn_is_collectible() -> None:
+    collector = LocalToolEvidenceCollector()
+    sentinel = object()
+    collector.append_evidence_record_for_turn(
+        session_id="sess-1", turn_id="turn-append", record=sentinel
+    )
+    out = collector.collect_for_turn("turn-append")
+    assert sentinel in out
+
+
+def test_append_evidence_record_for_turn_collected_by_turn_id_only() -> None:
+    # collect_for_turn filters by turn_id alone (session ignored), so a record
+    # appended under any session lands for that turn id.
+    collector = LocalToolEvidenceCollector()
+    rec = object()
+    collector.append_evidence_record_for_turn(
+        session_id="cli-session", turn_id="inv-123", record=rec
+    )
+    assert rec in collector.collect_for_turn("inv-123")
+    assert collector.collect_for_turn("other-turn") == ()
