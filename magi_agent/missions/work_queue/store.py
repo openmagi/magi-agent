@@ -251,6 +251,13 @@ class InMemoryWorkQueueStore:
     # ------------------------------------------------------------------
 
     def create(self, task: WorkTask) -> WorkTask:
+        if task.idempotency_key is not None:
+            existing = self.find_by_idempotency_key(task.idempotency_key)
+            if existing is not None:
+                raise ValueError(
+                    f"work-queue task with idempotency_key={task.idempotency_key!r} already exists; "
+                    "use create_idempotent for dedup"
+                )
         self._tasks[task.id] = task
         return task
 
@@ -526,6 +533,13 @@ class SqliteWorkQueueStore:
         }
 
     def create(self, task: WorkTask) -> WorkTask:
+        if task.idempotency_key is not None:
+            existing = self.find_by_idempotency_key(task.idempotency_key)
+            if existing is not None:
+                raise ValueError(
+                    f"work-queue task with idempotency_key={task.idempotency_key!r} already exists; "
+                    "use create_idempotent for dedup"
+                )
         conn = self._get_conn()
         vals = task.model_dump()
         vals["goal_mode"] = 1 if vals["goal_mode"] else 0

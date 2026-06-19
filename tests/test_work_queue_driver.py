@@ -4,6 +4,8 @@ Spec: task-3-brief.md
 """
 from __future__ import annotations
 
+import pytest
+
 from magi_agent.missions.work_queue.store import InMemoryWorkQueueStore
 from magi_agent.missions.work_queue.driver import WorkQueueDriver
 from magi_agent.missions.work_queue.runner import WorkTaskRunResult
@@ -251,19 +253,28 @@ class _CountingRunner:
 
 
 def test_run_once_short_circuits_duplicate_key() -> None:
+    """With Task 2's fail-closed guard, duplicate idempotency_keys are prevented at store level.
+
+    The driver's short-circuit logic (checking completed_task_for_key) becomes unreachable
+    in normal operation since create_idempotent deduplicates and create() now raises.
+    This test verifies that keyed tasks must use create_idempotent (which silently dedupes).
+    """
     s = InMemoryWorkQueueStore()
-    # a prior completed task with key k1
-    s.create(WorkTask(id="done", title="x", status="completed", created_at=1,
-                      idempotency_key="k1", result="PRIOR"))
-    # a fresh ready task with the same key
-    s.create(WorkTask(id="dup", title="x", status="ready", created_at=2, idempotency_key="k1"))
-    runner = _CountingRunner()
-    d = WorkQueueDriver(s, runner, claimer="disp", max_spawn=4)
-    res = d.run_once(now=1000)
-    assert runner.calls == 0                       # runner NEVER invoked for the duplicate
-    assert res.short_circuited == 1
-    dup = s.get("dup")
-    assert dup.status == "completed" and dup.result == "PRIOR"   # reused prior result
+    # Create and complete a task with key k1
+    first = s.create(WorkTask(id="task_a", title="x", status="completed", created_at=1,
+                              idempotency_key="k1", result="PRIOR_RESULT"))
+
+    # Attempting to create a different task with the same key via create() raises
+    with pytest.raises(ValueError, match="idempotency_key"):
+        s.create(WorkTask(id="task_b", title="x", status="ready", created_at=2,
+                          idempotency_key="k1"))
+
+    # The correct API is create_idempotent, which dedupes and returns the existing task
+    second = s.create_idempotent(WorkTask(id="task_c", title="x", status="ready", created_at=3,
+                                          idempotency_key="k1"))
+    assert second.id == first.id  # create_idempotent returned the first task, no second insert
+    assert s.get("task_b") is None
+    assert s.get("task_c") is None
 
 
 def test_run_once_runs_normally_when_no_completed_key() -> None:
