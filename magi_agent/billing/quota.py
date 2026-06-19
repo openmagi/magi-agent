@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
-import hashlib
-import json
 from typing import Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator, model_validator
+from pydantic import Field, field_serializer, field_validator, model_validator
 
 from magi_agent.ops.safety import (
+    FrozenContractModel,
+    canonical_digest,
     require_digest,
     require_safe_ref,
     safe_metadata,
@@ -21,39 +21,12 @@ QuotaUnit = Literal["requests", "tokens", "usd_micros", "tool_calls", "bytes", "
 QuotaDecisionStatus = Literal["allowed", "denied", "fail_closed"]
 QuotaDecisionSource = Literal["disabled", "local_contract"]
 
-_MODEL_CONFIG = ConfigDict(
-    frozen=True,
-    populate_by_name=True,
-    extra="forbid",
-    validate_default=True,
-    hide_input_in_errors=True,
-)
-
-
 def _digest_payload(payload: Mapping[str, object]) -> str:
-    encoded = json.dumps(
-        payload,
-        sort_keys=True,
-        separators=(",", ":"),
-        default=str,
-        allow_nan=False,
-    ).encode()
-    return "sha256:" + hashlib.sha256(encoded).hexdigest()
+    return canonical_digest(payload)
 
 
-class _BillingModel(BaseModel):
-    model_config = _MODEL_CONFIG
-
-    @classmethod
-    def model_construct(cls, _fields_set: set[str] | None = None, **values: object) -> Self:
-        _ = _fields_set, values
-        raise ValueError(f"model_construct is disabled for {cls.__name__}")
-
-    def model_copy(self, *, update: Mapping[str, object] | None = None, deep: bool = False) -> Self:
-        if update:
-            raise ValueError(f"model_copy update is disabled for {type(self).__name__}")
-        _ = deep
-        return type(self).model_validate(self.model_dump(by_alias=True, mode="json"))
+class _BillingModel(FrozenContractModel):
+    """Frozen billing contract base (collapsed onto the shared kernel)."""
 
 
 class QuotaEvaluationConfig(_BillingModel):
