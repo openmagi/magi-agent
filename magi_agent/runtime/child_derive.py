@@ -30,6 +30,10 @@ def derive(
         memory_mode=_child_memory_mode(
             parent_memory_mode, memory_inherit_enabled=memory_inherit_enabled
         ),
+        # A-8 fail-closed: a derived child defaults to the deny/ask enforcement
+        # mode (NOT bypass). A parent must grant more authority explicitly; this
+        # composes with — and is orthogonal to — ``permission_cap``.
+        permission_mode="default",
         provider=getattr(request, "provider", None),
         model=getattr(request, "model", None),
         depth=parent_depth + 1,

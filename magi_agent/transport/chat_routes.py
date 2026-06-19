@@ -136,6 +136,16 @@ from magi_agent.transport.usage_receipt_emit import (
 )
 
 
+# A-8 (P0.2): the governed-turn funnel no longer hard-codes ``bypassPermissions``
+# — its fallback and the child path default to deny/ask. The LOCAL serve path,
+# however, is the "maximally capable + YOLO by default" surface (Kevin's local-
+# serve stance), so it opts into bypass EXPLICITLY and visibly here, at the call
+# site, rather than relying on a silent funnel default. This is the single,
+# audited place the local serve YOLO authority is chosen; hard safety denies fire
+# regardless of mode.
+_LOCAL_SERVE_PERMISSION_MODE = "bypassPermissions"
+
+
 def _route_config(runtime: OpenMagiRuntime) -> Gate5BUserVisibleChatRouteConfig:
     config = getattr(runtime, "gate5b_user_visible_chat_route_config", None)
     if isinstance(config, Gate5BUserVisibleChatRouteConfig):
@@ -351,7 +361,8 @@ async def _local_adk_chat_sse(
     pinned_recipe_pack_ids = _pinned_recipe_pack_ids_from_payload(payload)
     headless = build_headless_runtime(
         cwd=workspace_root,
-        permission_mode="bypassPermissions",
+        # A-8: explicit, audited local-serve YOLO opt-in (see module constant).
+        permission_mode=_LOCAL_SERVE_PERMISSION_MODE,
         session_id=session_id,
         model=model_override,
         runner_policy_routing_enabled=local_runner_policy_routing_enabled_from_env(),
@@ -375,6 +386,12 @@ async def _local_adk_chat_sse(
         session_id=session_id,
         turn_id=turn_id,
         model=model_override,
+        # A-8: keep the ctx authority consistent with the pre-built ``headless``
+        # runtime above. Although ``runtime=headless`` means ``_build_runtime``
+        # is not invoked here, set the field explicitly so the serve TurnContext
+        # never silently relies on the deny/ask default — the serve policy choice
+        # is visible on the context too.
+        permission_mode=_LOCAL_SERVE_PERMISSION_MODE,
     )
     stream = run_governed_turn(ctx, runtime=headless)
     # Accumulate the assistant text + a tool-use signal so the turn-end memory

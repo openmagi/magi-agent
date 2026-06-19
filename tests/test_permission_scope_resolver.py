@@ -25,7 +25,7 @@ from magi_agent.tools import ToolSource
 from magi_agent.tools.context import ToolContext
 from magi_agent.tools.manifest import RuntimeMode, ToolManifest
 from magi_agent.tools.permission import ToolPermissionPolicy
-from magi_agent.tools.permission_scope import PermissionScopeResolver
+from magi_agent.tools.permission_scope import PermissionScopeResolver, fail_closed_scope
 
 
 def make_manifest(
@@ -161,3 +161,28 @@ def test_non_edit_modes_route_bash_to_ask(mode: str) -> None:
     resolver = PermissionScopeResolver()
     scope = resolver.resolve(permission_mode=mode, manifest=BASH)
     assert _decide(scope, BASH) == "ask"
+
+
+# --------------------------------------------------------------------------- #
+# fail_closed_scope (A-1 / P0.1): resolver-error fallback is least-privilege   #
+# --------------------------------------------------------------------------- #
+
+
+def test_fail_closed_scope_shape() -> None:
+    assert fail_closed_scope("resolver_error") == {
+        "mode": "default",
+        "source": "fail_closed",
+        "scopeResolution": "resolver_error",
+    }
+
+
+def test_fail_closed_scope_is_not_preapproval() -> None:
+    scope = fail_closed_scope("x")
+    # Must never resolve to selected_full_toolhost / bypass preapproval.
+    assert scope.get("mode") not in {"selected_full_toolhost", "bypass"}
+    assert scope.get("source") != "selected_full_toolhost"
+
+
+def test_fail_closed_scope_routes_file_write_to_ask() -> None:
+    # A fail-closed scope drives the real policy to ask (not allow).
+    assert _decide(fail_closed_scope("resolver_error"), FILE_WRITE) == "ask"

@@ -15,6 +15,58 @@ from .safety import RuntimePermissionArbiter
 PermissionAction = Literal["allow", "deny", "ask"]
 APPROVAL_PERMISSION_CLASSES = {"write", "execute", "net", "computer"}
 APPROVAL_TAGS = {"requires-approval", "approval-required"}
+# Side-effect classes that, for a ``net`` tool, indicate external mutation rather
+# than a pure remote read. A net tool tagged with one of these is NOT treated as
+# read-only even if it (mis)declares ``parallel_safety="readonly"``.
+_EXTERNALLY_MUTATING_SIDE_EFFECTS = {"local_and_external"}
+
+# A tool that carries its OWN enforcement gate (e.g. MemoryWrite: real
+# persistence requires ``MAGI_MEMORY_WRITE_ENABLED=1`` AND an injected provider,
+# and the write boundary rejects non-declarative facts and is bounded to its own
+# MEMORY.md/USER.md). Such a tool may declare this manifest tag so that, under
+# the fail-closed default, it auto-allows instead of prompting on every call.
+SELF_GATED_TAG = "self-gated"
+
+
+def is_self_gated_write_tool(manifest: ToolManifest) -> bool:
+    """Whether a tool is a narrow, self-gated WRITE eligible to skip approval.
+
+    HARD predicate (the exemption can NEVER be abused by a mis-tagged tool):
+    the tool must carry the :data:`SELF_GATED_TAG` AND be a *narrow* write —
+    ``permission == "write"`` exactly (so NOT ``execute`` / ``net`` / ``meta``)
+    AND ``dangerous is False``. An ``execute`` / ``net`` / ``dangerous`` tool that
+    declares the tag still fails this predicate and stays on the approval path.
+    The tag only expresses *intent*; this code enforces the bounded blast radius.
+    """
+    if SELF_GATED_TAG not in manifest.tags:
+        return False
+    if manifest.dangerous:
+        return False
+    if manifest.permission != "write":
+        return False
+    return manifest.permission not in {"execute", "net"}
+
+
+def is_readonly_net_tool(manifest: ToolManifest) -> bool:
+    """Whether a ``net``-permission tool only *reads* remote data.
+
+    Predicate: ``parallel_safety == "readonly"`` (e.g. WebSearch / WebFetch GET).
+    The manifest validator already forbids ``readonly`` tools from being
+    ``dangerous`` or ``mutates_workspace``, so a readonly classification can never
+    coexist with a local mutation/danger flag. As belt-and-suspenders we also
+    reject the explicitly external-mutating ``side_effect_class`` value
+    (``local_and_external``) so a net WRITE/POST tool that mis-declares itself
+    readonly is still sent to approval. A net tool that merely fetches remote
+    data (side_effect_class ``none`` or ``external``-read) is read-only; anything
+    that causes external side effects is not.
+    """
+    if manifest.permission != "net":
+        return False
+    if manifest.parallel_safety != "readonly":
+        return False
+    if manifest.side_effect_class in _EXTERNALLY_MUTATING_SIDE_EFFECTS:
+        return False
+    return True
 
 
 @dataclass(frozen=True)
@@ -153,8 +205,22 @@ class ToolPermissionPolicy:
 def approval_required_reason(manifest: ToolManifest) -> str | None:
     if manifest.dangerous:
         return "dangerous tool requires approval"
+    # Narrow self-gated WRITE tools (e.g. MemoryWrite) carry their own enforcement
+    # gate and a bounded blast radius, so under the fail-closed default they
+    # auto-allow instead of prompting every call. The predicate hard-requires
+    # ``permission == "write"`` and ``dangerous is False`` — an execute / net /
+    # dangerous tool that mis-declares the tag falls through to the checks below
+    # and STILL requires approval.
+    if is_self_gated_write_tool(manifest):
+        return None
     if manifest.mutates_workspace:
         return "workspace mutation requires approval"
+    # Read-only ``net`` tools (WebSearch / WebFetch GET) only fetch remote data;
+    # under the fail-closed default they auto-allow instead of prompting every
+    # call. Net WRITE / side-effecting net tools fall through to the class check
+    # below and still require approval.
+    if is_readonly_net_tool(manifest):
+        return None
     if manifest.permission in APPROVAL_PERMISSION_CLASSES:
         return f"{manifest.permission} permission requires approval"
     if APPROVAL_TAGS.intersection(manifest.tags):

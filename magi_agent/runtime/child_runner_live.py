@@ -459,7 +459,9 @@ class RealLocalChildRunner:
             model=route_model,
             tools=tools,
             memory_mode=ctx.memory_mode,  # single source: derived TurnContext
-            permission_mode="bypassPermissions",
+            # A-8 fail-closed: thread the child's derived permission_mode
+            # (default deny/ask) instead of a hard-coded bypass.
+            permission_mode=ctx.permission_mode,
             pinned_recipe_pack_ids=pinned_refs,
         )
 

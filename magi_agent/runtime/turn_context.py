@@ -10,8 +10,16 @@ class TurnContext:
     session_id: str
     turn_id: str
     recipe: str | None = None
+    # ``permission_cap`` (tool-allowlist cap), ``memory_mode``, and
+    # ``permission_mode`` are THREE distinct, orthogonal authority knobs that
+    # COMPOSE — do not collapse them. ``permission_cap`` bounds *which* tools a
+    # turn may use; ``permission_mode`` is the per-turn ENFORCEMENT mode
+    # (``default``/``ask`` vs ``bypassPermissions``) that A-1's resolver maps to
+    # a scope. Default ``"default"`` = deny/ask (least privilege); bypass is set
+    # ONLY when a caller explicitly and auditably requests it.
     permission_cap: frozenset[str] | None = None
     memory_mode: str = "normal"
+    permission_mode: str = "default"
     provider: str | None = None
     model: str | None = None
     depth: int = 0

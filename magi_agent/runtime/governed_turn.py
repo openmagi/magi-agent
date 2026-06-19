@@ -58,13 +58,17 @@ def _build_runtime(ctx: TurnContext) -> object:
     own runtime, so this path is not exercised by the REPL.
 
     All parameters have defaults in ``build_headless_runtime``; we forward the
-    three that ``TurnContext`` carries.  Callers that need ``cwd``, ``bot_id``,
-    ``owner_user_id``, etc. should build the runtime themselves and pass it in.
+    ones that ``TurnContext`` carries.  In particular ``permission_mode`` is
+    threaded from ``ctx`` (A-8 fail-closed): the fallback no longer hard-codes
+    ``bypassPermissions`` — it defaults to ``ctx.permission_mode`` (``"default"``
+    = ask) so serve/child turns stop silently bypassing approvals. Callers that
+    need ``cwd``, ``bot_id``, ``owner_user_id``, etc. should build the runtime
+    themselves and pass it in.
     """
     from magi_agent.cli.wiring import build_headless_runtime  # local import to avoid circular
 
     return build_headless_runtime(
-        permission_mode="bypassPermissions",
+        permission_mode=ctx.permission_mode,
         session_id=ctx.session_id,
         model=ctx.model,
     )

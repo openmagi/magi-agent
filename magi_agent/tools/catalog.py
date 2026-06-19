@@ -397,7 +397,14 @@ _CORE_TOOL_MANIFESTS: tuple[ToolManifest, ...] = (
         mutates_workspace=True,
         parallel_safety="unsafe",
         available_in_modes=("act",),
-        tags=("memory", "write", "declarative"),
+        # ``self-gated``: MemoryWrite carries its own enforcement gate (real
+        # persistence requires MAGI_MEMORY_WRITE_ENABLED=1 AND an injected
+        # provider; the write boundary rejects non-declarative facts and is
+        # bounded to MEMORY.md/USER.md), so it auto-allows under the fail-closed
+        # default instead of prompting every call. The permission policy still
+        # hard-requires permission=="write" and dangerous is False for the
+        # exemption, so the tag can never widen an execute/net/dangerous tool.
+        tags=("memory", "write", "declarative", "self-gated"),
         enabled_by_default=False,  # gate-off by default
         opt_out=True,
     ),
