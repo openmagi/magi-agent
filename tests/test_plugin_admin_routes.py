@@ -153,6 +153,7 @@ def test_default_runtime_exposes_exact_native_plugin_ids_enabled() -> None:
         "TaskList",
         "TaskOutput",
         "TaskStop",
+        "RunInBackground",
     ]
     assert scheduled_work["harnessRules"] == ["scheduled_work_recipe_policy"]
     assert scheduled_work["permissions"] == []
@@ -311,6 +312,7 @@ def test_plugin_detail_returns_scheduled_work_enabled_metadata_without_runtime_a
         "TaskList",
         "TaskOutput",
         "TaskStop",
+        "RunInBackground",
     ]
     assert plugin["hooks"] == []
     assert plugin["harnessRules"] == ["scheduled_work_recipe_policy"]
@@ -374,6 +376,7 @@ def test_audit_route_returns_snapshot_summary_with_forced_attachment_flags() -> 
         "TaskList",
         "TaskOutput",
         "TaskStop",
+        "RunInBackground",
     ]
     assert scheduled_work["declaredSecrets"] == []
     assert scheduled_work["trafficAttached"] is False

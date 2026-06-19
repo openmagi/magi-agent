@@ -59,6 +59,7 @@ TS_FIRST_PARTY_PARITY_TOOL_NAMES = frozenset(
         "RepoMap",
         "RepoTaskState",
         "RepositoryMap",
+        "RunInBackground",
         "SafeCommand",
         "SkillLoader",
         "SkillRuntimeHooks",
@@ -342,6 +343,7 @@ def test_scheduled_work_manifest_is_metadata_only_default_enabled_policy_surface
         "TaskList",
         "TaskOutput",
         "TaskStop",
+        "RunInBackground",
     )
     assert scheduled_work.name == "OpenMagi Scheduled Work"
     assert scheduled_work.default_installed is True
@@ -461,6 +463,7 @@ def test_native_catalog_resolves_to_enabled_metadata_only_state_and_opt_out_remo
         "RepoMap",
         "RepoTaskState",
         "RepositoryMap",
+        "RunInBackground",
         "SafeCommand",
         "SkillLoader",
         "SkillRuntimeHooks",

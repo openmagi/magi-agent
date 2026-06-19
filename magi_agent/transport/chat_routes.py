@@ -301,6 +301,10 @@ async def _local_adk_chat_sse(
 
     session_id = _local_chat_string(payload, "sessionId", "local-dashboard")
     turn_id = _local_chat_string(payload, "turnId", f"{session_id}:turn")
+    # Background-task completion injection (default-OFF). When on and the
+    # session has pending injections enqueued by a finished background task,
+    # fold them onto the prompt so the next assistant turn surfaces the result.
+    prompt = _apply_background_inject(session_id, prompt)
     yield _sse_data({"choices": [{"index": 0, "delta": {"role": "assistant"}}]})
     yield _sse_event(
         "agent",
@@ -501,15 +505,65 @@ def _local_chat_string(payload: object, key: str, default: str) -> str:
 # route); this module only owns the buffer so the contract — accept + count —
 # is real today and a future consumer has a single place to read from.
 #
-# Process-local, asyncio-loop-only (same constraints as ACTIVE_TURNS).
-_INJECT_BUFFERS: dict[str, list[str]] = {}
+# Process-local, asyncio-loop-only (same constraints as ACTIVE_TURNS). The
+# storage moved into ``missions.work_queue.inject_buffer`` so the background-
+# task completion sink (in the gateway layer) can write into the same buffer
+# without importing this module (which would pull FastAPI into the queue
+# layer). This module still owns the chat-side append + consumer entry points.
+from magi_agent.missions.work_queue import inject_buffer as _inject_buffer
+
+# Back-compat alias: existing tests (e.g. test_chat_route_contract) reach into
+# ``chat_routes._INJECT_BUFFERS`` directly to seed/inspect the buffer. Bind the
+# name to the shared module-level dict so those tests keep working without
+# importing the new location, and any mutation via either name stays coherent.
+_INJECT_BUFFERS: dict[str, list[str]] = _inject_buffer._BUFFERS
 
 
 def _buffer_injection(session_id: str, text: str) -> int:
     """Append *text* to *session_id*'s pending-injection buffer; return its size."""
-    buffer = _INJECT_BUFFERS.setdefault(session_id, [])
-    buffer.append(text)
-    return len(buffer)
+    return _inject_buffer.enqueue(session_id, text)
+
+
+_BACKGROUND_INJECT_CONSUMER_ENV = "MAGI_BACKGROUND_TASK_INJECT_CONSUMER_ENABLED"
+
+
+def _background_inject_consumer_enabled() -> bool:
+    raw = os.environ.get(_BACKGROUND_INJECT_CONSUMER_ENV, "")
+    return bool(raw) and raw.strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _format_background_inject_block(notes: list[str]) -> str:
+    """Render drained background-task summaries as a system note block.
+
+    Single rendering site so the prompt-fold is byte-identical wherever it's
+    applied. Returns an empty string for no notes.
+    """
+    if not notes:
+        return ""
+    rendered = "\n\n".join(note.strip() for note in notes if note and note.strip())
+    if not rendered:
+        return ""
+    return (
+        "[background-task completions since your last turn]\n"
+        f"{rendered}\n"
+        "[end background-task completions]"
+    )
+
+
+def _apply_background_inject(session_id: str, prompt: str) -> str:
+    """Drain *session_id*'s pending injections and prepend them to *prompt*.
+
+    Off (default) -> byte-identical to ``prompt``. On with no pending
+    injections -> also byte-identical (drain returns empty). On with pending
+    injections -> formatted system note block prepended, buffer cleared.
+    """
+    if not _background_inject_consumer_enabled() or not session_id:
+        return prompt
+    pending = _inject_buffer.drain(session_id)
+    block = _format_background_inject_block(pending)
+    if not block:
+        return prompt
+    return f"{block}\n\n{prompt}" if prompt else block
 
 
 def _resolve_session_key(payload: object, request: Request) -> str:

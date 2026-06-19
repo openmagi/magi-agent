@@ -182,24 +182,63 @@ class _SafeLocalGoalJudge:
         return JudgeVerdict(satisfied=False, raw="")
 
 
+_BACKGROUND_LIVE_RUNNER_ENV = "MAGI_BACKGROUND_LIVE_RUNNER_ENABLED"
+
+
+def _background_live_runner_enabled() -> bool:
+    raw = os.environ.get(_BACKGROUND_LIVE_RUNNER_ENV, "")
+    return bool(raw) and raw.strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _build_inner_work_task_runner() -> Any:
+    """Pick the inner WorkTaskRunner.
+
+    Default-OFF: returns the historical ``SafeLocalWorkTaskRunner`` stub so the
+    dispatcher's observable behaviour is byte-identical.
+
+    Flag-on (``MAGI_BACKGROUND_LIVE_RUNNER_ENABLED=1``): returns the live
+    ``ChildRunnerWorkTaskRunner`` composed with ``InjectingWorkTaskRunner`` so
+    each terminal result lands in the per-session inject buffer (the chat
+    consumer folds it into the next turn). The child-runner factory is a
+    closure over the operator workspace root (per-task workspaces live under
+    it). PR3 stays text-only — workspace mutation expansion is a later flag.
+    """
+    from magi_agent.missions.work_queue.runner import (  # noqa: PLC0415
+        ChildRunnerWorkTaskRunner,
+        InjectingWorkTaskRunner,
+        SafeLocalWorkTaskRunner,
+    )
+
+    if not _background_live_runner_enabled():
+        return SafeLocalWorkTaskRunner()
+
+    def _factory(workspace: str | None) -> Any:
+        from magi_agent.runtime.child_runner_live import RealLocalChildRunner  # noqa: PLC0415
+
+        return RealLocalChildRunner(workspace_root=workspace)
+
+    live = ChildRunnerWorkTaskRunner(_factory)
+    return InjectingWorkTaskRunner(live)
+
+
 def build_local_work_queue_driver() -> Any:
     """Build the local work-queue driver used by ``magi gateway start``.
 
-    Composes ``SqliteWorkQueueStore``, ``SafeLocalWorkTaskRunner`` (inner), and
-    ``GoalModeRunner`` (outer wrapper).  The runner is a safe stub: no ADK
-    authority or network client is constructed.  The ``GoalModeRunner`` is
-    inert by default because the inner runner returns ``failed`` on turn 1 so
-    the goal loop bails immediately and never calls the judge.
-
-    Live execution requires explicit operator wiring in a future phase.
+    Composes ``SqliteWorkQueueStore`` + an inner runner (selected by
+    ``_build_inner_work_task_runner`` — stub by default, live ChildRunner
+    composed with InjectingWorkTaskRunner when the live-runner flag is on),
+    wrapped by ``GoalModeRunner``. The ``GoalModeRunner`` is inert with the
+    default stub because turn 1 returns ``failed`` so the goal loop bails
+    immediately and never calls the judge.
     """
     from magi_agent.missions.work_queue.store import SqliteWorkQueueStore  # noqa: PLC0415
-    from magi_agent.missions.work_queue.runner import SafeLocalWorkTaskRunner, GoalModeRunner  # noqa: PLC0415
+    from magi_agent.missions.work_queue.runner import GoalModeRunner  # noqa: PLC0415
     from magi_agent.missions.work_queue.driver import WorkQueueDriver  # noqa: PLC0415
 
+    inner = _build_inner_work_task_runner()
     return WorkQueueDriver(
         store=SqliteWorkQueueStore(_work_queue_db_path_from_env()),
-        runner=GoalModeRunner(SafeLocalWorkTaskRunner(), _SafeLocalGoalJudge()),
+        runner=GoalModeRunner(inner, _SafeLocalGoalJudge()),
         claimer=_work_queue_claimer_from_env(),
     )
 
