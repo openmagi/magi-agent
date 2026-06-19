@@ -15,6 +15,56 @@ Versions follow the tags published on GitHub Releases.
 
 ### Fixed
 
+## 0.1.53
+
+### Added
+- H3 LLM producer family (all default-OFF, fail-open, byte-identical when off):
+  pre-refusal (#712), completion/promise (#723), resource/self-claim (#726),
+  claim-citation (#730), output-purity (#737).
+- C-4 strict-authority kernel: `FalseOnlyAuthorityModel` base + golden harness
+  (#731), plus C-1 (#714) and C-5 (#713) security refactors that already landed
+  on 0.1.52 main between releases.
+- Orchestrator pattern turned ON in the lab/full dogfood profile (#717), with
+  per-spawn recipe binding (#707), the ON-path go-live verification (#710), and
+  hosted wire-profile parity foundations (#702, #722, #740).
+- Work-queue completion path: P4 exactly-once (#693), P5 board API/UI/notifier
+  (#703/#709/#715), P6 safety prereqs (#728), and a default-OFF
+  `/workflows`-style background-tasks runner for web + TUI (#732).
+- `magi computer-use install` CLI (real download + integrity-verified install)
+  plus the cua-driver 0.5.7 contract (#727); the original #711 contract was
+  silently reverted during the #714 rebase and was fully recovered (#729, #733).
+- Self-host HookBus default-ON in the full/lab profile (#716) — a no-op until
+  the operator authors hooks, hosted unaffected.
+- Customize SHACL conversational compile + beginner guide panel + English i18n
+  (#734), key-aware chat model picker refresh (#735).
+- External recipe + verifier discovery via Python entry_points (`magi.recipes`
+  / `magi.verifiers`), strict default-OFF and tighten-only (#718, #719).
+- One canonical `canonical_digest()` + FrozenContractModel kernel (#713) and
+  one redaction kernel in `ops/safety.py` (#714).
+- Documented profiles + the `lab` dogfood profile on the install page (#675,
+  carried forward).
+
+### Changed
+- Dashboard bundle rebuilt for the message/input area catch-up (#720), SHACL
+  conversational compile UI (#734), work-queue board view (#709 + #732), local
+  runtime model presets refresh (#735).
+- `config/_truthy.py` leaf extracted to break the `flags.py` ↔ `env.py` import
+  cycle; `env.py` keeps a byte-identical re-export shim (#725).
+- Hosted gate5b wire-profile parity advances: tool-event projector default
+  values + the `engine → Gate5B4C3LiveRunnerBoundaryResult` shim (#722, #740).
+
+### Fixed
+- Permission scope is now fail-closed with mode-derived strict defaults and a
+  default-OFF rollback hatch; `MemoryWrite` stays auto-allowed under fail-closed
+  via self-gated readiness, and read-only net tools (`WebSearch`/`WebFetch`) are
+  auto-allowed under the default strict scope (#704).
+- `persist_model` keeps provider + model coherent (no more `fireworks/gpt-5.5`
+  half-set), via stable id-family inference (#724).
+- Dead scaffolding deleted (~22k lines): unused shadow contracts plus the tests
+  that imported them (#721).
+- Hosted clawy: KaTeX math rendering parity for the chat (#1587, hosted repo).
+- Documentation-only catch-up of `magi-cp` control-plane plans (#1588, hosted).
+
 ## 0.1.52
 
 ### Added
