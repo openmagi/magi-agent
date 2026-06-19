@@ -251,6 +251,7 @@ graph LR
     tools --> firstparty
     tools --> gates
     tools --> harness
+    tools --> ops
     tools --> packs
     tools --> plugins
     tools --> runtime
@@ -337,7 +338,7 @@ graph LR
 | delivery_receipts.py | — | contract, durable_store, file_delivery, safety | — |
 | file_delivery.py | — | contract, provider_receipts | artifacts/__init__.py, artifacts/delivery_boundary.py, artifacts/delivery_receipts.py, artifacts/file_delivery_live.py, plugins/native/documents.py |
 | file_delivery_live.py | Real filesystem-backed providers for the FileDelivery boundary. | _common, _file_delivery_fakes, contract, file_delivery | plugins/native/documents.py |
-| local_result_store.py | — | output_budget | tools/kernel.py |
+| local_result_store.py | — | output_budget, safety | tools/kernel.py |
 | output_registry_boundary.py | — | — | artifacts/__init__.py |
 | render_verification.py | — | durable_store, safety | — |
 
@@ -1228,7 +1229,7 @@ graph LR
 | job_queue.py | — | safety | — |
 | metrics.py | — | safety | — |
 | otel_noise.py | Suppress a benign OpenTelemetry teardown log line. | — | (root)/main.py, cli/app.py |
-| safety.py | — | authority | artifacts/delivery_receipts.py, artifacts/render_verification.py, billing/quota.py, billing/spend_guard.py, connectors/credential_lease.py, connectors/marketplace.py, connectors/registry.py, gates/gate2_readiness.py, ops/job_queue.py, ops/metrics.py, permissions/auto_control.py, runtime/heartbeat_contract.py, runtime/no_agent_watchdog.py, runtime/resume_decision.py, security/compliance.py, shadow/gate2_recipe_profile_resolver.py, tenancy/context.py, transport/product_admin.py |
+| safety.py | — | authority | artifacts/delivery_receipts.py, artifacts/local_result_store.py, artifacts/render_verification.py, billing/quota.py, billing/spend_guard.py, connectors/credential_lease.py, connectors/marketplace.py, connectors/registry.py, gates/gate2_readiness.py, ops/job_queue.py, ops/metrics.py, permissions/auto_control.py, runtime/governed_projection.py, runtime/heartbeat_contract.py, runtime/no_agent_watchdog.py, runtime/resume_decision.py, security/compliance.py, shadow/gate2_recipe_profile_resolver.py, tenancy/context.py, tools/kernel.py, tools/output_budget.py, tools/schema_validation.py, transport/product_admin.py |
 
 ### packs/
 
@@ -1463,7 +1464,7 @@ graph LR
 | fork_messages.py | — | — | runtime/fork_runner.py |
 | fork_runner.py | — | fork_messages, prompt_snapshot | adk_bridge/control_plane.py, cli/tests/test_real_runner.py |
 | goal_nudge.py | PR4 — Lightweight goal-nudge continuation primitive. | final_output_gate | cli/engine.py, cli/goal_nudge_wiring.py |
-| governed_projection.py | — | — | — |
+| governed_projection.py | — | safety | — |
 | governed_turn.py | The single primitive every governed turn flows through. | turn_context, wiring | channels/turn_engine.py, cli/headless.py, runtime/child_runner_live.py, transport/chat_routes.py |
 | heartbeat_boundary.py | — | heartbeat_contract, heartbeat_store | — |
 | heartbeat_contract.py | — | safety | runtime/events.py, runtime/heartbeat_boundary.py, runtime/heartbeat_store.py, runtime/resume_decision.py, runtime/stale_run_detector.py |
@@ -1710,13 +1711,13 @@ graph LR
 | file_toolhost.py | Handler bindings for the optional file & multimodal tool suite. | archive_tools, audio_tools, document_qa_tools, document_tools, env, image_tools, music_tools, registry, spreadsheet_tools, video_tools | cli/tool_runtime.py, cli/wiring.py |
 | health.py | Tool firing health checks (Principle 1 — "Built ≠ works"). | base, context, manifest, registry, result | — |
 | image_tools.py | ImageUnderstand tool — describe or Q&A an image file from the workspace. | context, env, flags, model_tiers, providers, result, spreadsheet_tools | tools/file_toolhost.py, tools/music_tools.py, tools/video_tools.py |
-| kernel.py | Evidence-emitting tool execution kernel — default-OFF, not the live hot path. | context, dispatch_shared, event_projection, local_result_store, manifest, output_budget, permission, registry, request_ledger, result, schema_validation, tool_boundary | runtime/approval_resume.py, tools/event_projection.py, tools/scheduler.py, web_acquisition/reference_research_tools.py |
+| kernel.py | Evidence-emitting tool execution kernel — default-OFF, not the live hot path. | context, dispatch_shared, event_projection, local_result_store, manifest, output_budget, permission, registry, request_ledger, result, safety, schema_validation, tool_boundary | runtime/approval_resume.py, tools/event_projection.py, tools/scheduler.py, web_acquisition/reference_research_tools.py |
 | local_readonly.py | — | context, env, memory_mode_guard, read_format, result, ripgrep, runtime_receipts, source_ledger | runtime/child_toolset.py, web_acquisition/reference_research_tools.py |
 | manifest.py | — | types | (root)/facades.py, adk_bridge/control_plane.py, adk_bridge/tool_adapter.py, browser/autonomous/tool.py, cli/tool_runtime.py, cli/wiring.py, computer/autonomous/tool.py, context/hook.py, firstparty/packs/callback_turn_audit/impl.py, firstparty/packs/connector_local_readonly/impl.py, firstparty/packs/tools_clock/impl.py, firstparty/packs/tools_persistent_python/impl.py, gates/gate1a_readonly_tools.py, gates/gate5b_full_toolhost.py, harness/general_automation/constraint_reinjection.py, harness/general_automation/package_manifest.py, harness/general_automation/package_tool_projection.py, harness/general_automation/question_tool.py, harness/general_automation/recipe_disclosure.py, harness/goal_loop_control.py, hooks/builtin/llm_safety_hooks.py, hooks/builtin/prompt_transforms.py, hooks/external_config.py, hooks/manifest.py, plugins/mcp_adapter.py, plugins/native/web.py, plugins/tool_projection.py, recipes/best_of_n.py, recipes/cross_verify.py, recipes/recipe_routing.py, shadow/office_automation_contract.py, shadow/patch_file_policy_contract.py, shadow/path_shell_policy_contract.py, shadow/tool_policy.py, shadow/toolhost_contract.py, tools/__init__.py, tools/base.py, tools/catalog.py, tools/concurrent_dispatcher.py, tools/deferred.py, tools/dispatch_shared.py, tools/dispatcher.py, tools/file_tool_manifests.py, tools/health.py, tools/kernel.py, tools/output_budget.py, tools/permission.py, tools/permission_scope.py, tools/python_exec.py, tools/registry.py, tools/safety.py, tools/scheduler.py, tools/schema_validation.py, tools/tool_search.py, transport/tools.py |
 | media_egress.py | SSRF preflight for remote media (video/audio URL) acquisition. | network | tools/audio_tools.py, tools/video_tools.py |
 | memory_mode_guard.py | Tool-level memory-mode hard enforcement. | patch_apply, session_identity | cli/learning_recall.py, cli/memory_recall_block.py, cli/wiring.py, firstparty/packs/gates_policy_default/impl.py, gates/gate5b_full_toolhost.py, tools/core_toolhost.py, tools/local_readonly.py |
 | music_tools.py | MusicNotation tool — read musical notation from an image via vision model. | context, image_tools, result, spreadsheet_tools | tools/file_toolhost.py |
-| output_budget.py | — | manifest, result | artifacts/local_result_store.py, plugins/mcp_adapter.py, tools/kernel.py |
+| output_budget.py | — | manifest, result, safety | artifacts/local_result_store.py, plugins/mcp_adapter.py, tools/kernel.py |
 | permission.py | — | context, control, manifest, safety, tool_perm | firstparty/packs/gates_policy_default/impl.py, gates/gate5b_full_toolhost.py, tools/__init__.py, tools/dispatcher.py, tools/kernel.py |
 | permission_scope.py | Mode-derived permission scope resolution (cluster 09 PR1). | manifest | cli/tool_runtime.py, cli/wiring.py |
 | persistent_python_toolhost.py | Additive first-party toolhost binder for the ``PersistentPython`` tool. | context, discovery, impl, python_exec, python_exec_worker, registry, result | cli/tool_runtime.py, runtime/openmagi_runtime.py |
@@ -1729,7 +1730,7 @@ graph LR
 | safety.py | — | context, env, manifest, read_ledger | cli/wiring.py, tools/permission.py |
 | scheduler.py | — | kernel, manifest, registry, request_ledger, result, schema_validation | — |
 | schema_projection.py | — | — | plugins/mcp_adapter.py, tools/tool_search.py |
-| schema_validation.py | — | manifest | tools/dispatcher.py, tools/kernel.py, tools/scheduler.py |
+| schema_validation.py | — | manifest, safety | tools/dispatcher.py, tools/kernel.py, tools/scheduler.py |
 | spreadsheet_tools.py | — | context, result | plugins/native/documents.py, tools/archive_tools.py, tools/audio_tools.py, tools/document_qa_tools.py, tools/document_tools.py, tools/file_markdown.py, tools/file_toolhost.py, tools/image_tools.py, tools/music_tools.py, tools/video_tools.py |
 | todo_toolhost.py | — | context, registry, result | runtime/openmagi_runtime.py |
 | tool_search.py | ToolSearchTool — search the tool registry by keyword or exact name. | manifest, registry, schema_projection | — |
