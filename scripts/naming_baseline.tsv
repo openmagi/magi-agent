@@ -71,7 +71,7 @@ openmagi	magi_agent/cli/engine.py	17
 openmagi	magi_agent/cli/real_runner.py	1
 openmagi	magi_agent/cli/session_log.py	2
 openmagi	magi_agent/cli/tests/test_commands.py	4
-openmagi	magi_agent/cli/tests/test_engine.py	9
+openmagi	magi_agent/cli/tests/test_engine.py	8
 openmagi	magi_agent/cli/tests/test_engine_recovery.py	2
 openmagi	magi_agent/cli/tests/test_fact_grounding_gate_wiring.py	4
 openmagi	magi_agent/cli/tests/test_force_recipe_env_wiring.py	5
@@ -98,6 +98,7 @@ openmagi	magi_agent/evidence/contracts.py	1
 openmagi	magi_agent/evidence/local_tool_collector.py	2
 openmagi	magi_agent/evidence/observed_egress.py	2
 openmagi	magi_agent/evidence/runtime_issuance.py	1
+openmagi	magi_agent/evidence/shacl_ontology.py	1
 openmagi	magi_agent/evidence/subagent.py	6
 openmagi	magi_agent/evidence/tool_boundary.py	1
 openmagi	magi_agent/gates/api_canary_ladder.py	10
