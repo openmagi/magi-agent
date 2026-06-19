@@ -1077,7 +1077,7 @@ graph LR
 
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
-| __init__.py | — | command_executor, context, http_executor, llm_executor, manifest, result | hooks/bus.py, hooks/executors/command_executor.py, hooks/executors/http_executor.py, hooks/executors/llm_executor.py |
+| __init__.py | — | command_executor, context, executors, http_executor, llm_executor, manifest, result | hooks/bus.py, hooks/executors/command_executor.py, hooks/executors/http_executor.py, hooks/executors/llm_executor.py |
 | command_executor.py | Command hook executor — spawns an external process via ``bash -c <command>``. | context, executors, manifest, result, sanitize | cli/hook_wiring.py, hooks/executors/__init__.py |
 | http_executor.py | HTTP hook executor — POSTs (or configurable method) to an external webhook URL. | context, executors, manifest, result, sanitize | hooks/executors/__init__.py |
 | llm_executor.py | LLM hook executor — classifies hook context via a lightweight LLM call. | context, executors, manifest, result, sanitize | hooks/executors/__init__.py |
