@@ -298,6 +298,10 @@ FLAGS: tuple[FlagSpec, ...] = (
         "MAGI_WORK_QUEUE_EXECUTOR_ENABLED",
         summary="Enable the durable work-queue dispatcher tick loop.",
     ),
+    _b(
+        "MAGI_WORK_QUEUE_BOARD_API_ENABLED",
+        summary="Mount the read-only work-queue board HTTP API.",
+    ),
     FlagSpec(
         name="MAGI_SESSION_TRANSCRIPT_RETENTION_DAYS",
         default=14,
