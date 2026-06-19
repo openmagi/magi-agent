@@ -201,7 +201,7 @@ def test_write_pack_creates_directory_and_files(tmp_path: Path) -> None:
     pack_root = tmp_path / "dashboard-authored"
     write_pack(pack_root, [_check("x")])
     assert (pack_root / "pack.toml").exists()
-    assert (pack_root / "checks.recipe.json").exists()
+    assert (pack_root / "checks.recipe.toml").exists()
     assert (pack_root / "dashboard-checks.json").exists()
 
 
@@ -218,7 +218,7 @@ def test_write_pack_pack_toml_references_recipe_spec(tmp_path: Path) -> None:
     body = (pack_root / "pack.toml").read_text()
     assert 'packId = "ext.dashboard.checks"' in body
     assert 'type = "recipe"' in body
-    assert 'spec = "checks.recipe.json"' in body
+    assert 'spec = "checks.recipe.toml"' in body
 
 
 def test_sidecar_contains_all_checks(tmp_path: Path) -> None:
@@ -244,8 +244,92 @@ def test_read_sidecar_missing_returns_empty(tmp_path: Path) -> None:
 
 
 def test_write_pack_atomic_recipe_spec_never_partial(tmp_path: Path) -> None:
-    # After a successful write, no .tmp file should remain.
+    # After a successful write, no mkstemp .tmp leftover should remain, and the
+    # directory holds exactly the three expected files.
     pack_root = tmp_path / "dashboard-authored"
     write_pack(pack_root, [_check("x")])
-    leftovers = [p.name for p in pack_root.iterdir() if p.name.startswith(".")]
-    assert leftovers == []
+    names = {p.name for p in pack_root.iterdir()}
+    assert not any(n.endswith(".tmp") for n in names)
+    assert names == {"pack.toml", "checks.recipe.toml", "dashboard-checks.json"}
+
+
+# --- schema hardening (defense-in-depth) ---
+
+
+def test_dashboard_check_id_field_validator_rejects_traversal() -> None:
+    with pytest.raises(ValueError):
+        DashboardCheck.model_validate(_ok(id="../../etc/passwd"))
+
+
+def test_validate_rejects_unknown_top_level_key() -> None:
+    rule = _ok()
+    rule["surprise"] = 1
+    errs = validate_dashboard_check(rule)
+    assert any("unknown key" in e and "surprise" in e for e in errs)
+
+
+def test_validate_rejects_unknown_key_under_trigger_match() -> None:
+    rule = _ok()
+    rule["trigger"]["match"]["bonus"] = True
+    errs = validate_dashboard_check(rule)
+    assert any("unknown key" in e and "bonus" in e for e in errs)
+
+
+# --- accept-boundary tests (exact-cap values pass) ---
+
+
+def test_validate_accepts_id_exactly_63_chars() -> None:
+    assert validate_dashboard_check(_ok(id="a" * 63)) == []
+
+
+def test_validate_accepts_label_exactly_200_chars() -> None:
+    assert validate_dashboard_check(_ok(label="x" * 200)) == []
+
+
+def test_validate_accepts_pattern_exactly_500_chars() -> None:
+    rule = _ok()
+    rule["trigger"]["match"]["pattern"] = "x" * 500
+    assert validate_dashboard_check(rule) == []
+
+
+def test_round_trip_carries_disabled_and_regex_flags(tmp_path: Path) -> None:
+    pack_root = tmp_path / "dashboard-authored"
+    check = DashboardCheck.model_validate(
+        _ok(
+            id="rx",
+            enabled=False,
+            trigger={"tool": "web_fetch", "match": {"pattern": "ssn", "isRegex": True}},
+        )
+    )
+    write_pack(pack_root, [check])
+    out = read_sidecar(pack_root)
+    assert len(out) == 1
+    assert out[0].enabled is False
+    assert out[0].trigger.match.is_regex is True
+
+
+def test_read_sidecar_skips_entry_with_unknown_key(tmp_path: Path) -> None:
+    pack_root = tmp_path / "dashboard-authored"
+    pack_root.mkdir(parents=True)
+    valid = _ok(id="good")
+    malformed = _ok(id="bad")
+    malformed["surprise"] = True  # extra="forbid" → model_validate raises → skipped
+    (pack_root / "dashboard-checks.json").write_text(json.dumps([valid, malformed]))
+    out = read_sidecar(pack_root)
+    assert {c.id for c in out} == {"good"}
+
+
+# --- discovery-format round trip (guards the TOML blocker) ---
+
+
+def test_recipe_spec_round_trips_through_parse_recipe_manifest(tmp_path: Path) -> None:
+    from magi_agent.recipes.kernel_recipe_packs import parse_recipe_manifest
+
+    pack_root = tmp_path / "dashboard-authored"
+    write_pack(pack_root, [_check("ssn-leak")])
+    parsed = parse_recipe_manifest(pack_root / "checks.recipe.toml")
+    assert parsed is not None
+    assert parsed.pack_id == "ext.dashboard.checks"
+    assert parsed.default_enabled is False
+    assert f"{DASHBOARD_EVIDENCE_REF_PREFIX}ssn-leak" in parsed.evidence_refs
+    assert validate_external_recipe_pack(parsed) == ""

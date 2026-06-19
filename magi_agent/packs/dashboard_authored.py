@@ -21,7 +21,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from magi_agent.recipes.compiler import RecipePackManifest
 
@@ -31,6 +31,8 @@ DASHBOARD_EVIDENCE_REF_PREFIX = "evidence:dashboard:"
 
 DashboardScope = Literal["always", "coding", "research", "delivery"]
 DashboardAction = Literal["block", "audit"]
+
+_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,62}$")
 
 
 class DashboardTriggerMatch(BaseModel):
@@ -54,8 +56,17 @@ class DashboardCheck(BaseModel):
     trigger: DashboardTrigger
     action: DashboardAction
 
+    @field_validator("id")
+    @classmethod
+    def _validate_id(cls, value: str) -> str:
+        if not _ID_RE.fullmatch(value):
+            raise ValueError(
+                "id must be lowercase alphanumeric+hyphen+underscore, "
+                "1-63 chars, first char alphanumeric"
+            )
+        return value
 
-_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,62}$")
+
 _LABEL_MAX = 200
 _PATTERN_MAX = 500
 _SCOPES: frozenset[str] = frozenset({"always", "coding", "research", "delivery"})
@@ -65,11 +76,22 @@ _ACTIONS: frozenset[str] = frozenset({"block", "audit"})
 _CATASTROPHIC_REGEX = re.compile(r"\([^)]*[+*]\)[+*]|\([^)]*\|[^)]*\)[+*]")
 
 
+_ALLOWED_TOP_KEYS: frozenset[str] = frozenset(
+    {"id", "label", "scope", "enabled", "trigger", "action"}
+)
+_ALLOWED_TRIGGER_KEYS: frozenset[str] = frozenset({"tool", "match"})
+_ALLOWED_MATCH_KEYS: frozenset[str] = frozenset({"pattern", "isRegex", "is_regex"})
+
+
 def validate_dashboard_check(rule: Any) -> list[str]:
     """Return a list of validation errors (empty = valid)."""
     errors: list[str] = []
     if not isinstance(rule, dict):
         return ["rule must be an object"]
+
+    for key in rule:
+        if key not in _ALLOWED_TOP_KEYS:
+            errors.append(f"unknown key: {key!r}")
 
     rid = rule.get("id")
     if not isinstance(rid, str) or not _ID_RE.fullmatch(rid):
@@ -97,6 +119,9 @@ def validate_dashboard_check(rule: Any) -> list[str]:
     trigger = rule.get("trigger")
     if not isinstance(trigger, dict):
         return [*errors, "trigger must be an object"]
+    for key in trigger:
+        if key not in _ALLOWED_TRIGGER_KEYS:
+            errors.append(f"unknown key under trigger: {key!r}")
     tool = trigger.get("tool")
     if not isinstance(tool, str) or not tool.strip():
         errors.append("trigger.tool is required")
@@ -104,6 +129,9 @@ def validate_dashboard_check(rule: Any) -> list[str]:
     match = trigger.get("match")
     if not isinstance(match, dict):
         return [*errors, "trigger.match must be an object"]
+    for key in match:
+        if key not in _ALLOWED_MATCH_KEYS:
+            errors.append(f"unknown key under trigger.match: {key!r}")
     pattern = match.get("pattern")
     is_regex = match.get("isRegex", False) or match.get("is_regex", False)
     if not isinstance(pattern, str) or not pattern.strip():
@@ -144,6 +172,9 @@ DASHBOARD_PACK_VERSION = "1"
 
 
 def _evidence_ref(check_id: str) -> str:
+    # The evidence ref keys off ``check.id`` (NOT ``slug_of(label)``), so PR3's
+    # producer MUST emit ``evidence:dashboard:<check.id>`` for the validator ref
+    # to line up. ``slug_of`` stays for later PRs / the frontend.
     return f"{DASHBOARD_EVIDENCE_REF_PREFIX}{check_id}"
 
 
@@ -187,6 +218,32 @@ def _atomic_write_json(target: Path, payload: object) -> None:
     _atomic_write_text(target, json.dumps(payload, indent=2, default=str) + "\n")
 
 
+def _toml_basic_string(value: str) -> str:
+    """Serialize a string as a TOML basic string (defensive escaping)."""
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+
+def _serialize_recipe_toml(manifest: RecipePackManifest) -> str:
+    """Hand-serialize the recipe manifest to TOML (dependency-free).
+
+    ``parse_recipe_manifest`` (kernel_recipe_packs.py) loads recipe specs with
+    ``tomllib.load`` (TOML-only) and is fail-closed — a JSON spec or any parse
+    error silently drops the pack. We emit camelCase fields matching the
+    hand-authored first-party style (recipe_authoring_static/...). All values are
+    derived from ``manifest`` so ``compile_recipe`` stays the single source.
+    """
+    refs = ", ".join(_toml_basic_string(ref) for ref in manifest.evidence_refs)
+    return (
+        f"packId = {_toml_basic_string(manifest.pack_id)}\n"
+        f"version = {_toml_basic_string(manifest.version)}\n"
+        f"displayName = {_toml_basic_string(manifest.display_name)}\n"
+        f"description = {_toml_basic_string(manifest.description)}\n"
+        f"defaultEnabled = {'true' if manifest.default_enabled else 'false'}\n"
+        f"evidenceRefs = [ {refs} ]\n"
+    )
+
+
 _PACK_TOML = (
     'packId = "ext.dashboard.checks"\n'
     'displayName = "Dashboard custom checks"\n'
@@ -196,13 +253,16 @@ _PACK_TOML = (
     '[[provides]]\n'
     'type = "recipe"\n'
     'ref = "recipe:ext.dashboard.checks@1"\n'
-    'spec = "checks.recipe.json"\n'
+    'spec = "checks.recipe.toml"\n'
 )
 
 
 def write_pack(packs_root: Path, checks: list[DashboardCheck]) -> None:
-    """Atomically write the dashboard pack to ``packs_root``.
+    """Write the dashboard pack to ``packs_root``.
 
+    Each file is written with an atomic replace; ``pack.toml`` is written LAST so
+    discovery never observes a manifest pointing at a missing or half-written
+    spec. (This is not whole-pack atomicity — individual files land atomically.)
     Empty ``checks`` removes the directory entirely so FS discovery sees nothing
     (byte-identical baseline).
     """
@@ -211,12 +271,12 @@ def write_pack(packs_root: Path, checks: list[DashboardCheck]) -> None:
             shutil.rmtree(packs_root)
         return
     packs_root.mkdir(parents=True, exist_ok=True)
-    # 1. recipe spec (validator side)
+    # 1. recipe spec (validator side) — TOML so parse_recipe_manifest can load it.
     manifest = compile_recipe(checks)
-    _atomic_write_json(
-        packs_root / "checks.recipe.json", manifest.model_dump(by_alias=True)
+    _atomic_write_text(
+        packs_root / "checks.recipe.toml", _serialize_recipe_toml(manifest)
     )
-    # 2. sidecar (producer side)
+    # 2. sidecar (producer side) — JSON, read by our own read_sidecar.
     _atomic_write_json(
         packs_root / "dashboard-checks.json",
         [c.model_dump(by_alias=True) for c in checks],
