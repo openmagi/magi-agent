@@ -19,7 +19,9 @@ a fake adapter exposing only ``collect_events``.
 Error / timeout mapping
 -----------------------
 - Empty event list  →  ``outcome="failed"``, ``error="no events returned"``
-- Runner exception  →  ``outcome="failed"``, ``error=f"adk error: {exc}"``
+- Runner exception  →  ``outcome="failed"``, ``error=f"adk error: {type(exc).__name__}"``
+  (message is redacted to type-name only to prevent credential/auth-header leakage
+  via last_failure_error → board API model_dump)
 - asyncio.TimeoutError  →  ``outcome="failed"``, ``error="timeout"``
 - Non-empty events  →  ``outcome="completed"``, ``summary=<digest>``
 
@@ -78,30 +80,6 @@ def _safe_session_suffix(task_id: str) -> str:
     return f"{cleaned or 'task'}:{h}"
 
 
-def _build_turn_input(plan: WorkTaskPlan) -> object:
-    """Synthesize a RunnerTurnInput for an unattended work-queue turn.
-
-    ADK imports are lazy to preserve boundary import purity.
-    """
-    from google.genai import types  # lazy: keeps module top-level ADK-free  # noqa: PLC0415
-    from magi_agent.adk_bridge.runner_adapter import RunnerTurnInput  # noqa: PLC0415
-    from magi_agent.harness.resolved import build_default_resolved_harness_state  # noqa: PLC0415
-
-    suffix = _safe_session_suffix(plan.task_id)
-    harness_state = build_default_resolved_harness_state(
-        agent_role="general",
-        spawn_depth=1,
-    )
-    return RunnerTurnInput(
-        userId=f"worker:task:{suffix}",
-        sessionId=f"agent:task:{suffix}",
-        turnId=f"task-turn:{suffix}",
-        invocationId=f"task-inv:{suffix}",
-        newMessage=types.Content(role="user", parts=[types.Part(text=plan.prompt)]),
-        harnessState=harness_state,
-    )
-
-
 def _summarize_events(events: list[object]) -> str:
     """Produce a compact, redaction-safe digest of collected events."""
     if not events:
@@ -145,9 +123,9 @@ class AdkWorkTaskRunner:
             prompt=prompt,
             timeout_seconds=self._default_timeout_seconds,
         )
-        turn_input = _build_turn_input(plan)
 
         try:
+            turn_input = self._build_turn_input(plan)
             events = await asyncio.wait_for(
                 self._runner_adapter.collect_events(turn_input),
                 timeout=plan.timeout_seconds,
@@ -155,7 +133,13 @@ class AdkWorkTaskRunner:
         except asyncio.TimeoutError:
             return WorkTaskRunResult(outcome="failed", error="timeout")
         except Exception as exc:  # noqa: BLE001
-            return WorkTaskRunResult(outcome="failed", error=f"adk error: {exc}")
+            # Redact exception message to type-name only: the full str(exc) can
+            # embed provider auth headers or upstream error bodies that would
+            # propagate into last_failure_error → board API model_dump().
+            return WorkTaskRunResult(
+                outcome="failed",
+                error=f"adk error: {type(exc).__name__}",
+            )
 
         if not events:
             return WorkTaskRunResult(outcome="failed", error="no events returned")
@@ -163,6 +147,34 @@ class AdkWorkTaskRunner:
         return WorkTaskRunResult(
             outcome="completed",
             summary=_summarize_events(events),
+        )
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def _build_turn_input(self, plan: WorkTaskPlan) -> object:
+        """Synthesize a RunnerTurnInput for an unattended work-queue turn.
+
+        ADK imports are lazy to preserve boundary import purity.  Mirrors the
+        structural layout of ``CronTurnRunnerAdapter._build_turn_input``.
+        """
+        from google.genai import types  # lazy: keeps module top-level ADK-free  # noqa: PLC0415
+        from magi_agent.adk_bridge.runner_adapter import RunnerTurnInput  # noqa: PLC0415
+        from magi_agent.harness.resolved import build_default_resolved_harness_state  # noqa: PLC0415
+
+        suffix = _safe_session_suffix(plan.task_id)
+        harness_state = build_default_resolved_harness_state(
+            agent_role="general",
+            spawn_depth=1,
+        )
+        return RunnerTurnInput(
+            userId=f"worker:task:{suffix}",
+            sessionId=f"agent:task:{suffix}",
+            turnId=f"task-turn:{suffix}",
+            invocationId=f"task-inv:{suffix}",
+            newMessage=types.Content(role="user", parts=[types.Part(text=plan.prompt)]),
+            harnessState=harness_state,
         )
 
 

@@ -46,9 +46,13 @@ def test_adk_runner_failed_on_empty_events():
 
 
 def test_adk_runner_failed_on_exception():
+    # error field must contain the exception type name but NOT the message
+    # (str(exc) can embed credentials/auth headers that would leak via board API).
     r = AdkWorkTaskRunner(_FakeAdkAdapter(raises=RuntimeError("boom")))
     out = asyncio.run(r.run_task(_task()))
-    assert out.outcome == "failed" and "boom" in (out.error or "")
+    assert out.outcome == "failed"
+    assert "RuntimeError" in (out.error or "")
+    assert "boom" not in (out.error or "")
 
 
 def test_adk_runner_failed_on_timeout():
@@ -64,3 +68,25 @@ def test_adk_runner_uses_body_when_present():
     # The synthesized turn_input must contain both title and body text.
     assert fake.captured is not None
     assert "extra context" in str(fake.captured)
+
+
+def test_adk_runner_build_turn_input_exception_is_caught():
+    """_build_turn_input failure (e.g. ImportError) must return failed, not propagate."""
+
+    class _BrokenAdapter:
+        async def collect_events(self, turn_input):  # pragma: no cover
+            return []
+
+    runner = AdkWorkTaskRunner(_BrokenAdapter())
+
+    # Patch _build_turn_input to raise ImportError (simulates missing dep).
+    original = runner._build_turn_input
+
+    def _raise(_plan):
+        raise ImportError("google.genai not installed")
+
+    runner._build_turn_input = _raise  # type: ignore[method-assign]
+    out = asyncio.run(runner.run_task(_task()))
+    assert out.outcome == "failed"
+    assert "ImportError" in (out.error or "")
+    assert "google.genai not installed" not in (out.error or "")
