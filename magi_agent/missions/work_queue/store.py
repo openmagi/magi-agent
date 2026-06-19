@@ -188,6 +188,18 @@ class WorkQueueStore(Protocol):
         """Return run rows for *task_id* ordered by started_at ASC."""
         ...
 
+    def terminal_events_since(self, since_id: int, *, limit: int = 200) -> list[dict]:
+        """Return terminal-kind events (completed, blocked, failed) with id > since_id.
+
+        Ordered by id ASC, capped at limit. Each dict has the same shape as
+        list_task_events: id, task_id, run_id, kind, payload (JSON-parsed), created_at.
+        """
+        ...
+
+    def latest_terminal_event_id(self) -> int:
+        """Return the max id among terminal-kind events, or 0 if none."""
+        ...
+
 
 # ---------------------------------------------------------------------------
 # InMemoryWorkQueueStore
@@ -444,6 +456,19 @@ class InMemoryWorkQueueStore:
         """
         return []
 
+    def terminal_events_since(self, since_id: int, *, limit: int = 200) -> list[dict]:
+        """Return [] — InMemory does not persist events.
+
+        InMemoryWorkQueueStore is a test double for task-state logic only.
+        The board API reads the durable Sqlite store in production where events
+        are persisted via _append_event().
+        """
+        return []
+
+    def latest_terminal_event_id(self) -> int:
+        """Return 0 — InMemory does not persist events."""
+        return 0
+
 
 # ---------------------------------------------------------------------------
 # SqliteWorkQueueStore
@@ -451,6 +476,8 @@ class InMemoryWorkQueueStore:
 
 
 class SqliteWorkQueueStore:
+    _TERMINAL_KINDS = ("completed", "blocked", "failed")
+
     def __init__(self, db_path: str | Path) -> None:
         self._db_path = Path(db_path)
         self._conn: sqlite3.Connection | None = None
@@ -477,6 +504,19 @@ class SqliteWorkQueueStore:
         d = {k: row[k] for k in _COLUMNS}
         d["goal_mode"] = bool(d["goal_mode"])
         return WorkTask(**d)
+
+    @staticmethod
+    def _event_row_to_dict(row: sqlite3.Row) -> dict:
+        """Convert a work_queue_task_events row to a dict with JSON-parsed payload."""
+        payload_raw = row["payload"]
+        return {
+            "id": row["id"],
+            "task_id": row["task_id"],
+            "run_id": row["run_id"],
+            "kind": row["kind"],
+            "payload": json.loads(payload_raw) if payload_raw is not None else None,
+            "created_at": row["created_at"],
+        }
 
     def create(self, task: WorkTask) -> WorkTask:
         conn = self._get_conn()
@@ -785,20 +825,7 @@ class SqliteWorkQueueStore:
             "FROM work_queue_task_events WHERE task_id=? ORDER BY id ASC LIMIT ?",
             (task_id, limit),
         ).fetchall()
-        result = []
-        for r in rows:
-            payload_raw = r["payload"]
-            result.append(
-                {
-                    "id": r["id"],
-                    "task_id": r["task_id"],
-                    "run_id": r["run_id"],
-                    "kind": r["kind"],
-                    "payload": json.loads(payload_raw) if payload_raw is not None else None,
-                    "created_at": r["created_at"],
-                }
-            )
-        return result
+        return [self._event_row_to_dict(r) for r in rows]
 
     def list_task_runs(self, task_id: str, *, limit: int = 100) -> list[dict]:
         """Return run rows for *task_id* ordered by started_at ASC.
@@ -827,6 +854,30 @@ class SqliteWorkQueueStore:
             }
             for r in rows
         ]
+
+    def terminal_events_since(self, since_id: int, *, limit: int = 200) -> list[dict]:
+        """Return terminal-kind events (completed, blocked, failed) with id > since_id.
+
+        Ordered by id ASC, capped at limit. Each dict has the same shape as
+        list_task_events: id, task_id, run_id, kind, payload (JSON-parsed), created_at.
+        """
+        conn = self._get_conn()
+        rows = conn.execute(
+            "SELECT id, task_id, run_id, kind, payload, created_at "
+            "FROM work_queue_task_events "
+            "WHERE kind IN (?,?,?) AND id > ? ORDER BY id ASC LIMIT ?",
+            (*self._TERMINAL_KINDS, since_id, limit),
+        ).fetchall()
+        return [self._event_row_to_dict(r) for r in rows]
+
+    def latest_terminal_event_id(self) -> int:
+        """Return the max id among terminal-kind events, or 0 if none."""
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT MAX(id) AS m FROM work_queue_task_events WHERE kind IN (?,?,?)",
+            self._TERMINAL_KINDS,
+        ).fetchone()
+        return int(row["m"]) if row and row["m"] is not None else 0
 
     def _append_event(self, conn, task_id, kind, payload):
         conn.execute(

@@ -302,6 +302,15 @@ FLAGS: tuple[FlagSpec, ...] = (
         "MAGI_WORK_QUEUE_BOARD_API_ENABLED",
         summary="Mount the read-only work-queue board HTTP API.",
     ),
+    _b(
+        "MAGI_WORK_QUEUE_NOTIFY_ENABLED",
+        summary=(
+            "Enable the work-queue terminal-event notifier gateway watcher: polls "
+            "for newly-completed/blocked/failed tasks and pushes each through the "
+            "injected delivery sink (default sink = logging-only; real channel sinks "
+            "are wired in P6). Default-OFF; when off the daemon does not poll."
+        ),
+    ),
     FlagSpec(
         name="MAGI_SESSION_TRANSCRIPT_RETENTION_DAYS",
         default=14,

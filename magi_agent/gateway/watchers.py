@@ -246,6 +246,78 @@ def build_work_queue_watcher(
     )
 
 
+# ---------------------------------------------------------------------------
+# Work-queue notify watcher — tails terminal events and pushes via injected sink
+# ---------------------------------------------------------------------------
+
+def is_work_queue_notify_enabled() -> bool:
+    """Return True iff ``MAGI_WORK_QUEUE_NOTIFY_ENABLED`` is set and truthy."""
+    from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+
+    return flag_bool("MAGI_WORK_QUEUE_NOTIFY_ENABLED")
+
+
+def _work_queue_notify_enabled() -> bool:
+    return is_work_queue_notify_enabled()
+
+
+def build_local_work_queue_notifier() -> Any:
+    """Build the local work-queue notifier used by ``magi gateway start``.
+
+    Composes ``SqliteWorkQueueStore`` (backed by the env-configured DB path) with
+    the safe ``LoggingNotifySink``.  No network/channel authority is constructed
+    here — real delivery sinks are injected by the operator in a future P6 phase.
+    """
+    from magi_agent.missions.work_queue.store import SqliteWorkQueueStore  # noqa: PLC0415
+    from magi_agent.missions.work_queue.notifier import (  # noqa: PLC0415
+        LoggingNotifySink,
+        WorkQueueNotifier,
+    )
+
+    return WorkQueueNotifier(
+        store=SqliteWorkQueueStore(_work_queue_db_path_from_env()),
+        sink=LoggingNotifySink(),
+    )
+
+
+def build_work_queue_notify_watcher(
+    *,
+    notifier: Any,
+    interval_seconds: float,
+    is_enabled: Callable[[], bool],
+) -> GatewayWatcher:
+    """Wrap a ``WorkQueueNotifier`` as a continuous tick-loop watcher.
+
+    The loop calls ``notifier.poll_once`` via ``asyncio.to_thread`` (it is
+    synchronous).  A single tick raising is caught + logged so a transient
+    store/sink failure never stops the watcher — the daemon's outer supervisor
+    handles persistent failures via restart.
+
+    Gate: ``is_enabled`` is the injected gate (typically
+    ``is_work_queue_notify_enabled``); with the gate off the daemon does not
+    start this watcher.
+    """
+
+    async def run(stop_event: asyncio.Event) -> None:
+        while not stop_event.is_set():
+            try:
+                await asyncio.to_thread(notifier.poll_once)
+            except Exception:  # noqa: BLE001 — transient tick error must not stop loop
+                _log.warning("work-queue notify tick failed", exc_info=True)
+            if stop_event.is_set():
+                break
+            try:
+                await asyncio.wait_for(stop_event.wait(), timeout=interval_seconds)
+            except asyncio.TimeoutError:
+                continue
+
+    return GatewayWatcher(
+        name="work_queue_notify",
+        run=run,
+        is_enabled=is_enabled,
+    )
+
+
 def build_default_watchers() -> tuple[GatewayWatcher, ...]:
     """First-party watcher set for ``magi gateway start`` (each self-gates).
 
@@ -309,6 +381,15 @@ def build_default_watchers() -> tuple[GatewayWatcher, ...]:
         )
     )
 
+    # Durable work-queue terminal-event notifier (self-gated; default-OFF).
+    watchers.append(
+        build_work_queue_notify_watcher(
+            notifier=build_local_work_queue_notifier(),
+            interval_seconds=DEFAULT_WORK_QUEUE_TICK_INTERVAL_SECONDS,
+            is_enabled=_work_queue_notify_enabled,
+        )
+    )
+
     return tuple(watchers)
 
 
@@ -364,8 +445,11 @@ __all__ = [
     "build_default_watchers",
     "build_local_scheduler_cron_driver",
     "build_local_work_queue_driver",
+    "build_local_work_queue_notifier",
     "build_scheduler_cron_watcher",
+    "build_work_queue_notify_watcher",
     "build_work_queue_watcher",
     "is_scheduler_executor_enabled",
     "is_work_queue_executor_enabled",
+    "is_work_queue_notify_enabled",
 ]

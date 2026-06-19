@@ -58,3 +58,37 @@ if loaded:
 """
     )
     assert completed.returncode == 0, completed.stderr
+
+
+def test_notifier_module_import_boundary() -> None:
+    """Importing notifier.py must not transitively load ADK, dispatcher, or transport modules."""
+    completed = _run_fresh_python(
+        """
+import importlib
+import sys
+
+importlib.import_module("magi_agent.missions.work_queue.notifier")
+
+forbidden_prefixes = ("google.adk",)
+forbidden_modules = (
+    "magi_agent.adk_bridge.runner_adapter",
+    "magi_agent.adk_bridge.tool_adapter",
+    "magi_agent.transport.chat",
+    "magi_agent.transport.tools",
+    "magi_agent.tools.dispatcher",
+    "magi_agent.hooks.bus",
+    "requests",
+)
+
+loaded = [
+    module
+    for module in sys.modules
+    if module.startswith(forbidden_prefixes) or module in forbidden_modules
+]
+if loaded:
+    raise AssertionError(
+        f"work_queue.notifier import loaded forbidden modules: {loaded}"
+    )
+"""
+    )
+    assert completed.returncode == 0, completed.stderr

@@ -108,5 +108,6 @@ Generated from the `FLAGS` registry in `magi_agent/config/flags.py` by `scripts/
 - `MAGI_WORK_QUEUE_BOARD_API_ENABLED` (default off) — Mount the read-only work-queue board HTTP API.
 - `MAGI_WORK_QUEUE_ENABLED` (default off) — Enable the durable multi-agent work-queue (task board + dispatcher).
 - `MAGI_WORK_QUEUE_EXECUTOR_ENABLED` (default off) — Enable the durable work-queue dispatcher tick loop.
+- `MAGI_WORK_QUEUE_NOTIFY_ENABLED` (default off) — Enable the work-queue terminal-event notifier gateway watcher: polls for newly-completed/blocked/failed tasks and pushes each through the injected delivery sink (default sink = logging-only; real channel sinks are wired in P6). Default-OFF; when off the daemon does not poll.
 
 <!-- END GENERATED FLAGS -->'
