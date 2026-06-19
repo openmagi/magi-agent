@@ -93,3 +93,37 @@ if loaded:
 """
     )
     assert completed.returncode == 0, completed.stderr
+
+
+def test_work_queue_adk_runner_import_does_not_pull_in_forbidden_modules() -> None:
+    """Importing adk_work_task_runner.py must not pull google.adk or adk_bridge at module top."""
+    completed = _run_fresh_python(
+        """
+import importlib
+import sys
+
+importlib.import_module("magi_agent.missions.work_queue.adk_work_task_runner")
+
+forbidden_prefixes = ("google.adk",)
+forbidden_modules = (
+    "magi_agent.adk_bridge.runner_adapter",
+    "magi_agent.adk_bridge.tool_adapter",
+    "magi_agent.transport.chat",
+    "magi_agent.transport.tools",
+    "magi_agent.tools.dispatcher",
+    "magi_agent.hooks.bus",
+    "requests",
+)
+
+loaded = [
+    module
+    for module in sys.modules
+    if module.startswith(forbidden_prefixes) or module in forbidden_modules
+]
+if loaded:
+    raise AssertionError(
+        f"work_queue.adk_work_task_runner import loaded forbidden modules: {loaded}"
+    )
+"""
+    )
+    assert completed.returncode == 0, completed.stderr
