@@ -1357,7 +1357,7 @@ graph LR
 
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
-| __init__.py | — | — | — |
+| __init__.py | First-party recipe packs — classification (H5 honesty pass). | — | — |
 | discovery.py | Discovery first-party recipe pack — metadata-only, default-OFF. | compiler | recipes/compiler.py |
 | learning_usage.py | Learning-usage first-party recipe pack — PR5 static injection. | compiler | recipes/compiler.py |
 | memory_recall.py | — | contracts, namespaces, policy, projection | cli/learning_recall.py, firstparty/packs/memory_strategies_default/impl.py, harness/memory_recall.py |
@@ -1368,7 +1368,7 @@ graph LR
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
 | __init__.py | — | ownership | — |
-| ownership.py | — | — | harness/coding/ownership_projection.py, recipes/first_party/coding/__init__.py |
+| ownership.py | Coding-ownership PR1 scaffold — intentional dormant (H5 honesty pass). | — | harness/coding/ownership_projection.py, recipes/first_party/coding/__init__.py |
 
 ### recipes/first_party/general_automation/
 
