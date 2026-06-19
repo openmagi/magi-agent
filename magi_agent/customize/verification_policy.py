@@ -87,6 +87,31 @@ class CustomizeVerificationPolicy:
             and rule["what"].get("kind") == "tool_perm"
         ]
 
+    def enabled_shacl_rules(self) -> list[dict[str, Any]]:
+        """Enabled ``shacl_constraint`` custom rules (pre-final SHACL gate).
+
+        For each enabled rule whose ``what.kind`` is ``"shacl_constraint"``,
+        returns ``{"ruleId": ..., "shapeTtl": ...}``. ``ruleId`` falls back to
+        the rule's top-level ``id`` when ``payload.ruleId`` is absent. Preserves
+        stored order. Malformed rules are silently skipped — never raises.
+        """
+        results: list[dict[str, Any]] = []
+        for rule in self.custom_rules:
+            if not rule.get("enabled", False):
+                continue
+            what = rule.get("what")
+            if not isinstance(what, dict) or what.get("kind") != "shacl_constraint":
+                continue
+            payload = what.get("payload")
+            if not isinstance(payload, dict):
+                continue
+            shape_ttl = payload.get("shapeTtl")
+            if not isinstance(shape_ttl, str) or not shape_ttl:
+                continue
+            rule_id = payload.get("ruleId") or rule.get("id")
+            results.append({"ruleId": rule_id, "shapeTtl": shape_ttl})
+        return results
+
     def enabled_llm_criterion_rules(self, *, fires_at: str) -> list[dict[str, Any]]:
         """Enabled ``llm_criterion`` custom rules for a fire-at point (P3/P4)."""
         return [

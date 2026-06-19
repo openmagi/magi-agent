@@ -20,7 +20,7 @@ from magi_agent.customize.what_menu import allowed_actions_for, is_known_ref
 CRITERION_MAX = 2000
 
 SCOPES = frozenset({"always", "coding", "research", "delivery", "memory", "task"})
-KINDS = frozenset({"deterministic_ref", "tool_perm", "llm_criterion"})
+KINDS = frozenset({"deterministic_ref", "tool_perm", "llm_criterion", "shacl_constraint"})
 ACTIONS = frozenset({"block", "retry", "ask_approval", "audit", "override"})
 FIRES_AT = frozenset({"pre_final", "before_tool_use", "after_tool_use"})
 
@@ -62,6 +62,9 @@ _LEGAL: dict[str, dict[str, frozenset[str]]] = {
         "pre_final": frozenset({"block", "retry", "audit"}),
         "after_tool_use": frozenset({"override"}),
     },
+    # audit/retry deferred: runtime always blocks on a failed shacl record regardless
+    # of the stored action, so promising audit/retry here is a false contract.
+    "shacl_constraint": {"pre_final": frozenset({"block"})},
 }
 
 
@@ -158,6 +161,18 @@ def validate_custom_rule(rule: Any) -> list[str]:
                 )
         elif not has_criterion:
             errors.append("llm_criterion.payload.criterion is required")
+    elif kind == "shacl_constraint":
+        from magi_agent.evidence.shacl_verifier import validate_shape_ttl  # noqa: PLC0415
+
+        shape_ttl = payload.get("shapeTtl")
+        if not isinstance(shape_ttl, str) or not shape_ttl.strip():
+            errors.append("shacl_constraint.payload.shapeTtl is required (non-empty string)")
+        else:
+            errors.extend(validate_shape_ttl(shape_ttl))
+        # optional ruleId — if absent, the rule's top-level id is used (no error)
+        rule_id = payload.get("ruleId")
+        if rule_id is not None and not isinstance(rule_id, str):
+            errors.append("shacl_constraint.payload.ruleId must be a string if provided")
 
     # (f) projection ⊆ whitelist (conversation rejected)
     projection = rule.get("projection")
