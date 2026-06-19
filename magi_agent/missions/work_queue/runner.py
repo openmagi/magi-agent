@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
 from typing import Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict
@@ -70,4 +71,65 @@ class GoalModeRunner:
                 return WorkTaskRunResult(outcome="completed", summary=result.summary)
         return WorkTaskRunResult(
             outcome="failed", error=f"goal not satisfied within {max_turns} turns"
+        )
+
+
+@runtime_checkable
+class _ChildRunnerLike(Protocol):
+    async def run_child(self, request: object) -> Mapping[str, object]:
+        ...
+
+
+def _child_text(value: object) -> str:
+    return value.strip() if isinstance(value, str) else ""
+
+
+class ChildRunnerWorkTaskRunner:
+    """WorkTaskRunner that executes a task as ONE child-runner turn.
+
+    Reuses ``RealLocalChildRunner`` via an injected ``child_runner_factory`` so
+    the queue dispatcher drives real model-backed work without importing ADK
+    here. The factory receives the resolved workspace root (Q4=B: the task's
+    shared session workspace) and returns an object exposing
+    ``run_child(request) -> Mapping``. The child runner never raises; its
+    ``status`` is mapped to a ``WorkTaskRunResult``.
+    """
+
+    def __init__(
+        self,
+        child_runner_factory: Callable[[str | None], _ChildRunnerLike],
+        *,
+        workspace_resolver: Callable[[str | None], str | None] | None = None,
+    ) -> None:
+        self._factory = child_runner_factory
+        self._workspace_resolver = workspace_resolver or (lambda _session_id: None)
+
+    async def run_task(self, task: WorkTask) -> WorkTaskRunResult:
+        request = self._build_request(task)
+        workspace = self._workspace_resolver(task.session_id)
+        runner = self._factory(workspace)
+        output = await runner.run_child(request)
+        return self._map_output(output)
+
+    @staticmethod
+    def _build_request(task: WorkTask) -> object:
+        from magi_agent.runtime.child_runner_boundary import ChildTaskRequest
+
+        objective = task.title if not task.body else f"{task.title}\n\n{task.body}"
+        return ChildTaskRequest(
+            parentExecutionId=task.session_id or "background",
+            turnId=f"bg-run-{task.current_run_id or 0}",
+            taskId=task.id,
+            objective=objective,
+        )
+
+    @staticmethod
+    def _map_output(output: Mapping[str, object]) -> WorkTaskRunResult:
+        status = _child_text(output.get("status"))
+        summary = _child_text(output.get("summary"))
+        if status == "completed":
+            return WorkTaskRunResult(outcome="completed", summary=summary or None)
+        return WorkTaskRunResult(
+            outcome="failed",
+            error=summary or f"child runner returned status={status or 'unknown'}",
         )
