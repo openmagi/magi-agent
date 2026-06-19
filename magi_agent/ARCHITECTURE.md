@@ -53,6 +53,7 @@ graph LR
     cli --> learning
     cli --> main
     cli --> memory
+    cli --> missions
     cli --> observability
     cli --> ops
     cli --> packs
@@ -459,7 +460,7 @@ graph LR
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
 | __init__.py | Command registry package for the Magi CLI (Stream D). | builtins, discovery, registry | cli/headless.py, cli/tests/test_commands.py, cli/tests/test_slash_p1_sources.py, cli/wiring.py |
-| builtins.py | Seed *local* builtin slash-commands for the Magi CLI (Stream D, PR-D2). | contracts, skills, slash_control_boundary | cli/commands/__init__.py, cli/commands/discovery.py, cli/tests/test_commands.py, cli/tests/test_tui_app.py |
+| builtins.py | Seed *local* builtin slash-commands for the Magi CLI (Stream D, PR-D2). | contracts, skills, slash_control_boundary, store | cli/commands/__init__.py, cli/commands/discovery.py, cli/tests/test_commands.py, cli/tests/test_tui_app.py |
 | bundled.py | Bundled slash-commands for the Magi CLI (Stream D, PR-D3 / P1.1). | contracts | cli/commands/discovery.py, cli/tests/test_slash_p1_sources.py |
 | control.py | Runtime-control slash-command seams for the Magi CLI (Stream D, PR4). | contracts, providers | cli/commands/discovery.py, cli/tests/test_model_picker_wire.py, cli/tests/test_slash_p2_control.py |
 | discovery.py | Command discovery + precedence merge for the Magi CLI (Stream D, PR-D2/D3). | builtins, bundled, contracts, control, registry, session_history, skill_commands | cli/commands/__init__.py, cli/commands/skill_commands.py, cli/tests/test_commands.py, cli/tests/test_headless_projection.py, cli/tests/test_slash_p1_sources.py, cli/tests/test_slash_p2_control.py, cli/tests/test_slash_p2_mcp.py, cli/tests/test_slash_p3_seams.py |
@@ -1201,7 +1202,7 @@ graph LR
 | models.py | — | — | missions/work_queue/__init__.py, missions/work_queue/runner.py, missions/work_queue/store.py, plugins/native/scheduled_work.py |
 | notifier.py | Work-queue terminal-event notifier — tail-from-now delivery via injected sink. | — | gateway/watchers.py |
 | runner.py | — | child_runner_boundary, goal_judge, models, work_queue | gateway/watchers.py, missions/work_queue/driver.py |
-| store.py | — | migrations, models | gateway/watchers.py, missions/work_queue/board_api.py, missions/work_queue/driver.py, plugins/native/scheduled_work.py |
+| store.py | — | migrations, models | cli/commands/builtins.py, gateway/watchers.py, missions/work_queue/board_api.py, missions/work_queue/driver.py, plugins/native/scheduled_work.py |
 
 ### observability/
 
