@@ -533,6 +533,21 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
     ),
     _b(
+        "MAGI_KERNEL_RECIPE_ENTRY_POINTS_ENABLED",
+        stage="stage2",
+        summary=(
+            "Discover external recipe packs via the Python `magi.recipes` "
+            "entry_points group on top of the filesystem source. AND'd with "
+            "MAGI_KERNEL_RECIPE_PACKS_ENABLED. EntryPoint.load() imports the "
+            "publisher's module (the standard distribution-tool trust model — "
+            "like pytest plugins), so this is self-host opt-in only; the hosted "
+            "floor must never enable it. Only inert DATA manifests are accepted; "
+            "callable / code-carrying payloads are dropped. External publishers "
+            "go through the same compose-only validation as user-dir packs "
+            "(R1/R4/R6/R7). Strict default-OFF (OFF is byte-identical)."
+        ),
+    ),
+    _b(
         "MAGI_KERNEL_ROLE_PROVIDES_ENABLED",
         stage="stage2",
         summary=(
