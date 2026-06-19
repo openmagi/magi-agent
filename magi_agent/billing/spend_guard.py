@@ -2,52 +2,24 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import UTC, datetime
-import hashlib
-import json
 from typing import Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator, model_validator
+from pydantic import Field, field_serializer, field_validator, model_validator
 
 from magi_agent.billing.quota import QuotaDecision
-from magi_agent.ops.safety import require_digest, require_safe_ref
+from magi_agent.ops.safety import FrozenContractModel, canonical_digest, require_digest, require_safe_ref
 from magi_agent.tenancy.context import TenantContext, TenantRuntimeAuthorityFlags
 
 
 SpendReceiptStatus = Literal["reserved", "committed", "released", "fail_closed"]
 
-_MODEL_CONFIG = ConfigDict(
-    frozen=True,
-    populate_by_name=True,
-    extra="forbid",
-    validate_default=True,
-    hide_input_in_errors=True,
-)
-
 
 def _digest_payload(payload: Mapping[str, object]) -> str:
-    encoded = json.dumps(
-        payload,
-        sort_keys=True,
-        separators=(",", ":"),
-        default=str,
-        allow_nan=False,
-    ).encode()
-    return "sha256:" + hashlib.sha256(encoded).hexdigest()
+    return canonical_digest(payload)
 
 
-class _SpendModel(BaseModel):
-    model_config = _MODEL_CONFIG
-
-    @classmethod
-    def model_construct(cls, _fields_set: set[str] | None = None, **values: object) -> Self:
-        _ = _fields_set, values
-        raise ValueError(f"model_construct is disabled for {cls.__name__}")
-
-    def model_copy(self, *, update: Mapping[str, object] | None = None, deep: bool = False) -> Self:
-        if update:
-            raise ValueError(f"model_copy update is disabled for {type(self).__name__}")
-        _ = deep
-        return type(self).model_validate(self.model_dump(by_alias=True, mode="json"))
+class _SpendModel(FrozenContractModel):
+    """Frozen spend-guard contract base (collapsed onto the shared kernel)."""
 
 
 class SpendAmount(_SpendModel):

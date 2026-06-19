@@ -2,13 +2,12 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import UTC, datetime
-import hashlib
-import json
 from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator, model_validator
 
 from magi_agent.ops.safety import (
+    canonical_digest,
     require_digest,
     require_safe_ref,
     reject_private_text,
@@ -31,14 +30,7 @@ _MODEL_CONFIG = ConfigDict(
 
 
 def _digest_payload(payload: Mapping[str, object]) -> str:
-    encoded = json.dumps(
-        payload,
-        sort_keys=True,
-        separators=(",", ":"),
-        default=str,
-        allow_nan=False,
-    ).encode()
-    return "sha256:" + hashlib.sha256(encoded).hexdigest()
+    return canonical_digest(payload)
 
 
 def _mapping_value(value: object, alias: str, field_name: str, default: object | None = None) -> object:

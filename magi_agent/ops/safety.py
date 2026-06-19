@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+import hashlib
+import json
 from math import isfinite
 import re
 
 from pydantic import ValidationError
+
+from magi_agent.ops.authority import FrozenContractModel as FrozenContractModel
 
 
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -61,6 +65,30 @@ UNSAFE_COMPACT_FRAGMENTS = (
     "apikey",
     "password",
 )
+
+
+def canonical_digest(payload: Mapping[str, object]) -> str:
+    """Canonical-JSON -> sha256 content-addressing primitive.
+
+    The single content-addressing helper for the tree (C-5). Serializes
+    ``payload`` deterministically (``sort_keys=True``, compact separators,
+    ``default=str`` for non-JSON-native values) and hashes the UTF-8 bytes.
+
+    ``allow_nan=False`` makes NaN/Inf raise ``ValueError`` instead of emitting
+    invalid JSON -- the intended correction for copies (e.g. the former
+    ``ops/job_queue`` and ``meta_orchestration/projection`` helpers) that omitted
+    it. ``ensure_ascii`` is left at its default (``True``) so the output is
+    byte-identical to the de-facto standard ``_digest_payload`` form copied
+    across the tree; durable digests therefore do not change.
+    """
+    encoded = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+        allow_nan=False,
+    ).encode()
+    return "sha256:" + hashlib.sha256(encoded).hexdigest()
 
 
 def require_digest(value: str) -> str:

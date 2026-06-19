@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
-import hashlib
-import json
 import re
 from typing import Literal, Self
 
@@ -11,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_valid
 
 from magi_agent.connectors.registry import ConnectorManifest
 from magi_agent.ops.safety import (
+    canonical_digest,
     require_digest,
     require_safe_ref,
     safe_metadata,
@@ -33,14 +32,7 @@ _NONCE_RE = re.compile(r"^nonce:[0-9a-f]{32,128}$")
 
 
 def _digest_payload(payload: Mapping[str, object]) -> str:
-    encoded = json.dumps(
-        payload,
-        sort_keys=True,
-        separators=(",", ":"),
-        default=str,
-        allow_nan=False,
-    ).encode()
-    return "sha256:" + hashlib.sha256(encoded).hexdigest()
+    return canonical_digest(payload)
 
 
 def _lease_part(value: str) -> str:
