@@ -2912,6 +2912,22 @@ def parse_completion_evidence_verification_enabled(env: Mapping[str, str]) -> bo
     return flag_bool("MAGI_VERIFY_COMPLETION_EVIDENCE", env=env)
 
 
+def parse_output_purity_verification_enabled(env: Mapping[str, str]) -> bool:
+    """MAGI_VERIFY_OUTPUT_PURITY — LLM internal-data/reasoning-leak gate.
+
+    When ON (and a critic model is available — MAGI_EGRESS_GATE_ENABLED), a final
+    answer that leaks internal data — raw tool-result envelopes, internal
+    reasoning traces (hidden_reasoning / chain_of_thought / scratchpad), or
+    canonical private payload keys in JSON shape — is blocked at the pre-final
+    gate via the generic criterion judge. Strict **default-OFF**: inert unless
+    explicitly set (or the output-purity Customize preset is enabled), so
+    flag-OFF behavior is byte-identical (no model call).
+    """
+    from .flags import flag_bool
+
+    return flag_bool("MAGI_VERIFY_OUTPUT_PURITY", env=env)
+
+
 def parse_claim_citation_verification_enabled(env: Mapping[str, str]) -> bool:
     """MAGI_VERIFY_CLAIM_CITATION — LLM uncited-factual-claim gate.
 

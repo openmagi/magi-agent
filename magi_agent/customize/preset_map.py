@@ -276,6 +276,20 @@ PRESET_SEAMS: dict[str, PresetSeam] = {
         supported_modes=("llm",),
         wiring="opt_in",
     ),
+    # Opt-in for the C3 output-purity LLM gate (cli/engine
+    # _output_purity_llm_block): blocks a final answer that leaks internal data
+    # — raw tool-result envelopes, reasoning traces, or canonical private
+    # payload keys in JSON shape. Det pre-gate skips the model call on clean
+    # answers; the criterion judge distinguishes a legitimate JSON answer from a
+    # raw envelope leak on suspicious ones. LLM tier, needs a critic model
+    # (MAGI_EGRESS_GATE_ENABLED). controls_refs is documentation-only.
+    "output-purity": PresetSeam(
+        preset_id="output-purity",
+        controls_refs=("output_purity:internal_leak",),
+        runtime_default_on=False,
+        supported_modes=("llm",),
+        wiring="opt_in",
+    ),
 }
 
 
@@ -397,7 +411,7 @@ _DESCRIPTIONS: dict[str, str] = {
     "answer-quality": "Block a final answer that doesn't genuinely address the task (LLM judge; needs a critic model).",
     "completion-evidence": "Block a completion/promise claim made with no action evidence this turn (LLM judge; needs a critic model).",
     "pre-refusal": "Block a premature refusal of a doable task (LLM judge; needs a critic model).",
-    "output-purity": "Blocks raw JSON or internal data from appearing in responses.",
+    "output-purity": "Block a final answer that leaks internal data (raw envelopes, reasoning traces, private payload keys; LLM judge; needs a critic model).",
     "deferral-blocker": "Block a promise of future delivery made with no action evidence this turn (LLM judge; shares the completion-evidence gate).",
     "self-claim": "Block a claim about file/URL/memory contents made with no read evidence this turn (LLM judge; needs a critic model).",
     "resource-existence": "Block an assertion that a specific file/URL exists when the turn inspected no source (LLM judge; shares the self-claim gate).",
