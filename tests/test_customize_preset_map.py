@@ -31,14 +31,14 @@ def test_tier_for_classifies_enforcement_mechanism():
     # the answer-quality seam is an LLM-tier judge → badges "llm", not a false "det"
     assert tier_for("answer-quality", is_security=False) == "llm"
     assert tier_for("dangerous-patterns", is_security=True) == "always-on"
-    assert tier_for("claim-citation", is_security=False) is None  # preview → no tier
+    assert tier_for("coding-context", is_security=False) is None  # preview → no tier
 
 
 def test_opt_method_for_reads_seam_wiring():
     assert opt_method_for("coding-verification") == "opt-out"
     assert opt_method_for("fact-grounding") == "opt-in"
     assert opt_method_for("answer-quality") == "opt-in"
-    assert opt_method_for("claim-citation") is None
+    assert opt_method_for("coding-context") is None
 
 
 def test_description_for_uses_accurate_text_for_wired_presets():
@@ -92,17 +92,19 @@ def test_enforcement_for_classifies_honestly():
     assert enforcement_for("completion-evidence", category="answer", is_security=False) == "enforcing"
     # the self-claim LLM seam (C-MERGE-2) is now wired → enforcing
     assert enforcement_for("self-claim", category="fact", is_security=False) == "enforcing"
+    # the claim-citation LLM seam (C4) is now wired → enforcing
+    assert enforcement_for("claim-citation", category="fact", is_security=False) == "enforcing"
     # metadata-only / no live producer → honest preview
-    assert enforcement_for("claim-citation", category="fact", is_security=False) == "preview"
+    assert enforcement_for("coding-context", category="coding", is_security=False) == "preview"
 
 
 def test_supported_modes_default_deterministic():
     # the answer-quality seam declares the llm tier; non-seam presets default det
     assert supported_modes_for("answer-quality") == ("llm",)
-    assert supported_modes_for("claim-citation") == ("deterministic",)
+    assert supported_modes_for("coding-context") == ("deterministic",)
     assert supported_modes_for("coding-verification") == ("deterministic",)
 
 
 def test_seam_for_unknown_returns_none():
     assert seam_for("does-not-exist") is None
-    assert seam_for("claim-citation") is None  # metadata-only, not wired
+    assert seam_for("coding-context") is None  # metadata-only, not wired

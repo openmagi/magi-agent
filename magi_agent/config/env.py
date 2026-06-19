@@ -2912,6 +2912,23 @@ def parse_completion_evidence_verification_enabled(env: Mapping[str, str]) -> bo
     return flag_bool("MAGI_VERIFY_COMPLETION_EVIDENCE", env=env)
 
 
+def parse_claim_citation_verification_enabled(env: Mapping[str, str]) -> bool:
+    """MAGI_VERIFY_CLAIM_CITATION — LLM uncited-factual-claim gate.
+
+    When ON (and a critic model is available — MAGI_EGRESS_GATE_ENABLED), a final
+    answer that makes specific factual claims without any source citation is
+    blocked at the pre-final gate via the generic criterion judge (free-text
+    claim-coverage). Distinct from source-authority (anti-fab/det over declared
+    ``src_N`` refs): this judges whether the answer's claims warrant citations at
+    all. Strict **default-OFF**: inert unless explicitly set (or the
+    claim-citation Customize preset is enabled), so flag-OFF behavior is
+    byte-identical (no model call).
+    """
+    from .flags import flag_bool
+
+    return flag_bool("MAGI_VERIFY_CLAIM_CITATION", env=env)
+
+
 def parse_resource_claim_verification_enabled(env: Mapping[str, str]) -> bool:
     """MAGI_VERIFY_RESOURCE_CLAIM — LLM unverified-resource/self-claim gate.
 
