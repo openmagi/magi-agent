@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Lock, Trash2 } from "lucide-react";
 import { SHACL_EXAMPLE_TEMPLATE } from "./shacl-example-template";
+import { CustomChecksSection } from "./custom-checks-section";
 import { Modal } from "@/components/ui/modal";
 import { Select } from "@/components/ui/select";
 import type {
@@ -1246,6 +1247,9 @@ export function VerificationRuleModal({
             onDelete={onDeleteCustomRule}
             onCompileShacl={onCompileShacl}
           />
+
+          {/* Dashboard-authored custom checks (after-tool evidence; self-host only) */}
+          <CustomChecksSection busy={customRuleBusy} />
 
           {/* Freeform prompt guidance (USER-RULES.md) */}
           <section>
