@@ -1,5 +1,3 @@
-"use client";
-
 /**
  * API client for the dashboard pack-kind builder surface.
  *

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Trash2 } from "lucide-react";
 import { useAgentFetch } from "@/lib/local-api";
+import { slugifyCheckId } from "./custom-checks-section.slug";
 import {
   deleteDashboardCheck,
   getDashboardChecks,
@@ -12,6 +13,8 @@ import {
   type DashboardCheck,
   type DashboardScope,
 } from "@/lib/packs-dashboard-api";
+
+export { slugifyCheckId };
 
 export interface CustomChecksSectionProps {
   /** Surfaces a save/delete error to the parent modal. */
@@ -25,13 +28,6 @@ const FLAG_NAME = "MAGI_DASHBOARD_PACK_AUTHORING_ENABLED";
 
 const inputCls =
   "mt-1 w-full rounded-lg border border-black/[0.12] bg-white px-2 py-1.5 text-sm";
-
-function slugify(label: string): string {
-  return label
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
 
 /**
  * Dashboard-authored custom-checks builder.
@@ -110,8 +106,9 @@ export function CustomChecksSection({
     if (!canAdd) return;
     setSaving(true);
     reportError(null);
+    const takenIds = new Set(checks.map((c) => c.id));
     const check: DashboardCheck = {
-      id: slugify(label),
+      id: slugifyCheckId(label, takenIds),
       label: label.trim(),
       scope,
       enabled: true,
