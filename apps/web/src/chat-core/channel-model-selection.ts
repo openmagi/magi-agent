@@ -10,8 +10,26 @@ export interface ChannelModelPreferenceRecord {
   routerType?: string | null;
 }
 
+/**
+ * App context passed to chat-core helpers so they stay runtime-agnostic.
+ * Hosted callers may omit it (defaults to "hosted" behavior). OSS local web
+ * callers pass `{ runtime: "oss-local" }` so the resolver doesn't emit
+ * hosted-only smart-router ids (`clawy-smart-router/auto`, `big-dic-router/auto`)
+ * the OSS runtime can't serve.
+ */
+export interface ChannelModelAppContext {
+  runtime?: "hosted" | "oss-local";
+}
+
+/**
+ * Sentinel selection value meaning "no concrete model chosen yet". Hosted
+ * resolves it to its smart-router; OSS callers must substitute the first
+ * available configured-provider model before sending.
+ */
+export const UNRESOLVED_MODEL_SENTINEL = "clawy_smart_routing";
+
 export const DEFAULT_CHANNEL_MODEL_SELECTION: ChannelModelSelection = {
-  modelSelection: "clawy_smart_routing",
+  modelSelection: UNRESOLVED_MODEL_SENTINEL,
   routerType: "standard",
 };
 
@@ -89,8 +107,16 @@ export function setChannelModelSelection(
   }
 }
 
-export function channelModelSelectionToRuntimeModel(selection: ChannelModelSelection): string {
-  if (selection.modelSelection === "clawy_smart_routing") {
+export function channelModelSelectionToRuntimeModel(
+  selection: ChannelModelSelection,
+  appContext?: ChannelModelAppContext,
+): string {
+  if (selection.modelSelection === UNRESOLVED_MODEL_SENTINEL) {
+    // OSS runtime has no smart router — return an empty string so the caller
+    // can choose whether to substitute (picker auto-selects the first
+    // configured-provider model) or block the send until the user picks.
+    // Hosted (default) keeps its smart-router routing.
+    if (appContext?.runtime === "oss-local") return "";
     return selection.routerType === "big_dic"
       ? "big-dic-router/auto"
       : "clawy-smart-router/auto";

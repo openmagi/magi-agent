@@ -8,6 +8,7 @@ import {
   type ModelOption,
 } from "@/lib/models/model-options";
 import { filterModelOptionsByConfiguredProviders } from "@/lib/models/model-availability";
+import { UNRESOLVED_MODEL_SENTINEL } from "@/chat-core";
 
 interface ChatModelPickerProps {
   botId: string;
@@ -204,6 +205,21 @@ export function ChatModelPicker({
     },
     [authFetch, botId, onModelSelectionChange, persistMode, selectedModel],
   );
+
+  // OSS local picker: when chat-core's persisted default sentinel is shown
+  // and the providers fetch has resolved, auto-pick the first concrete model
+  // the user can actually run, so the first turn doesn't hit a non-existent
+  // smart router. Skip when the user has already picked a concrete model.
+  useEffect(() => {
+    if (persistMode !== "local") return;
+    if (selectedModel !== UNRESOLVED_MODEL_SENTINEL) return;
+    if (!configuredProviders) return;
+    const firstConcrete = visibleOptions.find(
+      (option) => option.value !== UNRESOLVED_MODEL_SENTINEL,
+    );
+    if (!firstConcrete) return;
+    void saveModel(firstConcrete.value);
+  }, [persistMode, selectedModel, configuredProviders, visibleOptions, saveModel]);
 
   return (
     <div

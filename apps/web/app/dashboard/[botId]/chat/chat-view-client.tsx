@@ -293,6 +293,7 @@ export function ChatViewClient({
       if (queuedModelOverride) return queuedModelOverride;
       return channelModelSelectionToRuntimeModel(
         getChannelModelSelection(botId, channelName, serverBackedChannelModelSelection(channelName)),
+        { runtime: "oss-local" },
       );
     },
     [botId, serverBackedChannelModelSelection],
