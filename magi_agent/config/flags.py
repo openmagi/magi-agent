@@ -548,6 +548,22 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
     ),
     _b(
+        "MAGI_KERNEL_VERIFIER_ENTRY_POINTS_ENABLED",
+        stage="stage2",
+        summary=(
+            "Discover external verifier manifests via the Python `magi.verifiers` "
+            "entry_points group and merge them into the default verifier bus via "
+            "the tighten-only `with_additional_verifiers` helper. EntryPoint.load() "
+            "imports the publisher's module (the standard distribution-tool trust "
+            "model — like pytest plugins), so this is self-host opt-in only; the "
+            "hosted floor must never enable it. Only inert DATA manifests are "
+            "accepted; callable / code-carrying payloads are dropped. Tighten-only: "
+            "an external cannot overwrite an existing verifier id, invade the "
+            "hard-safety priority band, or claim hard-safety / security-critical "
+            "authority. Strict default-OFF (OFF is byte-identical)."
+        ),
+    ),
+    _b(
         "MAGI_KERNEL_ROLE_PROVIDES_ENABLED",
         stage="stage2",
         summary=(
