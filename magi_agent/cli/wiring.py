@@ -608,6 +608,17 @@ def _build_first_party_adk_tools(
         register_browser_tool_manifest(registry)
         bind_browser_toolhost_handler(registry)
 
+    # Direct Brave/SerpAPI + Firecrawl web tools, routed THROUGH the dispatcher
+    # (A-2). Key-gated; keyless installs byte-identical. Replaces the previous
+    # bare-FunctionTool append that bypassed URL policy/egress/receipts/redaction.
+    from magi_agent.plugins.native.web import (  # noqa: PLC0415
+        bind_direct_web_handlers,
+        register_direct_web_tools,
+    )
+
+    if register_direct_web_tools(registry):
+        bind_direct_web_handlers(registry)
+
     receipt_store = (
         general_automation_receipts
         if isinstance(general_automation_receipts, GeneralAutomationReceiptLedgerStore)
@@ -621,7 +632,6 @@ def _build_first_party_adk_tools(
     from magi_agent.evidence.first_party_gate import (  # noqa: PLC0415
         enabled_first_party_activity_refs,
     )
-    from magi_agent.tools.web_search_tools import build_web_search_tools  # noqa: PLC0415
 
     dispatcher = ToolDispatcher(
         registry,
@@ -629,17 +639,14 @@ def _build_first_party_adk_tools(
         first_party_activity_collector=local_tool_evidence_collector,
         first_party_evidence_refs=enabled_first_party_activity_refs(),
     )
-    try:
-        direct_web_tools = build_web_search_tools()
-    except Exception:
-        direct_web_tools = []
-    direct_web_replaces_native = bool(direct_web_tools)
-    native_web_tool_names = frozenset({"WebSearch", "WebFetch", "web-search", "web_search"})
     # Only advertise tools that actually have an execution handler bound. A
     # manifest with no handler can never be dispatched, so exposing it would
     # advertise a capability the runtime cannot deliver. (Handler-less catalog
     # manifests were removed in doc 12 PR5 — see tools/catalog.py — so this
-    # filter is now a guard rather than a routine drop-list.)
+    # filter is now a guard rather than a routine drop-list.) The direct web
+    # tools (web_search/web_fetch/research_fact) are now registered as
+    # dispatcher-backed manifests above (A-2), so they flow through this filter
+    # normally — no out-of-dispatcher append, no native-web hiding machinery.
     exposed_tool_names = tuple(
         registration.manifest.name
         for registration in (
@@ -650,10 +657,6 @@ def _build_first_party_adk_tools(
             registration is not None
             and registration.handler is not None
             and _cli_tool_allowed_for_mode(registration.manifest, mode=mode)
-            and not (
-                direct_web_replaces_native
-                and registration.manifest.name in native_web_tool_names
-            )
         )
     )
 
@@ -673,11 +676,10 @@ def _build_first_party_adk_tools(
         apply_orchestrator_filter as _apply_filter,
     )
 
-    # TODO(Seam 4): this ceiling is derived from ``exposed_tool_names``, which is
-    # captured BEFORE ``direct_web_tools`` are appended below. It therefore omits
-    # the direct web tools. Inert today (spawn_cap has no consumer), but before
-    # Seam 4 enforces the ceiling, derive it from the SAME complete final tool
-    # list used for filtering (one source of truth, as the serve path already does).
+    # The ceiling is derived from ``exposed_tool_names``, which now includes the
+    # direct web tools (they are dispatcher-backed manifests in the registry —
+    # A-2), so it reflects the complete final tool list. Inert today (spawn_cap
+    # has no consumer), but kept consistent for when Seam 4 enforces the ceiling.
     _spawn_cap_for_factory: tuple[str, ...] | None = None
     if _main_agent_profile() == "orchestrator":
         _, _spawn_cap_for_factory = _apply_filter(exposed_tool_names)
@@ -727,8 +729,6 @@ def _build_first_party_adk_tools(
         attach_enabled=True,
         exposed_tool_names=exposed_tool_names,
     )
-    if direct_web_tools:
-        tools = [*tools, *direct_web_tools]
     # Seam 1b (CLI): apply orchestrator profile filter AFTER building the full
     # toolset.  When the flag is unset this is a no-op (same list, None cap).
     tools, _ = _apply_orchestrator_profile(tools)

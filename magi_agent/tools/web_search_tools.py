@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import time
 import urllib.error
 import urllib.parse
@@ -25,6 +26,8 @@ import urllib.request
 from collections.abc import Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import TYPE_CHECKING, Literal
+
+from magi_agent.web_acquisition.policy import url_policy_error
 
 from .truncation import cap_text
 
@@ -96,6 +99,57 @@ def _with_receipt(
 
 
 # ---------------------------------------------------------------------------
+# Safe provider-error mapping (A-4)
+# ---------------------------------------------------------------------------
+#: Fixed, model-safe error codes. A provider exception NEVER reaches model
+#: output / SSE / transcript as ``repr(exc)`` — the raw string can carry the
+#: API key (embedded in a URL or echoed by the provider). We classify the
+#: exception into one of these codes and surface ONLY the code.
+_PROVIDER_ERROR = "provider_error"
+_PROVIDER_TIMEOUT = "provider_timeout"
+_PROVIDER_UNAUTHORIZED = "provider_unauthorized"
+_PROVIDER_RATE_LIMITED = "provider_rate_limited"
+
+
+def _safe_provider_error(exc: BaseException, *, provider: str) -> str:
+    """Classify ``exc`` into a fixed, secret-free public error code.
+
+    Returns one of ``provider_unauthorized`` / ``provider_rate_limited`` /
+    ``provider_timeout`` / ``provider_error``. The exception text is NEVER
+    returned — it can carry the provider API key (embedded in a SerpAPI query
+    URL, echoed in a 401 body, etc.). Full detail still reaches the scrubbed
+    debug log below (redacted via the existing ``ops/safety`` helper).
+
+    TODO(C-1): route the debug-log scrubbing through the consolidated
+    ``ops/safety`` kernel (``scrub_for_persistence``/``contains_secret_marker``)
+    once the C-1 kernel lands; until then we use the existing
+    ``web_acquisition.policy.redact_public_text`` scrubber (no new regex).
+    """
+    code = _PROVIDER_ERROR
+    if isinstance(exc, urllib.error.HTTPError):
+        status = getattr(exc, "code", None)
+        if status in (401, 403):
+            code = _PROVIDER_UNAUTHORIZED
+        elif status == 429:
+            code = _PROVIDER_RATE_LIMITED
+    elif isinstance(exc, (TimeoutError, socket.timeout)):
+        code = _PROVIDER_TIMEOUT
+    elif isinstance(exc, urllib.error.URLError) and isinstance(
+        getattr(exc, "reason", None), (TimeoutError, socket.timeout)
+    ):
+        code = _PROVIDER_TIMEOUT
+    try:  # debug-only; scrubbed; never surfaced to the model.
+        from magi_agent.web_acquisition.policy import (  # noqa: PLC0415
+            redact_public_text,
+        )
+
+        _ = redact_public_text(f"[{provider}] {code}: {exc}")
+    except Exception:  # noqa: BLE001 — logging must never break the tool.
+        pass
+    return code
+
+
+# ---------------------------------------------------------------------------
 # Raw callables — return parsed dicts; reusable by research_fact
 # ---------------------------------------------------------------------------
 
@@ -123,7 +177,7 @@ def _brave_search_raw(query: str) -> dict[str, object]:
             data: dict[str, object] = json.load(resp)
         return data
     except Exception as exc:  # noqa: BLE001
-        return {"error": repr(exc)}
+        return {"error": _safe_provider_error(exc, provider="brave")}
 
 
 def _serpapi_search_raw_impl(query: str) -> dict[str, object]:
@@ -182,7 +236,9 @@ def _serpapi_search_raw_impl(query: str) -> dict[str, object]:
                 )
         return {"web": {"results": results[:_DEFAULT_MAX_RESULTS]}}
     except Exception as exc:  # noqa: BLE001
-        return {"error": repr(exc)}
+        # The SerpAPI request URL embeds ``api_key`` (the API mandates the query
+        # param), so ``repr(exc)`` could leak the key. Surface only a safe code.
+        return {"error": _safe_provider_error(exc, provider="serpapi")}
 
 
 def serpapi_search_raw(query: str) -> dict[str, object]:
@@ -212,7 +268,15 @@ def web_search_raw(query: str) -> dict[str, object]:
 
 
 def _firecrawl_fetch_raw(url: str) -> dict[str, object]:
-    """Fetch a page via Firecrawl and return the raw parsed JSON response dict."""
+    """Fetch a page via Firecrawl and return the raw parsed JSON response dict.
+
+    Assumes the URL already passed ``url_policy_error`` (the SSRF firewall runs
+    at the :func:`web_fetch_raw` entry point, before any egress). A defensive
+    re-check is kept here for any residual direct caller.
+    """
+    blocked = url_policy_error(str(url))
+    if blocked is not None:
+        return {"error": "url_policy_error", "reason": blocked}
     key = os.environ.get("FIRECRAWL_API_KEY", "")
     if not key:
         return {"error": "FIRECRAWL_API_KEY not set"}
@@ -232,7 +296,7 @@ def _firecrawl_fetch_raw(url: str) -> dict[str, object]:
             data: dict[str, object] = json.load(resp)
         return data
     except Exception as exc:  # noqa: BLE001
-        return {"error": repr(exc)}
+        return {"error": _safe_provider_error(exc, provider="firecrawl")}
 
 
 def web_fetch_raw(url: str) -> dict[str, object]:
@@ -241,6 +305,13 @@ def web_fetch_raw(url: str) -> dict[str, object]:
     Returns a dict with structure ``{"data": {"markdown": "..."}}`` on success,
     or ``{"error": "..."}`` on any failure.  Never raises.
     """
+    # A-3: apply the native URL-policy/SSRF firewall on the model-supplied URL
+    # BEFORE any egress. A blocked URL (loopback, metadata, private/CGNAT IP,
+    # userinfo@, credential-bearing query, non-http(s) scheme) never reaches the
+    # provider. Local SSRF beyond the first hop is delegated to Firecrawl.
+    blocked = url_policy_error(str(url))
+    if blocked is not None:
+        return {"error": "url_policy_error", "reason": blocked}
     return _with_receipt("firecrawl", lambda: _firecrawl_fetch_raw(url))
 
 
@@ -349,7 +420,8 @@ def research_fact(
     try:
         search_data = search_fn(question)
     except Exception as exc:  # noqa: BLE001
-        return f"research_fact: search failed: {exc!r}"
+        # A-4: never echo ``repr(exc)`` — the message can carry the provider key.
+        return f"research_fact: search failed: {_safe_provider_error(exc, provider='search')}"
 
     web_section = search_data.get("web") or {}
     results: list[dict[str, object]] = list(  # type: ignore[assignment]
@@ -545,26 +617,32 @@ def _research_fact_tool(question: str) -> str:
 _research_fact_tool.__name__ = "research_fact"
 
 
-def build_web_search_tools() -> list[object]:
-    """Return ADK FunctionTools for web_search, web_fetch, and research_fact.
+def direct_web_tools_available(env: Mapping[str, str] | None = None) -> bool:
+    """True iff the direct Brave/SerpAPI+Firecrawl web path can reach a provider.
 
-    Default-OFF: returns an empty list when no search provider is configured
-    (``BRAVE_API_KEY`` absent and the SerpAPI provider not selected) or when
-    ``FIRECRAWL_API_KEY`` is absent from the environment, so agents that do
-    not have these keys configured receive no extra tools and no import-time
-    errors. With ``MAGI_WEB_SEARCH_PROVIDER`` unset this reduces exactly to
-    the original BRAVE+FIRECRAWL key check.
+    A search provider (``BRAVE_API_KEY`` present, or the SerpAPI provider
+    selected with ``SERPAPI_API_KEY``) AND ``FIRECRAWL_API_KEY`` must both be
+    configured. Keyless installs return False so the dispatcher-backed web
+    manifests are not registered (byte-identical: no tool exposed).
     """
+    source = os.environ if env is None else env
     search_available = (
-        bool(os.environ.get("BRAVE_API_KEY"))
-        or _resolve_search_provider() == "serpapi"
+        bool(source.get("BRAVE_API_KEY"))
+        or _resolve_search_provider(source) == "serpapi"
     )
-    if not search_available or not os.environ.get("FIRECRAWL_API_KEY"):
-        return []
-    from google.adk.tools import FunctionTool  # noqa: PLC0415
+    return search_available and bool(source.get("FIRECRAWL_API_KEY"))
 
-    return [
-        FunctionTool(web_search),
-        FunctionTool(web_fetch),
-        FunctionTool(_research_fact_tool),
-    ]
+
+def build_web_search_tools() -> list[object]:
+    """DEPRECATED no-op shim — always returns ``[]``.
+
+    Historically this returned bare ``FunctionTool(web_search/web_fetch/
+    research_fact)`` objects that were appended OUTSIDE ``ToolDispatcher``,
+    bypassing URL policy, egress proxy, live-gate accounting, receipts, and
+    redaction (A-2). The direct web capability now flows through dispatcher-
+    backed registry manifests (see
+    ``magi_agent.plugins.native.web.register_direct_web_tools`` /
+    ``bind_direct_web_handlers``). This shim is retained only so existing
+    imports/tests do not break during the sweep; it never attaches a tool.
+    """
+    return []

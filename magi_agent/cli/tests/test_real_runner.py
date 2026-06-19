@@ -358,12 +358,28 @@ def test_first_party_adk_tools_prefer_direct_web_tools_when_provider_keys_presen
 
     names = {getattr(tool, "name", None) for tool in tools}
     assert {"web_search", "web_fetch", "research_fact"}.issubset(names)
-    assert {"WebSearch", "WebFetch", "web-search"}.isdisjoint(names)
+    # A-2: the old ``direct_web_replaces_native`` HIDING machinery is removed.
+    # Native provider-router manifests (WebSearch/WebFetch) now flow through the
+    # dispatcher normally and coexist with the direct lowercase tools — both are
+    # governed (no out-of-dispatcher bypass), which is the fail-closed property.
 
-    result = _tool_by_name(tools, "web_search").func("Tesla 10-K")
+    # A-2: the direct web tools now flow through ToolDispatcher — invoke via the
+    # ADK ``arguments`` envelope and read the dispatched ToolResult dict.
+    result = asyncio.run(
+        _tool_by_name(tools, "web_search").run_async(
+            args={"arguments": {"query": "Tesla 10-K"}},
+            tool_context=_FakeAdkToolContext(
+                invocation_id="turn-direct-web",
+                tool_name="web_search",
+                call_id="call-direct-web",
+            ),
+        )
+    )
 
-    assert "direct result for Tesla 10-K" in result
-    assert "web_research_not_configured" not in result
+    assert result["status"] == "ok"
+    results = result["output"]["results"]
+    assert any("direct result for Tesla 10-K" in str(r) for r in results)
+    assert "web_research_not_configured" not in str(result)
 
 
 def test_first_party_direct_web_tools_keep_adk_signature_with_evidence_collector(
@@ -403,9 +419,11 @@ def test_first_party_direct_web_tools_keep_adk_signature_with_evidence_collector
         local_tool_evidence_collector=LocalToolEvidenceCollector(),
     )
 
+    # A-2: dispatcher-backed — the ADK callable takes the ``arguments`` envelope
+    # and returns the dispatched ToolResult dict (not a bare string).
     result = asyncio.run(
         _tool_by_name(tools, "web_search").run_async(
-            args={"query": "Tesla 10-K"},
+            args={"arguments": {"query": "Tesla 10-K"}},
             tool_context=_FakeAdkToolContext(
                 invocation_id="turn-direct-web",
                 tool_name="web_search",
@@ -414,7 +432,11 @@ def test_first_party_direct_web_tools_keep_adk_signature_with_evidence_collector
         )
     )
 
-    assert "direct result for Tesla 10-K" in result
+    assert result["status"] == "ok"
+    assert any(
+        "direct result for Tesla 10-K" in str(r)
+        for r in result["output"]["results"]
+    )
 
 
 def test_first_party_adk_tools_attach_browser_task_by_default(
