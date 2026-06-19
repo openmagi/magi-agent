@@ -826,6 +826,161 @@ def build_default_verifier_bus_metadata() -> VerifierBusMetadata:
     )
 
 
+VERIFIER_ENTRY_POINT_GROUP = "magi.verifiers"
+MAGI_KERNEL_VERIFIER_ENTRY_POINTS_ENABLED_ENV = "MAGI_KERNEL_VERIFIER_ENTRY_POINTS_ENABLED"
+
+
+def with_additional_verifiers(
+    base: VerifierBusMetadata,
+    externals: Sequence[VerifierMetadata],
+) -> VerifierBusMetadata:
+    """Return ``base`` extended with ``externals`` — **tighten-only**.
+
+    External verifiers may only ADD checks. This helper drops any external
+    manifest that would remove, replace, or weaken an existing verifier:
+
+    * V1 — the protected hard-safety id (``security-policy-hard-safety``) can
+      never be overwritten;
+    * V4 — any external reusing an EXISTING verifier id is dropped, never
+      replacing it (replacing would weaken / alter a first-party gate);
+    * V5 — any external whose priority invades the hard-safety band
+      (``priority <= 60``) is dropped;
+    * any external asserting hard-safety / security-critical authority is dropped
+      (those gates are first-party-only).
+
+    Duplicate external ids keep only the first. The result is rebuilt through the
+    :class:`VerifierBusMetadata` constructor so ``_validate_bus`` re-runs — the
+    protected hard-safety verifier and stage order are re-asserted, so a merge
+    can never produce a downgraded or malformed bus.
+
+    With ``externals`` empty (the default-OFF path) the returned bus is
+    byte-identical to ``base``.
+    """
+
+    existing_ids = {verifier.verifier_id for verifier in base.verifiers}
+    accepted: list[VerifierMetadata] = []
+    seen_external: set[str] = set()
+    for verifier in externals:
+        verifier_id = verifier.verifier_id
+        if verifier_id in existing_ids or verifier_id in seen_external:
+            continue
+        if verifier.hard_safety or verifier.security_critical:
+            continue
+        if verifier.priority <= _PROTECTED_HARD_SAFETY_DEFAULT_PRIORITY:
+            continue
+        seen_external.add(verifier_id)
+        accepted.append(verifier)
+
+    if not accepted:
+        return base
+    return VerifierBusMetadata(
+        stages=base.stages,
+        verifiers=tuple(base.verifiers) + tuple(accepted),
+    )
+
+
+def _coerce_verifier_payload(value: Any) -> dict | None:
+    """Coerce an ``entry_points`` payload to a verifier-manifest dict, or ``None``.
+
+    Mirrors :func:`magi_agent.recipes.kernel_recipe_packs._coerce_entry_point_payload`:
+    only inert DATA shapes (dict / Pydantic-style ``model_dump``) are accepted;
+    callable / code-carrying payloads are dropped so a published plugin cannot
+    smuggle a tool/control invocation through the verifier surface.
+    """
+
+    if value is None or callable(value):
+        return None
+    if isinstance(value, dict):
+        return value
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        try:
+            dumped = model_dump(by_alias=True)
+        except TypeError:
+            dumped = model_dump()
+        return dumped if isinstance(dumped, dict) else None
+    return None
+
+
+def _discover_entry_point_verifiers(*, group: str) -> list[VerifierMetadata]:
+    """Discover external verifier manifests via Python ``entry_points``.
+
+    Self-host opt-in: ``EntryPoint.load()`` imports the publisher's module (the
+    standard distribution-tool trust model — like pytest plugins). Hosted floor
+    must keep the gate OFF. Each per-entry failure (load error, validation error,
+    callable payload) is dropped; the whole boundary is fail-closed so the rest
+    of the discovery never halts.
+    """
+
+    import logging
+    from importlib import metadata as importlib_metadata
+
+    log = logging.getLogger(__name__)
+    discovered: list[VerifierMetadata] = []
+    try:
+        entry_points = tuple(importlib_metadata.entry_points(group=group))
+    except Exception:  # noqa: BLE001 - importlib_metadata absent/broken → empty
+        return discovered
+    for ep in entry_points:
+        loader = getattr(ep, "load", None)
+        if not callable(loader):
+            continue
+        try:
+            value = loader()
+        except Exception:  # noqa: BLE001 - a broken publisher never poisons others
+            log.warning("verifier entry_point %r failed to load", getattr(ep, "name", "?"))
+            continue
+        # Allow a publisher to ship a SEQUENCE of manifests in one entry point.
+        items = value if isinstance(value, (list, tuple)) else (value,)
+        for item in items:
+            payload = _coerce_verifier_payload(item)
+            if payload is None:
+                log.warning(
+                    "verifier entry_point %r skipped (non-data payload)",
+                    getattr(ep, "name", "?"),
+                )
+                continue
+            try:
+                verifier = VerifierMetadata.model_validate(payload)
+            except Exception:  # noqa: BLE001 - a malformed manifest drops, never raises
+                log.warning(
+                    "verifier entry_point %r dropped (invalid manifest)",
+                    getattr(ep, "name", "?"),
+                )
+                continue
+            discovered.append(verifier)
+    return discovered
+
+
+def build_runtime_verifier_bus_metadata(
+    env: Mapping[str, str] | None = None,
+) -> VerifierBusMetadata:
+    """Return the default verifier bus tightened with discovered externals.
+
+    Starts from :func:`build_default_verifier_bus_metadata` and merges any
+    external verifier manifests discovered via Python ``entry_points`` group
+    ``magi.verifiers`` through the tighten-only :func:`with_additional_verifiers`
+    helper.
+
+    With ``MAGI_KERNEL_VERIFIER_ENTRY_POINTS_ENABLED`` OFF (default), no discovery
+    is attempted so the bus is byte-identical to
+    :func:`build_default_verifier_bus_metadata`. Discovery is fail-closed: a bad
+    publisher never raises and the result always at least carries the full
+    default set.
+    """
+
+    from magi_agent.config.flags import flag_bool  # noqa: PLC0415
+
+    base = build_default_verifier_bus_metadata()
+    if not flag_bool(MAGI_KERNEL_VERIFIER_ENTRY_POINTS_ENABLED_ENV, env=env):
+        return base
+    try:
+        externals = _discover_entry_point_verifiers(group=VERIFIER_ENTRY_POINT_GROUP)
+    except Exception:  # noqa: BLE001 - fail-closed-to-first-party
+        return base
+    return with_additional_verifiers(base, externals)
+
+
 def execute_pre_final_verifier_bus(
     *,
     required_evidence: Sequence[str],
