@@ -7,10 +7,16 @@ import {
   type LocalRuntimeProvider,
 } from "./local-runtime-models";
 
-const PROVIDERS: LocalRuntimeProvider[] = ["anthropic", "openai", "gemini", "fireworks"];
+const PROVIDERS: LocalRuntimeProvider[] = [
+  "anthropic",
+  "openai",
+  "gemini",
+  "fireworks",
+  "openrouter",
+];
 
 describe("local-runtime-models", () => {
-  it("covers exactly the four local CLI providers", () => {
+  it("covers exactly the local CLI providers", () => {
     expect(Object.keys(LOCAL_RUNTIME_MODEL_PRESETS).sort()).toEqual(
       [...PROVIDERS].sort(),
     );
@@ -27,22 +33,35 @@ describe("local-runtime-models", () => {
       anthropic: "claude-sonnet-4-6",
       openai: "gpt-5.5",
       gemini: "gemini-3.5-flash",
-      fireworks: "accounts/fireworks/models/kimi-k2-instruct",
+      fireworks: "kimi-k2p6",
+      openrouter: "openai/gpt-5.5",
     });
   });
 
-  it("uses raw litellm model ids (fireworks = accounts path, not the hosted alias)", () => {
+  it("uses bare model ids the local resolver expects (no litellm provider prefix)", () => {
+    // Fireworks expects bare ids (e.g. `kimi-k2p6`); the resolver applies the
+    // `fireworks_ai/` prefix at call time. The legacy retired
+    // `accounts/fireworks/models/kimi-k2-instruct` id MUST NOT be offered.
     const fireworks = LOCAL_RUNTIME_MODEL_PRESETS.fireworks.map((m) => m.value);
-    expect(fireworks).toContain("accounts/fireworks/models/kimi-k2-instruct");
-    expect(fireworks).not.toContain("kimi-k2p6"); // hosted api-proxy alias, invalid locally
-    // No values carry a `<provider>/` litellm prefix — the resolver adds it.
+    expect(fireworks).toContain("kimi-k2p6");
+    expect(fireworks).not.toContain("accounts/fireworks/models/kimi-k2-instruct");
+    // Non-openrouter providers must NOT carry a `<provider>/` slug prefix —
+    // the resolver adds the litellm prefix itself. OpenRouter is the exception:
+    // its id IS a `<vendor>/<model>` slug.
     for (const provider of PROVIDERS) {
+      if (provider === "openrouter") continue;
       for (const option of LOCAL_RUNTIME_MODEL_PRESETS[provider]) {
-        if (provider !== "fireworks") {
-          expect(option.value.startsWith(`${provider}/`)).toBe(false);
-        }
+        expect(option.value.startsWith(`${provider}/`)).toBe(false);
       }
     }
+  });
+
+  it("offers the current frontier Anthropic model (Opus 4.8) and keeps 4.6 for back-compat", () => {
+    const anthropic = LOCAL_RUNTIME_MODEL_PRESETS.anthropic.map((m) => m.value);
+    expect(anthropic).toContain("claude-opus-4-8");
+    expect(anthropic).toContain("claude-sonnet-4-6");
+    expect(anthropic).toContain("claude-haiku-4-5");
+    expect(anthropic).toContain("claude-opus-4-6"); // legacy, kept selectable
   });
 
   it("isPresetModel distinguishes presets from custom ids", () => {
