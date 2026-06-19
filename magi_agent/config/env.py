@@ -2912,6 +2912,23 @@ def parse_completion_evidence_verification_enabled(env: Mapping[str, str]) -> bo
     return flag_bool("MAGI_VERIFY_COMPLETION_EVIDENCE", env=env)
 
 
+def parse_resource_claim_verification_enabled(env: Mapping[str, str]) -> bool:
+    """MAGI_VERIFY_RESOURCE_CLAIM — LLM unverified-resource/self-claim gate.
+
+    When ON (and a critic model is available — MAGI_EGRESS_GATE_ENABLED), a final
+    answer that asserts a specific resource exists / was read / was checked
+    (file path, URL, "I read X", memory contents) while the turn produced NO
+    source/read evidence is blocked at the pre-final gate via the generic
+    criterion judge. Covers the merged self-claim / resource-existence concern.
+    Strict **default-OFF**: inert unless explicitly set (or one of those
+    Customize presets is enabled), so flag-OFF behavior is byte-identical (no
+    evidence collection, no model call).
+    """
+    from .flags import flag_bool
+
+    return flag_bool("MAGI_VERIFY_RESOURCE_CLAIM", env=env)
+
+
 def parse_source_ledger_evidence_gate_enabled(env: Mapping[str, str]) -> bool:
     """MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED — live source-ledger evidence ref.
 

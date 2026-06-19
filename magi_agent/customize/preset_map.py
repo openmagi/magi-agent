@@ -243,6 +243,26 @@ PRESET_SEAMS: dict[str, PresetSeam] = {
         supported_modes=("llm",),
         wiring="opt_in",
     ),
+    # Opt-in for the C-MERGE-2 resource/self-claim LLM gate (cli/engine
+    # _resource_claim_llm_block): blocks a final answer that asserts a specific
+    # resource exists / was read / was checked while the turn produced no source
+    # /read evidence. ONE producer covers both concerns — enabling EITHER preset
+    # activates it. LLM tier (needs a critic model, MAGI_EGRESS_GATE_ENABLED).
+    # controls_refs is documentation-only for opt_in seams.
+    "self-claim": PresetSeam(
+        preset_id="self-claim",
+        controls_refs=("resource_claim:unverified_resource",),
+        runtime_default_on=False,
+        supported_modes=("llm",),
+        wiring="opt_in",
+    ),
+    "resource-existence": PresetSeam(
+        preset_id="resource-existence",
+        controls_refs=("resource_claim:unverified_resource",),
+        runtime_default_on=False,
+        supported_modes=("llm",),
+        wiring="opt_in",
+    ),
 }
 
 
@@ -366,8 +386,8 @@ _DESCRIPTIONS: dict[str, str] = {
     "pre-refusal": "Block a premature refusal of a doable task (LLM judge; needs a critic model).",
     "output-purity": "Blocks raw JSON or internal data from appearing in responses.",
     "deferral-blocker": "Block a promise of future delivery made with no action evidence this turn (LLM judge; shares the completion-evidence gate).",
-    "self-claim": "Blocks claiming file contents without reading first.",
-    "resource-existence": "Verifies referenced files actually exist.",
+    "self-claim": "Block a claim about file/URL/memory contents made with no read evidence this turn (LLM judge; needs a critic model).",
+    "resource-existence": "Block an assertion that a specific file/URL exists when the turn inspected no source (LLM judge; shares the self-claim gate).",
     "claim-citation": "Ensures factual claims include sources.",
     "deterministic-evidence": "Require recorded git-diff and test-run evidence on coding turns (disable to opt out).",
     "coding-context": "Auto-injects repo map and symbols for code tasks.",

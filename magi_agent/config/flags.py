@@ -701,6 +701,18 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
     ),
     _b(
+        "MAGI_VERIFY_RESOURCE_CLAIM",
+        stage="stage2",
+        summary=(
+            "Block a final answer that asserts a specific resource exists / was "
+            "read / was checked (file path, URL, 'I read X', memory) while the "
+            "turn produced no source/read evidence, via the LLM criterion judge "
+            "(merged self-claim / resource-existence concern); requires a critic "
+            "model (MAGI_EGRESS_GATE_ENABLED). Strict default-OFF and inert "
+            "unless explicitly set (or one of those Customize presets is enabled)."
+        ),
+    ),
+    _b(
         "MAGI_VERIFY_TASKBOARD_COMPLETION",
         stage="stage2",
         summary=(
