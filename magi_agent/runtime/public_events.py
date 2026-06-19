@@ -519,6 +519,49 @@ def task_board_event(
 # Tool-event id — shared by gate5b4c3 and future wire-profile consumers
 # ---------------------------------------------------------------------------
 
+__all__ = [
+    "result_digest",
+    "tool_event_id",
+    "tool_input_preview",
+    "tool_start_event",
+    "tool_progress_event",
+    "tool_end_event",
+    "tool_blocked_event",
+    "turn_phase_event",
+    "heartbeat_event",
+    "runtime_trace_event",
+    "source_inspected_event",
+    "rule_check_event",
+    "authorize_rule_check_event",
+    "authorize_rule_check_metadata",
+    "rule_check_event_has_authority",
+    "copy_rule_check_authority",
+    "is_rule_check_authority_field",
+    "child_progress_event",
+    "task_board_event",
+    "PublicEvent",
+    "PublicMetadata",
+    "PublicTask",
+    "TurnPhase",
+    "RuntimeTracePhase",
+    "RuntimeTraceSeverity",
+    "RuleVerdict",
+    "SourceKind",
+    "TrustTier",
+    "TaskStatus",
+]
+
+
+def result_digest(value: object) -> str:
+    """Return ``sha256:<hex>`` digest of *value* — thin public wrapper around ``_te_digest``.
+
+    Callers (T3 bridge, gate5b4c3 parity checks) import this public name
+    instead of reaching into the private ``_te_digest`` helper.  Byte-identical
+    to ``gate5b4c3_live_runner_boundary._digest``.
+    """
+    return _te_digest(value)
+
+
 def _te_json_dumps(value: object) -> str:
     """Canonical JSON serialisation for tool-event-id hashing.
 
