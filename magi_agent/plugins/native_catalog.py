@@ -560,6 +560,10 @@ _NATIVE_PLUGIN_DATA: tuple[Mapping[str, object], ...] = (
                 "name": "TaskStop",
                 "entrypoint": "magi_agent.plugins.native.scheduled_work:task_stop",
             },
+            {
+                "name": "RunInBackground",
+                "entrypoint": "magi_agent.plugins.native.scheduled_work:run_in_background",
+            },
         ),
         "harnessRules": ("scheduled_work_recipe_policy",),
         "configSchema": {
@@ -581,6 +585,7 @@ _NATIVE_PLUGIN_DATA: tuple[Mapping[str, object], ...] = (
             {"type": "tool", "name": "TaskList"},
             {"type": "tool", "name": "TaskOutput"},
             {"type": "tool", "name": "TaskStop"},
+            {"type": "tool", "name": "RunInBackground"},
             {"type": "harness", "name": "Scheduler"},
             {"type": "harness", "name": "ScriptCronRunner"},
             {"type": "harness", "name": "scheduled_work_recipe_policy"},

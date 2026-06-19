@@ -15,6 +15,13 @@ from magi_agent.web_acquisition.policy import redact_public_text
 # routes past the honest block to the (cluster-03-owned) live delegation seam.
 SCHEDULER_ATTACHED_ENV = "MAGI_SCHEDULER_ATTACHED"
 BACKGROUND_TASKS_ATTACHED_ENV = "MAGI_BACKGROUND_TASKS_ATTACHED"
+# Exposes the live ``RunInBackground`` enqueue entrypoint. OFF (default) keeps
+# the honest block; flipping it ON ALSO requires ``BACKGROUND_TASKS_ATTACHED``
+# (a real work-queue store) before a task is actually created.
+BACKGROUND_TASK_TOOL_ENABLED_ENV = "MAGI_BACKGROUND_TASK_TOOL_ENABLED"
+
+_MAX_TITLE_CHARS = 200
+_MAX_BODY_CHARS = 4000
 
 
 def _env(env: Mapping[str, str] | None = None) -> Mapping[str, str]:
@@ -27,6 +34,10 @@ def _scheduler_attached(env: Mapping[str, str] | None = None) -> bool:
 
 def _background_tasks_attached(env: Mapping[str, str] | None = None) -> bool:
     return _is_true(_env(env).get(BACKGROUND_TASKS_ATTACHED_ENV))
+
+
+def background_task_tool_enabled(env: Mapping[str, str] | None = None) -> bool:
+    return _is_true(_env(env).get(BACKGROUND_TASK_TOOL_ENABLED_ENV))
 
 
 def _record(tool_name: str, arguments: dict[str, object], context: ToolContext) -> ToolResult:
@@ -108,3 +119,80 @@ def task_stop(arguments: dict[str, object], context: ToolContext) -> ToolResult:
     if native_receipts_honest() and not _background_tasks_attached():
         return blocked_result("TaskStop", "background_tasks_not_configured")
     return _record("TaskStop", arguments, context)
+
+
+# ---------------------------------------------------------------------------
+# RunInBackground — enqueue a task on the durable work-queue.
+# ---------------------------------------------------------------------------
+# Entrance seam for the /workflows-style UX: the model (or a user request the
+# model relays) puts a long-horizon task on the work-queue and the chat turn
+# ends without blocking. Live behaviour requires BOTH flags:
+#   * MAGI_BACKGROUND_TASK_TOOL_ENABLED — exposes this entrypoint live, and
+#   * MAGI_BACKGROUND_TASKS_ATTACHED   — a real SqliteWorkQueueStore is wired.
+# Either off -> honest blocked_result; no task is created. Once both are on the
+# dispatcher (PR3) consumes the task; today the entry just lands in the store.
+
+
+def _clamp(value: object, max_chars: int) -> str:
+    raw = "" if value is None else str(value)
+    return redact_public_text(raw, max_chars=max_chars)
+
+
+def run_in_background(arguments: dict[str, object], context: ToolContext) -> ToolResult:
+    title = _clamp(arguments.get("title"), _MAX_TITLE_CHARS).strip()
+    body = _clamp(arguments.get("body"), _MAX_BODY_CHARS).strip() or None
+
+    if not background_task_tool_enabled():
+        return blocked_result("RunInBackground", "background_task_tool_disabled")
+    if native_receipts_honest() and not _background_tasks_attached():
+        return blocked_result("RunInBackground", "background_tasks_not_configured")
+    if not title:
+        return blocked_result("RunInBackground", "title_required")
+
+    # Imported lazily so the module stays cheap when the tool is disabled.
+    from magi_agent.missions.work_queue.models import WorkTask
+    from magi_agent.missions.work_queue.store import (
+        SqliteWorkQueueStore,
+        work_queue_db_path_from_env,
+    )
+    import time as _time
+    import uuid as _uuid
+
+    session_id = context.session_id
+    idem_payload = {"session": session_id, "title": title, "body": body}
+    idempotency_key = digest(idem_payload)
+    goal_mode = bool(arguments.get("goal_mode"))
+    raw_max_turns = arguments.get("goal_max_turns")
+    goal_max_turns = int(raw_max_turns) if isinstance(raw_max_turns, (int, float)) else None
+
+    task = WorkTask(
+        id=str(_uuid.uuid4()),
+        title=title,
+        body=body,
+        status="todo",
+        created_at=int(_time.time()),
+        session_id=session_id,
+        idempotency_key=idempotency_key,
+        goal_mode=goal_mode,
+        goal_max_turns=goal_max_turns,
+    )
+
+    store = SqliteWorkQueueStore(work_queue_db_path_from_env())
+    stored = store.create_idempotent(task)
+
+    short_id = stored.id[:6]
+    ack = (
+        f"Started in background (task {short_id}) — track on the work-queue board "
+        f"or via /tasks. The result will return in our next reply when it completes."
+    )
+    return ok_result(
+        "RunInBackground",
+        {
+            "taskId": stored.id,
+            "status": stored.status,
+            "title": stored.title,
+            "goalMode": stored.goal_mode,
+            "ack": ack,
+            "argumentsDigest": idempotency_key,
+        },
+    )
