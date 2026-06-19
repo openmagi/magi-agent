@@ -116,10 +116,11 @@ def validate_custom_rule(rule: Any) -> list[str]:
     elif kind == "tool_perm":
         match = payload.get("match")
         if not isinstance(match, dict) or not (
-            {"tool", "domain", "domainAllowlist"} & set(match)
+            {"tool", "domain", "domainAllowlist", "path", "pathAllowlist"} & set(match)
         ):
             errors.append(
-                "tool_perm.payload.match must specify tool, domain, or domainAllowlist"
+                "tool_perm.payload.match must specify tool, domain, domainAllowlist, "
+                "path, or pathAllowlist"
             )
         elif "domainAllowlist" in match and (
             not isinstance(match["domainAllowlist"], list)
@@ -128,6 +129,20 @@ def validate_custom_rule(rule: Any) -> list[str]:
         ):
             errors.append(
                 "tool_perm.payload.match.domainAllowlist must be a non-empty string list"
+            )
+        elif "path" in match and not (
+            isinstance(match["path"], str) and match["path"].strip()
+        ):
+            errors.append("tool_perm.payload.match.path must be a non-empty string")
+        elif "pathAllowlist" in match and (
+            not isinstance(match["pathAllowlist"], list)
+            or not match["pathAllowlist"]
+            or not all(
+                isinstance(p, str) and p.strip() for p in match["pathAllowlist"]
+            )
+        ):
+            errors.append(
+                "tool_perm.payload.match.pathAllowlist must be a non-empty string list"
             )
         if payload.get("decision") not in {"deny", "ask"}:
             errors.append("tool_perm.payload.decision must be 'deny' or 'ask'")
