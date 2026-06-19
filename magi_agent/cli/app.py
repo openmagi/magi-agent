@@ -793,23 +793,29 @@ def computer_use_root(ctx: typer.Context) -> None:
 
 @computer_use_app.command("install")
 def computer_use_install() -> None:
-    """Install the pinned cua-driver binary (checksum-verified)."""
-    import platform  # noqa: PLC0415
+    """Download, verify, and install the pinned cua-driver binary."""
+    import sys  # noqa: PLC0415
 
+    from magi_agent.computer.autonomous.install_runner import host_arch, install  # noqa: PLC0415
     from magi_agent.computer.autonomous.installer import (  # noqa: PLC0415
         CUA_DRIVER_VERSION,
+        InstallError,
         gatekeeper_note,
-        release_asset_url,
     )
 
-    arch = "arm64" if platform.machine() == "arm64" else "x86_64"
-    url = release_asset_url(CUA_DRIVER_VERSION, arch)
-    typer.echo(f"cua-driver v{CUA_DRIVER_VERSION} ({arch})")
-    typer.echo(f"Download: {url}")
-    typer.echo(
-        "Then verify its sha256 against the published checksum, extract "
-        "CuaDriver.app, and symlink `cua-driver` onto your PATH."
-    )
+    arch = host_arch()
+    typer.echo(f"Installing cua-driver v{CUA_DRIVER_VERSION} ({arch})…")
+    try:
+        report = install()
+    except InstallError as exc:
+        typer.echo(f"install failed: {exc}", err=True)
+        sys.exit(1)
+    typer.echo(f"  app:    {report.app_path}")
+    typer.echo(f"  binary: {report.binary_symlink}")
+    typer.echo(f"  sha256: {report.sha256}")
+    typer.echo("")
+    typer.echo("Next: grant TCC to the CuaDriver daemon (not your terminal):")
+    typer.echo("  cua-driver permissions grant")
     typer.echo(gatekeeper_note())
 
 
