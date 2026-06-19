@@ -238,4 +238,23 @@ describe("queue drain policy after a finalized turn", () => {
       ),
     ).toBe(true);
   });
+
+  it("does NOT drain when the turn ended with an error and no answer text", () => {
+    // Repro for the dashboard symptom: after a turn ends with an error (e.g.
+    // litellm "Unsupported value: reasoning_effort='max'"), the next queued
+    // user message must NOT be drained — otherwise every backlogged message is
+    // dispatched at once against the broken session and the bot replies to a
+    // past message instead of the latest one.
+    expect(
+      shouldDrainQueueAfterTurn(
+        state({ error: "litellm.BadRequestError: Unsupported value: 'reasoning_effort'" }),
+      ),
+    ).toBe(false);
+  });
+
+  it("does NOT drain when turnPhase committed to aborted with no answer text", () => {
+    // Belt-and-suspenders: an explicitly aborted turn (different from an error
+    // string) is also a mid-task stop from the queue's perspective.
+    expect(shouldDrainQueueAfterTurn(state({ turnPhase: "aborted" }))).toBe(false);
+  });
 });
