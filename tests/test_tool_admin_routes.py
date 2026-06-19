@@ -79,6 +79,7 @@ EXPECTED_NATIVE_TOOL_NAMES = {
     "TaskBoard",
     "TaskWait",
     "TaskStop",
+    "RunInBackground",
     "WebSearch",
     "web-search",
     "web_search",

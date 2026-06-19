@@ -512,6 +512,12 @@ def _local_chat_string(payload: object, key: str, default: str) -> str:
 # layer). This module still owns the chat-side append + consumer entry points.
 from magi_agent.missions.work_queue import inject_buffer as _inject_buffer
 
+# Back-compat alias: existing tests (e.g. test_chat_route_contract) reach into
+# ``chat_routes._INJECT_BUFFERS`` directly to seed/inspect the buffer. Bind the
+# name to the shared module-level dict so those tests keep working without
+# importing the new location, and any mutation via either name stays coherent.
+_INJECT_BUFFERS: dict[str, list[str]] = _inject_buffer._BUFFERS
+
 
 def _buffer_injection(session_id: str, text: str) -> int:
     """Append *text* to *session_id*'s pending-injection buffer; return its size."""

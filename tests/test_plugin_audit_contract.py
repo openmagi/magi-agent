@@ -146,6 +146,7 @@ def test_audit_entries_include_status_security_audit_and_opt_out_metadata() -> N
         "TaskList",
         "TaskOutput",
         "TaskStop",
+        "RunInBackground",
     )
     assert scheduled_work.hooks == ()
     assert scheduled_work.harness_rules == ("scheduled_work_recipe_policy",)

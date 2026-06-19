@@ -366,6 +366,7 @@ def test_gate1a_non_selected_scope_exposes_no_tools(tmp_path: Path) -> None:
         "TaskStop",
         "TaskCreate",
         "TaskWait",
+        "RunInBackground",
         "MemoryWrite",
         "BrowserClick",
         "TelegramSend",
