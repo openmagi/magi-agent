@@ -7,8 +7,9 @@ import json
 from types import MappingProxyType
 from typing import Any, Literal, NamedTuple, Self, get_args
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, Field, field_validator
 
+from magi_agent.ops.authority import FalseOnlyAuthorityModel
 from magi_agent.ops.safety import (
     require_digest,
     require_safe_ref,
@@ -52,13 +53,6 @@ _GUARD_MODES = set(get_args(GuardMode))
 _SELF_REVIEW_RECOMMENDATIONS = set(get_args(SelfReviewRecommendation))
 _SELF_REVIEW_CONFIDENCES = set(get_args(SelfReviewConfidence))
 
-_MODEL_CONFIG = ConfigDict(
-    frozen=True,
-    populate_by_name=True,
-    extra="forbid",
-    validate_default=True,
-    hide_input_in_errors=True,
-)
 _ZERO_DIGEST = "sha256:" + "0" * 64
 _MUTATING_PERMISSION_MARKERS = (
     "write",
@@ -166,9 +160,7 @@ def _read_alias_default(
     return default
 
 
-class AutoPermissionConfig(BaseModel):
-    model_config = _MODEL_CONFIG
-
+class AutoPermissionConfig(FalseOnlyAuthorityModel):
     enabled: bool = False
     auto_allow_permission_refs: tuple[str, ...] = Field(default=(), alias="autoAllowPermissionRefs")
     forbidden_permission_refs: tuple[str, ...] = Field(default=(), alias="forbiddenPermissionRefs")
@@ -181,31 +173,6 @@ class AutoPermissionConfig(BaseModel):
         alias="productionPolicyWritesEnabled",
     )
     route_attached: Literal[False] = Field(default=False, alias="routeAttached")
-
-    @classmethod
-    def model_construct(
-        cls,
-        _fields_set: set[str] | None = None,
-        **values: Any,
-    ) -> Self:
-        _ = _fields_set
-        values["frontendAdminAttached"] = False
-        values.pop("frontend_admin_attached", None)
-        values["productionPolicyWritesEnabled"] = False
-        values.pop("production_policy_writes_enabled", None)
-        values["routeAttached"] = False
-        values.pop("route_attached", None)
-        return cls.model_validate(values)
-
-    def model_copy(self, *, update: Mapping[str, Any] | None = None, deep: bool = False) -> Self:
-        payload = self.model_dump(by_alias=True, mode="json")
-        if update:
-            payload.update(update)
-        payload["frontendAdminAttached"] = False
-        payload["productionPolicyWritesEnabled"] = False
-        payload["routeAttached"] = False
-        _ = deep
-        return type(self).model_validate(payload)
 
     @field_validator("auto_allow_permission_refs", "forbidden_permission_refs", mode="before")
     @classmethod

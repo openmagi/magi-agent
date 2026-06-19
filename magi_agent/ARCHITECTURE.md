@@ -1231,7 +1231,7 @@ graph LR
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
 | __init__.py | — | — | transport/health.py, transport/product_admin.py |
-| authority.py | Frozen-contract / authority model bases (C-4 / C-5 shared home). | — | channels/discord_adapter.py, channels/dispatcher.py, channels/push_delivery.py, channels/runtime_boundary.py, channels/telegram_adapter.py, channels/telegram_boundary.py, channels/workflow_routing.py, config/models.py, connectors/credential_lease.py, connectors/marketplace.py, connectors/registry.py, ops/safety.py, tools/read_ledger.py, tools/scheduler.py |
+| authority.py | Frozen-contract / authority model bases (C-4 / C-5 shared home). | — | channels/discord_adapter.py, channels/dispatcher.py, channels/push_delivery.py, channels/runtime_boundary.py, channels/telegram_adapter.py, channels/telegram_boundary.py, channels/workflow_routing.py, config/models.py, connectors/credential_lease.py, connectors/marketplace.py, connectors/registry.py, ops/safety.py, permissions/auto_control.py, tools/read_ledger.py, tools/scheduler.py |
 | health.py | — | daemon, scheduler_job_execution | adk_bridge/event_adapter.py, gateway/daemon.py, shadow/gate5b4c3_live_runner_boundary.py, transport/sse.py, transport/streaming_chat_route.py |
 | job_queue.py | — | safety | — |
 | metrics.py | — | safety | — |
@@ -1261,7 +1261,7 @@ graph LR
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
 | __init__.py | — | auto_control | — |
-| auto_control.py | — | safety | harness/scheduler_job_execution.py, permissions/__init__.py |
+| auto_control.py | — | authority, safety | harness/scheduler_job_execution.py, permissions/__init__.py |
 
 ### plugins/
 

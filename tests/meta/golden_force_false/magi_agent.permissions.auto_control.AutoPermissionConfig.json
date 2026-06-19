@@ -13,7 +13,14 @@
     "routeAttached": false
   },
   "model_construct_force_false_leaks": [],
-  "model_validate_dump": null,
+  "model_validate_dump": {
+    "autoAllowPermissionRefs": [],
+    "enabled": false,
+    "forbiddenPermissionRefs": [],
+    "frontendAdminAttached": false,
+    "productionPolicyWritesEnabled": false,
+    "routeAttached": false
+  },
   "model_validate_force_false_leaks": [],
   "qualname": "magi_agent.permissions.auto_control.AutoPermissionConfig"
 }
