@@ -176,6 +176,7 @@ openmagi	magi_agent/runtime/heartbeat_boundary.py	2
 openmagi	magi_agent/runtime/heartbeat_contract.py	17
 openmagi	magi_agent/runtime/heartbeat_store.py	6
 openmagi	magi_agent/runtime/hosted_defaults.py	2
+openmagi	magi_agent/runtime/hosted_runtime.py	3
 openmagi	magi_agent/runtime/llm_stream_reader.py	1
 openmagi	magi_agent/runtime/local_defaults.py	1
 openmagi	magi_agent/runtime/message_builder.py	1
@@ -218,7 +219,7 @@ openmagi	magi_agent/tools/local_readonly.py	1
 openmagi	magi_agent/tools/schema_projection.py	1
 openmagi	magi_agent/transport/app_api.py	6
 openmagi	magi_agent/transport/chat.py	1
-openmagi	magi_agent/transport/chat_routes.py	54
+openmagi	magi_agent/transport/chat_routes.py	55
 openmagi	magi_agent/transport/chat_shared.py	5
 openmagi	magi_agent/transport/control_requests.py	3
 openmagi	magi_agent/transport/credentials.py	2

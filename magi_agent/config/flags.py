@@ -1120,6 +1120,16 @@ FLAGS: tuple[FlagSpec, ...] = (
         summary="Enable the magi CLI surface (headless NDJSON + Textual TUI); flat default-ON.",
     ),
     _b(
+        "MAGI_HOSTED_GOVERNED_TURN_ENABLED",
+        scope="hosted",
+        summary=(
+            "Route hosted serving turns through run_governed_turn → "
+            "MagiEngineDriver instead of gate5b4c3._invoke_async_turn (Phase 2 "
+            "flip; default-OFF; CLI/local path unchanged). When OFF the hosted "
+            "path is byte-identical to today."
+        ),
+    ),
+    _b(
         "MAGI_HOSTED_STREAMING_SERVE",
         scope="hosted",
         summary=(
