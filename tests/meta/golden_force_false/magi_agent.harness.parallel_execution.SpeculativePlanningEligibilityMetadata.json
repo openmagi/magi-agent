@@ -4,19 +4,8 @@
     "execution_attached",
     "runner_attached"
   ],
-  "model_construct_dump": {
-    "defaultEnabled": true,
-    "eligible": false,
-    "executionAttached": true,
-    "maxDrafts": 1,
-    "metadataOnly": true,
-    "runnerAttached": true
-  },
-  "model_construct_force_false_leaks": [
-    "default_enabled",
-    "execution_attached",
-    "runner_attached"
-  ],
+  "model_construct_dump": null,
+  "model_construct_force_false_leaks": [],
   "model_validate_dump": null,
   "model_validate_force_false_leaks": [],
   "qualname": "magi_agent.harness.parallel_execution.SpeculativePlanningEligibilityMetadata"

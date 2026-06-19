@@ -5,13 +5,16 @@
   "model_construct_dump": {
     "planStateOwner": "session-service",
     "sessionServiceOwner": "adk-session-service",
-    "sessionWriteAttached": true,
+    "sessionWriteAttached": false,
     "storesPlanStateLater": true
   },
-  "model_construct_force_false_leaks": [
-    "session_write_attached"
-  ],
-  "model_validate_dump": null,
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": {
+    "planStateOwner": "session-service",
+    "sessionServiceOwner": "adk-session-service",
+    "sessionWriteAttached": false,
+    "storesPlanStateLater": true
+  },
   "model_validate_force_false_leaks": [],
   "qualname": "magi_agent.harness.plan_gate.PlanGateSessionImpact"
 }

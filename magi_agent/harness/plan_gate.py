@@ -4,15 +4,14 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from magi_agent.ops.authority import FalseOnlyAuthorityModel
 from magi_agent.transport.tool_preview import sanitize_tool_preview
 
 
 PlanGateArtifactKind = Literal["plan", "interview", "consensus"]
 
 
-class PlanGateSessionImpact(BaseModel):
-    model_config = ConfigDict(frozen=True, populate_by_name=True, extra="forbid")
-
+class PlanGateSessionImpact(FalseOnlyAuthorityModel):
     session_service_owner: Literal["adk-session-service"] = Field(
         default="adk-session-service", alias="sessionServiceOwner"
     )
@@ -27,9 +26,7 @@ class PlanGateSessionImpact(BaseModel):
     )
 
 
-class PlanGateTranscriptImpact(BaseModel):
-    model_config = ConfigDict(frozen=True, populate_by_name=True, extra="forbid")
-
+class PlanGateTranscriptImpact(FalseOnlyAuthorityModel):
     transcript_owner: Literal["openmagi-transcript"] = Field(
         default="openmagi-transcript", alias="transcriptOwner"
     )
@@ -52,9 +49,7 @@ class PlanGateTranscriptImpact(BaseModel):
         return value
 
 
-class PlanGateArtifactImpact(BaseModel):
-    model_config = ConfigDict(frozen=True, populate_by_name=True, extra="forbid")
-
+class PlanGateArtifactImpact(FalseOnlyAuthorityModel):
     artifact_service_owner: Literal["adk-artifact-service"] = Field(
         default="adk-artifact-service", alias="artifactServiceOwner"
     )
@@ -111,9 +106,7 @@ class PlanGateControlRequestRef(BaseModel):
         return value
 
 
-class PlanGateDecisionSnapshot(BaseModel):
-    model_config = ConfigDict(frozen=True, populate_by_name=True, extra="forbid")
-
+class PlanGateDecisionSnapshot(FalseOnlyAuthorityModel):
     decision_id: str = Field(alias="decisionId")
     session_key: str = Field(alias="sessionKey")
     turn_id: str = Field(alias="turnId")

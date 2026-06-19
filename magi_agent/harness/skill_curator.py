@@ -78,6 +78,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from magi_agent.evidence.types import EvidenceRecord, EvidenceSource
 from magi_agent.learning.store import SqliteLearningStore
+from magi_agent.ops.authority import FalseOnlyAuthorityModel
 
 logger = logging.getLogger(__name__)
 
@@ -228,10 +229,11 @@ def _env_shadow_flag(name: str, *, default: bool) -> bool:
 # ---------------------------------------------------------------------------
 
 
-class CuratorAuthorityFlags(BaseModel):
-    """All authority flags are Literal[False] — the curator never spawns agents."""
+class CuratorAuthorityFlags(FalseOnlyAuthorityModel):
+    """All authority flags are Literal[False] — the curator never spawns agents.
 
-    model_config = _MODEL_CONFIG
+    Force-false is owned by the FalseOnlyAuthorityModel kernel.
+    """
 
     agent_spawned: Literal[False] = Field(default=False, alias="agentSpawned")
     network_call_allowed: Literal[False] = Field(

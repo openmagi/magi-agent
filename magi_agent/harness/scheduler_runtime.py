@@ -3,9 +3,9 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 import hashlib
 import re
-from typing import Any, Literal, Self
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from magi_agent.channels.contract import ChannelRef
 from magi_agent.channels.dispatcher import (
@@ -15,6 +15,7 @@ from magi_agent.channels.dispatcher import (
     ChannelDispatchProviderPort,
 )
 from magi_agent.channels.runtime_boundary import ChannelRuntimeReceipt
+from magi_agent.ops.authority import FalseOnlyAuthorityModel
 from magi_agent.runtime.provider_receipts import provider_digest
 
 
@@ -71,63 +72,20 @@ _SENSITIVE_KEY_MARKERS = (
 )
 
 
-class SchedulerRuntimeConfig(BaseModel):
-    model_config = _MODEL_CONFIG
-
+class SchedulerRuntimeConfig(FalseOnlyAuthorityModel):
     enabled: bool = False
     local_fake_scheduler_enabled: bool = Field(default=False, alias="localFakeSchedulerEnabled")
     background_scheduler_attached: Literal[False] = Field(default=False, alias="backgroundSchedulerAttached")
     production_channel_write_enabled: Literal[False] = Field(default=False, alias="productionChannelWriteEnabled")
     route_attached: Literal[False] = Field(default=False, alias="routeAttached")
 
-    @classmethod
-    def model_construct(cls, _fields_set: set[str] | None = None, **values: Any) -> Self:
-        _ = _fields_set, values
-        return cls()
 
-    def model_copy(self, *, update: Mapping[str, Any] | None = None, deep: bool = False) -> Self:
-        data = self.model_dump(mode="python", by_alias=False, warnings=False)
-        if update:
-            alias_to_name = {
-                field.alias: name
-                for name, field in self.__class__.model_fields.items()
-                if field.alias is not None
-            }
-            data.update({alias_to_name.get(str(key), str(key)): value for key, value in update.items()})
-        data["background_scheduler_attached"] = False
-        data["production_channel_write_enabled"] = False
-        data["route_attached"] = False
-        _ = deep
-        return type(self).model_validate(data)
-
-
-class SchedulerAuthorityFlags(BaseModel):
-    model_config = _MODEL_CONFIG
-
+class SchedulerAuthorityFlags(FalseOnlyAuthorityModel):
     background_scheduler_attached: Literal[False] = Field(default=False, alias="backgroundSchedulerAttached")
     background_task_started: Literal[False] = Field(default=False, alias="backgroundTaskStarted")
     production_channel_write: Literal[False] = Field(default=False, alias="productionChannelWrite")
     channel_delivery_performed: Literal[False] = Field(default=False, alias="channelDeliveryPerformed")
     route_attached: Literal[False] = Field(default=False, alias="routeAttached")
-
-    @classmethod
-    def model_construct(cls, _fields_set: set[str] | None = None, **values: Any) -> Self:
-        _ = _fields_set, values
-        return cls()
-
-    def model_copy(self, *, update: Mapping[str, Any] | None = None, deep: bool = False) -> Self:
-        _ = update, deep
-        return type(self)()
-
-    @field_serializer(
-        "background_scheduler_attached",
-        "background_task_started",
-        "production_channel_write",
-        "channel_delivery_performed",
-        "route_attached",
-    )
-    def _serialize_false(self, _value: object) -> bool:
-        return False
 
 
 class SchedulerLease(BaseModel):
@@ -184,9 +142,7 @@ class SchedulerDeliveryRequest(BaseModel):
         return _safe_ref(value)
 
 
-class SchedulerDueTurn(BaseModel):
-    model_config = _MODEL_CONFIG
-
+class SchedulerDueTurn(FalseOnlyAuthorityModel):
     source_ref: str = Field(alias="sourceRef")
     turn_ref: str = Field(alias="turnRef")
     execution_allowed: Literal[False] = Field(default=False, alias="executionAllowed")

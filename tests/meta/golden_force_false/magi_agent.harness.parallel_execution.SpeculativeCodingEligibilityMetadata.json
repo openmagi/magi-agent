@@ -5,22 +5,8 @@
     "hard_safety_bypassable",
     "workspace_attached"
   ],
-  "model_construct_dump": {
-    "blockedReason": "workspace_adoption_not_represented",
-    "childExecutionAttached": true,
-    "defaultEnabled": true,
-    "eligible": false,
-    "futureIntegrationApproved": false,
-    "hardSafetyBypassable": true,
-    "metadataOnly": true,
-    "workspaceAttached": true
-  },
-  "model_construct_force_false_leaks": [
-    "child_execution_attached",
-    "default_enabled",
-    "hard_safety_bypassable",
-    "workspace_attached"
-  ],
+  "model_construct_dump": null,
+  "model_construct_force_false_leaks": [],
   "model_validate_dump": null,
   "model_validate_force_false_leaks": [],
   "qualname": "magi_agent.harness.parallel_execution.SpeculativeCodingEligibilityMetadata"

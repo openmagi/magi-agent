@@ -5,6 +5,8 @@ from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from magi_agent.ops.authority import FalseOnlyAuthorityModel
+
 
 AUTOPILOT_FEATURE_KEY = "autopilot-fsm"
 DEFAULT_AUTOPILOT_MAX_REVIEW_CYCLES = 3
@@ -67,9 +69,7 @@ class AutopilotFsmPolicy(BaseModel):
         return self
 
 
-class AutopilotPhaseTransition(BaseModel):
-    model_config = ConfigDict(frozen=True, populate_by_name=True, extra="forbid")
-
+class AutopilotPhaseTransition(FalseOnlyAuthorityModel):
     from_phase: AutopilotPhase = Field(alias="fromPhase")
     to_phase: AutopilotPhase = Field(alias="toPhase")
     gate: str

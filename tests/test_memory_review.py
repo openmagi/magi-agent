@@ -391,21 +391,31 @@ def test_review_isolates_raising_write_host_per_fact(
 
 
 def test_review_config_authority_pins_locked() -> None:
-    """Forged authority flags are rejected (Literal[False] cannot be lifted)."""
-    import pydantic
+    """Forged authority flags are coerced to False (Literal[False] is force-false).
 
+    C-4 PR-G2 (raise-to-coerce): the introspection-based
+    :class:`FalseOnlyAuthorityModel` now coerces forged ``Literal[False]``
+    fields to ``False`` uniformly across construct/copy/validate, instead
+    of raising a ``ValidationError`` on a forged True via ``model_validate``.
+
+    The end-result invariant is preserved: a caller cannot smuggle a
+    forged True through any of construct / copy / validate — the value
+    still reads ``False`` in the resulting config.
+    """
     from magi_agent.harness.memory_review import MemoryReviewConfig
 
-    # A forged truthy value for any authority pin is a hard validation error.
-    with pytest.raises(pydantic.ValidationError):
-        MemoryReviewConfig.model_validate(
-            {
-                "enabled": True,
-                "backgroundReviewRunnerAttached": True,
-                "liveReviewerAttached": True,
-                "productionWritesEnabled": True,
-            }
-        )
+    # A forged truthy value via model_validate is coerced (raise-to-coerce).
+    validated = MemoryReviewConfig.model_validate(
+        {
+            "enabled": True,
+            "backgroundReviewRunnerAttached": True,
+            "liveReviewerAttached": True,
+            "productionWritesEnabled": True,
+        }
+    )
+    assert validated.background_review_runner_attached is False
+    assert validated.live_reviewer_attached is False
+    assert validated.production_writes_enabled is False
 
     # The default config pins are all False, and model_copy cannot lift them.
     config = MemoryReviewConfig(enabled=True)

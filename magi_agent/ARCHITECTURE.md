@@ -139,6 +139,7 @@ graph LR
     harness --> learning
     harness --> memory
     harness --> missions
+    harness --> ops
     harness --> packs
     harness --> permissions
     harness --> recipes
@@ -980,47 +981,47 @@ graph LR
 | __init__.py | — | approval_receipts, discipline_boundary, profiles, repair_policy | — |
 | approval_receipts.py | — | — | harness/__init__.py |
 | audit.py | — | presets | — |
-| autopilot.py | — | — | — |
-| cron_runtime.py | — | config, contract, learning_executor, provider_receipts | learning/api.py, learning/bootstrap.py |
+| autopilot.py | — | authority | — |
+| cron_runtime.py | — | authority, config, contract, learning_executor, provider_receipts | learning/api.py, learning/bootstrap.py |
 | cron_turn_runner_adapter.py | A-driver — CronTurnRunnerAdapter: OpenMagiRunnerAdapter -> CronTurnRunner bridge. | resolved, runner_adapter, scheduler_job_execution | — |
 | cross_review.py | Track 17 PR4 — adversarial cross-review + best-of-N variant generation. | inference_scaling, public_events, verifier_bus | harness/workflow_executor.py, recipes/workflow_recipe.py |
-| discipline_boundary.py | — | — | cli/engine.py, harness/__init__.py |
-| e2e_readiness.py | — | — | — |
+| discipline_boundary.py | — | authority | cli/engine.py, harness/__init__.py |
+| e2e_readiness.py | — | authority | — |
 | engine.py | — | evidence_scope, manifest, resolved, trace_context | — |
 | evidence_scope.py | — | — | harness/engine.py, harness/resolved.py |
 | goal_judge.py | B2 — GoalJudge: goal-satisfaction judge (parse + fail-open + parse-failure budget, | types | gateway/watchers.py, harness/goal_loop_control.py, missions/work_queue/runner.py |
-| goal_loop.py | — | — | harness/general_automation/delegation.py, harness/goal_state.py |
+| goal_loop.py | — | authority | harness/general_automation/delegation.py, harness/goal_state.py |
 | goal_loop_control.py | B3/B4 — Continuation loop control + after-turn hook (the Ralph loop). | context, discovery, goal_judge, goal_state, manifest, registries, result, types | firstparty/packs/goal_loop_default/impl.py |
 | goal_state.py | B1 — GoalState: persistent session-scoped goal state layer. | goal_loop, migrations | harness/goal_loop_control.py |
 | guardrail_matrix.py | — | — | — |
-| inference_scaling.py | — | — | channels/taskkind_classifier.py, harness/cross_review.py |
+| inference_scaling.py | — | authority | channels/taskkind_classifier.py, harness/cross_review.py |
 | kernel_roles.py | External agent roles as a kernel ``role`` provides type (PR2, contained seam). | discovery, flags | harness/resolved.py, packs/registries.py |
-| learning_executor.py | Learning reflection executor — PR3 (real signal extraction + labeling). | candidates, config, eval_gate, labeler, store | harness/cron_runtime.py, learning/bootstrap.py |
+| learning_executor.py | Learning reflection executor — PR3 (real signal extraction + labeling). | authority, candidates, config, eval_gate, labeler, store | harness/cron_runtime.py, learning/bootstrap.py |
 | long_context_eval.py | — | context_budget, final_output_gate, model_tiers, request_shape | — |
-| memory_compaction.py | — | discovery, memory_write, registries, write_boundary | firstparty/packs/memory_strategies_default/impl.py, harness/memory_review.py |
-| memory_recall.py | — | contracts, injection, learning_live_readiness, memory_recall, namespaces | cli/learning_recall.py, learning/live.py |
-| memory_review.py | Gated background memory-review harness (A1, PR5). | context, declarative_filter, memory_compaction | firstparty/packs/memory_strategies_default/impl.py |
-| memory_write.py | — | contracts, declarative_filter, learning_live_readiness, local_file_writable, write_boundary | cli/learning_recall.py, harness/memory_compaction.py, harness/memory_write_tool.py, learning/live.py |
+| memory_compaction.py | — | authority, discovery, memory_write, registries, write_boundary | firstparty/packs/memory_strategies_default/impl.py, harness/memory_review.py |
+| memory_recall.py | — | authority, contracts, injection, learning_live_readiness, memory_recall, namespaces | cli/learning_recall.py, learning/live.py |
+| memory_review.py | Gated background memory-review harness (A1, PR5). | authority, context, declarative_filter, memory_compaction | firstparty/packs/memory_strategies_default/impl.py |
+| memory_write.py | — | authority, contracts, declarative_filter, learning_live_readiness, local_file_writable, write_boundary | cli/learning_recall.py, harness/memory_compaction.py, harness/memory_write_tool.py, learning/live.py |
 | memory_write_tool.py | MemoryWriteToolHost — agent-callable tool surface for declarative memory writes (D2). | context, memory_write, registry, result | runtime/memory_write_wiring.py |
-| parallel_execution.py | — | — | harness/workflow_executor.py |
-| plan_gate.py | — | tool_preview | harness/general_automation/plan_act_switch.py |
+| parallel_execution.py | — | authority | harness/workflow_executor.py |
+| plan_gate.py | — | authority, tool_preview | harness/general_automation/plan_act_switch.py |
 | policy_state.py | — | presets, profiles | — |
 | presets.py | — | — | customize/catalog.py, harness/audit.py, harness/policy_state.py, harness/profiles.py |
 | profiles.py | — | presets | harness/__init__.py, harness/policy_state.py, runtime/openmagi_runtime.py |
 | repair_policy.py | — | — | harness/__init__.py |
 | research_routing.py | — | research_agents | — |
-| resolved.py | — | constraint_reinjection, evidence_scope, kernel_roles, manifest, question_tool, recipe_disclosure, rollout, scope, types | (root)/facades.py, adk_bridge/callback_adapter.py, cli/hook_wiring.py, firstparty/packs/harness_coding_lean/impl.py, firstparty/packs/harness_gaia_codeact/impl.py, harness/cron_turn_runner_adapter.py, harness/engine.py, hooks/bus.py, packs/harness_projection.py, runtime/message_builder.py |
-| scheduler_delivery.py | A4 — Delivery boundary for cron turn output. | types | channels/discord_live.py, channels/email_live.py, channels/slack_live.py, channels/telegram_live.py, gateway/channel_watchers.py, harness/scheduler_job_execution.py |
-| scheduler_executor.py | A2 — SchedulerExecutor: file-lock lease holder + at-most-once tick. | discovery, registries, schedule_grammar, scheduler_runtime | firstparty/packs/scheduler_default/impl.py, harness/scheduler_job_execution.py, harness/scheduler_job_store.py, harness/scheduler_loop_driver.py |
+| resolved.py | — | authority, constraint_reinjection, evidence_scope, kernel_roles, manifest, question_tool, recipe_disclosure, rollout, scope, types | (root)/facades.py, adk_bridge/callback_adapter.py, cli/hook_wiring.py, firstparty/packs/harness_coding_lean/impl.py, firstparty/packs/harness_gaia_codeact/impl.py, harness/cron_turn_runner_adapter.py, harness/engine.py, hooks/bus.py, packs/harness_projection.py, runtime/message_builder.py |
+| scheduler_delivery.py | A4 — Delivery boundary for cron turn output. | authority, types | channels/discord_live.py, channels/email_live.py, channels/slack_live.py, channels/telegram_live.py, gateway/channel_watchers.py, harness/scheduler_job_execution.py |
+| scheduler_executor.py | A2 — SchedulerExecutor: file-lock lease holder + at-most-once tick. | authority, discovery, registries, schedule_grammar, scheduler_runtime | firstparty/packs/scheduler_default/impl.py, harness/scheduler_job_execution.py, harness/scheduler_job_store.py, harness/scheduler_loop_driver.py |
 | scheduler_job_execution.py | A3 — Gated ADK turn execution for due scheduler jobs (shadow-first, default off). | auto_control, scheduler_delivery, scheduler_executor, scheduler_executor_readiness, scheduler_runtime, types | gateway/watchers.py, harness/cron_turn_runner_adapter.py, harness/scheduler_loop_driver.py, ops/health.py |
 | scheduler_job_store.py | A-driver — persistent SQLite-backed ScheduledJobSource. | migrations, scheduler_executor | gateway/watchers.py |
 | scheduler_loop_driver.py | A-driver — SchedulerLoopDriver: the periodic loop that fires due jobs. | scheduler_executor, scheduler_job_execution, scheduler_runtime | gateway/watchers.py |
-| scheduler_runtime.py | — | contract, dispatcher, provider_receipts, runtime_boundary | harness/scheduler_executor.py, harness/scheduler_job_execution.py, harness/scheduler_loop_driver.py |
+| scheduler_runtime.py | — | authority, contract, dispatcher, provider_receipts, runtime_boundary | harness/scheduler_executor.py, harness/scheduler_job_execution.py, harness/scheduler_loop_driver.py |
 | self_review.py | C1 — Post-turn self-review fork (default OFF, shadow-first, no writes). | prompt_snapshot, types | adk_bridge/control_plane.py, cli/tests/test_real_runner.py, harness/self_review_pipeline.py |
 | self_review_pipeline.py | C2 — LearningPipelineSink: routes self-review candidates through the learning eval-gate. | candidates, eval_gate, models, self_review, store, types | — |
-| skill_curator.py | C3 — SkillCurator: inactivity-triggered janitor for agent-authored learned items. | store, types | — |
-| verifier_bus.py | — | contracts, flags, ledger, types | cli/engine.py, cli/tests/test_evidence_turn_id_reconciliation.py, cli/tests/test_local_tool_evidence_wiring.py, evidence/coding_verification.py, evidence/event_projection.py, harness/cross_review.py, meta_orchestration/commit_adapter.py |
-| workflow_executor.py | Bounded workflow-executor — PR1 (skeleton) + PR3 (resumability). | child_runner_boundary, child_runner_live, child_toolset, compiler, cross_review, dry_run, parallel_execution, public_events, research_child_runner, runtime, workflow_executor_readiness, workflow_result_cache | recipes/workflow_recipe.py |
+| skill_curator.py | C3 — SkillCurator: inactivity-triggered janitor for agent-authored learned items. | authority, store, types | — |
+| verifier_bus.py | — | authority, contracts, flags, ledger, types | cli/engine.py, cli/tests/test_evidence_turn_id_reconciliation.py, cli/tests/test_local_tool_evidence_wiring.py, evidence/coding_verification.py, evidence/event_projection.py, harness/cross_review.py, meta_orchestration/commit_adapter.py |
+| workflow_executor.py | Bounded workflow-executor — PR1 (skeleton) + PR3 (resumability). | authority, child_runner_boundary, child_runner_live, child_toolset, compiler, cross_review, dry_run, parallel_execution, public_events, research_child_runner, runtime, workflow_executor_readiness, workflow_result_cache | recipes/workflow_recipe.py |
 | workflow_result_cache.py | Within-run result cache for the workflow executor — PR3. | — | harness/workflow_executor.py |
 
 ### harness/coding/
@@ -1233,7 +1234,7 @@ graph LR
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
 | __init__.py | — | — | transport/health.py, transport/product_admin.py |
-| authority.py | Frozen-contract / authority model bases (C-4 / C-5 shared home). | — | channels/discord_adapter.py, channels/dispatcher.py, channels/push_delivery.py, channels/runtime_boundary.py, channels/telegram_adapter.py, channels/telegram_boundary.py, channels/workflow_routing.py, config/models.py, connectors/credential_lease.py, connectors/marketplace.py, connectors/registry.py, evidence/builtin.py, evidence/child_runtime_envelope.py, evidence/citation_audit.py, evidence/coding_tool_receipts.py, evidence/coding_verification.py, evidence/ledger.py, evidence/reports.py, evidence/research_final_gate.py, evidence/rollout.py, evidence/runtime_receipts.py, evidence/source_ledger.py, evidence/subagent.py, evidence/types.py, memory/conformance.py, memory/contracts.py, memory/namespaces.py, memory/policy.py, memory/projection.py, memory/recall_ledger.py, memory/write_boundary.py, ops/safety.py, permissions/auto_control.py, tools/read_ledger.py, tools/scheduler.py |
+| authority.py | Frozen-contract / authority model bases (C-4 / C-5 shared home). | — | channels/discord_adapter.py, channels/dispatcher.py, channels/push_delivery.py, channels/runtime_boundary.py, channels/telegram_adapter.py, channels/telegram_boundary.py, channels/workflow_routing.py, config/models.py, connectors/credential_lease.py, connectors/marketplace.py, connectors/registry.py, evidence/builtin.py, evidence/child_runtime_envelope.py, evidence/citation_audit.py, evidence/coding_tool_receipts.py, evidence/coding_verification.py, evidence/ledger.py, evidence/reports.py, evidence/research_final_gate.py, evidence/rollout.py, evidence/runtime_receipts.py, evidence/source_ledger.py, evidence/subagent.py, evidence/types.py, harness/autopilot.py, harness/cron_runtime.py, harness/discipline_boundary.py, harness/e2e_readiness.py, harness/goal_loop.py, harness/inference_scaling.py, harness/learning_executor.py, harness/memory_compaction.py, harness/memory_recall.py, harness/memory_review.py, harness/memory_write.py, harness/parallel_execution.py, harness/plan_gate.py, harness/resolved.py, harness/scheduler_delivery.py, harness/scheduler_executor.py, harness/scheduler_runtime.py, harness/skill_curator.py, harness/verifier_bus.py, harness/workflow_executor.py, memory/conformance.py, memory/contracts.py, memory/namespaces.py, memory/policy.py, memory/projection.py, memory/recall_ledger.py, memory/write_boundary.py, ops/safety.py, permissions/auto_control.py, tools/read_ledger.py, tools/scheduler.py |
 | health.py | — | daemon, scheduler_job_execution | adk_bridge/event_adapter.py, gateway/daemon.py, shadow/gate5b4c3_live_runner_boundary.py, transport/sse.py, transport/streaming_chat_route.py |
 | job_queue.py | — | safety | — |
 | metrics.py | — | safety | — |

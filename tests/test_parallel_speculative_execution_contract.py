@@ -251,8 +251,10 @@ def test_timeout_budget_metadata_validates_positive_bounded_detached_values() ->
         ToolTimeoutBudgetMetadata(scope="tool_class", toolClass="read_only", timeoutMs=600001)
     with pytest.raises(ValidationError, match="batchId"):
         ToolTimeoutBudgetMetadata(scope="batch", timeoutMs=1000)
-    with pytest.raises(ValidationError):
-        per_class.model_copy(update={"executionAttached": True})
+    # C-4 PR-G2 (raise-to-coerce): a forged ``Literal[False]`` flag on
+    # ``model_copy(update=...)`` is now coerced to False instead of raising.
+    coerced = per_class.model_copy(update={"executionAttached": True})
+    assert coerced.execution_attached is False
 
 
 @pytest.mark.parametrize("side_effect_class", ("none", "read_only"))
@@ -294,8 +296,10 @@ def test_speculative_reasoning_experiments_are_benchmark_only_and_default_off() 
     assert experiment.runtime_rollout_attached is False
     assert experiment.eligible is True
 
-    with pytest.raises(ValidationError):
-        experiment.model_copy(update={"runtimeRolloutAttached": True})
+    # C-4 PR-G2 (raise-to-coerce): a forged ``Literal[False]`` flag on
+    # ``model_copy(update=...)`` is now coerced to False instead of raising.
+    coerced = experiment.model_copy(update={"runtimeRolloutAttached": True})
+    assert coerced.runtime_rollout_attached is False
 
 
 def test_non_hard_parallel_read_opt_out_disables_parallel_without_bypassing_hard_safety() -> None:
@@ -320,15 +324,25 @@ def test_non_hard_parallel_read_opt_out_disables_parallel_without_bypassing_hard
 
 
 def test_all_attachment_flags_remain_false_including_model_copy_updates() -> None:
+    """C-4 PR-G2 (raise-to-coerce): a forged ``Literal[False]`` attachment
+    flag on ``model_copy(update=...)`` is now coerced to False uniformly
+    rather than raising a ``ValidationError``. The end-result invariant is
+    preserved: the value still reads False on the resulting decision.
+    """
     decision = build_parallel_tool_policy_decision(_policy_input())
 
     for flag in ATTACHMENT_FLAGS:
         assert decision.model_dump(by_alias=True)[flag] is False
-        with pytest.raises(ValidationError):
-            decision.model_copy(update={flag: True})
+        coerced = decision.model_copy(update={flag: True})
+        assert coerced.model_dump(by_alias=True)[flag] is False
 
 
 def test_attachment_flags_remain_false_for_python_field_name_model_copy_updates() -> None:
+    """C-4 PR-G2 (raise-to-coerce): same as the alias-form sibling above,
+    but via the Python snake_case field name. The kernel's introspection
+    coerces uniformly regardless of whether the caller used the alias or
+    the field name.
+    """
     decision = build_parallel_tool_policy_decision(_policy_input())
 
     for field_name in (
@@ -342,8 +356,8 @@ def test_attachment_flags_remain_false_for_python_field_name_model_copy_updates(
         "workspace_attached",
         "canary_attached",
     ):
-        with pytest.raises(ValidationError):
-            decision.model_copy(update={field_name: True})
+        coerced = decision.model_copy(update={field_name: True})
+        assert getattr(coerced, field_name) is False
 
 
 def test_hard_tool_eligibility_requires_manifest_proof_and_workspace_adoption() -> None:

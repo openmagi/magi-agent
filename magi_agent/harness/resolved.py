@@ -14,6 +14,7 @@ from pydantic import (
 )
 
 from magi_agent.evidence.rollout import EvidenceRolloutMetadata
+from magi_agent.ops.authority import FalseOnlyAuthorityModel
 from magi_agent.harness.general_automation.constraint_reinjection import (
     GA_CONSTRAINT_REINJECTION_HOOK_NAME,
 )
@@ -88,8 +89,17 @@ class _ResolvedAgentRoleInput(BaseModel):
         return _validate_agent_role_value(value)
 
 
-class _ResolvedHarnessModel(BaseModel):
-    model_config = _RESOLVED_MODEL_CONFIG
+class _ResolvedHarnessModel(FalseOnlyAuthorityModel):
+    """Resolved-harness frozen base.
+
+    Inherits force-false validator/serializer/construct/copy from
+    FalseOnlyAuthorityModel; preserves a per-class ``model_copy`` shim that
+    keeps the nested-model ``_copy_update_value_for_validation`` thawing for
+    update values that themselves contain ``BaseModel`` instances. The kernel's
+    own ``model_copy`` would route through ``model_dump`` directly, which is
+    insufficient when an update value carries nested models that must be
+    re-serialized before re-validation.
+    """
 
     def model_copy(
         self,
@@ -176,20 +186,13 @@ class EvidenceVerdictReadinessMetadata(_ResolvedHarnessModel):
     status: EvidenceVerdictReadinessStatus = "not_evaluated"
     ready_contract_ids: tuple[str, ...] = Field(default=(), alias="readyContractIds")
     pending_contract_ids: tuple[str, ...] = Field(default=(), alias="pendingContractIds")
+    # Force-false owned by FalseOnlyAuthorityModel kernel: a forged True is
+    # coerced to False (raise-to-coerce conversion from the pre-C-4 inline
+    # ``_reject_attached_input`` ``model_validator(mode="before")`` that
+    # raised on a forged True; uniform with every other migrated
+    # ``Literal[False]`` field in the tree).
     traffic_attached: Literal[False] = Field(default=False, alias="trafficAttached")
     execution_attached: Literal[False] = Field(default=False, alias="executionAttached")
-
-    @model_validator(mode="before")
-    @classmethod
-    def _reject_attached_input(cls, data: object) -> object:
-        if isinstance(data, Mapping) and (
-            data.get("traffic_attached")
-            or data.get("trafficAttached")
-            or data.get("execution_attached")
-            or data.get("executionAttached")
-        ):
-            raise ValueError("evidence verdict readiness metadata must stay traffic-free")
-        return data
 
 
 class ResolvedEvidenceContractSnapshot(_ResolvedHarnessModel):
@@ -209,20 +212,12 @@ class ResolvedEvidenceContractSnapshot(_ResolvedHarnessModel):
     )
     skip_reason: EvidenceSkipReason | None = Field(default=None, alias="skipReason")
     rollout: EvidenceRolloutMetadata
+    # Force-false owned by FalseOnlyAuthorityModel kernel: a forged True is
+    # coerced to False (raise-to-coerce conversion from the pre-C-4 inline
+    # ``_reject_attached_input`` raise; uniform with every other migrated
+    # Literal[False] field in the tree).
     traffic_attached: Literal[False] = Field(default=False, alias="trafficAttached")
     execution_attached: Literal[False] = Field(default=False, alias="executionAttached")
-
-    @model_validator(mode="before")
-    @classmethod
-    def _reject_attached_input(cls, data: object) -> object:
-        if isinstance(data, Mapping) and (
-            data.get("traffic_attached")
-            or data.get("trafficAttached")
-            or data.get("execution_attached")
-            or data.get("executionAttached")
-        ):
-            raise ValueError("resolved evidence snapshots must stay traffic-free")
-        return data
 
     @model_validator(mode="after")
     def _validate_snapshot_policy(self) -> Self:
@@ -276,20 +271,12 @@ class ResolvedHarnessPresetState(_ResolvedHarnessModel):
         default_factory=EvidenceVerdictReadinessMetadata,
         alias="evidenceVerdictReadiness",
     )
+    # Force-false owned by FalseOnlyAuthorityModel kernel: a forged True is
+    # coerced to False (raise-to-coerce conversion from the pre-C-4 inline
+    # ``_reject_attached_input`` raise; uniform with every other migrated
+    # Literal[False] field in the tree).
     traffic_attached: Literal[False] = Field(default=False, alias="trafficAttached")
     execution_attached: Literal[False] = Field(default=False, alias="executionAttached")
-
-    @model_validator(mode="before")
-    @classmethod
-    def _reject_attached_input(cls, data: object) -> object:
-        if isinstance(data, Mapping) and (
-            data.get("traffic_attached")
-            or data.get("trafficAttached")
-            or data.get("execution_attached")
-            or data.get("executionAttached")
-        ):
-            raise ValueError("resolved harness state must stay traffic-free")
-        return data
 
     @model_validator(mode="after")
     def _validate_run_depth_pair(self) -> Self:

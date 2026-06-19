@@ -12,34 +12,8 @@
     "traffic_attached",
     "workspace_attached"
   ],
-  "model_construct_dump": {
-    "canaryAttached": true,
-    "childExecutionAttached": true,
-    "defaultEnabled": true,
-    "executionAttached": true,
-    "hardSafetyBypassable": true,
-    "metadataOnly": true,
-    "nonHardParallelOptedOut": false,
-    "routeAttached": true,
-    "runnerAttached": true,
-    "schedulerAttached": true,
-    "toolExecutionAttached": true,
-    "trafficAttached": true,
-    "workspaceAttached": true
-  },
-  "model_construct_force_false_leaks": [
-    "canary_attached",
-    "child_execution_attached",
-    "default_enabled",
-    "execution_attached",
-    "hard_safety_bypassable",
-    "route_attached",
-    "runner_attached",
-    "scheduler_attached",
-    "tool_execution_attached",
-    "traffic_attached",
-    "workspace_attached"
-  ],
+  "model_construct_dump": null,
+  "model_construct_force_false_leaks": [],
   "model_validate_dump": null,
   "model_validate_force_false_leaks": [],
   "qualname": "magi_agent.harness.parallel_execution.ParallelToolPolicyDecision"

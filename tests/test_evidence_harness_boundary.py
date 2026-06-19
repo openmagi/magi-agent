@@ -361,9 +361,17 @@ def test_runner_adapter_kwargs_do_not_include_evidence_snapshot_state() -> None:
 
 
 @pytest.mark.parametrize("attached_flag", ("traffic_attached", "trafficAttached"))
-def test_resolved_evidence_snapshot_model_copy_rejects_attached_traffic(
+def test_resolved_evidence_snapshot_model_copy_coerces_attached_traffic(
     attached_flag: str,
 ) -> None:
+    """C-4 PR-G2 (raise-to-coerce): ``ResolvedEvidenceContractSnapshot`` is
+    re-parented onto :class:`FalseOnlyAuthorityModel`; the kernel's
+    introspection-based ``_force_false`` validator coerces a forged
+    ``Literal[False]`` True to False BEFORE the Literal validator runs,
+    uniformly across construct/copy/validate (strictly stronger than the
+    previous per-class ``_reject_attached_input`` raise -- it fires on every
+    construction surface). The end-result invariant is preserved: a caller
+    cannot smuggle ``trafficAttached`` True through ``model_copy``."""
     engine = HarnessEngine(
         evidence_contracts=(
             _contract("coding-basic", agent_roles=("coding",), enforcement="audit"),
@@ -371,17 +379,21 @@ def test_resolved_evidence_snapshot_model_copy_rejects_attached_traffic(
     )
     _, state = engine.resolve(HarnessResolutionRequest(agent_role="coding"))
 
-    with pytest.raises(
-        ValidationError,
-        match="resolved evidence snapshots must stay traffic-free",
-    ):
-        state.evidence_contracts[0].model_copy(update={attached_flag: True})
+    copied = state.evidence_contracts[0].model_copy(update={attached_flag: True})
+    dumped = copied.model_dump(by_alias=True, mode="python", warnings=False)
+    assert dumped["trafficAttached"] is False
 
 
 @pytest.mark.parametrize("attached_flag", ("execution_attached", "executionAttached"))
-def test_resolved_evidence_readiness_model_copy_rejects_attached_execution(
+def test_resolved_evidence_readiness_model_copy_coerces_attached_execution(
     attached_flag: str,
 ) -> None:
+    """C-4 PR-G2 (raise-to-coerce): ``EvidenceVerdictReadinessMetadata`` is
+    re-parented onto :class:`FalseOnlyAuthorityModel`; the kernel coerces a
+    forged ``Literal[False]`` True to False before the Literal validator runs
+    (strictly stronger, fires on every construction surface). The end-result
+    invariant is preserved: a caller cannot smuggle ``executionAttached``
+    True through ``model_copy``."""
     engine = HarnessEngine(
         evidence_contracts=(
             _contract("coding-basic", agent_roles=("coding",), enforcement="audit"),
@@ -389,11 +401,9 @@ def test_resolved_evidence_readiness_model_copy_rejects_attached_execution(
     )
     _, state = engine.resolve(HarnessResolutionRequest(agent_role="coding"))
 
-    with pytest.raises(
-        ValidationError,
-        match="evidence verdict readiness metadata must stay traffic-free",
-    ):
-        state.evidence_verdict_readiness.model_copy(update={attached_flag: True})
+    copied = state.evidence_verdict_readiness.model_copy(update={attached_flag: True})
+    dumped = copied.model_dump(by_alias=True, mode="python", warnings=False)
+    assert dumped["executionAttached"] is False
 
 
 def test_resolved_harness_state_model_copy_rejects_attached_runtime_fields() -> None:
@@ -404,9 +414,17 @@ def test_resolved_harness_state_model_copy_rejects_attached_runtime_fields() -> 
     )
     _, state = engine.resolve(HarnessResolutionRequest(agent_role="coding"))
 
-    with pytest.raises(ValidationError, match="resolved harness state must stay traffic-free"):
-        state.model_copy(update={"traffic_attached": True})
+    # C-4 PR-G2: ``ResolvedHarnessPresetState`` re-parented onto
+    # ``FalseOnlyAuthorityModel`` -- the kernel coerces a forged
+    # ``Literal[False]`` True to False before the Literal validator runs
+    # (strictly stronger, fires on every construction surface) instead of the
+    # previous per-class ``_reject_attached_input`` raise.
+    copied = state.model_copy(update={"traffic_attached": True})
+    dumped = copied.model_dump(by_alias=True, mode="python", warnings=False)
+    assert dumped["trafficAttached"] is False
 
+    # Non-Literal[False] semantic guards (``_validate_run_depth_pair``) still
+    # raise as before -- the kernel only owns the force-false invariant.
     with pytest.raises(ValidationError, match="main runs must use spawnDepth=0"):
         state.model_copy(update={"spawn_depth": 1})
 
@@ -417,7 +435,16 @@ def test_resolved_harness_state_model_copy_rejects_attached_runtime_fields() -> 
         state.model_copy(update={"runOn": "child"})
 
 
-def test_resolved_harness_state_model_copy_revalidates_nested_snapshots() -> None:
+def test_resolved_harness_state_model_copy_coerces_nested_snapshot_traffic() -> None:
+    """C-4 PR-G2 (raise-to-coerce): ``ResolvedEvidenceContractSnapshot`` is
+    re-parented onto :class:`FalseOnlyAuthorityModel`; ``model_construct``
+    now ALSO routes through the kernel's ``_force_false`` validator, so a
+    forged ``traffic_attached=True`` is coerced to False at construct time
+    (strictly stronger than the previous per-class
+    ``_reject_attached_input`` raise -- the forge is unreachable through the
+    pydantic API). Nesting the (already-coerced) snapshot into a parent
+    ``model_copy`` therefore succeeds; the end-result invariant is preserved:
+    the nested snapshot reads ``trafficAttached`` False."""
     engine = HarnessEngine(
         evidence_contracts=(
             _contract("coding-basic", agent_roles=("coding",), enforcement="audit"),
@@ -439,12 +466,12 @@ def test_resolved_harness_state_model_copy_revalidates_nested_snapshots() -> Non
         traffic_attached=True,
         execution_attached=snapshot.execution_attached,
     )
+    # Kernel coerces the forged True at construct time.
+    assert invalid_snapshot.traffic_attached is False
 
-    with pytest.raises(
-        ValidationError,
-        match="resolved evidence snapshots must stay traffic-free",
-    ):
-        state.model_copy(update={"evidence_contracts": (invalid_snapshot,)})
+    copied = state.model_copy(update={"evidence_contracts": (invalid_snapshot,)})
+    dumped = copied.model_dump(by_alias=True, mode="python", warnings=False)
+    assert dumped["evidenceContracts"][0]["trafficAttached"] is False
 
 
 def test_resolved_evidence_snapshot_rejects_constructed_invalid_rollout() -> None:
@@ -475,7 +502,15 @@ def test_resolved_evidence_snapshot_rejects_constructed_invalid_rollout() -> Non
     assert coerced_rollout.traffic_attached is False
 
 
-def test_resolved_harness_state_rejects_constructed_invalid_evidence_contract() -> None:
+def test_resolved_harness_state_coerces_constructed_invalid_evidence_contract() -> None:
+    """C-4 PR-G2 (raise-to-coerce): ``ResolvedEvidenceContractSnapshot`` is
+    re-parented onto :class:`FalseOnlyAuthorityModel`; the kernel coerces a
+    forged ``Literal[False]`` True to False at ``model_construct`` time
+    (strictly stronger than the previous per-class
+    ``_reject_attached_input`` raise -- the "constructed-invalid snapshot"
+    is unreachable through the pydantic API). Re-validating the parent
+    state therefore succeeds; the end-result invariant is preserved: the
+    nested snapshot reads ``trafficAttached`` False."""
     engine = HarnessEngine(
         evidence_contracts=(
             _contract("coding-basic", agent_roles=("coding",), enforcement="audit"),
@@ -497,17 +532,26 @@ def test_resolved_harness_state_rejects_constructed_invalid_evidence_contract() 
         traffic_attached=True,
         execution_attached=snapshot.execution_attached,
     )
+    # Kernel coerces the forged True at construct time.
+    assert invalid_snapshot.traffic_attached is False
+
     payload = state.model_dump(by_alias=True, mode="python")
     payload["evidenceContracts"] = (invalid_snapshot,)
 
-    with pytest.raises(
-        ValidationError,
-        match="resolved evidence snapshots must stay traffic-free",
-    ):
-        ResolvedHarnessPresetState.model_validate(payload)
+    revalidated = ResolvedHarnessPresetState.model_validate(payload)
+    dumped = revalidated.model_dump(by_alias=True, mode="python", warnings=False)
+    assert dumped["evidenceContracts"][0]["trafficAttached"] is False
 
 
-def test_resolved_harness_state_rejects_constructed_invalid_evidence_readiness() -> None:
+def test_resolved_harness_state_coerces_constructed_invalid_evidence_readiness() -> None:
+    """C-4 PR-G2 (raise-to-coerce): ``EvidenceVerdictReadinessMetadata`` is
+    re-parented onto :class:`FalseOnlyAuthorityModel`; the kernel coerces a
+    forged ``Literal[False]`` True to False at ``model_construct`` time
+    (strictly stronger than the previous per-class
+    ``_reject_attached_input`` raise -- the "constructed-invalid readiness"
+    is unreachable through the pydantic API). Re-validating the parent
+    state therefore succeeds; the end-result invariant is preserved: the
+    nested readiness reads ``trafficAttached`` False."""
     engine = HarnessEngine(
         evidence_contracts=(
             _contract("coding-basic", agent_roles=("coding",), enforcement="audit"),
@@ -522,14 +566,15 @@ def test_resolved_harness_state_rejects_constructed_invalid_evidence_readiness()
         traffic_attached=True,
         execution_attached=readiness.execution_attached,
     )
+    # Kernel coerces the forged True at construct time.
+    assert invalid_readiness.traffic_attached is False
+
     payload = state.model_dump(by_alias=True, mode="python")
     payload["evidenceVerdictReadiness"] = invalid_readiness
 
-    with pytest.raises(
-        ValidationError,
-        match="evidence verdict readiness metadata must stay traffic-free",
-    ):
-        ResolvedHarnessPresetState.model_validate(payload)
+    revalidated = ResolvedHarnessPresetState.model_validate(payload)
+    dumped = revalidated.model_dump(by_alias=True, mode="python", warnings=False)
+    assert dumped["evidenceVerdictReadiness"]["trafficAttached"] is False
 
 
 def test_resolved_harness_import_stays_runner_route_and_dispatcher_free() -> None:

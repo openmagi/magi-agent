@@ -5,7 +5,9 @@ import hashlib
 import re
 from typing import Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from magi_agent.ops.authority import FalseOnlyAuthorityModel
 
 
 DisciplineCheck = Literal[
@@ -54,9 +56,7 @@ _REFUSAL_RE = re.compile(r"^\s*(?:i\s+can(?:not|'t)|unable\s+to|sorry,\s*i\s+can
 _HANGUL_RE = re.compile(r"[\uac00-\ud7a3]")
 
 
-class DisciplineBoundaryConfig(BaseModel):
-    model_config = _MODEL_CONFIG
-
+class DisciplineBoundaryConfig(FalseOnlyAuthorityModel):
     enabled: bool = False
     adk_callbacks_attached: Literal[False] = Field(default=False, alias="adkCallbacksAttached")
     adk_evals_attached: Literal[False] = Field(default=False, alias="adkEvalsAttached")
@@ -64,9 +64,7 @@ class DisciplineBoundaryConfig(BaseModel):
     route_attached: Literal[False] = Field(default=False, alias="routeAttached")
 
 
-class DisciplineAuthorityFlags(BaseModel):
-    model_config = _MODEL_CONFIG
-
+class DisciplineAuthorityFlags(FalseOnlyAuthorityModel):
     adk_callback_invoked: Literal[False] = Field(default=False, alias="adkCallbackInvoked")
     adk_eval_invoked: Literal[False] = Field(default=False, alias="adkEvalInvoked")
     prompt_injected: Literal[False] = Field(default=False, alias="promptInjected")
@@ -75,25 +73,6 @@ class DisciplineAuthorityFlags(BaseModel):
         alias="userVisibleOutputBlocked",
     )
     route_attached: Literal[False] = Field(default=False, alias="routeAttached")
-
-    @classmethod
-    def model_construct(cls, _fields_set: set[str] | None = None, **values: Any) -> Self:
-        _ = _fields_set, values
-        return cls()
-
-    def model_copy(self, *, update: Mapping[str, Any] | None = None, deep: bool = False) -> Self:
-        _ = update, deep
-        return type(self)()
-
-    @field_serializer(
-        "adk_callback_invoked",
-        "adk_eval_invoked",
-        "prompt_injected",
-        "user_visible_output_blocked",
-        "route_attached",
-    )
-    def _serialize_false(self, _value: object) -> bool:
-        return False
 
 
 class DisciplineRequest(BaseModel):

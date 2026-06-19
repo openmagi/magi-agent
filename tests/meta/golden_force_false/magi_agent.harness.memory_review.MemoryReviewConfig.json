@@ -12,7 +12,13 @@
     "productionWritesEnabled": false
   },
   "model_construct_force_false_leaks": [],
-  "model_validate_dump": null,
+  "model_validate_dump": {
+    "backgroundReviewRunnerAttached": false,
+    "enabled": false,
+    "intervalTurns": 10,
+    "liveReviewerAttached": false,
+    "productionWritesEnabled": false
+  },
   "model_validate_force_false_leaks": [],
   "qualname": "magi_agent.harness.memory_review.MemoryReviewConfig"
 }

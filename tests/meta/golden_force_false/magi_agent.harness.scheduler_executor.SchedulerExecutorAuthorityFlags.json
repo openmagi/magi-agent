@@ -10,26 +10,26 @@
     "production_channel_write"
   ],
   "model_construct_dump": {
-    "agentSpawned": true,
-    "backgroundTaskStarted": true,
-    "channelDeliveryPerformed": true,
-    "databaseMutationAllowed": true,
-    "filesystemMutationAllowed": true,
-    "liveToolExecution": true,
-    "networkCallAllowed": true,
-    "productionChannelWrite": true
+    "agentSpawned": false,
+    "backgroundTaskStarted": false,
+    "channelDeliveryPerformed": false,
+    "databaseMutationAllowed": false,
+    "filesystemMutationAllowed": false,
+    "liveToolExecution": false,
+    "networkCallAllowed": false,
+    "productionChannelWrite": false
   },
-  "model_construct_force_false_leaks": [
-    "agent_spawned",
-    "background_task_started",
-    "channel_delivery_performed",
-    "database_mutation_allowed",
-    "filesystem_mutation_allowed",
-    "live_tool_execution",
-    "network_call_allowed",
-    "production_channel_write"
-  ],
-  "model_validate_dump": null,
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": {
+    "agentSpawned": false,
+    "backgroundTaskStarted": false,
+    "channelDeliveryPerformed": false,
+    "databaseMutationAllowed": false,
+    "filesystemMutationAllowed": false,
+    "liveToolExecution": false,
+    "networkCallAllowed": false,
+    "productionChannelWrite": false
+  },
   "model_validate_force_false_leaks": [],
   "qualname": "magi_agent.harness.scheduler_executor.SchedulerExecutorAuthorityFlags"
 }
