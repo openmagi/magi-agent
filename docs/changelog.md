@@ -15,6 +15,38 @@ Versions follow the tags published on GitHub Releases.
 
 ### Fixed
 
+## 0.1.52
+
+### Added
+- Main-agent-as-orchestrator substrate (all default-OFF): a read+plan+spawn main
+  profile, per-spawn `allowedTools` ∩ `spawn_cap` ceiling, and `recipeRefs` that
+  bind a child's pre-turn gates/validators/instructions (#691, #707, #710).
+- Durable work-queue P4 exactly-once and P5 read-only board API + dashboard board
+  view (#693, #703, #709).
+- Deterministic SHACL constraint verifier: engine + customize rule kind + NL→SHACL
+  compiler + dashboard rule builder, all default-OFF (#690, #694, #700, #701).
+- macOS computer-use tool — local, model-agnostic, strictly opt-in and NOT
+  profile-enabled; fail-closed installer with a real-binary-verified cua-driver
+  contract (#689, #711).
+- Answer-quality LLM verification gate, opt-in (#708).
+- Hosted wire-profile parity foundation for the gate5b tool-event shape (#702).
+- Stream the model's thinking in the local dashboard by default (collapsible
+  thinking block); hosted multi-tenant keeps it off (#692).
+
+### Changed
+- Dashboard bundle rebuilt for the Work-panel catch-up, key-aware model picker,
+  LaTeX/KaTeX rendering, Discord/Slack connect UI, SHACL rule builder, and the
+  work-queue board view.
+
+### Fixed
+- Security hardening: credential proxy and permission-scope fail-closed posture,
+  web tools routed through the SSRF-guarded dispatcher, constant-time gateway-token
+  comparison, and active-turn ownership keyed by (session, turn) (#695, #696, #705,
+  #706).
+- Runtime: gate5b runs Bash/TestRun off the event loop, killable persistent-python
+  subprocess timeout, the local dashboard honors the selected model, and the
+  anthropic provider routes through cache-aware Claude (#697, #698, #699, #650).
+
 ## 0.1.51
 
 ### Added
