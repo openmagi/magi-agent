@@ -33,16 +33,8 @@ def test_sse_frames_for_events_and_terminal():
 # Additional focused test (a): suppressed event (thinking_delta) is skipped
 # ---------------------------------------------------------------------------
 
-def test_thinking_delta_events_are_skipped(monkeypatch: pytest.MonkeyPatch):
-    """Events whose sanitized payload is None (e.g. thinking_delta) must be dropped.
-
-    Hosted/default posture: with MAGI_STREAM_THINKING OFF the CLI SSE stream drops
-    thought parts entirely. Pin the flag OFF so the local-serve overlay default
-    (which enables streaming thinking on the user's own trusted machine) can't
-    leak into this process and make the guard falsely fail; the ON path is
-    covered by the dedicated thinking_delta streaming tests.
-    """
-    monkeypatch.delenv("MAGI_STREAM_THINKING", raising=False)
+def test_thinking_delta_events_are_skipped():
+    """Events whose sanitized payload is None (e.g. thinking_delta) must be dropped."""
     events = [
         RuntimeEvent(
             type="token",

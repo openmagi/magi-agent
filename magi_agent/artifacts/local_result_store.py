@@ -7,6 +7,7 @@ from typing import Any, Literal, Self, TypeGuard
 
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
 
+from magi_agent.ops.safety import UNSAFE_TEXT_RE
 from magi_agent.tools.output_budget import BudgetedToolResult
 
 
@@ -19,31 +20,10 @@ _MODEL_CONFIG = ConfigDict(
     validate_default=True,
     hide_input_in_errors=True,
 )
-_PRIVATE_TEXT_RE = re.compile(
-    r"(?:"
-    r"authorization\s*:\s*bearer\s+[A-Za-z0-9._~+/=-]+|"
-    r"\bbearer\s+[A-Za-z0-9._~+/=-]+|"
-    r"\bcookie\s*:\s*[^\n\r]+|"
-    r"\bsid=[A-Za-z0-9._-]+|"
-    r"\bsk-[A-Za-z0-9._-]+|"
-    r"gh[opusr]_[A-Za-z0-9_]+|"
-    r"github_pat_[A-Za-z0-9_]+|"
-    r"xox[a-z]-[A-Za-z0-9._-]+|"
-    r"AKIA[0-9A-Z]{8,}|"
-    r"AIza[A-Za-z0-9_-]+|"
-    r"/workspace(?:/[^\s,;}\"']*)?|"
-    r"/data/bots(?:/[^\s,;}\"']*)?|"
-    r"/Users(?:/[^\s,;}\"']*)?|"
-    r"/home(?:/[^\s,;}\"']*)?|"
-    r"/var/lib/kubelet(?:/[^\s,;}\"']*)?|"
-    r"s3://[^\s,;}\"']+|"
-    r"gs://[^\s,;}\"']+|"
-    r"supabase://[^\s,;}\"']+|"
-    r"raw[_ -]?(?:tool|child|prompt|transcript|output|result|log|args)|"
-    r"hidden[_ -]?reasoning|chain[_ -]?of[_ -]?thought"
-    r")",
-    re.IGNORECASE,
-)
+# C-1: forked secret/private-text regex replaced by the union denylist kernel
+# in ops/safety (strict superset, incl. cloud-storage URIs; local placeholder/
+# clip preserved below).
+_PRIVATE_TEXT_RE = UNSAFE_TEXT_RE
 _SENSITIVE_KEY_MARKERS = (
     "authorization",
     "cookie",

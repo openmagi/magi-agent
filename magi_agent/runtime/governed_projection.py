@@ -6,6 +6,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from magi_agent.ops.safety import contains_secret_marker
+
 
 ProjectionMode = Literal[
     "raw_text_allowed",
@@ -27,24 +29,7 @@ _MODEL_CONFIG = ConfigDict(
     hide_input_in_errors=True,
 )
 _SAFE_REF_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,180}$")
-_JWT_LIKE_RE = re.compile(
-    r"(?:^|[^A-Za-z0-9_-])[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\."
-    r"[A-Za-z0-9_-]{10,}(?:$|[^A-Za-z0-9_-])"
-)
-_PRIVATE_TEXT_RE = re.compile(
-    r"(?:"
-    r"authorization\s*:|set-cookie\s*:|\bcookie\b|\bbearer\s+[A-Za-z0-9._~+/=-]{6,}|"
-    r"\bsid=[A-Za-z0-9._-]+|\bsk-[A-Za-z0-9._-]{6,}|gh[opusr]_[A-Za-z0-9_]{6,}|"
-    r"github_pat_[A-Za-z0-9_]+|xox[a-z]-[A-Za-z0-9._-]+|AKIA[0-9A-Z]{8,}|"
-    r"AIza[A-Za-z0-9_-]+|api[_-]?key\s*[:=]|password\s*[:=]|secret\s*[:=]|"
-    r"token\s*[:=]|private[_-]?key|"
-    r"/Users(?:/|\b)|/home(?:/|\b)|/workspace(?:/|\b)|/data/bots(?:/|\b)|"
-    r"/var/lib/kubelet(?:/|\b)|pvc-[A-Za-z0-9-]+|"
-    r"raw[_ -]?(?:tool|child|prompt|transcript|output|result|log|args)|"
-    r"hidden[_ -]?reasoning|chain[_ -]?of[_ -]?thought"
-    r")",
-    re.IGNORECASE,
-)
+# C-1: forked secret/private-text + JWT regexes replaced by the union kernel.
 
 
 class GovernedClaim(BaseModel):
@@ -146,7 +131,7 @@ class ProjectionDecision(BaseModel):
         if value is None:
             return None
         text = value.strip()
-        if _PRIVATE_TEXT_RE.search(text) or _JWT_LIKE_RE.search(text):
+        if contains_secret_marker(text):
             raise ValueError("user-visible projection text must be public-safe")
         return text
 
@@ -300,7 +285,7 @@ def _safe_ref(value: str, *, field_name: str) -> str:
 
 
 def _contains_private_text(value: str) -> bool:
-    return bool(_PRIVATE_TEXT_RE.search(value) or _JWT_LIKE_RE.search(value))
+    return contains_secret_marker(value)
 
 
 def _safe_public_ref(value: str) -> str:
