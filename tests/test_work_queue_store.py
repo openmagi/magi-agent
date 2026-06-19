@@ -257,6 +257,22 @@ def test_parity_record_failure_breaker_boundary(store):
     assert t2.consecutive_failures == 2
 
 
+# (c1) record_failure honors task-level max_retries: max_retries=1 → 1st failure → blocked
+def test_parity_record_failure_honors_task_max_retries(store):
+    store.create(WorkTask(id="t", title="x", status="running", created_at=1, max_retries=1))
+    t1 = store.record_failure("t", outcome="crashed")
+    assert t1.status == "blocked"                  # 1st failure with max_retries=1 → blocked
+    assert t1.consecutive_failures == 1
+
+
+# (c2) record_failure max_retries=None falls back to failure_limit argument
+def test_parity_record_failure_max_retries_none_falls_back_to_arg(store):
+    store.create(WorkTask(id="t", title="x", status="running", created_at=1))  # max_retries=None
+    t1 = store.record_failure("t", outcome="crashed", failure_limit=2)
+    assert t1.status == "ready"                    # 1st failure with limit=2 → ready (unchanged today)
+    assert t1.consecutive_failures == 1
+
+
 # (d) complete: sets completed, resets consecutive_failures=0, idempotent on 2nd call
 def test_parity_complete_idempotent(store):
     store.create(WorkTask(id="t", title="x", status="running", created_at=1,
