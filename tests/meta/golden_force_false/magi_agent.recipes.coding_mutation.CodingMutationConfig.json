@@ -5,12 +5,14 @@
   "model_construct_dump": {
     "enabled": false,
     "localFakeApplyEnabled": false,
-    "productionWorkspaceMutationEnabled": true
+    "productionWorkspaceMutationEnabled": false
   },
-  "model_construct_force_false_leaks": [
-    "production_workspace_mutation_enabled"
-  ],
-  "model_validate_dump": null,
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": {
+    "enabled": false,
+    "localFakeApplyEnabled": false,
+    "productionWorkspaceMutationEnabled": false
+  },
   "model_validate_force_false_leaks": [],
   "qualname": "magi_agent.recipes.coding_mutation.CodingMutationConfig"
 }

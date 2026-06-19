@@ -21,6 +21,8 @@ from pydantic import (
     model_validator,
 )
 
+from magi_agent.ops.authority import FalseOnlyAuthorityModel
+
 
 _MODEL_CONFIG = ConfigDict(
     frozen=True,
@@ -265,10 +267,35 @@ def _mark_registry_admitted(snapshot: object, snapshot_digest: object) -> None:
     )
 
 
-class RecipeStackInput(BaseModel):
-    """Sanitized, local-only recipe stack input; refs remain untrusted until admission."""
+class RecipeStackInput(FalseOnlyAuthorityModel):
+    """Sanitized, local-only recipe stack input; refs remain untrusted until admission.
 
-    model_config = _MODEL_CONFIG
+    C-4 PR-G3: re-parented onto ``FalseOnlyAuthorityModel``. The kernel's
+    introspection-based ``_force_false`` validator + ``_ser`` serializer +
+    ``model_construct`` route-through-validate cover the ``trusted`` /
+    ``admitted`` ``Literal[False]`` fields uniformly. The previous custom
+    ``model_construct`` / ``model_copy`` were ``cls(**values)`` /
+    dump-and-revalidate -- functionally equivalent to the kernel's defaults
+    given populate_by_name + extra=forbid + frozen=True. The 2-field
+    ``@field_serializer("trusted", "admitted")`` is dropped (kernel covers it).
+    PRESERVED: the ``default_off`` ``@field_serializer`` (Literal[True], not in
+    scope for the kernel), the auto-refs serializer, the public-context
+    serializers, ``_normalize_disabled_auto_refs`` ``@model_validator(before)``
+    (semantic guard), ``revalidate_instances="always"`` (the only kernel
+    config drift -- preserved so ``model_validate(existing_instance)`` still
+    re-runs validation after a frozen-bypass ``__dict__`` mutation, per
+    ``tests/test_recipe_composition_stack.py::
+    test_model_validate_revalidates_existing_instances``).
+    """
+
+    model_config = ConfigDict(
+        frozen=True,
+        populate_by_name=True,
+        extra="forbid",
+        validate_default=True,
+        revalidate_instances="always",
+        hide_input_in_errors=True,
+    )
 
     explicit_recipe_refs: tuple[str, ...] = Field(default=(), alias="explicitRecipeRefs")
     auto_recipe_refs: tuple[str, ...] = Field(default=(), alias="autoRecipeRefs")
@@ -286,10 +313,6 @@ class RecipeStackInput(BaseModel):
     @field_serializer("default_off")
     def _serialize_default_off(self, value: object) -> bool:
         return True
-
-    @field_serializer("trusted", "admitted")
-    def _serialize_authority_false(self, value: object) -> bool:
-        return False
 
     @field_serializer("allow_additional_auto_recipes")
     def _serialize_allow_additional_auto_recipes(self, value: object) -> bool:
@@ -338,25 +361,6 @@ class RecipeStackInput(BaseModel):
                 _sanitize_recipe_refs(data["auto_recipe_refs"])
                 data["auto_recipe_refs"] = ()
         return data
-
-    @classmethod
-    def model_construct(
-        cls,
-        _fields_set: set[str] | None = None,
-        **values: Any,
-    ) -> Self:
-        return cls(**values)
-
-    def model_copy(
-        self,
-        *,
-        update: Mapping[str, Any] | None = None,
-        deep: bool = False,
-    ) -> "RecipeStackInput":
-        data = BaseModel.model_dump(self, by_alias=False, mode="python", warnings=False)
-        if update:
-            data.update(_alias_updates(RecipeStackInput, update))
-        return RecipeStackInput.model_validate(data)
 
     @field_validator(
         "explicit_recipe_refs",

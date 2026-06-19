@@ -5,8 +5,9 @@ import hashlib
 import re
 from typing import Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from magi_agent.ops.authority import FalseOnlyAuthorityModel
 from magi_agent.tools.read_ledger import (
     ReadLedger,
     WorkspaceMutationReadCheck,
@@ -37,9 +38,10 @@ _MODEL_CONFIG = ConfigDict(
 _SHA256_REF_RE = re.compile(r"^sha256:[a-f0-9]{64}$")
 
 
-class CodingMutationConfig(BaseModel):
-    model_config = _MODEL_CONFIG
-
+class CodingMutationConfig(FalseOnlyAuthorityModel):
+    # C-4 PR-G3: re-parented onto FalseOnlyAuthorityModel. Closes the
+    # pre-existing ``model_construct`` leak on
+    # ``productionWorkspaceMutationEnabled`` (raise-to-coerce on validate).
     enabled: bool = False
     local_fake_apply_enabled: bool = Field(default=False, alias="localFakeApplyEnabled")
     production_workspace_mutation_enabled: Literal[False] = Field(
@@ -48,9 +50,12 @@ class CodingMutationConfig(BaseModel):
     )
 
 
-class CodingMutationAuthorityFlags(BaseModel):
-    model_config = _MODEL_CONFIG
-
+class CodingMutationAuthorityFlags(FalseOnlyAuthorityModel):
+    # C-4 PR-G3: re-parented onto FalseOnlyAuthorityModel. The kernel owns the
+    # introspection-based ``_force_false`` validator + ``_ser`` serializer +
+    # ``model_construct`` / ``model_copy`` route-through-validate behaviour
+    # that previously needed hand-pasted overrides plus a 5-field
+    # ``@field_serializer`` and the ``_false_authority_overrides()`` helper.
     recipe_enabled: bool = Field(default=False, alias="recipeEnabled")
     local_fake_apply_enabled: bool = Field(default=False, alias="localFakeApplyEnabled")
     filesystem_write_attempted: Literal[False] = Field(
@@ -67,38 +72,6 @@ class CodingMutationAuthorityFlags(BaseModel):
         default=False,
         alias="userVisibleOutputAllowed",
     )
-
-    @classmethod
-    def model_construct(
-        cls,
-        _fields_set: set[str] | None = None,
-        **values: Any,
-    ) -> Self:
-        _ = _fields_set
-        values.update(_false_authority_overrides())
-        return cls.model_validate(values)
-
-    def model_copy(
-        self,
-        *,
-        update: Mapping[str, Any] | None = None,
-        deep: bool = False,
-    ) -> Self:
-        data = self.model_dump(by_alias=True, mode="python", warnings=False)
-        if update:
-            data.update(dict(update))
-        data.update(_false_authority_overrides())
-        return type(self).model_validate(data)
-
-    @field_serializer(
-        "filesystem_write_attempted",
-        "production_workspace_mutation_enabled",
-        "live_tool_attached",
-        "route_attached",
-        "user_visible_output_allowed",
-    )
-    def _serialize_false(self, _value: object) -> bool:
-        return False
 
 
 class CodingMutationRequest(BaseModel):
@@ -169,7 +142,7 @@ class CodingMutationMaterialization(BaseModel):
             "toolNames": list(self.tool_names),
             "ledgerRequired": self.ledger_required,
             "policyRefs": list(self.policy_refs),
-            "attachmentFlags": _false_authority_overrides(),
+            "attachmentFlags": dict(_FALSE_ATTACHMENT_FLAGS),
         }
 
 
@@ -252,10 +225,12 @@ class CodingMutationRecipe:
         self.read_ledger = read_ledger
 
     def evaluate(self, request: CodingMutationRequest) -> CodingMutationDecision:
+        # C-4 PR-G3: ``_false_authority_overrides()`` spread dropped -- the
+        # kernel ``FalseOnlyAuthorityModel`` base force-falses the same fields
+        # automatically when ``CodingMutationAuthorityFlags`` is constructed.
         flags = CodingMutationAuthorityFlags(
             recipeEnabled=self.config.enabled,
             localFakeApplyEnabled=self.config.local_fake_apply_enabled,
-            **_false_authority_overrides(),
         )
         path_ref = workspace_path_ref(request.workspace_ref, request.path)
         if not self.config.enabled:
@@ -709,23 +684,28 @@ def _mutation_kind_matches_tool(request: CodingMutationRequest) -> bool:
     return request.mutation_kind == "patch"
 
 
-def _false_authority_overrides() -> dict[str, bool]:
-    return {
-        "filesystemWriteAttempted": False,
-        "productionWorkspaceMutationEnabled": False,
-        "liveToolAttached": False,
-        "routeAttached": False,
-        "userVisibleOutputAllowed": False,
-    }
+# C-4 PR-G3: ``_false_authority_overrides()`` helper has been dropped. The
+# kernel ``FalseOnlyAuthorityModel`` base on ``CodingMutationAuthorityFlags``
+# now force-falses every ``Literal[False]`` field on every construction
+# surface; the explicit spread is no longer required.
+#
+# Module-level constant inlined for the two recipe materialization callsites
+# whose ``attachment_flags`` field is ``Mapping[str, Literal[False]]`` (a
+# dict-typed field, NOT a force-false pydantic model).
+_FALSE_ATTACHMENT_FLAGS: dict[str, bool] = {
+    "filesystemWriteAttempted": False,
+    "productionWorkspaceMutationEnabled": False,
+    "liveToolAttached": False,
+    "routeAttached": False,
+    "userVisibleOutputAllowed": False,
+}
 
 
 def _coerce_authority_flags(value: object) -> CodingMutationAuthorityFlags:
     if isinstance(value, CodingMutationAuthorityFlags):
-        return value.model_copy(update=_false_authority_overrides())
+        return value.model_copy()
     if isinstance(value, Mapping):
-        data = dict(value)
-        data.update(_false_authority_overrides())
-        return CodingMutationAuthorityFlags.model_validate(data)
+        return CodingMutationAuthorityFlags.model_validate(dict(value))
     return CodingMutationAuthorityFlags()
 
 
@@ -776,7 +756,7 @@ def _is_public_ref(value: str) -> bool:
 
 
 def materialize_coding_mutation_recipe() -> CodingMutationMaterialization:
-    return CodingMutationMaterialization(attachmentFlags=_false_authority_overrides())
+    return CodingMutationMaterialization(attachmentFlags=dict(_FALSE_ATTACHMENT_FLAGS))
 
 
 __all__ = [

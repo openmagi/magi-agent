@@ -204,6 +204,7 @@ graph LR
     recipes --> harness
     recipes --> memory
     recipes --> meta_orchestration
+    recipes --> ops
     recipes --> packs
     recipes --> research
     recipes --> runtime
@@ -1234,7 +1235,7 @@ graph LR
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
 | __init__.py | — | — | transport/health.py, transport/product_admin.py |
-| authority.py | Frozen-contract / authority model bases (C-4 / C-5 shared home). | — | channels/discord_adapter.py, channels/dispatcher.py, channels/push_delivery.py, channels/runtime_boundary.py, channels/telegram_adapter.py, channels/telegram_boundary.py, channels/workflow_routing.py, config/models.py, connectors/credential_lease.py, connectors/marketplace.py, connectors/registry.py, evidence/builtin.py, evidence/child_runtime_envelope.py, evidence/citation_audit.py, evidence/coding_tool_receipts.py, evidence/coding_verification.py, evidence/ledger.py, evidence/reports.py, evidence/research_final_gate.py, evidence/rollout.py, evidence/runtime_receipts.py, evidence/source_ledger.py, evidence/subagent.py, evidence/types.py, harness/autopilot.py, harness/cron_runtime.py, harness/discipline_boundary.py, harness/e2e_readiness.py, harness/goal_loop.py, harness/inference_scaling.py, harness/learning_executor.py, harness/memory_compaction.py, harness/memory_recall.py, harness/memory_review.py, harness/memory_write.py, harness/parallel_execution.py, harness/plan_gate.py, harness/resolved.py, harness/scheduler_delivery.py, harness/scheduler_executor.py, harness/scheduler_runtime.py, harness/skill_curator.py, harness/verifier_bus.py, harness/workflow_executor.py, memory/conformance.py, memory/contracts.py, memory/namespaces.py, memory/policy.py, memory/projection.py, memory/recall_ledger.py, memory/write_boundary.py, ops/safety.py, permissions/auto_control.py, tools/read_ledger.py, tools/scheduler.py |
+| authority.py | Frozen-contract / authority model bases (C-4 / C-5 shared home). | — | channels/discord_adapter.py, channels/dispatcher.py, channels/push_delivery.py, channels/runtime_boundary.py, channels/telegram_adapter.py, channels/telegram_boundary.py, channels/workflow_routing.py, config/models.py, connectors/credential_lease.py, connectors/marketplace.py, connectors/registry.py, evidence/builtin.py, evidence/child_runtime_envelope.py, evidence/citation_audit.py, evidence/coding_tool_receipts.py, evidence/coding_verification.py, evidence/ledger.py, evidence/reports.py, evidence/research_final_gate.py, evidence/rollout.py, evidence/runtime_receipts.py, evidence/source_ledger.py, evidence/subagent.py, evidence/types.py, harness/autopilot.py, harness/cron_runtime.py, harness/discipline_boundary.py, harness/e2e_readiness.py, harness/goal_loop.py, harness/inference_scaling.py, harness/learning_executor.py, harness/memory_compaction.py, harness/memory_recall.py, harness/memory_review.py, harness/memory_write.py, harness/parallel_execution.py, harness/plan_gate.py, harness/resolved.py, harness/scheduler_delivery.py, harness/scheduler_executor.py, harness/scheduler_runtime.py, harness/skill_curator.py, harness/verifier_bus.py, harness/workflow_executor.py, memory/conformance.py, memory/contracts.py, memory/namespaces.py, memory/policy.py, memory/projection.py, memory/recall_ledger.py, memory/write_boundary.py, ops/safety.py, permissions/auto_control.py, recipes/coding_evidence_gate.py, recipes/coding_mutation.py, recipes/coding_subagents.py, recipes/composition.py, recipes/opencode_child_lifecycle.py, recipes/opencode_permission_patterns.py, recipes/research_agents.py, recipes/research_child_runner.py, tools/read_ledger.py, tools/scheduler.py |
 | health.py | — | daemon, scheduler_job_execution | adk_bridge/event_adapter.py, gateway/daemon.py, shadow/gate5b4c3_live_runner_boundary.py, transport/sse.py, transport/streaming_chat_route.py |
 | job_queue.py | — | safety | — |
 | metrics.py | — | safety | — |
@@ -1335,11 +1336,11 @@ graph LR
 |---|---|---|---|
 | __init__.py | — | compiler, recipes, selector_validation | cli/engine.py |
 | best_of_n.py | General Best-of-N budgeted test-time scaling wrapper. | manifest | recipes/cross_verify.py |
-| coding_evidence_gate.py | — | coding_verification, types | — |
-| coding_mutation.py | — | edit_matching, env, read_ledger | recipes/coding_subagents.py |
-| coding_subagents.py | — | coding_mutation, read_ledger, runtime | — |
+| coding_evidence_gate.py | — | authority, coding_verification, types | — |
+| coding_mutation.py | — | authority, edit_matching, env, read_ledger | recipes/coding_subagents.py |
+| coding_subagents.py | — | authority, coding_mutation, read_ledger, runtime | — |
 | compiler.py | — | discovery, env, learning_usage | cli/real_runner.py, cli/tests/test_force_recipe_source_grounded_selection.py, cli/tests/test_runtime_policy_wiring.py, cli/tests/test_source_grounded_recipe_gate_integration.py, packs/dashboard_authored.py, packs/registries.py, recipes/__init__.py, recipes/first_party/discovery.py, recipes/first_party/learning_usage.py, recipes/kernel_recipe_packs.py, recipes/materializer.py, recipes/recipe_routing.py, recipes/workflow_recipe.py, shadow/gate2_recipe_profile_resolver.py, transport/chat.py, transport/chat_routes.py |
-| composition.py | — | — | recipes/effective_contract.py, recipes/merge_algebra.py |
+| composition.py | — | authority | recipes/effective_contract.py, recipes/merge_algebra.py |
 | cross_verify.py | Unified cross-verification recipe — fan out one prompt across N models, vote. | best_of_n, manifest, runtime | — |
 | effective_contract.py | — | composition, hook_composition, merge_algebra | recipes/projection.py |
 | hook_composition.py | — | — | recipes/effective_contract.py |
@@ -1351,14 +1352,14 @@ graph LR
 | ledger_workforce.py | Multi-agent workforce mode for ledger-based orchestration (Phase 4). | child_roles, env, ledger_task | — |
 | materializer.py | — | compiler, context_budget, model_tiers, phase_routing, phase_routing_defaults, reliability_budget, reliability_policy | cli/real_runner.py, cli/tests/test_source_grounded_recipe_gate_integration.py, recipes/workflow_recipe.py, transport/chat.py, transport/chat_routes.py |
 | merge_algebra.py | — | composition | recipes/effective_contract.py |
-| opencode_child_lifecycle.py | — | child_roles, child_runtime_envelope, subagent | — |
-| opencode_permission_patterns.py | — | control | — |
+| opencode_child_lifecycle.py | — | authority, child_roles, child_runtime_envelope, subagent | — |
+| opencode_permission_patterns.py | — | authority, control | — |
 | phase_routing_defaults.py | — | model_tiers, phase_routing, reliability_policy | recipes/materializer.py |
 | projection.py | — | effective_contract | — |
 | recipe_routing.py | Cross-family description-based recipe routing — generalizes the GA-only | compiler, context, env, kernel_recipe_packs, manifest, recipe_routing_constants, registry, result | cli/engine.py, cli/real_runner.py, cli/tool_runtime.py |
 | reliability_policy.py | — | model_tiers | recipes/materializer.py, recipes/phase_routing_defaults.py |
-| research_agents.py | — | — | harness/research_routing.py |
-| research_child_runner.py | — | runtime | harness/workflow_executor.py |
+| research_agents.py | — | authority | harness/research_routing.py |
+| research_child_runner.py | — | authority, runtime | harness/workflow_executor.py |
 | retry_repair_policies.py | — | turn_utilities | adk_bridge/edit_retry_reflection.py |
 | selector_validation.py | — | — | recipes/__init__.py |
 | workflow_recipe.py | Track 17 PR5 — Workflow-as-recipe + reuse ("save as command"). | child_acceptance, compiler, cross_review, final_assembly, inspection_loop, kernel_recipe_packs, materializer, registry, workflow_executor | — |

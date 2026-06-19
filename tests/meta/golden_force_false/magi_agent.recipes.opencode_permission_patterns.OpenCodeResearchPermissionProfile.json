@@ -3,9 +3,31 @@
     "live_authority_allowed",
     "production_broad_authority_allowed"
   ],
-  "model_construct_dump": null,
+  "model_construct_dump": {
+    "activationGate": "policy-fixture-only-hard-deny-preserved",
+    "adkPolicyMetadataOnly": true,
+    "defaultOff": true,
+    "enabled": false,
+    "fixtureOnly": true,
+    "hardDenies": [],
+    "liveAuthorityAllowed": false,
+    "localOnly": true,
+    "productionBroadAuthorityAllowed": false,
+    "softRules": []
+  },
   "model_construct_force_false_leaks": [],
-  "model_validate_dump": null,
+  "model_validate_dump": {
+    "activationGate": "policy-fixture-only-hard-deny-preserved",
+    "adkPolicyMetadataOnly": true,
+    "defaultOff": true,
+    "enabled": false,
+    "fixtureOnly": true,
+    "hardDenies": [],
+    "liveAuthorityAllowed": false,
+    "localOnly": true,
+    "productionBroadAuthorityAllowed": false,
+    "softRules": []
+  },
   "model_validate_force_false_leaks": [],
   "qualname": "magi_agent.recipes.opencode_permission_patterns.OpenCodeResearchPermissionProfile"
 }

@@ -3,9 +3,35 @@
     "admitted",
     "trusted"
   ],
-  "model_construct_dump": null,
+  "model_construct_dump": {
+    "admitted": false,
+    "allowAdditionalAutoRecipes": false,
+    "autoRecipeRefs": [],
+    "defaultOff": true,
+    "defaultRecipeRefs": [],
+    "explicitRecipeRefs": [],
+    "hardSafetyRefs": [],
+    "pluginRecipeRefs": [],
+    "selectionSource": null,
+    "sessionId": null,
+    "trusted": false,
+    "turnId": null
+  },
   "model_construct_force_false_leaks": [],
-  "model_validate_dump": null,
+  "model_validate_dump": {
+    "admitted": false,
+    "allowAdditionalAutoRecipes": false,
+    "autoRecipeRefs": [],
+    "defaultOff": true,
+    "defaultRecipeRefs": [],
+    "explicitRecipeRefs": [],
+    "hardSafetyRefs": [],
+    "pluginRecipeRefs": [],
+    "selectionSource": null,
+    "sessionId": null,
+    "trusted": false,
+    "turnId": null
+  },
   "model_validate_force_false_leaks": [],
   "qualname": "magi_agent.recipes.composition.RecipeStackInput"
 }

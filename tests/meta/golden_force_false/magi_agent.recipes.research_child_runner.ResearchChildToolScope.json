@@ -12,16 +12,26 @@
       "ListFiles",
       "InspectSource"
     ],
-    "liveProviderCallsAllowed": true,
-    "mutationIntentAllowed": true,
+    "liveProviderCallsAllowed": false,
+    "mutationIntentAllowed": false,
     "parentOwnsLifecycle": true,
     "sourceInspectionOnly": true
   },
-  "model_construct_force_false_leaks": [
-    "live_provider_calls_allowed",
-    "mutation_intent_allowed"
-  ],
-  "model_validate_dump": null,
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": {
+    "allowedTools": [
+      "SourceLedgerRead",
+      "SourceLedgerList",
+      "FileRead",
+      "SearchFiles",
+      "ListFiles",
+      "InspectSource"
+    ],
+    "liveProviderCallsAllowed": false,
+    "mutationIntentAllowed": false,
+    "parentOwnsLifecycle": true,
+    "sourceInspectionOnly": true
+  },
   "model_validate_force_false_leaks": [],
   "qualname": "magi_agent.recipes.research_child_runner.ResearchChildToolScope"
 }

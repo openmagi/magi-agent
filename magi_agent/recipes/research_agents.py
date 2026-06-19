@@ -7,6 +7,8 @@ from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
 
+from magi_agent.ops.authority import FalseOnlyAuthorityModel
+
 
 ResearchAgentType = Literal["direct", "explore", "plan", "verifier"]
 ResearchMaterializationStatus = Literal["direct", "ready", "blocked"]
@@ -158,9 +160,16 @@ class ResearchMaterializationDecision(BaseModel):
         return dict(value)
 
 
-class ScoutResearchToolGrant(BaseModel):
-    model_config = _MODEL_CONFIG
-
+class ScoutResearchToolGrant(FalseOnlyAuthorityModel):
+    # C-4 PR-G3: re-parented onto FalseOnlyAuthorityModel. Closes the
+    # pre-existing ``model_construct`` leak set of 2 fields
+    # (``mutatesWorkspace`` / ``liveExecutionAllowed`` -- raise-to-coerce on
+    # validate). Custom ``model_construct`` / ``model_copy`` dropped
+    # (``_revalidated_model_copy`` was alias-aware dump-and-revalidate; the
+    # kernel's by_alias=True model_copy is equivalent). PRESERVED:
+    # ``_validate_scout_grant`` ``@model_validator(mode="after")`` (fixture-
+    # name shape guard). ``revalidate_instances="always"`` is dropped
+    # (kernel default "never") -- no test depends on this behaviour.
     tool_name: str = Field(alias="toolName")
     permission: ResearchToolPermission = "read"
     read_only: Literal[True] = Field(default=True, alias="readOnly")
@@ -182,26 +191,14 @@ class ScoutResearchToolGrant(BaseModel):
             raise ValueError("ScoutResearchAgent grant rationale must be non-empty")
         return self
 
-    @classmethod
-    def model_construct(
-        cls,
-        _fields_set: set[str] | None = None,
-        **values: Any,
-    ) -> Self:
-        return cls(**values)
 
-    def model_copy(
-        self,
-        *,
-        update: Mapping[str, Any] | None = None,
-        deep: bool = False,
-    ) -> Self:
-        return _revalidated_model_copy(self, update=update)
-
-
-class ScoutResearchAgentProfile(BaseModel):
-    model_config = _MODEL_CONFIG
-
+class ScoutResearchAgentProfile(FalseOnlyAuthorityModel):
+    # C-4 PR-G3: re-parented onto FalseOnlyAuthorityModel. The kernel handles
+    # the 12 ``Literal[False]`` authority/attachment fields uniformly.
+    # PRESERVED: ``_validate_profile`` ``@model_validator(mode="after")``
+    # (semantic shape guard over tool grants + attachment_flags equality),
+    # ``_serialize_attachment_flags`` (non-Literal[False] Mapping field).
+    # Custom ``model_construct`` / ``model_copy`` dropped.
     profile_key: Literal["opencode.scout_research_agent"] = Field(
         default="opencode.scout_research_agent",
         alias="profileKey",
@@ -296,26 +293,14 @@ class ScoutResearchAgentProfile(BaseModel):
     def _serialize_attachment_flags(self, value: Mapping[str, bool]) -> dict[str, bool]:
         return dict(value)
 
-    @classmethod
-    def model_construct(
-        cls,
-        _fields_set: set[str] | None = None,
-        **values: Any,
-    ) -> Self:
-        return cls(**values)
 
-    def model_copy(
-        self,
-        *,
-        update: Mapping[str, Any] | None = None,
-        deep: bool = False,
-    ) -> Self:
-        return _revalidated_model_copy(self, update=update)
-
-
-class ScoutResearchAgentRecipeDecision(BaseModel):
-    model_config = _MODEL_CONFIG
-
+class ScoutResearchAgentRecipeDecision(FalseOnlyAuthorityModel):
+    # C-4 PR-G3: re-parented onto FalseOnlyAuthorityModel (same rationale as
+    # ScoutResearchAgentProfile). PRESERVED: ``_validate_decision``
+    # ``@model_validator(mode="after")`` (rich semantic guard over status /
+    # tool grants / prompt contract / denied capabilities / reason codes),
+    # the attachment_flags serializer. Custom ``model_construct`` /
+    # ``model_copy`` dropped.
     status: ScoutResearchRecipeStatus
     profile_key: ScoutResearchRecipeProfileKey = Field(alias="profileKey")
     reason_codes: tuple[str, ...] = Field(default=(), alias="reasonCodes")
@@ -419,22 +404,6 @@ class ScoutResearchAgentRecipeDecision(BaseModel):
     @field_serializer("attachment_flags")
     def _serialize_attachment_flags(self, value: Mapping[str, bool]) -> dict[str, bool]:
         return dict(value)
-
-    @classmethod
-    def model_construct(
-        cls,
-        _fields_set: set[str] | None = None,
-        **values: Any,
-    ) -> Self:
-        return cls(**values)
-
-    def model_copy(
-        self,
-        *,
-        update: Mapping[str, Any] | None = None,
-        deep: bool = False,
-    ) -> Self:
-        return _revalidated_model_copy(self, update=update)
 
 
 def materialize_research_agent(

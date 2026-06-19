@@ -5,8 +5,9 @@ import hashlib
 import re
 from typing import Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_serializer, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
+from magi_agent.ops.authority import FalseOnlyAuthorityModel
 from magi_agent.recipes.coding_mutation import (
     CodingMutationConfig,
     CodingMutationDecision,
@@ -48,9 +49,10 @@ _PRIVATE_TEXT_RE = re.compile(
 )
 
 
-class CodingSubagentConfig(BaseModel):
-    model_config = _MODEL_CONFIG
-
+class CodingSubagentConfig(FalseOnlyAuthorityModel):
+    # C-4 PR-G3: re-parented onto FalseOnlyAuthorityModel. Closes the
+    # pre-existing ``model_construct`` leak set of 5 fields
+    # (raise-to-coerce on validate).
     enabled: bool = False
     local_fake_child_runner_enabled: bool = Field(
         default=False,
@@ -94,9 +96,12 @@ class CodingSubagentConfig(BaseModel):
         return tuple(dict.fromkeys(safe))
 
 
-class CodingSubagentAuthorityFlags(BaseModel):
-    model_config = _MODEL_CONFIG
-
+class CodingSubagentAuthorityFlags(FalseOnlyAuthorityModel):
+    # C-4 PR-G3: re-parented onto FalseOnlyAuthorityModel. The kernel's
+    # ``_force_false`` validator + ``_ser`` serializer + construction-surface
+    # route-through-validate replaces the hand-pasted ``model_construct`` /
+    # ``model_copy`` overrides + 8-field ``@field_serializer`` + the
+    # ``_false_authority_overrides()`` helper.
     recipe_enabled: bool = Field(default=False, alias="recipeEnabled")
     local_fake_child_runner_enabled: bool = Field(
         default=False,
@@ -119,41 +124,6 @@ class CodingSubagentAuthorityFlags(BaseModel):
     production_authority: Literal[False] = Field(default=False, alias="productionAuthority")
     traffic_attached: Literal[False] = Field(default=False, alias="trafficAttached")
     user_visible_activation: Literal[False] = Field(default=False, alias="userVisibleActivation")
-
-    @classmethod
-    def model_construct(
-        cls,
-        _fields_set: set[str] | None = None,
-        **values: Any,
-    ) -> Self:
-        _ = _fields_set
-        values.update(_false_authority_overrides())
-        return cls.model_validate(values)
-
-    def model_copy(
-        self,
-        *,
-        update: Mapping[str, Any] | None = None,
-        deep: bool = False,
-    ) -> Self:
-        data = self.model_dump(by_alias=True, mode="python", warnings=False)
-        if update:
-            data.update(dict(update))
-        data.update(_false_authority_overrides())
-        return type(self).model_validate(data)
-
-    @field_serializer(
-        "workspace_mutation_enabled",
-        "workspace_mutated",
-        "background_mode_enabled",
-        "live_child_runner_enabled",
-        "live_tool_execution_enabled",
-        "production_authority",
-        "traffic_attached",
-        "user_visible_activation",
-    )
-    def _serialize_false(self, _value: object) -> bool:
-        return False
 
 
 class CodingSubagentToolScope(BaseModel):
@@ -344,12 +314,14 @@ class CodingSubagentRecipe:
             else CodingSubagentModeRequest.model_validate(request)
         )
         scope = _tool_scope(parsed.mode, self.config.additional_allowed_tools)
+        # C-4 PR-G3: ``_false_authority_overrides()`` spread dropped -- the
+        # kernel ``FalseOnlyAuthorityModel`` base force-falses the same fields
+        # automatically when ``CodingSubagentAuthorityFlags`` is constructed.
         flags = CodingSubagentAuthorityFlags(
             recipeEnabled=self.config.enabled,
             localFakeChildRunnerEnabled=(
                 self.config.local_fake_child_runner_enabled and self.child_runner is not None
             ),
-            **_false_authority_overrides(),
         )
         if not self.config.enabled:
             return _result(
@@ -579,17 +551,14 @@ def _coerce_authority_flags(value: object) -> CodingSubagentAuthorityFlags:
     return CodingSubagentAuthorityFlags()
 
 
-def _false_authority_overrides() -> dict[str, Literal[False]]:
-    return {
-        "workspaceMutationEnabled": False,
-        "workspaceMutated": False,
-        "backgroundModeEnabled": False,
-        "liveChildRunnerEnabled": False,
-        "liveToolExecutionEnabled": False,
-        "productionAuthority": False,
-        "trafficAttached": False,
-        "userVisibleActivation": False,
-    }
+# C-4 PR-G3: ``_false_authority_overrides()`` helper has been dropped. The
+# kernel ``FalseOnlyAuthorityModel`` base on ``CodingSubagentAuthorityFlags``
+# now force-falses every ``Literal[False]`` field on every construction
+# surface; the explicit spread is no longer required. The only remaining call
+# site was the single ``CodingSubagentAuthorityFlags(...)`` construction in
+# ``CodingSubagentRecipe.run`` (the kernel covers it now). This file has no
+# ``CodingSubagentMaterialization`` class that consumes the helper as an
+# ``attachmentFlags`` payload, so no module-level constant is needed.
 
 
 def _sanitize_projection(value: object) -> object:
