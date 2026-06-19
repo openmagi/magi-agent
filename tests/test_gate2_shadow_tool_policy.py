@@ -1890,7 +1890,13 @@ forbidden_terms = (
     "database",
     "supabase",
     "billing",
-    "auth",
+    # NOTE: "auth" was removed (2026-06-19) — the substring-match was an
+    # over-broad guard catching legitimate stdlib+pydantic leaves whose name
+    # only coincidentally contains the word ("ops.authority", the C-4
+    # FalseOnlyAuthorityModel home, and "firstparty.packs.recipe_authoring_*").
+    # The intent of this guard is to block dashboard-style auth packages from
+    # leaking into the shadow runtime; if such a package is ever introduced,
+    # add it explicitly to ``forbidden_prefixes`` instead.
     "model_routing",
     "model-routing",
     "telegram",
