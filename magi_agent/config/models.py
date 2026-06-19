@@ -9,10 +9,11 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
-    field_serializer,
     field_validator,
     model_validator,
 )
+
+from magi_agent.ops.authority import FalseOnlyAuthorityModel
 
 
 _DIGEST_RE = re.compile(r"^sha256:[a-f0-9]{64}$")
@@ -47,74 +48,19 @@ class BuildInfo(BaseModel):
     image_digest: str | None = Field(default=None, alias="imageDigest")
 
 
-def _force_false_aliases(
-    model_cls: type[BaseModel],
-    aliases: tuple[str, ...],
-    values: Mapping[str, Any] | None,
-) -> dict[str, Any]:
-    payload = dict(values or {})
-    for field_name in aliases:
-        field = model_cls.model_fields[field_name]
-        payload.pop(field_name, None)
-        payload[field.alias or field_name] = False
-    return payload
+class _FalseOnlyModel(FalseOnlyAuthorityModel):
+    """Thin alias for the canonical ``FalseOnlyAuthorityModel`` (C-4 PR-B).
 
-
-class _FalseOnlyModel(BaseModel):
-    model_config = ConfigDict(frozen=True, populate_by_name=True)
-
-    _FALSE_ONLY_FIELDS: ClassVar[tuple[str, ...]] = ()
-
-    @model_validator(mode="before")
-    @classmethod
-    def _force_false_only_fields(cls, value: object) -> object:
-        if not isinstance(value, Mapping):
-            return value
-        return _force_false_aliases(cls, cls._FALSE_ONLY_FIELDS, value)
-
-    @classmethod
-    def model_construct(
-        cls,
-        _fields_set: set[str] | None = None,
-        **values: Any,
-    ) -> Self:
-        _ = _fields_set
-        return cls.model_validate(_force_false_aliases(cls, cls._FALSE_ONLY_FIELDS, values))
-
-    def model_copy(
-        self,
-        *,
-        update: Mapping[str, Any] | None = None,
-        deep: bool = False,
-    ) -> Self:
-        _ = deep
-        payload = self.model_dump(by_alias=True, mode="python", warnings=False)
-        if update:
-            payload.update(dict(update))
-        return type(self).model_validate(
-            _force_false_aliases(type(self), type(self)._FALSE_ONLY_FIELDS, payload)
-        )
-
-    def copy(
-        self,
-        *,
-        include: Any = None,
-        exclude: Any = None,
-        update: Mapping[str, Any] | None = None,
-        deep: bool = False,
-    ) -> Self:
-        _ = include, exclude
-        return self.model_copy(update=update, deep=deep)
+    Pre-C-4 PR-B this class hand-rolled a ``model_validator(mode="before")`` +
+    ``model_construct``/``model_copy``/``copy`` overrides driven by a
+    per-subclass ``_FALSE_ONLY_FIELDS`` ClassVar tuple. The shared
+    ``FalseOnlyAuthorityModel`` introspects ``Literal[False]`` field annotations
+    instead, so the tuple is dead weight. The alias is preserved so existing
+    ``class Foo(_FalseOnlyModel)`` lines keep working without per-class edits.
+    """
 
 
 class PythonMemoryAdapterConfig(_FalseOnlyModel):
-    model_config = ConfigDict(frozen=True, populate_by_name=True)
-    _FALSE_ONLY_FIELDS: ClassVar[tuple[str, ...]] = (
-        "prompt_projection_enabled",
-        "live_provider_calls_enabled",
-        "adk_memory_service_attachment_enabled",
-    )
-
     enabled: bool = False
     mode: Literal["disabled", "readonly_fixture", "readonly_local"] = "disabled"
     adapter: str = "off"
@@ -142,22 +88,8 @@ class PythonMemoryAdapterConfig(_FalseOnlyModel):
             raise ValueError("memory adapter must be off or a safe provider adapter ref")
         return normalized
 
-    @field_serializer(
-        "prompt_projection_enabled",
-        "live_provider_calls_enabled",
-        "adk_memory_service_attachment_enabled",
-    )
-    def _serialize_memory_false(self, _value: object) -> bool:
-        return False
-
 
 class PythonToolHostAttachmentConfig(_FalseOnlyModel):
-    model_config = ConfigDict(frozen=True, populate_by_name=True)
-    _FALSE_ONLY_FIELDS: ClassVar[tuple[str, ...]] = (
-        "production_attachment_enabled",
-        "live_tool_mutation_enabled",
-    )
-
     enabled: bool = False
     mode: Literal["disabled", "shadow_readonly"] = "disabled"
     production_attachment_enabled: Literal[False] = Field(
@@ -169,20 +101,8 @@ class PythonToolHostAttachmentConfig(_FalseOnlyModel):
         alias="liveToolMutationEnabled",
     )
 
-    @field_serializer("production_attachment_enabled", "live_tool_mutation_enabled")
-    def _serialize_toolhost_false(self, _value: object) -> bool:
-        return False
-
 
 class PythonSecurityPostureConfig(_FalseOnlyModel):
-    model_config = ConfigDict(frozen=True, populate_by_name=True)
-    _FALSE_ONLY_FIELDS: ClassVar[tuple[str, ...]] = (
-        "external_surface_dispatch_attached",
-        "credential_broker_attached",
-        "context_guard_blocks_prompt_projection",
-        "supply_chain_startup_banner_attached",
-    )
-
     enabled: bool = False
     posture_preflight_attached: bool = Field(
         default=False,
@@ -218,26 +138,8 @@ class PythonSecurityPostureConfig(_FalseOnlyModel):
         payload["enabled"] = preflight
         return payload
 
-    @field_serializer(
-        "external_surface_dispatch_attached",
-        "credential_broker_attached",
-        "context_guard_blocks_prompt_projection",
-        "supply_chain_startup_banner_attached",
-    )
-    def _serialize_security_posture_false(self, _value: object) -> bool:
-        return False
-
 
 class PythonContextContinuityConfig(_FalseOnlyModel):
-    model_config = ConfigDict(frozen=True, populate_by_name=True)
-    _FALSE_ONLY_FIELDS: ClassVar[tuple[str, ...]] = (
-        "production_authority_allowed",
-        "transcript_write_allowed",
-        "sse_write_allowed",
-        "db_write_allowed",
-        "canary_evidence_verified",
-    )
-
     enabled: bool = False
     mode: Literal["disabled", "local_diagnostic", "selected_canary"] = "disabled"
     canary_status: Literal["missing", "pass", "fail"] = Field(
@@ -295,6 +197,15 @@ class PythonContextContinuityConfig(_FalseOnlyModel):
         payload = dict(value)
         payload.pop("canary_evidence_source", None)
         payload["canaryEvidenceSource"] = "none"
+        # ``canary_evidence_verified`` is typed ``bool`` (not ``Literal[False]``)
+        # so the introspection-based ``FalseOnlyAuthorityModel`` base does NOT
+        # force it. The legacy class enumerated it in ``_FALSE_ONLY_FIELDS``
+        # specifically to force-false external construction with True; the
+        # ``from_canary_evidence`` classmethod then uses ``object.__setattr__``
+        # to bypass and set True when evidence verifies. Preserve that
+        # protection by force-falsing here.
+        payload.pop("canary_evidence_verified", None)
+        payload["canaryEvidenceVerified"] = False
         return payload
 
     @property
@@ -483,15 +394,6 @@ class PythonContextContinuityConfig(_FalseOnlyModel):
     def _validate_reason_codes(cls, value: tuple[str, ...]) -> tuple[str, ...]:
         return _safe_reason_code_tuple(value)
 
-    @field_serializer(
-        "production_authority_allowed",
-        "transcript_write_allowed",
-        "sse_write_allowed",
-        "db_write_allowed",
-    )
-    def _serialize_context_false(self, _value: object) -> bool:
-        return False
-
 
 def _safe_literal(value: object, *, allowed: tuple[str, ...], default: str) -> str:
     text = str(value).strip().lower()
@@ -524,21 +426,6 @@ def _safe_reason_code_tuple(value: object) -> tuple[str, ...]:
 
 
 class PythonGate2ReadinessConfig(_FalseOnlyModel):
-    model_config = ConfigDict(frozen=True, populate_by_name=True)
-    _FALSE_ONLY_FIELDS: ClassVar[tuple[str, ...]] = (
-        "route_attached",
-        "production_workspace_mutation_allowed",
-        "write_mutation_authority_allowed",
-        "user_visible_output_allowed",
-        "tool_host_dispatch_allowed",
-        "live_tool_execution_allowed",
-        "memory_write_allowed",
-        "browser_web_channel_allowed",
-        "scheduler_mutation_allowed",
-        "connector_credential_use_allowed",
-        "network_egress_allowed",
-    )
-
     enabled: bool = False
     kill_switch_enabled: bool = Field(default=True, alias="killSwitchEnabled")
     local_sandbox_harness_enabled: bool = Field(
@@ -619,39 +506,8 @@ class PythonGate2ReadinessConfig(_FalseOnlyModel):
             return tuple(str(item).strip() for item in value if str(item).strip())
         return ()
 
-    @field_serializer(
-        "route_attached",
-        "production_workspace_mutation_allowed",
-        "write_mutation_authority_allowed",
-        "user_visible_output_allowed",
-        "tool_host_dispatch_allowed",
-        "live_tool_execution_allowed",
-        "memory_write_allowed",
-        "browser_web_channel_allowed",
-        "scheduler_mutation_allowed",
-        "connector_credential_use_allowed",
-        "network_egress_allowed",
-    )
-    def _serialize_gate2_false(self, _value: object) -> bool:
-        return False
-
 
 class PythonGate3ReadinessConfig(_FalseOnlyModel):
-    model_config = ConfigDict(frozen=True, populate_by_name=True)
-    _FALSE_ONLY_FIELDS: ClassVar[tuple[str, ...]] = (
-        "route_attached",
-        "live_capture_allowed",
-        "model_call_allowed",
-        "user_visible_output_allowed",
-        "tool_host_dispatch_allowed",
-        "workspace_mutation_allowed",
-        "memory_write_allowed",
-        "browser_web_network_allowed",
-        "channel_delivery_allowed",
-        "scheduler_mutation_allowed",
-        "db_write_allowed",
-    )
-
     enabled: bool = False
     kill_switch_enabled: bool = Field(default=True, alias="killSwitchEnabled")
     local_replay_harness_enabled: bool = Field(
@@ -713,41 +569,8 @@ class PythonGate3ReadinessConfig(_FalseOnlyModel):
             return tuple(str(item).strip() for item in value if str(item).strip())
         return ()
 
-    @field_serializer(
-        "route_attached",
-        "live_capture_allowed",
-        "model_call_allowed",
-        "user_visible_output_allowed",
-        "tool_host_dispatch_allowed",
-        "workspace_mutation_allowed",
-        "memory_write_allowed",
-        "browser_web_network_allowed",
-        "channel_delivery_allowed",
-        "scheduler_mutation_allowed",
-        "db_write_allowed",
-    )
-    def _serialize_gate3_false(self, _value: object) -> bool:
-        return False
-
 
 class PythonGate4ReadinessConfig(_FalseOnlyModel):
-    model_config = ConfigDict(frozen=True, populate_by_name=True)
-    _FALSE_ONLY_FIELDS: ClassVar[tuple[str, ...]] = (
-        "route_attached",
-        "adk_runner_invoked",
-        "live_runner_attached",
-        "model_call_allowed",
-        "user_visible_output_allowed",
-        "tool_host_dispatch_allowed",
-        "live_tools_executed",
-        "workspace_mutation_allowed",
-        "memory_write_allowed",
-        "browser_web_network_allowed",
-        "channel_delivery_allowed",
-        "scheduler_mutation_allowed",
-        "db_write_allowed",
-    )
-
     enabled: bool = False
     kill_switch_enabled: bool = Field(default=True, alias="killSwitchEnabled")
     local_shadow_harness_enabled: bool = Field(
@@ -811,46 +634,7 @@ class PythonGate4ReadinessConfig(_FalseOnlyModel):
             return tuple(str(item).strip() for item in value if str(item).strip())
         return ()
 
-    @field_serializer(
-        "route_attached",
-        "adk_runner_invoked",
-        "live_runner_attached",
-        "model_call_allowed",
-        "user_visible_output_allowed",
-        "tool_host_dispatch_allowed",
-        "live_tools_executed",
-        "workspace_mutation_allowed",
-        "memory_write_allowed",
-        "browser_web_network_allowed",
-        "channel_delivery_allowed",
-        "scheduler_mutation_allowed",
-        "db_write_allowed",
-    )
-    def _serialize_gate4_false(self, _value: object) -> bool:
-        return False
-
-
 class PythonGate5ReadinessConfig(_FalseOnlyModel):
-    model_config = ConfigDict(frozen=True, populate_by_name=True)
-    _FALSE_ONLY_FIELDS: ClassVar[tuple[str, ...]] = (
-        "route_attached",
-        "shadow_endpoint_enabled",
-        "adk_runner_invoked",
-        "live_runner_attached",
-        "model_call_allowed",
-        "user_visible_output_allowed",
-        "provider_credential_allowed",
-        "proxy_egress_allowed",
-        "tool_host_dispatch_allowed",
-        "live_tools_executed",
-        "workspace_mutation_allowed",
-        "memory_write_allowed",
-        "browser_web_network_allowed",
-        "channel_delivery_allowed",
-        "scheduler_mutation_allowed",
-        "db_write_allowed",
-    )
-
     enabled: bool = False
     kill_switch_enabled: bool = Field(default=True, alias="killSwitchEnabled")
     non_user_visible_harness_enabled: bool = Field(
@@ -926,50 +710,7 @@ class PythonGate5ReadinessConfig(_FalseOnlyModel):
             return tuple(str(item).strip() for item in value if str(item).strip())
         return ()
 
-    @field_serializer(
-        "route_attached",
-        "shadow_endpoint_enabled",
-        "adk_runner_invoked",
-        "live_runner_attached",
-        "model_call_allowed",
-        "user_visible_output_allowed",
-        "provider_credential_allowed",
-        "proxy_egress_allowed",
-        "tool_host_dispatch_allowed",
-        "live_tools_executed",
-        "workspace_mutation_allowed",
-        "memory_write_allowed",
-        "browser_web_network_allowed",
-        "channel_delivery_allowed",
-        "scheduler_mutation_allowed",
-        "db_write_allowed",
-    )
-    def _serialize_gate5_false(self, _value: object) -> bool:
-        return False
-
-
 class PythonGate7ReadinessConfig(_FalseOnlyModel):
-    model_config = ConfigDict(frozen=True, populate_by_name=True)
-    _FALSE_ONLY_FIELDS: ClassVar[tuple[str, ...]] = (
-        "route_attached",
-        "adk_runner_invoked",
-        "child_execution_allowed",
-        "real_child_runner_executed",
-        "workspace_adoption_applied",
-        "workspace_mutation_allowed",
-        "model_call_allowed",
-        "user_visible_output_allowed",
-        "provider_credential_allowed",
-        "proxy_egress_allowed",
-        "tool_host_dispatch_allowed",
-        "live_tools_executed",
-        "memory_write_allowed",
-        "browser_web_network_allowed",
-        "channel_delivery_allowed",
-        "scheduler_mutation_allowed",
-        "db_write_allowed",
-    )
-
     enabled: bool = False
     kill_switch_enabled: bool = Field(default=True, alias="killSwitchEnabled")
     local_replay_harness_enabled: bool = Field(
@@ -1074,49 +815,7 @@ class PythonGate7ReadinessConfig(_FalseOnlyModel):
             return tuple(str(item).strip() for item in value if str(item).strip())
         return ()
 
-    @field_serializer(
-        "route_attached",
-        "adk_runner_invoked",
-        "child_execution_allowed",
-        "real_child_runner_executed",
-        "workspace_adoption_applied",
-        "workspace_mutation_allowed",
-        "model_call_allowed",
-        "user_visible_output_allowed",
-        "provider_credential_allowed",
-        "proxy_egress_allowed",
-        "tool_host_dispatch_allowed",
-        "live_tools_executed",
-        "memory_write_allowed",
-        "browser_web_network_allowed",
-        "channel_delivery_allowed",
-        "scheduler_mutation_allowed",
-        "db_write_allowed",
-    )
-    def _serialize_gate7_false(self, _value: object) -> bool:
-        return False
-
-
 class PythonGate8ReadinessConfig(_FalseOnlyModel):
-    model_config = ConfigDict(frozen=True, populate_by_name=True)
-    _FALSE_ONLY_FIELDS: ClassVar[tuple[str, ...]] = (
-        "route_attached",
-        "production_route_attached",
-        "user_visible_output_allowed",
-        "write_mutation_allowed",
-        "tool_dispatch_allowed",
-        "read_only_tool_dispatch_allowed",
-        "transcript_write_allowed",
-        "sse_write_allowed",
-        "db_write_allowed",
-        "memory_write_allowed",
-        "channel_delivery_allowed",
-        "workspace_mutation_allowed",
-        "mission_scheduler_allowed",
-        "background_task_allowed",
-        "self_improvement_allowed",
-    )
-
     enabled: bool = False
     kill_switch_enabled: bool = Field(default=True, alias="killSwitchEnabled")
     selected_bot_digest: str = Field(default="", alias="selectedBotDigest")
@@ -1198,39 +897,23 @@ class PythonGate8ReadinessConfig(_FalseOnlyModel):
             return tuple(str(item).strip() for item in value if str(item).strip())
         return ()
 
-    @field_serializer(
-        "route_attached",
-        "production_route_attached",
-        "user_visible_output_allowed",
-        "write_mutation_allowed",
-        "tool_dispatch_allowed",
-        "read_only_tool_dispatch_allowed",
-        "transcript_write_allowed",
-        "sse_write_allowed",
-        "db_write_allowed",
-        "memory_write_allowed",
-        "channel_delivery_allowed",
-        "workspace_mutation_allowed",
-        "mission_scheduler_allowed",
-        "background_task_allowed",
-        "self_improvement_allowed",
-    )
-    def _serialize_gate8_false(self, _value: object) -> bool:
-        return False
-
-
 class PythonRuntimeAuthorityConfig(_FalseOnlyModel):
-    model_config = ConfigDict(frozen=True, populate_by_name=True)
-    _FALSE_ONLY_FIELDS: ClassVar[tuple[str, ...]] = (
-        "transcript_write_allowed",
-        "sse_write_allowed",
-        "channel_write_allowed",
-        "db_write_allowed",
-        "workspace_mutation_allowed",
-        "child_execution_allowed",
-        "mission_runtime_allowed",
-        "evidence_block_mode_allowed",
-    )
+    """Runtime authority flags.
+
+    The ``Literal[False]`` fields below are introspected by
+    ``FalseOnlyAuthorityModel`` and force-falsed on every construction surface.
+
+    ``user_visible_output_allowed`` and ``canary_routing_allowed`` are typed
+    ``bool`` (legitimately mutable through the primary ``__init__`` /
+    ``model_validate`` path -- see
+    ``tests/test_chat_route_contract.py``), but the ``model_construct`` and
+    ``model_copy`` escape hatches MUST force-false them so a caller that
+    bypasses validation cannot leak True (see
+    ``tests/test_memory_mission_final_review_hardening.py``). The two methods
+    below preserve that legacy ``_UNSAFE_CONSTRUCT_COPY_FIELDS`` semantics on
+    top of the introspection-based base.
+    """
+
     _UNSAFE_CONSTRUCT_COPY_FIELDS: ClassVar[tuple[str, ...]] = (
         "user_visible_output_allowed",
         "canary_routing_allowed",
@@ -1275,6 +958,17 @@ class PythonRuntimeAuthorityConfig(_FalseOnlyModel):
     )
 
     @classmethod
+    def _force_unsafe_bool_fields_false(
+        cls, values: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        payload = dict(values)
+        for field_name in cls._UNSAFE_CONSTRUCT_COPY_FIELDS:
+            field = cls.model_fields[field_name]
+            payload.pop(field_name, None)
+            payload[field.alias or field_name] = False
+        return payload
+
+    @classmethod
     def model_construct(
         cls,
         _fields_set: set[str] | None = None,
@@ -1282,7 +976,7 @@ class PythonRuntimeAuthorityConfig(_FalseOnlyModel):
     ) -> Self:
         return super().model_construct(
             _fields_set,
-            **_force_false_aliases(cls, cls._UNSAFE_CONSTRUCT_COPY_FIELDS, values),
+            **cls._force_unsafe_bool_fields_false(values),
         )
 
     def model_copy(
@@ -1296,27 +990,8 @@ class PythonRuntimeAuthorityConfig(_FalseOnlyModel):
         if update:
             payload.update(dict(update))
         return type(self).model_validate(
-            _force_false_aliases(
-                type(self),
-                (*type(self)._FALSE_ONLY_FIELDS, *type(self)._UNSAFE_CONSTRUCT_COPY_FIELDS),
-                payload,
-            )
+            type(self)._force_unsafe_bool_fields_false(payload)
         )
-
-    @field_serializer(
-        "user_visible_output_allowed",
-        "canary_routing_allowed",
-        "transcript_write_allowed",
-        "sse_write_allowed",
-        "channel_write_allowed",
-        "db_write_allowed",
-        "workspace_mutation_allowed",
-        "child_execution_allowed",
-        "mission_runtime_allowed",
-        "evidence_block_mode_allowed",
-    )
-    def _serialize_authority_flags(self, value: object) -> bool:
-        return bool(value)
 
 
 class RuntimeConfig(BaseModel):
