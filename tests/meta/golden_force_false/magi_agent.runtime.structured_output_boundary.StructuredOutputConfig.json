@@ -1,0 +1,21 @@
+{
+  "false_only_fields": [
+    "model_called",
+    "route_attached",
+    "runner_attached"
+  ],
+  "model_construct_dump": {
+    "enabled": false,
+    "modelCalled": true,
+    "routeAttached": true,
+    "runnerAttached": true
+  },
+  "model_construct_force_false_leaks": [
+    "model_called",
+    "route_attached",
+    "runner_attached"
+  ],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.runtime.structured_output_boundary.StructuredOutputConfig"
+}

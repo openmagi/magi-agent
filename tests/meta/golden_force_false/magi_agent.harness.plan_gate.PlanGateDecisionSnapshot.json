@@ -1,0 +1,22 @@
+{
+  "false_only_fields": [
+    "execution_attached",
+    "route_attached",
+    "traffic_attached"
+  ],
+  "model_construct_dump": {
+    "controlRequestRef": null,
+    "executionAttached": true,
+    "publicSignalPreview": null,
+    "routeAttached": true,
+    "trafficAttached": true
+  },
+  "model_construct_force_false_leaks": [
+    "execution_attached",
+    "route_attached",
+    "traffic_attached"
+  ],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.harness.plan_gate.PlanGateDecisionSnapshot"
+}

@@ -1,0 +1,17 @@
+{
+  "false_only_fields": [
+    "background_execution_enabled",
+    "database_mutation_attempted",
+    "filesystem_mutation_attempted",
+    "live_cron_mutation_enabled",
+    "network_call_attempted",
+    "production_writes_enabled",
+    "provider_call_attempted",
+    "scheduler_attached"
+  ],
+  "model_construct_dump": null,
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.missions.cron_policy.CronSchedulerMutationReceipt"
+}

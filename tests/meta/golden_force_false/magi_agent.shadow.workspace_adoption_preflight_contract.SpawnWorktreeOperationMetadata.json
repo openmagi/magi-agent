@@ -1,0 +1,25 @@
+{
+  "false_only_fields": [
+    "applied",
+    "cleanup_executed"
+  ],
+  "model_construct_dump": {
+    "adoptedCommitRef": null,
+    "adoptionIntent": false,
+    "applied": true,
+    "cleanupExecuted": true,
+    "createdFiles": [],
+    "deletedFiles": [],
+    "mergeStrategy": null,
+    "modifiedFiles": [],
+    "renamedFiles": [],
+    "truncated": false
+  },
+  "model_construct_force_false_leaks": [
+    "applied",
+    "cleanup_executed"
+  ],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.shadow.workspace_adoption_preflight_contract.SpawnWorktreeOperationMetadata"
+}

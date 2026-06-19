@@ -1,0 +1,30 @@
+{
+  "false_only_fields": [
+    "child_runner_attached",
+    "hidden_reasoning_injected",
+    "memory_provider_called",
+    "parent_context_raw_injection",
+    "production_authority",
+    "raw_tool_logs_injected",
+    "raw_transcript_injected",
+    "real_child_runner_executed",
+    "route_attached",
+    "workspace_mutated"
+  ],
+  "model_construct_dump": {
+    "childRunnerAttached": false,
+    "hiddenReasoningInjected": false,
+    "memoryProviderCalled": false,
+    "parentContextRawInjection": false,
+    "productionAuthority": false,
+    "rawToolLogsInjected": false,
+    "rawTranscriptInjected": false,
+    "realChildRunnerExecuted": false,
+    "routeAttached": false,
+    "workspaceMutated": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.runtime.child_runner_boundary.ChildRunnerAuthorityFlags"
+}

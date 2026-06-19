@@ -1,0 +1,28 @@
+{
+  "false_only_fields": [
+    "adk_memory_service_attachment_enabled",
+    "live_provider_calls_enabled",
+    "prompt_projection_enabled"
+  ],
+  "model_construct_dump": {
+    "adapter": "off",
+    "adkMemoryServiceAttachmentEnabled": false,
+    "enabled": false,
+    "liveProviderCallsEnabled": false,
+    "mode": "disabled",
+    "promptProjectionEnabled": false,
+    "workspaceRoot": null
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": {
+    "adapter": "off",
+    "adkMemoryServiceAttachmentEnabled": false,
+    "enabled": false,
+    "liveProviderCallsEnabled": false,
+    "mode": "disabled",
+    "promptProjectionEnabled": false,
+    "workspaceRoot": null
+  },
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.config.models.PythonMemoryAdapterConfig"
+}

@@ -1,0 +1,22 @@
+{
+  "false_only_fields": [
+    "channel_delivery_performed",
+    "discord_attached",
+    "gateway_attached",
+    "production_channel_write",
+    "provider_called",
+    "route_attached"
+  ],
+  "model_construct_dump": {
+    "channelDeliveryPerformed": false,
+    "discordAttached": false,
+    "gatewayAttached": false,
+    "productionChannelWrite": false,
+    "providerCalled": false,
+    "routeAttached": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.channels.discord_adapter.DiscordAdapterAuthorityFlags"
+}

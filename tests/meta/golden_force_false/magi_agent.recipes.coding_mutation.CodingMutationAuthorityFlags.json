@@ -1,0 +1,14 @@
+{
+  "false_only_fields": [
+    "filesystem_write_attempted",
+    "live_tool_attached",
+    "production_workspace_mutation_enabled",
+    "route_attached",
+    "user_visible_output_allowed"
+  ],
+  "model_construct_dump": null,
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.recipes.coding_mutation.CodingMutationAuthorityFlags"
+}

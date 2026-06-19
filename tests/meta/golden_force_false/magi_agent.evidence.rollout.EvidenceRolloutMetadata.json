@@ -1,0 +1,23 @@
+{
+  "false_only_fields": [
+    "block_mode_enabled_for_live_traffic",
+    "execution_attached",
+    "traffic_attached"
+  ],
+  "model_construct_dump": {
+    "auditBeforeBlock": true,
+    "blockModeEnabledForLiveTraffic": true,
+    "executionAttached": true,
+    "mode": "audit",
+    "scope": null,
+    "trafficAttached": true
+  },
+  "model_construct_force_false_leaks": [
+    "block_mode_enabled_for_live_traffic",
+    "execution_attached",
+    "traffic_attached"
+  ],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.evidence.rollout.EvidenceRolloutMetadata"
+}

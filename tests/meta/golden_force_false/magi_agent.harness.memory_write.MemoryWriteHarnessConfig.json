@@ -1,0 +1,32 @@
+{
+  "false_only_fields": [
+    "adk_memory_service_write_enabled",
+    "database_mutation_allowed",
+    "traffic_attached"
+  ],
+  "model_construct_dump": {
+    "adkMemoryServiceWriteEnabled": false,
+    "databaseMutationAllowed": false,
+    "enabled": false,
+    "filesystemMutationAllowed": false,
+    "localFakeAdapterEnabled": false,
+    "networkCallAllowed": false,
+    "productionWriteEnabled": false,
+    "providerCallAllowed": false,
+    "trafficAttached": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": {
+    "adkMemoryServiceWriteEnabled": false,
+    "databaseMutationAllowed": false,
+    "enabled": false,
+    "filesystemMutationAllowed": false,
+    "localFakeAdapterEnabled": false,
+    "networkCallAllowed": false,
+    "productionWriteEnabled": false,
+    "providerCallAllowed": false,
+    "trafficAttached": false
+  },
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.harness.memory_write.MemoryWriteHarnessConfig"
+}

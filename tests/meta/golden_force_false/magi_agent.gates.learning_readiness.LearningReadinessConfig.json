@@ -1,0 +1,14 @@
+{
+  "false_only_fields": [
+    "reflect_authority"
+  ],
+  "model_construct_dump": {
+    "enabled": false,
+    "killSwitchEnabled": true,
+    "reflectAuthority": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.gates.learning_readiness.LearningReadinessConfig"
+}

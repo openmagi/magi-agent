@@ -1,0 +1,24 @@
+{
+  "false_only_fields": [
+    "canary_attached",
+    "network_sse",
+    "production_attached",
+    "production_transcript_append",
+    "route_attached",
+    "traffic_attached",
+    "user_visible"
+  ],
+  "model_construct_dump": {
+    "canaryAttached": false,
+    "networkSse": false,
+    "productionAttached": false,
+    "productionTranscriptAppend": false,
+    "routeAttached": false,
+    "trafficAttached": false,
+    "userVisible": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.shadow.tool_policy.Gate2ShadowToolOutputFlags"
+}

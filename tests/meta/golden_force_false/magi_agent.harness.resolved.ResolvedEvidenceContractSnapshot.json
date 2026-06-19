@@ -1,0 +1,22 @@
+{
+  "false_only_fields": [
+    "execution_attached",
+    "research_citation_gate",
+    "traffic_attached"
+  ],
+  "model_construct_dump": {
+    "executionAttached": true,
+    "failureChannel": "evidence_contract",
+    "researchCitationGate": true,
+    "skipReason": null,
+    "trafficAttached": true
+  },
+  "model_construct_force_false_leaks": [
+    "execution_attached",
+    "research_citation_gate",
+    "traffic_attached"
+  ],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.harness.resolved.ResolvedEvidenceContractSnapshot"
+}

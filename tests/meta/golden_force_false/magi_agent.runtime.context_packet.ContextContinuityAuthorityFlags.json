@@ -1,0 +1,32 @@
+{
+  "false_only_fields": [
+    "channel_delivery_allowed",
+    "child_execution_allowed",
+    "db_write_allowed",
+    "memory_write_allowed",
+    "sse_write_allowed",
+    "transcript_write_allowed",
+    "workspace_mutation_allowed"
+  ],
+  "model_construct_dump": {
+    "channelDeliveryAllowed": false,
+    "childExecutionAllowed": false,
+    "dbWriteAllowed": false,
+    "memoryWriteAllowed": false,
+    "sseWriteAllowed": false,
+    "transcriptWriteAllowed": false,
+    "workspaceMutationAllowed": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": {
+    "channelDeliveryAllowed": false,
+    "childExecutionAllowed": false,
+    "dbWriteAllowed": false,
+    "memoryWriteAllowed": false,
+    "sseWriteAllowed": false,
+    "transcriptWriteAllowed": false,
+    "workspaceMutationAllowed": false
+  },
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.runtime.context_packet.ContextContinuityAuthorityFlags"
+}

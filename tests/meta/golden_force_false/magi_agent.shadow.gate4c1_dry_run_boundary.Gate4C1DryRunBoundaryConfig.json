@@ -1,0 +1,19 @@
+{
+  "false_only_fields": [
+    "model_calls_approved",
+    "runner_invocation_approved"
+  ],
+  "model_construct_dump": {
+    "dryRunOnly": true,
+    "enabled": false,
+    "modelCallsApproved": true,
+    "runnerInvocationApproved": true
+  },
+  "model_construct_force_false_leaks": [
+    "model_calls_approved",
+    "runner_invocation_approved"
+  ],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.shadow.gate4c1_dry_run_boundary.Gate4C1DryRunBoundaryConfig"
+}

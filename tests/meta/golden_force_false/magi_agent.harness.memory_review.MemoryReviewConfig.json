@@ -1,0 +1,18 @@
+{
+  "false_only_fields": [
+    "background_review_runner_attached",
+    "live_reviewer_attached",
+    "production_writes_enabled"
+  ],
+  "model_construct_dump": {
+    "backgroundReviewRunnerAttached": false,
+    "enabled": false,
+    "intervalTurns": 10,
+    "liveReviewerAttached": false,
+    "productionWritesEnabled": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.harness.memory_review.MemoryReviewConfig"
+}

@@ -1,0 +1,11 @@
+{
+  "false_only_fields": [
+    "model_call_attempted",
+    "runner_attempted"
+  ],
+  "model_construct_dump": null,
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.shadow.gate5b4c2_shadow_invocation_contract.Gate5B4C2ShadowReceipt"
+}

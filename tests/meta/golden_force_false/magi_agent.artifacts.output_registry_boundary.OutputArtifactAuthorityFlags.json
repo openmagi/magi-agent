@@ -1,0 +1,20 @@
+{
+  "false_only_fields": [
+    "adk_artifact_service_attached",
+    "artifact_written",
+    "child_artifact_imported",
+    "production_storage_written",
+    "route_attached"
+  ],
+  "model_construct_dump": {
+    "adkArtifactServiceAttached": false,
+    "artifactWritten": false,
+    "childArtifactImported": false,
+    "productionStorageWritten": false,
+    "routeAttached": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.artifacts.output_registry_boundary.OutputArtifactAuthorityFlags"
+}

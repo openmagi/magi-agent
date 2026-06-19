@@ -1,0 +1,24 @@
+{
+  "false_only_fields": [
+    "adk_runner_invoked",
+    "browser_executed",
+    "live_tool_dispatched",
+    "network_fetched",
+    "parent_context_injected",
+    "production_authority",
+    "raw_content_injected"
+  ],
+  "model_construct_dump": {
+    "adkRunnerInvoked": false,
+    "browserExecuted": false,
+    "liveToolDispatched": false,
+    "networkFetched": false,
+    "parentContextInjected": false,
+    "productionAuthority": false,
+    "rawContentInjected": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.web_acquisition.provider_boundary.WebAcquisitionAttachmentFlags"
+}

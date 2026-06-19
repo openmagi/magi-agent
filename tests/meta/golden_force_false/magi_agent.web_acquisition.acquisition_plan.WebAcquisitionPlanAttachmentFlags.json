@@ -1,0 +1,29 @@
+{
+  "false_only_fields": [
+    "browser_executed",
+    "live_provider_called",
+    "network_fetched",
+    "parent_context_injected",
+    "production_authority",
+    "raw_content_injected"
+  ],
+  "model_construct_dump": {
+    "browserExecuted": false,
+    "liveProviderCalled": false,
+    "networkFetched": false,
+    "parentContextInjected": false,
+    "productionAuthority": false,
+    "rawContentInjected": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": {
+    "browserExecuted": false,
+    "liveProviderCalled": false,
+    "networkFetched": false,
+    "parentContextInjected": false,
+    "productionAuthority": false,
+    "rawContentInjected": false
+  },
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.web_acquisition.acquisition_plan.WebAcquisitionPlanAttachmentFlags"
+}

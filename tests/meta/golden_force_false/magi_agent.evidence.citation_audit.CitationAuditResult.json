@@ -1,0 +1,30 @@
+{
+  "false_only_fields": [
+    "block_mode",
+    "final_answer_mutated"
+  ],
+  "model_construct_dump": {
+    "attachmentFlags": {
+      "adkRunnerInvoked": false,
+      "browserExecuted": false,
+      "evidenceBlockEnabled": false,
+      "liveToolDispatched": false,
+      "memoryProviderCalled": false,
+      "productionAuthority": false,
+      "routeOrApiAttached": false,
+      "sourceFetched": false,
+      "webSearchExecuted": false
+    },
+    "blockMode": true,
+    "enforcement": "audit",
+    "finalAnswerMutated": true,
+    "userVisibleEnforcementActions": []
+  },
+  "model_construct_force_false_leaks": [
+    "block_mode",
+    "final_answer_mutated"
+  ],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.evidence.citation_audit.CitationAuditResult"
+}

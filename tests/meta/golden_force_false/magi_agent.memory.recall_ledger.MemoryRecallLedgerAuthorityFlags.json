@@ -1,0 +1,26 @@
+{
+  "false_only_fields": [
+    "adk_memory_service_called",
+    "memory_provider_called",
+    "memory_write_allowed",
+    "production_write_allowed",
+    "prompt_injection_allowed"
+  ],
+  "model_construct_dump": {
+    "adkMemoryServiceCalled": false,
+    "memoryProviderCalled": false,
+    "memoryWriteAllowed": false,
+    "productionWriteAllowed": false,
+    "promptInjectionAllowed": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": {
+    "adkMemoryServiceCalled": false,
+    "memoryProviderCalled": false,
+    "memoryWriteAllowed": false,
+    "productionWriteAllowed": false,
+    "promptInjectionAllowed": false
+  },
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.memory.recall_ledger.MemoryRecallLedgerAuthorityFlags"
+}

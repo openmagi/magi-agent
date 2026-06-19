@@ -1,0 +1,24 @@
+{
+  "false_only_fields": [
+    "production_workspace_mutation_allowed",
+    "tool_host_dispatch_allowed",
+    "write_mutation_authority_allowed"
+  ],
+  "model_construct_dump": {
+    "gate": "gate2_sandbox_workspace_canary",
+    "parentCreateDiagnostics": null,
+    "productionWorkspaceMutationAllowed": true,
+    "rollbackReceipt": null,
+    "schemaVersion": "gate2.sandboxWorkspaceCanary.v1",
+    "toolHostDispatchAllowed": true,
+    "writeMutationAuthorityAllowed": true
+  },
+  "model_construct_force_false_leaks": [
+    "production_workspace_mutation_allowed",
+    "tool_host_dispatch_allowed",
+    "write_mutation_authority_allowed"
+  ],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.shadow.gate2_activation_loop_a.Gate2SandboxCanaryResult"
+}

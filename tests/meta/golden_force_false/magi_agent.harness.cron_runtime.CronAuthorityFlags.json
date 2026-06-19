@@ -1,0 +1,16 @@
+{
+  "false_only_fields": [
+    "background_scheduler_attached",
+    "production_writes_enabled",
+    "route_attached"
+  ],
+  "model_construct_dump": {
+    "backgroundSchedulerAttached": false,
+    "productionWritesEnabled": false,
+    "routeAttached": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.harness.cron_runtime.CronAuthorityFlags"
+}

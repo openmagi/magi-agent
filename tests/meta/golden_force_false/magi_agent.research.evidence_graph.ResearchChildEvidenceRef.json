@@ -1,0 +1,10 @@
+{
+  "false_only_fields": [
+    "completion_summary_is_evidence"
+  ],
+  "model_construct_dump": null,
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.research.evidence_graph.ResearchChildEvidenceRef"
+}

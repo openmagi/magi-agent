@@ -1,0 +1,12 @@
+{
+  "false_only_fields": [
+    "execution_attached",
+    "live_activation",
+    "traffic_attached"
+  ],
+  "model_construct_dump": null,
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.recipes.effective_contract.EffectiveRecipeContract"
+}

@@ -1,0 +1,22 @@
+{
+  "false_only_fields": [
+    "adk_artifact_service_attached",
+    "live_attachment_enabled",
+    "production_storage_writes_enabled"
+  ],
+  "model_construct_dump": {
+    "adkArtifactServiceAttached": true,
+    "enabled": false,
+    "liveAttachmentEnabled": true,
+    "localFakeStoreEnabled": false,
+    "productionStorageWritesEnabled": true
+  },
+  "model_construct_force_false_leaks": [
+    "adk_artifact_service_attached",
+    "live_attachment_enabled",
+    "production_storage_writes_enabled"
+  ],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.artifacts.local_result_store.LocalResultStoreConfig"
+}

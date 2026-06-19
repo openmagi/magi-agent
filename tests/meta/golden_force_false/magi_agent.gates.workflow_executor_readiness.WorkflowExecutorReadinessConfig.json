@@ -1,0 +1,32 @@
+{
+  "false_only_fields": [
+    "live_dispatch_allowed"
+  ],
+  "model_construct_dump": {
+    "canaryPromotionConfirmed": false,
+    "enabled": false,
+    "environment": "local",
+    "environmentAllowlist": [],
+    "killSwitchEnabled": true,
+    "liveDispatchAllowed": false,
+    "promotedGate": 0,
+    "selectedBotDigest": "",
+    "selectedOwnerUserIdDigest": "",
+    "shadowModeEnabled": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": {
+    "canaryPromotionConfirmed": false,
+    "enabled": false,
+    "environment": "local",
+    "environmentAllowlist": [],
+    "killSwitchEnabled": true,
+    "liveDispatchAllowed": false,
+    "promotedGate": 0,
+    "selectedBotDigest": "",
+    "selectedOwnerUserIdDigest": "",
+    "shadowModeEnabled": false
+  },
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.gates.workflow_executor_readiness.WorkflowExecutorReadinessConfig"
+}

@@ -1,0 +1,16 @@
+{
+  "false_only_fields": [
+    "content_loaded"
+  ],
+  "model_construct_dump": {
+    "adkArtifactServiceBoundary": "ArtifactService",
+    "contentLoaded": true,
+    "reasonCodes": []
+  },
+  "model_construct_force_false_leaks": [
+    "content_loaded"
+  ],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.harness.general_automation.followup_refs.FollowupRefDecision"
+}

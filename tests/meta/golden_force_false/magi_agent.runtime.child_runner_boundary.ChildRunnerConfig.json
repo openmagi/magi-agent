@@ -1,0 +1,27 @@
+{
+  "false_only_fields": [
+    "production_child_execution_enabled",
+    "production_writes_enabled"
+  ],
+  "model_construct_dump": {
+    "adkRunnerSurface": "future_adk_runner",
+    "childModel": "gemini-3.5-flash",
+    "childProvider": "google",
+    "enabled": false,
+    "liveChildRunnerEnabled": false,
+    "localFakeChildRunnerEnabled": false,
+    "maxOutputRefs": 8,
+    "maxSpawnDepth": 2,
+    "productionChildExecutionEnabled": true,
+    "productionWritesEnabled": true,
+    "realChildExecutionPackEnabled": false,
+    "runtimeId": "openmagi.child-runner-boundary"
+  },
+  "model_construct_force_false_leaks": [
+    "production_child_execution_enabled",
+    "production_writes_enabled"
+  ],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.runtime.child_runner_boundary.ChildRunnerConfig"
+}

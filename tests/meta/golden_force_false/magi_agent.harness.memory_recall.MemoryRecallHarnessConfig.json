@@ -1,0 +1,22 @@
+{
+  "false_only_fields": [
+    "live_provider_enabled",
+    "memory_write_allowed",
+    "production_write_allowed",
+    "traffic_attached",
+    "user_visible_output_allowed"
+  ],
+  "model_construct_dump": {
+    "enabled": false,
+    "liveProviderEnabled": false,
+    "localFakeAdapterEnabled": false,
+    "memoryWriteAllowed": false,
+    "productionWriteAllowed": false,
+    "trafficAttached": false,
+    "userVisibleOutputAllowed": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.harness.memory_recall.MemoryRecallHarnessConfig"
+}

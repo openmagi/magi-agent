@@ -1,0 +1,21 @@
+{
+  "false_only_fields": [
+    "production_channel_delivery_enabled",
+    "production_storage_writes_enabled",
+    "route_attached"
+  ],
+  "model_construct_dump": {
+    "enabled": false,
+    "liveArtifactStorageEnabled": false,
+    "liveChannelDeliveryEnabled": false,
+    "localFakeArtifactServiceEnabled": false,
+    "localFakeChannelDeliveryEnabled": false,
+    "productionChannelDeliveryEnabled": false,
+    "productionStorageWritesEnabled": false,
+    "routeAttached": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.artifacts.file_delivery.FileDeliveryConfig"
+}

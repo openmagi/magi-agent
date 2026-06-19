@@ -1,0 +1,24 @@
+{
+  "false_only_fields": [
+    "credential_used",
+    "external_tool_execution_enabled",
+    "live_tool_execution_enabled",
+    "mcp_server_attached",
+    "network_egress_enabled",
+    "route_attached",
+    "user_visible_output_allowed"
+  ],
+  "model_construct_dump": {
+    "credentialUsed": false,
+    "externalToolExecutionEnabled": false,
+    "liveToolExecutionEnabled": false,
+    "mcpServerAttached": false,
+    "networkEgressEnabled": false,
+    "routeAttached": false,
+    "userVisibleOutputAllowed": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.plugins.mcp_adapter.McpAuthorityFlags"
+}

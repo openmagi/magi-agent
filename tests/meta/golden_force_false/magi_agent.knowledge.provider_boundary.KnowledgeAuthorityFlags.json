@@ -1,0 +1,22 @@
+{
+  "false_only_fields": [
+    "external_source_fetched",
+    "knowledge_write_performed",
+    "production_writes_enabled",
+    "provider_called",
+    "raw_private_source_projected",
+    "route_attached"
+  ],
+  "model_construct_dump": {
+    "externalSourceFetched": false,
+    "knowledgeWritePerformed": false,
+    "productionWritesEnabled": false,
+    "providerCalled": false,
+    "rawPrivateSourceProjected": false,
+    "routeAttached": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.knowledge.provider_boundary.KnowledgeAuthorityFlags"
+}

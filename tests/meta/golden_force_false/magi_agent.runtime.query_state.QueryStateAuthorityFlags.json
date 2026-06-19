@@ -1,0 +1,32 @@
+{
+  "false_only_fields": [
+    "live_attachment_allowed",
+    "live_model_call_allowed",
+    "memory_provider_call_allowed",
+    "memory_write_allowed",
+    "production_transcript_write_allowed",
+    "tool_execution_allowed",
+    "user_visible_output_allowed"
+  ],
+  "model_construct_dump": {
+    "liveAttachmentAllowed": false,
+    "liveModelCallAllowed": false,
+    "memoryProviderCallAllowed": false,
+    "memoryWriteAllowed": false,
+    "productionTranscriptWriteAllowed": false,
+    "toolExecutionAllowed": false,
+    "userVisibleOutputAllowed": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": {
+    "liveAttachmentAllowed": false,
+    "liveModelCallAllowed": false,
+    "memoryProviderCallAllowed": false,
+    "memoryWriteAllowed": false,
+    "productionTranscriptWriteAllowed": false,
+    "toolExecutionAllowed": false,
+    "userVisibleOutputAllowed": false
+  },
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.runtime.query_state.QueryStateAuthorityFlags"
+}

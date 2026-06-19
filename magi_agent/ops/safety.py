@@ -11,24 +11,35 @@ from typing import TYPE_CHECKING
 from pydantic import ValidationError
 
 if TYPE_CHECKING:  # type-checker only — keep the public symbol visible
+    from magi_agent.ops.authority import (
+        FalseOnlyAuthorityModel as FalseOnlyAuthorityModel,
+    )
     from magi_agent.ops.authority import FrozenContractModel as FrozenContractModel
 
 
 def __getattr__(name: str) -> object:
-    """Lazy re-export of ``FrozenContractModel`` (C-5 + C-1 coexistence).
+    """Lazy re-export of authority bases (C-5 + C-4 + C-1 coexistence).
 
     Importing ``magi_agent.ops.safety`` must NOT eagerly pull in
     ``magi_agent.ops.authority``. The shadow runtime forbids importing the
     authority leaf in its production-runtime import boundary
     (``test_shadow_tool_policy_import_stays_production_runtime_free``), but
     callers reaching the redaction kernel via ``ops.safety`` should still see
-    ``FrozenContractModel`` as a public attribute. Resolve it on first access.
+    ``FrozenContractModel`` (and the C-4 ``FalseOnlyAuthorityModel`` base) as
+    public attributes. Resolve each on first access.
     """
     if name == "FrozenContractModel":
         from magi_agent.ops.authority import FrozenContractModel as _FrozenContractModel
 
         globals()[name] = _FrozenContractModel
         return _FrozenContractModel
+    if name == "FalseOnlyAuthorityModel":
+        from magi_agent.ops.authority import (
+            FalseOnlyAuthorityModel as _FalseOnlyAuthorityModel,
+        )
+
+        globals()[name] = _FalseOnlyAuthorityModel
+        return _FalseOnlyAuthorityModel
     raise AttributeError(f"module 'magi_agent.ops.safety' has no attribute {name!r}")
 
 

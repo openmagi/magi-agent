@@ -1,0 +1,23 @@
+{
+  "false_only_fields": [
+    "production_browser_enabled",
+    "production_writes_enabled",
+    "route_attached"
+  ],
+  "model_construct_dump": {
+    "browserFallbackEnabled": false,
+    "enabled": false,
+    "localFakeProviderEnabled": false,
+    "maxContentBytes": 32768,
+    "productionBrowserEnabled": false,
+    "productionWritesEnabled": false,
+    "providerAllowlist": [],
+    "providerId": "openmagi.browser-provider.system",
+    "routeAttached": false,
+    "timeoutMs": 60000
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.browser.live_provider_pack.BrowserProviderPackConfig"
+}

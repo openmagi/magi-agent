@@ -1,0 +1,34 @@
+{
+  "false_only_fields": [
+    "adk_eval_attached",
+    "adk_runner_invoked",
+    "block_mode_enabled",
+    "browser_executed",
+    "hook_attached",
+    "llm_judge_called",
+    "prompt_mutated",
+    "provider_called",
+    "source_fetched",
+    "toolhost_dispatched",
+    "transcript_read",
+    "web_search_executed"
+  ],
+  "model_construct_dump": {
+    "adkEvalAttached": false,
+    "adkRunnerInvoked": false,
+    "blockModeEnabled": false,
+    "browserExecuted": false,
+    "hookAttached": false,
+    "llmJudgeCalled": false,
+    "promptMutated": false,
+    "providerCalled": false,
+    "sourceFetched": false,
+    "toolHostDispatched": false,
+    "transcriptRead": false,
+    "webSearchExecuted": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.shadow.fact_grounding_verifier_contract.FactGroundingVerifierAttachmentFlags"
+}

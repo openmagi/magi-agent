@@ -1,0 +1,21 @@
+{
+  "false_only_fields": [
+    "live_tool_mutation_enabled",
+    "production_attachment_enabled"
+  ],
+  "model_construct_dump": {
+    "enabled": false,
+    "liveToolMutationEnabled": false,
+    "mode": "disabled",
+    "productionAttachmentEnabled": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": {
+    "enabled": false,
+    "liveToolMutationEnabled": false,
+    "mode": "disabled",
+    "productionAttachmentEnabled": false
+  },
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.config.models.PythonToolHostAttachmentConfig"
+}

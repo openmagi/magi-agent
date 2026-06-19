@@ -1,0 +1,18 @@
+{
+  "false_only_fields": [
+    "database_mutation_attempted",
+    "filesystem_mutation_attempted",
+    "long_running_function_tool_attached",
+    "network_call_attempted",
+    "production_background_execution_enabled",
+    "production_writes_enabled",
+    "provider_call_attempted",
+    "traffic_attached",
+    "user_visible_output_enabled"
+  ],
+  "model_construct_dump": null,
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.runtime.long_running_activity.LongRunningActivityReceipt"
+}

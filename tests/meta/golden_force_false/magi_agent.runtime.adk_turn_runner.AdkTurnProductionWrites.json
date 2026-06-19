@@ -1,0 +1,47 @@
+{
+  "false_only_fields": [
+    "browser_used",
+    "channel_published",
+    "child_invoked",
+    "db_written",
+    "memory_written",
+    "mission_mutated",
+    "sse_published",
+    "tool_executed",
+    "traffic_attempted",
+    "transcript_written",
+    "user_visible_output_emitted",
+    "workspace_mutated"
+  ],
+  "model_construct_dump": {
+    "browserUsed": false,
+    "channelPublished": false,
+    "childInvoked": false,
+    "dbWritten": false,
+    "memoryWritten": false,
+    "missionMutated": false,
+    "ssePublished": false,
+    "toolExecuted": false,
+    "trafficAttempted": false,
+    "transcriptWritten": false,
+    "userVisibleOutputEmitted": false,
+    "workspaceMutated": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": {
+    "browserUsed": false,
+    "channelPublished": false,
+    "childInvoked": false,
+    "dbWritten": false,
+    "memoryWritten": false,
+    "missionMutated": false,
+    "ssePublished": false,
+    "toolExecuted": false,
+    "trafficAttempted": false,
+    "transcriptWritten": false,
+    "userVisibleOutputEmitted": false,
+    "workspaceMutated": false
+  },
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.runtime.adk_turn_runner.AdkTurnProductionWrites"
+}

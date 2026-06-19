@@ -1,0 +1,17 @@
+{
+  "false_only_fields": [
+    "attached",
+    "snapshot_authority"
+  ],
+  "model_construct_dump": {
+    "attached": true,
+    "snapshotAuthority": true
+  },
+  "model_construct_force_false_leaks": [
+    "attached",
+    "snapshot_authority"
+  ],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.shadow.gate5b4d_stream_fixture_audit.Gate5B4DActiveSnapshotBoundary"
+}

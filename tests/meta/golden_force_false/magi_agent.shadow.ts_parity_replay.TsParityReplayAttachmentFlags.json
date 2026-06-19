@@ -1,0 +1,32 @@
+{
+  "false_only_fields": [
+    "adk_runner_invoked",
+    "agent_memory_imported",
+    "canary_traffic_attached",
+    "evidence_block_enabled",
+    "hipocampus_qmd_live_called",
+    "live_tool_dispatched",
+    "memory_provider_called",
+    "production_storage_written",
+    "route_or_api_attached",
+    "shell_or_code_executed",
+    "telegram_attached"
+  ],
+  "model_construct_dump": {
+    "adkRunnerInvoked": false,
+    "agentMemoryImported": false,
+    "canaryTrafficAttached": false,
+    "evidenceBlockEnabled": false,
+    "hipocampusQmdLiveCalled": false,
+    "liveToolDispatched": false,
+    "memoryProviderCalled": false,
+    "productionStorageWritten": false,
+    "routeOrApiAttached": false,
+    "shellOrCodeExecuted": false,
+    "telegramAttached": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.shadow.ts_parity_replay.TsParityReplayAttachmentFlags"
+}

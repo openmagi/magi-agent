@@ -1,0 +1,20 @@
+{
+  "false_only_fields": [
+    "adk_artifact_service_attached",
+    "artifact_write_allowed",
+    "production_storage_written"
+  ],
+  "model_construct_dump": {
+    "adkArtifactServiceAttached": false,
+    "artifactWriteAllowed": false,
+    "productionStorageWritten": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": {
+    "adkArtifactServiceAttached": false,
+    "artifactWriteAllowed": false,
+    "productionStorageWritten": false
+  },
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.adk_bridge.artifact_service.ArtifactAuthorityFlags"
+}

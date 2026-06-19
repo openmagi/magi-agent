@@ -1,0 +1,30 @@
+{
+  "false_only_fields": [
+    "memory_writes_enabled",
+    "model_calls_enabled",
+    "network_enabled",
+    "production_writes_enabled",
+    "sse_writes_enabled",
+    "transcript_writes_enabled"
+  ],
+  "model_construct_dump": {
+    "memoryWritesEnabled": true,
+    "modelCallsEnabled": true,
+    "networkEnabled": true,
+    "productionWritesEnabled": true,
+    "schemaVersion": "normalizedProjectionContract.v1",
+    "sseWritesEnabled": true,
+    "transcriptWritesEnabled": true
+  },
+  "model_construct_force_false_leaks": [
+    "memory_writes_enabled",
+    "model_calls_enabled",
+    "network_enabled",
+    "production_writes_enabled",
+    "sse_writes_enabled",
+    "transcript_writes_enabled"
+  ],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.runtime.events.NormalizedProjectionContract"
+}

@@ -1,0 +1,25 @@
+{
+  "false_only_fields": [
+    "completed_work_claim_allowed",
+    "delivery_claim_allowed"
+  ],
+  "model_construct_dump": {
+    "authorityFlags": {
+      "adkArtifactServiceAttached": false,
+      "artifactWritten": false,
+      "channelDeliveryPerformed": false,
+      "completedWorkClaimAllowed": false,
+      "userVisibleOutputAllowed": false
+    },
+    "completedWorkClaimAllowed": true,
+    "deliveryClaimAllowed": true,
+    "status": "referenced"
+  },
+  "model_construct_force_false_leaks": [
+    "completed_work_claim_allowed",
+    "delivery_claim_allowed"
+  ],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.harness.general_automation.output_budget_policy.AutomationOutputReference"
+}

@@ -1,0 +1,19 @@
+{
+  "false_only_fields": [
+    "scheduler_attached",
+    "tool_execution_attached"
+  ],
+  "model_construct_dump": {
+    "metadataOnly": true,
+    "schedulerAttached": true,
+    "stableOrdering": true,
+    "toolExecutionAttached": true
+  },
+  "model_construct_force_false_leaks": [
+    "scheduler_attached",
+    "tool_execution_attached"
+  ],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.harness.parallel_execution.ParallelBatchMetadata"
+}

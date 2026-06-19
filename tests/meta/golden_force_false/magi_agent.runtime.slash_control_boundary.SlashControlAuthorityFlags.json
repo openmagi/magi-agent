@@ -1,0 +1,24 @@
+{
+  "false_only_fields": [
+    "compaction_performed",
+    "plan_mode_mutated",
+    "production_writes_enabled",
+    "route_attached",
+    "session_reset_performed",
+    "slash_runtime_attached",
+    "user_visible_output"
+  ],
+  "model_construct_dump": {
+    "compactionPerformed": false,
+    "planModeMutated": false,
+    "productionWritesEnabled": false,
+    "routeAttached": false,
+    "sessionResetPerformed": false,
+    "slashRuntimeAttached": false,
+    "userVisibleOutput": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.runtime.slash_control_boundary.SlashControlAuthorityFlags"
+}

@@ -1,0 +1,28 @@
+{
+  "false_only_fields": [
+    "adk_runner_invoked",
+    "browser_executed",
+    "evidence_block_enabled",
+    "live_tool_dispatched",
+    "memory_provider_called",
+    "production_authority",
+    "route_or_api_attached",
+    "source_fetched",
+    "web_search_executed"
+  ],
+  "model_construct_dump": {
+    "adkRunnerInvoked": false,
+    "browserExecuted": false,
+    "evidenceBlockEnabled": false,
+    "liveToolDispatched": false,
+    "memoryProviderCalled": false,
+    "productionAuthority": false,
+    "routeOrApiAttached": false,
+    "sourceFetched": false,
+    "webSearchExecuted": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.evidence.source_ledger.SourceLedgerAttachmentFlags"
+}

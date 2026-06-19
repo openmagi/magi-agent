@@ -1,0 +1,15 @@
+{
+  "false_only_fields": [
+    "activation_enabled",
+    "credential_attached",
+    "hidden_reasoning_attached",
+    "live_tool_execution_attached",
+    "raw_prompt_attached",
+    "raw_tool_output_attached"
+  ],
+  "model_construct_dump": null,
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.ops.metrics.RuntimeOperationEvent"
+}

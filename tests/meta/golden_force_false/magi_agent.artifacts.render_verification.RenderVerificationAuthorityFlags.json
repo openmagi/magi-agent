@@ -1,0 +1,20 @@
+{
+  "false_only_fields": [
+    "adk_artifact_service_attached",
+    "production_storage_written",
+    "renderer_executed",
+    "route_attached",
+    "user_visible_render_allowed"
+  ],
+  "model_construct_dump": {
+    "adkArtifactServiceAttached": false,
+    "productionStorageWritten": false,
+    "rendererExecuted": false,
+    "routeAttached": false,
+    "userVisibleRenderAllowed": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.artifacts.render_verification.RenderVerificationAuthorityFlags"
+}

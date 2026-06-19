@@ -1,0 +1,12 @@
+{
+  "false_only_fields": [
+    "comparison_artifact_included",
+    "output_hash_included",
+    "output_preview_included"
+  ],
+  "model_construct_dump": null,
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.shadow.gate5b4c3_shadow_generation_contract.Gate5B4C3ShadowGenerationOutputMetadata"
+}

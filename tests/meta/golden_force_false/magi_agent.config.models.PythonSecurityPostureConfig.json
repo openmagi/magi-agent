@@ -1,0 +1,27 @@
+{
+  "false_only_fields": [
+    "context_guard_blocks_prompt_projection",
+    "credential_broker_attached",
+    "external_surface_dispatch_attached",
+    "supply_chain_startup_banner_attached"
+  ],
+  "model_construct_dump": {
+    "contextGuardBlocksPromptProjection": false,
+    "credentialBrokerAttached": false,
+    "enabled": false,
+    "externalSurfaceDispatchAttached": false,
+    "posturePreflightAttached": false,
+    "supplyChainStartupBannerAttached": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": {
+    "contextGuardBlocksPromptProjection": false,
+    "credentialBrokerAttached": false,
+    "enabled": false,
+    "externalSurfaceDispatchAttached": false,
+    "posturePreflightAttached": false,
+    "supplyChainStartupBannerAttached": false
+  },
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.config.models.PythonSecurityPostureConfig"
+}

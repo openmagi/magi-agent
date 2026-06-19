@@ -1,0 +1,41 @@
+{
+  "false_only_fields": [
+    "channel_delivery_enabled",
+    "child_execution_enabled",
+    "memory_write_enabled",
+    "model_call_enabled",
+    "production_writes_enabled",
+    "provider_call_enabled",
+    "scheduler_attached",
+    "tool_execution_enabled",
+    "wake_agent",
+    "workspace_mutation_enabled"
+  ],
+  "model_construct_dump": {
+    "channelDeliveryEnabled": false,
+    "childExecutionEnabled": false,
+    "memoryWriteEnabled": false,
+    "modelCallEnabled": false,
+    "productionWritesEnabled": false,
+    "providerCallEnabled": false,
+    "schedulerAttached": false,
+    "toolExecutionEnabled": false,
+    "wakeAgent": false,
+    "workspaceMutationEnabled": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": {
+    "channelDeliveryEnabled": false,
+    "childExecutionEnabled": false,
+    "memoryWriteEnabled": false,
+    "modelCallEnabled": false,
+    "productionWritesEnabled": false,
+    "providerCallEnabled": false,
+    "schedulerAttached": false,
+    "toolExecutionEnabled": false,
+    "wakeAgent": false,
+    "workspaceMutationEnabled": false
+  },
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.runtime.no_agent_watchdog.NoAgentWatchdogAuthorityFlags"
+}

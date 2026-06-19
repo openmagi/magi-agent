@@ -1,0 +1,17 @@
+{
+  "false_only_fields": [
+    "adk_runner_invocation_allowed",
+    "diagnostic_ready",
+    "enabled",
+    "fastapi_route_activation_allowed",
+    "production_writes_allowed",
+    "provider_sdk_import_allowed",
+    "replacement_ready",
+    "selected_turn_ready"
+  ],
+  "model_construct_dump": null,
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.runtime.readiness.PriorityAReadinessSnapshot"
+}

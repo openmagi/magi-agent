@@ -1,0 +1,22 @@
+{
+  "false_only_fields": [
+    "adk_artifact_service_attached",
+    "channel_delivery_performed",
+    "live_tool_attached",
+    "route_attached",
+    "workbook_loaded",
+    "workspace_mutated"
+  ],
+  "model_construct_dump": {
+    "adkArtifactServiceAttached": false,
+    "channelDeliveryPerformed": false,
+    "liveToolAttached": false,
+    "routeAttached": false,
+    "workbookLoaded": false,
+    "workspaceMutated": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.harness.general_automation.spreadsheet_evidence.SpreadsheetEvidenceAuthorityFlags"
+}

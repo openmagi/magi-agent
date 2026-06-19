@@ -1,0 +1,25 @@
+{
+  "false_only_fields": [
+    "production_channel_write_enabled",
+    "route_attached",
+    "telegram_attached",
+    "telegram_polling_attached",
+    "telegram_webhook_mitigation_attached"
+  ],
+  "model_construct_dump": {
+    "downloadEnabled": false,
+    "enabled": false,
+    "localFakeProviderEnabled": false,
+    "productionChannelWriteEnabled": false,
+    "providerAllowlist": [],
+    "routeAttached": false,
+    "selectedChannelRoutes": [],
+    "telegramAttached": false,
+    "telegramPollingAttached": false,
+    "telegramWebhookMitigationAttached": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.channels.telegram_adapter.TelegramAdapterConfig"
+}

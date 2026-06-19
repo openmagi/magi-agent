@@ -1,0 +1,20 @@
+{
+  "false_only_fields": [
+    "browser_action_performed",
+    "browser_worker_session_started",
+    "channel_delivery_performed",
+    "external_form_submitted",
+    "route_attached"
+  ],
+  "model_construct_dump": {
+    "browserActionPerformed": false,
+    "browserWorkerSessionStarted": false,
+    "channelDeliveryPerformed": false,
+    "externalFormSubmitted": false,
+    "routeAttached": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.harness.general_automation.browser_evidence.BrowserEvidenceAuthorityFlags"
+}

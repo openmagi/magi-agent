@@ -1,0 +1,28 @@
+{
+  "false_only_fields": [
+    "block_mode_enabled_for_live_traffic",
+    "canary_attached",
+    "execution_attached",
+    "network_sse",
+    "production_attached",
+    "production_transcript_append",
+    "route_attached",
+    "traffic_attached",
+    "user_visible"
+  ],
+  "model_construct_dump": {
+    "blockModeEnabledForLiveTraffic": false,
+    "canaryAttached": false,
+    "executionAttached": false,
+    "networkSse": false,
+    "productionAttached": false,
+    "productionTranscriptAppend": false,
+    "routeAttached": false,
+    "trafficAttached": false,
+    "userVisible": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.shadow.audit_reporter.Gate2AuditEvidenceOutputFlags"
+}

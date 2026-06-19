@@ -1,0 +1,35 @@
+{
+  "false_only_fields": [
+    "adk_runner_invoked",
+    "evidence_block_enabled",
+    "live_shadow_executed",
+    "queue_enqueued",
+    "shell_or_code_executed",
+    "storage_written",
+    "tools_executed",
+    "user_visible_output_attached"
+  ],
+  "model_construct_dump": {
+    "adkRunnerInvoked": false,
+    "evidenceBlockEnabled": false,
+    "liveShadowExecuted": false,
+    "queueEnqueued": false,
+    "shellOrCodeExecuted": false,
+    "storageWritten": false,
+    "toolsExecuted": false,
+    "userVisibleOutputAttached": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": {
+    "adkRunnerInvoked": false,
+    "evidenceBlockEnabled": false,
+    "liveShadowExecuted": false,
+    "queueEnqueued": false,
+    "shellOrCodeExecuted": false,
+    "storageWritten": false,
+    "toolsExecuted": false,
+    "userVisibleOutputAttached": false
+  },
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.shadow.gate3b_local_report.Gate3BLocalReportAttachmentFlags"
+}

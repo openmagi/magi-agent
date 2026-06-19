@@ -1,0 +1,16 @@
+{
+  "false_only_fields": [
+    "adk_memory_service_attached"
+  ],
+  "model_construct_dump": {
+    "adkMemoryServiceAttached": false,
+    "enabled": false,
+    "promptProjectionAllowed": false,
+    "recallAllowed": false,
+    "writeAllowed": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.adk_bridge.memory_service.MemoryBoundaryConfig"
+}

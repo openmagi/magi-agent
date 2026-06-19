@@ -1,0 +1,16 @@
+{
+  "false_only_fields": [
+    "production_writes_enabled"
+  ],
+  "model_construct_dump": {
+    "enabled": false,
+    "localInMemoryEnabled": false,
+    "productionWritesEnabled": true
+  },
+  "model_construct_force_false_leaks": [
+    "production_writes_enabled"
+  ],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.tools.read_ledger.ReadLedgerConfig"
+}

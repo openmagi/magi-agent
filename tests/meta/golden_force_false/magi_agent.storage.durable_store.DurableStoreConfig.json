@@ -1,0 +1,12 @@
+{
+  "false_only_fields": [
+    "hosted_sync_required",
+    "production_writes_enabled",
+    "sqlite_multi_writer_allowed"
+  ],
+  "model_construct_dump": null,
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.storage.durable_store.DurableStoreConfig"
+}

@@ -1,0 +1,22 @@
+{
+  "false_only_fields": [
+    "adk_artifact_service_attached",
+    "production_storage_writes_enabled",
+    "route_attached"
+  ],
+  "model_construct_dump": {
+    "adkArtifactServiceAttached": true,
+    "enabled": false,
+    "localFakeRegistryEnabled": false,
+    "productionStorageWritesEnabled": true,
+    "routeAttached": true
+  },
+  "model_construct_force_false_leaks": [
+    "adk_artifact_service_attached",
+    "production_storage_writes_enabled",
+    "route_attached"
+  ],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.artifacts.output_registry_boundary.OutputArtifactRegistryConfig"
+}

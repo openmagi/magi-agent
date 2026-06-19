@@ -1,0 +1,21 @@
+{
+  "false_only_fields": [
+    "prompt_projection_enabled",
+    "writes_enabled"
+  ],
+  "model_construct_dump": {
+    "memoryMode": "normal",
+    "promptProjectionEnabled": false,
+    "sourceAuthority": "long_term_disabled",
+    "writesEnabled": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": {
+    "memoryMode": "normal",
+    "promptProjectionEnabled": false,
+    "sourceAuthority": "long_term_disabled",
+    "writesEnabled": false
+  },
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.memory.policy.MemoryPolicy"
+}

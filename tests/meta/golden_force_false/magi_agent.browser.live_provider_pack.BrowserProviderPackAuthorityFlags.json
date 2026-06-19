@@ -1,0 +1,28 @@
+{
+  "false_only_fields": [
+    "browser_executed",
+    "browser_worker_attached",
+    "cdp_session_attached",
+    "parent_context_injected",
+    "production_writes_enabled",
+    "provider_called",
+    "raw_snapshot_injected",
+    "raw_tool_log_injected",
+    "route_attached"
+  ],
+  "model_construct_dump": {
+    "browserExecuted": false,
+    "browserWorkerAttached": false,
+    "cdpSessionAttached": false,
+    "parentContextInjected": false,
+    "productionWritesEnabled": false,
+    "providerCalled": false,
+    "rawSnapshotInjected": false,
+    "rawToolLogInjected": false,
+    "routeAttached": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.browser.live_provider_pack.BrowserProviderPackAuthorityFlags"
+}

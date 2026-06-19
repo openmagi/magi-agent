@@ -1,0 +1,19 @@
+{
+  "false_only_fields": [
+    "browser_execution_allowed",
+    "channel_delivery_allowed",
+    "child_execution_attached",
+    "child_summary_is_evidence",
+    "live_authority_allowed",
+    "memory_writes_allowed",
+    "model_calls_allowed",
+    "raw_child_output_projection_allowed",
+    "tool_execution_allowed",
+    "workspace_mutation_allowed"
+  ],
+  "model_construct_dump": null,
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.recipes.opencode_child_lifecycle.OpenCodeScoutChildLifecycleDecision"
+}

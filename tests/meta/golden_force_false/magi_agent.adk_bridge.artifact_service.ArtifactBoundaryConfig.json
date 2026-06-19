@@ -1,0 +1,15 @@
+{
+  "false_only_fields": [
+    "adk_artifact_service_attached"
+  ],
+  "model_construct_dump": {
+    "adkArtifactServiceAttached": false,
+    "artifactWriteAllowed": false,
+    "blobStorageLocation": "external_ref_only",
+    "enabled": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.adk_bridge.artifact_service.ArtifactBoundaryConfig"
+}

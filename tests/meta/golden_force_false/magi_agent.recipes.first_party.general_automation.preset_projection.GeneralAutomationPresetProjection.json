@@ -1,0 +1,25 @@
+{
+  "false_only_fields": [
+    "core_owned",
+    "spawns_child_runners"
+  ],
+  "model_construct_dump": {
+    "aliasIgnoredReasonCodes": [],
+    "authorityFlags": {
+      "browserSessionStarted": false,
+      "liveToolsAttached": false,
+      "productionRouteAttached": false,
+      "runnerSpawned": false
+    },
+    "coreOwned": true,
+    "recipeOwned": true,
+    "spawnsChildRunners": true
+  },
+  "model_construct_force_false_leaks": [
+    "core_owned",
+    "spawns_child_runners"
+  ],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.recipes.first_party.general_automation.preset_projection.GeneralAutomationPresetProjection"
+}

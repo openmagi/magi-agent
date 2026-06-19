@@ -1,0 +1,23 @@
+{
+  "false_only_fields": [
+    "delivery_claimed"
+  ],
+  "model_construct_dump": {
+    "authorityFlags": {
+      "adkArtifactServiceAttached": false,
+      "channelDeliveryPerformed": false,
+      "liveToolAttached": false,
+      "routeAttached": false,
+      "workbookLoaded": false,
+      "workspaceMutated": false
+    },
+    "deliveryClaimed": true,
+    "status": "artifact_recorded"
+  },
+  "model_construct_force_false_leaks": [
+    "delivery_claimed"
+  ],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.harness.general_automation.spreadsheet_evidence.SpreadsheetWriteEvidence"
+}

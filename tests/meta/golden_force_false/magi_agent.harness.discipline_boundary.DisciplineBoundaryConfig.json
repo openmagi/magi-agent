@@ -1,0 +1,24 @@
+{
+  "false_only_fields": [
+    "adk_callbacks_attached",
+    "adk_evals_attached",
+    "prompt_injection_enabled",
+    "route_attached"
+  ],
+  "model_construct_dump": {
+    "adkCallbacksAttached": true,
+    "adkEvalsAttached": true,
+    "enabled": false,
+    "promptInjectionEnabled": true,
+    "routeAttached": true
+  },
+  "model_construct_force_false_leaks": [
+    "adk_callbacks_attached",
+    "adk_evals_attached",
+    "prompt_injection_enabled",
+    "route_attached"
+  ],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.harness.discipline_boundary.DisciplineBoundaryConfig"
+}

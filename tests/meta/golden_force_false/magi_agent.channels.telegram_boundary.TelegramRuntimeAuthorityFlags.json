@@ -1,0 +1,20 @@
+{
+  "false_only_fields": [
+    "channel_delivery_performed",
+    "production_channel_write",
+    "route_attached",
+    "telegram_attached",
+    "telegram_polling_attached"
+  ],
+  "model_construct_dump": {
+    "channelDeliveryPerformed": false,
+    "productionChannelWrite": false,
+    "routeAttached": false,
+    "telegramAttached": false,
+    "telegramPollingAttached": false
+  },
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.channels.telegram_boundary.TelegramRuntimeAuthorityFlags"
+}

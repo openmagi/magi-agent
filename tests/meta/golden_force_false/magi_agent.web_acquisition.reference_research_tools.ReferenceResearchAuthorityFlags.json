@@ -1,0 +1,18 @@
+{
+  "false_only_fields": [
+    "browser_execution_invoked",
+    "channel_delivery_allowed",
+    "live_authority_allowed",
+    "live_tool_dispatched",
+    "memory_write_allowed",
+    "model_call_invoked",
+    "production_network_enabled",
+    "raw_source_injected",
+    "workspace_mutation_allowed"
+  ],
+  "model_construct_dump": null,
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": null,
+  "model_validate_force_false_leaks": [],
+  "qualname": "magi_agent.web_acquisition.reference_research_tools.ReferenceResearchAuthorityFlags"
+}
