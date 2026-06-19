@@ -1,9 +1,6 @@
 """Local-only diagnostic shadow helpers."""
 
 __all__ = [
-    "AgentMethodologyAttachmentFlags",
-    "AgentMethodologyFixture",
-    "PublicAgentMethodologyFixtureProjection",
     "Gate2AuditBlockReadiness",
     "Gate2AuditEvidenceOutputFlags",
     "Gate2AuditEvidenceReport",
@@ -37,14 +34,6 @@ __all__ = [
 
 def __getattr__(name: str) -> object:
     if name in __all__:
-        if name in {
-            "AgentMethodologyAttachmentFlags",
-            "AgentMethodologyFixture",
-            "PublicAgentMethodologyFixtureProjection",
-        }:
-            from . import agent_methodology_contract
-
-            return getattr(agent_methodology_contract, name)
         if name in {
             "Gate2AuditBlockReadiness",
             "Gate2AuditEvidenceOutputFlags",

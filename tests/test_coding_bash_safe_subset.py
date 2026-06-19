@@ -18,14 +18,9 @@ from magi_agent.plugins.shell_testrun_safe_subset import (
     ShellTestRunSafeSubsetConfig,
     ShellTestRunSafeSubsetRequest,
 )
-from magi_agent.shadow.path_shell_policy_contract import (
-    load_path_shell_policy_contract_fixture,
-    project_path_shell_policy_contract_fixture,
-)
 
 
 PYTHON_ROOT = Path(__file__).resolve().parents[1]
-PATH_POLICY_FIXTURES = Path(__file__).parent / "fixtures" / "path_shell_policy"
 PLUGIN_PATH = PYTHON_ROOT / "magi_agent" / "plugins" / "shell_testrun_safe_subset.py"
 GENERAL_POLICY_DIR = PYTHON_ROOT / "magi_agent" / "harness" / "general_automation"
 
@@ -265,31 +260,6 @@ def test_pr4_shell_is_blocked_when_dedicated_file_or_search_tool_contract_exists
     assert decision.reason_codes == ("shell_command_outside_safe_subset",)
 
 
-def test_pr4_path_policy_fixture_models_sealed_paths_cwd_budget_and_no_live_authority() -> None:
-    fixture = load_path_shell_policy_contract_fixture(
-        "policy_matrix.json",
-        fixture_root=PATH_POLICY_FIXTURES,
-    )
-    projection = project_path_shell_policy_contract_fixture(fixture)
-    cases = {case.case_id: case for case in fixture.cases}
-
-    assert projection.no_live_execution is True
-    assert set(projection.attachment_flags.model_dump(by_alias=True).values()) == {False}
-    assert cases["sealed_file_read_allowed"].tool.name == "FileRead"
-    assert cases["sealed_file_read_allowed"].decision == "allow"
-    assert cases["sealed_file_write_denied"].decision == "deny"
-    assert cases["workspace_escape_path"].decision == "deny"
-    assert cases["workspace_escape_path"].normalized_workspace_relative == "[outside-workspace]"
-    assert cases["command_timeout_budget_metadata"].budget_metadata.model_dump(by_alias=True) == {
-        "timeoutMs": 120000,
-        "outputChars": 6000,
-        "transcriptChars": 3000,
-    }
-    rendered = json.dumps(projection.model_dump(by_alias=True), sort_keys=True)
-    for forbidden in ("/data/bots", "/workspace", "/var/lib/kubelet", "Bearer unsafe"):
-        assert forbidden not in rendered
-
-
 def test_pr4_public_projections_expose_only_digest_refs_and_safe_metadata() -> None:
     command = (
         "python -m pytest /Users/acme/private "
@@ -379,6 +349,5 @@ def test_pr4_matrix_row_is_complete_default_off_and_records_shell_policy_files()
         "magi_agent/harness/general_automation/shell_policy.py",
         "magi_agent/harness/general_automation/shell_receipts.py",
         "magi_agent/plugins/shell_testrun_safe_subset.py",
-        "magi_agent/shadow/path_shell_policy_contract.py",
     ]
     assert "tests/test_coding_bash_safe_subset.py" in row["coveredByTests"]

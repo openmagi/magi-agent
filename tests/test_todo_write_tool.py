@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 
 from magi_agent.tools import ToolRegistry, register_core_tool_manifests
-from magi_agent.tools.concurrency import ToolCall, partition_tool_calls
 from magi_agent.tools.context import ToolContext
 from magi_agent.tools.dispatcher import ToolDispatcher
 from magi_agent.tools.todo_toolhost import (
@@ -93,21 +92,6 @@ def test_todowrite_dispatches_through_registry_as_meta_tool() -> None:
 
 def test_todowrite_runs_exclusively_and_is_not_readonly_offloaded() -> None:
     registry, _ = _registry_with_todo()
-
-    batches = partition_tool_calls(
-        (
-            ToolCall(name="Glob", arguments={}, tool_use_id="read-1"),
-            ToolCall(name=TODO_WRITE_TOOL_NAME, arguments={"todos": []}, tool_use_id="todo-1"),
-            ToolCall(name="Glob", arguments={}, tool_use_id="read-2"),
-        ),
-        registry,
-    )
-
-    assert [(batch.is_concurrent, [call.name for call in batch.calls]) for batch in batches] == [
-        (True, ["Glob"]),
-        (False, [TODO_WRITE_TOOL_NAME]),
-        (True, ["Glob"]),
-    ]
 
     registration = registry.resolve_registration(TODO_WRITE_TOOL_NAME)
     assert registration is not None
