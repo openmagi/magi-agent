@@ -742,6 +742,7 @@ export function ChatViewClient({
           await chatApi.sendMessage(botId, channel, allMessages, {
             model: turnModel,
             ...(sendOptions?.goalMode ? { goalMode: true } : {}),
+            ...(sendOptions?.reasoningEffort ? { reasoningEffort: sendOptions.reasoningEffort } : {}),
             onDelta: (delta) => {
               if (!isCurrentBot()) return;
               const s = useChatStore.getState().channelStates[channel];
@@ -1169,6 +1170,7 @@ export function ChatViewClient({
           ...(sendOptions?.explicitRecipeSelection
             ? { explicitRecipeSelection: sendOptions.explicitRecipeSelection }
             : {}),
+          ...(sendOptions?.reasoningEffort ? { reasoningEffort: sendOptions.reasoningEffort } : {}),
           ...(uploadedKbDocs.length > 0 ? { kbDocs: uploadedKbDocs } : {}),
         };
         const ok = state.enqueueMessage(channel, queued, { botId });
@@ -1197,12 +1199,13 @@ export function ChatViewClient({
         next.content,
         next.kbDocs ?? [],
         next.modelOverride,
-        next.goalMode || next.explicitRecipeSelection
+        next.goalMode || next.explicitRecipeSelection || next.reasoningEffort
           ? {
               ...(next.goalMode ? { goalMode: true } : {}),
               ...(next.explicitRecipeSelection
                 ? { explicitRecipeSelection: next.explicitRecipeSelection }
                 : {}),
+              ...(next.reasoningEffort ? { reasoningEffort: next.reasoningEffort } : {}),
             }
           : undefined,
       ).catch((err) => {

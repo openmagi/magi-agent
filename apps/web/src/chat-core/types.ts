@@ -2,6 +2,7 @@ import type {
   ExplicitRecipeSelectionRequest,
   PublicRecipeRef,
 } from "./recipe-selection";
+import type { ReasoningEffort } from "./reasoning-effort";
 
 /** Response/progress language currently supported by the runtime policy. */
 export type ChatResponseLanguage = "en" | "ko" | "ja" | "zh" | "es";
@@ -553,6 +554,8 @@ export interface QueuedMessage {
   goalMode?: boolean;
   /** Preserve explicit recipe request intent when the message drains later. */
   explicitRecipeSelection?: ExplicitRecipeSelectionRequest["explicitRecipeSelection"];
+  /** Preserve per-turn reasoning-effort override when the message drains later. */
+  reasoningEffort?: ReasoningEffort;
   queuedAt: number;
 }
 

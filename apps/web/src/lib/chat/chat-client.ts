@@ -26,6 +26,7 @@ import type {
   InspectedSourceKind,
   ResponseUsage,
   RuntimeTrace,
+  ReasoningEffort,
 } from "@/chat-core";
 import { getResetCounter } from "@/chat-core";
 import { getLocalAgentBaseUrl } from "../local-auth";
@@ -1116,6 +1117,11 @@ export interface SendMessageOptions {
   model?: string;
   /** Create a persistent goal mission and let runtime continue until done. */
   goalMode?: boolean;
+  /** Per-turn reasoning-effort override (cross-provider knob — see
+   *  `magi_agent/cli/real_runner.py` `_normalize_reasoning_effort`). Only
+   *  honored by models whose provider supports it. Backend wiring lands in
+   *  `chat_routes.py` (OSS) and `chat-proxy` (hosted) follow-ups. */
+  reasoningEffort?: ReasoningEffort;
   /** If set, the newest user message is a reply to this target. */
   replyTo?: ReplyTo;
   onDelta: (text: string) => void;
@@ -1364,6 +1370,7 @@ export async function sendMessage(
   const {
     model = "auto",
     goalMode,
+    reasoningEffort,
     replyTo,
     onDelta,
     onThinkingDelta,
@@ -2282,6 +2289,7 @@ export async function sendMessage(
     messages: messages.map((m) => ({ role: m.role, content: m.content })),
     stream: true,
     ...(goalMode ? { goalMode: true } : {}),
+    ...(reasoningEffort ? { reasoningEffort } : {}),
     ...(replyTo ? { replyTo } : {}),
   };
   const baseHeaders = {
@@ -2544,7 +2552,7 @@ async function sendMessageNonStreaming(
   messages: Pick<ChatMessage, "role" | "content">[],
   options: SendMessageOptions,
 ): Promise<void> {
-  const { model = "auto", goalMode, replyTo, onDelta, onDone, onError, signal } = options;
+  const { model = "auto", goalMode, reasoningEffort, replyTo, onDelta, onDone, onError, signal } = options;
   const visibleText = createStreamingTextSmoother(onDelta);
 
   try {
@@ -2567,6 +2575,7 @@ async function sendMessageNonStreaming(
         stream: !isLocalBot(botId) ? false : true,
         ...(isLocalBot(botId) ? { sessionId: sessionKey } : {}),
         ...(goalMode ? { goalMode: true } : {}),
+        ...(reasoningEffort ? { reasoningEffort } : {}),
         ...(replyTo ? { replyTo } : {}),
       }),
       signal,
