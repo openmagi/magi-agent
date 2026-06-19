@@ -7,6 +7,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from magi_agent.ops.authority import FalseOnlyAuthorityModel
+
 
 ConformancePhase = Literal["phase_0", "phase_1"]
 StorageModel = Literal["file_snapshot", "external", "vector", "graph", "hybrid", "sql", "object"]
@@ -34,9 +36,7 @@ OPERATION_ORDER: tuple[MemoryOperation, ...] = (
 _MODEL_CONFIG = ConfigDict(frozen=True, populate_by_name=True, extra="forbid")
 
 
-class MemoryConformanceAdkFirst(BaseModel):
-    model_config = _MODEL_CONFIG
-
+class MemoryConformanceAdkFirst(FalseOnlyAuthorityModel):
     adk_owns: list[str] = Field(alias="adkOwns")
     openmagi_owns: list[str] = Field(alias="openMagiOwns")
     memory_service_replacement_allowed: Literal[False] = Field(
@@ -49,9 +49,7 @@ class MemoryConformanceAdkFirst(BaseModel):
     )
 
 
-class MemoryConformanceImportBoundary(BaseModel):
-    model_config = _MODEL_CONFIG
-
+class MemoryConformanceImportBoundary(FalseOnlyAuthorityModel):
     adk_memory_service_replaced: Literal[False] = Field(
         default=False,
         alias="adkMemoryServiceReplaced",
@@ -464,7 +462,7 @@ def check_writable_provider_conformance(
 # ---------------------------------------------------------------------------
 
 
-class HipocampusQmdLiveRecallConformance(BaseModel):
+class HipocampusQmdLiveRecallConformance(FalseOnlyAuthorityModel):
     """Conformance record for the gated live qmd RECALL path.
 
     Records whether the OPTIONAL ``MAGI_MEMORY_QMD_LIVE_ENABLED`` recall gate is
@@ -473,8 +471,6 @@ class HipocampusQmdLiveRecallConformance(BaseModel):
     NEVER be True, asserting that enabling gated recall does not flip the parity
     surface.
     """
-
-    model_config = _MODEL_CONFIG
 
     #: Whether the gated live qmd RECALL path (recall adapter) is enabled.  This
     #: is a normal ``bool`` — the gate may be on (True) without weakening parity.

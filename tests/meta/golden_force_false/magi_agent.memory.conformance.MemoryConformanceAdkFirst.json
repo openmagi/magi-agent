@@ -3,14 +3,8 @@
     "memory_service_replacement_allowed",
     "provider_attachment_allowed"
   ],
-  "model_construct_dump": {
-    "memoryServiceReplacementAllowed": true,
-    "providerAttachmentAllowed": true
-  },
-  "model_construct_force_false_leaks": [
-    "memory_service_replacement_allowed",
-    "provider_attachment_allowed"
-  ],
+  "model_construct_dump": null,
+  "model_construct_force_false_leaks": [],
   "model_validate_dump": null,
   "model_validate_force_false_leaks": [],
   "qualname": "magi_agent.memory.conformance.MemoryConformanceAdkFirst"

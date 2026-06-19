@@ -12,30 +12,30 @@
     "routes_attached"
   ],
   "model_construct_dump": {
-    "adkMemoryServiceAttached": true,
-    "adkMemoryServiceReplaced": true,
-    "agentMemoryCalls": true,
-    "hipocampusQmdCalls": true,
-    "liveProviderCalls": true,
-    "memoryWrites": true,
-    "productionStorage": true,
-    "promptProjection": true,
-    "providerSdkImports": true,
-    "routesAttached": true
+    "adkMemoryServiceAttached": false,
+    "adkMemoryServiceReplaced": false,
+    "agentMemoryCalls": false,
+    "hipocampusQmdCalls": false,
+    "liveProviderCalls": false,
+    "memoryWrites": false,
+    "productionStorage": false,
+    "promptProjection": false,
+    "providerSdkImports": false,
+    "routesAttached": false
   },
-  "model_construct_force_false_leaks": [
-    "adk_memory_service_attached",
-    "adk_memory_service_replaced",
-    "agent_memory_calls",
-    "hipocampus_qmd_calls",
-    "live_provider_calls",
-    "memory_writes",
-    "production_storage",
-    "prompt_projection",
-    "provider_sdk_imports",
-    "routes_attached"
-  ],
-  "model_validate_dump": null,
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": {
+    "adkMemoryServiceAttached": false,
+    "adkMemoryServiceReplaced": false,
+    "agentMemoryCalls": false,
+    "hipocampusQmdCalls": false,
+    "liveProviderCalls": false,
+    "memoryWrites": false,
+    "productionStorage": false,
+    "promptProjection": false,
+    "providerSdkImports": false,
+    "routesAttached": false
+  },
   "model_validate_force_false_leaks": [],
   "qualname": "magi_agent.memory.conformance.MemoryConformanceImportBoundary"
 }

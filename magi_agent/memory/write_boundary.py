@@ -5,7 +5,9 @@ import re
 from collections.abc import Mapping, Sequence
 from typing import Any, Literal, Self, TypeAlias
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from magi_agent.ops.authority import FalseOnlyAuthorityModel
 
 
 MemoryMutationOperation: TypeAlias = Literal[
@@ -49,9 +51,7 @@ _PUBLIC_TEXT_MAX_LENGTH = 400
 _SAFE_CODE_RE = re.compile(r"^[a-z][a-z0-9_.:-]{0,127}$")
 
 
-class MemoryWriteAuthorityFlags(BaseModel):
-    model_config = _MODEL_CONFIG
-
+class MemoryWriteAuthorityFlags(FalseOnlyAuthorityModel):
     memory_write_allowed: Literal[False] = Field(default=False, alias="memoryWriteAllowed")
     memory_redact_allowed: Literal[False] = Field(default=False, alias="memoryRedactAllowed")
     memory_delete_allowed: Literal[False] = Field(default=False, alias="memoryDeleteAllowed")
@@ -66,53 +66,6 @@ class MemoryWriteAuthorityFlags(BaseModel):
         default=False,
         alias="productionWriteEnabled",
     )
-
-    @classmethod
-    def model_construct(
-        cls,
-        _fields_set: set[str] | None = None,
-        **values: Any,
-    ) -> Self:
-        _ = _fields_set, values
-        return cls(**_false_payload(cls))
-
-    def model_copy(
-        self,
-        *,
-        update: Mapping[str, Any] | None = None,
-        deep: bool = False,
-    ) -> Self:
-        _ = update, deep
-        return type(self)(**_false_payload(type(self)))
-
-    @model_validator(mode="before")
-    @classmethod
-    def _force_false_inputs(cls, value: object) -> object:
-        if not isinstance(value, Mapping):
-            return value
-        allowed_keys = set(cls.model_fields)
-        allowed_keys.update(
-            field.alias
-            for field in cls.model_fields.values()
-            if field.alias is not None
-        )
-        unsupported = set(value) - allowed_keys
-        if unsupported:
-            raise ValueError("memory write authority flags contain unsupported fields")
-        return _false_payload(cls)
-
-    @field_serializer(
-        "memory_write_allowed",
-        "memory_redact_allowed",
-        "memory_delete_allowed",
-        "provider_call_allowed",
-        "filesystem_write_allowed",
-        "database_write_allowed",
-        "network_call_allowed",
-        "production_write_enabled",
-    )
-    def _serialize_false(self, _value: object) -> bool:
-        return False
 
 
 class MemoryMutationTarget(BaseModel):
@@ -412,9 +365,7 @@ class MemoryBackendCapabilities(BaseModel):
     supports_vector: bool = Field(default=False, alias="supportsVector")
 
 
-class MemoryBackendDescriptor(BaseModel):
-    model_config = _MODEL_CONFIG
-
+class MemoryBackendDescriptor(FalseOnlyAuthorityModel):
     provider_id: str = Field(alias="providerId")
     kind: MemoryBackendKind
     display_name: str = Field(alias="displayName")
@@ -432,65 +383,6 @@ class MemoryBackendDescriptor(BaseModel):
     )
     capabilities: MemoryBackendCapabilities
     activation_blockers: tuple[str, ...] = Field(alias="activationBlockers")
-
-    @model_validator(mode="before")
-    @classmethod
-    def _force_backend_default_off(cls, value: object) -> object:
-        if not isinstance(value, Mapping):
-            return value
-        payload = dict(value)
-        for field_name, alias in (
-            ("enabled", "enabled"),
-            ("provider_calls_enabled", "providerCallsEnabled"),
-            ("provider_sdk_import_allowed", "providerSdkImportAllowed"),
-            ("memory_write_allowed", "memoryWriteAllowed"),
-            ("production_write_enabled", "productionWriteEnabled"),
-        ):
-            payload.pop(field_name, None)
-            payload[alias] = False
-        return payload
-
-    @classmethod
-    def model_construct(
-        cls,
-        _fields_set: set[str] | None = None,
-        **values: Any,
-    ) -> Self:
-        _ = _fields_set
-        return cls.model_validate(cls._force_backend_default_off(values))
-
-    def model_copy(
-        self,
-        *,
-        update: Mapping[str, Any] | None = None,
-        deep: bool = False,
-    ) -> Self:
-        _ = deep
-        payload = self.model_dump(by_alias=True, mode="python", warnings=False)
-        if update:
-            payload.update(dict(update))
-        return type(self).model_validate(type(self)._force_backend_default_off(payload))
-
-    def copy(
-        self,
-        *,
-        include: Any = None,
-        exclude: Any = None,
-        update: Mapping[str, Any] | None = None,
-        deep: bool = False,
-    ) -> Self:
-        _ = include, exclude
-        return self.model_copy(update=update, deep=deep)
-
-    @field_serializer(
-        "enabled",
-        "provider_calls_enabled",
-        "provider_sdk_import_allowed",
-        "memory_write_allowed",
-        "production_write_enabled",
-    )
-    def _serialize_backend_false(self, _value: object) -> bool:
-        return False
 
 
 def sha256_hex(value: str) -> str:
@@ -681,13 +573,6 @@ def provider_backend_descriptors() -> tuple[MemoryBackendDescriptor, ...]:
             ),
         ),
     )
-
-
-def _false_payload(model_type: type[MemoryWriteAuthorityFlags]) -> dict[str, bool]:
-    return {
-        field.alias or name: False
-        for name, field in model_type.model_fields.items()
-    }
 
 
 def _receipt_id(intent: MemoryMutationIntent) -> str:

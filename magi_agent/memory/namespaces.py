@@ -3,9 +3,11 @@ from __future__ import annotations
 from collections.abc import Mapping
 import hashlib
 import re
-from typing import Any, Literal, Self
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator, model_validator
+from pydantic import Field, field_validator
+
+from magi_agent.ops.authority import FalseOnlyAuthorityModel
 
 from .contracts import MemoryRecord, RecallResult
 from .policy import MemoryMode, MemorySourceAuthority
@@ -16,13 +18,6 @@ MemoryRedactionState = Literal["verified", "not_required", "unverified", "failed
 MemoryRetentionState = Literal["active", "expired", "suspended"]
 MemoryEraseState = Literal["active", "erased", "tombstoned"]
 
-_MODEL_CONFIG = ConfigDict(
-    frozen=True,
-    populate_by_name=True,
-    extra="forbid",
-    validate_default=True,
-    hide_input_in_errors=True,
-)
 _SAFE_REF_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_.:-]{1,180}$")
 _SAFE_REASON_RE = re.compile(r"^[a-z][a-z0-9_.:-]{0,120}$")
 _PRIVATE_VISIBILITIES = frozenset({"private", "shared"})
@@ -59,9 +54,7 @@ _SENSITIVE_TEXT_RE = re.compile(
 )
 
 
-class MemoryNamespacePolicy(BaseModel):
-    model_config = _MODEL_CONFIG
-
+class MemoryNamespacePolicy(FalseOnlyAuthorityModel):
     namespace_ref: str = Field(alias="namespaceRef")
     memory_mode: MemoryMode = Field(default="normal", alias="memoryMode")
     source_authority: MemorySourceAuthority = Field(
@@ -82,48 +75,8 @@ class MemoryNamespacePolicy(BaseModel):
     def _validate_namespace_ref(cls, value: str) -> str:
         return _safe_public_ref(value, prefix="memory-ns")
 
-    @model_validator(mode="before")
-    @classmethod
-    def _force_default_off(cls, value: object) -> dict[str, object]:
-        payload = dict(value) if isinstance(value, Mapping) else {}
-        payload["promptProjectionAllowed"] = False
-        payload.pop("prompt_projection_allowed", None)
-        payload["memoryWriteAllowed"] = False
-        payload.pop("memory_write_allowed", None)
-        return payload
 
-    @classmethod
-    def model_construct(
-        cls,
-        _fields_set: set[str] | None = None,
-        **values: Any,
-    ) -> Self:
-        _ = _fields_set
-        values["promptProjectionAllowed"] = False
-        values.pop("prompt_projection_allowed", None)
-        values["memoryWriteAllowed"] = False
-        values.pop("memory_write_allowed", None)
-        return cls.model_validate(values)
-
-    def model_copy(self, *, update: Mapping[str, Any] | None = None, deep: bool = False) -> Self:
-        payload = self.model_dump(by_alias=True, mode="python", warnings=False)
-        if update:
-            payload.update(dict(update))
-        payload["promptProjectionAllowed"] = False
-        payload.pop("prompt_projection_allowed", None)
-        payload["memoryWriteAllowed"] = False
-        payload.pop("memory_write_allowed", None)
-        _ = deep
-        return type(self).model_validate(payload)
-
-    @field_serializer("prompt_projection_allowed", "memory_write_allowed")
-    def _serialize_false(self, _value: object) -> bool:
-        return False
-
-
-class MemoryNamespaceDecision(BaseModel):
-    model_config = _MODEL_CONFIG
-
+class MemoryNamespaceDecision(FalseOnlyAuthorityModel):
     record_id: str = Field(alias="recordId")
     namespace_ref: str | None = Field(default=None, alias="namespaceRef")
     status: MemoryNamespaceDecisionStatus
@@ -152,48 +105,8 @@ class MemoryNamespaceDecision(BaseModel):
     def _sanitize_reason_codes(cls, value: object) -> tuple[str, ...]:
         return _sanitize_reason_codes(value)
 
-    @model_validator(mode="before")
-    @classmethod
-    def _force_default_off(cls, value: object) -> dict[str, object]:
-        payload = dict(value) if isinstance(value, Mapping) else {}
-        payload["promptProjectionAllowed"] = False
-        payload.pop("prompt_projection_allowed", None)
-        payload["memoryWriteAllowed"] = False
-        payload.pop("memory_write_allowed", None)
-        return payload
 
-    @classmethod
-    def model_construct(
-        cls,
-        _fields_set: set[str] | None = None,
-        **values: Any,
-    ) -> Self:
-        _ = _fields_set
-        values["promptProjectionAllowed"] = False
-        values.pop("prompt_projection_allowed", None)
-        values["memoryWriteAllowed"] = False
-        values.pop("memory_write_allowed", None)
-        return cls.model_validate(values)
-
-    def model_copy(self, *, update: Mapping[str, Any] | None = None, deep: bool = False) -> Self:
-        payload = self.model_dump(by_alias=True, mode="python", warnings=False)
-        if update:
-            payload.update(dict(update))
-        payload["promptProjectionAllowed"] = False
-        payload.pop("prompt_projection_allowed", None)
-        payload["memoryWriteAllowed"] = False
-        payload.pop("memory_write_allowed", None)
-        _ = deep
-        return type(self).model_validate(payload)
-
-    @field_serializer("prompt_projection_allowed", "memory_write_allowed")
-    def _serialize_false(self, _value: object) -> bool:
-        return False
-
-
-class MemoryNamespaceAdmission(BaseModel):
-    model_config = _MODEL_CONFIG
-
+class MemoryNamespaceAdmission(FalseOnlyAuthorityModel):
     namespace_policy: MemoryNamespacePolicy = Field(alias="namespacePolicy")
     decisions: tuple[MemoryNamespaceDecision, ...]
     result: RecallResult
@@ -204,48 +117,10 @@ class MemoryNamespaceAdmission(BaseModel):
     memory_write_allowed: Literal[False] = Field(default=False, alias="memoryWriteAllowed")
     reason_codes: tuple[str, ...] = Field(default=(), alias="reasonCodes")
 
-    @model_validator(mode="before")
-    @classmethod
-    def _force_default_off(cls, value: object) -> dict[str, object]:
-        payload = dict(value) if isinstance(value, Mapping) else {}
-        payload["promptProjectionAllowed"] = False
-        payload.pop("prompt_projection_allowed", None)
-        payload["memoryWriteAllowed"] = False
-        payload.pop("memory_write_allowed", None)
-        return payload
-
     @field_validator("reason_codes", mode="before")
     @classmethod
     def _sanitize_reason_codes(cls, value: object) -> tuple[str, ...]:
         return _sanitize_reason_codes(value)
-
-    @classmethod
-    def model_construct(
-        cls,
-        _fields_set: set[str] | None = None,
-        **values: Any,
-    ) -> Self:
-        _ = _fields_set
-        values["promptProjectionAllowed"] = False
-        values.pop("prompt_projection_allowed", None)
-        values["memoryWriteAllowed"] = False
-        values.pop("memory_write_allowed", None)
-        return cls.model_validate(values)
-
-    def model_copy(self, *, update: Mapping[str, Any] | None = None, deep: bool = False) -> Self:
-        payload = self.model_dump(by_alias=True, mode="python", warnings=False)
-        if update:
-            payload.update(dict(update))
-        payload["promptProjectionAllowed"] = False
-        payload.pop("prompt_projection_allowed", None)
-        payload["memoryWriteAllowed"] = False
-        payload.pop("memory_write_allowed", None)
-        _ = deep
-        return type(self).model_validate(payload)
-
-    @field_serializer("prompt_projection_allowed", "memory_write_allowed")
-    def _serialize_false(self, _value: object) -> bool:
-        return False
 
     def public_projection(self) -> dict[str, object]:
         return {

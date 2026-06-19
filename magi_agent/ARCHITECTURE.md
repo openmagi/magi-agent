@@ -162,6 +162,7 @@ graph LR
     learning --> memory
     learning --> storage
     learning --> telemetry
+    memory --> ops
     memory --> runtime
     memory --> transport
     meta_orchestration --> evidence
@@ -1140,17 +1141,17 @@ graph LR
 | compaction_tree.py | 5-level persistent compaction tree + ROOT.md synthesis (PR-A). | compactor, config, local_file_writable | runtime/memory_turn_hook.py |
 | compactor.py | Deterministic, IO-free memory compactor (gap-closer B2). | — | memory/adapters/local_file_writable.py, memory/compaction_tree.py |
 | config.py | Single source of truth for Hipocampus memory activation (PR1). | — | cli/memory_bootstrap.py, cli/memory_recall_block.py, gates/memory_write_readiness.py, memory/adapters/hipocampus_readonly.py, memory/adapters/local_file_writable.py, memory/adapters/operator_soul_writer.py, memory/compaction_tree.py, memory/policy.py, memory/search/__init__.py, runtime/memory_turn_hook.py |
-| conformance.py | — | declarative_filter, hipocampus_readonly, local_file_writable, policy | — |
+| conformance.py | — | authority, declarative_filter, hipocampus_readonly, local_file_writable, policy | — |
 | continuity_policy.py | A1 — memory continuity policy block. | — | cli/tool_runtime.py, memory/prompt_projection.py |
-| contracts.py | — | — | cli/learning_recall.py, harness/memory_recall.py, harness/memory_write.py, learning/injection.py, memory/__init__.py, memory/adapters/hipocampus_readonly.py, memory/adapters/local_file_writable.py, memory/adk_bridge.py, memory/namespaces.py, memory/policy.py, memory/projection.py, recipes/first_party/memory_recall.py |
+| contracts.py | — | authority | cli/learning_recall.py, harness/memory_recall.py, harness/memory_write.py, learning/injection.py, memory/__init__.py, memory/adapters/hipocampus_readonly.py, memory/adapters/local_file_writable.py, memory/adk_bridge.py, memory/namespaces.py, memory/policy.py, memory/projection.py, recipes/first_party/memory_recall.py |
 | declarative_filter.py | Declarative-only filter for agent memory writes (D2). | — | harness/memory_review.py, harness/memory_write.py, memory/conformance.py |
-| namespaces.py | — | contracts, policy | cli/learning_recall.py, harness/memory_recall.py, memory/__init__.py, memory/projection.py, recipes/first_party/memory_recall.py |
-| policy.py | — | config, contracts | memory/__init__.py, memory/adapters/hipocampus_readonly.py, memory/adapters/local_file_writable.py, memory/adk_bridge.py, memory/conformance.py, memory/namespaces.py, memory/projection.py, memory/prompt_projection.py, recipes/first_party/memory_recall.py |
-| projection.py | — | contracts, events, namespaces, policy, tool_preview | memory/prompt_projection.py, recipes/first_party/memory_recall.py |
+| namespaces.py | — | authority, contracts, policy | cli/learning_recall.py, harness/memory_recall.py, memory/__init__.py, memory/projection.py, recipes/first_party/memory_recall.py |
+| policy.py | — | authority, config, contracts | memory/__init__.py, memory/adapters/hipocampus_readonly.py, memory/adapters/local_file_writable.py, memory/adk_bridge.py, memory/conformance.py, memory/namespaces.py, memory/projection.py, memory/prompt_projection.py, recipes/first_party/memory_recall.py |
+| projection.py | — | authority, contracts, events, namespaces, policy, tool_preview | memory/prompt_projection.py, recipes/first_party/memory_recall.py |
 | prompt_projection.py | D3 — gated memory prompt projection. | continuity_policy, hipocampus_readonly, policy, projection, tool_preview | cli/memory_recall_block.py, runtime/memory_snapshot_cache.py |
 | qmd_client.py | Fail-open client for live qmd memory search. | — | memory/adapters/hipocampus_readonly.py |
-| recall_ledger.py | — | — | — |
-| write_boundary.py | — | — | harness/memory_compaction.py, harness/memory_write.py |
+| recall_ledger.py | — | authority | — |
+| write_boundary.py | — | authority | harness/memory_compaction.py, harness/memory_write.py |
 
 ### memory/adapters/
 
@@ -1231,7 +1232,7 @@ graph LR
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
 | __init__.py | — | — | transport/health.py, transport/product_admin.py |
-| authority.py | Frozen-contract / authority model bases (C-4 / C-5 shared home). | — | channels/discord_adapter.py, channels/dispatcher.py, channels/push_delivery.py, channels/runtime_boundary.py, channels/telegram_adapter.py, channels/telegram_boundary.py, channels/workflow_routing.py, config/models.py, connectors/credential_lease.py, connectors/marketplace.py, connectors/registry.py, ops/safety.py, permissions/auto_control.py, tools/read_ledger.py, tools/scheduler.py |
+| authority.py | Frozen-contract / authority model bases (C-4 / C-5 shared home). | — | channels/discord_adapter.py, channels/dispatcher.py, channels/push_delivery.py, channels/runtime_boundary.py, channels/telegram_adapter.py, channels/telegram_boundary.py, channels/workflow_routing.py, config/models.py, connectors/credential_lease.py, connectors/marketplace.py, connectors/registry.py, memory/conformance.py, memory/contracts.py, memory/namespaces.py, memory/policy.py, memory/projection.py, memory/recall_ledger.py, memory/write_boundary.py, ops/safety.py, permissions/auto_control.py, tools/read_ledger.py, tools/scheduler.py |
 | health.py | — | daemon, scheduler_job_execution | adk_bridge/event_adapter.py, gateway/daemon.py, shadow/gate5b4c3_live_runner_boundary.py, transport/sse.py, transport/streaming_chat_route.py |
 | job_queue.py | — | safety | — |
 | metrics.py | — | safety | — |
