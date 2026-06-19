@@ -116,7 +116,21 @@ _SPAWN_AGENT_INPUT_SCHEMA: dict[str, object] = {
     },
     "additionalProperties": True,
 }
+_WEB_READONLY_METADATA: dict[str, object] = {
+    # WebSearch / WebFetch (and aliases) only *read* remote data — no external
+    # mutation. Declaring them read-only lets the fail-closed default permission
+    # scope auto-allow them instead of prompting on every call. ``external``
+    # side-effect class reflects the network reach (NOT a workspace mutation);
+    # the manifest validator forbids readonly tools from being dangerous or
+    # mutating, so this stays safe.
+    "side_effect_class": "external",
+    "parallel_safety": "readonly",
+}
 _SPECIAL_TOOL_METADATA: dict[tuple[str, str], dict[str, object]] = {
+    ("openmagi.web", "WebSearch"): _WEB_READONLY_METADATA,
+    ("openmagi.web", "web-search"): _WEB_READONLY_METADATA,
+    ("openmagi.web", "web_search"): _WEB_READONLY_METADATA,
+    ("openmagi.web", "WebFetch"): _WEB_READONLY_METADATA,
     ("openmagi.agentmemory", "AgentMemoryRemember"): {
         "permission": "write",
     },
@@ -285,6 +299,7 @@ def _build_tool_manifest(
         should_defer=bool(metadata.get("should_defer", False)),
         capability_tags=cast(tuple[str, ...], metadata.get("capability_tags", ())),
         side_effect_class=cast(str, metadata.get("side_effect_class", "none")),
+        parallel_safety=cast(str, metadata.get("parallel_safety", "unsafe")),
         latency_class=cast(str, metadata.get("latency_class", "inline")),
         adk_tool_type=cast(str, metadata.get("adk_tool_type", "FunctionTool")),
         preconditions=cast(tuple[str, ...], metadata.get("preconditions", ())),

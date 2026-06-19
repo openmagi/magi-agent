@@ -15,6 +15,32 @@ from .safety import RuntimePermissionArbiter
 PermissionAction = Literal["allow", "deny", "ask"]
 APPROVAL_PERMISSION_CLASSES = {"write", "execute", "net", "computer"}
 APPROVAL_TAGS = {"requires-approval", "approval-required"}
+# Side-effect classes that, for a ``net`` tool, indicate external mutation rather
+# than a pure remote read. A net tool tagged with one of these is NOT treated as
+# read-only even if it (mis)declares ``parallel_safety="readonly"``.
+_EXTERNALLY_MUTATING_SIDE_EFFECTS = {"local_and_external"}
+
+
+def is_readonly_net_tool(manifest: ToolManifest) -> bool:
+    """Whether a ``net``-permission tool only *reads* remote data.
+
+    Predicate: ``parallel_safety == "readonly"`` (e.g. WebSearch / WebFetch GET).
+    The manifest validator already forbids ``readonly`` tools from being
+    ``dangerous`` or ``mutates_workspace``, so a readonly classification can never
+    coexist with a local mutation/danger flag. As belt-and-suspenders we also
+    reject the explicitly external-mutating ``side_effect_class`` value
+    (``local_and_external``) so a net WRITE/POST tool that mis-declares itself
+    readonly is still sent to approval. A net tool that merely fetches remote
+    data (side_effect_class ``none`` or ``external``-read) is read-only; anything
+    that causes external side effects is not.
+    """
+    if manifest.permission != "net":
+        return False
+    if manifest.parallel_safety != "readonly":
+        return False
+    if manifest.side_effect_class in _EXTERNALLY_MUTATING_SIDE_EFFECTS:
+        return False
+    return True
 
 
 @dataclass(frozen=True)
@@ -155,6 +181,12 @@ def approval_required_reason(manifest: ToolManifest) -> str | None:
         return "dangerous tool requires approval"
     if manifest.mutates_workspace:
         return "workspace mutation requires approval"
+    # Read-only ``net`` tools (WebSearch / WebFetch GET) only fetch remote data;
+    # under the fail-closed default they auto-allow instead of prompting every
+    # call. Net WRITE / side-effecting net tools fall through to the class check
+    # below and still require approval.
+    if is_readonly_net_tool(manifest):
+        return None
     if manifest.permission in APPROVAL_PERMISSION_CLASSES:
         return f"{manifest.permission} permission requires approval"
     if APPROVAL_TAGS.intersection(manifest.tags):
