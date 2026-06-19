@@ -57,8 +57,10 @@ class WireProfile:
         ``(tool_id, label) -> dict``
         Builds the ``tool_progress`` agent_event dict.
     build_tool_end:
-        ``(tool_id, status, output_preview) -> dict``
+        ``(tool_id, status, output_preview=None, *, receipt_refs=(), duration_ms=None) -> dict``
         Builds the ``tool_end`` agent_event dict.
+        HOSTED forwards ``receipt_refs`` → ``transcriptRefs`` and
+        ``duration_ms`` → ``durationMs``; DEFAULT accepts but ignores them.
     build_text_delta:
         ``(delta) -> dict``
         Builds the ``text_delta`` agent_event dict.
@@ -148,9 +150,17 @@ def _default_build_tool_progress(
 def _default_build_tool_end(
     tool_id: str,
     status: str,
-    output_preview: str | None,
+    output_preview: str | None = None,
+    *,
+    receipt_refs: tuple = (),
+    duration_ms: int | float | None = None,
 ) -> dict:
-    """Build tool_end dict matching event_adapter's current shape."""
+    """Build tool_end dict matching event_adapter's current shape.
+
+    ``receipt_refs`` and ``duration_ms`` are accepted for signature parity but
+    intentionally ignored — DEFAULT_PROFILE is test-only documentation of the
+    CLI wire shape which does not carry these fields.
+    """
     return {
         "type": "tool_end",
         "id": tool_id,
@@ -227,7 +237,10 @@ def _hosted_build_tool_progress(
 def _hosted_build_tool_end(
     tool_id: str,
     status: str,
-    output_preview: str | None,
+    output_preview: str | None = None,
+    *,
+    receipt_refs: tuple = (),
+    duration_ms: int | float | None = None,
 ) -> dict:
     from magi_agent.runtime.public_events import tool_end_event  # noqa: PLC0415
 
@@ -235,6 +248,8 @@ def _hosted_build_tool_end(
         tool_id=tool_id,
         status=status,
         output_preview=output_preview,
+        receipt_refs=receipt_refs,
+        duration_ms=duration_ms,
         event_family="tool_progress",
     )
 

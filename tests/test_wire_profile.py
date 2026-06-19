@@ -323,3 +323,67 @@ def test_default_and_hosted_produce_different_tool_start_dicts() -> None:
     default_evt = DEFAULT_PROFILE.build_tool_start(default_id, "Read", '{"path":"x"}')
     hosted_evt = HOSTED_PROFILE.build_tool_start(hosted_id, "Read", '{"path":"x"}')
     assert default_evt["id"] != hosted_evt["id"]
+
+
+# ---------------------------------------------------------------------------
+# Task 1: build_tool_end receipt_refs + duration_ms forwarding
+# ---------------------------------------------------------------------------
+
+
+def test_hosted_profile_tool_end_forwards_receipt_refs_and_duration_ms() -> None:
+    """HOSTED_PROFILE.build_tool_end must forward receipt_refs + duration_ms.
+
+    The result must equal what public_events.tool_end_event produces with the
+    same arguments — so transcriptRefs and durationMs are present in the dict.
+
+    Uses a valid ref:… token (matches _PUBLIC_REF_RE) so _safe_refs keeps it
+    and transcriptRefs appears in the output.
+    """
+    _valid_ref = "ref:result-sha256-abc"
+    result = HOSTED_PROFILE.build_tool_end(
+        "tu_x",
+        "ok",
+        "result:sha256:abc",
+        receipt_refs=(_valid_ref,),
+        duration_ms=12,
+    )
+    expected = tool_end_event(
+        tool_id="tu_x",
+        status="ok",
+        output_preview="result:sha256:abc",
+        receipt_refs=(_valid_ref,),
+        duration_ms=12,
+        event_family="tool_progress",
+    )
+    assert result == expected
+    assert "transcriptRefs" in result
+    assert result["transcriptRefs"] == [_valid_ref]
+    assert result["durationMs"] == 12
+
+
+def test_default_profile_tool_end_unchanged_with_new_kwargs() -> None:
+    """DEFAULT_PROFILE.build_tool_end must accept new kwargs but ignore them.
+
+    Its produced dict must be EXACTLY equal to the current snapshot — guards
+    the CLI-doc profile against accidental mutation.
+    """
+    # Snapshot of current DEFAULT dict (must stay byte-identical).
+    expected_snapshot = {
+        "type": "tool_end",
+        "id": "tu_x",
+        "status": "ok",
+        "output_preview": "p",
+        "durationMs": 0,
+    }
+    result = DEFAULT_PROFILE.build_tool_end("tu_x", "ok", "p")
+    assert result == expected_snapshot
+
+    # New kwargs must be accepted without error and must NOT affect the output.
+    result_with_kwargs = DEFAULT_PROFILE.build_tool_end(
+        "tu_x",
+        "ok",
+        "p",
+        receipt_refs=("result:sha256:abc",),
+        duration_ms=99,
+    )
+    assert result_with_kwargs == expected_snapshot
