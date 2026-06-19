@@ -37,6 +37,13 @@ _VERIFICATION_KINDS = {"recipes", "harness_presets", "hooks"}
 _MAX_PREVIEW_RECORDS = 50
 _MAX_NL_TEXT_BYTES = 20_000
 
+# Anti-loop cap: reject priorTurns if it already contains this many user turns.
+# Rationale: each round = 1 user turn + 1 assistant clarification.  If the caller
+# already has N≥3 user turns in priorTurns, the NEXT (current) turn would be
+# round N+1, pushing well past the 3-round bound.  We cap BEFORE calling the
+# compiler so the compiler never sees an unbounded context.
+_MAX_COMPILE_ROUNDS = 3
+
 # LLM call timeout (seconds) — fires through asyncio.wait_for; the existing
 # except-Exception paths already degrade gracefully on timeout.
 _LLM_CALL_TIMEOUT_S = 30
@@ -249,6 +256,49 @@ def register_customize_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
             sample_records_raw = sample_records_raw[:_MAX_PREVIEW_RECORDS]
             preview_truncated = True
 
+        # --- priorTurns validation ---
+        # If the body key is not a list, ignore it entirely (backward-compatible).
+        raw_prior_turns = body.get("priorTurns")
+        validated_prior_turns: list[dict] = []
+        if isinstance(raw_prior_turns, list):
+            total_content_bytes = 0
+            for element in raw_prior_turns:
+                # Each element must be a dict with a valid role and a non-empty str content.
+                if not isinstance(element, dict):
+                    continue
+                role = element.get("role")
+                content = element.get("content")
+                if role not in ("user", "assistant"):
+                    continue
+                if not isinstance(content, str) or not content:
+                    continue
+                # Per-element content byte-length cap (same limit as nlText).
+                content_bytes = len(content.encode())
+                if content_bytes > _MAX_NL_TEXT_BYTES:
+                    continue  # silently skip oversized individual elements
+                total_content_bytes += content_bytes
+                validated_prior_turns.append({"role": role, "content": content})
+
+            # DoS guard: total bytes across all content fields.
+            if total_content_bytes > 5 * _MAX_NL_TEXT_BYTES:
+                return JSONResponse(
+                    status_code=400,
+                    content={"ok": False, "error": "priorTurns total content too large"},
+                )
+
+        # Anti-loop cap: count validated user turns; reject if already at/above limit.
+        validated_user_turn_count = sum(
+            1 for t in validated_prior_turns if t["role"] == "user"
+        )
+        if validated_user_turn_count >= _MAX_COMPILE_ROUNDS:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "ok": False,
+                    "error": "too many conversation rounds — try raw mode",
+                },
+            )
+
         # Resolve the compiler model factory (test-injection → production → fail-open).
         factory = _resolve_shacl_compile_factory(body)
 
@@ -256,9 +306,31 @@ def register_customize_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
             # Step 1: Compile NL → SHACL TTL (with LLM timeout).
             fields = available_fields()
             compile_result = await asyncio.wait_for(
-                compile_nl_to_shacl(nl_text, fields, model_factory=factory),
+                compile_nl_to_shacl(
+                    nl_text,
+                    fields,
+                    model_factory=factory,
+                    prior_turns=tuple(validated_prior_turns),
+                ),
                 timeout=_LLM_CALL_TIMEOUT_S,
             )
+
+            # --- clarifyingQuestions branch (Task 5.2) ---
+            # If the compiler returned clarifying questions, forward them directly
+            # to the caller without running reviewer / explain / preview.
+            # The clarifyingQuestions value is a tuple in the compiler result; convert
+            # to a list for JSON serialization (no MappingProxyType leakage).
+            if compile_result.get("clarifyingQuestions"):
+                questions = list(compile_result["clarifyingQuestions"])
+                return JSONResponse(
+                    content={
+                        "ok": False,
+                        "clarifyingQuestions": questions,
+                        "shapeTtl": None,
+                        "error": None,
+                    }
+                )
+
             if not compile_result.get("ok"):
                 return JSONResponse(
                     content={
