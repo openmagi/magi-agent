@@ -1449,6 +1449,72 @@ class MagiEngineDriver:
         except Exception:
             return None
 
+    async def _completion_evidence_llm_block(
+        self, *, turn_id: str, final_text: str
+    ) -> str | None:
+        """C-MERGE-1 — reason if a completion/promise claim has no action evidence.
+
+        Merged completion-evidence / goal-progress / deferral-blocker check. The
+        gate is checked FIRST (no evidence collection, no model call when off →
+        byte-identical). When active, the turn's evidence is collected via the
+        cheap idempotent ``_collect_evidence`` read: if the turn produced ANY
+        evidence (it took action), the completion claim is considered backed and
+        the check passes WITHOUT a model call (conservative — never false-blocks
+        an acting turn). Only a ZERO-evidence turn is judged by the criterion
+        engine for an unsupported completion/promise claim.
+
+        Gated by ``MAGI_VERIFY_COMPLETION_EVIDENCE`` OR any of the
+        completion-evidence / goal-progress / deferral-blocker Customize presets,
+        AND a critic model present (``MAGI_EGRESS_GATE_ENABLED`` — the cost gate).
+        Inactive / no model / any error ⇒ ``None`` (fail-open).
+        """
+        import os  # noqa: PLC0415
+
+        from magi_agent.config.env import (  # noqa: PLC0415
+            parse_completion_evidence_verification_enabled,
+        )
+        from magi_agent.customize.runtime_gate import preset_enabled  # noqa: PLC0415
+
+        if self._criterion_model_factory is None:
+            return None
+        if not (
+            parse_completion_evidence_verification_enabled(os.environ)
+            or preset_enabled("completion-evidence", default=False)
+            or preset_enabled("goal-progress", default=False)
+            or preset_enabled("deferral-blocker", default=False)
+        ):
+            return None
+        # Det pre-gate: an acting turn (any collected evidence) can't false-block,
+        # and skips the model call entirely.
+        if self._collect_evidence(turn_id):
+            return None
+        try:
+            from magi_agent.customize.criterion_engine import (  # noqa: PLC0415
+                evaluate_criterion,
+            )
+
+            criterion = (
+                "The agent's turn produced NO action or tool evidence (it ran no "
+                "tools and recorded no work this turn). Judge the DRAFT. Pass=true "
+                "unless the draft asserts that a task is COMPLETE/done or PROMISES "
+                "future delivery ('I'll do X later', '다음에 처리하겠습니다', "
+                "'완료했습니다'). An honest report that it could NOT complete the "
+                "task ('I was unable to…', '완료하지 못했습니다'), a clarifying "
+                "question, or a plain informational answer is pass=true. Pass=false "
+                "ONLY if it claims completion or promises future work despite the "
+                "turn taking no action."
+            )
+            passed, reason = await evaluate_criterion(
+                criterion=criterion,
+                draft_text=final_text,
+                model_factory=self._criterion_model_factory,
+            )
+            if not passed:
+                return reason or "completion/promise claim has no action evidence"
+            return None
+        except Exception:
+            return None
+
     @property
     def runner(self) -> object | None:
         return self._runner
@@ -2364,6 +2430,13 @@ class MagiEngineDriver:
         if llm_block_reason is None:
             llm_block_reason = await self._pre_refusal_llm_block(
                 prompt=prompt, final_text=emitted_text
+            )
+        # C-MERGE-1 — built-in completion/promise-without-action llm gate. Collects
+        # the turn's evidence itself (only when its gate is on) for the det
+        # pre-gate; fail-open → None.
+        if llm_block_reason is None:
+            llm_block_reason = await self._completion_evidence_llm_block(
+                turn_id=turn_id, final_text=emitted_text
             )
         if llm_block_reason is not None:
             yield RuntimeEvent(

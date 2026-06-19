@@ -88,9 +88,10 @@ def test_enforcement_for_classifies_honestly():
     assert enforcement_for("dangerous-patterns", category="security", is_security=True) == "always-on"
     # the answer-quality LLM seam is now wired → enforcing
     assert enforcement_for("answer-quality", category="answer", is_security=False) == "enforcing"
+    # the completion-evidence LLM seam (C-MERGE-1) is now wired → enforcing
+    assert enforcement_for("completion-evidence", category="answer", is_security=False) == "enforcing"
     # metadata-only / no live producer → honest preview
     assert enforcement_for("self-claim", category="fact", is_security=False) == "preview"
-    assert enforcement_for("completion-evidence", category="answer", is_security=False) == "preview"
 
 
 def test_supported_modes_default_deterministic():
@@ -102,4 +103,4 @@ def test_supported_modes_default_deterministic():
 
 def test_seam_for_unknown_returns_none():
     assert seam_for("does-not-exist") is None
-    assert seam_for("completion-evidence") is None  # metadata-only, not wired
+    assert seam_for("self-claim") is None  # metadata-only, not wired

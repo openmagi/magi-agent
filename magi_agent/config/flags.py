@@ -689,6 +689,18 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
     ),
     _b(
+        "MAGI_VERIFY_COMPLETION_EVIDENCE",
+        stage="stage2",
+        summary=(
+            "Block a final answer that claims completion or promises future "
+            "delivery while the turn produced no action/tool evidence, via the "
+            "LLM criterion judge (merged completion-evidence / goal-progress / "
+            "deferral-blocker concern); requires a critic model "
+            "(MAGI_EGRESS_GATE_ENABLED). Strict default-OFF and inert unless "
+            "explicitly set (or one of those Customize presets is enabled)."
+        ),
+    ),
+    _b(
         "MAGI_VERIFY_TASKBOARD_COMPLETION",
         stage="stage2",
         summary=(
