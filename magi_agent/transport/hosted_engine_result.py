@@ -55,7 +55,7 @@ import time
 from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING
 
-from magi_agent.cli.contracts import EngineResult, Terminal
+from magi_agent.cli.contracts import EngineResult, RuntimeEvent, Terminal
 from magi_agent.cli.headless import drain
 from magi_agent.shadow.gate5b4c3_live_runner_boundary import (
     Gate5B4C3LiveRunnerBoundaryResult,
@@ -177,10 +177,13 @@ async def collect_engine_to_boundary_result(
     events, terminal = await drain(event_stream)  # type: ignore[arg-type]
 
     # Aggregate text from text_delta events only.
+    # The engine yields RuntimeEvent objects (not plain dicts); extract the
+    # payload dict from each RuntimeEvent before inspecting fields.
     text_chunks: list[str] = []
     for evt in events:
-        if isinstance(evt, dict) and evt.get("type") == "text_delta":
-            delta = evt.get("delta")
+        payload: dict = evt.payload if isinstance(evt, RuntimeEvent) else (evt if isinstance(evt, dict) else {})  # type: ignore[union-attr]
+        if payload.get("type") == "text_delta":
+            delta = payload.get("delta")
             if isinstance(delta, str):
                 text_chunks.append(delta)
 
