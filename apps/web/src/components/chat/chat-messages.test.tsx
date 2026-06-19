@@ -1,5 +1,5 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { ChatMessages } from "./chat-messages";
 import type {
   ChannelState,
@@ -7,12 +7,6 @@ import type {
   QueuedMessage,
   ControlRequestRecord,
 } from "@/chat-core";
-
-vi.mock("next/dynamic", () => ({
-  default: () => function DynamicComponentStub() {
-    return null;
-  },
-}));
 
 function baseChannelState(overrides: Partial<ChannelState> = {}): ChannelState {
   return {
@@ -87,6 +81,135 @@ describe("ChatMessages", () => {
     );
 
     expect(html.split("This assistant answer was streamed locally first").length - 1).toBe(3);
+  });
+
+  it("does not render the same short assistant answer twice when server history arrives late", () => {
+    const content = "CRDO 리포트 첨부를 다시 보냈습니다.";
+    const localMessages: ChatMessage[] = [
+      {
+        id: "user-1",
+        role: "user",
+        content: "crdo 리포트 첨부 누락됨 다시 보내줘",
+        timestamp: 1_800_000_000_000,
+      },
+      {
+        id: "assistant-local",
+        role: "assistant",
+        content,
+        timestamp: 1_800_000_010_000,
+      },
+    ];
+    const serverMessages: ChatMessage[] = [
+      {
+        id: "assistant-server",
+        serverId: "assistant-server",
+        role: "assistant",
+        content,
+        timestamp: 1_800_000_020_000,
+      },
+    ];
+
+    const html = renderToStaticMarkup(
+      <ChatMessages
+        ref={null}
+        messages={localMessages}
+        serverMessages={serverMessages}
+        channelState={baseChannelState()}
+      />,
+    );
+
+    expect(html.match(/CRDO 리포트 첨부를 다시 보냈습니다\./g)).toHaveLength(1);
+  });
+
+  it("dedupes short artifact resend copies with different attachment ids", () => {
+    const filename = "crdo-v13-full-report.md";
+    const localAttachment = `[attachment:00000000-0000-4000-8000-000000000111:${filename}]`;
+    const serverAttachment = `[attachment:00000000-0000-4000-8000-000000000222:${filename}]`;
+    const evidence = {
+      inspectedSources: [{
+        sourceId: "src-crdo-report",
+        kind: "file",
+        uri: "workspace/equity-reports-2026-05/crdo-v13-full-report.md",
+        inspectedAt: 1_800_000_000_000,
+      }],
+      capturedAt: 1_800_000_000_000,
+    } satisfies ChatMessage["researchEvidence"];
+    const localMessages: ChatMessage[] = [
+      {
+        id: "assistant-local",
+        role: "assistant",
+        content: `Sent the latest CRDO report.\n\n${localAttachment}`,
+        timestamp: 1_800_000_010_000,
+        researchEvidence: evidence,
+      },
+    ];
+    const serverMessages: ChatMessage[] = [
+      {
+        id: "assistant-server",
+        serverId: "assistant-server",
+        role: "assistant",
+        content: `전송했습니다.\n\nSent the latest CRDO report.\n\n${serverAttachment}`,
+        timestamp: 1_800_000_020_000,
+        researchEvidence: evidence,
+      },
+    ];
+
+    const html = renderToStaticMarkup(
+      <ChatMessages
+        ref={null}
+        messages={localMessages}
+        serverMessages={serverMessages}
+        channelState={baseChannelState()}
+      />,
+    );
+
+    expect(html.match(/Sent the latest CRDO report\./g)).toHaveLength(1);
+    expect(html.match(/crdo-v13-full-report\.md/g)).toHaveLength(2);
+    expect(html).toContain("전송했습니다.");
+  });
+
+  it("keeps identical short assistant answers from separate user turns", () => {
+    const content = "CRDO 리포트 첨부를 다시 보냈습니다.";
+    const localMessages: ChatMessage[] = [
+      {
+        id: "user-1",
+        role: "user",
+        content: "crdo 리포트 첨부 누락됨 다시 보내줘",
+        timestamp: 1_800_000_000_000,
+      },
+      {
+        id: "assistant-local",
+        role: "assistant",
+        content,
+        timestamp: 1_800_000_010_000,
+      },
+      {
+        id: "user-2",
+        role: "user",
+        content: "한 번 더 보내줘",
+        timestamp: 1_800_000_020_000,
+      },
+    ];
+    const serverMessages: ChatMessage[] = [
+      {
+        id: "assistant-server",
+        serverId: "assistant-server",
+        role: "assistant",
+        content,
+        timestamp: 1_800_000_030_000,
+      },
+    ];
+
+    const html = renderToStaticMarkup(
+      <ChatMessages
+        ref={null}
+        messages={localMessages}
+        serverMessages={serverMessages}
+        channelState={baseChannelState()}
+      />,
+    );
+
+    expect(html.match(/CRDO 리포트 첨부를 다시 보냈습니다\./g)).toHaveLength(2);
   });
 
   it("dedupes a longer server assistant copy that substantially overlaps an optimistic stream", () => {
@@ -401,6 +524,77 @@ describe("ChatMessages", () => {
     expect(html).not.toContain("Fabrinet FN Q3 2026");
   });
 
+  it("shows a typing placeholder while a run is active before answer text starts", () => {
+    const html = renderToStaticMarkup(
+      <ChatMessages
+        ref={null}
+        messages={[] satisfies ChatMessage[]}
+        serverMessages={[] satisfies ChatMessage[]}
+        channelState={baseChannelState({
+          streaming: true,
+          streamingText: "",
+          thinkingText: "",
+          thinkingStartedAt: 1_800_000_000_000,
+          hasTextContent: false,
+          turnPhase: "executing",
+          activeTools: [
+            {
+              id: "tool-read",
+              label: "Reviewing document",
+              status: "running",
+              startedAt: 1_800_000_000_000,
+            },
+          ],
+        })}
+      />,
+    );
+
+    expect(html).toContain("animate-bounce");
+    expect(html).not.toContain("Reviewing document");
+  });
+
+  it("shows a typing placeholder on the first active run frame before tools start", () => {
+    const html = renderToStaticMarkup(
+      <ChatMessages
+        ref={null}
+        messages={[] satisfies ChatMessage[]}
+        serverMessages={[] satisfies ChatMessage[]}
+        channelState={baseChannelState({
+          streaming: true,
+          streamingText: "",
+          thinkingText: "",
+          thinkingStartedAt: 1_800_000_000_000,
+          hasTextContent: false,
+          turnPhase: "pending",
+          activeTools: [],
+        })}
+      />,
+    );
+
+    expect(html).toContain("animate-bounce");
+  });
+
+  it("hides the typing placeholder once answer text has started", () => {
+    const html = renderToStaticMarkup(
+      <ChatMessages
+        ref={null}
+        messages={[] satisfies ChatMessage[]}
+        serverMessages={[] satisfies ChatMessage[]}
+        channelState={baseChannelState({
+          streaming: true,
+          streamingText: "답변 작성 중입니다.",
+          thinkingText: "",
+          thinkingStartedAt: 1_800_000_000_000,
+          hasTextContent: true,
+          turnPhase: "executing",
+        })}
+      />,
+    );
+
+    expect(html).toContain("답변 작성 중입니다.");
+    expect(html).not.toContain("animate-bounce");
+  });
+
   it("dedupes a committed assistant copy that only adds a route meta preamble", () => {
     const content =
       "벤처 리포트 v2 재전송했어. 파일 링크와 핵심 변경사항을 정리한 최종 답변입니다. " +
@@ -444,7 +638,7 @@ describe("ChatMessages", () => {
       {
         id: "assistant-1800000000000",
         role: "assistant",
-        content: `${baseContent}\n<!-- magi:research-evidence:v1:abc123 -->`,
+        content: `${baseContent}\n<!-- clawy:research-evidence:v1:abc123 -->`,
         timestamp: 1_800_000_000_000,
       },
     ];
@@ -510,6 +704,62 @@ describe("ChatMessages", () => {
     expect(html).not.toContain("Calling openai/gpt-5.5");
     expect(html).not.toContain("Still thinking");
     expect(html).not.toContain("공개 진행 로그");
+  });
+
+  it("strips document-review progress, leaked route metadata, and duplicate resend text", () => {
+    const attachment = "[attachment:att-pdf:portfolio-review-report-2026-05-19.pdf]";
+    const cleanAnswer = [
+      "재전송 완료했습니다.",
+      "",
+      "확인해보세요.",
+      "",
+      attachment,
+    ].join("\n");
+    const persistedContent = [
+      cleanAnswer,
+      "",
+      "Thinking through next step 요청 처리 중",
+      "공개 진행 로그를 갱신하고 있습니다",
+      "Thinking through next step",
+      "Calling anthropic/claude-opus-4-6",
+      "Reviewing PDF document outputs/portfolio-review-report-2026-05-19.pdf 17ms",
+      "Thinking through next step",
+      "Calling anthropic/claude-opus-4-6",
+      "Prepared file 1.3s",
+      "Thinking through next step",
+      "Calling anthropic/claude-opus-4-6",
+      "",
+      "재전송 완료했습니다.[META: i[META: intent=실행, domain=문서전달, complexity=단순, route=직접]",
+      "",
+      "재전송 완료했습니다.",
+      "",
+      "확인해보세요.",
+      "",
+      attachment,
+    ].join("\n");
+
+    const html = renderToStaticMarkup(
+      <ChatMessages
+        ref={null}
+        messages={[
+          {
+            id: "assistant-1800000000000",
+            role: "assistant",
+            content: persistedContent,
+            timestamp: 1_800_000_000_000,
+          },
+        ] satisfies ChatMessage[]}
+        serverMessages={[] satisfies ChatMessage[]}
+        channelState={baseChannelState()}
+      />,
+    );
+
+    expect(html.split("재전송 완료했습니다.").length - 1).toBe(1);
+    expect(html.split("확인해보세요.").length - 1).toBe(1);
+    expect(html).not.toContain("Thinking through next step");
+    expect(html).not.toContain("Calling anthropic/claude-opus-4-6");
+    expect(html).not.toContain("Reviewing PDF document");
+    expect(html).not.toContain("[META:");
   });
 
   it("dedupes a server assistant copy with inline progress logs spliced into the answer", () => {
@@ -1676,6 +1926,89 @@ describe("ChatMessages", () => {
     expect(html).toContain("Deny");
   });
 
+  it("renders ordinary pending user questions as assistant text, not an answer form", () => {
+    const requests: ControlRequestRecord[] = [
+      {
+        requestId: "cr_question",
+        kind: "user_question",
+        state: "pending",
+        sessionKey: "agent:main:app:general",
+        channelName: "general",
+        source: "system",
+        prompt: "Which output format should I create?",
+        proposedInput: {
+          choices: [
+            { id: "choice_1", label: "DOCX" },
+            { id: "choice_2", label: "PDF" },
+          ],
+        },
+        createdAt: 1,
+        expiresAt: Date.now() + 60_000,
+      },
+    ];
+
+    const html = renderToStaticMarkup(
+      <ChatMessages
+        ref={null}
+        messages={[] satisfies ChatMessage[]}
+        serverMessages={[] satisfies ChatMessage[]}
+        channelState={baseChannelState()}
+        controlRequests={requests}
+      />,
+    );
+
+    expect(html).toContain("Which output format should I create?");
+    expect(html).toContain("DOCX");
+    expect(html).toContain("PDF");
+    expect(html).not.toContain("data-control-question-inline");
+    expect(html).not.toContain("<textarea");
+    expect(html).not.toContain(">Answer</button>");
+  });
+
+  it("keeps ordinary pending user questions in chronological transcript order", () => {
+    const requests: ControlRequestRecord[] = [
+      {
+        requestId: "cr_question_order",
+        kind: "user_question",
+        state: "pending",
+        sessionKey: "agent:main:app:general",
+        channelName: "general",
+        source: "turn",
+        prompt: "Is the zip file already in the workspace?",
+        proposedInput: {
+          choices: [
+            { id: "workspace_root", label: "It is in the workspace root" },
+          ],
+        },
+        createdAt: 1_800_000_000_000,
+        expiresAt: Date.now() + 60_000,
+      },
+    ];
+
+    const html = renderToStaticMarkup(
+      <ChatMessages
+        ref={null}
+        messages={[
+          {
+            id: "user-1800000005000",
+            role: "user",
+            content: "It is in your workspace.",
+            timestamp: 1_800_000_005_000,
+          },
+        ] satisfies ChatMessage[]}
+        serverMessages={[] satisfies ChatMessage[]}
+        channelState={baseChannelState()}
+        controlRequests={requests}
+      />,
+    );
+
+    const questionIndex = html.indexOf("Is the zip file already in the workspace?");
+    const answerIndex = html.indexOf("It is in your workspace.");
+    expect(questionIndex).toBeGreaterThanOrEqual(0);
+    expect(answerIndex).toBeGreaterThanOrEqual(0);
+    expect(questionIndex).toBeLessThan(answerIndex);
+  });
+
   it("renders an export action in selection mode", () => {
     const html = renderToStaticMarkup(
       <ChatMessages
@@ -1866,5 +2199,52 @@ describe("ChatMessages", () => {
 
     expect(html).toContain("내외디스틸러리 재무제표를 분석하겠습니다.");
     expect(html).toContain("PDF 다시 첨부했습니다!");
+  });
+
+  it("suppresses a stale live assistant replay of the previous answer after a new user message", () => {
+    const priorAnswer = [
+      "미안, 방금 verifier 문구 때문에 답이 이상하게 꼬였어.",
+      "",
+      "네가 물은 핵심에만 답하면: 응, 스킬 두 개 다 업데이트되어 있어.",
+      "",
+      "- skills-learned/multibagger-full-report/SKILL.md",
+      "- skills-learned/stock-multibagger-screening/SKILL.md",
+      "",
+      "즉:",
+      "",
+      "- /multibagger-full-report -> v1.3 업데이트 완료",
+      "- /stock-multibagger-screening -> v7.1 업데이트 완료",
+    ].join("\n");
+
+    const html = renderToStaticMarkup(
+      <ChatMessages
+        ref={null}
+        messages={[
+          {
+            id: "assistant-prior",
+            role: "assistant",
+            content: priorAnswer,
+            timestamp: 1_800_000_000_000,
+          },
+          {
+            id: "user-next",
+            role: "user",
+            content: "그럼 그 스킬로 다시 CRDO /multibagger-full-report 다시 작성해줘",
+            timestamp: 1_800_000_030_000,
+          },
+        ] satisfies ChatMessage[]}
+        serverMessages={[]}
+        channelState={{
+          ...baseChannelState(),
+          streaming: true,
+          streamingText: `META: intent=질문답변, domain=미국주식, complexity=단순, route=직접]\n${priorAnswer}`,
+          hasTextContent: true,
+        }}
+      />,
+    );
+
+    expect(html.match(/스킬 두 개 다 업데이트되어 있어/g)).toHaveLength(1);
+    expect(html).not.toContain("META: intent=질문답변");
+    expect(html).toContain("그럼 그 스킬로 다시 CRDO");
   });
 });
