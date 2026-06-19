@@ -15,6 +15,31 @@ Versions follow the tags published on GitHub Releases.
 
 ### Fixed
 
+## 0.1.54
+
+### Added
+- C-4 PR-C: collapse `connectors/*` force-false bases onto
+  `FalseOnlyAuthorityModel`, with 5 per-class semantic invariants preserved
+  (`__getattribute__` defense-in-depth, `_force_contract_only`,
+  `_force_no_secret_material`, redacted serializer, fail-loud
+  `model_construct`/`model_copy`) (#748).
+- Hosted flip foundation (default-OFF, hosted-only): `HostedRuntime` +
+  `build_hosted_runtime` (#738), `hosted_request_to_turn_context` mapper (#739),
+  and the PR5/5 shadow-comparison harness CI gate (#750). Combined with #740 and
+  #744 already on 0.1.53, the full flip stack is now in main.
+- Customize: `tool_perm.match` `path` / `pathAllowlist` keys for workspace-lock
+  custom rules (#751).
+- Computer-use robustness: empty-screenshot guard + task-directed app hint
+  (#743).
+- TUI/headless `/tasks` slash command (#742).
+- Documentation: honest classification of the first-party scaffold packs (#741).
+
+### Fixed
+- Local-runtime "no final-answer text" recovery: normalize
+  `reasoning_effort="max"` per provider so the lab overlay default no longer
+  trips OpenAI/Gemini's 4-retry → BadRequest path (`max` → `xhigh` for
+  OpenAI/OpenRouter, `max` → `high` for Gemini; Anthropic keeps `max`) (#753).
+
 ## 0.1.53
 
 ### Added
