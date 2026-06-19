@@ -983,6 +983,15 @@ FLAGS: tuple[FlagSpec, ...] = (
             "Default OFF / None spawn_cap is a no-op (byte-identical)."
         ),
     ),
+    _b(
+        "MAGI_SPAWN_RECIPE_BIND_ENABLED",
+        summary=(
+            "Thread recipeRefs from request.metadata into the child runner as "
+            "pinned_recipe_pack_ids so the child's ProfileResolver binds the "
+            "parent-supplied recipe packs. Default OFF / empty refs is a no-op "
+            "(byte-identical to passing pinned_recipe_pack_ids=())."
+        ),
+    ),
     # --- Surfaces -----------------------------------------------------------
     # NOTE: flat default-ON, NOT profile-aware. cli/headless.py:_cli_enabled
     # reads MAGI_CLI_ENABLED directly (unset => True regardless of
