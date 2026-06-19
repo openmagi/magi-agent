@@ -3,7 +3,7 @@
  *
  * This is a TEXT TEMPLATE only.  It is NOT a built-in enforced rule pack.
  * Copy it into the raw TTL textarea, edit the shape name / path / constraint
- * to match your policy, then click "활성화" to save it as a custom rule.
+ * to match your policy, then click "Activate" to save it as a custom rule.
  *
  * The shape is modelled on the magi:Evidence ontology used by the runtime:
  *   - Evidence nodes carry rdf:type magi:Evidence.
@@ -14,7 +14,7 @@
 
 export const SHACL_EXAMPLE_TEMPLATE: string = `\
 # SHACL example — copy and edit to fit your policy.
-# This template is NOT automatically enforced; save it via "활성화" to activate.
+# This template is NOT automatically enforced; save it via "Activate" to activate.
 #
 # Ontology notes:
 #   magi:Evidence  — every evidence record is an instance of this class.

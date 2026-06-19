@@ -6,6 +6,7 @@ import { SHACL_EXAMPLE_TEMPLATE } from "./shacl-example-template";
 import { Modal } from "@/components/ui/modal";
 import { Select } from "@/components/ui/select";
 import type {
+  ConversationTurn,
   CustomizeCatalog,
   CustomRule,
   HarnessPresetItem,
@@ -34,7 +35,11 @@ interface VerificationRuleModalProps {
    * and preview. Injected by the parent (customize-tab.tsx) so the modal
    * doesn't call APIs directly.
    */
-  onCompileShacl: (nlText: string, sampleRecords?: unknown[]) => Promise<ShaclCompileResponse>;
+  onCompileShacl: (
+    nlText: string,
+    sampleRecords?: unknown[],
+    priorTurns?: ConversationTurn[],
+  ) => Promise<ShaclCompileResponse>;
   /** USER-RULES.md body + save handler. */
   userRules: string;
   rulesSaving: boolean;
@@ -53,6 +58,37 @@ const DOMAIN_LABELS: Record<string, string> = {
   research: "Research tasks",
   delivery: "Delivery / General",
 };
+
+// ---------------------------------------------------------------------------
+// Guide panel static data — v1 static fallback
+// ---------------------------------------------------------------------------
+
+const GUIDE_CATEGORIES = [
+  { name: "Numeric range", example: 'amount must be ≤ 3000' },
+  { name: "Allowed values", example: 'category must be one of {travel, meal}' },
+  { name: "Pattern match", example: 'filename must match *.pdf' },
+  { name: "Required field", example: 'every approval record must have signedBy' },
+  { name: "Cardinality", example: 'at most one approval per request' },
+] as const;
+
+// Source: _BUILTIN_FIELD_HINTS in customize/shacl_compiler.py. Do NOT add fields not present there.
+const STARTER_PROMPTS = [
+  "TestRun must have exitCode equal to 0.",
+  "EditMatch must have confidence at least 0.8.",
+  "DocumentCoverage coverageRatio must be at least 0.9.",
+  "Reject SourceInspection records where inspected is false.",
+] as const;
+
+// Source: _BUILTIN_FIELD_HINTS in customize/shacl_compiler.py. Do NOT add fields not present there.
+// Only types with non-empty hints are listed here. Types with [] (e.g. Calculation, GitDiff) have NO known fields.
+const STATIC_EVIDENCE_FIELDS = [
+  "TestRun: command, exitCode",
+  "EditMatch: tier, tierIndex, confidence, ambiguous, fileDigest, spanDigest",
+  "DocumentCoverage: totalUnits, coveredUnits, coverageRatio, threshold, status, sourceDigest, docDigest",
+  "SourceInspection: sourceId, sourceIds, sourceKind, inspected",
+  "CodeDiagnostics: checker, errorCount, fileDigest, diagnosticsDigest",
+  "CommitCheckpoint: checkpointDigest, pathRef",
+] as const;
 
 function Toggle({
   checked,
@@ -177,7 +213,11 @@ function CustomRulesSection({
   onAdd: (rule: CustomRule) => void;
   onToggle: (rule: CustomRule, enabled: boolean) => void;
   onDelete: (id: string) => void;
-  onCompileShacl: (nlText: string, sampleRecords?: unknown[]) => Promise<ShaclCompileResponse>;
+  onCompileShacl: (
+    nlText: string,
+    sampleRecords?: unknown[],
+    priorTurns?: ConversationTurn[],
+  ) => Promise<ShaclCompileResponse>;
 }) {
   const [adding, setAdding] = useState(false);
   const [kind, setKind] = useState<"deterministic_ref" | "tool_perm" | "llm_criterion" | "after_tool" | "shacl_constraint">("deterministic_ref");
@@ -192,6 +232,18 @@ function CustomRulesSection({
   const [compileError, setCompileError] = useState<string | null>(null);
   const [shaclPreview, setShaclPreview] = useState<ShaclCompileResponse | null>(null);
   const [shaclError, setShaclError] = useState<string | null>(null);
+
+  // Conversational compile state (Sub-task 5.3b)
+  const [conversation, setConversation] = useState<ConversationTurn[]>([]);
+  const [clarifyingQuestions, setClarifyingQuestions] = useState<string[] | null>(null);
+  const [pendingAnswer, setPendingAnswer] = useState("");
+  // exhausted=true when the user has consumed all allowed clarification rounds (≥3 user turns in priorTurns).
+  const [exhausted, setExhausted] = useState(false);
+
+  // Guide panel collapse state (Sub-task 5.3c)
+  // Default: expanded. Auto-collapse when user types in nlText.
+  const [guideExpanded, setGuideExpanded] = useState(true);
+
   const [ref, setRef] = useState(menu[0]?.ref ?? "");
   const [scope, setScope] = useState<string>("coding");
   const [matchType, setMatchType] = useState<"tool" | "domain" | "domainAllowlist">("tool");
@@ -205,6 +257,28 @@ function CustomRulesSection({
   const [contentNegate, setContentNegate] = useState(false);
 
   const menuLabel = (r: string) => menu.find((m) => m.ref === r)?.label ?? r;
+
+  /** Reset all conversational state — call on cancel, mode switch, kind change, save. */
+  const resetConversation = () => {
+    setConversation([]);
+    setClarifyingQuestions(null);
+    setPendingAnswer("");
+    setExhausted(false);
+  };
+
+  /** Reset all SHACL state back to clean. */
+  const resetShaclState = () => {
+    setShaclPreview(null);
+    setShaclError(null);
+    setCompileError(null);
+    setNlText("");
+    setRawTtl("");
+    setSampleRecordsText("");
+    setSampleRecordsError(null);
+    setShaclMode("nl");
+    resetConversation();
+    setGuideExpanded(true);
+  };
 
   const describe = (rule: CustomRule): string => {
     const p = (rule.what?.payload ?? {}) as Record<string, unknown>;
@@ -309,6 +383,13 @@ function CustomRulesSection({
   const selectCls = "mt-1 w-full rounded-lg border border-black/[0.12] bg-white px-2 py-1.5 text-sm";
   const selectTriggerCls = "mt-1 rounded-lg px-2 py-1.5 text-sm font-normal";
 
+  // Count user turns to enforce the round cap.
+  // The backend rejects when validated_user_turn_count >= 3 (i.e. priorTurns already has ≥3 user turns).
+  // We set exhausted=true when the user's answer would make us hit that cap, or when backend returns the error.
+  const userTurnCount = conversation.filter((t) => t.role === "user").length;
+  // exhausted state is managed explicitly (see setExhausted calls); this is kept for test assertions.
+  const roundsExhausted = exhausted;
+
   return (
     <section>
       <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-secondary/70">
@@ -333,7 +414,7 @@ function CustomRulesSection({
                   <p className="truncate text-sm font-medium text-foreground">{describe(rule)}</p>
                   {rule.what?.kind === "shacl_constraint" ? (
                     <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-medium text-emerald-600">
-                      결정론 · SHACL · live
+                      Deterministic · SHACL · live
                     </span>
                   ) : null}
                 </div>
@@ -371,12 +452,8 @@ function CustomRulesSection({
               value={kind}
               onChange={(v) => {
                 setKind(v as typeof kind);
-                // Reset SHACL sub-state on kind change
-                setShaclPreview(null);
-                setShaclError(null);
-                setNlText("");
-                setRawTtl("");
-                setShaclMode("nl");
+                // Reset all SHACL sub-state on kind change via the canonical helper.
+                resetShaclState();
               }}
               className={selectTriggerCls}
               options={[
@@ -388,56 +465,156 @@ function CustomRulesSection({
                 { value: "tool_perm", label: "Tool permission (deny / approval)" },
                 { value: "llm_criterion", label: "LLM criterion check (final answer)" },
                 { value: "after_tool", label: "Tool-result ingestion gate (after-tool)" },
-                { value: "shacl_constraint", label: "결정론 제약 (SHACL)" },
+                { value: "shacl_constraint", label: "Deterministic constraint (SHACL)" },
               ]}
             />
           </label>
 
           {kind === "shacl_constraint" ? (
             <div className="space-y-2">
-              {/* Input mode toggle: nl (자연어) | raw (.ttl 직접) */}
+              {/* Input mode toggle: Natural language | Raw .ttl */}
               <div className="flex items-center gap-2">
-                <span className="text-[11px] font-medium text-secondary">입력 모드:</span>
+                <span className="text-[11px] font-medium text-secondary">Input mode:</span>
                 <button
                   type="button"
-                  onClick={() => { setShaclMode("nl"); setShaclPreview(null); setShaclError(null); }}
+                  onClick={() => {
+                    setShaclMode("nl");
+                    setShaclPreview(null);
+                    setShaclError(null);
+                    resetConversation();
+                    setGuideExpanded(true);
+                  }}
                   className={`rounded px-2 py-0.5 text-[11px] font-medium transition-colors ${shaclMode === "nl" ? "bg-primary text-white" : "text-secondary hover:text-foreground"}`}
                 >
-                  자연어
+                  Natural language
                 </button>
                 <button
                   type="button"
-                  onClick={() => { setShaclMode("raw"); setShaclPreview(null); setShaclError(null); }}
+                  onClick={() => {
+                    setShaclMode("raw");
+                    setShaclPreview(null);
+                    setShaclError(null);
+                    resetConversation();
+                  }}
                   className={`rounded px-2 py-0.5 text-[11px] font-medium transition-colors ${shaclMode === "raw" ? "bg-primary text-white" : "text-secondary hover:text-foreground"}`}
                 >
-                  .ttl 직접
+                  Raw .ttl
                 </button>
               </div>
 
               {shaclMode === "nl" ? (
                 <>
+                  {/* Sub-task 5.3c — Guide panel (default expanded, auto-collapse on input) */}
+                  <div className="rounded-lg border border-black/[0.07] bg-white p-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-semibold text-foreground">
+                        What kind of rules can I write?
+                      </span>
+                      <button
+                        type="button"
+                        aria-expanded={guideExpanded}
+                        aria-controls="shacl-guide-content"
+                        onClick={() => setGuideExpanded((prev) => !prev)}
+                        className="text-[10px] text-secondary hover:text-foreground"
+                      >
+                        {guideExpanded ? "Hide" : "Show examples again"}
+                      </button>
+                    </div>
+                    <p className="mt-1 text-[10px] text-secondary/70">
+                      Clicking Compile asks an AI to translate your description into SHACL. You&apos;ll review the result and explicitly activate it — nothing is saved before approval.
+                    </p>
+
+                    {guideExpanded ? (
+                      <div id="shacl-guide-content" className="mt-2 space-y-2">
+                        {/* Category list */}
+                        <div className="space-y-1">
+                          {GUIDE_CATEGORIES.map((cat) => (
+                            <div key={cat.name} className="flex items-baseline gap-2">
+                              <span className="shrink-0 text-[11px] font-semibold text-foreground">
+                                {cat.name}
+                              </span>
+                              <span className="text-[10px] text-secondary">— {cat.example}</span>
+                            </div>
+                          ))}
+                        </div>
+                        <p className="text-[10px] italic text-secondary/70">
+                          Not for open-ended judgments like &apos;is the answer fair/polite/correct&apos;.
+                        </p>
+
+                        {/* Starter prompts */}
+                        <div>
+                          <p className="mb-1 text-[10px] font-semibold tracking-wide text-secondary/70">
+                            <span className="uppercase">Starter prompts</span>{" "}
+                            <span>— click to fill</span>
+                          </p>
+                          <div className="flex flex-wrap gap-1.5">
+                            {STARTER_PROMPTS.map((prompt) => (
+                              <button
+                                key={prompt}
+                                type="button"
+                                onClick={() => {
+                                  setNlText(prompt);
+                                  setShaclPreview(null);
+                                  setShaclError(null);
+                                  resetConversation();
+                                  // Auto-collapse when a starter prompt is selected
+                                  setGuideExpanded(false);
+                                }}
+                                className="rounded-md border border-black/[0.08] bg-gray-50 px-2 py-1 text-[10px] text-secondary hover:border-primary/20 hover:bg-primary/[0.04] hover:text-foreground"
+                              >
+                                {prompt}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* Available evidence field chips */}
+                        <div>
+                          <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-secondary/70">
+                            Available evidence fields
+                          </p>
+                          <div className="flex flex-wrap gap-1.5">
+                            {STATIC_EVIDENCE_FIELDS.map((field) => (
+                              <span
+                                key={field}
+                                className="rounded-md bg-black/[0.04] px-2 py-0.5 font-mono text-[10px] text-secondary"
+                              >
+                                {field}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+
                   <label className="block text-[11px] font-medium text-secondary">
-                    자연어로 제약 설명
+                    Describe your constraint in plain English
                     <textarea
-                      aria-label="자연어 제약 입력"
+                      aria-label="Natural-language constraint input"
                       value={nlText}
                       onChange={(e) => {
                         setNlText(e.target.value);
-                        // Reset preview on text change
+                        // Reset preview on text change (but NOT the conversation — the user
+                        // may be refining their text mid-clarification flow).
                         setShaclPreview(null);
                         setShaclError(null);
+                        // Auto-collapse guide when user starts typing
+                        if (e.target.value.trim().length > 0) {
+                          setGuideExpanded(false);
+                        }
                       }}
                       rows={3}
-                      placeholder="e.g. 최종 답변에는 반드시 비용 항목의 금액이 포함되어야 한다."
+                      placeholder="e.g. TestRun must have exitCode equal to 0."
                       className={`${selectCls} resize-y`}
                     />
                   </label>
 
                   {/* F1: Sample records textarea — optional, enables deterministic preview */}
                   <label className="block text-[11px] font-medium text-secondary">
-                    샘플 레코드 (JSON, 선택)
+                    Sample records (JSON, optional)
                     <textarea
-                      aria-label="샘플 레코드 JSON 입력"
+                      aria-label="Sample records JSON input"
                       value={sampleRecordsText}
                       onChange={(e) => {
                         setSampleRecordsText(e.target.value);
@@ -456,7 +633,7 @@ function CustomRulesSection({
 
                   <button
                     type="button"
-                    disabled={!nlText.trim() || compiling}
+                    disabled={!nlText.trim() || compiling || !!clarifyingQuestions || exhausted}
                     onClick={async () => {
                       // F1: parse sample records before compile
                       let parsedSamples: unknown[] | undefined;
@@ -464,12 +641,12 @@ function CustomRulesSection({
                         try {
                           const parsed: unknown = JSON.parse(sampleRecordsText);
                           if (!Array.isArray(parsed)) {
-                            setSampleRecordsError("JSON 배열이어야 합니다 (예: [{...}, {...}])");
+                            setSampleRecordsError("Must be a JSON array (e.g. [{...}, {...}])");
                             return;
                           }
                           parsedSamples = parsed;
                         } catch {
-                          setSampleRecordsError("유효하지 않은 JSON입니다 — 수정하거나 비워두세요.");
+                          setSampleRecordsError("Invalid JSON — fix or leave blank.");
                           return;
                         }
                       }
@@ -479,34 +656,179 @@ function CustomRulesSection({
                       setShaclError(null);
                       setCompileError(null);
                       try {
-                        const result = await onCompileShacl(nlText, parsedSamples);
-                        if (result.ok) {
+                        const result = await onCompileShacl(nlText, parsedSamples, conversation.length > 0 ? conversation : undefined);
+                        if (result.clarifyingQuestions && result.clarifyingQuestions.length > 0) {
+                          // Conversational: compiler needs clarification
+                          const newConversation: ConversationTurn[] = [
+                            ...conversation,
+                            { role: "user", content: nlText },
+                            {
+                              role: "assistant",
+                              content: JSON.stringify({ questions: result.clarifyingQuestions }),
+                            },
+                          ];
+                          setConversation(newConversation);
+                          setClarifyingQuestions(result.clarifyingQuestions);
+                        } else if (result.ok) {
                           setShaclPreview(result);
+                          setClarifyingQuestions(null);
                         } else {
-                          setShaclError(result.error ?? "컴파일 실패");
+                          setShaclError(result.error ?? "Compile failed");
                         }
                       } catch (err: unknown) {
-                        setCompileError(err instanceof Error ? err.message : "컴파일 중 오류가 발생했습니다.");
+                        setCompileError(err instanceof Error ? err.message : "An error occurred during compilation.");
                       } finally {
                         setCompiling(false);
                       }
                     }}
                     className="rounded-lg bg-black/[0.07] px-3 py-1.5 text-[11px] font-semibold text-foreground disabled:opacity-40 hover:bg-black/[0.12]"
                   >
-                    {compiling ? "컴파일 중…" : "컴파일"}
+                    {compiling ? "Compiling…" : "Compile"}
                   </button>
 
-                  {/* F4: catch-level compile error (thrown exception, not ok:false) */}
-                  {compileError ? (
-                    <div className="rounded-lg border border-red-500/25 bg-red-500/[0.06] px-3 py-2 text-[11px] text-red-600">
-                      {compileError}
+                  {/* Compile status area — aria-live so screen readers announce errors and questions */}
+                  <div role="status" aria-live="polite" aria-atomic="false">
+                    {/* F4: catch-level compile error (thrown exception, not ok:false) */}
+                    {compileError ? (
+                      <div className="rounded-lg border border-red-500/25 bg-red-500/[0.06] px-3 py-2 text-[11px] text-red-600">
+                        {compileError}
+                      </div>
+                    ) : null}
+
+                    {/* Compile error (ok:false from backend) */}
+                    {shaclError ? (
+                      <div className="rounded-lg border border-red-500/25 bg-red-500/[0.06] px-3 py-2 text-[11px] text-red-600">
+                        {shaclError}
+                      </div>
+                    ) : null}
+                  </div>
+
+                  {/* Sub-task 5.3b — Chat-style conversation history */}
+                  {conversation.length > 0 ? (
+                    <div className="rounded-lg border border-black/[0.06] bg-gray-50/80 px-3 py-2">
+                      <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-secondary/70">
+                        Conversation history
+                      </p>
+                      <div className="space-y-0.5 font-mono text-[10px] text-secondary">
+                        {conversation.map((turn, i) => (
+                          <div key={i}>
+                            <span className="font-semibold">{turn.role === "user" ? "You" : "AI"}:</span>{" "}
+                            {turn.role === "assistant"
+                              ? (() => {
+                                  try {
+                                    const parsed = JSON.parse(turn.content) as { questions?: string[] };
+                                    return (parsed.questions ?? []).join(" / ");
+                                  } catch {
+                                    return turn.content;
+                                  }
+                                })()
+                              : turn.content}
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   ) : null}
 
-                  {/* Compile error (ok:false from backend) */}
-                  {shaclError ? (
-                    <div className="rounded-lg border border-red-500/25 bg-red-500/[0.06] px-3 py-2 text-[11px] text-red-600">
-                      {shaclError}
+                  {/* Sub-task 5.3b — Clarifying questions card + exhausted state */}
+                  {(clarifyingQuestions && !shaclPreview?.ok) || exhausted ? (
+                    <div aria-live="polite" className="rounded-xl border border-blue-500/20 bg-blue-50/40 p-3">
+                      {clarifyingQuestions ? (
+                        <>
+                          <p className="mb-2 text-[11px] font-semibold text-foreground">
+                            The compiler needs clarification:
+                          </p>
+                          <ul id="shacl-clarifying-questions" className="mb-3 list-inside list-disc space-y-1 text-[11px] text-secondary">
+                            {clarifyingQuestions.map((q, i) => (
+                              <li key={i}>{q}</li>
+                            ))}
+                          </ul>
+                        </>
+                      ) : null}
+
+                      {exhausted ? (
+                        <div className="rounded-lg border border-amber-500/25 bg-amber-500/[0.06] px-3 py-2 text-[11px] text-amber-700">
+                          Compile attempts exhausted — switch to raw mode or rephrase your constraint.
+                          <span className="mt-1 block">Tip: switch to Raw .ttl mode to write SHACL directly.</span>
+                        </div>
+                      ) : (
+                        <>
+                          <label className="block text-[11px] font-medium text-secondary">
+                            Your answer
+                            <textarea
+                              value={pendingAnswer}
+                              onChange={(e) => setPendingAnswer(e.target.value)}
+                              rows={2}
+                              placeholder="Type your answer here…"
+                              className={`${selectCls} resize-y`}
+                              aria-label="Answer to clarifying question"
+                              aria-describedby="shacl-clarifying-questions"
+                            />
+                          </label>
+                          <button
+                            type="button"
+                            disabled={!pendingAnswer.trim() || compiling || userTurnCount >= 3}
+                            onClick={async () => {
+                              // If this answer would put us at the round cap (3 user turns in priorTurns),
+                              // flip exhausted immediately and do not call the backend again.
+                              const updatedConversation: ConversationTurn[] = [
+                                ...conversation,
+                                { role: "user", content: pendingAnswer },
+                              ];
+                              // Count user turns in the conversation AFTER appending this answer.
+                              const newUserTurnCount = updatedConversation.filter((t) => t.role === "user").length;
+                              setConversation(updatedConversation);
+                              setPendingAnswer("");
+
+                              if (newUserTurnCount >= 3) {
+                                // This answer fills the last allowed slot — mark exhausted.
+                                setExhausted(true);
+                                setClarifyingQuestions(null);
+                                return;
+                              }
+
+                              // F4: try/finally so compiling is always cleared
+                              setCompiling(true);
+                              setShaclPreview(null);
+                              setShaclError(null);
+                              setCompileError(null);
+                              try {
+                                const result = await onCompileShacl(nlText, undefined, updatedConversation);
+                                if (result.clarifyingQuestions && result.clarifyingQuestions.length > 0) {
+                                  // Another round of questions
+                                  const nextConversation: ConversationTurn[] = [
+                                    ...updatedConversation,
+                                    {
+                                      role: "assistant",
+                                      content: JSON.stringify({ questions: result.clarifyingQuestions }),
+                                    },
+                                  ];
+                                  setConversation(nextConversation);
+                                  setClarifyingQuestions(result.clarifyingQuestions);
+                                } else if (result.ok) {
+                                  setShaclPreview(result);
+                                  setClarifyingQuestions(null);
+                                } else {
+                                  // Check for backend round-cap error message
+                                  const errMsg = result.error ?? "Compile failed";
+                                  if (errMsg.includes("too many conversation rounds")) {
+                                    setExhausted(true);
+                                    setClarifyingQuestions(null);
+                                  } else {
+                                    setShaclError(errMsg);
+                                  }
+                                }
+                              } catch (err: unknown) {
+                                setCompileError(err instanceof Error ? err.message : "An error occurred during compilation.");
+                              } finally {
+                                setCompiling(false);
+                              }
+                            }}
+                            className="mt-2 rounded-lg bg-black/[0.07] px-3 py-1.5 text-[11px] font-semibold text-foreground disabled:opacity-40 hover:bg-black/[0.12]"
+                          >
+                            {compiling ? "Compiling…" : "Answer"}
+                          </button>
+                        </>
+                      )}
                     </div>
                   ) : null}
 
@@ -516,22 +838,22 @@ function CustomRulesSection({
                       {/* F2: Reviewer verdict — warn explicitly when absent */}
                       {shaclPreview.review ? (
                         <div className="text-[11px]">
-                          <span className="font-semibold text-foreground">리뷰어 verdict: </span>
+                          <span className="font-semibold text-foreground">Reviewer verdict: </span>
                           <span className="text-emerald-700">{shaclPreview.review.verdict}</span>
                           <span className="ml-2 text-secondary">
-                            (신뢰도 {Math.round((shaclPreview.review.confidence ?? 0) * 100)}%)
+                            (Confidence {Math.round((shaclPreview.review.confidence ?? 0) * 100)}%)
                           </span>
                         </div>
                       ) : (
                         <div className="rounded-lg border border-amber-500/25 bg-amber-500/[0.06] px-3 py-2 text-[11px] text-amber-700">
-                          ⚠ 리뷰어 검증을 사용할 수 없습니다 — 직접 SHACL을 확인하세요
+                          ⚠ Reviewer check unavailable — verify the SHACL manually
                         </div>
                       )}
 
                       {/* Reverse explanation */}
                       {shaclPreview.explanation ? (
                         <p className="text-[11px] leading-relaxed text-secondary">
-                          <span className="font-medium text-foreground">역설명: </span>
+                          <span className="font-medium text-foreground">Reverse explanation: </span>
                           {shaclPreview.explanation}
                         </p>
                       ) : null}
@@ -540,7 +862,7 @@ function CustomRulesSection({
                       {shaclPreview.previewCases && shaclPreview.previewCases.length > 0 ? (
                         <div>
                           <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-secondary/70">
-                            샘플 결과
+                            Sample results
                           </p>
                           <div className="space-y-1">
                             {shaclPreview.previewCases.map((c: ShaclPreviewCase, i: number) => (
@@ -564,14 +886,14 @@ function CustomRulesSection({
                         </div>
                       ) : (
                         <p className="text-[11px] text-secondary/70">
-                          샘플 레코드를 입력하면 결정론적 PASS/FAIL 미리보기가 표시됩니다.
+                          Add sample records to see deterministic PASS/FAIL preview.
                         </p>
                       )}
 
                       {/* Collapsed: generated SHACL */}
                       <details className="mt-1">
                         <summary className="cursor-pointer text-[10px] font-medium text-secondary hover:text-foreground">
-                          생성된 SHACL 보기
+                          View generated SHACL
                         </summary>
                         <pre className="mt-1 overflow-x-auto rounded bg-black/[0.04] p-2 text-[10px] text-foreground">
                           {shaclPreview.shapeTtl}
@@ -585,25 +907,23 @@ function CustomRulesSection({
                           onClick={() => {
                             onAdd(buildRule());
                             // Reset SHACL state after approval
-                            setShaclPreview(null);
-                            setShaclError(null);
-                            setNlText("");
-                            setRawTtl("");
-                            setSampleRecordsText("");
-                            setSampleRecordsError(null);
-                            setCompileError(null);
+                            resetShaclState();
                             setAdding(false);
                           }}
                           className="rounded-lg bg-emerald-600 px-3 py-1.5 text-[11px] font-semibold text-white hover:bg-emerald-700"
                         >
-                          ✓ 이게 맞습니다 — 활성화
+                          ✓ Looks right — activate
                         </button>
                         <button
                           type="button"
-                          onClick={() => { setShaclPreview(null); setShaclError(null); }}
+                          onClick={() => {
+                            setShaclPreview(null);
+                            setShaclError(null);
+                            resetConversation();
+                          }}
                           className="rounded-lg px-3 py-1.5 text-[11px] text-secondary hover:text-foreground"
                         >
-                          ✗ 다시
+                          ✗ Retry
                         </button>
                       </div>
                     </div>
@@ -613,17 +933,17 @@ function CustomRulesSection({
                 /* raw .ttl mode */
                 <div className="space-y-1">
                   <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-medium text-secondary">SHACL .ttl 직접 입력</span>
+                    <span className="text-[11px] font-medium text-secondary">SHACL .ttl direct input</span>
                     <button
                       type="button"
                       onClick={() => setRawTtl(SHACL_EXAMPLE_TEMPLATE)}
                       className="rounded px-2 py-0.5 text-[10px] font-medium text-secondary hover:bg-black/[0.06] hover:text-foreground"
                     >
-                      예시 불러오기
+                      Load example
                     </button>
                   </div>
                   <textarea
-                    aria-label="SHACL TTL 입력"
+                    aria-label="SHACL TTL input"
                     value={rawTtl}
                     onChange={(e) => setRawTtl(e.target.value)}
                     rows={6}
@@ -755,14 +1075,7 @@ function CustomRulesSection({
               type="button"
               onClick={() => {
                 setAdding(false);
-                setShaclPreview(null);
-                setShaclError(null);
-                setCompileError(null);
-                setNlText("");
-                setRawTtl("");
-                setSampleRecordsText("");
-                setSampleRecordsError(null);
-                setShaclMode("nl");
+                resetShaclState();
                 setKind("deterministic_ref");
               }}
               className="rounded-lg px-3 py-1.5 text-sm text-secondary hover:text-foreground"
@@ -782,14 +1095,14 @@ function CustomRulesSection({
                   setContentPattern("");
                   setContentIsRegex(false);
                   setContentNegate(false);
-                  setRawTtl("");
-                  setShaclPreview(null);
-                  setShaclError(null);
+                  // resetShaclState covers rawTtl, shaclPreview, shaclError, compileError,
+                  // sampleRecords, shaclMode, conversation, and guide state.
+                  resetShaclState();
                   setAdding(false);
                 }}
                 className="rounded-lg bg-primary px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-40"
               >
-                {kind === "shacl_constraint" ? "활성화" : "Add rule"}
+                {kind === "shacl_constraint" ? "Activate" : "Add rule"}
               </button>
             ) : null}
           </div>
