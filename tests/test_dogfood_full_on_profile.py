@@ -148,6 +148,9 @@ _STRICT_BOOL_FLAGS_ENABLED = (
     "MAGI_MEMORY_PROJECTION_ENABLED",
     "MAGI_MEMORY_QMD_LIVE_ENABLED",
     "MAGI_MEMORY_MODE_ROUTING_ENABLED",
+    # Orchestrator pattern: per-spawn tool ceiling + recipe-gate binding consumers.
+    "MAGI_SPAWN_RECIPE_CAP_ENABLED",
+    "MAGI_SPAWN_RECIPE_BIND_ENABLED",
 )
 
 
@@ -207,6 +210,23 @@ def test_document_authoring_coverage_is_block(profile: dict[str, str]) -> None:
     # Real governance: a hard block (not advisory/off) on failed DocumentCoverage.
     assert cfg_env.resolve_document_authoring_coverage_mode(profile) == "block"
     assert cfg_env.is_document_authoring_coverage_enabled(profile) is True
+
+
+def test_main_agent_profile_is_orchestrator(profile: dict[str, str]) -> None:
+    # The main agent runs as a lean orchestrator: its own toolset is restricted
+    # to read + spawn, and mutation/specialised work is delegated to children.
+    assert profile.get("MAGI_MAIN_AGENT_PROFILE") == "orchestrator"
+    assert cfg_env.main_agent_profile(profile) == "orchestrator"
+
+
+def test_child_runner_toolset_is_full(profile: dict[str, str]) -> None:
+    # Orchestrator delegation needs children that CAN mutate; the per-task
+    # allowedTools ∩ spawn_cap ceilings (the two flags above) narrow them, so the
+    # env-profile floor must be "full" rather than the blanket "readonly".
+    from magi_agent.runtime.child_toolset import resolve_child_toolset_profile
+
+    assert profile.get("MAGI_CHILD_RUNNER_TOOLSET") == "full"
+    assert resolve_child_toolset_profile(profile) == "full"
 
 
 # ---------------------------------------------------------------------------
