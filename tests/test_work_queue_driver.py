@@ -253,28 +253,33 @@ class _CountingRunner:
 
 
 def test_run_once_short_circuits_duplicate_key() -> None:
-    """With Task 2's fail-closed guard, duplicate idempotency_keys are prevented at store level.
+    """The dispatcher short-circuits a duplicate-key ready task to the prior completed
+    result WITHOUT invoking the runner (P4 core: exactly-once at dispatch).
 
-    The driver's short-circuit logic (checking completed_task_for_key) becomes unreachable
-    in normal operation since create_idempotent deduplicates and create() now raises.
-    This test verifies that keyed tasks must use create_idempotent (which silently dedupes).
+    With P6-prereq Task 2's fail-closed `create()` guard, normal callers cannot
+    insert two rows sharing an idempotency_key — `create_idempotent` is the only
+    sanctioned path and it silently dedups. The dispatcher's `completed_task_for_key`
+    short-circuit is a DEFENSIVE layer for the historic-dup scenario (e.g. a
+    pre-guard row that snuck in, or a future caller bypassing the guard). To prove
+    the defensive path still fires, we manually seed two same-key rows by mutating
+    `InMemoryWorkQueueStore._tasks` directly — bypassing the new guard the way a
+    historic dup would.
     """
     s = InMemoryWorkQueueStore()
-    # Create and complete a task with key k1
-    first = s.create(WorkTask(id="task_a", title="x", status="completed", created_at=1,
-                              idempotency_key="k1", result="PRIOR_RESULT"))
-
-    # Attempting to create a different task with the same key via create() raises
-    with pytest.raises(ValueError, match="idempotency_key"):
-        s.create(WorkTask(id="task_b", title="x", status="ready", created_at=2,
-                          idempotency_key="k1"))
-
-    # The correct API is create_idempotent, which dedupes and returns the existing task
-    second = s.create_idempotent(WorkTask(id="task_c", title="x", status="ready", created_at=3,
-                                          idempotency_key="k1"))
-    assert second.id == first.id  # create_idempotent returned the first task, no second insert
-    assert s.get("task_b") is None
-    assert s.get("task_c") is None
+    # Prior completed task with key k1 (plain create works — nothing else has k1).
+    s.create(WorkTask(id="done", title="x", status="completed", created_at=1,
+                      idempotency_key="k1", result="PRIOR"))
+    # Simulate a historic / guard-bypassed dup row with the same key.
+    s._tasks["dup"] = WorkTask(id="dup", title="x", status="ready", created_at=2,
+                               idempotency_key="k1")
+    runner = _CountingRunner()
+    d = WorkQueueDriver(s, runner, claimer="disp", max_spawn=4)
+    res = d.run_once(now=1000)
+    assert runner.calls == 0                       # dispatcher never invokes the runner
+    assert res.short_circuited == 1
+    dup = s.get("dup")
+    assert dup is not None
+    assert dup.status == "completed" and dup.result == "PRIOR"   # reused prior result
 
 
 def test_run_once_runs_normally_when_no_completed_key() -> None:

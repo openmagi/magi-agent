@@ -387,16 +387,32 @@ def test_create_no_key_unchanged(store):
     assert store.get("a") is not None and store.get("b") is not None
 
 
-# (j) completed_task_for_key: returns completed task with key, excludes self, else None
+# (j) completed_task_for_key: returns completed task with key, excludes self, else None.
+# Both tasks SHARE key k1 so the exclude_task_id parameter is actually exercised against
+# a real same-key candidate (a vacuous test would give b a different key — see review).
+# P6-prereq T2 closed plain create() against duplicate keys, so we seed the second row
+# via the store's internal storage (mirrors the historic-dup scenario the lookup defends).
 def test_parity_completed_task_for_key(store):
-    # Two tasks with different IDs and different keys (no duplicate key constraint)
     store.create(WorkTask(id="a", title="x", status="running", created_at=1, idempotency_key="k1"))
-    store.create(WorkTask(id="b", title="x", status="ready",   created_at=2, idempotency_key="k2"))
+    # Seed a second same-key row bypassing the new guard (sqlite: raw INSERT; in-memory: dict mutation)
+    dup = WorkTask(id="b", title="x", status="ready", created_at=2, idempotency_key="k1")
+    if hasattr(store, "_tasks"):       # InMemoryWorkQueueStore
+        store._tasks["b"] = dup
+    else:                              # SqliteWorkQueueStore
+        from magi_agent.missions.work_queue.store import _COLUMNS  # noqa: PLC0415
+        conn = store._get_conn()
+        cols = ",".join(_COLUMNS)
+        placeholders = ",".join("?" for _ in _COLUMNS)
+        vals = dup.model_dump()
+        vals["goal_mode"] = 1 if vals["goal_mode"] else 0
+        conn.execute(f"INSERT INTO work_queue_tasks ({cols}) VALUES ({placeholders})",
+                     tuple(vals[c] for c in _COLUMNS))
+        conn.commit()
     assert store.completed_task_for_key("k1", exclude_task_id="b") is None       # none completed yet
     store.complete("a", result="DONE")
     hit = store.completed_task_for_key("k1", exclude_task_id="b")
     assert hit is not None and hit.id == "a" and hit.result == "DONE"
-    assert store.completed_task_for_key("k1", exclude_task_id="a") is None       # excludes self
+    assert store.completed_task_for_key("k1", exclude_task_id="a") is None       # excludes self (a is the only completed match)
 
 
 # ---------------------------------------------------------------------------
