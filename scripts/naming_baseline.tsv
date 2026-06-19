@@ -71,7 +71,7 @@ openmagi	magi_agent/cli/engine.py	17
 openmagi	magi_agent/cli/real_runner.py	1
 openmagi	magi_agent/cli/session_log.py	2
 openmagi	magi_agent/cli/tests/test_commands.py	4
-openmagi	magi_agent/cli/tests/test_engine.py	9
+openmagi	magi_agent/cli/tests/test_engine.py	8
 openmagi	magi_agent/cli/tests/test_engine_recovery.py	2
 openmagi	magi_agent/cli/tests/test_fact_grounding_gate_wiring.py	4
 openmagi	magi_agent/cli/tests/test_force_recipe_env_wiring.py	5
@@ -223,7 +223,7 @@ openmagi	magi_agent/tools/schema_projection.py	1
 openmagi	magi_agent/transport/app_api.py	6
 openmagi	magi_agent/transport/chat.py	1
 openmagi	magi_agent/transport/chat_routes.py	54
-openmagi	magi_agent/transport/chat_shared.py	4
+openmagi	magi_agent/transport/chat_shared.py	5
 openmagi	magi_agent/transport/control_requests.py	3
 openmagi	magi_agent/transport/credentials.py	2
 openmagi	magi_agent/transport/customize.py	2
