@@ -4,6 +4,8 @@ Spec: task-3-brief.md
 """
 from __future__ import annotations
 
+import pytest
+
 from magi_agent.missions.work_queue.store import InMemoryWorkQueueStore
 from magi_agent.missions.work_queue.driver import WorkQueueDriver
 from magi_agent.missions.work_queue.runner import WorkTaskRunResult
@@ -251,18 +253,32 @@ class _CountingRunner:
 
 
 def test_run_once_short_circuits_duplicate_key() -> None:
+    """The dispatcher short-circuits a duplicate-key ready task to the prior completed
+    result WITHOUT invoking the runner (P4 core: exactly-once at dispatch).
+
+    With P6-prereq Task 2's fail-closed `create()` guard, normal callers cannot
+    insert two rows sharing an idempotency_key — `create_idempotent` is the only
+    sanctioned path and it silently dedups. The dispatcher's `completed_task_for_key`
+    short-circuit is a DEFENSIVE layer for the historic-dup scenario (e.g. a
+    pre-guard row that snuck in, or a future caller bypassing the guard). To prove
+    the defensive path still fires, we manually seed two same-key rows by mutating
+    `InMemoryWorkQueueStore._tasks` directly — bypassing the new guard the way a
+    historic dup would.
+    """
     s = InMemoryWorkQueueStore()
-    # a prior completed task with key k1
+    # Prior completed task with key k1 (plain create works — nothing else has k1).
     s.create(WorkTask(id="done", title="x", status="completed", created_at=1,
                       idempotency_key="k1", result="PRIOR"))
-    # a fresh ready task with the same key
-    s.create(WorkTask(id="dup", title="x", status="ready", created_at=2, idempotency_key="k1"))
+    # Simulate a historic / guard-bypassed dup row with the same key.
+    s._tasks["dup"] = WorkTask(id="dup", title="x", status="ready", created_at=2,
+                               idempotency_key="k1")
     runner = _CountingRunner()
     d = WorkQueueDriver(s, runner, claimer="disp", max_spawn=4)
     res = d.run_once(now=1000)
-    assert runner.calls == 0                       # runner NEVER invoked for the duplicate
+    assert runner.calls == 0                       # dispatcher never invokes the runner
     assert res.short_circuited == 1
     dup = s.get("dup")
+    assert dup is not None
     assert dup.status == "completed" and dup.result == "PRIOR"   # reused prior result
 
 

@@ -251,6 +251,13 @@ class InMemoryWorkQueueStore:
     # ------------------------------------------------------------------
 
     def create(self, task: WorkTask) -> WorkTask:
+        if task.idempotency_key is not None:
+            existing = self.find_by_idempotency_key(task.idempotency_key)
+            if existing is not None:
+                raise ValueError(
+                    f"work-queue task with idempotency_key={task.idempotency_key!r} already exists; "
+                    "use create_idempotent for dedup"
+                )
         self._tasks[task.id] = task
         return task
 
@@ -390,9 +397,16 @@ class InMemoryWorkQueueStore:
         error: str | None = None,
         failure_limit: int = DEFAULT_FAILURE_LIMIT,
     ) -> WorkTask:
+        """Increment ``consecutive_failures``; transition to ``blocked`` at *failure_limit*.
+
+        Effective limit = `task.max_retries` if not None, else the explicit `failure_limit` argument, else `DEFAULT_FAILURE_LIMIT`.
+        """
         task = self._tasks[task_id]
+        # Effective limit = task.max_retries if not None, else failure_limit arg, else default.
+        task_max_retries = task.max_retries
+        effective_limit = task_max_retries if task_max_retries is not None else failure_limit
         new_failures = task.consecutive_failures + 1
-        new_status = "blocked" if new_failures >= failure_limit else "ready"
+        new_status = "blocked" if new_failures >= effective_limit else "ready"
         return self._update(
             task_id,
             consecutive_failures=new_failures,
@@ -519,6 +533,13 @@ class SqliteWorkQueueStore:
         }
 
     def create(self, task: WorkTask) -> WorkTask:
+        if task.idempotency_key is not None:
+            existing = self.find_by_idempotency_key(task.idempotency_key)
+            if existing is not None:
+                raise ValueError(
+                    f"work-queue task with idempotency_key={task.idempotency_key!r} already exists; "
+                    "use create_idempotent for dedup"
+                )
         conn = self._get_conn()
         vals = task.model_dump()
         vals["goal_mode"] = 1 if vals["goal_mode"] else 0
@@ -713,8 +734,18 @@ class SqliteWorkQueueStore:
         error: str | None = None,
         failure_limit: int = DEFAULT_FAILURE_LIMIT,
     ) -> WorkTask:
+        """Increment ``consecutive_failures``; transition to ``blocked`` at *failure_limit*.
+
+        Effective limit = `task.max_retries` if not None, else the explicit `failure_limit` argument, else `DEFAULT_FAILURE_LIMIT`.
+        """
         now = int(time.time())
         conn = self._get_conn()
+        # Fetch the task to read task.max_retries before updating consecutive_failures
+        task = self.get(task_id)
+        assert task is not None
+        # Effective limit = task.max_retries if not None, else failure_limit arg, else default.
+        task_max_retries = task.max_retries
+        effective_limit = task_max_retries if task_max_retries is not None else failure_limit
         conn.execute(
             "UPDATE work_queue_tasks "
             "SET consecutive_failures = consecutive_failures + 1, last_failure_error = ?, "
@@ -733,7 +764,7 @@ class SqliteWorkQueueStore:
             (task_id,),
         ).fetchone()
         new_failures = row["consecutive_failures"]
-        if new_failures >= failure_limit:
+        if new_failures >= effective_limit:
             conn.execute(
                 "UPDATE work_queue_tasks SET status = 'blocked' WHERE id = ?",
                 (task_id,),

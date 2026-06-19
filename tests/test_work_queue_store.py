@@ -257,6 +257,22 @@ def test_parity_record_failure_breaker_boundary(store):
     assert t2.consecutive_failures == 2
 
 
+# (c1) record_failure honors task-level max_retries: max_retries=1 → 1st failure → blocked
+def test_parity_record_failure_honors_task_max_retries(store):
+    store.create(WorkTask(id="t", title="x", status="running", created_at=1, max_retries=1))
+    t1 = store.record_failure("t", outcome="crashed")
+    assert t1.status == "blocked"                  # 1st failure with max_retries=1 → blocked
+    assert t1.consecutive_failures == 1
+
+
+# (c2) record_failure max_retries=None falls back to failure_limit argument
+def test_parity_record_failure_max_retries_none_falls_back_to_arg(store):
+    store.create(WorkTask(id="t", title="x", status="running", created_at=1))  # max_retries=None
+    t1 = store.record_failure("t", outcome="crashed", failure_limit=2)
+    assert t1.status == "ready"                    # 1st failure with limit=2 → ready (unchanged today)
+    assert t1.consecutive_failures == 1
+
+
 # (d) complete: sets completed, resets consecutive_failures=0, idempotent on 2nd call
 def test_parity_complete_idempotent(store):
     store.create(WorkTask(id="t", title="x", status="running", created_at=1,
@@ -341,15 +357,62 @@ def test_parity_create_idempotent_no_key_always_inserts(store):
     assert store.get("a") is not None and store.get("b") is not None
 
 
-# (j) completed_task_for_key: returns completed task with key, excludes self, else None
+# (j1) create raises on duplicate idempotency_key (Task 2)
+def test_create_raises_on_duplicate_idempotency_key(store):
+    """create() must raise ValueError when called with an idempotency_key that already exists."""
+    store.create(WorkTask(id="a", title="x", status="todo", created_at=1, idempotency_key="k1"))
+    with pytest.raises(ValueError, match="idempotency_key"):
+        store.create(WorkTask(id="b", title="y", status="todo", created_at=2, idempotency_key="k1"))
+    # AND no second row was inserted
+    assert store.get("b") is None
+
+
+# (j2) create_idempotent still dedups silently (regression guard — Task 2)
+def test_create_idempotent_still_dedups_silently(store):
+    """Regression guard: create_idempotent's existing semantics are unchanged.
+
+    Even though create() now raises on duplicate keys, create_idempotent should
+    still silently dedup without raising (it short-circuits before calling create).
+    """
+    a = store.create_idempotent(WorkTask(id="a", title="x", status="todo", created_at=1, idempotency_key="k1"))
+    b = store.create_idempotent(WorkTask(id="b", title="x", status="todo", created_at=2, idempotency_key="k1"))
+    assert a.id == "a" and b.id == "a" and store.get("b") is None   # silent dedup, no raise
+
+
+# (j3) create with no idempotency_key is unchanged (Task 2)
+def test_create_no_key_unchanged(store):
+    """Tasks with idempotency_key=None must insert as before (no guard)."""
+    store.create(WorkTask(id="a", title="x", status="todo", created_at=1))   # no key
+    store.create(WorkTask(id="b", title="x", status="todo", created_at=2))   # no key
+    assert store.get("a") is not None and store.get("b") is not None
+
+
+# (j) completed_task_for_key: returns completed task with key, excludes self, else None.
+# Both tasks SHARE key k1 so the exclude_task_id parameter is actually exercised against
+# a real same-key candidate (a vacuous test would give b a different key — see review).
+# P6-prereq T2 closed plain create() against duplicate keys, so we seed the second row
+# via the store's internal storage (mirrors the historic-dup scenario the lookup defends).
 def test_parity_completed_task_for_key(store):
     store.create(WorkTask(id="a", title="x", status="running", created_at=1, idempotency_key="k1"))
-    store.create(WorkTask(id="b", title="x", status="ready",   created_at=2, idempotency_key="k1"))
+    # Seed a second same-key row bypassing the new guard (sqlite: raw INSERT; in-memory: dict mutation)
+    dup = WorkTask(id="b", title="x", status="ready", created_at=2, idempotency_key="k1")
+    if hasattr(store, "_tasks"):       # InMemoryWorkQueueStore
+        store._tasks["b"] = dup
+    else:                              # SqliteWorkQueueStore
+        from magi_agent.missions.work_queue.store import _COLUMNS  # noqa: PLC0415
+        conn = store._get_conn()
+        cols = ",".join(_COLUMNS)
+        placeholders = ",".join("?" for _ in _COLUMNS)
+        vals = dup.model_dump()
+        vals["goal_mode"] = 1 if vals["goal_mode"] else 0
+        conn.execute(f"INSERT INTO work_queue_tasks ({cols}) VALUES ({placeholders})",
+                     tuple(vals[c] for c in _COLUMNS))
+        conn.commit()
     assert store.completed_task_for_key("k1", exclude_task_id="b") is None       # none completed yet
     store.complete("a", result="DONE")
     hit = store.completed_task_for_key("k1", exclude_task_id="b")
     assert hit is not None and hit.id == "a" and hit.result == "DONE"
-    assert store.completed_task_for_key("k1", exclude_task_id="a") is None       # excludes self
+    assert store.completed_task_for_key("k1", exclude_task_id="a") is None       # excludes self (a is the only completed match)
 
 
 # ---------------------------------------------------------------------------
