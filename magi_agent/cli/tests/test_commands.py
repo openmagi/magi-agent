@@ -387,14 +387,14 @@ def test_markdown_dispatch_yields_content_blocks(tmp_path) -> None:
 def test_builtins_present_in_discovery() -> None:
     discovered = discover_commands("/tmp/no-such-cwd")
     names = {c.name for c in discovered}
-    assert {"status", "reset", "compact", "help", "plan", "goal", "onboarding", "superpowers"} <= names
+    assert {"status", "reset", "compact", "help", "plan", "goal", "onboarding", "superpowers", "tasks"} <= names
 
 
 def test_builtin_commands_factory_returns_eight_local() -> None:
     cmds = builtin_commands()
     assert {c.name for c in cmds} == {
         "status", "reset", "compact", "help",
-        "plan", "goal", "onboarding", "superpowers",
+        "plan", "goal", "onboarding", "superpowers", "tasks",
     }
     assert all(isinstance(c, LocalCommand) for c in cmds)
     assert all(c.surface == BOTH for c in cmds)
@@ -533,17 +533,17 @@ def test_install_discovery_wires_builder_and_no_import_side_effects(tmp_path) ->
 # P1.4: magi-native builtins (plan, goal, onboarding, superpowers)
 # ===========================================================================
 
-_MAGI_NATIVE_NAMES = {"plan", "goal", "onboarding", "superpowers"}
-_ALL_EIGHT = {"status", "reset", "compact", "help"} | _MAGI_NATIVE_NAMES
+_MAGI_NATIVE_NAMES = {"plan", "goal", "onboarding", "superpowers", "tasks"}
+_ALL_BUILTINS = {"status", "reset", "compact", "help"} | _MAGI_NATIVE_NAMES
 
 
 # ---------------------------------------------------------------------------
 # BUILTIN_COMMAND_NAMES and /help listing
 # ---------------------------------------------------------------------------
 def test_builtin_command_names_has_all_eight() -> None:
-    """BUILTIN_COMMAND_NAMES must expose all eight builtins."""
-    assert set(BUILTIN_COMMAND_NAMES) == _ALL_EIGHT
-    assert len(BUILTIN_COMMAND_NAMES) == 8
+    """BUILTIN_COMMAND_NAMES must expose every builtin."""
+    assert set(BUILTIN_COMMAND_NAMES) == _ALL_BUILTINS
+    assert len(BUILTIN_COMMAND_NAMES) == len(_ALL_BUILTINS)
 
 
 def test_help_lists_all_eight() -> None:
@@ -551,17 +551,17 @@ def test_help_lists_all_eight() -> None:
     reg = build_registry("/tmp/no-such-cwd")
     out = asyncio.run(dispatch(reg, "help", None, _ctx(), surface=HEADLESS))
     assert isinstance(out, Text)
-    for name in _ALL_EIGHT:
+    for name in _ALL_BUILTINS:
         assert name in out.text, f"'/help' output missing builtin: {name}"
 
 
 # ---------------------------------------------------------------------------
-# Factory: eight fresh LocalCommand instances, all BOTH-surface
+# Factory: fresh LocalCommand instances, all BOTH-surface
 # ---------------------------------------------------------------------------
 def test_builtin_commands_returns_eight_instances() -> None:
     cmds = builtin_commands()
-    assert len(cmds) == 8
-    assert {c.name for c in cmds} == _ALL_EIGHT
+    assert len(cmds) == len(_ALL_BUILTINS)
+    assert {c.name for c in cmds} == _ALL_BUILTINS
 
 
 def test_builtin_commands_factory_returns_fresh_instances() -> None:
