@@ -7,8 +7,10 @@ from magi_agent.computer.autonomous.engine import ComputerEngine, ComputerRunRes
 class _FakeBackend:
     def __init__(self) -> None:
         self.dispatched: list[dict] = []
+        self.capture_calls: list[str | None] = []
 
-    async def capture(self) -> CuaCapture:
+    async def capture(self, *, app_hint: str | None = None) -> CuaCapture:
+        self.capture_calls.append(app_hint)
         return CuaCapture(
             pid=1, window_id=2, screenshot_b64="QUJD",
             ax_tree='[element_index 1] AXButton "OK"', elements=[],
@@ -47,6 +49,18 @@ async def test_done_returns_ok() -> None:
     assert isinstance(result, ComputerRunResult)
     assert result.status == "ok"
     assert result.summary == "all set"
+
+
+@pytest.mark.asyncio
+async def test_app_hint_propagates_to_backend_capture() -> None:
+    backend = _FakeBackend()
+    engine = ComputerEngine(
+        backend=backend,
+        chat_step=_scripted_chat(['{"action": "done", "summary": "ok"}']),
+        consent=_allow,
+    )
+    await engine.run(task="anything", max_steps=2, app_hint="TextEdit")
+    assert backend.capture_calls == ["TextEdit"]
 
 
 @pytest.mark.asyncio
@@ -99,7 +113,7 @@ async def test_max_steps_exhausted_is_ok_with_budget_summary() -> None:
 @pytest.mark.asyncio
 async def test_run_failure_returns_error() -> None:
     class _BoomBackend(_FakeBackend):
-        async def capture(self):
+        async def capture(self, *, app_hint: str | None = None):
             raise RuntimeError("cua-driver died")
 
     engine = ComputerEngine(

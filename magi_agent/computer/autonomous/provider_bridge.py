@@ -23,25 +23,33 @@ class BridgeError(RuntimeError):
 def build_step_messages(
     task: str, ax_tree: str, screenshot_b64: str, history: list[str]
 ) -> list[dict]:
-    """Pure litellm message list for one computer-use step."""
+    """Pure litellm message list for one computer-use step.
+
+    When ``screenshot_b64`` is empty (transient capture during a window switch,
+    Screen Recording TCC not yet granted, etc.) the image part is omitted
+    rather than sent as ``data:image/png;base64,`` — providers like OpenAI
+    reject an empty base64 image_url. The step still has the AX tree.
+    """
     history_blob = "\n".join(f"- {h}" for h in history) if history else "(none yet)"
+    image_note = "" if screenshot_b64 else (
+        "\n\n(no screenshot available for this step; rely on the AX tree alone.)"
+    )
     user_text = (
         f"TASK: {task}\n\nACTIONS SO FAR:\n{history_blob}\n\n"
-        f"ACCESSIBILITY TREE:\n{ax_tree}\n\n"
+        f"ACCESSIBILITY TREE:\n{ax_tree}{image_note}\n\n"
         "Choose the next single action as JSON."
     )
+    parts: list[dict] = [{"type": "text", "text": user_text}]
+    if screenshot_b64:
+        parts.append(
+            {
+                "type": "image_url",
+                "image_url": {"url": f"data:image/png;base64,{screenshot_b64}"},
+            }
+        )
     return [
         {"role": "system", "content": SYSTEM_PROMPT},
-        {
-            "role": "user",
-            "content": [
-                {"type": "text", "text": user_text},
-                {
-                    "type": "image_url",
-                    "image_url": {"url": f"data:image/png;base64,{screenshot_b64}"},
-                },
-            ],
-        },
+        {"role": "user", "content": parts},
     ]
 
 

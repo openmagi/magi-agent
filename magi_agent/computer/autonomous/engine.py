@@ -39,12 +39,14 @@ class ComputerEngine:
         self._chat_step = chat_step
         self._consent = consent
 
-    async def run(self, *, task: str, max_steps: int) -> ComputerRunResult:
+    async def run(
+        self, *, task: str, max_steps: int, app_hint: str | None = None
+    ) -> ComputerRunResult:
         history: list[str] = []
         steps_used = 0
         try:
             for _ in range(max_steps):
-                cap = await self._backend.capture()  # type: ignore[attr-defined]
+                cap = await self._backend.capture(app_hint=app_hint)  # type: ignore[attr-defined]
                 messages = build_step_messages(
                     task=task,
                     ax_tree=cap.ax_tree,

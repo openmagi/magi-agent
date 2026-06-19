@@ -27,6 +27,14 @@ _INPUT_SCHEMA: dict[str, object] = {
     "properties": {
         "task": {"type": "string"},
         "max_steps": {"type": "integer"},
+        "app": {
+            "type": "string",
+            "description": (
+                "Optional hint for which app/window to control "
+                "(case-insensitive substring of app_name or window title; "
+                "e.g. \"TextEdit\", \"Chrome\")."
+            ),
+        },
     },
     "required": ["task"],
 }
@@ -113,6 +121,9 @@ async def _computer_task_handler(
     else:
         max_steps = ComputerToolConfig().max_steps
 
+    raw_app = arguments.get("app")
+    app_hint = str(raw_app).strip() if isinstance(raw_app, str) and raw_app.strip() else None
+
     from magi_agent.computer.autonomous.cua_backend import CuaDriverBackend  # noqa: PLC0415
 
     # The session() context manager owns the cua-driver subprocess + anyio scopes;
@@ -120,7 +131,7 @@ async def _computer_task_handler(
     async with CuaDriverBackend.session() as backend:
         run = await ComputerEngine(
             backend=backend, chat_step=chat_step, consent=_consent_from_context(context)
-        ).run(task=task, max_steps=max_steps)
+        ).run(task=task, max_steps=max_steps, app_hint=app_hint)
 
     if run.status != "ok":
         return ToolResult(

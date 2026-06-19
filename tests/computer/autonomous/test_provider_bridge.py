@@ -28,6 +28,22 @@ def test_build_step_messages_embeds_image_and_tree() -> None:
     )
 
 
+def test_build_step_messages_omits_image_part_when_screenshot_empty() -> None:
+    # Transient capture (e.g. mid-window-switch) may return an empty PNG. Sending
+    # `data:image/png;base64,` makes providers like OpenAI reject the request
+    # with "Invalid base64 image_url" — so the image part must be omitted.
+    msgs = build_step_messages(
+        task="anything",
+        ax_tree='- [1] AXButton "OK"',
+        screenshot_b64="",
+        history=[],
+    )
+    parts = msgs[-1]["content"]
+    assert not [p for p in parts if p["type"] == "image_url"]
+    text_blob = " ".join(p.get("text", "") for p in parts if p["type"] == "text")
+    assert "no screenshot" in text_blob.casefold()
+
+
 def test_build_chat_step_requires_provider() -> None:
     with pytest.raises(BridgeError):
         build_chat_step(None)
