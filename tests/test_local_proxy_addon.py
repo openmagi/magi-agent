@@ -234,6 +234,197 @@ def test_addon_block_enqueue_payload_carries_no_secret_with_fake_http(monkeypatc
     assert SECRET not in str(enqueued[0])
 
 
+# -- fail-closed: matched credential, secret unavailable → 502 BLOCK ------
+
+
+def _install_fake_mitmproxy_http(monkeypatch):
+    """Stub the lazily-imported ``mitmproxy.http`` so the block path is testable
+    without the optional extra. Returns the captured-response constructor."""
+    import sys
+    import types
+
+    fake_http = types.ModuleType("mitmproxy.http")
+
+    class _Resp:
+        def __init__(self, status_code, body=None):
+            self.status_code = status_code
+            self.text = body
+
+        @staticmethod
+        def make(status, body, headers):
+            return _Resp(status, body)
+
+    fake_http.Response = _Resp
+    fake_mitmproxy = types.ModuleType("mitmproxy")
+    fake_mitmproxy.http = fake_http
+    monkeypatch.setitem(sys.modules, "mitmproxy", fake_mitmproxy)
+    monkeypatch.setitem(sys.modules, "mitmproxy.http", fake_http)
+    return _Resp
+
+
+def _active_cred():
+    return {
+        "id": "cred-1",
+        "service": "notion",
+        "auth_scheme": "bearer",
+        "status": "active",
+        "vault_ref": "ref-abc",
+        "requires_approval": False,
+        "host": None,
+    }
+
+
+@pytest.fixture(autouse=True)
+def _clear_proxy_faults():
+    local_proxy.clear_proxy_faults()
+    yield
+    local_proxy.clear_proxy_faults()
+
+
+def test_addon_blocks_when_secret_missing(monkeypatch) -> None:
+    """A MATCHED active credential whose secret is missing (None) must BLOCK
+    upstream with 502 — never forward an unauthenticated request."""
+    _install_fake_mitmproxy_http(monkeypatch)
+    addon = CredentialInjectionAddon(
+        credentials_loader=lambda: [_active_cred()],
+        approvals_lookup=lambda _cid: False,
+    )
+    monkeypatch.setattr(addon._vault, "get_secret", lambda ref: None)
+
+    flow = _FakeFlow("api.notion.com")
+    addon.request(flow)
+
+    # Upstream is NOT reached: the request header was never injected and a
+    # blocking 502 response is set.
+    assert flow.response is not None
+    assert flow.response.status_code == 502
+    assert "Authorization" not in flow.request.headers
+
+
+def test_addon_blocks_when_secret_empty_string(monkeypatch) -> None:
+    _install_fake_mitmproxy_http(monkeypatch)
+    addon = CredentialInjectionAddon(
+        credentials_loader=lambda: [_active_cred()],
+        approvals_lookup=lambda _cid: False,
+    )
+    monkeypatch.setattr(addon._vault, "get_secret", lambda ref: "")
+
+    flow = _FakeFlow("api.notion.com")
+    addon.request(flow)
+
+    assert flow.response is not None
+    assert flow.response.status_code == 502
+    assert "Authorization" not in flow.request.headers
+
+
+def test_addon_blocks_when_get_secret_raises(monkeypatch) -> None:
+    """Undecryptable / vault error: get_secret raising must also BLOCK, not
+    forward."""
+    _install_fake_mitmproxy_http(monkeypatch)
+    addon = CredentialInjectionAddon(
+        credentials_loader=lambda: [_active_cred()],
+        approvals_lookup=lambda _cid: False,
+    )
+
+    def _boom(ref):  # noqa: ANN001
+        raise RuntimeError("decrypt failed")
+
+    monkeypatch.setattr(addon._vault, "get_secret", _boom)
+
+    flow = _FakeFlow("api.notion.com")
+    addon.request(flow)
+
+    assert flow.response is not None
+    assert flow.response.status_code == 502
+    assert "Authorization" not in flow.request.headers
+
+
+def test_addon_block_missing_secret_body_carries_no_secret(monkeypatch) -> None:
+    _install_fake_mitmproxy_http(monkeypatch)
+    addon = CredentialInjectionAddon(
+        credentials_loader=lambda: [_active_cred()],
+        approvals_lookup=lambda _cid: False,
+    )
+    monkeypatch.setattr(addon._vault, "get_secret", lambda ref: SECRET and None)
+
+    flow = _FakeFlow("api.notion.com")
+    addon.request(flow)
+
+    assert flow.response.status_code == 502
+    assert SECRET not in str(flow.response.text)
+    assert "ref-abc" not in str(flow.response.text)  # no vault_ref leak
+
+
+def test_addon_missing_secret_records_redacted_fault(monkeypatch) -> None:
+    """The fault is recorded (redacted) so /v1/vault/status can surface it."""
+    _install_fake_mitmproxy_http(monkeypatch)
+    addon = CredentialInjectionAddon(
+        credentials_loader=lambda: [_active_cred()],
+        approvals_lookup=lambda _cid: False,
+    )
+    monkeypatch.setattr(addon._vault, "get_secret", lambda ref: None)
+
+    addon.request(_FakeFlow("api.notion.com"))
+
+    fault = local_proxy.last_proxy_fault()
+    assert fault is not None
+    assert fault["reasonCode"] == "secret_missing"
+    assert fault["targetHost"] == "api.notion.com"
+    # Redacted: only a credential-id suffix, never the full id / ref / secret.
+    assert fault["credentialIdSuffix"] == "cred-1"[-4:]
+    assert "vault_ref" not in fault
+    assert SECRET not in str(fault)
+    assert "ref-abc" not in str(fault)
+    assert "createdAt" in fault
+
+
+def test_addon_undecryptable_records_reason_code(monkeypatch) -> None:
+    _install_fake_mitmproxy_http(monkeypatch)
+    addon = CredentialInjectionAddon(
+        credentials_loader=lambda: [_active_cred()],
+        approvals_lookup=lambda _cid: False,
+    )
+
+    def _boom(ref):  # noqa: ANN001
+        raise RuntimeError("decrypt failed")
+
+    monkeypatch.setattr(addon._vault, "get_secret", _boom)
+    addon.request(_FakeFlow("api.notion.com"))
+
+    fault = local_proxy.last_proxy_fault()
+    assert fault is not None
+    assert fault["reasonCode"] == "secret_undecryptable"
+
+
+def test_addon_block_missing_secret_does_not_log_secret(monkeypatch, caplog) -> None:
+    _install_fake_mitmproxy_http(monkeypatch)
+    addon = CredentialInjectionAddon(
+        credentials_loader=lambda: [_active_cred()],
+        approvals_lookup=lambda _cid: False,
+    )
+    monkeypatch.setattr(addon._vault, "get_secret", lambda ref: None)
+
+    with caplog.at_level(logging.DEBUG):
+        addon.request(_FakeFlow("api.notion.com"))
+
+    assert SECRET not in caplog.text
+
+
+def test_record_credential_proxy_fault_redacts(monkeypatch) -> None:
+    local_proxy.clear_proxy_faults()
+    local_proxy.record_credential_proxy_fault(
+        credential_id="some-long-credential-id-9999",
+        target_host="api.example.com",
+        reason_code="secret_missing",
+    )
+    fault = local_proxy.last_proxy_fault()
+    assert fault["credentialIdSuffix"] == "9999"
+    assert "some-long-credential-id" not in str(fault)
+    assert fault["targetHost"] == "api.example.com"
+    assert fault["reasonCode"] == "secret_missing"
+    assert "createdAt" in fault
+
+
 # -- gating: default-on only under the local sentinel ---------------------
 
 
