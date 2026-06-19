@@ -13,7 +13,12 @@ the sidecar split. R1/R4/R6/R7 still apply to the recipe pack.
 """
 from __future__ import annotations
 
+import json
+import os
 import re
+import shutil
+import tempfile
+from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -162,3 +167,79 @@ def compile_recipe(checks: list[DashboardCheck]) -> RecipePackManifest:
         defaultEnabled=False,
         evidenceRefs=tuple(refs),
     )
+
+
+def _atomic_write_text(target: Path, text: str) -> None:
+    fd, tmp_name = tempfile.mkstemp(dir=str(target.parent), suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+        os.replace(tmp_name, target)
+    except Exception:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
+
+
+def _atomic_write_json(target: Path, payload: object) -> None:
+    _atomic_write_text(target, json.dumps(payload, indent=2, default=str) + "\n")
+
+
+_PACK_TOML = (
+    'packId = "ext.dashboard.checks"\n'
+    'displayName = "Dashboard custom checks"\n'
+    'version = "1"\n'
+    'description = "User-authored custom evidence checks composed via the dashboard."\n'
+    '\n'
+    '[[provides]]\n'
+    'type = "recipe"\n'
+    'ref = "recipe:ext.dashboard.checks@1"\n'
+    'spec = "checks.recipe.json"\n'
+)
+
+
+def write_pack(packs_root: Path, checks: list[DashboardCheck]) -> None:
+    """Atomically write the dashboard pack to ``packs_root``.
+
+    Empty ``checks`` removes the directory entirely so FS discovery sees nothing
+    (byte-identical baseline).
+    """
+    if not checks:
+        if packs_root.exists():
+            shutil.rmtree(packs_root)
+        return
+    packs_root.mkdir(parents=True, exist_ok=True)
+    # 1. recipe spec (validator side)
+    manifest = compile_recipe(checks)
+    _atomic_write_json(
+        packs_root / "checks.recipe.json", manifest.model_dump(by_alias=True)
+    )
+    # 2. sidecar (producer side)
+    _atomic_write_json(
+        packs_root / "dashboard-checks.json",
+        [c.model_dump(by_alias=True) for c in checks],
+    )
+    # 3. pack.toml LAST so discovery never sees a manifest pointing at a missing spec
+    _atomic_write_text(packs_root / "pack.toml", _PACK_TOML)
+
+
+def read_sidecar(packs_root: Path) -> list[DashboardCheck]:
+    """Load the sidecar check list. Missing file → []."""
+    sidecar = packs_root / "dashboard-checks.json"
+    if not sidecar.exists():
+        return []
+    try:
+        raw = json.loads(sidecar.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    if not isinstance(raw, list):
+        return []
+    out: list[DashboardCheck] = []
+    for item in raw:
+        try:
+            out.append(DashboardCheck.model_validate(item))
+        except Exception:  # noqa: BLE001 — skip malformed entries
+            continue
+    return out

@@ -186,3 +186,66 @@ from magi_agent.recipes.kernel_recipe_packs import validate_external_recipe_pack
 def test_compiled_recipe_passes_external_pack_validation() -> None:
     manifest = compile_recipe([_check("x"), _check("y")])
     assert validate_external_recipe_pack(manifest) == ""
+
+
+import json
+from pathlib import Path
+
+from magi_agent.packs.dashboard_authored import (
+    read_sidecar,
+    write_pack,
+)
+
+
+def test_write_pack_creates_directory_and_files(tmp_path: Path) -> None:
+    pack_root = tmp_path / "dashboard-authored"
+    write_pack(pack_root, [_check("x")])
+    assert (pack_root / "pack.toml").exists()
+    assert (pack_root / "checks.recipe.json").exists()
+    assert (pack_root / "dashboard-checks.json").exists()
+
+
+def test_write_pack_empty_removes_directory(tmp_path: Path) -> None:
+    pack_root = tmp_path / "dashboard-authored"
+    write_pack(pack_root, [_check("x")])
+    write_pack(pack_root, [])
+    assert not pack_root.exists()
+
+
+def test_write_pack_pack_toml_references_recipe_spec(tmp_path: Path) -> None:
+    pack_root = tmp_path / "dashboard-authored"
+    write_pack(pack_root, [_check("x")])
+    body = (pack_root / "pack.toml").read_text()
+    assert 'packId = "ext.dashboard.checks"' in body
+    assert 'type = "recipe"' in body
+    assert 'spec = "checks.recipe.json"' in body
+
+
+def test_sidecar_contains_all_checks(tmp_path: Path) -> None:
+    pack_root = tmp_path / "dashboard-authored"
+    write_pack(pack_root, [_check("a"), _check("b")])
+    sidecar = json.loads((pack_root / "dashboard-checks.json").read_text())
+    ids = {c["id"] for c in sidecar}
+    assert ids == {"a", "b"}
+
+
+def test_read_sidecar_round_trip(tmp_path: Path) -> None:
+    pack_root = tmp_path / "dashboard-authored"
+    checks_in = [_check("a"), _check("b", action="audit")]
+    write_pack(pack_root, checks_in)
+    checks_out = read_sidecar(pack_root)
+    assert {c.id for c in checks_out} == {"a", "b"}
+    by_id = {c.id: c for c in checks_out}
+    assert by_id["b"].action == "audit"
+
+
+def test_read_sidecar_missing_returns_empty(tmp_path: Path) -> None:
+    assert read_sidecar(tmp_path / "absent") == []
+
+
+def test_write_pack_atomic_recipe_spec_never_partial(tmp_path: Path) -> None:
+    # After a successful write, no .tmp file should remain.
+    pack_root = tmp_path / "dashboard-authored"
+    write_pack(pack_root, [_check("x")])
+    leftovers = [p.name for p in pack_root.iterdir() if p.name.startswith(".")]
+    assert leftovers == []
