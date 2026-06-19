@@ -410,6 +410,16 @@ def test_telegram_adapter_decision_copy_cannot_forge_authority_flags() -> None:
 
 
 def test_telegram_adapter_config_construct_and_copy_cannot_enable_live_flags() -> None:
+    # C-4 PR-E: TelegramAdapterConfig now inherits FalseOnlyAuthorityModel. The
+    # security invariant ("Literal[False] live/attachment flags cannot be turned
+    # on through construction/copy") is the same; the kernel's force-false
+    # validator coerces every Literal[False] field to False on EVERY
+    # construction surface. Regular bool fields (``enabled``,
+    # ``localFakeProviderEnabled``) are preserved on these paths under the
+    # kernel -- the legacy ``model_construct`` ignored ALL inputs by returning
+    # ``cls()``, which was strictly more aggressive than what the security
+    # contract required. This test now asserts ONLY the Literal[False] invariant
+    # (the actual security contract).
     from magi_agent.channels.telegram_adapter import TelegramAdapterConfig
 
     constructed = TelegramAdapterConfig.model_construct(
@@ -433,30 +443,13 @@ def test_telegram_adapter_config_construct_and_copy_cannot_enable_live_flags() -
         }
     )
 
-    assert constructed.model_dump(by_alias=True) == {
-        "enabled": False,
-        "localFakeProviderEnabled": False,
-        "selectedChannelRoutes": (),
-        "providerAllowlist": (),
-        "downloadEnabled": False,
-        "productionChannelWriteEnabled": False,
-        "telegramPollingAttached": False,
-        "telegramAttached": False,
-        "telegramWebhookMitigationAttached": False,
-        "routeAttached": False,
-    }
-    assert copied.model_dump(by_alias=True) == {
-        "enabled": True,
-        "localFakeProviderEnabled": True,
-        "selectedChannelRoutes": (),
-        "providerAllowlist": (),
-        "downloadEnabled": False,
-        "productionChannelWriteEnabled": False,
-        "telegramPollingAttached": False,
-        "telegramAttached": False,
-        "telegramWebhookMitigationAttached": False,
-        "routeAttached": False,
-    }
+    # Literal[False] fields force-false on BOTH surfaces.
+    for instance in (constructed, copied):
+        assert instance.production_channel_write_enabled is False
+        assert instance.telegram_polling_attached is False
+        assert instance.telegram_attached is False
+        assert instance.telegram_webhook_mitigation_attached is False
+        assert instance.route_attached is False
 
 
 @pytest.mark.parametrize(

@@ -6,10 +6,11 @@ import ipaddress
 import re
 from typing import Any, Literal, Protocol, Self
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from magi_agent.channels.contract import ChannelRef, ChannelType
 from magi_agent.channels.runtime_boundary import ChannelRuntimeReceipt
+from magi_agent.ops.authority import FalseOnlyAuthorityModel
 from magi_agent.runtime.provider_execution import (
     ProviderExecutionBoundary,
     ProviderExecutionConfig,
@@ -139,9 +140,7 @@ class TelegramProviderPort(Protocol):
     def download_file(self, request: TelegramDownloadRequest) -> Mapping[str, object]: ...
 
 
-class TelegramAdapterConfig(BaseModel):
-    model_config = _MODEL_CONFIG
-
+class TelegramAdapterConfig(FalseOnlyAuthorityModel):
     enabled: bool = False
     local_fake_provider_enabled: bool = Field(default=False, alias="localFakeProviderEnabled")
     selected_channel_routes: tuple[ChannelType, ...] = Field(default=(), alias="selectedChannelRoutes")
@@ -158,28 +157,6 @@ class TelegramAdapterConfig(BaseModel):
         alias="telegramWebhookMitigationAttached",
     )
     route_attached: Literal[False] = Field(default=False, alias="routeAttached")
-
-    @classmethod
-    def model_construct(cls, _fields_set: set[str] | None = None, **values: Any) -> Self:
-        _ = _fields_set, values
-        return cls()
-
-    def model_copy(self, *, update: Mapping[str, Any] | None = None, deep: bool = False) -> Self:
-        data = self.model_dump(by_alias=False, mode="python", warnings=False)
-        if update:
-            alias_to_name = {
-                field.alias: name
-                for name, field in self.__class__.model_fields.items()
-                if field.alias is not None
-            }
-            data.update({alias_to_name.get(str(key), str(key)): value for key, value in update.items()})
-        data["production_channel_write_enabled"] = False
-        data["telegram_polling_attached"] = False
-        data["telegram_attached"] = False
-        data["telegram_webhook_mitigation_attached"] = False
-        data["route_attached"] = False
-        _ = deep
-        return type(self).model_validate(data)
 
     @field_validator("selected_channel_routes", mode="before")
     @classmethod
@@ -204,9 +181,7 @@ class TelegramAdapterConfig(BaseModel):
         return ()
 
 
-class TelegramAdapterAuthorityFlags(BaseModel):
-    model_config = _MODEL_CONFIG
-
+class TelegramAdapterAuthorityFlags(FalseOnlyAuthorityModel):
     provider_called: Literal[False] = Field(default=False, alias="providerCalled")
     telegram_polling_attached: Literal[False] = Field(default=False, alias="telegramPollingAttached")
     telegram_attached: Literal[False] = Field(default=False, alias="telegramAttached")
@@ -215,28 +190,6 @@ class TelegramAdapterAuthorityFlags(BaseModel):
     route_attached: Literal[False] = Field(default=False, alias="routeAttached")
     webhook_deleted: Literal[False] = Field(default=False, alias="webhookDeleted")
     download_performed: Literal[False] = Field(default=False, alias="downloadPerformed")
-
-    @classmethod
-    def model_construct(cls, _fields_set: set[str] | None = None, **values: Any) -> Self:
-        _ = _fields_set, values
-        return cls()
-
-    def model_copy(self, *, update: Mapping[str, Any] | None = None, deep: bool = False) -> Self:
-        _ = update, deep
-        return type(self)()
-
-    @field_serializer(
-        "provider_called",
-        "telegram_polling_attached",
-        "telegram_attached",
-        "channel_delivery_performed",
-        "production_channel_write",
-        "route_attached",
-        "webhook_deleted",
-        "download_performed",
-    )
-    def _serialize_false(self, _value: object) -> bool:
-        return False
 
 
 class _TelegramScopedRequest(BaseModel):

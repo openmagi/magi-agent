@@ -216,7 +216,6 @@ def test_digest_fork_allowlist_is_shrinking() -> None:
 # _TenancyModel); they are intentionally ABSENT below.
 _FROZEN_BASE_FORK_ALLOWLIST: frozenset[str] = frozenset(
     {
-        "channels/workflow_routing.py",
         "coding/meta_adapter.py",
         # digest migrated this PR; force-false base deferred (C-4)
         "connectors/credential_lease.py",

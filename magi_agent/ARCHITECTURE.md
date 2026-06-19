@@ -37,6 +37,7 @@ graph LR
     channels --> credentials_admin
     channels --> egress_proxy
     channels --> harness
+    channels --> ops
     channels --> runtime
     cli --> adk_bridge
     cli --> benchmarks
@@ -399,17 +400,17 @@ graph LR
 | channel_credentials.py | Resolve a channel credential from the local vault, then the environment. | credentials_admin, local_vault | gateway/channel_watchers.py |
 | channel_validate.py | Bot-token validation for the dashboard Discord + Slack integrations. | — | transport/integrations.py |
 | contract.py | — | — | artifacts/_file_delivery_fakes.py, artifacts/delivery_boundary.py, artifacts/delivery_receipts.py, artifacts/file_delivery.py, artifacts/file_delivery_live.py, channels/__init__.py, channels/discord_adapter.py, channels/discord_live.py, channels/dispatcher.py, channels/push_delivery.py, channels/runtime_boundary.py, channels/telegram_adapter.py, channels/telegram_live.py, harness/cron_runtime.py, harness/scheduler_runtime.py, plugins/native/documents.py |
-| discord_adapter.py | — | contract, dispatcher, provider_execution, provider_receipts | channels/discord_live.py, gateway/channel_watchers.py |
+| discord_adapter.py | — | authority, contract, dispatcher, provider_execution, provider_receipts | channels/discord_live.py, gateway/channel_watchers.py |
 | discord_live.py | E3 — Gated live Discord adapter. | contract, discord_adapter, scheduler_delivery, turn_bridge | gateway/channel_watchers.py |
-| dispatcher.py | — | contract, provider_execution, provider_receipts, runtime_boundary, workflow_routing | channels/discord_adapter.py, channels/runtime_boundary.py, channels/telegram_adapter.py, harness/scheduler_runtime.py |
+| dispatcher.py | — | authority, contract, provider_execution, provider_receipts, runtime_boundary, workflow_routing | channels/discord_adapter.py, channels/runtime_boundary.py, channels/telegram_adapter.py, harness/scheduler_runtime.py |
 | email_live.py | E4 — Gated live email adapter. | platform_registry, scheduler_delivery | — |
 | platform_registry.py | E1 — Platform Registry: self-registration seam for channel platforms. | — | channels/email_live.py, channels/slack_live.py |
-| push_delivery.py | — | contract, provider_execution, provider_receipts, runtime_boundary | — |
-| runtime_boundary.py | — | contract, dispatcher | channels/dispatcher.py, channels/push_delivery.py, channels/telegram_adapter.py, harness/scheduler_runtime.py |
+| push_delivery.py | — | authority, contract, provider_execution, provider_receipts, runtime_boundary | — |
+| runtime_boundary.py | — | authority, contract, dispatcher | channels/dispatcher.py, channels/push_delivery.py, channels/telegram_adapter.py, harness/scheduler_runtime.py |
 | slack_live.py | E4 — Gated live Slack adapter. | platform_registry, scheduler_delivery, slack_urllib, turn_bridge | channels/providers/slack_urllib.py, gateway/channel_watchers.py |
 | taskkind_classifier.py | — | inference_scaling | — |
-| telegram_adapter.py | — | contract, dispatcher, provider_execution, provider_receipts, runtime_boundary | channels/providers/telegram_httpx.py, channels/telegram_live.py, gateway/channel_watchers.py |
-| telegram_boundary.py | — | — | — |
+| telegram_adapter.py | — | authority, contract, dispatcher, provider_execution, provider_receipts, runtime_boundary | channels/providers/telegram_httpx.py, channels/telegram_live.py, gateway/channel_watchers.py |
+| telegram_boundary.py | — | authority | — |
 | telegram_credentials.py | Resolve the Telegram bot token from the local vault, then the environment. | credentials_admin, local_vault | gateway/channel_watchers.py |
 | telegram_easy.py | Telegram "easy setup": phone number → MTProto user session → automated | — | channels/telegram_easy_telethon.py, transport/integrations.py |
 | telegram_easy_telethon.py | Telethon adapter for the Telegram "easy setup" path. | telegram_easy | transport/integrations.py |
@@ -417,7 +418,7 @@ graph LR
 | telegram_validate.py | Bot-token validation for the dashboard Telegram integration. | — | transport/integrations.py |
 | turn_bridge.py | Shared channel turn bridge — inbound message -> agent turn -> reply (PR1). | — | channels/discord_live.py, channels/slack_live.py, channels/telegram_live.py, channels/turn_engine.py, gateway/channel_watchers.py |
 | turn_engine.py | Engine-backed ``run_turn`` for the channel turn bridge (PR1.5). | child_governed_collector, governed_turn, turn_bridge, turn_context | gateway/watchers.py |
-| workflow_routing.py | — | — | channels/dispatcher.py |
+| workflow_routing.py | — | authority | channels/dispatcher.py |
 
 ### channels/providers/
 
@@ -1230,7 +1231,7 @@ graph LR
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
 | __init__.py | — | — | transport/health.py, transport/product_admin.py |
-| authority.py | Frozen-contract / authority model bases (C-4 / C-5 shared home). | — | config/models.py, connectors/credential_lease.py, connectors/marketplace.py, connectors/registry.py, ops/safety.py, tools/read_ledger.py, tools/scheduler.py |
+| authority.py | Frozen-contract / authority model bases (C-4 / C-5 shared home). | — | channels/discord_adapter.py, channels/dispatcher.py, channels/push_delivery.py, channels/runtime_boundary.py, channels/telegram_adapter.py, channels/telegram_boundary.py, channels/workflow_routing.py, config/models.py, connectors/credential_lease.py, connectors/marketplace.py, connectors/registry.py, ops/safety.py, tools/read_ledger.py, tools/scheduler.py |
 | health.py | — | daemon, scheduler_job_execution | adk_bridge/event_adapter.py, gateway/daemon.py, shadow/gate5b4c3_live_runner_boundary.py, transport/sse.py, transport/streaming_chat_route.py |
 | job_queue.py | — | safety | — |
 | metrics.py | — | safety | — |
