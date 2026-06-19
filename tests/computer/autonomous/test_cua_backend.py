@@ -28,7 +28,7 @@ class _FakeSession:
                 "pid": 42,
                 "window_id": 7,
                 "element_count": 1,
-                "tree_markdown": '[element_index 1] AXButton "OK"',
+                "tree_markdown": '- [1] AXButton "OK" [actions=[press]]',
             }
         return {"ok": True}
 
@@ -41,7 +41,7 @@ async def test_capture_returns_parsed_state() -> None:
     assert isinstance(cap, CuaCapture)
     assert cap.pid == 42
     assert cap.window_id == 7
-    assert cap.ax_tree == '[element_index 1] AXButton "OK"'
+    assert cap.ax_tree == '- [1] AXButton "OK" [actions=[press]]'
     assert cap.screenshot_b64 == base64.b64encode(_PNG_BYTES).decode("ascii")
     assert cap.elements == [UIElement(index=1, role="AXButton", label="OK")]
 

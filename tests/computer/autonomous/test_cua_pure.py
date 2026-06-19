@@ -7,22 +7,29 @@ from magi_agent.computer.autonomous.cua_pure import (
     parse_window_state,
 )
 
+# Real cua-driver 0.5.7 format: indented `- [N] AXRole "label"? [id=…: actions=[…]]`.
 _SAMPLE = """\
-# Safari — Start Page
-[element_index 1] AXButton "Back"
-[element_index 2] AXTextField "Address"
+- [0] AXWindow "Start Page" [actions=[raise]]
+  - [1] AXButton "Back" [actions=[press]]
+  - [2] AXTextField "Address" [id=urlbar: actions=[confirm]]
 some non-element line
-[element_index 3] AXLink "Privacy Report"
+  - [3] AXLink [actions=[press]]
 """
 
 
 def test_parse_window_state_extracts_elements() -> None:
     els = parse_window_state(_SAMPLE)
     assert els == [
+        UIElement(index=0, role="AXWindow", label="Start Page"),
         UIElement(index=1, role="AXButton", label="Back"),
         UIElement(index=2, role="AXTextField", label="Address"),
-        UIElement(index=3, role="AXLink", label="Privacy Report"),
+        UIElement(index=3, role="AXLink", label=""),
     ]
+
+
+def test_parse_window_state_label_optional() -> None:
+    els = parse_window_state("  - [9] AXMenuItem [actions=[cancel,press,pick]]")
+    assert els == [UIElement(index=9, role="AXMenuItem", label="")]
 
 
 def test_parse_window_state_empty() -> None:
