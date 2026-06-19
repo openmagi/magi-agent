@@ -258,9 +258,12 @@ def register_customize_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
 
         # --- priorTurns validation ---
         # If the body key is not a list, ignore it entirely (backward-compatible).
+        _MAX_PRIOR_TURNS = 10  # defensive O(n) cap before iteration (> round cap 3, leaves slack)
         raw_prior_turns = body.get("priorTurns")
         validated_prior_turns: list[dict] = []
         if isinstance(raw_prior_turns, list):
+            # Upfront slice to bound iteration regardless of how many elements the client sends.
+            raw_prior_turns = raw_prior_turns[:_MAX_PRIOR_TURNS]
             total_content_bytes = 0
             for element in raw_prior_turns:
                 # Each element must be a dict with a valid role and a non-empty str content.
@@ -278,13 +281,12 @@ def register_customize_routes(app: FastAPI, runtime: OpenMagiRuntime) -> None:
                     continue  # silently skip oversized individual elements
                 total_content_bytes += content_bytes
                 validated_prior_turns.append({"role": role, "content": content})
-
-            # DoS guard: total bytes across all content fields.
-            if total_content_bytes > 5 * _MAX_NL_TEXT_BYTES:
-                return JSONResponse(
-                    status_code=400,
-                    content={"ok": False, "error": "priorTurns total content too large"},
-                )
+                # Early-exit DoS guard: stop accumulating as soon as total bytes exceed limit.
+                if total_content_bytes > 5 * _MAX_NL_TEXT_BYTES:
+                    return JSONResponse(
+                        status_code=400,
+                        content={"ok": False, "error": "priorTurns total content too large"},
+                    )
 
         # Anti-loop cap: count validated user turns; reject if already at/above limit.
         validated_user_turn_count = sum(

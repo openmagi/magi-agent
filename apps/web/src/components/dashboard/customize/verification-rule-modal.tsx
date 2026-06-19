@@ -71,20 +71,23 @@ const GUIDE_CATEGORIES = [
   { name: "Cardinality", example: 'at most one approval per request' },
 ] as const;
 
+// Source: _BUILTIN_FIELD_HINTS in customize/shacl_compiler.py. Do NOT add fields not present there.
 const STARTER_PROMPTS = [
-  "Block any Calculation result where amount exceeds 3000.",
   "TestRun must have exitCode equal to 0.",
   "EditMatch must have confidence at least 0.8.",
   "DocumentCoverage coverageRatio must be at least 0.9.",
   "Reject SourceInspection records where inspected is false.",
 ] as const;
 
+// Source: _BUILTIN_FIELD_HINTS in customize/shacl_compiler.py. Do NOT add fields not present there.
+// Only types with non-empty hints are listed here. Types with [] (e.g. Calculation, GitDiff) have NO known fields.
 const STATIC_EVIDENCE_FIELDS = [
-  "Calculation: amount, currency",
   "TestRun: command, exitCode",
-  "EditMatch: confidence, tier, fileDigest",
-  "DocumentCoverage: totalUnits, coveredUnits, coverageRatio",
-  "SourceInspection: sourceId, inspected",
+  "EditMatch: tier, tierIndex, confidence, ambiguous, fileDigest, spanDigest",
+  "DocumentCoverage: totalUnits, coveredUnits, coverageRatio, threshold, status, sourceDigest, docDigest",
+  "SourceInspection: sourceId, sourceIds, sourceKind, inspected",
+  "CodeDiagnostics: checker, errorCount, fileDigest, diagnosticsDigest",
+  "CommitCheckpoint: checkpointDigest, pathRef",
 ] as const;
 
 function Toggle({
@@ -234,6 +237,8 @@ function CustomRulesSection({
   const [conversation, setConversation] = useState<ConversationTurn[]>([]);
   const [clarifyingQuestions, setClarifyingQuestions] = useState<string[] | null>(null);
   const [pendingAnswer, setPendingAnswer] = useState("");
+  // exhausted=true when the user has consumed all allowed clarification rounds (≥3 user turns in priorTurns).
+  const [exhausted, setExhausted] = useState(false);
 
   // Guide panel collapse state (Sub-task 5.3c)
   // Default: expanded. Auto-collapse when user types in nlText.
@@ -258,6 +263,7 @@ function CustomRulesSection({
     setConversation([]);
     setClarifyingQuestions(null);
     setPendingAnswer("");
+    setExhausted(false);
   };
 
   /** Reset all SHACL state back to clean. */
@@ -377,9 +383,12 @@ function CustomRulesSection({
   const selectCls = "mt-1 w-full rounded-lg border border-black/[0.12] bg-white px-2 py-1.5 text-sm";
   const selectTriggerCls = "mt-1 rounded-lg px-2 py-1.5 text-sm font-normal";
 
-  // Count user turns to enforce the round cap
+  // Count user turns to enforce the round cap.
+  // The backend rejects when validated_user_turn_count >= 3 (i.e. priorTurns already has ≥3 user turns).
+  // We set exhausted=true when the user's answer would make us hit that cap, or when backend returns the error.
   const userTurnCount = conversation.filter((t) => t.role === "user").length;
-  const roundsExhausted = userTurnCount >= 3 && clarifyingQuestions !== null;
+  // exhausted state is managed explicitly (see setExhausted calls); this is kept for test assertions.
+  const roundsExhausted = exhausted;
 
   return (
     <section>
@@ -443,14 +452,8 @@ function CustomRulesSection({
               value={kind}
               onChange={(v) => {
                 setKind(v as typeof kind);
-                // Reset SHACL sub-state on kind change
-                setShaclPreview(null);
-                setShaclError(null);
-                setNlText("");
-                setRawTtl("");
-                setShaclMode("nl");
-                resetConversation();
-                setGuideExpanded(true);
+                // Reset all SHACL sub-state on kind change via the canonical helper.
+                resetShaclState();
               }}
               className={selectTriggerCls}
               options={[
@@ -509,15 +512,20 @@ function CustomRulesSection({
                       </span>
                       <button
                         type="button"
+                        aria-expanded={guideExpanded}
+                        aria-controls="shacl-guide-content"
                         onClick={() => setGuideExpanded((prev) => !prev)}
                         className="text-[10px] text-secondary hover:text-foreground"
                       >
                         {guideExpanded ? "Hide" : "Show examples again"}
                       </button>
                     </div>
+                    <p className="mt-1 text-[10px] text-secondary/70">
+                      Clicking Compile asks an AI to translate your description into SHACL. You&apos;ll review the result and explicitly activate it — nothing is saved before approval.
+                    </p>
 
                     {guideExpanded ? (
-                      <div className="mt-2 space-y-2">
+                      <div id="shacl-guide-content" className="mt-2 space-y-2">
                         {/* Category list */}
                         <div className="space-y-1">
                           {GUIDE_CATEGORIES.map((cat) => (
@@ -535,8 +543,9 @@ function CustomRulesSection({
 
                         {/* Starter prompts */}
                         <div>
-                          <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-secondary/70">
-                            Starter prompts — click to fill
+                          <p className="mb-1 text-[10px] font-semibold tracking-wide text-secondary/70">
+                            <span className="uppercase">Starter prompts</span>{" "}
+                            <span>— click to fill</span>
                           </p>
                           <div className="flex flex-wrap gap-1.5">
                             {STARTER_PROMPTS.map((prompt) => (
@@ -586,17 +595,17 @@ function CustomRulesSection({
                       value={nlText}
                       onChange={(e) => {
                         setNlText(e.target.value);
-                        // Reset preview on text change
+                        // Reset preview on text change (but NOT the conversation — the user
+                        // may be refining their text mid-clarification flow).
                         setShaclPreview(null);
                         setShaclError(null);
-                        resetConversation();
                         // Auto-collapse guide when user starts typing
                         if (e.target.value.trim().length > 0) {
                           setGuideExpanded(false);
                         }
                       }}
                       rows={3}
-                      placeholder="e.g. Block any Calculation result where amount exceeds 3000."
+                      placeholder="e.g. TestRun must have exitCode equal to 0."
                       className={`${selectCls} resize-y`}
                     />
                   </label>
@@ -624,7 +633,7 @@ function CustomRulesSection({
 
                   <button
                     type="button"
-                    disabled={!nlText.trim() || compiling}
+                    disabled={!nlText.trim() || compiling || !!clarifyingQuestions || exhausted}
                     onClick={async () => {
                       // F1: parse sample records before compile
                       let parsedSamples: unknown[] | undefined;
@@ -647,7 +656,7 @@ function CustomRulesSection({
                       setShaclError(null);
                       setCompileError(null);
                       try {
-                        const result = await onCompileShacl(nlText, parsedSamples, conversation.length > 0 ? conversation : []);
+                        const result = await onCompileShacl(nlText, parsedSamples, conversation.length > 0 ? conversation : undefined);
                         if (result.clarifyingQuestions && result.clarifyingQuestions.length > 0) {
                           // Conversational: compiler needs clarification
                           const newConversation: ConversationTurn[] = [
@@ -677,19 +686,22 @@ function CustomRulesSection({
                     {compiling ? "Compiling…" : "Compile"}
                   </button>
 
-                  {/* F4: catch-level compile error (thrown exception, not ok:false) */}
-                  {compileError ? (
-                    <div className="rounded-lg border border-red-500/25 bg-red-500/[0.06] px-3 py-2 text-[11px] text-red-600">
-                      {compileError}
-                    </div>
-                  ) : null}
+                  {/* Compile status area — aria-live so screen readers announce errors and questions */}
+                  <div role="status" aria-live="polite" aria-atomic="false">
+                    {/* F4: catch-level compile error (thrown exception, not ok:false) */}
+                    {compileError ? (
+                      <div className="rounded-lg border border-red-500/25 bg-red-500/[0.06] px-3 py-2 text-[11px] text-red-600">
+                        {compileError}
+                      </div>
+                    ) : null}
 
-                  {/* Compile error (ok:false from backend) */}
-                  {shaclError ? (
-                    <div className="rounded-lg border border-red-500/25 bg-red-500/[0.06] px-3 py-2 text-[11px] text-red-600">
-                      {shaclError}
-                    </div>
-                  ) : null}
+                    {/* Compile error (ok:false from backend) */}
+                    {shaclError ? (
+                      <div className="rounded-lg border border-red-500/25 bg-red-500/[0.06] px-3 py-2 text-[11px] text-red-600">
+                        {shaclError}
+                      </div>
+                    ) : null}
+                  </div>
 
                   {/* Sub-task 5.3b — Chat-style conversation history */}
                   {conversation.length > 0 ? (
@@ -717,21 +729,26 @@ function CustomRulesSection({
                     </div>
                   ) : null}
 
-                  {/* Sub-task 5.3b — Clarifying questions card */}
-                  {clarifyingQuestions && !shaclPreview?.ok ? (
-                    <div className="rounded-xl border border-blue-500/20 bg-blue-50/40 p-3">
-                      <p className="mb-2 text-[11px] font-semibold text-foreground">
-                        The compiler needs clarification:
-                      </p>
-                      <ul className="mb-3 list-inside list-disc space-y-1 text-[11px] text-secondary">
-                        {clarifyingQuestions.map((q, i) => (
-                          <li key={i}>{q}</li>
-                        ))}
-                      </ul>
+                  {/* Sub-task 5.3b — Clarifying questions card + exhausted state */}
+                  {(clarifyingQuestions && !shaclPreview?.ok) || exhausted ? (
+                    <div aria-live="polite" className="rounded-xl border border-blue-500/20 bg-blue-50/40 p-3">
+                      {clarifyingQuestions ? (
+                        <>
+                          <p className="mb-2 text-[11px] font-semibold text-foreground">
+                            The compiler needs clarification:
+                          </p>
+                          <ul id="shacl-clarifying-questions" className="mb-3 list-inside list-disc space-y-1 text-[11px] text-secondary">
+                            {clarifyingQuestions.map((q, i) => (
+                              <li key={i}>{q}</li>
+                            ))}
+                          </ul>
+                        </>
+                      ) : null}
 
-                      {roundsExhausted ? (
+                      {exhausted ? (
                         <div className="rounded-lg border border-amber-500/25 bg-amber-500/[0.06] px-3 py-2 text-[11px] text-amber-700">
                           Compile attempts exhausted — switch to raw mode or rephrase your constraint.
+                          <span className="mt-1 block">Tip: switch to Raw .ttl mode to write SHACL directly.</span>
                         </div>
                       ) : (
                         <>
@@ -744,23 +761,33 @@ function CustomRulesSection({
                               placeholder="Type your answer here…"
                               className={`${selectCls} resize-y`}
                               aria-label="Answer to clarifying question"
+                              aria-describedby="shacl-clarifying-questions"
                             />
                           </label>
                           <button
                             type="button"
-                            disabled={!pendingAnswer.trim() || compiling}
+                            disabled={!pendingAnswer.trim() || compiling || userTurnCount >= 3}
                             onClick={async () => {
-                              // Push the user answer and call compile with updated conversation
+                              // If this answer would put us at the round cap (3 user turns in priorTurns),
+                              // flip exhausted immediately and do not call the backend again.
                               const updatedConversation: ConversationTurn[] = [
                                 ...conversation,
                                 { role: "user", content: pendingAnswer },
                               ];
+                              // Count user turns in the conversation AFTER appending this answer.
+                              const newUserTurnCount = updatedConversation.filter((t) => t.role === "user").length;
                               setConversation(updatedConversation);
                               setPendingAnswer("");
 
+                              if (newUserTurnCount >= 3) {
+                                // This answer fills the last allowed slot — mark exhausted.
+                                setExhausted(true);
+                                setClarifyingQuestions(null);
+                                return;
+                              }
+
                               // F4: try/finally so compiling is always cleared
                               setCompiling(true);
-                              setClarifyingQuestions(null);
                               setShaclPreview(null);
                               setShaclError(null);
                               setCompileError(null);
@@ -781,7 +808,14 @@ function CustomRulesSection({
                                   setShaclPreview(result);
                                   setClarifyingQuestions(null);
                                 } else {
-                                  setShaclError(result.error ?? "Compile failed");
+                                  // Check for backend round-cap error message
+                                  const errMsg = result.error ?? "Compile failed";
+                                  if (errMsg.includes("too many conversation rounds")) {
+                                    setExhausted(true);
+                                    setClarifyingQuestions(null);
+                                  } else {
+                                    setShaclError(errMsg);
+                                  }
                                 }
                               } catch (err: unknown) {
                                 setCompileError(err instanceof Error ? err.message : "An error occurred during compilation.");
@@ -1061,9 +1095,9 @@ function CustomRulesSection({
                   setContentPattern("");
                   setContentIsRegex(false);
                   setContentNegate(false);
-                  setRawTtl("");
-                  setShaclPreview(null);
-                  setShaclError(null);
+                  // resetShaclState covers rawTtl, shaclPreview, shaclError, compileError,
+                  // sampleRecords, shaclMode, conversation, and guide state.
+                  resetShaclState();
                   setAdding(false);
                 }}
                 className="rounded-lg bg-primary px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-40"

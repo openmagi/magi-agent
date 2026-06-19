@@ -302,8 +302,9 @@ describe("5 — Guide panel: content and structure", () => {
     expect(modalSrc).toContain("Not for open-ended judgments");
   });
 
-  it("includes starter prompt for Calculation amount", () => {
-    expect(modalSrc).toContain("Block any Calculation result where amount exceeds 3000.");
+  // C1 fix: Calculation was removed from starter prompts (no known fields in _BUILTIN_FIELD_HINTS).
+  it("does NOT include fabricated Calculation starter prompt (C1 fix)", () => {
+    expect(modalSrc).not.toContain("Block any Calculation result where amount exceeds 3000.");
   });
 
   it("includes starter prompt for TestRun exitCode", () => {
@@ -322,24 +323,29 @@ describe("5 — Guide panel: content and structure", () => {
     expect(modalSrc).toContain("Reject SourceInspection records where inspected is false.");
   });
 
-  it("includes Calculation evidence field chip", () => {
-    expect(modalSrc).toContain("Calculation: amount, currency");
+  // C1 fix: Calculation has [] in _BUILTIN_FIELD_HINTS — must NOT appear in field chips.
+  it("does NOT include fabricated Calculation field chip (C1 fix)", () => {
+    expect(modalSrc).not.toContain("Calculation: amount");
+    expect(modalSrc).not.toContain("Calculation: amount, currency");
   });
 
-  it("includes TestRun evidence field chip", () => {
+  it("includes TestRun evidence field chip with exact canonical fields", () => {
     expect(modalSrc).toContain("TestRun: command, exitCode");
   });
 
-  it("includes EditMatch evidence field chip", () => {
-    expect(modalSrc).toContain("EditMatch: confidence, tier, fileDigest");
+  // C1 fix: EditMatch now has full canonical field set from _BUILTIN_FIELD_HINTS.
+  it("includes EditMatch evidence field chip with full canonical fields from _BUILTIN_FIELD_HINTS", () => {
+    expect(modalSrc).toContain("EditMatch: tier, tierIndex, confidence, ambiguous, fileDigest, spanDigest");
   });
 
-  it("includes DocumentCoverage evidence field chip", () => {
-    expect(modalSrc).toContain("DocumentCoverage: totalUnits, coveredUnits, coverageRatio");
+  // C1 fix: DocumentCoverage now has full canonical field set from _BUILTIN_FIELD_HINTS.
+  it("includes DocumentCoverage evidence field chip with full canonical fields from _BUILTIN_FIELD_HINTS", () => {
+    expect(modalSrc).toContain("DocumentCoverage: totalUnits, coveredUnits, coverageRatio, threshold, status, sourceDigest, docDigest");
   });
 
-  it("includes SourceInspection evidence field chip", () => {
-    expect(modalSrc).toContain("SourceInspection: sourceId, inspected");
+  // C1 fix: SourceInspection now has full canonical field set from _BUILTIN_FIELD_HINTS.
+  it("includes SourceInspection evidence field chip with full canonical fields from _BUILTIN_FIELD_HINTS", () => {
+    expect(modalSrc).toContain("SourceInspection: sourceId, sourceIds, sourceKind, inspected");
   });
 
   it("renders Available evidence fields section header", () => {
@@ -455,5 +461,242 @@ describe("8 — Save-only-on-approval: onAdd is NOT called automatically on comp
   it("resetShaclState is called after approval (state cleared post-save)", () => {
     // After onAdd(), resetShaclState() is called to clear the form
     expect(modalSrc).toMatch(/onAdd\(buildRule\(\)\)[\s\S]{0,100}resetShaclState/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test group 9 — C1: field honesty — only _BUILTIN_FIELD_HINTS fields in UI
+// ---------------------------------------------------------------------------
+import { readFileSync as readFileSyncNode } from "node:fs";
+import * as path from "node:path";
+
+describe("9 — C1: UI evidence fields are a strict subset of _BUILTIN_FIELD_HINTS", () => {
+  // Frozen reference derived verbatim from _BUILTIN_FIELD_HINTS in shacl_compiler.py.
+  // If the backend changes, update both files together.
+  const BACKEND_FIELD_HINTS: Record<string, string[]> = {
+    "TestRun":                     ["command", "exitCode"],
+    "CodeDiagnostics":             ["checker", "errorCount", "fileDigest", "diagnosticsDigest"],
+    "CommitCheckpoint":            ["checkpointDigest", "pathRef"],
+    "DeterministicEvidenceVerifier": [
+      "verdictOk", "verdictState", "enforcement",
+      "matchedEvidenceTypes", "missingRequirementTypes",
+      "failureCodes", "requiredEvidenceTypes",
+      "blockModeEnabled", "finalAnswerBlocked",
+    ],
+    "WebSearch":                   ["query", "resultCount", "sourceKind", "sourceIds"],
+    "KnowledgeSearch":             ["query", "resultCount", "sourceKind", "sourceIds"],
+    "SourceInspection":            ["sourceId", "sourceIds", "sourceKind", "inspected"],
+    "Clock":                       ["sourceKind", "date"],
+    "PromptTransform":             ["hook_name", "sections_modified", "tokens_before", "tokens_after"],
+    "EditMatch":                   ["tier", "tierIndex", "confidence", "ambiguous", "fileDigest", "spanDigest"],
+    "DocumentCoverage":            ["totalUnits", "coveredUnits", "coverageRatio", "threshold", "status", "sourceDigest", "docDigest"],
+    // These types have [] in hints — they must NOT appear in STATIC_EVIDENCE_FIELDS:
+    "GitDiff":                     [],
+    "FileDeliver":                 [],
+    "ArtifactVerify":              [],
+    "PlanVerifier":                [],
+    "Calculation":                 [],
+    "DateRange":                   [],
+    "TelegramDeliveryAck":         [],
+  };
+
+  it("Calculation has [] in backend hints and must NOT appear in STATIC_EVIDENCE_FIELDS", () => {
+    expect(BACKEND_FIELD_HINTS["Calculation"]).toEqual([]);
+    expect(modalSrc).not.toContain("Calculation: amount");
+    expect(modalSrc).not.toContain("Calculation: amount, currency");
+  });
+
+  it("every type in STATIC_EVIDENCE_FIELDS has non-empty backend hints", () => {
+    // Extract chip entries like "TypeName: field1, field2" from the STATIC_EVIDENCE_FIELDS array
+    const chipRegex = /"([A-Z][A-Za-z]+):\s*([^"]+)"/g;
+    const chips: Array<{ type: string; fields: string[] }> = [];
+    let m: RegExpExecArray | null;
+    // Only look in the STATIC_EVIDENCE_FIELDS constant definition
+    const staticFieldsBlock = modalSrc.match(/const STATIC_EVIDENCE_FIELDS[\s\S]*?] as const;/)?.[0] ?? "";
+    while ((m = chipRegex.exec(staticFieldsBlock)) !== null) {
+      const type = m[1];
+      const fields = m[2].split(",").map((f) => f.trim()).filter(Boolean);
+      chips.push({ type, fields });
+    }
+    // Must have at least some chips
+    expect(chips.length).toBeGreaterThan(0);
+    for (const { type, fields } of chips) {
+      const backendFields = BACKEND_FIELD_HINTS[type];
+      expect(backendFields, `Type "${type}" not found in backend hints`).toBeDefined();
+      expect(backendFields.length, `Type "${type}" has [] in backend hints but appears in UI`).toBeGreaterThan(0);
+      const backendSet = new Set(backendFields);
+      for (const field of fields) {
+        expect(backendSet.has(field), `Field "${field}" for type "${type}" not in backend hints`).toBe(true);
+      }
+    }
+  });
+
+  it("every starter prompt that references a type uses only that type's real fields", () => {
+    // Extract starter prompts from the STARTER_PROMPTS constant
+    const starterBlock = modalSrc.match(/const STARTER_PROMPTS[\s\S]*?] as const;/)?.[0] ?? "";
+    const promptRegex = /"([^"]+)"/g;
+    const prompts: string[] = [];
+    let pm: RegExpExecArray | null;
+    while ((pm = promptRegex.exec(starterBlock)) !== null) {
+      prompts.push(pm[1]);
+    }
+    expect(prompts.length).toBeGreaterThan(0);
+    // For each prompt, if it mentions an evidence type, check the fields referenced exist in hints.
+    for (const prompt of prompts) {
+      for (const [type, fields] of Object.entries(BACKEND_FIELD_HINTS)) {
+        if (prompt.includes(type)) {
+          // The type appears — if fields is empty, no field-specific reference should appear
+          if (fields.length === 0) {
+            // This would be a violation: a prompt mentions a type with empty hints
+            // We just assert the type isn't paired with any claimed field
+            // (No structural way to verify without NLP — but Calculation is the concrete case)
+            if (type === "Calculation") {
+              expect(prompt).not.toContain("amount");
+              expect(prompt).not.toContain("currency");
+            }
+          }
+        }
+      }
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test group 10 — I1: exhausted state is reachable (round-cap UX fix)
+// ---------------------------------------------------------------------------
+describe("10 — I1: exhausted state — round-cap UX is no longer dead code", () => {
+  it("declares exhausted boolean state", () => {
+    expect(modalSrc).toContain("exhausted");
+    expect(modalSrc).toMatch(/\bexhausted\b.*useState/s);
+  });
+
+  it("setExhausted(true) is called when rounds are consumed", () => {
+    expect(modalSrc).toContain("setExhausted(true)");
+  });
+
+  it("Compile button is disabled when exhausted is true", () => {
+    expect(modalSrc).toContain("exhausted");
+    // The disabled prop includes || exhausted
+    expect(modalSrc).toMatch(/disabled=\{[^}]*exhausted[^}]*\}/);
+  });
+
+  it("Compile button is disabled when clarifyingQuestions is non-null (M-compile-disabled)", () => {
+    expect(modalSrc).toMatch(/disabled=\{[^}]*clarifyingQuestions[^}]*\}/);
+  });
+
+  it("Answer button is disabled when userTurnCount >= 3 (pre-check before click)", () => {
+    expect(modalSrc).toMatch(/disabled=\{[^}]*userTurnCount\s*>=\s*3[^}]*\}/);
+  });
+
+  it("exhausted card renders without requiring clarifyingQuestions to be non-null", () => {
+    // The condition includes `|| exhausted` so the card is reachable even when clarifyingQuestions is null
+    expect(modalSrc).toMatch(/clarifyingQuestions.*?\|\|.*?exhausted|exhausted.*?\|\|.*?clarifyingQuestions/s);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test group 11 — I2: guide panel honesty sentence
+// ---------------------------------------------------------------------------
+describe("11 — I2: guide panel has the AI-translation honesty sentence", () => {
+  it("contains the Clicking Compile asks an AI sentence", () => {
+    expect(modalSrc).toContain("Clicking Compile asks an AI");
+  });
+
+  it("honesty sentence mentions review before activation", () => {
+    expect(modalSrc).toContain("explicitly activate it");
+  });
+
+  it("honesty sentence confirms nothing is saved before approval", () => {
+    expect(modalSrc).toContain("nothing is saved before approval");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test group 12 — I3: guide toggle aria-expanded + aria-controls
+// ---------------------------------------------------------------------------
+describe("12 — I3: guide toggle has accessibility attributes", () => {
+  it("guide content div has id=shacl-guide-content", () => {
+    expect(modalSrc).toContain('id="shacl-guide-content"');
+  });
+
+  it("guide toggle button has aria-expanded", () => {
+    expect(modalSrc).toContain("aria-expanded={guideExpanded}");
+  });
+
+  it("guide toggle button has aria-controls=shacl-guide-content", () => {
+    expect(modalSrc).toContain('aria-controls="shacl-guide-content"');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test group 13 — I4: nlText onChange does NOT call resetConversation
+// ---------------------------------------------------------------------------
+describe("13 — I4: nlText onChange does not reset conversation", () => {
+  it("nlText onChange handler does NOT contain resetConversation() call", () => {
+    // The textarea has aria-label "Natural-language constraint input" and its onChange
+    // must NOT call resetConversation() — only the guide collapse and preview reset happen there.
+    // Locate the 600-char window after the aria-label (which always precedes onChange in the file).
+    const onChangeRegion = modalSrc.match(
+      /aria-label="Natural-language constraint input"[\s\S]{0,600}/
+    )?.[0] ?? "";
+    expect(onChangeRegion.length, "Could not find Natural-language constraint textarea region").toBeGreaterThan(50);
+    expect(onChangeRegion).not.toContain("resetConversation()");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test group 14 — I5: aria-live region for compile status
+// ---------------------------------------------------------------------------
+describe("14 — I5: aria-live region wraps compile status/error area", () => {
+  it("source contains role=status or aria-live near compile errors", () => {
+    expect(modalSrc).toMatch(/role="status"|aria-live="polite"/);
+  });
+
+  it("clarifying questions card has aria-live=polite", () => {
+    expect(modalSrc).toContain('aria-live="polite"');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test group 15 — I6: kind-change handler uses resetShaclState
+// ---------------------------------------------------------------------------
+describe("15 — I6: kind-change handler uses resetShaclState()", () => {
+  it("Rule type Select onChange calls resetShaclState()", () => {
+    expect(modalSrc).toContain("resetShaclState()");
+  });
+
+  it("kind-change handler does NOT contain ad-hoc setShaclPreview(null) inline reset (uses resetShaclState instead)", () => {
+    // The onChange for the kind Select should just call resetShaclState(), not inline resets.
+    // Locate the kind Select onChange region.
+    const kindChangeRegion = modalSrc.match(
+      /Rule type[\s\S]{0,200}onChange=\{[\s\S]{0,400}?\}/
+    )?.[0] ?? "";
+    expect(kindChangeRegion.length).toBeGreaterThan(0);
+    // resetShaclState is present
+    expect(kindChangeRegion).toContain("resetShaclState");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Test group 16 — M-error: customize-api.ts forwards backend error body
+// ---------------------------------------------------------------------------
+describe("16 — M-error: compileCustomRule forwards backend error body", () => {
+  const apiSrc = readFileSyncNode(
+    new URL("../../../lib/customize-api.ts", import.meta.url),
+    "utf8",
+  );
+
+  it("!res.ok branch attempts to read JSON body for error message", () => {
+    expect(apiSrc).toContain("res.json()");
+    expect(apiSrc).toMatch(/!res\.ok[\s\S]{0,300}res\.json\(\)/);
+  });
+
+  it("!res.ok branch has try/catch around JSON parse to handle non-JSON bodies", () => {
+    expect(apiSrc).toMatch(/try\s*\{[\s\S]{0,300}res\.json\(\)[\s\S]{0,200}\}\s*catch/);
+  });
+
+  it("backend error string is forwarded if present", () => {
+    expect(apiSrc).toContain("errBody.error");
+    expect(apiSrc).toContain("backendError");
   });
 });

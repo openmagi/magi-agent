@@ -308,7 +308,12 @@ export async function compileCustomRule(
       body: JSON.stringify(bodyPayload),
     });
     if (!res.ok) {
-      return { ok: false, error: `Compile request failed (${res.status})` };
+      let backendError = `Compile request failed (${res.status})`;
+      try {
+        const errBody = (await res.json()) as { error?: string };
+        if (typeof errBody.error === "string" && errBody.error.length > 0) backendError = errBody.error;
+      } catch { /* ignore JSON parse failure on error body */ }
+      return { ok: false, error: backendError };
     }
     return (await res.json()) as ShaclCompileResponse;
   } catch (err: unknown) {
