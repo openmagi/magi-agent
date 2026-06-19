@@ -16,6 +16,9 @@ import {
   type ChatRecipeOption,
   type ChatRecipeSelectionMode,
   type ExplicitRecipeSelectionRequest,
+  type ReasoningEffort,
+  REASONING_EFFORT_VALUES,
+  DEFAULT_REASONING_EFFORT,
 } from "@/chat-core";
 
 export type { ChatRecipeOption, ChatRecipeSelectionMode };
@@ -116,11 +119,16 @@ export interface ChatInputHandle {
 export interface ChatInputSendOptions {
   goalMode?: boolean;
   explicitRecipeSelection?: ExplicitRecipeSelectionRequest["explicitRecipeSelection"];
+  /** Cross-provider reasoning-effort level. Only honored by models that
+   * support reasoning (Anthropic extended thinking / OpenAI o-series & GPT-5
+   * reasoning_effort / Gemini thinking). Backend wiring lands in a follow-up. */
+  reasoningEffort?: ReasoningEffort;
 }
 
 export function buildChatInputSendOptions(
   recipeMode: ChatRecipeSelectionMode = "auto",
   recipe?: ChatRecipeOption,
+  reasoningEffort?: ReasoningEffort,
 ): ChatInputSendOptions {
   const explicitRecipeSelection = buildExplicitRecipeSelection(
     recipeMode,
@@ -132,6 +140,7 @@ export function buildChatInputSendOptions(
   return {
     goalMode: true,
     ...(explicitRecipeSelection ? { explicitRecipeSelection } : {}),
+    ...(reasoningEffort ? { reasoningEffort } : {}),
   };
 }
 
@@ -179,6 +188,15 @@ interface ChatInputProps {
   customSkills?: ChatInputCustomSkill[];
   /** Safe public recipe refs available for explicit per-turn/session requests. */
   availableRecipes?: ChatRecipeOption[];
+  /** True when the currently-selected model supports a reasoning-effort knob
+   * (Anthropic extended thinking / OpenAI o-series & GPT-5 / Gemini thinking).
+   * When false the effort dropdown is hidden. */
+  supportsReasoningEffort?: boolean;
+  /** Current reasoning effort. Defaults to `DEFAULT_REASONING_EFFORT` when
+   * undefined. Ignored when `supportsReasoningEffort` is false. */
+  reasoningEffort?: ReasoningEffort;
+  /** Called when the user picks a different effort level. */
+  onReasoningEffortChange?: (effort: ReasoningEffort) => void;
 }
 
 interface ComposerEnterEvent {
@@ -279,9 +297,13 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     uiLanguage,
     customSkills,
     availableRecipes = [],
+    supportsReasoningEffort = false,
+    reasoningEffort,
+    onReasoningEffortChange,
   },
   ref,
 ) {
+  const effectiveReasoningEffort: ReasoningEffort = reasoningEffort ?? DEFAULT_REASONING_EFFORT;
   const [text, setText] = useState("");
   const [pendingFiles, setPendingFiles] = useState<PendingFile[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -527,7 +549,11 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
       const result = await onSend(
         trimmed,
         pendingFiles.length > 0 ? pendingFiles.map((p) => p.file) : undefined,
-        buildChatInputSendOptions(recipeMode, selectedRecipe),
+        buildChatInputSendOptions(
+          recipeMode,
+          selectedRecipe,
+          supportsReasoningEffort ? effectiveReasoningEffort : undefined,
+        ),
       );
       if (result === false) return;
       for (const p of pendingFiles) {
@@ -929,6 +955,32 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
             {composerAccessory && (
               <div className="flex min-w-0 items-center" data-composer-accessory="bottom-row">
                 {composerAccessory}
+              </div>
+            )}
+
+            {supportsReasoningEffort && (
+              <div className="flex shrink-0 items-center" data-reasoning-effort="dropdown">
+                <label className="sr-only" htmlFor="chat-input-reasoning-effort">
+                  Reasoning effort
+                </label>
+                <select
+                  id="chat-input-reasoning-effort"
+                  value={effectiveReasoningEffort}
+                  onChange={(event) => {
+                    const next = event.target.value as ReasoningEffort;
+                    onReasoningEffortChange?.(next);
+                  }}
+                  disabled={disabled}
+                  aria-label="Reasoning effort"
+                  title="Reasoning effort for this turn"
+                  className="h-8 cursor-pointer rounded-md border border-border/60 bg-transparent px-2 text-xs text-muted-foreground hover:border-border focus:border-foreground/40 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {REASONING_EFFORT_VALUES.map((value) => (
+                    <option key={value} value={value}>
+                      {value}
+                    </option>
+                  ))}
+                </select>
               </div>
             )}
 

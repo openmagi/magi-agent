@@ -17,6 +17,11 @@ import { ChatModelPicker } from "@/components/chat/chat-model-picker";
 import { KbContextBar } from "@/components/chat/kb-context-bar";
 import { KbSidePanel } from "@/components/chat/kb-side-panel";
 import { useChatStore, syncResetCounters } from "@/chat-core";
+import {
+  modelSupportsReasoningEffort,
+  DEFAULT_REASONING_EFFORT,
+  type ReasoningEffort,
+} from "@/chat-core";
 import { clipMessagesAtResetBoundary, getResetBoundaryTimestamp } from "@/chat-core";
 import { subscribeToPushMessages, type PushSubscriptionHandle } from "@/lib/chat/push-realtime";
 import * as chatApi from "@/lib/chat/chat-client";
@@ -244,6 +249,8 @@ export function ChatViewClient({
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [customCategories, setCustomCategories] = useState<string[]>([]);
   const [customSkills, setCustomSkills] = useState<ChatInputCustomSkill[]>([]);
+  const [reasoningEffort, setReasoningEffort] =
+    useState<ReasoningEffort>(DEFAULT_REASONING_EFFORT);
   const [refreshing, setRefreshing] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showTelegramGuide, setShowTelegramGuide] = useState(false);
@@ -2276,6 +2283,11 @@ export function ChatViewClient({
               onSelectKbDoc={handleToggleKbDoc}
               uploadStates={uploadStates}
               customSkills={customSkills}
+              supportsReasoningEffort={modelSupportsReasoningEffort(
+                resolveChannelRuntimeModel(activeChannel),
+              )}
+              reasoningEffort={reasoningEffort}
+              onReasoningEffortChange={setReasoningEffort}
               composerAccessory={
                 <ChatModelPicker
                   botId={botId}
