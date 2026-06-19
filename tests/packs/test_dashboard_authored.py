@@ -136,3 +136,53 @@ def test_slug_of_multiple_collisions() -> None:
 
 def test_slug_of_empty_label_falls_back() -> None:
     assert slug_of("!!!") == "check"
+
+
+from magi_agent.packs.dashboard_authored import (
+    DASHBOARD_EVIDENCE_REF_PREFIX,
+    compile_recipe,
+)
+
+
+def _check(id_: str = "ssn-leak", *, action="block", enabled=True):
+    return DashboardCheck.model_validate(_ok(id=id_, action=action, enabled=enabled))
+
+
+def test_compile_recipe_evidence_refs_namespaced_per_enabled_check() -> None:
+    checks = [_check("ssn-leak"), _check("api-key-leak"), _check("disabled-one", enabled=False)]
+    manifest = compile_recipe(checks)
+    refs = set(manifest.evidence_refs)
+    assert f"{DASHBOARD_EVIDENCE_REF_PREFIX}ssn-leak" in refs
+    assert f"{DASHBOARD_EVIDENCE_REF_PREFIX}api-key-leak" in refs
+    # disabled checks do not require evidence (so they never block the gate)
+    assert f"{DASHBOARD_EVIDENCE_REF_PREFIX}disabled-one" not in refs
+
+
+def test_compile_recipe_uses_dashboard_pack_id_and_not_default_enabled() -> None:
+    manifest = compile_recipe([_check("x")])
+    assert manifest.pack_id == DASHBOARD_PACK_ID
+    assert manifest.default_enabled is False
+    assert manifest.hard_safety is False
+
+
+def test_compile_recipe_only_block_action_adds_required_ref() -> None:
+    # 'audit' action SHOULD still emit the ref via producer, but MUST NOT block;
+    # validator side does not include audit-only refs in evidence_refs.
+    checks = [_check("blocker", action="block"), _check("auditor", action="audit")]
+    manifest = compile_recipe(checks)
+    refs = set(manifest.evidence_refs)
+    assert f"{DASHBOARD_EVIDENCE_REF_PREFIX}blocker" in refs
+    assert f"{DASHBOARD_EVIDENCE_REF_PREFIX}auditor" not in refs
+
+
+def test_compile_recipe_empty_checks_returns_empty_evidence_refs() -> None:
+    manifest = compile_recipe([])
+    assert tuple(manifest.evidence_refs) == ()
+
+
+from magi_agent.recipes.kernel_recipe_packs import validate_external_recipe_pack
+
+
+def test_compiled_recipe_passes_external_pack_validation() -> None:
+    manifest = compile_recipe([_check("x"), _check("y")])
+    assert validate_external_recipe_pack(manifest) == ""

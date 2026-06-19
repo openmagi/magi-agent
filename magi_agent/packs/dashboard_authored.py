@@ -18,6 +18,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from magi_agent.recipes.compiler import RecipePackManifest
+
 DASHBOARD_PACK_DIR_NAME = "dashboard-authored"
 DASHBOARD_PACK_ID = "ext.dashboard.checks"
 DASHBOARD_EVIDENCE_REF_PREFIX = "evidence:dashboard:"
@@ -131,3 +133,32 @@ def slug_of(label: str, *, taken: set[str] | None = None) -> str:
     while f"{base}-{n}" in taken:
         n += 1
     return f"{base}-{n}"
+
+
+DASHBOARD_PACK_VERSION = "1"
+
+
+def _evidence_ref(check_id: str) -> str:
+    return f"{DASHBOARD_EVIDENCE_REF_PREFIX}{check_id}"
+
+
+def compile_recipe(checks: list[DashboardCheck]) -> RecipePackManifest:
+    """Return the recipe pack manifest the validator side rides through.
+
+    Only enabled + ``action=block`` checks add a required evidence ref — audit
+    checks emit evidence via the producer side (sidecar) but never block the
+    pre-final gate.
+    """
+    refs = [
+        _evidence_ref(c.id)
+        for c in checks
+        if c.enabled and c.action == "block"
+    ]
+    return RecipePackManifest(
+        packId=DASHBOARD_PACK_ID,
+        version=DASHBOARD_PACK_VERSION,
+        displayName="Dashboard custom checks",
+        description="User-authored custom evidence checks composed via the dashboard.",
+        defaultEnabled=False,
+        evidenceRefs=tuple(refs),
+    )
