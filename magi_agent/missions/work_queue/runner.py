@@ -133,3 +133,44 @@ class ChildRunnerWorkTaskRunner:
             outcome="failed",
             error=summary or f"child runner returned status={status or 'unknown'}",
         )
+
+
+class InjectingWorkTaskRunner:
+    """Transparent decorator that pushes a task's terminal summary to the chat
+    inject buffer so the next chat turn picks it up.
+
+    Wraps any ``WorkTaskRunner`` and delegates ``run_task`` unchanged. After the
+    inner runner returns, it formats a one-line note (completed/failed) and
+    enqueues it on ``inject_buffer`` keyed by the task's ``session_id``. Tasks
+    without a session id (background-only / no chat surface) are skipped.
+
+    The driver is unaware — same Protocol, no callback hook needed. The chat-
+    side consumer (``_apply_background_inject``) drains and folds these into
+    the next prompt when the consumer flag is on.
+    """
+
+    def __init__(self, inner: WorkTaskRunner) -> None:
+        self._inner = inner
+
+    async def run_task(self, task: WorkTask) -> WorkTaskRunResult:
+        result = await self._inner.run_task(task)
+        self._emit(task, result)
+        return result
+
+    @staticmethod
+    def _emit(task: WorkTask, result: WorkTaskRunResult) -> None:
+        if not task.session_id:
+            return
+        from magi_agent.missions.work_queue import inject_buffer
+
+        short = (task.id or "")[:6] or "?"
+        title = (task.title or "").strip()
+        if result.outcome == "completed":
+            summary = (result.summary or "").strip()
+            note = f"Background task {short} ({title!r}) completed."
+            if summary:
+                note = f"{note}\nResult: {summary}"
+        else:
+            error = (result.error or "").strip() or "unknown error"
+            note = f"Background task {short} ({title!r}) failed: {error}"
+        inject_buffer.enqueue(task.session_id, note)
