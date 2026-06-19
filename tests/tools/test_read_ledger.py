@@ -587,27 +587,45 @@ def test_read_decision_blocks_forged_authority_flags() -> None:
     }
 
 
-def test_read_decision_public_projection_does_not_trust_flag_model_dump() -> None:
-    class ForgedFlags(ReadLedgerAuthorityFlags):
-        def model_dump(self, *args: object, **kwargs: object) -> dict[str, object]:
-            return {
-                "readLedgerEnabled": True,
-                "localInMemoryOnly": True,
-                "productionWritesEnabled": True,
-                "workspaceMutationAuthority": True,
-                "rawPath": "/Users/kevin/private/workspace",
-            }
+def test_read_decision_public_projection_does_not_trust_flag_model_dump(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Forge ``model_dump`` on the ``ReadLedgerAuthorityFlags`` class itself via
+    # monkeypatch instead of a nested subclass. A nested
+    # ``class ForgedFlags(ReadLedgerAuthorityFlags)`` triggers
+    # ``PydanticUserError: ForgedFlags is not fully defined`` on pydantic 2.13:
+    # the function-local namespace can't resolve inherited annotations (``Any``
+    # etc.) deferred by ``from __future__ import annotations``, so subclassing
+    # a force-false authority model from a function body is un-runnable.
+    # Patching the live class method GUARANTEES the forge is exercised — the
+    # ``public_projection`` invariant must still produce all-False output.
+    forged_dump: dict[str, object] = {
+        "readLedgerEnabled": True,
+        "localInMemoryOnly": True,
+        "productionWritesEnabled": True,
+        "workspaceMutationAuthority": True,
+        "rawPath": "/Users/kevin/private/workspace",
+    }
+    monkeypatch.setattr(
+        ReadLedgerAuthorityFlags,
+        "model_dump",
+        lambda self, *args, **kwargs: forged_dump,
+    )
+
+    flags = ReadLedgerAuthorityFlags(
+        readLedgerEnabled=True,
+        localInMemoryOnly=True,
+        productionWritesEnabled=False,
+        workspaceMutationAuthority=False,
+    )
+    # Sanity: the forge is live.
+    assert flags.model_dump() is forged_dump
 
     decision = WorkspaceMutationReadDecision(
         status="ok",
         reasonCodes=("fresh_full_read",),
         pathRef="path-ref:safe",
-        authorityFlags=ForgedFlags(
-            readLedgerEnabled=True,
-            localInMemoryOnly=True,
-            productionWritesEnabled=False,
-            workspaceMutationAuthority=False,
-        ),
+        authorityFlags=flags,
     )
 
     projection = decision.public_projection()

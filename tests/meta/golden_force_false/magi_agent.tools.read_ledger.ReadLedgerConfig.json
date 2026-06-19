@@ -5,12 +5,14 @@
   "model_construct_dump": {
     "enabled": false,
     "localInMemoryEnabled": false,
-    "productionWritesEnabled": true
+    "productionWritesEnabled": false
   },
-  "model_construct_force_false_leaks": [
-    "production_writes_enabled"
-  ],
-  "model_validate_dump": null,
+  "model_construct_force_false_leaks": [],
+  "model_validate_dump": {
+    "enabled": false,
+    "localInMemoryEnabled": false,
+    "productionWritesEnabled": false
+  },
   "model_validate_force_false_leaks": [],
   "qualname": "magi_agent.tools.read_ledger.ReadLedgerConfig"
 }

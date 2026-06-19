@@ -3,9 +3,19 @@
     "live_execution_enabled",
     "production_execution_attached"
   ],
-  "model_construct_dump": null,
+  "model_construct_dump": {
+    "enabled": false,
+    "liveExecutionEnabled": false,
+    "localFakeSchedulerEnabled": false,
+    "productionExecutionAttached": false
+  },
   "model_construct_force_false_leaks": [],
-  "model_validate_dump": null,
+  "model_validate_dump": {
+    "enabled": false,
+    "liveExecutionEnabled": false,
+    "localFakeSchedulerEnabled": false,
+    "productionExecutionAttached": false
+  },
   "model_validate_force_false_leaks": [],
   "qualname": "magi_agent.tools.scheduler.ToolSchedulerConfig"
 }

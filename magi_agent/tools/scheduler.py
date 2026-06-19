@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Mapping, Sequence
-from typing import Any, Literal, Self
+from typing import Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
+from pydantic import Field, field_serializer, model_validator
 
+from magi_agent.ops.authority import FalseOnlyAuthorityModel
 from magi_agent.runtime.request_ledger import (
     RequestLedgerAuthorityFlags,
     RequestLedgerDiagnostics,
@@ -29,43 +30,22 @@ ToolScheduleStepStatus = Literal[
 ]
 ToolScheduleMode = Literal["none", "parallel", "serial"]
 
-_MODEL_CONFIG = ConfigDict(
-    frozen=True,
-    populate_by_name=True,
-    extra="forbid",
-    validate_default=True,
-    revalidate_instances="always",
-    arbitrary_types_allowed=True,
-    hide_input_in_errors=True,
-)
 
+class _ToolSchedulerModel(FalseOnlyAuthorityModel):
+    """Thin alias for the canonical ``FalseOnlyAuthorityModel`` (C-4 PR-D).
 
-class _ToolSchedulerModel(BaseModel):
-    model_config = _MODEL_CONFIG
-
-    @classmethod
-    def model_construct(
-        cls,
-        _fields_set: set[str] | None = None,
-        **values: Any,
-    ) -> Self:
-        return cls(**values)
-
-    def model_copy(
-        self,
-        *,
-        update: Mapping[str, object] | None = None,
-        deep: bool = False,
-    ) -> Self:
-        data = self.model_dump(by_alias=False, mode="python", warnings=False)
-        if update:
-            alias_to_name = {
-                field.alias: name
-                for name, field in self.__class__.model_fields.items()
-                if field.alias is not None
-            }
-            data.update({alias_to_name.get(key, key): value for key, value in update.items()})
-        return self.__class__.model_validate(data)
+    Pre-PR-D this base hand-rolled ``model_construct`` (which lenient-built
+    via ``cls(**values)``, silently leaking any malicious ``True`` on a
+    ``Literal[False]`` field through pydantic's default validation
+    short-circuit) and ``model_copy`` (re-validated through ``model_dump`` +
+    ``model_validate`` so a copy was already safe). The shared
+    ``FalseOnlyAuthorityModel`` routes ``model_construct`` through
+    ``model_validate`` (closing the leak) and adds annotation-based
+    force-false on the validator/serializer surfaces. The alias is preserved
+    so existing ``class Foo(_ToolSchedulerModel)`` lines keep working without
+    per-class edits. 4 force-false subclasses keep their ``Literal[False]``
+    field annotations unchanged.
+    """
 
 
 class ToolSchedulerConfig(_ToolSchedulerModel):
