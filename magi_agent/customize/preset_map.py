@@ -191,6 +191,19 @@ PRESET_SEAMS: dict[str, PresetSeam] = {
         supported_modes=("deterministic",),
         wiring="opt_in",
     ),
+    # Opt-in for the C1 answer-quality LLM gate (cli/engine
+    # _answer_quality_llm_block): blocks a final answer that does not genuinely
+    # address the user's task. LLM tier (criterion judge), so it also requires a
+    # critic model (MAGI_EGRESS_GATE_ENABLED). Enabling the preset turns the gate
+    # on even when MAGI_VERIFY_ANSWER_QUALITY is off. controls_refs is
+    # documentation-only for opt_in seams.
+    "answer-quality": PresetSeam(
+        preset_id="answer-quality",
+        controls_refs=("answer_quality:unaddressed_task",),
+        runtime_default_on=False,
+        supported_modes=("llm",),
+        wiring="opt_in",
+    ),
 }
 
 
@@ -264,12 +277,17 @@ def domain_for(category: str) -> str:
 def tier_for(preset_id: str, *, is_security: bool) -> str | None:
     """Enforcement mechanism tier for the badge.
 
-    ``deterministic`` — a wired pre-final ref check (all current seams).
+    ``deterministic`` — a wired pre-final ref check.
+    ``llm``           — a wired pre-final LLM criterion judge (needs a critic model).
     ``always-on``     — security/PermissionGate, immutable.
     ``None``          — preview (no runtime gate yet).
+
+    For a wired seam the tier is its first ``supported_modes`` entry, so an
+    LLM-tier seam badges ``llm`` rather than falsely claiming ``deterministic``.
     """
-    if preset_id in PRESET_SEAMS:
-        return "deterministic"
+    seam = PRESET_SEAMS.get(preset_id)
+    if seam is not None:
+        return seam.supported_modes[0] if seam.supported_modes else "deterministic"
     if is_security:
         return "always-on"
     return None
@@ -304,7 +322,7 @@ _DESCRIPTIONS: dict[str, str] = {
     "sealed-files": "Protect sealed files from modification. Always-on safety.",
     "arity-permission": "Require permission for high-impact tool actions. Always-on safety.",
     # --- preview (hosted intent copy; honestly badged preview in the catalog) ---
-    "answer-quality": "Verifies the response actually answers the question.",
+    "answer-quality": "Block a final answer that doesn't genuinely address the task (LLM judge; needs a critic model).",
     "completion-evidence": "Checks completion claims have actual evidence.",
     "pre-refusal": "Prevents rushing to refuse tasks it can handle.",
     "output-purity": "Blocks raw JSON or internal data from appearing in responses.",

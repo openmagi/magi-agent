@@ -2855,6 +2855,21 @@ def parse_fact_grounding_verification_enabled(env: Mapping[str, str]) -> bool:
     return flag_bool("MAGI_FACT_GROUNDING_VERIFICATION_ENABLED", env=env)
 
 
+def parse_answer_quality_verification_enabled(env: Mapping[str, str]) -> bool:
+    """MAGI_VERIFY_ANSWER_QUALITY — LLM answer-quality pre-final gate.
+
+    When ON (and a critic model is available — MAGI_EGRESS_GATE_ENABLED), a final
+    answer that does not genuinely address the user's task (empty, pure
+    tool/JSON echo, or clearly unrelated) is blocked at the pre-final gate via the
+    generic criterion judge. Strict **default-OFF**: inert unless explicitly set
+    (or the answer-quality Customize preset is enabled), so flag-OFF behavior is
+    byte-identical (no model call).
+    """
+    from .flags import flag_bool
+
+    return flag_bool("MAGI_VERIFY_ANSWER_QUALITY", env=env)
+
+
 def parse_source_ledger_evidence_gate_enabled(env: Mapping[str, str]) -> bool:
     """MAGI_SOURCE_LEDGER_EVIDENCE_GATE_ENABLED — live source-ledger evidence ref.
 

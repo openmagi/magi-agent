@@ -167,8 +167,10 @@ def test_preset_entries_carry_enforcement_and_modes() -> None:
     assert "defaultEnabled" in cv
     # security presets are always-on (enforced via PermissionGate, not this tab)
     assert presets["dangerous-patterns"]["enforcement"] == "always-on"
-    # not-yet-wired preset is honestly preview
-    assert presets["answer-quality"]["enforcement"] == "preview"
+    # the answer-quality LLM seam is wired → enforcing
+    assert presets["answer-quality"]["enforcement"] == "enforcing"
+    # a still-unwired preset is honestly preview
+    assert presets["self-claim"]["enforcement"] == "preview"
 
 
 def test_preset_entries_carry_when_group_and_badges() -> None:
@@ -189,12 +191,16 @@ def test_preset_entries_carry_when_group_and_badges() -> None:
     sec = presets["dangerous-patterns"]
     assert sec["tier"] == "always-on"
     assert sec["domain"] == "always-on"
-    # preview preset → no tier / no opt-method, honest description present
+    # the answer-quality LLM seam badges the llm tier + opt-in (honest, not "det")
     aq = presets["answer-quality"]
-    assert aq["tier"] is None
-    assert aq["optMethod"] is None
+    assert aq["tier"] == "llm"
+    assert aq["optMethod"] == "opt-in"
     assert aq["domain"] == "delivery"
     assert aq["description"]
+    # a still-unwired preview preset → no tier / no opt-method
+    sc = presets["self-claim"]
+    assert sc["tier"] is None
+    assert sc["optMethod"] is None
 
 
 # ---------------------------------------------------------------------------

@@ -623,6 +623,17 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
     ),
     _b(
+        "MAGI_VERIFY_ANSWER_QUALITY",
+        stage="stage2",
+        summary=(
+            "Block a final answer that does not genuinely address the user's "
+            "task (empty / pure tool-or-JSON echo / clearly unrelated) via the "
+            "LLM criterion judge; requires a critic model "
+            "(MAGI_EGRESS_GATE_ENABLED). Strict default-OFF and inert unless "
+            "explicitly set (or the answer-quality Customize preset is enabled)."
+        ),
+    ),
+    _b(
         "MAGI_VERIFY_TASKBOARD_COMPLETION",
         stage="stage2",
         summary=(
