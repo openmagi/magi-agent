@@ -111,3 +111,28 @@ def test_validate_rejects_catastrophic_regex() -> None:
     # Heuristic: nested quantifiers like (.+)+ are commonly catastrophic.
     rule = _ok(); rule["trigger"]["match"] = {"pattern": "(.+)+x", "isRegex": True}
     assert any("regex" in e.lower() for e in validate_dashboard_check(rule))
+
+
+from magi_agent.packs.dashboard_authored import slug_of
+
+
+def test_slug_of_simple_lowercased() -> None:
+    assert slug_of("Block SSN leak") == "block-ssn-leak"
+
+
+def test_slug_of_strips_non_alphanumeric() -> None:
+    assert slug_of("API key!! (sensitive)") == "api-key-sensitive"
+
+
+def test_slug_of_collision_suffix() -> None:
+    existing = {"my-check"}
+    assert slug_of("My check", taken=existing) == "my-check-2"
+
+
+def test_slug_of_multiple_collisions() -> None:
+    existing = {"x", "x-2", "x-3"}
+    assert slug_of("X", taken=existing) == "x-4"
+
+
+def test_slug_of_empty_label_falls_back() -> None:
+    assert slug_of("!!!") == "check"

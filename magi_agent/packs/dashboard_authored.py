@@ -115,3 +115,19 @@ def validate_dashboard_check(rule: Any) -> list[str]:
         errors.append("trigger.match.isRegex must be a boolean")
 
     return errors
+
+
+_SLUG_NORMALIZE = re.compile(r"[^a-z0-9]+")
+
+
+def slug_of(label: str, *, taken: set[str] | None = None) -> str:
+    """Convert a label to a safe slug; append ``-N`` on collision with ``taken``."""
+    base = _SLUG_NORMALIZE.sub("-", (label or "").lower()).strip("-")
+    if not base:
+        base = "check"
+    if taken is None or base not in taken:
+        return base
+    n = 2
+    while f"{base}-{n}" in taken:
+        n += 1
+    return f"{base}-{n}"
