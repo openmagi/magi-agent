@@ -855,6 +855,21 @@ FLAGS: tuple[FlagSpec, ...] = (
         scope="public",
         stage="stage2",
     ),
+    _b(
+        "MAGI_DASHBOARD_PACK_AUTHORING_ENABLED",
+        summary=(
+            "Self-host-only dashboard pack-builder UI/REST plus the after-tool "
+            "dashboard producer control and the pre-final dashboard "
+            "deny-on-present gate. When a dashboard 'block' check matches an "
+            "after-tool result the producer emits a custom:DashboardCheck "
+            "evidence record with top-level status='failed' and the verifier-bus "
+            "gate flips the pre-final decision to 'block' (audit checks emit "
+            "status='ok' and never block). With no dashboard checks authored the "
+            "runtime is byte-identical to before. Strict default-OFF."
+        ),
+        scope="public",
+        stage="stage2",
+    ),
     # --- Resilience controls ------------------------------------------------
     # Profile-aware default-ON (env._runtime_feature_enabled): ON in the full
     # runtime profile, OFF under MAGI_RUNTIME_PROFILE=safe|eval.
