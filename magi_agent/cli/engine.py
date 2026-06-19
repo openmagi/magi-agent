@@ -1600,6 +1600,78 @@ class MagiEngineDriver:
         except Exception:
             return None
 
+    async def _claim_citation_llm_block(self, *, final_text: str) -> str | None:
+        """C4 — reason if factual claims are uncited, else None.
+
+        Free-text claim-coverage check. Distinct from source-authority (which is
+        anti-fab/det over declared ``src_N`` refs already in the answer): this
+        judges whether the answer's claims warrant citations AT ALL.
+
+        Det pre-gate: when ``final_text`` already contains any ``[src_N]``
+        citation marker (the existing source-citation convention used by the
+        research projection gate), skip the model call — the answer cited
+        something and isn't a bare uncited claim. The criterion engine's prompt
+        decides whether the cited claims are *sufficient* — but that's the
+        source-authority concern (anti-fab), not claim-citation (coverage).
+
+        Gated by ``MAGI_VERIFY_CLAIM_CITATION`` OR the ``claim-citation``
+        Customize preset, AND a critic model present (``MAGI_EGRESS_GATE_ENABLED``
+        — the cost gate). Inactive / no model / any error ⇒ ``None`` (fail-open).
+        """
+        import os  # noqa: PLC0415
+
+        from magi_agent.config.env import (  # noqa: PLC0415
+            parse_claim_citation_verification_enabled,
+        )
+        from magi_agent.customize.runtime_gate import preset_enabled  # noqa: PLC0415
+
+        if self._criterion_model_factory is None:
+            return None
+        if not (
+            parse_claim_citation_verification_enabled(os.environ)
+            or preset_enabled("claim-citation", default=False)
+        ):
+            return None
+        # Det pre-gate: a cited answer skips the model call.
+        try:
+            from magi_agent.research.final_projection_gate import (  # noqa: PLC0415
+                _SOURCE_CITATION_RE,
+            )
+
+            if _SOURCE_CITATION_RE.search(final_text):
+                return None
+        except Exception:
+            logger.debug("claim-citation pre-gate failed", exc_info=True)
+            return None
+        try:
+            from magi_agent.customize.criterion_engine import (  # noqa: PLC0415
+                evaluate_criterion,
+            )
+
+            criterion = (
+                "The DRAFT contains NO source citation markers (no [src_N]). "
+                "Judge whether the draft makes specific factual claims that "
+                "warrant a citation. Pass=true if the draft is a general answer, "
+                "a clarifying question, an opinion/recommendation framed as such, "
+                "an honest report that no source was inspected, or a procedural "
+                "explanation without specific factual claims. This holds in ANY "
+                "language including Korean. Pass=false ONLY if the draft asserts "
+                "specific factual claims (numbers, dates, named entities' "
+                "properties, historical events, citable facts) that a reader "
+                "should be able to verify against a source — but no citation is "
+                "provided."
+            )
+            passed, reason = await evaluate_criterion(
+                criterion=criterion,
+                draft_text=final_text,
+                model_factory=self._criterion_model_factory,
+            )
+            if not passed:
+                return reason or "factual claims are uncited"
+            return None
+        except Exception:
+            return None
+
     @property
     def runner(self) -> object | None:
         return self._runner
@@ -2530,6 +2602,13 @@ class MagiEngineDriver:
         if llm_block_reason is None:
             llm_block_reason = await self._resource_claim_llm_block(
                 turn_id=turn_id, final_text=emitted_text
+            )
+        # C4 — built-in claim-citation (free-text claim-coverage) llm gate. Det
+        # pre-gate keys off the answer text only (contains [src_N]?), so a turn
+        # that already cited sources skips the model call.
+        if llm_block_reason is None:
+            llm_block_reason = await self._claim_citation_llm_block(
+                final_text=emitted_text
             )
         if llm_block_reason is not None:
             yield RuntimeEvent(

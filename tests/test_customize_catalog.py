@@ -171,8 +171,10 @@ def test_preset_entries_carry_enforcement_and_modes() -> None:
     assert presets["answer-quality"]["enforcement"] == "enforcing"
     # the self-claim LLM seam (C-MERGE-2) is wired → enforcing
     assert presets["self-claim"]["enforcement"] == "enforcing"
+    # the claim-citation LLM seam (C4) is wired → enforcing
+    assert presets["claim-citation"]["enforcement"] == "enforcing"
     # a still-unwired preset is honestly preview
-    assert presets["claim-citation"]["enforcement"] == "preview"
+    assert presets["coding-context"]["enforcement"] == "preview"
 
 
 def test_preset_entries_carry_when_group_and_badges() -> None:
@@ -200,7 +202,7 @@ def test_preset_entries_carry_when_group_and_badges() -> None:
     assert aq["domain"] == "delivery"
     assert aq["description"]
     # a still-unwired preview preset → no tier / no opt-method
-    cc = presets["claim-citation"]
+    cc = presets["coding-context"]
     assert cc["tier"] is None
     assert cc["optMethod"] is None
 

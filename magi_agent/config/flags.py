@@ -713,6 +713,18 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
     ),
     _b(
+        "MAGI_VERIFY_CLAIM_CITATION",
+        stage="stage2",
+        summary=(
+            "Block a final answer that makes specific factual claims without any "
+            "source citation, via the LLM criterion judge (free-text "
+            "claim-coverage; distinct from source-authority anti-fab over "
+            "declared src_N refs); requires a critic model "
+            "(MAGI_EGRESS_GATE_ENABLED). Strict default-OFF and inert unless "
+            "explicitly set (or the claim-citation Customize preset is enabled)."
+        ),
+    ),
+    _b(
         "MAGI_VERIFY_TASKBOARD_COMPLETION",
         stage="stage2",
         summary=(

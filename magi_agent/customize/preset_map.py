@@ -263,6 +263,19 @@ PRESET_SEAMS: dict[str, PresetSeam] = {
         supported_modes=("llm",),
         wiring="opt_in",
     ),
+    # Opt-in for the C4 claim-citation LLM gate (cli/engine
+    # _claim_citation_llm_block): blocks a final answer that makes specific
+    # factual claims with no source citation. Distinct from source-authority
+    # (anti-fab/det over declared src_N refs): this is free-text claim-coverage.
+    # LLM tier, needs a critic model (MAGI_EGRESS_GATE_ENABLED). controls_refs is
+    # documentation-only for opt_in seams.
+    "claim-citation": PresetSeam(
+        preset_id="claim-citation",
+        controls_refs=("claim_citation:uncited_claim",),
+        runtime_default_on=False,
+        supported_modes=("llm",),
+        wiring="opt_in",
+    ),
 }
 
 
@@ -388,7 +401,7 @@ _DESCRIPTIONS: dict[str, str] = {
     "deferral-blocker": "Block a promise of future delivery made with no action evidence this turn (LLM judge; shares the completion-evidence gate).",
     "self-claim": "Block a claim about file/URL/memory contents made with no read evidence this turn (LLM judge; needs a critic model).",
     "resource-existence": "Block an assertion that a specific file/URL exists when the turn inspected no source (LLM judge; shares the self-claim gate).",
-    "claim-citation": "Ensures factual claims include sources.",
+    "claim-citation": "Block uncited factual claims in the answer (LLM judge; coverage, distinct from source-authority anti-fab; needs a critic model).",
     "deterministic-evidence": "Require recorded git-diff and test-run evidence on coding turns (disable to opt out).",
     "coding-context": "Auto-injects repo map and symbols for code tasks.",
     "coding-workspace-lock": "Prevents unrelated file changes during coding.",
