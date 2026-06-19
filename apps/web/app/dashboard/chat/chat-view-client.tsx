@@ -16,6 +16,11 @@ import type {
 } from "@/components/chat/chat-input";
 import { ChatModelPicker } from "@/components/chat/chat-model-picker";
 import { useChatStore, syncResetCounters } from "@/chat-core";
+import {
+  modelSupportsReasoningEffort,
+  DEFAULT_REASONING_EFFORT,
+  type ReasoningEffort,
+} from "@/chat-core";
 import { clipMessagesAtResetBoundary, getResetBoundaryTimestamp } from "@/chat-core";
 import * as chatApi from "@/lib/chat/chat-client";
 import { setChatTokenGetter } from "@/lib/chat/chat-client";
@@ -200,6 +205,8 @@ export function ChatViewClient({
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [customCategories, setCustomCategories] = useState<string[]>([]);
   const [customSkills, setCustomSkills] = useState<ChatInputCustomSkill[]>([]);
+  const [reasoningEffort, setReasoningEffort] =
+    useState<ReasoningEffort>(DEFAULT_REASONING_EFFORT);
   const [refreshing, setRefreshing] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [showTelegramGuide, setShowTelegramGuide] = useState(false);
@@ -1937,6 +1944,11 @@ export function ChatViewClient({
               queueFull={(queuedMessages[activeChannel] ?? []).length >= MAX_QUEUED_MESSAGES}
               uploadStates={uploadStates}
               customSkills={customSkills}
+              supportsReasoningEffort={modelSupportsReasoningEffort(
+                resolveChannelRuntimeModel(activeChannel),
+              )}
+              reasoningEffort={reasoningEffort}
+              onReasoningEffortChange={setReasoningEffort}
               composerAccessory={
                 <ChatModelPicker
                   botId={botId}
