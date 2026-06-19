@@ -138,9 +138,9 @@ def register_work_queue_board(app: Any, runtime: Any) -> None:
     if getattr(getattr(app, "state", None), "work_queue_board_mounted", False):
         return None  # already registered
 
-    from magi_agent.gateway.watchers import _work_queue_db_path_from_env  # noqa: PLC0415
+    from magi_agent.missions.work_queue.store import work_queue_db_path_from_env  # noqa: PLC0415
 
-    db_path = _work_queue_db_path_from_env()
+    db_path = work_queue_db_path_from_env()
     store = SqliteWorkQueueStore(db_path)
     router = build_work_queue_board_router(store, runtime)
     app.include_router(router)

@@ -2,12 +2,35 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import time
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
 from magi_agent.missions.work_queue.models import WorkTask
+
+
+# ---------------------------------------------------------------------------
+# DB-path helper — canonical location so every consumer resolves the same path
+# ---------------------------------------------------------------------------
+
+
+def work_queue_db_path_from_env() -> Path:
+    """Return the SQLite DB path for the work-queue store.
+
+    Resolution order (byte-identical to the legacy private helper in
+    ``gateway.watchers``):
+
+    1. ``MAGI_WORK_QUEUE_DB_PATH`` env var (if set and non-blank).
+    2. ``<MAGI_STATE_DIR>/work_queue.db`` (defaults to ``~/.magi/work_queue.db``).
+    """
+    raw = os.environ.get("MAGI_WORK_QUEUE_DB_PATH", "")
+    if raw.strip():
+        return Path(raw).expanduser()
+    state_dir = Path(os.environ.get("MAGI_STATE_DIR", "~/.magi")).expanduser()
+    return state_dir / "work_queue.db"
+
 
 CLAIM_TTL_SECONDS = 15 * 60
 CLAIM_HEARTBEAT_MAX_STALE_SECONDS = 60 * 60
