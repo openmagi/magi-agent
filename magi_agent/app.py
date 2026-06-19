@@ -21,6 +21,7 @@ from .transport.learning_dashboard import register_learning_dashboard_routes
 from .transport.tools import register_tool_admin_routes
 from .transport.app_api import register_app_api_routes
 from .transport.customize import register_customize_routes
+from .transport.packs_dashboard import register_dashboard_pack_routes
 from .transport.credentials import register_credentials_routes
 from .transport.integrations import register_integrations_routes
 from magi_agent.observability import register_observability, register_session_transcript
@@ -107,6 +108,11 @@ def create_app(runtime: OpenMagiRuntime) -> FastAPI:
     register_shadow_invocation_routes(app, runtime)
     register_tool_admin_routes(app, runtime)
     register_customize_routes(app, runtime)
+    # Default-OFF: dashboard pack-builder REST endpoints. Routes register
+    # unconditionally but every handler returns 410 unless
+    # MAGI_DASHBOARD_PACK_AUTHORING_ENABLED is on AND the deployment is not
+    # hosted (self-host only — same model as the user HookBus).
+    register_dashboard_pack_routes(app, runtime)
     # Default-OFF vault seam: routes serve unconditionally, but registration
     # returns 503 and persists nothing until MAGI_VAULT_ADMIN_ENABLED + a real
     # vault admin API are wired.
