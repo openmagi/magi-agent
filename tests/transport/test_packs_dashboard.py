@@ -67,6 +67,34 @@ def test_put_then_get_round_trip(client):
     assert any(c["id"] == "ssn" for c in g.json()["checks"])
 
 
+def test_reput_same_id_updates_not_duplicates(client):
+    client.put("/v1/app/packs/dashboard/checks/ssn", json=_payload("ssn", label="A"))
+    r = client.put("/v1/app/packs/dashboard/checks/ssn", json=_payload("ssn", label="B"))
+    assert r.status_code == 200
+    checks = r.json()["checks"]
+    assert len([c for c in checks if c["id"] == "ssn"]) == 1
+    assert checks[0]["label"] == "B"
+
+
+def test_put_malformed_json_returns_400(client):
+    r = client.put(
+        "/v1/app/packs/dashboard/checks/ssn",
+        content=b"{not json",
+        headers={"content-type": "application/json"},
+    )
+    assert r.status_code == 400
+
+
+def test_put_gate_precedes_body_parse_when_disabled(monkeypatch):
+    # When the surface is disabled, a PUT (even with no/garbage body) must 410,
+    # not 422 from body validation — the gate is evaluated first.
+    monkeypatch.setenv("MAGI_DASHBOARD_PACK_AUTHORING_ENABLED", "0")
+    app = FastAPI()
+    register_dashboard_pack_routes(app, runtime=None)
+    c = TestClient(app)
+    assert c.put("/v1/app/packs/dashboard/checks/ssn", content=b"garbage").status_code == 410
+
+
 def test_put_path_body_id_mismatch_rejected(client):
     r = client.put("/v1/app/packs/dashboard/checks/ssn", json=_payload("other"))
     assert r.status_code == 400

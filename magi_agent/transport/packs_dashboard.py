@@ -23,13 +23,18 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from pydantic import ValidationError
 
 from magi_agent.config.env import (
     is_dashboard_pack_authoring_enabled,
     is_hosted_deployment,
 )
+
+# DoS cap: the producer runs every check's regex against every tool result, so
+# an unbounded check list is a self-inflicted slowdown. Self-host only, but cap
+# the authored set defensively.
+_MAX_CHECKS = 200
 
 
 def _pack_root() -> Path:
@@ -114,7 +119,10 @@ def register_dashboard_pack_routes(app: FastAPI, runtime) -> None:  # noqa: ANN0
         return {"tools": tools}
 
     @app.put("/v1/app/packs/dashboard/checks/{check_id}")
-    def upsert(check_id: str, payload: dict) -> dict:
+    async def upsert(check_id: str, request: Request) -> dict:
+        # Gate FIRST — parse the body only after the surface is confirmed live,
+        # so a disabled/hosted deployment returns 410 (not a body-validation 422)
+        # and never leaks that the route exists by accepting input.
         _gate()
         from magi_agent.packs.dashboard_authored import (
             DashboardCheck,
@@ -122,6 +130,13 @@ def register_dashboard_pack_routes(app: FastAPI, runtime) -> None:  # noqa: ANN0
             validate_dashboard_check,
             write_pack,
         )
+
+        try:
+            payload = await request.json()
+        except Exception as exc:  # noqa: BLE001 — malformed JSON → 400, not 500
+            raise HTTPException(
+                status_code=400, detail="request body must be valid JSON"
+            ) from exc
 
         if not isinstance(payload, dict) or payload.get("id") != check_id:
             raise HTTPException(
@@ -138,6 +153,11 @@ def register_dashboard_pack_routes(app: FastAPI, runtime) -> None:  # noqa: ANN0
         root = _pack_root()
         checks = [c for c in read_sidecar(root) if c.id != check_id]
         checks.append(check)
+        if len(checks) > _MAX_CHECKS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"too many checks (cap is {_MAX_CHECKS})",
+            )
         write_pack(root, checks)
         return _checks_payload(root, checks)
 
