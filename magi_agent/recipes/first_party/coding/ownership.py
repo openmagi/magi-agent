@@ -1,3 +1,21 @@
+"""Coding-ownership PR1 scaffold — intentional dormant (H5 honesty pass).
+
+Unlike its sibling first-party packs (discovery / self_improvement /
+memory_recall / learning_usage), this pack has **no separate execution track
+planned** (see ``recipes/first_party/__init__.py`` classification). The
+``activation_gate`` field is pinned to a fixture-only literal
+(``"PR1-coding-ownership-fixture-only"``) and every authority / attach flag is
+``Literal[False]`` by design: the pack exists to document the canonical coding
+mechanic ids and the ``coding_recipe`` ownership boundary as a contract fixture,
+**not** to run anything.
+
+The mechanic ids surfaced here (``read-before-edit``, ``stale-read-rejection``,
+...) are referenced by tests that pin the contract; flipping any attach flag to
+``True`` is an intentional change that would also need a real runtime track and
+its own default-OFF env gate. There is no such gate today.
+
+Intentional dormant — DO NOT activate as a fake toggle.
+"""
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
