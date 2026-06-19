@@ -29,6 +29,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import ValidationError
 
 from magi_agent.config.env import is_egress_gate_enabled
+from magi_agent.config.flags import flag_bool
 from magi_agent.evidence.gate1a_egress_correlation import (
     GATE1A_EGRESS_CORRELATION_MODE,
     GATE1A_EGRESS_TELEMETRY_SOURCE,
@@ -82,6 +83,8 @@ from magi_agent.runtime.user_visible_model_routing import (
     _safe_label_or_none,
 )
 from magi_agent.runtime.hosted_runtime import build_hosted_runtime
+# TODO(flip-pr4): promote to public API before flipping MAGI_HOSTED_GOVERNED_TURN_ENABLED to ON;
+# private symbol coupling acceptable while default-OFF.
 from magi_agent.shadow.gate5b4c3_live_runner_boundary import (
     _gate1a_correlated_model_or_label,
     run_gate5b4c3_live_runner_boundary_async,
@@ -1603,8 +1606,7 @@ async def _run_live_chat_runner(
         # Gate5B4C3LiveRunnerBoundaryResult so all downstream code is unchanged.
         # Flag-OFF (default) = byte-identical to today: the legacy boundary call
         # is taken without any additional overhead.
-        from magi_agent.config.flags import flag_bool as _flag_bool  # noqa: PLC0415
-        if _flag_bool("MAGI_HOSTED_GOVERNED_TURN_ENABLED"):
+        if flag_bool("MAGI_HOSTED_GOVERNED_TURN_ENABLED"):
             # 1. Build the runner input (input adapter + policy checks).
             runner_input_result = build_gate5b4c3_runner_input(generation)
             if runner_input_result.status != "accepted" or runner_input_result.runner_input is None:
