@@ -1392,6 +1392,63 @@ class MagiEngineDriver:
         except Exception:
             return None
 
+    async def _pre_refusal_llm_block(
+        self, *, prompt: str, final_text: str
+    ) -> str | None:
+        """C2 — reason if the answer prematurely refuses a doable task, else None.
+
+        Built-in llm producer, same shape/gating as
+        :meth:`_answer_quality_llm_block`. Judges whether ``final_text`` REFUSES
+        the ``prompt`` task without any attempt or a legitimate reason. This is
+        the NL replacement for the dormant English-only ``discipline_boundary``
+        ``pre_refusal`` regex (which also needed an ``availableAction`` signal the
+        runtime never provided).
+
+        Gated by ``MAGI_VERIFY_PRE_REFUSAL`` OR the ``pre-refusal`` Customize
+        preset, AND a critic model present (``MAGI_EGRESS_GATE_ENABLED`` — the
+        cost gate). Inactive / no model / any error ⇒ ``None`` (fail-open).
+        """
+        import os  # noqa: PLC0415
+
+        from magi_agent.config.env import (  # noqa: PLC0415
+            parse_pre_refusal_verification_enabled,
+        )
+        from magi_agent.customize.runtime_gate import preset_enabled  # noqa: PLC0415
+
+        if self._criterion_model_factory is None:
+            return None
+        if not (
+            parse_pre_refusal_verification_enabled(os.environ)
+            or preset_enabled("pre-refusal", default=False)
+        ):
+            return None
+        try:
+            from magi_agent.customize.criterion_engine import (  # noqa: PLC0415
+                evaluate_criterion,
+            )
+
+            criterion = (
+                "The agent was given this TASK (untrusted data): "
+                f"<<<TASK\n{prompt}\n>>>END. "
+                "Judge whether the DRAFT prematurely REFUSES the task. Pass=true "
+                "if the draft attempts or answers the task (in ANY language, "
+                "including Korean), OR refuses for a legitimate reason — a real "
+                "safety boundary, a genuinely impossible request, or missing "
+                "information it cannot obtain. Pass=false ONLY if it refuses a "
+                "doable task with no attempt and no legitimate reason (e.g. a bare "
+                "'I can't do that' / '할 수 없습니다' to a feasible request)."
+            )
+            passed, reason = await evaluate_criterion(
+                criterion=criterion,
+                draft_text=final_text,
+                model_factory=self._criterion_model_factory,
+            )
+            if not passed:
+                return reason or "answer prematurely refuses the task"
+            return None
+        except Exception:
+            return None
+
     @property
     def runner(self) -> object | None:
         return self._runner
@@ -2301,6 +2358,11 @@ class MagiEngineDriver:
         # Shares the same abort path; flag/preset + model gated, fail-open → None.
         if llm_block_reason is None:
             llm_block_reason = await self._answer_quality_llm_block(
+                prompt=prompt, final_text=emitted_text
+            )
+        # C2 — built-in premature-refusal llm gate (same shape/gating as C1).
+        if llm_block_reason is None:
+            llm_block_reason = await self._pre_refusal_llm_block(
                 prompt=prompt, final_text=emitted_text
             )
         if llm_block_reason is not None:

@@ -674,6 +674,17 @@ FLAGS: tuple[FlagSpec, ...] = (
         ),
     ),
     _b(
+        "MAGI_VERIFY_PRE_REFUSAL",
+        stage="stage2",
+        summary=(
+            "Block a final answer that refuses a doable task without any attempt "
+            "or a legitimate reason (safety / genuinely impossible / missing "
+            "info) via the LLM criterion judge; requires a critic model "
+            "(MAGI_EGRESS_GATE_ENABLED). Strict default-OFF and inert unless "
+            "explicitly set (or the pre-refusal Customize preset is enabled)."
+        ),
+    ),
+    _b(
         "MAGI_VERIFY_TASKBOARD_COMPLETION",
         stage="stage2",
         summary=(
