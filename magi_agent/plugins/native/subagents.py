@@ -404,6 +404,16 @@ async def spawn_agent(arguments: dict[str, object], context: ToolContext) -> Too
         )
         if allowed_tools:
             request_metadata["allowedTools"] = allowed_tools
+        raw_recipe = (
+            arguments.get("recipeRefs")
+            or arguments.get("recipe_refs")
+            or arguments.get("recipe_pack_ids")
+        )
+        recipe_refs = tuple(
+            r for r in (raw_recipe or ()) if isinstance(r, str) and r.strip()
+        )
+        if recipe_refs:
+            request_metadata["recipeRefs"] = recipe_refs
         request = ChildTaskRequest(
             parentExecutionId=parent_exec_id,
             turnId=turn_id,

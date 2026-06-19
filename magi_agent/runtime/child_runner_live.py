@@ -422,6 +422,18 @@ class RealLocalChildRunner:
             metadata.get("parentMemoryMode") or "incognito"
         ) if isinstance(metadata, dict) else "incognito"
 
+        # --- Extract recipeRefs → pinned_recipe_pack_ids (TY2) ---------------
+        # When MAGI_SPAWN_RECIPE_BIND_ENABLED is ON and the request carries
+        # recipeRefs, thread them through as pinned_recipe_pack_ids so the
+        # child's ProfileResolver binds the parent-supplied recipe packs.
+        # Flag OFF → () → byte-identical to today (same as the kwarg default).
+        raw_refs = metadata.get("recipeRefs") if isinstance(metadata, dict) else None
+        pinned_refs: tuple[str, ...] = (
+            tuple(raw_refs)
+            if (raw_refs and flag_bool("MAGI_SPAWN_RECIPE_BIND_ENABLED", env=self._env))
+            else ()
+        )
+
         # --- Derive the child TurnContext FIRST (single source of memory_mode) -
         # derive() → _child_memory_mode() is the canonical authority for the
         # child's memory_mode.  We call it before build_headless_runtime so the
@@ -448,6 +460,7 @@ class RealLocalChildRunner:
             tools=tools,
             memory_mode=ctx.memory_mode,  # single source: derived TurnContext
             permission_mode="bypassPermissions",
+            pinned_recipe_pack_ids=pinned_refs,
         )
 
         # --- Drive the governed turn + collect summary + evidence_refs -------
@@ -468,6 +481,7 @@ class RealLocalChildRunner:
         from magi_agent.cli.real_runner import (  # noqa: PLC0415
             build_cli_model_runner,
         )
+        from magi_agent.config.flags import flag_bool  # noqa: PLC0415
 
         # m-2: compute the child session id ONCE and reuse it.
         session_id = self._child_session_id(request)
@@ -477,6 +491,19 @@ class RealLocalChildRunner:
         # request is forwarded for Task 2B.3 tighten-only parent_cap filtering.
         tools, evidence_collector = self._resolve_turn_toolset(session_id, request=request)
         if runner is None:
+            # --- Extract recipeRefs → pinned_recipe_pack_ids (TY2) -----------
+            legacy_metadata = getattr(request, "metadata", None) or {}
+            legacy_raw_refs = (
+                legacy_metadata.get("recipeRefs") if isinstance(legacy_metadata, dict) else None
+            )
+            legacy_pinned_refs: tuple[str, ...] = (
+                tuple(legacy_raw_refs)
+                if (
+                    legacy_raw_refs
+                    and flag_bool("MAGI_SPAWN_RECIPE_BIND_ENABLED", env=self._env)
+                )
+                else ()
+            )
             workspace = self._workspace_root or tempfile.mkdtemp()
             runner = build_cli_model_runner(
                 config,  # type: ignore[arg-type]
@@ -495,6 +522,7 @@ class RealLocalChildRunner:
                 memory_mode="incognito",
                 session_id=session_id,
                 local_tool_evidence_collector=evidence_collector,
+                pinned_recipe_pack_ids=legacy_pinned_refs,
             )
 
         prompt = _child_prompt(request)
