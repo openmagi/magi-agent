@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from pydantic import ValidationError
 
 from magi_agent.artifacts.local_result_store import (
     LocalResultStore,
@@ -350,11 +349,26 @@ def test_kernel_budget_store_hook_ignores_instance_method_rebinding() -> None:
     assert store.get(outcome.output_projection["storeRef"]) is not None
 
 
-def test_scheduler_default_off_and_rejects_live_config() -> None:
+def test_scheduler_default_off_and_force_falses_live_config() -> None:
     from magi_agent.tools.scheduler import ToolScheduler, ToolSchedulerConfig
 
-    with pytest.raises(ValidationError):
-        ToolSchedulerConfig(enabled=True, liveExecutionEnabled=True)
+    # C-4 PR-D: ToolSchedulerConfig now inherits from FalseOnlyAuthorityModel,
+    # which force-falses any malicious True on the ``Literal[False]`` fields
+    # rather than raising ValidationError. The security invariant ("production
+    # cannot be turned on through config construction") is strictly stronger
+    # post-migration: even ``model_construct`` (the documented pydantic escape
+    # hatch) is funneled through ``model_validate`` and force-falsed, so the
+    # leak path the old raise-on-True semantic left exposed is closed.
+    forced = ToolSchedulerConfig(enabled=True, liveExecutionEnabled=True)
+    assert forced.live_execution_enabled is False
+    assert forced.production_execution_attached is False
+    constructed = ToolSchedulerConfig.model_construct(
+        enabled=True,
+        liveExecutionEnabled=True,
+        productionExecutionAttached=True,
+    )
+    assert constructed.live_execution_enabled is False
+    assert constructed.production_execution_attached is False
 
     scheduler = ToolScheduler()
     outcome = asyncio.run(scheduler.execute(()))

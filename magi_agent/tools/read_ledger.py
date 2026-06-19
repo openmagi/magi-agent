@@ -8,7 +8,9 @@ import threading
 from pathlib import PurePosixPath
 from typing import Any, Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from magi_agent.ops.authority import FalseOnlyAuthorityModel
 
 
 ReadMode = Literal["full", "partial", "metadata"]
@@ -44,9 +46,7 @@ _PRIVATE_REF_RE = re.compile(
 )
 
 
-class ReadLedgerConfig(BaseModel):
-    model_config = _MODEL_CONFIG
-
+class ReadLedgerConfig(FalseOnlyAuthorityModel):
     enabled: bool = False
     local_in_memory_enabled: bool = Field(default=False, alias="localInMemoryEnabled")
     production_writes_enabled: Literal[False] = Field(
@@ -55,9 +55,7 @@ class ReadLedgerConfig(BaseModel):
     )
 
 
-class ReadLedgerAuthorityFlags(BaseModel):
-    model_config = _MODEL_CONFIG
-
+class ReadLedgerAuthorityFlags(FalseOnlyAuthorityModel):
     read_ledger_enabled: bool = Field(default=False, alias="readLedgerEnabled")
     local_in_memory_only: bool = Field(default=False, alias="localInMemoryOnly")
     production_writes_enabled: Literal[False] = Field(
@@ -68,34 +66,6 @@ class ReadLedgerAuthorityFlags(BaseModel):
         default=False,
         alias="workspaceMutationAuthority",
     )
-
-    @classmethod
-    def model_construct(
-        cls,
-        _fields_set: set[str] | None = None,
-        **values: Any,
-    ) -> Self:
-        _ = _fields_set
-        values["productionWritesEnabled"] = False
-        values["workspaceMutationAuthority"] = False
-        return cls.model_validate(values)
-
-    def model_copy(
-        self,
-        *,
-        update: Mapping[str, Any] | None = None,
-        deep: bool = False,
-    ) -> Self:
-        data = self.model_dump(by_alias=True, mode="python", warnings=False)
-        if update:
-            data.update(dict(update))
-        data["productionWritesEnabled"] = False
-        data["workspaceMutationAuthority"] = False
-        return type(self).model_validate(data)
-
-    @field_serializer("production_writes_enabled", "workspace_mutation_authority")
-    def _serialize_false(self, _value: object) -> bool:
-        return False
 
 
 class ReadLedgerEntry(BaseModel):
