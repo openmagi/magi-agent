@@ -6,6 +6,23 @@ from typing import Any
 _DEFAULT_MODE = "deterministic"
 
 
+def _rule_scope_matches(rule: dict[str, Any], current_scope: str) -> bool:
+    """Does a custom rule's declared ``scope`` cover ``current_scope``?
+
+    Defensive: a rule with a missing or non-vocabulary scope is treated as
+    ``always`` (universal) so a corrupt persisted rule does not silently vanish
+    on a scope-aware call. ``always`` always matches every current scope.
+    """
+    from magi_agent.customize.scope import ALWAYS_SCOPE, SCOPES  # local import — cycle guard
+
+    raw = rule.get("scope")
+    if not isinstance(raw, str) or raw not in SCOPES:
+        return True  # legacy / corrupt / unknown ⇒ universal fallback
+    if raw == ALWAYS_SCOPE:
+        return True
+    return raw == current_scope
+
+
 @dataclass(frozen=True)
 class CustomizeVerificationPolicy:
     """Resolved view of persisted verification overrides.
@@ -77,15 +94,30 @@ class CustomizeVerificationPolicy:
                 refs.append(ref)
         return refs
 
-    def enabled_tool_perm_rules(self) -> list[dict[str, Any]]:
-        """Enabled ``tool_perm`` custom rules (P2 before-tool-use deny/ask)."""
-        return [
+    def enabled_tool_perm_rules(
+        self, *, current_scope: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Enabled ``tool_perm`` custom rules (P2 before-tool-use deny/ask).
+
+        When ``current_scope`` is supplied, the returned list is filtered to
+        rules whose ``scope`` matches the current turn (per
+        :func:`customize.scope.preset_scope_matches`: ``always`` is universal;
+        multi-scope match-any). When ``current_scope`` is ``None`` the historic
+        scope-blind list is returned so legacy call sites keep working.
+
+        Defensive: a rule with a missing or non-vocabulary ``scope`` is treated
+        as ``always`` so a corrupt persisted rule does not silently vanish.
+        """
+        candidates = [
             rule
             for rule in self.custom_rules
             if rule.get("enabled", False)
             and isinstance(rule.get("what"), dict)
             and rule["what"].get("kind") == "tool_perm"
         ]
+        if current_scope is None:
+            return candidates
+        return [rule for rule in candidates if _rule_scope_matches(rule, current_scope)]
 
     def enabled_shacl_rules(self) -> list[dict[str, Any]]:
         """Enabled ``shacl_constraint`` custom rules (pre-final SHACL gate).
@@ -112,9 +144,17 @@ class CustomizeVerificationPolicy:
             results.append({"ruleId": rule_id, "shapeTtl": shape_ttl})
         return results
 
-    def enabled_llm_criterion_rules(self, *, fires_at: str) -> list[dict[str, Any]]:
-        """Enabled ``llm_criterion`` custom rules for a fire-at point (P3/P4)."""
-        return [
+    def enabled_llm_criterion_rules(
+        self, *, fires_at: str, current_scope: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Enabled ``llm_criterion`` custom rules for a fire-at point (P3/P4).
+
+        When ``current_scope`` is supplied, the returned list is additionally
+        filtered to rules whose ``scope`` matches the current turn. The
+        ``fires_at`` filter still applies (composed with scope, not replaced).
+        ``current_scope=None`` preserves the historic scope-blind behavior.
+        """
+        candidates = [
             rule
             for rule in self.custom_rules
             if rule.get("enabled", False)
@@ -122,6 +162,9 @@ class CustomizeVerificationPolicy:
             and isinstance(rule.get("what"), dict)
             and rule["what"].get("kind") == "llm_criterion"
         ]
+        if current_scope is None:
+            return candidates
+        return [rule for rule in candidates if _rule_scope_matches(rule, current_scope)]
 
     def explicit_preset(self, preset_id: str) -> bool | None:
         """Explicit per-preset enable state, or None if the user never set it."""
