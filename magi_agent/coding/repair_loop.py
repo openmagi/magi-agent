@@ -142,14 +142,23 @@ def evaluate_repair_decision(
     config: CodingRepairLoopConfig,
     state: CodingRepairLoopState,
     latest_test_evidence: Mapping[str, object] | None,
+    is_coding_turn: bool = True,
 ) -> CodingRepairDecision:
     """Evaluate the next repair decision based on config, state, and evidence.
 
     Returns a deterministic ``CodingRepairDecision`` with one of:
     - ``continue_repair``: another attempt is allowed
     - ``ask_user``: max attempts reached, ask the user
-    - ``abstain``: disabled or max attempts with no evidence
+    - ``abstain``: disabled, non-coding turn, or max attempts with no evidence
     - ``project_success``: passing test evidence detected
+
+    ``is_coding_turn`` (default ``True`` for backwards compat) lets the engine
+    suppress the loop entirely on turns the coding scope does not cover (chat,
+    research, etc.). The lab profile sets ``MAGI_CODING_REPAIR_LOOP_ENABLED=1``
+    by default, so without this scope check a plain "Hi" turn would fall through
+    ``continue_repair`` and inject the "bounded repair attempt N/M" preamble
+    into the model — Opus 4.6 then refuses it as suspected prompt injection and
+    the user sees "no final answer text".
     """
     # Disabled -- abstain immediately
     if not config.enabled:
@@ -157,6 +166,17 @@ def evaluate_repair_decision(
             action="abstain",
             attemptCount=state.attempt_count,
             reasonCodes=("repair_loop_disabled",),
+            evidenceRefs=state.evidence_refs,
+            evidenceDigest=None,
+        )
+
+    # Non-coding turn -- abstain so chat/research turns never see the repair
+    # preamble (lab bug fix; see docstring).
+    if not is_coding_turn:
+        return CodingRepairDecision(
+            action="abstain",
+            attemptCount=state.attempt_count,
+            reasonCodes=("non_coding_turn",),
             evidenceRefs=state.evidence_refs,
             evidenceDigest=None,
         )
