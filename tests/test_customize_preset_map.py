@@ -25,17 +25,20 @@ def test_domain_for_maps_category_to_when_group():
 
 
 def test_tier_for_classifies_enforcement_mechanism():
-    # all 4 wired seams are deterministic today
+    # deterministic wired seams badge "deterministic"
     for pid in ("coding-verification", "fact-grounding", "source-authority", "artifact-delivery"):
         assert tier_for(pid, is_security=False) == "deterministic", pid
+    # the answer-quality seam is an LLM-tier judge → badges "llm", not a false "det"
+    assert tier_for("answer-quality", is_security=False) == "llm"
     assert tier_for("dangerous-patterns", is_security=True) == "always-on"
-    assert tier_for("answer-quality", is_security=False) is None  # preview → no tier
+    assert tier_for("self-claim", is_security=False) is None  # preview → no tier
 
 
 def test_opt_method_for_reads_seam_wiring():
     assert opt_method_for("coding-verification") == "opt-out"
     assert opt_method_for("fact-grounding") == "opt-in"
-    assert opt_method_for("answer-quality") is None
+    assert opt_method_for("answer-quality") == "opt-in"
+    assert opt_method_for("self-claim") is None
 
 
 def test_description_for_uses_accurate_text_for_wired_presets():
@@ -83,13 +86,17 @@ def test_enforcement_for_classifies_honestly():
     assert enforcement_for("artifact-delivery", category="output", is_security=False) == "enforcing"
     # security presets are enforced elsewhere (PermissionGate), not via this toggle
     assert enforcement_for("dangerous-patterns", category="security", is_security=True) == "always-on"
+    # the answer-quality LLM seam is now wired → enforcing
+    assert enforcement_for("answer-quality", category="answer", is_security=False) == "enforcing"
     # metadata-only / no live producer → honest preview
-    assert enforcement_for("answer-quality", category="answer", is_security=False) == "preview"
+    assert enforcement_for("self-claim", category="fact", is_security=False) == "preview"
     assert enforcement_for("completion-evidence", category="answer", is_security=False) == "preview"
 
 
 def test_supported_modes_default_deterministic():
-    assert supported_modes_for("answer-quality") == ("deterministic",)
+    # the answer-quality seam declares the llm tier; non-seam presets default det
+    assert supported_modes_for("answer-quality") == ("llm",)
+    assert supported_modes_for("self-claim") == ("deterministic",)
     assert supported_modes_for("coding-verification") == ("deterministic",)
 
 

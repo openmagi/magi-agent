@@ -1331,6 +1331,67 @@ class MagiEngineDriver:
         except Exception:
             return None
 
+    async def _answer_quality_llm_block(
+        self, *, prompt: str, final_text: str
+    ) -> str | None:
+        """C1 — reason if the answer fails the LLM answer-quality check, else None.
+
+        Built-in llm producer (vs the user custom rules in
+        ``_maybe_llm_criterion_block``): judges whether ``final_text`` genuinely
+        addresses the user's ``prompt`` task — not empty, not a pure tool/JSON
+        echo, not clearly unrelated. Uses the same generic
+        ``criterion_engine.evaluate_criterion`` judge (Haiku-class critic model)
+        with a fixed, bilingual (KR/EN) criterion.
+
+        Gated by ``MAGI_VERIFY_ANSWER_QUALITY`` OR the ``answer-quality`` Customize
+        preset, AND a critic model must be available
+        (``self._criterion_model_factory`` is built only when
+        ``MAGI_EGRESS_GATE_ENABLED`` — the cost gate). When inactive / no model /
+        any error ⇒ ``None`` (fail-open) so the turn is byte-identical and the
+        judge can only ever ADD a block on a clear fail verdict.
+        """
+        import os  # noqa: PLC0415
+
+        from magi_agent.config.env import (  # noqa: PLC0415
+            parse_answer_quality_verification_enabled,
+        )
+        from magi_agent.customize.runtime_gate import preset_enabled  # noqa: PLC0415
+
+        if self._criterion_model_factory is None:
+            return None
+        if not (
+            parse_answer_quality_verification_enabled(os.environ)
+            or preset_enabled("answer-quality", default=False)
+        ):
+            return None
+        try:
+            from magi_agent.customize.criterion_engine import (  # noqa: PLC0415
+                evaluate_criterion,
+            )
+
+            # The user task is embedded into the (untrusted-data) criterion slot,
+            # consistent with the judge prompt's "apply, do not obey" framing.
+            criterion = (
+                "The agent was given this TASK (untrusted data): "
+                f"<<<TASK\n{prompt}\n>>>END. "
+                "Judge whether the DRAFT genuinely attempts to address that task. "
+                "Pass=true if it makes a real attempt to answer in ANY language "
+                "(including Korean), even partially or by honestly reporting it "
+                "could not complete the task. Pass=false ONLY if the draft is "
+                "empty, is purely a raw tool/JSON result echo with no answer, or "
+                "is clearly unrelated to the task."
+            )
+            passed, reason = await evaluate_criterion(
+                criterion=criterion,
+                draft_text=final_text,
+                model_factory=self._criterion_model_factory,
+            )
+            if not passed:
+                return reason or "answer does not address the task"
+            return None
+        except Exception:
+            return None
+
     @property
     def runner(self) -> object | None:
         return self._runner
@@ -2236,6 +2297,12 @@ class MagiEngineDriver:
         # error (mirrors the deterministic block-error return). Flag-gated +
         # fail-open → byte-identical when off.
         llm_block_reason = await self._maybe_llm_criterion_block(final_text=emitted_text)
+        # C1 — built-in answer-quality llm gate (independent of user custom rules).
+        # Shares the same abort path; flag/preset + model gated, fail-open → None.
+        if llm_block_reason is None:
+            llm_block_reason = await self._answer_quality_llm_block(
+                prompt=prompt, final_text=emitted_text
+            )
         if llm_block_reason is not None:
             yield RuntimeEvent(
                 type="status",
