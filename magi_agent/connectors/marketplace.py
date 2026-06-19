@@ -5,9 +5,10 @@ from datetime import UTC, datetime
 import re
 from typing import Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 
 from magi_agent.connectors.registry import ConnectorManifest
+from magi_agent.ops.authority import FalseOnlyAuthorityModel
 from magi_agent.ops.safety import (
     canonical_digest,
     require_digest,
@@ -23,13 +24,6 @@ from magi_agent.plugins.sandbox_policy import SandboxMode, evaluate_plugin_sandb
 MarketplaceOperation = Literal["install", "update", "remove"]
 MarketplacePromotionStatus = Literal["allowed", "blocked"]
 
-_MODEL_CONFIG = ConfigDict(
-    frozen=True,
-    populate_by_name=True,
-    extra="forbid",
-    validate_default=True,
-    hide_input_in_errors=True,
-)
 _AUTHORITY_FLAG_FIELDS = frozenset({
     "marketplace_live_sync_enabled",
     "plugin_execution_enabled",
@@ -119,20 +113,17 @@ def _digest_ref_metadata_value(value: object) -> object:
     raise ValueError("metadata must contain only digest or safe public refs")
 
 
-class _MarketplaceModel(BaseModel):
-    model_config = _MODEL_CONFIG
+class _MarketplaceModel(FalseOnlyAuthorityModel):
+    """Thin alias for the canonical ``FalseOnlyAuthorityModel`` (C-4 PR-C).
 
-    @classmethod
-    def model_construct(cls, _fields_set: set[str] | None = None, **values: object) -> Self:
-        _ = _fields_set
-        return cls.model_validate(values)
-
-    def model_copy(self, *, update: Mapping[str, object] | None = None, deep: bool = False) -> Self:
-        data = self.model_dump(by_alias=True, mode="json")
-        if update:
-            data.update(update)
-        _ = deep
-        return type(self).model_validate(data)
+    Pre-PR-C this base hand-rolled ``model_construct`` (routed through
+    ``model_validate``) and ``model_copy(update=...)`` (re-dumped + re-validated)
+    plus a copy of the frozen ``ConfigDict`` trio. The shared
+    ``FalseOnlyAuthorityModel`` has the same shape (validate-routed construct,
+    update-via-validate copy) and adds annotation-based force-false +
+    serializer + ``public_projection``. The alias is preserved so existing
+    ``class Foo(_MarketplaceModel)`` lines keep working without per-class edits.
+    """
 
 
 class MarketplaceAuthorityFlags(_MarketplaceModel):
@@ -160,47 +151,15 @@ class MarketplaceAuthorityFlags(_MarketplaceModel):
     )
 
     def __getattribute__(self, name: str) -> object:
+        # Defense-in-depth: even if a future pydantic version permits in-place
+        # mutation or a caller forges the instance dict, attribute reads on
+        # authority flag names always return False. The base's serializer +
+        # validator already cover the dump/build paths; this guard covers the
+        # attribute-access path. Preserved per-class semantic (not provided by
+        # FalseOnlyAuthorityModel).
         if name in _AUTHORITY_FLAG_FIELDS:
             return False
         return super().__getattribute__(name)
-
-    @model_validator(mode="before")
-    @classmethod
-    def _force_false(cls, value: object) -> dict[str, object]:
-        payload = dict(value) if isinstance(value, Mapping) else {}
-        for field_name, field in cls.model_fields.items():
-            payload[field.alias or field_name] = False
-            payload.pop(field_name, None)
-        return payload
-
-    @field_serializer(
-        "marketplace_live_sync_enabled",
-        "plugin_execution_enabled",
-        "credential_read_enabled",
-        "live_secret_read",
-        "network_call_allowed",
-        "route_or_api_attached",
-        "production_authority",
-        "model_called",
-        "toolhost_dispatched",
-        "runtime_activation_allowed",
-    )
-    def _serialize_false(self, _value: object) -> bool:
-        return False
-
-    def public_projection(self) -> dict[str, bool]:
-        return {
-            "marketplaceLiveSyncEnabled": False,
-            "pluginExecutionEnabled": False,
-            "credentialReadEnabled": False,
-            "liveSecretRead": False,
-            "networkCallAllowed": False,
-            "routeOrApiAttached": False,
-            "productionAuthority": False,
-            "modelCalled": False,
-            "toolHostDispatched": False,
-            "runtimeActivationAllowed": False,
-        }
 
 
 class MarketplaceRevocationSnapshot(_MarketplaceModel):

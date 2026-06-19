@@ -692,9 +692,9 @@ graph LR
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
 | __init__.py | — | credential_lease, registry | — |
-| credential_lease.py | — | durable_store, registry, safety | connectors/__init__.py |
-| marketplace.py | — | manifest, registry, safety, sandbox_policy | — |
-| registry.py | — | safety | connectors/__init__.py, connectors/credential_lease.py, connectors/marketplace.py |
+| credential_lease.py | — | authority, durable_store, registry, safety | connectors/__init__.py |
+| marketplace.py | — | authority, manifest, registry, safety, sandbox_policy | — |
+| registry.py | — | authority, safety | connectors/__init__.py, connectors/credential_lease.py, connectors/marketplace.py |
 
 ### context/
 
@@ -1225,7 +1225,7 @@ graph LR
 | Module | Purpose | Depends On | Depended By |
 |---|---|---|---|
 | __init__.py | — | — | transport/health.py, transport/product_admin.py |
-| authority.py | Frozen-contract / authority model bases (C-4 / C-5 shared home). | — | config/models.py, ops/safety.py |
+| authority.py | Frozen-contract / authority model bases (C-4 / C-5 shared home). | — | config/models.py, connectors/credential_lease.py, connectors/marketplace.py, connectors/registry.py, ops/safety.py |
 | health.py | — | daemon, scheduler_job_execution | adk_bridge/event_adapter.py, gateway/daemon.py, shadow/gate5b4c3_live_runner_boundary.py, transport/sse.py, transport/streaming_chat_route.py |
 | job_queue.py | — | safety | — |
 | metrics.py | — | safety | — |

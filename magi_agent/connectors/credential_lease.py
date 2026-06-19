@@ -5,9 +5,10 @@ from datetime import UTC, datetime, timedelta
 import re
 from typing import Literal, Self
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator, model_validator
+from pydantic import Field, field_serializer, field_validator, model_validator
 
 from magi_agent.connectors.registry import ConnectorManifest
+from magi_agent.ops.authority import FalseOnlyAuthorityModel
 from magi_agent.ops.safety import (
     canonical_digest,
     require_digest,
@@ -20,13 +21,6 @@ from magi_agent.storage.durable_store import DurableRecord
 CredentialLeaseStatus = Literal["issued", "fail_closed"]
 CredentialRedactionStatus = Literal["metadata_only"]
 
-_MODEL_CONFIG = ConfigDict(
-    frozen=True,
-    populate_by_name=True,
-    extra="forbid",
-    validate_default=True,
-    hide_input_in_errors=True,
-)
 _SAFE_LEASE_PART_RE = re.compile(r"[^a-z0-9]+")
 _NONCE_RE = re.compile(r"^nonce:[0-9a-f]{32,128}$")
 
@@ -79,8 +73,24 @@ class CredentialLeaseReplayLedger:
 _DEFAULT_REPLAY_LEDGER = CredentialLeaseReplayLedger()
 
 
-class _LeaseModel(BaseModel):
-    model_config = _MODEL_CONFIG
+class _LeaseModel(FalseOnlyAuthorityModel):
+    """Frozen credential-lease base on the canonical ``FalseOnlyAuthorityModel``
+    (C-4 PR-C), with the pre-PR-C escape-hatch raising on ``model_construct`` /
+    ``model_copy(update=...)`` preserved.
+
+    Like ``_ConnectorModel`` (registry side), credential-lease models fail-loudly
+    on illegal escape-hatch construction or in-place mutation: this is asserted
+    by the ``CredentialLeaseAuthorityFlags`` golden
+    (``model_construct_dump: null``) and the
+    ``ConnectorCredentialLeaseReceipt`` golden (both dumps null because
+    ``model_construct`` raises and ``model_validate`` rejects missing required
+    fields), as well as
+    ``tests/test_connector_credential_contracts.py`` which asserts
+    ``CredentialLeaseAuthorityFlags.model_copy(update=...)`` raises
+    ``ValueError``. Per the C-4 PR-B precedent on per-class raising semantics
+    (``_UNSAFE_CONSTRUCT_COPY_FIELDS``), the raising shape is preserved at this
+    base via the two surface overrides rather than dropped.
+    """
 
     @classmethod
     def model_construct(cls, _fields_set: set[str] | None = None, **values: object) -> Self:
@@ -106,34 +116,6 @@ class CredentialLeaseAuthorityFlags(_LeaseModel):
     )
     network_call_allowed: Literal[False] = Field(default=False, alias="networkCallAllowed")
     production_authority: Literal[False] = Field(default=False, alias="productionAuthority")
-
-    @model_validator(mode="before")
-    @classmethod
-    def _force_false(cls, value: object) -> dict[str, object]:
-        payload = dict(value) if isinstance(value, Mapping) else {}
-        for field_name, field in cls.model_fields.items():
-            payload[field.alias or field_name] = False
-            payload.pop(field_name, None)
-        return payload
-
-    @field_serializer(
-        "credential_read_enabled",
-        "live_secret_read",
-        "plugin_execution_enabled",
-        "network_call_allowed",
-        "production_authority",
-    )
-    def _serialize_false(self, _value: object) -> bool:
-        return False
-
-    def public_projection(self) -> dict[str, bool]:
-        return {
-            "credentialReadEnabled": False,
-            "liveSecretRead": False,
-            "pluginExecutionEnabled": False,
-            "networkCallAllowed": False,
-            "productionAuthority": False,
-        }
 
 
 class ConnectorCredentialLeaseRequest(_LeaseModel):
@@ -341,12 +323,16 @@ class ConnectorCredentialLeaseReceipt(_LeaseModel):
             raise ValueError("credential lease expiry must exactly match ttl")
         return self
 
-    @field_serializer("secret_material_present", "live_secret_read")
-    def _serialize_false(self, _value: object) -> bool:
-        return False
-
+    # ``secret_material_present`` / ``live_secret_read`` (both Literal[False])
+    # are force-falsed by ``FalseOnlyAuthorityModel``'s annotation-based
+    # serializer; no per-field serializer needed here.
     @field_serializer("raw_secret_material")
     def _serialize_no_secret(self, _value: object) -> None:
+        # Literal[None] is NOT handled by ``FalseOnlyAuthorityModel`` (that base
+        # is force-FALSE on Literal[False], not Literal[None]). Preserve the
+        # no-secret invariant on the serializer surface explicitly here. The
+        # ``_force_no_secret_material`` validator above also raises on any
+        # non-None inbound ``rawSecretMaterial``.
         return None
 
     @property
