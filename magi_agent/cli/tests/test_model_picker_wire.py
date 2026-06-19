@@ -95,7 +95,9 @@ class TestPersistModel:
         assert data["providers"]["anthropic"]["api_key"] == "sk-test-key"
 
     def test_preserves_other_sections(self, tmp_path: Path) -> None:
-        """Existing keys/sections outside [model] are not clobbered."""
+        """Sections outside [model] are not clobbered; provider stays when the
+        new model unambiguously belongs to the same provider's family (anthropic
+        claude-* matches the existing anthropic provider)."""
         import tomllib
 
         cfg = tmp_path / "config.toml"
@@ -103,12 +105,61 @@ class TestPersistModel:
             "[server]\nport = 8080\n\n[model]\nprovider = \"anthropic\"\n",
             encoding="utf-8",
         )
-        persist_model("new-model", path=cfg)
+        persist_model("claude-haiku-4-5", path=cfg)
         with open(cfg, "rb") as fh:
             data = tomllib.load(fh)
         assert data["server"]["port"] == 8080
         assert data["model"]["provider"] == "anthropic"
-        assert data["model"]["model"] == "new-model"
+        assert data["model"]["model"] == "claude-haiku-4-5"
+
+    def test_provider_realigned_when_new_model_belongs_to_different_provider(
+        self, tmp_path: Path
+    ) -> None:
+        """persist_model("gpt-5.5") on an existing provider=fireworks config
+        MUST also update provider→openai. Persisting `model` without realigning
+        `provider` produced the impossible `fireworks/gpt-5.5` combo that bricked
+        local serve with empty responses."""
+        import tomllib
+
+        cfg = tmp_path / "config.toml"
+        cfg.write_text(
+            '[model]\nprovider = "fireworks"\nmodel = "kimi-k2p6"\n',
+            encoding="utf-8",
+        )
+        persist_model("gpt-5.5", path=cfg)
+        with open(cfg, "rb") as fh:
+            data = tomllib.load(fh)
+        assert data["model"]["provider"] == "openai"
+        assert data["model"]["model"] == "gpt-5.5"
+
+    def test_provider_inferred_when_absent(self, tmp_path: Path) -> None:
+        """A bare model id with no [model].provider sets BOTH so the result is
+        always a coherent (provider, model) pair, never half-set."""
+        import tomllib
+
+        cfg = tmp_path / "config.toml"
+        cfg.write_text("", encoding="utf-8")
+        persist_model("gemini-3.5-flash", path=cfg)
+        with open(cfg, "rb") as fh:
+            data = tomllib.load(fh)
+        assert data["model"]["provider"] == "gemini"
+        assert data["model"]["model"] == "gemini-3.5-flash"
+
+    def test_unknown_model_id_keeps_existing_provider(self, tmp_path: Path) -> None:
+        """Custom/unknown model id: provider isn't inferrable, so keep the
+        existing one. Only safe when a provider was already set."""
+        import tomllib
+
+        cfg = tmp_path / "config.toml"
+        cfg.write_text(
+            '[model]\nprovider = "openai"\nmodel = "gpt-5.5"\n',
+            encoding="utf-8",
+        )
+        persist_model("my-custom-fine-tune-v3", path=cfg)
+        with open(cfg, "rb") as fh:
+            data = tomllib.load(fh)
+        assert data["model"]["provider"] == "openai"
+        assert data["model"]["model"] == "my-custom-fine-tune-v3"
 
     def test_overwrites_existing_model_key(self, tmp_path: Path) -> None:
         import tomllib

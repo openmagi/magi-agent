@@ -594,6 +594,32 @@ def persist_provider_keys(
                 pass
 
 
+def _infer_provider_for_model(model_id: str) -> str | None:
+    """Best-effort: map a bare model id to its provider, else None.
+
+    Anchored on stable id families (``claude-*`` → anthropic, ``gpt-*``/``o*-``
+    → openai, ``gemini-*`` → gemini, ``accounts/fireworks/*`` / ``kimi-*`` /
+    ``minimax-*`` → fireworks, ``<vendor>/<model>`` slug → openrouter). Returns
+    ``None`` for a model whose provider cannot be unambiguously determined so the
+    caller keeps the existing provider rather than guessing wrong.
+    """
+    text = model_id.strip().lower()
+    if not text:
+        return None
+    if text.startswith("accounts/fireworks/") or text.startswith("kimi-") or text.startswith("minimax-"):
+        return "fireworks"
+    if text.startswith("claude-"):
+        return "anthropic"
+    if text.startswith("gemini-"):
+        return "gemini"
+    if text.startswith("gpt-") or text.startswith("o1-") or text.startswith("o3-") or text.startswith("o4-"):
+        return "openai"
+    # ``<vendor>/<model>`` slug is OpenRouter's id shape (e.g. "openai/gpt-5.5").
+    if "/" in text and not text.startswith("accounts/"):
+        return "openrouter"
+    return None
+
+
 def persist_model(model_id: str, *, path: Path | None = None) -> None:
     """Write ``model_id`` to ``[model].model`` in the magi config file.
 
@@ -620,6 +646,14 @@ def persist_model(model_id: str, *, path: Path | None = None) -> None:
         model_section = {}
     model_section = dict(model_section)  # shallow copy — don't mutate original
     model_section["model"] = model_id
+    # Provider/model coherence: a bare model id whose provider is unambiguously
+    # inferable overrides any stale provider, so the file never holds an
+    # impossible pair like ``provider=fireworks, model=gpt-5.5``. When inference
+    # is ambiguous (custom id, fine-tune), keep the existing provider — and when
+    # neither is present nothing is written so the file is never half-set.
+    inferred_provider = _infer_provider_for_model(model_id)
+    if inferred_provider is not None:
+        model_section["provider"] = inferred_provider
     raw = dict(raw)  # shallow copy top level
     raw["model"] = model_section
 
