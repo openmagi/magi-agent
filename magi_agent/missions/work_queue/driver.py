@@ -42,6 +42,7 @@ class WorkQueueTickResult(BaseModel):
     claimed: int = 0
     completed: int = 0
     failed: int = 0
+    short_circuited: int = 0
 
 
 class WorkQueueDriver:
@@ -101,6 +102,7 @@ class WorkQueueDriver:
         claimed: int = 0
         completed: int = 0
         failed: int = 0
+        short_circuited: int = 0
 
         for task in ready:
             claimed_task = self._store.claim(task.id, claimer=self._claimer, now=now)
@@ -110,6 +112,21 @@ class WorkQueueDriver:
                 continue
 
             claimed += 1
+
+            # Exactly-once at dispatch: keyed tasks must be enqueued via
+            # store.create_idempotent (unique idempotency_key constraint).
+            # Bypassing that allows two same-key ready tasks to be claimed
+            # and run in a single tick before either is marked 'completed',
+            # causing both side effects to fire. P6 real-runner enqueue seam
+            # MUST route all keyed enqueues through create_idempotent.
+            key = claimed_task.idempotency_key
+            if key is not None:
+                prior = self._store.completed_task_for_key(key, exclude_task_id=claimed_task.id)
+                if prior is not None:
+                    self._store.complete(claimed_task.id, result=prior.result)
+                    short_circuited += 1
+                    continue
+
             try:
                 result = asyncio.run(self._runner.run_task(claimed_task))
             except Exception as exc:  # noqa: BLE001
@@ -139,6 +156,7 @@ class WorkQueueDriver:
             claimed=claimed,
             completed=completed,
             failed=failed,
+            short_circuited=short_circuited,
         )
 
     async def run_forever(

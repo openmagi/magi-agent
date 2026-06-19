@@ -326,6 +326,32 @@ def test_parity_ready_tasks_orders_and_limits(store):
     assert [t.id for t in store.ready_tasks(limit=1)] == ["b"]
 
 
+# (h) create_idempotent: if task has idempotency_key and exists, return existing; else insert
+def test_parity_create_idempotent_dedups_on_key(store):
+    a = store.create_idempotent(WorkTask(id="a", title="x", status="todo", created_at=1, idempotency_key="k1"))
+    b = store.create_idempotent(WorkTask(id="b", title="x", status="todo", created_at=2, idempotency_key="k1"))
+    assert a.id == "a" and b.id == "a"            # second returns the existing task
+    assert store.get("b") is None                 # no duplicate inserted
+
+
+# (i) create_idempotent: tasks with no idempotency_key always insert (no dedup)
+def test_parity_create_idempotent_no_key_always_inserts(store):
+    a = store.create_idempotent(WorkTask(id="a", title="x", status="todo", created_at=1))   # no key
+    b = store.create_idempotent(WorkTask(id="b", title="x", status="todo", created_at=2))   # no key
+    assert store.get("a") is not None and store.get("b") is not None
+
+
+# (j) completed_task_for_key: returns completed task with key, excludes self, else None
+def test_parity_completed_task_for_key(store):
+    store.create(WorkTask(id="a", title="x", status="running", created_at=1, idempotency_key="k1"))
+    store.create(WorkTask(id="b", title="x", status="ready",   created_at=2, idempotency_key="k1"))
+    assert store.completed_task_for_key("k1", exclude_task_id="b") is None       # none completed yet
+    store.complete("a", result="DONE")
+    hit = store.completed_task_for_key("k1", exclude_task_id="b")
+    assert hit is not None and hit.id == "a" and hit.result == "DONE"
+    assert store.completed_task_for_key("k1", exclude_task_id="a") is None       # excludes self
+
+
 # ---------------------------------------------------------------------------
 # BEGIN IMMEDIATE transaction hardening — Task 5
 # ---------------------------------------------------------------------------

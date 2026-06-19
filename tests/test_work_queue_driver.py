@@ -236,6 +236,54 @@ def test_build_default_watchers_includes_self_gated_work_queue() -> None:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# Exactly-once short-circuit tests (Task 2 — P4)
+# ---------------------------------------------------------------------------
+
+
+class _CountingRunner:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def run_task(self, task: WorkTask) -> WorkTaskRunResult:
+        self.calls += 1
+        return WorkTaskRunResult(outcome="completed", summary="ran")
+
+
+def test_run_once_short_circuits_duplicate_key() -> None:
+    s = InMemoryWorkQueueStore()
+    # a prior completed task with key k1
+    s.create(WorkTask(id="done", title="x", status="completed", created_at=1,
+                      idempotency_key="k1", result="PRIOR"))
+    # a fresh ready task with the same key
+    s.create(WorkTask(id="dup", title="x", status="ready", created_at=2, idempotency_key="k1"))
+    runner = _CountingRunner()
+    d = WorkQueueDriver(s, runner, claimer="disp", max_spawn=4)
+    res = d.run_once(now=1000)
+    assert runner.calls == 0                       # runner NEVER invoked for the duplicate
+    assert res.short_circuited == 1
+    dup = s.get("dup")
+    assert dup.status == "completed" and dup.result == "PRIOR"   # reused prior result
+
+
+def test_run_once_runs_normally_when_no_completed_key() -> None:
+    s = InMemoryWorkQueueStore()
+    s.create(WorkTask(id="t", title="x", status="ready", created_at=1, idempotency_key="k9"))
+    runner = _CountingRunner()
+    d = WorkQueueDriver(s, runner, claimer="disp", max_spawn=4)
+    res = d.run_once(now=1000)
+    assert runner.calls == 1 and res.short_circuited == 0 and res.completed == 1
+
+
+def test_run_once_no_key_never_short_circuits() -> None:
+    s = InMemoryWorkQueueStore()
+    s.create(WorkTask(id="t", title="x", status="ready", created_at=1))   # no key
+    runner = _CountingRunner()
+    d = WorkQueueDriver(s, runner, claimer="disp", max_spawn=4)
+    res = d.run_once(now=1000)
+    assert runner.calls == 1 and res.short_circuited == 0
+
+
 def test_goal_mode_task_end_to_end_via_driver() -> None:
     """Prove the driver drives a GoalModeRunner with no driver changes.
 

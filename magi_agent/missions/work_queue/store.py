@@ -118,6 +118,16 @@ class WorkQueueStore(Protocol):
         """Return the task whose ``idempotency_key`` matches *key*, or None."""
         ...
 
+    def create_idempotent(self, task: WorkTask) -> WorkTask:
+        """Create a task; if it has an idempotency_key and a task with that key exists,
+        return the existing task unchanged (no insert). Otherwise behave like create()."""
+        ...
+
+    def completed_task_for_key(self, key: str, *, exclude_task_id: str) -> WorkTask | None:
+        """Return a task whose idempotency_key == key, status == 'completed',
+        and id != exclude_task_id, else None."""
+        ...
+
     def record_failure(
         self,
         task_id: str,
@@ -304,6 +314,19 @@ class InMemoryWorkQueueStore:
         for task in self._tasks.values():
             if task.idempotency_key == key:
                 return task
+        return None
+
+    def create_idempotent(self, task: WorkTask) -> WorkTask:
+        if task.idempotency_key is not None:
+            existing = self.find_by_idempotency_key(task.idempotency_key)
+            if existing is not None:
+                return existing
+        return self.create(task)
+
+    def completed_task_for_key(self, key: str, *, exclude_task_id: str) -> WorkTask | None:
+        for t in self._tasks.values():
+            if t.idempotency_key == key and t.status == "completed" and t.id != exclude_task_id:
+                return t
         return None
 
     def record_failure(
@@ -547,6 +570,22 @@ class SqliteWorkQueueStore:
         row = conn.execute(
             "SELECT * FROM work_queue_tasks WHERE idempotency_key = ? LIMIT 1",
             (key,),
+        ).fetchone()
+        return self._row_to_task(row) if row else None
+
+    def create_idempotent(self, task: WorkTask) -> WorkTask:
+        if task.idempotency_key is not None:
+            existing = self.find_by_idempotency_key(task.idempotency_key)
+            if existing is not None:
+                return existing
+        return self.create(task)
+
+    def completed_task_for_key(self, key: str, *, exclude_task_id: str) -> WorkTask | None:
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT * FROM work_queue_tasks "
+            "WHERE idempotency_key = ? AND status = 'completed' AND id != ? LIMIT 1",
+            (key, exclude_task_id),
         ).fetchone()
         return self._row_to_task(row) if row else None
 
