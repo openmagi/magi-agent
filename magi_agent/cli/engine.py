@@ -1515,6 +1515,91 @@ class MagiEngineDriver:
         except Exception:
             return None
 
+    async def _resource_claim_llm_block(
+        self, *, turn_id: str, final_text: str
+    ) -> str | None:
+        """C-MERGE-2 — reason if a resource/self claim has no read evidence.
+
+        Merged self-claim / resource-existence concern. The gate is checked FIRST
+        (no evidence collection, no model call when off → byte-identical). When
+        active, the turn's evidence is collected via the cheap idempotent
+        ``_collect_evidence`` read: if the turn produced ANY SOURCE/READ evidence
+        (a ``SourceInspection`` / ``WebSearch`` / ``KnowledgeSearch`` record —
+        same types the source-ledger projector counts), the resource claim is
+        considered backed and the check passes WITHOUT a model call (conservative
+        — a turn that actually read something is never false-blocked). Only a
+        zero-source-read turn is judged by the criterion engine for an
+        unverified-resource claim.
+
+        Gated by ``MAGI_VERIFY_RESOURCE_CLAIM`` OR either of the self-claim /
+        resource-existence Customize presets, AND a critic model present
+        (``MAGI_EGRESS_GATE_ENABLED`` — the cost gate). Inactive / no model / any
+        error ⇒ ``None`` (fail-open).
+        """
+        import os  # noqa: PLC0415
+
+        from magi_agent.config.env import (  # noqa: PLC0415
+            parse_resource_claim_verification_enabled,
+        )
+        from magi_agent.customize.runtime_gate import preset_enabled  # noqa: PLC0415
+
+        if self._criterion_model_factory is None:
+            return None
+        if not (
+            parse_resource_claim_verification_enabled(os.environ)
+            or preset_enabled("self-claim", default=False)
+            or preset_enabled("resource-existence", default=False)
+        ):
+            return None
+        # Det pre-gate: a turn that inspected ≥1 source can't false-block, and
+        # skips the model call entirely. Uses the same source-evidence types as
+        # the source-ledger projector.
+        try:
+            from magi_agent.evidence.final_output_gate import (  # noqa: PLC0415
+                _SOURCE_EVIDENCE_TYPES,
+            )
+
+            for record in self._collect_evidence(turn_id):
+                record_type = (
+                    record.get("type")
+                    if isinstance(record, Mapping)
+                    else getattr(record, "type", None)
+                )
+                if isinstance(record_type, str) and record_type in _SOURCE_EVIDENCE_TYPES:
+                    return None
+        except Exception:
+            logger.debug("resource-claim pre-gate failed", exc_info=True)
+            return None
+        try:
+            from magi_agent.customize.criterion_engine import (  # noqa: PLC0415
+                evaluate_criterion,
+            )
+
+            criterion = (
+                "The agent's turn produced NO source/read evidence (it inspected "
+                "no file, URL, or knowledge source this turn). Judge the DRAFT. "
+                "Pass=true unless the draft ASSERTS that a specific resource "
+                "exists, was read, or was checked — for example: a concrete file "
+                "path ('/Users/...', '/home/...', 'utils.py contains...'), a URL "
+                "('https://example.com says...'), or a self-claim about contents "
+                "('I read the README and it says X', '문서를 확인했더니...'). A "
+                "GENERAL answer that does not assert reading anything, an honest "
+                "report that no resource was inspected, or a clarifying question "
+                "is pass=true. Pass=false ONLY if the draft makes such a "
+                "resource-existence or self-read claim despite the turn taking no "
+                "such read."
+            )
+            passed, reason = await evaluate_criterion(
+                criterion=criterion,
+                draft_text=final_text,
+                model_factory=self._criterion_model_factory,
+            )
+            if not passed:
+                return reason or "resource/self claim has no read evidence"
+            return None
+        except Exception:
+            return None
+
     @property
     def runner(self) -> object | None:
         return self._runner
@@ -2436,6 +2521,14 @@ class MagiEngineDriver:
         # pre-gate; fail-open → None.
         if llm_block_reason is None:
             llm_block_reason = await self._completion_evidence_llm_block(
+                turn_id=turn_id, final_text=emitted_text
+            )
+        # C-MERGE-2 — built-in resource/self-claim llm gate. Same shape, but the
+        # det pre-gate counts SOURCE/READ evidence (SourceInspection / WebSearch
+        # / KnowledgeSearch), so a turn that actually inspected ≥1 source skips
+        # the model call.
+        if llm_block_reason is None:
+            llm_block_reason = await self._resource_claim_llm_block(
                 turn_id=turn_id, final_text=emitted_text
             )
         if llm_block_reason is not None:
