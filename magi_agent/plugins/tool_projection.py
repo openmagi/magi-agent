@@ -74,6 +74,48 @@ _FILE_SEND_INPUT_SCHEMA: dict[str, object] = {
     },
     "required": ("path",),
 }
+_SPAWN_AGENT_INPUT_SCHEMA: dict[str, object] = {
+    "type": "object",
+    "properties": {
+        "prompt": {
+            "type": "string",
+            "description": "The task prompt to send to the child agent.",
+        },
+        "persona": {
+            "type": "string",
+            "description": "Persona/role for the child agent (e.g. 'coding', 'research', 'general').",
+        },
+        "provider": {
+            "type": "string",
+            "description": "LLM provider override for the child (e.g. 'anthropic', 'openai').",
+        },
+        "model": {
+            "type": "string",
+            "description": "Model override for the child (e.g. 'claude-opus-4-5').",
+        },
+        "budgetMs": {
+            "type": "integer",
+            "description": "Wall-clock time budget in milliseconds for the child task.",
+        },
+        "allowedTools": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": (
+                "Per-task tool grant: names of tools the child is allowed to use. "
+                "The grant is intersected with the session ceiling — it can only narrow, not expand."
+            ),
+        },
+        "recipeRefs": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": (
+                "Recipe pack references to bind to the child task "
+                "(validators, gates, and instructions scoped to this subtask)."
+            ),
+        },
+    },
+    "additionalProperties": True,
+}
 _SPECIAL_TOOL_METADATA: dict[tuple[str, str], dict[str, object]] = {
     ("openmagi.agentmemory", "AgentMemoryRemember"): {
         "permission": "write",
@@ -130,6 +172,15 @@ _SPECIAL_TOOL_METADATA: dict[tuple[str, str], dict[str, object]] = {
     },
     ("openmagi.source-ledger", "ExternalSourceCache"): {
         "permission": "write",
+    },
+    ("openmagi.subagents", "SpawnAgent"): {
+        "description": (
+            "Delegate a bounded subtask to a child Magi Agent. "
+            "Use allowedTools to narrow the child's tool grant (intersected with the session ceiling; "
+            "can only restrict, not expand) and recipeRefs to bind recipe packs "
+            "(validators, gates, and instructions) scoped to that child task."
+        ),
+        "input_schema": _SPAWN_AGENT_INPUT_SCHEMA,
     },
     ("openmagi.taskboard", "TaskBoard"): {
         "permission": "write",
