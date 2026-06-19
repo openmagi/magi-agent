@@ -16,6 +16,7 @@ from magi_agent.customize.preset_map import (
     tier_for,
 )
 from magi_agent.customize.what_menu import what_menu
+from magi_agent.customize.preset_map import scope_for_preset
 from magi_agent.harness.presets import builtin_preset_catalog
 from magi_agent.transport.app_api import _RUNTIME_HOOK_POINTS as _HOOK_POINTS
 
@@ -76,6 +77,11 @@ def _build_harness_presets() -> list[dict[str, Any]]:
                 "optMethod": opt_method_for(preset.key),
                 "description": description_for(preset.key),
                 "supportedModes": list(supported_modes_for(preset.key)),
+                # Phase 1 — scope classification (mirrors customize/scope.SCOPES,
+                # same vocabulary the custom-rule builder uses). Lets the modal
+                # group presets by scope (Phase 4 UI), and lets the engine drop
+                # refs whose scope does not cover the current turn.
+                "scope": list(scope_for_preset(preset.key)),
             }
         )
     return entries

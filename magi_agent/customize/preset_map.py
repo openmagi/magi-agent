@@ -25,7 +25,108 @@ handled with the Phase 3 reality-check batch. No fake toggles.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+
+
+# ---------------------------------------------------------------------------
+# 38-preset scope classification (Phase 1).
+#
+# Scope vocabulary lives in ``customize/scope.py`` (mirrors ``custom_rules.SCOPES``
+# so the schema exposed in the UI custom-rule builder matches the catalog rows).
+# A preset may belong to multiple scopes — multi-scope presets match every turn
+# that includes any of their scopes (``always`` is the universal). The runtime
+# filter (``_apply_customize_verification`` / opt-in satisfier) consults this map
+# via :func:`preset_scope_matches`.
+#
+# Defaults: ``always`` is conservative — a preset not in this map (e.g. an
+# externally-contributed unknown preset) is treated as scope ``("always",)`` by
+# :func:`scope_for_preset`. Listing every catalog preset here explicitly avoids
+# silent classification drift.
+# ---------------------------------------------------------------------------
+PRESET_SCOPES: dict[str, tuple[str, ...]] = {
+    # always — security + universal answer-quality + universal-fact verifiers
+    "arity-permission": ("always",),
+    "dangerous-patterns": ("always",),
+    "git-safety": ("always",),
+    "path-escape": ("always",),
+    "sealed-files": ("always",),
+    "secret-exposure": ("always",),
+    "redaction": ("always",),
+    "evidence-pack": ("always",),
+    "answer-quality": ("always",),
+    "pre-refusal": ("always",),
+    "output-purity": ("always",),
+    "response-language": ("always",),
+    "self-claim": ("always",),
+    "resource-existence": ("always",),
+    "benchmark-verifier": ("always",),
+    # coding
+    "coding-verification": ("coding",),
+    "coding-context": ("coding",),
+    "coding-workspace-lock": ("coding",),
+    "coding-child-review": ("coding",),
+    "deterministic-evidence": ("coding",),
+    # research
+    "fact-grounding": ("research",),
+    "source-authority": ("research",),
+    "parallel-research": ("research",),
+    "claim-citation": ("research",),
+    # delivery
+    "artifact-delivery": ("delivery",),
+    "output-delivery": ("delivery",),
+    "document-authoring-coverage": ("delivery",),
+    # memory
+    "memory-continuity": ("memory",),
+    # task / automation
+    "task-contract": ("task",),
+    "goal-progress": ("task",),
+    "task-board-completion": ("task",),
+    "completion-evidence": ("task",),
+    "deferral-blocker": ("task",),
+    "autopilot-consensus-gate": ("task",),
+    "autopilot-interview-gate": ("task",),
+    "autopilot-phase-router": ("task",),
+    "autopilot-qa-gate": ("task",),
+    "autopilot-review-gate": ("task",),
+}
+
+
+def scope_for_preset(preset_id: str) -> tuple[str, ...]:
+    """Return the scope tuple for a preset id; unknown presets ⇒ ``("always",)``."""
+    return PRESET_SCOPES.get(preset_id, ("always",))
+
+
+def filter_refs_by_scope(
+    refs: tuple[str, ...] | list[str],
+    *,
+    current_scope: str,
+) -> tuple[str, ...]:
+    """Drop ``refs`` belonging to presets whose scope does not include
+    ``current_scope`` (and is not ``always``).
+
+    A ref is "scoped" when it appears in some preset seam's ``controls_refs``.
+    Refs not owned by any preset seam (e.g. external pack validators) are kept
+    unchanged — scope filtering is opt-in per preset and cannot silently drop a
+    ref a preset has no claim over.
+    """
+    from magi_agent.customize.scope import preset_scope_matches  # local — circular guard
+
+    # Build ref → preset_id index from PRESET_SEAMS at first call (cheap; small).
+    ref_owner: dict[str, str] = {}
+    for preset_id, seam in PRESET_SEAMS.items():
+        for ref in seam.controls_refs:
+            ref_owner.setdefault(ref, preset_id)
+
+    kept: list[str] = []
+    for ref in refs:
+        owner = ref_owner.get(ref)
+        if owner is None:
+            kept.append(ref)
+            continue
+        scopes = scope_for_preset(owner)
+        if preset_scope_matches(scopes, current_scope):
+            kept.append(ref)
+    return tuple(kept)
 
 
 @dataclass(frozen=True)
