@@ -495,6 +495,52 @@ def test_inmemory_events_runs_empty():
 
 
 # ---------------------------------------------------------------------------
+# Task 1: terminal event tail queries
+# ---------------------------------------------------------------------------
+
+
+def test_terminal_events_since_and_latest(tmp_path):
+    """terminal_events_since and latest_terminal_event_id tail terminal-kind events.
+
+    Asserts:
+      - latest_terminal_event_id() starts at 0 (no events).
+      - After claim (non-terminal) and complete (terminal), latest > 0.
+      - terminal_events_since(0) returns only 'completed' (excludes 'claimed').
+      - terminal_events_since(latest) returns [] (no newer events).
+      - After a second terminal event ('blocked'), it appears in the cursor-advanced tail.
+    """
+    from magi_agent.missions.work_queue.store import SqliteWorkQueueStore
+
+    s = SqliteWorkQueueStore(tmp_path / "wq.db")
+    assert s.latest_terminal_event_id() == 0  # no events yet
+    s.create(WorkTask(id="t", title="x", status="ready", created_at=1))
+    s.claim("t", claimer="w1", now=1000, worker_pid=1)  # emits 'claimed' (NOT terminal)
+    s.complete("t", result="D")  # emits 'completed' (terminal)
+    latest = s.latest_terminal_event_id()
+    assert latest > 0
+    # since 0 → the completed event; since latest → nothing newer
+    since0 = s.terminal_events_since(0)
+    assert [e["kind"] for e in since0] == ["completed"]  # 'claimed' excluded (not terminal)
+    assert s.terminal_events_since(latest) == []
+    # a second terminal task shows up after the cursor
+    s.create(WorkTask(id="u", title="y", status="running", created_at=2))
+    s.record_failure("u", outcome="crashed", failure_limit=1)  # 1>=1 → 'blocked' (terminal)
+    after = s.terminal_events_since(latest)
+    assert [e["kind"] for e in after] == ["blocked"]
+
+
+def test_inmemory_terminal_events_empty():
+    """InMemoryWorkQueueStore.terminal_events_since and latest_terminal_event_id return [] and 0.
+
+    InMemory does not persist events by design — consistent with list_task_events().
+    """
+    from magi_agent.missions.work_queue.store import InMemoryWorkQueueStore
+
+    s = InMemoryWorkQueueStore()
+    assert s.terminal_events_since(0) == [] and s.latest_terminal_event_id() == 0
+
+
+# ---------------------------------------------------------------------------
 # Rollback guard on claim error — Task 6 Fix 1
 # ---------------------------------------------------------------------------
 
