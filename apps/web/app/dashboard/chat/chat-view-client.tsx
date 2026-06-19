@@ -16,6 +16,7 @@ import type {
 } from "@/components/chat/chat-input";
 import { ChatModelPicker } from "@/components/chat/chat-model-picker";
 import { useChatStore, syncResetCounters } from "@/chat-core";
+import { clipMessagesAtResetBoundary, getResetBoundaryTimestamp } from "@/chat-core";
 import * as chatApi from "@/lib/chat/chat-client";
 import { setChatTokenGetter } from "@/lib/chat/chat-client";
 import { setAttachmentTokenGetter } from "@/chat-core";
@@ -721,7 +722,13 @@ export function ChatViewClient({
       }, { botId });
       if (!isCurrentBot()) return;
 
-      const allMessages = useChatStore.getState().messages[channel] ?? [];
+      // Drop messages from BEFORE the current reset boundary so a Reset truly
+      // starts a fresh conversation (in-memory store keeps pre-reset history for
+      // the divider/scroll-back UX, but we must NOT replay it to the backend).
+      const allMessages = clipMessagesAtResetBoundary(
+        useChatStore.getState().messages[channel] ?? [],
+        getResetBoundaryTimestamp(botId, channel),
+      );
 
       const attempt = async (retryCount: number): Promise<void> => {
         const controller = new AbortController();
