@@ -24,6 +24,7 @@ from .transport.customize import register_customize_routes
 from .transport.credentials import register_credentials_routes
 from .transport.integrations import register_integrations_routes
 from magi_agent.observability import register_observability, register_session_transcript
+from magi_agent.missions.work_queue.board_api import register_work_queue_board
 from magi_agent.egress_proxy.config import EgressProxyConfig
 
 logger = logging.getLogger(__name__)
@@ -124,5 +125,8 @@ def create_app(runtime: OpenMagiRuntime) -> FastAPI:
     # Default-OFF: installs the per-session JSONL transcript sink only when
     # MAGI_SESSION_TRANSCRIPT_ENABLED is truthy; otherwise registers nothing.
     register_session_transcript(app, runtime)
+    # Default-OFF: mounts the read-only work-queue board API only when
+    # MAGI_WORK_QUEUE_BOARD_API_ENABLED is truthy; otherwise registers nothing.
+    register_work_queue_board(app, runtime)
 
     return app

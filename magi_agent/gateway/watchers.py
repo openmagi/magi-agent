@@ -148,12 +148,7 @@ def _work_queue_executor_enabled() -> bool:
     return is_work_queue_executor_enabled()
 
 
-def _work_queue_db_path_from_env() -> Path:
-    raw = os.environ.get("MAGI_WORK_QUEUE_DB_PATH", "")
-    if raw.strip():
-        return Path(raw).expanduser()
-    state_dir = Path(os.environ.get("MAGI_STATE_DIR", "~/.magi")).expanduser()
-    return state_dir / "work_queue.db"
+from magi_agent.missions.work_queue.store import work_queue_db_path_from_env as _work_queue_db_path_from_env  # noqa: E402
 
 
 def _work_queue_claimer_from_env() -> str:
