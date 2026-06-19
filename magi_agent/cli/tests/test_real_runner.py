@@ -775,7 +775,17 @@ def test_first_party_cli_tools_run_mutations_with_per_invocation_scope(
     tmp_path,
 ) -> None:
     monkeypatch.setenv("MAGI_GA_LIVE_ENABLED", "0")
-    tools = _build_first_party_adk_tools(cwd=tmp_path, session_id="sid-tools")
+    # A-1 fail-closed flip: mode-derived permission scope is now the DEFAULT, so a
+    # FileWrite under the bare ``default`` mode reaches ``needs_approval`` (ask).
+    # This test's intent is the per-invocation mutation + distinct receipt, which
+    # requires the write to actually run, so drive it under ``acceptEdits`` (the
+    # edit-class preapproval path) — the secure, explicit equivalent of the old
+    # silent full-toolhost preapproval.
+    tools = _build_first_party_adk_tools(
+        cwd=tmp_path,
+        session_id="sid-tools",
+        permission_mode="acceptEdits",
+    )
     file_write = _tool_by_name(tools, "FileWrite")
 
     first = _run_adk_tool(

@@ -46,12 +46,6 @@ class CliToolRuntime:
     general_automation_receipts: "GeneralAutomationReceiptLedgerStore"
 
 
-_LEGACY_FULL_TOOLHOST_SCOPE: dict[str, object] = {
-    "mode": "selected_full_toolhost",
-    "source": "selected_full_toolhost",
-}
-
-
 def build_cli_tool_runtime(
     *,
     workspace_root: str,
@@ -314,25 +308,44 @@ def _resolve_cli_permission_scope(
 ) -> dict[str, object]:
     """Return the ``permission_scope`` for a CLI tool call.
 
-    When ``MAGI_PERMISSION_SCOPE_FROM_MODE`` is OFF (default) this returns the
-    legacy hardcoded ``selected_full_toolhost`` scope — byte-identical to the
-    pre-PR1 behavior, so the regression surface is zero. When ON, the scope is
-    derived from ``permission_mode`` + the called tool's manifest via
-    :class:`~magi_agent.tools.permission_scope.PermissionScopeResolver`:
+    A-1 fail-closed flip: mode-derived strict scope is now the DEFAULT.
+    The scope is derived from ``permission_mode`` + the called tool's manifest
+    via :class:`~magi_agent.tools.permission_scope.PermissionScopeResolver`:
     ``default``/``smartApprove`` get no preapproval (arbiter ``ask`` reaches),
     ``acceptEdits`` preapproves only edit-class tools, ``bypassPermissions`` gets
     a ``bypass`` scope (hard-safety still enforced).
 
-    Fail-open: any error (gate lookup, manifest resolution) collapses back to the
-    legacy scope so a malformed runtime never breaks tool dispatch.
+    The deprecated rollback hatch ``MAGI_PERMISSION_SCOPE_LEGACY_FULL_TOOLHOST``
+    (default OFF) restores the byte-identical legacy ``selected_full_toolhost``
+    stamp for one release. Disabling ``MAGI_PERMISSION_SCOPE_FROM_MODE`` without
+    that hatch still resolves to the strict builtin scope — never full-toolhost.
+
+    Fail-CLOSED: any error (gate lookup, manifest resolution) collapses to the
+    least-privilege :func:`fail_closed_scope`, NOT the legacy full-toolhost
+    scope, so a malformed runtime can never silently over-preapprove.
     """
+    from magi_agent.tools.permission_scope import (  # noqa: PLC0415
+        LEGACY_FULL_TOOLHOST_SCOPE,
+        PermissionScopeResolver,
+        fail_closed_scope,
+    )
+
     try:
         from magi_agent.config.env import (  # noqa: PLC0415
             permission_scope_from_mode_enabled,
+            permission_scope_legacy_full_toolhost_enabled,
         )
 
+        # Deprecated rollback hatch wins outright: restore the byte-identical
+        # legacy stamp for operators who must roll back the A-1 default flip.
+        if permission_scope_legacy_full_toolhost_enabled():
+            return dict(LEGACY_FULL_TOOLHOST_SCOPE)
+
         if not permission_scope_from_mode_enabled():
-            return dict(_LEGACY_FULL_TOOLHOST_SCOPE)
+            # Mode-derivation explicitly disabled (without the rollback hatch):
+            # fall back to the strict (no-preapproval) scope so OFF is still
+            # fail-closed — never the legacy full-toolhost stamp.
+            return fail_closed_scope("mode_derivation_disabled")
 
         manifest = _manifest_for_adk_context(adk_tool_context, registry=registry)
         if manifest is None:
@@ -343,17 +356,13 @@ def _resolve_cli_permission_scope(
                 return {"mode": "bypass", "source": "bypass"}
             return {"mode": "default", "source": "builtin"}
 
-        from magi_agent.tools.permission_scope import (  # noqa: PLC0415
-            PermissionScopeResolver,
-        )
-
         return PermissionScopeResolver().resolve(
             permission_mode=permission_mode,
             manifest=manifest,
             channel="cli",
         )
     except Exception:
-        return dict(_LEGACY_FULL_TOOLHOST_SCOPE)
+        return fail_closed_scope("resolver_error")
 
 
 def _manifest_for_adk_context(

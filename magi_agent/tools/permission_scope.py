@@ -32,7 +32,34 @@ from __future__ import annotations
 
 from magi_agent.tools.manifest import ToolManifest
 
-__all__ = ["PermissionScopeResolver", "EDIT_CLASS_TOOLS"]
+__all__ = [
+    "PermissionScopeResolver",
+    "EDIT_CLASS_TOOLS",
+    "fail_closed_scope",
+    "LEGACY_FULL_TOOLHOST_SCOPE",
+]
+
+
+# The deprecated, byte-identical legacy stamp restored ONLY behind the explicit
+# rollback hatch ``MAGI_PERMISSION_SCOPE_LEGACY_FULL_TOOLHOST`` (default OFF).
+# Consolidated here so the CLI and first-party resolvers share one definition
+# (was duplicated across ``cli/tool_runtime.py`` and ``cli/wiring.py``).
+LEGACY_FULL_TOOLHOST_SCOPE: dict[str, object] = {
+    "mode": "selected_full_toolhost",
+    "source": "selected_full_toolhost",
+}
+
+
+def fail_closed_scope(reason: str) -> dict[str, object]:
+    """Return the least-privilege scope used on a resolver-error fallback (A-1).
+
+    The legacy CLI/first-party resolvers collapsed ``except Exception`` back to
+    the broad ``selected_full_toolhost`` scope — fail-OPEN. The fail-closed
+    invariant requires the error path to resolve to NO preapproval (the arbiter
+    ``ask`` branch reaches), exactly like the ``default`` mode, while recording
+    *why* it fell back via ``scopeResolution`` for auditing.
+    """
+    return {"mode": "default", "source": "fail_closed", "scopeResolution": reason}
 
 
 # Edit-class tool names that ``acceptEdits`` preapproves. Mirrors

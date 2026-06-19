@@ -3127,24 +3127,55 @@ def persistent_python_enabled(env: Mapping[str, str] | None = None) -> bool:
 
 
 MAGI_PERMISSION_SCOPE_FROM_MODE_ENV = "MAGI_PERMISSION_SCOPE_FROM_MODE"
+MAGI_PERMISSION_SCOPE_LEGACY_FULL_TOOLHOST_ENV = (
+    "MAGI_PERMISSION_SCOPE_LEGACY_FULL_TOOLHOST"
+)
 
 
 def permission_scope_from_mode_enabled(env: Mapping[str, str] | None = None) -> bool:
     """Single source of truth for the mode-derived permission-scope gate.
 
-    Default OFF (strict truthy opt-in: "1"/"true"/"yes"/"on"). When OFF the CLI
-    tool runtime keeps stamping the legacy hardcoded
-    ``permission_scope={"mode": "selected_full_toolhost", ...}`` onto every
-    ``ToolContext`` — byte-identical to before. When ON, the scope is derived
-    from the active permission mode via
+    Default ON (A-1 fail-closed flip). When the env var is ABSENT the CLI /
+    first-party tool runtimes derive the ``permission_scope`` from the active
+    permission mode via
     :class:`magi_agent.tools.permission_scope.PermissionScopeResolver`, so the
     ``default`` mode no longer preapproves mutating tools and the arbiter "ask"
-    branch can actually be reached. Like ``is_egress_gate_enabled`` this is an
-    additive, default-disabled seam and deliberately does NOT follow the
-    runtime-profile default-ON convention.
+    branch is reachable. Set the var to a falsey value ("0"/"false"/"no"/"off")
+    to disable mode-derivation; even then the runtime falls back to the strict
+    builtin scope (NOT the legacy full-toolhost stamp) unless the explicit,
+    deprecated rollback hatch
+    (:func:`permission_scope_legacy_full_toolhost_enabled`) is also set.
+
+    Resolution: absent -> ON; explicit truthy -> ON; explicit falsey -> OFF.
     """
     source = os.environ if env is None else env
-    return _is_true(source.get(MAGI_PERMISSION_SCOPE_FROM_MODE_ENV))
+    raw = source.get(MAGI_PERMISSION_SCOPE_FROM_MODE_ENV)
+    if raw is None:
+        return True
+    normalized = raw.strip().lower()
+    if normalized in _FALSE_VALUES:
+        return False
+    if normalized in _TRUE_VALUES:
+        return True
+    # Unrecognised value -> keep the secure default (ON).
+    return True
+
+
+def permission_scope_legacy_full_toolhost_enabled(
+    env: Mapping[str, str] | None = None,
+) -> bool:
+    """Deprecated rollback hatch for the legacy full-toolhost permission scope.
+
+    Default OFF (strict truthy opt-in). When set, the CLI / first-party tool
+    runtimes restore the byte-identical pre-A-1 behavior of stamping
+    ``permission_scope={"mode": "selected_full_toolhost", ...}`` onto every
+    ``ToolContext`` — fail-OPEN. This exists ONLY so operators who hit a
+    regression from the A-1 default flip can roll back for one release; it is
+    deprecated and slated for removal. The arbiter "ask" branch is unreachable
+    while it is set, so it must never be enabled in a hardened deployment.
+    """
+    source = os.environ if env is None else env
+    return _is_true(source.get(MAGI_PERMISSION_SCOPE_LEGACY_FULL_TOOLHOST_ENV))
 
 
 MAGI_CONTROL_STORE_DURABLE_ENV = "MAGI_CONTROL_STORE_DURABLE"

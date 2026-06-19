@@ -739,12 +739,6 @@ def _build_first_party_adk_tools(
     )
 
 
-_LEGACY_FULL_TOOLHOST_SCOPE: dict[str, object] = {
-    "mode": "selected_full_toolhost",
-    "source": "selected_full_toolhost",
-}
-
-
 def _apply_orchestrator_profile(
     full_tools: list[object],
     env: Mapping[str, str] | None = None,
@@ -785,20 +779,36 @@ def _resolve_first_party_permission_scope(
 ) -> dict[str, object]:
     """Return the ``permission_scope`` for a first-party CLI tool call.
 
-    When ``MAGI_PERMISSION_SCOPE_FROM_MODE`` is OFF (default) this returns the
-    legacy hardcoded ``selected_full_toolhost`` scope — byte-identical to the
-    pre-PR1 behavior. When ON, the scope is derived from ``permission_mode`` +
-    the called tool's manifest via
-    :class:`~magi_agent.tools.permission_scope.PermissionScopeResolver`. Fail-open:
-    any error collapses back to the legacy scope.
+    A-1 fail-closed flip: mode-derived strict scope is now the DEFAULT. The
+    scope is derived from ``permission_mode`` + the called tool's manifest via
+    :class:`~magi_agent.tools.permission_scope.PermissionScopeResolver`.
+
+    The deprecated rollback hatch ``MAGI_PERMISSION_SCOPE_LEGACY_FULL_TOOLHOST``
+    (default OFF) restores the byte-identical legacy ``selected_full_toolhost``
+    stamp for one release. Disabling ``MAGI_PERMISSION_SCOPE_FROM_MODE`` without
+    that hatch still resolves to the strict builtin scope — never full-toolhost.
+
+    Fail-CLOSED: any error collapses to the least-privilege
+    :func:`fail_closed_scope`, NOT the legacy full-toolhost scope.
     """
+    from magi_agent.tools.permission_scope import (  # noqa: PLC0415
+        LEGACY_FULL_TOOLHOST_SCOPE,
+        PermissionScopeResolver,
+        fail_closed_scope,
+    )
+
     try:
         from magi_agent.config.env import (  # noqa: PLC0415
             permission_scope_from_mode_enabled,
+            permission_scope_legacy_full_toolhost_enabled,
         )
 
+        # Deprecated rollback hatch wins outright (see cli/tool_runtime.py).
+        if permission_scope_legacy_full_toolhost_enabled():
+            return dict(LEGACY_FULL_TOOLHOST_SCOPE)
+
         if not permission_scope_from_mode_enabled():
-            return dict(_LEGACY_FULL_TOOLHOST_SCOPE)
+            return fail_closed_scope("mode_derivation_disabled")
 
         manifest = None
         if tool_name:
@@ -813,17 +823,13 @@ def _resolve_first_party_permission_scope(
                 return {"mode": "bypass", "source": "bypass"}
             return {"mode": "default", "source": "builtin"}
 
-        from magi_agent.tools.permission_scope import (  # noqa: PLC0415
-            PermissionScopeResolver,
-        )
-
         return PermissionScopeResolver().resolve(
             permission_mode=permission_mode,
             manifest=manifest,
             channel="cli",
         )
     except Exception:
-        return dict(_LEGACY_FULL_TOOLHOST_SCOPE)
+        return fail_closed_scope("resolver_error")
 
 
 def _source_ledger_for_session(
