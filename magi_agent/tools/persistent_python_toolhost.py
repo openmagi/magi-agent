@@ -9,27 +9,36 @@ invoked from the same runtime build paths. It is ADDITIVE and removable: if the
 manifest is not registered (pack disabled), ``bind_persistent_python_handler``
 binds nothing and returns ``()``.
 
-CodeAct persistence: the handler keeps a ``dict[key, _Interpreter]`` keyed by
+CodeAct persistence: the handler keeps a ``dict[key, PythonExecWorker]`` keyed by
 ``(workspace_root, turn_id or session_id or "local")`` — the same keying idea as
-``CoreToolhostHandlerSet._host_for``. Each interpreter persists a ``globals``
-dict across calls so variables carry across steps within a turn; a different
-turn/session gets a fresh namespace (no cross-question leak).
+``CoreToolhostHandlerSet._host_for``. Each worker is a long-lived ``python3 -I``
+subprocess whose module namespace persists across calls so variables carry across
+steps within a turn; a different turn/session gets a fresh subprocess namespace
+(no cross-question leak).
 
-Security: OSS-local full-trust scope. This is a guarded ``exec`` in-process — the
-real control is the existing execute/dangerous/requires-approval machinery that
-governs ``Bash``/``PythonExec``. The hosted opinionated runtime gates this pack
-off (``config.toml [packs] disable``).
+Killable timeout (B-3): execution previously ran on a daemon ``threading.Thread``
+with ``Thread.join(timeout=...)``. Python cannot kill a thread, so a runaway
+``while True`` cell kept pinning a CPU core after the "timeout" returned and
+leaked one thread per timeout. This binder now reuses the SAME killable
+subprocess machinery that backs ``PythonExec`` (``python_exec_worker``): on
+timeout the worker process *group* is SIGKILLed (``start_new_session=True`` +
+``os.killpg``) and a fresh worker is spawned for that key on the next call. No
+second worker implementation is forked.
+
+Security: OSS-local full-trust scope. The subprocess runs with a PATH-only env
+(no inherited secrets) and the import allowlist set to the wildcard ``"*"`` so the
+full-trust ``exec`` semantics are preserved (arbitrary imports allowed) — the real
+control is the existing execute/dangerous/requires-approval machinery that governs
+``Bash``/``PythonExec``. The hosted opinionated runtime gates this pack off
+(``config.toml [packs] disable``).
 """
 from __future__ import annotations
 
-import ast
-import contextlib
-import io
-import threading
 from collections.abc import Mapping
-from typing import Any
 
 from .context import ToolContext
+from .python_exec import PythonExecConfig
+from .python_exec_worker import PythonExecWorker, WorkerDead, WorkerTimeout
 from .registry import ToolRegistry
 from .result import ToolResult
 
@@ -41,80 +50,10 @@ _PERSISTENT_PYTHON_PACK_ID = "open" "magi.tools-persistent-python"
 _DEFAULT_TIMEOUT_S = 30.0
 _DEFAULT_MAX_OUTPUT_BYTES = 16_384
 
-
-class _Interpreter:
-    """A long-lived guarded-``exec`` namespace for one context key.
-
-    ``globals`` persists across calls so the model can load data once and keep
-    filtering/aggregating it across steps (CodeAct). Execution runs the code as a
-    module body, then — if the final statement is a bare expression — evaluates it
-    so its value can be reported (Jupyter-style last-expression echo).
-    """
-
-    def __init__(self) -> None:
-        self._globals: dict[str, Any] = {"__name__": "__persistent_python__"}
-
-    def run(self, code: str, *, timeout_s: float) -> tuple[bool, str, str | None, str | None]:
-        """Execute ``code``; return ``(ok, stdout, value_repr, error)``.
-
-        Never raises: a syntax/runtime error or a timeout is reported as
-        ``ok=False`` with a short ``error`` string. ``value_repr`` is the repr of
-        the final bare expression when present, else ``None``.
-        """
-        stdout_buf = io.StringIO()
-        outcome: dict[str, Any] = {"ok": False, "value": None, "error": None}
-
-        def _target() -> None:
-            try:
-                body, last_expr = _split_last_expression(code)
-                with contextlib.redirect_stdout(stdout_buf):
-                    if body is not None:
-                        exec(body, self._globals)  # noqa: S102 - full-trust local
-                    if last_expr is not None:
-                        value = eval(last_expr, self._globals)  # noqa: S307
-                        outcome["value"] = None if value is None else repr(value)
-                outcome["ok"] = True
-            except BaseException as exc:  # noqa: BLE001 - fail-soft, report not raise
-                outcome["error"] = f"{type(exc).__name__}: {exc}"
-
-        worker = threading.Thread(target=_target, daemon=True)
-        worker.start()
-        worker.join(timeout=max(0.1, timeout_s))
-        if worker.is_alive():
-            # The daemon thread keeps running but we stop waiting; report a
-            # timeout rather than blocking the agent loop. The namespace may be
-            # left mid-mutation, which is acceptable for a full-trust local tool.
-            return (
-                False,
-                stdout_buf.getvalue(),
-                None,
-                f"TimeoutError: code exceeded {timeout_s:.0f}s wall-clock limit",
-            )
-        return (
-            bool(outcome["ok"]),
-            stdout_buf.getvalue(),
-            outcome["value"],
-            outcome["error"],
-        )
-
-
-def _split_last_expression(code: str) -> tuple[Any | None, Any | None]:
-    """Split ``code`` into a (body, last-expression) pair of compiled code objects.
-
-    If the module's final statement is a bare expression it is compiled
-    separately in ``eval`` mode so its value can be echoed. A parse error is
-    re-raised by the caller's guarded ``exec`` path (compile happens inside the
-    worker so SyntaxError is reported fail-soft).
-    """
-    parsed = ast.parse(code, mode="exec")
-    if parsed.body and isinstance(parsed.body[-1], ast.Expr):
-        last = parsed.body.pop()
-        body_code = compile(parsed, "<persistent_python>", "exec") if parsed.body else None
-        expr_module = ast.Expression(body=last.value)
-        ast.copy_location(expr_module, last)
-        expr_code = compile(expr_module, "<persistent_python>", "eval")
-        return body_code, expr_code
-    return compile(parsed, "<persistent_python>", "exec"), None
+# Full-trust local scope: allow ALL imports inside the killable subprocess. The
+# shared worker driver treats ``"*"`` as "no import allowlist", preserving the
+# in-process ``exec`` semantics this pack had before the subprocess migration.
+_FULL_TRUST_ALLOWLIST: tuple[str, ...] = ("*",)
 
 
 def _bounded_head_tail(text: str, max_bytes: int) -> str:
@@ -138,12 +77,18 @@ def _bounded_head_tail(text: str, max_bytes: int) -> str:
 
 
 class PersistentPythonHandlerSet:
-    """Per-context-key persistent interpreters for the ``PersistentPython`` tool.
+    """Per-context-key persistent **subprocess** workers for ``PersistentPython``.
 
     A single instance is created once per registry (one per CLI/runtime session),
-    so the ``_interpreters`` map survives across calls. Keyed by
+    so the ``_workers`` map survives across calls. Keyed by
     ``(workspace_root, turn_id or session_id or "local")`` — the same keying idea
     as ``CoreToolhostHandlerSet._host_for``.
+
+    Each key owns one long-lived, killable ``PythonExecWorker`` subprocess (the
+    same primitive that backs ``PythonExec``) instead of an in-process daemon
+    thread. The subprocess module namespace persists across calls (CodeAct); a
+    runaway cell is SIGKILLed on timeout and the worker for that key is dropped so
+    the next call spawns a fresh namespace.
     """
 
     def __init__(
@@ -154,7 +99,16 @@ class PersistentPythonHandlerSet:
     ) -> None:
         self._timeout_s = timeout_s
         self._max_output_bytes = max_output_bytes
-        self._interpreters: dict[tuple[str, str], _Interpreter] = {}
+        # Full-trust config for the shared worker: wildcard allowlist (arbitrary
+        # imports), our wall-clock timeout, and a raw in-driver capture cap a bit
+        # above the host head+tail cap so truncation still shows an elision marker.
+        self._worker_config = PythonExecConfig(
+            timeout_s=timeout_s,
+            max_output_bytes=max_output_bytes,
+            raw_capture_bytes=max(max_output_bytes * 8, 262_144),
+            import_allowlist=_FULL_TRUST_ALLOWLIST,
+        )
+        self._workers: dict[tuple[str, str], PythonExecWorker] = {}
 
     def bind(self, registry: ToolRegistry) -> tuple[str, ...]:
         registration = registry.resolve_registration(PERSISTENT_PYTHON_TOOL_NAME)
@@ -172,12 +126,32 @@ class PersistentPythonHandlerSet:
         scope = context.turn_id or context.session_id or "local"
         return (str(workspace_root), str(scope))
 
-    def _interpreter_for_key(self, key: tuple[str, str]) -> _Interpreter:
-        interpreter = self._interpreters.get(key)
-        if interpreter is None:
-            interpreter = _Interpreter()
-            self._interpreters[key] = interpreter
-        return interpreter
+    def _worker_for_key(self, key: tuple[str, str]) -> PythonExecWorker:
+        worker = self._workers.get(key)
+        if worker is not None and not worker.is_alive():
+            self._drop_worker(key)
+            worker = None
+        if worker is None:
+            workspace_root = key[0] if key[0] != "local" else None
+            worker = PythonExecWorker(
+                workspace_root=workspace_root,
+                config=self._worker_config,
+            )
+            self._workers[key] = worker
+        return worker
+
+    def _drop_worker(self, key: tuple[str, str]) -> None:
+        worker = self._workers.pop(key, None)
+        if worker is not None:
+            try:
+                worker.close()
+            except Exception:  # noqa: BLE001 - best-effort cleanup, never raise
+                pass
+
+    def close(self) -> None:
+        """Kill all per-key worker subprocesses (session/registry teardown)."""
+        for key in list(self._workers):
+            self._drop_worker(key)
 
     def _handle(self, arguments: Mapping[str, object], context: ToolContext) -> ToolResult:
         try:
@@ -190,24 +164,44 @@ class PersistentPythonHandlerSet:
                     metadata={"toolName": PERSISTENT_PYTHON_TOOL_NAME},
                 )
             key = self._context_key(context)
-            interpreter = self._interpreter_for_key(key)
-            ok, stdout, value, error = interpreter.run(code, timeout_s=self._timeout_s)
-            if error and error.startswith("TimeoutError:"):
-                # Timed-out daemon threads can continue mutating their namespace
-                # after this call returns. Drop that interpreter so later calls in
-                # the same turn do not observe partially-mutated state.
-                self._interpreters.pop(key, None)
-            capped_stdout = _bounded_head_tail(stdout, self._max_output_bytes)
-            if ok:
+            worker = self._worker_for_key(key)
+            try:
+                response = worker.execute(code)
+            except WorkerTimeout:
+                # SIGKILLed by the worker; drop it so the next call in this key
+                # spawns a fresh namespace (the OS reclaimed the runaway).
+                self._drop_worker(key)
                 return ToolResult(
-                    status="ok",
-                    output={"stdout": capped_stdout, "value": value},
+                    status="error",
+                    error_code="persistent_python_error",
+                    error_message=(
+                        f"TimeoutError: code exceeded {self._timeout_s:.0f}s "
+                        "wall-clock limit; interpreter killed"
+                    ),
                     metadata={"toolName": PERSISTENT_PYTHON_TOOL_NAME},
                 )
+            except WorkerDead as exc:
+                self._drop_worker(key)
+                return ToolResult(
+                    status="error",
+                    error_code="persistent_python_unavailable",
+                    error_message=str(exc),
+                    metadata={"toolName": PERSISTENT_PYTHON_TOOL_NAME},
+                )
+
+            stdout = str(response.get("stdout") or "")
+            capped_stdout = _bounded_head_tail(stdout, self._max_output_bytes)
+            if response.get("ok"):
+                return ToolResult(
+                    status="ok",
+                    output={"stdout": capped_stdout, "value": response.get("value")},
+                    metadata={"toolName": PERSISTENT_PYTHON_TOOL_NAME},
+                )
+            error_text = str(response.get("error") or "execution failed")
             return ToolResult(
                 status="error",
                 error_code="persistent_python_error",
-                error_message=error or "execution failed",
+                error_message=error_text,
                 output={"stdout": capped_stdout} if capped_stdout else None,
                 metadata={"toolName": PERSISTENT_PYTHON_TOOL_NAME},
             )

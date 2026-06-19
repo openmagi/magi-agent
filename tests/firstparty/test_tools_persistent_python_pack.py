@@ -191,7 +191,10 @@ def test_handler_truncates_large_output() -> None:
 def test_timeout_drops_interpreter_state_for_future_calls() -> None:
     registries, _ = load_into_registries([_TOOL_PACK])
     registry = registries.tools
-    handler_set = PersistentPythonHandlerSet(timeout_s=0.01)
+    # The handler now runs in a killable subprocess; the wall-clock timeout
+    # includes subprocess IPC, so use a realistic budget that still kills the
+    # runaway ``sleep(2)`` cell but not a fast assignment / read.
+    handler_set = PersistentPythonHandlerSet(timeout_s=0.5)
     assert bind_persistent_python_handler(registry, handler_set=handler_set) is handler_set
     handler = _handler(registry)
     ctx = _ctx("turn-timeout")
@@ -199,7 +202,7 @@ def test_timeout_drops_interpreter_state_for_future_calls() -> None:
     seeded = handler({"code": "x = 41"}, ctx)
     assert seeded.status == "ok"
 
-    timed_out = handler({"code": "import time\ntime.sleep(0.2)\nx = 99"}, ctx)
+    timed_out = handler({"code": "import time\ntime.sleep(2)\nx = 99"}, ctx)
     assert timed_out.status == "error"
     assert "TimeoutError" in str(timed_out.error_message)
 
