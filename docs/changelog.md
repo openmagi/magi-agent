@@ -15,6 +15,42 @@ Versions follow the tags published on GitHub Releases.
 
 ### Fixed
 
+## 0.1.55
+
+### Added
+- C-4 PR-D/E/F/H force-false collapse: `tools/*` (#757), `channels/*` (#771),
+  `permissions/auto_control` (#762), and `memory/*` (#766) authority models now
+  reuse the `FalseOnlyAuthorityModel` base. PR-G1/G2/G3 (`evidence`, `harness`,
+  `recipes`) remain open pending an envelope-contract fix.
+- Background-task UX glue: web ack-card + N-running indicator view-models in
+  `chat-core` (#769) so the chat surfaces can render the durable-work-queue's
+  state. Pure logic, no React/lib deps.
+- Lab-profile opt-in for the background-task UX: `scripts/dogfood-full-on.env`
+  now exports all five `MAGI_BACKGROUND_*`/`MAGI_WORK_QUEUE_EXECUTOR_ENABLED`
+  flags + a hermetic ON-path verification test (`test_background_task_onpath_verify.py`)
+  that walks the full enqueue → store → dispatcher → inject-buffer → chat
+  consumer chain (#768). Default-OFF preserved.
+- Dashboard pack builders web UI (PR4/5 #759, PR5/5 #760): dashboard
+  custom-checks/REST endpoints + builder surface, completing the deny-on-present
+  authoring path. default-OFF (`MAGI_DASHBOARD_PACK_AUTHORING_ENABLED`).
+- Reasoning-effort per-turn knob (PR2a #770 UI dropdown, PR2b #772 chat-client
+  wire). Shown only for Anthropic / OpenAI / Gemini models; default `medium`.
+  Backend per-turn override lands in PR2c/d (OSS + hosted), so the dropdown is
+  currently cosmetic on main.
+- OSS picker reflects real runtime config + drop smart-routing knob (#767).
+
+### Changed
+- Customize Phase 1: preset scope data model (`config/customize/scope.py`) +
+  38-preset classification + helpers + catalog scope reach the OSS payload.
+  Engine filter call reverted — wiring will be added by Phase 2/4 follow-ups
+  (#754).
+
+### Fixed
+- Lab repair preamble no longer fires on non-coding turns. Phase 0 scope-fix
+  keeps the gate fully engaged but limits the repair preamble to the two
+  surfaces that need it (`repair_loop is_coding_turn`, `real_runner audit→repair`
+  coding-only). Site 1 on `engine._pre_final_gate_applies` reverted (#752).
+
 ## 0.1.54
 
 ### Added
