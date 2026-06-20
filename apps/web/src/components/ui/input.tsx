@@ -5,13 +5,13 @@ interface InputProps extends InputHTMLAttributes<HTMLInputElement> {
 }
 
 const inputBase =
-  "w-full bg-white border border-black/10 rounded-xl px-4 py-3 text-foreground placeholder:text-gray-400 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-colors duration-200";
+  "w-full bg-white border border-black/10 rounded-lg px-3.5 py-2.5 text-sm text-foreground placeholder:text-gray-400 focus:outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20 transition-colors duration-200";
 
 export function Input({ label, className = "", ...props }: InputProps) {
   return (
     <label className="block">
       {label && (
-        <span className="block text-sm font-medium text-secondary mb-1.5">
+        <span className="block text-sm font-medium text-secondary mb-1">
           {label}
         </span>
       )}
@@ -28,7 +28,7 @@ export function Textarea({ label, className = "", ...props }: TextareaProps) {
   return (
     <label className="block">
       {label && (
-        <span className="block text-sm font-medium text-secondary mb-1.5">
+        <span className="block text-sm font-medium text-secondary mb-1">
           {label}
         </span>
       )}

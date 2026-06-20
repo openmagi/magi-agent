@@ -35,7 +35,7 @@ interface SelectProps {
 }
 
 const triggerBase =
-  "flex w-full min-w-0 cursor-pointer items-center justify-between gap-2 rounded-xl border border-black/10 bg-white px-4 py-3 text-sm font-medium text-foreground outline-none transition-colors duration-200 hover:border-black/20 focus:border-primary/45 focus:ring-4 focus:ring-primary/10 disabled:cursor-not-allowed disabled:opacity-60";
+  "flex w-full min-w-0 cursor-pointer items-center justify-between gap-2 rounded-lg border border-black/10 bg-white px-3.5 py-2.5 text-sm font-medium text-foreground outline-none transition-colors duration-200 hover:border-black/20 focus:border-primary/45 focus:ring-4 focus:ring-primary/10 disabled:cursor-not-allowed disabled:opacity-60";
 
 export function getSelectMenuPositionClass(placement: SelectMenuPlacement): string {
   return placement === "top" ? "bottom-full mb-1.5" : "top-full mt-1.5";
@@ -181,7 +181,7 @@ export function Select({
         <ul
           id={listboxId}
           role="listbox"
-          className={`absolute left-0 z-50 min-w-full max-w-[calc(100vw-2rem)] overflow-y-auto rounded-xl border border-black/10 bg-white/95 py-1 shadow-lg backdrop-blur-xl max-h-[60dvh] ${getSelectMenuPositionClass(menuPlacement)}`}
+          className={`absolute left-0 z-50 min-w-full max-w-[calc(100vw-2rem)] overflow-y-auto rounded-lg border border-black/10 bg-white/95 py-1 shadow-lg backdrop-blur-xl max-h-[60dvh] ${getSelectMenuPositionClass(menuPlacement)}`}
         >
           {options.map((option, index) => {
             const isSelected = option.value === value;
@@ -196,7 +196,7 @@ export function Select({
                   disabled={option.disabled}
                   onMouseEnter={() => setActiveIndex(index)}
                   onClick={() => commit(index)}
-                  className={`flex w-full cursor-pointer items-start gap-2 px-4 py-2.5 text-left text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+                  className={`flex w-full cursor-pointer items-start gap-2 px-3.5 py-2 text-left text-sm transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
                     isSelected
                       ? "font-semibold text-primary"
                       : "text-foreground/85"
@@ -231,7 +231,7 @@ export function Select({
 
   return (
     <div className="block">
-      <span id={labelId} className="mb-1.5 block text-sm font-medium text-secondary">
+      <span id={labelId} className="mb-1 block text-sm font-medium text-secondary">
         {label}
       </span>
       {trigger}
