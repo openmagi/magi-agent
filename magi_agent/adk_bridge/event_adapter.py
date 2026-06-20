@@ -664,10 +664,27 @@ def project_runner_end_event(
     reason: str | None = None,
     usage: dict[str, object] | None = None,
     receipt_ref: str | None = None,
+    expect_receipt: bool = True,
 ) -> EventProjection:
+    """Project a runner-end event into a ``turn_end`` SSE payload.
+
+    Hosted contract: a ``committed`` turn without a runtime ``receipt_ref`` is
+    a protocol violation — it gets downgraded to ``aborted`` with
+    ``reason="missing_runtime_receipt"`` so downstream consumers don't accept a
+    half-baked turn.
+
+    Local OSS contract: the local CLI / dashboard runner has no runtime-receipt
+    infrastructure (receipts are a hosted concept). On that path the caller
+    sets ``expect_receipt=False`` to say "no receipt is expected here, do not
+    downgrade." Without that switch every local turn projects as ``aborted``
+    even when the user got a perfectly normal reply, and consumers that read
+    the raw projection (not the transport reconciler) treat every successful
+    local turn as a failure — including observability and any provider whose
+    SSE rendering keys off the projected status.
+    """
     safe_receipt_ref = _safe_receipt_ref(receipt_ref)
     safe_status: Literal["committed", "aborted"] = "aborted"
-    if status == "committed" and safe_receipt_ref is not None:
+    if status == "committed" and (safe_receipt_ref is not None or not expect_receipt):
         safe_status = "committed"
     event: dict[str, object] = {
         "type": "turn_end",
@@ -676,13 +693,16 @@ def project_runner_end_event(
     }
     if safe_status == "committed":
         event["stopReason"] = _safe_stop_reason(stop_reason, default="end_turn")
-        event["receiptRef"] = safe_receipt_ref
+        # receiptRef is only carried when a real receipt was supplied; the
+        # local path leaves it absent rather than synthesizing a placeholder.
+        if safe_receipt_ref is not None:
+            event["receiptRef"] = safe_receipt_ref
         safe_usage = _public_usage(usage)
         if safe_usage:
             event["usage"] = safe_usage
     else:
         event["reason"] = _safe_stop_reason(reason or stop_reason, default="aborted")
-        if status == "committed" and safe_receipt_ref is None:
+        if status == "committed" and safe_receipt_ref is None and expect_receipt:
             event["reason"] = "missing_runtime_receipt"
     return EventProjection(agent_events=[event])
 
@@ -854,10 +874,15 @@ def _project_content_parts(
 
     flush_final_text(public_if_non_final=saw_tool_part)
     if is_final_response and live_compatible:
+        # Local CLI / dashboard path: the OSS runner has no runtime-receipt
+        # infrastructure, so emit `committed` directly without the hosted
+        # receipt downgrade (which would otherwise mark every successful local
+        # turn as aborted/missing_runtime_receipt).
         end_projection = project_runner_end_event(
             turn_id=turn_id,
             status="committed",
             stop_reason=_final_stop_reason(event),
+            expect_receipt=False,
         )
         agent_events.extend(end_projection.agent_events)
 

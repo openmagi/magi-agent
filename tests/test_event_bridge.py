@@ -847,11 +847,16 @@ def test_event_bridge_projects_final_text_to_public_delta_before_turn_end() -> N
         "delta": "final transcript text with Authorization: Bearer [redacted] path=[redacted-path]",
     }
     turn_end = projection.agent_events[1]
+    # live_compatible (local CLI/dashboard) emits a committed turn_end without
+    # a receiptRef because the local OSS runner has no receipt infrastructure;
+    # the previous behavior — downgrading every successful local turn to
+    # aborted/missing_runtime_receipt — broke observability and any consumer
+    # that read the raw projection (vs the transport reconciler).
     assert turn_end == {
         "type": "turn_end",
         "turnId": "turn-final",
-        "status": "aborted",
-        "reason": "missing_runtime_receipt",
+        "status": "committed",
+        "stopReason": "end_turn",
     }
     assert projection.legacy_deltas == []
     rendered_agent_events = json.dumps(projection.agent_events)
@@ -888,11 +893,13 @@ def test_event_bridge_live_compatible_final_empty_events_emit_turn_end() -> None
 
         assert len(projection.agent_events) == 1
         turn_end = projection.agent_events[0]
+        # As above: local OSS path emits a committed turn_end without a
+        # receiptRef instead of the historical missing_runtime_receipt downgrade.
         assert turn_end == {
             "type": "turn_end",
             "turnId": event.invocation_id,
-            "status": "aborted",
-            "reason": "missing_runtime_receipt",
+            "status": "committed",
+            "stopReason": "end_turn",
         }
         assert projection.legacy_deltas == []
         assert projection.transcript_entries == []
