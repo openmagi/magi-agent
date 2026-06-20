@@ -2,13 +2,8 @@
   "false_only_fields": [
     "summary_is_evidence"
   ],
-  "model_construct_dump": {
-    "requiredFiles": [],
-    "summaryIsEvidence": true
-  },
-  "model_construct_force_false_leaks": [
-    "summary_is_evidence"
-  ],
+  "model_construct_dump": null,
+  "model_construct_force_false_leaks": [],
   "model_validate_dump": null,
   "model_validate_force_false_leaks": [],
   "qualname": "magi_agent.evidence.child_runtime_envelope.ChildRuntimeCompletionContractMetadata"

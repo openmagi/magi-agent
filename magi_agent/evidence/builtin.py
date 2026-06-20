@@ -4,9 +4,10 @@ from typing import Literal, Self
 
 from pydantic import Field, field_validator, model_validator
 
+from magi_agent.ops.authority import FalseOnlyAuthorityModel
+
 from .types import (
     BUILTIN_EVIDENCE_TYPES,
-    EvidenceMetadataModel,
     EvidenceSourceKind,
     _validate_strict_bool,
     validate_evidence_type_name,
@@ -24,7 +25,7 @@ ProducerSurface = Literal[
 ]
 
 
-class BuiltInEvidenceType(EvidenceMetadataModel):
+class BuiltInEvidenceType(FalseOnlyAuthorityModel):
     type: str
     description: str
     producer_surfaces: tuple[ProducerSurface, ...] = Field(alias="producerSurfaces")

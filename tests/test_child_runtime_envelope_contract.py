@@ -195,12 +195,19 @@ def test_accepts_runtime_issued_metadata_only_child_envelope() -> None:
         "evidenceBlockEnabled",
     ),
 )
-def test_rejects_any_true_live_authority_flag(flag_name: str) -> None:
+def test_coerces_any_true_live_authority_flag_to_false(flag_name: str) -> None:
+    # C-4 PR-G1: ``ChildRuntimeEnvelopeAuthorityFlags`` re-parented onto
+    # ``FalseOnlyAuthorityModel``. The kernel's ``_force_false`` validator
+    # coerces any forged ``True`` on a ``Literal[False]`` field down to
+    # ``False`` BEFORE the Literal validator runs, instead of raising — same
+    # authority guarantee, strictly stronger (the forged value can never
+    # survive on any construction surface, not just ``model_validate``).
     payload = _payload()
     payload["authorityFlags"] = {flag_name: True}
 
-    with pytest.raises(ValidationError):
-        ChildRuntimeEnvelope.model_validate(payload)
+    envelope = ChildRuntimeEnvelope.model_validate(payload)
+    dumped = envelope.authority_flags.model_dump(by_alias=True)
+    assert dumped[flag_name] is False
 
 
 def test_authority_flags_model_construct_cannot_forge_internal_true_state() -> None:

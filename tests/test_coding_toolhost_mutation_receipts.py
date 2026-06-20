@@ -291,11 +291,16 @@ class TestDefaultOffBehavior:
         assert config.production_workspace_mutation_allowed is False
 
     def test_cannot_set_production_mutation_true(self) -> None:
-        with pytest.raises(Exception):
-            CodingToolReceiptConfig(
-                enabled=True,
-                productionWorkspaceMutationAllowed=True,
-            )
+        # C-4 PR-G1: ``CodingToolReceiptConfig`` re-parented onto
+        # ``FalseOnlyAuthorityModel``. The kernel's ``_force_false`` validator
+        # coerces a forged ``Literal[False]`` True down to False BEFORE the
+        # Literal validator runs (instead of raising). Same authority guarantee,
+        # strictly stronger — the coerce fires on every construction surface.
+        config = CodingToolReceiptConfig(
+            enabled=True,
+            productionWorkspaceMutationAllowed=True,
+        )
+        assert config.production_workspace_mutation_allowed is False
 
 
 # ---------------------------------------------------------------------------

@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
 import hashlib
 import re
-from typing import Any, Literal, Self
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -17,6 +16,7 @@ from magi_agent.evidence.source_ledger import (
     SourceLedgerRecord,
 )
 from magi_agent.evidence.types import _validate_strict_bool
+from magi_agent.ops.authority import FalseOnlyAuthorityModel
 
 
 ResearchFinalGateMode = Literal[
@@ -58,23 +58,6 @@ _FACTUAL_CLAIM_RE = re.compile(
     re.IGNORECASE,
 )
 _SHA256_DIGEST_RE = re.compile(r"^sha256:[a-f0-9]{64}$")
-_RESULT_FIELD_ALIASES: Mapping[str, str] = {
-    "approval_required_block_intent": "approvalRequiredBlockIntent",
-    "authority_flags": "authorityFlags",
-    "block_intent": "blockIntent",
-    "citation_audit_result": "citationAuditResult",
-    "cited_refs": "citedRefs",
-    "contract_id": "contractId",
-    "extracted_claim_refs": "extractedClaimRefs",
-    "final_answer_blocking_enabled": "finalAnswerBlockingEnabled",
-    "final_answer_digest": "finalAnswerDigest",
-    "ok": "ok",
-    "output_link_digests": "outputLinkDigests",
-    "reason_codes": "reasonCodes",
-    "source_ledger": "sourceLedger",
-    "status": "status",
-    "turn_id": "turnId",
-}
 _PRIVATE_REF_RE = re.compile(
     r"(?:"
     r"/Users/|/home/|/workspace/|/data/bots/|/var/lib/kubelet/|"
@@ -116,9 +99,7 @@ class ResearchClaimRef(BaseModel):
         return _validate_strict_bool(value, "requiresFreshSource")
 
 
-class ResearchFinalGateAuthorityFlags(BaseModel):
-    model_config = _MODEL_CONFIG
-
+class ResearchFinalGateAuthorityFlags(FalseOnlyAuthorityModel):
     final_answer_blocked: Literal[False] = Field(default=False, alias="finalAnswerBlocked")
     final_answer_blocking_enabled: Literal[False] = Field(
         default=False,
@@ -130,24 +111,6 @@ class ResearchFinalGateAuthorityFlags(BaseModel):
     )
     production_authority: Literal[False] = Field(default=False, alias="productionAuthority")
     route_attached: Literal[False] = Field(default=False, alias="routeAttached")
-
-    @classmethod
-    def model_construct(
-        cls,
-        _fields_set: set[str] | None = None,
-        **values: Any,
-    ) -> Self:
-        _ = _fields_set, values
-        return cls()
-
-    def model_copy(
-        self,
-        *,
-        update: Mapping[str, Any] | None = None,
-        deep: bool = False,
-    ) -> Self:
-        _ = update, deep
-        return type(self)()
 
 
 class ResearchFinalGateRequest(BaseModel):
@@ -187,9 +150,7 @@ class ResearchFinalGateRequest(BaseModel):
         return value
 
 
-class ResearchFinalGateResult(BaseModel):
-    model_config = _MODEL_CONFIG
-
+class ResearchFinalGateResult(FalseOnlyAuthorityModel):
     contract_id: str = Field(alias="contractId")
     turn_id: str = Field(alias="turnId")
     mode: ResearchFinalGateMode
@@ -245,39 +206,6 @@ class ResearchFinalGateResult(BaseModel):
             "authorityFlags": self.authority_flags.model_dump(by_alias=True),
         }
 
-    @classmethod
-    def model_construct(
-        cls,
-        _fields_set: set[str] | None = None,
-        **values: Any,
-    ) -> Self:
-        _ = _fields_set
-        values = _alias_result_values(values)
-        values.pop("final_answer_blocking_enabled", None)
-        values.pop("authority_flags", None)
-        values["finalAnswerBlockingEnabled"] = False
-        values["authorityFlags"] = ResearchFinalGateAuthorityFlags()
-        values.setdefault("reasonCodes", ())
-        values.setdefault("citedRefs", ())
-        values.setdefault("outputLinkDigests", ())
-        values.setdefault("citationAuditResult", None)
-        values.setdefault("extractedClaimRefs", ())
-        return cls.model_validate(values)
-
-    def model_copy(
-        self,
-        *,
-        update: Mapping[str, Any] | None = None,
-        deep: bool = False,
-    ) -> Self:
-        data = self.model_dump(by_alias=True, mode="python", warnings=False)
-        if update:
-            data.update(_alias_result_values(dict(update)))
-        data.pop("final_answer_blocking_enabled", None)
-        data.pop("authority_flags", None)
-        data["finalAnswerBlockingEnabled"] = False
-        data["authorityFlags"] = ResearchFinalGateAuthorityFlags()
-        return type(self).model_validate(data)
 
 
 def evaluate_research_final_gate(request: ResearchFinalGateRequest) -> ResearchFinalGateResult:
@@ -605,10 +533,6 @@ def _public_audit_items(result: CitationAuditResult) -> tuple[object, ...]:
     if isinstance(items, list):
         return tuple(items)
     return ()
-
-
-def _alias_result_values(values: Mapping[str, Any]) -> dict[str, Any]:
-    return {_RESULT_FIELD_ALIASES.get(key, key): value for key, value in values.items()}
 
 
 def _public_source_ref(record: SourceLedgerRecord) -> dict[str, object]:

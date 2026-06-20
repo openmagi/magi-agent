@@ -13,6 +13,7 @@ from magi_agent.evidence.types import (
     EvidenceRecord,
     EvidenceRequirement,
 )
+from magi_agent.ops.authority import FalseOnlyAuthorityModel
 from magi_agent.transport.tool_preview import sanitize_tool_preview
 
 
@@ -119,9 +120,7 @@ class PublicEvidenceRequirementReport(BaseModel):
     fields: dict[str, object] = Field(default_factory=dict)
 
 
-class PublicEvidenceVerdictReport(BaseModel):
-    model_config = ConfigDict(frozen=True, populate_by_name=True)
-
+class PublicEvidenceVerdictReport(FalseOnlyAuthorityModel):
     contract_id: str = Field(alias="contractId")
     ok: bool
     state: str

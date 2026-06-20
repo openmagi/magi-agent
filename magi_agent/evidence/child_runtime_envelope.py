@@ -22,6 +22,7 @@ from magi_agent.evidence.runtime_issuance import (
     RuntimeIssueAuthority,
     require_runtime_issue_authority,
 )
+from magi_agent.ops.authority import FalseOnlyAuthorityModel
 from magi_agent.transport.tool_preview import sanitize_tool_preview
 
 from .subagent import (
@@ -48,18 +49,6 @@ _MODEL_CONFIG = ConfigDict(
     revalidate_instances="never",
     hide_input_in_errors=True,
 )
-_AUTHORITY_FLAG_NAMES = (
-    "runner_attached",
-    "child_execution_attached",
-    "tool_host_dispatched",
-    "workspace_mutated",
-    "mission_store_written",
-    "background_runtime_attached",
-    "memory_provider_called",
-    "route_attached",
-    "production_authority",
-    "evidence_block_enabled",
-)
 _UNSAFE_PATH_RE = re.compile(
     r"(?:"
     r"~[\\/][^,\s\"'{}\]\)]+|"
@@ -82,9 +71,7 @@ _RUNTIME_ISSUED_ENVELOPE_FINGERPRINTS: dict[int, object] = {}
 _RUNTIME_ISSUED_ENVELOPE_FINALIZERS: dict[int, object] = {}
 
 
-class ChildRuntimeEnvelopeAuthorityFlags(BaseModel):
-    model_config = _MODEL_CONFIG
-
+class ChildRuntimeEnvelopeAuthorityFlags(FalseOnlyAuthorityModel):
     runner_attached: Literal[False] = Field(default=False, alias="runnerAttached")
     child_execution_attached: Literal[False] = Field(
         default=False,
@@ -101,23 +88,6 @@ class ChildRuntimeEnvelopeAuthorityFlags(BaseModel):
     route_attached: Literal[False] = Field(default=False, alias="routeAttached")
     production_authority: Literal[False] = Field(default=False, alias="productionAuthority")
     evidence_block_enabled: Literal[False] = Field(default=False, alias="evidenceBlockEnabled")
-
-    @classmethod
-    def model_construct(
-        cls,
-        _fields_set: set[str] | None = None,
-        **values: Any,
-    ) -> Self:
-        return cls(**{name: False for name in cls.model_fields})
-
-    @field_validator(*_AUTHORITY_FLAG_NAMES, mode="before")
-    @classmethod
-    def _validate_false_only_flags(cls, value: object, info: Any) -> object:
-        return _validate_strict_bool(value, info.field_name)
-
-    @field_serializer(*_AUTHORITY_FLAG_NAMES)
-    def _serialize_false(self, _value: object) -> bool:
-        return False
 
 
 class ChildRuntimeTaskMetadata(BaseModel):
@@ -178,9 +148,7 @@ class ChildRuntimePolicySnapshotMetadata(BaseModel):
         return self
 
 
-class ChildRuntimeWorkspaceIsolationMetadata(BaseModel):
-    model_config = _MODEL_CONFIG
-
+class ChildRuntimeWorkspaceIsolationMetadata(FalseOnlyAuthorityModel):
     workspace_policy: ChildRuntimeWorkspacePolicy = Field(alias="workspacePolicy")
     isolation_ref: str = Field(alias="isolationRef")
     parent_workspace_ref: str = Field(alias="parentWorkspaceRef")
@@ -189,11 +157,6 @@ class ChildRuntimeWorkspaceIsolationMetadata(BaseModel):
     adoption_attached: Literal[False] = Field(default=False, alias="adoptionAttached")
     workspace_mutated: Literal[False] = Field(default=False, alias="workspaceMutated")
     private_notes: tuple[str, ...] = Field(default=(), alias="privateNotes")
-
-    @field_validator("adoption_attached", "workspace_mutated", mode="before")
-    @classmethod
-    def _validate_false_flags(cls, value: object, info: Any) -> object:
-        return _validate_strict_bool(value, info.field_name)
 
     @model_validator(mode="after")
     def _validate_workspace_refs(self) -> Self:
@@ -205,9 +168,7 @@ class ChildRuntimeWorkspaceIsolationMetadata(BaseModel):
         return self
 
 
-class ChildRuntimeCompletionContractMetadata(BaseModel):
-    model_config = _MODEL_CONFIG
-
+class ChildRuntimeCompletionContractMetadata(FalseOnlyAuthorityModel):
     required_evidence: ChildRuntimeCompletionEvidence = Field(alias="requiredEvidence")
     required_files: tuple[str, ...] = Field(default=(), alias="requiredFiles")
     require_non_empty_result: bool = Field(alias="requireNonEmptyResult")
@@ -226,9 +187,7 @@ class ChildRuntimeCompletionContractMetadata(BaseModel):
         return self
 
 
-class ChildRuntimeADKPrimitiveOwnershipMetadata(BaseModel):
-    model_config = _MODEL_CONFIG
-
+class ChildRuntimeADKPrimitiveOwnershipMetadata(FalseOnlyAuthorityModel):
     agent_owner: Literal["adk_future_agent"] = Field(alias="agentOwner")
     runner_owner: Literal["adk_future_runner"] = Field(alias="runnerOwner")
     event_owner: Literal["adk_event_bridge"] = Field(alias="eventOwner")
@@ -241,11 +200,6 @@ class ChildRuntimeADKPrimitiveOwnershipMetadata(BaseModel):
     )
     allowed_tool_names: tuple[str, ...] = Field(default=(), alias="allowedToolNames")
     callback_hook_refs: tuple[str, ...] = Field(default=(), alias="callbackHookRefs")
-
-    @field_validator("runner_attached", "child_execution_attached", mode="before")
-    @classmethod
-    def _validate_false_flags(cls, value: object, info: Any) -> object:
-        return _validate_strict_bool(value, info.field_name)
 
     @model_validator(mode="after")
     def _validate_ownership_metadata(self) -> Self:

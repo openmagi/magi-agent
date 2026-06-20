@@ -4,10 +4,11 @@ from typing import Literal
 
 from pydantic import Field, field_serializer
 
-from magi_agent.evidence.types import EvidenceContractScopeMetadata, EvidenceMetadataModel
+from magi_agent.evidence.types import EvidenceContractScopeMetadata
+from magi_agent.ops.authority import FalseOnlyAuthorityModel
 
 
-class EvidenceRolloutMetadata(EvidenceMetadataModel):
+class EvidenceRolloutMetadata(FalseOnlyAuthorityModel):
     traffic_attached: Literal[False] = Field(default=False, alias="trafficAttached")
     execution_attached: Literal[False] = Field(default=False, alias="executionAttached")
     mode: Literal["audit", "block_final_answer"] = "audit"

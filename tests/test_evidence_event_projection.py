@@ -264,7 +264,7 @@ def test_inconsistent_citation_success_projects_pending_not_ok() -> None:
             sourceLedger=_ledger(),
         )
     )
-    forged = pass_result.model_copy(update={"audit_items": (), "ok": True})
+    forged = pass_result.model_copy(update={"auditItems": (), "ok": True})
 
     payload = _payloads(project_citation_audit_rule_events(forged))[0]
 
@@ -294,7 +294,7 @@ def test_citation_success_requires_matching_source_inspection_evidence() -> None
     forged = pass_result.model_copy(
         update={
             "verdict": pass_result.verdict.model_copy(
-                update={"matched_evidence": (unrelated_evidence,)}
+                update={"matchedEvidence": (unrelated_evidence,)}
             )
         }
     )

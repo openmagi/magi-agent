@@ -12,35 +12,8 @@
     "session_runtime_attached",
     "traffic_attached"
   ],
-  "model_construct_dump": {
-    "apiAttached": true,
-    "artifactRuntimeAttached": true,
-    "canaryAttached": true,
-    "childExecutionAttached": true,
-    "childLedgerRefs": [],
-    "dashboardAttached": true,
-    "enforcementAttached": true,
-    "executionAttached": true,
-    "parentExecutionId": null,
-    "routeAttached": true,
-    "runnerAttached": true,
-    "sessionRuntimeAttached": true,
-    "taskId": null,
-    "trafficAttached": true
-  },
-  "model_construct_force_false_leaks": [
-    "api_attached",
-    "artifact_runtime_attached",
-    "canary_attached",
-    "child_execution_attached",
-    "dashboard_attached",
-    "enforcement_attached",
-    "execution_attached",
-    "route_attached",
-    "runner_attached",
-    "session_runtime_attached",
-    "traffic_attached"
-  ],
+  "model_construct_dump": null,
+  "model_construct_force_false_leaks": [],
   "model_validate_dump": null,
   "model_validate_force_false_leaks": [],
   "qualname": "magi_agent.evidence.subagent.EvidenceBoundaryLedgerRef"

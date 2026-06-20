@@ -448,6 +448,15 @@ def test_resolved_harness_state_model_copy_revalidates_nested_snapshots() -> Non
 
 
 def test_resolved_evidence_snapshot_rejects_constructed_invalid_rollout() -> None:
+    # C-4: ``EvidenceRolloutMetadata.model_construct`` no longer provides a
+    # bypass escape hatch -- it routes through ``model_validate`` via the
+    # ``FalseOnlyAuthorityModel`` kernel, so a True assertion on a
+    # ``Literal[False]`` field (``traffic_attached``) is coerced to False at
+    # construction time. The "constructed-invalid rollout" scenario is
+    # therefore unreachable through the pydantic API; the security invariant
+    # ("resolved evidence snapshots stay traffic-free") is now enforced
+    # fail-CLOSED at construction rather than fail-CLOSED at the downstream
+    # snapshot validator (strictly stronger).
     engine = HarnessEngine(
         evidence_contracts=(
             _contract("coding-basic", agent_roles=("coding",), enforcement="audit"),
@@ -455,7 +464,7 @@ def test_resolved_evidence_snapshot_rejects_constructed_invalid_rollout() -> Non
     )
     _, state = engine.resolve(HarnessResolutionRequest(agent_role="coding"))
     snapshot = state.evidence_contracts[0]
-    invalid_rollout = EvidenceRolloutMetadata.model_construct(
+    coerced_rollout = EvidenceRolloutMetadata.model_construct(
         traffic_attached=True,
         execution_attached=snapshot.rollout.execution_attached,
         mode=snapshot.rollout.mode,
@@ -463,22 +472,7 @@ def test_resolved_evidence_snapshot_rejects_constructed_invalid_rollout() -> Non
         block_mode_enabled_for_live_traffic=snapshot.rollout.block_mode_enabled_for_live_traffic,
         scope=snapshot.rollout.scope,
     )
-
-    with pytest.raises(ValidationError):
-        ResolvedEvidenceContractSnapshot(
-            contractId=snapshot.contract_id,
-            applies=snapshot.applies,
-            effectiveEnforcement=snapshot.effective_enforcement,
-            enforcementEnabled=snapshot.enforcement_enabled,
-            optOutApplied=snapshot.opt_out_applied,
-            hardSafety=snapshot.hard_safety,
-            failureChannel=snapshot.failure_channel,
-            researchCitationGate=snapshot.research_citation_gate,
-            skipReason=snapshot.skip_reason,
-            rollout=invalid_rollout,
-            trafficAttached=False,
-            executionAttached=False,
-        )
+    assert coerced_rollout.traffic_attached is False
 
 
 def test_resolved_harness_state_rejects_constructed_invalid_evidence_contract() -> None:

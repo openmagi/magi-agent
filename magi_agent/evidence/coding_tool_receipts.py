@@ -16,11 +16,11 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections.abc import Mapping
-from typing import Any, Literal, Self
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import Field, field_validator
 
+from magi_agent.ops.authority import FalseOnlyAuthorityModel
 from magi_agent.tools.result import ToolResult
 
 
@@ -43,14 +43,6 @@ _TOOL_ACTION_MAP: dict[str, str] = {
     "PatchApply": "patch",
     "Bash": "execute",
 }
-
-_MODEL_CONFIG = ConfigDict(
-    frozen=True,
-    populate_by_name=True,
-    extra="forbid",
-    validate_default=True,
-    hide_input_in_errors=True,
-)
 
 _PRIVATE_DATA_RE = re.compile(
     r"(?:"
@@ -104,24 +96,12 @@ def text_claim_is_not_receipt(value: object) -> bool:
 # ---------------------------------------------------------------------------
 
 
-class CodingToolReceiptConfig(BaseModel):
-    model_config = _MODEL_CONFIG
-
+class CodingToolReceiptConfig(FalseOnlyAuthorityModel):
     enabled: bool = False
     production_workspace_mutation_allowed: Literal[False] = Field(
         default=False,
         alias="productionWorkspaceMutationAllowed",
     )
-
-    @classmethod
-    def model_construct(
-        cls,
-        _fields_set: set[str] | None = None,
-        **values: Any,
-    ) -> Self:
-        _ = _fields_set
-        values["productionWorkspaceMutationAllowed"] = False
-        return cls.model_validate(values)
 
 
 # ---------------------------------------------------------------------------
@@ -129,9 +109,7 @@ class CodingToolReceiptConfig(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class CodingToolReceiptRecord(BaseModel):
-    model_config = _MODEL_CONFIG
-
+class CodingToolReceiptRecord(FalseOnlyAuthorityModel):
     tool_call_id: str = Field(alias="toolCallId")
     tool_name: str = Field(alias="toolName")
     action: str
