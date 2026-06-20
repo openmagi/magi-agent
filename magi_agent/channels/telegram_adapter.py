@@ -1157,6 +1157,17 @@ def _url_is_token_bearing(value: str) -> bool:
 
 
 def _url_is_private(value: str) -> bool:
+    """Detect whether a Telegram payload URL points at a private/internal target.
+
+    C-6 consolidation: the private/metadata/legacy-IPv4 classification now
+    flows through :func:`magi_agent.security.ssrf.classify_host`. The
+    telegram-adapter-specific extras (Supabase / R2 / object-host regex /
+    ``.local`` mDNS TLD) stay here because they are NOT SSRF concerns — they
+    are "don't leak signed storage URLs into telegram outbound" concerns
+    specific to this transport.
+    """
+    from magi_agent.security.ssrf import classify_host
+
     parsed = _split_url_host(value)
     if parsed is None:
         return True
@@ -1170,26 +1181,24 @@ def _url_is_private(value: str) -> bool:
         return True
     if host.endswith(".supabase.co") or host.endswith(".r2.cloudflarestorage.com"):
         return True
-    if host in {"localhost", "metadata.google.internal"} or host.endswith(".local"):
+    if host.endswith(".local"):
+        # mDNS-style local TLD — not in the SSRF leaf because the SSRF leaf
+        # uses ``.localhost`` not ``.local``. Telegram-adapter keeps this
+        # extra rule because shipping mDNS hostnames to telegram is a
+        # transport-specific concern (the SSRF leaf is a strict superset of
+        # what blocks egress; the adapter then adds extras on top).
         return True
-    try:
-        address = ipaddress.ip_address(host)
-    except ValueError:
-        if host.isdigit():
-            try:
-                address = ipaddress.ip_address(int(host))
-            except ValueError:
-                return False
-        else:
-            return False
-    return (
-        address.is_private
-        or address.is_loopback
-        or address.is_link_local
-        or address.is_multicast
-        or address.is_reserved
-        or address.is_unspecified
-    )
+    # Shared SSRF kernel handles localhost, metadata hosts, legacy IPv4 forms,
+    # NAT64-embedded private/metadata IPv4, and standard IPv6 link-local /
+    # loopback / private / reserved / multicast.
+    if classify_host(host):
+        return True
+    # ``host.isdigit()`` legacy fork: the integer-host form (e.g. ``"123"`` →
+    # ``0.0.0.123``) was handled in the legacy copy. ``classify_host`` routes
+    # that through ``coerce_ip`` which already handles the legacy IPv4 forms;
+    # the cases that reach here are non-IP DNS names that legitimately serve
+    # telegram payloads — return False (not private).
+    return False
 
 
 def _split_url_host(value: str) -> tuple[str, str] | None:
